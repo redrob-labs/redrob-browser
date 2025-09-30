@@ -5,6 +5,12 @@ is_component_build = true
 symbol_level = 0
 chrome_pgo_phase = 0
 is_official_build = false
+use_siso = false
+is_clang = true
+exclude_unwind_tables = false
+treat_warnings_as_errors = false
+use_sysroot = false
+v8_symbol_level = 0
 
 # Windows-specific compiler/linker settings
 target_cpu = "x64"
