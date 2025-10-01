@@ -51,7 +51,7 @@ from modules.string_replaces import apply_string_replacements
 from modules.inject import inject_version
 from modules.configure import configure
 from modules.compile import build
-from modules.gcs import upload_package_artifacts, upload_signed_artifacts
+from modules.gcs import upload_package_artifacts, upload_signed_artifacts, handle_upload_dist
 
 # Platform-specific imports
 if IS_MACOS:
@@ -568,6 +568,17 @@ def build_main(
     default=False,
     help="Skip uploading artifacts to Google Cloud Storage",
 )
+@click.option(
+    "--upload-dist",
+    type=click.Path(exists=True, path_type=Path),
+    help="Upload pre-built artifacts from dist/<version> directory to GCS: --upload-dist dist/61",
+)
+@click.option(
+    "--platform",
+    type=click.Choice(["macos", "linux", "win"]),
+    default=None,
+    help="Override platform for GCS upload (auto-detected if not specified)",
+)
 def main(
     config,
     clean,
@@ -586,6 +597,8 @@ def main(
     patch_interactive,
     patch_commit,
     no_gcs_upload,
+    upload_dist,
+    platform,
 ):
     """Simple build system for Nxtscape Browser"""
 
@@ -658,6 +671,17 @@ def main(
         arch1_path, arch2_path = merge
 
         if handle_merge_command(arch1_path, arch2_path, chromium_src, sign, package):
+            sys.exit(0)
+        else:
+            sys.exit(1)
+
+    # Handle upload-dist command
+    if upload_dist:
+        # Get root directory
+        root_dir = Path(__file__).parent.parent
+
+        # Call the upload handler from gcs module
+        if handle_upload_dist(upload_dist, root_dir, platform_override=platform):
             sys.exit(0)
         else:
             sys.exit(1)
