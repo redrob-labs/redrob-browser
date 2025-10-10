@@ -160,8 +160,9 @@ def upload_package_artifacts(ctx: BuildContext) -> tuple[bool, List[str]]:
             artifacts.extend(dist_dir.glob("*.exe"))
             artifacts.extend(dist_dir.glob("*.zip"))
         else:  # Linux
-            # Look for AppImage files
+            # Look for AppImage and .deb files
             artifacts.extend(dist_dir.glob("*.AppImage"))
+            artifacts.extend(dist_dir.glob("*.deb"))
 
     if not artifacts:
         log_info("No package artifacts found to upload")
@@ -239,7 +240,7 @@ def _detect_artifacts(dist_path: Path, platform_override: Optional[str] = None) 
         elif platform_override == "win":
             patterns = ["*.exe", "*.zip"]
         elif platform_override == "linux":
-            patterns = ["*.AppImage"]
+            patterns = ["*.AppImage", "*.deb"]
         else:
             log_error(f"Invalid platform: {platform_override}. Must be macos/linux/win")
             return []
@@ -250,7 +251,7 @@ def _detect_artifacts(dist_path: Path, platform_override: Optional[str] = None) 
         elif IS_WINDOWS:
             patterns = ["*.exe", "*.zip"]
         else:  # Linux
-            patterns = ["*.AppImage"]
+            patterns = ["*.AppImage", "*.deb"]
 
     # Find all matching files
     for pattern in patterns:
