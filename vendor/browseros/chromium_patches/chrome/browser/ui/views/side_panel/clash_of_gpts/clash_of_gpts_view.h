@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/ui/views/side_panel/clash_of_gpts/clash_of_gpts_view.h b/chrome/browser/ui/views/side_panel/clash_of_gpts/clash_of_gpts_view.h
 new file mode 100644
-index 0000000000000..43724dd1b3bfb
+index 0000000000000..e9bc398177fe3
 --- /dev/null
 +++ b/chrome/browser/ui/views/side_panel/clash_of_gpts/clash_of_gpts_view.h
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,112 @@
 +// Copyright 2025 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -54,9 +54,6 @@ index 0000000000000..43724dd1b3bfb
 +
 +  // Shows copy feedback message
 +  void ShowCopyFeedback();
-+
-+  // Focuses the input field for a specific pane
-+  void FocusInputFieldForPane(int pane_index);
 +
 +  // views::View:
 +  void OnThemeChanged() override;

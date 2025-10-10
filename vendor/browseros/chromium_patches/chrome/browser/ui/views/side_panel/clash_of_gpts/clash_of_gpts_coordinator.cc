@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/ui/views/side_panel/clash_of_gpts/clash_of_gpts_coordinator.cc b/chrome/browser/ui/views/side_panel/clash_of_gpts/clash_of_gpts_coordinator.cc
 new file mode 100644
-index 0000000000000..e6a8b8b97eada
+index 0000000000000..c009ece12f3fd
 --- /dev/null
 +++ b/chrome/browser/ui/views/side_panel/clash_of_gpts/clash_of_gpts_coordinator.cc
-@@ -0,0 +1,534 @@
+@@ -0,0 +1,548 @@
 +// Copyright 2025 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -14,7 +14,9 @@ index 0000000000000..e6a8b8b97eada
 +#include "base/logging.h"
 +#include "base/strings/string_number_conversions.h"
 +#include "base/strings/stringprintf.h"
++#include "base/strings/utf_string_conversions.h"
 +#include "base/task/sequenced_task_runner.h"
++#include "chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/ui/browser.h"
 +#include "chrome/browser/ui/browser_commands.h"
@@ -40,11 +42,12 @@ index 0000000000000..e6a8b8b97eada
 +namespace {
 +
 +// Preference names
-+const char kClashOfGptsProvidersPref[] = "clash_of_gpts.providers";
-+const char kClashOfGptsLastUrlsPref[] = "clash_of_gpts.last_urls";
-+const char kClashOfGptsPaneCountPref[] = "clash_of_gpts.pane_count";
++const char kClashOfGptsPaneProvidersPref[] = "browseros.clash_of_gpts.pane_providers";  // Per-pane selections
++const char kClashOfGptsLastUrlsPref[] = "browseros.clash_of_gpts.last_urls";
++const char kClashOfGptsPaneCountPref[] = "browseros.clash_of_gpts.pane_count";
 +
-+// Default providers are now initialized directly in the constructor
++// Shared provider list preference (from third_party_llm)
++const char kThirdPartyLlmProvidersPref[] = "browseros.third_party_llm.providers";
 +
 +}  // namespace
 +
@@ -54,10 +57,14 @@ index 0000000000000..e6a8b8b97eada
 +  browser_list_observation_.Observe(BrowserList::GetInstance());
 +  profile_observation_.Observe(browser->profile());
 +
-+  // Initialize with default providers for max panes
-+  pane_providers_[0] = LlmProvider::kChatGPT;
-+  pane_providers_[1] = LlmProvider::kClaude;
-+  pane_providers_[2] = LlmProvider::kGrok;
++  // Load shared provider list first
++  LoadProvidersFromPrefs();
++
++  // Initialize with default provider indices for max panes
++  pane_provider_indices_[0] = 0;
++  pane_provider_indices_[1] = 1;
++  pane_provider_indices_[2] = 2;
++
 +  LoadState();
 +}
 +
@@ -94,9 +101,13 @@ index 0000000000000..e6a8b8b97eada
 +    return;
 +  }
 +
-+  int current = static_cast<int>(pane_providers_[pane_index]);
-+  int next = (current + 1) % 5;  // Now we have 5 providers including Grok
-+  SetProviderForPane(pane_index, static_cast<LlmProvider>(next));
++  if (providers_.empty()) {
++    return;
++  }
++
++  size_t current = pane_provider_indices_[pane_index];
++  size_t next = (current + 1) % providers_.size();
++  SetProviderForPane(pane_index, next);
 +}
 +
 +void ClashOfGptsCoordinator::CopyContentToAll() {
@@ -144,16 +155,79 @@ index 0000000000000..e6a8b8b97eada
 +  }
 +}
 +
-+ClashOfGptsCoordinator::LlmProvider ClashOfGptsCoordinator::GetProviderForPane(
-+    int pane_index) const {
-+  if (pane_index < 0 || pane_index >= current_pane_count_) {
-+    return LlmProvider::kChatGPT;
-+  }
-+  return pane_providers_[pane_index];
++std::vector<LlmProviderInfo> ClashOfGptsCoordinator::GetDefaultProviders() const {
++  std::vector<LlmProviderInfo> defaults;
++  defaults.push_back({u"ChatGPT", GURL("https://chatgpt.com")});
++  defaults.push_back({u"Claude", GURL("https://claude.ai")});
++  defaults.push_back({u"Grok", GURL("https://grok.com")});
++  defaults.push_back({u"Gemini", GURL("https://gemini.google.com")});
++  defaults.push_back({u"Perplexity", GURL("https://www.perplexity.ai")});
++  return defaults;
 +}
 +
-+void ClashOfGptsCoordinator::SetProviderForPane(int pane_index, LlmProvider provider) {
++void ClashOfGptsCoordinator::LoadProvidersFromPrefs() {
++  PrefService* prefs = GetBrowser().profile()->GetPrefs();
++  if (!prefs) {
++    LOG(ERROR) << "[browseros] Failed to get PrefService";
++    providers_ = GetDefaultProviders();
++    return;
++  }
++
++  const base::Value::List& providers_list = prefs->GetList(kThirdPartyLlmProvidersPref);
++
++  providers_.clear();
++
++  if (!providers_list.empty()) {
++    for (const base::Value& item : providers_list) {
++      if (!item.is_dict()) {
++        LOG(WARNING) << "[browseros] Invalid provider entry (not a dict), skipping";
++        continue;
++      }
++
++      const std::string* name = item.GetDict().FindString("name");
++      const std::string* url = item.GetDict().FindString("url");
++
++      if (!name || name->empty()) {
++        LOG(WARNING) << "[browseros] Provider missing name, skipping";
++        continue;
++      }
++
++      if (!url || url->empty()) {
++        LOG(WARNING) << "[browseros] Provider missing URL, skipping";
++        continue;
++      }
++
++      GURL provider_url(*url);
++      if (!provider_url.is_valid()) {
++        LOG(WARNING) << "[browseros] Invalid provider URL: " << *url;
++        continue;
++      }
++
++      providers_.push_back({base::UTF8ToUTF16(*name), provider_url});
++    }
++  }
++
++  // If no valid providers loaded, use defaults
++  if (providers_.empty()) {
++    LOG(INFO) << "[browseros] No providers in prefs, using defaults";
++    providers_ = GetDefaultProviders();
++  }
++}
++
++size_t ClashOfGptsCoordinator::GetProviderIndexForPane(int pane_index) const {
 +  if (pane_index < 0 || pane_index >= current_pane_count_) {
++    return 0;  // Default to first provider
++  }
++  return pane_provider_indices_[pane_index];
++}
++
++void ClashOfGptsCoordinator::SetProviderForPane(int pane_index, size_t provider_index) {
++  if (pane_index < 0 || pane_index >= current_pane_count_) {
++    return;
++  }
++
++  if (provider_index >= providers_.size()) {
++    LOG(ERROR) << "[browseros] Invalid provider index: " << provider_index;
 +    return;
 +  }
 +
@@ -162,54 +236,24 @@ index 0000000000000..e6a8b8b97eada
 +    if (content::WebContents* web_contents = view_->GetWebContentsForPane(pane_index)) {
 +      GURL current_url = web_contents->GetURL();
 +      if (current_url.is_valid()) {
-+        last_urls_[{pane_index, pane_providers_[pane_index]}] = current_url;
++        last_urls_[{pane_index, pane_provider_indices_[pane_index]}] = current_url;
 +      }
 +    }
 +  }
 +
-+  pane_providers_[pane_index] = provider;
++  pane_provider_indices_[pane_index] = provider_index;
 +  SaveState();
 +
 +  // Navigate to the new provider URL
 +  if (view_) {
 +    GURL provider_url;
-+    auto it = last_urls_.find({pane_index, provider});
++    auto it = last_urls_.find({pane_index, provider_index});
 +    if (it != last_urls_.end() && it->second.is_valid()) {
 +      provider_url = it->second;
 +    } else {
-+      provider_url = GetProviderUrl(provider);
++      provider_url = providers_[provider_index].url;
 +    }
 +    view_->NavigatePaneToUrl(pane_index, provider_url);
-+  }
-+}
-+
-+GURL ClashOfGptsCoordinator::GetProviderUrl(LlmProvider provider) const {
-+  switch (provider) {
-+    case LlmProvider::kChatGPT:
-+      return GURL("https://chatgpt.com");
-+    case LlmProvider::kClaude:
-+      return GURL("https://claude.ai");
-+    case LlmProvider::kGrok:
-+      return GURL("https://grok.com");
-+    case LlmProvider::kGemini:
-+      return GURL("https://gemini.google.com");
-+    case LlmProvider::kPerplexity:
-+      return GURL("https://www.perplexity.ai");
-+  }
-+}
-+
-+std::u16string ClashOfGptsCoordinator::GetProviderName(LlmProvider provider) const {
-+  switch (provider) {
-+    case LlmProvider::kChatGPT:
-+      return u"ChatGPT";
-+    case LlmProvider::kClaude:
-+      return u"Claude";
-+    case LlmProvider::kGrok:
-+      return u"Grok";
-+    case LlmProvider::kGemini:
-+      return u"Gemini";
-+    case LlmProvider::kPerplexity:
-+      return u"Perplexity";
 +  }
 +}
 +
@@ -248,23 +292,6 @@ index 0000000000000..e6a8b8b97eada
 +bool ClashOfGptsCoordinator::HandleKeyboardEvent(
 +    content::WebContents* source,
 +    const input::NativeWebKeyboardEvent& event) {
-+  // Handle Cmd+1/2/3 for focusing panes
-+  if (event.GetType() == blink::WebInputEvent::Type::kRawKeyDown &&
-+      event.GetModifiers() & blink::WebInputEvent::kMetaKey) {
-+    // Check for number keys (1, 2, 3)
-+    int pane_index = -1;
-+    if (event.windows_key_code >= ui::VKEY_1 && 
-+        event.windows_key_code <= ui::VKEY_3) {
-+      pane_index = event.windows_key_code - ui::VKEY_1;
-+    }
-+
-+    // Only focus if the pane exists
-+    if (pane_index >= 0 && pane_index < current_pane_count_ && view_) {
-+      view_->FocusInputFieldForPane(pane_index);
-+      return true;
-+    }
-+  }
-+  
 +  // Use the unhandled keyboard event handler to process the event
 +  // This ensures standard browser shortcuts like Cmd+C and Cmd+V work properly
 +  if (view_ && view_->GetWidget()) {
@@ -273,7 +300,7 @@ index 0000000000000..e6a8b8b97eada
 +      return unhandled_keyboard_event_handler_.HandleKeyboardEvent(event, focus_manager);
 +    }
 +  }
-+  
++
 +  return false;
 +}
 +
@@ -365,18 +392,18 @@ index 0000000000000..e6a8b8b97eada
 +  // Save pane count
 +  prefs->SetInteger(kClashOfGptsPaneCountPref, current_pane_count_);
 +
-+  // Save provider selections
-+  ScopedListPrefUpdate providers_update(prefs, kClashOfGptsProvidersPref);
++  // Save provider selections (as indices)
++  ScopedListPrefUpdate providers_update(prefs, kClashOfGptsPaneProvidersPref);
 +  providers_update->clear();
 +  for (int i = 0; i < current_pane_count_; ++i) {
-+    providers_update->Append(static_cast<int>(pane_providers_[i]));
++    providers_update->Append(static_cast<int>(pane_provider_indices_[i]));
 +  }
 +
 +  // Save last URLs
 +  ScopedDictPrefUpdate urls_update(prefs, kClashOfGptsLastUrlsPref);
 +  urls_update->clear();
 +  for (const auto& [key, url] : last_urls_) {
-+    std::string dict_key = base::StringPrintf("%d_%d", key.first, static_cast<int>(key.second));
++    std::string dict_key = base::StringPrintf("%d_%zu", key.first, key.second);
 +    urls_update->Set(dict_key, url.spec());
 +  }
 +}
@@ -394,14 +421,14 @@ index 0000000000000..e6a8b8b97eada
 +    current_pane_count_ = kDefaultPaneCount;
 +  }
 +
-+  // Load provider selections
-+  const base::Value::List& providers_list = prefs->GetList(kClashOfGptsProvidersPref);
++  // Load provider selections (indices)
++  const base::Value::List& providers_list = prefs->GetList(kClashOfGptsPaneProvidersPref);
 +  if (providers_list.size() > 0) {
 +    for (size_t i = 0; i < providers_list.size() && i < kMaxPanes; ++i) {
 +      if (providers_list[i].is_int()) {
-+        int provider_int = providers_list[i].GetInt();
-+        if (provider_int >= 0 && provider_int <= 4) {  // Now includes kPerplexity = 4
-+          pane_providers_[i] = static_cast<LlmProvider>(provider_int);
++        int provider_index = providers_list[i].GetInt();
++        if (provider_index >= 0 && static_cast<size_t>(provider_index) < providers_.size()) {
++          pane_provider_indices_[i] = static_cast<size_t>(provider_index);
 +        }
 +      }
 +    }
@@ -413,16 +440,16 @@ index 0000000000000..e6a8b8b97eada
 +    if (const std::string* url_str = value.GetIfString()) {
 +      // Parse key format "pane_provider" safely without sscanf
 +      size_t underscore_pos = key.find('_');
-+      if (underscore_pos != std::string::npos && underscore_pos > 0 && 
++      if (underscore_pos != std::string::npos && underscore_pos > 0 &&
 +          underscore_pos < key.length() - 1) {
-+        int pane_index, provider_int;
++        int pane_index, provider_index;
 +        if (base::StringToInt(key.substr(0, underscore_pos), &pane_index) &&
-+            base::StringToInt(key.substr(underscore_pos + 1), &provider_int)) {
++            base::StringToInt(key.substr(underscore_pos + 1), &provider_index)) {
 +          if (pane_index >= 0 && pane_index < kMaxPanes &&
-+              provider_int >= 0 && provider_int <= 4) {  // Now includes kPerplexity = 4
++              provider_index >= 0 && static_cast<size_t>(provider_index) < providers_.size()) {
 +            GURL url(*url_str);
 +            if (url.is_valid()) {
-+              last_urls_[{pane_index, static_cast<LlmProvider>(provider_int)}] = url;
++              last_urls_[{pane_index, static_cast<size_t>(provider_index)}] = url;
 +            }
 +          }
 +        }
@@ -434,7 +461,7 @@ index 0000000000000..e6a8b8b97eada
 +// static
 +void ClashOfGptsCoordinator::RegisterProfilePrefs(
 +    user_prefs::PrefRegistrySyncable* registry) {
-+  registry->RegisterListPref(kClashOfGptsProvidersPref);
++  registry->RegisterListPref(kClashOfGptsPaneProvidersPref);
 +  registry->RegisterDictionaryPref(kClashOfGptsLastUrlsPref);
 +  registry->RegisterIntegerPref(kClashOfGptsPaneCountPref, kDefaultPaneCount);
 +}
@@ -442,29 +469,16 @@ index 0000000000000..e6a8b8b97eada
 +
 +// PaneWebContentsObserver implementation
 +ClashOfGptsCoordinator::PaneWebContentsObserver::PaneWebContentsObserver(
-+    ClashOfGptsCoordinator* coordinator, int pane_index, content::WebContents* web_contents)
++    ClashOfGptsCoordinator* coordinator, content::WebContents* web_contents)
 +    : content::WebContentsObserver(web_contents),
-+      coordinator_(coordinator),
-+      pane_index_(pane_index) {}
++      coordinator_(coordinator) {}
 +
 +ClashOfGptsCoordinator::PaneWebContentsObserver::~PaneWebContentsObserver() = default;
 +
 +void ClashOfGptsCoordinator::PaneWebContentsObserver::DidFinishLoad(
 +    content::RenderFrameHost* render_frame_host,
 +    const GURL& validated_url) {
-+  // Focus the input field when the page finishes loading
-+  if (render_frame_host && render_frame_host->IsInPrimaryMainFrame()) {
-+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
-+        FROM_HERE,
-+        base::BindOnce([](base::WeakPtr<ClashOfGptsCoordinator> coordinator,
-+                         int pane_index) {
-+          if (!coordinator || !coordinator->view_) {
-+            return;
-+          }
-+          coordinator->view_->FocusInputFieldForPane(pane_index);
-+        }, coordinator_->weak_factory_.GetWeakPtr(), pane_index_),
-+        base::Seconds(1));
-+  }
++  // Nothing to do on page load
 +}
 +
 +content::WebContents* ClashOfGptsCoordinator::GetOrCreateWebContentsForPane(int pane_index) {
@@ -481,7 +495,7 @@ index 0000000000000..e6a8b8b97eada
 +
 +    // Create observer for this pane
 +    pane_observers_[pane_index] = std::make_unique<PaneWebContentsObserver>(
-+        this, pane_index, owned_web_contents_[pane_index].get());
++        this, owned_web_contents_[pane_index].get());
 +  }
 +
 +  return owned_web_contents_[pane_index].get();
@@ -494,7 +508,7 @@ index 0000000000000..e6a8b8b97eada
 +      if (content::WebContents* web_contents = view_->GetWebContentsForPane(i)) {
 +        GURL current_url = web_contents->GetURL();
 +        if (current_url.is_valid()) {
-+          last_urls_[{i, pane_providers_[i]}] = current_url;
++          last_urls_[{i, pane_provider_indices_[i]}] = current_url;
 +        }
 +      }
 +    }

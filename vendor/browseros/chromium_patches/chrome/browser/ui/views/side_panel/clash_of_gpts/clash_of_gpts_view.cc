@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/ui/views/side_panel/clash_of_gpts/clash_of_gpts_view.cc b/chrome/browser/ui/views/side_panel/clash_of_gpts/clash_of_gpts_view.cc
 new file mode 100644
-index 0000000000000..7e08e2f8fc872
+index 0000000000000..0a917c1613c48
 --- /dev/null
 +++ b/chrome/browser/ui/views/side_panel/clash_of_gpts/clash_of_gpts_view.cc
-@@ -0,0 +1,553 @@
+@@ -0,0 +1,467 @@
 +// Copyright 2025 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -14,6 +14,7 @@ index 0000000000000..7e08e2f8fc872
 +
 +#include "base/functional/bind.h"
 +#include "chrome/browser/ui/views/side_panel/clash_of_gpts/clash_of_gpts_coordinator.h"
++#include "chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.h"
 +#include "base/strings/string_number_conversions.h"
 +#include "base/strings/stringprintf.h"
 +#include "base/strings/utf_string_conversions.h"
@@ -49,28 +50,25 @@ index 0000000000000..7e08e2f8fc872
 +// ComboboxModel for LLM provider selection
 +class LlmProviderComboboxModel : public ui::ComboboxModel {
 + public:
-+  LlmProviderComboboxModel() = default;
++  explicit LlmProviderComboboxModel(ClashOfGptsCoordinator* coordinator)
++      : coordinator_(coordinator) {}
 +  ~LlmProviderComboboxModel() override = default;
 +
 +  // ui::ComboboxModel:
-+  size_t GetItemCount() const override { return 5; }
++  size_t GetItemCount() const override {
++    return coordinator_->GetProviders().size();
++  }
 +
 +  std::u16string GetItemAt(size_t index) const override {
-+    switch (index) {
-+      case 0:
-+        return u"ChatGPT";
-+      case 1:
-+        return u"Claude";
-+      case 2:
-+        return u"Grok";
-+      case 3:
-+        return u"Gemini";
-+      case 4:
-+        return u"Perplexity";
-+      default:
-+        NOTREACHED();
++    const auto& providers = coordinator_->GetProviders();
++    if (index >= providers.size()) {
++      NOTREACHED();
 +    }
++    return providers[index].name;
 +  }
++
++ private:
++  raw_ptr<ClashOfGptsCoordinator> coordinator_;
 +};
 +
 +}  // namespace
@@ -230,91 +228,6 @@ index 0000000000000..7e08e2f8fc872
 +  }
 +}
 +
-+void ClashOfGptsView::FocusInputFieldForPane(int pane_index) {
-+  content::WebContents* web_contents = GetWebContentsForPane(pane_index);
-+  if (!web_contents) {
-+    return;
-+  }
-+
-+  content::RenderFrameHost* main_frame = web_contents->GetPrimaryMainFrame();
-+  if (!main_frame || !main_frame->IsRenderFrameLive()) {
-+    return;
-+  }
-+
-+  // JavaScript to focus the input field for each provider
-+  std::string focus_script;
-+  ClashOfGptsCoordinator::LlmProvider provider = 
-+      coordinator_->GetProviderForPane(pane_index);
-+  
-+  switch (provider) {
-+    case ClashOfGptsCoordinator::LlmProvider::kChatGPT:
-+      focus_script = R"(
-+        setTimeout(() => {
-+          const input = document.querySelector('#prompt-textarea');
-+          if (input) {
-+            input.focus();
-+            input.click();
-+          }
-+        }, 500);
-+      )";
-+      break;
-+      
-+    case ClashOfGptsCoordinator::LlmProvider::kClaude:
-+      focus_script = R"(
-+        setTimeout(() => {
-+          const input = document.querySelector('div[contenteditable="true"]');
-+          if (input) {
-+            input.focus();
-+            input.click();
-+          }
-+        }, 500);
-+      )";
-+      break;
-+      
-+    case ClashOfGptsCoordinator::LlmProvider::kGrok:
-+      focus_script = R"(
-+        setTimeout(() => {
-+          const input = document.querySelector('textarea, input[type="text"]');
-+          if (input) {
-+            input.focus();
-+            input.click();
-+          }
-+        }, 500);
-+      )";
-+      break;
-+      
-+    case ClashOfGptsCoordinator::LlmProvider::kGemini:
-+      focus_script = R"(
-+        setTimeout(() => {
-+          const input = document.querySelector('.ql-editor, textarea, input[type="text"]');
-+          if (input) {
-+            input.focus();
-+            input.click();
-+          }
-+        }, 500);
-+      )";
-+      break;
-+      
-+    case ClashOfGptsCoordinator::LlmProvider::kPerplexity:
-+      focus_script = R"(
-+        setTimeout(() => {
-+          const input = document.querySelector('textarea');
-+          if (input) {
-+            input.focus();
-+            input.click();
-+          }
-+        }, 500);
-+      )";
-+      break;
-+  }
-+
-+  if (!focus_script.empty()) {
-+    main_frame->ExecuteJavaScriptForTests(
-+        base::UTF8ToUTF16(focus_script),
-+        base::NullCallback(),
-+        /* has_user_gesture= */ true);
-+  }
-+}
 +
 +void ClashOfGptsView::OnThemeChanged() {
 +  views::View::OnThemeChanged();
@@ -396,11 +309,11 @@ index 0000000000000..7e08e2f8fc872
 +  panes_[pane_index].pane_label->SetEnabledColor(ui::kColorLabelForegroundSecondary);
 +
 +  // Add provider dropdown
-+  auto provider_model = std::make_unique<LlmProviderComboboxModel>();
++  auto provider_model = std::make_unique<LlmProviderComboboxModel>(coordinator_);
 +  panes_[pane_index].provider_selector = header->AddChildView(
 +      std::make_unique<views::Combobox>(std::move(provider_model)));
 +  panes_[pane_index].provider_selector->SetSelectedIndex(
-+      static_cast<size_t>(coordinator_->GetProviderForPane(pane_index)));
++      coordinator_->GetProviderIndexForPane(pane_index));
 +  panes_[pane_index].provider_selector->SetCallback(base::BindRepeating(
 +      &ClashOfGptsView::OnProviderChanged, base::Unretained(this), pane_index));
 +  panes_[pane_index].provider_selector->SetAccessibleName(
@@ -436,13 +349,16 @@ index 0000000000000..7e08e2f8fc872
 +  content::WebContents* web_contents = coordinator_->GetOrCreateWebContentsForPane(pane_index);
 +  if (web_contents) {
 +    // Navigate to initial provider URL
-+    GURL provider_url = coordinator_->GetProviderUrl(
-+        coordinator_->GetProviderForPane(pane_index));
-+    web_contents->GetController().LoadURL(
-+        provider_url,
-+        content::Referrer(),
-+        ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
-+        std::string());
++    size_t provider_index = coordinator_->GetProviderIndexForPane(pane_index);
++    const auto& providers = coordinator_->GetProviders();
++    if (provider_index < providers.size()) {
++      GURL provider_url = providers[provider_index].url;
++      web_contents->GetController().LoadURL(
++          provider_url,
++          content::Referrer(),
++          ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
++          std::string());
++    }
 +
 +    // Set the WebContents in the WebView (WebView does NOT take ownership)
 +    panes_[pane_index].web_view->SetWebContents(web_contents);
@@ -462,13 +378,11 @@ index 0000000000000..7e08e2f8fc872
 +  }
 +
 +  auto selected_index = panes_[pane_index].provider_selector->GetSelectedIndex();
-+  if (!selected_index || selected_index.value() > 4) {
++  if (!selected_index || selected_index.value() >= coordinator_->GetProviders().size()) {
 +    return;
 +  }
 +
-+  coordinator_->SetProviderForPane(
-+      pane_index, 
-+      static_cast<ClashOfGptsCoordinator::LlmProvider>(selected_index.value()));
++  coordinator_->SetProviderForPane(pane_index, selected_index.value());
 +}
 +
 +void ClashOfGptsView::OnOpenInNewTab(int pane_index) {
