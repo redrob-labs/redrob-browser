@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.cc b/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.cc
 new file mode 100644
-index 0000000000000..65d7bfc9181fe
+index 0000000000000..1bd325ebcc36f
 --- /dev/null
 +++ b/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.cc
-@@ -0,0 +1,1177 @@
+@@ -0,0 +1,1142 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -76,34 +76,31 @@ index 0000000000000..65d7bfc9181fe
 +
 +namespace {
 +
-+// Preference name for storing selected LLM provider
-+const char kThirdPartyLlmProviderPref[] = "third_party_llm.selected_provider";
++// Preference names
++const char kThirdPartyLlmProvidersPref[] = "browseros.third_party_llm.providers";
++const char kThirdPartyLlmSelectedProviderPref[] = "browseros.third_party_llm.selected_provider";
 +
 +// ComboboxModel for LLM provider selection
 +class LlmProviderComboboxModel : public ui::ComboboxModel {
 + public:
-+  LlmProviderComboboxModel() = default;
++  explicit LlmProviderComboboxModel(const std::vector<LlmProviderInfo>* providers)
++      : providers_(providers) {}
 +  ~LlmProviderComboboxModel() override = default;
 +
 +  // ui::ComboboxModel:
-+  size_t GetItemCount() const override { return 5; }
++  size_t GetItemCount() const override {
++    return providers_ ? providers_->size() : 0;
++  }
 +
 +  std::u16string GetItemAt(size_t index) const override {
-+    switch (index) {
-+      case 0:
-+        return u"ChatGPT";
-+      case 1:
-+        return u"Claude";
-+      case 2:
-+        return u"Grok";
-+      case 3:
-+        return u"Gemini";
-+      case 4:
-+        return u"Perplexity";
-+      default:
-+        NOTREACHED();
++    if (!providers_ || index >= providers_->size()) {
++      NOTREACHED();
 +    }
++    return (*providers_)[index].name;
 +  }
++
++ private:
++  raw_ptr<const std::vector<LlmProviderInfo>> providers_;
 +};
 +
 +}  // namespace
@@ -115,14 +112,8 @@ index 0000000000000..65d7bfc9181fe
 +  browser_list_observation_.Observe(BrowserList::GetInstance());
 +  profile_observation_.Observe(browser->profile());
 +
-+  // Load saved provider preference
-+  PrefService* prefs = browser->profile()->GetPrefs();
-+  if (prefs->HasPrefPath(kThirdPartyLlmProviderPref)) {
-+    int provider_value = prefs->GetInteger(kThirdPartyLlmProviderPref);
-+    if (provider_value >= 0 && provider_value <= 4) {
-+      current_provider_ = static_cast<LlmProvider>(provider_value);
-+    }
-+  }
++  // Load providers from preferences
++  LoadProvidersFromPrefs();
 +}
 +
 +ThirdPartyLlmPanelCoordinator::~ThirdPartyLlmPanelCoordinator() {
@@ -180,10 +171,10 @@ index 0000000000000..65d7bfc9181fe
 +      12));  // Increased spacing between elements
 +  
 +  // Add dropdown
-+  auto provider_model = std::make_unique<LlmProviderComboboxModel>();
++  auto provider_model = std::make_unique<LlmProviderComboboxModel>(&providers_);
 +  provider_selector_ = header->AddChildView(
 +      std::make_unique<views::Combobox>(std::move(provider_model)));
-+  provider_selector_->SetSelectedIndex(static_cast<size_t>(current_provider_));
++  provider_selector_->SetSelectedIndex(current_provider_index_);
 +  provider_selector_->SetCallback(base::BindRepeating(
 +      &ThirdPartyLlmPanelCoordinator::OnProviderChanged,
 +      weak_factory_.GetWeakPtr()));
@@ -303,17 +294,22 @@ index 0000000000000..65d7bfc9181fe
 +
 +  // Navigate to initial provider (use last URL if available)
 +  GURL provider_url;
-+  auto it = last_urls_.find(current_provider_);
-+  if (it != last_urls_.end() && it->second.is_valid()) {
-+    provider_url = it->second;
-+  } else {
-+    provider_url = GetProviderUrl(current_provider_);
++  if (current_provider_index_ < providers_.size()) {
++    auto it = last_urls_.find(current_provider_index_);
++    if (it != last_urls_.end() && it->second.is_valid()) {
++      provider_url = it->second;
++    } else {
++      provider_url = providers_[current_provider_index_].url;
++    }
 +  }
-+  owned_web_contents_->GetController().LoadURL(
-+      provider_url, 
-+      content::Referrer(),
-+      ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
-+      std::string());
++
++  if (provider_url.is_valid()) {
++    owned_web_contents_->GetController().LoadURL(
++        provider_url,
++        content::Referrer(),
++        ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
++        std::string());
++  }
 +
 +  // Set the WebContents in the WebView (WebView does NOT take ownership)
 +  // We pass the raw pointer but retain ownership via owned_web_contents_
@@ -363,40 +359,136 @@ index 0000000000000..65d7bfc9181fe
 +    return;
 +
 +  auto selected_index = provider_selector_->GetSelectedIndex();
-+  if (!selected_index || selected_index.value() > 4)
++  if (!selected_index || selected_index.value() >= providers_.size())
 +    return;
 +
-+  DoProviderChange(static_cast<LlmProvider>(selected_index.value()));
++  DoProviderChange(selected_index.value());
 +}
 +
-+void ThirdPartyLlmPanelCoordinator::DoProviderChange(LlmProvider new_provider) {
++std::vector<LlmProviderInfo> ThirdPartyLlmPanelCoordinator::GetDefaultProviders() const {
++  std::vector<LlmProviderInfo> defaults;
++  defaults.push_back({u"ChatGPT", GURL("https://chatgpt.com")});
++  defaults.push_back({u"Claude", GURL("https://claude.ai")});
++  defaults.push_back({u"Grok", GURL("https://grok.com")});
++  defaults.push_back({u"Gemini", GURL("https://gemini.google.com")});
++  defaults.push_back({u"Perplexity", GURL("https://www.perplexity.ai")});
++  return defaults;
++}
++
++void ThirdPartyLlmPanelCoordinator::LoadProvidersFromPrefs() {
++  PrefService* prefs = GetBrowser().profile()->GetPrefs();
++  if (!prefs) {
++    LOG(ERROR) << "[browseros] Failed to get PrefService";
++    providers_ = GetDefaultProviders();
++    return;
++  }
++
++  const base::Value::List& providers_list = prefs->GetList(kThirdPartyLlmProvidersPref);
++
++  providers_.clear();
++
++  if (!providers_list.empty()) {
++    for (const base::Value& item : providers_list) {
++      if (!item.is_dict()) {
++        LOG(WARNING) << "[browseros] Invalid provider entry (not a dict), skipping";
++        continue;
++      }
++
++      const std::string* name = item.GetDict().FindString("name");
++      const std::string* url = item.GetDict().FindString("url");
++
++      if (!name || name->empty()) {
++        LOG(WARNING) << "[browseros] Provider missing name, skipping";
++        continue;
++      }
++
++      if (!url || url->empty()) {
++        LOG(WARNING) << "[browseros] Provider missing URL, skipping";
++        continue;
++      }
++
++      GURL provider_url(*url);
++      if (!provider_url.is_valid()) {
++        LOG(WARNING) << "[browseros] Invalid provider URL: " << *url;
++        continue;
++      }
++
++      providers_.push_back({base::UTF8ToUTF16(*name), provider_url});
++    }
++  }
++
++  // If no valid providers loaded, use defaults
++  if (providers_.empty()) {
++    LOG(INFO) << "[browseros] No providers in prefs, using defaults";
++    providers_ = GetDefaultProviders();
++    SaveProvidersToPrefs();
++  }
++
++  // Load selected provider index
++  int selected_index = prefs->GetInteger(kThirdPartyLlmSelectedProviderPref);
++  if (selected_index < 0 || static_cast<size_t>(selected_index) >= providers_.size()) {
++    LOG(WARNING) << "[browseros] Invalid selected provider index: " << selected_index
++                 << ", resetting to 0";
++    current_provider_index_ = 0;
++    prefs->SetInteger(kThirdPartyLlmSelectedProviderPref, 0);
++  } else {
++    current_provider_index_ = static_cast<size_t>(selected_index);
++  }
++}
++
++void ThirdPartyLlmPanelCoordinator::SaveProvidersToPrefs() {
++  PrefService* prefs = GetBrowser().profile()->GetPrefs();
++  if (!prefs) {
++    LOG(ERROR) << "[browseros] Failed to get PrefService for saving";
++    return;
++  }
++
++  base::Value::List providers_list;
++
++  for (const auto& provider : providers_) {
++    base::Value::Dict provider_dict;
++    provider_dict.Set("name", base::UTF16ToUTF8(provider.name));
++    provider_dict.Set("url", provider.url.spec());
++    providers_list.Append(std::move(provider_dict));
++  }
++
++  prefs->SetList(kThirdPartyLlmProvidersPref, std::move(providers_list));
++}
++
++void ThirdPartyLlmPanelCoordinator::DoProviderChange(size_t new_provider_index) {
 +  // Prevent re-entrancy and overlapping updates.
-+  if (provider_change_in_progress_ || new_provider == current_provider_)
++  if (provider_change_in_progress_ || new_provider_index == current_provider_index_)
 +    return;
 +
++  if (new_provider_index >= providers_.size()) {
++    LOG(ERROR) << "[browseros] Invalid provider index: " << new_provider_index;
++    return;
++  }
++
 +  provider_change_in_progress_ = true;
-+  
++
 +  browseros_metrics::BrowserOSMetrics::Log("llmchat.provider.changed");
 +
 +  if (owned_web_contents_) {
 +    GURL current_url = owned_web_contents_->GetURL();
 +    if (current_url.is_valid()) {
-+      last_urls_[current_provider_] = current_url;
++      last_urls_[current_provider_index_] = current_url;
 +    }
 +  }
 +
-+  current_provider_ = new_provider;
++  current_provider_index_ = new_provider_index;
 +
 +  // Persist preference.
 +  if (PrefService* prefs = GetBrowser().profile()->GetPrefs()) {
-+    prefs->SetInteger(kThirdPartyLlmProviderPref, static_cast<int>(current_provider_));
++    prefs->SetInteger(kThirdPartyLlmSelectedProviderPref, static_cast<int>(current_provider_index_));
 +  }
 +
 +  // Determine URL to load.
 +  GURL provider_url;
-+  auto it = last_urls_.find(current_provider_);
-+  provider_url = (it != last_urls_.end() && it->second.is_valid()) ? it->second
-+                                                                    : GetProviderUrl(current_provider_);
++  auto it = last_urls_.find(current_provider_index_);
++  provider_url = (it != last_urls_.end() && it->second.is_valid())
++                     ? it->second
++                     : providers_[current_provider_index_].url;
 +
 +  if (owned_web_contents_) {
 +    owned_web_contents_->GetController().LoadURL(
@@ -406,53 +498,23 @@ index 0000000000000..65d7bfc9181fe
 +  provider_change_in_progress_ = false;
 +}
 +
-+GURL ThirdPartyLlmPanelCoordinator::GetProviderUrl(LlmProvider provider) const {
-+  switch (provider) {
-+    case LlmProvider::kChatGPT:
-+      return GURL("https://chatgpt.com");
-+    case LlmProvider::kClaude:
-+      return GURL("https://claude.ai");
-+    case LlmProvider::kGrok:
-+      return GURL("https://grok.com");
-+    case LlmProvider::kGemini:
-+      return GURL("https://gemini.google.com");
-+    case LlmProvider::kPerplexity:
-+      return GURL("https://www.perplexity.ai");
-+  }
-+}
-+
-+std::u16string ThirdPartyLlmPanelCoordinator::GetProviderName(LlmProvider provider) const {
-+  switch (provider) {
-+    case LlmProvider::kChatGPT:
-+      return u"ChatGPT";
-+    case LlmProvider::kClaude:
-+      return u"Claude";
-+    case LlmProvider::kGrok:
-+      return u"Grok";
-+    case LlmProvider::kGemini:
-+      return u"Gemini";
-+    case LlmProvider::kPerplexity:
-+      return u"Perplexity";
-+  }
-+}
-+
 +void ThirdPartyLlmPanelCoordinator::OnRefreshContent() {
-+  if (!owned_web_contents_) {
++  if (!owned_web_contents_ || current_provider_index_ >= providers_.size()) {
 +    return;
 +  }
-+  
++
 +  // Get the default URL for the current provider
-+  GURL provider_url = GetProviderUrl(current_provider_);
-+  
++  GURL provider_url = providers_[current_provider_index_].url;
++
 +  // Navigate to the default URL
 +  owned_web_contents_->GetController().LoadURL(
 +      provider_url,
 +      content::Referrer(),
 +      ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
 +      std::string());
-+  
++
 +  // Clear the saved URL for this provider so it uses the default next time
-+  last_urls_.erase(current_provider_);
++  last_urls_.erase(current_provider_index_);
 +}
 +
 +void ThirdPartyLlmPanelCoordinator::OnOpenInNewTab() {
@@ -823,10 +885,8 @@ index 0000000000000..65d7bfc9181fe
 +  bool is_known_llm = false;
 +
 +  // Check all LLM providers
-+  for (int i = 0; i <= static_cast<int>(LlmProvider::kPerplexity); ++i) {
-+    LlmProvider provider = static_cast<LlmProvider>(i);
-+    GURL provider_url = GetProviderUrl(provider);
-+    if (origin_url.host() == provider_url.host()) {
++  for (const auto& provider : providers_) {
++    if (origin_url.host() == provider.url.host()) {
 +      is_known_llm = true;
 +      break;
 +    }
@@ -878,10 +938,8 @@ index 0000000000000..65d7bfc9181fe
 +  const GURL origin_url = security_origin.GetURL();
 +
 +  // Check all LLM providers
-+  for (int i = 0; i <= static_cast<int>(LlmProvider::kPerplexity); ++i) {
-+    LlmProvider provider = static_cast<LlmProvider>(i);
-+    GURL provider_url = GetProviderUrl(provider);
-+    if (origin_url.host() == provider_url.host()) {
++  for (const auto& provider : providers_) {
++    if (origin_url.host() == provider.url.host()) {
 +      // Auto-grant permission check for trusted LLM sites
 +      VLOG(2) << "[browseros] Media permission check for trusted LLM origin: "
 +              << security_origin.Serialize()
@@ -919,31 +977,35 @@ index 0000000000000..65d7bfc9181fe
 +    return;
 +  }
 +
-+  // Calculate next provider (cycle through 0-4)
-+  int next_provider = (static_cast<int>(current_provider_) + 1) % 5;
-+  LlmProvider new_provider = static_cast<LlmProvider>(next_provider);
-+  
++  if (providers_.empty()) {
++    return;
++  }
++
++  // Calculate next provider (cycle through all providers)
++  size_t next_provider_index = (current_provider_index_ + 1) % providers_.size();
++
 +  // Update the provider selector if it exists
 +  if (provider_selector_) {
 +    // Combobox selection changes made programmatically do NOT invoke the
 +    // `SetCallback` observer, so we must call `OnProviderChanged()` manually
 +    // to keep the page in sync with the visible provider label.
-+    provider_selector_->SetSelectedIndex(next_provider);
++    provider_selector_->SetSelectedIndex(next_provider_index);
 +    OnProviderChanged();
 +    return;
 +  } else {
 +    // If the UI isn't created yet, update everything manually
-+    current_provider_ = new_provider;
++    current_provider_index_ = next_provider_index;
 +
 +    // Save preference
 +    PrefService* prefs = GetBrowser().profile()->GetPrefs();
 +    if (prefs) {
-+      prefs->SetInteger(kThirdPartyLlmProviderPref, next_provider);
++      prefs->SetInteger(kThirdPartyLlmSelectedProviderPref,
++                        static_cast<int>(next_provider_index));
 +    }
 +
 +    // Navigate to the new provider URL if we have WebContents
-+    if (owned_web_contents_) {
-+      GURL provider_url = GetProviderUrl(current_provider_);
++    if (owned_web_contents_ && next_provider_index < providers_.size()) {
++      GURL provider_url = providers_[next_provider_index].url;
 +      owned_web_contents_->GetController().LoadURL(
 +          provider_url,
 +          content::Referrer(),
@@ -958,105 +1020,7 @@ index 0000000000000..65d7bfc9181fe
 +void ThirdPartyLlmPanelCoordinator::DidFinishLoad(
 +    content::RenderFrameHost* render_frame_host,
 +    const GURL& validated_url) {
-+  // Focus the input field when the page finishes loading
-+  // Use a delayed task to ensure the page is fully ready
-+  if (render_frame_host && render_frame_host->IsInPrimaryMainFrame()) {
-+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
-+        FROM_HERE,
-+        base::BindOnce(&ThirdPartyLlmPanelCoordinator::FocusInputField,
-+                       weak_factory_.GetWeakPtr()),
-+        base::Seconds(1));
-+  }
-+}
-+
-+void ThirdPartyLlmPanelCoordinator::FocusInputField() {
-+  if (!owned_web_contents_) {
-+    return;
-+  }
-+  
-+  // Get the main frame
-+  content::RenderFrameHost* main_frame = 
-+      owned_web_contents_->GetPrimaryMainFrame();
-+  if (!main_frame || !main_frame->IsRenderFrameLive()) {
-+    return;
-+  }
-+  
-+  // JavaScript to focus the input field for each provider
-+  std::string focus_script;
-+  switch (current_provider_) {
-+    case LlmProvider::kChatGPT:
-+      // ChatGPT uses a textarea with id "prompt-textarea"
-+      focus_script = R"(
-+        setTimeout(() => {
-+          const input = document.querySelector('#prompt-textarea');
-+          if (input) {
-+            input.focus();
-+            input.click();
-+          }
-+        }, 500);
-+      )";
-+      break;
-+      
-+    case LlmProvider::kClaude:
-+      // Claude uses a div with contenteditable
-+      focus_script = R"(
-+        setTimeout(() => {
-+          const input = document.querySelector('div[contenteditable="true"]');
-+          if (input) {
-+            input.focus();
-+            input.click();
-+          }
-+        }, 500);
-+      )";
-+      break;
-+      
-+    case LlmProvider::kGrok:
-+      // Grok uses a textarea or input field
-+      focus_script = R"(
-+        setTimeout(() => {
-+          const input = document.querySelector('textarea, input[type="text"]');
-+          if (input) {
-+            input.focus();
-+            input.click();
-+          }
-+        }, 500);
-+      )";
-+      break;
-+      
-+    case LlmProvider::kGemini:
-+      // Gemini uses a rich text editor
-+      focus_script = R"(
-+        setTimeout(() => {
-+          const input = document.querySelector('.ql-editor, textarea, input[type="text"]');
-+          if (input) {
-+            input.focus();
-+            input.click();
-+          }
-+        }, 500);
-+      )";
-+      break;
-+      
-+    case LlmProvider::kPerplexity:
-+      // Perplexity uses a textarea
-+      focus_script = R"(
-+        setTimeout(() => {
-+          const input = document.querySelector('textarea');
-+          if (input) {
-+            input.focus();
-+            input.click();
-+          }
-+        }, 500);
-+      )";
-+      break;
-+  }
-+  
-+  // Execute the JavaScript
-+  if (!focus_script.empty()) {
-+    main_frame->ExecuteJavaScriptForTests(
-+        base::UTF8ToUTF16(focus_script),
-+        base::NullCallback(),
-+        /* has_user_gesture= */ true);
-+  }
++  // Nothing to do on page load
 +}
 +
 +void ThirdPartyLlmPanelCoordinator::CleanupWebContents() {
@@ -1177,7 +1141,8 @@ index 0000000000000..65d7bfc9181fe
 +// static
 +void ThirdPartyLlmPanelCoordinator::RegisterProfilePrefs(
 +    user_prefs::PrefRegistrySyncable* registry) {
-+  registry->RegisterIntegerPref(kThirdPartyLlmProviderPref, 0);  // Default to ChatGPT
++  registry->RegisterListPref(kThirdPartyLlmProvidersPref);
++  registry->RegisterIntegerPref(kThirdPartyLlmSelectedProviderPref, 0);
 +}
 +
 +BROWSER_USER_DATA_KEY_IMPL(ThirdPartyLlmPanelCoordinator);

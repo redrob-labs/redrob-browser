@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.h b/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.h
 new file mode 100644
-index 0000000000000..8a772310b3c73
+index 0000000000000..11b602d0b06a1
 --- /dev/null
 +++ b/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.h
-@@ -0,0 +1,233 @@
+@@ -0,0 +1,234 @@
 +// Copyright 2026 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -73,6 +73,12 @@ index 0000000000000..8a772310b3c73
 +class WebView;
 +}  // namespace views
 +
++// Information about an LLM provider
++struct LlmProviderInfo {
++  std::u16string name;  // Display name (e.g., "ChatGPT")
++  GURL url;            // Provider URL
++};
++
 +// ThirdPartyLlmPanelCoordinator handles the creation and registration of the
 +// third-party LLM SidePanelEntry.
 +class ThirdPartyLlmPanelCoordinator
@@ -138,16 +144,8 @@ index 0000000000000..8a772310b3c73
 +
 + private:
 +  friend class BrowserUserData<ThirdPartyLlmPanelCoordinator>;
-+  
-+  BROWSER_USER_DATA_KEY_DECL();
 +
-+  enum class LlmProvider {
-+    kChatGPT = 0,
-+    kClaude = 1,
-+    kGrok = 2,
-+    kGemini = 3,
-+    kPerplexity = 4,
-+  };
++  BROWSER_USER_DATA_KEY_DECL();
 +
 +  // Menu command IDs
 +  enum MenuCommands {
@@ -160,7 +158,7 @@ index 0000000000000..8a772310b3c73
 +
 +  std::unique_ptr<views::View> CreateThirdPartyLlmWebView(
 +      SidePanelEntryScope& scope);
-+  
++
 +  void OnProviderChanged();
 +  void OnRefreshContent();
 +  void OnOpenInNewTab();
@@ -172,35 +170,38 @@ index 0000000000000..8a772310b3c73
 +      const ui::AXNodeData* node,
 +      const std::map<ui::AXNodeID, const ui::AXNodeData*>& node_map,
 +      std::u16string* output);
-+  GURL GetProviderUrl(LlmProvider provider) const;
-+  std::u16string GetProviderName(LlmProvider provider) const;
-+  void FocusInputField();
 +  void HideFeedbackLabel();
 +  void ShowOptionsMenu();
++
++  // Provider management
++  std::vector<LlmProviderInfo> GetDefaultProviders() const;
++  void LoadProvidersFromPrefs();
++  void SaveProvidersToPrefs();
 +
 +  // Executes the actual provider switch after all sanity checks. Should only
 +  // be called on the UI thread.  Uses |provider_change_in_progress_| to avoid
 +  // reentrancy.
-+  void DoProviderChange(LlmProvider new_provider);
++  void DoProviderChange(size_t new_provider_index);
 +
 +  // Clean up WebContents early to avoid shutdown crashes.
 +  void CleanupWebContents();
 +
-+  // Current provider selection
-+  LlmProvider current_provider_ = LlmProvider::kChatGPT;
-+  
++  // Provider list and current selection
++  std::vector<LlmProviderInfo> providers_;
++  size_t current_provider_index_ = 0;
++
 +  // UI elements
 +  raw_ptr<views::WebView> web_view_ = nullptr;
 +  raw_ptr<views::Combobox> provider_selector_ = nullptr;
 +  raw_ptr<views::Label> copy_feedback_label_ = nullptr;
 +  raw_ptr<views::ImageButton> menu_button_ = nullptr;
-+  
++
 +  // We need to own the WebContents because WebView doesn't take ownership
 +  // when we call SetWebContents with externally created WebContents
 +  std::unique_ptr<content::WebContents> owned_web_contents_;
 +
 +  // Store the last URL for each provider to restore state
-+  std::map<LlmProvider, GURL> last_urls_;
++  std::map<size_t, GURL> last_urls_;
 +  
 +  // Timer for auto-hiding feedback messages
 +  std::unique_ptr<base::OneShotTimer> feedback_timer_;
