@@ -27,9 +27,9 @@ def package(ctx: BuildContext) -> bool:
     log_info("\n📦 Creating Windows packages...")
 
     # First, ensure mini_installer is built
-    if not build_mini_installer(ctx):
-        log_error("Failed to build mini_installer")
-        return False
+    # if not build_mini_installer(ctx):
+    #     log_error("Failed to build mini_installer")
+    #     return False
 
     # Create both installer and portable zip
     success = True

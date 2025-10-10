@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/extensions/browseros_external_loader.h b/chrome/browser/extensions/browseros_external_loader.h
 new file mode 100644
-index 0000000000000..cad2de57fdd40
+index 0000000000000..3d0ba110fe6e1
 --- /dev/null
 +++ b/chrome/browser/extensions/browseros_external_loader.h
-@@ -0,0 +1,113 @@
+@@ -0,0 +1,116 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -89,6 +89,9 @@ index 0000000000000..cad2de57fdd40
 +  
 +  // Triggers immediate installation of all BrowserOS extensions on first start
 +  void TriggerImmediateInstallation();
++
++  // Checks extension state and logs to metrics if not enabled
++  void CheckAndLogExtensionState(const std::string& context);
 +
 +  // The profile associated with this loader.
 +  raw_ptr<Profile> profile_;

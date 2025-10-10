@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/extensions/browseros_external_loader.cc b/chrome/browser/extensions/browseros_external_loader.cc
 new file mode 100644
-index 0000000000000..cccd8bdf7c920
+index 0000000000000..53eeebf1be954
 --- /dev/null
 +++ b/chrome/browser/extensions/browseros_external_loader.cc
-@@ -0,0 +1,579 @@
+@@ -0,0 +1,661 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -28,6 +28,7 @@ index 0000000000000..cccd8bdf7c920
 +#include "chrome/browser/extensions/external_provider_impl.h"
 +#include "chrome/browser/extensions/updater/extension_updater.h"
 +#include "chrome/browser/profiles/profile.h"
++#include "components/metrics/browseros_metrics/browseros_metrics.h"
 +#include "content/public/browser/browser_context.h"
 +#include "content/public/browser/storage_partition.h"
 +#include "extensions/browser/disable_reason.h"
@@ -248,6 +249,9 @@ index 0000000000000..cccd8bdf7c920
 +  
 +  // Start periodic checking after initial load
 +  StartPeriodicCheck();
++
++  // Log initial extension state at startup
++  CheckAndLogExtensionState("startup");
 +}
 +
 +void BrowserOSExternalLoader::StartPeriodicCheck() {
@@ -282,7 +286,10 @@ index 0000000000000..cccd8bdf7c920
 +  
 +  // 4. Force immediate update check for all BrowserOS extensions
 +  ForceUpdateCheck();
-+  
++
++  // 5. Log extension state after all maintenance attempts
++  CheckAndLogExtensionState("periodic_maintenance");
++
 +  // Schedule the next maintenance
 +  StartPeriodicCheck();
 +}
@@ -374,20 +381,10 @@ index 0000000000000..cccd8bdf7c920
 +    if (!registry->disabled_extensions().Contains(extension_id)) {
 +      continue;  // Extension is not disabled, skip to next
 +    }
-+    
-+    // Check the disable reasons
-+    auto disable_reasons = prefs->GetDisableReasons(extension_id);
-+    
-+    // Re-enable if it was disabled by user action
-+    // (we don't re-enable if disabled for other reasons like policy or corruption)
-+    if (disable_reasons.contains(disable_reason::DISABLE_USER_ACTION)) {
-+      LOG(INFO) << "browseros: Re-enabling extension " << extension_id 
-+                << " that was disabled by user action";
-+      service->EnableExtension(extension_id);
-+    } else {
-+      LOG(INFO) << "browseros: Extension " << extension_id 
-+                << " is disabled but not by user action, leaving as-is";
-+    }
++
++    // Re-enable BrowserOS extensions regardless of disable reason
++    LOG(INFO) << "browseros: Re-enabling extension " << extension_id;
++    service->EnableExtension(extension_id);
 +  }
 +}
 +
@@ -580,6 +577,91 @@ index 0000000000000..cccd8bdf7c920
 +      }, config_file_for_testing_),
 +      base::BindOnce(&BrowserOSExternalLoader::ParseConfiguration,
 +                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++void BrowserOSExternalLoader::CheckAndLogExtensionState(
++    const std::string& context) {
++  if (!profile_) {
++    return;
++  }
++
++  ExtensionRegistry* registry = ExtensionRegistry::Get(profile_);
++  ExtensionPrefs* prefs = ExtensionPrefs::Get(profile_);
++
++  if (!registry || !prefs) {
++    return;
++  }
++
++  for (const std::string& extension_id : browseros_extension_ids_) {
++    // If extension is enabled, it's healthy - skip logging
++    if (registry->enabled_extensions().Contains(extension_id)) {
++      continue;
++    }
++
++    // Extension is NOT enabled - gather diagnostic information
++    base::Value::Dict properties;
++    properties.Set("extension_id", extension_id);
++    properties.Set("context", context);
++
++    std::string state;
++
++    if (registry->disabled_extensions().Contains(extension_id)) {
++      state = "disabled";
++
++      // Get extension version if available
++      const Extension* extension = registry->disabled_extensions().GetByID(extension_id);
++      if (extension) {
++        properties.Set("version", extension->version().GetString());
++      }
++
++      // Get disable reasons using public API
++      DisableReasonSet disable_reasons = prefs->GetDisableReasons(extension_id);
++
++      // Convert to bitmask by ORing all reason values
++      int bitmask = 0;
++      for (disable_reason::DisableReason reason : disable_reasons) {
++        bitmask |= static_cast<int>(reason);
++      }
++      properties.Set("disable_reasons_bitmask", bitmask);
++
++      // Log individual disable reason flags for easy querying
++      properties.Set("reason_user_action",
++                     disable_reasons.contains(disable_reason::DISABLE_USER_ACTION));
++      properties.Set("reason_permissions_increase",
++                     disable_reasons.contains(disable_reason::DISABLE_PERMISSIONS_INCREASE));
++      properties.Set("reason_reload",
++                     disable_reasons.contains(disable_reason::DISABLE_RELOAD));
++      properties.Set("reason_corrupted",
++                     disable_reasons.contains(disable_reason::DISABLE_CORRUPTED));
++      properties.Set("reason_greylist",
++                     disable_reasons.contains(disable_reason::DISABLE_GREYLIST));
++      properties.Set("reason_remote_install",
++                     disable_reasons.contains(disable_reason::DISABLE_REMOTE_INSTALL));
++
++    } else if (registry->blocklisted_extensions().Contains(extension_id)) {
++      state = "blocklisted";
++
++    } else if (registry->blocked_extensions().Contains(extension_id)) {
++      state = "blocked";
++
++    } else if (registry->terminated_extensions().Contains(extension_id)) {
++      state = "terminated";
++
++    } else {
++      state = "not_installed";
++    }
++
++    properties.Set("state", state);
++
++    // Log to metrics
++    browseros_metrics::BrowserOSMetrics::Log("ota.extension.unexpected_state",
++                                              std::move(properties));
++
++    // Also log to Chrome logs for local debugging
++    LOG(WARNING) << "browseros: Extension " << extension_id
++                 << " in unexpected state: " << state
++                 << " (context: " << context << ")";
++  }
 +}
 +
 +}  // namespace extensions
