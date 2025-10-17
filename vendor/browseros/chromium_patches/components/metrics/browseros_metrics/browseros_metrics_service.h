@@ -1,9 +1,9 @@
 diff --git a/components/metrics/browseros_metrics/browseros_metrics_service.h b/components/metrics/browseros_metrics/browseros_metrics_service.h
 new file mode 100644
-index 0000000000000..db124fd11382a
+index 0000000000000..cb7519c887826
 --- /dev/null
 +++ b/components/metrics/browseros_metrics/browseros_metrics_service.h
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,95 @@
 +// Copyright 2025 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -30,11 +30,13 @@ index 0000000000000..db124fd11382a
 +namespace browseros_metrics {
 +
 +// Service for capturing and sending analytics events to PostHog.
-+// This service manages a stable client ID and sends events to the PostHog API.
++// This service manages a stable client ID (per-profile) and install ID
++// (per-installation) and sends events to the PostHog API.
 +class BrowserOSMetricsService : public KeyedService {
 + public:
 +  explicit BrowserOSMetricsService(
 +      PrefService* pref_service,
++      PrefService* local_state_prefs,
 +      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
 +
 +  BrowserOSMetricsService(const BrowserOSMetricsService&) = delete;
@@ -48,15 +50,21 @@ index 0000000000000..db124fd11382a
 +  void CaptureEvent(const std::string& event_name,
 +                    base::Value::Dict properties);
 +
-+  // Returns the stable client ID for this browser instance.
++  // Returns the stable client ID for this profile.
 +  std::string GetClientId() const;
++
++  // Returns the stable install ID for this browser installation.
++  std::string GetInstallId() const;
 +
 +  // KeyedService:
 +  void Shutdown() override;
 +
 + private:
-+  // Initializes or retrieves the stable client ID from preferences.
++  // Initializes or retrieves the stable client ID from profile preferences.
 +  void InitializeClientId();
++
++  // Initializes or retrieves the stable install ID from local state.
++  void InitializeInstallId();
 +
 +  // Sends the event to PostHog API.
 +  void SendEventToPostHog(const std::string& event_name,
@@ -69,14 +77,20 @@ index 0000000000000..db124fd11382a
 +  // Adds default properties to the event.
 +  void AddDefaultProperties(base::Value::Dict& properties);
 +
-+  // PrefService for storing the stable client ID.
++  // PrefService for storing the stable client ID (profile prefs).
 +  raw_ptr<PrefService> pref_service_;
++
++  // PrefService for storing the stable install ID (local state).
++  raw_ptr<PrefService> local_state_prefs_;
 +
 +  // Factory for creating URL loaders.
 +  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
 +
-+  // Stable client ID for this browser instance.
++  // Stable client ID for this profile.
 +  std::string client_id_;
++
++  // Stable install ID for this browser installation.
++  std::string install_id_;
 +
 +  // Weak pointer factory for callbacks.
 +  base::WeakPtrFactory<BrowserOSMetricsService> weak_factory_{this};

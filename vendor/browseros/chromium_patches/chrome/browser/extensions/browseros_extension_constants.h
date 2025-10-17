@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/extensions/browseros_extension_constants.h b/chrome/browser/extensions/browseros_extension_constants.h
 new file mode 100644
-index 0000000000000..6505926e1890f
+index 0000000000000..6bb906bc7068f
 --- /dev/null
 +++ b/chrome/browser/extensions/browseros_extension_constants.h
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,74 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -26,17 +26,23 @@ index 0000000000000..6505926e1890f
 +inline constexpr char kBugReporterExtensionId[] =
 +    "adlpneommgkgeanpaekgoaolcpncohkf";
 +
++// Controller Extension ID
++inline constexpr char kControllerExtensionId[] =
++    "nlnihljpboknmfagkikhkdblbedophja";
++
 +// Allowlist of BrowserOS extension IDs that are permitted to be installed
 +// Only extensions with these IDs will be loaded from the config
 +constexpr const char* kAllowedExtensions[] = {
 +    kAISidePanelExtensionId,  // AI Side Panel extension
 +    kBugReporterExtensionId,  // Bug Reporter extension
++    kControllerExtensionId,   // Controller extension
 +};
 +
 +// Check if an extension is a BrowserOS extension
 +inline bool IsBrowserOSExtension(const std::string& extension_id) {
 +  return extension_id == kAISidePanelExtensionId ||
-+         extension_id == kBugReporterExtensionId;
++         extension_id == kBugReporterExtensionId ||
++         extension_id == kControllerExtensionId;
 +}
 +
 +// Check if an extension can be uninstalled (false for BrowserOS extensions)
@@ -48,7 +54,8 @@ index 0000000000000..6505926e1890f
 +inline std::vector<std::string> GetBrowserOSExtensionIds() {
 +  return {
 +    kAISidePanelExtensionId,
-+    kBugReporterExtensionId
++    kBugReporterExtensionId,
++    kControllerExtensionId
 +  };
 +}
 +
@@ -58,9 +65,11 @@ index 0000000000000..6505926e1890f
 +inline std::optional<std::string> GetExtensionDisplayName(
 +    const std::string& extension_id) {
 +  if (extension_id == kAISidePanelExtensionId) {
-+    return "BrowserOS/settings";
++    return "BrowserOS";
 +  } else if (extension_id == kBugReporterExtensionId) {
 +    return "BrowserOS/bug-reporter";
++  } else if (extension_id == kControllerExtensionId) {
++    return "BrowserOS/controller";
 +  }
 +  return std::nullopt;
 +}

@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/extensions/api/browser_os/browser_os_api.cc b/chrome/browser/extensions/api/browser_os/browser_os_api.cc
 new file mode 100644
-index 0000000000000..8065045e17330
+index 0000000000000..e8db2c11b8b31
 --- /dev/null
 +++ b/chrome/browser/extensions/api/browser_os/browser_os_api.cc
-@@ -0,0 +1,1260 @@
+@@ -0,0 +1,1235 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -18,6 +18,7 @@ index 0000000000000..8065045e17330
 +
 +#include "base/functional/bind.h"
 +#include "base/threading/platform_thread.h"
++#include "chrome/browser/browser_process.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "components/prefs/pref_service.h"
 +#include "base/json/json_writer.h"
@@ -67,6 +68,45 @@ index 0000000000000..8065045e17330
 +
 +namespace extensions {
 +namespace api {
++
++namespace {
++
++// Helper to find which PrefService contains a preference
++// Tries Local State first, then Profile prefs
++PrefService* FindPrefService(const std::string& pref_name, Profile* profile) {
++  PrefService* local_state = g_browser_process->local_state();
++  if (local_state && local_state->FindPreference(pref_name)) {
++    return local_state;
++  }
++
++  PrefService* profile_prefs = profile->GetPrefs();
++  if (profile_prefs && profile_prefs->FindPreference(pref_name)) {
++    return profile_prefs;
++  }
++
++  return nullptr;
++}
++
++// Helper to determine preference type name from value
++std::string GetPrefTypeName(const base::Value* value) {
++  switch (value->type()) {
++    case base::Value::Type::BOOLEAN:
++      return "boolean";
++    case base::Value::Type::INTEGER:
++    case base::Value::Type::DOUBLE:
++      return "number";
++    case base::Value::Type::STRING:
++      return "string";
++    case base::Value::Type::LIST:
++      return "list";
++    case base::Value::Type::DICT:
++      return "dictionary";
++    default:
++      return "unknown";
++  }
++}
++
++}  // namespace
 +
 +// Static member initialization
 +uint32_t BrowserOSGetInteractiveSnapshotFunction::next_snapshot_id_ = 1;
@@ -933,53 +973,22 @@ index 0000000000000..8065045e17330
 +      browser_os::GetPref::Params::Create(args());
 +  EXTENSION_FUNCTION_VALIDATE(params);
 +
-+  // Allow reading any preferences - no restrictions for now
-+  // This includes nxtscape.*, browseros.*, and any other preferences
-+  // Note: Be careful with this in production as it exposes all Chrome preferences
-+
 +  Profile* profile = Profile::FromBrowserContext(browser_context());
-+  PrefService* prefs = profile->GetPrefs();
++  PrefService* prefs = FindPrefService(params->name, profile);
 +
-+  if (!prefs->HasPrefPath(params->name)) {
++  if (!prefs) {
 +    return RespondNow(Error("Preference not found: " + params->name));
 +  }
 +
-+  // Create PrefObject to return
 +  browser_os::PrefObject pref_obj;
 +  pref_obj.key = params->name;
-+  
-+  // Get the preference value - user value if set, otherwise default
-+  // GetDefaultPrefValue returns const base::Value* and is guaranteed 
-+  // to not be nullptr for registered preferences per Chromium API
++
 +  const base::Value* value = prefs->GetUserPrefValue(params->name);
 +  if (!value) {
 +    value = prefs->GetDefaultPrefValue(params->name);
 +  }
 +
-+  // Set type based on value type
-+  switch (value->type()) {
-+    case base::Value::Type::BOOLEAN:
-+      pref_obj.type = "boolean";
-+      break;
-+    case base::Value::Type::INTEGER:
-+      pref_obj.type = "number";
-+      break;
-+    case base::Value::Type::DOUBLE:
-+      pref_obj.type = "number";
-+      break;
-+    case base::Value::Type::STRING:
-+      pref_obj.type = "string";
-+      break;
-+    case base::Value::Type::LIST:
-+      pref_obj.type = "list";
-+      break;
-+    case base::Value::Type::DICT:
-+      pref_obj.type = "dictionary";
-+      break;
-+    default:
-+      pref_obj.type = "unknown";
-+  }
-+
++  pref_obj.type = GetPrefTypeName(value);
 +  pref_obj.value = value->Clone();
 +
 +  return RespondNow(ArgumentList(
@@ -992,21 +1001,18 @@ index 0000000000000..8065045e17330
 +      browser_os::SetPref::Params::Create(args());
 +  EXTENSION_FUNCTION_VALIDATE(params);
 +
-+  // Allow setting nxtscape.* and browseros.* prefs
-+  // This provides access to AI provider configurations
-+  if (!params->name.starts_with("nxtscape.") && 
-+      !params->name.starts_with("browseros.")) {
-+    return RespondNow(Error("Only nxtscape.* and browseros.* preferences can be modified"));
++  // Security: only allow modifying browseros.* prefs
++  if (!params->name.starts_with("browseros.")) {
++    return RespondNow(Error("Only browseros.* preferences can be modified"));
 +  }
 +
 +  Profile* profile = Profile::FromBrowserContext(browser_context());
-+  PrefService* prefs = profile->GetPrefs();
++  PrefService* prefs = FindPrefService(params->name, profile);
 +
-+  if (!prefs->HasPrefPath(params->name)) {
++  if (!prefs) {
 +    return RespondNow(Error("Preference not found: " + params->name));
 +  }
 +
-+  // Set the preference value
 +  prefs->Set(params->name, params->value);
 +
 +  return RespondNow(ArgumentList(
@@ -1016,73 +1022,42 @@ index 0000000000000..8065045e17330
 +// BrowserOSGetAllPrefsFunction
 +ExtensionFunction::ResponseAction BrowserOSGetAllPrefsFunction::Run() {
 +  Profile* profile = Profile::FromBrowserContext(browser_context());
-+  PrefService* prefs = profile->GetPrefs();
++  PrefService* profile_prefs = profile->GetPrefs();
++  PrefService* local_state = g_browser_process->local_state();
 +
-+  // List of all nxtscape and browseros prefs to return
-+  const std::vector<std::string> nxtscape_prefs = {
-+    // Legacy nxtscape prefs
-+    "nxtscape.default_provider",
-+    "nxtscape.nxtscape_model",
-+    "nxtscape.openai_api_key",
-+    "nxtscape.openai_model",
-+    "nxtscape.openai_base_url",
-+    "nxtscape.anthropic_api_key",
-+    "nxtscape.anthropic_model",
-+    "nxtscape.anthropic_base_url",
-+    "nxtscape.gemini_api_key",
-+    "nxtscape.gemini_model",
-+    "nxtscape.gemini_base_url",
-+    "nxtscape.ollama_api_key",
-+    "nxtscape.ollama_model",
-+    "nxtscape.ollama_base_url",
-+    // New browseros prefs
-+    "browseros.providers",
-+    "browseros.default_provider_id",
-+    "browseros.show_toolbar_labels",
-+    "browseros.custom_providers"
++  // Build a combined browseros prefs dict from both sources
++  base::Value::Dict combined_browseros;
++
++  // Lambda to merge browseros prefs from a PrefService
++  auto merge_prefs_from_service = [&](PrefService* prefs, const std::string& source_name) {
++    if (!prefs) {
++      return;
++    }
++
++    // Get all preference values (returns nested Dict structure)
++    base::Value::Dict pref_dict = prefs->GetPreferenceValues(
++        PrefService::INCLUDE_DEFAULTS);
++
++    // Look for "browseros" key in the top-level dict
++    const base::Value* browseros_value = pref_dict.Find("browseros");
++    if (browseros_value && browseros_value->is_dict()) {
++      // Merge this browseros dict into combined
++      combined_browseros.Merge(browseros_value->GetDict().Clone());
++      LOG(INFO) << "[browseros] GetAllPrefs: Found browseros.* prefs in " << source_name;
++    }
 +  };
 +
++  // Merge from both Local State and Profile prefs
++  merge_prefs_from_service(local_state, "local_state");
++  merge_prefs_from_service(profile_prefs, "profile_prefs");
++
++  // Create single PrefObject with the entire browseros dict
 +  std::vector<browser_os::PrefObject> pref_objects;
-+
-+  for (const auto& pref_name : nxtscape_prefs) {
-+    if (prefs->HasPrefPath(pref_name)) {
-+      browser_os::PrefObject pref_obj;
-+      pref_obj.key = pref_name;
-+      
-+      // Get the preference value - user value if set, otherwise default
-+      const base::Value* value = prefs->GetUserPrefValue(pref_name);
-+      if (!value) {
-+        value = prefs->GetDefaultPrefValue(pref_name);
-+      }
-+
-+      // Set type based on value type
-+      switch (value->type()) {
-+        case base::Value::Type::BOOLEAN:
-+          pref_obj.type = "boolean";
-+          break;
-+        case base::Value::Type::INTEGER:
-+          pref_obj.type = "number";
-+          break;
-+        case base::Value::Type::DOUBLE:
-+          pref_obj.type = "number";
-+          break;
-+        case base::Value::Type::STRING:
-+          pref_obj.type = "string";
-+          break;
-+        case base::Value::Type::LIST:
-+          pref_obj.type = "list";
-+          break;
-+        case base::Value::Type::DICT:
-+          pref_obj.type = "dictionary";
-+          break;
-+        default:
-+          pref_obj.type = "unknown";
-+      }
-+
-+      pref_obj.value = value->Clone();
-+      pref_objects.push_back(std::move(pref_obj));
-+    }
-+  }
++  browser_os::PrefObject pref_obj;
++  pref_obj.key = "browseros";
++  pref_obj.type = "dictionary";
++  pref_obj.value = base::Value(std::move(combined_browseros));
++  pref_objects.push_back(std::move(pref_obj));
 +
 +  return RespondNow(ArgumentList(
 +      browser_os::GetAllPrefs::Results::Create(pref_objects)));

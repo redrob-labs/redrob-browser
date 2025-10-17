@@ -187,6 +187,13 @@ def find_components_to_sign(
         if nested_app not in components["helpers"]:
             components["apps"].append(nested_app)
 
+    # Find BrowserOS Server binaries
+    browseros_server_dir = join_paths(app_path, "Contents", "Resources", "BrowserOSServer")
+    if browseros_server_dir.exists():
+        for item in browseros_server_dir.rglob("*"):
+            if item.is_file() and not item.suffix and os.access(item, os.X_OK):
+                components["executables"].append(item)
+
     return components
 
 
@@ -206,6 +213,7 @@ def get_identifier_for_component(
         "chrome_crashpad_handler": f"{base_identifier}.crashpad_handler",
         "app_mode_loader": f"{base_identifier}.app_mode_loader",
         "web_app_shortcut_copier": f"{base_identifier}.web_app_shortcut_copier",
+        "browseros_server": f"{base_identifier}.browseros_server",
     }
 
     # Check for special cases
@@ -241,11 +249,11 @@ def get_signing_options(component_path: Path) -> str:
     """Determine signing options based on component type"""
     name = component_path.name
 
-    # For Sparkle XPC services and apps
+    # For Sparkle XPC services and apps - minimal restrictions
     if "sparkle" in str(component_path).lower():
         return "runtime"
 
-    # For helper apps with specific requirements
+    # For Chromium helper apps with specific sandboxing requirements
     if (
         "Helper (Renderer)" in name
         or "Helper (GPU)" in name
@@ -253,8 +261,16 @@ def get_signing_options(component_path: Path) -> str:
     ):
         return "restrict,kill,runtime"
 
-    # Default for most components
-    return "restrict,library,runtime,kill"
+    # For browseros_server - needs JIT, minimal restrictions
+    if "browseros_server" in str(component_path).lower():
+        return "runtime"
+
+    # For dylibs - library flag ONLY for dynamic libraries
+    if component_path.suffix == ".dylib":
+        return "restrict,library,runtime,kill"
+
+    # Default for other executables - no library flag
+    return "runtime"
 
 
 def sign_component(
@@ -324,10 +340,26 @@ def sign_all_components(
     # 3. Sign executables
     if components["executables"]:
         log_info("\n🔏 Signing executables...")
+        # Get entitlements directory from context
+        entitlements_dirs = []
+        if ctx:
+            entitlements_dirs.append(ctx.get_entitlements_dir())
+
         for exe in components["executables"]:
             identifier = get_identifier_for_component(exe)
             options = get_signing_options(exe)
-            if not sign_component(exe, certificate_name, identifier, options):
+
+            # Check for specific entitlements
+            entitlements = None
+            if "browseros_server" in str(exe).lower():
+                entitlements_name = "browseros-server-entitlements.plist"
+                for ent_dir in entitlements_dirs:
+                    ent_path = join_paths(ent_dir, entitlements_name)
+                    if ent_path.exists():
+                        entitlements = ent_path
+                        break
+
+            if not sign_component(exe, certificate_name, identifier, options, entitlements):
                 return False
 
     # 4. Sign dylibs

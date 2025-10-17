@@ -1,5 +1,5 @@
 diff --git a/chrome/common/pref_names.h b/chrome/common/pref_names.h
-index 0e898dc745b6e..b06aec04ab52e 100644
+index 0e898dc745b6e..c649ec745fbcd 100644
 --- a/chrome/common/pref_names.h
 +++ b/chrome/common/pref_names.h
 @@ -1590,6 +1590,8 @@ inline constexpr char kImportDialogSavedPasswords[] =
@@ -11,7 +11,7 @@ index 0e898dc745b6e..b06aec04ab52e 100644
  
  #if BUILDFLAG(IS_CHROMEOS)
  // Boolean controlling whether native client is force allowed by policy.
-@@ -4271,6 +4273,25 @@ inline constexpr char kServiceWorkerToControlSrcdocIframeEnabled[] =
+@@ -4271,6 +4273,29 @@ inline constexpr char kServiceWorkerToControlSrcdocIframeEnabled[] =
  // is set as a SharedWorker script URL.
  inline constexpr char kSharedWorkerBlobURLFixEnabled[] =
      "worker.shared_worker_blob_url_fix_enabled";
@@ -19,6 +19,10 @@ index 0e898dc745b6e..b06aec04ab52e 100644
 +// String containing the stable client ID for BrowserOS metrics
 +inline constexpr char kBrowserOSMetricsClientId[] =
 +    "browseros.metrics_client_id";
++
++// String containing the stable install ID for BrowserOS metrics (Local State)
++inline constexpr char kBrowserOSMetricsInstallId[] =
++    "browseros.metrics_install_id";
 +
 +// JSON string containing custom AI providers for BrowserOS
 +inline constexpr char kBrowserOSCustomProviders[] = 

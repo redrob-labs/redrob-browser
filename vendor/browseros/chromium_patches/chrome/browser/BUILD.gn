@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
-index ad39862fdd9a5..8cadfe3c6e7fb 100644
+index ad39862fdd9a5..fc8552e6e6dac 100644
 --- a/chrome/browser/BUILD.gn
 +++ b/chrome/browser/BUILD.gn
 @@ -12,6 +12,7 @@ import("//build/config/features.gni")
@@ -22,7 +22,18 @@ index ad39862fdd9a5..8cadfe3c6e7fb 100644
  source_set("browser_process") {
    sources = [
      "browser_process.cc",
-@@ -6557,6 +6563,20 @@ static_library("browser") {
+@@ -287,6 +293,10 @@ static_library("browser") {
+     "chrome_browser_interface_binders.h",
+     "chrome_browser_interface_binders_webui.cc",
+     "chrome_browser_interface_binders_webui.h",
++    "browseros_server/browseros_server_manager.cc",
++    "browseros_server/browseros_server_manager.h",
++    "browseros_server/browseros_server_prefs.cc",
++    "browseros_server/browseros_server_prefs.h",
+     "chrome_browser_main.cc",
+     "chrome_browser_main.h",
+     "chrome_browser_main_extra_parts_nacl_deprecation.cc",
+@@ -6557,6 +6567,20 @@ static_library("browser") {
      ]
    }
  

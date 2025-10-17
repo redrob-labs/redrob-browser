@@ -96,3 +96,9 @@ copy_operations:
     source: "resources/icons/product_logo_64.png"
     destination: "chrome/app/theme/default_200_percent/chromium/product_logo_32.png"
     type: "file"
+
+  # Binaries
+  - name: "BrowserOS Server Binaries"
+    source: "resources/binaries/browseros_server/*"
+    destination: "chrome/browser/browseros_server/binaries/"
+    type: "files"

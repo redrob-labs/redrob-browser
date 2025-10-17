@@ -1,9 +1,9 @@
 diff --git a/components/metrics/browseros_metrics/browseros_metrics_service.cc b/components/metrics/browseros_metrics/browseros_metrics_service.cc
 new file mode 100644
-index 0000000000000..707ac50393820
+index 0000000000000..4f592a2c7b95b
 --- /dev/null
 +++ b/components/metrics/browseros_metrics/browseros_metrics_service.cc
-@@ -0,0 +1,201 @@
+@@ -0,0 +1,231 @@
 +// Copyright 2025 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -76,12 +76,16 @@ index 0000000000000..707ac50393820
 +
 +BrowserOSMetricsService::BrowserOSMetricsService(
 +    PrefService* pref_service,
++    PrefService* local_state_prefs,
 +    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
 +    : pref_service_(pref_service),
++      local_state_prefs_(local_state_prefs),
 +      url_loader_factory_(std::move(url_loader_factory)) {
 +  CHECK(pref_service_);
++  CHECK(local_state_prefs_);
 +  CHECK(url_loader_factory_);
 +  InitializeClientId();
++  InitializeInstallId();
 +}
 +
 +BrowserOSMetricsService::~BrowserOSMetricsService() = default;
@@ -106,6 +110,10 @@ index 0000000000000..707ac50393820
 +  return client_id_;
 +}
 +
++std::string BrowserOSMetricsService::GetInstallId() const {
++  return install_id_;
++}
++
 +void BrowserOSMetricsService::Shutdown() {
 +  // Cancel any pending network requests
 +  weak_factory_.InvalidateWeakPtrs();
@@ -113,11 +121,11 @@ index 0000000000000..707ac50393820
 +
 +void BrowserOSMetricsService::InitializeClientId() {
 +  CHECK(pref_service_);
-+  
++
 +  // Check if we have an existing client ID
 +  const std::string& stored_id =
 +      pref_service_->GetString(prefs::kBrowserOSMetricsClientId);
-+  
++
 +  if (!stored_id.empty() && base::Uuid::ParseCaseInsensitive(stored_id).is_valid()) {
 +    client_id_ = stored_id;
 +    VLOG(1) << "browseros: Using existing metrics client ID";
@@ -128,6 +136,25 @@ index 0000000000000..707ac50393820
 +    LOG(INFO) << "browseros: Generated new metrics client ID";
 +  }
 +  VLOG(1) << "browseros: Metrics client ID: " << client_id_;
++}
++
++void BrowserOSMetricsService::InitializeInstallId() {
++  CHECK(local_state_prefs_);
++
++  // Check if we have an existing install ID
++  const std::string& stored_id =
++      local_state_prefs_->GetString(prefs::kBrowserOSMetricsInstallId);
++
++  if (!stored_id.empty() && base::Uuid::ParseCaseInsensitive(stored_id).is_valid()) {
++    install_id_ = stored_id;
++    VLOG(1) << "browseros: Using existing metrics install ID";
++  } else {
++    // Generate a new UUID
++    install_id_ = base::Uuid::GenerateRandomV4().AsLowercaseString();
++    local_state_prefs_->SetString(prefs::kBrowserOSMetricsInstallId, install_id_);
++    LOG(INFO) << "browseros: Generated new metrics install ID";
++  }
++  VLOG(1) << "browseros: Metrics install ID: " << install_id_;
 +}
 +
 +void BrowserOSMetricsService::SendEventToPostHog(
@@ -192,16 +219,19 @@ index 0000000000000..707ac50393820
 +    base::Value::Dict& properties) {
 +  // Add browser version
 +  properties.Set("$browser_version", version_info::GetVersionNumber());
-+  
++
 +  // Add OS information
 +  properties.Set("$os", base::SysInfo::OperatingSystemName());
 +  properties.Set("$os_version", base::SysInfo::OperatingSystemVersion());
-+  
++
 +  // Ensure anonymous tracking
 +  properties.Set("$process_person_profile", false);
-+  
++
 +  // Add platform architecture
 +  properties.Set("$arch", base::SysInfo::OperatingSystemArchitecture());
++
++  // Add install ID for correlating events across profiles
++  properties.Set("install_id", install_id_);
 +}
 +
 +}  // namespace browseros_metrics

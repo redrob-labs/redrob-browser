@@ -1,9 +1,9 @@
 diff --git a/components/metrics/browseros_metrics/browseros_metrics_service_factory.cc b/components/metrics/browseros_metrics/browseros_metrics_service_factory.cc
 new file mode 100644
-index 0000000000000..bddc97f6d9a05
+index 0000000000000..8f549533da577
 --- /dev/null
 +++ b/components/metrics/browseros_metrics/browseros_metrics_service_factory.cc
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,58 @@
 +// Copyright 2025 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -13,6 +13,7 @@ index 0000000000000..bddc97f6d9a05
 +#include <memory>
 +
 +#include "base/no_destructor.h"
++#include "chrome/browser/browser_process.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "components/keyed_service/content/browser_context_dependency_manager.h"
 +#include "components/metrics/browseros_metrics/browseros_metrics_service.h"
@@ -47,14 +48,15 @@ index 0000000000000..bddc97f6d9a05
 +BrowserOSMetricsServiceFactory::BuildServiceInstanceForBrowserContext(
 +    content::BrowserContext* context) const {
 +  Profile* profile = Profile::FromBrowserContext(context);
-+  
++
 +  // Don't create service for incognito profiles
 +  if (profile->IsOffTheRecord()) {
 +    return nullptr;
 +  }
-+  
++
 +  return std::make_unique<BrowserOSMetricsService>(
 +      profile->GetPrefs(),
++      g_browser_process->local_state(),
 +      profile->GetDefaultStoragePartition()
 +          ->GetURLLoaderFactoryForBrowserProcess());
 +}

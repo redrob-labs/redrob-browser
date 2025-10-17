@@ -181,15 +181,16 @@ def sign_binaries(ctx: BuildContext, certificate_name: Optional[str] = None) -> 
     # Get paths to sign
     build_output_dir = join_paths(ctx.chromium_src, ctx.out_dir)
 
-    # List of binaries to sign
-    binaries_to_sign = [
+    # STEP 1: Sign chrome.exe and browseros_server.exe BEFORE building mini_installer
+    log_info("\nStep 1/3: Signing executables before packaging...")
+    binaries_to_sign_first = [
         build_output_dir / "chrome.exe",
-        build_output_dir / "mini_installer.exe",
+        build_output_dir / "BrowserOSServer" / "default" / "browseros_server.exe",
     ]
 
     # Check which binaries exist
     existing_binaries = []
-    for binary in binaries_to_sign:
+    for binary in binaries_to_sign_first:
         if binary.exists():
             existing_binaries.append(binary)
             log_info(f"Found binary to sign: {binary.name}")
@@ -200,8 +201,30 @@ def sign_binaries(ctx: BuildContext, certificate_name: Optional[str] = None) -> 
         log_error("No binaries found to sign")
         return False
 
-    # Always use CodeSignTool for signing
-    return sign_with_codesigntool(existing_binaries)
+    # Sign the executables
+    if not sign_with_codesigntool(existing_binaries):
+        log_error("Failed to sign executables")
+        return False
+
+    # STEP 2: Build mini_installer to package the signed binaries
+    log_info("\nStep 2/3: Building mini_installer with signed binaries...")
+    if not build_mini_installer(ctx):
+        log_error("Failed to build mini_installer")
+        return False
+
+    # STEP 3: Sign the mini_installer.exe
+    log_info("\nStep 3/3: Signing mini_installer.exe...")
+    mini_installer_path = build_output_dir / "mini_installer.exe"
+    if not mini_installer_path.exists():
+        log_error(f"mini_installer.exe not found at: {mini_installer_path}")
+        return False
+
+    if not sign_with_codesigntool([mini_installer_path]):
+        log_error("Failed to sign mini_installer.exe")
+        return False
+
+    log_success("✅ All binaries signed successfully!")
+    return True
 
 
 def sign_with_codesigntool(binaries: List[Path]) -> bool:

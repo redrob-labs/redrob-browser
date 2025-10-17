@@ -55,12 +55,8 @@ def build(ctx: BuildContext) -> bool:
     autoninja_cmd = "autoninja.bat" if IS_WINDOWS else "autoninja"
     log_info("Using default autoninja parallelism")
 
-    # Build chrome, chromedriver, and mini_installer on Windows
-    if IS_WINDOWS:
-        log_info("Building chrome, chromedriver, and mini_installer for Windows")
-        run_command([autoninja_cmd, "-C", ctx.out_dir, "chrome", "chromedriver", "mini_installer"])
-    else:
-        run_command([autoninja_cmd, "-C", ctx.out_dir, "chrome", "chromedriver"])
+    # Build chrome and chromedriver on Windows
+    run_command([autoninja_cmd, "-C", ctx.out_dir, "chrome", "chromedriver"])
 
     # Rename Chromium.app to Nxtscape.app
     app_path = ctx.get_chromium_app_path()

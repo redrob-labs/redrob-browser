@@ -26,7 +26,9 @@ from utils import (
 # =============================================================================
 
 
-def copy_browser_files(ctx: BuildContext, target_dir: Path, set_sandbox_suid: bool = True) -> bool:
+def copy_browser_files(
+    ctx: BuildContext, target_dir: Path, set_sandbox_suid: bool = True
+) -> bool:
     """Copy browser binaries, libraries, and resources to target directory.
 
     Args:
@@ -66,7 +68,7 @@ def copy_browser_files(ctx: BuildContext, target_dir: Path, set_sandbox_suid: bo
         else:
             log_warning(f"  ⚠ File not found: {file}")
 
-    dirs_to_copy = ["locales", "MEIPreload"]
+    dirs_to_copy = ["locales", "MEIPreload", "BrowserOSServer"]
     for dir_name in dirs_to_copy:
         src = join_paths(out_dir, dir_name)
         if Path(src).exists():
@@ -163,7 +165,9 @@ def prepare_appdir(ctx: BuildContext, appdir: Path) -> bool:
         return False
 
     # Create desktop file
-    desktop_file = create_desktop_file(apps_dir, f"/opt/browseros/{ctx.NXTSCAPE_APP_NAME}")
+    desktop_file = create_desktop_file(
+        apps_dir, f"/opt/browseros/{ctx.NXTSCAPE_APP_NAME}"
+    )
 
     # Copy icon
     icon_src = Path(join_paths(ctx.root_dir, "resources", "icons", "product_logo.png"))
@@ -287,7 +291,7 @@ def create_control_file(ctx: BuildContext, debian_dir: Path) -> None:
 
     # Version formatting: strip 'v' prefix and spaces, ensure numeric
     version = ctx.get_nxtscape_chromium_version()
-    version = version.lstrip('v').replace(' ', '').replace('_', '.')
+    version = version.lstrip("v").replace(" ", "").replace("_", ".")
 
     # Architecture mapping
     deb_arch = "amd64" if ctx.architecture == "x64" else "arm64"
@@ -462,7 +466,12 @@ def package_deb(ctx: BuildContext, package_dir: Path) -> Optional[Path]:
         safe_rmtree(debdir)
         return None
 
-    version = ctx.get_nxtscape_chromium_version().lstrip('v').replace(' ', '').replace('_', '.')
+    version = (
+        ctx.get_nxtscape_chromium_version()
+        .lstrip("v")
+        .replace(" ", "")
+        .replace("_", ".")
+    )
     arch_suffix = "amd64" if ctx.architecture == "x64" else "arm64"
     filename = f"browseros_{version}_{arch_suffix}.deb"
     output_path = Path(join_paths(package_dir, filename))
