@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/extensions/api/browser_os/browser_os_api.cc b/chrome/browser/extensions/api/browser_os/browser_os_api.cc
 new file mode 100644
-index 0000000000000..e8db2c11b8b31
+index 0000000000000..b1b07be39dda0
 --- /dev/null
 +++ b/chrome/browser/extensions/api/browser_os/browser_os_api.cc
-@@ -0,0 +1,1235 @@
+@@ -0,0 +1,1358 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -70,6 +70,164 @@ index 0000000000000..e8db2c11b8b31
 +namespace api {
 +
 +namespace {
++
++// Serializes ui::AXNodeData to base::Value::Dict with all fields
++base::Value::Dict SerializeAXNodeData(const ui::AXNodeData& node) {
++  base::Value::Dict dict;
++
++  // Core identity
++  dict.Set("id", node.id);
++  dict.Set("role", ui::ToString(node.role));
++
++  // Hierarchy
++  if (!node.child_ids.empty()) {
++    base::Value::List children;
++    for (int32_t child_id : node.child_ids) {
++      children.Append(child_id);
++    }
++    dict.Set("childIds", std::move(children));
++  }
++
++  // State bitfield converted to string array
++  base::Value::List states;
++  for (int i = static_cast<int>(ax::mojom::State::kMinValue);
++       i <= static_cast<int>(ax::mojom::State::kMaxValue); ++i) {
++    auto state = static_cast<ax::mojom::State>(i);
++    if (node.HasState(state)) {
++      states.Append(ui::ToString(state));
++    }
++  }
++  if (!states.empty()) {
++    dict.Set("states", std::move(states));
++  }
++
++  // Actions bitfield converted to string array
++  base::Value::List actions;
++  for (int i = static_cast<int>(ax::mojom::Action::kMinValue);
++       i <= static_cast<int>(ax::mojom::Action::kMaxValue); ++i) {
++    auto action = static_cast<ax::mojom::Action>(i);
++    if (node.HasAction(action)) {
++      actions.Append(ui::ToString(action));
++    }
++  }
++  if (!actions.empty()) {
++    dict.Set("actions", std::move(actions));
++  }
++
++  // String attributes map with enum keys converted to strings
++  if (!node.string_attributes.empty()) {
++    base::Value::Dict attrs;
++    for (const auto& [key, value] : node.string_attributes) {
++      attrs.Set(ui::ToString(key), value);
++    }
++    dict.Set("stringAttributes", std::move(attrs));
++  }
++
++  // Int attributes map
++  if (!node.int_attributes.empty()) {
++    base::Value::Dict attrs;
++    for (const auto& [key, value] : node.int_attributes) {
++      attrs.Set(ui::ToString(key), value);
++    }
++    dict.Set("intAttributes", std::move(attrs));
++  }
++
++  // Float attributes map
++  if (!node.float_attributes.empty()) {
++    base::Value::Dict attrs;
++    for (const auto& [key, value] : node.float_attributes) {
++      attrs.Set(ui::ToString(key), static_cast<double>(value));
++    }
++    dict.Set("floatAttributes", std::move(attrs));
++  }
++
++  // Bool attributes map
++  if (!node.bool_attributes.empty()) {
++    base::Value::Dict attrs;
++    for (const auto& [key, value] : node.bool_attributes) {
++      attrs.Set(ui::ToString(key), value);
++    }
++    dict.Set("boolAttributes", std::move(attrs));
++  }
++
++  // IntList attributes map
++  if (!node.intlist_attributes.empty()) {
++    base::Value::Dict attrs;
++    for (const auto& [key, values] : node.intlist_attributes) {
++      base::Value::List list;
++      for (int v : values) {
++        list.Append(v);
++      }
++      attrs.Set(ui::ToString(key), std::move(list));
++    }
++    dict.Set("intListAttributes", std::move(attrs));
++  }
++
++  // StringList attributes map
++  if (!node.stringlist_attributes.empty()) {
++    base::Value::Dict attrs;
++    for (const auto& [key, values] : node.stringlist_attributes) {
++      base::Value::List list;
++      for (const auto& v : values) {
++        list.Append(v);
++      }
++      attrs.Set(ui::ToString(key), std::move(list));
++    }
++    dict.Set("stringListAttributes", std::move(attrs));
++  }
++
++  // HTML attributes (name-value pairs)
++  if (!node.html_attributes.empty()) {
++    base::Value::Dict attrs;
++    for (const auto& [name, value] : node.html_attributes) {
++      attrs.Set(name, value);
++    }
++    dict.Set("htmlAttributes", std::move(attrs));
++  }
++
++  return dict;
++}
++
++// Serializes ui::AXTreeData to base::Value::Dict
++base::Value::Dict SerializeAXTreeData(const ui::AXTreeData& tree_data) {
++  base::Value::Dict dict;
++
++  // Document metadata
++  if (!tree_data.title.empty()) {
++    dict.Set("title", tree_data.title);
++  }
++  if (!tree_data.url.empty()) {
++    dict.Set("url", tree_data.url);
++  }
++  if (!tree_data.doctype.empty()) {
++    dict.Set("doctype", tree_data.doctype);
++  }
++  if (!tree_data.mimetype.empty()) {
++    dict.Set("mimetype", tree_data.mimetype);
++  }
++
++  // Loading state
++  dict.Set("loaded", tree_data.loaded);
++  dict.Set("loadingProgress", tree_data.loading_progress);
++
++  // Focus
++  if (tree_data.focus_id != -1) {
++    dict.Set("focusId", tree_data.focus_id);
++  }
++
++  // Selection
++  if (tree_data.sel_anchor_object_id != -1) {
++    base::Value::Dict selection;
++    selection.Set("anchorObjectId", tree_data.sel_anchor_object_id);
++    selection.Set("anchorOffset", tree_data.sel_anchor_offset);
++    selection.Set("focusObjectId", tree_data.sel_focus_object_id);
++    selection.Set("focusOffset", tree_data.sel_focus_offset);
++    selection.Set("isBackward", tree_data.sel_is_backward);
++    dict.Set("selection", std::move(selection));
++  }
++
++  return dict;
++}
 +
 +// Helper to find which PrefService contains a preference
 +// Tries Local State first, then Profile prefs
@@ -157,53 +315,18 @@ index 0000000000000..e8db2c11b8b31
 +  browser_os::AccessibilityTree result;
 +  result.root_id = tree_update.root_id;
 +
-+  // Convert AX nodes to API format
++  // Serialize all nodes with complete AX data
 +  base::Value::Dict nodes;
 +  for (const auto& node_data : tree_update.nodes) {
-+    browser_os::AccessibilityNode node;
-+    node.id = node_data.id;
-+    node.role = ui::ToString(node_data.role);
-+
-+    if (node_data.HasStringAttribute(ax::mojom::StringAttribute::kName)) {
-+      node.name =
-+          node_data.GetStringAttribute(ax::mojom::StringAttribute::kName);
-+    }
-+
-+    if (node_data.HasStringAttribute(ax::mojom::StringAttribute::kValue)) {
-+      node.value =
-+          node_data.GetStringAttribute(ax::mojom::StringAttribute::kValue);
-+    }
-+
-+    // Add child IDs
-+    if (!node_data.child_ids.empty()) {
-+      node.child_ids.emplace();
-+      for (int32_t child_id : node_data.child_ids) {
-+        node.child_ids->push_back(child_id);
-+      }
-+    }
-+
-+    // Add basic attributes
-+    base::Value::Dict attributes;
-+    if (node_data.HasBoolAttribute(ax::mojom::BoolAttribute::kSelected)) {
-+      attributes.Set("selected",
-+                     node_data.GetBoolAttribute(ax::mojom::BoolAttribute::kSelected));
-+    }
-+    // TODO: Add focused attribute when available
-+    if (node_data.HasIntAttribute(ax::mojom::IntAttribute::kHierarchicalLevel)) {
-+      attributes.Set("level",
-+                     node_data.GetIntAttribute(ax::mojom::IntAttribute::kHierarchicalLevel));
-+    }
-+    if (!attributes.empty()) {
-+      browser_os::AccessibilityNode::Attributes attr;
-+      attr.additional_properties = std::move(attributes);
-+      node.attributes = std::move(attr);
-+    }
-+
-+    // Convert to dictionary
-+    nodes.Set(base::NumberToString(node_data.id), node.ToValue());
++    nodes.Set(base::NumberToString(node_data.id),
++              SerializeAXNodeData(node_data));
 +  }
-+
 +  result.nodes.additional_properties = std::move(nodes);
++
++  // Serialize tree-level metadata
++  browser_os::AccessibilityTree::TreeData tree_data_obj;
++  tree_data_obj.additional_properties = SerializeAXTreeData(tree_update.tree_data);
++  result.tree_data = std::move(tree_data_obj);
 +
 +  Respond(ArgumentList(
 +      browser_os::GetAccessibilityTree::Results::Create(result)));

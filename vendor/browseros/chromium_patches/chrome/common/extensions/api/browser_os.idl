@@ -1,30 +1,29 @@
 diff --git a/chrome/common/extensions/api/browser_os.idl b/chrome/common/extensions/api/browser_os.idl
 new file mode 100644
-index 0000000000000..23de5b35d5043
+index 0000000000000..edf420a6624dd
 --- /dev/null
 +++ b/chrome/common/extensions/api/browser_os.idl
-@@ -0,0 +1,383 @@
+@@ -0,0 +1,382 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
 +// browserOS API for accessing system-level browser functionality
 +namespace browserOS {
-+  dictionary AccessibilityNode {
-+    long id;
-+    DOMString role;
-+    DOMString? name;
-+    DOMString? value;
-+    object? attributes;
-+    long[]? childIds;
-+  };
 +
 +  dictionary AccessibilityTree {
 +    // The ID of the root node
 +    long rootId;
-+    
-+    // Map of node IDs to AccessibilityNode objects
++
++    // Map of node IDs to complete accessibility node data
++    // Each node contains: id, role, states, actions, all attribute maps,
++    // childIds, and other ui::AXNodeData fields
 +    object nodes;
++
++    // Tree-level metadata (optional)
++    // Contains: title, url, doctype, mimetype, loaded, loadingProgress,
++    // focusId, and selection information
++    object? treeData;
 +  };
 +
 +  // Interactive element types
