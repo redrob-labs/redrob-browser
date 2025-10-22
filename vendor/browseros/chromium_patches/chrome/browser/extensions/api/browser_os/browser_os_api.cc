@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/extensions/api/browser_os/browser_os_api.cc b/chrome/browser/extensions/api/browser_os/browser_os_api.cc
 new file mode 100644
-index 0000000000000..b1b07be39dda0
+index 0000000000000..0022c6ea0fe1b
 --- /dev/null
 +++ b/chrome/browser/extensions/api/browser_os/browser_os_api.cc
-@@ -0,0 +1,1358 @@
+@@ -0,0 +1,1316 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1033,61 +1033,19 @@ index 0000000000000..b1b07be39dda0
 +  if (!has_callback()) {
 +    return;
 +  }
-+  
-+  // Get parameters again
-+  auto params = browser_os::GetSnapshot::Params::Create(args());
-+  if (!params) {
-+    Respond(Error("Invalid parameters"));
-+    return;
-+  }
-+  
-+  // Get tab info again for viewport size
-+  std::string error_message;
-+  auto tab_info = GetTabFromOptionalId(params->tab_id, browser_context(),
-+                                       include_incognito_information(),
-+                                       &error_message);
-+  if (!tab_info) {
-+    Respond(Error(error_message));
-+    return;
-+  }
-+  
-+  // Get viewport size
-+  gfx::Size viewport_size;
-+  content::WebContents* web_contents = tab_info->web_contents;
-+  content::RenderWidgetHostView* rwhv = web_contents->GetRenderWidgetHostView();
-+  if (rwhv) {
-+    viewport_size = rwhv->GetVisibleViewportSize();
-+  }
-+  
-+  // Extract options
-+  browser_os::SnapshotContext context = browser_os::SnapshotContext::kVisible;
-+  std::vector<browser_os::SectionType> include_sections;
-+  
-+  if (params->options) {
-+    context = params->options->context;
-+    if (params->options->include_sections.has_value()) {
-+      include_sections = params->options->include_sections.value();
-+    }
-+  }
-+  
-+  // Process the accessibility tree
-+  ContentProcessor::ProcessAccessibilityTree(
-+      tree_update,
-+      params->type,
-+      context,
-+      include_sections,
-+      viewport_size,
-+      base::BindOnce(&BrowserOSGetSnapshotFunction::OnContentProcessed, this));
-+}
 +
-+void BrowserOSGetSnapshotFunction::OnContentProcessed(
-+    api::ContentProcessingResult result) {
-+  if (!has_callback()) {
-+    return;
-+  }
-+  
-+  Respond(ArgumentList(
-+      browser_os::GetSnapshot::Results::Create(result.snapshot)));
++  // Extract page content using the processor
++  base::Time start_time = base::Time::Now();
++  auto items = ContentProcessor::ExtractPageContent(tree_update);
++
++  // Build result
++  browser_os::PageContent result;
++  result.items = std::move(items);
++  result.timestamp = base::Time::Now().InMillisecondsFSinceUnixEpoch();
++  result.processing_time_ms =
++      (base::Time::Now() - start_time).InMilliseconds();
++
++  Respond(ArgumentList(browser_os::GetSnapshot::Results::Create(result)));
 +}
 +
 +// BrowserOSGetPrefFunction

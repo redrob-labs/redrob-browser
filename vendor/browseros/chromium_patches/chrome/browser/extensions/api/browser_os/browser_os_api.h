@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/extensions/api/browser_os/browser_os_api.h b/chrome/browser/extensions/api/browser_os/browser_os_api.h
 new file mode 100644
-index 0000000000000..51ba01b900769
+index 0000000000000..e4b1c5f821342
 --- /dev/null
 +++ b/chrome/browser/extensions/api/browser_os/browser_os_api.h
-@@ -0,0 +1,333 @@
+@@ -0,0 +1,331 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -221,8 +221,6 @@ index 0000000000000..51ba01b900769
 +
 + private:
 +  void OnAccessibilityTreeReceived(ui::AXTreeUpdate& tree_update);
-+  void OnContentProcessed(
-+      api::ContentProcessingResult result);
 +};
 +
 +// Settings API functions

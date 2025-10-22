@@ -1,9 +1,9 @@
 diff --git a/chrome/common/extensions/api/browser_os.idl b/chrome/common/extensions/api/browser_os.idl
 new file mode 100644
-index 0000000000000..edf420a6624dd
+index 0000000000000..36468c42af41a
 --- /dev/null
 +++ b/chrome/common/extensions/api/browser_os.idl
-@@ -0,0 +1,382 @@
+@@ -0,0 +1,336 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -24,6 +24,38 @@ index 0000000000000..edf420a6624dd
 +    // Contains: title, url, doctype, mimetype, loaded, loadingProgress,
 +    // focusId, and selection information
 +    object? treeData;
++  };
++
++  // Page content extraction types
++  enum ContentItemType {
++    heading,
++    text,
++    link,
++    image,
++    video
++  };
++
++  // A content item extracted from the page in document order
++  dictionary ContentItem {
++    ContentItemType type;
++    // Text content (for heading, text, link - the accessible name)
++    DOMString? text;
++    // URL (for link, image, video - the href or src)
++    DOMString? url;
++    // Heading level (for heading only, 1-6)
++    long? level;
++    // Alternative text (for image, video - alt attribute or title)
++    DOMString? alt;
++  };
++
++  // Page content in document order
++  dictionary PageContent {
++    // Content items in the order they appear in the document
++    ContentItem[] items;
++    // Timestamp when extraction was performed
++    double timestamp;
++    // Time taken to process (milliseconds)
++    long processingTimeMs;
 +  };
 +
 +  // Interactive element types
@@ -89,81 +121,7 @@ index 0000000000000..edf420a6624dd
 +  callback ScrollCallback = void();
 +  callback ScrollToNodeCallback = void(boolean scrolled);
 +  callback CaptureScreenshotCallback = void(DOMString dataUrl);
-+
-+  // Snapshot extraction types
-+  enum SnapshotType {
-+    text,
-+    links
-+  };
-+
-+  // Context for snapshot extraction
-+  enum SnapshotContext {
-+    visible,
-+    full
-+  };
-+
-+  // Section types based on ARIA landmarks
-+  enum SectionType {
-+    main,
-+    navigation,
-+    footer,
-+    header,
-+    article,
-+    aside,
-+    complementary,
-+    contentinfo,
-+    form,
-+    search,
-+    region,
-+    other
-+  };
-+
-+  // Text snapshot result for a section
-+  dictionary TextSnapshotResult {
-+    DOMString text;
-+    long characterCount;
-+  };
-+
-+  // Link information
-+  dictionary LinkInfo {
-+    DOMString text;
-+    DOMString url;
-+    DOMString? title;
-+    object? attributes;
-+    boolean isExternal;
-+  };
-+
-+  // Links snapshot result for a section
-+  dictionary LinksSnapshotResult {
-+    LinkInfo[] links;
-+  };
-+
-+  // Section with all possible snapshot results
-+  dictionary SnapshotSection {
-+    DOMString type;
-+    // Text result - only populated for text snapshots
-+    TextSnapshotResult textResult;
-+    // Links result - only populated for links snapshots  
-+    LinksSnapshotResult linksResult;
-+  };
-+
-+  // Main snapshot result
-+  dictionary Snapshot {
-+    SnapshotType type;
-+    SnapshotContext context;
-+    double timestamp;
-+    SnapshotSection[] sections;
-+    long processingTimeMs;
-+  };
-+
-+  // Options for getSnapshot
-+  dictionary SnapshotOptions {
-+    // Defaults to visible if not specified
-+    SnapshotContext context;
-+    SectionType[]? includeSections;
-+  };
-+
-+  callback GetSnapshotCallback = void(Snapshot snapshot);
++  callback GetSnapshotCallback = void(PageContent content);
 +
 +  // Settings-related types
 +  dictionary PrefObject {
@@ -326,15 +284,11 @@ index 0000000000000..edf420a6624dd
 +        optional long height,
 +        CaptureScreenshotCallback callback);
 +
-+    // Gets a content snapshot of the specified type from the page
-+    // |tabId|: The tab to get the snapshot from. Defaults to active tab.
-+    // |type|: The type of snapshot to extract (text or links).
-+    // |options|: Options for the snapshot extraction.
-+    // |callback|: Called with the snapshot data.
++    // Gets a simple text snapshot of the page
++    // |tabId|: The tab to extract content from. Defaults to active tab.
++    // |callback|: Called with the page snapshot.
 +    static void getSnapshot(
 +        optional long tabId,
-+        SnapshotType type,
-+        optional SnapshotOptions options,
 +        GetSnapshotCallback callback);
 +
 +    // Settings API functions - compatible with chrome.settingsPrivate
