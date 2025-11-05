@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/browseros_server/browseros_server_manager.cc b/chrome/browser/browseros_server/browseros_server_manager.cc
 new file mode 100644
-index 0000000000000..4d34f3efb2645
+index 0000000000000..a53135fb1500f
 --- /dev/null
 +++ b/chrome/browser/browseros_server/browseros_server_manager.cc
-@@ -0,0 +1,1070 @@
+@@ -0,0 +1,1077 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1039,6 +1039,7 @@ index 0000000000000..4d34f3efb2645
 +}
 +
 +base::FilePath BrowserOSServerManager::GetBrowserOSExecutionDir() const {
++#if BUILDFLAG(IS_LINUX)
 +  base::FilePath user_data_dir;
 +  if (!base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir)) {
 +    LOG(ERROR) << "browseros: Failed to resolve DIR_USER_DATA path";
@@ -1058,6 +1059,12 @@ index 0000000000000..4d34f3efb2645
 +
 +  LOG(INFO) << "browseros: Using execution directory: " << exec_dir;
 +  return exec_dir;
++#else
++  // On Mac and Windows, use the resources path itself as execution directory
++  base::FilePath resources_path = GetBrowserOSServerResourcesPath();
++  LOG(INFO) << "browseros: Using resources path as execution directory: " << resources_path;
++  return resources_path;
++#endif
 +}
 +
 +base::FilePath BrowserOSServerManager::GetBrowserOSServerExecutablePath() const {
