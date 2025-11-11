@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/extensions/extension_context_menu_model.cc b/chrome/browser/extensions/extension_context_menu_model.cc
-index d5e3f14b43b44..1a3f546260abb 100644
+index d5e3f14b43b44..350087695ae38 100644
 --- a/chrome/browser/extensions/extension_context_menu_model.cc
 +++ b/chrome/browser/extensions/extension_context_menu_model.cc
 @@ -7,6 +7,7 @@
@@ -16,7 +16,7 @@ index d5e3f14b43b44..1a3f546260abb 100644
    bool has_options_page = OptionsPageInfo::HasOptionsPage(extension);
 -  bool can_uninstall_extension = !is_component_ && !is_required_by_policy;
 +  bool can_uninstall_extension = !is_component_ && !is_required_by_policy &&
-+                                  browseros::CanUninstallExtension(extension->id());
++                                  !browseros::IsBrowserOSExtension(extension->id());
    if (can_show_icon_in_toolbar || has_options_page || can_uninstall_extension) {
      AddSeparator(ui::NORMAL_SEPARATOR);
    }

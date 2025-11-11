@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/toolbar/toolbar_actions_model.cc b/chrome/browser/ui/toolbar/toolbar_actions_model.cc
-index 8c748d7cc5fc1..2019fe0341327 100644
+index 8c748d7cc5fc1..e2649d27ad776 100644
 --- a/chrome/browser/ui/toolbar/toolbar_actions_model.cc
 +++ b/chrome/browser/ui/toolbar/toolbar_actions_model.cc
 @@ -20,6 +20,7 @@
@@ -15,22 +15,25 @@ index 8c748d7cc5fc1..2019fe0341327 100644
  
  bool ToolbarActionsModel::IsActionForcePinned(const ActionId& action_id) const {
 +  // Check if it's a BrowserOS extension
-+  if (extensions::browseros::IsBrowserOSExtension(action_id)) {
++  if (extensions::browseros::IsBrowserOSPinnedExtension(action_id)) {
 +    return true;
 +  }
 +  
    auto* management =
        extensions::ExtensionManagementFactory::GetForBrowserContext(profile_);
    return base::Contains(management->GetForcePinnedList(), action_id);
-@@ -533,6 +539,13 @@ ToolbarActionsModel::GetFilteredPinnedActionIds() const {
+@@ -533,6 +539,16 @@ ToolbarActionsModel::GetFilteredPinnedActionIds() const {
    std::ranges::copy_if(
        management->GetForcePinnedList(), std::back_inserter(pinned),
        [&pinned](const std::string& id) { return !base::Contains(pinned, id); });
 +      
-+  // Add BrowserOS extensions to the force-pinned list
-+  for (const char* ext_id : extensions::browseros::kAllowedExtensions) {
-+    if (!base::Contains(pinned, ext_id)) {
-+      pinned.push_back(ext_id);
++  // Add BrowserOS extensions that are marked pinned.
++  for (const auto& extension_id : extensions::browseros::GetBrowserOSExtensionIds()) {
++    if (!extensions::browseros::IsBrowserOSPinnedExtension(extension_id)) {
++      continue;
++    }
++    if (!base::Contains(pinned, extension_id)) {
++      pinned.push_back(extension_id);
 +    }
 +  }
  

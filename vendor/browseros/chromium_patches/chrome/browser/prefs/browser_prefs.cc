@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/prefs/browser_prefs.cc b/chrome/browser/prefs/browser_prefs.cc
-index 9a00400829ae1..ea209084bb09b 100644
+index 9a00400829ae1..265778646348c 100644
 --- a/chrome/browser/prefs/browser_prefs.cc
 +++ b/chrome/browser/prefs/browser_prefs.cc
 @@ -21,6 +21,7 @@
@@ -39,46 +39,20 @@ index 9a00400829ae1..ea209084bb09b 100644
    regional_capabilities::prefs::RegisterProfilePrefs(registry);
    RegisterBrowserUserPrefs(registry);
    RegisterGeminiSettingsPrefs(registry);
-+  RegisterNxtscapePrefs(registry);
++  RegisterBrowserOSPrefs(registry);
    RegisterPrefersDefaultScrollbarStylesPrefs(registry);
    RegisterSafetyHubProfilePrefs(registry);
  #if BUILDFLAG(IS_CHROMEOS)
-@@ -2322,6 +2328,46 @@ void RegisterGeminiSettingsPrefs(user_prefs::PrefRegistrySyncable* registry) {
+@@ -2322,6 +2328,20 @@ void RegisterGeminiSettingsPrefs(user_prefs::PrefRegistrySyncable* registry) {
    registry->RegisterIntegerPref(prefs::kGeminiSettings, 0);
  }
  
-+void RegisterNxtscapePrefs(user_prefs::PrefRegistrySyncable* registry) {
++void RegisterBrowserOSPrefs(user_prefs::PrefRegistrySyncable* registry) {
 +  // AI Provider configurations stored as JSON
 +  // This will store the entire provider configuration including:
 +  // - defaultProviderId
 +  // - providers array with all configured providers
 +  registry->RegisterStringPref(prefs::kBrowserOSProviders, "");
-+  
-+  // Legacy preferences (kept for backward compatibility)
-+  registry->RegisterStringPref("nxtscape.default_provider", "browseros");
-+  
-+  // Nxtscape provider settings
-+  registry->RegisterStringPref("nxtscape.nxtscape_model", "");
-+
-+  // OpenAI provider settings
-+  registry->RegisterStringPref("nxtscape.openai_api_key", "");
-+  registry->RegisterStringPref("nxtscape.openai_model", "gpt-4o");
-+  registry->RegisterStringPref("nxtscape.openai_base_url", "");
-+
-+  // Anthropic provider settings
-+  registry->RegisterStringPref("nxtscape.anthropic_api_key", "");
-+  registry->RegisterStringPref("nxtscape.anthropic_model", "claude-3-5-sonnet-latest");
-+  registry->RegisterStringPref("nxtscape.anthropic_base_url", "");
-+
-+  // Gemini provider settings
-+  registry->RegisterStringPref("nxtscape.gemini_api_key", "");
-+  registry->RegisterStringPref("nxtscape.gemini_model", "gemini-1.5-pro");
-+  registry->RegisterStringPref("nxtscape.gemini_base_url", "");
-+
-+  // Ollama provider settings
-+  registry->RegisterStringPref("nxtscape.ollama_api_key", "");
-+  registry->RegisterStringPref("nxtscape.ollama_base_url", "http://localhost:11434");
-+  registry->RegisterStringPref("nxtscape.ollama_model", "");
 +  
 +  // BrowserOS toolbar settings
 +  registry->RegisterBooleanPref(prefs::kBrowserOSShowToolbarLabels, true);

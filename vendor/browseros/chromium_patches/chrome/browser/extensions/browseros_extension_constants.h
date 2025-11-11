@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/extensions/browseros_extension_constants.h b/chrome/browser/extensions/browseros_extension_constants.h
 new file mode 100644
-index 0000000000000..17b78fbb99a9f
+index 0000000000000..e42df6740460c
 --- /dev/null
 +++ b/chrome/browser/extensions/browseros_extension_constants.h
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,112 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -11,6 +11,7 @@ index 0000000000000..17b78fbb99a9f
 +#ifndef CHROME_BROWSER_EXTENSIONS_BROWSEROS_EXTENSION_CONSTANTS_H_
 +#define CHROME_BROWSER_EXTENSIONS_BROWSEROS_EXTENSION_CONSTANTS_H_
 +
++#include <cstddef>
 +#include <optional>
 +#include <string>
 +#include <vector>
@@ -36,33 +37,67 @@ index 0000000000000..17b78fbb99a9f
 +inline constexpr char kBrowserOSUpdateUrl[] =
 +    "https://cdn.browseros.com/extensions/update-manifest.xml";
 +
-+// Allowlist of BrowserOS extension IDs that are permitted to be installed
-+// Only extensions with these IDs will be loaded from the config
-+constexpr const char* kAllowedExtensions[] = {
-+    kAISidePanelExtensionId,  // AI Side Panel extension
-+    kBugReporterExtensionId,  // Bug Reporter extension
-+    kControllerExtensionId,   // Controller extension
++// BrowserOS extension config URL
++inline constexpr char kBrowserOSConfigUrl[] =
++    "https://cdn.browseros.com/extensions/extensions.json";
++
++struct BrowserOSExtensionInfo {
++  const char* id;
++  const char* display_name;
++  bool is_pinned;
++  bool is_labelled;
 +};
++
++inline constexpr BrowserOSExtensionInfo kBrowserOSExtensions[] = {
++    {kAISidePanelExtensionId, "BrowserOS", true, true},
++    {kBugReporterExtensionId, "BrowserOS/bug-reporter", true, false},
++    {kControllerExtensionId, "BrowserOS/controller", false, false},
++};
++
++// Allowlist of BrowserOS extension IDs that are permitted to be installed.
++// Only extensions with these IDs will be loaded from the config.
++inline constexpr const char* kAllowedExtensions[] = {
++    kBrowserOSExtensions[0].id,
++    kBrowserOSExtensions[1].id,
++    kBrowserOSExtensions[2].id,
++};
++
++inline constexpr size_t kBrowserOSExtensionsCount =
++    sizeof(kBrowserOSExtensions) / sizeof(kBrowserOSExtensions[0]);
++
++inline const BrowserOSExtensionInfo* FindBrowserOSExtensionInfo(
++    const std::string& extension_id) {
++  for (const auto& info : kBrowserOSExtensions) {
++    if (extension_id == info.id)
++      return &info;
++  }
++  return nullptr;
++}
 +
 +// Check if an extension is a BrowserOS extension
 +inline bool IsBrowserOSExtension(const std::string& extension_id) {
-+  return extension_id == kAISidePanelExtensionId ||
-+         extension_id == kBugReporterExtensionId ||
-+         extension_id == kControllerExtensionId;
++  return FindBrowserOSExtensionInfo(extension_id) != nullptr;
 +}
 +
-+// Check if an extension can be uninstalled (false for BrowserOS extensions)
-+inline bool CanUninstallExtension(const std::string& extension_id) {
-+  return !IsBrowserOSExtension(extension_id);
++inline bool IsBrowserOSPinnedExtension(const std::string& extension_id) {
++  const BrowserOSExtensionInfo* info =
++      FindBrowserOSExtensionInfo(extension_id);
++  return info && info->is_pinned;
++}
++
++inline bool IsBrowserOSLabelledExtension(const std::string& extension_id) {
++  const BrowserOSExtensionInfo* info =
++      FindBrowserOSExtensionInfo(extension_id);
++  return info && info->is_labelled;
 +}
 +
 +// Get all BrowserOS extension IDs
 +inline std::vector<std::string> GetBrowserOSExtensionIds() {
-+  return {
-+    kAISidePanelExtensionId,
-+    kBugReporterExtensionId,
-+    kControllerExtensionId
-+  };
++  std::vector<std::string> ids;
++  ids.reserve(kBrowserOSExtensionsCount);
++  for (const auto& info : kBrowserOSExtensions)
++    ids.push_back(info.id);
++  return ids;
 +}
 +
 +// Get display name for BrowserOS extensions in omnibox
@@ -70,12 +105,9 @@ index 0000000000000..17b78fbb99a9f
 +// otherwise returns std::nullopt
 +inline std::optional<std::string> GetExtensionDisplayName(
 +    const std::string& extension_id) {
-+  if (extension_id == kAISidePanelExtensionId) {
-+    return "BrowserOS";
-+  } else if (extension_id == kBugReporterExtensionId) {
-+    return "BrowserOS/bug-reporter";
-+  } else if (extension_id == kControllerExtensionId) {
-+    return "BrowserOS/controller";
++  if (const BrowserOSExtensionInfo* info =
++          FindBrowserOSExtensionInfo(extension_id)) {
++    return info->display_name;
 +  }
 +  return std::nullopt;
 +}

@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/ui/actions/browseros_actions_config.h b/chrome/browser/ui/actions/browseros_actions_config.h
 new file mode 100644
-index 0000000000000..3900759f40883
+index 0000000000000..68985b1490511
 --- /dev/null
 +++ b/chrome/browser/ui/actions/browseros_actions_config.h
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,72 @@
 +// Copyright 2025 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -43,10 +43,14 @@ index 0000000000000..3900759f40883
 +    return true;
 +  }
 +
-+  // Check extension actions using the allowed extensions from browseros constants
-+  for (const char* ext_id : extensions::browseros::kAllowedExtensions) {
++  // Only labelled extensions are considered for BrowserOS actions
++  for (const auto& ext_id :
++       extensions::browseros::GetBrowserOSExtensionIds()) {
++    if (!extensions::browseros::IsBrowserOSLabelledExtension(ext_id)) {
++      continue;
++    }
 +    auto ext_action_id = actions::ActionIdMap::StringToActionId(
-+        SidePanelEntryKey(SidePanelEntryId::kExtension, std::string(ext_id))
++        SidePanelEntryKey(SidePanelEntryId::kExtension, ext_id)
 +            .ToString());
 +    if (ext_action_id && id == *ext_action_id) {
 +      return true;
@@ -72,4 +76,3 @@ index 0000000000000..3900759f40883
 +}  // namespace browseros
 +
 +#endif  // CHROME_BROWSER_UI_ACTIONS_BROWSEROS_ACTIONS_CONFIG_H_
-+

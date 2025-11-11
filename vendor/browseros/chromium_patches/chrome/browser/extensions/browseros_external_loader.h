@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/extensions/browseros_external_loader.h b/chrome/browser/extensions/browseros_external_loader.h
 new file mode 100644
-index 0000000000000..3d0ba110fe6e1
+index 0000000000000..b313a0ba6fa10
 --- /dev/null
 +++ b/chrome/browser/extensions/browseros_external_loader.h
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,126 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -12,11 +12,13 @@ index 0000000000000..3d0ba110fe6e1
 +#define CHROME_BROWSER_EXTENSIONS_BROWSEROS_EXTERNAL_LOADER_H_
 +
 +#include <memory>
++#include <set>
 +#include <string>
 +
 +#include "base/files/file_path.h"
 +#include "base/memory/scoped_refptr.h"
 +#include "base/memory/weak_ptr.h"
++#include "base/timer/timer.h"
 +#include "chrome/browser/extensions/external_loader.h"
 +#include "services/network/public/cpp/simple_url_loader.h"
 +
@@ -47,7 +49,7 @@ index 0000000000000..3d0ba110fe6e1
 +    config_file_for_testing_ = path;
 +  }
 +
-+  // Starts periodic check to re-enable disabled BrowserOS extensions and check for updates
++  // Starts periodic maintenance loop (no-op if already running).
 +  void StartPeriodicCheck();
 +
 +  // Periodic maintenance: re-enables disabled extensions, checks config, and forces updates
@@ -70,16 +72,19 @@ index 0000000000000..3d0ba110fe6e1
 +
 +  // Called when the URL fetch completes.
 +  void OnURLFetchComplete(std::unique_ptr<std::string> response_body);
-+  
++
 +  // Called when config check fetch completes
 +  void OnConfigCheckComplete(std::unique_ptr<network::SimpleURLLoader> loader,
 +                             std::unique_ptr<std::string> response_body);
 +
 +  // Parses the fetched JSON configuration and loads extensions.
-+  void ParseConfiguration(const std::string& json_content);
++  bool ParseConfiguration(const std::string& json_content);
 +
 +  // Loads configuration from a local file (for testing).
 +  void LoadFromFile();
++
++  // Handles the config contents read from a local file.
++  void OnConfigFileLoaded(std::string contents);
 +  
 +  // Checks for uninstalled BrowserOS extensions and reinstalls them
 +  void ReinstallUninstalledExtensions();
@@ -114,10 +119,14 @@ index 0000000000000..3d0ba110fe6e1
 +  // Last fetched config for comparison
 +  base::Value::Dict last_config_;
 +
++  // Tracks whether we have successfully applied a configuration during this session.
++  bool has_successful_config_ = false;
++
++  base::RepeatingTimer periodic_timer_;
++
 +  base::WeakPtrFactory<BrowserOSExternalLoader> weak_ptr_factory_{this};
 +};
 +
 +}  // namespace extensions
 +
 +#endif  // CHROME_BROWSER_EXTENSIONS_BROWSEROS_EXTERNAL_LOADER_H_
-\ No newline at end of file

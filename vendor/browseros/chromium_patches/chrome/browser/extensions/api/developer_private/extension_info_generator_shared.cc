@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/extensions/api/developer_private/extension_info_generator_shared.cc b/chrome/browser/extensions/api/developer_private/extension_info_generator_shared.cc
-index e6c15e15d3157..c1e2b724f5f8f 100644
+index e6c15e15d3157..38f6be4832650 100644
 --- a/chrome/browser/extensions/api/developer_private/extension_info_generator_shared.cc
 +++ b/chrome/browser/extensions/api/developer_private/extension_info_generator_shared.cc
 @@ -12,6 +12,7 @@
@@ -26,24 +26,19 @@ index e6c15e15d3157..c1e2b724f5f8f 100644
  #include "extensions/grit/extensions_browser_resources.h"
  #include "third_party/skia/include/core/SkBitmap.h"
  #include "ui/base/l10n/l10n_util.h"
-@@ -78,6 +81,16 @@ namespace developer = api::developer_private;
+@@ -78,6 +81,11 @@ namespace developer = api::developer_private;
  
  namespace {
  
-+// Check if an extension is a BrowserOS extension that should be hidden
++// Check if an extension is a BrowserOS extension that should be hidden.
 +bool IsBrowserOSExtension(const std::string& extension_id) {
-+  for (const char* allowed_id : browseros::kAllowedExtensions) {
-+    if (extension_id == allowed_id) {
-+      return true;
-+    }
-+  }
-+  return false;
++  return browseros::IsBrowserOSExtension(extension_id);
 +}
 +
  // Given a Manifest::Type, converts it into its developer_private
  // counterpart.
  developer::ExtensionType GetExtensionType(Manifest::Type manifest_type) {
-@@ -447,8 +460,19 @@ void ExtensionInfoGeneratorShared::CreateExtensionInfo(
+@@ -447,8 +455,19 @@ void ExtensionInfoGeneratorShared::CreateExtensionInfo(
      state = developer::ExtensionState::kBlocklisted;
    }
  
@@ -64,7 +59,7 @@ index e6c15e15d3157..c1e2b724f5f8f 100644
    }
  
    if (pending_image_loads_ == 0) {
-@@ -465,11 +489,22 @@ void ExtensionInfoGeneratorShared::CreateExtensionsInfo(
+@@ -465,11 +484,22 @@ void ExtensionInfoGeneratorShared::CreateExtensionsInfo(
      bool include_disabled,
      bool include_terminated,
      ExtensionInfosCallback callback) {
