@@ -34,36 +34,6 @@ features:
     - chrome/browser/resources/settings/settings_main/settings_main.ts
     - chrome/browser/resources/settings/settings_menu/settings_menu.html
     - chrome/common/pref_names.h
-  browseros-browseros-api-updates-v2:
-    description: 'browseros api updates v2: execute js, highlights, screenshot'
-    files:
-    - chrome/browser/extensions/api/browser_os/browser_os_api.cc
-    - chrome/browser/extensions/api/browser_os/browser_os_api.h
-    - chrome/browser/extensions/api/browser_os/browser_os_api_helpers.cc
-    - chrome/browser/extensions/api/browser_os/browser_os_api_helpers.h
-    - chrome/browser/extensions/api/browser_os/browser_os_api_utils.cc
-    - chrome/browser/extensions/api/browser_os/browser_os_api_utils.h
-    - chrome/browser/extensions/api/browser_os/browser_os_snapshot_processor.cc
-    - chrome/browser/extensions/api/browser_os/browser_os_snapshot_processor.h
-    - chrome/browser/extensions/chrome_extensions_browser_api_provider.cc
-    - chrome/common/extensions/api/browser_os.idl
-    - extensions/browser/extension_function_histogram_value.h
-  browseros-browseros-api-updates:
-    description: 'browseros api updates: version, metric, click, prefs,'
-    files:
-    - chrome/browser/extensions/BUILD.gn
-    - chrome/browser/extensions/api/browser_os/browser_os_api.cc
-    - chrome/browser/extensions/api/browser_os/browser_os_api.h
-    - chrome/browser/extensions/api/browser_os/browser_os_api_helpers.cc
-    - chrome/browser/extensions/api/browser_os/browser_os_api_helpers.h
-    - chrome/browser/extensions/api/browser_os/browser_os_api_utils.cc
-    - chrome/browser/extensions/api/browser_os/browser_os_api_utils.h
-    - chrome/browser/extensions/api/browser_os/browser_os_change_detector.cc
-    - chrome/browser/extensions/api/browser_os/browser_os_change_detector.h
-    - chrome/browser/extensions/api/browser_os/browser_os_snapshot_processor.cc
-    - chrome/browser/extensions/api/browser_os/browser_os_snapshot_processor.h
-    - chrome/common/extensions/api/browser_os.idl
-    - extensions/browser/extension_function_histogram_value.h
   browseros-browseros-api:
     description: browseros API
     files:
@@ -188,7 +158,7 @@ features:
     - chrome/browser/ui/webui/nxtscape_first_run.h
     - chrome/common/webui_url_constants.cc
   browseros-llm-chat:
-    description: llm-chat
+    description: llm chat and updates
     files:
     - chrome/app/chrome_command_ids.h
     - chrome/app/generated_resources.grd
@@ -201,6 +171,7 @@ features:
     - chrome/browser/ui/ui_features.h
     - chrome/browser/ui/views/accelerator_table.cc
     - chrome/browser/ui/views/side_panel/BUILD.gn
+    - chrome/browser/ui/views/side_panel/clash_of_gpts/clash_of_gpts_coordinator.cc
     - chrome/browser/ui/views/side_panel/side_panel_entry_id.h
     - chrome/browser/ui/views/side_panel/side_panel_prefs.cc
     - chrome/browser/ui/views/side_panel/side_panel_util.cc
@@ -303,11 +274,3 @@ features:
     - chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
     - chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.h
     - chrome/common/pref_names.h
-  browseros-updates-llm-chat-and-hub:
-    description: 'updates: llmchat and llmhub'
-    files:
-    - chrome/browser/ui/browser_command_controller.cc
-    - chrome/browser/ui/views/side_panel/BUILD.gn
-    - chrome/browser/ui/views/side_panel/clash_of_gpts/clash_of_gpts_coordinator.cc
-    - chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.cc
-    - chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.h
