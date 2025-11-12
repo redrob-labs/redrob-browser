@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.h b/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.h
 new file mode 100644
-index 0000000000000..11b602d0b06a1
+index 0000000000000..f931b40df2743
 --- /dev/null
 +++ b/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.h
-@@ -0,0 +1,234 @@
+@@ -0,0 +1,230 @@
 +// Copyright 2026 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -166,10 +166,6 @@ index 0000000000000..11b602d0b06a1
 +  void OnScreenshotContent();
 +  void OnAccessibilityTreeReceived(ui::AXTreeUpdate& update);
 +  void OnScreenshotCaptured(const gfx::Image& image);
-+  void ExtractTextFromNodeData(
-+      const ui::AXNodeData* node,
-+      const std::map<ui::AXNodeID, const ui::AXNodeData*>& node_map,
-+      std::u16string* output);
 +  void HideFeedbackLabel();
 +  void ShowOptionsMenu();
 +

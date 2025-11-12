@@ -1,8 +1,17 @@
 diff --git a/chrome/browser/ui/views/side_panel/BUILD.gn b/chrome/browser/ui/views/side_panel/BUILD.gn
-index 2af616e71a52a..56021613259dc 100644
+index 2af616e71a52a..18e2926e274d1 100644
 --- a/chrome/browser/ui/views/side_panel/BUILD.gn
 +++ b/chrome/browser/ui/views/side_panel/BUILD.gn
-@@ -88,6 +88,16 @@ source_set("side_panel") {
+@@ -14,6 +14,8 @@ source_set("side_panel") {
+   sources = [
+     "bookmarks/bookmarks_side_panel_coordinator.cc",
+     "bookmarks/bookmarks_side_panel_coordinator.h",
++    "browseros_simple_page_extractor.cc",
++    "browseros_simple_page_extractor.h",
+     "customize_chrome/customize_chrome_utils.cc",
+     "customize_chrome/customize_chrome_utils.h",
+     "customize_chrome/side_panel_controller_views.cc",
+@@ -88,6 +90,16 @@ source_set("side_panel") {
      "side_panel_util.h",
      "side_panel_web_ui_view.cc",
      "side_panel_web_ui_view.h",
@@ -19,7 +28,7 @@ index 2af616e71a52a..56021613259dc 100644
    ]
    public_deps = [
      "//base",
-@@ -162,6 +172,7 @@ source_set("side_panel") {
+@@ -162,6 +174,7 @@ source_set("side_panel") {
      "//components/keyed_service/core",
      "//components/language/core/browser",
      "//components/language/core/common",

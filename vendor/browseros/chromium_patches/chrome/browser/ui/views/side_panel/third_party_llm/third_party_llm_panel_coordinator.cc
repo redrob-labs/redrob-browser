@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.cc b/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.cc
 new file mode 100644
-index 0000000000000..e417ab706cd5c
+index 0000000000000..77cb397565a2d
 --- /dev/null
 +++ b/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.cc
-@@ -0,0 +1,1165 @@
+@@ -0,0 +1,1068 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -17,6 +17,7 @@ index 0000000000000..e417ab706cd5c
 +#include "ui/views/controls/menu/menu_runner.h"
 +#include "ui/base/mojom/menu_source_type.mojom.h"
 +#include "chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_view.h"
++#include "chrome/browser/ui/views/side_panel/browseros_simple_page_extractor.h"
 +#include "base/strings/utf_string_conversions.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/ui/browser.h"
@@ -53,6 +54,7 @@ index 0000000000000..e417ab706cd5c
 +#include "ui/accessibility/ax_node.h"
 +#include "ui/accessibility/ax_node_data.h"
 +#include "ui/accessibility/ax_enums.mojom.h"
++#include "ui/accessibility/ax_role_properties.h"
 +#include "ui/accessibility/ax_tree_update.h"
 +#include "ui/base/clipboard/clipboard.h"
 +#include "ui/base/clipboard/scoped_clipboard_writer.h"
@@ -660,61 +662,48 @@ index 0000000000000..e417ab706cd5c
 +
 +void ThirdPartyLlmPanelCoordinator::OnAccessibilityTreeReceived(
 +    ui::AXTreeUpdate& update) {
-+  // Build a map of node IDs to node data for easy lookup
-+  std::map<ui::AXNodeID, const ui::AXNodeData*> node_map;
-+  for (const auto& node_data : update.nodes) {
-+    node_map[node_data.id] = &node_data;
-+  }
-+  
-+  // Find the root node
-+  ui::AXNodeID root_id = update.root_id;
-+  if (node_map.find(root_id) == node_map.end()) {
-+    LOG(ERROR) << "Root node not found in tree update";
-+    return;
-+  }
-+  
-+  // Extract text from the accessibility tree recursively
-+  std::u16string extracted_text;
-+  ExtractTextFromNodeData(node_map[root_id], node_map, &extracted_text);
-+  
-+  // Clean up text - remove excessive whitespace
-+  if (!extracted_text.empty()) {
-+    // Simple cleanup of multiple spaces
-+    size_t pos = 0;
-+    while ((pos = extracted_text.find(u"  ", pos)) != std::u16string::npos) {
-+      extracted_text.replace(pos, 2, u" ");
-+    }
-+    
-+    // Format the final output
-+    std::u16string formatted_output = u"----------- WEB PAGE -----------\n\n";
-+    formatted_output += u"TITLE: " + page_title_ + u"\n\n";
-+    formatted_output += u"URL: " + base::UTF8ToUTF16(page_url_.spec()) + u"\n\n";
-+    formatted_output += u"CONTENT:\n\n" + extracted_text;
-+    formatted_output += u" ------------------------------------\n\n";
-+    formatted_output += u"USER PROMPT:\n\n";
-+    
-+    // Copy to clipboard
-+    ui::ScopedClipboardWriter clipboard_writer(ui::ClipboardBuffer::kCopyPaste);
-+    clipboard_writer.WriteText(formatted_output);
-+    
-+    browseros_metrics::BrowserOSMetrics::Log("llmchat.content.copied");
-+    
-+    // Show feedback message
-+    if (copy_feedback_label_) {
-+      copy_feedback_label_->SetText(u"Content copied to clipboard");
-+      copy_feedback_label_->SetVisible(true);
++  // Use the BrowserOS simple page extractor
++  std::u16string extracted_text = side_panel::BrowserOSSimplePageExtractor::ExtractStructuredText(update);
 +
-+      // Cancel any existing timer
-+      if (feedback_timer_->IsRunning()) {
-+        feedback_timer_->Stop();
-+      }
-+
-+      // Start timer to hide message after 2.5 seconds
-+      feedback_timer_->Start(FROM_HERE, base::Seconds(2.5),
-+          base::BindOnce(&ThirdPartyLlmPanelCoordinator::HideFeedbackLabel,
-+                         weak_factory_.GetWeakPtr()));
-+    }
++  // Check if we actually got content
++  if (extracted_text.empty()) {
++    LOG(WARNING) << "[browseros] No content extracted from accessibility tree";
++    extracted_text = u"(No readable content found on this page)";
 +  }
++
++  // Format the final output for LLM consumption
++  std::u16string formatted_output = u"----------- WEB PAGE -----------\n\n";
++  formatted_output += u"TITLE: " + page_title_ + u"\n\n";
++  formatted_output += u"URL: " + base::UTF8ToUTF16(page_url_.spec()) + u"\n\n";
++  formatted_output += u"CONTENT:\n\n";
++  formatted_output += extracted_text;
++  formatted_output += u"\n\n------------------------------------\n\n";
++  formatted_output += u"USER PROMPT:\n\n";
++
++  // Copy to clipboard
++  ui::ScopedClipboardWriter clipboard_writer(ui::ClipboardBuffer::kCopyPaste);
++  clipboard_writer.WriteText(formatted_output);
++
++  browseros_metrics::BrowserOSMetrics::Log("llmchat.content.copied");
++
++  // Show feedback message
++  if (copy_feedback_label_) {
++    copy_feedback_label_->SetText(u"Page content copied to clipboard");
++    copy_feedback_label_->SetVisible(true);
++
++    // Cancel any existing timer
++    if (feedback_timer_->IsRunning()) {
++      feedback_timer_->Stop();
++    }
++
++    // Start timer to hide message after 2.5 seconds
++    feedback_timer_->Start(FROM_HERE, base::Seconds(2.5),
++        base::BindOnce(&ThirdPartyLlmPanelCoordinator::HideFeedbackLabel,
++                       weak_factory_.GetWeakPtr()));
++  }
++
++  LOG(INFO) << "[browseros] Extracted " << extracted_text.length()
++            << " characters of structured text";
 +}
 +
 +void ThirdPartyLlmPanelCoordinator::HideFeedbackLabel() {
@@ -753,92 +742,6 @@ index 0000000000000..e417ab706cd5c
 +
 +  // Remove observation for this view.
 +  view_observation_.RemoveObservation(observed_view);
-+}
-+
-+
-+void ThirdPartyLlmPanelCoordinator::ExtractTextFromNodeData(
-+    const ui::AXNodeData* node,
-+    const std::map<ui::AXNodeID, const ui::AXNodeData*>& node_map,
-+    std::u16string* output) {
-+  if (!node || !output) {
-+    return;
-+  }
-+  
-+  // Skip UI elements and navigation
-+  if (node->role == ax::mojom::Role::kButton ||
-+      node->role == ax::mojom::Role::kNavigation ||
-+      node->role == ax::mojom::Role::kBanner ||
-+      node->role == ax::mojom::Role::kComplementary ||
-+      node->role == ax::mojom::Role::kContentInfo ||
-+      node->role == ax::mojom::Role::kForm ||
-+      node->role == ax::mojom::Role::kSearch ||
-+      node->role == ax::mojom::Role::kMenu ||
-+      node->role == ax::mojom::Role::kMenuBar ||
-+      node->role == ax::mojom::Role::kMenuItem ||
-+      node->role == ax::mojom::Role::kToolbar) {
-+    // For these elements, still traverse children but don't extract their text
-+    for (ui::AXNodeID child_id : node->child_ids) {
-+      auto it = node_map.find(child_id);
-+      if (it != node_map.end()) {
-+        ExtractTextFromNodeData(it->second, node_map, output);
-+      }
-+    }
-+    return;
-+  }
-+  
-+  // Check if this is a text-containing element
-+  bool is_text_element = (node->role == ax::mojom::Role::kStaticText ||
-+                         node->role == ax::mojom::Role::kInlineTextBox);
-+  
-+  // Extract text if this is a text element
-+  if (is_text_element) {
-+    std::u16string text;
-+    if (node->HasStringAttribute(ax::mojom::StringAttribute::kName)) {
-+      text = node->GetString16Attribute(ax::mojom::StringAttribute::kName);
-+    }
-+    
-+    if (text.empty() && node->HasStringAttribute(ax::mojom::StringAttribute::kValue)) {
-+      text = node->GetString16Attribute(ax::mojom::StringAttribute::kValue);
-+    }
-+    
-+    if (!text.empty()) {
-+      // Add appropriate spacing
-+      if (!output->empty() && output->back() != ' ' && output->back() != '\n') {
-+        *output += u" ";
-+      }
-+      *output += text;
-+    }
-+  }
-+  
-+  // Handle line breaks
-+  if (node->role == ax::mojom::Role::kLineBreak) {
-+    *output += u"\n";
-+  }
-+  
-+  // Add paragraph breaks for block-level elements
-+  bool needs_paragraph_break = (node->role == ax::mojom::Role::kParagraph ||
-+                               node->role == ax::mojom::Role::kHeading ||
-+                               node->role == ax::mojom::Role::kListItem ||
-+                               node->role == ax::mojom::Role::kBlockquote ||
-+                               node->role == ax::mojom::Role::kArticle ||
-+                               node->role == ax::mojom::Role::kSection);
-+  
-+  if (needs_paragraph_break && !output->empty() && output->back() != '\n') {
-+    *output += u"\n\n";
-+  }
-+  
-+  // Recursively process children for all elements
-+  for (ui::AXNodeID child_id : node->child_ids) {
-+    auto it = node_map.find(child_id);
-+    if (it != node_map.end()) {
-+      ExtractTextFromNodeData(it->second, node_map, output);
-+    }
-+  }
-+  
-+  // Add paragraph break after block-level elements if they had content
-+  if (needs_paragraph_break && !output->empty() && output->back() != '\n') {
-+    *output += u"\n\n";
-+  }
 +}
 +
 +bool ThirdPartyLlmPanelCoordinator::HandleKeyboardEvent(
