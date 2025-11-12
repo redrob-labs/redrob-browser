@@ -209,6 +209,8 @@ features:
     - chrome/browser/ui/ui_features.h
     - chrome/browser/ui/views/accelerator_table.cc
     - chrome/browser/ui/views/side_panel/BUILD.gn
+    - chrome/browser/ui/views/side_panel/browseros_simple_page_extractor.cc
+    - chrome/browser/ui/views/side_panel/browseros_simple_page_extractor.h
     - chrome/browser/ui/views/side_panel/clash_of_gpts/clash_of_gpts_coordinator.cc
     - chrome/browser/ui/views/side_panel/side_panel_entry_id.h
     - chrome/browser/ui/views/side_panel/side_panel_prefs.cc
