@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_manager.cc b/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_manager.cc
-index 30d4b3bc95d1c..558e8f442d671 100644
+index 30d4b3bc95d1c..be4933111028f 100644
 --- a/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_manager.cc
 +++ b/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_manager.cc
 @@ -6,6 +6,7 @@
@@ -24,7 +24,7 @@ index 30d4b3bc95d1c..558e8f442d671 100644
            .Build());
 +
 +  // Auto-pin BrowserOS extensions to the toolbar.
-+  if (browseros::IsBrowserOSExtension(extension->id())) {
++  if (browseros::IsBrowserOSPinnedExtension(extension->id())) {
 +    LOG(INFO) << "browseros: Auto-pinning BrowserOS extension: " << extension->id();
 +    if (auto* pinned_model = PinnedToolbarActionsModel::Get(profile_)) {
 +      pinned_model->UpdatePinnedState(extension_action_id, true);
@@ -39,7 +39,7 @@ index 30d4b3bc95d1c..558e8f442d671 100644
    }
 +  
 +  // Unpin BrowserOS extensions before removing the action item
-+  if (browseros::IsBrowserOSExtension(extension->id())) {
++  if (browseros::IsBrowserOSPinnedExtension(extension->id())) {
 +    LOG(INFO) << "browseros: Unpinning BrowserOS extension: " << extension->id() 
 +              << " reason: " << static_cast<int>(reason);
 +    if (auto* pinned_model = PinnedToolbarActionsModel::Get(profile_)) {
