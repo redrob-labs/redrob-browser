@@ -42,12 +42,13 @@ from ..modules.patches.series_patches import SeriesPatchesModule
 from ..modules.resources.chromium_replace import ChromiumReplaceModule
 from ..modules.resources.string_replaces import StringReplacesModule
 from ..modules.resources.resources import ResourcesModule
-from ..modules.upload import GCSUploadModule
+from ..modules.upload import UploadModule
 
 # Platform-specific modules (imported unconditionally - validation handles platform checks)
 from ..modules.sign.macos import MacOSSignModule
 from ..modules.sign.windows import WindowsSignModule
 from ..modules.sign.linux import LinuxSignModule
+from ..modules.sign.sparkle import SparkleSignModule
 from ..modules.package.macos import MacOSPackageModule
 from ..modules.package.windows import WindowsPackageModule
 from ..modules.package.linux import LinuxPackageModule
@@ -71,12 +72,13 @@ AVAILABLE_MODULES = {
     "sign_macos": MacOSSignModule,
     "sign_windows": WindowsSignModule,
     "sign_linux": LinuxSignModule,
+    "sparkle_sign": SparkleSignModule,  # macOS Sparkle signing for auto-update
     # Package (platform-specific, validated at runtime)
     "package_macos": MacOSPackageModule,
     "package_windows": WindowsPackageModule,
     "package_linux": LinuxPackageModule,
     # Upload
-    "upload_gcs": GCSUploadModule,
+    "upload": UploadModule,
 }
 
 
@@ -113,7 +115,13 @@ EXECUTION_ORDER = [
     # Phase 2: Patches & Resources
     (
         "prep",
-        ["resources", "chromium_replace", "string_replaces", "series_patches", "patches"],
+        [
+            "resources",
+            "chromium_replace",
+            "string_replaces",
+            "series_patches",
+            "patches",
+        ],
     ),
     # Phase 3: Configure & Build
     ("build", ["configure", "compile"]),
@@ -122,7 +130,19 @@ EXECUTION_ORDER = [
     # Phase 5: Packaging (platform-aware)
     ("package", [_get_package_module()]),
     # Phase 6: Upload
-    ("upload", ["upload_gcs"]),
+    ("upload", ["upload"]),
+]
+
+# Modules that trigger Slack notifications (to reduce verbosity)
+NOTIFY_MODULES = [
+    "compile",
+    "sign_macos",
+    "sign_windows",
+    "sign_linux",
+    "package_macos",
+    "package_windows",
+    "package_linux",
+    "upload",
 ]
 
 
@@ -163,8 +183,9 @@ def execute_pipeline(
             module_class = available_modules[module_name]
             module = module_class()
 
-            # Notify module start and track timing
-            notify_module_start(module_name)
+            # Notify module start and track timing (only for key modules)
+            if module_name in NOTIFY_MODULES:
+                notify_module_start(module_name)
             module_start = time.time()
 
             # Validate right before executing (fail fast)
@@ -181,7 +202,8 @@ def execute_pipeline(
             try:
                 module.execute(ctx)
                 module_duration = time.time() - module_start
-                notify_module_completion(module_name, module_duration)
+                if module_name in NOTIFY_MODULES:
+                    notify_module_completion(module_name, module_duration)
                 log_success(f"Module {module_name} completed in {module_duration:.1f}s")
             except Exception as e:
                 log_error(f"Module {module_name} failed: {e}")
@@ -261,7 +283,7 @@ def main(
     upload: bool = typer.Option(
         False,
         "--upload",
-        help="Run upload phase (upload_gcs)",
+        help="Run upload phase (upload artifacts)",
     ),
     # Global options that override config
     arch: Optional[str] = typer.Option(
@@ -435,6 +457,9 @@ def main(
     log_info(f"📍 Architecture: {ctx.architecture}")
     log_info(f"📍 Build type: {ctx.build_type}")
     log_info(f"📍 Output: {ctx.out_dir}")
+    log_info(f"📍 Semantic version: {ctx.semantic_version}")
+    log_info(f"📍 Chromium version: {ctx.chromium_version}")
+    log_info(f"📍 Build offset: {ctx.browseros_build_offset}")
     log_info(f"📍 Pipeline: {' → '.join(pipeline)}")
     log_info("=" * 70)
 

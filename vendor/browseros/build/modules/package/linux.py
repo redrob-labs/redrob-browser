@@ -19,6 +19,7 @@ from ...common.utils import (
     join_paths,
     IS_LINUX,
 )
+from ...common.notify import get_notifier, COLOR_GREEN
 
 
 class LinuxPackageModule(CommandModule):
@@ -62,6 +63,23 @@ class LinuxPackageModule(CommandModule):
             log_warning("   Only AppImage created (.deb failed)")
         elif deb_path:
             log_warning("   Only .deb created (AppImage failed)")
+
+        # Send Slack notification
+        notifier = get_notifier()
+        artifacts = []
+        if appimage_path:
+            artifacts.append(appimage_path.name)
+        if deb_path:
+            artifacts.append(deb_path.name)
+        notifier.notify(
+            "📦 Package Created",
+            f"Linux packages created successfully",
+            {
+                "Artifacts": ", ".join(artifacts),
+                "Version": ctx.semantic_version,
+            },
+            color=COLOR_GREEN,
+        )
 
     def _package_appimage(self, ctx: Context, package_dir: Path) -> Optional[Path]:
         return package_appimage(ctx, package_dir)
@@ -494,9 +512,7 @@ def package_appimage(ctx: Context, package_dir: Path) -> Optional[Path]:
         safe_rmtree(appdir)
         return None
 
-    version = ctx.get_browseros_chromium_version().replace(" ", "_")
-    arch_suffix = "x86_64" if ctx.architecture == "x64" else "arm64"
-    filename = f"{ctx.BROWSEROS_APP_BASE_NAME}-{version}-{arch_suffix}.AppImage"
+    filename = ctx.get_artifact_name("appimage")
     output_path = Path(join_paths(package_dir, filename))
 
     success = create_appimage(ctx, appdir, output_path)
@@ -526,14 +542,7 @@ def package_deb(ctx: Context, package_dir: Path) -> Optional[Path]:
         safe_rmtree(debdir)
         return None
 
-    version = (
-        ctx.get_browseros_chromium_version()
-        .lstrip("v")
-        .replace(" ", "")
-        .replace("_", ".")
-    )
-    arch_suffix = "amd64" if ctx.architecture == "x64" else "arm64"
-    filename = f"browseros_{version}_{arch_suffix}.deb"
+    filename = ctx.get_artifact_name("deb")
     output_path = Path(join_paths(package_dir, filename))
 
     success = create_deb(ctx, debdir, output_path)

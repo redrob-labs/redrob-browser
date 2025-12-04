@@ -3,7 +3,7 @@
 
 import subprocess
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from ...common.module import CommandModule, ValidationError
 from ...common.context import Context
 from ...common.env import EnvConfig
@@ -35,7 +35,7 @@ class WindowsSignModule(CommandModule):
         if not build_output_dir.exists():
             raise ValidationError(f"Build output directory not found: {build_output_dir}")
 
-        env = EnvConfig()
+        env = ctx.env
         if not env.code_sign_tool_path:
             raise ValidationError("CODE_SIGN_TOOL_PATH environment variable not set")
 
@@ -55,14 +55,14 @@ class WindowsSignModule(CommandModule):
 
         build_output_dir = join_paths(ctx.chromium_src, ctx.out_dir)
 
-        self._sign_executables(build_output_dir)
+        self._sign_executables(build_output_dir, ctx.env)
         self._build_mini_installer(ctx)
-        mini_installer_path = self._sign_installer(build_output_dir)
+        mini_installer_path = self._sign_installer(build_output_dir, ctx.env)
 
         ctx.artifact_registry.add("signed_installer", mini_installer_path)
         log_success("✅ All binaries signed successfully!")
 
-    def _sign_executables(self, build_output_dir: Path) -> None:
+    def _sign_executables(self, build_output_dir: Path, env: EnvConfig) -> None:
         log_info("\nStep 1/3: Signing executables before packaging...")
         binaries_to_sign_first = [build_output_dir / "chrome.exe"]
         binaries_to_sign_first.extend(get_browseros_server_binary_paths(build_output_dir))
@@ -78,7 +78,7 @@ class WindowsSignModule(CommandModule):
         if not existing_binaries:
             raise RuntimeError("No binaries found to sign")
 
-        if not sign_with_codesigntool(existing_binaries):
+        if not sign_with_codesigntool(existing_binaries, env):
             raise RuntimeError("Failed to sign executables")
 
     def _build_mini_installer(self, ctx: Context) -> None:
@@ -86,13 +86,13 @@ class WindowsSignModule(CommandModule):
         if not build_mini_installer(ctx):
             raise RuntimeError("Failed to build mini_installer")
 
-    def _sign_installer(self, build_output_dir: Path) -> Path:
+    def _sign_installer(self, build_output_dir: Path, env: EnvConfig) -> Path:
         log_info("\nStep 3/3: Signing mini_installer.exe...")
         mini_installer_path = build_output_dir / "mini_installer.exe"
         if not mini_installer_path.exists():
             raise RuntimeError(f"mini_installer.exe not found at: {mini_installer_path}")
 
-        if not sign_with_codesigntool([mini_installer_path]):
+        if not sign_with_codesigntool([mini_installer_path], env):
             raise RuntimeError("Failed to sign mini_installer.exe")
 
         return mini_installer_path
@@ -111,11 +111,20 @@ def build_mini_installer(ctx: Context) -> bool:
     return build_target(ctx, "mini_installer")
 
 
-def sign_with_codesigntool(binaries: List[Path]) -> bool:
-    """Sign binaries using SSL.com CodeSignTool"""
+def sign_with_codesigntool(
+    binaries: List[Path],
+    env: Optional[EnvConfig] = None,
+) -> bool:
+    """Sign binaries using SSL.com CodeSignTool
+
+    Args:
+        binaries: List of binary paths to sign
+        env: Optional EnvConfig instance. If not provided, creates a new one.
+    """
     log_info("Using SSL.com CodeSignTool for signing...")
 
-    env = EnvConfig()
+    if env is None:
+        env = EnvConfig()
 
     if not env.code_sign_tool_path:
         log_error("CODE_SIGN_TOOL_PATH not set in .env file")
@@ -239,9 +248,14 @@ def sign_universal(contexts: List[Context]) -> bool:
     return True
 
 
-def check_signing_environment() -> bool:
-    """Check if Windows signing environment is properly configured"""
-    env = EnvConfig()
+def check_signing_environment(env: Optional[EnvConfig] = None) -> bool:
+    """Check if Windows signing environment is properly configured
+
+    Args:
+        env: Optional EnvConfig instance. If not provided, creates a new one.
+    """
+    if env is None:
+        env = EnvConfig()
 
     if not env.code_sign_tool_path:
         log_error("CODE_SIGN_TOOL_PATH not set")

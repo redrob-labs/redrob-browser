@@ -40,7 +40,7 @@ def show_available_modules(available_modules: Dict[str, Type[CommandModule]]) ->
         "Build": ["compile"],
         "Code Signing": ["sign_macos", "sign_windows", "sign_linux"],
         "Packaging": ["package_macos", "package_windows", "package_linux"],
-        "Upload": ["upload_gcs"],
+        "Upload": ["upload"],
     }
 
     log_info("\n" + "=" * 70)

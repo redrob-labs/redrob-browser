@@ -125,23 +125,47 @@ class EnvConfig:
         """eSigner credential ID for Windows code signing"""
         return os.environ.get("ESIGNER_CREDENTIAL_ID")
 
-    # === Upload & Distribution ===
+    # === Upload & Distribution (Cloudflare R2) ===
 
     @property
-    def gcs_bucket(self) -> str:
-        """Google Cloud Storage bucket for artifact uploads
-
-        Defaults to 'nxtscape' if not set via GCS_BUCKET env var
-        """
-        return os.environ.get("GCS_BUCKET", "nxtscape")
+    def r2_account_id(self) -> Optional[str]:
+        """Cloudflare account ID for R2"""
+        return os.environ.get("R2_ACCOUNT_ID")
 
     @property
-    def gcs_service_account_file(self) -> str:
-        """Service account JSON file for GCS authentication
+    def r2_access_key_id(self) -> Optional[str]:
+        """R2 access key ID"""
+        return os.environ.get("R2_ACCESS_KEY_ID")
 
-        Defaults to 'gclient.json' if not set via GCS_SERVICE_ACCOUNT_FILE env var
-        """
-        return os.environ.get("GCS_SERVICE_ACCOUNT_FILE", "gclient.json")
+    @property
+    def r2_secret_access_key(self) -> Optional[str]:
+        """R2 secret access key"""
+        return os.environ.get("R2_SECRET_ACCESS_KEY")
+
+    @property
+    def r2_bucket(self) -> str:
+        """R2 bucket name (default: browseros)"""
+        return os.environ.get("R2_BUCKET", "browseros")
+
+    @property
+    def r2_cdn_base_url(self) -> str:
+        """CDN base URL for R2 artifacts (default: http://cdn.browseros.com)"""
+        return os.environ.get("R2_CDN_BASE_URL", "http://cdn.browseros.com")
+
+    @property
+    def r2_endpoint_url(self) -> Optional[str]:
+        """R2 S3-compatible endpoint URL (computed from account ID)"""
+        account_id = self.r2_account_id
+        if account_id:
+            return f"https://{account_id}.r2.cloudflarestorage.com"
+        return None
+
+    # === Sparkle Signing (macOS) ===
+
+    @property
+    def sparkle_private_key(self) -> Optional[str]:
+        """Base64-encoded Sparkle Ed25519 private key for macOS auto-update signing"""
+        return os.environ.get("SPARKLE_PRIVATE_KEY")
 
     # === Notifications ===
 
@@ -207,12 +231,28 @@ class EnvConfig:
                 f"Missing required environment variables: {', '.join(missing)}"
             )
 
-    def has_macos_signing_config(self) -> bool:
-        """Check if all macOS signing environment variables are set"""
-        config = self.get_macos_signing_config()
-        return all(config.values())
+    def get_r2_config(self) -> dict:
+        """
+        Get all R2 configuration as a dict
 
-    def has_windows_signing_config(self) -> bool:
-        """Check if all Windows signing environment variables are set"""
-        config = self.get_windows_signing_config()
-        return all(config.values())
+        Returns:
+            dict with keys: account_id, access_key_id, secret_access_key, bucket, cdn_base_url, endpoint_url
+        """
+        return {
+            "account_id": self.r2_account_id or "",
+            "access_key_id": self.r2_access_key_id or "",
+            "secret_access_key": self.r2_secret_access_key or "",
+            "bucket": self.r2_bucket,
+            "cdn_base_url": self.r2_cdn_base_url,
+            "endpoint_url": self.r2_endpoint_url or "",
+        }
+
+    def has_r2_config(self) -> bool:
+        """Check if R2 upload configuration is available"""
+        return bool(
+            self.r2_account_id and self.r2_access_key_id and self.r2_secret_access_key
+        )
+
+    def has_sparkle_key(self) -> bool:
+        """Check if Sparkle private key is available"""
+        return bool(self.sparkle_private_key)

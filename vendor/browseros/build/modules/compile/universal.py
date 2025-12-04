@@ -15,7 +15,7 @@ Design:
         3. Merge arm64 + x64 into universal
         4. sign universal -> package -> upload
 
-    Output: 3 DMGs uploaded to GCS:
+    Output: 3 DMGs uploaded:
         - BrowserOS_{version}_arm64_signed.dmg
         - BrowserOS_{version}_x64_signed.dmg
         - BrowserOS_{version}_universal_signed.dmg
@@ -34,7 +34,7 @@ This module internally runs (for EACH architecture):
     - compile (ninja build)
     - sign_macos (code signing + notarization)
     - package_macos (DMG creation)
-    - upload_gcs (GCS upload)
+    - upload (artifact upload)
 
 Then merges and processes the universal binary.
 """
@@ -60,7 +60,7 @@ class UniversalBuildModule(CommandModule):
     The base context passed to this module can have any architecture value -
     it will be ignored and arm64/x64 will be built explicitly.
 
-    Output artifacts (all uploaded to GCS):
+    Output artifacts:
         - BrowserOS_{version}_arm64_signed.dmg
         - BrowserOS_{version}_x64_signed.dmg
         - BrowserOS_{version}_universal_signed.dmg
@@ -68,7 +68,9 @@ class UniversalBuildModule(CommandModule):
 
     produces = ["dmg_arm64", "dmg_x64", "dmg_universal"]
     requires = []
-    description = "Build, sign, package, and upload universal binary (arm64 + x64) for macOS"
+    description = (
+        "Build, sign, package, and upload universal binary (arm64 + x64) for macOS"
+    )
 
     def validate(self, ctx: Context) -> None:
         """Validate universal build can run"""
@@ -106,7 +108,7 @@ class UniversalBuildModule(CommandModule):
         # Import sign/package/upload modules
         from ..sign.macos import MacOSSignModule
         from ..package.macos import MacOSPackageModule
-        from ..upload import GCSUploadModule
+        from ..upload import UploadModule
 
         # Clean all build directories before starting
         self._clean_build_directories(ctx)
@@ -123,7 +125,7 @@ class UniversalBuildModule(CommandModule):
             arch_ctx = self._create_arch_context(ctx, arch)
 
             log_info(f"📍 Chromium: {arch_ctx.chromium_version}")
-            log_info(f"📍 BrowserOS: {arch_ctx.browseros_version}")
+            log_info(f"📍 BrowserOS: {arch_ctx.browseros_build_offset}")
             log_info(f"📍 Output directory: {arch_ctx.out_dir}")
 
             # === BUILD PHASE ===
@@ -161,7 +163,7 @@ class UniversalBuildModule(CommandModule):
             # === UPLOAD PHASE ===
             log_info(f"\n☁️  Uploading {arch} artifacts...")
             try:
-                GCSUploadModule().execute(arch_ctx)
+                UploadModule().execute(arch_ctx)
                 log_success(f"✅ {arch} upload complete")
             except Exception as e:
                 log_warning(f"⚠️  {arch} upload failed (non-fatal): {e}")
@@ -200,7 +202,7 @@ class UniversalBuildModule(CommandModule):
         # Upload universal
         log_info("\n☁️  Uploading universal artifacts...")
         try:
-            GCSUploadModule().execute(universal_ctx)
+            UploadModule().execute(universal_ctx)
             log_success("✅ Universal upload complete")
         except Exception as e:
             log_warning(f"⚠️  Universal upload failed (non-fatal): {e}")
@@ -208,9 +210,15 @@ class UniversalBuildModule(CommandModule):
         log_info("\n" + "=" * 70)
         log_success("✅ Universal build pipeline complete!")
         log_info("Artifacts created:")
-        log_info(f"  - arm64 DMG: {ctx.get_dist_dir() / ctx.get_dmg_name(signed=True).replace('universal', 'arm64')}")
-        log_info(f"  - x64 DMG: {ctx.get_dist_dir() / ctx.get_dmg_name(signed=True).replace('universal', 'x64')}")
-        log_info(f"  - universal DMG: {ctx.get_dist_dir() / universal_ctx.get_dmg_name(signed=True)}")
+        log_info(
+            f"  - arm64 DMG: {ctx.get_dist_dir() / ctx.get_artifact_name('dmg').replace('universal', 'arm64')}"
+        )
+        log_info(
+            f"  - x64 DMG: {ctx.get_dist_dir() / ctx.get_artifact_name('dmg').replace('universal', 'x64')}"
+        )
+        log_info(
+            f"  - universal DMG: {ctx.get_dist_dir() / universal_ctx.get_artifact_name('dmg')}"
+        )
         log_info("=" * 70)
 
     def _clean_build_directories(self, ctx: Context) -> None:
@@ -258,7 +266,9 @@ class UniversalBuildModule(CommandModule):
         # Set fixed app path to prevent universal auto-detection in get_app_path()
         # This is critical: after arm64 is built, get_app_path() would otherwise
         # try to detect the universal dir for x64 context
-        ctx._fixed_app_path = ctx.chromium_src / f"out/Default_{arch}" / ctx.BROWSEROS_APP_NAME
+        ctx._fixed_app_path = (
+            ctx.chromium_src / f"out/Default_{arch}" / ctx.BROWSEROS_APP_NAME
+        )
         return ctx
 
     def _create_universal_context(self, base_ctx: Context) -> Context:
@@ -277,7 +287,9 @@ class UniversalBuildModule(CommandModule):
             build_type=base_ctx.build_type,
         )
         # Set fixed app path to the universal binary
-        ctx._fixed_app_path = ctx.chromium_src / "out/Default_universal" / ctx.BROWSEROS_APP_NAME
+        ctx._fixed_app_path = (
+            ctx.chromium_src / "out/Default_universal" / ctx.BROWSEROS_APP_NAME
+        )
         # Override out_dir for universal
         ctx.out_dir = "out/Default_universal"
         return ctx
@@ -309,7 +321,9 @@ class UniversalBuildModule(CommandModule):
         universal_app = universal_dir / "BrowserOS.app"
 
         # Find universalizer script
-        universalizer_script = ctx.root_dir / "build/modules/package/universalizer_patched.py"
+        universalizer_script = (
+            ctx.root_dir / "build/modules/package/universalizer_patched.py"
+        )
 
         log_info(f"📱 Input 1 (arm64): {arm64_app}")
         log_info(f"📱 Input 2 (x64): {x64_app}")

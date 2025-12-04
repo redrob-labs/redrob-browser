@@ -16,6 +16,7 @@ from ...common.utils import (
     join_paths,
     IS_WINDOWS,
 )
+from ...common.notify import get_notifier, COLOR_GREEN
 
 
 class WindowsPackageModule(CommandModule):
@@ -44,6 +45,18 @@ class WindowsPackageModule(CommandModule):
 
         log_success("Windows packages created successfully")
 
+        # Send Slack notification
+        notifier = get_notifier()
+        notifier.notify(
+            "📦 Package Created",
+            f"Windows packages created successfully",
+            {
+                "Artifacts": f"{installer_path.name}, {zip_path.name}",
+                "Version": ctx.semantic_version,
+            },
+            color=COLOR_GREEN,
+        )
+
     def _create_installer(self, ctx: Context) -> Path:
         build_output_dir = join_paths(ctx.chromium_src, ctx.out_dir)
         mini_installer_path = build_output_dir / "mini_installer.exe"
@@ -51,7 +64,7 @@ class WindowsPackageModule(CommandModule):
         output_dir = ctx.get_dist_dir()
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        installer_name = f"{ctx.get_app_base_name()}_{ctx.get_browseros_chromium_version()}_{ctx.architecture}_installer.exe"
+        installer_name = ctx.get_artifact_name("installer")
         installer_path = output_dir / installer_name
 
         try:
@@ -68,12 +81,12 @@ class WindowsPackageModule(CommandModule):
         output_dir = ctx.get_dist_dir()
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        zip_name = f"{ctx.get_app_base_name()}_{ctx.get_browseros_chromium_version()}_{ctx.architecture}_installer.zip"
+        zip_name = ctx.get_artifact_name("installer_zip")
         zip_path = output_dir / zip_name
 
         try:
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-                installer_name = f"{ctx.get_app_base_name()}_{ctx.get_browseros_version()}_{ctx.architecture}_installer.exe"
+                installer_name = ctx.get_artifact_name("installer")
                 zipf.write(mini_installer_path, installer_name)
 
                 file_size = mini_installer_path.stat().st_size
@@ -170,7 +183,7 @@ def create_installer(ctx: Context) -> bool:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate installer filename with version and architecture
-    installer_name = f"{ctx.get_app_base_name()}_{ctx.get_browseros_chromium_version()}_{ctx.architecture}_installer.exe"
+    installer_name = ctx.get_artifact_name("installer")
     installer_path = output_dir / installer_name
 
     # Copy mini_installer to final location
@@ -203,14 +216,14 @@ def create_portable_zip(ctx: Context) -> bool:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate ZIP filename with version and architecture
-    zip_name = f"{ctx.get_app_base_name()}_{ctx.get_browseros_chromium_version()}_{ctx.architecture}_installer.zip"
+    zip_name = ctx.get_artifact_name("installer_zip")
     zip_path = output_dir / zip_name
 
     # Create ZIP file containing just the installer
     try:
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
             # Add mini_installer.exe to the zip
-            installer_name = f"{ctx.get_app_base_name()}_{ctx.get_browseros_version()}_{ctx.architecture}_installer.exe"
+            installer_name = ctx.get_artifact_name("installer")
             zipf.write(mini_installer_path, installer_name)
 
             # Get file size for logging

@@ -32,10 +32,10 @@ modules:
   #   - Build arm64 -> sign -> package -> upload
   #   - Build x64 -> sign -> package -> upload
   #   - Merge -> sign universal -> package -> upload
-  # Output: 3 DMGs uploaded to GCS (arm64, x64, universal)
+  # Output: 3 DMGs uploaded (arm64, x64, universal)
   - universal_build
 
-  # NOTE: sign_macos, package_macos, upload_gcs are now internal to universal_build
+  # NOTE: sign_macos, package_macos, upload are now internal to universal_build
   # For single-arch builds, use the standard pipeline with those modules
 
 # Required environment variables

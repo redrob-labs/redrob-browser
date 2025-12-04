@@ -36,9 +36,9 @@ app.add_typer(build_app, name="build", help="Build BrowserOS browser")
 from .cli import dev
 app.add_typer(dev.app, name="dev", help="Dev patch management")
 
-# TODO: Add release command in future
-# from .cli import release
-# app.add_typer(release.app, name="release", help="Release automation")
+# Release automation commands
+from .cli import release
+app.add_typer(release.app, name="release", help="Release automation")
 
 
 if __name__ == "__main__":

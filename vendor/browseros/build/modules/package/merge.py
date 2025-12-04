@@ -197,7 +197,7 @@ def merge_sign_package(
             dmg_dir = ctx.root_dir / "dmg"
             dmg_dir.mkdir(parents=True, exist_ok=True)
 
-            dmg_name = ctx.get_dmg_name()
+            dmg_name = ctx.get_artifact_name("dmg")
 
             dmg_path = dmg_dir / dmg_name
             pkg_dmg_path = ctx.get_pkg_dmg_path()

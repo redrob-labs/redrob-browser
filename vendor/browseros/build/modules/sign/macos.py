@@ -65,7 +65,7 @@ class MacOSSignModule(CommandModule):
         if not app_path.exists():
             raise ValidationError(f"App not found at: {app_path}")
 
-        env_ok, env_vars = check_environment()
+        env_ok, env_vars = check_environment(ctx.env)
         if not env_ok:
             raise ValidationError("Required signing environment variables not set")
 
@@ -75,7 +75,7 @@ class MacOSSignModule(CommandModule):
         log_info("=" * 70)
 
         app_path = ctx.get_app_path()
-        env_ok, env_vars = check_environment()
+        env_ok, env_vars = check_environment(ctx.env)
 
         self._clear_extended_attributes(app_path)
         self._sign_all_components(app_path, env_vars["certificate_name"], ctx)
@@ -100,13 +100,19 @@ class MacOSSignModule(CommandModule):
     def _notarize(self, app_path: Path, env_vars: Dict[str, str], ctx: Context) -> None:
         if not notarize_app(app_path, ctx.root_dir, env_vars, ctx):
             raise RuntimeError("Notarization failed")
-def check_signing_environment() -> bool:
-    """Check if all required environment variables are set for signing (early check)"""
+def check_signing_environment(env: Optional[EnvConfig] = None) -> bool:
+    """Check if all required environment variables are set for signing (early check)
+
+    Args:
+        env: Optional EnvConfig instance. If not provided, creates a new one.
+    """
     # Only check on macOS
     if not IS_MACOS:
         return True
 
-    env = EnvConfig()
+    if env is None:
+        env = EnvConfig()
+
     missing = []
 
     if not env.macos_certificate_name:
@@ -127,9 +133,15 @@ def check_signing_environment() -> bool:
     return True
 
 
-def check_environment() -> Tuple[bool, Dict[str, str]]:
-    """Check if all required environment variables are set"""
-    env = EnvConfig()
+def check_environment(env: Optional[EnvConfig] = None) -> Tuple[bool, Dict[str, str]]:
+    """Check if all required environment variables are set
+
+    Args:
+        env: Optional EnvConfig instance. If not provided, creates a new one.
+    """
+    if env is None:
+        env = EnvConfig()
+
     env_vars = {
         "certificate_name": env.macos_certificate_name or "",
         "apple_id": env.macos_notarization_apple_id or "",
@@ -717,7 +729,7 @@ def sign_app(ctx: Context, create_dmg: bool = True) -> bool:
     dmg_path = None
     if create_dmg:
         dmg_dir = ctx.get_dist_dir()
-        dmg_name = ctx.get_dmg_name(True)
+        dmg_name = ctx.get_artifact_name("dmg")
         dmg_path = join_paths(dmg_dir, dmg_name)
 
     # Verify app exists
