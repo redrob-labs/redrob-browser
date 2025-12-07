@@ -170,6 +170,9 @@ def extract_commit(
     base: Optional[str] = Option(
         None, "--base", help="Extract full diff from base commit for files in COMMIT"
     ),
+    feature: bool = Option(
+        False, "--feature", help="Add extracted files to a feature in features.yaml"
+    ),
 ):
     """Extract patches from a single commit"""
     ctx = create_build_context(state.chromium_src)
@@ -190,6 +193,7 @@ def extract_commit(
             force=force,
             include_binary=include_binary,
             base=base,
+            feature=feature,
         )
     except Exception as e:
         log_error(f"Failed to extract commit: {e}")
@@ -201,6 +205,9 @@ def extract_patch_cmd(
     chromium_path: str = Argument(..., help="Chromium file path (e.g., chrome/common/foo.h)"),
     base: str = Option(..., "--base", "-b", help="Base commit to diff against"),
     force: bool = Option(False, "--force", "-f", help="Overwrite existing patch without prompting"),
+    feature: bool = Option(
+        False, "--feature", help="Add extracted file to a feature in features.yaml"
+    ),
 ):
     """Extract patch for a specific file"""
     ctx = create_build_context(state.chromium_src)
@@ -214,6 +221,17 @@ def extract_patch_cmd(
         log_error(error or "Unknown error")
         raise typer.Exit(1)
     log_success(f"Successfully extracted patch for: {chromium_path}")
+
+    # Handle --feature flag
+    if feature:
+        from ..modules.feature import prompt_feature_selection, add_files_to_feature
+
+        result = prompt_feature_selection(ctx, base[:12], None)
+        if result is None:
+            log_warning("Skipped adding file to feature")
+        else:
+            feature_name, description = result
+            add_files_to_feature(ctx, feature_name, description, [chromium_path])
 
 
 @extract_app.command(name="range")
@@ -231,6 +249,9 @@ def extract_range(
         None,
         "--base",
         help="Use different base for diff (full diff from base for files in range)",
+    ),
+    feature: bool = Option(
+        False, "--feature", help="Add extracted files to a feature in features.yaml"
     ),
 ):
     """Extract patches from a range of commits"""
@@ -254,6 +275,7 @@ def extract_range(
             include_binary=include_binary,
             squash=squash,
             base=base,
+            feature=feature,
         )
     except Exception as e:
         log_error(f"Failed to extract range: {e}")
@@ -266,9 +288,11 @@ def apply_all(
     interactive: bool = Option(
         True, "--interactive/--no-interactive", "-i/-n", help="Interactive mode"
     ),
-    commit: bool = Option(False, "--commit", "-c", help="Commit after each patch"),
     reset_to: Optional[str] = Option(
         None, "--reset-to", "-r", help="Reset files to this commit before applying patches"
+    ),
+    annotate: bool = Option(
+        False, "--annotate", "-a", help="Create git commits per feature after applying"
     ),
 ):
     """Apply all patches from chromium_patches/"""
@@ -281,7 +305,7 @@ def apply_all(
     module = ApplyAllModule()
     try:
         module.validate(ctx)
-        module.execute(ctx, interactive=interactive, commit=commit, reset_to=reset_to)
+        module.execute(ctx, interactive=interactive, reset_to=reset_to, annotate=annotate)
     except Exception as e:
         log_error(f"Failed to apply patches: {e}")
         raise typer.Exit(1)
@@ -293,9 +317,11 @@ def apply_feature(
     interactive: bool = Option(
         True, "--interactive/--no-interactive", "-i/-n", help="Interactive mode"
     ),
-    commit: bool = Option(False, "--commit", "-c", help="Commit after applying"),
     reset_to: Optional[str] = Option(
         None, "--reset-to", "-r", help="Reset files to this commit before applying patches"
+    ),
+    annotate: bool = Option(
+        False, "--annotate", "-a", help="Create git commit for this feature after applying"
     ),
 ):
     """Apply patches for a specific feature"""
@@ -309,7 +335,7 @@ def apply_feature(
     try:
         module.validate(ctx)
         module.execute(
-            ctx, feature_name=feature_name, interactive=interactive, commit=commit, reset_to=reset_to
+            ctx, feature_name=feature_name, interactive=interactive, reset_to=reset_to, annotate=annotate
         )
     except Exception as e:
         log_error(f"Failed to apply feature: {e}")
@@ -400,6 +426,62 @@ def feature_add(
         )
     except Exception as e:
         log_error(f"Failed to add feature: {e}")
+        raise typer.Exit(1)
+
+
+@feature_app.command(name="classify")
+def feature_classify():
+    """Classify unclassified patch files into features
+
+    Lists all patches in chromium_patches/ that are not in any feature,
+    then prompts one-by-one to assign each to a feature.
+
+    Examples:
+        browseros dev feature classify
+    """
+    ctx = create_build_context(state.chromium_src)
+    if not ctx:
+        raise typer.Exit(1)
+
+    from ..modules.feature import ClassifyFeaturesModule
+
+    module = ClassifyFeaturesModule()
+    try:
+        module.validate(ctx)
+        module.execute(ctx)
+    except Exception as e:
+        log_error(f"Failed to classify features: {e}")
+        raise typer.Exit(1)
+
+
+# Annotate command
+@app.command(name="annotate")
+def annotate_cmd(
+    feature_name: Optional[str] = Argument(
+        None, help="Optional: specific feature to annotate (default: all features)"
+    ),
+):
+    """Create git commits organized by features from features.yaml
+
+    For each feature with modified files, creates a commit with the format:
+    "{feature_name}: {description}"
+
+    Examples:
+        browseros dev annotate -S /path/to/chromium
+        browseros dev annotate llm-chat -S /path/to/chromium
+    """
+    ctx = create_build_context(state.chromium_src)
+    if not ctx:
+        raise typer.Exit(1)
+
+    from ..modules.annotate import AnnotateModule
+
+    module = AnnotateModule()
+    try:
+        module.validate(ctx)
+        module.execute(ctx, feature_name=feature_name)
+    except Exception as e:
+        log_error(f"Failed to annotate: {e}")
         raise typer.Exit(1)
 
 
