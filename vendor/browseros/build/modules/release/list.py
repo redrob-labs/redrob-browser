@@ -44,6 +44,8 @@ class ListModule(CommandModule):
         log_info(f"Release: v{version}")
         log_info(f"{'='*60}")
 
+        download_urls: dict[str, list[str]] = {}
+
         for platform in PLATFORMS:
             if platform not in metadata:
                 continue
@@ -56,9 +58,26 @@ class ListModule(CommandModule):
             if platform == "macos" and "sparkle_version" in release:
                 log_info(f"  Sparkle Version: {release['sparkle_version']}")
 
+            platform_urls = []
             for key, artifact in release.get("artifacts", {}).items():
                 size = format_size(artifact.get("size", 0))
                 sig_indicator = " [signed]" if "sparkle_signature" in artifact else ""
                 log_info(f"  - {key}: {artifact['filename']} ({size}){sig_indicator}")
+                if "url" in artifact:
+                    platform_urls.append(artifact["url"])
+
+            if platform_urls:
+                download_urls[platform] = platform_urls
+
+        log_info(f"\n{'='*60}")
+        log_info("Downloads:")
+        log_info(f"{'='*60}")
+
+        for platform in PLATFORMS:
+            if platform not in download_urls:
+                continue
+            log_info(f"\n{PLATFORM_DISPLAY_NAMES[platform]}:")
+            for url in download_urls[platform]:
+                log_info(f"  {url}")
 
         log_info(f"\n{'='*60}")
