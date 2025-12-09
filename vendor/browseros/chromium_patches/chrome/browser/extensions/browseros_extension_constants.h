@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/extensions/browseros_extension_constants.h b/chrome/browser/extensions/browseros_extension_constants.h
 new file mode 100644
-index 0000000000000..3a2119d05122b
+index 0000000000000..4adea4a1da931
 --- /dev/null
 +++ b/chrome/browser/extensions/browseros_extension_constants.h
-@@ -0,0 +1,126 @@
+@@ -0,0 +1,133 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -41,6 +41,10 @@ index 0000000000000..3a2119d05122b
 +inline constexpr char kControllerExtensionId[] =
 +    "nlnihljpboknmfagkikhkdblbedophja";
 +
++// uBlock Origin Extension ID (Chrome Web Store)
++inline constexpr char kUBlockOriginExtensionId[] =
++    "cjpalhdlnbpafiamejdnhcphjbkeiagm";
++
 +// BrowserOS CDN update manifest URL
 +// Used for extensions installed from local .crx files that don't have
 +// an update_url in their manifest
@@ -59,6 +63,8 @@ index 0000000000000..3a2119d05122b
 +    {kBugReporterExtensionId, "BrowserOS/bug-reporter", true, false},
 +    {kControllerExtensionId, "BrowserOS/controller", false, false},
 +    {kAgentV2ExtensionId, "BrowserOS", false, false},
++    // ublock origin gets installed from chrome web store
++    {kUBlockOriginExtensionId, "uBlock Origin", false, false},
 +};
 +
 +// Allowlist of BrowserOS extension IDs that are permitted to be installed.
@@ -68,6 +74,7 @@ index 0000000000000..3a2119d05122b
 +    kBrowserOSExtensions[1].id,
 +    kBrowserOSExtensions[2].id,
 +    kBrowserOSExtensions[3].id,
++    kBrowserOSExtensions[4].id,
 +};
 +
 +inline constexpr size_t kBrowserOSExtensionsCount =
