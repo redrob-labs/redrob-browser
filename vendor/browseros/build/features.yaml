@@ -393,3 +393,10 @@ features:
     description: "series: windows rc terminating error"
     files:
       - build/build_config.h
+  agent-v2-infobar:
+    description: "fix: show infobar if agent v2 is installing/updating"
+    files:
+      - chrome/browser/ui/browser_actions.cc
+      - chrome/browser/ui/browser_command_controller.cc
+      - components/infobars/core/infobar_delegate.h
+      - tools/metrics/histograms/metadata/browser/enums.xml
