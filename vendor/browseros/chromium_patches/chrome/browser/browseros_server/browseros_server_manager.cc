@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/browseros_server/browseros_server_manager.cc b/chrome/browser/browseros_server/browseros_server_manager.cc
 new file mode 100644
-index 0000000000000..692b9b05869d1
+index 0000000000000..43f1ee391f0a8
 --- /dev/null
 +++ b/chrome/browser/browseros_server/browseros_server_manager.cc
-@@ -0,0 +1,966 @@
+@@ -0,0 +1,967 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -56,7 +56,8 @@ index 0000000000000..692b9b05869d1
 +namespace {
 +
 +const int kBackLog = 10;
-+const char kConfigFileName[] = "server_config.json";
++constexpr base::FilePath::CharType kConfigFileName[] =
++    FILE_PATH_LITERAL("server_config.json");
 +
 +// Holds configuration data gathered on UI thread, passed to background thread
 +struct ServerConfig {
@@ -76,7 +77,7 @@ index 0000000000000..692b9b05869d1
 +                               uint16_t extension_port,
 +                               const ServerConfig& server_config) {
 +  base::FilePath config_path =
-+      execution_dir.Append(FILE_PATH_LITERAL(kConfigFileName));
++      execution_dir.Append(kConfigFileName);
 +
 +  base::Value::Dict config;
 +
