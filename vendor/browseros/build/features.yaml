@@ -40,7 +40,7 @@ features:
       - chrome/browser/ui/webui/help/sparkle_version_updater_mac.h
       - chrome/browser/ui/webui/help/sparkle_version_updater_mac.mm
       - chrome/browser/ui/webui/help/version_updater_mac.mm
-      - third_party/sparkle/
+      - third_party/sparkle/BUILD.gn
   settings-page:
     description: "feat: settings page updates"
     files:
