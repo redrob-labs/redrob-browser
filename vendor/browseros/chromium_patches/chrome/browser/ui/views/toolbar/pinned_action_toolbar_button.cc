@@ -1,12 +1,13 @@
 diff --git a/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc b/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
-index f8298702050da..a666d65dd226c 100644
+index f8298702050da..980853c953c22 100644
 --- a/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
 +++ b/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
-@@ -8,6 +8,11 @@
+@@ -8,6 +8,12 @@
  #include <type_traits>
  
  #include "base/auto_reset.h"
-+#include "chrome/browser/ui/actions/browseros_action_utils.h"
++#include "chrome/browser/browseros/core/browseros_action_utils.h"
++#include "chrome/browser/browseros/core/browseros_prefs.h"
 +#include "chrome/browser/ui/actions/chrome_action_id.h"
 +#include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
 +#include "chrome/browser/ui/views/side_panel/side_panel_entry_id.h"
@@ -14,7 +15,7 @@ index f8298702050da..a666d65dd226c 100644
  #include "base/metrics/user_metrics.h"
  #include "base/strings/strcat.h"
  #include "chrome/app/vector_icons/vector_icons.h"
-@@ -30,6 +35,7 @@
+@@ -30,6 +36,7 @@
  #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
  #include "chrome/browser/ui/web_applications/app_browser_controller.h"
  #include "chrome/grit/generated_resources.h"
@@ -22,7 +23,7 @@ index f8298702050da..a666d65dd226c 100644
  #include "ui/actions/action_id.h"
  #include "ui/actions/action_utils.h"
  #include "ui/actions/actions.h"
-@@ -43,6 +49,8 @@
+@@ -43,6 +50,8 @@
  #include "ui/views/controls/button/button_controller.h"
  #include "ui/views/view_class_properties.h"
  #include "ui/views/view_utils.h"
@@ -31,7 +32,7 @@ index f8298702050da..a666d65dd226c 100644
  
  namespace {
  // Width of the status indicator shown across the button.
-@@ -85,6 +93,30 @@ PinnedActionToolbarButton::PinnedActionToolbarButton(
+@@ -85,6 +94,28 @@ PinnedActionToolbarButton::PinnedActionToolbarButton(
    GetViewAccessibility().SetDescription(
        std::u16string(), ax::mojom::DescriptionFrom::kAttributeExplicitlyEmpty);
  
@@ -41,10 +42,8 @@ index f8298702050da..a666d65dd226c 100644
 +      // Check if labels should be shown
 +      bool show_labels = true;
 +      if (browser_ && browser_->profile()) {
-+        show_labels = browser_->profile()->GetPrefs()->GetBoolean(
-+            prefs::kBrowserOSShowToolbarLabels);
-+      }
-+      else {
++        show_labels = browseros::ShouldShowToolbarLabels(
++            browser_->profile()->GetPrefs());
 +      }
 +      
 +      if (show_labels) {
@@ -62,7 +61,38 @@ index f8298702050da..a666d65dd226c 100644
    // Normally, the notify action is determined by whether a view is draggable
    // (and is set to press for non-draggable and release for draggable views).
    // However, PinnedActionToolbarButton may be draggable or non-draggable
-@@ -234,7 +266,13 @@ void PinnedActionToolbarButton::UpdateIcon() {
+@@ -222,6 +253,30 @@ void PinnedActionToolbarButton::OnMouseReleased(const ui::MouseEvent& event) {
+   skip_execution_ = false;
+ }
+ 
++void PinnedActionToolbarButton::UpdateLabelVisibility() {
++  if (!browseros::IsBrowserOSAction(action_id_)) {
++    return;
++  }
++
++  auto* action_item = container_->GetActionItemFor(action_id_);
++  if (!action_item) {
++    return;
++  }
++
++  bool show_labels = true;
++  if (browser_ && browser_->profile()) {
++    show_labels =
++        browseros::ShouldShowToolbarLabels(browser_->profile()->GetPrefs());
++  }
++
++  if (show_labels) {
++    views::LabelButton::SetText(action_item->GetText());
++    SetTextSubpixelRenderingEnabled(false);
++  } else {
++    views::LabelButton::SetText(std::u16string());
++  }
++}
++
+ void PinnedActionToolbarButton::UpdateIcon() {
+   const std::optional<VectorIcons>& icons = GetVectorIcons();
+   // If the button is a cached permanent button the color provider will not be
+@@ -234,7 +289,13 @@ void PinnedActionToolbarButton::UpdateIcon() {
                                      ? icons->touch_icon
                                      : icons->icon;
  
@@ -77,7 +107,7 @@ index f8298702050da..a666d65dd226c 100644
      UpdateIconsWithColors(
          icon, GetColorProvider()->GetColor(kColorToolbarActionItemEngaged),
          GetColorProvider()->GetColor(kColorToolbarActionItemEngaged),
-@@ -336,6 +374,26 @@ void PinnedActionToolbarButtonActionViewInterface::ActionItemChangedImpl(
+@@ -336,6 +397,26 @@ void PinnedActionToolbarButtonActionViewInterface::ActionItemChangedImpl(
      }
    }
  
@@ -86,10 +116,10 @@ index f8298702050da..a666d65dd226c 100644
 +    // Check if labels should be shown
 +    bool show_labels = true;
 +    if (action_view_->GetBrowser() && action_view_->GetBrowser()->profile()) {
-+      show_labels = action_view_->GetBrowser()->profile()->GetPrefs()->GetBoolean(
-+          prefs::kBrowserOSShowToolbarLabels);
++      show_labels = browseros::ShouldShowToolbarLabels(
++          action_view_->GetBrowser()->profile()->GetPrefs());
 +    }
-+    
++
 +    if (show_labels) {
 +      // Use LabelButton::SetText directly to set permanent text
 +      action_view_->views::LabelButton::SetText(action_item->GetText());

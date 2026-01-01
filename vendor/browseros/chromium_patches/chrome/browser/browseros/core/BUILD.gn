@@ -1,16 +1,14 @@
 diff --git a/chrome/browser/browseros/core/BUILD.gn b/chrome/browser/browseros/core/BUILD.gn
 new file mode 100644
-index 0000000000000..96db0f4580080
+index 0000000000000..0e2fac369ff8d
 --- /dev/null
 +++ b/chrome/browser/browseros/core/BUILD.gn
-@@ -0,0 +1,18 @@
+@@ -0,0 +1,47 @@
 +# Copyright 2024 The Chromium Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
 +
 +# BrowserOS core constants and utilities.
-+# This is a header-only library containing shared constants and utility
-+# functions used across BrowserOS components.
 +
 +source_set("core") {
 +  sources = [
@@ -20,5 +18,36 @@ index 0000000000000..96db0f4580080
 +
 +  deps = [
 +    "//base",
++  ]
++}
++
++source_set("prefs") {
++  sources = [
++    "browseros_prefs.cc",
++    "browseros_prefs.h",
++  ]
++
++  deps = [
++    "//base",
++    "//chrome/browser/ui/actions:actions_headers",
++    "//components/pref_registry",
++    "//components/prefs",
++    "//ui/actions:actions_headers",
++  ]
++}
++
++source_set("action_utils") {
++  sources = [
++    "browseros_action_utils.h",
++  ]
++
++  deps = [
++    ":core",
++    "//base",
++    "//chrome/browser/ui:ui_features",
++    "//chrome/browser/ui/actions:actions_headers",
++    "//chrome/browser/ui/views/side_panel",
++    "//chrome/common:chrome_features",
++    "//ui/actions",
 +  ]
 +}

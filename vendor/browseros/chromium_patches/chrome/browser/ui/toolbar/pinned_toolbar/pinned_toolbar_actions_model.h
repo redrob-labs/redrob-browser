@@ -1,8 +1,18 @@
 diff --git a/chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h b/chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h
-index b1eb4975bb7e5..1636739c788ea 100644
+index 9f7cbd0272c0a..a47f90c1ae192 100644
 --- a/chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h
 +++ b/chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h
-@@ -95,6 +95,11 @@ class PinnedToolbarActionsModel : public KeyedService {
+@@ -55,6 +55,9 @@ class PinnedToolbarActionsModel : public KeyedService {
+     // the above methods, this does include pref updates.
+     virtual void OnActionsChanged() {}
+ 
++    // Called when toolbar label visibility pref changes.
++    virtual void OnLabelsVisibilityChanged() {}
++
+    protected:
+     virtual ~Observer() = default;
+   };
+@@ -96,6 +99,11 @@ class PinnedToolbarActionsModel : public KeyedService {
    // Search migrations are complete.
    void MaybeMigrateExistingPinnedStates();
  
@@ -13,4 +23,19 @@ index b1eb4975bb7e5..1636739c788ea 100644
 +
    // Returns the ordered list of pinned ActionIds.
    virtual const std::vector<actions::ActionId>& PinnedActionIds() const;
+ 
+@@ -114,6 +122,14 @@ class PinnedToolbarActionsModel : public KeyedService {
+ 
+   void UpdatePref(const std::vector<actions::ActionId>& updated_list);
+ 
++  // Called when a BrowserOS visibility pref changes (e.g., kShowLLMChat).
++  // Re-evaluates which actions should be pinned and notifies observers.
++  void OnBrowserOSVisibilityPrefChanged();
++
++  // Called when the toolbar labels pref changes.
++  // Notifies observers so buttons can refresh their labels.
++  void OnBrowserOSLabelsPrefChanged();
++
+   // Our observers.
+   base::ObserverList<Observer>::Unchecked observers_;
  

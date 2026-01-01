@@ -1,12 +1,12 @@
 diff --git a/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc b/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc
-index 4a29bd9b5a149..c47932d542346 100644
+index 4a29bd9b5a149..a7fea40359f09 100644
 --- a/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc
 +++ b/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc
 @@ -18,6 +18,8 @@
  #include "base/task/single_thread_task_runner.h"
  #include "base/time/time.h"
  #include "chrome/browser/profiles/profile.h"
-+#include "chrome/browser/ui/actions/browseros_action_utils.h"
++#include "chrome/browser/browseros/core/browseros_action_utils.h"
 +#include "chrome/browser/ui/actions/chrome_action_id.h"
  #include "chrome/browser/ui/browser_actions.h"
  #include "chrome/browser/ui/browser_element_identifiers.h"
@@ -21,7 +21,35 @@ index 4a29bd9b5a149..c47932d542346 100644
    UpdateViews();
  }
  
-@@ -821,6 +826,14 @@ PinnedToolbarActionsContainer::CreateOrGetButtonForAction(
+@@ -267,6 +272,16 @@ void PinnedToolbarActionsContainer::UpdateAllIcons() {
+   }
+ }
+ 
++void PinnedToolbarActionsContainer::UpdateAllLabels() {
++  for (PinnedActionToolbarButton* const pinned_button : pinned_buttons_) {
++    pinned_button->UpdateLabelVisibility();
++  }
++  for (PinnedActionToolbarButton* const popped_out_button :
++       popped_out_buttons_) {
++    popped_out_button->UpdateLabelVisibility();
++  }
++}
++
+ void PinnedToolbarActionsContainer::OnThemeChanged() {
+   const SkColor toolbar_divider_color =
+       GetColorProvider()->GetColor(kColorToolbarExtensionSeparatorEnabled);
+@@ -390,6 +405,10 @@ void PinnedToolbarActionsContainer::OnActionsChanged() {
+   drop_weak_ptr_factory_.InvalidateWeakPtrs();
+ }
+ 
++void PinnedToolbarActionsContainer::OnLabelsVisibilityChanged() {
++  UpdateAllLabels();
++}
++
+ void PinnedToolbarActionsContainer::WriteDragDataForView(
+     View* sender,
+     const gfx::Point& press_pt,
+@@ -821,6 +840,14 @@ PinnedToolbarActionsContainer::CreateOrGetButtonForAction(
    action_view_controller_->CreateActionViewRelationship(
        button.get(), GetActionItemFor(id)->GetAsWeakPtr());
  
