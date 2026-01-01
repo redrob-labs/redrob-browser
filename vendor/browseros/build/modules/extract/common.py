@@ -19,7 +19,7 @@ from .utils import (
     create_deletion_marker,
     create_binary_marker,
     log_extraction_summary,
-    get_commit_changed_files,
+    get_commit_changed_files_with_status,
 )
 
 
@@ -186,12 +186,15 @@ def extract_with_base(
 ) -> Tuple[int, List[str]]:
     """Extract patches with custom base (full diff from base for files in commit).
 
+    Uses git's --name-status to get accurate operation types, avoiding inference
+    bugs with edge cases like files that were added after base and then deleted.
+
     Returns:
         Tuple of (count, list of extracted file paths)
     """
 
-    # Step 1: Get list of files changed in the commit
-    changed_files = get_commit_changed_files(commit_hash, ctx.chromium_src)
+    # Step 1: Get files changed in commit WITH their status (A/M/D/R/C)
+    changed_files = get_commit_changed_files_with_status(commit_hash, ctx.chromium_src)
 
     if not changed_files:
         log_warning(f"No files changed in commit {commit_hash}")
@@ -200,14 +203,24 @@ def extract_with_base(
     if verbose:
         log_info(f"Files changed in {commit_hash}: {len(changed_files)}")
 
-    # Step 2: For each file, get diff from base to commit
+    # Step 2: Process each file based on its status
     file_patches = {}
 
-    for file_path in changed_files:
+    for file_path, status in changed_files.items():
         if verbose:
-            log_info(f"  Getting diff for: {file_path}")
+            log_info(f"  Processing ({status}): {file_path}")
 
-        # Get diff for this specific file from base to commit
+        # Handle deletions directly - trust git's status, no inference needed
+        if status == "D":
+            file_patches[file_path] = FilePatch(
+                file_path=file_path,
+                operation=FileOperation.DELETE,
+                patch_content=None,
+                is_binary=False,
+            )
+            continue
+
+        # For A/M/R/C: get diff from base to commit
         diff_cmd = ["git", "diff", f"{base}..{commit_hash}", "--", file_path]
         if include_binary:
             diff_cmd.append("--binary")
@@ -219,48 +232,23 @@ def extract_with_base(
             continue
 
         if result.stdout.strip():
-            # Parse this single file's diff
             patches = parse_diff_output(result.stdout)
-            # Should only have one file in the result
             if patches:
                 file_patches.update(patches)
-        else:
-            # File might have been added/deleted
-            # Check if file exists in base and commit
-            base_exists = (
-                run_git_command(
-                    ["git", "cat-file", "-e", f"{base}:{file_path}"],
-                    cwd=ctx.chromium_src,
-                ).returncode
-                == 0
-            )
-
-            commit_exists = (
-                run_git_command(
-                    ["git", "cat-file", "-e", f"{commit_hash}:{file_path}"],
-                    cwd=ctx.chromium_src,
-                ).returncode
-                == 0
-            )
-
-            if not base_exists and commit_exists:
-                # File was added - get full content
-                diff_cmd = ["git", "diff", f"{base}..{commit_hash}", "--", file_path]
-                if include_binary:
-                    diff_cmd.append("--binary")
-                result = run_git_command(diff_cmd, cwd=ctx.chromium_src)
-                if result.stdout.strip():
-                    patches = parse_diff_output(result.stdout)
-                    if patches:
-                        file_patches.update(patches)
-            elif base_exists and not commit_exists:
-                # File was deleted
+        elif status == "A":
+            # Added file with no diff from base - file may not exist in base
+            # Try getting full content as new file
+            show_cmd = ["git", "show", f"{commit_hash}:{file_path}"]
+            show_result = run_git_command(show_cmd, cwd=ctx.chromium_src)
+            if show_result.returncode == 0 and show_result.stdout:
+                # Create a synthetic add patch
                 file_patches[file_path] = FilePatch(
                     file_path=file_path,
-                    operation=FileOperation.DELETE,
-                    patch_content=None,
+                    operation=FileOperation.ADD,
+                    patch_content=None,  # Will be handled specially
                     is_binary=False,
                 )
+                log_warning(f"  Added file needs manual handling: {file_path}")
 
     if not file_patches:
         log_warning("No patches to extract")

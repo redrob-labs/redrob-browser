@@ -150,23 +150,58 @@ def validate_commit_exists(commit_hash: str, chromium_src: Path) -> bool:
         return False
 
 
-def get_commit_changed_files(commit_hash: str, chromium_src: Path) -> List[str]:
-    """Get list of files changed in a commit"""
+def get_commit_changed_files_with_status(
+    commit_hash: str, chromium_src: Path
+) -> Dict[str, str]:
+    """Get files changed in a commit with their operation status.
+
+    Uses git diff-tree --name-status to get accurate operation types directly
+    from git, avoiding inference bugs with edge cases like "added then deleted".
+
+    Args:
+        commit_hash: Git commit reference
+        chromium_src: Path to chromium source
+
+    Returns:
+        Dict mapping file path to status character:
+        - 'A' = Added
+        - 'M' = Modified
+        - 'D' = Deleted
+        - 'R' = Renamed
+        - 'C' = Copied
+    """
     try:
         result = run_git_command(
-            ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", commit_hash],
+            ["git", "diff-tree", "--no-commit-id", "--name-status", "-r", commit_hash],
             cwd=chromium_src,
         )
 
         if result.returncode != 0:
             log_error(f"Failed to get changed files for commit {commit_hash}")
-            return []
+            return {}
 
-        files = [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]
+        files = {}
+        for line in result.stdout.strip().split("\n"):
+            if not line.strip():
+                continue
+            # Format: "D\tpath/to/file" or "R100\told\tnew"
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                status = parts[0][0]  # First char: A, M, D, R, C
+                file_path = parts[-1]  # Last part is the (new) file path
+                files[file_path] = status
         return files
     except GitError as e:
         log_error(f"Error getting changed files: {e}")
-        return []
+        return {}
+
+
+def get_commit_changed_files(commit_hash: str, chromium_src: Path) -> List[str]:
+    """Get list of files changed in a commit.
+
+    Note: For operation-aware extraction, use get_commit_changed_files_with_status().
+    """
+    return list(get_commit_changed_files_with_status(commit_hash, chromium_src).keys())
 
 
 def parse_diff_output(diff_output: str) -> Dict[str, FilePatch]:

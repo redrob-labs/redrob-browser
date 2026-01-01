@@ -11,6 +11,7 @@ from ...common.module import CommandModule, ValidationError
 from ...common.utils import log_info, log_error, log_success, log_warning
 from .utils import (
     FileOperation,
+    FilePatch,
     GitError,
     run_git_command,
     validate_git_repository,
@@ -23,6 +24,39 @@ from .utils import (
 )
 from .common import check_overwrite, extract_with_base
 from .extract_commit import extract_single_commit
+
+
+def get_range_changed_files_with_status(
+    base_commit: str, head_commit: str, chromium_src: Path
+) -> dict:
+    """Get files changed in a commit range with their operation status.
+
+    Args:
+        base_commit: Start of range (exclusive)
+        head_commit: End of range (inclusive)
+        chromium_src: Path to chromium source
+
+    Returns:
+        Dict mapping file path to status character (A/M/D/R/C)
+    """
+    result = run_git_command(
+        ["git", "diff", "--name-status", f"{base_commit}..{head_commit}"],
+        cwd=chromium_src,
+    )
+
+    if result.returncode != 0:
+        return {}
+
+    files = {}
+    for line in result.stdout.strip().split("\n"):
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            status = parts[0][0]
+            file_path = parts[-1]
+            files[file_path] = status
+    return files
 
 
 def extract_commit_range(
@@ -62,20 +96,9 @@ def extract_commit_range(
 
     # Step 2: Get diff based on whether we have a custom base
     if custom_base:
-        # First get list of files changed in the range
-        range_files_cmd = [
-            "git",
-            "diff",
-            "--name-only",
-            f"{base_commit}..{head_commit}",
-        ]
-        result = run_git_command(range_files_cmd, cwd=ctx.chromium_src)
-
-        if result.returncode != 0:
-            raise GitError(f"Failed to get changed files: {result.stderr}")
-
-        changed_files = (
-            result.stdout.strip().split("\n") if result.stdout.strip() else []
+        # Get files changed in range WITH status to handle deletions correctly
+        changed_files = get_range_changed_files_with_status(
+            base_commit, head_commit, ctx.chromium_src
         )
 
         if not changed_files:
@@ -84,26 +107,50 @@ def extract_commit_range(
 
         log_info(f"Found {len(changed_files)} files changed in range")
 
-        # Now get diff from custom base to head for these files
-        diff_cmd = ["git", "diff", f"{custom_base}..{head_commit}"]
-        if include_binary:
-            diff_cmd.append("--binary")
-        # Add the specific files to diff command
-        diff_cmd.append("--")
-        diff_cmd.extend(changed_files)
+        # Separate deleted files from others
+        deleted_files = [f for f, s in changed_files.items() if s == "D"]
+        non_deleted_files = [f for f, s in changed_files.items() if s != "D"]
+
+        file_patches = {}
+
+        # Handle deleted files directly
+        for file_path in deleted_files:
+            file_patches[file_path] = FilePatch(
+                file_path=file_path,
+                operation=FileOperation.DELETE,
+                patch_content=None,
+                is_binary=False,
+            )
+
+        # Get diff from custom base for non-deleted files
+        if non_deleted_files:
+            diff_cmd = ["git", "diff", f"{custom_base}..{head_commit}"]
+            if include_binary:
+                diff_cmd.append("--binary")
+            diff_cmd.append("--")
+            diff_cmd.extend(non_deleted_files)
+
+            result = run_git_command(diff_cmd, cwd=ctx.chromium_src, timeout=120)
+
+            if result.returncode != 0:
+                raise GitError(f"Failed to get diff for range: {result.stderr}")
+
+            # Parse and merge with deleted files
+            parsed_patches = parse_diff_output(result.stdout)
+            file_patches.update(parsed_patches)
     else:
         # Regular diff from base_commit to head_commit
         diff_cmd = ["git", "diff", f"{base_commit}..{head_commit}"]
         if include_binary:
             diff_cmd.append("--binary")
 
-    result = run_git_command(diff_cmd, cwd=ctx.chromium_src, timeout=120)
+        result = run_git_command(diff_cmd, cwd=ctx.chromium_src, timeout=120)
 
-    if result.returncode != 0:
-        raise GitError(f"Failed to get diff for range: {result.stderr}")
+        if result.returncode != 0:
+            raise GitError(f"Failed to get diff for range: {result.stderr}")
 
-    # Step 3-5: Process diff
-    file_patches = parse_diff_output(result.stdout)
+        # Parse diff into file patches
+        file_patches = parse_diff_output(result.stdout)
 
     if not file_patches:
         log_warning("No changes found in commit range")

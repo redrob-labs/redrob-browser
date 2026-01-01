@@ -168,25 +168,6 @@ def reset_file_to_commit(file_path: str, commit: str, chromium_src: Path) -> boo
     return result.returncode == 0
 
 
-def get_commit_changed_files(commit_hash: str, chromium_src: Path) -> List[str]:
-    """Get list of files changed in a commit"""
-    try:
-        result = run_git_command(
-            ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", commit_hash],
-            cwd=chromium_src,
-        )
-
-        if result.returncode != 0:
-            log_error(f"Failed to get changed files for commit {commit_hash}")
-            return []
-
-        files = [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]
-        return files
-    except GitError as e:
-        log_error(f"Error getting changed files: {e}")
-        return []
-
-
 def parse_diff_output(diff_output: str) -> Dict[str, FilePatch]:
     """
     Parse git diff output into individual file patches with full metadata.
