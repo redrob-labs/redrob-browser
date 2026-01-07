@@ -14,6 +14,8 @@
 #   - Supported values: x64, arm64
 # - Use 'build_type' field to specify when an operation should run
 #   - Supported values: debug, release
+# - Use 'executable' field to mark files that need executable permissions
+#   - Set to true for binaries (permissions are not preserved during download)
 #
 # R2 Path Structure:
 #   binaries/browseros-server/{filename}
@@ -32,24 +34,28 @@ download_operations:
     destination: "resources/binaries/browseros_server/browseros-server-darwin-arm64"
     os: ["macos"]
     arch: ["arm64"]
+    executable: true
 
   - name: "BrowserOS Server - macOS x64"
     r2_key: "binaries/browseros-server/browseros-server-darwin-x64"
     destination: "resources/binaries/browseros_server/browseros-server-darwin-x64"
     os: ["macos"]
     arch: ["x64"]
+    executable: true
 
   - name: "BrowserOS Server - Linux ARM64"
     r2_key: "binaries/browseros-server/browseros-server-linux-arm64"
     destination: "resources/binaries/browseros_server/browseros-server-linux-arm64"
     os: ["linux"]
     arch: ["arm64"]
+    executable: true
 
   - name: "BrowserOS Server - Linux x64"
     r2_key: "binaries/browseros-server/browseros-server-linux-x64"
     destination: "resources/binaries/browseros_server/browseros-server-linux-x64"
     os: ["linux"]
     arch: ["x64"]
+    executable: true
 
   - name: "BrowserOS Server - Windows x64"
     r2_key: "binaries/browseros-server/browseros-server-windows-x64.exe"

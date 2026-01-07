@@ -99,6 +99,11 @@ class DownloadResourcesModule(CommandModule):
             if not download_file_from_r2(client, r2_key, dest_path, bucket):
                 raise RuntimeError(f"Failed to download: {name}")
 
+            # Set executable permissions if specified
+            if op.get("executable", False):
+                dest_path.chmod(dest_path.stat().st_mode | 0o755)
+                log_info(f"    Set executable permissions")
+
         log_success(f"Downloaded {len(filtered_ops)} resource(s) from R2")
 
     def _filter_operations(
