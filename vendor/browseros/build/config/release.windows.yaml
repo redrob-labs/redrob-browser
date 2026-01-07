@@ -18,6 +18,7 @@ modules:
   - git_setup
 
   # Phase 2: Patches & Resources
+  - download_resources
   - resources
   - bundled_extensions
   - chromium_replace

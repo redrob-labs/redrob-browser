@@ -22,6 +22,7 @@ modules:
   - sparkle_setup
 
   # Phase 2: Patches & Resources
+  - download_resources
   - bundled_extensions
   - chromium_replace
   - string_replaces

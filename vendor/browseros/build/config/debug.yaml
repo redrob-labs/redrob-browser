@@ -20,6 +20,7 @@ modules:
   - git_setup
 
   # Phase 2: Patches & Resources
+  - download_resources
   - resources
   - chromium_replace
   - string_replaces
