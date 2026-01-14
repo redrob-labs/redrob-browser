@@ -1,9 +1,9 @@
 diff --git a/chrome/utility/importer/browseros/chrome_decryptor_mac.mm b/chrome/utility/importer/browseros/chrome_decryptor_mac.mm
 new file mode 100644
-index 0000000000000..c71a63015ff1d
+index 0000000000000..caabfa17010ab
 --- /dev/null
 +++ b/chrome/utility/importer/browseros/chrome_decryptor_mac.mm
-@@ -0,0 +1,188 @@
+@@ -0,0 +1,191 @@
 +// Copyright 2024 AKW Technology Inc
 +// Chrome decryption - macOS implementation
 +// Uses Keychain for key retrieval, PBKDF2 for key derivation, AES-128-CBC for decryption
@@ -12,6 +12,7 @@ index 0000000000000..c71a63015ff1d
 +
 +#include <Security/Security.h>
 +
++#include "base/containers/span.h"
 +#include "base/logging.h"
 +#include "base/strings/string_util.h"
 +#include "build/build_config.h"
@@ -115,7 +116,9 @@ index 0000000000000..c71a63015ff1d
 +  }
 +
 +  int final_length = 0;
-+  if (!EVP_DecryptFinal_ex(ctx.get(), output.data() + output_length,
++  auto output_span = base::span(output);
++  if (!EVP_DecryptFinal_ex(ctx.get(),
++                           output_span.subspan(static_cast<size_t>(output_length)).data(),
 +                           &final_length)) {
 +    LOG(WARNING) << "browseros: EVP_DecryptFinal_ex failed - possible padding error";
 +    return false;
@@ -173,10 +176,10 @@ index 0000000000000..c71a63015ff1d
 +  }
 +
 +  // Extract the actual encrypted data (skip "v10" prefix)
-+  const uint8_t* encrypted_data =
-+      reinterpret_cast<const uint8_t*>(ciphertext.data()) +
-+      kEncryptionVersionPrefixLength;
-+  size_t encrypted_length = ciphertext.length() - kEncryptionVersionPrefixLength;
++  auto ciphertext_span = base::as_byte_span(ciphertext);
++  auto encrypted_span = ciphertext_span.subspan(kEncryptionVersionPrefixLength);
++  const uint8_t* encrypted_data = encrypted_span.data();
++  size_t encrypted_length = encrypted_span.size();
 +
 +  if (encrypted_length == 0) {
 +    LOG(WARNING) << "browseros: Empty ciphertext after prefix";
