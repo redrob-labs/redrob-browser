@@ -165,17 +165,7 @@ features:
       - chrome/common/importer/profile_import_process_param_traits.h
       - chrome/common/pref_names.h
       - chrome/utility/BUILD.gn
-      - chrome/utility/importer/browseros/BUILD.gn
-      - chrome/utility/importer/browseros/chrome_cookie_importer.cc
-      - chrome/utility/importer/browseros/chrome_cookie_importer.h
-      - chrome/utility/importer/browseros/chrome_decryptor.cc
-      - chrome/utility/importer/browseros/chrome_decryptor.h
-      - chrome/utility/importer/browseros/chrome_decryptor_mac.mm
-      - chrome/utility/importer/browseros/chrome_decryptor_win.cc
-      - chrome/utility/importer/browseros/chrome_importer.cc
-      - chrome/utility/importer/browseros/chrome_importer.h
-      - chrome/utility/importer/browseros/chrome_password_importer.cc
-      - chrome/utility/importer/browseros/chrome_password_importer.h
+      - chrome/utility/importer/browseros/
       - chrome/utility/importer/external_process_importer_bridge.cc
       - chrome/utility/importer/external_process_importer_bridge.h
       - chrome/utility/importer/importer_creator.cc
