@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/browseros/core/browseros_constants.h b/chrome/browser/browseros/core/browseros_constants.h
 new file mode 100644
-index 0000000000000..db4aede1d2396
+index 0000000000000..476d761245673
 --- /dev/null
 +++ b/chrome/browser/browseros/core/browseros_constants.h
-@@ -0,0 +1,216 @@
+@@ -0,0 +1,222 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -43,9 +43,13 @@ index 0000000000000..db4aede1d2396
 +inline constexpr char kControllerExtensionId[] =
 +    "nlnihljpboknmfagkikhkdblbedophja";
 +
++// Clawdbot Browser Relay Extension ID (feature-gated)
++inline constexpr char kClawdbotExtensionId[] =
++    "nkaehhfoahfeglbnbdglnkidgpapbgma";
++
 +// uBlock Origin Extension ID (Chrome Web Store)
-+inline constexpr char kUBlockOriginExtensionId[] =
-+    "cjpalhdlnbpafiamejdnhcphjbkeiagm";
++// inline constexpr char kUBlockOriginExtensionId[] =
++//     "cjpalhdlnbpafiamejdnhcphjbkeiagm";
 +
 +// BrowserOS CDN update manifest URL
 +// Used for extensions installed from local .crx files that don't have
@@ -67,8 +71,8 @@ index 0000000000000..db4aede1d2396
 +};
 +
 +inline constexpr BrowserOSURLRoute kBrowserOSURLRoutes[] = {
-+    {"/settings", kAgentV2ExtensionId, "options.html", ""},
-+    {"/mcp", kAgentV2ExtensionId, "options.html", "mcp"},
++    {"/settings", kAgentV2ExtensionId, "app.html", "/settings"},
++    {"/mcp", kAgentV2ExtensionId, "app.html", "/mcp"},
 +    {"/onboarding", kAgentV2ExtensionId, "onboarding.html", ""},
 +};
 +
@@ -170,7 +174,9 @@ index 0000000000000..db4aede1d2396
 +    {kBugReporterExtensionId, true, false},
 +    {kControllerExtensionId, false, false},
 +    // ublock origin gets installed from chrome web store
-+    {kUBlockOriginExtensionId, false, false},
++    // {kUBlockOriginExtensionId, false, false},
++    // Clawdbot is feature-gated (kBrowserOsClawdbot)
++    {kClawdbotExtensionId, true, false},
 +};
 +
 +inline constexpr size_t kBrowserOSExtensionsCount =

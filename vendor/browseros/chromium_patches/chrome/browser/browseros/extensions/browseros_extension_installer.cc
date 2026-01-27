@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/browseros/extensions/browseros_extension_installer.cc b/chrome/browser/browseros/extensions/browseros_extension_installer.cc
 new file mode 100644
-index 0000000000000..56a3fb65d5348
+index 0000000000000..e84ab10537ec4
 --- /dev/null
 +++ b/chrome/browser/browseros/extensions/browseros_extension_installer.cc
-@@ -0,0 +1,298 @@
+@@ -0,0 +1,338 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -12,11 +12,13 @@ index 0000000000000..56a3fb65d5348
 +
 +#include <utility>
 +
++#include "base/feature_list.h"
 +#include "base/files/file_util.h"
 +#include "base/json/json_reader.h"
 +#include "base/logging.h"
 +#include "base/path_service.h"
 +#include "base/task/thread_pool.h"
++#include "chrome/browser/browser_features.h"
 +#include "chrome/browser/browseros/core/browseros_constants.h"
 +#include "chrome/browser/extensions/external_provider_impl.h"
 +#include "chrome/browser/profiles/profile.h"
@@ -135,6 +137,19 @@ index 0000000000000..56a3fb65d5348
 +      continue;
 +    }
 +
++    // Only install registered BrowserOS extensions
++    if (!IsBrowserOSExtension(extension_id)) {
++      LOG(WARNING) << "browseros: Skipping unregistered extension "
++                   << extension_id;
++      continue;
++    }
++
++    // Skip Clawdbot unless feature is enabled
++    if (extension_id == kClawdbotExtensionId &&
++        !base::FeatureList::IsEnabled(features::kBrowserOsClawdbot)) {
++      continue;
++    }
++
 +    const base::Value::Dict& config_dict = config.GetDict();
 +    const std::string* crx_file = config_dict.FindString("external_crx");
 +    const std::string* version = config_dict.FindString("external_version");
@@ -242,6 +257,19 @@ index 0000000000000..56a3fb65d5348
 +      continue;
 +    }
 +
++    // Only install registered BrowserOS extensions
++    if (!IsBrowserOSExtension(extension_id)) {
++      LOG(WARNING) << "browseros: Skipping unregistered extension "
++                   << extension_id;
++      continue;
++    }
++
++    // Skip Clawdbot unless feature is enabled
++    if (extension_id == kClawdbotExtensionId &&
++        !base::FeatureList::IsEnabled(features::kBrowserOsClawdbot)) {
++      continue;
++    }
++
 +    result.extension_ids.insert(extension_id);
 +
 +    const base::Value::Dict& config_dict = config.GetDict();
@@ -271,6 +299,18 @@ index 0000000000000..56a3fb65d5348
 +
 +  LOG(INFO) << "browseros: Loaded " << result.prefs.size()
 +            << " extensions from remote config";
++
++  // Add Clawdbot if feature enabled and not already in config.
++  // Uses main update URL since alpha config would already contain Clawdbot.
++  if (base::FeatureList::IsEnabled(features::kBrowserOsClawdbot) &&
++      !result.prefs.contains(kClawdbotExtensionId)) {
++    base::Value::Dict clawdbot_prefs;
++    clawdbot_prefs.Set(extensions::ExternalProviderImpl::kExternalUpdateUrl,
++                       kBrowserOSUpdateUrl);
++    result.prefs.Set(kClawdbotExtensionId, std::move(clawdbot_prefs));
++    result.extension_ids.insert(kClawdbotExtensionId);
++    LOG(INFO) << "browseros: Added Clawdbot via feature flag";
++  }
 +
 +  Complete(std::move(result));
 +}
