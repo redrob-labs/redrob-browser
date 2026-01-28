@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.cc b/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.cc
 new file mode 100644
-index 0000000000000..f87c563fdd645
+index 0000000000000..ea3e4207ee029
 --- /dev/null
 +++ b/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.cc
-@@ -0,0 +1,1163 @@
+@@ -0,0 +1,1187 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -84,6 +84,10 @@ index 0000000000000..f87c563fdd645
 +const char kThirdPartyLlmProvidersPref[] = "browseros.third_party_llm.providers";
 +const char kThirdPartyLlmSelectedProviderPref[] = "browseros.third_party_llm.selected_provider";
 +
++bool IsRestorableProviderUrl(const GURL& url) {
++  return url.is_valid() && url.SchemeIsHTTPOrHTTPS();
++}
++
 +// ComboboxModel for LLM provider selection
 +class LlmProviderComboboxModel : public ui::ComboboxModel {
 + public:
@@ -148,7 +152,9 @@ index 0000000000000..f87c563fdd645
 +  if (owned_web_contents_) {
 +    GURL current_url = owned_web_contents_->GetURL();
 +    if (current_url.is_valid()) {
-+      last_urls_[current_provider_index_] = current_url;
++      if (IsRestorableProviderUrl(current_url)) {
++        last_urls_[current_provider_index_] = current_url;
++      }
 +    }
 +  }
 +
@@ -327,8 +333,10 @@ index 0000000000000..f87c563fdd645
 +  GURL provider_url;
 +  if (current_provider_index_ < providers_.size()) {
 +    auto it = last_urls_.find(current_provider_index_);
-+    if (it != last_urls_.end() && it->second.is_valid()) {
-+      provider_url = it->second;
++    if (it != last_urls_.end()) {
++      if (IsRestorableProviderUrl(it->second)) {
++        provider_url = it->second;
++      }
 +    } else {
 +      provider_url = providers_[current_provider_index_].url;
 +    }
@@ -508,7 +516,9 @@ index 0000000000000..f87c563fdd645
 +  if (owned_web_contents_) {
 +    GURL current_url = owned_web_contents_->GetURL();
 +    if (current_url.is_valid()) {
-+      last_urls_[current_provider_index_] = current_url;
++      if (IsRestorableProviderUrl(current_url)) {
++        last_urls_[current_provider_index_] = current_url;
++      }
 +    }
 +  }
 +
@@ -522,9 +532,14 @@ index 0000000000000..f87c563fdd645
 +  // Determine URL to load.
 +  GURL provider_url;
 +  auto it = last_urls_.find(current_provider_index_);
-+  provider_url = (it != last_urls_.end() && it->second.is_valid())
-+                     ? it->second
-+                     : providers_[current_provider_index_].url;
++  if (it != last_urls_.end()) {
++    if (IsRestorableProviderUrl(it->second)) {
++      provider_url = it->second;
++    }
++  }
++  if (!provider_url.is_valid()) {
++    provider_url = providers_[current_provider_index_].url;
++  }
 +
 +  if (owned_web_contents_) {
 +    owned_web_contents_->GetController().LoadURL(
@@ -765,6 +780,9 @@ index 0000000000000..f87c563fdd645
 +  if (observed_view == web_view_) {
 +    // Just clear our pointer. DO NOT call methods on the view being destroyed!
 +    web_view_ = nullptr;
++    // The side panel WebView is being destroyed; tear down the owned
++    // WebContents without touching the view.
++    CleanupWebContents();
 +  }
 +
 +  if (observed_view == menu_button_) {
@@ -1059,11 +1077,17 @@ index 0000000000000..f87c563fdd645
 +}
 +
 +void ThirdPartyLlmPanelCoordinator::OnBrowserRemoved(Browser* browser) {
-+  // Clean up WebContents when any browser is removed to be safe
-+  // Since we no longer track the specific browser, clean up if profile matches
-+  if (browser && browser->profile() == GetProfile()) {
-+    CleanupWebContents();
++  // Only clean up when the *owning* browser window is removed. Other windows
++  // on the same profile should not blank out this panel's WebContents.
++  if (!browser) {
++    return;
 +  }
++
++  if (browser->tab_strip_model() != &tab_strip_model_.get()) {
++    return;
++  }
++
++  CleanupWebContents();
 +}
 +
 +void ThirdPartyLlmPanelCoordinator::OnProfileWillBeDestroyed(Profile* profile) {
