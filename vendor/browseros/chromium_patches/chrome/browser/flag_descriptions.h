@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/flag_descriptions.h b/chrome/browser/flag_descriptions.h
-index fea522351cd1b..0913447c4cafe 100644
+index fea522351cd1b..cc466bdbf03a3 100644
 --- a/chrome/browser/flag_descriptions.h
 +++ b/chrome/browser/flag_descriptions.h
-@@ -188,6 +188,12 @@ extern const char kByDateHistoryInSidePanelDescription[];
+@@ -188,6 +188,15 @@ extern const char kByDateHistoryInSidePanelDescription[];
  extern const char kBookmarksTreeViewName[];
  extern const char kBookmarksTreeViewDescription[];
  
@@ -11,6 +11,9 @@ index fea522351cd1b..0913447c4cafe 100644
 +
 +extern const char kBrowserOsClawdbotName[];
 +extern const char kBrowserOsClawdbotDescription[];
++
++extern const char kBrowserOsKeyboardShortcutsName[];
++extern const char kBrowserOsKeyboardShortcutsDescription[];
 +
  extern const char kBrowsingHistoryActorIntegrationM1Name[];
  extern const char kBrowsingHistoryActorIntegrationM1Description[];

@@ -1,15 +1,30 @@
 diff --git a/chrome/browser/ui/accelerator_table.cc b/chrome/browser/ui/accelerator_table.cc
-index 171a1037969db..816720670423c 100644
+index 171a1037969db..e5f17e5be1047 100644
 --- a/chrome/browser/ui/accelerator_table.cc
 +++ b/chrome/browser/ui/accelerator_table.cc
-@@ -155,6 +155,10 @@ const AcceleratorMapping kAcceleratorMap[] = {
-     {ui::VKEY_F11, ui::EF_NONE, IDC_FULLSCREEN},
-     {ui::VKEY_M, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,
-      IDC_SHOW_AVATAR_MENU},
-+    {ui::VKEY_K, ui::EF_ALT_DOWN, IDC_SHOW_THIRD_PARTY_LLM_SIDE_PANEL},
-+    {ui::VKEY_L, ui::EF_ALT_DOWN, IDC_CYCLE_THIRD_PARTY_LLM_PROVIDER},
-+    {ui::VKEY_U, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_OPEN_CLASH_OF_GPTS},
-+    {ui::VKEY_A, ui::EF_ALT_DOWN, IDC_TOGGLE_BROWSEROS_AGENT},
+@@ -15,6 +15,7 @@
+ #include "build/branding_buildflags.h"
+ #include "build/build_config.h"
+ #include "chrome/app/chrome_command_ids.h"
++#include "chrome/browser/browser_features.h"
+ #include "chrome/browser/ui/tabs/features.h"
+ #include "chrome/browser/ui/ui_features.h"
+ #include "components/lens/buildflags.h"
+@@ -333,6 +334,17 @@ std::vector<AcceleratorMapping> GetAcceleratorList() {
+     }
+ #endif
  
- // Platform-specific key maps.
- #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++    if (base::FeatureList::IsEnabled(features::kBrowserOsKeyboardShortcuts)) {
++      accelerators->push_back(
++          {ui::VKEY_K, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,
++           IDC_SHOW_THIRD_PARTY_LLM_SIDE_PANEL});
++      accelerators->push_back(
++          {ui::VKEY_L, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,
++           IDC_CYCLE_THIRD_PARTY_LLM_PROVIDER});
++      accelerators->push_back(
++          {ui::VKEY_A, ui::EF_ALT_DOWN, IDC_TOGGLE_BROWSEROS_AGENT});
++    }
++
+     if (base::FeatureList::IsEnabled(features::kUIDebugTools)) {
+       accelerators->insert(accelerators->begin(),
+                            std::begin(kUIDebugAcceleratorMap),

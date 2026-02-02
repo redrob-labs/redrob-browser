@@ -1,15 +1,31 @@
 diff --git a/chrome/browser/global_keyboard_shortcuts_mac.mm b/chrome/browser/global_keyboard_shortcuts_mac.mm
-index beffea21ede4b..2b2f16558609c 100644
+index beffea21ede4b..dc8cfed5ada8a 100644
 --- a/chrome/browser/global_keyboard_shortcuts_mac.mm
 +++ b/chrome/browser/global_keyboard_shortcuts_mac.mm
-@@ -145,6 +145,10 @@ const std::vector<KeyboardShortcutData>& GetShortcutsNotPresentInMainMenu() {
+@@ -15,6 +15,7 @@
+ #include "chrome/app/chrome_command_ids.h"
+ #import "chrome/browser/app_controller_mac.h"
+ #include "chrome/browser/ui/cocoa/accelerators_cocoa.h"
++#include "chrome/browser/browser_features.h"
+ #include "chrome/browser/ui/tabs/features.h"
+ #include "chrome/browser/ui/ui_features.h"
+ #include "ui/base/accelerators/accelerator.h"
+@@ -166,6 +167,18 @@ const std::vector<KeyboardShortcutData>& GetShortcutsNotPresentInMainMenu() {
+           {true, false, true, false, kVK_ANSI_Z, IDC_FOCUS_PREV_TAB_GROUP});
+     }
  
-       {true,  true,  false, false, kVK_ANSI_M,            IDC_SHOW_AVATAR_MENU},
-       {true,  false, false, true,  kVK_ANSI_L,            IDC_SHOW_DOWNLOADS},
-+      {false, false, false, true,  kVK_ANSI_K,            IDC_SHOW_THIRD_PARTY_LLM_SIDE_PANEL},
-+      {false, false, false, true,  kVK_ANSI_L,            IDC_CYCLE_THIRD_PARTY_LLM_PROVIDER},
-+      {true,  true,  false, false, kVK_ANSI_U,            IDC_OPEN_CLASH_OF_GPTS},
-+      {false, false, false, true,  kVK_ANSI_A,            IDC_TOGGLE_BROWSEROS_AGENT},
-       {true,  true,  false, false, kVK_ANSI_C,            IDC_DEV_TOOLS_INSPECT},
-       {true,  false, false, true,  kVK_ANSI_C,            IDC_DEV_TOOLS_INSPECT},
-       {true,  false, false, true,  kVK_DownArrow,         IDC_FOCUS_NEXT_PANE},
++    if (base::FeatureList::IsEnabled(features::kBrowserOsKeyboardShortcuts)) {
++      keys.push_back(
++          {true, true, false, false, kVK_ANSI_K,
++           IDC_SHOW_THIRD_PARTY_LLM_SIDE_PANEL});
++      keys.push_back(
++          {true, true, false, false, kVK_ANSI_L,
++           IDC_CYCLE_THIRD_PARTY_LLM_PROVIDER});
++      keys.push_back(
++          {false, false, false, true, kVK_ANSI_A,
++           IDC_TOGGLE_BROWSEROS_AGENT});
++    }
++
+     if (base::FeatureList::IsEnabled(features::kUIDebugTools)) {
+       keys.push_back(
+           {false, true, true, true, kVK_ANSI_T, IDC_DEBUG_TOGGLE_TABLET_MODE});
