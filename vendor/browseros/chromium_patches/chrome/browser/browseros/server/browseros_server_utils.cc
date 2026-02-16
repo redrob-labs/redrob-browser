@@ -1,6 +1,6 @@
 diff --git a/chrome/browser/browseros/server/browseros_server_utils.cc b/chrome/browser/browseros/server/browseros_server_utils.cc
 new file mode 100644
-index 0000000000000..867dbf4699f17
+index 0000000000000..8b3137bf24e8a
 --- /dev/null
 +++ b/chrome/browser/browseros/server/browseros_server_utils.cc
 @@ -0,0 +1,518 @@
@@ -412,7 +412,7 @@ index 0000000000000..867dbf4699f17
 +#elif BUILDFLAG(IS_WIN)
 +  base::win::ScopedHandle handle(
 +      OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
-+  if (!handle.IsValid()) {
++  if (!handle.is_valid()) {
 +    return std::nullopt;
 +  }
 +
@@ -441,7 +441,7 @@ index 0000000000000..867dbf4699f17
 +#elif BUILDFLAG(IS_WIN)
 +  base::win::ScopedHandle handle(
 +      OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
-+  if (!handle.IsValid()) {
++  if (!handle.is_valid()) {
 +    return false;
 +  }
 +  DWORD exit_code;
@@ -493,7 +493,7 @@ index 0000000000000..867dbf4699f17
 +
 +#elif BUILDFLAG(IS_WIN)
 +  base::win::ScopedHandle handle(OpenProcess(PROCESS_TERMINATE, FALSE, pid));
-+  if (!handle.IsValid()) {
++  if (!handle.is_valid()) {
 +    DWORD error = GetLastError();
 +    if (error == ERROR_INVALID_PARAMETER) {
 +      return true;  // Process doesn't exist
