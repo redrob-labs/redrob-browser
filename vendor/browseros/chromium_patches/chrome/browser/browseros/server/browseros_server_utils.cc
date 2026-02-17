@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/browseros/server/browseros_server_utils.cc b/chrome/browser/browseros/server/browseros_server_utils.cc
 new file mode 100644
-index 0000000000000..867dbf4699f17
+index 0000000000000..a555293979225
 --- /dev/null
 +++ b/chrome/browser/browseros/server/browseros_server_utils.cc
-@@ -0,0 +1,518 @@
+@@ -0,0 +1,517 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -275,8 +275,7 @@ index 0000000000000..867dbf4699f17
 +    return std::nullopt;
 +  }
 +
-+  std::optional<base::Value> parsed =
-+      base::JSONReader::Read(contents, base::JSON_PARSE_RFC);
++  std::optional<base::Value> parsed = base::JSONReader::Read(contents);
 +  if (!parsed || !parsed->is_dict()) {
 +    LOG(WARNING) << "browseros: Invalid state file format";
 +    return std::nullopt;
@@ -412,7 +411,7 @@ index 0000000000000..867dbf4699f17
 +#elif BUILDFLAG(IS_WIN)
 +  base::win::ScopedHandle handle(
 +      OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
-+  if (!handle.IsValid()) {
++  if (!handle.is_valid()) {
 +    return std::nullopt;
 +  }
 +
@@ -441,7 +440,7 @@ index 0000000000000..867dbf4699f17
 +#elif BUILDFLAG(IS_WIN)
 +  base::win::ScopedHandle handle(
 +      OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
-+  if (!handle.IsValid()) {
++  if (!handle.is_valid()) {
 +    return false;
 +  }
 +  DWORD exit_code;
@@ -493,7 +492,7 @@ index 0000000000000..867dbf4699f17
 +
 +#elif BUILDFLAG(IS_WIN)
 +  base::win::ScopedHandle handle(OpenProcess(PROCESS_TERMINATE, FALSE, pid));
-+  if (!handle.IsValid()) {
++  if (!handle.is_valid()) {
 +    DWORD error = GetLastError();
 +    if (error == ERROR_INVALID_PARAMETER) {
 +      return true;  // Process doesn't exist

@@ -37,6 +37,9 @@ class ConfigureModule(CommandModule):
         args_file.write_text(args_content)
 
         gn_cmd = "gn.bat" if IS_WINDOWS() else "gn"
-        run_command([gn_cmd, "gen", ctx.out_dir, "--fail-on-unused-args"], cwd=ctx.chromium_src)
+        gn_args = [gn_cmd, "gen", ctx.out_dir]
+        if ctx.build_type != "debug":
+            gn_args.append("--fail-on-unused-args")
+        run_command(gn_args, cwd=ctx.chromium_src)
 
         log_success("Build configured")
