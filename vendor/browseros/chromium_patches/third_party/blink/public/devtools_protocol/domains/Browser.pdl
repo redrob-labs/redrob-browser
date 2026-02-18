@@ -1,0 +1,30 @@
+diff --git a/third_party/blink/public/devtools_protocol/domains/Browser.pdl b/third_party/blink/public/devtools_protocol/domains/Browser.pdl
+index 6015a94554c21..100650d3db5dd 100644
+--- a/third_party/blink/public/devtools_protocol/domains/Browser.pdl
++++ b/third_party/blink/public/devtools_protocol/domains/Browser.pdl
+@@ -8,6 +8,7 @@
+ domain Browser
+   experimental type BrowserContextID extends string
+   experimental type WindowID extends integer
++  experimental type TabID extends integer
+ 
+   # The state of the browser window.
+   experimental type WindowState extends string
+@@ -294,6 +295,17 @@ domain Browser
+       # position and size are returned.
+       Bounds bounds
+ 
++  # Get the tab that contains the devtools target.
++  experimental command getTabForTarget
++    parameters
++      # Devtools agent host id. If called as a part of the session, associated targetId is used.
++      optional Target.TargetID targetId
++    returns
++      # Tab id. Unique within the current browser session.
++      TabID tabId
++      # Browser window id that contains the tab.
++      WindowID windowId
++
+   # Set position and/or size of the browser window.
+   experimental command setWindowBounds
+     parameters

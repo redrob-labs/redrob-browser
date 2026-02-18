@@ -1,0 +1,13 @@
+diff --git a/chrome/browser/devtools/inspector_protocol_config.json b/chrome/browser/devtools/inspector_protocol_config.json
+index df7ff4a10c045..9ac60b3b08f41 100644
+--- a/chrome/browser/devtools/inspector_protocol_config.json
++++ b/chrome/browser/devtools/inspector_protocol_config.json
+@@ -14,7 +14,7 @@
+             },
+             {
+                 "domain": "Browser",
+-                "include": [ "getWindowForTarget", "getWindowBounds", "setWindowBounds", "setContentsSize", "close", "setDockTile", "executeBrowserCommand", "addPrivacySandboxEnrollmentOverride" ],
++                "include": [ "getWindowForTarget", "getTabForTarget", "getWindowBounds", "setWindowBounds", "setContentsSize", "close", "setDockTile", "executeBrowserCommand", "addPrivacySandboxEnrollmentOverride" ],
+                 "include_events": []
+             },
+             {
