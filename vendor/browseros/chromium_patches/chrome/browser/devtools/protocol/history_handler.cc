@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/devtools/protocol/history_handler.cc b/chrome/browser/devtools/protocol/history_handler.cc
 new file mode 100644
-index 0000000000000..c23d0c63f9046
+index 0000000000000..689f6e900a968
 --- /dev/null
 +++ b/chrome/browser/devtools/protocol/history_handler.cc
-@@ -0,0 +1,183 @@
+@@ -0,0 +1,188 @@
 +// Copyright 2026 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -22,6 +22,8 @@ index 0000000000000..c23d0c63f9046
 +#include "components/history/core/browser/history_service.h"
 +#include "components/history/core/browser/history_types.h"
 +#include "components/history/core/browser/url_row.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 +#include "content/public/browser/devtools_agent_host.h"
 +
 +using protocol::Response;
@@ -55,7 +57,10 @@ index 0000000000000..c23d0c63f9046
 +  if (host && host->GetBrowserContext()) {
 +    return Profile::FromBrowserContext(host->GetBrowserContext());
 +  }
-+  return nullptr;
++  // Browser-level targets have no BrowserContext; fall back to active window.
++  BrowserWindowInterface* bwi =
++      GetLastActiveBrowserWindowInterfaceWithAnyProfile();
++  return bwi ? bwi->GetProfile() : nullptr;
 +}
 +
 +history::HistoryService* HistoryHandler::GetHistoryService() const {

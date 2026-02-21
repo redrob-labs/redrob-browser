@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/devtools/protocol/bookmarks_handler.cc b/chrome/browser/devtools/protocol/bookmarks_handler.cc
 new file mode 100644
-index 0000000000000..ba94d3cf12c7e
+index 0000000000000..7b1e0ef01fe5e
 --- /dev/null
 +++ b/chrome/browser/devtools/protocol/bookmarks_handler.cc
-@@ -0,0 +1,299 @@
+@@ -0,0 +1,304 @@
 +// Copyright 2026 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -22,6 +22,8 @@ index 0000000000000..ba94d3cf12c7e
 +#include "components/bookmarks/browser/bookmark_utils.h"
 +#include "components/bookmarks/browser/titled_url_match.h"
 +#include "components/query_parser/query_parser.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 +#include "content/public/browser/devtools_agent_host.h"
 +
 +using protocol::Response;
@@ -99,7 +101,10 @@ index 0000000000000..ba94d3cf12c7e
 +  if (host && host->GetBrowserContext()) {
 +    return Profile::FromBrowserContext(host->GetBrowserContext());
 +  }
-+  return nullptr;
++  // Browser-level targets have no BrowserContext; fall back to active window.
++  BrowserWindowInterface* bwi =
++      GetLastActiveBrowserWindowInterfaceWithAnyProfile();
++  return bwi ? bwi->GetProfile() : nullptr;
 +}
 +
 +BookmarkModel* BookmarksHandler::GetBookmarkModel() const {
