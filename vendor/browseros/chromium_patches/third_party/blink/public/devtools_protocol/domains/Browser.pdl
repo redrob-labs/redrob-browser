@@ -1,16 +1,187 @@
 diff --git a/third_party/blink/public/devtools_protocol/domains/Browser.pdl b/third_party/blink/public/devtools_protocol/domains/Browser.pdl
-index 6015a94554c21..7a158e3d24555 100644
+index 6015a94554c21..9e861e3468c3e 100644
 --- a/third_party/blink/public/devtools_protocol/domains/Browser.pdl
 +++ b/third_party/blink/public/devtools_protocol/domains/Browser.pdl
-@@ -8,6 +8,7 @@
+@@ -8,6 +8,16 @@
  domain Browser
    experimental type BrowserContextID extends string
    experimental type WindowID extends integer
 +  experimental type TabID extends integer
++
++  experimental type WindowType extends string
++    enum
++      normal
++      popup
++      app
++      devtools
++      app_popup
++      picture_in_picture
  
    # The state of the browser window.
    experimental type WindowState extends string
-@@ -294,6 +295,28 @@ domain Browser
+@@ -31,6 +41,161 @@ domain Browser
+       # The window state. Default to normal.
+       optional WindowState windowState
+ 
++  experimental type WindowInfo extends object
++    properties
++      WindowID windowId
++      WindowType windowType
++      Bounds bounds
++      boolean isActive
++      boolean isVisible
++      integer tabCount
++      optional TabID activeTabId
++      optional BrowserContextID browserContextId
++
++  experimental type TabInfo extends object
++    properties
++      TabID tabId
++      Target.TargetID targetId
++      string url
++      string title
++      boolean isActive
++      boolean isLoading
++      number loadProgress
++      boolean isPinned
++      boolean isHidden
++      optional WindowID windowId
++      optional integer index
++      optional BrowserContextID browserContextId
++
++  # --- Window Management ---
++
++  experimental command getWindows
++    returns
++      array of WindowInfo windows
++
++  experimental command getActiveWindow
++    returns
++      optional WindowInfo window
++
++  experimental command createWindow
++    parameters
++      optional string url
++      optional Bounds bounds
++      optional WindowType windowType
++      optional boolean hidden
++      optional BrowserContextID browserContextId
++    returns
++      WindowInfo window
++
++  experimental command closeWindow
++    parameters
++      WindowID windowId
++
++  experimental command activateWindow
++    parameters
++      WindowID windowId
++
++  experimental command showWindow
++    parameters
++      WindowID windowId
++
++  experimental command hideWindow
++    parameters
++      WindowID windowId
++
++  # --- Tab Management ---
++  # Commands that operate on a single tab accept both targetId and tabId.
++  # Exactly one must be provided.
++
++  experimental command getTabs
++    parameters
++      optional WindowID windowId
++      optional boolean includeHidden
++    returns
++      array of TabInfo tabs
++
++  experimental command getActiveTab
++    parameters
++      optional WindowID windowId
++    returns
++      optional TabInfo tab
++
++  experimental command getTabInfo
++    parameters
++      optional Target.TargetID targetId
++      optional TabID tabId
++    returns
++      TabInfo tab
++
++  experimental command createTab
++    parameters
++      optional string url
++      optional WindowID windowId
++      optional integer index
++      optional boolean background
++      optional boolean pinned
++      optional boolean hidden
++      optional BrowserContextID browserContextId
++    returns
++      TabInfo tab
++
++  experimental command closeTab
++    parameters
++      optional Target.TargetID targetId
++      optional TabID tabId
++
++  experimental command activateTab
++    parameters
++      optional Target.TargetID targetId
++      optional TabID tabId
++
++  experimental command moveTab
++    parameters
++      optional Target.TargetID targetId
++      optional TabID tabId
++      optional WindowID windowId
++      optional integer index
++    returns
++      TabInfo tab
++
++  experimental command duplicateTab
++    parameters
++      optional Target.TargetID targetId
++      optional TabID tabId
++    returns
++      TabInfo tab
++
++  experimental command pinTab
++    parameters
++      optional Target.TargetID targetId
++      optional TabID tabId
++    returns
++      TabInfo tab
++
++  experimental command unpinTab
++    parameters
++      optional Target.TargetID targetId
++      optional TabID tabId
++    returns
++      TabInfo tab
++
++  experimental command showTab
++    parameters
++      optional Target.TargetID targetId
++      optional TabID tabId
++      optional WindowID windowId
++      optional integer index
++      optional boolean activate
++    returns
++      TabInfo tab
++
++  experimental command hideTab
++    parameters
++      optional Target.TargetID targetId
++      optional TabID tabId
++    returns
++      TabInfo tab
++
+   experimental type PermissionType extends string
+     enum
+       ar
+@@ -294,6 +459,28 @@ domain Browser
        # position and size are returned.
        Bounds bounds
  

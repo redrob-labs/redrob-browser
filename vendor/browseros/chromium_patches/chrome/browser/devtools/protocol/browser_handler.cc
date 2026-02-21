@@ -1,16 +1,280 @@
 diff --git a/chrome/browser/devtools/protocol/browser_handler.cc b/chrome/browser/devtools/protocol/browser_handler.cc
-index 30bd52d09c3fc..e15fa4618c1e3 100644
+index 30bd52d09c3fc..e374fc071f8d2 100644
 --- a/chrome/browser/devtools/protocol/browser_handler.cc
 +++ b/chrome/browser/devtools/protocol/browser_handler.cc
-@@ -21,6 +21,7 @@
+@@ -8,19 +8,27 @@
+ #include <vector>
+ 
+ #include "base/functional/bind.h"
++#include "base/memory/raw_ptr.h"
+ #include "base/memory/ref_counted_memory.h"
++#include "base/strings/utf_string_conversions.h"
+ #include "chrome/app/chrome_command_ids.h"
+ #include "chrome/browser/devtools/chrome_devtools_manager_delegate.h"
+ #include "chrome/browser/devtools/devtools_dock_tile.h"
++#include "chrome/browser/devtools/protocol/hidden_tab_manager.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/profiles/profile_manager.h"
++#include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_list.h"
++#include "chrome/browser/ui/browser_tabstrip.h"
+ #include "chrome/browser/ui/browser_window.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
  #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
++#include "chrome/browser/ui/tabs/tab_enums.h"
  #include "chrome/browser/ui/tabs/tab_strip_model.h"
  #include "components/privacy_sandbox/privacy_sandbox_attestations/privacy_sandbox_attestations.h"
 +#include "components/sessions/content/session_tab_helper.h"
  #include "content/public/browser/browser_task_traits.h"
  #include "content/public/browser/browser_thread.h"
  #include "content/public/browser/devtools_agent_host.h"
-@@ -120,6 +121,65 @@ Response BrowserHandler::GetWindowForTarget(
+@@ -72,11 +80,242 @@ std::unique_ptr<protocol::Browser::Bounds> GetBrowserWindowBounds(
+       .Build();
+ }
+ 
++BrowserWindowInterface* GetBrowserWindowInterface(int window_id) {
++  BrowserWindowInterface* result = nullptr;
++  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
++      [window_id, &result](BrowserWindowInterface* bwi) {
++        if (bwi->GetSessionID().id() == window_id) {
++          result = bwi;
++          return false;
++        }
++        return true;
++      });
++  return result;
++}
++
++std::string GetBrowserWindowType(BrowserWindowInterface::Type type) {
++  switch (type) {
++    case BrowserWindowInterface::TYPE_NORMAL:
++      return "normal";
++    case BrowserWindowInterface::TYPE_POPUP:
++      return "popup";
++    case BrowserWindowInterface::TYPE_APP:
++      return "app";
++#if !BUILDFLAG(IS_ANDROID)
++    case BrowserWindowInterface::TYPE_DEVTOOLS:
++      return "devtools";
++#endif
++    case BrowserWindowInterface::TYPE_APP_POPUP:
++      return "app_popup";
++#if BUILDFLAG(IS_CHROMEOS)
++    case BrowserWindowInterface::TYPE_CUSTOM_TAB:
++      return "normal";
++#endif
++#if !BUILDFLAG(IS_ANDROID)
++    case BrowserWindowInterface::TYPE_PICTURE_IN_PICTURE:
++      return "picture_in_picture";
++#endif
++  }
++}
++
++BrowserWindowInterface::Type ParseWindowType(const std::string& type_str) {
++  if (type_str == "popup")
++    return BrowserWindowInterface::TYPE_POPUP;
++  if (type_str == "app")
++    return BrowserWindowInterface::TYPE_APP;
++#if !BUILDFLAG(IS_ANDROID)
++  if (type_str == "devtools")
++    return BrowserWindowInterface::TYPE_DEVTOOLS;
++#endif
++  if (type_str == "app_popup")
++    return BrowserWindowInterface::TYPE_APP_POPUP;
++#if !BUILDFLAG(IS_ANDROID)
++  if (type_str == "picture_in_picture")
++    return BrowserWindowInterface::TYPE_PICTURE_IN_PICTURE;
++#endif
++  return BrowserWindowInterface::TYPE_NORMAL;
++}
++
++std::unique_ptr<protocol::Browser::WindowInfo> BuildWindowInfo(
++    BrowserWindowInterface* bwi) {
++  ui::BaseWindow* window = bwi->GetWindow();
++  TabStripModel* tab_strip = bwi->GetTabStripModel();
++
++  auto info = protocol::Browser::WindowInfo::Create()
++                  .SetWindowId(bwi->GetSessionID().id())
++                  .SetWindowType(GetBrowserWindowType(bwi->GetType()))
++                  .SetBounds(GetBrowserWindowBounds(window))
++                  .SetIsActive(bwi->IsActive())
++                  .SetIsVisible(window->IsVisible())
++                  .SetTabCount(tab_strip->count())
++                  .Build();
++
++  content::WebContents* active_wc = tab_strip->GetActiveWebContents();
++  if (active_wc) {
++    SessionID tab_id = sessions::SessionTabHelper::IdForTab(active_wc);
++    if (tab_id.is_valid()) {
++      info->SetActiveTabId(tab_id.id());
++    }
++  }
++
++  Profile* profile = bwi->GetProfile();
++  if (profile) {
++    info->SetBrowserContextId(profile->GetDebugName());
++  }
++
++  return info;
++}
++
++std::unique_ptr<protocol::Browser::TabInfo> BuildTabInfo(
++    content::WebContents* wc,
++    BrowserWindowInterface* bwi,
++    int tab_index,
++    bool is_hidden) {
++  SessionID sid = sessions::SessionTabHelper::IdForTab(wc);
++  scoped_refptr<content::DevToolsAgentHost> host =
++      content::DevToolsAgentHost::GetOrCreateFor(wc);
++
++  bool is_active = false;
++  bool is_pinned = false;
++  if (!is_hidden && bwi) {
++    TabStripModel* tab_strip = bwi->GetTabStripModel();
++    is_active = tab_strip->GetActiveWebContents() == wc;
++    is_pinned = tab_strip->IsTabPinned(tab_index);
++  }
++
++  auto info = protocol::Browser::TabInfo::Create()
++                  .SetTabId(sid.id())
++                  .SetTargetId(host->GetId())
++                  .SetUrl(wc->GetVisibleURL().spec())
++                  .SetTitle(base::UTF16ToUTF8(wc->GetTitle()))
++                  .SetIsActive(is_active)
++                  .SetIsLoading(wc->IsLoading())
++                  .SetLoadProgress(wc->GetLoadProgress())
++                  .SetIsPinned(is_pinned)
++                  .SetIsHidden(is_hidden)
++                  .Build();
++
++  if (!is_hidden && bwi) {
++    info->SetWindowId(bwi->GetSessionID().id());
++    info->SetIndex(tab_index);
++  }
++
++  Profile* profile =
++      Profile::FromBrowserContext(wc->GetBrowserContext());
++  if (profile) {
++    info->SetBrowserContextId(profile->GetDebugName());
++  }
++
++  return info;
++}
++
++struct TabLookupResult {
++  raw_ptr<content::WebContents> web_contents = nullptr;
++  raw_ptr<BrowserWindowInterface> bwi = nullptr;
++  int tab_index = -1;
++  bool is_hidden = false;
++};
++
++Response ResolveTabIdentifier(std::optional<std::string> target_id,
++                              std::optional<int> tab_id,
++                              HiddenTabManager* hidden_manager,
++                              TabLookupResult* result) {
++  if (target_id.has_value() && tab_id.has_value()) {
++    return Response::InvalidParams(
++        "Specify either targetId or tabId, not both");
++  }
++  if (!target_id.has_value() && !tab_id.has_value()) {
++    return Response::InvalidParams(
++        "Either targetId or tabId must be specified");
++  }
++
++  if (target_id.has_value()) {
++    auto host = content::DevToolsAgentHost::GetForId(target_id.value());
++    if (!host)
++      return Response::ServerError("No target with given id");
++    content::WebContents* wc = host->GetWebContents();
++    if (!wc)
++      return Response::ServerError("No web contents in the target");
++
++    if (hidden_manager) {
++      SessionID sid = sessions::SessionTabHelper::IdForTab(wc);
++      if (sid.is_valid() && hidden_manager->IsHidden(sid.id())) {
++        result->web_contents = wc;
++        result->is_hidden = true;
++        return Response::Success();
++      }
++    }
++
++    BrowserWindowInterface* found_bwi = nullptr;
++    int found_index = -1;
++    ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
++        [wc, &found_bwi, &found_index](BrowserWindowInterface* bwi) {
++          TabStripModel* tab_strip = bwi->GetTabStripModel();
++          int idx = tab_strip->GetIndexOfWebContents(wc);
++          if (idx != TabStripModel::kNoTab) {
++            found_bwi = bwi;
++            found_index = idx;
++            return false;
++          }
++          return true;
++        });
++
++    if (!found_bwi)
++      return Response::ServerError("No tab with given id");
++
++    result->web_contents = wc;
++    result->bwi = found_bwi;
++    result->tab_index = found_index;
++    return Response::Success();
++  }
++
++  // tab_id provided
++  int tid = tab_id.value();
++
++  if (hidden_manager) {
++    content::WebContents* hidden_wc = hidden_manager->FindByTabId(tid);
++    if (hidden_wc) {
++      result->web_contents = hidden_wc;
++      result->is_hidden = true;
++      return Response::Success();
++    }
++  }
++
++  BrowserWindowInterface* found_bwi = nullptr;
++  content::WebContents* found_wc = nullptr;
++  int found_index = -1;
++  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
++      [tid, &found_bwi, &found_wc,
++       &found_index](BrowserWindowInterface* bwi) {
++        TabStripModel* tab_strip = bwi->GetTabStripModel();
++        for (int i = 0; i < tab_strip->count(); ++i) {
++          content::WebContents* wc = tab_strip->GetWebContentsAt(i);
++          SessionID sid = sessions::SessionTabHelper::IdForTab(wc);
++          if (sid.is_valid() && sid.id() == tid) {
++            found_bwi = bwi;
++            found_wc = wc;
++            found_index = i;
++            return false;
++          }
++        }
++        return true;
++      });
++
++  if (!found_wc)
++    return Response::ServerError("No tab with given id");
++
++  result->web_contents = found_wc;
++  result->bwi = found_bwi;
++  result->tab_index = found_index;
++  return Response::Success();
++}
++
+ }  // namespace
+ 
+ BrowserHandler::BrowserHandler(protocol::UberDispatcher* dispatcher,
+                                const std::string& target_id)
+-    : target_id_(target_id) {
++    : target_id_(target_id),
++      hidden_tab_manager_(std::make_unique<HiddenTabManager>()) {
+   // Dispatcher can be null in tests.
+   if (dispatcher)
+     protocol::Browser::Dispatcher::wire(dispatcher, this);
+@@ -120,6 +359,65 @@ Response BrowserHandler::GetWindowForTarget(
    return Response::Success();
  }
  
@@ -76,3 +340,546 @@ index 30bd52d09c3fc..e15fa4618c1e3 100644
  Response BrowserHandler::GetWindowBounds(
      int window_id,
      std::unique_ptr<protocol::Browser::Bounds>* out_bounds) {
+@@ -297,3 +595,542 @@ protocol::Response BrowserHandler::AddPrivacySandboxEnrollmentOverride(
+       net::SchemefulSite(url_to_add));
+   return Response::Success();
+ }
++
++// --- Window Management ---
++
++Response BrowserHandler::GetWindows(
++    std::unique_ptr<protocol::Array<protocol::Browser::WindowInfo>>*
++        out_windows) {
++  auto windows =
++      std::make_unique<protocol::Array<protocol::Browser::WindowInfo>>();
++  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
++      [&windows](BrowserWindowInterface* bwi) {
++        windows->push_back(BuildWindowInfo(bwi));
++        return true;
++      });
++  *out_windows = std::move(windows);
++  return Response::Success();
++}
++
++Response BrowserHandler::GetActiveWindow(
++    std::unique_ptr<protocol::Browser::WindowInfo>* out_window) {
++  BrowserWindowInterface* bwi =
++      GetLastActiveBrowserWindowInterfaceWithAnyProfile();
++  if (bwi) {
++    *out_window = BuildWindowInfo(bwi);
++  }
++  return Response::Success();
++}
++
++Response BrowserHandler::CreateWindow(
++    std::optional<std::string> url,
++    std::unique_ptr<protocol::Browser::Bounds> bounds,
++    std::optional<std::string> window_type,
++    std::optional<bool> hidden,
++    std::optional<std::string> browser_context_id,
++    std::unique_ptr<protocol::Browser::WindowInfo>* out_window) {
++  Profile* profile = nullptr;
++  BrowserWindowInterface* last_active =
++      GetLastActiveBrowserWindowInterfaceWithAnyProfile();
++  if (last_active) {
++    profile = last_active->GetProfile();
++  }
++  if (!profile) {
++    return Response::ServerError("No profile available");
++  }
++
++  BrowserWindowInterface::Type type = BrowserWindowInterface::TYPE_NORMAL;
++  if (window_type.has_value()) {
++    type = ParseWindowType(window_type.value());
++  }
++
++  Browser::CreateParams params(type, profile, true);
++  if (bounds) {
++    params.initial_bounds =
++        gfx::Rect(bounds->GetLeft(0), bounds->GetTop(0),
++                   bounds->GetWidth(0), bounds->GetHeight(0));
++  }
++
++  Browser* browser = Browser::Create(params);
++
++  GURL navigate_url = url.has_value() ? GURL(url.value()) : GURL();
++  chrome::AddTabAt(browser, navigate_url, -1, true);
++
++  if (hidden.value_or(false)) {
++    browser->window()->Hide();
++  } else {
++    browser->window()->Show();
++  }
++
++  BrowserWindowInterface* bwi = GetBrowserWindowInterface(
++      browser->session_id().id());
++  if (!bwi) {
++    return Response::ServerError("Failed to create window");
++  }
++
++  *out_window = BuildWindowInfo(bwi);
++  return Response::Success();
++}
++
++Response BrowserHandler::CloseWindow(int window_id) {
++  BrowserWindowInterface* bwi = GetBrowserWindowInterface(window_id);
++  if (!bwi) {
++    return Response::ServerError("Browser window not found");
++  }
++  bwi->GetTabStripModel()->CloseAllTabs();
++  bwi->GetWindow()->Close();
++  return Response::Success();
++}
++
++Response BrowserHandler::ActivateWindow(int window_id) {
++  BrowserWindowInterface* bwi = GetBrowserWindowInterface(window_id);
++  if (!bwi) {
++    return Response::ServerError("Browser window not found");
++  }
++  bwi->GetWindow()->Activate();
++  return Response::Success();
++}
++
++Response BrowserHandler::ShowWindow(int window_id) {
++  BrowserWindowInterface* bwi = GetBrowserWindowInterface(window_id);
++  if (!bwi) {
++    return Response::ServerError("Browser window not found");
++  }
++  bwi->GetWindow()->Show();
++  return Response::Success();
++}
++
++Response BrowserHandler::HideWindow(int window_id) {
++  BrowserWindowInterface* bwi = GetBrowserWindowInterface(window_id);
++  if (!bwi) {
++    return Response::ServerError("Browser window not found");
++  }
++  bwi->GetWindow()->Hide();
++  return Response::Success();
++}
++
++// --- Tab Management ---
++
++Response BrowserHandler::GetTabs(
++    std::optional<int> window_id,
++    std::optional<bool> include_hidden,
++    std::unique_ptr<protocol::Array<protocol::Browser::TabInfo>>* out_tabs) {
++  auto tabs =
++      std::make_unique<protocol::Array<protocol::Browser::TabInfo>>();
++
++  if (window_id.has_value()) {
++    BrowserWindowInterface* bwi =
++        GetBrowserWindowInterface(window_id.value());
++    if (!bwi) {
++      return Response::ServerError("Browser window not found");
++    }
++    TabStripModel* tab_strip = bwi->GetTabStripModel();
++    for (int i = 0; i < tab_strip->count(); ++i) {
++      tabs->push_back(
++          BuildTabInfo(tab_strip->GetWebContentsAt(i), bwi, i, false));
++    }
++  } else {
++    ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
++        [&tabs](BrowserWindowInterface* bwi) {
++          TabStripModel* tab_strip = bwi->GetTabStripModel();
++          for (int i = 0; i < tab_strip->count(); ++i) {
++            tabs->push_back(
++                BuildTabInfo(tab_strip->GetWebContentsAt(i), bwi, i, false));
++          }
++          return true;
++        });
++  }
++
++  if (include_hidden.value_or(false)) {
++    for (const auto& wc : hidden_tab_manager_->hidden_tabs()) {
++      tabs->push_back(BuildTabInfo(wc.get(), nullptr, -1, true));
++    }
++  }
++
++  *out_tabs = std::move(tabs);
++  return Response::Success();
++}
++
++Response BrowserHandler::GetActiveTab(
++    std::optional<int> window_id,
++    std::unique_ptr<protocol::Browser::TabInfo>* out_tab) {
++  BrowserWindowInterface* bwi = nullptr;
++  if (window_id.has_value()) {
++    bwi = GetBrowserWindowInterface(window_id.value());
++    if (!bwi) {
++      return Response::ServerError("Browser window not found");
++    }
++  } else {
++    bwi = GetLastActiveBrowserWindowInterfaceWithAnyProfile();
++  }
++
++  if (bwi) {
++    TabStripModel* tab_strip = bwi->GetTabStripModel();
++    content::WebContents* active_wc = tab_strip->GetActiveWebContents();
++    if (active_wc) {
++      int index = tab_strip->GetIndexOfWebContents(active_wc);
++      *out_tab = BuildTabInfo(active_wc, bwi, index, false);
++    }
++  }
++  return Response::Success();
++}
++
++Response BrowserHandler::GetTabInfo(
++    std::optional<std::string> target_id,
++    std::optional<int> tab_id,
++    std::unique_ptr<protocol::Browser::TabInfo>* out_tab) {
++  TabLookupResult lookup;
++  Response response = ResolveTabIdentifier(target_id, tab_id,
++                                           hidden_tab_manager_.get(), &lookup);
++  if (!response.IsSuccess())
++    return response;
++
++  *out_tab = BuildTabInfo(lookup.web_contents, lookup.bwi, lookup.tab_index,
++                          lookup.is_hidden);
++  return Response::Success();
++}
++
++Response BrowserHandler::CreateTab(
++    std::optional<std::string> url,
++    std::optional<int> window_id,
++    std::optional<int> index,
++    std::optional<bool> background,
++    std::optional<bool> pinned,
++    std::optional<bool> hidden,
++    std::optional<std::string> browser_context_id,
++    std::unique_ptr<protocol::Browser::TabInfo>* out_tab) {
++  bool is_hidden = hidden.value_or(false);
++
++  if (is_hidden) {
++    if (window_id.has_value()) {
++      return Response::InvalidParams(
++          "Cannot specify windowId for hidden tabs");
++    }
++    if (pinned.value_or(false)) {
++      return Response::InvalidParams("Cannot pin a hidden tab");
++    }
++
++    Profile* profile = nullptr;
++    BrowserWindowInterface* last_active =
++        GetLastActiveBrowserWindowInterfaceWithAnyProfile();
++    if (last_active) {
++      profile = last_active->GetProfile();
++    }
++    if (!profile) {
++      return Response::ServerError("No profile available");
++    }
++
++    GURL navigate_url = url.has_value() ? GURL(url.value()) : GURL();
++    int tab_id =
++        hidden_tab_manager_->CreateHiddenTab(navigate_url, profile);
++    content::WebContents* wc = hidden_tab_manager_->FindByTabId(tab_id);
++    if (!wc) {
++      return Response::ServerError("Failed to create hidden tab");
++    }
++
++    *out_tab = BuildTabInfo(wc, nullptr, -1, true);
++    return Response::Success();
++  }
++
++  // Normal (visible) tab creation.
++  BrowserWindowInterface* bwi = nullptr;
++  if (window_id.has_value()) {
++    bwi = GetBrowserWindowInterface(window_id.value());
++    if (!bwi) {
++      return Response::ServerError("Browser window not found");
++    }
++  } else {
++    bwi = GetLastActiveBrowserWindowInterfaceWithAnyProfile();
++  }
++  if (!bwi) {
++    return Response::ServerError("No browser window available");
++  }
++
++  Browser* browser = bwi->GetBrowserForMigrationOnly();
++  GURL navigate_url = url.has_value() ? GURL(url.value()) : GURL();
++  int insert_index = index.value_or(-1);
++  bool foreground = !background.value_or(false);
++
++  content::WebContents* new_wc = chrome::AddAndReturnTabAt(
++      browser, navigate_url, insert_index, foreground);
++  if (!new_wc) {
++    return Response::ServerError("Failed to create tab");
++  }
++
++  TabStripModel* tab_strip = bwi->GetTabStripModel();
++  int new_index = tab_strip->GetIndexOfWebContents(new_wc);
++
++  if (pinned.value_or(false) && new_index != TabStripModel::kNoTab) {
++    new_index = tab_strip->SetTabPinned(new_index, true);
++  }
++
++  *out_tab = BuildTabInfo(new_wc, bwi, new_index, false);
++  return Response::Success();
++}
++
++Response BrowserHandler::CloseTab(std::optional<std::string> target_id,
++                                  std::optional<int> tab_id) {
++  TabLookupResult lookup;
++  Response response = ResolveTabIdentifier(target_id, tab_id,
++                                           hidden_tab_manager_.get(), &lookup);
++  if (!response.IsSuccess())
++    return response;
++
++  if (lookup.is_hidden) {
++    SessionID sid =
++        sessions::SessionTabHelper::IdForTab(lookup.web_contents);
++    if (sid.is_valid()) {
++      hidden_tab_manager_->DetachByTabId(sid.id());
++    }
++    return Response::Success();
++  }
++
++  TabStripModel* tab_strip = lookup.bwi->GetTabStripModel();
++  tab_strip->CloseWebContentsAt(lookup.tab_index,
++                                TabCloseTypes::CLOSE_CREATE_HISTORICAL_TAB);
++  return Response::Success();
++}
++
++Response BrowserHandler::ActivateTab(std::optional<std::string> target_id,
++                                     std::optional<int> tab_id) {
++  TabLookupResult lookup;
++  Response response = ResolveTabIdentifier(target_id, tab_id,
++                                           hidden_tab_manager_.get(), &lookup);
++  if (!response.IsSuccess())
++    return response;
++
++  if (lookup.is_hidden) {
++    return Response::InvalidParams(
++        "Cannot activate a hidden tab. Use showTab first.");
++  }
++
++  lookup.bwi->GetTabStripModel()->ActivateTabAt(lookup.tab_index);
++  lookup.bwi->GetWindow()->Activate();
++  return Response::Success();
++}
++
++Response BrowserHandler::MoveTab(
++    std::optional<std::string> target_id,
++    std::optional<int> tab_id,
++    std::optional<int> window_id,
++    std::optional<int> index,
++    std::unique_ptr<protocol::Browser::TabInfo>* out_tab) {
++  TabLookupResult lookup;
++  Response response = ResolveTabIdentifier(target_id, tab_id,
++                                           hidden_tab_manager_.get(), &lookup);
++  if (!response.IsSuccess())
++    return response;
++
++  if (lookup.is_hidden) {
++    return Response::InvalidParams(
++        "Cannot move a hidden tab. Use showTab first.");
++  }
++
++  BrowserWindowInterface* target_bwi = lookup.bwi;
++
++  if (window_id.has_value()) {
++    BrowserWindowInterface* new_bwi =
++        GetBrowserWindowInterface(window_id.value());
++    if (!new_bwi) {
++      return Response::ServerError("Browser window not found");
++    }
++
++    if (new_bwi != lookup.bwi) {
++      // Cross-window move.
++      TabStripModel* source_strip = lookup.bwi->GetTabStripModel();
++      std::unique_ptr<content::WebContents> detached_wc =
++          source_strip->DetachWebContentsAtForInsertion(lookup.tab_index);
++
++      TabStripModel* target_strip = new_bwi->GetTabStripModel();
++      int insert_index =
++          index.has_value() ? index.value() : target_strip->count();
++      target_strip->InsertWebContentsAt(insert_index, std::move(detached_wc),
++                                        AddTabTypes::ADD_NONE);
++
++      int final_index =
++          target_strip->GetIndexOfWebContents(lookup.web_contents);
++      *out_tab =
++          BuildTabInfo(lookup.web_contents, new_bwi, final_index, false);
++      return Response::Success();
++    }
++    target_bwi = new_bwi;
++  }
++
++  // Same-window move or no window specified.
++  if (index.has_value()) {
++    TabStripModel* tab_strip = target_bwi->GetTabStripModel();
++    int new_index =
++        tab_strip->MoveWebContentsAt(lookup.tab_index, index.value(), false);
++    *out_tab =
++        BuildTabInfo(lookup.web_contents, target_bwi, new_index, false);
++  } else {
++    *out_tab = BuildTabInfo(lookup.web_contents, target_bwi,
++                            lookup.tab_index, false);
++  }
++  return Response::Success();
++}
++
++Response BrowserHandler::DuplicateTab(
++    std::optional<std::string> target_id,
++    std::optional<int> tab_id,
++    std::unique_ptr<protocol::Browser::TabInfo>* out_tab) {
++  TabLookupResult lookup;
++  Response response = ResolveTabIdentifier(target_id, tab_id,
++                                           hidden_tab_manager_.get(), &lookup);
++  if (!response.IsSuccess())
++    return response;
++
++  if (lookup.is_hidden) {
++    return Response::InvalidParams("Cannot duplicate a hidden tab");
++  }
++
++  Browser* browser = lookup.bwi->GetBrowserForMigrationOnly();
++  content::WebContents* new_wc =
++      chrome::DuplicateTabAt(browser, lookup.tab_index);
++  if (!new_wc) {
++    return Response::ServerError("Failed to duplicate tab");
++  }
++
++  TabStripModel* tab_strip = lookup.bwi->GetTabStripModel();
++  int new_index = tab_strip->GetIndexOfWebContents(new_wc);
++  *out_tab = BuildTabInfo(new_wc, lookup.bwi, new_index, false);
++  return Response::Success();
++}
++
++Response BrowserHandler::PinTab(
++    std::optional<std::string> target_id,
++    std::optional<int> tab_id,
++    std::unique_ptr<protocol::Browser::TabInfo>* out_tab) {
++  TabLookupResult lookup;
++  Response response = ResolveTabIdentifier(target_id, tab_id,
++                                           hidden_tab_manager_.get(), &lookup);
++  if (!response.IsSuccess())
++    return response;
++
++  if (lookup.is_hidden) {
++    return Response::InvalidParams("Cannot pin a hidden tab");
++  }
++
++  TabStripModel* tab_strip = lookup.bwi->GetTabStripModel();
++  int new_index = tab_strip->SetTabPinned(lookup.tab_index, true);
++  *out_tab =
++      BuildTabInfo(lookup.web_contents, lookup.bwi, new_index, false);
++  return Response::Success();
++}
++
++Response BrowserHandler::UnpinTab(
++    std::optional<std::string> target_id,
++    std::optional<int> tab_id,
++    std::unique_ptr<protocol::Browser::TabInfo>* out_tab) {
++  TabLookupResult lookup;
++  Response response = ResolveTabIdentifier(target_id, tab_id,
++                                           hidden_tab_manager_.get(), &lookup);
++  if (!response.IsSuccess())
++    return response;
++
++  if (lookup.is_hidden) {
++    return Response::InvalidParams("Cannot unpin a hidden tab");
++  }
++
++  TabStripModel* tab_strip = lookup.bwi->GetTabStripModel();
++  int new_index = tab_strip->SetTabPinned(lookup.tab_index, false);
++  *out_tab =
++      BuildTabInfo(lookup.web_contents, lookup.bwi, new_index, false);
++  return Response::Success();
++}
++
++Response BrowserHandler::ShowTab(
++    std::optional<std::string> target_id,
++    std::optional<int> tab_id,
++    std::optional<int> window_id,
++    std::optional<int> index,
++    std::optional<bool> activate,
++    std::unique_ptr<protocol::Browser::TabInfo>* out_tab) {
++  TabLookupResult lookup;
++  Response response = ResolveTabIdentifier(target_id, tab_id,
++                                           hidden_tab_manager_.get(), &lookup);
++  if (!response.IsSuccess())
++    return response;
++
++  if (!lookup.is_hidden) {
++    return Response::InvalidParams("Tab is not hidden");
++  }
++
++  SessionID sid =
++      sessions::SessionTabHelper::IdForTab(lookup.web_contents);
++  if (!sid.is_valid()) {
++    return Response::ServerError("Hidden tab has invalid tab id");
++  }
++
++  std::unique_ptr<content::WebContents> detached =
++      hidden_tab_manager_->DetachByTabId(sid.id());
++  if (!detached) {
++    return Response::ServerError("Failed to detach hidden tab");
++  }
++
++  BrowserWindowInterface* target_bwi = nullptr;
++  if (window_id.has_value()) {
++    target_bwi = GetBrowserWindowInterface(window_id.value());
++    if (!target_bwi) {
++      // Put it back if the window wasn't found.
++      hidden_tab_manager_->TakeWebContents(std::move(detached));
++      return Response::ServerError("Browser window not found");
++    }
++  } else {
++    target_bwi = GetLastActiveBrowserWindowInterfaceWithAnyProfile();
++  }
++
++  if (!target_bwi) {
++    // No windows exist — create one.
++    Profile* profile =
++        Profile::FromBrowserContext(detached->GetBrowserContext());
++    Browser::CreateParams params(
++        BrowserWindowInterface::TYPE_NORMAL, profile, true);
++    Browser* browser = Browser::Create(params);
++    browser->window()->Show();
++    target_bwi = GetBrowserWindowInterface(browser->session_id().id());
++    if (!target_bwi) {
++      hidden_tab_manager_->TakeWebContents(std::move(detached));
++      return Response::ServerError("Failed to create window for tab");
++    }
++  }
++
++  TabStripModel* tab_strip = target_bwi->GetTabStripModel();
++  int insert_index = index.value_or(tab_strip->count());
++  bool should_activate = activate.value_or(true);
++  int add_types = should_activate ? AddTabTypes::ADD_ACTIVE
++                                  : AddTabTypes::ADD_NONE;
++
++  content::WebContents* raw_wc = detached.get();
++  tab_strip->InsertWebContentsAt(insert_index, std::move(detached),
++                                 add_types);
++
++  int final_index = tab_strip->GetIndexOfWebContents(raw_wc);
++  *out_tab = BuildTabInfo(raw_wc, target_bwi, final_index, false);
++  return Response::Success();
++}
++
++Response BrowserHandler::HideTab(
++    std::optional<std::string> target_id,
++    std::optional<int> tab_id,
++    std::unique_ptr<protocol::Browser::TabInfo>* out_tab) {
++  TabLookupResult lookup;
++  Response response = ResolveTabIdentifier(target_id, tab_id,
++                                           hidden_tab_manager_.get(), &lookup);
++  if (!response.IsSuccess())
++    return response;
++
++  if (lookup.is_hidden) {
++    return Response::InvalidParams("Tab is already hidden");
++  }
++
++  TabStripModel* tab_strip = lookup.bwi->GetTabStripModel();
++  std::unique_ptr<content::WebContents> detached =
++      tab_strip->DetachWebContentsAtForInsertion(lookup.tab_index);
++
++  content::WebContents* raw_wc = detached.get();
++  hidden_tab_manager_->TakeWebContents(std::move(detached));
++
++  *out_tab = BuildTabInfo(raw_wc, nullptr, -1, true);
++  return Response::Success();
++}

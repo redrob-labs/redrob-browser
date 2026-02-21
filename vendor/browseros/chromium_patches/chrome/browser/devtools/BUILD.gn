@@ -1,0 +1,13 @@
+diff --git a/chrome/browser/devtools/BUILD.gn b/chrome/browser/devtools/BUILD.gn
+index 4fc39e878028e..41c3c73e1b5c2 100644
+--- a/chrome/browser/devtools/BUILD.gn
++++ b/chrome/browser/devtools/BUILD.gn
+@@ -388,6 +388,8 @@ static_library("devtools") {
+       "protocol/autofill_handler.h",
+       "protocol/browser_handler.cc",
+       "protocol/browser_handler.h",
++      "protocol/hidden_tab_manager.cc",
++      "protocol/hidden_tab_manager.h",
+       "protocol/cast_handler.cc",
+       "protocol/cast_handler.h",
+       "protocol/emulation_handler.cc",

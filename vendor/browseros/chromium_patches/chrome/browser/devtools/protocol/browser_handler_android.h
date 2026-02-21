@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/devtools/protocol/browser_handler_android.h b/chrome/browser/devtools/protocol/browser_handler_android.h
-index a80686d439110..045c092b74d7a 100644
+index a80686d439110..0d29b08d9d927 100644
 --- a/chrome/browser/devtools/protocol/browser_handler_android.h
 +++ b/chrome/browser/devtools/protocol/browser_handler_android.h
 @@ -22,6 +22,14 @@ class BrowserHandlerAndroid : public protocol::Browser::Backend {
@@ -17,3 +17,84 @@ index a80686d439110..045c092b74d7a 100644
    protocol::Response GetWindowBounds(
        int window_id,
        std::unique_ptr<protocol::Browser::Bounds>* out_bounds) override;
+@@ -40,6 +48,80 @@ class BrowserHandlerAndroid : public protocol::Browser::Backend {
+   protocol::Response AddPrivacySandboxEnrollmentOverride(
+       const std::string& in_url) override;
+ 
++  // Window management
++  protocol::Response GetWindows(
++      std::unique_ptr<protocol::Array<protocol::Browser::WindowInfo>>*
++          out_windows) override;
++  protocol::Response GetActiveWindow(
++      std::unique_ptr<protocol::Browser::WindowInfo>* out_window) override;
++  protocol::Response CreateWindow(
++      std::optional<std::string> url,
++      std::unique_ptr<protocol::Browser::Bounds> bounds,
++      std::optional<std::string> window_type,
++      std::optional<bool> hidden,
++      std::optional<std::string> browser_context_id,
++      std::unique_ptr<protocol::Browser::WindowInfo>* out_window) override;
++  protocol::Response CloseWindow(int window_id) override;
++  protocol::Response ActivateWindow(int window_id) override;
++  protocol::Response ShowWindow(int window_id) override;
++  protocol::Response HideWindow(int window_id) override;
++
++  // Tab management
++  protocol::Response GetTabs(
++      std::optional<int> window_id,
++      std::optional<bool> include_hidden,
++      std::unique_ptr<protocol::Array<protocol::Browser::TabInfo>>* out_tabs)
++      override;
++  protocol::Response GetActiveTab(
++      std::optional<int> window_id,
++      std::unique_ptr<protocol::Browser::TabInfo>* out_tab) override;
++  protocol::Response GetTabInfo(
++      std::optional<std::string> target_id,
++      std::optional<int> tab_id,
++      std::unique_ptr<protocol::Browser::TabInfo>* out_tab) override;
++  protocol::Response CreateTab(
++      std::optional<std::string> url,
++      std::optional<int> window_id,
++      std::optional<int> index,
++      std::optional<bool> background,
++      std::optional<bool> pinned,
++      std::optional<bool> hidden,
++      std::optional<std::string> browser_context_id,
++      std::unique_ptr<protocol::Browser::TabInfo>* out_tab) override;
++  protocol::Response CloseTab(std::optional<std::string> target_id,
++                              std::optional<int> tab_id) override;
++  protocol::Response ActivateTab(std::optional<std::string> target_id,
++                                 std::optional<int> tab_id) override;
++  protocol::Response MoveTab(
++      std::optional<std::string> target_id,
++      std::optional<int> tab_id,
++      std::optional<int> window_id,
++      std::optional<int> index,
++      std::unique_ptr<protocol::Browser::TabInfo>* out_tab) override;
++  protocol::Response DuplicateTab(
++      std::optional<std::string> target_id,
++      std::optional<int> tab_id,
++      std::unique_ptr<protocol::Browser::TabInfo>* out_tab) override;
++  protocol::Response PinTab(
++      std::optional<std::string> target_id,
++      std::optional<int> tab_id,
++      std::unique_ptr<protocol::Browser::TabInfo>* out_tab) override;
++  protocol::Response UnpinTab(
++      std::optional<std::string> target_id,
++      std::optional<int> tab_id,
++      std::unique_ptr<protocol::Browser::TabInfo>* out_tab) override;
++  protocol::Response ShowTab(
++      std::optional<std::string> target_id,
++      std::optional<int> tab_id,
++      std::optional<int> window_id,
++      std::optional<int> index,
++      std::optional<bool> activate,
++      std::unique_ptr<protocol::Browser::TabInfo>* out_tab) override;
++  protocol::Response HideTab(
++      std::optional<std::string> target_id,
++      std::optional<int> tab_id,
++      std::unique_ptr<protocol::Browser::TabInfo>* out_tab) override;
++
+  private:
+   const std::string target_id_;
+ };
