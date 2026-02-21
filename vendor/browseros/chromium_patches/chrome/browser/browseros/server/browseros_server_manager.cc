@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/browseros/server/browseros_server_manager.cc b/chrome/browser/browseros/server/browseros_server_manager.cc
 new file mode 100644
-index 0000000000000..87a0c20a2c67e
+index 0000000000000..0070cd46351f6
 --- /dev/null
 +++ b/chrome/browser/browseros/server/browseros_server_manager.cc
-@@ -0,0 +1,1062 @@
+@@ -0,0 +1,1066 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -489,6 +489,10 @@ index 0000000000000..87a0c20a2c67e
 +
 +void BrowserOSServerManager::StartCDPServer() {
 +  LOG(INFO) << "browseros: Starting CDP server on port " << ports_.cdp;
++
++  // Stop any existing DevTools server (e.g. from --remote-debugging-port or
++  // the approval-mode feature) so our handler isn't racing with it.
++  content::DevToolsAgentHost::StopRemoteDebuggingServer();
 +
 +  content::DevToolsAgentHost::StartRemoteDebuggingServer(
 +      std::make_unique<CDPServerSocketFactory>(ports_.cdp),

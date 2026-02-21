@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
-index 03aef97f335b0..c6b111da5e01e 100644
+index 92a45baf84050..476d604b649fc 100644
 --- a/chrome/browser/chrome_browser_main.cc
 +++ b/chrome/browser/chrome_browser_main.cc
 @@ -10,6 +10,7 @@
@@ -10,7 +10,7 @@ index 03aef97f335b0..c6b111da5e01e 100644
  #include "base/base_switches.h"
  #include "base/check.h"
  #include "base/command_line.h"
-@@ -998,6 +999,8 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
+@@ -1233,6 +1234,8 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
    if (first_run::IsChromeFirstRun()) {
      if (!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kApp) &&
          !base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kAppId)) {
@@ -19,7 +19,7 @@ index 03aef97f335b0..c6b111da5e01e 100644
        browser_creator_->AddFirstRunTabs(master_prefs_->new_tabs);
      }
    }
-@@ -1017,6 +1020,43 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
+@@ -1252,6 +1255,43 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
    }
  #endif
  
@@ -63,20 +63,22 @@ index 03aef97f335b0..c6b111da5e01e 100644
  #if BUILDFLAG(IS_MAC)
  #if defined(ARCH_CPU_X86_64)
    // The use of Rosetta to run the x64 version of Chromium on Arm is neither
-@@ -1414,6 +1454,10 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
-   // running.
-   browser_process_->PreMainMessageLoopRun();
+@@ -1812,6 +1852,12 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
+     g_browser_process->CreateDevToolsAutoOpener();
+   }
  
-+  // BrowserOS: Start the BrowserOS server after browser initialization
++  // BrowserOS: Start AFTER CreateDevToolsProtocolHandler so that BrowserOS's
++  // CDP handler replaces Chromium's (StartRemoteDebuggingServer is a global
++  // singleton — the last caller wins).
 +  LOG(INFO) << "browseros: Starting BrowserOS server process";
 +  browseros::BrowserOSServerManager::GetInstance()->Start();
 +
- #if BUILDFLAG(IS_WIN)
-   // If the command line specifies 'uninstall' then we need to work here
-   // unless we detect another chrome browser running.
-@@ -1855,6 +1899,11 @@ void ChromeBrowserMainParts::PostMainMessageLoopRun() {
-   for (auto& chrome_extra_part : chrome_extra_parts_)
+   // Needs to be done before PostProfileInit, since the SODA Installer setup is
+   // called inside PostProfileInit and depends on it.
+   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+@@ -2099,6 +2145,11 @@ void ChromeBrowserMainParts::PostMainMessageLoopRun() {
      chrome_extra_part->PostMainMessageLoopRun();
+   }
  
 +
 +  // BrowserOS: Stop the BrowserOS server during shutdown
