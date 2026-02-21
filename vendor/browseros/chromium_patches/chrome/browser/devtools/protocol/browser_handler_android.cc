@@ -1,8 +1,16 @@
 diff --git a/chrome/browser/devtools/protocol/browser_handler_android.cc b/chrome/browser/devtools/protocol/browser_handler_android.cc
-index 82199c6e2e93b..c53c1cf6843a9 100644
+index 82199c6e2e93b..ea33e3877dbe6 100644
 --- a/chrome/browser/devtools/protocol/browser_handler_android.cc
 +++ b/chrome/browser/devtools/protocol/browser_handler_android.cc
-@@ -55,6 +55,32 @@ Response BrowserHandlerAndroid::GetWindowForTarget(
+@@ -11,6 +11,7 @@
+ #include "chrome/browser/android/tab_android.h"
+ #include "chrome/browser/ui/android/tab_model/tab_model.h"
+ #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
++#include "content/public/browser/devtools_agent_host.h"
+ 
+ using protocol::Response;
+ 
+@@ -55,6 +56,59 @@ Response BrowserHandlerAndroid::GetWindowForTarget(
    return Response::ServerError("Browser window not found");
  }
  
@@ -30,6 +38,33 @@ index 82199c6e2e93b..c53c1cf6843a9 100644
 +  }
 +
 +  return Response::ServerError("Tab not found");
++}
++
++Response BrowserHandlerAndroid::GetTargetForTab(
++    int tab_id,
++    std::string* out_target_id,
++    int* out_window_id) {
++  for (TabModel* model : TabModelList::models()) {
++    for (int i = 0; i < model->GetTabCount(); ++i) {
++      TabAndroid* tab = model->GetTabAt(i);
++      if (tab->GetAndroidId() == tab_id) {
++        content::WebContents* web_contents = tab->web_contents();
++        if (!web_contents)
++          return Response::ServerError("Tab has no web contents");
++
++        scoped_refptr<content::DevToolsAgentHost> host =
++            content::DevToolsAgentHost::GetOrCreateFor(web_contents);
++        if (!host)
++          return Response::ServerError("No target for tab");
++
++        *out_target_id = host->GetId();
++        *out_window_id = tab->GetWindowId().id();
++        return Response::Success();
++      }
++    }
++  }
++
++  return Response::ServerError("No tab with given id");
 +}
 +
  Response BrowserHandlerAndroid::GetWindowBounds(
