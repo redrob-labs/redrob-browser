@@ -46,7 +46,7 @@ class CleanModule(CommandModule):
                 "-fdx",
                 "chrome/",
                 "components/",
-                "--exclude=third_party/",
+                "third_party/",
                 "--exclude=build_tools/",
                 "--exclude=uc_staging/",
                 "--exclude=buildtools/",
