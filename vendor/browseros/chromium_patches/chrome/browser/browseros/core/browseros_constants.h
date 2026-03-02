@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/browseros/core/browseros_constants.h b/chrome/browser/browseros/core/browseros_constants.h
 new file mode 100644
-index 0000000000000..1e5f2cbc71a62
+index 0000000000000..e554c96adc5ad
 --- /dev/null
 +++ b/chrome/browser/browseros/core/browseros_constants.h
-@@ -0,0 +1,223 @@
+@@ -0,0 +1,227 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -70,7 +70,7 @@ index 0000000000000..1e5f2cbc71a62
 +inline constexpr BrowserOSURLRoute kBrowserOSURLRoutes[] = {
 +    {"/settings", kAgentV2ExtensionId, "app.html", "/settings"},
 +    {"/mcp", kAgentV2ExtensionId, "app.html", "/mcp"},
-+    {"/onboarding", kAgentV2ExtensionId, "onboarding.html", ""},
++    {"/onboarding", kAgentV2ExtensionId, "app.html", "/onboarding"},
 +};
 +
 +inline constexpr size_t kBrowserOSURLRoutesCount =
@@ -141,8 +141,12 @@ index 0000000000000..1e5f2cbc71a62
 +      continue;
 +    }
 +
-+    // Exact hash match - return immediately
-+    if (normalized_ref == route.extension_hash) {
++    // Exact hash match - normalize route hash the same way (strip leading /)
++    std::string normalized_hash(route.extension_hash);
++    if (!normalized_hash.empty() && normalized_hash[0] == '/') {
++      normalized_hash = normalized_hash.substr(1);
++    }
++    if (normalized_ref == normalized_hash) {
 +      return std::string("chrome://") + kBrowserOSHost + route.virtual_path;
 +    }
 +
