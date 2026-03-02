@@ -1,6 +1,6 @@
 diff --git a/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.cc b/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.cc
 new file mode 100644
-index 0000000000000..d6a803c592c98
+index 0000000000000..9eea7f83e53dd
 --- /dev/null
 +++ b/chrome/browser/ui/views/side_panel/third_party_llm/third_party_llm_panel_coordinator.cc
 @@ -0,0 +1,1192 @@
@@ -387,10 +387,10 @@ index 0000000000000..d6a803c592c98
 +  // Add shortcut text
 +#if BUILDFLAG(IS_MAC)
 +  auto* shortcuts_label = footer->AddChildView(
-+      std::make_unique<views::Label>(u"Toggle: Option+K  •  Next: Option+L"));
++      std::make_unique<views::Label>(u"Toggle: ⌘+Shift+K  •  Next: ⌘+Shift+L"));
 +#else
 +  auto* shortcuts_label = footer->AddChildView(
-+      std::make_unique<views::Label>(u"Toggle: Alt+K  •  Next: Alt+L"));
++      std::make_unique<views::Label>(u"Toggle: Ctrl+Shift+K  •  Next: Ctrl+Shift+L"));
 +#endif
 +  shortcuts_label->SetEnabledColor(ui::kColorLabelForegroundSecondary);
 +  shortcuts_label->SetFontList(
