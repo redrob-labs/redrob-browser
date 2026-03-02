@@ -1,21 +1,11 @@
 diff --git a/chrome/browser/resources/settings/settings_main/settings_main.html b/chrome/browser/resources/settings/settings_main/settings_main.html
-index e91a42678789f..b45aab13e278c 100644
+index 984fd2c865e57..5de8f5bbd28b0 100644
 --- a/chrome/browser/resources/settings/settings_main/settings_main.html
 +++ b/chrome/browser/resources/settings/settings_main/settings_main.html
-@@ -228,4 +228,24 @@
+@@ -229,4 +229,14 @@
        </settings-about-page>
      </template>
    </div>
-+
-+  <div slot="view" id="nxtscape">
-+    <template is="dom-if" if="[[renderPlugin_(
-+        routes_.NXTSCAPE, lastRoute_, inSearchMode_)]]">
-+      <settings-nxtscape-page role="main"
-+          class="cr-centered-card-container"
-+          prefs="{{prefs}}">
-+      </settings-nxtscape-page>
-+    </template>
-+  </div>
 +
 +  <div slot="view" id="browserosPrefs">
 +    <template is="dom-if" if="[[renderPlugin_(
