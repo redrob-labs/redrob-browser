@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/browseros/extensions/browseros_extension_installer.cc b/chrome/browser/browseros/extensions/browseros_extension_installer.cc
 new file mode 100644
-index 0000000000000..e8c6dd400d699
+index 0000000000000..ad2da65f1d4f4
 --- /dev/null
 +++ b/chrome/browser/browseros/extensions/browseros_extension_installer.cc
-@@ -0,0 +1,317 @@
+@@ -0,0 +1,313 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -76,13 +76,9 @@ index 0000000000000..e8c6dd400d699
 +
 +  LOG(INFO) << "browseros: Starting extension installation";
 +
-+  // TODO(nikhil): Re-enable bundled extension loading once OTA update flow is
-+  // fully validated. Remote install is now fast with InstallPendingNow fix.
-+#if 0
 +  if (TryLoadFromBundled()) {
 +    return;
 +  }
-+#endif
 +
 +  FetchFromRemote();
 +}
@@ -180,8 +176,11 @@ index 0000000000000..e8c6dd400d699
 +void BrowserOSExtensionInstaller::OnBundledLoadComplete(
 +    const base::FilePath& bundled_path,
 +    base::Value::Dict prefs) {
++  LOG(INFO) << "browseros: Bundled load complete, " << prefs.size()
++            << " extensions from " << bundled_path.value();
++
 +  if (prefs.empty()) {
-+    LOG(INFO) << "browseros: No valid bundled extensions, fetching remote";
++    LOG(INFO) << "browseros: No bundled prefs, falling back to remote";
 +    FetchFromRemote();
 +    return;
 +  }
@@ -194,9 +193,6 @@ index 0000000000000..e8c6dd400d699
 +  for (const auto [extension_id, _] : result.prefs) {
 +    result.extension_ids.insert(extension_id);
 +  }
-+
-+  LOG(INFO) << "browseros: Loaded " << result.prefs.size()
-+            << " bundled extensions";
 +
 +  Complete(std::move(result));
 +}

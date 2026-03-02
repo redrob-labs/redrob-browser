@@ -1,6 +1,6 @@
 diff --git a/chrome/browser/browseros/extensions/browseros_extension_loader.h b/chrome/browser/browseros/extensions/browseros_extension_loader.h
 new file mode 100644
-index 0000000000000..c0b26b369ad07
+index 0000000000000..2a14e9068156e
 --- /dev/null
 +++ b/chrome/browser/browseros/extensions/browseros_extension_loader.h
 @@ -0,0 +1,81 @@
@@ -11,6 +11,7 @@ index 0000000000000..c0b26b369ad07
 +#ifndef CHROME_BROWSER_BROWSEROS_EXTENSIONS_BROWSEROS_EXTENSION_LOADER_H_
 +#define CHROME_BROWSER_BROWSEROS_EXTENSIONS_BROWSEROS_EXTENSION_LOADER_H_
 +
++#include <map>
 +#include <memory>
 +#include <set>
 +#include <string>
@@ -61,19 +62,18 @@ index 0000000000000..c0b26b369ad07
 +  // Convergence point for both startup paths.
 +  void OnStartupComplete(bool from_bundled);
 +
-+  // Triggers immediate download for remote-loaded extensions.
-+  void TriggerImmediateInstallation(base::Value::Dict config);
++  // Installs remote extensions immediately via PendingExtensionManager + updater.
++  void InstallRemoteExtensionsNow(base::Value::Dict config);
 +
-+  // Adjusts prefs to match existing install locations. Extensions installed via
-+  // kExternalPrefDownload must be claimed via external_update_url to avoid
-+  // orphan detection when bundled prefs use external_crx.
-+  void AdjustPrefsForExistingInstalls(base::Value::Dict& prefs);
++  // Installs bundled CRX extensions immediately via CrxInstaller.
++  void InstallBundledExtensionsNow();
 +
 +  raw_ptr<Profile> profile_;
 +  GURL config_url_;
 +  base::FilePath bundled_crx_base_path_;
 +
 +  std::set<std::string> extension_ids_;
++  std::map<std::string, std::string> bundled_versions_;
 +  base::Value::Dict last_config_;
 +
 +  std::unique_ptr<BrowserOSExtensionInstaller> installer_;

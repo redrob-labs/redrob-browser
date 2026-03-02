@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/browseros/extensions/browseros_extension_maintainer.cc b/chrome/browser/browseros/extensions/browseros_extension_maintainer.cc
 new file mode 100644
-index 0000000000000..404fb31de4e55
+index 0000000000000..bb33ae5d3b156
 --- /dev/null
 +++ b/chrome/browser/browseros/extensions/browseros_extension_maintainer.cc
-@@ -0,0 +1,383 @@
+@@ -0,0 +1,395 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -30,6 +30,7 @@ index 0000000000000..404fb31de4e55
 +#include "extensions/browser/pending_extension_manager.h"
 +#include "extensions/browser/uninstall_reason.h"
 +#include "extensions/common/extension.h"
++#include "extensions/common/manifest_url_handlers.h"
 +#include "extensions/common/mojom/manifest.mojom-shared.h"
 +#include "net/base/load_flags.h"
 +#include "net/traffic_annotation/network_traffic_annotation.h"
@@ -74,8 +75,9 @@ index 0000000000000..404fb31de4e55
 +  extension_ids_ = std::move(extension_ids);
 +  last_config_ = std::move(initial_config);
 +
-+  LOG(INFO) << "browseros: Scheduling maintenance in "
-+            << kInitialMaintenanceDelay.InSeconds() << " seconds";
++  LOG(INFO) << "browseros: Maintainer started, " << extension_ids_.size()
++            << " extensions, scheduling in "
++            << kInitialMaintenanceDelay.InSeconds() << "s";
 +
 +  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
 +      FROM_HERE,
@@ -90,8 +92,6 @@ index 0000000000000..404fb31de4e55
 +}
 +
 +void BrowserOSExtensionMaintainer::RunMaintenanceCycle() {
-+  LOG(INFO) << "browseros: Running maintenance cycle";
-+
 +  if (!profile_) {
 +    ScheduleNextMaintenance();
 +    return;
@@ -137,6 +137,8 @@ index 0000000000000..404fb31de4e55
 +
 +      LOG(INFO) << "browseros: Updated config with " << last_config_.size()
 +                << " extensions";
++    } else {
++      LOG(WARNING) << "browseros: Fetched config parsed as empty";
 +    }
 +  } else {
 +    LOG(WARNING) << "browseros: Failed to fetch maintenance config";
@@ -178,9 +180,6 @@ index 0000000000000..404fb31de4e55
 +}
 +
 +void BrowserOSExtensionMaintainer::ScheduleNextMaintenance() {
-+  LOG(INFO) << "browseros: Scheduling next maintenance in "
-+            << kMaintenanceInterval.InMinutes() << " minutes";
-+
 +  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
 +      FROM_HERE,
 +      base::BindOnce(&BrowserOSExtensionMaintainer::RunMaintenanceCycle,
@@ -314,14 +313,27 @@ index 0000000000000..404fb31de4e55
 +    return;
 +  }
 +
++  extensions::ExtensionRegistry* registry =
++      extensions::ExtensionRegistry::Get(profile_);
 +  extensions::ExtensionUpdater* updater =
 +      extensions::ExtensionUpdater::Get(profile_);
 +  if (!updater) {
 +    return;
 +  }
 +
-+  LOG(INFO) << "browseros: Forcing update check for " << extension_ids_.size()
-+            << " extensions";
++  LOG(INFO) << "browseros: Force update check for "
++            << extension_ids_.size() << " extensions";
++
++  for (const std::string& id : extension_ids_) {
++    const extensions::Extension* ext =
++        registry ? registry->GetInstalledExtension(id) : nullptr;
++    if (ext) {
++      LOG(INFO) << "browseros: ext=" << id
++                << " v" << ext->version().GetString();
++    } else {
++      LOG(INFO) << "browseros: ext=" << id << " not installed";
++    }
++  }
 +
 +  extensions::ExtensionUpdater::CheckParams params;
 +  params.ids = std::list<extensions::ExtensionId>(extension_ids_.begin(),
