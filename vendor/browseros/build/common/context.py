@@ -192,7 +192,9 @@ class Context:
     browseros_build_offset: str = ""
     browseros_chromium_version: str = ""
     semantic_version: str = ""  # e.g., "0.31.0" from resources/BROWSEROS_VERSION
-    release_version: str = ""  # Explicit version for release operations (overrides semantic_version)
+    release_version: str = (
+        ""  # Explicit version for release operations (overrides semantic_version)
+    )
     github_repo: str = ""  # GitHub repo for release operations (owner/repo)
     start_time: float = 0.0
 
@@ -423,7 +425,8 @@ class Context:
 
     def get_extensions_manifest_url(self) -> str:
         """Get CDN URL for bundled extensions update manifest"""
-        return "https://cdn.browseros.com/extensions/update-manifest.xml"
+        # return "https://cdn.browseros.com/extensions/update-manifest.xml"
+        return "https://cdn.browseros.com/extensions/update-manifest.alpha.xml"
 
     def get_entitlements_dir(self) -> Path:
         """Get entitlements directory"""
