@@ -28,7 +28,7 @@ export const OAUTH_MCP_SERVERS: OAuthMcpServer[] = [
   { name: 'Linear', description: 'Create issues, manage cycles' },
   { name: 'Jira', description: 'Create issues, manage sprints' },
   { name: 'Figma', description: 'Access and manage design files' },
-  { name: 'Canva', description: 'Create and manage designs' },
+  // { name: 'Canva', description: 'Create and manage designs' }, // not working
   { name: 'Salesforce', description: 'Manage leads, contacts, opportunities' },
   { name: 'ClickUp', description: 'Manage tasks, projects, and workflows' },
   { name: 'Asana', description: 'Organize and track team projects' },
@@ -43,7 +43,7 @@ export const OAUTH_MCP_SERVERS: OAuthMcpServer[] = [
   { name: 'Cloudflare', description: 'Manage domains, DNS, and security' },
   { name: 'Brave Search', description: 'Search the web privately' },
   { name: 'Mem0', description: 'Store and retrieve AI memory' },
-  { name: 'Exa', description: 'AI-powered semantic web search' },
+  // { name: 'Exa', description: 'AI-powered semantic web search' }, // not working
   { name: 'Dropbox', description: 'Store and share files in the cloud' },
   { name: 'OneDrive', description: 'Store and sync files with Microsoft' },
   { name: 'WordPress', description: 'Manage websites and blog content' },

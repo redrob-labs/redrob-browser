@@ -5,13 +5,11 @@ import AsanaSvg from '@/assets/mcp-icons/asana.svg'
 import BoxSvg from '@/assets/mcp-icons/box.svg'
 import BraveSearchSvg from '@/assets/mcp-icons/brave_search.svg'
 import CalComSvg from '@/assets/mcp-icons/cal_com.svg'
-import CanvaSvg from '@/assets/mcp-icons/canva.svg'
 import ClickUpSvg from '@/assets/mcp-icons/clickup.svg'
 import CloudflareSvg from '@/assets/mcp-icons/cloudflare.svg'
 import ConfluenceSvg from '@/assets/mcp-icons/confluence.svg'
 import DiscordSvg from '@/assets/mcp-icons/discord.svg'
 import DropboxSvg from '@/assets/mcp-icons/dropbox.svg'
-import ExaPng from '@/assets/mcp-icons/exa.png'
 import FigmaSvg from '@/assets/mcp-icons/figma.svg'
 import GithubSvg from '@/assets/mcp-icons/github.svg'
 import GitlabSvg from '@/assets/mcp-icons/gitlab.svg'
@@ -64,7 +62,6 @@ const mcpIconMap: Record<string, string> = {
   Linear: LinearSvg,
   Jira: JiraSvg,
   Figma: FigmaSvg,
-  Canva: CanvaSvg,
   Salesforce: SalesforceSvg,
   ClickUp: ClickUpSvg,
   Asana: AsanaSvg,
@@ -79,7 +76,6 @@ const mcpIconMap: Record<string, string> = {
   Cloudflare: CloudflareSvg,
   'Brave Search': BraveSearchSvg,
   Mem0: Mem0Webp,
-  Exa: ExaPng,
   Dropbox: DropboxSvg,
   OneDrive: OneDriveSvg,
   WordPress: WordPressSvg,
