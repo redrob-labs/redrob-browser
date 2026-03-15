@@ -8,6 +8,7 @@ import { mkdir, utimes } from 'node:fs/promises'
 import path from 'node:path'
 import { createAgentUIStreamResponse, type UIMessage } from 'ai'
 import { AiSdkAgent } from '../../agent/ai-sdk-agent'
+import { filterValidMessages } from '../../agent/message-validation'
 import { formatUserMessage } from '../../agent/format-message'
 import type { SessionStore } from '../../agent/session-store'
 import type { ResolvedAgentConfig } from '../../agent/types'
@@ -139,6 +140,7 @@ export class ChatService {
 
     if (isNewSession && request.previousConversation?.length) {
       for (const msg of request.previousConversation) {
+        if (!msg.content.trim()) continue
         session.agent.messages.push({
           id: crypto.randomUUID(),
           role: msg.role === 'assistant' ? 'assistant' : 'user',
@@ -168,10 +170,10 @@ export class ChatService {
 
     return createAgentUIStreamResponse({
       agent: session.agent.toolLoopAgent,
-      uiMessages: session.agent.messages,
+      uiMessages: filterValidMessages(session.agent.messages),
       abortSignal,
       onFinish: async ({ messages }: { messages: UIMessage[] }) => {
-        session.agent.messages = messages
+        session.agent.messages = filterValidMessages(messages)
         logger.info('Agent execution complete', {
           conversationId: request.conversationId,
           totalMessages: messages.length,
