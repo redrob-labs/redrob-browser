@@ -6,7 +6,8 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignoreUnknown": false
+    "ignoreUnknown": false,
+    "ignore": ["apps/eval/src/dashboard/index.html"]
   },
   "formatter": {
     "enabled": true,

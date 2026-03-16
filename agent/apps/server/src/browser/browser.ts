@@ -726,6 +726,33 @@ export class Browser {
     )
   }
 
+  async hoverAt(page: number, x: number, y: number): Promise<void> {
+    const session = await this.resolveSession(page)
+    await mouse.dispatchHover(session, x, y)
+  }
+
+  async typeAt(
+    page: number,
+    x: number,
+    y: number,
+    text: string,
+    clear = false,
+  ): Promise<void> {
+    const session = await this.resolveSession(page)
+    await mouse.dispatchClick(session, x, y, 'left', 1, 0)
+    if (clear) await keyboard.clearField(session)
+    await keyboard.typeText(session, text)
+  }
+
+  async dragAt(
+    page: number,
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+  ): Promise<void> {
+    const session = await this.resolveSession(page)
+    await mouse.dispatchDrag(session, from, to)
+  }
+
   async hover(
     page: number,
     element: number,

@@ -87,6 +87,62 @@ export const click_at = defineTool({
   },
 })
 
+export const hover_at = defineTool({
+  name: 'hover_at',
+  description: 'Hover at specific page coordinates',
+  input: z.object({
+    page: pageParam,
+    x: z.number().describe('X coordinate'),
+    y: z.number().describe('Y coordinate'),
+  }),
+  handler: async (args, ctx, response) => {
+    await ctx.browser.hoverAt(args.page, args.x, args.y)
+    response.text(`Hovered at (${args.x}, ${args.y})`)
+    response.includeSnapshot(args.page)
+  },
+})
+
+export const type_at = defineTool({
+  name: 'type_at',
+  description:
+    'Click at specific coordinates then type text. Use for typing into inputs at known positions.',
+  input: z.object({
+    page: pageParam,
+    x: z.number().describe('X coordinate to click before typing'),
+    y: z.number().describe('Y coordinate to click before typing'),
+    text: z.string().describe('Text to type'),
+    clear: z.boolean().default(false).describe('Clear field before typing'),
+  }),
+  handler: async (args, ctx, response) => {
+    await ctx.browser.typeAt(args.page, args.x, args.y, args.text, args.clear)
+    response.text(`Typed ${args.text.length} chars at (${args.x}, ${args.y})`)
+    response.includeSnapshot(args.page)
+  },
+})
+
+export const drag_at = defineTool({
+  name: 'drag_at',
+  description: 'Drag from one coordinate to another',
+  input: z.object({
+    page: pageParam,
+    startX: z.number().describe('Start X coordinate'),
+    startY: z.number().describe('Start Y coordinate'),
+    endX: z.number().describe('End X coordinate'),
+    endY: z.number().describe('End Y coordinate'),
+  }),
+  handler: async (args, ctx, response) => {
+    await ctx.browser.dragAt(
+      args.page,
+      { x: args.startX, y: args.startY },
+      { x: args.endX, y: args.endY },
+    )
+    response.text(
+      `Dragged from (${args.startX}, ${args.startY}) to (${args.endX}, ${args.endY})`,
+    )
+    response.includeSnapshot(args.page)
+  },
+})
+
 export const hover = defineTool({
   name: 'hover',
   description: 'Hover over an element by its ID',
