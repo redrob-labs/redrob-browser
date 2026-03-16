@@ -6,6 +6,10 @@ export interface CdpBackend extends ProtocolApi {
   isConnected(): boolean
   getTargets(): Promise<CdpTarget[]>
   session(sessionId: string): ProtocolApi
+  onSessionEvent(
+    event: string,
+    handler: (params: unknown, sessionId: string) => void,
+  ): () => void
 }
 
 export interface ControllerBackend {

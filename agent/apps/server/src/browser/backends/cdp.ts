@@ -36,6 +36,10 @@ class CdpBackend implements ICdpBackend {
   private reconnecting = false
   private reconnectRequested = false
   private eventHandlers = new Map<string, ((params: unknown) => void)[]>()
+  private sessionEventHandlers = new Map<
+    string,
+    ((params: unknown, sessionId: string) => void)[]
+  >()
   private sessionCache = new Map<string, ProtocolApi>()
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null
   private preferredDiscoveryHost: LoopbackDiscoveryHost | null = null
@@ -432,6 +436,26 @@ class CdpBackend implements ICdpBackend {
     }
   }
 
+  onSessionEvent(
+    event: string,
+    handler: (params: unknown, sessionId: string) => void,
+  ): () => void {
+    if (!this.sessionEventHandlers.has(event)) {
+      this.sessionEventHandlers.set(event, [])
+    }
+    const handlers = this.sessionEventHandlers.get(event)
+    if (handlers) {
+      handlers.push(handler)
+    }
+    return () => {
+      const list = this.sessionEventHandlers.get(event)
+      if (list) {
+        const idx = list.indexOf(handler)
+        if (idx !== -1) list.splice(idx, 1)
+      }
+    }
+  }
+
   private handleMessage(data: string): void {
     const message = JSON.parse(data) as {
       id?: number
@@ -439,8 +463,10 @@ class CdpBackend implements ICdpBackend {
       params?: unknown
       result?: unknown
       error?: { message: string; code: number }
+      sessionId?: string
     }
 
+    // Route responses to pending requests
     if (message.id !== undefined) {
       const pending = this.pending.get(message.id)
       if (pending) {
@@ -453,10 +479,21 @@ class CdpBackend implements ICdpBackend {
         }
       }
     } else if (message.method) {
+      // Dispatch to global event handlers
       const handlers = this.eventHandlers.get(message.method)
       if (handlers) {
         for (const handler of handlers) {
           handler(message.params)
+        }
+      }
+
+      // Dispatch to session-aware handlers when sessionId is present
+      if (message.sessionId) {
+        const sessionHandlers = this.sessionEventHandlers.get(message.method)
+        if (sessionHandlers) {
+          for (const handler of sessionHandlers) {
+            handler(message.params, message.sessionId)
+          }
         }
       }
     }

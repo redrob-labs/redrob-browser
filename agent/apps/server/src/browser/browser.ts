@@ -4,6 +4,11 @@ import type { CdpBackend, ControllerBackend } from './backends/types'
 import type { BookmarkNode } from './bookmarks'
 import * as bookmarks from './bookmarks'
 import {
+  ConsoleCollector,
+  type GetConsoleLogsOptions,
+  type GetConsoleLogsResult,
+} from './console-collector'
+import {
   buildContentMarkdownExpression,
   type ContentMarkdownOptions,
 } from './content-markdown'
@@ -84,6 +89,7 @@ export class Browser {
   private cdp: CdpBackend
   // biome-ignore lint/correctness/noUnusedPrivateClassMembers: kept for later removal
   private controller: ControllerBackend
+  private consoleCollector: ConsoleCollector
   private pages = new Map<number, PageInfo>()
   private sessions = new Map<string, string>()
   private nextPageId = 1
@@ -91,6 +97,7 @@ export class Browser {
   constructor(cdp: CdpBackend, controller: ControllerBackend) {
     this.cdp = cdp
     this.controller = controller
+    this.consoleCollector = new ConsoleCollector(cdp)
     this.setupEventHandlers()
   }
 
@@ -123,11 +130,14 @@ export class Browser {
       throw new Error(
         `Unknown page ${page}. Use list_pages to see available pages.`,
       )
-    const sessionId = await this.attachToPage(info.targetId)
+    const sessionId = await this.attachToPage(info.targetId, page)
     return this.cdp.session(sessionId)
   }
 
-  private async attachToPage(targetId: string): Promise<string> {
+  private async attachToPage(
+    targetId: string,
+    pageId: number,
+  ): Promise<string> {
     const cached = this.sessions.get(targetId)
     if (cached) return cached
 
@@ -143,10 +153,13 @@ export class Browser {
       session.Page.enable(),
       session.DOM.enable(),
       session.Runtime.enable(),
+      session.Log.enable(),
       session.Accessibility.enable(),
     ])
 
     this.sessions.set(targetId, sessionId)
+    this.consoleCollector.attach(pageId, sessionId)
+
     return sessionId
   }
 
@@ -204,6 +217,7 @@ export class Browser {
 
     for (const [pageId, info] of this.pages) {
       if (!seenTargetIds.has(info.targetId)) {
+        this.consoleCollector.detach(pageId)
         this.pages.delete(pageId)
       }
     }
@@ -290,6 +304,7 @@ export class Browser {
         `Unknown page ${page}. Use list_pages to see available pages.`,
       )
     await this.cdp.Browser.closeTab({ tabId: info.tabId })
+    this.consoleCollector.detach(page)
     this.pages.delete(page)
     this.sessions.delete(info.targetId)
   }
@@ -1235,5 +1250,15 @@ export class Browser {
 
   async closeTabGroup(groupId: string): Promise<void> {
     return tabGroups.closeTabGroup(this.cdp, groupId)
+  }
+
+  // --- Console ---
+
+  async getConsoleLogs(
+    page: number,
+    opts?: GetConsoleLogsOptions,
+  ): Promise<GetConsoleLogsResult> {
+    await this.resolveSession(page)
+    return this.consoleCollector.getLogs(page, opts)
   }
 }
