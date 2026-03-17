@@ -8,8 +8,8 @@ import { mkdir, utimes } from 'node:fs/promises'
 import path from 'node:path'
 import { createAgentUIStreamResponse, type UIMessage } from 'ai'
 import { AiSdkAgent } from '../../agent/ai-sdk-agent'
-import { filterValidMessages } from '../../agent/message-validation'
 import { formatUserMessage } from '../../agent/format-message'
+import { filterValidMessages } from '../../agent/message-validation'
 import type { SessionStore } from '../../agent/session-store'
 import type { ResolvedAgentConfig } from '../../agent/types'
 import type { Browser } from '../../browser/browser'
@@ -26,6 +26,7 @@ export interface ChatServiceDeps {
   browser: Browser
   registry: ToolRegistry
   browserosId?: string
+  aiSdkDevtoolsEnabled?: boolean
 }
 
 export class ChatService {
@@ -87,6 +88,7 @@ export class ChatService {
         browserContext,
         klavisClient: this.deps.klavisClient,
         browserosId: this.deps.browserosId,
+        aiSdkDevtoolsEnabled: this.deps.aiSdkDevtoolsEnabled,
       })
       session = { agent, browserContext, mcpServerKey }
       session.agent.messages = previousMessages
@@ -133,6 +135,7 @@ export class ChatService {
         browserContext,
         klavisClient: this.deps.klavisClient,
         browserosId: this.deps.browserosId,
+        aiSdkDevtoolsEnabled: this.deps.aiSdkDevtoolsEnabled,
       })
       session = { agent, hiddenWindowId, browserContext, mcpServerKey }
       sessionStore.set(request.conversationId, session)
