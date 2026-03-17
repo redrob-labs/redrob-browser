@@ -11,6 +11,7 @@ export const TIMEOUTS = {
   TOOL_CALL: 120_000,
   TOOL_POST_ACTION: 2_000,
   TEST_PROVIDER: 15_000,
+  REFINE_PROMPT: 30_000,
 
   // Controller communication
   CONTROLLER_DEFAULT: 60_000,

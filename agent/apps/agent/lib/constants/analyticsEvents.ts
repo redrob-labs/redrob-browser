@@ -57,6 +57,10 @@ export const SCHEDULED_TASK_DELETED_EVENT = 'settings.scheduled_task.deleted'
 export const SCHEDULED_TASK_TOGGLED_EVENT = 'settings.scheduled_task.toggled'
 
 /** @public */
+export const SCHEDULED_TASK_PROMPT_REFINED_EVENT =
+  'settings.scheduled_task.prompt_refined'
+
+/** @public */
 export const SCHEDULED_TASK_TESTED_EVENT = 'settings.scheduled_task.tested'
 
 /** @public */

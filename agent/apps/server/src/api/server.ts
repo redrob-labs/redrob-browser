@@ -23,6 +23,7 @@ import { createKlavisRoutes } from './routes/klavis'
 import { createMcpRoutes } from './routes/mcp'
 import { createMemoryRoutes } from './routes/memory'
 import { createProviderRoutes } from './routes/provider'
+import { createRefinePromptRoutes } from './routes/refine-prompt'
 import { createSdkRoutes } from './routes/sdk'
 import { createShutdownRoute } from './routes/shutdown'
 import { createSkillsRoutes } from './routes/skills'
@@ -113,6 +114,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/memory', createMemoryRoutes())
     .route('/skills', createSkillsRoutes())
     .route('/test-provider', createProviderRoutes())
+    .route('/refine-prompt', createRefinePromptRoutes())
     .route('/klavis', createKlavisRoutes({ browserosId: browserosId || '' }))
     .route(
       '/mcp',
