@@ -1,16 +1,33 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const GATEWAY_URL = 'https://llm.browseros.com'
+const WAVEFORM_BAND_COUNT = 5
 
-interface UseVoiceInputReturn {
+export interface VoiceInputState {
+  isRecording: boolean
+  isTranscribing: boolean
+  audioLevels: number[]
+  error: string | null
+  onStartRecording: () => void
+  onStopRecording: () => void
+}
+
+export interface UseVoiceInputReturn {
   isRecording: boolean
   isTranscribing: boolean
   transcript: string
   audioLevel: number
+  audioLevels: number[]
   error: string | null
-  startRecording: () => Promise<void>
+  startRecording: () => Promise<boolean>
   stopRecording: () => Promise<void>
   clearTranscript: () => void
+}
+
+const EMPTY_LEVELS = Array(WAVEFORM_BAND_COUNT).fill(0)
+
+interface TranscribeResponse {
+  text: string
 }
 
 async function transcribeAudio(audioBlob: Blob): Promise<string> {
@@ -21,16 +38,17 @@ async function transcribeAudio(audioBlob: Blob): Promise<string> {
   const response = await fetch(`${GATEWAY_URL}/api/transcribe`, {
     method: 'POST',
     body: formData,
+    signal: AbortSignal.timeout(30_000),
   })
 
   if (!response.ok) {
-    const error = await response
+    const errorBody: { error?: string } = await response
       .json()
       .catch(() => ({ error: 'Transcription failed' }))
-    throw new Error(error.error || `Transcription failed: ${response.status}`)
+    throw new Error(errorBody.error || `Transcription failed: ${response.status}`)
   }
 
-  const result = await response.json()
+  const result: TranscribeResponse = await response.json()
   return result.text || ''
 }
 
@@ -39,6 +57,7 @@ export function useVoiceInput(): UseVoiceInputReturn {
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [transcript, setTranscript] = useState('')
   const [audioLevel, setAudioLevel] = useState(0)
+  const [audioLevels, setAudioLevels] = useState<number[]>(EMPTY_LEVELS)
   const [error, setError] = useState<string | null>(null)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -48,7 +67,7 @@ export function useVoiceInput(): UseVoiceInputReturn {
   const analyserRef = useRef<AnalyserNode | null>(null)
   const animationFrameRef = useRef<number | null>(null)
 
-  const stopAudioLevelMonitoring = useCallback(() => {
+  const stopAudioLevelMonitoring = () => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current)
       animationFrameRef.current = null
@@ -59,7 +78,8 @@ export function useVoiceInput(): UseVoiceInputReturn {
     audioContextRef.current = null
     analyserRef.current = null
     setAudioLevel(0)
-  }, [])
+    setAudioLevels(EMPTY_LEVELS)
+  }
 
   useEffect(() => {
     return () => {
@@ -71,9 +91,9 @@ export function useVoiceInput(): UseVoiceInputReturn {
       }
       stopAudioLevelMonitoring()
     }
-  }, [stopAudioLevelMonitoring])
+  }, [])
 
-  const startAudioLevelMonitoring = useCallback((stream: MediaStream) => {
+  const startAudioLevelMonitoring = (stream: MediaStream) => {
     const audioContext = new AudioContext()
     const analyser = audioContext.createAnalyser()
     analyser.fftSize = 256
@@ -87,20 +107,36 @@ export function useVoiceInput(): UseVoiceInputReturn {
     const updateLevel = () => {
       if (!analyserRef.current) return
 
-      const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount)
-      analyserRef.current.getByteFrequencyData(dataArray)
+      const dataArray = new Uint8Array(analyserRef.current.fftSize)
+      analyserRef.current.getByteTimeDomainData(dataArray)
 
-      const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
-      const normalized = Math.min(100, (average / 128) * 100)
-      setAudioLevel(Math.round(normalized))
+      const binCount = dataArray.length
+      const levels: number[] = []
+      let totalPeak = 0
+
+      for (let band = 0; band < WAVEFORM_BAND_COUNT; band++) {
+        const start = Math.floor((band / WAVEFORM_BAND_COUNT) * binCount)
+        const end = Math.floor(((band + 1) / WAVEFORM_BAND_COUNT) * binCount)
+        let peak = 0
+        for (let j = start; j < end; j++) {
+          const amplitude = Math.abs(dataArray[j] - 128)
+          if (amplitude > peak) peak = amplitude
+        }
+        const normalized = Math.round(Math.min(100, (peak / 50) * 100))
+        levels.push(normalized)
+        totalPeak += normalized
+      }
+
+      setAudioLevels(levels)
+      setAudioLevel(Math.round(totalPeak / WAVEFORM_BAND_COUNT))
 
       animationFrameRef.current = requestAnimationFrame(updateLevel)
     }
 
     updateLevel()
-  }, [])
+  }
 
-  const startRecording = useCallback(async () => {
+  const startRecording = async (): Promise<boolean> => {
     try {
       setError(null)
       setTranscript('')
@@ -133,7 +169,12 @@ export function useVoiceInput(): UseVoiceInputReturn {
 
       mediaRecorder.start(250)
       setIsRecording(true)
+      return true
     } catch (err) {
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+      stopAudioLevelMonitoring()
+
       if (err instanceof Error) {
         if (err.name === 'NotAllowedError') {
           setError('Microphone permission denied')
@@ -145,10 +186,11 @@ export function useVoiceInput(): UseVoiceInputReturn {
       } else {
         setError('Failed to start recording')
       }
+      return false
     }
-  }, [startAudioLevelMonitoring])
+  }
 
-  const stopRecording = useCallback(async () => {
+  const stopRecording = async () => {
     const mediaRecorder = mediaRecorderRef.current
 
     if (!mediaRecorder || mediaRecorder.state === 'inactive') {
@@ -188,18 +230,19 @@ export function useVoiceInput(): UseVoiceInputReturn {
     } finally {
       setIsTranscribing(false)
     }
-  }, [stopAudioLevelMonitoring])
+  }
 
-  const clearTranscript = useCallback(() => {
+  const clearTranscript = () => {
     setTranscript('')
     setError(null)
-  }, [])
+  }
 
   return {
     isRecording,
     isTranscribing,
     transcript,
     audioLevel,
+    audioLevels,
     error,
     startRecording,
     stopRecording,

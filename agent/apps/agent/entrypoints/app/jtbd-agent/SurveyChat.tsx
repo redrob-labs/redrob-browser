@@ -4,8 +4,8 @@ import { MessageResponse } from '@/components/ai-elements/message'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { useVoiceInput } from '@/lib/voice/useVoiceInput'
 import type { Message } from './useSurveyChat'
-import { useVoiceInput } from './useVoiceInput'
 import { VoiceInputButton } from './VoiceInputButton'
 
 interface Props {
@@ -81,6 +81,7 @@ export const Chat: FC<Props> = ({
   }, [messagesLength])
 
   // Insert transcript into input when transcription completes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only trigger on transcript/transcribing change
   useEffect(() => {
     if (voice.transcript && !voice.isTranscribing) {
       setInput((prev) => {
@@ -89,7 +90,7 @@ export const Chat: FC<Props> = ({
       })
       voice.clearTranscript()
     }
-  }, [voice])
+  }, [voice.transcript, voice.isTranscribing])
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()

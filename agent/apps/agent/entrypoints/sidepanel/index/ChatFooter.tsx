@@ -10,6 +10,7 @@ import { useCapabilities } from '@/lib/browseros/useCapabilities'
 import { useMcpServers } from '@/lib/mcp/mcpServerStorage'
 import { useSyncRemoteIntegrations } from '@/lib/mcp/useSyncRemoteIntegrations'
 import { cn } from '@/lib/utils'
+import type { VoiceInputState } from '@/lib/voice/useVoiceInput'
 import { useWorkspace } from '@/lib/workspace/use-workspace'
 import { ChatAttachedTabs } from './ChatAttachedTabs'
 import { ChatInput, type ChatInputHandle } from './ChatInput'
@@ -27,6 +28,7 @@ interface ChatFooterProps {
   attachedTabs: chrome.tabs.Tab[]
   onToggleTab: (tab: chrome.tabs.Tab) => void
   onRemoveTab: (tabId?: number) => void
+  voice?: VoiceInputState
 }
 
 export const ChatFooter: FC<ChatFooterProps> = ({
@@ -40,6 +42,7 @@ export const ChatFooter: FC<ChatFooterProps> = ({
   attachedTabs,
   onToggleTab,
   onRemoveTab,
+  voice,
 }) => {
   const { selectedFolder } = useWorkspace()
   const { supports } = useCapabilities()
@@ -172,6 +175,10 @@ export const ChatFooter: FC<ChatFooterProps> = ({
           </div>
         </div>
 
+        {voice?.error && (
+          <div className="mt-1 text-destructive text-xs">{voice.error}</div>
+        )}
+
         <ChatInput
           input={input}
           status={status}
@@ -182,6 +189,7 @@ export const ChatFooter: FC<ChatFooterProps> = ({
           selectedTabs={attachedTabs}
           onToggleTab={onToggleTab}
           onTabMentionOpenChange={setIsTabMentionOpen}
+          voice={voice}
           ref={chatInputRef}
         />
       </div>
