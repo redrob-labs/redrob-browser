@@ -111,7 +111,7 @@ export const AISettingsPage: FC = () => {
     null,
   )
 
-  // OAuth status for ChatGPT Pro
+  // OAuth status for ChatGPT Plus/Pro
   const {
     status: chatgptProStatus,
     startPolling: startChatGPTProPolling,
@@ -137,7 +137,7 @@ export const AISettingsPage: FC = () => {
       saveProvider({
         id: `chatgpt-pro-${now}`,
         type: 'chatgpt-pro',
-        name: `ChatGPT Pro${chatgptProStatus.email ? ` (${chatgptProStatus.email})` : ''}`,
+        name: `ChatGPT Plus/Pro${chatgptProStatus.email ? ` (${chatgptProStatus.email})` : ''}`,
         modelId: template?.defaultModelId ?? 'gpt-5.3-codex',
         supportsImages: template?.supportsImages ?? true,
         contextWindow: template?.contextWindow ?? 400000,
@@ -148,13 +148,13 @@ export const AISettingsPage: FC = () => {
       track(CHATGPT_PRO_OAUTH_COMPLETED_EVENT, {
         email: chatgptProStatus.email,
       })
-      toast.success('ChatGPT Pro Connected', {
+      toast.success('ChatGPT Plus/Pro Connected', {
         description: chatgptProStatus.email
           ? `Authenticated as ${chatgptProStatus.email}`
-          : 'Successfully authenticated with ChatGPT Pro',
+          : 'Successfully authenticated with ChatGPT Plus/Pro',
       })
     } catch (err) {
-      toast.error('Failed to create ChatGPT Pro provider', {
+      toast.error('Failed to create ChatGPT Plus/Pro provider', {
         description: err instanceof Error ? err.message : 'Unknown error',
       })
     } finally {
@@ -202,7 +202,7 @@ export const AISettingsPage: FC = () => {
     // Start polling for OAuth completion
     startChatGPTProPolling()
     track(CHATGPT_PRO_OAUTH_STARTED_EVENT)
-    toast.info('Authenticating with ChatGPT Pro', {
+    toast.info('Authenticating with ChatGPT Plus/Pro', {
       description: 'Complete the login in the opened tab.',
     })
   }

@@ -20,7 +20,7 @@ export interface OAuthProviderConfig {
 export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
   'chatgpt-pro': {
     id: 'chatgpt-pro',
-    name: 'ChatGPT Pro',
+    name: 'ChatGPT Plus/Pro',
     clientId: 'app_EMoamEEZ73f0CkXaXp7hrann',
     authEndpoint: EXTERNAL_URLS.OPENAI_AUTH,
     tokenEndpoint: EXTERNAL_URLS.OPENAI_TOKEN,

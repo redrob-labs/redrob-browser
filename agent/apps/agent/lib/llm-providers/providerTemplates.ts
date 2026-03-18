@@ -22,7 +22,7 @@ export interface ProviderTemplate {
 export const providerTemplates: ProviderTemplate[] = [
   {
     id: 'chatgpt-pro',
-    name: 'ChatGPT Pro',
+    name: 'ChatGPT Plus/Pro',
     defaultBaseUrl: 'https://chatgpt.com/backend-api',
     defaultModelId: 'gpt-5.3-codex',
     supportsImages: true,
@@ -138,7 +138,7 @@ export const providerTemplates: ProviderTemplate[] = [
  * @public
  */
 export const providerTypeOptions: { value: ProviderType; label: string }[] = [
-  { value: 'chatgpt-pro', label: 'ChatGPT Pro' },
+  { value: 'chatgpt-pro', label: 'ChatGPT Plus/Pro' },
   { value: 'moonshot', label: 'Moonshot AI' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
