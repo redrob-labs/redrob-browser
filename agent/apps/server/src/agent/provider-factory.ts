@@ -7,6 +7,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { LLM_PROVIDERS } from '@browseros/shared/schemas/llm'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import type { LanguageModel } from 'ai'
+import { createCodexFetch } from '../lib/clients/oauth/codex-fetch'
 import { logger } from '../lib/logger'
 import { createOpenRouterCompatibleFetch } from '../lib/openrouter-fetch'
 import type { ResolvedAgentConfig } from './types'
@@ -148,6 +149,17 @@ function createMoonshotFactory(
   })
 }
 
+function createChatGPTProFactory(
+  config: ResolvedAgentConfig,
+): (modelId: string) => unknown {
+  if (!config.apiKey)
+    throw new Error('ChatGPT Pro requires OAuth authentication')
+  return createOpenAI({
+    apiKey: config.apiKey,
+    fetch: createCodexFetch(config.accountId) as typeof globalThis.fetch,
+  }).responses
+}
+
 const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
   [LLM_PROVIDERS.ANTHROPIC]: createAnthropicFactory,
   [LLM_PROVIDERS.OPENAI]: createOpenAIFactory,
@@ -160,6 +172,7 @@ const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
   [LLM_PROVIDERS.BROWSEROS]: createBrowserOSFactory,
   [LLM_PROVIDERS.OPENAI_COMPATIBLE]: createOpenAICompatibleFactory,
   [LLM_PROVIDERS.MOONSHOT]: createMoonshotFactory,
+  [LLM_PROVIDERS.CHATGPT_PRO]: createChatGPTProFactory,
 }
 
 export function createLanguageModel(

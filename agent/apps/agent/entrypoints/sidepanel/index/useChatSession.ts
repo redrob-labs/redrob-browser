@@ -308,6 +308,9 @@ export const useChatSession = (options?: ChatSessionOptions) => {
             secretAccessKey: provider?.secretAccessKey,
             region: provider?.region,
             sessionToken: provider?.sessionToken,
+            // ChatGPT Pro (Codex)
+            reasoningEffort: provider?.reasoningEffort,
+            reasoningSummary: provider?.reasoningSummary,
             browserContext,
             userSystemPrompt:
               options?.origin === 'newtab'

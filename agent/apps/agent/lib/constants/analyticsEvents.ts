@@ -30,6 +30,18 @@ export const CONVERSATION_RESET_EVENT = 'ui.conversation.reset'
 export const AI_PROVIDER_ADDED_EVENT = 'settings.ai_provider.added'
 
 /** @public */
+export const CHATGPT_PRO_OAUTH_STARTED_EVENT =
+  'settings.chatgpt_pro.oauth_started'
+
+/** @public */
+export const CHATGPT_PRO_OAUTH_COMPLETED_EVENT =
+  'settings.chatgpt_pro.oauth_completed'
+
+/** @public */
+export const CHATGPT_PRO_OAUTH_DISCONNECTED_EVENT =
+  'settings.chatgpt_pro.oauth_disconnected'
+
+/** @public */
 export const HUB_PROVIDER_ADDED_EVENT = 'settings.hub_provider.added'
 
 /** @public */

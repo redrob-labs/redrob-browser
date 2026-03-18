@@ -16,6 +16,7 @@ import { LLM_PROVIDERS } from '@browseros/shared/schemas/llm'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import type { LanguageModel } from 'ai'
 import { logger } from '../../logger'
+import { createCodexFetch } from '../oauth/codex-fetch'
 import { createOpenRouterCompatibleFetch } from '../../openrouter-fetch'
 import type { ResolvedLLMConfig } from './types'
 
@@ -134,6 +135,15 @@ function createMoonshotModel(config: ResolvedLLMConfig): LanguageModel {
   })(config.model)
 }
 
+function createChatGPTProModel(config: ResolvedLLMConfig): LanguageModel {
+  if (!config.apiKey)
+    throw new Error('ChatGPT Pro requires OAuth authentication')
+  return createOpenAI({
+    apiKey: config.apiKey,
+    fetch: createCodexFetch(config.accountId) as typeof globalThis.fetch,
+  }).responses(config.model)
+}
+
 const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
   [LLM_PROVIDERS.ANTHROPIC]: createAnthropicModel,
   [LLM_PROVIDERS.OPENAI]: createOpenAIModel,
@@ -146,6 +156,7 @@ const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
   [LLM_PROVIDERS.BROWSEROS]: createBrowserOSModel,
   [LLM_PROVIDERS.OPENAI_COMPATIBLE]: createOpenAICompatibleModel,
   [LLM_PROVIDERS.MOONSHOT]: createMoonshotModel,
+  [LLM_PROVIDERS.CHATGPT_PRO]: createChatGPTProModel,
 }
 
 export function createLLMProvider(config: ResolvedLLMConfig): LanguageModel {
