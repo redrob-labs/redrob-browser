@@ -9,7 +9,7 @@ import {
   OpenAI,
   OpenRouter,
 } from '@lobehub/icons'
-import { Bot } from 'lucide-react'
+import { Bot, Github } from 'lucide-react'
 import type { FC, SVGProps } from 'react'
 import ProductLogoSvg from '@/assets/product_logo.svg'
 import type { ProviderType } from './types'
@@ -33,6 +33,7 @@ const providerIconMap: Record<ProviderType, IconComponent | null> = {
   browseros: null,
   moonshot: Kimi,
   'chatgpt-pro': OpenAI,
+  'github-copilot': Github,
 }
 
 interface ProviderIconProps {

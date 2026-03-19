@@ -29,6 +29,17 @@ export function createOAuthRoutes(deps: OAuthRouteDeps) {
       }
 
       try {
+        // Device Code flow: return JSON with user code for the extension to display
+        if (provider.authFlow === 'device-code') {
+          const result = await tokenManager.startDeviceCodeFlow(providerId)
+          return c.json({
+            userCode: result.userCode,
+            verificationUri: result.verificationUri,
+            expiresIn: result.expiresIn,
+          })
+        }
+
+        // PKCE flow: redirect to auth server
         const authUrl = await tokenManager.generateAuthorizationUrl(
           providerId,
           redirectBackUrl,

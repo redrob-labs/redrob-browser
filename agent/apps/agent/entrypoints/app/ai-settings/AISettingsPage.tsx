@@ -17,6 +17,9 @@ import {
   CHATGPT_PRO_OAUTH_COMPLETED_EVENT,
   CHATGPT_PRO_OAUTH_DISCONNECTED_EVENT,
   CHATGPT_PRO_OAUTH_STARTED_EVENT,
+  GITHUB_COPILOT_OAUTH_COMPLETED_EVENT,
+  GITHUB_COPILOT_OAUTH_DISCONNECTED_EVENT,
+  GITHUB_COPILOT_OAUTH_STARTED_EVENT,
 } from '@/lib/constants/analyticsEvents'
 import { GetProfileIdByUserIdDocument } from '@/lib/conversations/graphql/uploadConversationDocument'
 import { getQueryKeyFromDocument } from '@/lib/graphql/getQueryKeyFromDocument'
@@ -118,8 +121,16 @@ export const AISettingsPage: FC = () => {
     disconnect: disconnectChatGPTPro,
   } = useOAuthStatus('chatgpt-pro')
 
+  // OAuth status for GitHub Copilot
+  const {
+    status: copilotStatus,
+    startPolling: startCopilotPolling,
+    disconnect: disconnectCopilot,
+  } = useOAuthStatus('github-copilot')
+
   // Track whether user explicitly started an OAuth flow this session
   const oauthFlowStartedRef = useRef(false)
+  const copilotOAuthStartedRef = useRef(false)
 
   // Auto-create provider only when user actively completed OAuth,
   // not on passive page load when server has old tokens
@@ -162,6 +173,42 @@ export const AISettingsPage: FC = () => {
     }
   }, [chatgptProStatus?.authenticated])
 
+  // Auto-create GitHub Copilot provider on successful OAuth
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — only trigger on auth status change
+  useEffect(() => {
+    if (!copilotStatus?.authenticated) return
+    if (!copilotOAuthStartedRef.current) return
+
+    const exists = providers.some((p) => p.type === 'github-copilot')
+    if (exists) return
+
+    const now = Date.now()
+    try {
+      const template = getProviderTemplate('github-copilot')
+      saveProvider({
+        id: `github-copilot-${now}`,
+        type: 'github-copilot',
+        name: 'GitHub Copilot',
+        modelId: template?.defaultModelId ?? 'gpt-4o',
+        supportsImages: template?.supportsImages ?? true,
+        contextWindow: template?.contextWindow ?? 128000,
+        temperature: 0.2,
+        createdAt: now,
+        updatedAt: now,
+      })
+      track(GITHUB_COPILOT_OAUTH_COMPLETED_EVENT)
+      toast.success('GitHub Copilot Connected', {
+        description: 'Successfully authenticated with GitHub Copilot',
+      })
+    } catch (err) {
+      toast.error('Failed to create GitHub Copilot provider', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    } finally {
+      copilotOAuthStartedRef.current = false
+    }
+  }, [copilotStatus?.authenticated])
+
   const handleAddProvider = () => {
     setTemplateValues(undefined)
     setIsNewDialogOpen(true)
@@ -171,6 +218,10 @@ export const AISettingsPage: FC = () => {
     // OAuth providers: trigger OAuth flow instead of opening form dialog
     if (template.id === 'chatgpt-pro') {
       handleStartChatGPTProOAuth()
+      return
+    }
+    if (template.id === 'github-copilot') {
+      handleStartGitHubCopilotOAuth()
       return
     }
 
@@ -207,6 +258,47 @@ export const AISettingsPage: FC = () => {
     })
   }
 
+  const handleStartGitHubCopilotOAuth = async () => {
+    if (!agentServerUrl) {
+      toast.error('Server not available', {
+        description: 'Cannot start OAuth flow without server connection.',
+      })
+      return
+    }
+    copilotOAuthStartedRef.current = true
+
+    try {
+      // Device Code flow: get user code from server, then open GitHub
+      const res = await fetch(`${agentServerUrl}/oauth/github-copilot/start`)
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+
+      const data = (await res.json()) as {
+        userCode?: string
+        verificationUri?: string
+      }
+
+      if (!data.userCode || !data.verificationUri) {
+        throw new Error('Invalid response from server')
+      }
+
+      // Open GitHub device verification page
+      window.open(data.verificationUri, '_blank')
+
+      // Start polling for completion
+      startCopilotPolling()
+      track(GITHUB_COPILOT_OAUTH_STARTED_EVENT)
+      toast.info(`Enter code: ${data.userCode}`, {
+        description: 'Paste this code on the GitHub page that just opened.',
+        duration: 60_000,
+      })
+    } catch (err) {
+      copilotOAuthStartedRef.current = false
+      toast.error('Failed to start GitHub Copilot authentication', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    }
+  }
+
   const handleEditProvider = (provider: LlmProviderConfig) => {
     setEditingProvider(provider)
     setIsEditDialogOpen(true)
@@ -222,6 +314,10 @@ export const AISettingsPage: FC = () => {
       if (providerToDelete.type === 'chatgpt-pro') {
         await disconnectChatGPTPro()
         track(CHATGPT_PRO_OAUTH_DISCONNECTED_EVENT)
+      }
+      if (providerToDelete.type === 'github-copilot') {
+        await disconnectCopilot()
+        track(GITHUB_COPILOT_OAUTH_DISCONNECTED_EVENT)
       }
       await deleteProvider(providerToDelete.id)
       deleteRemoteProviderMutation.mutate({ rowId: providerToDelete.id })

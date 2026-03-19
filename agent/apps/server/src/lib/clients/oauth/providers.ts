@@ -15,6 +15,7 @@ export interface OAuthProviderConfig {
   scopes: string[]
   extraAuthParams?: Record<string, string>
   upstreamLLMProvider: string
+  authFlow?: 'pkce' | 'device-code'
 }
 
 export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
@@ -31,6 +32,16 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
       originator: 'browseros',
     },
     upstreamLLMProvider: 'openai',
+  },
+  'github-copilot': {
+    id: 'github-copilot',
+    name: 'GitHub Copilot',
+    clientId: 'Ov23li8tweQw6odWQebz',
+    authEndpoint: EXTERNAL_URLS.GITHUB_DEVICE_CODE,
+    tokenEndpoint: EXTERNAL_URLS.GITHUB_OAUTH_TOKEN,
+    scopes: ['read:user'],
+    upstreamLLMProvider: 'github-copilot',
+    authFlow: 'device-code',
   },
 }
 

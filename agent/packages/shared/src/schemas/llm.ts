@@ -25,6 +25,7 @@ export const LLM_PROVIDERS = {
   OPENAI_COMPATIBLE: 'openai-compatible',
   MOONSHOT: 'moonshot',
   CHATGPT_PRO: 'chatgpt-pro',
+  GITHUB_COPILOT: 'github-copilot',
 } as const
 
 /**
@@ -44,6 +45,7 @@ export const LLMProviderSchema: z.ZodEnum<
     'openai-compatible',
     'moonshot',
     'chatgpt-pro',
+    'github-copilot',
   ]
 > = z.enum([
   LLM_PROVIDERS.ANTHROPIC,
@@ -58,6 +60,7 @@ export const LLMProviderSchema: z.ZodEnum<
   LLM_PROVIDERS.OPENAI_COMPATIBLE,
   LLM_PROVIDERS.MOONSHOT,
   LLM_PROVIDERS.CHATGPT_PRO,
+  LLM_PROVIDERS.GITHUB_COPILOT,
 ])
 
 export type LLMProvider = z.infer<typeof LLMProviderSchema>

@@ -25,6 +25,26 @@ interface OAuthTokenResponse {
   id_token?: string
 }
 
+export interface DeviceCodeResult {
+  userCode: string
+  verificationUri: string
+  expiresIn: number
+}
+
+interface GitHubDeviceCodeResponse {
+  device_code: string
+  user_code: string
+  verification_uri: string
+  expires_in: number
+  interval: number
+}
+
+interface GitHubTokenPollResponse {
+  access_token?: string
+  error?: string
+  interval?: number
+}
+
 export class OAuthTokenManager {
   private readonly pendingFlows = new Map<string, PendingOAuthFlow>()
   private readonly refreshLocks = new Map<
@@ -36,6 +56,8 @@ export class OAuthTokenManager {
     private readonly store: OAuthTokenStore,
     private readonly browserosId: string,
   ) {}
+
+  // --- PKCE flow (ChatGPT Plus/Pro) ---
 
   async generateAuthorizationUrl(
     providerId: string,
@@ -138,16 +160,150 @@ export class OAuthTokenManager {
     return { tokens, redirectBackUrl: flow.redirectBackUrl }
   }
 
-  // Mutex-protected refresh: concurrent callers share one in-flight refresh
+  // --- Device Code flow (GitHub Copilot) ---
+
+  private readonly activeDeviceFlows = new Set<string>()
+
+  async startDeviceCodeFlow(providerId: string): Promise<DeviceCodeResult> {
+    const provider = getOAuthProvider(providerId)
+    if (!provider) throw new Error(`Unknown OAuth provider: ${providerId}`)
+
+    // Cancel any existing flow — user may be retrying
+    this.activeDeviceFlows.delete(providerId)
+
+    // Request a device code from GitHub
+    const response = await fetch(provider.authEndpoint, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        client_id: provider.clientId,
+        scope: provider.scopes.join(' '),
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Failed to request device code: ${response.status}`)
+    }
+
+    const data = (await response.json()) as GitHubDeviceCodeResponse
+
+    // GitHub can return 200 with an error payload (e.g. invalid scope)
+    const dataObj = data as unknown as Record<string, unknown>
+    if ('error' in dataObj) {
+      throw new Error(`GitHub device code error: ${dataObj.error}`)
+    }
+    if (!data.device_code || !data.user_code) {
+      throw new Error('Invalid device code response from GitHub')
+    }
+
+    // Start background polling with error handling
+    this.activeDeviceFlows.add(providerId)
+    this.pollDeviceCode(
+      providerId,
+      provider,
+      data.device_code,
+      data.interval,
+      data.expires_in,
+    ).finally(() => this.activeDeviceFlows.delete(providerId))
+
+    return {
+      userCode: data.user_code,
+      verificationUri: data.verification_uri,
+      expiresIn: data.expires_in,
+    }
+  }
+
+  private async pollDeviceCode(
+    providerId: string,
+    provider: ReturnType<typeof getOAuthProvider> & {},
+    deviceCode: string,
+    initialInterval: number,
+    expiresIn: number,
+  ): Promise<void> {
+    let interval = initialInterval
+    const deadline = Date.now() + expiresIn * 1000
+
+    while (Date.now() < deadline) {
+      // Wait before polling (interval + safety margin per OpenCode pattern)
+      await sleep(interval * 1000 + TIMEOUTS.DEVICE_CODE_POLL_SAFETY_MARGIN)
+
+      try {
+        const response = await fetch(provider.tokenEndpoint, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            client_id: provider.clientId,
+            device_code: deviceCode,
+            grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+          }),
+        })
+
+        const data = (await response.json()) as GitHubTokenPollResponse
+
+        // Token received — store it and return
+        if (data.access_token) {
+          const tokens: StoredOAuthTokens = {
+            accessToken: data.access_token,
+            refreshToken: '',
+            expiresAt: 0,
+            email: undefined,
+            accountId: undefined,
+          }
+          this.store.upsertTokens(this.browserosId, providerId, tokens)
+          logger.info('Device code OAuth successful', { provider: providerId })
+          return
+        }
+
+        // Handle polling errors per RFC 8628
+        if (data.error === 'authorization_pending') continue
+        if (data.error === 'slow_down') {
+          interval = (data.interval ?? interval) + 5
+          continue
+        }
+        if (data.error === 'expired_token' || data.error === 'access_denied') {
+          logger.warn('Device code flow ended', {
+            provider: providerId,
+            error: data.error,
+          })
+          return
+        }
+
+        logger.warn('Unexpected device code poll response', {
+          provider: providerId,
+          error: data.error,
+        })
+        return
+      } catch (err) {
+        // Transient network error — loop continues to retry
+        logger.warn('Device code poll request failed, retrying', {
+          provider: providerId,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
+
+    logger.warn('Device code flow timed out', { provider: providerId })
+  }
+
+  // --- Token refresh (PKCE providers only) ---
+
   async refreshIfExpired(provider: string): Promise<StoredOAuthTokens | null> {
     const tokens = this.store.getTokens(this.browserosId, provider)
     if (!tokens) return null
+
+    // GitHub Copilot tokens never expire (expiresAt = 0)
+    if (tokens.expiresAt === 0) return tokens
 
     if (Date.now() < tokens.expiresAt - TIMEOUTS.OAUTH_TOKEN_EXPIRY_BUFFER) {
       return tokens
     }
 
-    // If a refresh is already in progress, await it instead of starting another
     const existing = this.refreshLocks.get(provider)
     if (existing) return existing
 
@@ -214,6 +370,12 @@ export class OAuthTokenManager {
     return refreshed
   }
 
+  // --- Shared ---
+
+  getTokens(provider: string): StoredOAuthTokens | null {
+    return this.store.getTokens(this.browserosId, provider)
+  }
+
   getStatus(provider: string) {
     return this.store.getStatus(this.browserosId, provider)
   }
@@ -255,6 +417,10 @@ function generateRandomState(): string {
 function base64UrlEncode(bytes: Uint8Array): string {
   const base64 = btoa(String.fromCharCode(...bytes))
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 // Extracts claims without signature verification — safe because the token

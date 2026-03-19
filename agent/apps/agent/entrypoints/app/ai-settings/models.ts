@@ -24,6 +24,7 @@ export interface ModelsData {
   browseros: ModelInfo[]
   moonshot: ModelInfo[]
   'chatgpt-pro': ModelInfo[]
+  'github-copilot': ModelInfo[]
 }
 
 /**
@@ -100,6 +101,32 @@ export const MODELS_DATA: ModelsData = {
     { modelId: 'gpt-5.1-codex-max', contextLength: 400000 },
     { modelId: 'gpt-5.1-codex-mini', contextLength: 400000 },
     { modelId: 'gpt-5.1', contextLength: 200000 },
+  ],
+  'github-copilot': [
+    // Free tier (unlimited with Pro)
+    { modelId: 'gpt-5-mini', contextLength: 128000 },
+    { modelId: 'claude-haiku-4.5', contextLength: 128000 },
+    { modelId: 'gpt-4o', contextLength: 64000 },
+    { modelId: 'gpt-4.1', contextLength: 64000 },
+    // Premium models (Pro: 300/mo, Pro+: 1500/mo)
+    { modelId: 'claude-sonnet-4.6', contextLength: 128000 },
+    { modelId: 'claude-sonnet-4.5', contextLength: 128000 },
+    { modelId: 'claude-sonnet-4', contextLength: 128000 },
+    { modelId: 'claude-opus-4.6', contextLength: 128000 },
+    { modelId: 'claude-opus-4.5', contextLength: 128000 },
+    { modelId: 'gemini-2.5-pro', contextLength: 128000 },
+    { modelId: 'gemini-3-pro-preview', contextLength: 128000 },
+    { modelId: 'gemini-3-flash-preview', contextLength: 128000 },
+    { modelId: 'gemini-3.1-pro-preview', contextLength: 128000 },
+    { modelId: 'gpt-5.4', contextLength: 272000 },
+    { modelId: 'gpt-5.4-mini', contextLength: 128000 },
+    { modelId: 'gpt-5.3-codex', contextLength: 272000 },
+    { modelId: 'gpt-5.2-codex', contextLength: 272000 },
+    { modelId: 'gpt-5.2', contextLength: 128000 },
+    { modelId: 'gpt-5.1-codex', contextLength: 128000 },
+    { modelId: 'gpt-5.1-codex-max', contextLength: 128000 },
+    { modelId: 'gpt-5.1', contextLength: 128000 },
+    { modelId: 'grok-code-fast-1', contextLength: 128000 },
   ],
 }
 

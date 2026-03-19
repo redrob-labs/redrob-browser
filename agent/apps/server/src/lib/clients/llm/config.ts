@@ -17,9 +17,12 @@ export async function resolveLLMConfig(
   config: LLMConfig,
   browserosId?: string,
 ): Promise<ResolvedLLMConfig> {
-  // ChatGPT Pro: resolve OAuth token from server-side storage
+  // OAuth providers: resolve token from server-side storage
   if (config.provider === LLM_PROVIDERS.CHATGPT_PRO) {
     return resolveChatGPTProConfig(config, browserosId)
+  }
+  if (config.provider === LLM_PROVIDERS.GITHUB_COPILOT) {
+    return resolveGitHubCopilotConfig(config, browserosId)
   }
 
   // BrowserOS gateway: fetch config from remote service
@@ -58,6 +61,32 @@ async function resolveChatGPTProConfig(
     apiKey: tokens.accessToken,
     upstreamProvider: 'openai',
     accountId: tokens.accountId,
+  }
+}
+
+async function resolveGitHubCopilotConfig(
+  config: LLMConfig,
+  browserosId?: string,
+): Promise<ResolvedLLMConfig> {
+  const tokenManager = getOAuthTokenManager()
+  if (!tokenManager || !browserosId) {
+    throw new Error(
+      'Not authenticated with GitHub Copilot. Please login first.',
+    )
+  }
+
+  // GitHub tokens never expire — no refresh needed
+  const tokens = tokenManager.getTokens('github-copilot')
+  if (!tokens) {
+    throw new Error(
+      'Not authenticated with GitHub Copilot. Please login first.',
+    )
+  }
+
+  return {
+    ...config,
+    model: config.model || 'gpt-5-mini',
+    apiKey: tokens.accessToken,
   }
 }
 
