@@ -10,6 +10,7 @@ import {
 } from 'react-router'
 
 import { NewTab } from '../newtab/index/NewTab'
+import { NewTabChat } from '../newtab/index/NewTabChat'
 import { NewTabLayout } from '../newtab/layout/NewTabLayout'
 import { Personalize } from '../newtab/personalize/Personalize'
 import { OnboardingDemo } from '../onboarding/demo/OnboardingDemo'
@@ -99,6 +100,7 @@ const AppRoutes: FC = () => {
           {/* Home routes */}
           <Route path="home" element={<NewTabLayout />}>
             <Route index element={<NewTab />} />
+            <Route path="chat" element={<NewTabChat />} />
             <Route path="personalize" element={<Personalize />} />
             <Route path="soul" element={<SoulPage />} />
             <Route path="skills" element={<SkillsPage />} />
