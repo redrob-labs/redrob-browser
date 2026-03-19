@@ -27,6 +27,7 @@ import { createDefaultBrowserOSProvider } from '@/lib/llm-providers/storage'
 import { useLlmProviders } from '@/lib/llm-providers/useLlmProviders'
 import { track } from '@/lib/metrics/track'
 import { searchActionsStorage } from '@/lib/search-actions/searchActionsStorage'
+import { selectedTextStorage } from '@/lib/selected-text/selectedTextStorage'
 import { stopAgentStorage } from '@/lib/stop-agent/stop-agent-storage'
 import { selectedWorkspaceStorage } from '@/lib/workspace/workspace-storage'
 import type { ChatMode } from './chatTypes'
@@ -165,7 +166,33 @@ export const useChatSession = (options?: ChatSessionOptions) => {
   const modeRef = useRef<ChatMode>(mode)
   const textToActionRef = useRef<Map<string, ChatAction>>(textToAction)
   const workingDirRef = useRef<string | undefined>(undefined)
+  const selectionMapRef = useRef<
+    Record<string, { text: string; url: string; title: string }>
+  >({})
+  const pendingSelectionTabKeyRef = useRef<string | null>(null)
   const messagesRef = useRef<UIMessage[]>([])
+
+  useEffect(() => {
+    const toRef = (
+      map: Record<string, { text: string; pageUrl: string; pageTitle: string }>,
+    ) => {
+      const result: Record<
+        string,
+        { text: string; url: string; title: string }
+      > = {}
+      for (const [k, v] of Object.entries(map)) {
+        result[k] = { text: v.text, url: v.pageUrl, title: v.pageTitle }
+      }
+      return result
+    }
+    selectedTextStorage.getValue().then((map) => {
+      selectionMapRef.current = toRef(map)
+    })
+    const unwatchText = selectedTextStorage.watch((map) => {
+      selectionMapRef.current = toRef(map)
+    })
+    return () => unwatchText()
+  }, [])
 
   useEffect(() => {
     selectedWorkspaceStorage.getValue().then((folder) => {
@@ -210,6 +237,9 @@ export const useChatSession = (options?: ChatSessionOptions) => {
           currentWindow: true,
         })
         const activeTab = activeTabsList?.[0] ?? undefined
+        const activeTabSelection = activeTab?.id
+          ? (selectionMapRef.current[String(activeTab.id)] ?? null)
+          : null
         const message = getLastMessageText(messages)
         const provider =
           selectedLlmProviderRef.current ?? createDefaultBrowserOSProvider()
@@ -287,7 +317,7 @@ export const useChatSession = (options?: ChatSessionOptions) => {
             : history.map((m) => `${m.role}: ${m.content}`).join('\n')
           : undefined
 
-        return {
+        const result = {
           api: `${agentUrlRef.current}/chat`,
           body: {
             message,
@@ -322,8 +352,21 @@ export const useChatSession = (options?: ChatSessionOptions) => {
             supportsImages: provider?.supportsImages,
             previousConversation,
             declinedApps: declinedApps.length > 0 ? declinedApps : undefined,
+            selectedText: activeTabSelection?.text,
+            selectedTextSource: activeTabSelection
+              ? {
+                  url: activeTabSelection.url,
+                  title: activeTabSelection.title,
+                }
+              : undefined,
           },
         }
+
+        // Track which tab's selection was sent so we can clear it on success
+        pendingSelectionTabKeyRef.current =
+          activeTabSelection && activeTab?.id ? String(activeTab.id) : null
+
+        return result
       },
     }),
   })
@@ -416,6 +459,19 @@ export const useChatSession = (options?: ChatSessionOptions) => {
     previousStatusRef.current = status
 
     if (!justFinished) return
+
+    // Clear the selected text that was sent with this request
+    const tabKey = pendingSelectionTabKeyRef.current
+    if (tabKey) {
+      pendingSelectionTabKeyRef.current = null
+      delete selectionMapRef.current[tabKey]
+      selectedTextStorage.getValue().then((map) => {
+        if (map[tabKey]) {
+          const { [tabKey]: _, ...rest } = map
+          selectedTextStorage.setValue(rest)
+        }
+      })
+    }
 
     const messagesToSave = messages.filter((m) => m.parts?.length > 0)
     if (messagesToSave.length === 0) return
