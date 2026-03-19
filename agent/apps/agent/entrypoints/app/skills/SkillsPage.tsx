@@ -260,7 +260,14 @@ const SkillCard: FC<{
   <Card className="h-full py-0 shadow-sm">
     <CardContent className="flex h-full flex-col p-4">
       <div className="flex items-start justify-between gap-3">
-        <h2 className="font-semibold text-sm leading-5">{skill.name}</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="font-semibold text-sm leading-5">{skill.name}</h2>
+          {skill.builtIn ? (
+            <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+              Built-in
+            </Badge>
+          ) : null}
+        </div>
         <Switch
           checked={skill.enabled}
           onCheckedChange={onToggle}
@@ -284,15 +291,17 @@ const SkillCard: FC<{
           <Pencil className="size-3.5" />
           Edit
         </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onDelete}
-          className="size-7 text-muted-foreground hover:bg-transparent hover:text-destructive"
-          aria-label={`Delete ${skill.name}`}
-        >
-          <Trash2 className="size-4" />
-        </Button>
+        {!skill.builtIn ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onDelete}
+            className="size-7 text-muted-foreground hover:bg-transparent hover:text-destructive"
+            aria-label={`Delete ${skill.name}`}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        ) : null}
       </div>
     </CardContent>
   </Card>

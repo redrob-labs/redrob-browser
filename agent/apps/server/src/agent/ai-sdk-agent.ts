@@ -15,7 +15,6 @@ import {
   wrapLanguageModel,
 } from 'ai'
 import type { Browser } from '../browser/browser'
-import { getSkillsDir } from '../lib/browseros-dir'
 import type { KlavisClient } from '../lib/clients/klavis/klavis-client'
 import { logger } from '../lib/logger'
 import { isSoulBootstrap, readSoul } from '../lib/soul'
@@ -151,7 +150,7 @@ export class AiSdkAgent {
     const isBootstrap = await isSoulBootstrap()
 
     // Load skills catalog for prompt injection
-    const skills = await loadSkills(getSkillsDir())
+    const skills = await loadSkills()
     const skillsCatalog =
       skills.length > 0 ? buildSkillsCatalog(skills) : undefined
 
