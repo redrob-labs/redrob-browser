@@ -37,6 +37,10 @@
       "types": "./src/types/logger.ts",
       "default": "./src/types/logger.ts"
     },
+    "./types/server-config": {
+      "types": "./src/types/server-config.ts",
+      "default": "./src/types/server-config.ts"
+    },
     "./schemas/llm": {
       "types": "./src/schemas/llm.ts",
       "default": "./src/schemas/llm.ts"

@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -170,11 +172,44 @@ func defaultServerURL() string {
 	}
 
 	cfg, err := config.Load()
+	if err == nil {
+		if url := normalizeServerURL(cfg.ServerURL); url != "" {
+			return url
+		}
+	}
+
+	if url := loadBrowserosServerURL(); url != "" {
+		return url
+	}
+
+	return ""
+}
+
+type serverDiscoveryConfig struct {
+	ServerPort       int    `json:"server_port"`
+	URL              string `json:"url"`
+	ServerVersion    string `json:"server_version"`
+	BrowserOSVersion string `json:"browseros_version,omitempty"`
+	ChromiumVersion  string `json:"chromium_version,omitempty"`
+}
+
+func loadBrowserosServerURL() string {
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
 
-	return normalizeServerURL(cfg.ServerURL)
+	data, err := os.ReadFile(filepath.Join(home, ".browseros", "server.json"))
+	if err != nil {
+		return ""
+	}
+
+	var sc serverDiscoveryConfig
+	if err := json.Unmarshal(data, &sc); err != nil {
+		return ""
+	}
+
+	return normalizeServerURL(sc.URL)
 }
 
 func normalizeServerURL(raw string) string {
