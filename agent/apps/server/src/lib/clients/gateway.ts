@@ -11,7 +11,16 @@ export interface Provider {
   apiKey: string
   baseUrl?: string
   dailyRateLimit?: number
+  dailyCredits?: number
+  creditCostPerRequest?: number
+  resetInterval?: string
   providerType?: string // LLMProvider value from ai-gateway: "openrouter" | "azure" | "anthropic"
+}
+
+export interface CreditsInfo {
+  credits: number
+  dailyLimit: number
+  lastResetAt?: string
 }
 
 export interface BrowserOSConfig {
@@ -108,4 +117,21 @@ export function getLLMConfigFromProvider(
     provider,
     providerType: provider.providerType,
   }
+}
+
+export async function fetchCredits(
+  gatewayBaseUrl: string,
+  browserosId: string,
+): Promise<CreditsInfo> {
+  const url = new URL(`/credits/${browserosId}`, gatewayBaseUrl).href
+  const response = await fetch(url)
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(
+      `Failed to fetch credits: ${response.status} ${response.statusText} - ${errorText}`,
+    )
+  }
+  const result = (await response.json()) as CreditsInfo
+  logger.debug('Credits fetched', { credits: result.credits })
+  return result
 }

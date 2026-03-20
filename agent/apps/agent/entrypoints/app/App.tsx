@@ -28,6 +28,7 @@ import { ScheduledTasksPage } from './scheduled-tasks/ScheduledTasksPage'
 import { SearchProviderPage } from './search-provider/SearchProviderPage'
 import { SkillsPage } from './skills/SkillsPage'
 import { SoulPage } from './soul/SoulPage'
+import { UsagePage } from './usage/UsagePage'
 import { WorkflowsPageWrapper } from './workflows/WorkflowsPageWrapper'
 
 function getSurveyParams(): { maxTurns?: number; experimentId?: string } {
@@ -103,6 +104,7 @@ export const App: FC = () => {
             <Route path="customization" element={<CustomizationPage />} />
             <Route path="search" element={<SearchProviderPage />} />
             <Route path="survey" element={<SurveyPage {...surveyParams} />} />
+            <Route path="usage" element={<UsagePage />} />
           </Route>
         </Route>
 

@@ -46,4 +46,6 @@ export interface ResolvedAgentConfig {
   isScheduledTask?: boolean
   /** Apps the user previously declined to connect via MCP (chose "do it manually"). */
   declinedApps?: string[]
+  /** BrowserOS installation ID for credit-based tracking. */
+  browserosId?: string
 }

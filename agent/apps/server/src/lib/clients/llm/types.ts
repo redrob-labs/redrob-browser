@@ -11,5 +11,6 @@ import type { LLMConfig } from '@browseros/shared/schemas/llm'
 export interface ResolvedLLMConfig extends LLMConfig {
   model: string
   upstreamProvider?: string
+  browserosId?: string
   accountId?: string
 }

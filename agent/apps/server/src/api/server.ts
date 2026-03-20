@@ -14,11 +14,13 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { HttpAgentError } from '../agent/errors'
+import { INLINED_ENV } from '../env'
 import { KlavisClient } from '../lib/clients/klavis/klavis-client'
 import { initializeOAuth } from '../lib/clients/oauth'
 import { getDb } from '../lib/db'
 import { logger } from '../lib/logger'
 import { createChatRoutes } from './routes/chat'
+import { createCreditsRoutes } from './routes/credits'
 import { createGraphRoutes } from './routes/graph'
 import { createHealthRoute } from './routes/health'
 import { createKlavisRoutes } from './routes/klavis'
@@ -132,6 +134,15 @@ export async function createHttpServer(config: HttpServerConfig) {
           ),
     )
     .route('/klavis', createKlavisRoutes({ browserosId: browserosId || '' }))
+    .route(
+      '/credits',
+      createCreditsRoutes({
+        browserosId,
+        gatewayBaseUrl: INLINED_ENV.BROWSEROS_CONFIG_URL
+          ? new URL(INLINED_ENV.BROWSEROS_CONFIG_URL).origin
+          : undefined,
+      }),
+    )
     .route(
       '/mcp',
       createMcpRoutes({

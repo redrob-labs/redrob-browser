@@ -3,10 +3,26 @@ import type { FC } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import { ChatProviderSelector } from '@/components/chat/ChatProviderSelector'
 import type { Provider } from '@/components/chat/chatComponentTypes'
+import { CreditBadge } from '@/components/credits/CreditBadge'
 import { ThemeToggle } from '@/components/elements/theme-toggle'
+import { Feature } from '@/lib/browseros/capabilities'
+import { useCapabilities } from '@/lib/browseros/useCapabilities'
 import { productRepositoryUrl } from '@/lib/constants/productUrls'
+import { useCredits } from '@/lib/credits/useCredits'
 import { BrowserOSIcon, ProviderIcon } from '@/lib/llm-providers/providerIcons'
 import type { ProviderType } from '@/lib/llm-providers/types'
+
+const CreditsBadgeWrapper: FC = () => {
+  const { supports } = useCapabilities()
+  const { data } = useCredits()
+  if (!supports(Feature.CREDITS_SUPPORT) || data === undefined) return null
+  return (
+    <CreditBadge
+      credits={data.credits}
+      onClick={() => window.open('/app.html#/settings/usage', '_blank')}
+    />
+  )
+}
 
 interface ChatHeaderProps {
   selectedProvider: Provider
@@ -61,6 +77,7 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
             </span>
           </button>
         </ChatProviderSelector>
+        {selectedProvider.type === 'browseros' && <CreditsBadgeWrapper />}
       </div>
 
       <div className="flex items-center gap-1">

@@ -21,6 +21,7 @@ import {
   useConversations,
 } from '@/lib/conversations/conversationStorage'
 import { formatConversationHistory } from '@/lib/conversations/formatConversationHistory'
+import { useInvalidateCredits } from '@/lib/credits/useCredits'
 import { declinedAppsStorage } from '@/lib/declined-apps/storage'
 import { useGraphqlQuery } from '@/lib/graphql/useGraphqlQuery'
 import { createDefaultBrowserOSProvider } from '@/lib/llm-providers/storage'
@@ -86,6 +87,7 @@ export const useChatSession = (options?: ChatSessionOptions) => {
     selectedLlmProvider,
     isLoadingProviders,
   } = useChatRefs()
+  const invalidateCredits = useInvalidateCredits()
 
   const { providers: llmProviders, setDefaultProvider } = useLlmProviders()
 
@@ -481,7 +483,13 @@ export const useChatSession = (options?: ChatSessionOptions) => {
     } else {
       saveLocalConversation(conversationIdRef.current, messagesToSave)
     }
+
+    invalidateCredits()
   }, [status])
+
+  useEffect(() => {
+    if (chatError) invalidateCredits()
+  }, [chatError, invalidateCredits])
 
   const isIntegrationsSynced = options?.isIntegrationsSynced ?? true
   const isIntegrationsSyncedRef = useRef(isIntegrationsSynced)

@@ -119,5 +119,6 @@ async function resolveBrowserOSConfig(
     apiKey: llmConfig.apiKey,
     baseUrl: llmConfig.baseUrl,
     upstreamProvider: llmConfig.providerType,
+    browserosId,
   }
 }

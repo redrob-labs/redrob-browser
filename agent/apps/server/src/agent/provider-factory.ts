@@ -8,6 +8,7 @@ import { EXTERNAL_URLS } from '@browseros/shared/constants/urls'
 import { LLM_PROVIDERS } from '@browseros/shared/schemas/llm'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import type { LanguageModel } from 'ai'
+import { createBrowserOSFetch } from '../lib/browseros-fetch'
 import { createCodexFetch } from '../lib/clients/oauth/codex-fetch'
 import { createCopilotFetch } from '../lib/clients/oauth/copilot-fetch'
 import { logger } from '../lib/logger'
@@ -104,26 +105,38 @@ function createBrowserOSFactory(
   config: ResolvedAgentConfig,
 ): (modelId: string) => unknown {
   if (!config.baseUrl) throw new Error('BrowserOS provider requires baseUrl')
-  const { baseUrl, apiKey, upstreamProvider } = config
+  const { baseUrl, apiKey, upstreamProvider, browserosId } = config
+  const browserosFetch = browserosId
+    ? createBrowserOSFetch(browserosId)
+    : createOpenRouterCompatibleFetch()
 
   if (upstreamProvider === LLM_PROVIDERS.OPENROUTER) {
     return createOpenRouter({
       baseURL: baseUrl,
       ...(apiKey && { apiKey }),
-      fetch: createOpenRouterCompatibleFetch(),
+      fetch: browserosFetch,
     })
   }
   if (upstreamProvider === LLM_PROVIDERS.ANTHROPIC) {
-    return createAnthropic({ baseURL: baseUrl, ...(apiKey && { apiKey }) })
+    return createAnthropic({
+      baseURL: baseUrl,
+      ...(apiKey && { apiKey }),
+      fetch: browserosFetch,
+    })
   }
   if (upstreamProvider === LLM_PROVIDERS.AZURE) {
-    return createAzure({ baseURL: baseUrl, ...(apiKey && { apiKey }) })
+    return createAzure({
+      baseURL: baseUrl,
+      ...(apiKey && { apiKey }),
+      fetch: browserosFetch,
+    })
   }
-  logger.info('creating openai-compatible')
+  logger.debug('Creating OpenAI-compatible provider for BrowserOS')
   return createOpenAICompatible({
     name: 'browseros',
     baseURL: baseUrl,
     ...(apiKey && { apiKey }),
+    fetch: browserosFetch,
   })
 }
 

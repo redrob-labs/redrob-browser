@@ -64,6 +64,7 @@ export class ChatService {
       chatMode: request.mode === 'chat',
       isScheduledTask: request.isScheduledTask,
       declinedApps: request.declinedApps,
+      browserosId: this.deps.browserosId,
     }
 
     let session = sessionStore.get(request.conversationId)
