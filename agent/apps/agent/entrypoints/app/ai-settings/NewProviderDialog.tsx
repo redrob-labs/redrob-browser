@@ -63,6 +63,7 @@ const providerTypeEnum = z.enum([
   'browseros',
   'chatgpt-pro',
   'github-copilot',
+  'qwen-code',
 ])
 
 /**
@@ -133,7 +134,11 @@ export const providerFormSchema = z
       }
     }
     // OAuth providers: no credentials needed (server-managed)
-    else if (data.type === 'chatgpt-pro' || data.type === 'github-copilot') {
+    else if (
+      data.type === 'chatgpt-pro' ||
+      data.type === 'github-copilot' ||
+      data.type === 'qwen-code'
+    ) {
       // No validation needed — OAuth tokens are on the server
     }
     // Other providers: require baseUrl
@@ -383,7 +388,11 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
     if (!watchedModelId) return false
 
     // OAuth providers: always testable (server has the OAuth token)
-    if (watchedType === 'chatgpt-pro' || watchedType === 'github-copilot')
+    if (
+      watchedType === 'chatgpt-pro' ||
+      watchedType === 'github-copilot' ||
+      watchedType === 'qwen-code'
+    )
       return true
 
     if (watchedType === 'azure') {
@@ -467,11 +476,12 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
   }
 
   const renderProviderSpecificFields = () => {
-    // GitHub Copilot: OAuth credentials only
-    if (watchedType === 'github-copilot') {
+    // OAuth-only providers (no API key needed)
+    if (watchedType === 'github-copilot' || watchedType === 'qwen-code') {
+      const name = watchedType === 'github-copilot' ? 'GitHub' : 'Qwen Code'
       return (
         <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-green-700 text-sm dark:border-green-800 dark:bg-green-950 dark:text-green-300">
-          Credentials are managed via GitHub OAuth. No API key needed.
+          Credentials are managed via {name} OAuth. No API key needed.
         </div>
       )
     }

@@ -151,6 +151,17 @@ function createMoonshotFactory(
   })
 }
 
+function createQwenCodeFactory(
+  config: ResolvedAgentConfig,
+): (modelId: string) => unknown {
+  if (!config.apiKey) throw new Error('Qwen Code requires OAuth authentication')
+  return createOpenAICompatible({
+    name: 'qwen-code',
+    baseURL: EXTERNAL_URLS.QWEN_CODE_API,
+    apiKey: config.apiKey,
+  })
+}
+
 function createGitHubCopilotFactory(
   config: ResolvedAgentConfig,
 ): (modelId: string) => unknown {
@@ -189,6 +200,7 @@ const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
   [LLM_PROVIDERS.MOONSHOT]: createMoonshotFactory,
   [LLM_PROVIDERS.CHATGPT_PRO]: createChatGPTProFactory,
   [LLM_PROVIDERS.GITHUB_COPILOT]: createGitHubCopilotFactory,
+  [LLM_PROVIDERS.QWEN_CODE]: createQwenCodeFactory,
 }
 
 export function createLanguageModel(

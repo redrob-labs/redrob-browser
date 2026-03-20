@@ -137,6 +137,15 @@ function createMoonshotModel(config: ResolvedLLMConfig): LanguageModel {
   })(config.model)
 }
 
+function createQwenCodeModel(config: ResolvedLLMConfig): LanguageModel {
+  if (!config.apiKey) throw new Error('Qwen Code requires OAuth authentication')
+  return createOpenAICompatible({
+    name: 'qwen-code',
+    baseURL: EXTERNAL_URLS.QWEN_CODE_API,
+    apiKey: config.apiKey,
+  })(config.model)
+}
+
 function createGitHubCopilotModel(config: ResolvedLLMConfig): LanguageModel {
   if (!config.apiKey)
     throw new Error('GitHub Copilot requires OAuth authentication')
@@ -171,6 +180,7 @@ const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
   [LLM_PROVIDERS.MOONSHOT]: createMoonshotModel,
   [LLM_PROVIDERS.CHATGPT_PRO]: createChatGPTProModel,
   [LLM_PROVIDERS.GITHUB_COPILOT]: createGitHubCopilotModel,
+  [LLM_PROVIDERS.QWEN_CODE]: createQwenCodeModel,
 }
 
 export function createLLMProvider(config: ResolvedLLMConfig): LanguageModel {

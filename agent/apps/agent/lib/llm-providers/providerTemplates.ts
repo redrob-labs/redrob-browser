@@ -39,6 +39,15 @@ export const providerTemplates: ProviderTemplate[] = [
     setupGuideUrl: 'https://docs.browseros.com/features/github-copilot-oauth',
   },
   {
+    id: 'qwen-code',
+    name: 'Qwen Code',
+    defaultBaseUrl: 'https://portal.qwen.ai/v1',
+    defaultModelId: 'coder-model',
+    supportsImages: true,
+    contextWindow: 1000000,
+    setupGuideUrl: 'https://docs.browseros.com/features/qwen-code-oauth',
+  },
+  {
     id: 'moonshot',
     name: 'Moonshot AI',
     defaultBaseUrl: 'https://api.moonshot.ai/v1',
@@ -149,6 +158,7 @@ export const providerTemplates: ProviderTemplate[] = [
 export const providerTypeOptions: { value: ProviderType; label: string }[] = [
   { value: 'chatgpt-pro', label: 'ChatGPT Plus/Pro' },
   { value: 'github-copilot', label: 'GitHub Copilot' },
+  { value: 'qwen-code', label: 'Qwen Code' },
   { value: 'moonshot', label: 'Moonshot AI' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
@@ -179,6 +189,7 @@ export const getProviderTemplate = (
 export const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
   'chatgpt-pro': 'https://chatgpt.com/backend-api',
   'github-copilot': 'https://api.githubcopilot.com',
+  'qwen-code': 'https://portal.qwen.ai/v1',
   moonshot: 'https://api.moonshot.ai/v1',
   anthropic: 'https://api.anthropic.com/v1',
   openai: 'https://api.openai.com/v1',

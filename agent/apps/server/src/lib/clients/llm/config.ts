@@ -19,10 +19,32 @@ export async function resolveLLMConfig(
 ): Promise<ResolvedLLMConfig> {
   // OAuth providers: resolve token from server-side storage
   if (config.provider === LLM_PROVIDERS.CHATGPT_PRO) {
-    return resolveChatGPTProConfig(config, browserosId)
+    return resolveOAuthConfig(config, browserosId, {
+      providerId: 'chatgpt-pro',
+      displayName: 'ChatGPT Plus/Pro',
+      defaultModel: 'gpt-5.3-codex',
+      useRefresh: true,
+      extraFields: (tokens) => ({
+        upstreamProvider: 'openai',
+        accountId: tokens.accountId,
+      }),
+    })
   }
   if (config.provider === LLM_PROVIDERS.GITHUB_COPILOT) {
-    return resolveGitHubCopilotConfig(config, browserosId)
+    return resolveOAuthConfig(config, browserosId, {
+      providerId: 'github-copilot',
+      displayName: 'GitHub Copilot',
+      defaultModel: 'gpt-5-mini',
+      useRefresh: false,
+    })
+  }
+  if (config.provider === LLM_PROVIDERS.QWEN_CODE) {
+    return resolveOAuthConfig(config, browserosId, {
+      providerId: 'qwen-code',
+      displayName: 'Qwen Code',
+      defaultModel: 'coder-model',
+      useRefresh: true,
+    })
   }
 
   // BrowserOS gateway: fetch config from remote service
@@ -37,56 +59,41 @@ export async function resolveLLMConfig(
   return config as ResolvedLLMConfig
 }
 
-async function resolveChatGPTProConfig(
-  config: LLMConfig,
-  browserosId?: string,
-): Promise<ResolvedLLMConfig> {
-  const tokenManager = getOAuthTokenManager()
-  if (!tokenManager || !browserosId) {
-    throw new Error(
-      'Not authenticated with ChatGPT Plus/Pro. Please login first.',
-    )
-  }
-
-  const tokens = await tokenManager.refreshIfExpired('chatgpt-pro')
-  if (!tokens) {
-    throw new Error(
-      'Not authenticated with ChatGPT Plus/Pro. Please login first.',
-    )
-  }
-
-  return {
-    ...config,
-    model: config.model || 'gpt-5.3-codex',
-    apiKey: tokens.accessToken,
-    upstreamProvider: 'openai',
-    accountId: tokens.accountId,
-  }
+interface OAuthResolveOptions {
+  providerId: string
+  displayName: string
+  defaultModel: string
+  useRefresh: boolean
+  extraFields?: (tokens: { accountId?: string }) => Record<string, unknown>
 }
 
-async function resolveGitHubCopilotConfig(
+async function resolveOAuthConfig(
   config: LLMConfig,
-  browserosId?: string,
+  browserosId: string | undefined,
+  opts: OAuthResolveOptions,
 ): Promise<ResolvedLLMConfig> {
   const tokenManager = getOAuthTokenManager()
   if (!tokenManager || !browserosId) {
     throw new Error(
-      'Not authenticated with GitHub Copilot. Please login first.',
+      `Not authenticated with ${opts.displayName}. Please login first.`,
     )
   }
 
-  // GitHub tokens never expire — no refresh needed
-  const tokens = tokenManager.getTokens('github-copilot')
+  const tokens = opts.useRefresh
+    ? await tokenManager.refreshIfExpired(opts.providerId)
+    : tokenManager.getTokens(opts.providerId)
+
   if (!tokens) {
     throw new Error(
-      'Not authenticated with GitHub Copilot. Please login first.',
+      `Not authenticated with ${opts.displayName}. Please login first.`,
     )
   }
 
   return {
     ...config,
-    model: config.model || 'gpt-5-mini',
+    model: config.model || opts.defaultModel,
     apiKey: tokens.accessToken,
+    ...opts.extraFields?.(tokens),
   }
 }
 

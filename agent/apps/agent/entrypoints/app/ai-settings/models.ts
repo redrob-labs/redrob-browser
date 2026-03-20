@@ -25,6 +25,7 @@ export interface ModelsData {
   moonshot: ModelInfo[]
   'chatgpt-pro': ModelInfo[]
   'github-copilot': ModelInfo[]
+  'qwen-code': ModelInfo[]
 }
 
 /**
@@ -127,6 +128,12 @@ export const MODELS_DATA: ModelsData = {
     { modelId: 'gpt-5.1-codex-max', contextLength: 128000 },
     { modelId: 'gpt-5.1', contextLength: 128000 },
     { modelId: 'grok-code-fast-1', contextLength: 128000 },
+  ],
+  'qwen-code': [
+    { modelId: 'coder-model', contextLength: 1000000 },
+    { modelId: 'qwen3-coder-plus', contextLength: 1000000 },
+    { modelId: 'qwen3-coder-flash', contextLength: 1000000 },
+    { modelId: 'qwen3.5-plus', contextLength: 1000000 },
   ],
 }
 
