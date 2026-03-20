@@ -5,8 +5,11 @@ import {
   Folder,
   Globe,
   Layers,
+  Loader2,
+  Mic,
   PlugZap,
   Search,
+  Square,
   X,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
@@ -44,6 +47,10 @@ import {
   NEWTAB_TAB_REMOVED_EVENT,
   NEWTAB_TAB_TOGGLED_EVENT,
   NEWTAB_TABS_OPENED_EVENT,
+  NEWTAB_VOICE_ERROR_EVENT,
+  NEWTAB_VOICE_RECORDING_STARTED_EVENT,
+  NEWTAB_VOICE_RECORDING_STOPPED_EVENT,
+  NEWTAB_VOICE_TRANSCRIPTION_COMPLETED_EVENT,
   NEWTAB_WORKSPACE_OPENED_EVENT,
 } from '@/lib/constants/analyticsEvents'
 import { BrowserOSIcon, ProviderIcon } from '@/lib/llm-providers/providerIcons'
@@ -53,6 +60,7 @@ import { useSyncRemoteIntegrations } from '@/lib/mcp/useSyncRemoteIntegrations'
 import { openSidePanelWithSearch } from '@/lib/messaging/sidepanel/openSidepanelWithSearch'
 import { track } from '@/lib/metrics/track'
 import { cn } from '@/lib/utils'
+import { useVoiceInput } from '@/lib/voice/useVoiceInput'
 import { useWorkspace } from '@/lib/workspace/use-workspace'
 import { ImportDataHint } from './ImportDataHint'
 import type { SuggestionItem } from './lib/suggestions/types'
@@ -99,6 +107,36 @@ export const NewTab = () => {
   const { servers: mcpServers } = useMcpServers()
   const { data: userMCPIntegrations } = useGetUserMCPIntegrations()
   useSyncRemoteIntegrations()
+
+  const voice = useVoiceInput()
+
+  // Voice transcript → populate search input
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only trigger on transcript/transcribing change
+  useEffect(() => {
+    if (voice.transcript && !voice.isTranscribing) {
+      setComboboxInputValue(voice.transcript)
+      track(NEWTAB_VOICE_TRANSCRIPTION_COMPLETED_EVENT)
+      voice.clearTranscript()
+    }
+  }, [voice.transcript, voice.isTranscribing])
+
+  useEffect(() => {
+    if (voice.error) {
+      track(NEWTAB_VOICE_ERROR_EVENT, { error: voice.error })
+    }
+  }, [voice.error])
+
+  const handleStartRecording = async () => {
+    const started = await voice.startRecording()
+    if (started) {
+      track(NEWTAB_VOICE_RECORDING_STARTED_EVENT)
+    }
+  }
+
+  const handleStopRecording = async () => {
+    await voice.stopRecording()
+    track(NEWTAB_VOICE_RECORDING_STOPPED_EVENT)
+  }
 
   const connectedManagedServers = mcpServers.filter((s) => {
     if (s.type !== 'managed' || !s.managedServerName) return false
@@ -430,31 +468,88 @@ export const NewTab = () => {
                 anchorRef={inputRef}
                 side="bottom"
               />
-              <input
-                type="text"
-                placeholder={searchPlaceholder}
-                className="flex-1 border-none bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground"
-                {...getInputProps({
-                  ref: inputRef,
-                  onChange: (e) => handleInputChange(e.currentTarget.value),
-                  onKeyDown: (e) => {
-                    if (!mentionStateRef.current.isOpen) return
-                    if (e.key === 'Tab') {
-                      e.preventDefault()
-                      closeMention()
-                    }
-                  },
-                })}
-              />
+              {voice.isRecording ? (
+                <div className="flex min-h-[40px] flex-1 items-center justify-center gap-1.5">
+                  {voice.audioLevels.map((level, i) => (
+                    <div
+                      key={i.toString()}
+                      className="w-1.5 rounded-full bg-red-500 transition-all duration-75"
+                      style={{
+                        height: `${Math.max(6, Math.min(28, level * 0.7))}px`,
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  placeholder={
+                    voice.isTranscribing ? 'Transcribing...' : searchPlaceholder
+                  }
+                  disabled={voice.isTranscribing}
+                  className="flex-1 border-none bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-60"
+                  {...getInputProps({
+                    ref: inputRef,
+                    onChange: (e) => handleInputChange(e.currentTarget.value),
+                    onKeyDown: (e) => {
+                      if (!mentionStateRef.current.isOpen) return
+                      if (e.key === 'Tab') {
+                        e.preventDefault()
+                        closeMention()
+                      }
+                    },
+                  })}
+                />
+              )}
 
-              <Button
-                onClick={handleSend}
-                size="icon"
-                className="h-10 w-10 flex-shrink-0 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                <ArrowRight className="h-5 w-5" />
-              </Button>
+              <div className="flex items-center gap-1.5">
+                {voice.isRecording ? (
+                  <Button
+                    type="button"
+                    size="icon"
+                    onClick={handleStopRecording}
+                    className="h-10 w-10 flex-shrink-0 rounded-xl bg-red-600 text-white hover:bg-red-700"
+                  >
+                    <Square className="h-4 w-4" />
+                  </Button>
+                ) : voice.isTranscribing ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    disabled
+                    className="h-10 w-10 flex-shrink-0 rounded-xl"
+                  >
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleStartRecording}
+                    className="h-10 w-10 flex-shrink-0 rounded-xl text-muted-foreground transition-colors hover:text-foreground"
+                    title="Voice input"
+                  >
+                    <Mic className="h-5 w-5" />
+                  </Button>
+                )}
+                <Button
+                  onClick={handleSend}
+                  size="icon"
+                  disabled={voice.isRecording || voice.isTranscribing}
+                  className="h-10 w-10 flex-shrink-0 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90"
+                >
+                  <ArrowRight className="h-5 w-5" />
+                </Button>
+              </div>
             </div>
+
+            {voice.error && (
+              <div className="px-5 pb-2 text-destructive text-xs">
+                {voice.error}
+              </div>
+            )}
 
             <AnimatePresence>
               {selectedTabs.length > 0 && (
