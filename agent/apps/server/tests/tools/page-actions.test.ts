@@ -30,13 +30,13 @@ function structuredOf<T>(result: { structuredContent?: unknown }): T {
 
 function createToolContext(
   browser: Browser,
-  executionDir: string,
+  workingDir: string,
   resourcesDir?: string,
 ): ToolContext {
   return {
     browser,
     directories: {
-      executionDir,
+      workingDir,
       resourcesDir,
     },
   }
@@ -50,10 +50,8 @@ function createBrowserStub(methods: Record<string, unknown>): Browser {
 }
 
 describe('page action tools', () => {
-  it('save_pdf resolves relative paths against the execution directory by default', async () => {
-    const executionDir = await mkdtemp(
-      join(tmpdir(), 'browseros-page-actions-'),
-    )
+  it('save_pdf resolves relative paths against the working directory by default', async () => {
+    const workingDir = await mkdtemp(join(tmpdir(), 'browseros-page-actions-'))
     const browser = createBrowserStub({
       printToPDF: async () => ({
         data: Buffer.from('pdf-data').toString('base64'),
@@ -64,26 +62,24 @@ describe('page action tools', () => {
       const result = await executeTool(
         save_pdf,
         { page: 1, path: 'report.pdf' },
-        createToolContext(browser, executionDir),
+        createToolContext(browser, workingDir),
         AbortSignal.timeout(1_000),
       )
 
       assert.ok(!result.isError, textOf(result))
-      const outputPath = join(executionDir, 'report.pdf')
+      const outputPath = join(workingDir, 'report.pdf')
       assert.strictEqual(
         structuredOf<{ path: string }>(result).path,
         outputPath,
       )
-      assert.ok(existsSync(outputPath), 'PDF file should exist in executionDir')
+      assert.ok(existsSync(outputPath), 'PDF file should exist in workingDir')
     } finally {
-      await rm(executionDir, { recursive: true, force: true })
+      await rm(workingDir, { recursive: true, force: true })
     }
   })
 
   it('save_screenshot still honors an explicit cwd override', async () => {
-    const executionDir = await mkdtemp(
-      join(tmpdir(), 'browseros-page-actions-'),
-    )
+    const workingDir = await mkdtemp(join(tmpdir(), 'browseros-page-actions-'))
     const overrideDir = await mkdtemp(join(tmpdir(), 'browseros-page-actions-'))
     const browser = createBrowserStub({
       screenshot: async () => ({
@@ -95,7 +91,7 @@ describe('page action tools', () => {
       const result = await executeTool(
         save_screenshot,
         { page: 1, path: 'capture.png', cwd: overrideDir },
-        createToolContext(browser, executionDir),
+        createToolContext(browser, workingDir),
         AbortSignal.timeout(1_000),
       )
 
@@ -110,18 +106,18 @@ describe('page action tools', () => {
         'Screenshot should exist in overrideDir',
       )
       assert.ok(
-        !existsSync(join(executionDir, 'capture.png')),
-        'Execution directory should not be used when cwd is provided',
+        !existsSync(join(workingDir, 'capture.png')),
+        'Working directory should not be used when cwd is provided',
       )
     } finally {
-      await rm(executionDir, { recursive: true, force: true })
+      await rm(workingDir, { recursive: true, force: true })
       await rm(overrideDir, { recursive: true, force: true })
     }
   })
 
-  it('download_file resolves relative directories against the execution directory by default', async () => {
+  it('download_file resolves relative directories against the working directory by default', async () => {
     const baseDir = await mkdtemp(join(tmpdir(), 'browseros-page-actions-'))
-    const executionDir = join(baseDir, 'execution')
+    const workingDir = join(baseDir, 'working')
     let stagingDir: string | undefined
     const browser = createBrowserStub({
       downloadViaClick: async (
@@ -143,23 +139,23 @@ describe('page action tools', () => {
       const result = await executeTool(
         download_file,
         { page: 1, element: 7, path: '.' },
-        createToolContext(browser, executionDir),
+        createToolContext(browser, workingDir),
         AbortSignal.timeout(1_000),
       )
 
       assert.ok(!result.isError, textOf(result))
-      const outputPath = join(executionDir, 'download.txt')
+      const outputPath = join(workingDir, 'download.txt')
       const structured = structuredOf<{
         directory: string
         destinationPath: string
       }>(result)
-      assert.strictEqual(structured.directory, executionDir)
+      assert.strictEqual(structured.directory, workingDir)
       assert.strictEqual(structured.destinationPath, outputPath)
-      assert.ok(existsSync(outputPath), 'Download should land in executionDir')
+      assert.ok(existsSync(outputPath), 'Download should land in workingDir')
       assert.ok(stagingDir, 'Download should use a staging directory')
       assert.ok(
-        stagingDir.startsWith(join(executionDir, 'browseros-dl-')),
-        'Staging directory should be created inside executionDir',
+        stagingDir.startsWith(join(workingDir, 'browseros-dl-')),
+        'Staging directory should be created inside workingDir',
       )
       assert.ok(
         !existsSync(stagingDir),

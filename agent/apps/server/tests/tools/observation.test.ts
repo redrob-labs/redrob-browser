@@ -203,7 +203,8 @@ describe('observation tools', () => {
         savedPath = data.path
 
         assert.strictEqual(data.writtenToFile, true)
-        assert.ok(textOf(contentResult).includes('Saved page content'))
+        assert.ok(textOf(contentResult).includes('Content truncated'))
+        assert.ok(textOf(contentResult).includes(savedPath))
         assert.ok(existsSync(savedPath), 'Saved page content file should exist')
         assert.ok(
           dirname(savedPath).startsWith(

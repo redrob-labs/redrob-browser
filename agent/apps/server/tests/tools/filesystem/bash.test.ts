@@ -55,7 +55,7 @@ describe('filesystem_bash', () => {
   })
 
   it('times out long-running commands', async () => {
-    const result = await exec({ command: 'sleep 30', timeout: 1 })
+    const result = await exec({ command: 'exec sleep 30', timeout: 1 })
     expect(result.isError).toBe(true)
     expect(result.text).toContain('timed out')
   }, 10_000)

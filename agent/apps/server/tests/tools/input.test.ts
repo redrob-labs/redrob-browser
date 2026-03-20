@@ -1,5 +1,7 @@
 import { describe, it } from 'bun:test'
 import assert from 'node:assert'
+import type { Browser } from '../../src/browser/browser'
+import { executeTool, type ToolContext } from '../../src/tools/framework'
 import {
   check,
   click,
@@ -320,37 +322,48 @@ describe('input tools', () => {
   }, 60_000)
 
   it('scroll dispatches without error', async () => {
-    await withBrowser(async ({ execute }) => {
-      const newResult = await execute(new_page, {
-        url: FORM_PAGE,
-      })
-      const pageId = pageIdOf(newResult)
+    const calls: Array<{
+      page: number
+      direction: string
+      amount: number
+      element?: number
+    }> = []
+    const browser = {
+      getTabIdForPage: () => undefined,
+      scroll: async (
+        page: number,
+        direction: string,
+        amount: number,
+        element?: number,
+      ) => {
+        calls.push({ page, direction, amount, element })
+      },
+    } as unknown as Browser
+    const ctx: ToolContext = {
+      browser,
+      directories: { workingDir: process.cwd() },
+    }
 
-      const before = await execute(evaluate_script, {
-        page: pageId,
-        expression: 'window.scrollY',
-      })
+    const result = await executeTool(
+      scroll,
+      { page: 7, direction: 'down', amount: 5 },
+      ctx,
+      AbortSignal.timeout(1_000),
+    )
 
-      const scrollResult = await execute(scroll, {
-        page: pageId,
-        direction: 'down',
-        amount: 5,
-      })
-      assert.ok(!scrollResult.isError, textOf(scrollResult))
-      assert.ok(textOf(scrollResult).includes('Scrolled down'))
-
-      const after = await execute(evaluate_script, {
-        page: pageId,
-        expression: 'window.scrollY',
-      })
-      assert.ok(
-        Number(textOf(after)) > Number(textOf(before)),
-        `Expected scrollY to increase, before=${textOf(before)} after=${textOf(after)}`,
-      )
-
-      await execute(close_page, { page: pageId })
+    assert.ok(!result.isError, textOf(result))
+    assert.ok(textOf(result).includes('Scrolled down'))
+    assert.deepStrictEqual(calls, [
+      { page: 7, direction: 'down', amount: 5, element: undefined },
+    ])
+    assert.deepStrictEqual(structuredOf(result), {
+      action: 'scroll',
+      page: 7,
+      direction: 'down',
+      amount: 5,
+      element: undefined,
     })
-  }, 60_000)
+  })
 
   it('hover moves cursor over element', async () => {
     await withBrowser(async ({ execute }) => {
