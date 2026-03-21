@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
@@ -197,6 +197,133 @@ app.get('/api/screenshots/:taskId/:index', async (c) => {
   } catch {
     return c.notFound()
   }
+})
+
+app.get('/api/messages/:taskId', async (c) => {
+  const { taskId } = c.req.param()
+  if (taskId.includes('..') || taskId.includes('/')) {
+    return c.json({ error: 'Invalid parameters' }, 400)
+  }
+  const filepath = join(dashboardState.outputDir, taskId, 'messages.jsonl')
+  const resolved = resolve(filepath)
+  if (!resolved.startsWith(resolve(dashboardState.outputDir))) {
+    return c.json({ error: 'Invalid path' }, 400)
+  }
+  try {
+    const file = Bun.file(filepath)
+    if (!(await file.exists())) return c.notFound()
+    const data = await file.arrayBuffer()
+    return c.body(data, 200, {
+      'Content-Type': 'application/x-ndjson',
+      'Cache-Control': 'no-cache',
+    })
+  } catch {
+    return c.notFound()
+  }
+})
+
+const resultsDir = join(import.meta.dir, '..', '..', 'results')
+
+app.get('/api/runs', async (c) => {
+  try {
+    const runs: string[] = []
+    const entries = await readdir(resultsDir, { withFileTypes: true })
+    for (const entry of entries.filter((e) => e.isDirectory())) {
+      const subEntries = await readdir(join(resultsDir, entry.name), {
+        withFileTypes: true,
+      }).catch(() => [] as import('node:fs').Dirent[])
+      const hasTimestampDirs = subEntries.some(
+        (s) => s.isDirectory() && /^\d{4}-\d{2}-\d{2}-\d{4}$/.test(s.name),
+      )
+      if (hasTimestampDirs) {
+        for (const sub of subEntries.filter((s) => s.isDirectory())) {
+          runs.push(`${entry.name}/${sub.name}`)
+        }
+      } else {
+        runs.push(entry.name)
+      }
+    }
+    runs.sort().reverse()
+    return c.json(runs)
+  } catch {
+    return c.json([])
+  }
+})
+
+app.post('/api/load-run', async (c) => {
+  if (evalRunning)
+    return c.json({ error: 'Cannot load while eval is running' }, 409)
+  let body: { runName: string }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400)
+  }
+  const runName = body.runName
+  if (!runName || runName.includes('..')) {
+    return c.json({ error: 'Invalid run name' }, 400)
+  }
+  if ((runName.match(/\//g) || []).length > 1) {
+    return c.json({ error: 'Invalid run name' }, 400)
+  }
+  const outputDir = resolve(resultsDir, runName)
+  if (!outputDir.startsWith(resolve(resultsDir))) {
+    return c.json({ error: 'Invalid path' }, 400)
+  }
+  const dirStat = await stat(outputDir).catch(() => null)
+  if (!dirStat?.isDirectory()) {
+    return c.json({ error: 'Run directory not found' }, 404)
+  }
+  const entries = await readdir(outputDir, { withFileTypes: true })
+  const taskDirs = entries.filter((e) => e.isDirectory())
+  const loadedTasks: DashboardTask[] = []
+  let agentType = ''
+  for (const taskDir of taskDirs) {
+    const metaPath = join(outputDir, taskDir.name, 'metadata.json')
+    try {
+      const raw = JSON.parse(await readFile(metaPath, 'utf-8'))
+      if (!agentType && raw.agent_config?.type) {
+        agentType = raw.agent_config.type
+      }
+      const screenshotDir = join(outputDir, taskDir.name, 'screenshots')
+      let screenshotCount = raw.screenshot_count ?? 0
+      if (!screenshotCount) {
+        try {
+          const files = await readdir(screenshotDir)
+          screenshotCount = files.filter((f: string) =>
+            f.endsWith('.png'),
+          ).length
+        } catch {}
+      }
+      loadedTasks.push({
+        queryId: raw.query_id || taskDir.name,
+        query: raw.query || '',
+        startUrl: raw.start_url,
+        status:
+          raw.termination_reason === 'completed'
+            ? 'completed'
+            : raw.termination_reason === 'timeout'
+              ? 'timeout'
+              : 'failed',
+        durationMs: raw.total_duration_ms,
+        graderResults: raw.grader_results,
+        screenshotCount,
+      })
+    } catch {}
+  }
+  if (loadedTasks.length === 0) {
+    return c.json({ error: 'No completed tasks found in this run' }, 404)
+  }
+  dashboardState.configName = runName
+  dashboardState.agentType = agentType
+  dashboardState.outputDir = outputDir
+  dashboardState.tasks = loadedTasks
+  return c.json({
+    status: 'loaded',
+    configName: runName,
+    agentType,
+    taskCount: loadedTasks.length,
+  })
 })
 
 // ============================================================================
