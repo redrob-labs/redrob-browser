@@ -22,6 +22,13 @@ export const scheduledJobRunStorage = storage.defineItem<ScheduledJobRun[]>(
   },
 )
 
+export const pendingDeletionStorage = storage.defineItem<string[]>(
+  'local:scheduledJobsPendingDeletion',
+  {
+    fallback: [],
+  },
+)
+
 export function useScheduledJobs() {
   const [jobs, setJobs] = useState<ScheduledJob[]>([])
 
@@ -53,6 +60,11 @@ export function useScheduledJobs() {
 
   const removeJob = async (id: string) => {
     await chrome.alarms.clear(getAlarmName(id))
+
+    const pending = (await pendingDeletionStorage.getValue()) ?? []
+    if (!pending.includes(id)) {
+      await pendingDeletionStorage.setValue([...pending, id])
+    }
 
     const currentJobs = (await scheduledJobStorage.getValue()) ?? []
     await scheduledJobStorage.setValue(currentJobs.filter((j) => j.id !== id))

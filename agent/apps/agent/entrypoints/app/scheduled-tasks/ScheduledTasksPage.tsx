@@ -22,9 +22,7 @@ import {
   SCHEDULED_TASK_TOGGLED_EVENT,
   SCHEDULED_TASK_VIEW_RESULTS_EVENT,
 } from '@/lib/constants/analyticsEvents'
-import { useGraphqlMutation } from '@/lib/graphql/useGraphqlMutation'
 import { track } from '@/lib/metrics/track'
-import { DeleteScheduledJobDocument } from '@/lib/schedules/graphql/syncSchedulesDocument'
 import {
   scheduledJobRunStorage,
   useScheduledJobRuns,
@@ -45,8 +43,6 @@ export const ScheduledTasksPage: FC = () => {
   const { jobs, addJob, editJob, toggleJob, removeJob, runJob } =
     useScheduledJobs()
   const { jobRuns, cancelJobRun } = useScheduledJobRuns()
-
-  const deleteRemoteJobMutation = useGraphqlMutation(DeleteScheduledJobDocument)
 
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -102,7 +98,6 @@ export const ScheduledTasksPage: FC = () => {
   const confirmDelete = async () => {
     if (deleteJobId) {
       await removeJob(deleteJobId)
-      deleteRemoteJobMutation.mutate({ rowId: deleteJobId })
       setDeleteJobId(null)
       track(SCHEDULED_TASK_DELETED_EVENT)
     }
