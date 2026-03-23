@@ -72,7 +72,6 @@ export async function createHttpServer(config: HttpServerConfig) {
     browserosId,
     executionDir,
     resourcesDir,
-    rateLimiter,
     version,
     browser,
     controller,
@@ -162,7 +161,6 @@ export async function createHttpServer(config: HttpServerConfig) {
         browser,
         registry,
         browserosId,
-        rateLimiter,
         aiSdkDevtoolsEnabled: config.aiSdkDevtoolsEnabled,
       }),
     )
