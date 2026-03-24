@@ -2,11 +2,6 @@ import { AlertCircle, RefreshCw } from 'lucide-react'
 import type { FC } from 'react'
 // import { useMemo } from 'react'
 import { Button } from '@/components/ui/button'
-import {
-  KIMI_RATE_LIMIT_DOCS_CLICKED_EVENT,
-  KIMI_RATE_LIMIT_PLATFORM_CLICKED_EVENT,
-} from '@/lib/constants/analyticsEvents'
-import { track } from '@/lib/metrics/track'
 
 // --- Commented out for Kimi partnership launch (restore after) ---
 // const SURVEY_DIRECTIONS = [
@@ -55,6 +50,7 @@ function parseErrorMessage(
   if (
     isBrowserosProvider &&
     (message.includes('CREDITS_EXHAUSTED') ||
+      message.includes('Credits exhausted') ||
       message.includes('Daily credits exhausted'))
   ) {
     return {
@@ -165,31 +161,15 @@ export const ChatError: FC<ChatErrorProps> = ({
           View Usage & Billing
         </a>
       )}
-      {isRateLimit && !isCreditsExhausted && providerType === 'browseros' && (
-        <div className="flex flex-col items-center gap-1">
-          <p className="text-muted-foreground text-xs">
-            {/* biome-ignore lint/a11y/useValidAnchor: link with click tracking */}
-            <a
-              href="https://docs.browseros.com/features/bring-your-own-llm#kimi-k2-5-%E2%80%94-in-partnership-with-moonshot-ai"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:text-foreground"
-              onClick={() => track(KIMI_RATE_LIMIT_DOCS_CLICKED_EVENT)}
-            >
-              Learn how to get a Kimi API key
-            </a>
-            {' or '}
-            <a
-              href="https://platform.moonshot.ai"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:text-foreground"
-              onClick={() => track(KIMI_RATE_LIMIT_PLATFORM_CLICKED_EVENT)}
-            >
-              get your API key
-            </a>
-          </p>
-        </div>
+      {isRateLimit && providerType === 'browseros' && (
+        <a
+          href="/app.html#/settings/ai"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--accent-orange)] bg-[var(--accent-orange)]/10 px-3 py-1.5 font-medium text-[var(--accent-orange)] text-xs transition-colors hover:bg-[var(--accent-orange)]/20"
+        >
+          Add your own provider for unlimited usage
+        </a>
       )}
       {onRetry && (
         <Button

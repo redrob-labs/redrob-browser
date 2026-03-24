@@ -105,18 +105,40 @@ export const UsagePage: FC = () => {
       </div>
 
       <div className="rounded-xl border p-5">
+        <div className="flex items-center gap-3">
+          <CreditCard className="h-5 w-5 text-muted-foreground" />
+          <div>
+            <p className="flex items-center gap-2 font-semibold text-sm">
+              Need more credits?
+              <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
+                Coming soon
+              </span>
+            </p>
+            <p className="text-muted-foreground text-xs">
+              Additional credit packages will be available soon
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-[var(--accent-orange)]/30 bg-[var(--accent-orange)]/5 p-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <CreditCard className="h-5 w-5 text-muted-foreground" />
+            <Zap className="h-5 w-5 text-[var(--accent-orange)]" />
             <div>
-              <p className="font-semibold text-sm">Need more credits?</p>
+              <p className="font-semibold text-sm">Want unlimited usage?</p>
               <p className="text-muted-foreground text-xs">
-                Additional credit packages coming soon
+                Add your own LLM provider — no credit limits
               </p>
             </div>
           </div>
-          <Button variant="outline" size="sm" disabled className="opacity-50">
-            Add Credits
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-[var(--accent-orange)] bg-[var(--accent-orange)]/10 text-[var(--accent-orange)] hover:bg-[var(--accent-orange)]/20"
+            asChild
+          >
+            <a href="/app.html#/settings/ai">Add Provider</a>
           </Button>
         </div>
       </div>

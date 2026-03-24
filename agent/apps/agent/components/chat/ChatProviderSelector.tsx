@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react'
+import { Check, Plus } from 'lucide-react'
 import type { FC, PropsWithChildren } from 'react'
 import { useState } from 'react'
 import {
@@ -77,6 +77,19 @@ export const ChatProviderSelector: FC<
                 )
               })}
             </CommandGroup>
+            <div className="border-border border-t p-1">
+              <button
+                type="button"
+                className="flex w-full items-center gap-3 rounded-md p-2 text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground"
+                onClick={() => {
+                  window.open('/app.html#/settings/ai', '_blank')
+                  setOpen(false)
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                Add Provider
+              </button>
+            </div>
           </CommandList>
         </Command>
       </PopoverContent>
