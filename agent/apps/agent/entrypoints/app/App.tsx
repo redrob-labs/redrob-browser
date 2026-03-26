@@ -10,6 +10,7 @@ import { FeaturesPage } from '../onboarding/features/Features'
 import { Onboarding } from '../onboarding/index/Onboarding'
 import { StepsLayout } from '../onboarding/steps/StepsLayout'
 import { AgentsPage } from './agents/AgentsPage'
+import { AclSettingsPage } from './acl-settings/AclSettingsPage'
 import { AISettingsPage } from './ai-settings/AISettingsPage'
 import { ConnectMCP } from './connect-mcp/ConnectMCP'
 import { CustomizationPage } from './customization/CustomizationPage'
@@ -102,6 +103,7 @@ export const App: FC = () => {
             <Route path="search" element={<SearchProviderPage />} />
             <Route path="survey" element={<SurveyPage {...surveyParams} />} />
             <Route path="usage" element={<UsagePage />} />
+            <Route path="acl" element={<AclSettingsPage />} />
           </Route>
         </Route>
 
