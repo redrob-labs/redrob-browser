@@ -54,6 +54,16 @@ browseros-cli init                   # interactive — prompts for URL
 
 Config is saved to `~/.config/browseros-cli/config.yaml`. The CLI also auto-discovers the server from `~/.browseros/server.json` (written by BrowserOS on startup).
 
+### CLI updates
+
+The CLI checks for a newer BrowserOS CLI release in the background about once per day and will suggest an update on a later run when one is available.
+
+```bash
+browseros-cli update         # check and apply the latest CLI release
+browseros-cli update --check # check only
+browseros-cli update --yes   # apply without prompting
+```
+
 ## Usage
 
 ```bash
