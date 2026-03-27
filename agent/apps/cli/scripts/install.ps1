@@ -68,7 +68,6 @@ if (-not [Environment]::Is64BitOperatingSystem) {
 $Tag = "browseros-cli-v$Version"
 $Filename = "${Binary}_${Version}_windows_${Arch}.zip"
 $Url = "https://github.com/$Repo/releases/download/$Tag/$Filename"
-$ChecksumUrl = "https://github.com/$Repo/releases/download/$Tag/checksums.txt"
 $TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("browseros-cli-install-" + [System.IO.Path]::GetRandomFileName())
 
 try {
@@ -78,37 +77,6 @@ try {
 
     Write-Host "Downloading $Url..."
     Invoke-WebRequest -Uri $Url -OutFile $ZipPath -UseBasicParsing
-
-    $ChecksumPath = Join-Path $TmpDir "checksums.txt"
-    $ChecksumAvailable = $true
-    try {
-        Invoke-WebRequest -Uri $ChecksumUrl -OutFile $ChecksumPath -UseBasicParsing
-    } catch {
-        $ChecksumAvailable = $false
-        Write-Warning "Could not fetch checksums.txt; skipping checksum verification. $($_.Exception.Message)"
-    }
-
-    if ($ChecksumAvailable) {
-        $ExpectedChecksum = $null
-        foreach ($line in Get-Content $ChecksumPath) {
-            $parts = $line -split '\s+', 2
-            if ($parts.Length -eq 2 -and $parts[1] -eq $Filename) {
-                $ExpectedChecksum = $parts[0].ToLowerInvariant()
-                break
-            }
-        }
-
-        if ($ExpectedChecksum) {
-            $ActualChecksum = (Get-FileHash -Path $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ($ActualChecksum -ne $ExpectedChecksum) {
-                Write-Error "Checksum mismatch (expected $ExpectedChecksum, got $ActualChecksum)"
-                exit 1
-            }
-            Write-Host "Checksum verified."
-        } else {
-            Write-Warning "Checksum not found in checksums.txt; skipping checksum verification."
-        }
-    }
 
     Expand-Archive -Path $ZipPath -DestinationPath $TmpDir -Force
 
