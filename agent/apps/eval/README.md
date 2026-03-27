@@ -1,6 +1,8 @@
 # BrowserOS Eval
 
-Evaluation framework for benchmarking BrowserOS browser automation agents. Runs tasks from standard datasets (WebVoyager, Mind2Web), captures trajectories with screenshots, and grades results automatically.
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](../../../../LICENSE)
+
+Evaluation framework for benchmarking BrowserOS browser automation agents. Runs tasks from standard datasets ([WebVoyager](https://arxiv.org/abs/2401.13919), [Mind2Web](https://arxiv.org/abs/2306.06070)), captures trajectories with screenshots, and grades results automatically.
 
 ## Prerequisites
 

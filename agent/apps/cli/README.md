@@ -1,17 +1,39 @@
 # browseros-cli
 
-Command-line interface for controlling BrowserOS via MCP. Talks to the BrowserOS MCP server over JSON-RPC 2.0 / StreamableHTTP.
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](../../../../LICENSE)
 
-## Setup
+Command-line interface for controlling BrowserOS — launch and automate the browser from the terminal or from AI coding agents like Claude Code and Gemini CLI.
+
+Communicates with the BrowserOS MCP server over JSON-RPC 2.0 / StreamableHTTP. All 53+ MCP tools are mapped to CLI commands.
+
+## Install
+
+### macOS / Linux
+
+```bash
+curl -fsSL https://cdn.browseros.com/cli/install.sh | bash
+```
+
+### Windows
+
+```powershell
+irm https://cdn.browseros.com/cli/install.ps1 | iex
+```
+
+### Build from Source
 
 Requires Go 1.25+.
 
 ```bash
-# Build
-make
+make            # Build binary
+make install    # Install to $GOPATH/bin
+```
 
+## Setup
+
+```bash
 # First run — configure server connection
-./browseros-cli init
+browseros-cli init
 ```
 
 The `init` command prompts for your MCP server URL. Find it in:
@@ -66,6 +88,12 @@ browseros-cli bookmark search "github"
 browseros-cli history recent
 browseros-cli group list
 ```
+
+## Use as MCP Server
+
+BrowserOS exposes an MCP server that AI coding agents can connect to directly. The CLI is the easiest way to verify the connection and interact with tools from the terminal.
+
+To connect Claude Code, Gemini CLI, or any MCP client, see the [MCP setup guide](https://docs.browseros.com/features/use-with-claude-code).
 
 ## Global Flags
 
@@ -163,4 +191,8 @@ The CLI communicates with BrowserOS via two HTTP POST requests per command:
 1. `initialize` — MCP handshake
 2. `tools/call` — execute the actual tool
 
-All 54 MCP tools are mapped to CLI commands.
+## Links
+
+- [Documentation](https://docs.browseros.com)
+- [MCP Setup Guide](https://docs.browseros.com/features/use-with-claude-code)
+- [Changelog](./CHANGELOG.md)
