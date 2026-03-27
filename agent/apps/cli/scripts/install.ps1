@@ -17,10 +17,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# TLS 1.2 — required for GitHub, older PS 5.1 defaults to TLS 1.0
+# TLS 1.2 — older PS 5.1 defaults to TLS 1.0
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$Repo = "browseros-ai/BrowserOS"
+$CdnBase = "https://cdn.browseros.com/cli"
 $Binary = "browseros-cli"
 
 # When piped via irm | iex, param() is ignored — fall back to env vars
@@ -31,15 +31,16 @@ if (-not $Dir) { $Dir = if ($env:BROWSEROS_DIR) { $env:BROWSEROS_DIR } else { "$
 
 if (-not $Version) {
     Write-Host "Fetching latest version..."
-    $releases = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases?per_page=100"
-    $tag = ($releases `
-        | Where-Object { $_.tag_name -match "^browseros-cli-v" -and $_.tag_name -notmatch "-rc" } `
-        | Select-Object -First 1).tag_name
-    if (-not $tag) {
+    $Version = (Invoke-WebRequest -Uri "$CdnBase/latest/version.txt" -UseBasicParsing).Content.Trim()
+    if (-not $Version) {
         Write-Error "Could not determine latest version. Try: -Version 0.1.0"
         exit 1
     }
-    $Version = $tag -replace "^browseros-cli-v", ""
+}
+
+if ($Version -notmatch '^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$') {
+    Write-Error "Unexpected version format: '$Version'"
+    exit 1
 }
 
 Write-Host "Installing browseros-cli v$Version..."
@@ -65,9 +66,8 @@ if (-not [Environment]::Is64BitOperatingSystem) {
 
 # ── Download and extract ─────────────────────────────────────────────────────
 
-$Tag = "browseros-cli-v$Version"
 $Filename = "${Binary}_${Version}_windows_${Arch}.zip"
-$Url = "https://github.com/$Repo/releases/download/$Tag/$Filename"
+$Url = "$CdnBase/v$Version/$Filename"
 $TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("browseros-cli-install-" + [System.IO.Path]::GetRandomFileName())
 
 try {

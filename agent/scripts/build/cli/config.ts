@@ -6,7 +6,6 @@ import { parse } from 'dotenv'
 import type { R2Config } from '../server/types'
 
 const PROD_ENV_PATH = join('apps', 'cli', '.env.production')
-const PROD_ENV_TEMPLATE_PATH = join('apps', 'cli', '.env.production.example')
 
 function pickEnv(name: string, fileEnv: Record<string, string>): string {
   const value = process.env[name] ?? fileEnv[name]
@@ -19,15 +18,8 @@ function pickEnv(name: string, fileEnv: Record<string, string>): string {
 function loadProdEnv(rootDir: string): Record<string, string> {
   const prodEnvPath = join(rootDir, PROD_ENV_PATH)
   if (!existsSync(prodEnvPath)) {
-    const templatePath = join(rootDir, PROD_ENV_TEMPLATE_PATH)
-    if (existsSync(templatePath)) {
-      throw new Error(
-        `Missing ${PROD_ENV_PATH}. Create it from ${PROD_ENV_TEMPLATE_PATH} before running upload:cli-installers.`,
-      )
-    }
-    throw new Error(
-      `Missing ${PROD_ENV_PATH}. The template file ${PROD_ENV_TEMPLATE_PATH} was not found.`,
-    )
+    // In CI, credentials come from process.env — no .env file needed
+    return {}
   }
   return parse(readFileSync(prodEnvPath, 'utf-8'))
 }

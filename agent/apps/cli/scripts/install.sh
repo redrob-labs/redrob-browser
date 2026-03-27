@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-REPO="browseros-ai/BrowserOS"
+CDN_BASE="https://cdn.browseros.com/cli"
 BINARY="browseros-cli"
 INSTALL_DIR="${HOME}/.browseros/bin"
 
@@ -43,19 +43,18 @@ done
 # ── Resolve latest version ───────────────────────────────────────────────────
 
 if [[ -z "$VERSION" ]]; then
-  # Use per_page=1 with a tag name filter via the releases endpoint.
-  # The tags all start with "browseros-cli-v" so we grab page 1 of those.
-  VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=100" \
-    | grep -o '"tag_name": *"browseros-cli-v[^"]*"' \
-    | grep -v -- "-rc" \
-    | head -1 \
-    | sed 's/.*browseros-cli-v//; s/"//')
+  VERSION=$(curl -fsSL "${CDN_BASE}/latest/version.txt" | tr -d '[:space:]')
 
   if [[ -z "$VERSION" ]]; then
     echo "Error: could not determine latest version." >&2
     echo "  Try: install.sh --version 0.1.0" >&2
     exit 1
   fi
+fi
+
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+  echo "Error: unexpected version format: '$VERSION'" >&2
+  exit 1
 fi
 
 echo "Installing browseros-cli v${VERSION}..."
@@ -80,9 +79,8 @@ esac
 # ── Download and extract ─────────────────────────────────────────────────────
 
 FILENAME="${BINARY}_${VERSION}_${OS}_${ARCH}.tar.gz"
-TAG="browseros-cli-v${VERSION}"
-URL="https://github.com/${REPO}/releases/download/${TAG}/${FILENAME}"
-CHECKSUM_URL="https://github.com/${REPO}/releases/download/${TAG}/checksums.txt"
+URL="${CDN_BASE}/v${VERSION}/${FILENAME}"
+CHECKSUM_URL="${CDN_BASE}/v${VERSION}/checksums.txt"
 
 TMPDIR_DL=$(mktemp -d)
 trap 'rm -rf "$TMPDIR_DL"' EXIT
