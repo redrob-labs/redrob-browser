@@ -561,9 +561,11 @@ export const useChatSession = (options?: ChatSessionOptions) => {
   }, [])
 
   const handleSelectProvider = (provider: Provider) => {
+    const fullProvider = llmProviders.find((p) => p.id === provider.id)
     track(PROVIDER_SELECTED_EVENT, {
       provider_id: provider.id,
       provider_type: provider.type,
+      model_id: fullProvider?.modelId,
     })
     setDefaultProvider(provider.id)
   }
