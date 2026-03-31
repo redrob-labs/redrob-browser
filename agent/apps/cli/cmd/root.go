@@ -34,6 +34,7 @@ const automaticUpdateDrainTimeout = 150 * time.Millisecond
 
 func SetVersion(v string) {
 	version = v
+	rootCmd.Version = v
 }
 
 var (
