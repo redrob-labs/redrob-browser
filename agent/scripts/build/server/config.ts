@@ -75,7 +75,6 @@ function validateProductionEnv(envVars: Record<string, string>): void {
 }
 
 export interface LoadBuildConfigOptions {
-  compileOnly?: boolean
   ci?: boolean
 }
 
@@ -95,7 +94,7 @@ export function loadBuildConfig(
     ...process.env,
   }
 
-  if (options.compileOnly || options.ci) {
+  if (options.ci) {
     return { version: readServerVersion(rootDir), envVars, processEnv }
   }
 
