@@ -37,6 +37,7 @@ export async function runProdResourceBuild(argv: string[]): Promise<void> {
     buildConfig.envVars,
     buildConfig.processEnv,
     buildConfig.version,
+    { ci: args.ci },
   )
 
   if (args.ci) {
