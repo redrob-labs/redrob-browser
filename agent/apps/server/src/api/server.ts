@@ -38,7 +38,7 @@ import { createStatusRoute } from './routes/status'
 import {
   connectKlavisProxy,
   type KlavisProxyHandle,
-} from './services/mcp/register-klavis-mcp'
+} from './services/klavis/strata-proxy'
 import type { Env, HttpServerConfig } from './types'
 import { defaultCorsConfig } from './utils/cors'
 
