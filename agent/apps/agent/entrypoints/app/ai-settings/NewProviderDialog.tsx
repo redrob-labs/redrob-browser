@@ -8,7 +8,7 @@ import {
   Loader2,
   XCircle,
 } from 'lucide-react'
-import { type FC, useEffect, useMemo, useState } from 'react'
+import { type FC, useEffect, useMemo, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod/v3'
 import { Button } from '@/components/ui/button'
@@ -223,6 +223,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
   const [testResult, setTestResult] = useState<TestResult | null>(null)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [modelSearch, setModelSearch] = useState('')
+  const modelListRef = useRef<HTMLDivElement>(null)
   const { supports } = useCapabilities()
   const { baseUrl: agentServerUrl } = useAgentServerUrl()
   const kimiLaunch = useKimiLaunch()
@@ -305,14 +306,12 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
     [modelInfoList],
   )
 
-  const filteredModels = useMemo(() => {
-    if (!modelSearch) return modelInfoList
-    const fuzzyResults = modelFuse.search(modelSearch).map((r) => r.item)
-    const hasExactMatch = fuzzyResults.some((m) => m.modelId === modelSearch)
-    if (hasExactMatch) return fuzzyResults
-    const customEntry = { modelId: modelSearch, contextLength: 0 }
-    return [customEntry, ...fuzzyResults]
-  }, [modelSearch, modelFuse, modelInfoList])
+  const filteredModels = modelSearch
+    ? modelFuse.search(modelSearch).map((r) => r.item)
+    : modelInfoList
+
+  const showCustomEntry =
+    modelSearch && !filteredModels.some((m) => m.modelId === modelSearch)
 
   // Handle provider type change (user-initiated via Select)
   const handleTypeChange = (newType: ProviderType) => {
@@ -899,7 +898,12 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                           <CommandInput
                             placeholder="Search models..."
                             value={modelSearch}
-                            onValueChange={setModelSearch}
+                            onValueChange={(v) => {
+                              setModelSearch(v)
+                              requestAnimationFrame(() => {
+                                modelListRef.current?.scrollTo(0, 0)
+                              })
+                            }}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' && modelSearch) {
                                 e.preventDefault()
@@ -917,11 +921,36 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                               }
                             }}
                           />
-                          <CommandList>
+                          <CommandList ref={modelListRef}>
                             <CommandEmpty>
                               No models found. Press Enter to use &quot;
                               {modelSearch}&quot;
                             </CommandEmpty>
+                            {showCustomEntry && (
+                              <CommandGroup forceMount>
+                                <CommandItem
+                                  forceMount
+                                  value={`custom:${modelSearch}`}
+                                  onSelect={() => {
+                                    form.setValue('modelId', modelSearch)
+                                    track(MODEL_SELECTED_EVENT, {
+                                      provider_type: watchedType,
+                                      model_id: modelSearch,
+                                      is_custom_model: true,
+                                    })
+                                    setModelPickerOpen(false)
+                                    setModelSearch('')
+                                  }}
+                                >
+                                  <span className="flex-1 truncate">
+                                    {modelSearch}
+                                  </span>
+                                  {field.value === modelSearch && (
+                                    <Check className="ml-2 h-4 w-4 shrink-0" />
+                                  )}
+                                </CommandItem>
+                              </CommandGroup>
+                            )}
                             {filteredModels.length > 0 && (
                               <CommandGroup>
                                 {filteredModels.map((model) => (
