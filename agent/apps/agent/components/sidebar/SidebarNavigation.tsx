@@ -5,6 +5,7 @@ import {
   Home,
   PlugZap,
   Settings,
+  Shield,
   Sparkles,
   Wand2,
 } from 'lucide-react'
@@ -59,6 +60,7 @@ const primaryNavItems: NavItem[] = [
     icon: Sparkles,
     feature: Feature.SOUL_SUPPORT,
   },
+  { name: 'Governance', to: '/admin', icon: Shield },
   { name: 'Settings', to: '/settings/ai', icon: Settings },
 ]
 
