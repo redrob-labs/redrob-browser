@@ -9,6 +9,8 @@ import {
   RotateCcw,
   Search,
   Server,
+  ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react'
 import type { FC } from 'react'
 import { NavLink } from 'react-router'
@@ -78,7 +80,9 @@ const primarySettingsSections: NavSection[] = [
         icon: Palette,
         feature: Feature.CUSTOMIZATION_SUPPORT,
       },
+      { name: 'Tool Approvals', to: '/settings/approvals', icon: ShieldCheck },
       { name: 'BrowserOS as MCP', to: '/settings/mcp', icon: Server },
+      { name: 'ACL Rules', to: '/settings/acl', icon: ShieldAlert },
       {
         name: 'Usage & Billing',
         to: '/settings/usage',

@@ -6,6 +6,7 @@ import type {
 import { AGENT_LIMITS } from '@browseros/shared/constants/limits'
 import type { BrowserContext } from '@browseros/shared/schemas/browser-context'
 import { LLM_PROVIDERS } from '@browseros/shared/schemas/llm'
+import type { AclRule } from '@browseros/shared/types/acl'
 import {
   type LanguageModel,
   type ModelMessage,
@@ -23,6 +24,7 @@ import { isSoulBootstrap, readSoul } from '../lib/soul'
 import { buildSkillsCatalog } from '../skills/catalog'
 import { loadSkills } from '../skills/loader'
 import { buildFilesystemToolSet } from '../tools/filesystem/build-toolset'
+import type { ToolContext } from '../tools/framework'
 import { buildMemoryToolSet } from '../tools/memory/build-toolset'
 import type { ToolRegistry } from '../tools/tool-registry'
 import { CHAT_MODE_ALLOWED_TOOLS } from './chat-mode'
@@ -46,6 +48,7 @@ export interface AiSdkAgentConfig {
   klavisClient?: KlavisClient
   browserosId?: string
   aiSdkDevtoolsEnabled?: boolean
+  aclRules?: AclRule[]
 }
 
 export class AiSdkAgent {
@@ -55,6 +58,7 @@ export class AiSdkAgent {
     private _mcpClients: Array<{ close(): Promise<void> }>,
     private conversationId: string,
     private _toolNames: Set<string>,
+    private toolContext: ToolContext,
   ) {}
 
   /** Tool names registered on this agent — used to sanitize messages during session rebuilds. */
@@ -99,14 +103,19 @@ export class AiSdkAgent {
 
     // Build browser tools from the unified tool registry
     const originPageId = config.browserContext?.activeTab?.pageId
-    const allBrowserTools = buildBrowserToolSet(
-      config.registry,
-      config.browser,
-      config.resolvedConfig.workingDir,
-      {
+    const toolContext: ToolContext = {
+      browser: config.browser,
+      directories: { workingDir: config.resolvedConfig.workingDir },
+      session: {
         origin: config.resolvedConfig.origin,
         originPageId,
       },
+      aclRules: config.aclRules,
+    }
+    const allBrowserTools = buildBrowserToolSet(
+      config.registry,
+      toolContext,
+      config.resolvedConfig.toolApprovalConfig,
     )
     const browserTools = config.resolvedConfig.chatMode
       ? Object.fromEntries(
@@ -277,6 +286,7 @@ export class AiSdkAgent {
       clients,
       config.resolvedConfig.conversationId,
       new Set(Object.keys(tools)),
+      toolContext,
     )
   }
 
@@ -298,6 +308,10 @@ export class AiSdkAgent {
       role: 'user',
       parts: [{ type: 'text', text: content }],
     })
+  }
+
+  updateAclRules(rules?: AclRule[]): void {
+    this.toolContext.aclRules = rules
   }
 
   async dispose(): Promise<void> {
