@@ -9,9 +9,12 @@
 
 import { copyFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import {
+  OPENCLAW_COMPOSE_PROJECT_NAME,
+  OPENCLAW_GATEWAY_CONTAINER_NAME,
+} from '@browseros/shared/constants/openclaw'
 import type { LogFn, PodmanRuntime } from './podman-runtime'
 
-const COMPOSE_PROJECT_NAME = 'browseros-openclaw'
 const COMPOSE_FILE_NAME = 'docker-compose.yml'
 const ENV_FILE_NAME = '.env'
 
@@ -117,7 +120,7 @@ export class ContainerRuntime {
     try {
       const containers = await this.podman.listRunningContainers()
       const allOurs = containers.every((name) =>
-        name.startsWith('browseros-openclaw'),
+        name.startsWith(OPENCLAW_COMPOSE_PROJECT_NAME),
       )
 
       if (containers.length === 0 || allOurs) {
@@ -129,16 +132,18 @@ export class ContainerRuntime {
   }
 
   async execInContainer(command: string[], onLog?: LogFn): Promise<number> {
-    const containerName = `${COMPOSE_PROJECT_NAME}-openclaw-gateway-1`
-    return this.podman.runCommand(['exec', containerName, ...command], {
-      onOutput: onLog,
-    })
+    return this.podman.runCommand(
+      ['exec', OPENCLAW_GATEWAY_CONTAINER_NAME, ...command],
+      {
+        onOutput: onLog,
+      },
+    )
   }
 
   private async compose(args: string[], onLog?: LogFn): Promise<number> {
     return this.podman.runCommand(['compose', ...args], {
       cwd: this.projectDir,
-      env: { COMPOSE_PROJECT_NAME },
+      env: { COMPOSE_PROJECT_NAME: OPENCLAW_COMPOSE_PROJECT_NAME },
       onOutput: onLog,
     })
   }

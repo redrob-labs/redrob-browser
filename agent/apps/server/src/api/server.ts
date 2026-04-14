@@ -10,7 +10,9 @@
  * - MCP HTTP routes (using @hono/mcp transport)
  */
 
+import { OPENCLAW_GATEWAY_CONTAINER_NAME } from '@browseros/shared/constants/openclaw'
 import { Hono } from 'hono'
+import { websocket } from 'hono/bun'
 import { cors } from 'hono/cors'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { HttpAgentError } from '../agent/errors'
@@ -20,6 +22,7 @@ import { initializeOAuth } from '../lib/clients/oauth'
 import { getDb } from '../lib/db'
 import { logger } from '../lib/logger'
 import { Sentry } from '../lib/sentry'
+import { getPodmanRuntime } from '../services/openclaw/podman-runtime'
 import { createChatRoutes } from './routes/chat'
 import { createCreditsRoutes } from './routes/credits'
 import { createHealthRoute } from './routes/health'
@@ -35,12 +38,14 @@ import { createShutdownRoute } from './routes/shutdown'
 import { createSkillsRoutes } from './routes/skills'
 import { createSoulRoutes } from './routes/soul'
 import { createStatusRoute } from './routes/status'
+import { createTerminalRoutes } from './routes/terminal'
 import {
   connectKlavisProxy,
   type KlavisProxyHandle,
 } from './services/klavis/strata-proxy'
 import type { Env, HttpServerConfig } from './types'
 import { defaultCorsConfig } from './utils/cors'
+import { requireTrustedAppOrigin } from './utils/request-auth'
 
 async function assertPortAvailable(port: number): Promise<void> {
   const net = await import('node:net')
@@ -101,6 +106,20 @@ export async function createHttpServer(config: HttpServerConfig) {
       )
     }
   }
+
+  const clawRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createOpenClawRoutes())
+
+  const terminalRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route(
+      '/',
+      createTerminalRoutes({
+        containerName: OPENCLAW_GATEWAY_CONTAINER_NAME,
+        podmanPath: getPodmanRuntime().getPodmanPath(),
+      }),
+    )
 
   const app = new Hono<Env>()
     .use('/*', cors(defaultCorsConfig))
@@ -171,7 +190,7 @@ export async function createHttpServer(config: HttpServerConfig) {
         browserosId,
       }),
     )
-    .route('/claw', createOpenClawRoutes())
+    .route('/claw', clawRoutes)
 
   // Error handler
   app.onError((err, c) => {
@@ -213,11 +232,14 @@ export async function createHttpServer(config: HttpServerConfig) {
 
   await assertPortAvailable(port)
 
+  app.route('/terminal', terminalRoutes)
+
   const server = Bun.serve({
     fetch: (request, server) => app.fetch(request, { server }),
     port,
     hostname: host,
     idleTimeout: 0,
+    websocket,
   })
 
   logger.info('Consolidated HTTP Server started', { port, host })

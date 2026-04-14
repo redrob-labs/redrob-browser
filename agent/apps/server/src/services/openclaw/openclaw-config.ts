@@ -7,11 +7,13 @@
  * Config is write-once at setup — agent CRUD uses WS RPC, not config edits.
  */
 
+import {
+  OPENCLAW_CONTAINER_HOME,
+  OPENCLAW_GATEWAY_PORT,
+} from '@browseros/shared/constants/openclaw'
 import { DEFAULT_PORTS } from '@browseros/shared/constants/ports'
 
 const OPENCLAW_IMAGE = 'ghcr.io/openclaw/openclaw:latest'
-const OPENCLAW_GATEWAY_PORT = 18789
-const CONTAINER_HOME = '/home/node/.openclaw'
 
 export const PROVIDER_ENV_MAP: Record<string, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
@@ -46,7 +48,7 @@ export function buildBootstrapConfig(
   const serverPort = input.browserosServerPort ?? DEFAULT_PORTS.server
 
   const defaults: Record<string, unknown> = {
-    workspace: `${CONTAINER_HOME}/workspace`,
+    workspace: `${OPENCLAW_CONTAINER_HOME}/workspace`,
     timeoutSeconds: 4200,
     thinkingDefault: 'adaptive',
   }

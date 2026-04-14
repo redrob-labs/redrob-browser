@@ -7,8 +7,15 @@
  * Thin layer delegating to OpenClawService.
  */
 
+import { OPENCLAW_GATEWAY_PORT } from '@browseros/shared/constants/openclaw'
 import { Hono } from 'hono'
 import { stream } from 'hono/streaming'
+import {
+  OpenClawAgentAlreadyExistsError,
+  OpenClawAgentNotFoundError,
+  OpenClawInvalidAgentNameError,
+  OpenClawProtectedAgentError,
+} from '../../services/openclaw/errors'
 import { getOpenClawService } from '../../services/openclaw/openclaw-service'
 
 export function createOpenClawRoutes() {
@@ -33,7 +40,7 @@ export function createOpenClawRoutes() {
         return c.json(
           {
             status: 'running',
-            port: 18789,
+            port: OPENCLAW_GATEWAY_PORT,
             agents: agents.map((a) => ({
               agentId: a.agentId,
               name: a.name,
@@ -114,13 +121,13 @@ export function createOpenClawRoutes() {
         })
         return c.json({ agent }, 201)
       } catch (err) {
+        if (err instanceof OpenClawAgentAlreadyExistsError) {
+          return c.json({ error: err.message }, 409)
+        }
+        if (err instanceof OpenClawInvalidAgentNameError) {
+          return c.json({ error: err.message }, 400)
+        }
         const message = err instanceof Error ? err.message : String(err)
-        if (message.includes('already exists')) {
-          return c.json({ error: message }, 409)
-        }
-        if (message.includes('must start with')) {
-          return c.json({ error: message }, 400)
-        }
         return c.json({ error: message }, 500)
       }
     })
@@ -132,13 +139,13 @@ export function createOpenClawRoutes() {
         await getOpenClawService().removeAgent(id)
         return c.json({ success: true })
       } catch (err) {
+        if (err instanceof OpenClawAgentNotFoundError) {
+          return c.json({ error: err.message }, 404)
+        }
+        if (err instanceof OpenClawProtectedAgentError) {
+          return c.json({ error: err.message }, 400)
+        }
         const message = err instanceof Error ? err.message : String(err)
-        if (message.includes('not found')) {
-          return c.json({ error: message }, 404)
-        }
-        if (message.includes('Cannot delete')) {
-          return c.json({ error: message }, 400)
-        }
         return c.json({ error: message }, 500)
       }
     })

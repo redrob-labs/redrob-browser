@@ -12,13 +12,12 @@
 import crypto from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { OPENCLAW_CONTAINER_HOME } from '@browseros/shared/constants/openclaw'
 import { logger } from '../../lib/logger'
 
 const RPC_TIMEOUT_MS = 15_000
 const RECONNECT_DELAY_MS = 2_000
 const MAX_RECONNECT_RETRIES = 5
-const CONTAINER_HOME = '/home/node/.openclaw'
-
 const SCOPES = [
   'operator.read',
   'operator.write',
@@ -170,18 +169,16 @@ export class GatewayClient {
   private pendingRequests = new Map<string, PendingRequest>()
   private reconnectAttempts = 0
   private shouldReconnect = true
-  private version: string
   private device: DeviceIdentity | null = null
 
   constructor(
-    private port: number,
-    private token: string,
-    openclawDir: string,
-    version = '1.0.0',
+    private readonly port: number,
+    private readonly token: string,
+    private readonly openclawDir: string,
+    private readonly version = '1.0.0',
   ) {
-    this.version = version
     try {
-      const identityPath = join(openclawDir, 'client-identity.json')
+      const identityPath = join(this.openclawDir, 'client-identity.json')
       this.device = JSON.parse(readFileSync(identityPath, 'utf-8'))
     } catch {
       logger.warn('Client device identity not found, WS auth may fail')
@@ -203,16 +200,8 @@ export class GatewayClient {
       let connectReqId: string | null = null
 
       this.ws.onmessage = (event) => {
-        let frame: WsFrame
-        try {
-          frame = JSON.parse(
-            typeof event.data === 'string'
-              ? event.data
-              : new TextDecoder().decode(event.data as ArrayBuffer),
-          )
-        } catch {
-          return
-        }
+        const frame = GatewayClient.parseFrame(event.data)
+        if (!frame) return
 
         if (!handshakeComplete) {
           if (frame.type === 'event' && frame.event === 'connect.challenge') {
@@ -281,18 +270,7 @@ export class GatewayClient {
           return
         }
 
-        if (frame.type === 'res' && frame.id) {
-          const pending = this.pendingRequests.get(frame.id)
-          if (pending) {
-            this.pendingRequests.delete(frame.id)
-            clearTimeout(pending.timer)
-            if (frame.ok) {
-              pending.resolve(frame.payload)
-            } else {
-              pending.reject(new Error(frame.error?.message ?? 'RPC error'))
-            }
-          }
-        }
+        this.resolvePendingRequest(frame)
       }
 
       this.ws.onerror = (err) => {
@@ -413,177 +391,91 @@ export class GatewayClient {
     sessionKey: string,
     message: string,
   ): ReadableStream<OpenClawStreamEvent> {
-    if (!this._connected || !this.ws) {
+    if (!this._connected) {
       throw new Error('Gateway WS not connected')
     }
 
-    const ws = this.ws
-    const pendingRequests = this.pendingRequests
     const fullSessionKey = `agent:${agentId}:browseros-${sessionKey}`
     const idempotencyKey = globalThis.crypto.randomUUID()
-    const originalOnMessage = ws.onmessage
-
-    const restore = () => {
-      ws.onmessage = originalOnMessage
-    }
+    const streamClient = new GatewayClient(
+      this.port,
+      this.token,
+      this.openclawDir,
+      this.version,
+    )
 
     return new ReadableStream<OpenClawStreamEvent>({
-      start: (controller) => {
+      start: async (controller) => {
+        try {
+          await streamClient.connect()
+        } catch (error) {
+          controller.enqueue({
+            type: 'error',
+            data: {
+              message:
+                error instanceof Error
+                  ? error.message
+                  : 'Gateway WS not connected',
+            },
+          })
+          controller.close()
+          return
+        }
+
+        const ws = streamClient.ws
+        if (!ws) {
+          controller.enqueue({
+            type: 'error',
+            data: { message: 'Gateway WS not connected' },
+          })
+          controller.close()
+          return
+        }
+
         const subscribeId = globalThis.crypto.randomUUID()
         const agentReqId = globalThis.crypto.randomUUID()
+        let finished = false
+
+        const finish = (event?: OpenClawStreamEvent) => {
+          if (finished) return
+          finished = true
+          if (event) controller.enqueue(event)
+          controller.close()
+          streamClient.disconnect()
+        }
 
         ws.onmessage = (event) => {
-          let frame: WsFrame
-          try {
-            frame = JSON.parse(
-              typeof event.data === 'string'
-                ? event.data
-                : new TextDecoder().decode(event.data as ArrayBuffer),
+          const frame = GatewayClient.parseFrame(event.data)
+          if (!frame) return
+
+          if (
+            this.handleChatStreamControlFrame(
+              frame,
+              subscribeId,
+              agentReqId,
+              finish,
             )
-          } catch {
+          ) {
             return
           }
 
-          if (frame.type === 'res' && frame.id) {
-            if (frame.id === subscribeId || frame.id === agentReqId) {
-              if (!frame.ok) {
-                controller.enqueue({
-                  type: 'error',
-                  data: {
-                    message: frame.error?.message ?? 'RPC error',
-                    code: frame.error?.code,
-                  },
-                })
-                controller.close()
-                restore()
-              }
-              return
-            }
+          this.handleChatStreamEventFrame(frame, controller, finish)
+        }
 
-            const pending = pendingRequests.get(frame.id)
-            if (pending) {
-              pendingRequests.delete(frame.id)
-              clearTimeout(pending.timer)
-              if (frame.ok) {
-                pending.resolve(frame.payload)
-              } else {
-                pending.reject(new Error(frame.error?.message ?? 'RPC error'))
-              }
-            }
-            return
-          }
+        ws.onclose = () => {
+          if (finished) return
+          finish({
+            type: 'error',
+            data: { message: 'Gateway WS disconnected' },
+          })
+        }
 
-          const anyFrame = frame as any
-          const eventName = anyFrame.event as string | undefined
-          const payload = anyFrame.payload as
-            | Record<string, unknown>
-            | undefined
-
-          if (!eventName || !payload) return
-
-          if (eventName === 'agent') {
-            const streamType = payload.stream as string | undefined
-            const data = payload.data as Record<string, unknown> | undefined
-
-            if (streamType === 'assistant' && data?.delta) {
-              controller.enqueue({
-                type: 'text-delta',
-                data: { text: data.delta },
-              })
-              return
-            }
-
-            if (streamType === 'item' && data) {
-              const phase = data.phase as string | undefined
-              if (phase === 'start') {
-                controller.enqueue({
-                  type: 'tool-start',
-                  data: {
-                    toolCallId: data.toolCallId ?? data.id,
-                    toolName: data.name ?? data.title,
-                    kind: data.kind,
-                  },
-                })
-                return
-              }
-              if (phase === 'end') {
-                controller.enqueue({
-                  type: 'tool-end',
-                  data: {
-                    toolCallId: data.toolCallId ?? data.id,
-                    status: data.status,
-                    durationMs: data.durationMs,
-                  },
-                })
-                return
-              }
-            }
-
-            if (streamType === 'lifecycle') {
-              controller.enqueue({
-                type: 'lifecycle',
-                data: { phase: data?.phase ?? payload.phase },
-              })
-              return
-            }
-          }
-
-          if (eventName === 'session.tool') {
-            const toolData =
-              (payload.data as Record<string, unknown>) ?? payload
-            const phase =
-              (toolData.phase as string) ?? (payload.phase as string)
-            if (phase === 'result') {
-              controller.enqueue({
-                type: 'tool-output',
-                data: {
-                  toolCallId: toolData.toolCallId,
-                  isError: toolData.isError ?? false,
-                  meta: toolData.meta,
-                },
-              })
-              return
-            }
-          }
-
-          if (eventName === 'session.message') {
-            const msg = payload.message as Record<string, unknown> | undefined
-            if (msg?.role === 'assistant') {
-              const content = msg.content as
-                | Array<Record<string, unknown>>
-                | undefined
-              if (content) {
-                for (const block of content) {
-                  if (block.type === 'thinking') {
-                    const text =
-                      (block.thinking as string) ??
-                      (block.content as string) ??
-                      (block.text as string) ??
-                      ''
-                    if (text) {
-                      controller.enqueue({
-                        type: 'thinking',
-                        data: { text },
-                      })
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          if (eventName === 'chat') {
-            const state = payload.state as string | undefined
-            if (state === 'final') {
-              controller.enqueue({
-                type: 'done',
-                data: { text: (payload.text as string) ?? '' },
-              })
-              controller.close()
-              restore()
-              return
-            }
-          }
+        ws.onerror = () => {
+          if (finished) return
+          finish({
+            type: 'error',
+            data: { message: 'Gateway WS connection error' },
+          })
         }
 
         ws.send(
@@ -609,7 +501,17 @@ export class GatewayClient {
         )
       },
       cancel: () => {
-        restore()
+        if (streamClient.ws?.readyState === WebSocket.OPEN) {
+          streamClient.ws.send(
+            JSON.stringify({
+              type: 'req',
+              id: globalThis.crypto.randomUUID(),
+              method: 'sessions.abort',
+              params: { sessionKey: fullSessionKey },
+            }),
+          )
+        }
+        streamClient.disconnect()
       },
     })
   }
@@ -618,8 +520,20 @@ export class GatewayClient {
 
   static agentWorkspace(name: string): string {
     return name === 'main'
-      ? `${CONTAINER_HOME}/workspace`
-      : `${CONTAINER_HOME}/workspace-${name}`
+      ? `${OPENCLAW_CONTAINER_HOME}/workspace`
+      : `${OPENCLAW_CONTAINER_HOME}/workspace-${name}`
+  }
+
+  private static parseFrame(data: unknown): WsFrame | null {
+    try {
+      return JSON.parse(
+        typeof data === 'string'
+          ? data
+          : new TextDecoder().decode(data as ArrayBuffer),
+      ) as WsFrame
+    } catch {
+      return null
+    }
   }
 
   private tryReconnect(): void {
@@ -650,5 +564,176 @@ export class GatewayClient {
       pending.reject(new Error(reason))
       this.pendingRequests.delete(id)
     }
+  }
+
+  private resolvePendingRequest(frame: WsFrame): void {
+    if (frame.type !== 'res' || !frame.id) return
+
+    const pending = this.pendingRequests.get(frame.id)
+    if (!pending) return
+
+    this.pendingRequests.delete(frame.id)
+    clearTimeout(pending.timer)
+    if (frame.ok) {
+      pending.resolve(frame.payload)
+    } else {
+      pending.reject(new Error(frame.error?.message ?? 'RPC error'))
+    }
+  }
+
+  private handleChatStreamControlFrame(
+    frame: WsFrame,
+    subscribeId: string,
+    agentReqId: string,
+    finish: (event?: OpenClawStreamEvent) => void,
+  ): boolean {
+    if (frame.type !== 'res' || !frame.id) return false
+    if (frame.id !== subscribeId && frame.id !== agentReqId) return false
+
+    if (!frame.ok) {
+      finish({
+        type: 'error',
+        data: {
+          message: frame.error?.message ?? 'RPC error',
+          code: frame.error?.code,
+        },
+      })
+    }
+
+    return true
+  }
+
+  private handleChatStreamEventFrame(
+    frame: WsFrame,
+    controller: ReadableStreamDefaultController<OpenClawStreamEvent>,
+    finish: (event?: OpenClawStreamEvent) => void,
+  ): void {
+    if (frame.type !== 'event' || !frame.event || !frame.payload) return
+
+    switch (frame.event) {
+      case 'agent':
+        this.handleAgentStreamEvent(frame.payload, controller)
+        return
+      case 'session.tool':
+        this.handleSessionToolStreamEvent(frame.payload, controller)
+        return
+      case 'session.message':
+        this.handleSessionMessageStreamEvent(frame.payload, controller)
+        return
+      case 'chat':
+        this.handleChatCompletionEvent(frame.payload, finish)
+        return
+      default:
+        return
+    }
+  }
+
+  private handleAgentStreamEvent(
+    payload: Record<string, unknown>,
+    controller: ReadableStreamDefaultController<OpenClawStreamEvent>,
+  ): void {
+    const streamType = payload.stream as string | undefined
+    const data = payload.data as Record<string, unknown> | undefined
+
+    if (streamType === 'assistant' && data?.delta) {
+      controller.enqueue({
+        type: 'text-delta',
+        data: { text: data.delta },
+      })
+      return
+    }
+
+    if (streamType === 'item' && data) {
+      const phase = data.phase as string | undefined
+      if (phase === 'start') {
+        controller.enqueue({
+          type: 'tool-start',
+          data: {
+            toolCallId: data.toolCallId ?? data.id,
+            toolName: data.name ?? data.title,
+            kind: data.kind,
+          },
+        })
+        return
+      }
+
+      if (phase === 'end') {
+        controller.enqueue({
+          type: 'tool-end',
+          data: {
+            toolCallId: data.toolCallId ?? data.id,
+            status: data.status,
+            durationMs: data.durationMs,
+          },
+        })
+        return
+      }
+    }
+
+    if (streamType === 'lifecycle') {
+      controller.enqueue({
+        type: 'lifecycle',
+        data: { phase: data?.phase ?? payload.phase },
+      })
+    }
+  }
+
+  private handleSessionToolStreamEvent(
+    payload: Record<string, unknown>,
+    controller: ReadableStreamDefaultController<OpenClawStreamEvent>,
+  ): void {
+    const toolData = (payload.data as Record<string, unknown>) ?? payload
+    const phase = (toolData.phase as string) ?? (payload.phase as string)
+    if (phase !== 'result') return
+
+    controller.enqueue({
+      type: 'tool-output',
+      data: {
+        toolCallId: toolData.toolCallId,
+        isError: toolData.isError ?? false,
+        meta: toolData.meta,
+      },
+    })
+  }
+
+  private handleSessionMessageStreamEvent(
+    payload: Record<string, unknown>,
+    controller: ReadableStreamDefaultController<OpenClawStreamEvent>,
+  ): void {
+    const message = payload.message as Record<string, unknown> | undefined
+    if (message?.role !== 'assistant') return
+
+    const content = message.content as
+      | Array<Record<string, unknown>>
+      | undefined
+    if (!content) return
+
+    for (const block of content) {
+      if (block.type !== 'thinking') continue
+
+      const text =
+        (block.thinking as string) ??
+        (block.content as string) ??
+        (block.text as string) ??
+        ''
+      if (!text) continue
+
+      controller.enqueue({
+        type: 'thinking',
+        data: { text },
+      })
+    }
+  }
+
+  private handleChatCompletionEvent(
+    payload: Record<string, unknown>,
+    finish: (event?: OpenClawStreamEvent) => void,
+  ): void {
+    if ((payload.state as string | undefined) !== 'final') return
+
+    finish({
+      type: 'done',
+      data: { text: (payload.text as string) ?? '' },
+    })
   }
 }

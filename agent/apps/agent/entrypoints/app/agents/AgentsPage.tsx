@@ -6,6 +6,7 @@ import {
   Plus,
   RefreshCw,
   Square,
+  TerminalSquare,
   Trash2,
 } from 'lucide-react'
 import { type FC, useEffect, useState } from 'react'
@@ -28,12 +29,14 @@ import {
 } from '@/components/ui/select'
 import { useLlmProviders } from '@/lib/llm-providers/useLlmProviders'
 import { AgentChat } from './AgentChat'
+import { AgentTerminal } from './AgentTerminal'
 import {
   type AgentEntry,
   createAgent,
   deleteAgent,
   restartOpenClaw,
   setupOpenClaw,
+  startOpenClaw,
   stopOpenClaw,
   useOpenClawAgents,
   useOpenClawStatus,
@@ -76,6 +79,7 @@ export const AgentsPage: FC = () => {
 
   const [actionInProgress, setActionInProgress] = useState(false)
   const [chatAgent, setChatAgent] = useState<AgentEntry | null>(null)
+  const [showTerminal, setShowTerminal] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const compatibleProviders = providers.filter(
@@ -159,6 +163,19 @@ export const AgentsPage: FC = () => {
     }
   }
 
+  const handleStart = async () => {
+    setActionInProgress(true)
+    setError(null)
+    try {
+      await startOpenClaw()
+      refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setActionInProgress(false)
+    }
+  }
+
   const handleRestart = async () => {
     setActionInProgress(true)
     try {
@@ -169,6 +186,10 @@ export const AgentsPage: FC = () => {
     } finally {
       setActionInProgress(false)
     }
+  }
+
+  if (showTerminal) {
+    return <AgentTerminal onBack={() => setShowTerminal(false)} />
   }
 
   if (chatAgent) {
@@ -220,6 +241,10 @@ export const AgentsPage: FC = () => {
                 title="Stop gateway"
               >
                 <Square className="size-4" />
+              </Button>
+              <Button variant="outline" onClick={() => setShowTerminal(true)}>
+                <TerminalSquare className="mr-1 size-4" />
+                Terminal
               </Button>
               <Button onClick={() => setCreateOpen(true)}>
                 <Plus className="mr-1 size-4" />
@@ -279,7 +304,9 @@ export const AgentsPage: FC = () => {
                 The OpenClaw gateway is not running.
               </p>
             </div>
-            <Button onClick={() => setSetupOpen(true)}>Start Gateway</Button>
+            <Button onClick={handleStart} disabled={actionInProgress}>
+              Start Gateway
+            </Button>
           </CardContent>
         </Card>
       )}

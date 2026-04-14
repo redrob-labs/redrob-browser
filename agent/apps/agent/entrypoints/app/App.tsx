@@ -1,7 +1,5 @@
 import type { FC } from 'react'
 import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router'
-
-import { NewTab } from '../newtab/index/NewTab'
 import { NewTabChat } from '../newtab/index/NewTabChat'
 import { NewTabLayout } from '../newtab/layout/NewTabLayout'
 import { Personalize } from '../newtab/personalize/Personalize'
@@ -9,9 +7,12 @@ import { OnboardingDemo } from '../onboarding/demo/OnboardingDemo'
 import { FeaturesPage } from '../onboarding/features/Features'
 import { Onboarding } from '../onboarding/index/Onboarding'
 import { StepsLayout } from '../onboarding/steps/StepsLayout'
-import { AgentsPage } from './agents/AgentsPage'
 import { AclSettingsPage } from './acl-settings/AclSettingsPage'
 import { AdminDashboardPage } from './admin-dashboard/AdminDashboardPage'
+import { AgentCommandConversation } from './agent-command/AgentCommandConversation'
+import { AgentCommandHome } from './agent-command/AgentCommandHome'
+import { AgentCommandLayout } from './agent-command/agent-command-layout'
+import { AgentsPage } from './agents/AgentsPage'
 import { AISettingsPage } from './ai-settings/AISettingsPage'
 import { ConnectMCP } from './connect-mcp/ConnectMCP'
 import { CustomizationPage } from './customization/CustomizationPage'
@@ -80,7 +81,13 @@ export const App: FC = () => {
         <Route element={<SidebarLayout />}>
           {/* Home routes */}
           <Route path="home" element={<NewTabLayout />}>
-            <Route index element={<NewTab />} />
+            <Route element={<AgentCommandLayout />}>
+              <Route index element={<AgentCommandHome />} />
+              <Route
+                path="agents/:agentId"
+                element={<AgentCommandConversation />}
+              />
+            </Route>
             <Route path="chat" element={<NewTabChat />} />
             <Route path="personalize" element={<Personalize />} />
             <Route path="soul" element={<SoulPage />} />

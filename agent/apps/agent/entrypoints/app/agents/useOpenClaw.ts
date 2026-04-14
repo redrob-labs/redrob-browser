@@ -5,7 +5,12 @@ export interface AgentEntry {
   agentId: string
   name: string
   workspace: string
-  model?: string
+  model?: unknown
+}
+
+export function getModelDisplayName(model: unknown): string | undefined {
+  if (typeof model === 'string') return model.split('/').pop()
+  return undefined
 }
 
 export interface OpenClawStatus {
@@ -20,6 +25,16 @@ export interface OpenClawStatus {
 async function clawFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const baseUrl = await getAgentServerUrl()
   const res = await fetch(`${baseUrl}/claw${path}`, init)
+  if (!res.ok) {
+    let message = `Request failed with status ${res.status}`
+    try {
+      const body = (await res.json()) as { error?: string }
+      if (body.error) {
+        message = body.error
+      }
+    } catch {}
+    throw new Error(message)
+  }
   return res.json() as Promise<T>
 }
 
@@ -133,11 +148,13 @@ export async function chatWithAgent(
   agentId: string,
   message: string,
   sessionKey?: string,
+  signal?: AbortSignal,
 ): Promise<Response> {
   const baseUrl = await getAgentServerUrl()
   return fetch(`${baseUrl}/claw/agents/${agentId}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, sessionKey }),
+    signal,
   })
 }

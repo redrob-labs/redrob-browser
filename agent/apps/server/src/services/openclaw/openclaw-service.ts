@@ -11,10 +11,17 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { OPENCLAW_GATEWAY_PORT } from '@browseros/shared/constants/openclaw'
 import { DEFAULT_PORTS } from '@browseros/shared/constants/ports'
 import { getOpenClawDir } from '../../lib/browseros-dir'
 import { logger } from '../../lib/logger'
 import { ContainerRuntime } from './container-runtime'
+import {
+  OpenClawAgentAlreadyExistsError,
+  OpenClawAgentNotFoundError,
+  OpenClawInvalidAgentNameError,
+  OpenClawProtectedAgentError,
+} from './errors'
 import {
   ensureClientIdentity,
   type GatewayAgentEntry,
@@ -33,7 +40,6 @@ const COMPOSE_RESOURCE = resolve(
   '../../../resources/openclaw-compose.yml',
 )
 const OPENCLAW_CONFIG_FILE = 'openclaw.json'
-const GATEWAY_PORT = 18789
 const READY_TIMEOUT_MS = 30_000
 const AGENT_NAME_PATTERN = /^[a-z][a-z0-9-]*$/
 
@@ -63,7 +69,7 @@ export class OpenClawService {
   private runtime: ContainerRuntime
   private gateway: GatewayClient | null = null
   private openclawDir: string
-  private port = GATEWAY_PORT
+  private port = OPENCLAW_GATEWAY_PORT
   private token: string
   private lastError: string | null = null
   private browserosServerPort: number
@@ -158,6 +164,7 @@ export class OpenClawService {
     await this.connectGateway()
 
     // Ensure main agent exists (gateway may auto-create it)
+    // biome-ignore lint/style/noNonNullAssertion: gateway is guaranteed connected after connectGateway()
     const existingAgents = await this.gateway!.listAgents()
     const hasMain = existingAgents.some((a) => a.agentId === 'main')
     if (!hasMain) {
@@ -166,6 +173,7 @@ export class OpenClawService {
         input.providerType && input.modelId
           ? `${input.providerType}/${input.modelId}`
           : undefined
+      // biome-ignore lint/style/noNonNullAssertion: gateway is connected
       await this.gateway!.createAgent({
         name: 'main',
         workspace: GatewayClient.agentWorkspace('main'),
@@ -305,9 +313,7 @@ export class OpenClawService {
   }): Promise<GatewayAgentEntry> {
     const { name } = input
     if (!AGENT_NAME_PATTERN.test(name)) {
-      throw new Error(
-        'Agent name must start with a lowercase letter and contain only lowercase letters, numbers, and hyphens',
-      )
+      throw new OpenClawInvalidAgentNameError()
     }
 
     logger.debug('Creating OpenClaw agent', {
@@ -335,11 +341,25 @@ export class OpenClawService {
         ? `${input.providerType}/${input.modelId}`
         : undefined
 
-    const agent = await this.gateway!.createAgent({
-      name,
-      workspace: GatewayClient.agentWorkspace(name),
-      model,
-    })
+    const gateway = this.gateway
+    if (!gateway) {
+      throw new Error('Gateway WS not connected')
+    }
+
+    let agent: GatewayAgentEntry
+    try {
+      agent = await gateway.createAgent({
+        name,
+        workspace: GatewayClient.agentWorkspace(name),
+        model,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.includes('already exists')) {
+        throw new OpenClawAgentAlreadyExistsError(name)
+      }
+      throw error
+    }
 
     logger.info('Agent created via WS RPC', {
       agentId: agent.agentId,
@@ -350,17 +370,27 @@ export class OpenClawService {
 
   async removeAgent(agentId: string): Promise<void> {
     if (agentId === 'main') {
-      throw new Error('Cannot delete the main agent')
+      throw new OpenClawProtectedAgentError('Cannot delete the main agent')
     }
 
     this.ensureGatewayConnected()
-    await this.gateway!.deleteAgent(agentId)
+    try {
+      // biome-ignore lint/style/noNonNullAssertion: ensureGatewayConnected() guards above
+      await this.gateway!.deleteAgent(agentId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.includes('not found')) {
+        throw new OpenClawAgentNotFoundError(agentId)
+      }
+      throw error
+    }
     logger.info('Agent removed via WS RPC', { agentId })
   }
 
   async listAgents(): Promise<GatewayAgentEntry[]> {
     this.ensureGatewayConnected()
     logger.debug('Listing OpenClaw agents')
+    // biome-ignore lint/style/noNonNullAssertion: ensureGatewayConnected() guards above
     return this.gateway!.listAgents()
   }
 
@@ -373,6 +403,7 @@ export class OpenClawService {
   ): ReadableStream<OpenClawStreamEvent> {
     this.ensureGatewayConnected()
     logger.debug('Starting OpenClaw chat stream', { agentId, sessionKey })
+    // biome-ignore lint/style/noNonNullAssertion: ensureGatewayConnected() guards above
     return this.gateway!.chatStream(agentId, sessionKey, message)
   }
 
@@ -503,7 +534,9 @@ export class OpenClawService {
     }
 
     const jsonStr = output.join('\n')
-    let data: { pending?: Array<{ requestId: string }> }
+    let data: {
+      pending?: Array<{ requestId: string; deviceId?: string }>
+    }
     try {
       data = JSON.parse(jsonStr)
     } catch {
@@ -518,7 +551,19 @@ export class OpenClawService {
       throw new Error('No pending device pair requests to approve')
     }
 
-    const requestId = pending[0].requestId
+    const clientDeviceId = await this.readClientDeviceId()
+    const pendingRequest =
+      pending.find((request) => request.deviceId === clientDeviceId) ??
+      pending[0]
+    const requestId = pendingRequest.requestId
+
+    if (clientDeviceId && pendingRequest.deviceId !== clientDeviceId) {
+      logger.warn('Pending device request did not match client identity', {
+        clientDeviceId,
+        approvedRequestId: requestId,
+      })
+    }
+
     logProgress(`Approving device pair request ${requestId.slice(0, 8)}...`)
 
     const code = await this.runtime.execInContainer([
@@ -591,7 +636,8 @@ export class OpenClawService {
     let addedNew = false
     let updatedExisting = false
     for (const [key, value] of Object.entries(newKeys)) {
-      const pattern = new RegExp(`^${key}=.*$`, 'm')
+      const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const pattern = new RegExp(`^${escapedKey}=.*$`, 'm')
       if (pattern.test(content)) {
         content = content.replace(pattern, `${key}=${value}`)
         updatedExisting = true
@@ -621,6 +667,18 @@ export class OpenClawService {
       }
     } catch {
       logger.debug('OpenClaw env file not available while loading token')
+    }
+  }
+
+  private async readClientDeviceId(): Promise<string | null> {
+    try {
+      const identityPath = join(this.openclawDir, 'client-identity.json')
+      const identity = JSON.parse(await readFile(identityPath, 'utf-8')) as {
+        deviceId?: string
+      }
+      return identity.deviceId ?? null
+    } catch {
+      return null
     }
   }
 
