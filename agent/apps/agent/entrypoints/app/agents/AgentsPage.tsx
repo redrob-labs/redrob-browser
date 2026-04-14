@@ -1,3 +1,7 @@
+import type {
+  BrowserOSCustomRoleInput,
+  BrowserOSRoleBoundary,
+} from '@browseros/shared/types/role-aware-agents'
 import {
   AlertCircle,
   Cpu,
@@ -31,18 +35,54 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { useLlmProviders } from '@/lib/llm-providers/useLlmProviders'
 import { AgentChat } from './AgentChat'
 import { AgentTerminal } from './AgentTerminal'
 import {
   type AgentEntry,
   type OpenClawStatus,
+  type RoleTemplateSummary,
   useOpenClawAgents,
   useOpenClawMutations,
+  useOpenClawRoles,
   useOpenClawStatus,
 } from './useOpenClaw'
 
 const OAUTH_ONLY_TYPES = new Set(['chatgpt-pro', 'github-copilot', 'qwen-code'])
+const CUSTOM_ROLE_VALUE = '__custom__'
+const PLAIN_AGENT_VALUE = '__plain__'
+type AgentCreationMode = 'builtin' | 'custom' | 'plain'
+
+function createDefaultCustomRoleBoundaries(): BrowserOSRoleBoundary[] {
+  return [
+    {
+      key: 'draft-external-comms',
+      label: 'Draft external communications',
+      description: 'May prepare outbound messages for review.',
+      defaultMode: 'allow',
+    },
+    {
+      key: 'send-external-comms',
+      label: 'Send external communications',
+      description: 'Should require approval before sending messages.',
+      defaultMode: 'ask',
+    },
+    {
+      key: 'calendar-mutations',
+      label: 'Modify calendar events',
+      description: 'Should ask before moving or creating calendar events.',
+      defaultMode: 'ask',
+    },
+  ]
+}
+
+function parseCommaSeparatedList(input: string): string[] {
+  return input
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
 
 const CONTROL_PLANE_COPY: Record<
   OpenClawStatus['controlPlaneStatus'],
@@ -211,10 +251,10 @@ const ProviderSelector: FC<ProviderSelectorProps> = ({
           <SelectValue placeholder="Select a provider" />
         </SelectTrigger>
         <SelectContent>
-          {providers.map((p) => (
-            <SelectItem key={p.id} value={p.id}>
-              {p.name} — {p.modelId}
-              {p.id === defaultProviderId ? ' (default)' : ''}
+          {providers.map((provider) => (
+            <SelectItem key={provider.id} value={provider.id}>
+              {provider.name} — {provider.modelId}
+              {provider.id === defaultProviderId ? ' (default)' : ''}
             </SelectItem>
           ))}
         </SelectContent>
@@ -241,6 +281,7 @@ export const AgentsPage: FC = () => {
     loading: agentsLoading,
     error: agentsError,
   } = useOpenClawAgents(agentsQueryEnabled)
+  const { roles, loading: rolesLoading, error: rolesError } = useOpenClawRoles()
   const {
     setupOpenClaw,
     createAgent,
@@ -260,8 +301,20 @@ export const AgentsPage: FC = () => {
   const [setupProviderId, setSetupProviderId] = useState('')
 
   const [createOpen, setCreateOpen] = useState(false)
+  const [selectedRoleValue, setSelectedRoleValue] = useState<
+    | RoleTemplateSummary['id']
+    | typeof CUSTOM_ROLE_VALUE
+    | typeof PLAIN_AGENT_VALUE
+  >('chief-of-staff')
   const [newName, setNewName] = useState('')
   const [createProviderId, setCreateProviderId] = useState('')
+  const [customRole, setCustomRole] = useState<BrowserOSCustomRoleInput>({
+    name: '',
+    shortDescription: '',
+    longDescription: '',
+    recommendedApps: [],
+    boundaries: createDefaultCustomRoleBoundaries(),
+  })
 
   const [chatAgent, setChatAgent] = useState<AgentEntry | null>(null)
   const [showTerminal, setShowTerminal] = useState(false)
@@ -270,6 +323,20 @@ export const AgentsPage: FC = () => {
   const compatibleProviders = providers.filter(
     (provider) => provider.apiKey && !OAUTH_ONLY_TYPES.has(provider.type),
   )
+  const creationMode: AgentCreationMode =
+    selectedRoleValue === CUSTOM_ROLE_VALUE
+      ? 'custom'
+      : selectedRoleValue === PLAIN_AGENT_VALUE
+        ? 'plain'
+        : 'builtin'
+  const isCustomRole = creationMode === 'custom'
+  const isPlainAgent = creationMode === 'plain'
+  const selectedRole =
+    creationMode === 'builtin'
+      ? (roles.find((role) => role.id === selectedRoleValue) ??
+        roles[0] ??
+        null)
+      : null
 
   useEffect(() => {
     if (compatibleProviders.length === 0) return
@@ -288,8 +355,48 @@ export const AgentsPage: FC = () => {
     defaultProviderId,
   ])
 
+  useEffect(() => {
+    if (!createOpen || roles.length === 0) return
+
+    const defaultRole = roles.find((role) => role.id === 'chief-of-staff')
+    const nextRole = defaultRole ?? roles[0]
+
+    setSelectedRoleValue((current) => {
+      if (current === CUSTOM_ROLE_VALUE || current === PLAIN_AGENT_VALUE)
+        return current
+      const hasCurrent = roles.some((role) => role.id === current)
+      return hasCurrent ? current : nextRole.id
+    })
+    setNewName((current) => current || nextRole.defaultAgentName)
+  }, [createOpen, roles])
+
+  useEffect(() => {
+    if (!createOpen) return
+
+    if (isCustomRole) {
+      setNewName(
+        (current) =>
+          current || customRole.name.trim().toLowerCase().replace(/\s+/g, '-'),
+      )
+      return
+    }
+
+    if (isPlainAgent) {
+      setNewName((current) => current || 'agent')
+      return
+    }
+
+    if (selectedRole) {
+      setNewName((current) => current || selectedRole.defaultAgentName)
+    }
+  }, [createOpen, isCustomRole, isPlainAgent, customRole.name, selectedRole])
+
   const inlineError =
-    error ?? statusError?.message ?? agentsError?.message ?? null
+    error ??
+    statusError?.message ??
+    agentsError?.message ??
+    rolesError?.message ??
+    null
 
   const gatewayUiState = useMemo(() => {
     if (!status) {
@@ -333,7 +440,9 @@ export const AgentsPage: FC = () => {
   }
 
   const handleSetup = async () => {
-    const provider = compatibleProviders.find((p) => p.id === setupProviderId)
+    const provider = compatibleProviders.find(
+      (item) => item.id === setupProviderId,
+    )
 
     await runWithErrorHandling(async () => {
       await setupOpenClaw({
@@ -349,11 +458,38 @@ export const AgentsPage: FC = () => {
 
   const handleCreate = async () => {
     if (!newName.trim()) return
-    const provider = compatibleProviders.find((p) => p.id === createProviderId)
+    const provider = compatibleProviders.find(
+      (item) => item.id === createProviderId,
+    )
+    const normalizedName = newName.trim().toLowerCase().replace(/\s+/g, '-')
+    const customRolePayload = isCustomRole
+      ? {
+          ...customRole,
+          name: customRole.name.trim(),
+          shortDescription: customRole.shortDescription.trim(),
+          longDescription: customRole.longDescription.trim(),
+        }
+      : undefined
+
+    if (
+      isCustomRole &&
+      (!customRolePayload?.name ||
+        !customRolePayload.shortDescription ||
+        !customRolePayload.longDescription)
+    ) {
+      setError(
+        'Custom roles require a role name, short description, and long description.',
+      )
+      return
+    }
+
+    if (creationMode === 'builtin' && !selectedRole) return
 
     await runWithErrorHandling(async () => {
       await createAgent({
-        name: newName.trim().toLowerCase().replace(/\s+/g, '-'),
+        name: normalizedName,
+        roleId: creationMode === 'builtin' ? selectedRole?.id : undefined,
+        customRole: isCustomRole ? customRolePayload : undefined,
         providerType: provider?.type,
         providerName: provider?.name,
         baseUrl: provider?.baseUrl,
@@ -362,6 +498,13 @@ export const AgentsPage: FC = () => {
       })
       setCreateOpen(false)
       setNewName('')
+      setCustomRole({
+        name: '',
+        shortDescription: '',
+        longDescription: '',
+        recommendedApps: [],
+        boundaries: createDefaultCustomRoleBoundaries(),
+      })
     })
   }
 
@@ -641,10 +784,24 @@ export const AgentsPage: FC = () => {
                   <div className="flex items-center gap-3">
                     <Cpu className="size-5 text-muted-foreground" />
                     <div>
-                      <CardTitle className="text-base">{agent.name}</CardTitle>
+                      <div className="flex items-center gap-2">
+                        <CardTitle className="text-base">
+                          {agent.name}
+                        </CardTitle>
+                        {agent.role && (
+                          <Badge variant="secondary">
+                            {agent.role.roleName}
+                          </Badge>
+                        )}
+                      </div>
                       <p className="font-mono text-muted-foreground text-xs">
                         {agent.workspace}
                       </p>
+                      {agent.role && (
+                        <p className="text-muted-foreground text-xs">
+                          {agent.role.shortDescription}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
@@ -711,6 +868,246 @@ export const AgentsPage: FC = () => {
             <DialogTitle>Create Agent</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <label className="font-medium text-sm" htmlFor="agent-role">
+                Agent Role
+              </label>
+              <Select
+                value={selectedRoleValue}
+                onValueChange={(value) => {
+                  if (value === CUSTOM_ROLE_VALUE) {
+                    setSelectedRoleValue(CUSTOM_ROLE_VALUE)
+                    setNewName(
+                      customRole.name
+                        .trim()
+                        .toLowerCase()
+                        .replace(/\s+/g, '-') || 'custom-agent',
+                    )
+                    return
+                  }
+
+                  if (value === PLAIN_AGENT_VALUE) {
+                    setSelectedRoleValue(PLAIN_AGENT_VALUE)
+                    setNewName('agent')
+                    return
+                  }
+
+                  const role = roles.find((item) => item.id === value)
+                  if (!role) return
+
+                  setSelectedRoleValue(role.id)
+                  setNewName(role.defaultAgentName)
+                }}
+                disabled={rolesLoading}
+              >
+                <SelectTrigger id="agent-role">
+                  <SelectValue
+                    placeholder={
+                      rolesLoading ? 'Loading roles...' : 'Select a role'
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {roles.map((role) => (
+                    <SelectItem key={role.id} value={role.id}>
+                      {role.name}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={PLAIN_AGENT_VALUE}>Plain Agent</SelectItem>
+                  <SelectItem value={CUSTOM_ROLE_VALUE}>Custom Role</SelectItem>
+                </SelectContent>
+              </Select>
+              {selectedRole && !isCustomRole && (
+                <Card>
+                  <CardContent className="space-y-3 py-4">
+                    <div>
+                      <div className="font-medium text-sm">
+                        {selectedRole.name}
+                      </div>
+                      <p className="text-muted-foreground text-xs">
+                        {selectedRole.shortDescription}
+                      </p>
+                    </div>
+                    <div>
+                      <div className="font-medium text-xs">
+                        Recommended Apps
+                      </div>
+                      <p className="text-muted-foreground text-xs">
+                        {selectedRole.recommendedApps.join(', ')}
+                      </p>
+                    </div>
+                    <div>
+                      <div className="font-medium text-xs">
+                        Default Boundaries
+                      </div>
+                      <ul className="space-y-1 text-muted-foreground text-xs">
+                        {selectedRole.boundaries.map((boundary) => (
+                          <li key={boundary.key}>
+                            {boundary.label}: {boundary.defaultMode}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+              {isPlainAgent && (
+                <Card>
+                  <CardContent className="space-y-2 py-4">
+                    <div className="font-medium text-sm">Plain Agent</div>
+                    <p className="text-muted-foreground text-xs">
+                      No role bootstrap or defaults. Intended for temporary
+                      development and testing only.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            {isCustomRole && (
+              <Card>
+                <CardContent className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="custom-role-name"
+                      className="font-medium text-sm"
+                    >
+                      Custom Role Name
+                    </label>
+                    <Input
+                      id="custom-role-name"
+                      value={customRole.name}
+                      onChange={(event) => {
+                        const name = event.target.value
+                        setCustomRole((current) => ({ ...current, name }))
+                        setNewName(
+                          name.trim().toLowerCase().replace(/\s+/g, '-') ||
+                            'custom-agent',
+                        )
+                      }}
+                      placeholder="Board Prep Operator"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="custom-role-short-description"
+                      className="font-medium text-sm"
+                    >
+                      Short Description
+                    </label>
+                    <Input
+                      id="custom-role-short-description"
+                      value={customRole.shortDescription}
+                      onChange={(event) =>
+                        setCustomRole((current) => ({
+                          ...current,
+                          shortDescription: event.target.value,
+                        }))
+                      }
+                      placeholder="Prepares executive briefs and weekly follow-ups."
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="custom-role-long-description"
+                      className="font-medium text-sm"
+                    >
+                      Long Description
+                    </label>
+                    <Textarea
+                      id="custom-role-long-description"
+                      value={customRole.longDescription}
+                      onChange={(event) =>
+                        setCustomRole((current) => ({
+                          ...current,
+                          longDescription: event.target.value,
+                        }))
+                      }
+                      placeholder="Describe the role, purpose, and what kinds of outcomes this agent should produce."
+                      rows={4}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="custom-role-apps"
+                      className="font-medium text-sm"
+                    >
+                      Recommended Apps
+                    </label>
+                    <Input
+                      id="custom-role-apps"
+                      value={customRole.recommendedApps.join(', ')}
+                      onChange={(event) =>
+                        setCustomRole((current) => ({
+                          ...current,
+                          recommendedApps: parseCommaSeparatedList(
+                            event.target.value,
+                          ),
+                        }))
+                      }
+                      placeholder="gmail, slack, notion"
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      Comma-separated. Used as role guidance only in this
+                      milestone.
+                    </p>
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <div className="font-medium text-sm">
+                        Boundary Defaults
+                      </div>
+                      <p className="text-muted-foreground text-xs">
+                        Set the starting behavior for common high-impact
+                        actions.
+                      </p>
+                    </div>
+                    {customRole.boundaries.map((boundary) => (
+                      <div
+                        key={boundary.key}
+                        className="grid gap-2 rounded-lg border p-3"
+                      >
+                        <div>
+                          <div className="font-medium text-sm">
+                            {boundary.label}
+                          </div>
+                          <p className="text-muted-foreground text-xs">
+                            {boundary.description}
+                          </p>
+                        </div>
+                        <Select
+                          value={boundary.defaultMode}
+                          onValueChange={(value) =>
+                            setCustomRole((current) => ({
+                              ...current,
+                              boundaries: current.boundaries.map((item) =>
+                                item.key === boundary.key
+                                  ? {
+                                      ...item,
+                                      defaultMode:
+                                        value as BrowserOSRoleBoundary['defaultMode'],
+                                    }
+                                  : item,
+                              ),
+                            }))
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="allow">Allow</SelectItem>
+                            <SelectItem value="ask">Ask</SelectItem>
+                            <SelectItem value="block">Block</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <div>
               <label
                 htmlFor="agent-name"
@@ -731,19 +1128,23 @@ export const AgentsPage: FC = () => {
                 Lowercase letters, numbers, and hyphens only.
               </p>
             </div>
+
             <ProviderSelector
               providers={compatibleProviders}
               defaultProviderId={defaultProviderId}
               selectedId={createProviderId}
               onSelect={setCreateProviderId}
             />
+
             <Button
               onClick={handleCreate}
               disabled={
                 !newName.trim() ||
                 creating ||
+                rolesLoading ||
                 !gatewayUiState.canManageAgents ||
-                compatibleProviders.length === 0
+                compatibleProviders.length === 0 ||
+                (creationMode === 'builtin' && !selectedRole)
               }
               className="w-full"
             >

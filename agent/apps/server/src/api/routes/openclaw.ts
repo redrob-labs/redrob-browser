@@ -8,6 +8,11 @@
  */
 
 import { OPENCLAW_GATEWAY_PORT } from '@browseros/shared/constants/openclaw'
+import { BROWSEROS_ROLE_TEMPLATES } from '@browseros/shared/constants/role-aware-agents'
+import type {
+  BrowserOSAgentRoleId,
+  BrowserOSCustomRoleInput,
+} from '@browseros/shared/types/role-aware-agents'
 import { Hono } from 'hono'
 import { stream } from 'hono/streaming'
 import {
@@ -17,6 +22,23 @@ import {
   OpenClawProtectedAgentError,
 } from '../services/openclaw/errors'
 import { getOpenClawService } from '../services/openclaw/openclaw-service'
+
+function isValidBoundaryMode(
+  value: unknown,
+): value is BrowserOSCustomRoleInput['boundaries'][number]['defaultMode'] {
+  return value === 'allow' || value === 'ask' || value === 'block'
+}
+
+function isValidCustomRoleBoundary(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const boundary = value as Record<string, unknown>
+  return (
+    typeof boundary.key === 'string' &&
+    typeof boundary.label === 'string' &&
+    typeof boundary.description === 'string' &&
+    isValidBoundaryMode(boundary.defaultMode)
+  )
+}
 
 export function createOpenClawRoutes() {
   return new Hono()
@@ -111,9 +133,25 @@ export function createOpenClawRoutes() {
       }
     })
 
+    .get('/roles', async (c) => {
+      return c.json({
+        roles: BROWSEROS_ROLE_TEMPLATES.map((role) => ({
+          id: role.id,
+          name: role.name,
+          shortDescription: role.shortDescription,
+          longDescription: role.longDescription,
+          recommendedApps: role.recommendedApps,
+          boundaries: role.boundaries,
+          defaultAgentName: role.defaultAgentName,
+        })),
+      })
+    })
+
     .post('/agents', async (c) => {
       const body = await c.req.json<{
         name: string
+        roleId?: BrowserOSAgentRoleId
+        customRole?: BrowserOSCustomRoleInput
         providerType?: string
         providerName?: string
         baseUrl?: string
@@ -125,10 +163,67 @@ export function createOpenClawRoutes() {
       if (!name) {
         return c.json({ error: 'Name is required' }, 400)
       }
+      if (body.roleId && body.customRole) {
+        return c.json(
+          { error: 'Provide either roleId or customRole, not both' },
+          400,
+        )
+      }
+      if (
+        body.customRole &&
+        (!body.customRole.name?.trim() ||
+          !body.customRole.shortDescription?.trim() ||
+          !body.customRole.longDescription?.trim())
+      ) {
+        return c.json(
+          {
+            error:
+              'Custom roles require name, shortDescription, and longDescription',
+          },
+          400,
+        )
+      }
+      if (
+        body.customRole &&
+        (!Array.isArray(body.customRole.recommendedApps) ||
+          !Array.isArray(body.customRole.boundaries))
+      ) {
+        return c.json(
+          {
+            error: 'Custom roles require recommendedApps and boundaries arrays',
+          },
+          400,
+        )
+      }
+      if (
+        body.customRole &&
+        !body.customRole.recommendedApps.every((app) => typeof app === 'string')
+      ) {
+        return c.json(
+          {
+            error: 'Custom role recommendedApps must be an array of strings',
+          },
+          400,
+        )
+      }
+      if (
+        body.customRole &&
+        !body.customRole.boundaries.every(isValidCustomRoleBoundary)
+      ) {
+        return c.json(
+          {
+            error:
+              'Custom role boundaries must include key, label, description, and a valid defaultMode',
+          },
+          400,
+        )
+      }
 
       try {
         const agent = await getOpenClawService().createAgent({
           name,
+          roleId: body.roleId,
+          customRole: body.customRole,
           providerType: body.providerType,
           providerName: body.providerName,
           baseUrl: body.baseUrl,
