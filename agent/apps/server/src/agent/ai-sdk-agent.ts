@@ -32,7 +32,6 @@ import { buildMemoryToolSet } from '../tools/memory/build-toolset'
 import type { ToolRegistry } from '../tools/tool-registry'
 import { CHAT_MODE_ALLOWED_TOOLS } from './chat-mode'
 import { createCompactionPrepareStep, type StepWithUsage } from './compaction'
-import { createContextOverflowMiddleware } from './context-overflow-middleware'
 import { buildMcpServerSpecs, createMcpClients } from './mcp-builder'
 import {
   getMessageNormalizationOptions,
@@ -74,7 +73,6 @@ export class AiSdkAgent {
       config.resolvedConfig.contextWindowSize ??
       AGENT_LIMITS.DEFAULT_CONTEXT_WINDOW
 
-    // Build language model with middleware stack
     const rawModel = createLanguageModel(config.resolvedConfig)
     const isV3Model =
       typeof rawModel === 'object' &&
@@ -83,25 +81,16 @@ export class AiSdkAgent {
       rawModel.specificationVersion === 'v3'
 
     let model = rawModel
-    if (isV3Model) {
-      // Always apply context overflow protection
+    if (isV3Model && config.aiSdkDevtoolsEnabled) {
       model = wrapLanguageModel({
         model: rawModel as LanguageModelV3,
-        middleware: createContextOverflowMiddleware(contextWindow),
+        middleware: devToolsMiddleware() as LanguageModelV3Middleware,
       })
-
-      // Optionally add AI SDK DevTools tracing (dev-only)
-      if (config.aiSdkDevtoolsEnabled) {
-        model = wrapLanguageModel({
-          model: model as LanguageModelV3,
-          middleware: devToolsMiddleware() as LanguageModelV3Middleware,
-        })
-        logger.info('AI SDK DevTools middleware enabled', {
-          conversationId: config.resolvedConfig.conversationId,
-          provider: config.resolvedConfig.provider,
-          model: config.resolvedConfig.model,
-        })
-      }
+      logger.info('AI SDK DevTools middleware enabled', {
+        conversationId: config.resolvedConfig.conversationId,
+        provider: config.resolvedConfig.provider,
+        model: config.resolvedConfig.model,
+      })
     }
 
     // Build browser tools from the unified tool registry
