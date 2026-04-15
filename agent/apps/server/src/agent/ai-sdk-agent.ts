@@ -16,8 +16,11 @@ import {
   type UIMessage,
   wrapLanguageModel,
 } from 'ai'
+import {
+  buildKlavisToolSet,
+  type KlavisProxyRef,
+} from '../api/services/klavis/strata-proxy'
 import type { Browser } from '../browser/browser'
-import type { KlavisClient } from '../lib/clients/klavis/klavis-client'
 import { logger } from '../lib/logger'
 import { metrics } from '../lib/metrics'
 import { isSoulBootstrap, readSoul } from '../lib/soul'
@@ -45,7 +48,7 @@ export interface AiSdkAgentConfig {
   browser: Browser
   registry: ToolRegistry
   browserContext?: BrowserContext
-  klavisClient?: KlavisClient
+  klavisRef?: KlavisProxyRef
   browserosId?: string
   aiSdkDevtoolsEnabled?: boolean
   aclRules?: AclRule[]
@@ -130,14 +133,28 @@ export class AiSdkAgent {
       })
     }
 
-    // Build external MCP server specs (Klavis, custom) and connect clients
+    // Get Klavis tools from shared background handle (no per-session connection).
+    // Only expose when user has enabled servers — matches old per-session gating.
+    const klavisTools =
+      config.klavisRef?.handle &&
+      config.browserContext?.enabledMcpServers?.length
+        ? buildKlavisToolSet(config.klavisRef.handle)
+        : {}
+
+    // Connect custom (non-Klavis) MCP servers per-session
     const specs = await buildMcpServerSpecs({
       browserContext: config.browserContext,
-      klavisClient: config.klavisClient,
-      browserosId: config.browserosId,
     })
-    const { clients, tools: rawExternalMcpTools } =
-      await createMcpClients(specs)
+    const { clients, tools: customMcpTools } = await createMcpClients(specs)
+    const collidingToolNames = Object.keys(customMcpTools).filter(
+      (name) => name in klavisTools,
+    )
+    if (collidingToolNames.length > 0) {
+      logger.warn('Custom MCP tools override Klavis tools', {
+        toolNames: collidingToolNames,
+      })
+    }
+    const rawExternalMcpTools = { ...klavisTools, ...customMcpTools }
 
     // Wrap external MCP tools (Klavis, custom) with metrics
     const externalMcpTools: ToolSet = {}

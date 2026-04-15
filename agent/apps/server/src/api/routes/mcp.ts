@@ -11,7 +11,7 @@ import { logger } from '../../lib/logger'
 import { metrics } from '../../lib/metrics'
 import { Sentry } from '../../lib/sentry'
 import type { ToolRegistry } from '../../tools/tool-registry'
-import type { KlavisProxyHandle } from '../services/klavis/strata-proxy'
+import type { KlavisProxyRef } from '../services/klavis/strata-proxy'
 import { createMcpServer } from '../services/mcp/mcp-server'
 import type { Env } from '../types'
 
@@ -21,7 +21,7 @@ interface McpRouteDeps {
   browser: Browser
   executionDir: string
   resourcesDir: string
-  klavisProxy?: KlavisProxyHandle | null
+  klavisRef?: KlavisProxyRef
 }
 
 export function createMcpRoutes(deps: McpRouteDeps) {
