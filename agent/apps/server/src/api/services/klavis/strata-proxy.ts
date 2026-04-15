@@ -158,8 +158,7 @@ export function connectKlavisInBackground(
   options: BackgroundConnectOptions = {},
 ): () => void {
   const connect = options.connect ?? connectKlavisProxy
-  const retryDelaysMs =
-    options.retryDelaysMs ?? KLAVIS_PROXY_RETRY_BACKOFF_MS
+  const retryDelaysMs = options.retryDelaysMs ?? KLAVIS_PROXY_RETRY_BACKOFF_MS
   let stopped = false
   let retryTimer: ReturnType<typeof setTimeout> | undefined
 
