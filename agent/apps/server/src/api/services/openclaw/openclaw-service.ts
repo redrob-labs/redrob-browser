@@ -116,6 +116,7 @@ export class OpenClawService {
   private lastGatewayError: string | null = null
   private lastRecoveryReason: OpenClawGatewayRecoveryReason | null = null
   private gatewayReconnectPromise: Promise<void> | null = null
+  private stopLogTail: (() => void) | null = null
 
   constructor(browserosServerPort?: number) {
     this.openclawDir = getOpenClawDir()
@@ -187,6 +188,7 @@ export class OpenClawService {
 
     logProgress('Starting OpenClaw gateway...')
     await this.runtime.composeUp(logProgress)
+    this.startGatewayLogTail()
 
     logProgress('Waiting for gateway readiness...')
     const ready = await this.runtime.waitForReady(this.port, READY_TIMEOUT_MS)
@@ -238,9 +240,11 @@ export class OpenClawService {
 
     logProgress('Loading gateway auth token...')
     await this.loadTokenFromEnv()
+    await this.ensureDevLoggingInConfig()
     await this.runtime.ensureReady(logProgress)
     logProgress('Starting OpenClaw gateway...')
     await this.runtime.composeUp(logProgress)
+    this.startGatewayLogTail()
 
     logProgress('Waiting for gateway readiness...')
     const ready = await this.runtime.waitForReady(this.port, READY_TIMEOUT_MS)
@@ -258,6 +262,7 @@ export class OpenClawService {
   async stop(): Promise<void> {
     logger.info('Stopping OpenClaw service', { port: this.port })
     this.disconnectGateway()
+    this.stopGatewayLogTail()
     await this.runtime.composeStop()
     logger.info('OpenClaw container stopped')
   }
@@ -269,10 +274,13 @@ export class OpenClawService {
     })
 
     this.disconnectGateway()
+    this.stopGatewayLogTail()
     logProgress('Loading gateway auth token...')
     await this.loadTokenFromEnv()
+    await this.ensureDevLoggingInConfig()
     logProgress('Restarting OpenClaw gateway...')
     await this.runtime.composeRestart(logProgress)
+    this.startGatewayLogTail()
 
     logProgress('Waiting for gateway readiness...')
     const ready = await this.runtime.waitForReady(this.port, READY_TIMEOUT_MS)
@@ -312,6 +320,7 @@ export class OpenClawService {
 
   async shutdown(): Promise<void> {
     this.disconnectGateway()
+    this.stopGatewayLogTail()
     try {
       await this.runtime.composeStop()
     } catch {
@@ -847,6 +856,52 @@ export class OpenClawService {
     const configPath = join(this.openclawDir, OPENCLAW_CONFIG_FILE)
     await writeFile(configPath, JSON.stringify(config, null, 2))
     logger.info('Persisted OpenClaw bootstrap config')
+  }
+
+  private async ensureDevLoggingInConfig(): Promise<void> {
+    if (process.env.NODE_ENV !== 'development') return
+    const configPath = join(this.openclawDir, OPENCLAW_CONFIG_FILE)
+    if (!existsSync(configPath)) return
+    try {
+      const raw = await readFile(configPath, 'utf-8')
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      const existing = (parsed.logging ?? {}) as Record<string, unknown>
+      if (existing.level === 'debug' && existing.consoleLevel === 'debug') {
+        return
+      }
+      parsed.logging = { ...existing, level: 'debug', consoleLevel: 'debug' }
+      await writeFile(configPath, JSON.stringify(parsed, null, 2))
+      logger.info('Patched openclaw.json for dev debug logging')
+    } catch (err) {
+      logger.warn('Failed to patch openclaw.json for dev debug logging', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  private startGatewayLogTail(): void {
+    if (process.env.NODE_ENV !== 'development') return
+    if (this.stopLogTail) return
+    try {
+      this.stopLogTail = this.runtime.tailGatewayLogs((line) => {
+        logger.debug(`[openclaw] ${line}`)
+      })
+      logger.info('Streaming OpenClaw gateway logs into server log (dev mode)')
+    } catch (err) {
+      logger.warn('Failed to start OpenClaw gateway log tail', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  private stopGatewayLogTail(): void {
+    if (!this.stopLogTail) return
+    try {
+      this.stopLogTail()
+    } catch {
+      // best effort
+    }
+    this.stopLogTail = null
   }
 
   private getHostWorkspaceDir(agentName: string): string {

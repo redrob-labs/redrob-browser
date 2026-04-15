@@ -65,6 +65,21 @@ function hasBuiltinProvider(providerType?: string): providerType is string {
   return !!providerType && providerType in PROVIDER_ENV_MAP
 }
 
+/**
+ * OpenRouter's public slugs use dots for version numbers
+ * (e.g. `anthropic/claude-haiku-4.5`), but openclaw's model registry expects
+ * dashes (`claude-haiku-4-5`). Passing the dotted form makes openclaw fail
+ * the registry lookup silently and the agent turn completes with zero
+ * payloads. Rewrite dots to dashes for openrouter model ids only.
+ */
+function normalizeBuiltinModelId(
+  providerType: string,
+  modelId: string,
+): string {
+  if (providerType !== 'openrouter') return modelId
+  return modelId.replace(/\./g, '-')
+}
+
 export function deriveOpenClawProviderId(providerInput: {
   providerType?: string
   providerName?: string
@@ -102,10 +117,14 @@ export function resolveProviderConfig(
       providerKeys[PROVIDER_ENV_MAP[input.providerType]] = input.apiKey
     }
 
+    const normalizedModelId = input.modelId
+      ? normalizeBuiltinModelId(input.providerType, input.modelId)
+      : undefined
+
     return {
       providerKeys,
-      model: input.modelId
-        ? `${input.providerType}/${input.modelId}`
+      model: normalizedModelId
+        ? `${input.providerType}/${normalizedModelId}`
         : undefined,
     }
   }
@@ -220,6 +239,10 @@ export function buildBootstrapConfig(
 
   if (provider.models) {
     config.models = provider.models
+  }
+
+  if (process.env.NODE_ENV === 'development') {
+    config.logging = { level: 'debug', consoleLevel: 'debug' }
   }
 
   return config

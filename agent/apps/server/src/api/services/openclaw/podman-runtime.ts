@@ -163,6 +163,32 @@ export class PodmanRuntime {
   }
 
   /**
+   * Follow container logs. Returns a stop function that terminates the
+   * underlying `podman logs -f` process. Each output line is passed to
+   * onLine as-is.
+   */
+  tailContainerLogs(containerName: string, onLine: LogFn): () => void {
+    const proc = Bun.spawn(
+      [this.podmanPath, 'logs', '-f', '--tail', '0', containerName],
+      { stdout: 'pipe', stderr: 'pipe' },
+    )
+
+    void this.drainStream(proc.stdout ?? null, onLine)
+    void this.drainStream(proc.stderr ?? null, onLine)
+
+    let stopped = false
+    return () => {
+      if (stopped) return
+      stopped = true
+      try {
+        proc.kill()
+      } catch {
+        // process may already be gone
+      }
+    }
+  }
+
+  /**
    * Lists running container names. Used to check whether non-BrowserOS
    * containers are running before stopping the Podman machine.
    */

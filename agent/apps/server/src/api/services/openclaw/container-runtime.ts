@@ -153,6 +153,13 @@ export class ContainerRuntime {
     )
   }
 
+  tailGatewayLogs(onLine: LogFn): () => void {
+    return this.podman.tailContainerLogs(
+      OPENCLAW_GATEWAY_CONTAINER_NAME,
+      onLine,
+    )
+  }
+
   private async compose(args: string[], onLog?: LogFn): Promise<number> {
     const lines: string[] = []
     const command = ['podman', 'compose', ...args].join(' ')
