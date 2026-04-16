@@ -18,8 +18,11 @@ from ...common.utils import (
 
 BROWSEROS_SERVER_BINARIES: List[str] = [
     "browseros_server.exe",
-    "codex.exe",
-    "bun.exe",
+    "third_party/bun.exe",
+    "third_party/rg.exe",
+    "third_party/podman/podman.exe",
+    "third_party/podman/gvproxy.exe",
+    "third_party/podman/win-sshproxy.exe",
 ]
 
 
@@ -102,7 +105,7 @@ class WindowsSignModule(CommandModule):
 def get_browseros_server_binary_paths(build_output_dir: Path) -> List[Path]:
     """Return absolute paths to BrowserOS Server binaries for signing."""
     server_dir = build_output_dir / "BrowserOSServer" / "default" / "resources" / "bin"
-    return [server_dir / binary for binary in BROWSEROS_SERVER_BINARIES]
+    return [server_dir / Path(binary) for binary in BROWSEROS_SERVER_BINARIES]
 
 
 def build_mini_installer(ctx: Context) -> bool:

@@ -29,15 +29,32 @@ BROWSEROS_SERVER_BINARIES: Dict[str, Dict[str, str]] = {
         "options": "runtime",
         "entitlements": "browseros-executable-entitlements.plist",
     },
-    "codex": {
-        "identifier_suffix": "codex",
-        "options": "runtime",
-        "entitlements": "browseros-executable-entitlements.plist",
-    },
     "bun": {
         "identifier_suffix": "bun",
         "options": "runtime",
         "entitlements": "browseros-executable-entitlements.plist",
+    },
+    "podman": {
+        "identifier_suffix": "podman",
+        "options": "runtime",
+    },
+    "gvproxy": {
+        "identifier_suffix": "gvproxy",
+        "options": "runtime",
+    },
+    "vfkit": {
+        "identifier_suffix": "vfkit",
+        "options": "runtime",
+        "entitlements": "podman-vfkit-entitlements.plist",
+    },
+    "krunkit": {
+        "identifier_suffix": "krunkit",
+        "options": "runtime",
+        "entitlements": "podman-krunkit-entitlements.plist",
+    },
+    "podman-mac-helper": {
+        "identifier_suffix": "podman_mac_helper",
+        "options": "runtime",
     },
 }
 
