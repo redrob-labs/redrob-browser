@@ -14,6 +14,7 @@ import path from 'node:path'
 import { EXIT_CODES } from '@browseros/shared/constants/exit-codes'
 import { createHttpServer } from './api/server'
 import { getOpenClawService } from './api/services/openclaw/openclaw-service'
+import { configurePodmanRuntime } from './api/services/openclaw/podman-runtime'
 import { CdpBackend } from './browser/backends/cdp'
 import { Browser } from './browser/browser'
 import type { ServerConfig } from './config'
@@ -55,6 +56,9 @@ export class Application {
       resourcesDir: path.resolve(this.config.resourcesDir),
     })
 
+    configurePodmanRuntime({
+      resourcesDir: path.resolve(this.config.resourcesDir),
+    })
     await this.initCoreServices()
 
     if (!this.config.cdpPort) {
