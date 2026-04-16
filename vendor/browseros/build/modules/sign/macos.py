@@ -10,6 +10,7 @@ from typing import Optional, List, Dict, Tuple
 from ...common.module import CommandModule, ValidationError
 from ...common.context import Context
 from ...common.env import EnvConfig
+from ...common.server_binaries import macos_sign_spec_for
 from ...common.utils import (
     run_command as utils_run_command,
     log_info,
@@ -20,49 +21,19 @@ from ...common.utils import (
     join_paths,
 )
 
-# Central list of BrowserOS Server binaries we need to sign explicitly.
-# Each entry controls identifiers, signing options, and entitlement files so
-# adding a new binary is a one-line update here rather than scattered changes.
-BROWSEROS_SERVER_BINARIES: Dict[str, Dict[str, str]] = {
-    "browseros_server": {
-        "identifier_suffix": "browseros_server",
-        "options": "runtime",
-        "entitlements": "browseros-executable-entitlements.plist",
-    },
-    "bun": {
-        "identifier_suffix": "bun",
-        "options": "runtime",
-        "entitlements": "browseros-executable-entitlements.plist",
-    },
-    "podman": {
-        "identifier_suffix": "podman",
-        "options": "runtime",
-    },
-    "gvproxy": {
-        "identifier_suffix": "gvproxy",
-        "options": "runtime",
-    },
-    "vfkit": {
-        "identifier_suffix": "vfkit",
-        "options": "runtime",
-        "entitlements": "podman-vfkit-entitlements.plist",
-    },
-    "krunkit": {
-        "identifier_suffix": "krunkit",
-        "options": "runtime",
-        "entitlements": "podman-krunkit-entitlements.plist",
-    },
-    "podman-mac-helper": {
-        "identifier_suffix": "podman_mac_helper",
-        "options": "runtime",
-    },
-}
-
 
 def get_browseros_server_binary_info(component_path: Path) -> Optional[Dict[str, str]]:
     """Return metadata for known BrowserOS Server binaries, if applicable."""
-    name = component_path.stem.lower()
-    return BROWSEROS_SERVER_BINARIES.get(name)
+    spec = macos_sign_spec_for(component_path)
+    if spec is None:
+        return None
+    info: Dict[str, str] = {
+        "identifier_suffix": spec.identifier_suffix,
+        "options": spec.options,
+    }
+    if spec.entitlements:
+        info["entitlements"] = spec.entitlements
+    return info
 
 
 def run_command(
