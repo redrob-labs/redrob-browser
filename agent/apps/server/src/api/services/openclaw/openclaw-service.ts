@@ -4,14 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Main orchestrator for OpenClaw integration.
- * Container lifecycle via Podman, agent CRUD via Gateway WS RPC,
+ * Container lifecycle via Podman, agent CRUD via in-container CLI,
  * chat via HTTP /v1/chat/completions proxy.
  */
 
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { OPENCLAW_GATEWAY_PORT } from '@browseros/shared/constants/openclaw'
+import {
+  OPENCLAW_CONTAINER_HOME,
+  OPENCLAW_GATEWAY_PORT,
+} from '@browseros/shared/constants/openclaw'
 import { DEFAULT_PORTS } from '@browseros/shared/constants/ports'
 import type {
   BrowserOSAgentRoleId,
@@ -28,11 +31,9 @@ import {
   OpenClawProtectedAgentError,
 } from './errors'
 import {
-  ensureClientIdentity,
-  type GatewayAgentEntry,
-  GatewayClient,
-  type OpenClawStreamEvent,
-} from './gateway-client'
+  OpenClawAdminClient,
+  type OpenClawAgentRecord,
+} from './openclaw-admin-client'
 import {
   buildBootstrapConfig,
   buildEnvFile,
@@ -42,6 +43,8 @@ import {
   resolveProviderKeys,
   resolveProviderModel,
 } from './openclaw-config'
+import { OpenClawHttpChatClient } from './openclaw-http-chat-client'
+import type { OpenClawStreamEvent } from './openclaw-types'
 import { getPodmanRuntime } from './podman-runtime'
 import {
   buildRoleBootstrapFiles,
@@ -62,10 +65,12 @@ export type OpenClawControlPlaneStatus =
   | 'connecting'
   | 'connected'
   | 'reconnecting'
+  // Retained for extension compatibility while the UI still branches on it.
   | 'recovering'
   | 'failed'
 
 export type OpenClawGatewayRecoveryReason =
+  // Retained for extension compatibility while the UI still renders these reasons.
   | 'transient_disconnect'
   | 'signature_expired'
   | 'pairing_required'
@@ -92,7 +97,7 @@ export interface OpenClawStatusResponse {
   lastRecoveryReason: OpenClawGatewayRecoveryReason | null
 }
 
-export interface OpenClawAgentEntry extends GatewayAgentEntry {
+export interface OpenClawAgentEntry extends OpenClawAgentRecord {
   role?: BrowserOSAgentRoleSummary
 }
 
@@ -106,7 +111,8 @@ export interface SetupInput {
 
 export class OpenClawService {
   private runtime: ContainerRuntime
-  private gateway: GatewayClient | null = null
+  private adminClient: OpenClawAdminClient
+  private chatClient: OpenClawHttpChatClient
   private openclawDir: string
   private port = OPENCLAW_GATEWAY_PORT
   private token: string
@@ -115,13 +121,20 @@ export class OpenClawService {
   private controlPlaneStatus: OpenClawControlPlaneStatus = 'disconnected'
   private lastGatewayError: string | null = null
   private lastRecoveryReason: OpenClawGatewayRecoveryReason | null = null
-  private gatewayReconnectPromise: Promise<void> | null = null
   private stopLogTail: (() => void) | null = null
 
   constructor(browserosServerPort?: number) {
     this.openclawDir = getOpenClawDir()
     this.runtime = new ContainerRuntime(getPodmanRuntime(), this.openclawDir)
     this.token = crypto.randomUUID()
+    this.adminClient = new OpenClawAdminClient(
+      this.runtime,
+      async () => this.token,
+    )
+    this.chatClient = new OpenClawHttpChatClient(
+      this.port,
+      async () => this.token,
+    )
     this.browserosServerPort = browserosServerPort ?? DEFAULT_PORTS.server
   }
 
@@ -199,32 +212,26 @@ export class OpenClawService {
       throw new Error(this.lastError)
     }
 
-    // Generate client device identity for WS auth
-    logProgress('Generating client device identity...')
-    ensureClientIdentity(this.openclawDir)
+    this.controlPlaneStatus = 'connecting'
+    logProgress('Probing OpenClaw control plane...')
+    await this.runControlPlaneCall(() => this.adminClient.probe())
 
-    logProgress('Connecting to gateway...')
-    await this.connectGatewayResiliently(logProgress)
-
-    // Ensure main agent exists (gateway may auto-create it)
-    // biome-ignore lint/style/noNonNullAssertion: gateway is guaranteed connected after connectGateway()
-    const existingAgents = await this.gateway!.listAgents()
+    const existingAgents = await this.listAgents()
     logger.info('Fetched existing OpenClaw agents after setup', {
       count: existingAgents.length,
       names: existingAgents.map((agent) => agent.name),
     })
-    const hasMain = existingAgents.some((a) => a.agentId === 'main')
-    if (!hasMain) {
-      logProgress('Creating main agent...')
-      const model = resolveProviderModel(input)
-      // biome-ignore lint/style/noNonNullAssertion: gateway is connected
-      await this.gateway!.createAgent({
-        name: 'main',
-        workspace: GatewayClient.agentWorkspace('main'),
-        model,
-      })
+    if (existingAgents.some((agent) => agent.agentId === 'main')) {
+      logProgress('Main agent detected')
     } else {
-      logProgress('Main agent already exists')
+      logProgress('Creating main agent...')
+      await this.runControlPlaneCall(() =>
+        this.adminClient.createAgent({
+          name: 'main',
+          workspace: this.getContainerWorkspacePath('main'),
+          model: resolveProviderModel(input),
+        }),
+      )
     }
 
     this.lastError = null
@@ -253,15 +260,16 @@ export class OpenClawService {
       throw new Error(this.lastError)
     }
 
-    logProgress('Connecting to gateway...')
-    await this.connectGatewayResiliently(logProgress)
+    this.controlPlaneStatus = 'connecting'
+    logProgress('Probing OpenClaw control plane...')
+    await this.runControlPlaneCall(() => this.adminClient.probe())
     this.lastError = null
     logger.info('OpenClaw gateway started', { port: this.port })
   }
 
   async stop(): Promise<void> {
     logger.info('Stopping OpenClaw service', { port: this.port })
-    this.disconnectGateway()
+    this.controlPlaneStatus = 'disconnected'
     this.stopGatewayLogTail()
     await this.runtime.composeStop()
     logger.info('OpenClaw container stopped')
@@ -273,7 +281,7 @@ export class OpenClawService {
       port: this.port,
     })
 
-    this.disconnectGateway()
+    this.controlPlaneStatus = 'reconnecting'
     this.stopGatewayLogTail()
     logProgress('Loading gateway auth token...')
     await this.loadTokenFromEnv()
@@ -289,8 +297,8 @@ export class OpenClawService {
       throw new Error(this.lastError)
     }
 
-    logProgress('Connecting to gateway...')
-    await this.connectGatewayResiliently(logProgress)
+    logProgress('Probing OpenClaw control plane...')
+    await this.runControlPlaneCall(() => this.adminClient.probe())
     this.lastError = null
     logProgress('Gateway restarted successfully')
     logger.info('OpenClaw gateway restarted', { port: this.port })
@@ -311,15 +319,14 @@ export class OpenClawService {
 
     logProgress('Reloading gateway auth token...')
     await this.loadTokenFromEnv()
-    this.disconnectGateway()
-
+    this.controlPlaneStatus = 'reconnecting'
     logProgress('Reconnecting control plane...')
-    await this.ensureGatewayReady()
+    await this.runControlPlaneCall(() => this.adminClient.probe())
     logProgress('Control plane connected')
   }
 
   async shutdown(): Promise<void> {
-    this.disconnectGateway()
+    this.controlPlaneStatus = 'disconnected'
     this.stopGatewayLogTail()
     try {
       await this.runtime.composeStop()
@@ -370,12 +377,14 @@ export class OpenClawService {
       : false
 
     let agentCount = 0
-    if (ready && this.gateway?.isConnected) {
+    if (ready) {
       try {
-        const agents = await this.gateway.listAgents()
+        const agents = await this.runControlPlaneCall(() =>
+          this.adminClient.listAgents(),
+        )
         agentCount = agents.length
       } catch {
-        // WS may be momentarily unavailable
+        // latest control plane error is captured by runControlPlaneCall
       }
     }
 
@@ -386,17 +395,13 @@ export class OpenClawService {
       port: this.port,
       agentCount,
       error: this.lastError,
-      controlPlaneStatus: ready
-        ? this.gateway?.isConnected
-          ? 'connected'
-          : this.controlPlaneStatus
-        : 'disconnected',
+      controlPlaneStatus: ready ? this.controlPlaneStatus : 'disconnected',
       lastGatewayError: this.lastGatewayError,
       lastRecoveryReason: this.lastRecoveryReason,
     }
   }
 
-  // ── Agent Management (via WS RPC) ───────────────────────────────────
+  // ── Agent Management (via CLI) ──────────────────────────────────────
 
   async createAgent(input: {
     name: string
@@ -423,7 +428,7 @@ export class OpenClawService {
       hasModel: !!input.modelId,
       hasApiKey: !!input.apiKey,
     })
-    await this.ensureGatewayReady()
+    await this.assertGatewayReady()
 
     const configChanged = await this.mergeProviderConfigIfChanged(input)
     const keysChanged =
@@ -441,19 +446,15 @@ export class OpenClawService {
     }
 
     const model = resolveProviderModel(input)
-
-    const gateway = this.gateway
-    if (!gateway) {
-      throw new Error('Gateway WS not connected')
-    }
-
-    let agent: GatewayAgentEntry
+    let agent: OpenClawAgentRecord
     try {
-      agent = await gateway.createAgent({
-        name,
-        workspace: GatewayClient.agentWorkspace(name),
-        model,
-      })
+      agent = await this.runControlPlaneCall(() =>
+        this.adminClient.createAgent({
+          name,
+          workspace: this.getContainerWorkspacePath(name),
+          model,
+        }),
+      )
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (message.includes('already exists')) {
@@ -463,10 +464,13 @@ export class OpenClawService {
     }
 
     if (input.roleId || input.customRole) {
-      await this.writeRoleBootstrapFiles(
-        name,
-        input.roleId ? resolveRoleTemplate(input.roleId) : input.customRole!,
-      )
+      const role = input.roleId
+        ? resolveRoleTemplate(input.roleId)
+        : input.customRole
+      if (!role) {
+        throw new Error('Role bootstrap requested without a role definition')
+      }
+      await this.writeRoleBootstrapFiles(name, role)
     }
 
     const roleSummary = input.roleId
@@ -475,7 +479,7 @@ export class OpenClawService {
         ? toRoleSummary(input.customRole)
         : undefined
 
-    logger.info('Agent created via WS RPC', {
+    logger.info('Agent created via CLI', {
       agentId: agent.agentId,
       roleId: input.roleId,
       roleSource: roleSummary?.roleSource,
@@ -493,10 +497,11 @@ export class OpenClawService {
       throw new OpenClawProtectedAgentError('Cannot delete the main agent')
     }
 
-    await this.ensureGatewayReady()
+    await this.assertGatewayReady()
     try {
-      // biome-ignore lint/style/noNonNullAssertion: ensureGatewayReady() guarantees a connected client
-      await this.gateway!.deleteAgent(agentId)
+      await this.runControlPlaneCall(() =>
+        this.adminClient.deleteAgent(agentId),
+      )
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (message.includes('not found')) {
@@ -504,14 +509,15 @@ export class OpenClawService {
       }
       throw error
     }
-    logger.info('Agent removed via WS RPC', { agentId })
+    logger.info('Agent removed via CLI', { agentId })
   }
 
   async listAgents(): Promise<OpenClawAgentEntry[]> {
-    await this.ensureGatewayReady()
+    await this.assertGatewayReady()
     logger.debug('Listing OpenClaw agents')
-    // biome-ignore lint/style/noNonNullAssertion: ensureGatewayReady() guarantees a connected client
-    const agents = await this.gateway!.listAgents()
+    const agents = await this.runControlPlaneCall(() =>
+      this.adminClient.listAgents(),
+    )
     return Promise.all(
       agents.map(async (agent) => ({
         ...agent,
@@ -520,21 +526,26 @@ export class OpenClawService {
     )
   }
 
-  // ── Chat Stream (WS) ─────────────────────────────────────────────────
+  // ── Chat Stream (HTTP) ───────────────────────────────────────────────
 
   async chatStream(
     agentId: string,
     sessionKey: string,
     message: string,
   ): Promise<ReadableStream<OpenClawStreamEvent>> {
-    await this.ensureGatewayReady()
+    await this.assertGatewayReady()
     logger.info('Starting OpenClaw chat stream', {
       agentId,
       sessionKey,
       messageLength: message.length,
     })
-    // biome-ignore lint/style/noNonNullAssertion: ensureGatewayReady() guarantees a connected client
-    return this.gateway!.chatStream(agentId, sessionKey, message)
+    return this.runControlPlaneCall(() =>
+      this.chatClient.streamChat({
+        agentId,
+        sessionKey,
+        message,
+      }),
+    )
   }
 
   // ── Provider Keys ────────────────────────────────────────────────────
@@ -587,7 +598,7 @@ export class OpenClawService {
         }
       }
 
-      await this.connectGatewayResiliently()
+      await this.runControlPlaneCall(() => this.adminClient.probe())
       logger.info('OpenClaw gateway auto-started')
     } catch (err) {
       logger.warn('OpenClaw auto-start failed', {
@@ -596,258 +607,51 @@ export class OpenClawService {
     }
   }
 
-  private async connectGatewayResiliently(
-    onLog?: (msg: string) => void,
-  ): Promise<void> {
-    const logProgress = this.createProgressLogger(onLog)
-    const existingConnection =
-      !!this.gateway || this.controlPlaneStatus !== 'disconnected'
-    this.controlPlaneStatus = existingConnection ? 'reconnecting' : 'connecting'
-    this.lastGatewayError = null
-    this.lastRecoveryReason = null
+  // ── Internal ─────────────────────────────────────────────────────────
 
+  private async assertGatewayReady(): Promise<void> {
+    const portReady = await this.runtime.isReady(this.port)
+    logger.debug('Checking OpenClaw gateway readiness before use', {
+      port: this.port,
+      portReady,
+      controlPlaneStatus: this.controlPlaneStatus,
+    })
+    if (portReady) {
+      return
+    }
+
+    this.controlPlaneStatus = 'failed'
+    this.lastGatewayError = 'OpenClaw gateway is not ready'
+    this.lastRecoveryReason = 'container_not_ready'
+    throw new Error('OpenClaw gateway is not ready')
+  }
+
+  private async runControlPlaneCall<T>(fn: () => Promise<T>): Promise<T> {
     try {
-      logger.info('Connecting OpenClaw control plane', {
-        port: this.port,
-        status: this.controlPlaneStatus,
-      })
-      await this.connectGateway()
+      await this.ensureTokenLoaded()
+      const result = await fn()
       this.controlPlaneStatus = 'connected'
       this.lastGatewayError = null
       this.lastRecoveryReason = null
-      logger.info('OpenClaw gateway control plane connected', {
-        port: this.port,
-      })
-      return
+      return result
     } catch (error) {
-      const reason = this.classifyGatewayError(error)
       const message = error instanceof Error ? error.message : String(error)
+      const reason = this.classifyControlPlaneError(error)
+      this.controlPlaneStatus = 'failed'
       this.lastGatewayError = message
       this.lastRecoveryReason = reason
-      logger.warn('OpenClaw gateway connect failed', { reason, error: message })
-
-      if (!this.isRecoverableGatewayError(reason)) {
-        this.controlPlaneStatus = 'failed'
-        throw error
-      }
-
-      this.controlPlaneStatus = 'recovering'
-      logProgress(`Recovering gateway connection: ${reason}`)
-      await this.performGatewayRecovery(reason, logProgress)
-
-      try {
-        await this.connectGateway()
-        this.controlPlaneStatus = 'connected'
-        this.lastGatewayError = null
-        logger.info('OpenClaw gateway control plane recovered', {
-          reason,
-          port: this.port,
-        })
-      } catch (retryError) {
-        const retryMessage =
-          retryError instanceof Error ? retryError.message : String(retryError)
-        this.lastGatewayError = retryMessage
-        this.lastRecoveryReason = this.classifyGatewayError(retryError)
-        this.controlPlaneStatus = 'failed'
-        logger.error('OpenClaw gateway recovery failed', {
-          reason,
-          error: retryMessage,
-        })
-        throw retryError
-      }
+      throw error
     }
   }
 
-  // ── Internal ─────────────────────────────────────────────────────────
-
-  /**
-   * Approves the latest pending device pair request via the openclaw CLI
-   * running inside the container. This is needed because the gateway requires
-   * Ed25519 device identity and approval before granting operator scopes.
-   */
-  private async approvePendingDevice(
-    logProgress: (msg: string) => void,
-  ): Promise<void> {
-    logger.info('Approving pending OpenClaw device pairing')
-    // List pending devices to get the request ID
-    const output: string[] = []
-    const listCode = await this.runtime.execInContainer(
-      [
-        'node',
-        'dist/index.js',
-        'devices',
-        'list',
-        '--json',
-        '--token',
-        this.token,
-      ],
-      (line) => output.push(line),
-    )
-
-    if (listCode !== 0) {
-      throw new Error(`Failed to list pending devices (exit ${listCode})`)
-    }
-
-    const jsonStr = output.join('\n')
-    let data: {
-      pending?: Array<{ requestId: string; deviceId?: string }>
-    }
-    try {
-      data = JSON.parse(jsonStr)
-    } catch {
-      throw new Error(
-        `Failed to parse device list output: ${jsonStr.slice(0, 200)}`,
-      )
-    }
-
-    const pending = data.pending
-    if (!pending?.length) {
-      logger.warn('No pending device pair requests found')
-      throw new Error('No pending device pair requests to approve')
-    }
-
-    const clientDeviceId = await this.readClientDeviceId()
-    const pendingRequest =
-      pending.find((request) => request.deviceId === clientDeviceId) ??
-      pending[0]
-    const requestId = pendingRequest.requestId
-
-    if (clientDeviceId && pendingRequest.deviceId !== clientDeviceId) {
-      logger.warn('Pending device request did not match client identity', {
-        clientDeviceId,
-        approvedRequestId: requestId,
-      })
-    }
-
-    logProgress(`Approving device pair request ${requestId.slice(0, 8)}...`)
-
-    const code = await this.runtime.execInContainer([
-      'node',
-      'dist/index.js',
-      'devices',
-      'approve',
-      requestId,
-      '--token',
-      this.token,
-      '--json',
-    ])
-
-    if (code !== 0) {
-      logger.warn('Device approval command exited with code', { code })
-      throw new Error('Failed to approve client device pairing')
-    }
-
-    logProgress('Client device approved')
-  }
-
-  private async connectGateway(): Promise<void> {
-    this.disconnectGateway()
-    logger.info('Connecting OpenClaw gateway client', {
-      port: this.port,
-    })
-    const gateway = new GatewayClient(this.port, this.token, this.openclawDir)
-    await gateway.connect()
-    this.gateway = gateway
-  }
-
-  private disconnectGateway(): void {
-    if (this.gateway) {
-      this.gateway.disconnect()
-      this.gateway = null
-    }
-    this.controlPlaneStatus = 'disconnected'
-  }
-
-  private async ensureGatewayReady(): Promise<void> {
-    if (this.gateway?.isConnected) {
-      this.controlPlaneStatus = 'connected'
-      return
-    }
-
-    const portReady = await this.runtime.isReady(this.port)
-    logger.info('Checking OpenClaw gateway readiness before WS use', {
-      port: this.port,
-      portReady,
-      hasGatewayClient: !!this.gateway,
-      gatewayConnected: !!this.gateway?.isConnected,
-    })
-    if (!portReady) {
-      this.controlPlaneStatus = 'failed'
-      this.lastGatewayError = 'OpenClaw gateway is not ready'
-      this.lastRecoveryReason = 'container_not_ready'
-      throw new Error('OpenClaw gateway is not ready')
-    }
-
-    if (this.gatewayReconnectPromise) {
-      await this.gatewayReconnectPromise
-      return
-    }
-
-    this.gatewayReconnectPromise = this.connectGatewayResiliently()
-    try {
-      await this.gatewayReconnectPromise
-    } finally {
-      this.gatewayReconnectPromise = null
-    }
-  }
-
-  private classifyGatewayError(error: unknown): OpenClawGatewayRecoveryReason {
+  private classifyControlPlaneError(
+    error: unknown,
+  ): OpenClawGatewayRecoveryReason {
     const message = error instanceof Error ? error.message : String(error)
-    if (message.includes('signature expired')) return 'signature_expired'
-    if (message.includes('pairing required')) return 'pairing_required'
-    if (message.includes('Gateway WS not connected'))
-      return 'transient_disconnect'
+    if (message.includes('Unauthorized')) return 'token_mismatch'
     if (message.includes('token')) return 'token_mismatch'
     if (message.includes('not ready')) return 'container_not_ready'
     return 'unknown'
-  }
-
-  private isRecoverableGatewayError(
-    reason: OpenClawGatewayRecoveryReason,
-  ): boolean {
-    return (
-      reason === 'transient_disconnect' ||
-      reason === 'signature_expired' ||
-      reason === 'pairing_required' ||
-      reason === 'token_mismatch'
-    )
-  }
-
-  private async performGatewayRecovery(
-    reason: OpenClawGatewayRecoveryReason,
-    logProgress: (msg: string) => void,
-  ): Promise<void> {
-    switch (reason) {
-      case 'signature_expired': {
-        logProgress('Restarting gateway to resync device signature clock...')
-        await this.runtime.composeRestart(logProgress)
-        const ready = await this.runtime.waitForReady(
-          this.port,
-          READY_TIMEOUT_MS,
-        )
-        if (!ready) {
-          throw new Error('Gateway not ready after clock resync restart')
-        }
-        return
-      }
-
-      case 'pairing_required':
-        logProgress('Approving pending device pairing...')
-        await this.approvePendingDevice(logProgress)
-        return
-
-      case 'token_mismatch':
-        logProgress('Reloading gateway auth token...')
-        await this.loadTokenFromEnv()
-        return
-
-      case 'transient_disconnect':
-        logProgress('Retrying gateway connection...')
-        return
-
-      default:
-        throw new Error(`Unrecoverable gateway error: ${reason}`)
-    }
   }
 
   private async writeBootstrapConfig(
@@ -884,7 +688,7 @@ export class OpenClawService {
     if (this.stopLogTail) return
     try {
       this.stopLogTail = this.runtime.tailGatewayLogs((line) => {
-        logger.debug(`[openclaw] ${line}`)
+        logger.debug(line)
       })
       logger.info('Streaming OpenClaw gateway logs into server log (dev mode)')
     } catch (err) {
@@ -909,6 +713,12 @@ export class OpenClawService {
       this.openclawDir,
       agentName === 'main' ? 'workspace' : `workspace-${agentName}`,
     )
+  }
+
+  private getContainerWorkspacePath(agentName: string): string {
+    return agentName === 'main'
+      ? `${OPENCLAW_CONTAINER_HOME}/workspace`
+      : `${OPENCLAW_CONTAINER_HOME}/workspace-${agentName}`
   }
 
   private async writeRoleBootstrapFiles(
@@ -1013,6 +823,14 @@ export class OpenClawService {
     return addedNew || updatedExisting
   }
 
+  private async ensureTokenLoaded(): Promise<void> {
+    if (!existsSync(join(this.openclawDir, '.env'))) {
+      return
+    }
+
+    await this.loadTokenFromEnv()
+  }
+
   private async mergeProviderConfigIfChanged(input: {
     providerType?: string
     providerName?: string
@@ -1105,18 +923,6 @@ export class OpenClawService {
       }
     } catch {
       logger.warn('OpenClaw env file not available while loading token')
-    }
-  }
-
-  private async readClientDeviceId(): Promise<string | null> {
-    try {
-      const identityPath = join(this.openclawDir, 'client-identity.json')
-      const identity = JSON.parse(await readFile(identityPath, 'utf-8')) as {
-        deviceId?: string
-      }
-      return identity.deviceId ?? null
-    } catch {
-      return null
     }
   }
 
