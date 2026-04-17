@@ -10,7 +10,7 @@
 
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import {
   OPENCLAW_CONTAINER_HOME,
   OPENCLAW_GATEWAY_PORT,
@@ -43,12 +43,26 @@ import { resolveSupportedOpenClawProvider } from './openclaw-provider-map'
 import type { OpenClawStreamEvent } from './openclaw-types'
 import { getPodmanRuntime } from './podman-runtime'
 
-const COMPOSE_RESOURCE = resolve(
+export const SOURCE_COMPOSE_RESOURCE = resolve(
   import.meta.dir,
   '../../../../resources/openclaw-compose.yml',
 )
 const READY_TIMEOUT_MS = 30_000
 const AGENT_NAME_PATTERN = /^[a-z][a-z0-9-]*$/
+
+export function resolveComposeResourcePath(resourcesDir?: string): string {
+  if (resourcesDir) {
+    const bundledComposePath = join(resourcesDir, 'openclaw-compose.yml')
+    if (existsSync(bundledComposePath)) {
+      return bundledComposePath
+    }
+    logger.warn(
+      'Bundled openclaw-compose.yml not found in resourcesDir, falling back to source tree',
+      { resourcesDir },
+    )
+  }
+  return SOURCE_COMPOSE_RESOURCE
+}
 
 export type OpenClawControlPlaneStatus =
   | 'disconnected'
@@ -102,12 +116,18 @@ export interface OpenClawProviderUpdateResult {
   modelUpdated: boolean
 }
 
+export interface OpenClawServiceConfig {
+  browserosServerPort?: number
+  resourcesDir?: string
+}
+
 export class OpenClawService {
   private runtime: ContainerRuntime
   private cliClient: OpenClawCliClient
   private bootstrapCliClient: OpenClawCliClient
   private chatClient: OpenClawHttpChatClient
   private openclawDir: string
+  private composeResourcePath: string
   private port = OPENCLAW_GATEWAY_PORT
   private token: string
   private tokenLoaded = false
@@ -118,7 +138,7 @@ export class OpenClawService {
   private lastRecoveryReason: OpenClawGatewayRecoveryReason | null = null
   private stopLogTail: (() => void) | null = null
 
-  constructor(browserosServerPort?: number) {
+  constructor(config: OpenClawServiceConfig = {}) {
     this.openclawDir = getOpenClawDir()
     this.runtime = new ContainerRuntime(getPodmanRuntime(), this.openclawDir)
     this.token = crypto.randomUUID()
@@ -131,7 +151,18 @@ export class OpenClawService {
       this.port,
       async () => this.token,
     )
-    this.browserosServerPort = browserosServerPort ?? DEFAULT_PORTS.server
+    this.composeResourcePath = resolveComposeResourcePath(config.resourcesDir)
+    this.browserosServerPort =
+      config.browserosServerPort ?? DEFAULT_PORTS.server
+  }
+
+  configure(config: OpenClawServiceConfig): void {
+    if (config.browserosServerPort !== undefined) {
+      this.browserosServerPort = config.browserosServerPort
+    }
+    if (config.resourcesDir !== undefined) {
+      this.composeResourcePath = resolveComposeResourcePath(config.resourcesDir)
+    }
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────────
@@ -165,7 +196,7 @@ export class OpenClawService {
     await mkdir(this.getHostWorkspaceDir('main'), { recursive: true })
 
     logProgress('Copying compose file...')
-    await this.runtime.copyComposeFile(COMPOSE_RESOURCE)
+    await this.runtime.copyComposeFile(this.composeResourcePath)
 
     await this.writeComposeEnv()
     logProgress('Generated .env file')
@@ -530,9 +561,8 @@ export class OpenClawService {
   }): Promise<OpenClawProviderUpdateResult> {
     const provider = resolveSupportedOpenClawProvider(input)
     if (provider.model) {
-      await this.applyCliMutation(() =>
-        this.cliClient.setDefaultModel(provider.model!),
-      )
+      const model = provider.model
+      await this.applyCliMutation(() => this.cliClient.setDefaultModel(model))
     }
     const changed = await this.writeStateEnv(provider.envValues)
     if (changed) {
@@ -925,9 +955,19 @@ export class OpenClawService {
 
 let service: OpenClawService | null = null
 
-export function getOpenClawService(
-  browserosServerPort?: number,
+export function configureOpenClawService(
+  config: OpenClawServiceConfig,
 ): OpenClawService {
-  if (!service) service = new OpenClawService(browserosServerPort)
+  if (!service) {
+    service = new OpenClawService(config)
+    return service
+  }
+
+  service.configure(config)
+  return service
+}
+
+export function getOpenClawService(): OpenClawService {
+  if (!service) service = new OpenClawService()
   return service
 }
