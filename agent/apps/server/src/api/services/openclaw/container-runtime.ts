@@ -153,6 +153,24 @@ export class ContainerRuntime {
     )
   }
 
+  async runGatewaySetupCommand(
+    command: string[],
+    onLog?: LogFn,
+  ): Promise<number> {
+    return this.compose(
+      [
+        'run',
+        '--rm',
+        '--no-deps',
+        '--entrypoint',
+        'node',
+        'openclaw-gateway',
+        ...command.slice(1),
+      ],
+      onLog,
+    )
+  }
+
   tailGatewayLogs(onLine: LogFn): () => void {
     return this.podman.tailContainerLogs(
       OPENCLAW_GATEWAY_CONTAINER_NAME,

@@ -1,7 +1,3 @@
-import type {
-  BrowserOSAgentRoleId,
-  BrowserOSCustomRoleInput,
-} from '@browseros/shared/types/role-aware-agents'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getAgentServerUrl } from '@/lib/browseros/helpers'
 import { useAgentServerUrl } from '@/lib/browseros/useBrowserOSProviders'
@@ -11,27 +7,6 @@ export interface AgentEntry {
   name: string
   workspace: string
   model?: unknown
-  role?: {
-    roleSource: 'builtin' | 'custom'
-    roleId?: BrowserOSAgentRoleId
-    roleName: string
-    shortDescription: string
-  }
-}
-
-export interface RoleTemplateSummary {
-  id: BrowserOSAgentRoleId
-  name: string
-  shortDescription: string
-  longDescription: string
-  recommendedApps: string[]
-  defaultAgentName: string
-  boundaries: Array<{
-    key: string
-    label: string
-    description: string
-    defaultMode: 'allow' | 'ask' | 'block'
-  }>
 }
 
 export interface OpenClawStatus {
@@ -61,8 +36,6 @@ export interface OpenClawStatus {
 
 export interface OpenClawAgentMutationInput {
   name: string
-  roleId?: BrowserOSAgentRoleId
-  customRole?: BrowserOSCustomRoleInput
   providerType?: string
   providerName?: string
   baseUrl?: string
@@ -86,7 +59,6 @@ export function getModelDisplayName(model: unknown): string | undefined {
 export const OPENCLAW_QUERY_KEYS = {
   status: 'openclaw-status',
   agents: 'openclaw-agents',
-  roles: 'openclaw-roles',
 } as const
 
 async function clawFetch<T>(
@@ -115,16 +87,6 @@ async function fetchOpenClawStatus(baseUrl: string): Promise<OpenClawStatus> {
 async function fetchOpenClawAgents(baseUrl: string): Promise<AgentEntry[]> {
   const data = await clawFetch<{ agents: AgentEntry[] }>(baseUrl, '/agents')
   return data.agents ?? []
-}
-
-async function fetchOpenClawRoles(
-  baseUrl: string,
-): Promise<RoleTemplateSummary[]> {
-  const data = await clawFetch<{ roles: RoleTemplateSummary[] }>(
-    baseUrl,
-    '/roles',
-  )
-  return data.roles ?? []
 }
 
 async function invalidateOpenClawQueries(
@@ -173,28 +135,6 @@ export function useOpenClawAgents(enabled = true) {
 
   return {
     agents: query.data ?? [],
-    loading: query.isLoading || urlLoading,
-    error: query.error ?? urlError,
-    refetch: query.refetch,
-  }
-}
-
-export function useOpenClawRoles() {
-  const {
-    baseUrl,
-    isLoading: urlLoading,
-    error: urlError,
-  } = useAgentServerUrl()
-
-  const query = useQuery<RoleTemplateSummary[], Error>({
-    queryKey: [OPENCLAW_QUERY_KEYS.roles, baseUrl],
-    queryFn: () => fetchOpenClawRoles(baseUrl as string),
-    enabled: !!baseUrl && !urlLoading,
-    staleTime: 60_000,
-  })
-
-  return {
-    roles: query.data ?? [],
     loading: query.isLoading || urlLoading,
     error: query.error ?? urlError,
     refetch: query.refetch,

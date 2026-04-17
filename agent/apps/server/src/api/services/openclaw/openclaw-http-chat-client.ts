@@ -65,7 +65,7 @@ export class OpenClawHttpChatClient {
 }
 
 function resolveAgentModel(agentId: string): string {
-  return agentId === 'main' ? 'openclaw/default' : `openclaw/${agentId}`
+  return agentId === 'main' ? 'openclaw' : `openclaw/${agentId}`
 }
 
 function createEventStream(
@@ -179,6 +179,16 @@ function finishStream(
   done: boolean,
 ): boolean {
   if (!done) {
+    if (!text.trim()) {
+      controller.enqueue({
+        type: 'error',
+        data: {
+          message: "Agent couldn't generate a response. Please try again.",
+        },
+      })
+      controller.close()
+      return true
+    }
     controller.enqueue({
       type: 'done',
       data: { text },

@@ -4,15 +4,21 @@
  */
 
 import { afterEach, describe, expect, it, mock } from 'bun:test'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { OPENCLAW_CONTAINER_HOME } from '@browseros/shared/constants/openclaw'
+import {
+  resolveSupportedOpenClawProvider,
+  UnsupportedOpenClawProviderError,
+} from '../../../../src/api/services/openclaw/openclaw-provider-map'
 import { OpenClawService } from '../../../../src/api/services/openclaw/openclaw-service'
 
 type MutableOpenClawService = OpenClawService & {
   openclawDir: string
   token: string
+  restart: ReturnType<typeof mock>
   runtime: {
     ensureReady?: () => Promise<void>
     isPodmanAvailable?: () => Promise<boolean>
@@ -21,13 +27,21 @@ type MutableOpenClawService = OpenClawService & {
     copyComposeFile?: (_source: string) => Promise<void>
     writeEnvFile?: (_content: string) => Promise<void>
     composePull?: () => Promise<void>
+    composeRestart?: () => Promise<void>
     composeUp?: () => Promise<void>
     waitForReady?: () => Promise<boolean>
   }
-  adminClient: {
+  cliClient: {
     probe?: ReturnType<typeof mock>
     createAgent?: ReturnType<typeof mock>
+    getConfig?: ReturnType<typeof mock>
     listAgents?: ReturnType<typeof mock>
+  }
+  bootstrapCliClient: {
+    runOnboard?: ReturnType<typeof mock>
+    setConfigBatch?: ReturnType<typeof mock>
+    setDefaultModel?: ReturnType<typeof mock>
+    validateConfig?: ReturnType<typeof mock>
   }
 }
 
@@ -42,7 +56,7 @@ describe('OpenClawService', () => {
     }
   })
 
-  it('creates agents through the admin client and writes role bootstrap files', async () => {
+  it('creates agents through the cli client without role bootstrap files', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
     const createAgent = mock(async () => ({
       agentId: 'ops',
@@ -56,52 +70,84 @@ describe('OpenClawService', () => {
     service.runtime = {
       isReady: async () => true,
     }
-    service.adminClient = {
+    service.cliClient = {
       createAgent,
     }
 
     const agent = await service.createAgent({
       name: 'ops',
-      roleId: 'chief-of-staff',
     })
 
     expect(createAgent).toHaveBeenCalledWith({
       name: 'ops',
-      workspace: `${OPENCLAW_CONTAINER_HOME}/workspace-ops`,
       model: undefined,
     })
-    expect(agent.role).toEqual({
-      roleSource: 'builtin',
-      roleId: 'chief-of-staff',
-      roleName: 'Chief of Staff',
-      shortDescription:
-        'Executive coordination, follow-ups, scheduling, and briefing support.',
+    expect(agent).toEqual({
+      agentId: 'ops',
+      name: 'ops',
+      workspace: `${OPENCLAW_CONTAINER_HOME}/workspace-ops`,
+      model: 'openclaw/default',
     })
-
-    const roleMetadata = JSON.parse(
-      await readFile(
-        join(tempDir, 'workspace-ops', '.browseros-role.json'),
-        'utf-8',
+    expect(
+      existsSync(
+        join(tempDir, '.openclaw', 'workspace-ops', '.browseros-role.json'),
       ),
-    ) as {
-      roleId: string
-      agentName: string
-    }
-    expect(roleMetadata).toMatchObject({
-      roleId: 'chief-of-staff',
-      agentName: 'ops',
-    })
+    ).toBe(false)
   })
 
-  it('maps successful admin probes into connected status', async () => {
+  it('lists plain agent entries without role metadata', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw', 'workspace-ops'), {
+      recursive: true,
+    })
+    await writeFile(join(tempDir, '.openclaw', 'openclaw.json'), '{}')
+    await writeFile(
+      join(tempDir, '.openclaw', 'workspace-ops', '.browseros-role.json'),
+      '{"roleId":"chief-of-staff"}\n',
+      'utf-8',
+    )
     const service = new OpenClawService() as MutableOpenClawService
 
+    service.openclawDir = tempDir
+    service.runtime = {
+      isReady: async () => true,
+    }
+    service.cliClient = {
+      getConfig: mock(async () => 'cli-token'),
+      listAgents: mock(async () => [
+        {
+          agentId: 'ops',
+          name: 'ops',
+          workspace: `${OPENCLAW_CONTAINER_HOME}/workspace-ops`,
+          model: 'openai/gpt-5.4-mini',
+        },
+      ]),
+    }
+
+    await expect(service.listAgents()).resolves.toEqual([
+      {
+        agentId: 'ops',
+        name: 'ops',
+        workspace: `${OPENCLAW_CONTAINER_HOME}/workspace-ops`,
+        model: 'openai/gpt-5.4-mini',
+      },
+    ])
+  })
+
+  it('maps successful cli client probes into connected status', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(join(tempDir, '.openclaw', 'openclaw.json'), '{}')
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
     service.runtime = {
       isPodmanAvailable: async () => true,
       getMachineStatus: async () => ({ initialized: true, running: true }),
       isReady: async () => true,
     }
-    service.adminClient = {
+    service.cliClient = {
+      getConfig: mock(async () => 'cli-token'),
       listAgents: mock(async () => [
         {
           agentId: 'main',
@@ -133,11 +179,118 @@ describe('OpenClawService', () => {
 
   it('creates the main agent during setup when the gateway starts without one', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    const steps: string[] = []
+    const runOnboard = mock(async () => {
+      steps.push('onboard')
+    })
+    const setConfigBatch = mock(async () => {
+      steps.push('batch')
+    })
+    const setDefaultModel = mock(async () => {})
+    const validateConfig = mock(async () => {
+      steps.push('validate')
+      return { ok: true }
+    })
+    const getConfig = mock(async (path: string) => {
+      if (path === 'gateway.auth.token') return 'cli-token'
+      return null
+    })
     const createAgent = mock(async () => ({
       agentId: 'main',
       name: 'main',
       workspace: `${OPENCLAW_CONTAINER_HOME}/workspace`,
     }))
+    const writeEnvFile = mock(async (_content: string) => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.runtime = {
+      isPodmanAvailable: async () => true,
+      ensureReady: async () => {},
+      isReady: async () => true,
+      copyComposeFile: async () => {},
+      writeEnvFile,
+      composePull: async () => {},
+      composeRestart: mock(async () => {
+        steps.push('restart')
+      }),
+      composeUp: mock(async () => {
+        steps.push('up')
+      }),
+      waitForReady: mock(async () => {
+        steps.push('ready')
+        return true
+      }),
+    }
+    service.cliClient = {
+      getConfig,
+      probe: mock(async () => {}),
+      listAgents: mock(async () => []),
+      createAgent,
+    }
+    service.bootstrapCliClient = {
+      runOnboard,
+      setConfigBatch,
+      setDefaultModel,
+      validateConfig,
+    }
+
+    await service.setup({})
+
+    expect(runOnboard).toHaveBeenCalledWith({
+      acceptRisk: true,
+      authChoice: 'skip',
+      gatewayAuth: 'token',
+      gatewayBind: 'lan',
+      gatewayPort: 18789,
+      installDaemon: false,
+      mode: 'local',
+      nonInteractive: true,
+      skipHealth: true,
+    })
+    expect(setConfigBatch).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        {
+          path: 'mcp.servers.browseros.url',
+          value: 'http://host.containers.internal:9100/mcp',
+        },
+        {
+          path: 'mcp.servers.browseros.transport',
+          value: 'streamable-http',
+        },
+        {
+          path: 'gateway.http.endpoints.chatCompletions.enabled',
+          value: true,
+        },
+      ]),
+    )
+    expect(validateConfig).toHaveBeenCalled()
+    expect(createAgent).toHaveBeenCalledWith({
+      name: 'main',
+      model: undefined,
+    })
+    expect(steps).toEqual(['onboard', 'batch', 'validate', 'up', 'ready'])
+    expect(writeEnvFile).toHaveBeenCalledWith(
+      expect.stringContaining(`OPENCLAW_HOST_HOME=${tempDir}`),
+    )
+    expect(service.runtime.composeRestart).not.toHaveBeenCalled()
+  })
+
+  it('applies setup-time config in one batch before the gateway starts', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    const runOnboard = mock(async () => {})
+    const setConfigBatch = mock(async () => {})
+    const validateConfig = mock(async () => ({ ok: true }))
+    const getConfig = mock(async (path: string) => {
+      if (path === 'gateway.auth.token') return 'cli-token'
+      return null
+    })
+    const createAgent = mock(async () => ({
+      agentId: 'main',
+      name: 'main',
+      workspace: `${OPENCLAW_CONTAINER_HOME}/workspace`,
+    }))
+    const waitForReady = mock(async () => true)
     const service = new OpenClawService() as MutableOpenClawService
 
     service.openclawDir = tempDir
@@ -148,27 +301,47 @@ describe('OpenClawService', () => {
       copyComposeFile: async () => {},
       writeEnvFile: async () => {},
       composePull: async () => {},
+      composeRestart: mock(async () => {}),
       composeUp: async () => {},
-      waitForReady: async () => true,
+      waitForReady,
     }
-    service.adminClient = {
+    service.cliClient = {
+      getConfig,
       probe: mock(async () => {}),
       listAgents: mock(async () => []),
       createAgent,
     }
+    service.bootstrapCliClient = {
+      runOnboard,
+      setConfigBatch,
+      setDefaultModel: mock(async () => {}),
+      validateConfig,
+    }
 
-    await service.setup({})
+    await expect(service.setup({})).resolves.toBeUndefined()
 
+    expect(setConfigBatch).toHaveBeenCalledTimes(1)
+    expect(waitForReady).toHaveBeenCalledTimes(1)
     expect(createAgent).toHaveBeenCalledWith({
       name: 'main',
-      workspace: `${OPENCLAW_CONTAINER_HOME}/workspace`,
       model: undefined,
     })
+    expect(service.runtime.composeRestart).not.toHaveBeenCalled()
   })
 
-  it('loads the persisted gateway token before control plane calls', async () => {
+  it('loads the persisted gateway token from the mounted config before control plane calls', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
-    await writeFile(join(tempDir, '.env'), 'OPENCLAW_GATEWAY_TOKEN=env-token\n')
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.openclaw', 'openclaw.json'),
+      JSON.stringify({
+        gateway: {
+          auth: {
+            token: 'cli-token',
+          },
+        },
+      }),
+    )
     const service = new OpenClawService() as MutableOpenClawService
 
     service.openclawDir = tempDir
@@ -176,13 +349,340 @@ describe('OpenClawService', () => {
     service.runtime = {
       isReady: async () => true,
     }
-    service.adminClient = {
+    service.cliClient = {
       listAgents: mock(async () => {
-        expect(service.token).toBe('env-token')
+        expect(service.token).toBe('cli-token')
         return []
       }),
     }
 
     await service.listAgents()
+  })
+
+  it('caches the loaded gateway token from config across steady-state control plane calls', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.openclaw', 'openclaw.json'),
+      JSON.stringify({
+        gateway: {
+          auth: {
+            token: 'cli-token',
+          },
+        },
+      }),
+    )
+    const listAgents = mock(async () => [])
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.runtime = {
+      isReady: async () => true,
+    }
+    service.cliClient = {
+      listAgents,
+    }
+
+    await service.listAgents()
+    await service.listAgents()
+
+    expect(listAgents).toHaveBeenCalledTimes(2)
+  })
+
+  it('writes provider credentials into the mounted state env file during setup', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.runtime = {
+      isPodmanAvailable: async () => true,
+      ensureReady: async () => {},
+      isReady: async () => true,
+      copyComposeFile: async () => {},
+      writeEnvFile: async () => {},
+      composePull: async () => {},
+      composeRestart: async () => {},
+      composeUp: async () => {},
+      waitForReady: async () => true,
+    }
+    service.cliClient = {
+      getConfig: mock(async (path: string) =>
+        path === 'gateway.auth.token' ? 'cli-token' : null,
+      ),
+      probe: mock(async () => {}),
+      listAgents: mock(async () => [
+        {
+          agentId: 'main',
+          name: 'main',
+          workspace: `${OPENCLAW_CONTAINER_HOME}/workspace`,
+        },
+      ]),
+      createAgent: mock(async () => {
+        throw new Error('createAgent should not be called when main exists')
+      }),
+    }
+    service.bootstrapCliClient = {
+      runOnboard: mock(async () => {}),
+      setConfigBatch: mock(async () => {}),
+      setDefaultModel: mock(async () => {}),
+      validateConfig: mock(async () => ({ ok: true })),
+    }
+
+    await service.setup({
+      providerType: 'openai',
+      apiKey: 'sk-test',
+      modelId: 'gpt-5.4-mini',
+    })
+
+    expect(
+      await readFile(join(tempDir, '.openclaw', '.env'), 'utf-8'),
+    ).toContain('OPENAI_API_KEY=sk-test')
+  })
+
+  it('keeps openrouter model refs verbatim without rewriting dots', () => {
+    const provider = resolveSupportedOpenClawProvider({
+      providerType: 'openrouter',
+      apiKey: 'or-key',
+      modelId: 'anthropic/claude-haiku-4.5',
+    })
+
+    expect(provider).toEqual({
+      envValues: {
+        OPENROUTER_API_KEY: 'or-key',
+      },
+      model: 'openrouter/anthropic/claude-haiku-4.5',
+      providerType: 'openrouter',
+    })
+  })
+
+  it('only resolves env vars for the supported bootstrap providers', () => {
+    expect(
+      resolveSupportedOpenClawProvider({
+        providerType: 'anthropic',
+        apiKey: 'ant-key',
+        modelId: 'claude-sonnet-4.5',
+      }),
+    ).toEqual({
+      envValues: {
+        ANTHROPIC_API_KEY: 'ant-key',
+      },
+      model: 'anthropic/claude-sonnet-4.5',
+      providerType: 'anthropic',
+    })
+
+    expect(
+      resolveSupportedOpenClawProvider({
+        providerType: 'moonshot',
+        apiKey: 'moon-key',
+        modelId: 'kimi-k2',
+      }),
+    ).toEqual({
+      envValues: {
+        MOONSHOT_API_KEY: 'moon-key',
+      },
+      model: 'moonshot/kimi-k2',
+      providerType: 'moonshot',
+    })
+
+    expect(() =>
+      resolveSupportedOpenClawProvider({
+        providerType: 'google',
+        apiKey: 'google-key',
+        modelId: 'gemini-2.5-pro',
+      }),
+    ).toThrow(new UnsupportedOpenClawProviderError('google'))
+
+    expect(() =>
+      resolveSupportedOpenClawProvider({
+        providerType: 'custom-api-key',
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'custom-key',
+        modelId: 'custom-model',
+      }),
+    ).toThrow(new UnsupportedOpenClawProviderError('custom-api-key'))
+  })
+
+  it('rejects unsupported providers before mutating env or creating agents', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    const createAgent = mock(async () => ({
+      agentId: 'ops',
+      name: 'ops',
+      workspace: `${OPENCLAW_CONTAINER_HOME}/workspace-ops`,
+    }))
+    const restart = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.restart = restart
+    service.runtime = {
+      isReady: async () => true,
+    }
+    service.cliClient = {
+      createAgent,
+    }
+
+    await expect(
+      service.createAgent({
+        name: 'ops',
+        providerType: 'google',
+        apiKey: 'google-key',
+        modelId: 'gemini-2.5-pro',
+      }),
+    ).rejects.toThrow('Unsupported OpenClaw provider')
+
+    expect(createAgent).not.toHaveBeenCalled()
+    expect(restart).not.toHaveBeenCalled()
+    expect(existsSync(join(tempDir, '.openclaw', '.env'))).toBe(false)
+  })
+
+  it('passes openrouter model refs through verbatim into agent creation', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.openclaw', '.env'),
+      'OPENROUTER_API_KEY=or-key\n',
+      'utf-8',
+    )
+    const createAgent = mock(async () => ({
+      agentId: 'research',
+      name: 'research',
+      workspace: `${OPENCLAW_CONTAINER_HOME}/workspace-research`,
+      model: 'openrouter/anthropic/claude-haiku-4.5',
+    }))
+    const restart = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.restart = restart
+    service.runtime = {
+      isReady: async () => true,
+    }
+    service.cliClient = {
+      createAgent,
+    }
+
+    await service.createAgent({
+      name: 'research',
+      providerType: 'openrouter',
+      apiKey: 'or-key',
+      modelId: 'anthropic/claude-haiku-4.5',
+    })
+
+    expect(createAgent).toHaveBeenCalledWith({
+      name: 'research',
+      model: 'openrouter/anthropic/claude-haiku-4.5',
+    })
+    expect(restart).not.toHaveBeenCalled()
+  })
+
+  it('updateProviderKeys rejects unsupported providers without restarting', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    const restart = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.restart = restart
+
+    await expect(
+      service.updateProviderKeys({
+        providerType: 'google',
+        apiKey: 'google-key',
+        modelId: 'gemini-2.5-pro',
+      }),
+    ).rejects.toThrow('Unsupported OpenClaw provider')
+
+    expect(restart).not.toHaveBeenCalled()
+  })
+
+  it('does not restart when provider env content is unchanged', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.openclaw', '.env'),
+      'OPENAI_API_KEY=sk-test\n',
+      'utf-8',
+    )
+
+    const restart = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.restart = restart
+
+    await service.updateProviderKeys({
+      providerType: 'openai',
+      apiKey: 'sk-test',
+    })
+
+    expect(restart).not.toHaveBeenCalled()
+    expect(await readFile(join(tempDir, '.openclaw', '.env'), 'utf-8')).toBe(
+      'OPENAI_API_KEY=sk-test\n',
+    )
+  })
+
+  it('applies the default model when provider keys are unchanged', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.openclaw', '.env'),
+      'OPENAI_API_KEY=sk-test\n',
+      'utf-8',
+    )
+
+    const restart = mock(async () => {})
+    const setDefaultModel = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.restart = restart
+    service.cliClient = {
+      setDefaultModel,
+    }
+
+    await expect(
+      service.updateProviderKeys({
+        providerType: 'openai',
+        apiKey: 'sk-test',
+        modelId: 'gpt-5.4-mini',
+      }),
+    ).resolves.toEqual({
+      modelUpdated: true,
+      restarted: false,
+    })
+
+    expect(setDefaultModel).toHaveBeenCalledWith('openai/gpt-5.4-mini')
+    expect(restart).not.toHaveBeenCalled()
+    expect(await readFile(join(tempDir, '.openclaw', '.env'), 'utf-8')).toBe(
+      'OPENAI_API_KEY=sk-test\n',
+    )
+  })
+
+  it('does not persist env updates when setting the default model fails', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+
+    const setDefaultModel = mock(async () => {
+      throw new Error('container unavailable')
+    })
+    const restart = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.restart = restart
+    service.cliClient = {
+      setDefaultModel,
+    }
+
+    await expect(
+      service.updateProviderKeys({
+        providerType: 'openai',
+        apiKey: 'sk-test',
+        modelId: 'gpt-5.4-mini',
+      }),
+    ).rejects.toThrow('container unavailable')
+
+    expect(setDefaultModel).toHaveBeenCalledWith('openai/gpt-5.4-mini')
+    expect(restart).not.toHaveBeenCalled()
+    expect(existsSync(join(tempDir, '.openclaw', '.env'))).toBe(false)
   })
 })

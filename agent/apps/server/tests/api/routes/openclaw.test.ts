@@ -4,6 +4,7 @@
  */
 
 import { afterEach, describe, expect, it, mock } from 'bun:test'
+import { UnsupportedOpenClawProviderError } from '../../../src/api/services/openclaw/openclaw-provider-map'
 
 describe('createOpenClawRoutes', () => {
   afterEach(() => {
@@ -62,5 +63,153 @@ describe('createOpenClawRoutes', () => {
         'data: {"type":"done","data":{"text":"Hello"}}\n\n' +
         'data: [DONE]\n\n',
     )
+  })
+
+  it('returns 400 for unsupported provider payloads', async () => {
+    const actualOpenClawService = await import(
+      '../../../src/api/services/openclaw/openclaw-service'
+    )
+    const updateProviderKeys = mock(async () => {
+      throw new UnsupportedOpenClawProviderError('google')
+    })
+
+    mock.module('../../../src/api/services/openclaw/openclaw-service', () => ({
+      ...actualOpenClawService,
+      getOpenClawService: () =>
+        ({
+          updateProviderKeys,
+        }) as never,
+    }))
+
+    const { createOpenClawRoutes } = await import(
+      '../../../src/api/routes/openclaw'
+    )
+    const route = createOpenClawRoutes()
+
+    const response = await route.request('/providers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        providerType: 'google',
+        apiKey: 'google-key',
+      }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(updateProviderKeys).toHaveBeenCalledWith({
+      providerType: 'google',
+      apiKey: 'google-key',
+    })
+    expect(await response.json()).toEqual({
+      error: 'Unsupported OpenClaw provider: google',
+    })
+  })
+
+  it('returns a non-restarting response when only the default model changes', async () => {
+    const actualOpenClawService = await import(
+      '../../../src/api/services/openclaw/openclaw-service'
+    )
+    const updateProviderKeys = mock(async () => ({
+      restarted: false,
+      modelUpdated: true,
+    }))
+
+    mock.module('../../../src/api/services/openclaw/openclaw-service', () => ({
+      ...actualOpenClawService,
+      getOpenClawService: () =>
+        ({
+          updateProviderKeys,
+        }) as never,
+    }))
+
+    const { createOpenClawRoutes } = await import(
+      '../../../src/api/routes/openclaw'
+    )
+    const route = createOpenClawRoutes()
+
+    const response = await route.request('/providers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        providerType: 'openai',
+        apiKey: 'sk-test',
+        modelId: 'gpt-5.4-mini',
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(updateProviderKeys).toHaveBeenCalledWith({
+      providerType: 'openai',
+      apiKey: 'sk-test',
+      modelId: 'gpt-5.4-mini',
+    })
+    expect(await response.json()).toEqual({
+      status: 'updated',
+      message: 'Provider updated without a restart',
+    })
+  })
+
+  it('does not expose a roles route', async () => {
+    const { createOpenClawRoutes } = await import(
+      '../../../src/api/routes/openclaw'
+    )
+    const route = createOpenClawRoutes()
+
+    const response = await route.request('/roles')
+
+    expect(response.status).toBe(404)
+  })
+
+  it('ignores role fields when creating agents', async () => {
+    const actualOpenClawService = await import(
+      '../../../src/api/services/openclaw/openclaw-service'
+    )
+    const createAgent = mock(async () => ({
+      agentId: 'research',
+      name: 'research',
+      workspace: '/home/node/.openclaw/workspace-research',
+    }))
+
+    mock.module('../../../src/api/services/openclaw/openclaw-service', () => ({
+      ...actualOpenClawService,
+      getOpenClawService: () =>
+        ({
+          createAgent,
+        }) as never,
+    }))
+
+    const { createOpenClawRoutes } = await import(
+      '../../../src/api/routes/openclaw'
+    )
+    const route = createOpenClawRoutes()
+
+    const response = await route.request('/agents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'research',
+        roleId: 'chief-of-staff',
+        customRole: {
+          name: 'Ignored',
+          shortDescription: 'Ignored',
+          longDescription: 'Ignored',
+          recommendedApps: [],
+          boundaries: [],
+        },
+        providerType: 'openai',
+        apiKey: 'sk-test',
+        modelId: 'gpt-5.4-mini',
+      }),
+    })
+
+    expect(response.status).toBe(201)
+    expect(createAgent).toHaveBeenCalledWith({
+      name: 'research',
+      providerType: 'openai',
+      providerName: undefined,
+      baseUrl: undefined,
+      apiKey: 'sk-test',
+      modelId: 'gpt-5.4-mini',
+    })
   })
 })

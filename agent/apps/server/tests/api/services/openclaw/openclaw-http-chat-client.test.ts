@@ -82,7 +82,7 @@ describe('OpenClawHttpChatClient', () => {
     ])
   })
 
-  it('uses openclaw/default for the main agent', async () => {
+  it('uses openclaw for the main agent', async () => {
     const fetchMock = mock(() =>
       Promise.resolve(
         new Response(
@@ -113,7 +113,7 @@ describe('OpenClawHttpChatClient', () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
       model: string
     }
-    expect(body.model).toBe('openclaw/default')
+    expect(body.model).toBe('openclaw')
   })
 
   it('throws on non-success HTTP responses', async () => {
@@ -132,6 +132,50 @@ describe('OpenClawHttpChatClient', () => {
         message: 'hi',
       }),
     ).rejects.toThrow('Unauthorized')
+  })
+
+  it('surfaces an error when OpenClaw finishes without assistant text', async () => {
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              const encoder = new TextEncoder()
+              controller.enqueue(
+                encoder.encode(
+                  'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+                ),
+              )
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+              controller.close()
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          },
+        ),
+      ),
+    ) as typeof globalThis.fetch
+    const client = new OpenClawHttpChatClient(
+      18789,
+      async () => 'gateway-token',
+    )
+
+    const stream = await client.streamChat({
+      agentId: 'main',
+      sessionKey: 'session-123',
+      message: 'hi',
+    })
+
+    await expect(readEvents(stream)).resolves.toEqual([
+      {
+        type: 'error',
+        data: {
+          message: "Agent couldn't generate a response. Please try again.",
+        },
+      },
+    ])
   })
 
   it('stops processing batched SSE events after a malformed chunk closes the stream', async () => {
