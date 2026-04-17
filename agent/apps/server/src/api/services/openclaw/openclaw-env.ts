@@ -7,7 +7,8 @@
 import { join } from 'node:path'
 import { OPENCLAW_GATEWAY_PORT } from '@browseros/shared/constants/openclaw'
 
-const OPENCLAW_IMAGE = 'ghcr.io/openclaw/openclaw:latest'
+// Pin away from latest because newer OpenClaw releases regress OpenRouter chat streams.
+const OPENCLAW_IMAGE = 'ghcr.io/openclaw/openclaw:2026.4.12'
 const STATE_DIR_NAME = '.openclaw'
 
 export function getOpenClawStateDir(openclawDir: string): string {

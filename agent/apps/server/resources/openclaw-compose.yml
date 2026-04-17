@@ -1,6 +1,7 @@
 services:
   openclaw-gateway:
-    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
+    # Pin away from latest because newer OpenClaw releases regress OpenRouter chat streams.
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:2026.4.12}
     ports:
       - "127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}:18789"
     env_file:
