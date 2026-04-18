@@ -635,6 +635,10 @@ describe('OpenClawService', () => {
 
     service.openclawDir = tempDir
     service.restart = restart
+    service.runtime = {
+      isReady: async () => true,
+      waitForReady: async () => true,
+    }
     service.cliClient = {
       setDefaultModel,
     }
