@@ -24,12 +24,22 @@ type MutableOpenClawService = OpenClawService & {
     isPodmanAvailable?: () => Promise<boolean>
     getMachineStatus?: () => Promise<{ initialized: boolean; running: boolean }>
     isReady: () => Promise<boolean>
-    copyComposeFile?: (_source: string) => Promise<void>
-    writeEnvFile?: (_content: string) => Promise<void>
-    composePull?: () => Promise<void>
-    composeRestart?: () => Promise<void>
-    composeUp?: () => Promise<void>
+    pullImage?: (
+      _image: string,
+      _onLog?: (_line: string) => void,
+    ) => Promise<void>
+    startGateway?: (
+      _input: unknown,
+      _onLog?: (_line: string) => void,
+    ) => Promise<void>
+    restartGateway?: (
+      _input: unknown,
+      _onLog?: (_line: string) => void,
+    ) => Promise<void>
+    stopGateway?: (_onLog?: (_line: string) => void) => Promise<void>
+    getGatewayLogs?: (_tail?: number) => Promise<string[]>
     waitForReady?: () => Promise<boolean>
+    stopMachineIfSafe?: () => Promise<void>
   }
   cliClient: {
     probe?: ReturnType<typeof mock>
@@ -191,39 +201,36 @@ describe('OpenClawService', () => {
       steps.push('validate')
       return { ok: true }
     })
-    const getConfig = mock(async (path: string) => {
-      if (path === 'gateway.auth.token') return 'cli-token'
-      return null
-    })
     const createAgent = mock(async () => ({
       agentId: 'main',
       name: 'main',
       workspace: `${OPENCLAW_CONTAINER_HOME}/workspace`,
     }))
-    const writeEnvFile = mock(async (_content: string) => {})
     const service = new OpenClawService() as MutableOpenClawService
 
     service.openclawDir = tempDir
+    const pullImage = mock(async () => {
+      steps.push('pull')
+    })
+    const restartGateway = mock(async () => {
+      steps.push('restart')
+    })
+    const startGateway = mock(async () => {
+      steps.push('start')
+    })
     service.runtime = {
       isPodmanAvailable: async () => true,
       ensureReady: async () => {},
       isReady: async () => true,
-      copyComposeFile: async () => {},
-      writeEnvFile,
-      composePull: async () => {},
-      composeRestart: mock(async () => {
-        steps.push('restart')
-      }),
-      composeUp: mock(async () => {
-        steps.push('up')
-      }),
+      pullImage,
+      restartGateway,
+      startGateway,
       waitForReady: mock(async () => {
         steps.push('ready')
         return true
       }),
     }
     service.cliClient = {
-      getConfig,
       probe: mock(async () => {}),
       listAgents: mock(async () => []),
       createAgent,
@@ -269,11 +276,29 @@ describe('OpenClawService', () => {
       name: 'main',
       model: undefined,
     })
-    expect(steps).toEqual(['onboard', 'batch', 'validate', 'up', 'ready'])
-    expect(writeEnvFile).toHaveBeenCalledWith(
-      expect.stringContaining(`OPENCLAW_HOST_HOME=${tempDir}`),
+    expect(steps).toEqual([
+      'pull',
+      'onboard',
+      'batch',
+      'validate',
+      'start',
+      'ready',
+    ])
+    expect(pullImage).toHaveBeenCalledWith(
+      'ghcr.io/openclaw/openclaw:2026.4.12',
+      expect.any(Function),
     )
-    expect(service.runtime.composeRestart).not.toHaveBeenCalled()
+    expect(startGateway).toHaveBeenCalledWith(
+      expect.objectContaining({
+        image: 'ghcr.io/openclaw/openclaw:2026.4.12',
+        port: 18789,
+        hostHome: tempDir,
+        envFilePath: join(tempDir, '.openclaw', '.env'),
+        gatewayToken: undefined,
+      }),
+      expect.any(Function),
+    )
+    expect(restartGateway).not.toHaveBeenCalled()
   })
 
   it('applies setup-time config in one batch before the gateway starts', async () => {
@@ -281,10 +306,6 @@ describe('OpenClawService', () => {
     const runOnboard = mock(async () => {})
     const setConfigBatch = mock(async () => {})
     const validateConfig = mock(async () => ({ ok: true }))
-    const getConfig = mock(async (path: string) => {
-      if (path === 'gateway.auth.token') return 'cli-token'
-      return null
-    })
     const createAgent = mock(async () => ({
       agentId: 'main',
       name: 'main',
@@ -294,19 +315,18 @@ describe('OpenClawService', () => {
     const service = new OpenClawService() as MutableOpenClawService
 
     service.openclawDir = tempDir
+    const restartGateway = mock(async () => {})
+    const startGateway = mock(async () => {})
     service.runtime = {
       isPodmanAvailable: async () => true,
       ensureReady: async () => {},
       isReady: async () => true,
-      copyComposeFile: async () => {},
-      writeEnvFile: async () => {},
-      composePull: async () => {},
-      composeRestart: mock(async () => {}),
-      composeUp: async () => {},
+      pullImage: async () => {},
+      restartGateway,
+      startGateway,
       waitForReady,
     }
     service.cliClient = {
-      getConfig,
       probe: mock(async () => {}),
       listAgents: mock(async () => []),
       createAgent,
@@ -326,7 +346,8 @@ describe('OpenClawService', () => {
       name: 'main',
       model: undefined,
     })
-    expect(service.runtime.composeRestart).not.toHaveBeenCalled()
+    expect(startGateway).toHaveBeenCalledTimes(1)
+    expect(restartGateway).not.toHaveBeenCalled()
   })
 
   it('loads the persisted gateway token from the mounted config before control plane calls', async () => {
@@ -398,11 +419,9 @@ describe('OpenClawService', () => {
       isPodmanAvailable: async () => true,
       ensureReady: async () => {},
       isReady: async () => true,
-      copyComposeFile: async () => {},
-      writeEnvFile: async () => {},
-      composePull: async () => {},
-      composeRestart: async () => {},
-      composeUp: async () => {},
+      pullImage: async () => {},
+      restartGateway: async () => {},
+      startGateway: async () => {},
       waitForReady: async () => true,
     }
     service.cliClient = {
@@ -437,6 +456,209 @@ describe('OpenClawService', () => {
     expect(
       await readFile(join(tempDir, '.openclaw', '.env'), 'utf-8'),
     ).toContain('OPENAI_API_KEY=sk-test')
+  })
+
+  it('start uses the direct runtime startGateway flow', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.openclaw', 'openclaw.json'),
+      JSON.stringify({
+        gateway: {
+          auth: {
+            token: 'cli-token',
+          },
+        },
+      }),
+    )
+    const ensureReady = mock(async () => {})
+    const startGateway = mock(async () => {})
+    const waitForReady = mock(async () => true)
+    const probe = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.runtime = {
+      ensureReady,
+      isReady: async () => true,
+      startGateway,
+      waitForReady,
+    }
+    service.cliClient = {
+      probe,
+    }
+
+    await service.start()
+
+    expect(ensureReady).toHaveBeenCalledTimes(1)
+    expect(startGateway).toHaveBeenCalledWith(
+      expect.objectContaining({
+        image: 'ghcr.io/openclaw/openclaw:2026.4.12',
+        port: 18789,
+        hostHome: tempDir,
+        envFilePath: join(tempDir, '.openclaw', '.env'),
+        gatewayToken: 'cli-token',
+      }),
+      expect.any(Function),
+    )
+    expect(waitForReady).toHaveBeenCalledTimes(1)
+    expect(probe).toHaveBeenCalledTimes(1)
+  })
+
+  it('restart uses the direct runtime restartGateway flow', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.openclaw', 'openclaw.json'),
+      JSON.stringify({
+        gateway: {
+          auth: {
+            token: 'cli-token',
+          },
+        },
+      }),
+    )
+    const restartGateway = mock(async () => {})
+    const waitForReady = mock(async () => true)
+    const probe = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.runtime = {
+      isReady: async () => true,
+      restartGateway,
+      waitForReady,
+    }
+    service.cliClient = {
+      probe,
+    }
+
+    await service.restart()
+
+    expect(restartGateway).toHaveBeenCalledWith(
+      expect.objectContaining({
+        image: 'ghcr.io/openclaw/openclaw:2026.4.12',
+        port: 18789,
+        hostHome: tempDir,
+        envFilePath: join(tempDir, '.openclaw', '.env'),
+        gatewayToken: 'cli-token',
+      }),
+      expect.any(Function),
+    )
+    expect(waitForReady).toHaveBeenCalledTimes(1)
+    expect(probe).toHaveBeenCalledTimes(1)
+  })
+
+  it('stop calls runtime.stopGateway', async () => {
+    const stopGateway = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.runtime = {
+      isReady: async () => true,
+      stopGateway,
+    }
+
+    await service.stop()
+
+    expect(stopGateway).toHaveBeenCalledTimes(1)
+  })
+
+  it('getLogs proxies to runtime.getGatewayLogs with tail', async () => {
+    const getGatewayLogs = mock(async (tail = 50) => [`tail:${tail}`])
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.runtime = {
+      isReady: async () => true,
+      getGatewayLogs,
+    }
+
+    await expect(service.getLogs(25)).resolves.toEqual(['tail:25'])
+    expect(getGatewayLogs).toHaveBeenCalledWith(25)
+  })
+
+  it('shutdown stops gateway and then stops machine when safe', async () => {
+    const stopGateway = mock(async () => {})
+    const stopMachineIfSafe = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.runtime = {
+      isReady: async () => true,
+      stopGateway,
+      stopMachineIfSafe,
+    }
+
+    await service.shutdown()
+
+    expect(stopGateway).toHaveBeenCalledTimes(1)
+    expect(stopMachineIfSafe).toHaveBeenCalledTimes(1)
+  })
+
+  it('shutdown still stops machine when stopGateway fails', async () => {
+    const stopGateway = mock(async () => {
+      throw new Error('stop failed')
+    })
+    const stopMachineIfSafe = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.runtime = {
+      isReady: async () => true,
+      stopGateway,
+      stopMachineIfSafe,
+    }
+
+    await expect(service.shutdown()).resolves.toBeUndefined()
+
+    expect(stopGateway).toHaveBeenCalledTimes(1)
+    expect(stopMachineIfSafe).toHaveBeenCalledTimes(1)
+  })
+
+  it('tryAutoStart uses direct-runtime startGateway when gateway is not ready', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.openclaw', 'openclaw.json'),
+      JSON.stringify({
+        gateway: {
+          auth: {
+            token: 'cli-token',
+          },
+        },
+      }),
+    )
+    const ensureReady = mock(async () => {})
+    const isReady = mock(async () => false)
+    const startGateway = mock(async () => {})
+    const waitForReady = mock(async () => true)
+    const probe = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.runtime = {
+      isPodmanAvailable: async () => true,
+      ensureReady,
+      isReady,
+      startGateway,
+      waitForReady,
+    }
+    service.cliClient = {
+      probe,
+    }
+
+    await service.tryAutoStart()
+
+    expect(ensureReady).toHaveBeenCalledTimes(1)
+    expect(startGateway).toHaveBeenCalledWith(
+      expect.objectContaining({
+        image: 'ghcr.io/openclaw/openclaw:2026.4.12',
+        port: 18789,
+        hostHome: tempDir,
+        envFilePath: join(tempDir, '.openclaw', '.env'),
+        gatewayToken: 'cli-token',
+      }),
+    )
+    expect(waitForReady).toHaveBeenCalledTimes(1)
+    expect(probe).toHaveBeenCalledTimes(1)
+    expect(isReady).toHaveBeenCalledTimes(1)
   })
 
   it('keeps openrouter model refs verbatim without rewriting dots', () => {
