@@ -53,7 +53,7 @@ describe('MonitoringStorage run id validation', () => {
     })
 
     await appendFile(
-      getLazyMonitoringRunDir(runId) + '/tool-calls.jsonl',
+      `${getLazyMonitoringRunDir(runId)}/tool-calls.jsonl`,
       [
         JSON.stringify({
           monitoringSessionId: runId,
@@ -96,7 +96,9 @@ describe('MonitoringStorage run id validation', () => {
 
     await mkdir(getLazyMonitoringRunsDir(), { recursive: true })
     await mkdir(getLazyMonitoringRunDir(validRunId), { recursive: true })
-    await mkdir(getLazyMonitoringRunsDir() + '/not-a-uuid', { recursive: true })
+    await mkdir(`${getLazyMonitoringRunsDir()}/not-a-uuid`, {
+      recursive: true,
+    })
 
     const storage = new MonitoringStorage()
     const runIds = await storage.listRunIds()
@@ -104,7 +106,7 @@ describe('MonitoringStorage run id validation', () => {
     expect(runIds).toContain(validRunId)
     expect(runIds).not.toContain('not-a-uuid')
 
-    await rm(getLazyMonitoringRunsDir() + '/not-a-uuid', {
+    await rm(`${getLazyMonitoringRunsDir()}/not-a-uuid`, {
       recursive: true,
       force: true,
     })

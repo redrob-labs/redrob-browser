@@ -14,7 +14,7 @@ describe('createOpenClawRoutes', () => {
     mock.restore()
   })
 
-  it('preserves BrowserOS SSE framing and session headers for chat', async () => {
+  it('preserves BrowserOS SSE framing, session headers, and defaults chat history for chat', async () => {
     const actualOpenClawService = await import(
       '../../../src/api/services/openclaw/openclaw-service'
     )
@@ -60,12 +60,113 @@ describe('createOpenClawRoutes', () => {
     expect(response.status).toBe(200)
     expect(response.headers.get('Content-Type')).toContain('text/event-stream')
     expect(response.headers.get('X-Session-Key')).toBe('session-123')
-    expect(chatStream).toHaveBeenCalledWith('research', 'session-123', 'hi')
+    expect(chatStream).toHaveBeenCalledWith('research', 'session-123', 'hi', [])
     expect(await response.text()).toBe(
       'data: {"type":"text-delta","data":{"text":"Hello"}}\n\n' +
         'data: {"type":"done","data":{"text":"Hello"}}\n\n' +
         'data: [DONE]\n\n',
     )
+  })
+
+  it('passes prior chat history through to the OpenClaw chat stream', async () => {
+    const actualOpenClawService = await import(
+      '../../../src/api/services/openclaw/openclaw-service'
+    )
+    const chatStream = mock(
+      async () =>
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue({
+              type: 'done',
+              data: { text: 'Done' },
+            })
+            controller.close()
+          },
+        }),
+    )
+
+    mock.module('../../../src/api/services/openclaw/openclaw-service', () => ({
+      ...actualOpenClawService,
+      getOpenClawService: () =>
+        ({
+          chatStream,
+        }) as never,
+    }))
+
+    const { createOpenClawRoutes } = await import(
+      '../../../src/api/routes/openclaw'
+    )
+    const route = createOpenClawRoutes()
+    const history = [
+      { role: 'user' as const, content: 'Find my open tasks' },
+      { role: 'assistant' as const, content: 'I am checking Linear now.' },
+    ]
+
+    const response = await route.request('/agents/research/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Summarize what is blocked',
+        sessionKey: 'session-456',
+        history,
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(chatStream).toHaveBeenCalledWith(
+      'research',
+      'session-456',
+      'Summarize what is blocked',
+      history,
+    )
+  })
+
+  it('rejects concurrent monitored chat requests for the same agent', async () => {
+    const actualOpenClawService = await import(
+      '../../../src/api/services/openclaw/openclaw-service'
+    )
+    const actualMonitoringService = await import(
+      '../../../src/monitoring/service'
+    )
+    const chatStream = mock(async () => new ReadableStream())
+
+    mock.module('../../../src/api/services/openclaw/openclaw-service', () => ({
+      ...actualOpenClawService,
+      getOpenClawService: () =>
+        ({
+          chatStream,
+        }) as never,
+    }))
+
+    mock.module('../../../src/monitoring/service', () => ({
+      ...actualMonitoringService,
+      getMonitoringService: () =>
+        ({
+          getActiveSessionId: (agentId: string) =>
+            agentId === 'research' ? 'existing-run' : undefined,
+        }) as never,
+    }))
+
+    const { createOpenClawRoutes } = await import(
+      '../../../src/api/routes/openclaw'
+    )
+    const route = createOpenClawRoutes()
+
+    const response = await route.request('/agents/research/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'hi',
+        sessionKey: 'session-789',
+      }),
+    })
+
+    expect(response.status).toBe(409)
+    expect(chatStream).not.toHaveBeenCalled()
+    expect(await response.json()).toEqual({
+      error:
+        'A monitored chat session is already active for this agent. Wait for it to finish before starting another.',
+    })
   })
 
   it('returns 400 for unsupported provider payloads', async () => {
