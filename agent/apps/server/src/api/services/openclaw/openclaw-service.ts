@@ -131,6 +131,7 @@ export class OpenClawService {
   private lastGatewayError: string | null = null
   private lastRecoveryReason: OpenClawGatewayRecoveryReason | null = null
   private stopLogTail: (() => void) | null = null
+  private lifecycleLock: Promise<void> = Promise.resolve()
 
   constructor(config: OpenClawServiceConfig = {}) {
     this.openclawDir = getOpenClawDir()
@@ -163,213 +164,250 @@ export class OpenClawService {
   // ── Lifecycle ────────────────────────────────────────────────────────
 
   async setup(input: SetupInput, onLog?: (msg: string) => void): Promise<void> {
-    const logProgress = this.createProgressLogger(onLog)
-    const provider = resolveSupportedOpenClawProvider(input)
-    logger.info('Starting OpenClaw setup', {
-      hostPort: this.hostPort,
-      browserosServerPort: this.browserosServerPort,
-      providerType: input.providerType,
-      providerName: input.providerName,
-      hasBaseUrl: !!input.baseUrl,
-      hasModel: !!input.modelId,
-      hasApiKey: !!input.apiKey,
-    })
+    return this.withLifecycleLock('setup', async () => {
+      const logProgress = this.createProgressLogger(onLog)
+      const provider = resolveSupportedOpenClawProvider(input)
+      logger.info('Starting OpenClaw setup', {
+        hostPort: this.hostPort,
+        browserosServerPort: this.browserosServerPort,
+        providerType: input.providerType,
+        providerName: input.providerName,
+        hasBaseUrl: !!input.baseUrl,
+        hasModel: !!input.modelId,
+        hasApiKey: !!input.apiKey,
+      })
 
-    logProgress('Checking container runtime...')
-    const available = await this.runtime.isPodmanAvailable()
-    if (!available) {
-      throw new Error(
-        'Podman is not available. Install Podman to use OpenClaw agents.',
+      logProgress('Checking container runtime...')
+      const available = await this.runtime.isPodmanAvailable()
+      if (!available) {
+        throw new Error(
+          'Podman is not available. Install Podman to use OpenClaw agents.',
+        )
+      }
+
+      await this.runtime.ensureReady(logProgress)
+      logProgress('Container runtime ready')
+
+      await mkdir(this.openclawDir, { recursive: true })
+      await mkdir(this.getStateDir(), { recursive: true })
+      await mkdir(this.getHostWorkspaceDir('main'), { recursive: true })
+
+      await this.ensureStateEnvFile()
+      await this.writeStateEnv(provider.envValues)
+      logger.info('Updated OpenClaw state env', {
+        providerKeyCount: Object.keys(provider.envValues).length,
+      })
+
+      logProgress('Pulling OpenClaw image...')
+      await this.runtime.pullImage(this.getGatewayImage(), logProgress)
+      logProgress('Image ready')
+
+      await this.ensureGatewayPortAllocated(logProgress)
+
+      logProgress('Bootstrapping OpenClaw config...')
+      await this.bootstrapCliClient.runOnboard({
+        acceptRisk: true,
+        authChoice: 'skip',
+        gatewayAuth: 'token',
+        gatewayBind: 'lan',
+        gatewayPort: OPENCLAW_GATEWAY_CONTAINER_PORT,
+        installDaemon: false,
+        mode: 'local',
+        nonInteractive: true,
+        skipHealth: true,
+      })
+      await this.applyBrowserosConfig()
+      await this.mergeProviderConfigIfChanged(provider)
+      if (provider.model) {
+        await this.bootstrapCliClient.setDefaultModel(provider.model)
+      }
+
+      logProgress('Validating OpenClaw config...')
+      await this.assertConfigValid(this.bootstrapCliClient)
+
+      this.tokenLoaded = false
+      await this.loadTokenFromConfig()
+
+      logProgress('Starting OpenClaw gateway...')
+      await this.runtime.startGateway(
+        this.buildGatewayRuntimeSpec(),
+        logProgress,
       )
-    }
-
-    await this.runtime.ensureReady(logProgress)
-    logProgress('Container runtime ready')
-
-    await mkdir(this.openclawDir, { recursive: true })
-    await mkdir(this.getStateDir(), { recursive: true })
-    await mkdir(this.getHostWorkspaceDir('main'), { recursive: true })
-
-    await this.ensureStateEnvFile()
-    await this.writeStateEnv(provider.envValues)
-    logger.info('Updated OpenClaw state env', {
-      providerKeyCount: Object.keys(provider.envValues).length,
-    })
-
-    logProgress('Pulling OpenClaw image...')
-    await this.runtime.pullImage(this.getGatewayImage(), logProgress)
-    logProgress('Image ready')
-
-    await this.ensureGatewayPortAllocated(logProgress)
-
-    logProgress('Bootstrapping OpenClaw config...')
-    await this.bootstrapCliClient.runOnboard({
-      acceptRisk: true,
-      authChoice: 'skip',
-      gatewayAuth: 'token',
-      gatewayBind: 'lan',
-      gatewayPort: OPENCLAW_GATEWAY_CONTAINER_PORT,
-      installDaemon: false,
-      mode: 'local',
-      nonInteractive: true,
-      skipHealth: true,
-    })
-    await this.applyBrowserosConfig()
-    await this.mergeProviderConfigIfChanged(provider)
-    if (provider.model) {
-      await this.bootstrapCliClient.setDefaultModel(provider.model)
-    }
-
-    logProgress('Validating OpenClaw config...')
-    await this.assertConfigValid(this.bootstrapCliClient)
-
-    this.tokenLoaded = false
-    await this.loadTokenFromConfig()
-
-    logProgress('Starting OpenClaw gateway...')
-    await this.runtime.startGateway(this.buildGatewayRuntimeSpec(), logProgress)
-    this.startGatewayLogTail()
-    logProgress('Waiting for gateway readiness...')
-    const ready = await this.runtime.waitForReady(
-      this.hostPort,
-      READY_TIMEOUT_MS,
-    )
-    if (!ready) {
-      this.lastError = 'Gateway did not become ready within 30 seconds'
-      const logs = await this.runtime.getGatewayLogs()
-      logger.error('Gateway readiness check failed', { logs })
-      throw new Error(this.lastError)
-    }
-
-    this.controlPlaneStatus = 'connecting'
-    logProgress('Probing OpenClaw control plane...')
-    await this.runControlPlaneCall(() => this.cliClient.probe())
-
-    const existingAgents = await this.listAgents()
-    logger.info('Fetched existing OpenClaw agents after setup', {
-      count: existingAgents.length,
-      names: existingAgents.map((agent) => agent.name),
-    })
-    if (existingAgents.some((agent) => agent.agentId === 'main')) {
-      logProgress('Main agent detected')
-    } else {
-      logProgress('Creating main agent...')
-      await this.runControlPlaneCall(() =>
-        this.cliClient.createAgent({
-          name: 'main',
-          model: provider.model,
-        }),
+      this.startGatewayLogTail()
+      logProgress('Waiting for gateway readiness...')
+      const ready = await this.runtime.waitForReady(
+        this.hostPort,
+        READY_TIMEOUT_MS,
       )
-    }
+      if (!ready) {
+        this.lastError = 'Gateway did not become ready within 30 seconds'
+        const logs = await this.runtime.getGatewayLogs()
+        logger.error('Gateway readiness check failed', { logs })
+        throw new Error(this.lastError)
+      }
 
-    this.lastError = null
-    logProgress(`OpenClaw gateway running at http://127.0.0.1:${this.hostPort}`)
-    logger.info('OpenClaw setup complete', { hostPort: this.hostPort })
+      this.controlPlaneStatus = 'connecting'
+      logProgress('Probing OpenClaw control plane...')
+      await this.runControlPlaneCall(() => this.cliClient.probe())
+
+      const existingAgents = await this.listAgents()
+      logger.info('Fetched existing OpenClaw agents after setup', {
+        count: existingAgents.length,
+        names: existingAgents.map((agent) => agent.name),
+      })
+      if (existingAgents.some((agent) => agent.agentId === 'main')) {
+        logProgress('Main agent detected')
+      } else {
+        logProgress('Creating main agent...')
+        await this.runControlPlaneCall(() =>
+          this.cliClient.createAgent({
+            name: 'main',
+            model: provider.model,
+          }),
+        )
+      }
+
+      this.lastError = null
+      logProgress(
+        `OpenClaw gateway running at http://127.0.0.1:${this.hostPort}`,
+      )
+      logger.info('OpenClaw setup complete', { hostPort: this.hostPort })
+    })
   }
 
   async start(onLog?: (msg: string) => void): Promise<void> {
-    const logProgress = this.createProgressLogger(onLog)
-    logger.info('Starting OpenClaw service', {
-      hostPort: this.hostPort,
+    return this.withLifecycleLock('start', async () => {
+      const logProgress = this.createProgressLogger(onLog)
+      logger.info('Starting OpenClaw service', {
+        hostPort: this.hostPort,
+      })
+
+      await this.runtime.ensureReady(logProgress)
+
+      logProgress('Refreshing gateway auth token...')
+      this.tokenLoaded = false
+      await this.loadTokenFromConfig()
+      await this.ensureStateEnvFile()
+
+      await this.ensureGatewayPortAllocated(logProgress)
+
+      if (await this.isGatewayAvailable(this.hostPort)) {
+        this.startGatewayLogTail()
+        this.controlPlaneStatus = 'connecting'
+        logProgress('Probing OpenClaw control plane...')
+        try {
+          await this.runControlPlaneCall(() => this.cliClient.probe())
+          this.lastError = null
+          logger.info('OpenClaw gateway already running', {
+            hostPort: this.hostPort,
+          })
+          return
+        } catch (error) {
+          logger.warn('OpenClaw control plane probe failed during start', {
+            hostPort: this.hostPort,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+
+      logProgress('Starting OpenClaw gateway...')
+      await this.runtime.startGateway(
+        this.buildGatewayRuntimeSpec(),
+        logProgress,
+      )
+      this.startGatewayLogTail()
+
+      logProgress('Waiting for gateway readiness...')
+      const ready = await this.runtime.waitForReady(
+        this.hostPort,
+        READY_TIMEOUT_MS,
+      )
+      if (!ready) {
+        this.lastError = 'Gateway did not become ready after start'
+        throw new Error(this.lastError)
+      }
+
+      this.controlPlaneStatus = 'connecting'
+      logProgress('Probing OpenClaw control plane...')
+      await this.runControlPlaneCall(() => this.cliClient.probe())
+      this.lastError = null
+      logger.info('OpenClaw gateway started', { hostPort: this.hostPort })
     })
-
-    await this.runtime.ensureReady(logProgress)
-
-    logProgress('Refreshing gateway auth token...')
-    this.tokenLoaded = false
-    await this.loadTokenFromConfig()
-    await this.ensureStateEnvFile()
-
-    await this.ensureGatewayPortAllocated(logProgress)
-
-    logProgress('Starting OpenClaw gateway...')
-    await this.runtime.startGateway(this.buildGatewayRuntimeSpec(), logProgress)
-    this.startGatewayLogTail()
-
-    logProgress('Waiting for gateway readiness...')
-    const ready = await this.runtime.waitForReady(
-      this.hostPort,
-      READY_TIMEOUT_MS,
-    )
-    if (!ready) {
-      this.lastError = 'Gateway did not become ready after start'
-      throw new Error(this.lastError)
-    }
-
-    this.controlPlaneStatus = 'connecting'
-    logProgress('Probing OpenClaw control plane...')
-    await this.runControlPlaneCall(() => this.cliClient.probe())
-    this.lastError = null
-    logger.info('OpenClaw gateway started', { hostPort: this.hostPort })
   }
 
   async stop(): Promise<void> {
-    logger.info('Stopping OpenClaw service', { hostPort: this.hostPort })
-    this.controlPlaneStatus = 'disconnected'
-    this.stopGatewayLogTail()
-    await this.runtime.stopGateway()
-    logger.info('OpenClaw container stopped')
+    return this.withLifecycleLock('stop', async () => {
+      logger.info('Stopping OpenClaw service', { hostPort: this.hostPort })
+      this.controlPlaneStatus = 'disconnected'
+      this.stopGatewayLogTail()
+      await this.runtime.stopGateway()
+      logger.info('OpenClaw container stopped')
+    })
   }
 
   async restart(onLog?: (msg: string) => void): Promise<void> {
-    const logProgress = this.createProgressLogger(onLog)
-    logger.info('Restarting OpenClaw service', {
-      hostPort: this.hostPort,
+    return this.withLifecycleLock('restart', async () => {
+      const logProgress = this.createProgressLogger(onLog)
+      logger.info('Restarting OpenClaw service', {
+        hostPort: this.hostPort,
+      })
+
+      this.controlPlaneStatus = 'reconnecting'
+      this.stopGatewayLogTail()
+      logProgress('Refreshing gateway auth token...')
+      this.tokenLoaded = false
+      await this.loadTokenFromConfig()
+      await this.ensureStateEnvFile()
+      await this.ensureGatewayPortAllocated(logProgress)
+      logProgress('Restarting OpenClaw gateway...')
+      await this.runtime.restartGateway(
+        this.buildGatewayRuntimeSpec(),
+        logProgress,
+      )
+      this.startGatewayLogTail()
+
+      logProgress('Waiting for gateway readiness...')
+      const ready = await this.runtime.waitForReady(
+        this.hostPort,
+        READY_TIMEOUT_MS,
+      )
+      if (!ready) {
+        this.lastError = 'Gateway did not become ready after restart'
+        throw new Error(this.lastError)
+      }
+
+      logProgress('Probing OpenClaw control plane...')
+      await this.runControlPlaneCall(() => this.cliClient.probe())
+      this.lastError = null
+      logProgress('Gateway restarted successfully')
+      logger.info('OpenClaw gateway restarted', { hostPort: this.hostPort })
     })
-
-    this.controlPlaneStatus = 'reconnecting'
-    this.stopGatewayLogTail()
-    logProgress('Refreshing gateway auth token...')
-    this.tokenLoaded = false
-    await this.loadTokenFromConfig()
-    await this.ensureStateEnvFile()
-    await this.ensureGatewayPortAllocated(logProgress)
-    logProgress('Restarting OpenClaw gateway...')
-    await this.runtime.restartGateway(
-      this.buildGatewayRuntimeSpec(),
-      logProgress,
-    )
-    this.startGatewayLogTail()
-
-    logProgress('Waiting for gateway readiness...')
-    const ready = await this.runtime.waitForReady(
-      this.hostPort,
-      READY_TIMEOUT_MS,
-    )
-    if (!ready) {
-      this.lastError = 'Gateway did not become ready after restart'
-      throw new Error(this.lastError)
-    }
-
-    logProgress('Probing OpenClaw control plane...')
-    await this.runControlPlaneCall(() => this.cliClient.probe())
-    this.lastError = null
-    logProgress('Gateway restarted successfully')
-    logger.info('OpenClaw gateway restarted', { hostPort: this.hostPort })
   }
 
   async reconnectControlPlane(onLog?: (msg: string) => void): Promise<void> {
-    const logProgress = this.createProgressLogger(onLog)
-    logger.info('Reconnecting OpenClaw control plane', {
-      hostPort: this.hostPort,
+    return this.withLifecycleLock('reconnect', async () => {
+      const logProgress = this.createProgressLogger(onLog)
+      logger.info('Reconnecting OpenClaw control plane', {
+        hostPort: this.hostPort,
+      })
+
+      logProgress('Checking gateway readiness...')
+      const ready = await this.runtime.isReady(this.hostPort)
+      if (!ready) {
+        this.controlPlaneStatus = 'failed'
+        this.lastGatewayError = 'OpenClaw gateway is not ready'
+        this.lastRecoveryReason = 'container_not_ready'
+        throw new Error('OpenClaw gateway is not ready')
+      }
+
+      logProgress('Reloading gateway auth token...')
+      this.tokenLoaded = false
+      await this.loadTokenFromConfig()
+      this.controlPlaneStatus = 'reconnecting'
+      logProgress('Reconnecting control plane...')
+      await this.runControlPlaneCall(() => this.cliClient.probe())
+      logProgress('Control plane connected')
     })
-
-    logProgress('Checking gateway readiness...')
-    const ready = await this.runtime.isReady(this.hostPort)
-    if (!ready) {
-      this.controlPlaneStatus = 'failed'
-      this.lastGatewayError = 'OpenClaw gateway is not ready'
-      this.lastRecoveryReason = 'container_not_ready'
-      throw new Error('OpenClaw gateway is not ready')
-    }
-
-    logProgress('Reloading gateway auth token...')
-    this.tokenLoaded = false
-    await this.loadTokenFromConfig()
-    this.controlPlaneStatus = 'reconnecting'
-    logProgress('Reconnecting control plane...')
-    await this.runControlPlaneCall(() => this.cliClient.probe())
-    logProgress('Control plane connected')
   }
 
   async shutdown(): Promise<void> {
@@ -639,47 +677,49 @@ export class OpenClawService {
   // ── Auto-start on BrowserOS boot ────────────────────────────────────
 
   async tryAutoStart(): Promise<void> {
-    const isSetUp = existsSync(this.getStateConfigPath())
-    if (!isSetUp) return
+    return this.withLifecycleLock('auto-start', async () => {
+      const isSetUp = existsSync(this.getStateConfigPath())
+      if (!isSetUp) return
 
-    const available = await this.runtime.isPodmanAvailable()
-    if (!available) return
-    logger.info('Attempting OpenClaw auto-start', {
-      hostPort: this.hostPort,
-    })
-
-    try {
-      await this.runtime.ensureReady()
-
-      this.tokenLoaded = false
-      await this.loadTokenFromConfig()
-      await this.ensureStateEnvFile()
-
-      const persistedPort = await readPersistedGatewayPort(this.openclawDir)
-      if (persistedPort !== null) {
-        this.setPort(persistedPort)
-      }
-
-      if (!(await this.runtime.isReady(this.hostPort))) {
-        await this.ensureGatewayPortAllocated()
-        await this.runtime.startGateway(this.buildGatewayRuntimeSpec())
-        const ready = await this.runtime.waitForReady(
-          this.hostPort,
-          READY_TIMEOUT_MS,
-        )
-        if (!ready) {
-          logger.warn('OpenClaw gateway failed to become ready on auto-start')
-          return
-        }
-      }
-
-      await this.runControlPlaneCall(() => this.cliClient.probe())
-      logger.info('OpenClaw gateway auto-started')
-    } catch (err) {
-      logger.warn('OpenClaw auto-start failed', {
-        error: err instanceof Error ? err.message : String(err),
+      const available = await this.runtime.isPodmanAvailable()
+      if (!available) return
+      logger.info('Attempting OpenClaw auto-start', {
+        hostPort: this.hostPort,
       })
-    }
+
+      try {
+        await this.runtime.ensureReady()
+
+        this.tokenLoaded = false
+        await this.loadTokenFromConfig()
+        await this.ensureStateEnvFile()
+
+        const persistedPort = await readPersistedGatewayPort(this.openclawDir)
+        if (persistedPort !== null) {
+          this.setPort(persistedPort)
+        }
+
+        if (!(await this.runtime.isReady(this.hostPort))) {
+          await this.ensureGatewayPortAllocated()
+          await this.runtime.startGateway(this.buildGatewayRuntimeSpec())
+          const ready = await this.runtime.waitForReady(
+            this.hostPort,
+            READY_TIMEOUT_MS,
+          )
+          if (!ready) {
+            logger.warn('OpenClaw gateway failed to become ready on auto-start')
+            return
+          }
+        }
+
+        await this.runControlPlaneCall(() => this.cliClient.probe())
+        logger.info('OpenClaw gateway auto-started')
+      } catch (err) {
+        logger.warn('OpenClaw auto-start failed', {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+    })
   }
 
   // ── Internal ─────────────────────────────────────────────────────────
@@ -714,12 +754,32 @@ export class OpenClawService {
   private async ensureGatewayPortAllocated(
     logProgress?: (msg: string) => void,
   ): Promise<void> {
+    const persistedPort = await readPersistedGatewayPort(this.openclawDir)
+    if (persistedPort !== null) {
+      this.setPort(persistedPort)
+    }
+    if (await this.isGatewayAvailable(this.hostPort)) {
+      return
+    }
     const hostPort = await allocateGatewayPort(this.openclawDir)
     if (hostPort !== this.hostPort) {
       logProgress?.(`Allocated OpenClaw gateway host port ${hostPort}`)
       logger.info('Allocated OpenClaw gateway host port', { hostPort })
       this.setPort(hostPort)
     }
+  }
+
+  private async isGatewayAvailable(hostPort: number): Promise<boolean> {
+    if (await this.runtime.isReady(hostPort)) {
+      return true
+    }
+    const runtime = this.runtime as {
+      isHealthy?: (port: number) => Promise<boolean>
+    }
+    if (runtime.isHealthy) {
+      return runtime.isHealthy(hostPort)
+    }
+    return false
   }
 
   private async assertGatewayReady(): Promise<void> {
@@ -1128,6 +1188,24 @@ export class OpenClawService {
     return (msg) => {
       logger.debug(`OpenClaw: ${msg}`)
       onLog?.(msg)
+    }
+  }
+
+  private async withLifecycleLock<T>(
+    operation: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.lifecycleLock
+    let release!: () => void
+    this.lifecycleLock = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await previous.catch(() => undefined)
+    try {
+      logger.debug('OpenClaw lifecycle operation started', { operation })
+      return await fn()
+    } finally {
+      release()
     }
   }
 }

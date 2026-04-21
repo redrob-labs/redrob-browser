@@ -39,12 +39,21 @@ import { AgentTerminal } from './AgentTerminal'
 import { getOpenClawSupportedProviders } from './openclaw-supported-providers'
 import {
   type AgentEntry,
+  type GatewayLifecycleAction,
   type OpenClawStatus,
   useOpenClawAgents,
   useOpenClawMutations,
   useOpenClawStatus,
   usePodmanOverrides,
 } from './useOpenClaw'
+
+const LIFECYCLE_BANNER_COPY: Record<GatewayLifecycleAction, string> = {
+  setup: 'Setting up OpenClaw...',
+  start: 'Starting gateway...',
+  stop: 'Stopping gateway...',
+  restart: 'Restarting gateway...',
+  reconnect: 'Restoring gateway connection...',
+}
 
 const CONTROL_PLANE_COPY: Record<
   OpenClawStatus['controlPlaneStatus'],
@@ -372,6 +381,7 @@ export const AgentsPage: FC = () => {
     creating,
     deleting,
     reconnecting,
+    pendingGatewayAction,
   } = useOpenClawMutations()
 
   const [setupOpen, setSetupOpen] = useState(false)
@@ -408,8 +418,13 @@ export const AgentsPage: FC = () => {
     setNewName((current) => current || 'agent')
   }, [createOpen])
 
-  const inlineError =
-    error ?? statusError?.message ?? agentsError?.message ?? null
+  const lifecyclePending = pendingGatewayAction !== null
+  const inlineError = lifecyclePending
+    ? null
+    : (error ?? statusError?.message ?? agentsError?.message ?? null)
+  const lifecycleBanner = pendingGatewayAction
+    ? LIFECYCLE_BANNER_COPY[pendingGatewayAction]
+    : null
 
   const gatewayUiState = useMemo(() => {
     if (!status) {
@@ -437,6 +452,10 @@ export const AgentsPage: FC = () => {
       controlPlaneDegraded,
     }
   }, [status])
+
+  const canManageAgents = gatewayUiState.canManageAgents && !lifecyclePending
+  const showControlPlaneDegraded =
+    !lifecyclePending && gatewayUiState.controlPlaneDegraded
 
   const recoveryDetail = status ? getRecoveryDetail(status) : null
   const controlPlaneCopy = status
@@ -601,7 +620,7 @@ export const AgentsPage: FC = () => {
                 </Button>
                 <Button
                   onClick={() => setCreateOpen(true)}
-                  disabled={!gatewayUiState.canManageAgents}
+                  disabled={!canManageAgents}
                 >
                   <Plus className="mr-1 size-4" />
                   New Agent
@@ -611,6 +630,13 @@ export const AgentsPage: FC = () => {
           </div>
         )}
       </div>
+
+      {lifecycleBanner && (
+        <Alert>
+          <Loader2 className="animate-spin" />
+          <AlertTitle>{lifecycleBanner}</AlertTitle>
+        </Alert>
+      )}
 
       {inlineError && (
         <Alert variant="destructive">
@@ -631,7 +657,7 @@ export const AgentsPage: FC = () => {
         </Alert>
       )}
 
-      {status && gatewayUiState.controlPlaneDegraded && (
+      {status && showControlPlaneDegraded && (
         <Alert
           variant={
             status.controlPlaneStatus === 'failed' ? 'destructive' : 'default'
@@ -752,7 +778,7 @@ export const AgentsPage: FC = () => {
                 <Button
                   variant="outline"
                   onClick={() => setCreateOpen(true)}
-                  disabled={!gatewayUiState.canManageAgents}
+                  disabled={!canManageAgents}
                 >
                   <Plus className="mr-1 size-4" />
                   Create Agent
@@ -781,7 +807,7 @@ export const AgentsPage: FC = () => {
                       variant="ghost"
                       size="sm"
                       onClick={() => setChatAgent(agent)}
-                      disabled={!gatewayUiState.canManageAgents}
+                      disabled={!canManageAgents}
                     >
                       <MessageSquare className="mr-1 size-4" />
                       Chat
@@ -791,7 +817,7 @@ export const AgentsPage: FC = () => {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleDelete(agent.agentId)}
-                        disabled={!gatewayUiState.canManageAgents || deleting}
+                        disabled={!canManageAgents || deleting}
                       >
                         <Trash2 className="size-4 text-destructive" />
                       </Button>
@@ -875,7 +901,7 @@ export const AgentsPage: FC = () => {
               disabled={
                 !newName.trim() ||
                 creating ||
-                !gatewayUiState.canManageAgents ||
+                !canManageAgents ||
                 compatibleProviders.length === 0
               }
               className="w-full"

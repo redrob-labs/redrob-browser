@@ -67,6 +67,13 @@ export interface PodmanOverrides {
   effectivePodmanPath: string
 }
 
+export type GatewayLifecycleAction =
+  | 'setup'
+  | 'start'
+  | 'stop'
+  | 'restart'
+  | 'reconnect'
+
 async function clawFetch<T>(
   baseUrl: string,
   path: string,
@@ -224,6 +231,13 @@ export function useOpenClawMutations() {
     onSuccess,
   })
 
+  let pendingGatewayAction: GatewayLifecycleAction | null = null
+  if (setupMutation.isPending) pendingGatewayAction = 'setup'
+  else if (restartMutation.isPending) pendingGatewayAction = 'restart'
+  else if (stopMutation.isPending) pendingGatewayAction = 'stop'
+  else if (startMutation.isPending) pendingGatewayAction = 'start'
+  else if (reconnectMutation.isPending) pendingGatewayAction = 'reconnect'
+
   return {
     setupOpenClaw: setupMutation.mutateAsync,
     createAgent: createMutation.mutateAsync,
@@ -244,6 +258,7 @@ export function useOpenClawMutations() {
     creating: createMutation.isPending,
     deleting: deleteMutation.isPending,
     reconnecting: reconnectMutation.isPending,
+    pendingGatewayAction,
   }
 }
 

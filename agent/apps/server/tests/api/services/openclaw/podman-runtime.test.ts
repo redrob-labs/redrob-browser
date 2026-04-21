@@ -11,8 +11,42 @@ import path from 'node:path'
 import {
   configurePodmanRuntime,
   getPodmanRuntime,
+  PodmanRuntime,
   resolveBundledPodmanPath,
 } from '../../../../src/api/services/openclaw/podman-runtime'
+
+class FakePodmanRuntime extends PodmanRuntime {
+  machineStatuses: Array<{ initialized: boolean; running: boolean }>
+  initCalls = 0
+  startCalls = 0
+  statusCalls = 0
+
+  constructor(statuses: Array<{ initialized: boolean; running: boolean }>) {
+    super({ podmanPath: 'podman' })
+    this.machineStatuses = [...statuses]
+  }
+
+  async getMachineStatus(): Promise<{
+    initialized: boolean
+    running: boolean
+  }> {
+    this.statusCalls += 1
+    return (
+      this.machineStatuses.shift() ?? {
+        initialized: true,
+        running: true,
+      }
+    )
+  }
+
+  async initMachine(): Promise<void> {
+    this.initCalls += 1
+  }
+
+  async startMachine(): Promise<void> {
+    this.startCalls += 1
+  }
+}
 
 describe('podman runtime', () => {
   let tempDir: string
@@ -79,5 +113,57 @@ describe('podman runtime', () => {
     const runtime = configurePodmanRuntime({ resourcesDir: tempDir })
 
     expect(runtime.getPodmanPath()).toBe('podman')
+  })
+
+  it('ensureReady re-checks machine status on every call', async () => {
+    const runtime = new FakePodmanRuntime([
+      { initialized: true, running: true },
+      { initialized: true, running: true },
+      { initialized: true, running: true },
+    ])
+
+    await runtime.ensureReady()
+    await runtime.ensureReady()
+    await runtime.ensureReady()
+
+    expect(runtime.statusCalls).toBe(3)
+    expect(runtime.initCalls).toBe(0)
+    expect(runtime.startCalls).toBe(0)
+  })
+
+  it('ensureReady initializes when machine is not present', async () => {
+    const runtime = new FakePodmanRuntime([
+      { initialized: false, running: false },
+    ])
+
+    await runtime.ensureReady()
+
+    expect(runtime.statusCalls).toBe(1)
+    expect(runtime.initCalls).toBe(1)
+    expect(runtime.startCalls).toBe(1)
+  })
+
+  it('ensureReady starts when machine is initialized but stopped', async () => {
+    const runtime = new FakePodmanRuntime([
+      { initialized: true, running: false },
+    ])
+
+    await runtime.ensureReady()
+
+    expect(runtime.initCalls).toBe(0)
+    expect(runtime.startCalls).toBe(1)
+  })
+
+  it('ensureReady detects an externally stopped machine on the next call', async () => {
+    const runtime = new FakePodmanRuntime([
+      { initialized: true, running: true },
+      { initialized: true, running: false },
+    ])
+
+    await runtime.ensureReady()
+    await runtime.ensureReady()
+
+    expect(runtime.statusCalls).toBe(2)
+    expect(runtime.startCalls).toBe(1)
   })
 })

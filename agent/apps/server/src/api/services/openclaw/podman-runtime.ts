@@ -37,7 +37,6 @@ export function resolveBundledPodmanPath(
 
 export class PodmanRuntime {
   private podmanPath: string
-  private machineReady = false
 
   constructor(config?: { podmanPath?: string }) {
     this.podmanPath = config?.podmanPath ?? 'podman'
@@ -138,12 +137,9 @@ export class PodmanRuntime {
     const code = await proc.exited
     if (code !== 0)
       throw new Error(`podman machine stop failed with code ${code}`)
-    this.machineReady = false
   }
 
   async ensureReady(onLog?: LogFn): Promise<void> {
-    if (this.machineReady) return
-
     const status = await this.getMachineStatus()
 
     if (!status.initialized) {
@@ -155,8 +151,6 @@ export class PodmanRuntime {
       onLog?.('Starting Podman machine...')
       await this.startMachine(onLog)
     }
-
-    this.machineReady = true
   }
 
   async runCommand(
