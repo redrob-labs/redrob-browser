@@ -1,0 +1,12 @@
+{
+  "schema": "v1",
+  "agents": [
+    {
+      "name": "openclaw",
+      "image": "ghcr.io/openclaw/openclaw",
+      "version": "2026.4.12",
+      "arches": ["amd64", "arm64"],
+      "publishAs": "openclaw"
+    }
+  ]
+}

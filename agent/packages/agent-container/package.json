@@ -1,0 +1,32 @@
+{
+  "name": "@browseros/agent-container",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BrowserOS agent container OCI tarball producer",
+  "exports": {
+    "./schema": {
+      "types": "./src/schema/index.ts",
+      "default": "./src/schema/index.ts"
+    },
+    "./load": {
+      "types": "./src/load.ts",
+      "default": "./src/load.ts"
+    }
+  },
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "upload": "bun run scripts/upload.ts",
+    "smoke": "bun run scripts/smoke.ts",
+    "list-matrix": "bun run scripts/list-matrix.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.933.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.3"
+  }
+}
