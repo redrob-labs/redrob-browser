@@ -72,8 +72,7 @@ Pulls the published manifest and tarballs from R2 (`cdn.browseros.com/vm/`). Dev
 ## Seed the dev cache from a local build
 
 ```bash
-bun run --filter @browseros/build-tools build:tarball -- --agent openclaw --arch arm64
-NODE_ENV=development bun run --filter @browseros/build-tools cache:sync:dev
+NODE_ENV=development bun run --filter @browseros/build-tools dev:seed:tarball
 ```
 
-`cache:sync:dev` hardcodes `arm64` (all devs are on Apple Silicon), skips R2 entirely, and writes an arm64-only manifest + tarball into `~/.browseros-dev/cache/vm/` from `./dist/`. It refuses to run unless `NODE_ENV=development`. Use this when you want to test the server against a local tarball without publishing.
+`dev:seed:tarball` hardcodes `arm64` (all devs are on Apple Silicon), builds the configured agent tarball, skips R2 entirely, and writes an arm64-only manifest + tarball into `~/.browseros-dev/cache/vm/`. It refuses to run unless `NODE_ENV=development`. Use this when you want to test the server against the latest configured agent tarball without publishing.
