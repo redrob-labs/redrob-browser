@@ -41,7 +41,7 @@ type MutableOpenClawService = OpenClawService & {
     stopGateway?: (_onLog?: (_line: string) => void) => Promise<void>
     getGatewayLogs?: (_tail?: number) => Promise<string[]>
     waitForReady?: () => Promise<boolean>
-    stopMachineIfSafe?: () => Promise<void>
+    stopVm?: () => Promise<void>
   }
   cliClient: {
     probe?: ReturnType<typeof mock>
@@ -212,9 +212,6 @@ describe('OpenClawService', () => {
     const service = new OpenClawService() as MutableOpenClawService
 
     service.openclawDir = tempDir
-    const pullImage = mock(async () => {
-      steps.push('pull')
-    })
     const restartGateway = mock(async () => {
       steps.push('restart')
     })
@@ -225,7 +222,6 @@ describe('OpenClawService', () => {
       isPodmanAvailable: async () => true,
       ensureReady: async () => {},
       isReady: async () => true,
-      pullImage,
       restartGateway,
       startGateway,
       waitForReady: mock(async () => {
@@ -279,18 +275,7 @@ describe('OpenClawService', () => {
       name: 'main',
       model: undefined,
     })
-    expect(steps).toEqual([
-      'pull',
-      'onboard',
-      'batch',
-      'validate',
-      'start',
-      'ready',
-    ])
-    expect(pullImage).toHaveBeenCalledWith(
-      'ghcr.io/openclaw/openclaw:2026.4.12',
-      expect.any(Function),
-    )
+    expect(steps).toEqual(['onboard', 'batch', 'validate', 'start', 'ready'])
     expect(startGateway).toHaveBeenCalledWith(
       expect.objectContaining({
         image: 'ghcr.io/openclaw/openclaw:2026.4.12',
@@ -706,6 +691,7 @@ describe('OpenClawService', () => {
         },
       }),
     )
+    const ensureReady = mock(async () => {})
     const restartGateway = mock(async () => {})
     const waitForReady = mock(async () => true)
     const probe = mock(async () => {})
@@ -713,6 +699,7 @@ describe('OpenClawService', () => {
 
     service.openclawDir = tempDir
     service.runtime = {
+      ensureReady,
       isReady: async () => true,
       restartGateway,
       waitForReady,
@@ -723,6 +710,7 @@ describe('OpenClawService', () => {
 
     await service.restart()
 
+    expect(ensureReady).toHaveBeenCalledTimes(1)
     expect(restartGateway).toHaveBeenCalledWith(
       expect.objectContaining({
         image: 'ghcr.io/openclaw/openclaw:2026.4.12',
@@ -766,6 +754,7 @@ describe('OpenClawService', () => {
       join(tempDir, '.openclaw', 'runtime-state.json'),
       `${JSON.stringify({ gatewayPort: occupiedPort }, null, 2)}\n`,
     )
+    const ensureReady = mock(async () => {})
     const restartGateway = mock(async () => {})
     const waitForReady = mock(async () => true)
     const probe = mock(async () => {})
@@ -773,6 +762,7 @@ describe('OpenClawService', () => {
 
     service.openclawDir = tempDir
     service.runtime = {
+      ensureReady,
       isReady: async (hostPort?: number) => hostPort === occupiedPort,
       restartGateway,
       waitForReady,
@@ -801,6 +791,7 @@ describe('OpenClawService', () => {
       }),
       expect.any(Function),
     )
+    expect(ensureReady).toHaveBeenCalledTimes(1)
   })
 
   it('stop calls runtime.stopGateway', async () => {
@@ -830,40 +821,40 @@ describe('OpenClawService', () => {
     expect(getGatewayLogs).toHaveBeenCalledWith(25)
   })
 
-  it('shutdown stops gateway and then stops machine when safe', async () => {
+  it('shutdown stops gateway and then stops the VM', async () => {
     const stopGateway = mock(async () => {})
-    const stopMachineIfSafe = mock(async () => {})
+    const stopVm = mock(async () => {})
     const service = new OpenClawService() as MutableOpenClawService
 
     service.runtime = {
       isReady: async () => true,
       stopGateway,
-      stopMachineIfSafe,
+      stopVm,
     }
 
     await service.shutdown()
 
     expect(stopGateway).toHaveBeenCalledTimes(1)
-    expect(stopMachineIfSafe).toHaveBeenCalledTimes(1)
+    expect(stopVm).toHaveBeenCalledTimes(1)
   })
 
-  it('shutdown still stops machine when stopGateway fails', async () => {
+  it('shutdown still stops the VM when stopGateway fails', async () => {
     const stopGateway = mock(async () => {
       throw new Error('stop failed')
     })
-    const stopMachineIfSafe = mock(async () => {})
+    const stopVm = mock(async () => {})
     const service = new OpenClawService() as MutableOpenClawService
 
     service.runtime = {
       isReady: async () => true,
       stopGateway,
-      stopMachineIfSafe,
+      stopVm,
     }
 
     await expect(service.shutdown()).resolves.toBeUndefined()
 
     expect(stopGateway).toHaveBeenCalledTimes(1)
-    expect(stopMachineIfSafe).toHaveBeenCalledTimes(1)
+    expect(stopVm).toHaveBeenCalledTimes(1)
   })
 
   it('tryAutoStart uses direct-runtime startGateway when gateway is not ready', async () => {
@@ -1422,62 +1413,5 @@ describe('OpenClawService', () => {
     expect(await readFile(join(tempDir, '.openclaw', '.env'), 'utf-8')).toBe(
       'OPENAI_API_KEY=sk-test\n',
     )
-  })
-
-  it('applyPodmanOverrides persists the override and refreshes the runtime', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
-    const service = new OpenClawService() as MutableOpenClawService
-    service.openclawDir = tempDir
-
-    const result = await service.applyPodmanOverrides({
-      podmanPath: '/opt/homebrew/bin/podman',
-    })
-
-    expect(result.podmanPath).toBe('/opt/homebrew/bin/podman')
-    expect(result.effectivePodmanPath).toBe('/opt/homebrew/bin/podman')
-
-    const persisted = JSON.parse(
-      await readFile(join(tempDir, 'podman-overrides.json'), 'utf-8'),
-    )
-    expect(persisted).toEqual({ podmanPath: '/opt/homebrew/bin/podman' })
-
-    const reloaded = await service.getPodmanOverrides()
-    expect(reloaded.podmanPath).toBe('/opt/homebrew/bin/podman')
-    expect(reloaded.effectivePodmanPath).toBe('/opt/homebrew/bin/podman')
-  })
-
-  it('applyPodmanOverrides with null clears the override and falls back', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
-    const service = new OpenClawService({
-      resourcesDir: tempDir,
-    }) as MutableOpenClawService
-    service.openclawDir = tempDir
-
-    await service.applyPodmanOverrides({
-      podmanPath: '/opt/homebrew/bin/podman',
-    })
-    const cleared = await service.applyPodmanOverrides({ podmanPath: null })
-
-    expect(cleared.podmanPath).toBeNull()
-    // resourcesDir has no bundled binary, so the runtime falls through to 'podman'
-    expect(cleared.effectivePodmanPath).toBe('podman')
-
-    const persisted = JSON.parse(
-      await readFile(join(tempDir, 'podman-overrides.json'), 'utf-8'),
-    )
-    expect(persisted).toEqual({ podmanPath: null })
-  })
-
-  it('applyPodmanOverrides rebuilds ContainerRuntime so it picks up the new Podman reference', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
-    const service = new OpenClawService() as MutableOpenClawService
-    service.openclawDir = tempDir
-
-    const before = service.runtime
-    await service.applyPodmanOverrides({
-      podmanPath: '/opt/homebrew/bin/podman',
-    })
-
-    expect(service.runtime).not.toBe(before)
   })
 })

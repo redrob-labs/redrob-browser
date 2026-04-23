@@ -11,7 +11,9 @@ const TERMINAL_NAME = 'xterm-256color'
 
 interface TerminalSessionDeps {
   containerName: string
-  podmanPath: string
+  limaHome: string
+  limactlPath: string
+  vmName: string
   workingDir: string
   onExit: (exitCode: number) => void
   onOutput: (data: string) => void
@@ -24,12 +26,17 @@ export interface TerminalSession {
 }
 
 export function buildTerminalExecCommand(
-  podmanPath: string,
+  limactlPath: string,
+  vmName: string,
   containerName: string,
   workingDir: string,
 ): string[] {
   return [
-    podmanPath,
+    limactlPath,
+    'shell',
+    vmName,
+    '--',
+    'nerdctl',
     'exec',
     '-it',
     '-w',
@@ -39,17 +46,23 @@ export function buildTerminalExecCommand(
   ]
 }
 
+export function buildTerminalEnv(limaHome: string): NodeJS.ProcessEnv {
+  return { ...process.env, LIMA_HOME: limaHome, TERM: TERMINAL_NAME }
+}
+
 export function createTerminalSession(
   deps: TerminalSessionDeps,
 ): TerminalSession {
   const decoder = new TextDecoder()
   const proc = Bun.spawn(
     buildTerminalExecCommand(
-      deps.podmanPath,
+      deps.limactlPath,
+      deps.vmName,
       deps.containerName,
       deps.workingDir,
     ),
     {
+      cwd: '/',
       terminal: {
         cols: DEFAULT_COLS,
         rows: DEFAULT_ROWS,
@@ -58,7 +71,7 @@ export function createTerminalSession(
           if (chunk) deps.onOutput(chunk)
         },
       },
-      env: { ...process.env, TERM: TERMINAL_NAME },
+      env: buildTerminalEnv(deps.limaHome),
     },
   )
   let closed = false
