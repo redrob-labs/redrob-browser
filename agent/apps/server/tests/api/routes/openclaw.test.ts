@@ -12,7 +12,7 @@ describe('createOpenClawRoutes', () => {
     mock.restore()
   })
 
-  it('preserves BrowserOS SSE framing, session headers, and defaults chat history for chat', async () => {
+  it('preserves BrowserOS SSE framing and normalizes recursive session keys for chat', async () => {
     const actualOpenClawService = await import(
       '../../../src/api/services/openclaw/openclaw-service'
     )
@@ -51,7 +51,8 @@ describe('createOpenClawRoutes', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: 'hi',
-        sessionKey: 'session-123',
+        sessionKey:
+          'agent:research:openai-user:browseros:research:agent:research:openai-user:browseros:research:session-123',
       }),
     })
 
@@ -260,6 +261,180 @@ describe('createOpenClawRoutes', () => {
     const response = await route.request('/roles')
 
     expect(response.status).toBe(404)
+  })
+
+  it('returns OpenClaw sessions for an agent', async () => {
+    const actualOpenClawService = await import(
+      '../../../src/api/services/openclaw/openclaw-service'
+    )
+    const listSessions = mock(async () => [
+      {
+        key: 'openai-user:browseros:main:session-1',
+        updatedAt: 20,
+        sessionId: 'session-1',
+        agentId: 'main',
+        kind: 'chat',
+        source: 'user-chat',
+      },
+    ])
+
+    mock.module('../../../src/api/services/openclaw/openclaw-service', () => ({
+      ...actualOpenClawService,
+      getOpenClawService: () => ({ listSessions }) as never,
+    }))
+
+    const { createOpenClawRoutes } = await import(
+      '../../../src/api/routes/openclaw'
+    )
+    const route = createOpenClawRoutes()
+
+    const response = await route.request('/agents/main/sessions?limit=1')
+
+    expect(response.status).toBe(200)
+    expect(listSessions).toHaveBeenCalledWith('main')
+    expect(await response.json()).toEqual({
+      agentId: 'main',
+      sessions: [
+        {
+          key: 'openai-user:browseros:main:session-1',
+          updatedAt: 20,
+          sessionId: 'session-1',
+          agentId: 'main',
+          kind: 'chat',
+          source: 'user-chat',
+        },
+      ],
+    })
+  })
+
+  it('returns the resolved active OpenClaw session for an agent', async () => {
+    const actualOpenClawService = await import(
+      '../../../src/api/services/openclaw/openclaw-service'
+    )
+    const resolveAgentSession = mock(async () => ({
+      agentId: 'main',
+      exists: true,
+      sessionKey: 'session-1',
+      session: {
+        key: 'session-1',
+        updatedAt: 20,
+        sessionId: 'session-1',
+        agentId: 'main',
+        kind: 'chat',
+        source: 'other',
+      },
+    }))
+
+    mock.module('../../../src/api/services/openclaw/openclaw-service', () => ({
+      ...actualOpenClawService,
+      getOpenClawService: () => ({ resolveAgentSession }) as never,
+    }))
+
+    const { createOpenClawRoutes } = await import(
+      '../../../src/api/routes/openclaw'
+    )
+    const route = createOpenClawRoutes()
+
+    const response = await route.request('/agents/main/session')
+
+    expect(response.status).toBe(200)
+    expect(resolveAgentSession).toHaveBeenCalledWith('main')
+    expect(await response.json()).toEqual({
+      agentId: 'main',
+      exists: true,
+      sessionKey: 'session-1',
+      session: {
+        key: 'session-1',
+        updatedAt: 20,
+        sessionId: 'session-1',
+        agentId: 'main',
+        kind: 'chat',
+        source: 'other',
+      },
+    })
+  })
+
+  it('returns a normalized OpenClaw history page for an agent', async () => {
+    const actualOpenClawService = await import(
+      '../../../src/api/services/openclaw/openclaw-service'
+    )
+    const getAgentHistoryPage = mock(async () => ({
+      agentId: 'main',
+      sessionKey: 'session-1',
+      session: {
+        key: 'session-1',
+        updatedAt: 20,
+        sessionId: 'session-1',
+        agentId: 'main',
+        kind: 'chat',
+        source: 'other',
+      },
+      items: [
+        {
+          id: 'session-1:0',
+          role: 'user',
+          text: 'Hello',
+          timestamp: 1,
+          messageSeq: 0,
+          sessionKey: 'session-1',
+          source: 'other',
+        },
+      ],
+      page: {
+        cursor: 'older-cursor',
+        hasMore: true,
+        limit: 25,
+      },
+    }))
+
+    mock.module('../../../src/api/services/openclaw/openclaw-service', () => ({
+      ...actualOpenClawService,
+      getOpenClawService: () => ({ getAgentHistoryPage }) as never,
+    }))
+
+    const { createOpenClawRoutes } = await import(
+      '../../../src/api/routes/openclaw'
+    )
+    const route = createOpenClawRoutes()
+
+    const response = await route.request(
+      '/agents/main/history?sessionKey=session-1&cursor=abc&limit=25',
+    )
+
+    expect(response.status).toBe(200)
+    expect(getAgentHistoryPage).toHaveBeenCalledWith('main', {
+      sessionKey: 'session-1',
+      cursor: 'abc',
+      limit: 25,
+    })
+    expect(await response.json()).toEqual({
+      agentId: 'main',
+      sessionKey: 'session-1',
+      session: {
+        key: 'session-1',
+        updatedAt: 20,
+        sessionId: 'session-1',
+        agentId: 'main',
+        kind: 'chat',
+        source: 'other',
+      },
+      items: [
+        {
+          id: 'session-1:0',
+          role: 'user',
+          text: 'Hello',
+          timestamp: 1,
+          messageSeq: 0,
+          sessionKey: 'session-1',
+          source: 'other',
+        },
+      ],
+      page: {
+        cursor: 'older-cursor',
+        hasMore: true,
+        limit: 25,
+      },
+    })
   })
 
   it('ignores role fields when creating agents', async () => {
