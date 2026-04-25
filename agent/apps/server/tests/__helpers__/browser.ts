@@ -91,8 +91,13 @@ export async function spawnBrowser(
   const browserProcess = spawn(
     config.binaryPath,
     [
+      '--no-first-run',
+      '--no-default-browser-check',
       '--use-mock-keychain',
       '--show-component-extension-options',
+      // Match the supported dev/eval launch path and keep legacy BrowserOS
+      // extensions from trying to talk to the removed controller bridge.
+      '--disable-browseros-extensions',
       '--enable-logging=stderr',
       ...(config.headless ? ['--headless=new'] : []),
       ...config.extraArgs,

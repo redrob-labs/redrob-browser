@@ -16,3 +16,46 @@ export function swallowMonitoringError(
     error: error instanceof Error ? error.message : String(error),
   })
 }
+
+export function buildMonitoringToolOutput(output: {
+  content?: unknown
+  structuredContent?: unknown
+  metadata?: unknown
+  isError?: boolean
+}): Record<string, unknown> {
+  const sanitizeContentItem = (item: unknown): unknown => {
+    if (!item || typeof item !== 'object') {
+      return item
+    }
+
+    const record = item as {
+      type?: unknown
+      mimeType?: unknown
+      data?: unknown
+    }
+
+    if (
+      record.type === 'image' &&
+      typeof record.mimeType === 'string' &&
+      typeof record.data === 'string'
+    ) {
+      return {
+        type: 'image',
+        mimeType: record.mimeType,
+        omitted: true,
+        dataLength: record.data.length,
+      }
+    }
+
+    return item
+  }
+
+  return {
+    content: Array.isArray(output.content)
+      ? output.content.map((item) => sanitizeContentItem(item))
+      : output.content,
+    structuredContent: output.structuredContent,
+    metadata: output.metadata,
+    isError: output.isError,
+  }
+}

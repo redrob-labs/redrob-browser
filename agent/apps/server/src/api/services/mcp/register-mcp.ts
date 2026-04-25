@@ -1,7 +1,10 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { logger } from '../../../lib/logger'
 import { metrics } from '../../../lib/metrics'
-import type { ToolExecutionObserver } from '../../../monitoring/observer'
+import {
+  buildMonitoringToolOutput,
+  type ToolExecutionObserver,
+} from '../../../monitoring/observer'
 import { executeTool, type ToolContext } from '../../../tools/framework'
 import type { ToolRegistry } from '../../../tools/tool-registry'
 
@@ -23,6 +26,7 @@ export function registerTools(
         await ctx.observer?.onToolStart({
           toolCallId,
           toolName: tool.name,
+          toolDescription: tool.description,
           source: 'browser-tool',
           args,
         })
@@ -38,7 +42,12 @@ export function registerTools(
 
         await ctx.observer?.onToolEnd({
           toolCallId,
-          output: result.structuredContent ?? result.content,
+          output: buildMonitoringToolOutput({
+            content: result.content,
+            structuredContent: result.structuredContent,
+            metadata: result.metadata,
+            isError: result.isError,
+          }),
           error: result.isError ? 'Tool returned isError=true' : undefined,
         })
 

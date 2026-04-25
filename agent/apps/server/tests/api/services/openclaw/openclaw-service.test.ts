@@ -6,7 +6,6 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { OPENCLAW_CONTAINER_HOME } from '@browseros/shared/constants/openclaw'
@@ -79,6 +78,14 @@ describe('OpenClawService', () => {
       tempDir = null
     }
   })
+
+  function getSyntheticOccupiedPort(): number {
+    const forced = Number.parseInt(
+      process.env.BROWSEROS_TEST_OPENCLAW_GATEWAY_PORT ?? '41003',
+      10,
+    )
+    return forced >= 65000 ? forced - 10 : forced + 10
+  }
 
   it('creates agents through the cli client without role bootstrap files', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
@@ -1022,18 +1029,7 @@ describe('OpenClawService', () => {
         },
       }),
     )
-    const occupiedServer = createServer()
-    const occupiedPort = await new Promise<number>((resolve, reject) => {
-      occupiedServer.once('error', reject)
-      occupiedServer.listen(0, '127.0.0.1', () => {
-        const address = occupiedServer.address()
-        if (!address || typeof address === 'string') {
-          reject(new Error('failed to allocate test port'))
-          return
-        }
-        resolve(address.port)
-      })
-    })
+    const occupiedPort = getSyntheticOccupiedPort()
     await writeFile(
       join(tempDir, '.openclaw', 'runtime-state.json'),
       `${JSON.stringify({ gatewayPort: occupiedPort }, null, 2)}\n`,
@@ -1056,19 +1052,7 @@ describe('OpenClawService', () => {
     }
     mockGatewayAuth()
 
-    try {
-      await service.restart()
-    } finally {
-      await new Promise<void>((resolve, reject) => {
-        occupiedServer.close((error) => {
-          if (error) {
-            reject(error)
-            return
-          }
-          resolve()
-        })
-      })
-    }
+    await service.restart()
 
     expect(restartGateway).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1092,18 +1076,7 @@ describe('OpenClawService', () => {
         },
       }),
     )
-    const occupiedServer = createServer()
-    const occupiedPort = await new Promise<number>((resolve, reject) => {
-      occupiedServer.once('error', reject)
-      occupiedServer.listen(0, '127.0.0.1', () => {
-        const address = occupiedServer.address()
-        if (!address || typeof address === 'string') {
-          reject(new Error('failed to allocate test port'))
-          return
-        }
-        resolve(address.port)
-      })
-    })
+    const occupiedPort = getSyntheticOccupiedPort()
     await writeFile(
       join(tempDir, '.openclaw', 'runtime-state.json'),
       `${JSON.stringify({ gatewayPort: occupiedPort }, null, 2)}\n`,
@@ -1126,19 +1099,7 @@ describe('OpenClawService', () => {
     }
     mockGatewayAuth(401)
 
-    try {
-      await service.restart()
-    } finally {
-      await new Promise<void>((resolve, reject) => {
-        occupiedServer.close((error) => {
-          if (error) {
-            reject(error)
-            return
-          }
-          resolve()
-        })
-      })
-    }
+    await service.restart()
 
     expect(restartGateway).toHaveBeenCalledWith(
       expect.objectContaining({

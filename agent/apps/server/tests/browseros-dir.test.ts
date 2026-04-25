@@ -18,9 +18,11 @@ import { logger } from '../src/lib/logger'
 
 describe('getBrowserosDir', () => {
   const originalNodeEnv = process.env.NODE_ENV
+  const originalBrowserosDir = process.env.BROWSEROS_DIR
 
   beforeEach(() => {
     delete process.env.NODE_ENV
+    delete process.env.BROWSEROS_DIR
   })
 
   afterEach(() => {
@@ -30,6 +32,13 @@ describe('getBrowserosDir', () => {
     }
 
     process.env.NODE_ENV = originalNodeEnv
+
+    if (originalBrowserosDir === undefined) {
+      delete process.env.BROWSEROS_DIR
+      return
+    }
+
+    process.env.BROWSEROS_DIR = originalBrowserosDir
   })
 
   it('uses a separate home directory in development', () => {

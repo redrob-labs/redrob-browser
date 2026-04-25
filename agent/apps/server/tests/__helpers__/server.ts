@@ -26,6 +26,49 @@ interface ServerState {
 
 let serverState: ServerState | null = null
 
+function appendBufferedLog(buffer: string[], chunk: Buffer | string): void {
+  const text = chunk.toString()
+  const lines = text
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+  if (lines.length === 0) {
+    return
+  }
+  buffer.push(...lines)
+  const overflow = buffer.length - 40
+  if (overflow > 0) {
+    buffer.splice(0, overflow)
+  }
+}
+
+function formatStartupFailure(
+  process: ChildProcess,
+  port: number,
+  stdoutBuffer: string[],
+  stderrBuffer: string[],
+  reason: string,
+): Error {
+  const details: string[] = [reason]
+
+  if (process.exitCode !== null) {
+    details.push(`exit code: ${process.exitCode}`)
+  }
+  if (process.signalCode) {
+    details.push(`signal: ${process.signalCode}`)
+  }
+
+  if (stderrBuffer.length > 0) {
+    details.push(`stderr:\n${stderrBuffer.join('\n')}`)
+  } else if (stdoutBuffer.length > 0) {
+    details.push(`stdout:\n${stdoutBuffer.join('\n')}`)
+  }
+
+  return new Error(
+    `Server failed to start on port ${port}. ${details.join('\n\n')}`,
+  )
+}
+
 export async function isServerRunning(port: number): Promise<boolean> {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/health`, {
@@ -37,14 +80,35 @@ export async function isServerRunning(port: number): Promise<boolean> {
   }
 }
 
-async function waitForHealth(port: number, maxAttempts = 30): Promise<void> {
+async function waitForHealth(
+  process: ChildProcess,
+  port: number,
+  stdoutBuffer: string[],
+  stderrBuffer: string[],
+  maxAttempts = 60,
+): Promise<void> {
   for (let i = 0; i < maxAttempts; i++) {
     if (await isServerRunning(port)) {
       return
     }
+    if (process.exitCode !== null || process.signalCode) {
+      throw formatStartupFailure(
+        process,
+        port,
+        stdoutBuffer,
+        stderrBuffer,
+        'Server process exited before /health became ready.',
+      )
+    }
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
-  throw new Error(`Server failed to start on port ${port} within timeout`)
+  throw formatStartupFailure(
+    process,
+    port,
+    stdoutBuffer,
+    stderrBuffer,
+    'Timed out waiting for /health to become ready.',
+  )
 }
 
 export function getServerState(): ServerState | null {
@@ -68,6 +132,8 @@ export async function spawnServer(config: ServerConfig): Promise<ServerState> {
   }
 
   console.log(`Starting BrowserOS Server on port ${config.serverPort}...`)
+  const stdoutBuffer: string[] = []
+  const stderrBuffer: string[] = []
   const process = spawn(
     'bun',
     [
@@ -87,14 +153,12 @@ export async function spawnServer(config: ServerConfig): Promise<ServerState> {
     },
   )
 
-  process.stdout?.on('data', (_data) => {
-    // Uncomment for debugging
-    // console.log(`[SERVER] ${_data.toString().trim()}`)
+  process.stdout?.on('data', (data) => {
+    appendBufferedLog(stdoutBuffer, data)
   })
 
-  process.stderr?.on('data', (_data) => {
-    // Uncomment for debugging
-    // console.error(`[SERVER] ${_data.toString().trim()}`)
+  process.stderr?.on('data', (data) => {
+    appendBufferedLog(stderrBuffer, data)
   })
 
   process.on('error', (error) => {
@@ -102,7 +166,7 @@ export async function spawnServer(config: ServerConfig): Promise<ServerState> {
   })
 
   console.log('Waiting for server to be ready...')
-  await waitForHealth(config.serverPort)
+  await waitForHealth(process, config.serverPort, stdoutBuffer, stderrBuffer)
   console.log('Server is ready')
 
   serverState = { process, config }

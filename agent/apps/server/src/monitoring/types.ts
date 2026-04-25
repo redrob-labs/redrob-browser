@@ -22,6 +22,7 @@ export interface MonitoringToolCallRecord {
   agentId: string
   toolCallId: string
   toolName: string
+  toolDescription?: string
   source: MonitoringToolCallSource
   args: unknown
   output?: unknown
@@ -72,6 +73,7 @@ export interface MonitoringSessionStartInput {
 export interface MonitoringToolStartInput {
   toolCallId: string
   toolName: string
+  toolDescription?: string
   source: MonitoringToolCallSource
   args: unknown
 }

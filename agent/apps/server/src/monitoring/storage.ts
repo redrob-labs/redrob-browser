@@ -19,6 +19,7 @@ import type {
 
 const CONTEXT_FILE_NAME = 'context.json'
 const TOOL_CALLS_FILE_NAME = 'tool-calls.jsonl'
+const ERROR_LOG_FILE_NAME = 'error-log.jsonl'
 const FINALIZATION_FILE_NAME = 'finalization.json'
 const AUDIT_ENVELOPE_FILE_NAME = 'audit-envelope.json'
 const UUID_PATTERN =
@@ -63,6 +64,17 @@ export class MonitoringStorage {
     await writeFile(
       this.getFinalizationPath(finalization.monitoringSessionId),
       `${JSON.stringify(finalization, null, 2)}\n`,
+    )
+  }
+
+  async appendErrorLog(
+    runId: string,
+    entry: Record<string, unknown>,
+  ): Promise<void> {
+    await this.ensureRunDir(runId)
+    await appendFile(
+      this.getErrorLogPath(runId),
+      `${JSON.stringify({ ...entry, timestamp: new Date().toISOString() })}\n`,
     )
   }
 
@@ -166,6 +178,11 @@ export class MonitoringStorage {
   private getFinalizationPath(runId: string): string {
     assertValidMonitoringRunId(runId)
     return join(getLazyMonitoringRunDir(runId), FINALIZATION_FILE_NAME)
+  }
+
+  private getErrorLogPath(runId: string): string {
+    assertValidMonitoringRunId(runId)
+    return join(getLazyMonitoringRunDir(runId), ERROR_LOG_FILE_NAME)
   }
 
   private getAuditEnvelopePath(runId: string): string {

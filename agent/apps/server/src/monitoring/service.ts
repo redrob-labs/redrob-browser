@@ -1,4 +1,7 @@
 import { buildJudgeAuditEnvelope } from './envelope'
+import { LazyMonitoringJudgeError } from './judge/llm-judge'
+import type { LazyMonitoringJudgeService } from './judge/service'
+import { createLazyMonitoringJudgeService } from './judge/service'
 import { swallowMonitoringError, type ToolExecutionObserver } from './observer'
 import { MonitoringSessionRegistry } from './session-registry'
 import { MonitoringStorage } from './storage'
@@ -19,9 +22,26 @@ type ActiveToolCallState = Omit<
   'finishedAt' | 'durationMs' | 'error' | 'output'
 >
 
+interface MonitoringServiceDeps {
+  storage?: MonitoringStorage
+  registry?: MonitoringSessionRegistry
+  judge?: LazyMonitoringJudgeService
+}
+
 export class MonitoringService {
-  private readonly storage = new MonitoringStorage()
-  private readonly registry = new MonitoringSessionRegistry()
+  private readonly storage: MonitoringStorage
+  private readonly registry: MonitoringSessionRegistry
+  private readonly judge: LazyMonitoringJudgeService
+  private readonly completedToolCallsBySession = new Map<
+    string,
+    MonitoringToolCallRecord[]
+  >()
+
+  constructor(deps: MonitoringServiceDeps = {}) {
+    this.storage = deps.storage ?? new MonitoringStorage()
+    this.registry = deps.registry ?? new MonitoringSessionRegistry()
+    this.judge = deps.judge ?? createLazyMonitoringJudgeService()
+  }
 
   async startSession(
     input: MonitoringSessionStartInput,
@@ -37,7 +57,12 @@ export class MonitoringService {
     }
 
     await this.storage.writeContext(context)
-    this.registry.setActive(context.agentId, context.monitoringSessionId)
+    this.registry.setActive(
+      context.agentId,
+      context.monitoringSessionId,
+      context.source,
+    )
+    this.completedToolCallsBySession.set(context.monitoringSessionId, [])
     return context
   }
 
@@ -45,11 +70,19 @@ export class MonitoringService {
     return this.registry.getActive(agentId)
   }
 
-  getSingleActiveSession():
-    | { agentId: string; monitoringSessionId: string }
-    | undefined {
-    return this.registry.getSingleActive()
+  resolveSessionForMcpRequest(
+    explicitAgentId?: string,
+  ): { agentId: string; monitoringSessionId: string } | undefined {
+    if (explicitAgentId) {
+      const monitoringSessionId = this.registry.getActive(explicitAgentId)
+      return monitoringSessionId
+        ? { agentId: explicitAgentId, monitoringSessionId }
+        : undefined
+    }
+
+    return this.registry.resolveForUnattributedToolCalls()
   }
+
   clearActiveSession(agentId: string, monitoringSessionId: string): void {
     this.registry.clearIfMatches(agentId, monitoringSessionId)
   }
@@ -59,19 +92,106 @@ export class MonitoringService {
     agentId: string,
   ): ToolExecutionObserver {
     const activeToolCalls = new Map<string, ActiveToolCallState>()
+    const completedToolCalls =
+      this.completedToolCallsBySession.get(monitoringSessionId) ?? []
+    this.completedToolCallsBySession.set(
+      monitoringSessionId,
+      completedToolCalls,
+    )
+    const contextPromise = this.storage.readContext(monitoringSessionId)
+    let judgeQueue = Promise.resolve()
+
+    const enqueueJudgeReview = (toolCall: ActiveToolCallState): void => {
+      const priorToolCalls = [...completedToolCalls]
+
+      judgeQueue = judgeQueue
+        .catch(() => undefined)
+        .then(async () => {
+          const context = await contextPromise
+          if (!context) {
+            return
+          }
+
+          const judgment = await this.judge.evaluate({
+            run: context,
+            priorToolCalls,
+            currentToolCall: toolCall,
+          })
+
+          console.log(
+            JSON.stringify({
+              type: 'lazy-monitoring-judge',
+              monitoringSessionId,
+              agentId,
+              originalPrompt: context.originalPrompt,
+              toolCallId: judgment.toolCallId,
+              toolName: judgment.toolName,
+              verdict: judgment.verdict,
+              summary: judgment.summary,
+              mode: judgment.mode,
+              destructive: judgment.destructive,
+              categories: judgment.categories,
+              matchedIntentCategories: judgment.matchedIntentCategories,
+              policyDimensions: judgment.policyDimensions,
+              policyVersion: judgment.policyVersion,
+              model: judgment.model,
+              shouldInterrupt: judgment.shouldInterrupt,
+            }),
+          )
+        })
+        .catch((error) => {
+          if (error instanceof LazyMonitoringJudgeError) {
+            const errorPayload: Record<string, unknown> = {
+              type: 'lazy-monitoring-judge-error',
+              monitoringSessionId,
+              agentId,
+              toolCallId: toolCall.toolCallId,
+              toolName: toolCall.toolName,
+              error: error.message,
+              stack: error.stack,
+            }
+            if (error.cause) {
+              const cause = error.cause
+              errorPayload.cause =
+                cause instanceof Error
+                  ? {
+                      message: cause.message,
+                      name: cause.name,
+                      stack: cause.stack,
+                    }
+                  : String(cause)
+            }
+            console.error(JSON.stringify(errorPayload))
+            this.storage
+              .appendErrorLog(monitoringSessionId, errorPayload)
+              .catch(() => {})
+            return
+          }
+
+          swallowMonitoringError('judge review', error, {
+            monitoringSessionId,
+            agentId,
+            toolCallId: toolCall.toolCallId,
+            toolName: toolCall.toolName,
+          })
+        })
+    }
 
     return {
       onToolStart: async (input: MonitoringToolStartInput) => {
         try {
-          activeToolCalls.set(input.toolCallId, {
+          const toolCall: ActiveToolCallState = {
             monitoringSessionId,
             agentId,
             toolCallId: input.toolCallId,
             toolName: input.toolName,
+            toolDescription: input.toolDescription,
             source: input.source,
             args: input.args,
             startedAt: new Date().toISOString(),
-          })
+          }
+          activeToolCalls.set(input.toolCallId, toolCall)
+          enqueueJudgeReview(toolCall)
         } catch (error) {
           swallowMonitoringError('tool start recording', error, {
             monitoringSessionId,
@@ -108,6 +228,7 @@ export class MonitoringService {
           }
 
           await this.storage.appendToolCall(record)
+          completedToolCalls.push(record)
           activeToolCalls.delete(input.toolCallId)
         } catch (error) {
           swallowMonitoringError('tool end recording', error, {
@@ -145,7 +266,11 @@ export class MonitoringService {
 
     await this.storage.writeFinalization(finalization)
     this.registry.clearIfMatches(input.agentId, input.monitoringSessionId)
-    return this.buildAndPersistEnvelope(input.monitoringSessionId)
+    const envelope = await this.buildAndPersistEnvelope(
+      input.monitoringSessionId,
+    )
+    this.completedToolCallsBySession.delete(input.monitoringSessionId)
+    return envelope
   }
 
   async getRunEnvelope(runId: string): Promise<JudgeAuditEnvelope | null> {

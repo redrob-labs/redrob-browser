@@ -29,6 +29,7 @@ import {
 describe('VM paths', () => {
   const originalNodeEnv = process.env.NODE_ENV
   const originalPath = process.env.PATH
+  const originalBrowserosDir = process.env.BROWSEROS_DIR
 
   afterEach(() => {
     if (originalNodeEnv === undefined) {
@@ -41,10 +42,17 @@ describe('VM paths', () => {
     } else {
       process.env.PATH = originalPath
     }
+
+    if (originalBrowserosDir === undefined) {
+      delete process.env.BROWSEROS_DIR
+    } else {
+      process.env.BROWSEROS_DIR = originalBrowserosDir
+    }
   })
 
   it('uses production VM directories below .browseros', () => {
     process.env.NODE_ENV = 'production'
+    delete process.env.BROWSEROS_DIR
 
     expect(getLimaHomeDir()).toBe(join(homedir(), '.browseros', 'lima'))
     expect(getVmStateDir()).toBe(join(homedir(), '.browseros', 'vm'))
@@ -55,6 +63,7 @@ describe('VM paths', () => {
 
   it('uses development VM directories below .browseros-dev', () => {
     process.env.NODE_ENV = 'development'
+    delete process.env.BROWSEROS_DIR
 
     expect(getLimaHomeDir()).toBe(join(homedir(), '.browseros-dev', 'lima'))
     expect(getVmStateDir()).toBe(join(homedir(), '.browseros-dev', 'vm'))
@@ -65,6 +74,7 @@ describe('VM paths', () => {
 
   it('keeps the legacy OpenClaw directory addressable for migration', () => {
     process.env.NODE_ENV = 'production'
+    delete process.env.BROWSEROS_DIR
 
     expect(getLegacyOpenClawDir()).toBe(
       join(homedir(), PATHS.BROWSEROS_DIR_NAME, PATHS.OPENCLAW_DIR_NAME),

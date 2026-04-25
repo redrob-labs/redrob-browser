@@ -20,7 +20,10 @@ import { KlavisClient } from '../../../lib/clients/klavis/klavis-client'
 import { OAUTH_MCP_SERVERS } from '../../../lib/clients/klavis/oauth-mcp-servers'
 import { logger } from '../../../lib/logger'
 import { metrics } from '../../../lib/metrics'
-import type { ToolExecutionObserver } from '../../../monitoring/observer'
+import {
+  buildMonitoringToolOutput,
+  type ToolExecutionObserver,
+} from '../../../monitoring/observer'
 import { klavisStrataCache } from './strata-cache'
 
 function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
@@ -256,6 +259,8 @@ export function registerKlavisTools(
         await observer?.onToolStart({
           toolCallId,
           toolName: 'connector_mcp_servers',
+          toolDescription:
+            'Check whether an external connector is connected and ready for use.',
           source: 'klavis-tool',
           args,
         })
@@ -375,6 +380,7 @@ export function registerKlavisTools(
           await observer?.onToolStart({
             toolCallId,
             toolName: tool.name,
+            toolDescription: tool.description ?? undefined,
             source: 'klavis-tool',
             args,
           })
@@ -389,7 +395,7 @@ export function registerKlavisTools(
 
           await observer?.onToolEnd({
             toolCallId,
-            output: result,
+            output: buildMonitoringToolOutput(result),
             error: result.isError ? 'Tool returned isError=true' : undefined,
           })
 

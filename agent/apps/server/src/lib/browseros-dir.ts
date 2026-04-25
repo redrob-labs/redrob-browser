@@ -7,6 +7,10 @@ import type { ServerDiscoveryConfig } from '@browseros/shared/types/server-confi
 import { logger } from './logger'
 
 export function getBrowserosDir(): string {
+  const override = process.env.BROWSEROS_DIR?.trim()
+  if (override) {
+    return override
+  }
   const dirName =
     process.env.NODE_ENV === 'development'
       ? PATHS.DEV_BROWSEROS_DIR_NAME

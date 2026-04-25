@@ -45,13 +45,8 @@ export function createMcpRoutes(deps: McpRouteDeps) {
       c.req.query('agentId') ??
       c.req.header('X-BrowserOS-Agent-Id') ??
       undefined
-    const activeSession = explicitAgentId
-      ? {
-          agentId: explicitAgentId,
-          monitoringSessionId:
-            monitoringService.getActiveSessionId(explicitAgentId),
-        }
-      : monitoringService.getSingleActiveSession()
+    const activeSession =
+      monitoringService.resolveSessionForMcpRequest(explicitAgentId)
     const agentId = activeSession?.agentId
     metrics.log('mcp.request', { scopeId })
     const aclRules = await resolveAclPolicyForMcpRequest({

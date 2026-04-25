@@ -167,7 +167,9 @@ describe('ContainerCli', () => {
     const lines: string[] = []
 
     const stop = cli.tailLogs('gateway', (line) => lines.push(line))
-    await Bun.sleep(20)
+    for (let attempts = 0; attempts < 50 && lines.length === 0; attempts += 1) {
+      await Bun.sleep(10)
+    }
     stop()
 
     expect(lines).toEqual(['line'])

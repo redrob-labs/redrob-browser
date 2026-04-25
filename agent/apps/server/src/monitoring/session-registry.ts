@@ -1,32 +1,66 @@
-export class MonitoringSessionRegistry {
-  private readonly activeSessionsByAgent = new Map<string, string>()
+import type { MonitoringSessionContext } from './types'
 
-  setActive(agentId: string, monitoringSessionId: string): void {
-    this.activeSessionsByAgent.set(agentId, monitoringSessionId)
+interface ActiveMonitoringSession {
+  monitoringSessionId: string
+  source: MonitoringSessionContext['source']
+}
+
+export class MonitoringSessionRegistry {
+  private readonly activeSessionsByAgent = new Map<
+    string,
+    ActiveMonitoringSession
+  >()
+
+  setActive(
+    agentId: string,
+    monitoringSessionId: string,
+    source: MonitoringSessionContext['source'],
+  ): void {
+    this.activeSessionsByAgent.set(agentId, { monitoringSessionId, source })
   }
 
   getActive(agentId: string): string | undefined {
-    return this.activeSessionsByAgent.get(agentId)
+    return this.activeSessionsByAgent.get(agentId)?.monitoringSessionId
   }
 
-  getSingleActive():
+  resolveForUnattributedToolCalls():
     | { agentId: string; monitoringSessionId: string }
     | undefined {
-    if (this.activeSessionsByAgent.size !== 1) {
-      return undefined
+    const activeSessions = [...this.activeSessionsByAgent.entries()].flatMap(
+      ([agentId, session]) =>
+        session?.monitoringSessionId
+          ? [
+              {
+                agentId,
+                monitoringSessionId: session.monitoringSessionId,
+                source: session.source,
+              },
+            ]
+          : [],
+    )
+
+    if (activeSessions.length === 1) {
+      const [{ agentId, monitoringSessionId }] = activeSessions
+      return { agentId, monitoringSessionId }
     }
 
-    const [agentId, monitoringSessionId] =
-      this.activeSessionsByAgent.entries().next().value ?? []
+    const openClawSessions = activeSessions.filter(
+      (session) => session.source === 'openclaw-agent-chat',
+    )
 
-    if (!agentId || !monitoringSessionId) {
-      return undefined
+    if (openClawSessions.length === 1) {
+      const [{ agentId, monitoringSessionId }] = openClawSessions
+      return { agentId, monitoringSessionId }
     }
 
-    return { agentId, monitoringSessionId }
+    return undefined
   }
+
   clearIfMatches(agentId: string, monitoringSessionId: string): void {
-    if (this.activeSessionsByAgent.get(agentId) !== monitoringSessionId) {
+    if (
+      this.activeSessionsByAgent.get(agentId)?.monitoringSessionId !==
+      monitoringSessionId
+    ) {
       return
     }
     this.activeSessionsByAgent.delete(agentId)

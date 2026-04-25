@@ -21,6 +21,17 @@ interface RuntimeState {
   gatewayPort: number
 }
 
+function readForcedGatewayPort(): number | null {
+  const raw = process.env.BROWSEROS_TEST_OPENCLAW_GATEWAY_PORT?.trim()
+  if (!raw) return null
+
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
+    return null
+  }
+  return parsed
+}
+
 function getRuntimeStatePath(openclawDir: string): string {
   return join(getOpenClawStateDir(openclawDir), RUNTIME_STATE_FILE)
 }
@@ -87,6 +98,12 @@ async function findAvailablePort(startPort: number): Promise<number> {
 export async function allocateGatewayPort(
   openclawDir: string,
 ): Promise<number> {
+  const forcedPort = readForcedGatewayPort()
+  if (forcedPort !== null) {
+    await writePersistedGatewayPort(openclawDir, forcedPort)
+    return forcedPort
+  }
+
   const persisted = await readPersistedGatewayPort(openclawDir)
   if (persisted !== null && (await isPortAvailable(persisted))) {
     return persisted

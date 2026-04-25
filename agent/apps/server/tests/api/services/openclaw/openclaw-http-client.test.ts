@@ -249,6 +249,44 @@ describe('OpenClawHttpClient', () => {
     ])
   })
 
+  it('does not double-close the stream controller when the request is aborted', async () => {
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              const encoder = new TextEncoder()
+              controller.enqueue(
+                encoder.encode(
+                  'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n',
+                ),
+              )
+            },
+            cancel() {
+              return Promise.resolve()
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          },
+        ),
+      ),
+    ) as typeof globalThis.fetch
+    const client = new OpenClawHttpClient(18789, async () => 'gateway-token')
+    const abortController = new AbortController()
+    abortController.abort()
+
+    const stream = await client.streamChat({
+      agentId: 'research',
+      sessionKey: 'session-123',
+      message: 'hi',
+      signal: abortController.signal,
+    })
+
+    await expect(readEvents(stream)).resolves.toEqual([])
+  })
+
   describe('getSessionHistory', () => {
     it('sends GET with bearer auth and forwards limit/cursor as query params', async () => {
       const fetchMock = mock(() =>

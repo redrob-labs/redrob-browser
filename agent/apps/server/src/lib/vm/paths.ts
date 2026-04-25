@@ -25,6 +25,10 @@ const HOST_LIMACTL_BINARY = 'limactl'
 export type Arch = 'arm64' | 'x64'
 
 function rootDir(): string {
+  const override = process.env.BROWSEROS_DIR?.trim()
+  if (override) {
+    return override
+  }
   const base =
     process.env.NODE_ENV === 'development'
       ? PATHS.DEV_BROWSEROS_DIR_NAME
