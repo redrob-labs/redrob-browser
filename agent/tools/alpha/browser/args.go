@@ -24,6 +24,7 @@ func BuildArgs(cfg ArgsConfig) []string {
 		"--show-component-extension-options",
 		"--disable-browseros-server",
 		"--disable-browseros-extensions",
+		"--enable-logging=stderr",
 		fmt.Sprintf("--remote-debugging-port=%d", cfg.Ports.CDP),
 		// Keep all server aliases until installed BrowserOS apps converge on one switch.
 		fmt.Sprintf("--browseros-mcp-port=%d", cfg.Ports.Server),

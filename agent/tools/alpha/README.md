@@ -92,6 +92,7 @@ Each start:
 - Runs `tools/dev/setup.sh`.
 - Builds the WXT extension.
 - Starts BrowserOS and the local Bun server.
+- Tees BrowserOS and server output to log files under the copied profile.
 
 Use this when you want to refresh the copied profile before launching:
 
@@ -106,6 +107,28 @@ balpha start --headless
 ```
 
 Stop the environment with `Ctrl+C`.
+
+## Logs
+
+`balpha start` writes process logs to:
+
+```text
+~/.config/balpha/profile/logs
+```
+
+The current files are:
+
+- `chromium.log`: BrowserOS/Chromium stdout and stderr.
+- `server.log`: local Bun server stdout and stderr.
+
+When either file is older than one day at startup, `balpha` rotates it to
+`<name>.old` before writing a fresh log.
+
+To print the log directory and file paths:
+
+```bash
+balpha logs
+```
 
 ## Update The Checkout
 

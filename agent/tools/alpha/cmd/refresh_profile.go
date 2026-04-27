@@ -35,6 +35,17 @@ var refreshProfileCmd = &cobra.Command{
 }
 
 func loadConfig() (config.Config, error) {
+	cfg, err := loadConfigWithoutValidation()
+	if err != nil {
+		return config.Config{}, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return config.Config{}, err
+	}
+	return cfg, nil
+}
+
+func loadConfigWithoutValidation() (config.Config, error) {
 	path, err := config.Path()
 	if err != nil {
 		return config.Config{}, err
@@ -42,9 +53,6 @@ func loadConfig() (config.Config, error) {
 	cfg, err := config.Load(path)
 	if err != nil {
 		return config.Config{}, fmt.Errorf("missing config at %s; run balpha init: %w", path, err)
-	}
-	if err := cfg.Validate(); err != nil {
-		return config.Config{}, err
 	}
 	return cfg, nil
 }

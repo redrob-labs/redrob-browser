@@ -38,6 +38,8 @@ type packageJSON struct {
 	Name string `json:"name"`
 }
 
+const LogDirName = "logs"
+
 func Path() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -125,6 +127,14 @@ func (c Config) SourceProfilePath() string {
 
 func (c Config) DevProfilePath() string {
 	return filepath.Join(c.DevUserDataDir, c.DevProfileDir)
+}
+
+func (c Config) LogDir() string {
+	return filepath.Join(c.DevUserDataDir, LogDirName)
+}
+
+func (c Config) LogPath(name string) string {
+	return filepath.Join(c.LogDir(), name)
 }
 
 func (c Config) Validate() error {

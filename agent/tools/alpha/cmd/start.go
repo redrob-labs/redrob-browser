@@ -22,6 +22,11 @@ import (
 var startRefreshProfile bool
 var startHeadless bool
 
+const (
+	serverLogName   = "server.log"
+	chromiumLogName = "chromium.log"
+)
+
 func init() {
 	startCmd.Flags().BoolVar(&startRefreshProfile, "refresh-profile", false, "Refresh copied BrowserOS profile before launch")
 	startCmd.Flags().BoolVar(&startHeadless, "headless", false, "Run BrowserOS headless")
@@ -84,12 +89,17 @@ func runEnvironment(cfg config.Config, agentRoot string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	if err := os.MkdirAll(cfg.LogDir(), 0755); err != nil {
+		return err
+	}
+
 	var wg sync.WaitGroup
 	var managed []*proc.ManagedProc
 	managed = append(managed, proc.StartManaged(ctx, &wg, proc.ProcConfig{
 		Tag:     proc.TagBrowser,
 		Dir:     agentRoot,
 		Restart: false,
+		LogPath: cfg.LogPath(chromiumLogName),
 		Cmd: browser.BuildArgs(browser.ArgsConfig{
 			Binary:      cfg.BrowserOSAppPath,
 			AgentRoot:   agentRoot,
@@ -119,6 +129,7 @@ func runEnvironment(cfg config.Config, agentRoot string) error {
 		Dir:     serverDir,
 		Env:     env,
 		Restart: true,
+		LogPath: cfg.LogPath(serverLogName),
 		Cmd:     serverCommand(),
 	}))
 	printSummary(cfg, agentRoot)
@@ -172,6 +183,7 @@ func printSummary(cfg config.Config, agentRoot string) {
 	proc.LogMsgf(proc.TagInfo, "Repo: %s", cfg.RepoPath)
 	proc.LogMsgf(proc.TagInfo, "Agent root: %s", agentRoot)
 	proc.LogMsgf(proc.TagInfo, "Profile: %s", cfg.DevUserDataDir)
+	proc.LogMsgf(proc.TagInfo, "Logs: %s", cfg.LogDir())
 	proc.LogMsgf(proc.TagInfo, "Ports: CDP=%d Server=%d Extension=%d", cfg.Ports.CDP, cfg.Ports.Server, cfg.Ports.Extension)
 	fmt.Println()
 }

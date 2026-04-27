@@ -2,8 +2,10 @@ package proc
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -17,6 +19,7 @@ type ProcConfig struct {
 	Restart     bool
 	Cmd         []string
 	BeforeStart func() error
+	LogPath     string
 }
 
 type ManagedProc struct {
@@ -45,6 +48,22 @@ func StartManaged(ctx context.Context, wg *sync.WaitGroup, cfg ProcConfig) *Mana
 }
 
 func (mp *ManagedProc) run(ctx context.Context) {
+	var logFile *os.File
+	var logMu sync.Mutex
+	if mp.Cfg.LogPath != "" {
+		file, path, err := OpenLogFile(filepath.Dir(mp.Cfg.LogPath), filepath.Base(mp.Cfg.LogPath), time.Now())
+		if err != nil {
+			LogMsg(mp.Cfg.Tag, WarnColor.Sprintf("File logging disabled: %v", err))
+		} else {
+			logFile = file
+			defer logFile.Close()
+			LogMsgTee(mp.Cfg.Tag, "Writing log file: "+path, logFile, &logMu)
+		}
+	}
+	log := func(msg string) {
+		LogMsgTee(mp.Cfg.Tag, msg, logFile, &logMu)
+	}
+
 	for {
 		if ctx.Err() != nil {
 			return
@@ -52,7 +71,7 @@ func (mp *ManagedProc) run(ctx context.Context) {
 
 		if mp.Cfg.BeforeStart != nil {
 			if err := mp.Cfg.BeforeStart(); err != nil {
-				LogMsg(mp.Cfg.Tag, ErrorColor.Sprintf("Pre-start failed: %v", err))
+				log(ErrorColor.Sprintf("Pre-start failed: %v", err))
 				if !mp.Cfg.Restart || ctx.Err() != nil {
 					return
 				}
@@ -61,7 +80,7 @@ func (mp *ManagedProc) run(ctx context.Context) {
 			}
 		}
 
-		LogMsgf(mp.Cfg.Tag, "Starting: %s", DimColor.Sprint(strings.Join(mp.Cfg.Cmd, " ")))
+		log(fmt.Sprintf("Starting: %s", DimColor.Sprint(strings.Join(mp.Cfg.Cmd, " "))))
 
 		cmd := exec.Command(mp.Cfg.Cmd[0], mp.Cfg.Cmd[1:]...)
 		cmd.Dir = mp.Cfg.Dir
@@ -74,7 +93,7 @@ func (mp *ManagedProc) run(ctx context.Context) {
 		stderr, _ := cmd.StderrPipe()
 
 		if err := cmd.Start(); err != nil {
-			LogMsg(mp.Cfg.Tag, ErrorColor.Sprintf("Error starting: %v", err))
+			log(ErrorColor.Sprintf("Error starting: %v", err))
 			if !mp.Cfg.Restart || ctx.Err() != nil {
 				return
 			}
@@ -94,8 +113,8 @@ func (mp *ManagedProc) run(ctx context.Context) {
 
 		var streamWg sync.WaitGroup
 		streamWg.Add(2)
-		go func() { defer streamWg.Done(); StreamLines(stdout, mp.Cfg.Tag) }()
-		go func() { defer streamWg.Done(); StreamLines(stderr, mp.Cfg.Tag) }()
+		go func() { defer streamWg.Done(); streamLines(stdout, mp.Cfg.Tag, os.Stdout, logFile, &logMu) }()
+		go func() { defer streamWg.Done(); streamLines(stderr, mp.Cfg.Tag, os.Stdout, logFile, &logMu) }()
 
 		streamWg.Wait()
 		_ = cmd.Wait()
@@ -111,16 +130,16 @@ func (mp *ManagedProc) run(ctx context.Context) {
 
 		exitCode := cmd.ProcessState.ExitCode()
 		if exitCode != 0 {
-			LogMsg(mp.Cfg.Tag, ErrorColor.Sprintf("Process exited with code %d", exitCode))
+			log(ErrorColor.Sprintf("Process exited with code %d", exitCode))
 		} else {
-			LogMsg(mp.Cfg.Tag, "Process exited cleanly")
+			log("Process exited cleanly")
 		}
 
 		if !mp.Cfg.Restart {
 			return
 		}
 
-		LogMsg(mp.Cfg.Tag, WarnColor.Sprint("Restarting in 1s..."))
+		log(WarnColor.Sprint("Restarting in 1s..."))
 		select {
 		case <-ctx.Done():
 			return

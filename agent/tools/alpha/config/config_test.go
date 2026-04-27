@@ -20,6 +20,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.DevUserDataDir != filepath.Join(home, ".config/balpha/profile") {
 		t.Fatalf("unexpected dev dir: %s", cfg.DevUserDataDir)
 	}
+	if cfg.LogDir() != filepath.Join(home, ".config/balpha/profile/logs") {
+		t.Fatalf("unexpected log dir: %s", cfg.LogDir())
+	}
 	if cfg.DevProfileDir != "Default" {
 		t.Fatalf("unexpected dev profile: %s", cfg.DevProfileDir)
 	}
@@ -37,6 +40,15 @@ func TestDefaults(t *testing.T) {
 	}
 	if cfg.ProductionEnv.CLI["R2_UPLOAD_PREFIX"] != "" {
 		t.Fatalf("cli upload prefix got %q want empty", cfg.ProductionEnv.CLI["R2_UPLOAD_PREFIX"])
+	}
+}
+
+func TestLogPathUsesProfileLogDir(t *testing.T) {
+	cfg := Config{DevUserDataDir: "/tmp/balpha-profile"}
+	got := cfg.LogPath("server.log")
+	want := filepath.Join("/tmp/balpha-profile", "logs", "server.log")
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
 	}
 }
 
