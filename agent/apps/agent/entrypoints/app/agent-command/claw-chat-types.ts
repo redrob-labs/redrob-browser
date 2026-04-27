@@ -17,11 +17,21 @@ export interface BrowserOSOpenClawSession {
   modelProvider?: string
 }
 
-export interface AgentSessionResponse {
-  agentId: string
-  exists: boolean
-  sessionKey: string | null
-  session: BrowserOSOpenClawSession | null
+export interface BrowserOSChatHistoryToolCall {
+  toolCallId?: string
+  toolName: string
+  label: string
+  subject?: string
+  status: 'completed' | 'failed'
+  input?: Record<string, unknown>
+  output?: string
+  error?: string
+  durationMs?: number
+}
+
+export interface BrowserOSChatHistoryReasoning {
+  text: string
+  durationMs?: number
 }
 
 export interface BrowserOSChatHistoryItem {
@@ -32,6 +42,11 @@ export interface BrowserOSChatHistoryItem {
   messageSeq: number
   sessionKey: string
   source: ClawChatSource
+  costUsd?: number
+  tokensIn?: number
+  tokensOut?: number
+  toolCalls?: BrowserOSChatHistoryToolCall[]
+  reasoning?: BrowserOSChatHistoryReasoning
 }
 
 export interface AgentHistoryPageResponse {
@@ -58,10 +73,13 @@ export type ClawChatMessagePart =
   | {
       type: 'tool-call'
       name: string
+      label: string
+      subject?: string
       status: 'pending' | 'running' | 'completed' | 'failed'
       input?: unknown
       output?: unknown
       error?: string
+      durationMs?: number
     }
   | { type: 'meta'; label: string; value: string }
 
@@ -74,11 +92,51 @@ export interface ClawChatMessage {
   messageSeq?: number
   status?: ClawChatMessageStatus
   parts: ClawChatMessagePart[]
+  costUsd?: number
+  tokensIn?: number
+  tokensOut?: number
 }
 
 export function mapHistoryItemToClawMessage(
   item: BrowserOSChatHistoryItem,
 ): ClawChatMessage {
+  const parts: ClawChatMessagePart[] = []
+
+  // Reasoning, then tool calls, then text — the chronological order the
+  // agent produced them (think → act → answer).
+  if (item.reasoning && item.reasoning.text.trim().length > 0) {
+    // 0ms means thinking and the final answer were emitted in the same JSONL
+    // line (no tool calls between them) — there's no real elapsed wall-clock,
+    // so fall through to the "Thinking" trigger instead of "Thought for 0
+    // seconds" / streaming shimmer. Real multi-line turns floor at 1s.
+    const durationMs = item.reasoning.durationMs ?? 0
+    const duration =
+      durationMs > 0 ? Math.max(1, Math.round(durationMs / 1000)) : undefined
+    parts.push({
+      type: 'reasoning',
+      text: item.reasoning.text,
+      duration,
+    })
+  }
+
+  if (item.toolCalls && item.toolCalls.length > 0) {
+    for (const tc of item.toolCalls) {
+      parts.push({
+        type: 'tool-call',
+        name: tc.toolName,
+        label: tc.label,
+        subject: tc.subject,
+        status: tc.status,
+        input: tc.input,
+        output: tc.output,
+        error: tc.error,
+        durationMs: tc.durationMs,
+      })
+    }
+  }
+
+  parts.push({ type: 'text', text: item.text })
+
   return {
     id: item.id,
     role: item.role,
@@ -87,7 +145,10 @@ export function mapHistoryItemToClawMessage(
     source: item.source,
     messageSeq: item.messageSeq,
     status: 'historical',
-    parts: [{ type: 'text', text: item.text }],
+    parts,
+    costUsd: item.costUsd,
+    tokensIn: item.tokensIn,
+    tokensOut: item.tokensOut,
   }
 }
 

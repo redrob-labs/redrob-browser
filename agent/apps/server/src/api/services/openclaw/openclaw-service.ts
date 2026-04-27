@@ -18,6 +18,7 @@ import { DEFAULT_PORTS } from '@browseros/shared/constants/ports'
 import { getOpenClawDir } from '../../../lib/browseros-dir'
 import { logger } from '../../../lib/logger'
 import type { MonitoringChatTurn } from '../../../monitoring/types'
+import { buildToolLabel } from '../../../tools/tool-label-registry'
 import {
   type AgentLiveStatus,
   type AgentSessionState,
@@ -167,6 +168,23 @@ export interface BrowserOSOpenClawAgentSessionResponse {
   session: BrowserOSOpenClawSession | null
 }
 
+export interface BrowserOSChatHistoryToolCall {
+  toolCallId?: string
+  toolName: string
+  label: string
+  subject?: string
+  status: 'completed' | 'failed'
+  input?: Record<string, unknown>
+  output?: string
+  error?: string
+  durationMs?: number
+}
+
+export interface BrowserOSChatHistoryReasoning {
+  text: string
+  durationMs?: number
+}
+
 export interface BrowserOSChatHistoryItem {
   id: string
   role: 'user' | 'assistant'
@@ -175,6 +193,11 @@ export interface BrowserOSChatHistoryItem {
   messageSeq: number
   sessionKey: string
   source: OpenClawSessionSource
+  costUsd?: number
+  tokensIn?: number
+  tokensOut?: number
+  toolCalls?: BrowserOSChatHistoryToolCall[]
+  reasoning?: BrowserOSChatHistoryReasoning
 }
 
 export interface BrowserOSOpenClawHistoryPageResponse {
@@ -257,7 +280,72 @@ function jsonlEventsToHistoryItems(
   const items: BrowserOSChatHistoryItem[] = []
   let seq = 0
 
+  // Accumulate tool calls between text messages. The agent emits
+  // tool_use → tool_result pairs interspersed with assistant text. We
+  // pair them by toolCallId and attach the resulting list to the next
+  // assistant message (the one that follows the tool sequence).
+  let pendingToolCalls: BrowserOSChatHistoryToolCall[] = []
+  const pendingToolStarts = new Map<string, ClawEvent>()
+
+  // Accumulate thinking blocks across the turn — there can be multiple
+  // (e.g., think → tool → think → tool → answer). We collapse them into
+  // a single Reasoning block per assistant message so the UI shows one
+  // collapsible per turn, with duration = first thinking → final answer.
+  let pendingReasoningTexts: string[] = []
+  let pendingReasoningFirstAt: number | null = null
+
   for (const event of events) {
+    if (event.type === 'agent.thinking') {
+      const text = event.content.trim()
+      if (text) pendingReasoningTexts.push(text)
+      if (pendingReasoningFirstAt == null) {
+        pendingReasoningFirstAt = event.createdAt
+      }
+      continue
+    }
+
+    if (event.type === 'agent.tool_use') {
+      if (event.toolCallId) {
+        pendingToolStarts.set(event.toolCallId, event)
+      }
+      // Keep order — record the tool call now with status pending; we'll
+      // patch the result/error/duration when the matching tool_result arrives.
+      const rawName = event.toolName ?? event.content
+      const { label, subject } = buildToolLabel(rawName, event.toolArguments)
+      pendingToolCalls.push({
+        toolCallId: event.toolCallId,
+        toolName: rawName,
+        label,
+        subject,
+        status: 'completed', // optimistic; downgraded if a failed result arrives
+        input: event.toolArguments,
+      })
+      continue
+    }
+
+    if (event.type === 'agent.tool_result') {
+      // Find the matching tool_use entry by toolCallId and patch it
+      const match = pendingToolCalls.find(
+        (t) => t.toolCallId && t.toolCallId === event.toolCallId,
+      )
+      if (match) {
+        if (event.isError) {
+          match.status = 'failed'
+          match.error = event.content
+        } else {
+          match.output = event.content
+        }
+        const start = event.toolCallId
+          ? pendingToolStarts.get(event.toolCallId)
+          : undefined
+        if (start) {
+          match.durationMs = Math.max(0, event.createdAt - start.createdAt)
+          if (event.toolCallId) pendingToolStarts.delete(event.toolCallId)
+        }
+      }
+      continue
+    }
+
     if (event.type !== 'user.message' && event.type !== 'agent.message') {
       continue
     }
@@ -289,12 +377,17 @@ function jsonlEventsToHistoryItems(
           .trim()
           .replace(/^User:\s*/i, '')
       } else {
+        // Reset all per-turn buffers — they belong to a discarded turn
+        pendingToolCalls = []
+        pendingToolStarts.clear()
+        pendingReasoningTexts = []
+        pendingReasoningFirstAt = null
         continue
       }
       if (!text) continue
     }
 
-    items.push({
+    const item: BrowserOSChatHistoryItem = {
       id: `${sessionKey}:${seq}`,
       role: event.type === 'user.message' ? 'user' : 'assistant',
       text,
@@ -302,7 +395,48 @@ function jsonlEventsToHistoryItems(
       messageSeq: seq,
       sessionKey,
       source,
-    })
+    }
+
+    if (event.type === 'agent.message') {
+      // Pass through per-turn cost and token data
+      if (event.costUsd) item.costUsd = event.costUsd
+      if (event.tokensIn) item.tokensIn = event.tokensIn
+      if (event.tokensOut) item.tokensOut = event.tokensOut
+
+      // Attach any tool calls that happened before this assistant message
+      if (pendingToolCalls.length > 0) {
+        item.toolCalls = pendingToolCalls
+        pendingToolCalls = []
+        pendingToolStarts.clear()
+      }
+
+      // Attach accumulated thinking. Duration is from the first thinking
+      // event to the final answer — the wall-clock time the user waited
+      // through the model's reasoning loop.
+      if (pendingReasoningTexts.length > 0) {
+        const reasoning: BrowserOSChatHistoryReasoning = {
+          text: pendingReasoningTexts.join('\n\n'),
+        }
+        if (pendingReasoningFirstAt != null) {
+          reasoning.durationMs = Math.max(
+            0,
+            event.createdAt - pendingReasoningFirstAt,
+          )
+        }
+        item.reasoning = reasoning
+        pendingReasoningTexts = []
+        pendingReasoningFirstAt = null
+      }
+    } else if (event.type === 'user.message') {
+      // User messages reset all per-turn buffers — anything pending was
+      // part of an earlier turn that had no final assistant message.
+      pendingToolCalls = []
+      pendingToolStarts.clear()
+      pendingReasoningTexts = []
+      pendingReasoningFirstAt = null
+    }
+
+    items.push(item)
     seq++
   }
 
