@@ -1,4 +1,4 @@
-BINARY := balpha
+BINARY := browseros-dogfood
 SOURCES := $(shell find . -name '*.go') go.mod go.sum
 PREFIX ?= $(HOME)/bin
 

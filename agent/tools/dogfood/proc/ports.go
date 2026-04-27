@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"browseros-alpha/config"
+	"browseros-dogfood/config"
 )
 
 func ResolvePorts(start config.Ports) (config.Ports, bool, error) {

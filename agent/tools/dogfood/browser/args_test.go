@@ -4,14 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"browseros-alpha/config"
+	"browseros-dogfood/config"
 )
 
 func TestBuildArgs(t *testing.T) {
 	args := BuildArgs(ArgsConfig{
 		Binary:      "/Applications/BrowserOS.app/Contents/MacOS/BrowserOS",
 		AgentRoot:   "/repo/packages/browseros-agent",
-		UserDataDir: "/tmp/balpha",
+		UserDataDir: "/tmp/browseros-dogfood",
 		ProfileDir:  "Default",
 		Ports:       config.Ports{CDP: 9015, Server: 9115, Extension: 9315},
 	})
@@ -22,7 +22,7 @@ func TestBuildArgs(t *testing.T) {
 		"--browseros-server-port=9115",
 		"--browseros-proxy-port=9115",
 		"--browseros-extension-port=9315",
-		"--user-data-dir=/tmp/balpha",
+		"--user-data-dir=/tmp/browseros-dogfood",
 		"--profile-directory=Default",
 		"--disable-browseros-server",
 		"--disable-browseros-extensions",
@@ -43,7 +43,7 @@ func TestBuildArgsHeadless(t *testing.T) {
 	args := BuildArgs(ArgsConfig{
 		Binary:      "/bin/browser",
 		AgentRoot:   "/repo/packages/browseros-agent",
-		UserDataDir: "/tmp/balpha",
+		UserDataDir: "/tmp/browseros-dogfood",
 		Ports:       config.Ports{CDP: 1, Server: 2, Extension: 3},
 		Headless:    true,
 	})

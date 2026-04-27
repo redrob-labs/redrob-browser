@@ -4,7 +4,7 @@ import (
 	"net"
 	"testing"
 
-	"browseros-alpha/config"
+	"browseros-dogfood/config"
 )
 
 func TestResolvePortsIncrementsBusyPort(t *testing.T) {

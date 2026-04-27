@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"browseros-alpha/config"
+	"browseros-dogfood/config"
 )
 
 func TestPrintLogsShowsDirectoryAndFiles(t *testing.T) {

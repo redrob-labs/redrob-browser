@@ -1,4 +1,4 @@
-module browseros-alpha
+module browseros-dogfood
 
 go 1.25.7
 

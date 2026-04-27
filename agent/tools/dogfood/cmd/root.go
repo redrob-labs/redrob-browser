@@ -8,9 +8,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:               "balpha",
-	Short:             "BrowserOS alpha dogfooding CLI",
-	Long:              "balpha - BrowserOS alpha dogfooding CLI",
+	Use:               "browseros-dogfood",
+	Short:             "BrowserOS dogfooding CLI",
+	Long:              "browseros-dogfood - BrowserOS dogfooding CLI",
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 	SilenceUsage:      true,
 	SilenceErrors:     true,

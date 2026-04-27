@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"browseros-alpha/config"
+	"browseros-dogfood/config"
 )
 
 type ArgsConfig struct {

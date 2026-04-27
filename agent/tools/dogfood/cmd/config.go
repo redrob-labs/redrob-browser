@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	"browseros-alpha/config"
+	"browseros-dogfood/config"
 
 	"github.com/spf13/cobra"
 )
@@ -17,12 +17,12 @@ func init() {
 
 var configCmd = &cobra.Command{
 	Use:   "config",
-	Short: "Manage balpha config",
+	Short: "Manage browseros-dogfood config",
 }
 
 var configEditCmd = &cobra.Command{
 	Use:   "edit",
-	Short: "Open balpha config in $EDITOR",
+	Short: "Open browseros-dogfood config in $EDITOR",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path, err := config.Path()
 		if err != nil {

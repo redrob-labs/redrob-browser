@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"browseros-alpha/internal/fspath"
+	"browseros-dogfood/internal/fspath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -50,9 +50,9 @@ func Path() (string, error) {
 
 func DefaultConfigDir(home string) string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "balpha")
+		return filepath.Join(xdg, "browseros-dogfood")
 	}
-	return filepath.Join(home, ".config", "balpha")
+	return filepath.Join(home, ".config", "browseros-dogfood")
 }
 
 func Defaults(home string) Config {
@@ -89,7 +89,7 @@ func Save(path string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	header := "# balpha configuration\n# Run: balpha init to reconfigure\n\n"
+	header := "# browseros-dogfood configuration\n# Run: browseros-dogfood init to reconfigure\n\n"
 	return os.WriteFile(path, append([]byte(header), data...), 0644)
 }
 

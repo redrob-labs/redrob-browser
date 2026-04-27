@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"browseros-alpha/internal/fspath"
+	"browseros-dogfood/internal/fspath"
 )
 
 type ImportConfig struct {

@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"browseros-alpha/config"
-	"browseros-alpha/pipeline"
-	"browseros-alpha/profile"
+	"browseros-dogfood/config"
+	"browseros-dogfood/pipeline"
+	"browseros-dogfood/profile"
 
 	"github.com/spf13/cobra"
 )
@@ -21,7 +21,7 @@ func init() {
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Create or update balpha config",
+	Short: "Create or update browseros-dogfood config",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -50,7 +50,7 @@ var initCmd = &cobra.Command{
 		if err := pipeline.WriteProductionEnvFiles(cfg.AgentRoot(), cfg); err != nil {
 			return err
 		}
-		fmt.Printf("Config written: %s\nRun: balpha start\n", path)
+		fmt.Printf("Config written: %s\nRun: browseros-dogfood start\n", path)
 		return nil
 	},
 }

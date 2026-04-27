@@ -1,6 +1,6 @@
 package main
 
-import "browseros-alpha/cmd"
+import "browseros-dogfood/cmd"
 
 func main() {
 	cmd.Execute()

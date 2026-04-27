@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"browseros-alpha/config"
-	"browseros-alpha/proc"
+	"browseros-dogfood/config"
+	"browseros-dogfood/proc"
 
 	"github.com/spf13/cobra"
 )
@@ -16,7 +16,7 @@ func init() {
 
 var logsCmd = &cobra.Command{
 	Use:   "logs",
-	Short: "Print balpha log files",
+	Short: "Print browseros-dogfood log files",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadConfigWithoutValidation()
 		if err != nil {

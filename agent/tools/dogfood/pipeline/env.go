@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"browseros-alpha/config"
+	"browseros-dogfood/config"
 )
 
 func WriteProductionEnvFiles(agentRoot string, cfg config.Config) error {

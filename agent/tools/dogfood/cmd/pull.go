@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"browseros-alpha/pipeline"
+	"browseros-dogfood/pipeline"
 
 	"github.com/spf13/cobra"
 )

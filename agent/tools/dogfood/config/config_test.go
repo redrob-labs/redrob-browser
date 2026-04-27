@@ -17,10 +17,10 @@ func TestDefaults(t *testing.T) {
 	if cfg.SourceUserDataDir != filepath.Join(home, "Library/Application Support/BrowserOS") {
 		t.Fatalf("unexpected source dir: %s", cfg.SourceUserDataDir)
 	}
-	if cfg.DevUserDataDir != filepath.Join(home, ".config/balpha/profile") {
+	if cfg.DevUserDataDir != filepath.Join(home, ".config/browseros-dogfood/profile") {
 		t.Fatalf("unexpected dev dir: %s", cfg.DevUserDataDir)
 	}
-	if cfg.LogDir() != filepath.Join(home, ".config/balpha/profile/logs") {
+	if cfg.LogDir() != filepath.Join(home, ".config/browseros-dogfood/profile/logs") {
 		t.Fatalf("unexpected log dir: %s", cfg.LogDir())
 	}
 	if cfg.DevProfileDir != "Default" {
@@ -44,9 +44,9 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestLogPathUsesProfileLogDir(t *testing.T) {
-	cfg := Config{DevUserDataDir: "/tmp/balpha-profile"}
+	cfg := Config{DevUserDataDir: "/tmp/browseros-dogfood-profile"}
 	got := cfg.LogPath("server.log")
-	want := filepath.Join("/tmp/balpha-profile", "logs", "server.log")
+	want := filepath.Join("/tmp/browseros-dogfood-profile", "logs", "server.log")
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -117,7 +117,7 @@ func TestConfigPathHonorsXDG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(dir, "balpha", "config.yaml")
+	want := filepath.Join(dir, "browseros-dogfood", "config.yaml")
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -131,7 +131,7 @@ func TestPathDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(home, ".config", "balpha", "config.yaml")
+	want := filepath.Join(home, ".config", "browseros-dogfood", "config.yaml")
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}

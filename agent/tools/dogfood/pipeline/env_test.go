@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"browseros-alpha/config"
+	"browseros-dogfood/config"
 )
 
 func TestWriteProductionEnvFiles(t *testing.T) {

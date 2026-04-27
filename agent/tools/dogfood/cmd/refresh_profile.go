@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"browseros-alpha/config"
-	"browseros-alpha/profile"
+	"browseros-dogfood/config"
+	"browseros-dogfood/profile"
 
 	"github.com/spf13/cobra"
 )
@@ -15,7 +15,7 @@ func init() {
 
 var refreshProfileCmd = &cobra.Command{
 	Use:   "refresh-profile",
-	Short: "Copy the configured BrowserOS profile into the balpha dev profile",
+	Short: "Copy the configured BrowserOS profile into the browseros-dogfood dev profile",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadConfig()
 		if err != nil {
@@ -52,7 +52,7 @@ func loadConfigWithoutValidation() (config.Config, error) {
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
-		return config.Config{}, fmt.Errorf("missing config at %s; run balpha init: %w", path, err)
+		return config.Config{}, fmt.Errorf("missing config at %s; run browseros-dogfood init: %w", path, err)
 	}
 	return cfg, nil
 }

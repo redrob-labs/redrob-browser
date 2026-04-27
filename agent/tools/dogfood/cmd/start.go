@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"browseros-alpha/browser"
-	"browseros-alpha/config"
-	"browseros-alpha/pipeline"
-	"browseros-alpha/proc"
-	"browseros-alpha/profile"
+	"browseros-dogfood/browser"
+	"browseros-dogfood/config"
+	"browseros-dogfood/pipeline"
+	"browseros-dogfood/proc"
+	"browseros-dogfood/profile"
 
 	"github.com/spf13/cobra"
 )
@@ -35,7 +35,7 @@ func init() {
 
 var startCmd = &cobra.Command{
 	Use:   "start",
-	Short: "Start BrowserOS alpha dogfooding environment",
+	Short: "Start BrowserOS dogfooding environment",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadConfig()
 		if err != nil {
