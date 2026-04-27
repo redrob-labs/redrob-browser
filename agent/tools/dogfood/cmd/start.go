@@ -34,8 +34,9 @@ func init() {
 }
 
 var startCmd = &cobra.Command{
-	Use:   "start",
-	Short: "Start BrowserOS dogfooding environment",
+	Use:     "start",
+	Short:   "Start BrowserOS dogfooding environment",
+	GroupID: groupRun,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadConfig()
 		if err != nil {
@@ -44,7 +45,7 @@ var startCmd = &cobra.Command{
 		agentRoot := cfg.AgentRoot()
 		runner := pipeline.ExecRunner{}
 		if dirty, err := pipeline.Dirty(cfg.RepoPath, runner); err == nil && dirty {
-			fmt.Fprintln(os.Stderr, "warning: checkout has uncommitted changes; start will use current files")
+			fmt.Fprintln(os.Stderr, warnStyle.Sprint("warning: checkout has uncommitted changes; start will use current files"))
 		}
 		if startRefreshProfile || !exists(cfg.DevUserDataDir) {
 			if err := profile.Import(profile.ImportConfig{

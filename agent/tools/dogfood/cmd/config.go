@@ -16,8 +16,9 @@ func init() {
 }
 
 var configCmd = &cobra.Command{
-	Use:   "config",
-	Short: "Manage browseros-dogfood config",
+	Use:     "config",
+	Short:   "Manage browseros-dogfood config",
+	GroupID: groupSetup,
 }
 
 var configEditCmd = &cobra.Command{

@@ -16,8 +16,9 @@ func init() {
 }
 
 var pullCmd = &cobra.Command{
-	Use:   "pull",
-	Short: "Refresh the configured BrowserOS checkout",
+	Use:     "pull",
+	Short:   "Refresh the configured BrowserOS checkout",
+	GroupID: groupRun,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadConfig()
 		if err != nil {
@@ -29,7 +30,7 @@ var pullCmd = &cobra.Command{
 		}
 		branch := pipeline.Branch(cfg.RepoPath, runner)
 		head, _ := pipeline.Head(cfg.RepoPath, runner)
-		fmt.Printf("Repo: %s %s %s\n", cfg.RepoPath, branch, head)
+		fmt.Printf("%s %s %s %s\n", labelStyle.Sprint("Repo:"), pathStyle.Sprint(cfg.RepoPath), commandStyle.Sprint(branch), dimStyle.Sprint(head))
 		dirty, err := pipeline.Dirty(cfg.RepoPath, runner)
 		if err != nil {
 			return err
@@ -41,7 +42,7 @@ var pullCmd = &cobra.Command{
 			return err
 		}
 		newHead, _ := pipeline.Head(cfg.RepoPath, runner)
-		fmt.Printf("Updated to %s\n", newHead)
+		fmt.Printf("%s %s\n", successStyle.Sprint("Updated to"), commandStyle.Sprint(newHead))
 		return nil
 	},
 }

@@ -14,8 +14,9 @@ func init() {
 }
 
 var refreshProfileCmd = &cobra.Command{
-	Use:   "refresh-profile",
-	Short: "Copy the configured BrowserOS profile into the browseros-dogfood dev profile",
+	Use:     "refresh-profile",
+	Short:   "Copy the configured BrowserOS profile into the browseros-dogfood dev profile",
+	GroupID: groupRun,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadConfig()
 		if err != nil {
@@ -29,7 +30,7 @@ var refreshProfileCmd = &cobra.Command{
 		}); err != nil {
 			return err
 		}
-		fmt.Printf("Profile refreshed: %s\n", cfg.DevUserDataDir)
+		fmt.Printf("%s %s\n", successStyle.Sprint("Profile refreshed:"), pathStyle.Sprint(cfg.DevUserDataDir))
 		return nil
 	},
 }

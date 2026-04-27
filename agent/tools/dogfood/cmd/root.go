@@ -16,6 +16,38 @@ var rootCmd = &cobra.Command{
 	SilenceErrors:     true,
 }
 
+const usageTemplate = `{{helpHeader "Usage:"}}{{if .Runnable}}
+  {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
+  {{.CommandPath}} [command]{{end}}{{if .HasExample}}
+
+{{helpHeader "Examples:"}}
+{{.Example}}{{end}}{{if .HasAvailableSubCommands}}
+{{groupedHelp .}}{{end}}{{if .HasAvailableLocalFlags}}
+
+{{helpHeader "Flags:"}}
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+
+{{helpHeader "Global Flags:"}}
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableSubCommands}}
+
+{{helpHint (printf "Use \"%s [command] --help\" for more information." .CommandPath)}}{{end}}
+`
+
+func init() {
+	cobra.AddTemplateFunc("helpHeader", helpHeader)
+	cobra.AddTemplateFunc("helpHint", helpHint)
+	cobra.AddTemplateFunc("groupedHelp", groupedHelp)
+
+	rootCmd.AddGroup(
+		&cobra.Group{ID: groupSetup, Title: "Setup:"},
+		&cobra.Group{ID: groupRun, Title: "Run:"},
+		&cobra.Group{ID: groupInspect, Title: "Inspect:"},
+		&cobra.Group{ID: groupOther, Title: groupOtherTitle},
+	)
+	rootCmd.SetHelpCommandGroupID(groupOther)
+	rootCmd.SetUsageTemplate(usageTemplate)
+}
+
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

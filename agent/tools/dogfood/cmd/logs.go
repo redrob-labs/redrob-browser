@@ -15,8 +15,9 @@ func init() {
 }
 
 var logsCmd = &cobra.Command{
-	Use:   "logs",
-	Short: "Print browseros-dogfood log files",
+	Use:     "logs",
+	Short:   "Print browseros-dogfood log files",
+	GroupID: groupInspect,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadConfigWithoutValidation()
 		if err != nil {
@@ -28,17 +29,17 @@ var logsCmd = &cobra.Command{
 
 func printLogs(out io.Writer, cfg config.Config) error {
 	logDir := cfg.LogDir()
-	fmt.Fprintf(out, "Log directory: %s\n", logDir)
+	fmt.Fprintf(out, "%s %s\n", labelStyle.Sprint("Log directory:"), pathStyle.Sprint(logDir))
 	files, err := proc.ListLogFiles(logDir)
 	if err != nil {
 		return err
 	}
 	if len(files) == 0 {
-		fmt.Fprintln(out, "No log files found.")
+		fmt.Fprintln(out, dimStyle.Sprint("No log files found."))
 		return nil
 	}
 	for _, file := range files {
-		fmt.Fprintf(out, "%s (%d bytes, modified %s)\n", file.Path, file.Size, file.ModTime.Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(out, "%s %s\n", pathStyle.Sprint(file.Path), dimStyle.Sprintf("(%d bytes, modified %s)", file.Size, file.ModTime.Format("2006-01-02 15:04:05")))
 	}
 	return nil
 }

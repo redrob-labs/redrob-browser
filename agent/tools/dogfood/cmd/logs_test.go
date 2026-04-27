@@ -28,7 +28,7 @@ func TestPrintLogsShowsDirectoryAndFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := out.String()
+	got := stripANSI(out.String())
 	for _, want := range []string{
 		"Log directory: " + logDir,
 		filepath.Join(logDir, "chromium.log"),
@@ -48,7 +48,7 @@ func TestPrintLogsHandlesMissingDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := out.String()
+	got := stripANSI(out.String())
 	if !strings.Contains(got, "No log files found.") {
 		t.Fatalf("unexpected output:\n%s", got)
 	}
