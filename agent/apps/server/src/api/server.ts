@@ -24,6 +24,7 @@ import { logger } from '../lib/logger'
 import { Sentry } from '../lib/sentry'
 import { getLimaHomeDir, resolveBundledLimactl, VM_NAME } from '../lib/vm'
 import { createAclRoutes } from './routes/acl'
+import { createAgentRoutes } from './routes/agents'
 import { createChatRoutes } from './routes/chat'
 import { createCreditsRoutes } from './routes/credits'
 import { createHealthRoute } from './routes/health'
@@ -128,6 +129,10 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/*', requireTrustedAppOrigin())
     .route('/', createMonitoringRoutes())
 
+  const agentRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createAgentRoutes())
+
   const app = new Hono<Env>()
     .use('/*', cors(defaultCorsConfig))
     .route('/health', createHealthRoute({ browser }))
@@ -202,6 +207,7 @@ export async function createHttpServer(config: HttpServerConfig) {
         browserosId,
       }),
     )
+    .route('/agents', agentRoutes)
     .route('/claw', clawRoutes)
 
   // Error handler
