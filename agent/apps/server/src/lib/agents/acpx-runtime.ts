@@ -274,10 +274,30 @@ function mapToolUseToHistoryToolCall(
 }
 
 function userContentToText(content: AcpxUserContent): string {
-  if ('Text' in content) return content.Text
+  if ('Text' in content) return unwrapBrowserosAcpPrompt(content.Text)
   if ('Mention' in content) return content.Mention.content
   if ('Image' in content) return content.Image.source ? '[image]' : ''
   return ''
+}
+
+function unwrapBrowserosAcpPrompt(value: string): string {
+  const prefix = `${BROWSEROS_ACP_AGENT_INSTRUCTIONS}
+
+<user_request>
+`
+  const suffix = `
+</user_request>`
+  if (!value.startsWith(prefix) || !value.endsWith(suffix)) return value
+
+  // TODO: nikhil: remove this once acpx/runtime exposes system prompt support.
+  return unescapePromptTagText(value.slice(prefix.length, -suffix.length))
+}
+
+function unescapePromptTagText(value: string): string {
+  return value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
 }
 
 function toolResultValue(result: AcpxToolResult): unknown {

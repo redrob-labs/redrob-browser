@@ -229,6 +229,82 @@ describe('AcpxRuntime', () => {
     })
   })
 
+  it('shows only the user request for persisted BrowserOS-wrapped prompts', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'browseros-acpx-runtime-'))
+    const stateDir = await mkdtemp(join(tmpdir(), 'browseros-acpx-state-'))
+    tempDirs.push(cwd, stateDir)
+    const timestamp = '2026-04-28T20:00:00.000Z'
+    const agent: AgentDefinition = {
+      id: 'agent-1',
+      name: 'Browser bot',
+      adapter: 'codex',
+      permissionMode: 'approve-all',
+      sessionKey: 'agent:agent-1:main',
+      createdAt: 1000,
+      updatedAt: 1000,
+    }
+    const record: AcpSessionRecord = {
+      schema: 'acpx.session.v1',
+      acpxRecordId: agent.sessionKey,
+      acpSessionId: 'sid-1',
+      agentSessionId: 'inner-1',
+      agentCommand: 'codex --acp',
+      cwd,
+      name: agent.sessionKey,
+      createdAt: timestamp,
+      lastUsedAt: timestamp,
+      lastSeq: 0,
+      eventLog: {
+        active_path: '',
+        segment_count: 0,
+        max_segment_bytes: 0,
+        max_segments: 0,
+      },
+      closed: false,
+      messages: [
+        {
+          User: {
+            id: 'user-1',
+            content: [
+              {
+                Text: `<role>
+You are BrowserOS - a browser agent with full control of a Chromium browser through the BrowserOS MCP server.
+
+Use the BrowserOS MCP server for all browser tasks, including browsing the web, interacting with pages, inspecting browser state, and managing tabs, windows, bookmarks, and history.
+</role>
+
+<user_request>
+open &lt;example.com&gt;
+</user_request>`,
+              },
+            ],
+          },
+        },
+      ],
+      updated_at: timestamp,
+      cumulative_token_usage: {},
+      request_token_usage: {},
+      acpx: {},
+    }
+    await createRuntimeStore({ stateDir }).save(record)
+
+    const history = await new AcpxRuntime({ cwd, stateDir }).getHistory({
+      agent,
+      sessionId: 'main',
+    })
+
+    expect(history.items).toEqual([
+      {
+        id: 'agent:agent-1:main:0',
+        agentId: 'agent-1',
+        sessionId: 'main',
+        role: 'user',
+        text: 'open <example.com>',
+        createdAt: Date.parse(timestamp),
+      },
+    ])
+  })
+
   it('continues the turn when runtime config control is unavailable', async () => {
     const calls: Array<{ method: string; input: unknown }> = []
     const runtime = new AcpxRuntime({
