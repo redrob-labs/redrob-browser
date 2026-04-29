@@ -29,6 +29,7 @@ export interface VmManifest {
   agents: Record<string, VmAgentEntry>
 }
 
+export type VmAgentTarball = VmArtifact
 export type VersionComparison = 'same' | 'upgrade' | 'downgrade' | 'fresh'
 
 export async function readCachedManifest(
@@ -78,7 +79,7 @@ export function agentForArch(
 ): {
   image: string
   version: string
-  tarball: VmManifest['agents'][string]['tarballs'][Arch]
+  tarball: VmAgentTarball
 } {
   const agent = manifest.agents[name]
   if (!agent) throw new Error(`missing agent in VM manifest: ${name}`)

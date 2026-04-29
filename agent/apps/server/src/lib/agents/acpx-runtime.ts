@@ -757,6 +757,8 @@ function resolveOpenclawAcpCommand(
     `LIMA_HOME=${limaHome}`,
     limactl,
     'shell',
+    '--workdir',
+    '/',
     vm,
     '--',
     'nerdctl',

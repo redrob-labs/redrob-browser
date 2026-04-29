@@ -5,6 +5,7 @@
  */
 
 import {
+  OPENCLAW_AGENT_NAME,
   OPENCLAW_GATEWAY_CONTAINER_NAME,
   OPENCLAW_GATEWAY_CONTAINER_PORT,
 } from '@browseros/shared/constants/openclaw'
@@ -39,7 +40,6 @@ const GATEWAY_PATH = [
 ].join(':')
 
 export type GatewayContainerSpec = {
-  image: string
   hostPort: number
   hostHome: string
   envFilePath: string
@@ -50,7 +50,10 @@ export type GatewayContainerSpec = {
 export interface ContainerRuntimeConfig {
   vm: VmRuntime
   shell: ContainerCli
-  loader: { ensureImageLoaded(ref: string, onLog?: LogFn): Promise<void> }
+  loader: {
+    ensureImageLoaded(ref: string, onLog?: LogFn): Promise<void>
+    ensureAgentImageLoaded(name: string, onLog?: LogFn): Promise<string>
+  }
   projectDir: string
 }
 
@@ -59,6 +62,7 @@ export class ContainerRuntime {
   private readonly shell: ContainerCli
   private readonly loader: {
     ensureImageLoaded(ref: string, onLog?: LogFn): Promise<void>
+    ensureAgentImageLoaded(name: string, onLog?: LogFn): Promise<string>
   }
   private readonly projectDir: string
 
@@ -96,8 +100,8 @@ export class ContainerRuntime {
     onLog?: LogFn,
   ): Promise<void> {
     await this.removeGatewayContainer(onLog)
-    await this.loader.ensureImageLoaded(input.image, onLog)
-    const container = await this.buildGatewayContainerSpec(input)
+    const image = await this.ensureGatewayImageLoaded(onLog)
+    const container = await this.buildGatewayContainerSpec(input, image)
     await this.shell.createContainer(container, onLog)
     await this.shell.startContainer(container.name)
   }
@@ -183,7 +187,7 @@ export class ContainerRuntime {
   ): Promise<number> {
     const setupContainerName = `${OPENCLAW_GATEWAY_CONTAINER_NAME}-setup`
     await this.shell.removeContainer(setupContainerName, { force: true }, onLog)
-    await this.loader.ensureImageLoaded(spec.image, onLog)
+    const image = await this.ensureGatewayImageLoaded(onLog)
     const setupArgs = command[0] === 'node' ? command.slice(1) : command
     const createResult = await this.shell.runCommand(
       [
@@ -191,7 +195,7 @@ export class ContainerRuntime {
         '--name',
         setupContainerName,
         ...(await this.buildGatewayRunArgs(spec)),
-        spec.image,
+        image,
         'node',
         ...setupArgs,
       ],
@@ -235,10 +239,11 @@ export class ContainerRuntime {
 
   private async buildGatewayContainerSpec(
     input: GatewayContainerSpec,
+    image: string,
   ): Promise<ContainerSpec> {
     return {
       name: OPENCLAW_GATEWAY_CONTAINER_NAME,
-      image: input.image,
+      image,
       restart: 'unless-stopped',
       ports: [
         {
@@ -288,6 +293,16 @@ export class ContainerRuntime {
 
   private async hostContainersInternalEntry(): Promise<string> {
     return `host.containers.internal:${await this.vm.getDefaultGateway()}`
+  }
+
+  private async ensureGatewayImageLoaded(onLog?: LogFn): Promise<string> {
+    // Local image testing can bypass the synced VM manifest with OPENCLAW_IMAGE.
+    const override = process.env.OPENCLAW_IMAGE?.trim()
+    if (override) {
+      await this.loader.ensureImageLoaded(override, onLog)
+      return override
+    }
+    return this.loader.ensureAgentImageLoaded(OPENCLAW_AGENT_NAME, onLog)
   }
 
   private buildGatewayEnv(input: GatewayContainerSpec): Record<string, string> {

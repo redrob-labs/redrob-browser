@@ -6,7 +6,7 @@
 
 import { basename, join } from 'node:path'
 import { ContainerCliError, ImageLoadError } from '../vm/errors'
-import type { VmManifest } from '../vm/manifest'
+import type { VmAgentTarball, VmManifest } from '../vm/manifest'
 import type { Arch } from '../vm/paths'
 import { getImageCacheDir, hostPathToGuest } from '../vm/paths'
 import type { ContainerCli } from './container-cli'
@@ -24,6 +24,28 @@ export class ImageLoader {
     if (await this.cli.imageExists(ref)) return
 
     const tarball = this.resolveTarball(ref)
+    await this.loadResolvedTarball(ref, tarball, onLog)
+  }
+
+  /** Load an agent tarball from the VM cache and return its local image ref. */
+  async ensureAgentImageLoaded(name: string, onLog?: LogFn): Promise<string> {
+    const agent = this.resolveAgent(name)
+    const ref = `${agent.image}:${agent.version}`
+    if (await this.cli.imageExists(ref)) return ref
+
+    const tarball = agent.tarballs[this.arch]
+    if (!tarball) {
+      throw new ImageLoadError(ref, `no ${this.arch} tarball in manifest`)
+    }
+    await this.loadResolvedTarball(ref, tarball, onLog)
+    return ref
+  }
+
+  private async loadResolvedTarball(
+    ref: string,
+    tarball: VmAgentTarball,
+    onLog?: LogFn,
+  ): Promise<void> {
     const hostPath = join(
       getImageCacheDir(this.browserosRoot),
       basename(tarball.key),
@@ -47,9 +69,7 @@ export class ImageLoader {
     }
   }
 
-  private resolveTarball(
-    ref: string,
-  ): VmManifest['agents'][string]['tarballs'][Arch] {
+  private resolveTarball(ref: string): VmAgentTarball {
     for (const agent of Object.values(this.manifest.agents)) {
       if (`${agent.image}:${agent.version}` !== ref) continue
       const tarball = agent.tarballs[this.arch]
@@ -60,5 +80,11 @@ export class ImageLoader {
     }
 
     throw new ImageLoadError(ref, `no agent in manifest matches ${ref}`)
+  }
+
+  private resolveAgent(name: string): VmManifest['agents'][string] {
+    const agent = this.manifest.agents[name]
+    if (!agent) throw new ImageLoadError(name, `no agent in manifest: ${name}`)
+    return agent
   }
 }

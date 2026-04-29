@@ -512,7 +512,9 @@ open &lt;example.com&gt;
     const runtimeOptions = calls[0]?.input as AcpRuntimeOptions
     const command = runtimeOptions.agentRegistry.resolve('openclaw')
     expect(command).toContain('env LIMA_HOME=/Users/dev/.browseros-dev/lima')
-    expect(command).toContain('/opt/homebrew/bin/limactl shell browseros-vm --')
+    expect(command).toContain(
+      '/opt/homebrew/bin/limactl shell --workdir / browseros-vm --',
+    )
     expect(command).toContain(
       'nerdctl exec -i -e OPENCLAW_HIDE_BANNER=1 -e OPENCLAW_SUPPRESS_NOTES=1 browseros-openclaw-openclaw-gateway-1',
     )

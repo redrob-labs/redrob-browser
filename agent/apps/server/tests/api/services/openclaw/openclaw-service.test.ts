@@ -315,7 +315,6 @@ describe('OpenClawService', () => {
     expect(steps).toEqual(['onboard', 'batch', 'validate', 'start', 'ready'])
     expect(startGateway).toHaveBeenCalledWith(
       expect.objectContaining({
-        image: 'ghcr.io/openclaw/openclaw:2026.4.12',
         hostPort: expect.any(Number),
         hostHome: tempDir,
         envFilePath: join(tempDir, '.openclaw', '.env'),
@@ -323,6 +322,7 @@ describe('OpenClawService', () => {
       }),
       expect.any(Function),
     )
+    expect(startGateway.mock.calls[0]?.[0]).not.toHaveProperty('image')
     expect(restartGateway).not.toHaveBeenCalled()
   })
 
@@ -610,7 +610,6 @@ describe('OpenClawService', () => {
     expect(ensureReady).toHaveBeenCalledTimes(1)
     expect(startGateway).toHaveBeenCalledWith(
       expect.objectContaining({
-        image: 'ghcr.io/openclaw/openclaw:2026.4.12',
         hostPort: expect.any(Number),
         hostHome: tempDir,
         envFilePath: join(tempDir, '.openclaw', '.env'),
@@ -753,7 +752,6 @@ describe('OpenClawService', () => {
     expect(ensureReady).toHaveBeenCalledTimes(1)
     expect(restartGateway).toHaveBeenCalledWith(
       expect.objectContaining({
-        image: 'ghcr.io/openclaw/openclaw:2026.4.12',
         hostPort: expect.any(Number),
         hostHome: tempDir,
         envFilePath: join(tempDir, '.openclaw', '.env'),
@@ -962,7 +960,6 @@ describe('OpenClawService', () => {
     expect(ensureReady).toHaveBeenCalledTimes(1)
     expect(startGateway).toHaveBeenCalledWith(
       expect.objectContaining({
-        image: 'ghcr.io/openclaw/openclaw:2026.4.12',
         hostPort: expect.any(Number),
         hostHome: tempDir,
         envFilePath: join(tempDir, '.openclaw', '.env'),

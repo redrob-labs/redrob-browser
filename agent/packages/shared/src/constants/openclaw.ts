@@ -1,3 +1,4 @@
+export const OPENCLAW_AGENT_NAME = 'openclaw'
 export const OPENCLAW_GATEWAY_CONTAINER_PORT = 18789
 export const OPENCLAW_CONTAINER_HOME = '/home/node/.openclaw'
 export const OPENCLAW_COMPOSE_PROJECT_NAME = 'browseros-openclaw'
