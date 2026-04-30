@@ -2,14 +2,4 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$DIR/../.." && pwd)"
-
-cd "$ROOT"
-
-echo "[setup] Installing dependencies..."
-bun install --frozen-lockfile
-
-echo "[setup] Generating agent code..."
-bun run codegen:agent
-
-echo "[setup] Ready"
+exec "$DIR/run.sh" setup "$@"

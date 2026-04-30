@@ -115,6 +115,10 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	}()
 	defer reservations.ReleaseAll()
 
+	if err := runDevSetup(cmd.Context(), root, setupModeIfNeeded); err != nil {
+		return err
+	}
+
 	fmt.Println()
 	proc.LogMsgf(proc.TagInfo, "Mode: %s", proc.BoldColor.Sprint(mode))
 	proc.LogMsgf(proc.TagInfo, "Ports: CDP=%d Server=%d Extension=%d", p.CDP, p.Server, p.Extension)

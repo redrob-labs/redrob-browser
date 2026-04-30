@@ -14,6 +14,7 @@ type Tag struct {
 
 var (
 	TagBuild   = Tag{"build", color.New(color.FgYellow)}
+	TagSetup   = Tag{"setup", color.New(color.FgHiYellow)}
 	TagAgent   = Tag{"agent", color.New(color.FgMagenta)}
 	TagServer  = Tag{"server", color.New(color.FgCyan)}
 	TagBrowser = Tag{"browser", color.New(color.FgBlue)}
