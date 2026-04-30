@@ -1,32 +1,188 @@
 package proc
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"syscall"
+	"testing"
+	"time"
+)
 
-func TestWatchProcessGroupsFromPSSelectsOtherWatchGroups(t *testing.T) {
-	output := `
-  111  111 /tmp/one/browseros-dev watch
-  222  222 /tmp/two/browseros-dev watch --new
-  333  333 /tmp/one/browseros-dev cleanup
-  444  444 rg browseros-dev watch
-  555  555 bun run dev:watch
-`
+const watchLockHelperEnv = "BROWSEROS_DEV_WATCH_LOCK_HELPER"
 
-	groups := watchProcessGroupsFromPS(output, 999)
+func TestMain(m *testing.M) {
+	if os.Getenv(watchLockHelperEnv) == "1" {
+		runWatchLockHelper()
+		return
+	}
+	os.Exit(m.Run())
+}
 
-	if len(groups) != 1 || groups[0] != 111 {
-		t.Fatalf("expected only pgid 111, got %#v", groups)
+func TestWatchRunPathsStableAndDistinct(t *testing.T) {
+	baseDir := t.TempDir()
+	identity := WatchRunIdentity{
+		Mode:    "watch",
+		Profile: "/tmp/browseros-dev",
+		Ports:   Ports{CDP: 9005, Server: 9105, Extension: 9305},
+	}
+
+	first := watchRunPaths(baseDir, identity)
+	second := watchRunPaths(baseDir, identity)
+	if first != second {
+		t.Fatalf("expected stable paths, got %#v and %#v", first, second)
+	}
+
+	withDifferentPort := identity
+	withDifferentPort.Ports.Server = 9106
+	third := watchRunPaths(baseDir, withDifferentPort)
+	if third.Lock == first.Lock || third.State == first.State {
+		t.Fatalf("expected distinct paths for different ports, got %#v and %#v", first, third)
 	}
 }
 
-func TestWatchProcessGroupsFromPSDedupesProcessGroups(t *testing.T) {
-	output := `
-  111  111 /tmp/one/browseros-dev watch
-  112  111 /tmp/one/browseros-dev watch
-`
+func TestAcquireWatchRunLockWritesStateAndReleases(t *testing.T) {
+	baseDir := t.TempDir()
+	identity := WatchRunIdentity{
+		Mode:    "watch",
+		Profile: "/tmp/browseros-dev",
+		Ports:   Ports{CDP: 9005, Server: 9105, Extension: 9305},
+	}
 
-	groups := watchProcessGroupsFromPS(output, 999)
+	lock, stopped, err := AcquireWatchRunLockInDir(baseDir, identity, time.Second)
+	if err != nil {
+		t.Fatalf("AcquireWatchRunLockInDir returned error: %v", err)
+	}
+	if stopped {
+		t.Fatal("expected first acquisition not to stop another run")
+	}
 
-	if len(groups) != 1 || groups[0] != 111 {
-		t.Fatalf("expected one pgid 111, got %#v", groups)
+	paths := watchRunPaths(baseDir, identity)
+	state, err := ReadWatchRunState(paths.State)
+	if err != nil {
+		t.Fatalf("ReadWatchRunState returned error: %v", err)
+	}
+	if state.PID != os.Getpid() {
+		t.Fatalf("expected state PID %d, got %d", os.Getpid(), state.PID)
+	}
+	if state.PGID <= 0 {
+		t.Fatalf("expected positive PGID, got %d", state.PGID)
+	}
+	if state.Identity != identity {
+		t.Fatalf("expected identity %#v, got %#v", identity, state.Identity)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatalf("closing lock: %v", err)
+	}
+	if _, err := os.Stat(paths.State); !os.IsNotExist(err) {
+		t.Fatalf("expected state file to be removed on close, got %v", err)
+	}
+	if _, err := os.Stat(paths.Lock); err != nil {
+		t.Fatalf("expected lock file path to remain reusable, got %v", err)
+	}
+
+	lock, stopped, err = AcquireWatchRunLockInDir(baseDir, identity, time.Second)
+	if err != nil {
+		t.Fatalf("reacquiring lock returned error: %v", err)
+	}
+	if stopped {
+		t.Fatal("expected reacquisition after close not to stop another run")
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatalf("closing reacquired lock: %v", err)
+	}
+}
+
+func TestAcquireWatchRunLockRejectsInvalidPorts(t *testing.T) {
+	identity := WatchRunIdentity{
+		Mode:    "watch",
+		Profile: "/tmp/browseros-dev",
+		Ports:   Ports{CDP: 9005, Server: 65536, Extension: 9305},
+	}
+
+	if _, _, err := AcquireWatchRunLockInDir(t.TempDir(), identity, time.Second); err == nil {
+		t.Fatal("expected invalid port error")
+	}
+}
+
+func TestAcquireWatchRunLockStopsExistingOwnerByStatePGID(t *testing.T) {
+	baseDir := t.TempDir()
+	readyPath := filepath.Join(baseDir, "ready")
+	identity := WatchRunIdentity{
+		Mode:    "watch",
+		Profile: "/tmp/browseros-dev",
+		Ports:   Ports{CDP: 9005, Server: 9105, Extension: 9305},
+	}
+	identityJSON, err := json.Marshal(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMain")
+	cmd.Env = append(os.Environ(),
+		watchLockHelperEnv+"=1",
+		"BROWSEROS_DEV_WATCH_LOCK_BASE="+baseDir,
+		"BROWSEROS_DEV_WATCH_LOCK_READY="+readyPath,
+		"BROWSEROS_DEV_WATCH_LOCK_IDENTITY="+string(identityJSON),
+	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting helper: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	waitForFile(t, readyPath, 3*time.Second)
+
+	lock, stopped, err := AcquireWatchRunLockInDir(baseDir, identity, 3*time.Second)
+	if err != nil {
+		t.Fatalf("AcquireWatchRunLockInDir returned error: %v", err)
+	}
+	defer lock.Close()
+	if !stopped {
+		t.Fatal("expected takeover to stop existing owner")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("expected helper process to exit after takeover")
+	}
+}
+
+func runWatchLockHelper() {
+	baseDir := os.Getenv("BROWSEROS_DEV_WATCH_LOCK_BASE")
+	readyPath := os.Getenv("BROWSEROS_DEV_WATCH_LOCK_READY")
+	var identity WatchRunIdentity
+	if err := json.Unmarshal([]byte(os.Getenv("BROWSEROS_DEV_WATCH_LOCK_IDENTITY")), &identity); err != nil {
+		os.Exit(2)
+	}
+
+	lock, _, err := AcquireWatchRunLockInDir(baseDir, identity, time.Second)
+	if err != nil {
+		os.Exit(3)
+	}
+	defer lock.Close()
+	if err := os.WriteFile(readyPath, []byte("ready\n"), 0o644); err != nil {
+		os.Exit(4)
+	}
+	time.Sleep(30 * time.Second)
+}
+
+func waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", path)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

@@ -48,6 +48,26 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	p := defaultPorts
 	var reservations *proc.PortReservations
 	userDataDir := "/tmp/browseros-dev"
+	mode := "watch"
+	if watchManual {
+		mode = "manual"
+	}
+	var runLock *proc.WatchRunLock
+	acquireRunLock := func(ports proc.Ports) error {
+		lock, stopped, err := proc.AcquireWatchRunLock(proc.WatchRunIdentity{
+			Mode:    mode,
+			Profile: userDataDir,
+			Ports:   ports,
+		}, 3*time.Second)
+		if err != nil {
+			return err
+		}
+		runLock = lock
+		if stopped {
+			proc.LogMsgf(proc.TagInfo, "Stopped existing dev watch for profile %s", userDataDir)
+		}
+		return nil
+	}
 
 	if watchNew {
 		proc.LogMsg(proc.TagInfo, "Selecting random available ports...")
@@ -62,16 +82,15 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		}
 		userDataDir = dir
 		proc.LogMsgf(proc.TagInfo, "Created fresh profile: %s", userDataDir)
+		if err := acquireRunLock(p); err != nil {
+			return err
+		}
 	} else {
 		if err := os.MkdirAll(userDataDir, 0o755); err != nil {
 			return fmt.Errorf("creating user-data dir: %w", err)
 		}
-		stopped, err := proc.StopExistingWatchProcesses(3 * time.Second)
-		if err != nil {
+		if err := acquireRunLock(p); err != nil {
 			return err
-		}
-		if stopped > 0 {
-			proc.LogMsgf(proc.TagInfo, "Stopped %d existing dev watch process group(s)", stopped)
 		}
 		proc.LogMsg(proc.TagInfo, "Killing processes on preferred ports...")
 		if err := proc.KillPortsAndWait(defaultPorts, 3*time.Second); err != nil {
@@ -89,13 +108,14 @@ func runWatch(cmd *cobra.Command, args []string) error {
 				p.CDP, p.Server, p.Extension)
 		}
 	}
+	defer func() {
+		if err := runLock.Close(); err != nil {
+			proc.LogMsgf(proc.TagInfo, "Warning: closing run lock: %v", err)
+		}
+	}()
 	defer reservations.ReleaseAll()
 
 	fmt.Println()
-	mode := "watch"
-	if watchManual {
-		mode = "manual"
-	}
 	proc.LogMsgf(proc.TagInfo, "Mode: %s", proc.BoldColor.Sprint(mode))
 	proc.LogMsgf(proc.TagInfo, "Ports: CDP=%d Server=%d Extension=%d", p.CDP, p.Server, p.Extension)
 	proc.LogMsgf(proc.TagInfo, "Profile: %s", userDataDir)
