@@ -7,7 +7,7 @@
     "baseUrl": "https://openrouter.ai/api/v1",
     "supportsImages": true
   },
-  "dataset": "../data/webbench-2of4-50.jsonl",
+  "dataset": "../../data/webarena-infinity-hard-50.jsonl",
   "num_workers": 10,
   "restart_server_per_task": true,
   "browseros": {
@@ -21,6 +21,6 @@
   "captcha": {
     "api_key_env": "NOPECHA_API_KEY"
   },
-  "graders": ["performance_grader"],
+  "graders": ["infinity_state"],
   "timeout_ms": 1800000
 }

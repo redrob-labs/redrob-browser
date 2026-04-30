@@ -8,10 +8,16 @@ import type { ErrorSource, EvalConfig, GraderResult, Task } from '../types'
 
 export interface RunEvalOptions {
   configPath: string
+  config?: EvalConfig
   dataPath?: string
   query?: string
   startUrl?: string
   outputDir?: string
+}
+
+export interface RunEvalResult {
+  outputDir: string
+  summary: BatchSummary
 }
 
 // ============================================================================

@@ -1,13 +1,13 @@
 {
+  "id": "agisdk-real-smoke",
+  "dataset": "../../data/agisdk-real-smoke.jsonl",
   "agent": {
-    "type": "single",
-    "provider": "openrouter",
-    "model": "openai/gpt-4.1",
-    "apiKey": "OPENROUTER_API_KEY"
+    "type": "single"
   },
-  "dataset": "../data/mind2web.jsonl",
-  "num_workers": 5,
-  "restart_server_per_task": true,
+  "graders": ["agisdk_state_diff"],
+  "workers": 1,
+  "restartBrowserPerTask": true,
+  "timeoutMs": 1800000,
   "browseros": {
     "server_url": "http://127.0.0.1:9110",
     "base_cdp_port": 9010,
@@ -18,7 +18,5 @@
   },
   "captcha": {
     "api_key_env": "NOPECHA_API_KEY"
-  },
-  "graders": ["performance_grader"],
-  "timeout_ms": 300000
+  }
 }

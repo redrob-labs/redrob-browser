@@ -24,8 +24,9 @@ import {
   resolveProviderConfig,
 } from '../../utils/resolve-provider-config'
 import { withEvalTimeout } from '../../utils/with-eval-timeout'
+import { createExecutorBackend } from '../orchestrated/backends/create-executor-backend'
 import type { AgentContext, AgentEvaluator, AgentResult } from '../types'
-import { Executor, type ExecutorCallbacks } from './executor'
+import type { ExecutorCallbacks } from './executor'
 import { OrchestratorAgent } from './orchestrator-agent'
 import type { ExecutorFactory, ExecutorResult } from './types'
 
@@ -235,12 +236,13 @@ export class OrchestratorExecutorEvaluator implements AgentEvaluator {
         await capture.messageLogger.logStreamEvent(delegateInputEvent)
         capture.emitEvent(task.query_id, delegateInputEvent)
 
-        const executor = new Executor(
-          executorConfig,
+        const executor = createExecutorBackend({
+          backendKind: isCladoAction ? 'clado' : 'tool-loop',
+          configTemplate: executorConfig,
           browser,
-          config.browseros.server_url,
-          { isCladoAction, callbacks },
-        )
+          serverUrl: config.browseros.server_url,
+          callbacks,
+        })
         let result: ExecutorResult
         try {
           result = await executor.execute(instruction, signal)

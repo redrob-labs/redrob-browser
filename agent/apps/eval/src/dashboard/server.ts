@@ -1,5 +1,5 @@
 import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { ParallelExecutor } from '../runner/parallel-executor'
@@ -127,6 +127,35 @@ let activeExecutor: ParallelExecutor | null = null
 let dashboardConfigMode = false
 const configsDir = join(import.meta.dir, '..', '..', 'configs')
 const projectRoot = resolve(import.meta.dir, '..', '..', '..', '..')
+
+async function listConfigFiles(dir: string, prefix = ''): Promise<string[]> {
+  const entries = await readdir(join(dir, prefix), { withFileTypes: true })
+  const files: string[] = []
+  for (const entry of entries) {
+    const relativePath = prefix ? join(prefix, entry.name) : entry.name
+    if (entry.isDirectory()) {
+      files.push(...(await listConfigFiles(dir, relativePath)))
+    } else if (entry.isFile() && entry.name.endsWith('.json')) {
+      files.push(relativePath.split(sep).join('/'))
+    }
+  }
+  return files.sort()
+}
+
+function resolveConfigPath(name: string): string | null {
+  if (!name.endsWith('.json')) return null
+  if (name.split('/').some((part) => !part || part === '.' || part === '..')) {
+    return null
+  }
+
+  const resolvedPath = resolve(configsDir, name)
+  const resolvedConfigsDir = resolve(configsDir)
+  const configRootPrefix = resolvedConfigsDir.endsWith(sep)
+    ? resolvedConfigsDir
+    : `${resolvedConfigsDir}${sep}`
+  if (!resolvedPath.startsWith(configRootPrefix)) return null
+  return resolvedPath
+}
 
 // ============================================================================
 // Hono App
@@ -339,21 +368,21 @@ app.get('/api/mode', (c) => {
 // List saved config files
 app.get('/api/configs', async (c) => {
   try {
-    const files = await readdir(configsDir)
-    return c.json(files.filter((f) => f.endsWith('.json')))
+    return c.json(await listConfigFiles(configsDir))
   } catch {
     return c.json([])
   }
 })
 
 // Read a specific config file
-app.get('/api/config/:name', async (c) => {
-  const name = c.req.param('name')
-  if (name.includes('/') || name.includes('..')) {
+app.get('/api/config/*', async (c) => {
+  const name = decodeURIComponent(c.req.path.slice('/api/config/'.length))
+  const configPath = resolveConfigPath(name)
+  if (!configPath) {
     return c.json({ error: 'Invalid config name' }, 400)
   }
   try {
-    const content = await readFile(join(configsDir, name), 'utf-8')
+    const content = await readFile(configPath, 'utf-8')
     return c.json(JSON.parse(content))
   } catch {
     return c.notFound()
@@ -382,8 +411,17 @@ app.post('/api/run', async (c) => {
 
   const config = parseResult.data
 
-  // Resolve relative paths from configs/ dir (dataset dropdown values are relative to it)
-  const baseDir = configsDir
+  let baseDir = configsDir
+  if (body.configName) {
+    const configPath = resolveConfigPath(body.configName)
+    if (!configPath) {
+      return c.json({ error: 'Invalid config name' }, 400)
+    }
+    baseDir = dirname(configPath)
+  }
+
+  // Resolve relative paths from the loaded config location. Unsaved dashboard
+  // configs keep using apps/eval/configs as their base for dropdown values.
   const datasetPath = resolve(
     config.dataset.startsWith('/')
       ? config.dataset

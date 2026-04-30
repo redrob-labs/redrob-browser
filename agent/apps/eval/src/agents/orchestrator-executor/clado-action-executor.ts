@@ -1,106 +1,47 @@
 import { randomUUID } from 'node:crypto'
-import {
-  CLADO_REQUEST_TIMEOUT_MS,
-  MAX_ACTIONS_PER_DELEGATION,
-} from '../../constants'
+import { MAX_ACTIONS_PER_DELEGATION } from '../../constants'
 import { McpClient, type McpToolResult } from '../../utils/mcp-client'
 import { sleep } from '../../utils/sleep'
+import {
+  extractCladoThinking,
+  formatCladoHistory,
+  getCladoActionSignature,
+  parseCladoActions,
+  summarizeCladoPrediction,
+} from '../orchestrated/backends/clado/clado-actions'
+import {
+  normalizeCladoDirection,
+  normalizeCladoPressKey,
+  normalizeCladoScrollAmount,
+  prepareCladoToolArgs,
+  resolveCladoPoint,
+} from '../orchestrated/backends/clado/clado-browser-driver'
+import { CladoActionClient } from '../orchestrated/backends/clado/clado-client'
+import {
+  CLADO_ACTION_PROVIDER,
+  type CladoAction,
+  type CladoActionPoint,
+  type CladoActionResponse,
+  type CladoViewport,
+  isCladoActionProvider,
+} from '../orchestrated/backends/clado/types'
 import type { ExecutorCallbacks } from './executor'
 import type { ExecutorConfig, ExecutorResult } from './types'
 
-const CLADO_ACTION_PROVIDER = 'clado-action'
-const PAGE_SCOPED_TOOLS = new Set<string>([
-  'take_screenshot',
-  'evaluate_script',
-  'click',
-  'click_at',
-  'hover',
-  'hover_at',
-  'clear',
-  'fill',
-  'press_key',
-  'type_at',
-  'drag',
-  'drag_at',
-  'scroll',
-  'handle_dialog',
-  'select_option',
-  'navigate_page',
-  'close_page',
-  'wait_for',
-])
-
-interface CladoActionResponse {
-  action?: string | null
-  x?: number
-  y?: number
-  text?: string
-  key?: string
-  direction?: string
-  startX?: number
-  startY?: number
-  endX?: number
-  endY?: number
-  amount?: number
-  time?: number
-  final_answer?: string | null
-  inference_time_seconds?: number
-  raw_response?: string
-  thinking?: string | null
-  parse_error?: string | null
-}
-
-interface Viewport {
-  width: number
-  height: number
-}
-
-interface CladoAction {
-  action: string
-  x?: number
-  y?: number
-  text?: string
-  key?: string
-  direction?: string
-  startX?: number
-  startY?: number
-  endX?: number
-  endY?: number
-  amount?: number
-  time?: number
-  final_answer?: string
-}
-
-type RawActionPayload = Partial<Omit<CladoAction, 'final_answer'>> & {
-  final_answer?: string | null
-}
-
 const MAX_CONSECUTIVE_PARSE_FAILURES = 3
-
-interface ActionPoint {
-  x: number
-  y: number
-}
 
 function asErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function clampNormalized(value: number): number {
-  return Math.min(999, Math.max(0, Math.round(value)))
-}
-
-function isCladoProvider(provider: string): boolean {
-  return provider === CLADO_ACTION_PROVIDER
-}
-
 export class CladoActionExecutor {
   private readonly mcpClient: McpClient
+  private readonly cladoClient: CladoActionClient
   private readonly pageId: number
   private callbacks: ExecutorCallbacks = {}
   private stepsUsed = 0
-  private viewport: Viewport | null = null
-  private lastPoint: ActionPoint | null = null
+  private viewport: CladoViewport | null = null
+  private lastPoint: CladoActionPoint | null = null
   private currentUrl = ''
 
   constructor(
@@ -110,12 +51,16 @@ export class CladoActionExecutor {
     readonly _tabId?: number,
     initialPageId?: number,
   ) {
-    if (!isCladoProvider(config.provider)) {
+    if (!isCladoActionProvider(config.provider)) {
       throw new Error(
         `CladoActionExecutor requires provider="${CLADO_ACTION_PROVIDER}"`,
       )
     }
     this.mcpClient = new McpClient(`${serverUrl}/mcp`)
+    this.cladoClient = new CladoActionClient({
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+    })
     this.pageId = initialPageId ?? 1
   }
 
@@ -165,7 +110,7 @@ export class CladoActionExecutor {
         break
       }
 
-      const historyForPrediction = this.formatHistory(actionHistory)
+      const historyForPrediction = formatCladoHistory(actionHistory)
       const actionToolCallId = randomUUID()
       const predictionInput = {
         instruction,
@@ -187,7 +132,7 @@ export class CladoActionExecutor {
           signal,
         )
         predictionCalls++
-        const thinking = this.extractThinking(prediction.raw_response)
+        const thinking = extractCladoThinking(prediction.raw_response)
         if (thinking) {
           const previous = thinkingTrace[thinkingTrace.length - 1]
           if (previous !== thinking) {
@@ -217,7 +162,7 @@ export class CladoActionExecutor {
         break
       }
 
-      const predictedActions = this.parseActions(prediction)
+      const predictedActions = parseCladoActions(prediction)
       if (predictedActions.length === 0) {
         // Per Clado contract: HTTP 200 with action=null on parse failure.
         // Count as an invalid step so the model can self-correct on the
@@ -243,7 +188,7 @@ export class CladoActionExecutor {
               toolCallId: actionToolCallId,
               toolName: 'clado_action_predict',
               output: {
-                prediction: this.summarizePrediction(prediction),
+                prediction: summarizeCladoPrediction(prediction),
                 parsedActions: [],
                 parseError,
                 consecutiveParseFailures,
@@ -285,7 +230,7 @@ export class CladoActionExecutor {
                 toolCallId: actionToolCallId,
                 toolName: 'clado_action_predict',
                 output: {
-                  prediction: this.summarizePrediction(prediction),
+                  prediction: summarizeCladoPrediction(prediction),
                   parsedActions: predictedActions,
                   executed: executionNotes,
                 },
@@ -326,7 +271,7 @@ export class CladoActionExecutor {
               toolCallId: actionToolCallId,
               toolName: 'clado_action_predict',
               output: {
-                prediction: this.summarizePrediction(prediction),
+                prediction: summarizeCladoPrediction(prediction),
                 parsedActions: predictedActions,
                 executed: executionNotes,
               },
@@ -378,125 +323,12 @@ export class CladoActionExecutor {
     actionHistory: CladoAction[],
     signal?: AbortSignal,
   ): Promise<CladoActionResponse> {
-    if (!this.config.baseUrl) {
-      throw new Error('executor.baseUrl must be set for clado-action provider')
-    }
-
-    const requestController = new AbortController()
-    const onAbort = () => requestController.abort()
-    signal?.addEventListener('abort', onAbort, { once: true })
-
-    const timeoutHandle = setTimeout(() => {
-      requestController.abort()
-    }, CLADO_REQUEST_TIMEOUT_MS)
-
-    try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      }
-      if (this.config.apiKey) {
-        headers.Authorization = `Bearer ${this.config.apiKey}`
-      }
-
-      const response = await fetch(this.config.baseUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          instruction,
-          image_base64: imageBase64,
-          history: this.formatHistory(actionHistory),
-        }),
-        signal: requestController.signal,
-      })
-
-      if (!response.ok) {
-        const body = await response.text()
-        throw new Error(
-          `HTTP ${response.status} ${response.statusText}: ${body.slice(0, 400)}`,
-        )
-      }
-
-      return (await response.json()) as CladoActionResponse
-    } finally {
-      clearTimeout(timeoutHandle)
-      signal?.removeEventListener('abort', onAbort)
-    }
-  }
-
-  private parseActions(prediction: CladoActionResponse): CladoAction[] {
-    const actionFromField =
-      typeof prediction.action === 'string' ? prediction.action : null
-
-    const rawActions = this.parseActionsFromRawResponse(prediction.raw_response)
-    const primaryFromRaw = rawActions[0] ?? null
-    const mergedPrimary = {
-      ...primaryFromRaw,
-      ...prediction,
-      action: actionFromField ?? primaryFromRaw?.action,
-    }
-
-    const normalized: CladoAction[] = []
-    const primary = this.normalizeActionPayload(mergedPrimary)
-    if (primary) normalized.push(primary)
-
-    for (const candidate of rawActions.slice(1)) {
-      const parsed = this.normalizeActionPayload(candidate)
-      if (!parsed) continue
-      const prev = normalized[normalized.length - 1]
-      if (
-        !prev ||
-        this.getActionSignature(prev) !== this.getActionSignature(parsed)
-      ) {
-        normalized.push(parsed)
-      }
-    }
-
-    return normalized
-  }
-
-  private normalizeActionPayload(
-    payload: RawActionPayload,
-  ): CladoAction | null {
-    if (!payload.action || typeof payload.action !== 'string') {
-      return null
-    }
-    return {
-      action: payload.action,
-      x: typeof payload.x === 'number' ? payload.x : undefined,
-      y: typeof payload.y === 'number' ? payload.y : undefined,
-      text: typeof payload.text === 'string' ? payload.text : undefined,
-      key: typeof payload.key === 'string' ? payload.key : undefined,
-      direction:
-        typeof payload.direction === 'string' ? payload.direction : undefined,
-      startX: typeof payload.startX === 'number' ? payload.startX : undefined,
-      startY: typeof payload.startY === 'number' ? payload.startY : undefined,
-      endX: typeof payload.endX === 'number' ? payload.endX : undefined,
-      endY: typeof payload.endY === 'number' ? payload.endY : undefined,
-      amount: typeof payload.amount === 'number' ? payload.amount : undefined,
-      time: typeof payload.time === 'number' ? payload.time : undefined,
-      final_answer:
-        typeof payload.final_answer === 'string'
-          ? payload.final_answer
-          : undefined,
-    }
-  }
-
-  private parseActionsFromRawResponse(
-    rawResponse: string | undefined,
-  ): RawActionPayload[] {
-    if (!rawResponse) return []
-    const matches = [
-      ...rawResponse.matchAll(/<answer>\s*([\s\S]*?)\s*<\/answer>/gi),
-    ]
-    const parsed: RawActionPayload[] = []
-    for (const match of matches) {
-      try {
-        parsed.push(JSON.parse(match[1]) as RawActionPayload)
-      } catch {
-        // ignore malformed answer blocks
-      }
-    }
-    return parsed
+    return this.cladoClient.requestActionPrediction({
+      instruction,
+      imageBase64,
+      actionHistory,
+      signal,
+    })
   }
 
   private async executeAction(
@@ -567,14 +399,14 @@ export class CladoActionExecutor {
       }
 
       case 'press_key': {
-        const key = this.normalizePressKey(action.key)
+        const key = normalizeCladoPressKey(action.key)
         await this.runTool('press_key', { key }, signal)
         return `Pressed key "${key}".`
       }
 
       case 'scroll': {
-        const direction = this.normalizeDirection(action.direction)
-        const amountPx = this.normalizeScrollAmount(action.amount)
+        const direction = normalizeCladoDirection(action.direction)
+        const amountPx = normalizeCladoScrollAmount(action.amount)
         const ticks = Math.max(1, Math.round(amountPx / 120))
 
         await this.runTool('scroll', { direction, amount: ticks }, signal)
@@ -645,7 +477,7 @@ export class CladoActionExecutor {
     return image.data
   }
 
-  private async getViewport(signal?: AbortSignal): Promise<Viewport> {
+  private async getViewport(signal?: AbortSignal): Promise<CladoViewport> {
     if (this.viewport) return this.viewport
 
     try {
@@ -676,15 +508,9 @@ export class CladoActionExecutor {
     normalizedX: number | undefined,
     normalizedY: number | undefined,
     signal?: AbortSignal,
-  ): Promise<ActionPoint> {
+  ): Promise<CladoActionPoint> {
     const viewport = await this.getViewport(signal)
-    const nx = clampNormalized(normalizedX ?? 500)
-    const ny = clampNormalized(normalizedY ?? 500)
-
-    return {
-      x: Math.round((nx / 1000) * viewport.width),
-      y: Math.round((ny / 1000) * viewport.height),
-    }
+    return resolveCladoPoint(viewport, normalizedX, normalizedY)
   }
 
   private async getCurrentUrl(signal?: AbortSignal): Promise<string> {
@@ -711,7 +537,7 @@ export class CladoActionExecutor {
       throw new Error('aborted')
     }
 
-    const toolArgs = this.prepareToolArgs(toolName, args)
+    const toolArgs = prepareCladoToolArgs(toolName, args, this.pageId)
 
     try {
       const raw = await this.mcpClient.callTool(toolName, toolArgs)
@@ -730,207 +556,6 @@ export class CladoActionExecutor {
     }
   }
 
-  private prepareToolArgs(
-    toolName: string,
-    args: Record<string, unknown>,
-  ): Record<string, unknown> {
-    const prepared: Record<string, unknown> = { ...args }
-
-    if (
-      toolName === 'evaluate_script' &&
-      typeof prepared.function === 'string' &&
-      prepared.expression === undefined
-    ) {
-      prepared.expression = this.toEvaluateExpression(prepared.function)
-      delete prepared.function
-    }
-
-    if (
-      toolName === 'click_at' &&
-      typeof prepared.dblClick === 'boolean' &&
-      prepared.clickCount === undefined
-    ) {
-      prepared.clickCount = prepared.dblClick ? 2 : 1
-      delete prepared.dblClick
-    }
-
-    // Use fixed page ID for all page-scoped tools (single-page operation)
-    if (PAGE_SCOPED_TOOLS.has(toolName) && typeof prepared.page !== 'number') {
-      prepared.page = this.pageId
-    }
-
-    return prepared
-  }
-
-  private toEvaluateExpression(rawFunction: unknown): string {
-    const source = String(rawFunction).trim()
-    if (source.startsWith('() =>') || source.startsWith('async () =>')) {
-      return `(${source})()`
-    }
-    if (source.startsWith('function')) {
-      return `(${source})()`
-    }
-    return source
-  }
-
-  private normalizePressKey(key: string | undefined): string {
-    const raw = (key ?? '').trim()
-    if (!raw) throw new Error('press_key action missing key field')
-
-    const map: Record<string, string> = {
-      'C-a': 'Control+A',
-      'C-c': 'Control+C',
-      'C-v': 'Control+V',
-      'C-x': 'Control+X',
-      'C-z': 'Control+Z',
-      'C-y': 'Control+Y',
-      'C-s': 'Control+S',
-      'C-t': 'Control+T',
-      'C-w': 'Control+W',
-      'C-h': 'Control+H',
-      'C-f': 'Control+F',
-      'C-+': 'Control++',
-      'C--': 'Control+-',
-      'C-tab': 'Control+Tab',
-      'C-S-tab': 'Control+Shift+Tab',
-      'C-S-n': 'Control+Shift+N',
-      'C-down': 'Control+ArrowDown',
-      // macOS Cmd shortcuts (Meta in CDP).
-      'M-a': 'Meta+A',
-      'M-c': 'Meta+C',
-      'M-v': 'Meta+V',
-      'M-x': 'Meta+X',
-      'M-f4': 'Alt+F4',
-    }
-    return map[raw] ?? raw
-  }
-
-  private normalizeDirection(
-    direction: string | undefined,
-  ): 'up' | 'down' | 'left' | 'right' {
-    if (
-      direction === 'up' ||
-      direction === 'down' ||
-      direction === 'left' ||
-      direction === 'right'
-    ) {
-      return direction
-    }
-    return 'down'
-  }
-
-  private normalizeScrollAmount(amount: number | undefined): number {
-    if (typeof amount !== 'number') return 500
-    if (amount <= 0) return 100
-    const clamped = Math.min(amount, 1000)
-    return Math.max(100, Math.round((clamped / 1000) * 900))
-  }
-
-  private summarizePrediction(
-    prediction: CladoActionResponse,
-  ): Record<string, unknown> {
-    const preview =
-      typeof prediction.raw_response === 'string' &&
-      prediction.raw_response.length > 0
-        ? prediction.raw_response.slice(0, 240)
-        : undefined
-
-    return {
-      action: prediction.action,
-      x: prediction.x,
-      y: prediction.y,
-      text: prediction.text,
-      key: prediction.key,
-      direction: prediction.direction,
-      startX: prediction.startX,
-      startY: prediction.startY,
-      endX: prediction.endX,
-      endY: prediction.endY,
-      amount: prediction.amount,
-      time: prediction.time,
-      inference_time_seconds: prediction.inference_time_seconds,
-      raw_response_preview: preview,
-    }
-  }
-
-  private extractThinking(rawResponse: string | undefined): string | undefined {
-    if (!rawResponse) return undefined
-    const matches = [
-      ...rawResponse.matchAll(/<thinking>\s*([\s\S]*?)\s*<\/thinking>/gi),
-    ]
-    if (matches.length === 0) return undefined
-
-    const merged = matches
-      .map((match) => match[1]?.replace(/\s+/g, ' ').trim() ?? '')
-      .filter((value) => value.length > 0)
-      .join(' ')
-
-    if (!merged) return undefined
-    return merged
-  }
-
-  private getActionSignature(action: CladoAction): string {
-    switch (action.action) {
-      case 'click':
-      case 'double_click':
-      case 'right_click':
-      case 'hover':
-        return `${action.action}:${action.x ?? 'x'}:${action.y ?? 'y'}`
-      case 'type':
-        return `${action.action}:${(action.text ?? '').slice(0, 16)}`
-      case 'press_key':
-        return `${action.action}:${action.key ?? 'key'}`
-      case 'scroll':
-        return `${action.action}:${action.direction ?? 'down'}:${action.amount ?? 500}`
-      case 'drag':
-        return `${action.action}:${action.startX}:${action.startY}:${action.endX}:${action.endY}`
-      case 'wait':
-        return `${action.action}:${action.time ?? 1}`
-      case 'end':
-        return action.final_answer
-          ? `end(${action.final_answer.slice(0, 32)})`
-          : 'end()'
-      case 'invalid':
-        return `invalid(${(action.text ?? '').slice(0, 40)})`
-      default:
-        return action.action
-    }
-  }
-
-  private formatHistory(actions: CladoAction[]): string {
-    if (actions.length === 0) return 'None'
-
-    const parts = actions.map((action) => {
-      switch (action.action) {
-        case 'click':
-        case 'double_click':
-        case 'right_click':
-        case 'hover':
-          return `${action.action}(${Math.round(action.x ?? 500)}, ${Math.round(action.y ?? 500)})`
-        case 'type': {
-          const text = (action.text ?? '').replace(/'/g, "\\'")
-          return `type('${text}')`
-        }
-        case 'press_key':
-          return `press_key('${action.key ?? 'Enter'}')`
-        case 'scroll':
-          return `scroll(${action.direction ?? 'down'})`
-        case 'drag':
-          return `drag(${Math.round(action.startX ?? 500)},${Math.round(action.startY ?? 500)} -> ${Math.round(action.endX ?? 500)},${Math.round(action.endY ?? 500)})`
-        case 'wait':
-          return `wait(${Math.round(action.time ?? 1)}s)`
-        case 'end':
-          return 'end()'
-        case 'invalid':
-          return 'invalid()'
-        default:
-          return action.action
-      }
-    })
-
-    return parts.join(' -> ')
-  }
-
   private buildObservation(params: {
     status: ExecutorResult['status']
     reason: string
@@ -946,7 +571,7 @@ export class CladoActionExecutor {
         : actions
             .slice(-5)
             .map(
-              (action, idx) => `${idx + 1}. ${this.getActionSignature(action)}`,
+              (action, idx) => `${idx + 1}. ${getCladoActionSignature(action)}`,
             )
             .join('\n')
     const thinkingSummary =

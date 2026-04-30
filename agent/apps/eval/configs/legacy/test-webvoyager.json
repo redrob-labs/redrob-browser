@@ -7,8 +7,8 @@
     "baseUrl": "https://api.fireworks.ai/inference/v1",
     "supportsImages": true
   },
-  "dataset": "../data/agisdk-real.jsonl",
-  "num_workers": 4,
+  "dataset": "../../data/webvoyager.jsonl",
+  "num_workers": 3,
   "restart_server_per_task": true,
   "browseros": {
     "server_url": "http://127.0.0.1:9110",
@@ -21,6 +21,6 @@
   "captcha": {
     "api_key_env": "NOPECHA_API_KEY"
   },
-  "graders": ["agisdk_state_diff"],
-  "timeout_ms": 1800000
+  "graders": ["performance_grader"],
+  "timeout_ms": 1200000
 }
