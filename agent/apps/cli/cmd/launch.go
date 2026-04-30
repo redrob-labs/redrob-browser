@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -38,6 +39,7 @@ If BrowserOS is already running, reports the server URL.`,
 
 			if url := probeRunningServer(); url != "" {
 				green.Printf("BrowserOS is already running at %s\n", url)
+				dim.Printf("Next: browseros-cli init %s\n", mcpEndpointURL(url))
 				return
 			}
 
@@ -63,7 +65,7 @@ If BrowserOS is already running, reports the server URL.`,
 
 			green.Printf("BrowserOS is ready at %s\n", url)
 			fmt.Println()
-			dim.Println("Next: browseros-cli init --auto")
+			dim.Printf("Next: browseros-cli init %s\n", mcpEndpointURL(url))
 		},
 	}
 
@@ -75,37 +77,75 @@ If BrowserOS is already running, reports the server URL.`,
 // Server probing
 // ---------------------------------------------------------------------------
 
-// probeRunningServer checks server.json, config, and common ports for a running server.
+var commonBrowserOSPorts = []int{9100, 9200, 9300}
+
+// probeRunningServer checks launch discovery, explicit config, and common ports for a running server.
 func probeRunningServer() string {
-	check := func(baseURL string) bool {
-		client := &http.Client{Timeout: 2 * time.Second}
-		resp, err := client.Get(baseURL + "/health")
-		if err != nil {
-			return false
-		}
-		resp.Body.Close()
-		return resp.StatusCode == 200
-	}
+	client := &http.Client{Timeout: 2 * time.Second}
 
-	// 1. server.json — written by BrowserOS on startup with the actual port
-	if url := loadBrowserosServerURL(); url != "" && check(url) {
+	if url := loadBrowserosServerURL(); url != "" && checkServerHealth(client, url) {
 		return url
 	}
 
-	// 2. Saved config / env var
-	if url := defaultServerURL(); url != "" && check(url) {
+	if url := defaultServerURL(); url != "" && checkServerHealth(client, url) {
 		return url
 	}
 
-	// 3. Probe common BrowserOS ports as last resort
-	for _, port := range []int{9100, 9200, 9300} {
+	return probeCommonServerPorts(client)
+}
+
+func checkServerHealth(client *http.Client, baseURL string) bool {
+	resp, err := client.Get(baseURL + "/health")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == 200
+}
+
+func probeCommonServerPorts(client *http.Client) string {
+	for _, port := range commonBrowserOSPorts {
 		url := fmt.Sprintf("http://127.0.0.1:%d", port)
-		if check(url) {
+		if checkServerHealth(client, url) {
 			return url
 		}
 	}
-
 	return ""
+}
+
+type serverDiscoveryConfig struct {
+	ServerPort       int    `json:"server_port"`
+	URL              string `json:"url"`
+	ServerVersion    string `json:"server_version"`
+	BrowserOSVersion string `json:"browseros_version,omitempty"`
+	ChromiumVersion  string `json:"chromium_version,omitempty"`
+}
+
+// loadBrowserosServerURL reads BrowserOS's runtime discovery file for launch readiness only.
+//
+// Normal command resolution must not call this because it can override a URL the
+// user explicitly saved with `browseros-cli init <Server URL>`.
+func loadBrowserosServerURL() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".browseros", "server.json"))
+	if err != nil {
+		return ""
+	}
+
+	var sc serverDiscoveryConfig
+	if err := json.Unmarshal(data, &sc); err != nil {
+		return ""
+	}
+
+	return normalizeServerURL(sc.URL)
+}
+
+func mcpEndpointURL(baseURL string) string {
+	return strings.TrimSuffix(baseURL, "/") + "/mcp"
 }
 
 // ---------------------------------------------------------------------------
@@ -117,7 +157,8 @@ func probeRunningServer() string {
 // macOS:   `open -Ra "BrowserOS"` — queries Launch Services (finds apps anywhere)
 // Linux:   checks /usr/bin/browseros (.deb), browseros.desktop, or AppImage files
 // Windows: checks executable at %LOCALAPPDATA%\BrowserOS\Application\BrowserOS.exe
-//          and registry uninstall key (per-user Chromium install pattern)
+//
+//	and registry uninstall key (per-user Chromium install pattern)
 func isBrowserOSInstalled() bool {
 	switch runtime.GOOS {
 	case "darwin":
@@ -271,14 +312,11 @@ func waitForServer(maxWait time.Duration) (string, bool) {
 
 	for time.Now().Before(deadline) {
 		// server.json is written by BrowserOS on startup with the actual port
-		if url := loadBrowserosServerURL(); url != "" {
-			resp, err := client.Get(url + "/health")
-			if err == nil {
-				resp.Body.Close()
-				if resp.StatusCode == 200 {
-					return url, true
-				}
-			}
+		if url := loadBrowserosServerURL(); url != "" && checkServerHealth(client, url) {
+			return url, true
+		}
+		if url := probeCommonServerPorts(client); url != "" {
+			return url, true
 		}
 		fmt.Print(".")
 		time.Sleep(1 * time.Second)
