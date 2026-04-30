@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import type { R2RunManifest } from '../../src/publishing/r2-manifest'
 import { buildViewerManifest } from '../../src/viewer/viewer-manifest'
 
 describe('buildViewerManifest', () => {
@@ -22,12 +23,15 @@ describe('buildViewerManifest', () => {
               score: 0,
               pass: false,
               reasoning: 'Missing checkout item',
+              details: { missing: ['checkout item'] },
             },
           },
         },
       ],
     })
 
+    const publishManifest: R2RunManifest = manifest
+    expect(publishManifest.schemaVersion).toBe(2)
     expect(manifest.tasks[0].paths.messages).toBe(
       'tasks/agisdk-dashdish-4/messages.jsonl',
     )
@@ -37,5 +41,72 @@ describe('buildViewerManifest', () => {
     expect(manifest.tasks[0].paths.graderArtifacts).toBe(
       'tasks/agisdk-dashdish-4/grader-artifacts',
     )
+    expect(manifest.tasks[0].graderResults.agisdk_state_diff.details).toEqual({
+      missing: ['checkout item'],
+    })
+  })
+
+  it('builds stable paths when optional task fields are missing', () => {
+    const manifest = buildViewerManifest({
+      runId: 'run-2',
+      uploadedAt: '2026-04-29T06:00:00.000Z',
+      tasks: [
+        {
+          queryId: 'task-with-minimal-fields',
+          query: 'Do the task',
+          status: 'completed',
+          durationMs: 10,
+          screenshotCount: 0,
+          graderResults: {},
+        },
+      ],
+    })
+
+    expect(manifest).toMatchObject({
+      schemaVersion: 2,
+      runId: 'run-2',
+      uploadedAt: '2026-04-29T06:00:00.000Z',
+      tasks: [
+        {
+          queryId: 'task-with-minimal-fields',
+          startUrl: '',
+          paths: {
+            attempt: 'tasks/task-with-minimal-fields/attempt.json',
+            metadata: 'tasks/task-with-minimal-fields/metadata.json',
+            messages: 'tasks/task-with-minimal-fields/messages.jsonl',
+            trace: 'tasks/task-with-minimal-fields/trace.jsonl',
+            grades: 'tasks/task-with-minimal-fields/grades.json',
+            screenshots: 'tasks/task-with-minimal-fields/screenshots',
+            graderArtifacts: 'tasks/task-with-minimal-fields/grader-artifacts',
+          },
+        },
+      ],
+    })
+  })
+
+  it('can separate display query ids from artifact path ids', () => {
+    const manifest = buildViewerManifest({
+      runId: 'run-3',
+      tasks: [
+        {
+          queryId: 'metadata-query-id',
+          artifactId: 'task-dir-id',
+          query: 'Do the task',
+          status: 'completed',
+          durationMs: 10,
+          screenshotCount: 0,
+          graderResults: {},
+        },
+      ],
+    })
+
+    expect(manifest.tasks[0]).toMatchObject({
+      queryId: 'metadata-query-id',
+      paths: {
+        metadata: 'tasks/task-dir-id/metadata.json',
+        screenshots: 'tasks/task-dir-id/screenshots',
+      },
+    })
+    expect('artifactId' in manifest.tasks[0]).toBe(false)
   })
 })

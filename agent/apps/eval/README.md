@@ -181,6 +181,8 @@ export EVAL_R2_BUCKET=browseros-eval
 export EVAL_R2_CDN_BASE_URL=https://eval.browseros.com
 ```
 
+`EVAL_R2_CDN_BASE_URL` must be a public R2 custom domain, `r2.dev` URL, or Worker URL. Do not set it to the private `*.r2.cloudflarestorage.com` S3 API endpoint.
+
 Published runs are available at `EVAL_R2_CDN_BASE_URL/viewer.html?run=<run-id>`.
 
 ### BrowserOS infrastructure
@@ -253,7 +255,35 @@ results/
       summary.json             # Aggregate pass rates
 ```
 
-R2 publishing preserves the same task files under `runs/<run-id>/...`, writes `runs/<run-id>/manifest.json`, and uploads `viewer.html` at the bucket root. The viewer URL is `EVAL_R2_CDN_BASE_URL/viewer.html?run=<run-id>`.
+R2 publishing preserves the task files under `runs/<run-id>/...`, writes `runs/<run-id>/manifest.json`, and uploads `viewer.html` at the bucket root. The viewer URL is `EVAL_R2_CDN_BASE_URL/viewer.html?run=<run-id>`.
+
+### R2 viewer manifest
+
+`runs/<run-id>/manifest.json` is the source of truth for the public viewer. New manifests include `schemaVersion: 2` and each task includes explicit artifact paths:
+
+```json
+{
+  "schemaVersion": 2,
+  "runId": "agisdk-real-smoke-2026-04-30-0000",
+  "tasks": [
+    {
+      "queryId": "agisdk-dashdish-10",
+      "paths": {
+        "metadata": "tasks/agisdk-dashdish-10/metadata.json",
+        "messages": "tasks/agisdk-dashdish-10/messages.jsonl",
+        "grades": "tasks/agisdk-dashdish-10/grades.json",
+        "trace": "tasks/agisdk-dashdish-10/trace.jsonl",
+        "screenshots": "tasks/agisdk-dashdish-10/screenshots",
+        "graderArtifacts": "tasks/agisdk-dashdish-10/grader-artifacts"
+      }
+    }
+  ]
+}
+```
+
+The static viewer uses `task.paths` when present. Older uploaded runs without `schemaVersion` or `task.paths` still work through the legacy inferred layout: `runs/<run-id>/<task-id>/metadata.json`, `messages.jsonl`, and `screenshots/<n>.png`.
+
+Manifest paths are stable artifact locations, not a guarantee that every optional artifact exists for every task. For example, `attempt.json`, `trace.jsonl`, or grader artifact directories may be absent when that artifact was not produced by the run.
 
 ## Troubleshooting
 

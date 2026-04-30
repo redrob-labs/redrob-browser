@@ -26,6 +26,7 @@ async function writeRunFixture(
   root: string,
   configName = 'browseros-agent-weekly',
   timestamp = '2026-04-29-1200',
+  options: { queryId?: string } = {},
 ): Promise<{ runDir: string; runId: string }> {
   const runDir = join(root, configName, timestamp)
   const taskDir = join(runDir, 'task-1')
@@ -33,7 +34,7 @@ async function writeRunFixture(
   await writeFile(
     join(taskDir, 'metadata.json'),
     JSON.stringify({
-      query_id: 'task-1',
+      query_id: options.queryId ?? 'task-1',
       dataset: 'webbench',
       query: 'Find pricing',
       start_url: 'https://example.test',
@@ -94,6 +95,15 @@ describe('R2Publisher', () => {
     expect(
       byKey.get(`runs/${runId}/task-1/screenshots/1.png`)?.ContentType,
     ).toBe('image/png')
+    expect(
+      byKey.get(`runs/${runId}/tasks/task-1/metadata.json`)?.ContentType,
+    ).toBe('application/json')
+    expect(
+      byKey.get(`runs/${runId}/tasks/task-1/messages.jsonl`)?.ContentType,
+    ).toBe('application/x-ndjson')
+    expect(
+      byKey.get(`runs/${runId}/tasks/task-1/screenshots/1.png`)?.ContentType,
+    ).toBe('image/png')
     expect(byKey.get(`runs/${runId}/manifest.json`)?.ContentType).toBe(
       'application/json',
     )
@@ -111,8 +121,10 @@ describe('R2Publisher', () => {
       ).toString('utf-8'),
     )
     expect(manifest).toMatchObject({
+      schemaVersion: 2,
       runId,
       uploadedAt: '2026-04-29T12:00:00.000Z',
+      agentConfig: { type: 'single', model: 'kimi' },
       dataset: 'webbench',
       summary: { passRate: 1, avgDurationMs: 1200 },
       tasks: [
@@ -120,9 +132,84 @@ describe('R2Publisher', () => {
           queryId: 'task-1',
           status: 'completed',
           screenshotCount: 1,
+          paths: {
+            attempt: 'tasks/task-1/attempt.json',
+            metadata: 'tasks/task-1/metadata.json',
+            messages: 'tasks/task-1/messages.jsonl',
+            trace: 'tasks/task-1/trace.jsonl',
+            grades: 'tasks/task-1/grades.json',
+            screenshots: 'tasks/task-1/screenshots',
+            graderArtifacts: 'tasks/task-1/grader-artifacts',
+          },
         },
       ],
     })
+  })
+
+  it('uses task directory ids for canonical paths when metadata query ids differ', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-r2-path-id-'))
+    const { runDir, runId } = await writeRunFixture(
+      dir,
+      'weekly',
+      '2026-04-29-1200',
+      { queryId: 'query-id-from-metadata' },
+    )
+    const viewerPath = join(dir, 'viewer.html')
+    await writeFile(viewerPath, '<html>viewer</html>')
+    const client = new FakeR2Client()
+
+    await new R2Publisher({
+      client,
+      viewerPath,
+      config: {
+        accountId: 'acct',
+        accessKeyId: 'key',
+        secretAccessKey: 'secret',
+        bucket: 'bucket',
+        cdnBaseUrl: 'https://eval.example.test',
+      },
+      now: () => new Date('2026-04-29T12:00:00.000Z'),
+    }).publishRun(runDir, runId)
+
+    const byKey = new Map(client.puts.map((put) => [put.Key, put]))
+    const manifest = JSON.parse(
+      Buffer.from(
+        byKey.get(`runs/${runId}/manifest.json`)?.Body as Buffer,
+      ).toString('utf-8'),
+    )
+
+    expect(byKey.has(`runs/${runId}/tasks/task-1/metadata.json`)).toBe(true)
+    expect(manifest.tasks[0]).toMatchObject({
+      queryId: 'query-id-from-metadata',
+      paths: {
+        metadata: 'tasks/task-1/metadata.json',
+        screenshots: 'tasks/task-1/screenshots',
+      },
+    })
+  })
+
+  it('encodes run ids in returned viewer urls', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-r2-viewer-url-'))
+    const { runDir } = await writeRunFixture(dir)
+    const viewerPath = join(dir, 'viewer.html')
+    await writeFile(viewerPath, '<html>viewer</html>')
+    const client = new FakeR2Client()
+
+    const result = await new R2Publisher({
+      client,
+      viewerPath,
+      config: {
+        accountId: 'acct',
+        accessKeyId: 'key',
+        secretAccessKey: 'secret',
+        bucket: 'bucket',
+        cdnBaseUrl: 'https://eval.example.test',
+      },
+    }).publishRun(runDir, 'run with spaces')
+
+    expect(result.viewerUrl).toBe(
+      'https://eval.example.test/viewer.html?run=run%20with%20spaces',
+    )
   })
 
   it('publishes unuploaded runs from a config results directory', async () => {
@@ -186,8 +273,27 @@ describe('R2Publisher', () => {
     }).publishPath(runDir)
 
     const keys = client.puts.map((put) => put.Key)
+    const byKey = new Map(client.puts.map((put) => [put.Key, put]))
+    const manifest = JSON.parse(
+      Buffer.from(
+        byKey.get(`runs/${runId}/manifest.json`)?.Body as Buffer,
+      ).toString('utf-8'),
+    )
+
     expect(result.uploadedRuns.map((run) => run.runId)).toEqual([runId])
     expect(keys).toContain(`runs/${runId}/task-1/metadata.json`)
     expect(keys).toContain(`runs/${runId}/tasks/task-1/metadata.json`)
+    expect(manifest).toMatchObject({
+      schemaVersion: 2,
+      tasks: [
+        {
+          queryId: 'task-1',
+          paths: {
+            metadata: 'tasks/task-1/metadata.json',
+            screenshots: 'tasks/task-1/screenshots',
+          },
+        },
+      ],
+    })
   })
 })

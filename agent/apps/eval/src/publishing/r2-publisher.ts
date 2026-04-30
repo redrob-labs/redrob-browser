@@ -5,8 +5,11 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3'
+import {
+  buildViewerManifest,
+  type ViewerManifestTaskInput,
+} from '../viewer/viewer-manifest'
 import type {
-  R2ManifestTask,
   R2PublishPathResult,
   R2PublishRunResult,
   R2RunManifest,
@@ -43,7 +46,6 @@ interface UploadJob {
 interface TaskDirEntry {
   taskId: string
   taskPath: string
-  canonicalLayout: boolean
 }
 
 export function contentTypeForPath(filePath: string): string {
@@ -129,7 +131,6 @@ async function findTaskDirs(runDir: string): Promise<TaskDirEntry[]> {
       legacyTasks.push({
         taskId: entry.name,
         taskPath,
-        canonicalLayout: false,
       })
     }
   }
@@ -146,7 +147,6 @@ async function findTaskDirs(runDir: string): Promise<TaskDirEntry[]> {
       canonicalTasks.push({
         taskId: entry.name,
         taskPath,
-        canonicalLayout: true,
       })
     }
   }
@@ -262,7 +262,7 @@ export class R2Publisher {
       throw new Error(`No task subdirectories in ${runId}`)
     }
 
-    const manifestTasks: R2ManifestTask[] = []
+    const manifestTasks: ViewerManifestTaskInput[] = []
     const jobs: UploadJob[] = (await collectRunRootFiles(runDir)).map(
       (job) => ({
         ...job,
@@ -289,22 +289,23 @@ export class R2Publisher {
         if (relative.startsWith('screenshots/') && extname(file) === '.png') {
           screenshotCount++
         }
+        // Keep legacy keys during the manifest v2 rollout so cached viewers and
+        // old manifests can still resolve task artifacts.
         jobs.push({
           key: `runs/${runId}/${taskId}/${relative}`,
           filePath: file,
           contentType: contentTypeForPath(file),
         })
-        if (taskDirEntry.canonicalLayout) {
-          jobs.push({
-            key: `runs/${runId}/tasks/${taskId}/${relative}`,
-            filePath: file,
-            contentType: contentTypeForPath(file),
-          })
-        }
+        jobs.push({
+          key: `runs/${runId}/tasks/${taskId}/${relative}`,
+          filePath: file,
+          contentType: contentTypeForPath(file),
+        })
       }
 
       manifestTasks.push({
         queryId: (meta.query_id as string | undefined) || taskId,
+        artifactId: taskId,
         query: (meta.query as string | undefined) || '',
         startUrl: (meta.start_url as string | undefined) || '',
         status: statusFromMetadata(meta),
@@ -312,7 +313,8 @@ export class R2Publisher {
         screenshotCount:
           (meta.screenshot_count as number | undefined) || screenshotCount,
         graderResults:
-          (meta.grader_results as Record<string, unknown> | undefined) || {},
+          (meta.grader_results as ViewerManifestTaskInput['graderResults']) ||
+          {},
       })
     }
 
@@ -347,7 +349,7 @@ export class R2Publisher {
     return {
       runId,
       uploadedFiles: uploaded + 2,
-      viewerUrl: `${this.config.cdnBaseUrl}/viewer.html?run=${runId}`,
+      viewerUrl: `${this.config.cdnBaseUrl}/viewer.html?run=${encodeURIComponent(runId)}`,
       manifest,
     }
   }
@@ -369,7 +371,7 @@ export class R2Publisher {
     runId: string,
     agentConfig: Record<string, unknown> | undefined,
     dataset: string | undefined,
-    tasks: R2ManifestTask[],
+    tasks: ViewerManifestTaskInput[],
   ): Promise<R2RunManifest> {
     let summaryData: Record<string, unknown> | undefined
     try {
@@ -378,7 +380,7 @@ export class R2Publisher {
       ) as Record<string, unknown>
     } catch {}
 
-    return {
+    return buildViewerManifest({
       runId,
       uploadedAt: this.now().toISOString(),
       agentConfig,
@@ -390,7 +392,7 @@ export class R2Publisher {
           }
         : undefined,
       tasks,
-    }
+    })
   }
 
   private async uploadFile(job: UploadJob): Promise<void> {

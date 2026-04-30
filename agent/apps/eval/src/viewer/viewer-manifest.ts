@@ -1,7 +1,20 @@
 import type { GraderResult } from '../types'
 
+export const VIEWER_MANIFEST_SCHEMA_VERSION = 2
+
+export interface ViewerManifestTaskPaths {
+  attempt: string
+  metadata: string
+  messages: string
+  trace: string
+  grades: string
+  screenshots: string
+  graderArtifacts: string
+}
+
 export interface ViewerManifestTaskInput {
   queryId: string
+  artifactId?: string
   query: string
   startUrl?: string
   status: string
@@ -10,34 +23,45 @@ export interface ViewerManifestTaskInput {
   graderResults: Record<string, GraderResult>
 }
 
-export interface ViewerManifestTask extends ViewerManifestTaskInput {
-  paths: {
-    attempt: string
-    metadata: string
-    messages: string
-    trace: string
-    grades: string
-    screenshots: string
-    graderArtifacts: string
-  }
+export interface ViewerManifestTask
+  extends Omit<ViewerManifestTaskInput, 'artifactId'> {
+  startUrl: string
+  paths: ViewerManifestTaskPaths
 }
 
 export interface ViewerManifest {
+  schemaVersion: typeof VIEWER_MANIFEST_SCHEMA_VERSION
   runId: string
-  suiteId: string
-  variantId: string
+  suiteId?: string
+  variantId?: string
   uploadedAt?: string
-  summary: Record<string, unknown>
+  agentConfig?: Record<string, unknown>
+  dataset?: string
+  summary?: Record<string, unknown>
   tasks: ViewerManifestTask[]
 }
 
 export interface BuildViewerManifestInput {
   runId: string
-  suiteId: string
-  variantId: string
+  suiteId?: string
+  variantId?: string
   uploadedAt?: string
-  summary: Record<string, unknown>
+  agentConfig?: Record<string, unknown>
+  dataset?: string
+  summary?: Record<string, unknown>
   tasks: ViewerManifestTaskInput[]
+}
+
+function taskPaths(queryId: string): ViewerManifestTaskPaths {
+  return {
+    attempt: `tasks/${queryId}/attempt.json`,
+    metadata: `tasks/${queryId}/metadata.json`,
+    messages: `tasks/${queryId}/messages.jsonl`,
+    trace: `tasks/${queryId}/trace.jsonl`,
+    grades: `tasks/${queryId}/grades.json`,
+    screenshots: `tasks/${queryId}/screenshots`,
+    graderArtifacts: `tasks/${queryId}/grader-artifacts`,
+  }
 }
 
 /** Builds the compact JSON index consumed by the static R2 viewer. */
@@ -45,22 +69,21 @@ export function buildViewerManifest(
   input: BuildViewerManifestInput,
 ): ViewerManifest {
   return {
+    schemaVersion: VIEWER_MANIFEST_SCHEMA_VERSION,
     runId: input.runId,
-    suiteId: input.suiteId,
-    variantId: input.variantId,
-    uploadedAt: input.uploadedAt,
-    summary: input.summary,
-    tasks: input.tasks.map((task) => ({
-      ...task,
-      paths: {
-        attempt: `tasks/${task.queryId}/attempt.json`,
-        metadata: `tasks/${task.queryId}/metadata.json`,
-        messages: `tasks/${task.queryId}/messages.jsonl`,
-        trace: `tasks/${task.queryId}/trace.jsonl`,
-        grades: `tasks/${task.queryId}/grades.json`,
-        screenshots: `tasks/${task.queryId}/screenshots`,
-        graderArtifacts: `tasks/${task.queryId}/grader-artifacts`,
-      },
-    })),
+    ...(input.suiteId ? { suiteId: input.suiteId } : {}),
+    ...(input.variantId ? { variantId: input.variantId } : {}),
+    ...(input.uploadedAt ? { uploadedAt: input.uploadedAt } : {}),
+    ...(input.agentConfig ? { agentConfig: input.agentConfig } : {}),
+    ...(input.dataset ? { dataset: input.dataset } : {}),
+    ...(input.summary ? { summary: input.summary } : {}),
+    tasks: input.tasks.map((task) => {
+      const { artifactId, ...publicTask } = task
+      return {
+        ...publicTask,
+        startUrl: publicTask.startUrl ?? '',
+        paths: taskPaths(artifactId ?? publicTask.queryId),
+      }
+    }),
   }
 }

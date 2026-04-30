@@ -1,3 +1,8 @@
+import type {
+  ViewerManifest,
+  ViewerManifestTask,
+} from '../viewer/viewer-manifest'
+
 export interface R2UploadConfig {
   accountId: string
   accessKeyId: string
@@ -6,27 +11,9 @@ export interface R2UploadConfig {
   cdnBaseUrl: string
 }
 
-export interface R2ManifestTask {
-  queryId: string
-  query: string
-  startUrl: string
-  status: string
-  durationMs: number
-  screenshotCount: number
-  graderResults: Record<string, unknown>
-}
+export type R2ManifestTask = ViewerManifestTask
 
-export interface R2RunManifest {
-  runId: string
-  uploadedAt: string
-  agentConfig?: Record<string, unknown>
-  dataset?: string
-  summary?: {
-    passRate?: unknown
-    avgDurationMs?: unknown
-  }
-  tasks: R2ManifestTask[]
-}
+export type R2RunManifest = ViewerManifest
 
 export interface R2PublishRunResult {
   runId: string
