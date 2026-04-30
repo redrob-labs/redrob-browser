@@ -7,17 +7,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { logger } from '../logger'
-import { ensureVmCacheAvailable } from './cache-sync'
 import { LimaCommandError, VmError, VmNotReadyError } from './errors'
 import { LimaCli } from './lima-cli'
 import { renderLimaTemplate } from './lima-config'
-import {
-  compareVersions,
-  readCachedManifest,
-  readInstalledManifest,
-  writeInstalledManifest,
-} from './manifest'
-import { getImageCacheDir, getVmStateDir, VM_NAME } from './paths'
+import { getVmStateDir, VM_NAME } from './paths'
 import { VM_TELEMETRY_EVENTS } from './telemetry'
 
 export type LogFn = (msg: string) => void
@@ -31,7 +24,6 @@ export interface VmRuntimeDeps {
   browserosRoot?: string
   readinessTimeoutMs?: number
   readinessPollMs?: number
-  ensureCacheAvailable?: () => Promise<void>
 }
 
 export class VmRuntime {
@@ -59,34 +51,17 @@ export class VmRuntime {
       limactlPath: this.deps.limactlPath,
     })
 
-    await this.ensureCacheAvailable()
-    const cached = await readCachedManifest(this.deps.browserosRoot)
-    const installed = await readInstalledManifest(this.deps.browserosRoot)
-    const versionComparison = compareVersions(installed, cached)
-    logger.debug(VM_TELEMETRY_EVENTS.manifestCompared, {
-      versionComparison,
-      installedUpdatedAt: installed?.updatedAt ?? null,
-      cachedUpdatedAt: cached.updatedAt,
-    })
-
     const vms = await this.cli.list()
     const existing = vms.find((vm) => vm.name === VM_NAME)
-    let shouldWriteInstalledManifest =
-      !existing || versionComparison === 'fresh' || versionComparison === 'same'
 
     let branch = !existing
       ? 'provision-fresh'
       : existing.status !== 'Running'
         ? 'start-existing'
-        : versionComparison === 'upgrade'
-          ? 'running-upgrade-warn'
-          : versionComparison === 'downgrade'
-            ? 'running-downgrade-warn'
-            : 'running-same'
+        : 'running'
     logger.info(VM_TELEMETRY_EVENTS.ensureReadyBranch, {
       branch,
       existingStatus: existing?.status ?? null,
-      versionComparison,
     })
 
     if (!existing) {
@@ -101,28 +76,11 @@ export class VmRuntime {
         (await this.needsContainerdReprovision())
       ) {
         branch = 'recreate-legacy-runtime'
-        shouldWriteInstalledManifest = true
         await this.recreateForContainerd(onLog)
-      } else if (versionComparison === 'upgrade') {
-        logger.warn(VM_TELEMETRY_EVENTS.upgradeDetected, {
-          from: installed?.updatedAt ?? null,
-          to: cached.updatedAt,
-        })
-      } else if (versionComparison === 'downgrade') {
-        logger.warn(VM_TELEMETRY_EVENTS.downgradeDetected, {
-          from: installed?.updatedAt ?? null,
-          to: cached.updatedAt,
-        })
       }
     }
 
     await this.waitForRootlessNerdctl(this.readinessTimeoutMs)
-    if (shouldWriteInstalledManifest) {
-      await writeInstalledManifest(cached, this.deps.browserosRoot)
-      logger.debug(VM_TELEMETRY_EVENTS.manifestWritten, {
-        updatedAt: cached.updatedAt,
-      })
-    }
 
     logger.info(VM_TELEMETRY_EVENTS.ensureReadyOk, {
       durationMs: Date.now() - started,
@@ -220,14 +178,6 @@ export class VmRuntime {
     })
   }
 
-  private async ensureCacheAvailable(): Promise<void> {
-    if (this.deps.ensureCacheAvailable) {
-      await this.deps.ensureCacheAvailable()
-      return
-    }
-    await ensureVmCacheAvailable({ browserosRoot: this.deps.browserosRoot })
-  }
-
   private async recreateForContainerd(onLog?: LogFn): Promise<void> {
     onLog?.('Recreating BrowserOS VM for containerd runtime...')
     try {
@@ -271,7 +221,6 @@ export class VmRuntime {
 
     return renderLimaTemplate(await readFile(this.deps.templatePath, 'utf8'), {
       vmStateDir: getVmStateDir(this.deps.browserosRoot),
-      imageCacheDir: getImageCacheDir(this.deps.browserosRoot),
     })
   }
 

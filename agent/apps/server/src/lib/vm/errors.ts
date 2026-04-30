@@ -44,17 +44,3 @@ export class ImageLoadError extends VmError {
     super(`failed to load image ${imageRef}: ${message}`)
   }
 }
-
-export class ManifestMissingError extends VmError {
-  constructor(public readonly manifestPath: string) {
-    super(manifestMissingMessage(manifestPath))
-  }
-}
-
-function manifestMissingMessage(manifestPath: string): string {
-  const message = `VM manifest is missing at ${manifestPath}`
-  if (process.env.NODE_ENV === 'development') {
-    return `${message}; run bun run dev:setup before starting the server`
-  }
-  return message
-}

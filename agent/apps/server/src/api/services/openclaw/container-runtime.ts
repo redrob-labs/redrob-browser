@@ -8,6 +8,7 @@ import {
   OPENCLAW_AGENT_NAME,
   OPENCLAW_GATEWAY_CONTAINER_NAME,
   OPENCLAW_GATEWAY_CONTAINER_PORT,
+  OPENCLAW_IMAGE,
 } from '@browseros/shared/constants/openclaw'
 import type {
   ContainerCli,
@@ -93,6 +94,27 @@ export class ContainerRuntime {
 
   async pullImage(image: string, onLog?: LogFn): Promise<void> {
     await this.loader.ensureImageLoaded(image, onLog)
+  }
+
+  /** Warm the gateway image in containerd without creating or starting containers. */
+  async prewarmGatewayImage(onLog?: LogFn): Promise<void> {
+    await this.ensureGatewayImageLoaded(onLog)
+  }
+
+  /** Report whether the existing gateway container was created from the target image. */
+  async isGatewayCurrent(): Promise<boolean> {
+    const image = await this.shell.containerImageRef(
+      OPENCLAW_GATEWAY_CONTAINER_NAME,
+    )
+    const expected = this.expectedGatewayImageRef()
+    const current = imageMatchesExpectedRef(image, expected)
+    if (!current) {
+      logger.info('OpenClaw gateway image is not current', {
+        actualImageRef: image,
+        expectedImageRef: expected,
+      })
+    }
+    return current
   }
 
   async startGateway(
@@ -296,13 +318,17 @@ export class ContainerRuntime {
   }
 
   private async ensureGatewayImageLoaded(onLog?: LogFn): Promise<string> {
-    // Local image testing can bypass the synced VM manifest with OPENCLAW_IMAGE.
+    // Local image testing can override the pinned GHCR image with OPENCLAW_IMAGE.
     const override = process.env.OPENCLAW_IMAGE?.trim()
     if (override) {
       await this.loader.ensureImageLoaded(override, onLog)
       return override
     }
     return this.loader.ensureAgentImageLoaded(OPENCLAW_AGENT_NAME, onLog)
+  }
+
+  private expectedGatewayImageRef(): string {
+    return process.env.OPENCLAW_IMAGE?.trim() || OPENCLAW_IMAGE
   }
 
   private buildGatewayEnv(input: GatewayContainerSpec): Record<string, string> {
@@ -329,4 +355,13 @@ export class ContainerRuntime {
     }
     return hostPathToGuest(path)
   }
+}
+
+function imageMatchesExpectedRef(
+  actual: string | null,
+  expected: string,
+): boolean {
+  return (
+    actual === expected || actual?.startsWith(`${expected}@sha256:`) === true
+  )
 }

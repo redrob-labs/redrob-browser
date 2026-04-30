@@ -5,15 +5,11 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 import { ContainerCli } from '../../src/lib/container'
-import { LimaCli, type VmManifest, VmRuntime } from '../../src/lib/vm'
-import {
-  getCachedManifestPath,
-  getContainerdSocketPath,
-  VM_NAME,
-} from '../../src/lib/vm/paths'
+import { LimaCli, VmRuntime } from '../../src/lib/vm'
+import { getContainerdSocketPath, VM_NAME } from '../../src/lib/vm/paths'
 
 const LIVE_VM_SMOKE_TIMEOUT_MS = 10 * 60 * 1000
 const liveIt = process.env.LIVE_VM_SMOKE === '1' ? it : it.skip
@@ -23,12 +19,6 @@ const templatePath = resolve(
   '../../../../packages/build-tools/template/browseros-vm.yaml',
 )
 
-const manifest: VmManifest = {
-  schemaVersion: 2,
-  updatedAt: '2026-04-22T00:00:00.000Z',
-  agents: {},
-}
-
 describe('BrowserOS VM live smoke', () => {
   let root: string
   let limaHome: string
@@ -36,9 +26,6 @@ describe('BrowserOS VM live smoke', () => {
   beforeEach(async () => {
     root = await mkdtemp('/tmp/bovm-')
     limaHome = join(root, 'lima')
-    const manifestPath = getCachedManifestPath(root)
-    await mkdir(dirname(manifestPath), { recursive: true })
-    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   })
 
   afterEach(async () => {

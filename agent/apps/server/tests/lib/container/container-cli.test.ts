@@ -42,6 +42,35 @@ describe('ContainerCli', () => {
     await expect(cli.imageExists('openclaw:v1')).resolves.toBe(false)
   })
 
+  it('reads a container configured image ref', async () => {
+    const sshPath = await fakeSsh(
+      { stdout: 'ghcr.io/openclaw/openclaw:2026.4.12\n' },
+      logPath,
+    )
+    const cli = await createCli(sshPath, tempDir)
+
+    await expect(cli.containerImageRef('gateway')).resolves.toBe(
+      'ghcr.io/openclaw/openclaw:2026.4.12',
+    )
+
+    await expect(readFile(logPath, 'utf8')).resolves.toContain(
+      `${sshPrefix(sshConfigPath(tempDir))} 'nerdctl' 'inspect' '--format' '{{.Config.Image}}' 'gateway'`,
+    )
+  })
+
+  it('returns null when reading a missing container image ref', async () => {
+    const sshPath = await fakeSsh(
+      {
+        stderr: 'no such container',
+        exit: 1,
+      },
+      logPath,
+    )
+    const cli = await createCli(sshPath, tempDir)
+
+    await expect(cli.containerImageRef('missing')).resolves.toBeNull()
+  })
+
   it('pulls images with progress and throws typed command errors', async () => {
     const sshPath = await fakeSsh(
       { stdout: 'pulling\n', stderr: 'denied', exit: 2 },
@@ -59,21 +88,6 @@ describe('ContainerCli', () => {
     expect(error.stderr).toBe('denied')
     expect(lines).toContain('pulling')
     expect(lines).toContain('denied')
-  })
-
-  it('loads images from guest tarballs and returns loaded refs', async () => {
-    const sshPath = await fakeSsh(
-      { stdout: 'Loaded image(s): openclaw:v1\n' },
-      logPath,
-    )
-    const cli = await createCli(sshPath, tempDir)
-
-    await expect(
-      cli.loadImage('/mnt/browseros/cache/images/openclaw.tar.gz'),
-    ).resolves.toEqual(['openclaw:v1'])
-    await expect(readFile(logPath, 'utf8')).resolves.toContain(
-      `${sshPrefix(sshConfigPath(tempDir))} 'nerdctl' 'load' '-i' '/mnt/browseros/cache/images/openclaw.tar.gz'`,
-    )
   })
 
   it('creates containers from typed specs', async () => {

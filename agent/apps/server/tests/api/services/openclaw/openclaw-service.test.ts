@@ -8,7 +8,10 @@ import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { OPENCLAW_CONTAINER_HOME } from '@browseros/shared/constants/openclaw'
+import {
+  OPENCLAW_CONTAINER_HOME,
+  OPENCLAW_IMAGE,
+} from '@browseros/shared/constants/openclaw'
 import {
   resolveSupportedOpenClawProvider,
   UnsupportedOpenClawProviderError,
@@ -23,11 +26,13 @@ type MutableOpenClawService = OpenClawService & {
   token: string
   restart: ReturnType<typeof mock>
   runtime: {
-    ensureReady?: () => Promise<void>
+    ensureReady?: (_onLog?: (_line: string) => void) => Promise<void>
     isPodmanAvailable?: () => Promise<boolean>
     getMachineStatus?: () => Promise<{ initialized: boolean; running: boolean }>
     isHealthy?: (_hostPort?: number) => Promise<boolean>
     isReady: (_hostPort?: number) => Promise<boolean>
+    prewarmGatewayImage?: (_onLog?: (_line: string) => void) => Promise<void>
+    isGatewayCurrent?: () => Promise<boolean>
     pullImage?: (
       _image: string,
       _onLog?: (_line: string) => void,
@@ -86,6 +91,60 @@ describe('OpenClawService', () => {
     )
     return forced >= 65000 ? forced - 10 : forced + 10
   }
+
+  it('prewarms the VM and gateway image', async () => {
+    const ensureReady = mock(async () => {})
+    const prewarmGatewayImage = mock(async () => {})
+    const logs: string[] = []
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.runtime = {
+      ensureReady,
+      isReady: async () => false,
+      prewarmGatewayImage,
+    }
+
+    await service.prewarm((line) => logs.push(line))
+
+    expect(ensureReady).toHaveBeenCalledTimes(1)
+    expect(prewarmGatewayImage).toHaveBeenCalledTimes(1)
+    expect(ensureReady.mock.calls[0]?.length).toBe(0)
+    expect(prewarmGatewayImage.mock.calls[0]?.length).toBe(0)
+    expect(logs).toContain('OpenClaw prewarm: ensuring BrowserOS VM is ready')
+    expect(logs).toContain(
+      `OpenClaw prewarm: ensuring image ${OPENCLAW_IMAGE} is available`,
+    )
+    expect(logs).toContain('OpenClaw prewarm: ready')
+  })
+
+  it('logs the overridden image ref during prewarm', async () => {
+    const originalImage = process.env.OPENCLAW_IMAGE
+    process.env.OPENCLAW_IMAGE = 'localhost/openclaw:test'
+    const ensureReady = mock(async () => {})
+    const prewarmGatewayImage = mock(async () => {})
+    const logs: string[] = []
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.runtime = {
+      ensureReady,
+      isReady: async () => false,
+      prewarmGatewayImage,
+    }
+
+    try {
+      await service.prewarm((line) => logs.push(line))
+    } finally {
+      if (originalImage === undefined) {
+        delete process.env.OPENCLAW_IMAGE
+      } else {
+        process.env.OPENCLAW_IMAGE = originalImage
+      }
+    }
+
+    expect(logs).toContain(
+      'OpenClaw prewarm: ensuring image localhost/openclaw:test is available',
+    )
+  })
 
   it('creates agents through the cli client without role bootstrap files', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
@@ -657,6 +716,7 @@ describe('OpenClawService', () => {
     service.runtime = {
       ensureReady,
       isReady: async () => gatewayReady,
+      isGatewayCurrent: mock(async () => true),
       startGateway,
       waitForReady,
     }
@@ -700,6 +760,7 @@ describe('OpenClawService', () => {
     service.runtime = {
       ensureReady,
       isReady: async () => true,
+      isGatewayCurrent: mock(async () => true),
       startGateway,
       waitForReady,
     }
@@ -948,6 +1009,7 @@ describe('OpenClawService', () => {
       isPodmanAvailable: async () => true,
       ensureReady,
       isReady,
+      isGatewayCurrent: mock(async () => true),
       startGateway,
       waitForReady,
     }
@@ -969,6 +1031,71 @@ describe('OpenClawService', () => {
     expect(waitForReady).toHaveBeenCalledTimes(1)
     expect(probe).toHaveBeenCalledTimes(1)
     expect(isReady).toHaveBeenCalledTimes(2)
+  })
+
+  it('tryAutoStart reuses a ready gateway when the image is current', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.openclaw', 'openclaw.json'),
+      JSON.stringify({ gateway: { auth: { token: 'cli-token' } } }),
+    )
+    const ensureReady = mock(async () => {})
+    const isReady = mock(async () => true)
+    const isGatewayCurrent = mock(async () => true)
+    const startGateway = mock(async () => {})
+    const probe = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.runtime = {
+      ensureReady,
+      isReady,
+      isGatewayCurrent,
+      startGateway,
+    }
+    service.cliClient = { probe }
+    mockGatewayAuth()
+
+    await service.tryAutoStart()
+
+    expect(ensureReady).toHaveBeenCalledTimes(1)
+    expect(isGatewayCurrent).toHaveBeenCalledTimes(1)
+    expect(startGateway).not.toHaveBeenCalled()
+    expect(probe).toHaveBeenCalledTimes(1)
+  })
+
+  it('tryAutoStart recreates a ready gateway when the image is stale', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.openclaw', 'openclaw.json'),
+      JSON.stringify({ gateway: { auth: { token: 'cli-token' } } }),
+    )
+    const ensureReady = mock(async () => {})
+    const isReady = mock(async () => true)
+    const isGatewayCurrent = mock(async () => false)
+    const startGateway = mock(async () => {})
+    const waitForReady = mock(async () => true)
+    const probe = mock(async () => {})
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.runtime = {
+      ensureReady,
+      isReady,
+      isGatewayCurrent,
+      startGateway,
+      waitForReady,
+    }
+    service.cliClient = { probe }
+    mockGatewayAuth()
+
+    await service.tryAutoStart()
+
+    expect(startGateway).toHaveBeenCalledTimes(1)
+    expect(waitForReady).toHaveBeenCalledTimes(1)
+    expect(probe).toHaveBeenCalledTimes(1)
   })
 
   it('keeps openrouter model refs verbatim without rewriting dots', () => {

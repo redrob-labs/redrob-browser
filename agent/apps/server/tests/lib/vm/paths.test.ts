@@ -14,10 +14,7 @@ import {
 } from '../../../src/lib/browseros-dir'
 import {
   detectArch,
-  getCachedManifestPath,
   getContainerdSocketPath,
-  getImageCacheDir,
-  getInstalledManifestPath,
   getLimaHomeDir,
   getVmCacheDir,
   getVmStateDir,
@@ -81,17 +78,10 @@ describe('VM paths', () => {
     )
   })
 
-  it('builds cached and installed manifest paths', () => {
+  it('builds VM storage paths', () => {
     const root = '/Users/foo/.browseros'
 
     expect(getVmCacheDir(root)).toBe('/Users/foo/.browseros/cache/vm')
-    expect(getImageCacheDir(root)).toBe('/Users/foo/.browseros/cache/vm/images')
-    expect(getCachedManifestPath(root)).toBe(
-      '/Users/foo/.browseros/cache/vm/manifest.json',
-    )
-    expect(getInstalledManifestPath(root)).toBe(
-      '/Users/foo/.browseros/vm/manifest.json',
-    )
     expect(getContainerdSocketPath(root)).toBe(
       '/Users/foo/.browseros/lima/browseros-vm/sock/containerd.sock',
     )
@@ -103,9 +93,6 @@ describe('VM paths', () => {
     expect(hostPathToGuest('/Users/foo/.browseros/vm/openclaw/x', root)).toBe(
       '/mnt/browseros/vm/openclaw/x',
     )
-    expect(
-      hostPathToGuest('/Users/foo/.browseros/cache/vm/images/a.tar.gz', root),
-    ).toBe('/mnt/browseros/cache/images/a.tar.gz')
   })
 
   it('rejects unmapped host paths', () => {

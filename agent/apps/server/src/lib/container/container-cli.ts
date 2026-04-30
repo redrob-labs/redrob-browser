@@ -41,13 +41,20 @@ export class ContainerCli {
     return result.exitCode === 0
   }
 
-  async pullImage(ref: string, onLog?: LogFn): Promise<void> {
-    await this.runRequired(['pull', ref], onLog)
+  /** Return the image ref used to create a container, or null when absent. */
+  async containerImageRef(name: string): Promise<string | null> {
+    const args = ['inspect', '--format', '{{.Config.Image}}', name]
+    const result = await this.runCommand(args)
+    if (result.exitCode === 0) {
+      const image = result.stdout.trim()
+      return image || null
+    }
+    if (isNoSuchContainer(result.stderr)) return null
+    throw this.commandError(args, result)
   }
 
-  async loadImage(tarballPath: string, onLog?: LogFn): Promise<string[]> {
-    const result = await this.runRequired(['load', '-i', tarballPath], onLog)
-    return parseLoadedImageRefs(result.stdout)
+  async pullImage(ref: string, onLog?: LogFn): Promise<void> {
+    await this.runRequired(['pull', ref], onLog)
   }
 
   async createContainer(spec: ContainerSpec, onLog?: LogFn): Promise<void> {
@@ -189,13 +196,6 @@ function portArg(port: PortMapping): string {
 
 function mountArg(mount: MountSpec): string {
   return `${mount.source}:${mount.target}${mount.readonly ? ':ro' : ''}`
-}
-
-function parseLoadedImageRefs(stdout: string): string[] {
-  return stdout
-    .split('\n')
-    .map((line) => line.match(/^Loaded image(?:\(s\))?:\s*(.+)$/i)?.[1]?.trim())
-    .filter((ref): ref is string => !!ref)
 }
 
 function isNoSuchContainer(stderr: string): boolean {

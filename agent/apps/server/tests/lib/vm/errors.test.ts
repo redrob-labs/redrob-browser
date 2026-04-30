@@ -8,7 +8,6 @@ import {
   ContainerCliError,
   ImageLoadError,
   LimaCommandError,
-  ManifestMissingError,
   VmError,
   VmNotReadyError,
   VmStateCorruptedError,
@@ -24,7 +23,6 @@ describe('VM errors', () => {
       new LimaCommandError('limactl start', 7, 'bad lima'),
       new ContainerCliError('nerdctl pull', 8, 'bad nerdctl'),
       new ImageLoadError('openclaw:v1', 'bad image'),
-      new ManifestMissingError('/tmp/manifest.json'),
     ]
 
     for (const error of errors) {
@@ -48,8 +46,30 @@ describe('VM errors', () => {
   })
 
   it('exports VM telemetry event names', () => {
+    expect(Object.keys(VM_TELEMETRY_EVENTS)).toEqual([
+      'ensureReadyStart',
+      'ensureReadyOk',
+      'ensureReadyBranch',
+      'create',
+      'start',
+      'stop',
+      'resetDetected',
+      'resetOk',
+      'nerdctlWaitStart',
+      'nerdctlWaitOk',
+      'nerdctlWaitPoll',
+      'nerdctlWaitTimeout',
+      'migrationOpenClawMoved',
+      'limaSpawn',
+      'limaExit',
+      'limaStderrChunk',
+      'provisionYamlWrite',
+      'provisionCreateStart',
+      'provisionCreateOk',
+      'provisionStartBegin',
+      'provisionStartOk',
+    ])
     expect(VM_TELEMETRY_EVENTS.ensureReadyStart).toBe('vm.ensure_ready.start')
-    expect(VM_TELEMETRY_EVENTS.downgradeDetected).toBe('vm.downgrade.detected')
     expect(VM_TELEMETRY_EVENTS.nerdctlWaitTimeout).toBe(
       'vm.nerdctl_wait.timeout',
     )

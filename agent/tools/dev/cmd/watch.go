@@ -40,9 +40,6 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := ensureDevCachePresent(); err != nil {
-		return err
-	}
 	if err := ensureLimactlPresent(); err != nil {
 		return err
 	}
@@ -68,6 +65,13 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	} else {
 		if err := os.MkdirAll(userDataDir, 0o755); err != nil {
 			return fmt.Errorf("creating user-data dir: %w", err)
+		}
+		stopped, err := proc.StopExistingWatchProcesses(3 * time.Second)
+		if err != nil {
+			return err
+		}
+		if stopped > 0 {
+			proc.LogMsgf(proc.TagInfo, "Stopped %d existing dev watch process group(s)", stopped)
 		}
 		proc.LogMsg(proc.TagInfo, "Killing processes on preferred ports...")
 		if err := proc.KillPortsAndWait(defaultPorts, 3*time.Second); err != nil {
@@ -185,21 +189,6 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	}
 	wg.Wait()
 	proc.LogMsg(proc.TagInfo, "All processes stopped")
-	return nil
-}
-
-func ensureDevCachePresent() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	manifestPath := filepath.Join(home, ".browseros-dev", "cache", "vm", "manifest.json")
-	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
-		return fmt.Errorf("%s %s",
-			proc.ErrorColor.Sprint("VM cache is missing."),
-			proc.DimColor.Sprintf("Run %s once.", proc.BoldColor.Sprint("bun run dev:setup")),
-		)
-	}
 	return nil
 }
 

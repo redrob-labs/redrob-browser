@@ -12,14 +12,11 @@ describe('renderLimaTemplate', () => {
       'minimumLimaVersion: 2.0.0\nmounts: []\nprobes: []\n',
       {
         vmStateDir: '/Users/me/.browseros/vm',
-        imageCacheDir: '/Users/me/.browseros/cache/vm/images',
       },
     )
 
     expect(yaml).toContain('mountPoint: "/mnt/browseros/vm"')
     expect(yaml).toContain('location: "/Users/me/.browseros/vm"')
-    expect(yaml).toContain('mountPoint: "/mnt/browseros/cache/images"')
-    expect(yaml).toContain('location: "/Users/me/.browseros/cache/vm/images"')
     expect(yaml).toContain('probes: []')
   })
 
@@ -27,7 +24,6 @@ describe('renderLimaTemplate', () => {
     expect(() =>
       renderLimaTemplate('minimumLimaVersion: 2.0.0\n', {
         vmStateDir: '/state',
-        imageCacheDir: '/images',
       }),
     ).toThrow('mounts: [] marker')
   })

@@ -75,10 +75,6 @@ export function getVmDisksDir(): string {
   return getVmCacheDir()
 }
 
-export function getAgentCacheDir(): string {
-  return join(getVmCacheDir(), 'images')
-}
-
 export function getLazyMonitoringDir(): string {
   return join(getBrowserosDir(), 'lazy-monitoring')
 }
@@ -116,7 +112,7 @@ export async function ensureBrowserosDir(): Promise<void> {
   await mkdir(getBuiltinSkillsDir(), { recursive: true })
   await mkdir(getSessionsDir(), { recursive: true })
   await mkdir(getLazyMonitoringRunsDir(), { recursive: true })
-  await mkdir(getAgentCacheDir(), { recursive: true })
+  await mkdir(getVmDisksDir(), { recursive: true })
 }
 
 export async function cleanOldSessions(): Promise<void> {

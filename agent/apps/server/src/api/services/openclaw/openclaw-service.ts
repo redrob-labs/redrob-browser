@@ -13,6 +13,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import {
   OPENCLAW_CONTAINER_HOME,
   OPENCLAW_GATEWAY_CONTAINER_PORT,
+  OPENCLAW_IMAGE,
 } from '@browseros/shared/constants/openclaw'
 import { DEFAULT_PORTS } from '@browseros/shared/constants/ports'
 import { getOpenClawDir } from '../../../lib/browseros-dir'
@@ -26,10 +27,7 @@ import type {
   ContainerRuntime,
   GatewayContainerSpec,
 } from './container-runtime'
-import {
-  buildContainerRuntime,
-  type VmCacheRuntimeConfig,
-} from './container-runtime-factory'
+import { buildContainerRuntime } from './container-runtime-factory'
 import {
   OpenClawAgentAlreadyExistsError,
   OpenClawAgentNotFoundError,
@@ -135,7 +133,6 @@ export interface OpenClawServiceConfig {
   browserosServerPort?: number
   resourcesDir?: string
   browserosDir?: string
-  vmCache?: VmCacheRuntimeConfig
 }
 
 export type OpenClawSessionSource =
@@ -267,7 +264,6 @@ export class OpenClawService {
   private browserosServerPort: number
   private resourcesDir: string | null
   private browserosDir: string | undefined
-  private vmCache: VmCacheRuntimeConfig | undefined
   private controlPlaneStatus: OpenClawControlPlaneStatus = 'disconnected'
   private lastGatewayError: string | null = null
   private lastRecoveryReason: OpenClawGatewayRecoveryReason | null = null
@@ -282,7 +278,6 @@ export class OpenClawService {
       resourcesDir: config.resourcesDir,
       projectDir: this.openclawDir,
       browserosRoot: config.browserosDir,
-      vmCache: config.vmCache,
     })
     this.token = crypto.randomUUID()
     this.cliClient = new OpenClawCliClient(this.runtime)
@@ -295,7 +290,6 @@ export class OpenClawService {
       config.browserosServerPort ?? DEFAULT_PORTS.server
     this.resourcesDir = config.resourcesDir ?? null
     this.browserosDir = config.browserosDir
-    this.vmCache = config.vmCache
   }
 
   configure(config: OpenClawServiceConfig): void {
@@ -316,13 +310,6 @@ export class OpenClawService {
       config.browserosDir !== this.browserosDir
     ) {
       this.browserosDir = config.browserosDir
-      runtimeChanged = true
-    }
-    if (
-      config.vmCache !== undefined &&
-      !sameVmCacheRuntimeConfig(config.vmCache, this.vmCache)
-    ) {
-      this.vmCache = config.vmCache
       runtimeChanged = true
     }
     if (runtimeChanged) {
@@ -360,6 +347,23 @@ export class OpenClawService {
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────────
+
+  /** Warm the VM and gateway image so later setup/start avoids registry work. */
+  async prewarm(onLog?: (msg: string) => void): Promise<void> {
+    return this.withLifecycleLock('prewarm', async () => {
+      const imageRef = process.env.OPENCLAW_IMAGE?.trim() || OPENCLAW_IMAGE
+      const logProgress = (message: string) => {
+        // Startup prewarm runs outside a user request, so keep phase logs visible without streaming command progress.
+        logger.info(message)
+        onLog?.(message)
+      }
+      logProgress('OpenClaw prewarm: ensuring BrowserOS VM is ready')
+      await this.runtime.ensureReady()
+      logProgress(`OpenClaw prewarm: ensuring image ${imageRef} is available`)
+      await this.runtime.prewarmGatewayImage()
+      logProgress('OpenClaw prewarm: ready')
+    })
+  }
 
   async setup(input: SetupInput, onLog?: (msg: string) => void): Promise<void> {
     return this.withLifecycleLock('setup', async () => {
@@ -478,7 +482,7 @@ export class OpenClawService {
 
       await this.ensureGatewayPortAllocated(logProgress)
 
-      if (await this.isGatewayAvailable(this.hostPort)) {
+      if (await this.isCurrentGatewayAvailable(this.hostPort)) {
         this.startGatewayLogTail()
         this.controlPlaneStatus = 'connecting'
         logProgress('Probing OpenClaw control plane...')
@@ -873,7 +877,7 @@ export class OpenClawService {
           this.setPort(persistedPort)
         }
 
-        if (!(await this.isGatewayAvailable(this.hostPort))) {
+        if (!(await this.isCurrentGatewayAvailable(this.hostPort))) {
           await this.ensureGatewayPortAllocated()
           await this.runtime.startGateway(this.buildGatewayRuntimeSpec())
           const ready = await this.runtime.waitForReady(
@@ -987,7 +991,6 @@ export class OpenClawService {
       resourcesDir: this.resourcesDir ?? undefined,
       projectDir: this.openclawDir,
       browserosRoot: this.browserosDir,
-      vmCache: this.vmCache,
     })
     this.cliClient = new OpenClawCliClient(this.runtime)
     this.bootstrapCliClient = this.buildBootstrapCliClient()
@@ -1044,6 +1047,11 @@ export class OpenClawService {
       })
     }
     return authenticated
+  }
+
+  private async isCurrentGatewayAvailable(hostPort: number): Promise<boolean> {
+    if (!(await this.isGatewayAvailable(hostPort))) return false
+    return this.runtime.isGatewayCurrent()
   }
 
   private async isGatewayPortReady(hostPort: number): Promise<boolean> {
@@ -1529,7 +1537,6 @@ export function configureOpenClawService(
 export function configureVmRuntime(config: {
   resourcesDir?: string
   browserosDir?: string
-  vmCache?: VmCacheRuntimeConfig
 }): OpenClawService {
   return configureOpenClawService(config)
 }
@@ -1537,15 +1544,4 @@ export function configureVmRuntime(config: {
 export function getOpenClawService(): OpenClawService {
   if (!service) service = new OpenClawService()
   return service
-}
-
-function sameVmCacheRuntimeConfig(
-  left: VmCacheRuntimeConfig | undefined,
-  right: VmCacheRuntimeConfig | undefined,
-): boolean {
-  return (
-    left?.manifestUrl === right?.manifestUrl &&
-    left?.ensureAvailable === right?.ensureAvailable &&
-    left?.ensureSynced === right?.ensureSynced
-  )
 }

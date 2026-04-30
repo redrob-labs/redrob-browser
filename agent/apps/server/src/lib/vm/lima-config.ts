@@ -8,7 +8,6 @@ export function renderLimaTemplate(
   template: string,
   cfg: {
     vmStateDir: string
-    imageCacheDir: string
   },
 ): string {
   const mounts = [
@@ -16,9 +15,6 @@ export function renderLimaTemplate(
     `- location: "${cfg.vmStateDir}"`,
     '  mountPoint: "/mnt/browseros/vm"',
     '  writable: true',
-    `- location: "${cfg.imageCacheDir}"`,
-    '  mountPoint: "/mnt/browseros/cache/images"',
-    '  writable: false',
   ].join('\n')
 
   if (!template.includes('mounts: []')) {

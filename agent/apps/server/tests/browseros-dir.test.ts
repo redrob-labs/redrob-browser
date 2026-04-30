@@ -8,7 +8,6 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { PATHS } from '@browseros/shared/constants/paths'
 import {
-  getAgentCacheDir,
   getBrowserosDir,
   getCacheDir,
   getVmCacheDir,
@@ -104,14 +103,6 @@ describe('getBrowserosDir', () => {
 
     expect(getVmCacheDir()).toBe(
       join(homedir(), '.browseros-dev', 'cache', 'vm'),
-    )
-  })
-
-  it('uses an agent image cache directory below vm cache', () => {
-    process.env.NODE_ENV = 'development'
-
-    expect(getAgentCacheDir()).toBe(
-      join(homedir(), '.browseros-dev', 'cache', 'vm', 'images'),
     )
   })
 })
