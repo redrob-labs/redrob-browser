@@ -36,6 +36,15 @@ interface UseAgentConversationOptions {
   history?: OpenClawChatHistoryMessage[]
   onComplete?: () => void
   onSessionKeyChange?: (sessionKey: string) => void
+  /**
+   * Server-side active turn id, surfaced via the listing query. When
+   * this changes from null/<id> to a different non-null id while we
+   * aren't already streaming (e.g. the server just popped a queued
+   * message and started a new turn), the hook reattaches via
+   * /chat/active so the chat panel picks up the live stream without
+   * waiting for a remount.
+   */
+  activeTurnId?: string | null
 }
 
 export function useAgentConversation(
@@ -211,31 +220,46 @@ export function useAgentConversation(
   }
   processEventRef.current = processAgentHarnessStreamEvent
 
-  // On mount (and whenever the agent changes), check whether the
-  // server has an in-flight turn for this agent and reattach to it.
-  // This is what makes the chat resilient across tab close/reopen,
-  // refresh, and navigation: the runtime call kept running on the
-  // server while we were away. Effect only depends on `agentId` —
-  // the event handler is read off a ref so this doesn't re-subscribe
-  // every render.
+  const activeTurnIdDep = options.activeTurnId ?? null
+
+  // On mount, on agent change, and whenever the listing reports a
+  // *new* active turn id, check whether the server has an in-flight
+  // turn for this agent and reattach to it. This catches three
+  // cases at once: the chat resilience flow (tab close/reopen),
+  // navigation between agents, AND queue drain (the server starts a
+  // new turn from a queued message → activeTurnId flips → attach).
   useEffect(() => {
     let cancelled = false
     const abortController = new AbortController()
+    // Reference the dep inside the body so biome's exhaustive-deps
+    // rule sees it consumed; the value is just an "any non-null
+    // active turn id" trigger — the actual id we attach to comes
+    // from the fresh fetchActiveHarnessTurn call below.
+    void activeTurnIdDep
 
     const attemptResume = async () => {
+      // Track whether *we* started a stream in this run. When the
+      // early-return paths fire (no active turn, or a `send()` /
+      // earlier resume already owns `streamAbortRef`), the finally
+      // block must NOT touch streaming/turnIdRef/lastSeqRef —
+      // otherwise we clobber the in-flight stream's state and the
+      // Stop button drops out mid-turn while events keep arriving.
+      let weStartedStream = false
       try {
         const active = await fetchActiveHarnessTurn(agentId)
         if (cancelled || !active || active.status !== 'running') return
-        if (streamAbortRef.current) return // a fresh send already in flight
+        if (streamAbortRef.current) return // someone else already owns the stream
 
         // Stage a placeholder turn so the streamed events have a row
-        // to render into. We don't have the user message text on
-        // resume; the assistant turn is what we're catching up on.
+        // to render into. The server now persists the kicking-off
+        // prompt on the active turn, so we render it as the user
+        // bubble immediately — no empty-bubble flicker when a queued
+        // message starts running.
         setTurns((prev) => [
           ...prev,
           {
             id: crypto.randomUUID(),
-            userText: '',
+            userText: active.prompt ?? '',
             parts: [],
             done: false,
             timestamp: active.startedAt,
@@ -247,6 +271,7 @@ export function useAgentConversation(
         lastSeqRef.current = null
         streamAbortRef.current = abortController
         setStreaming(true)
+        weStartedStream = true
 
         const response = await attachToHarnessTurn(agentId, {
           turnId: active.turnId,
@@ -265,10 +290,20 @@ export function useAgentConversation(
         // Resume is best-effort; transient errors fall back to the
         // user starting a new turn manually.
       } finally {
-        if (!cancelled) {
-          if (streamAbortRef.current === abortController) {
-            streamAbortRef.current = null
-          }
+        // Always release `streamAbortRef` if we owned it — even when
+        // the effect was cancelled mid-stream (a listing poll
+        // captured the next queue-drain turn id, for example). If we
+        // don't, the next effect run hits `if (streamAbortRef.current)
+        // return` against our now-aborted controller and never
+        // reattaches, leaving `streaming === true` with no live stream.
+        if (weStartedStream && streamAbortRef.current === abortController) {
+          streamAbortRef.current = null
+        }
+        // The other state (streaming flag, turn id, lastSeq) is the
+        // *current run's* lifecycle: only reset it on a clean exit.
+        // When `cancelled` is true the next run will set these
+        // itself, so resetting here would only cause a brief flicker.
+        if (!cancelled && weStartedStream) {
           turnIdRef.current = null
           lastSeqRef.current = null
           setStreaming(false)
@@ -281,7 +316,7 @@ export function useAgentConversation(
       cancelled = true
       abortController.abort()
     }
-  }, [agentId])
+  }, [agentId, activeTurnIdDep])
 
   const send = async (input: string | SendInput) => {
     const normalized: SendInput =
