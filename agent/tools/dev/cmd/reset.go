@@ -10,11 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"browseros-dev/proc"
+
 	"github.com/spf13/cobra"
 )
 
 const (
-	devDirName             = ".browseros-dev"
 	limaVMName             = "browseros-vm"
 	openClawImage          = "ghcr.io/openclaw/openclaw:2026.4.12"
 	openClawContainerName  = "browseros-openclaw-openclaw-gateway-1"
@@ -23,14 +24,9 @@ const (
 
 var resetCmd = &cobra.Command{
 	Use:   "reset",
-	Short: "Guide destructive BrowserOS dev profile and VM resets",
-	Long:  "Walks through safe cleanup, VM shutdown/deletion, OpenClaw container/image removal, and full ~/.browseros-dev reset.",
+	Short: "Guide destructive BrowserOS profile and VM resets",
+	Long:  "Walks through safe cleanup, VM shutdown/deletion, OpenClaw container/image removal, and target BrowserOS state reset.",
 	RunE:  runReset,
-}
-
-type devPaths struct {
-	Root     string
-	LimaHome string
 }
 
 type resetPrompt struct {
@@ -49,7 +45,18 @@ type podmanMachineEntry struct {
 	Running bool   `json:"Running"`
 }
 
+var (
+	resetTargetName         string
+	resetBrowserOSDir       string
+	resetPortsValue         string
+	resetBrowserUserDataDir string
+)
+
 func init() {
+	resetCmd.Flags().StringVar(&resetTargetName, "target", targetDev, "Reset target: dev, dogfood, or prod")
+	resetCmd.Flags().StringVar(&resetBrowserOSDir, "browseros-dir", "", "Override target BrowserOS state directory")
+	resetCmd.Flags().StringVar(&resetPortsValue, "ports", "", "Override ports as cdp,server,extension")
+	resetCmd.Flags().StringVar(&resetBrowserUserDataDir, "browser-user-data-dir", "", "Override BrowserOS user-data dir to stop")
 	rootCmd.AddCommand(resetCmd)
 }
 
@@ -57,21 +64,34 @@ func init() {
 func runReset(cmd *cobra.Command, args []string) error {
 	out := cmd.OutOrStdout()
 	reader := bufio.NewReader(os.Stdin)
-	paths, err := resolveDevPaths()
+	root, err := proc.FindMonorepoRoot()
+	if err != nil {
+		return err
+	}
+	target, err := resolveResetTarget(root, resetTargetOptions{
+		Target:             resetTargetName,
+		BrowserOSDir:       resetBrowserOSDir,
+		Ports:              resetPortsValue,
+		BrowserUserDataDir: resetBrowserUserDataDir,
+	})
 	if err != nil {
 		return err
 	}
 
-	printResetOverview(out, paths)
+	printResetOverview(out, target)
+
+	if err := ensureTargetStopped(out, target); err != nil {
+		return err
+	}
 
 	if ok, err := confirmYesNo(out, reader, resetPrompt{
 		Title:  "Run safe cleanup first?",
-		Body:   "This stops old dev watch processes, clears dev ports, and removes temporary /tmp browser profiles. It does not touch saved dev data.",
-		Action: "Run safe cleanup",
+		Body:   fmt.Sprintf("This stops %s processes, clears target ports, and removes target temp profiles. It does not touch saved BrowserOS data.", target.Name),
+		Action: "Run safe cleanup for " + target.Name,
 	}); err != nil {
 		return err
 	} else if ok {
-		if err := runSafeCleanup(out, safeCleanupOptions{ports: true, temps: true}); err != nil {
+		if err := runSafeCleanup(out, target, safeCleanupOptions{ports: true, temps: true}); err != nil {
 			return err
 		}
 	}
@@ -82,28 +102,28 @@ func runReset(cmd *cobra.Command, args []string) error {
 		if err := maybeResetLegacyPodman(out, reader); err != nil {
 			return err
 		}
-		return maybeDeleteDevProfile(out, reader, paths)
+		return maybeDeleteTargetRoot(out, reader, target)
 	}
 
-	vm, err := findVM(limactlPath, paths.LimaHome)
+	vm, err := findVM(limactlPath, target.LimaHome)
 	if err != nil {
 		fmt.Fprintf(out, "%s could not inspect Lima VMs: %v\n", warnStyle.Sprint("Warning:"), err)
 		if err := maybeResetLegacyPodman(out, reader); err != nil {
 			return err
 		}
-		return maybeDeleteDevProfile(out, reader, paths)
+		return maybeDeleteTargetRoot(out, reader, target)
 	}
 	if vm == nil {
-		fmt.Fprintf(out, "%s %s was not found in %s.\n", dimStyle.Sprint("Not found:"), limaVMName, pathStyle.Sprint(paths.LimaHome))
+		fmt.Fprintf(out, "%s %s was not found in %s.\n", dimStyle.Sprint("Not found:"), limaVMName, pathStyle.Sprint(target.LimaHome))
 		if err := maybeResetLegacyPodman(out, reader); err != nil {
 			return err
 		}
-		return maybeDeleteDevProfile(out, reader, paths)
+		return maybeDeleteTargetRoot(out, reader, target)
 	}
 
 	fmt.Fprintf(out, "%s %s %s\n", labelStyle.Sprint("Found VM:"), commandStyle.Sprint(vm.Name), dimStyle.Sprintf("(%s)", vm.Status))
 	if strings.EqualFold(vm.Status, "Running") {
-		if err := maybeResetOpenClaw(out, reader, limactlPath, paths.LimaHome); err != nil {
+		if err := maybeResetOpenClaw(out, reader, limactlPath, target.LimaHome); err != nil {
 			return err
 		}
 		if ok, err := confirmYesNo(out, reader, resetPrompt{
@@ -113,7 +133,7 @@ func runReset(cmd *cobra.Command, args []string) error {
 		}); err != nil {
 			return err
 		} else if ok {
-			if err := runLimactl(out, limactlPath, paths.LimaHome, "stop", limaVMName); err != nil {
+			if err := runLimactl(out, limactlPath, target.LimaHome, "stop", limaVMName); err != nil {
 				return err
 			}
 			fmt.Fprintln(out, successStyle.Sprint("VM stopped."))
@@ -125,12 +145,12 @@ func runReset(cmd *cobra.Command, args []string) error {
 
 	if ok, err := confirmYesNo(out, reader, resetPrompt{
 		Title:  "Delete VM?",
-		Body:   "This deletes the Lima VM and its container store. ~/.browseros-dev remains. OpenClaw will be pulled again next time.",
+		Body:   fmt.Sprintf("This deletes the Lima VM and its container store. %s remains. OpenClaw will be pulled again next time.", target.BrowserOSDir),
 		Action: "Delete browseros-vm",
 	}); err != nil {
 		return err
 	} else if ok {
-		if err := runLimactl(out, limactlPath, paths.LimaHome, "delete", "--force", limaVMName); err != nil {
+		if err := runLimactl(out, limactlPath, target.LimaHome, "delete", "--force", limaVMName); err != nil {
 			return err
 		}
 		fmt.Fprintln(out, successStyle.Sprint("VM deleted."))
@@ -140,35 +160,19 @@ func runReset(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	return maybeDeleteDevProfile(out, reader, paths)
+	return maybeDeleteTargetRoot(out, reader, target)
 }
 
-func resolveDevPaths() (devPaths, error) {
-	if override := strings.TrimSpace(os.Getenv("BROWSEROS_DIR")); override != "" {
-		root, err := filepath.Abs(override)
-		if err != nil {
-			return devPaths{}, err
-		}
-		return devPaths{Root: root, LimaHome: filepath.Join(root, "lima")}, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return devPaths{}, err
-	}
-	root := filepath.Join(home, devDirName)
-	return devPaths{Root: root, LimaHome: filepath.Join(root, "lima")}, nil
-}
-
-func printResetOverview(out io.Writer, paths devPaths) {
-	fmt.Fprintln(out, headerStyle.Sprint("BrowserOS dev reset"))
+func printResetOverview(out io.Writer, target resetTarget) {
+	fmt.Fprintln(out, headerStyle.Sprint(target.Title))
 	fmt.Fprintln(out)
-	fmt.Fprintf(out, "This can reset parts of %s. Pick the smallest reset that matches the problem.\n", pathStyle.Sprint(paths.Root))
+	fmt.Fprintf(out, "This can reset parts of %s. Pick the smallest reset that matches the problem.\n", pathStyle.Sprint(target.BrowserOSDir))
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "  %s %s\n", labelStyle.Sprint("Stop VM:"), dimStyle.Sprint("Shuts down browseros-vm. Keeps data."))
-	fmt.Fprintf(out, "  %s %s\n", labelStyle.Sprint("Delete VM:"), dimStyle.Sprint("Removes Lima/container state. Keeps the dev profile."))
+	fmt.Fprintf(out, "  %s %s\n", labelStyle.Sprint("Delete VM:"), dimStyle.Sprint("Removes Lima/container state. Keeps the target state root."))
 	fmt.Fprintf(out, "  %s %s\n", labelStyle.Sprint("Remove OpenClaw container:"), dimStyle.Sprint("Keeps the downloaded OpenClaw image."))
 	fmt.Fprintf(out, "  %s %s\n", labelStyle.Sprint("Remove OpenClaw image:"), dimStyle.Sprint("Next startup pulls it again."))
-	fmt.Fprintf(out, "  %s %s\n", warnStyle.Sprint("Delete dev profile:"), dimStyle.Sprint("Deletes the dev profile root and dev-local BrowserOS data."))
+	fmt.Fprintf(out, "  %s %s\n", warnStyle.Sprint(target.DeleteRootLabel), dimStyle.Sprint("Deletes the target BrowserOS state root."))
 	fmt.Fprintln(out)
 }
 
@@ -244,24 +248,24 @@ func maybeResetOpenClaw(out io.Writer, reader *bufio.Reader, limactlPath string,
 	return nil
 }
 
-func maybeDeleteDevProfile(out io.Writer, reader *bufio.Reader, paths devPaths) error {
+func maybeDeleteTargetRoot(out io.Writer, reader *bufio.Reader, target resetTarget) error {
 	ok, err := confirmTyped(
 		out,
 		reader,
-		"Delete dev profile?",
-		fmt.Sprintf("This deletes %s. It removes BrowserOS dev data plus VM/OpenClaw state.", pathStyle.Sprint(paths.Root)),
+		target.DeleteRootLabel,
+		fmt.Sprintf("This deletes %s. %s", pathStyle.Sprint(target.BrowserOSDir), target.DeleteRootBody),
 		"DELETE",
 	)
 	if err != nil || !ok {
 		return err
 	}
-	if err := validateDevProfileRootForDeletion(paths.Root); err != nil {
+	if err := validateDevProfileRootForDeletion(target.BrowserOSDir); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(paths.Root); err != nil {
+	if err := os.RemoveAll(target.BrowserOSDir); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "%s %s\n", successStyle.Sprint("Deleted:"), pathStyle.Sprint(paths.Root))
+	fmt.Fprintf(out, "%s %s\n", successStyle.Sprint("Deleted:"), pathStyle.Sprint(target.BrowserOSDir))
 	return nil
 }
 

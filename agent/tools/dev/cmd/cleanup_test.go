@@ -64,7 +64,11 @@ func TestConfirmTypedRequiresExactToken(t *testing.T) {
 
 func TestResetOverviewTellsUserToUseSmallestReset(t *testing.T) {
 	var out bytes.Buffer
-	printResetOverview(&out, devPaths{Root: "/Users/me/.browseros-dev"})
+	printResetOverview(&out, resetTarget{
+		Title:           "BrowserOS dev reset",
+		BrowserOSDir:    "/Users/me/.browseros-dev",
+		DeleteRootLabel: "Delete dev profile:",
+	})
 
 	text := out.String()
 	for _, want := range []string{

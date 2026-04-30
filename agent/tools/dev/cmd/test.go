@@ -41,7 +41,10 @@ func runTest(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	p := proc.DefaultLocalPorts()
+	p, err := resolveTargetPorts(root, "")
+	if err != nil {
+		return err
+	}
 
 	proc.LogMsg(proc.TagInfo, "Killing processes on test ports...")
 	proc.KillPorts(p)

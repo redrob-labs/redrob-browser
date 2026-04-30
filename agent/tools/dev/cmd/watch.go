@@ -44,7 +44,10 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	defaultPorts := proc.DefaultLocalPorts()
+	defaultPorts, err := resolveTargetPorts(root, "")
+	if err != nil {
+		return err
+	}
 	p := defaultPorts
 	var reservations *proc.PortReservations
 	userDataDir := "/tmp/browseros-dev"
