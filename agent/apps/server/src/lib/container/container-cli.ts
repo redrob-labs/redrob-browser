@@ -4,9 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { ContainerCliError } from '../vm/errors'
+import {
+  ContainerCliError,
+  ContainerNameInUseError,
+  ContainerNameReleaseTimeoutError,
+} from '../vm/errors'
 import { LimaCli } from '../vm/lima-cli'
-import type { ContainerSpec, LogFn, MountSpec, PortMapping } from './types'
+import type {
+  ContainerInfo,
+  ContainerSpec,
+  LogFn,
+  MountSpec,
+  PortMapping,
+  WaitForContainerNameReleaseOptions,
+} from './types'
 
 export function buildNerdctlCommand(args: string[]): string[] {
   return ['nerdctl', ...args]
@@ -58,7 +69,18 @@ export class ContainerCli {
   }
 
   async createContainer(spec: ContainerSpec, onLog?: LogFn): Promise<void> {
-    await this.runRequired(buildCreateArgs(spec), onLog)
+    const args = buildCreateArgs(spec)
+    const result = await this.runCommand(args, onLog)
+    if (result.exitCode === 0) return
+    if (isContainerNameInUse(result.stderr)) {
+      throw new ContainerNameInUseError(
+        spec.name,
+        `nerdctl ${args.join(' ')}`,
+        result.exitCode,
+        result.stderr.trim(),
+      )
+    }
+    throw this.commandError(args, result)
   }
 
   async startContainer(name: string, onLog?: LogFn): Promise<void> {
@@ -82,6 +104,36 @@ export class ContainerCli {
     const result = await this.runCommand(args, onLog)
     if (result.exitCode === 0 || isNoSuchContainer(result.stderr)) return
     throw this.commandError(args, result)
+  }
+
+  /** Inspect a named container without treating absence as a command failure. */
+  async inspectContainer(name: string): Promise<ContainerInfo | null> {
+    const args = ['container', 'inspect', '--format', '{{json .}}', name]
+    const result = await this.runCommand(args)
+    if (result.exitCode === 0) {
+      return parseContainerInfo(result.stdout, name)
+    }
+    if (isNoSuchContainer(result.stderr)) return null
+    throw this.commandError(args, result)
+  }
+
+  /** Wait for containerd/nerdctl to stop resolving a container name after rm. */
+  async waitForContainerNameRelease(
+    name: string,
+    opts: WaitForContainerNameReleaseOptions = {},
+  ): Promise<void> {
+    const timeoutMs = opts.timeoutMs ?? 5_000
+    const intervalMs = opts.intervalMs ?? 100
+    const startedAt = Date.now()
+
+    while (Date.now() - startedAt <= timeoutMs) {
+      if (!(await this.inspectContainer(name))) return
+      const remainingMs = timeoutMs - (Date.now() - startedAt)
+      if (remainingMs <= 0) break
+      await Bun.sleep(Math.min(intervalMs, remainingMs))
+    }
+
+    throw new ContainerNameReleaseTimeoutError(name, timeoutMs)
   }
 
   async exec(name: string, cmd: string[], onLog?: LogFn): Promise<number> {
@@ -198,12 +250,65 @@ function mountArg(mount: MountSpec): string {
   return `${mount.source}:${mount.target}${mount.readonly ? ':ro' : ''}`
 }
 
+function parseContainerInfo(
+  stdout: string,
+  fallbackName: string,
+): ContainerInfo {
+  const line = stdout
+    .trim()
+    .split('\n')
+    .map((entry) => entry.trim())
+    .find(Boolean)
+  if (!line) {
+    throw new Error(`nerdctl container inspect returned empty output`)
+  }
+  const parsed = JSON.parse(line) as unknown
+  const container = Array.isArray(parsed) ? parsed[0] : parsed
+  const object = isRecord(container) ? container : {}
+  const config = isRecord(object.Config) ? object.Config : {}
+  const state = isRecord(object.State) ? object.State : {}
+  const name = stringValue(object.Name)?.replace(/^\/+/, '') ?? fallbackName
+  const status = stringValue(state.Status) ?? stringValue(object.Status)
+  const running =
+    typeof state.Running === 'boolean'
+      ? state.Running
+      : status
+        ? status.toLowerCase() === 'running'
+        : null
+
+  return {
+    id: stringValue(object.ID) ?? stringValue(object.Id),
+    name,
+    image: stringValue(config.Image) ?? stringValue(object.Image),
+    status,
+    running,
+  }
+}
+
 function isNoSuchContainer(stderr: string): boolean {
   const lower = stderr.toLowerCase()
-  return lower.includes('no such container') || lower.includes('not found')
+  return (
+    lower.includes('no such container') || lower.includes('container not found')
+  )
+}
+
+export function isContainerNameInUse(stderr: string): boolean {
+  const lower = stderr.toLowerCase()
+  return (
+    (lower.includes('name-store error') && lower.includes('already used')) ||
+    lower.includes('name is already in use')
+  )
 }
 
 function linesToOutput(lines: string[]): string {
   if (lines.length === 0) return ''
   return `${lines.join('\n')}\n`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null
 }

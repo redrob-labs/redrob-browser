@@ -737,6 +737,77 @@ describe('OpenClawService', () => {
     expect(probe).toHaveBeenCalledTimes(2)
   })
 
+  it('serializes start across service instances sharing an OpenClaw dir', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.openclaw', 'openclaw.json'),
+      JSON.stringify({
+        gateway: {
+          auth: {
+            token: 'cli-token',
+          },
+        },
+      }),
+    )
+    let gatewayReady = false
+    let releaseStartGateway!: () => void
+    let notifyStartGatewayEntered!: () => void
+    const startGatewayEntered = new Promise<void>((resolve) => {
+      notifyStartGatewayEntered = resolve
+    })
+    const unblockStartGateway = new Promise<void>((resolve) => {
+      releaseStartGateway = resolve
+    })
+    const firstEnsureReady = mock(async () => {})
+    const secondEnsureReady = mock(async () => {})
+    const startGateway = mock(async () => {
+      notifyStartGatewayEntered()
+      await unblockStartGateway
+      gatewayReady = true
+    })
+    const waitForReady = mock(async () => true)
+    const probe = mock(async () => {})
+    const firstService = new OpenClawService() as MutableOpenClawService
+    const secondService = new OpenClawService() as MutableOpenClawService
+
+    firstService.openclawDir = tempDir
+    secondService.openclawDir = tempDir
+    firstService.runtime = {
+      ensureReady: firstEnsureReady,
+      isReady: async () => gatewayReady,
+      isGatewayCurrent: async () => true,
+      startGateway,
+      waitForReady,
+    }
+    secondService.runtime = {
+      ensureReady: secondEnsureReady,
+      isReady: async () => gatewayReady,
+      isGatewayCurrent: async () => true,
+      startGateway,
+      waitForReady,
+    }
+    firstService.cliClient = { probe }
+    secondService.cliClient = { probe }
+    mockGatewayAuth()
+
+    const firstStart = firstService.start()
+    await startGatewayEntered
+    const secondStart = secondService.start()
+    await Bun.sleep(25)
+    const secondEnteredBeforeFirstFinished = secondEnsureReady.mock.calls.length
+
+    releaseStartGateway()
+    await Promise.all([firstStart, secondStart])
+
+    expect(secondEnteredBeforeFirstFinished).toBe(0)
+    expect(firstEnsureReady).toHaveBeenCalledTimes(1)
+    expect(secondEnsureReady).toHaveBeenCalledTimes(1)
+    expect(startGateway).toHaveBeenCalledTimes(1)
+    expect(waitForReady).toHaveBeenCalledTimes(1)
+    expect(probe).toHaveBeenCalledTimes(2)
+  })
+
   it('does not restart a ready gateway when start is called again', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
     await mkdir(join(tempDir, '.openclaw'), { recursive: true })

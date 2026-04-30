@@ -38,6 +38,19 @@ export interface ContainerSpec {
   command?: string[]
 }
 
+export interface ContainerInfo {
+  id: string | null
+  name: string
+  image: string | null
+  status: string | null
+  running: boolean | null
+}
+
+export interface WaitForContainerNameReleaseOptions {
+  timeoutMs?: number
+  intervalMs?: number
+}
+
 export interface LogLine {
   stream: 'stdout' | 'stderr'
   line: string

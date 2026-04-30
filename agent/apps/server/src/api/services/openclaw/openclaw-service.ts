@@ -10,6 +10,7 @@
 
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import {
   OPENCLAW_CONTAINER_HOME,
   OPENCLAW_GATEWAY_CONTAINER_PORT,
@@ -18,6 +19,7 @@ import {
 import { DEFAULT_PORTS } from '@browseros/shared/constants/ports'
 import { getOpenClawDir } from '../../../lib/browseros-dir'
 import { logger } from '../../../lib/logger'
+import { withProcessLock } from '../../../lib/process-lock'
 import {
   type AgentLiveStatus,
   type AgentSessionState,
@@ -1012,10 +1014,16 @@ export class OpenClawService {
     if (persistedPort !== null) {
       this.setPort(persistedPort)
     }
-    if (await this.isGatewayAvailable(this.hostPort)) {
+    const currentPortReady = await this.isGatewayPortReady(this.hostPort)
+    if (
+      currentPortReady &&
+      (await this.isGatewayAuthenticated(this.hostPort))
+    ) {
       return
     }
-    const hostPort = await allocateGatewayPort(this.openclawDir)
+    const hostPort = await allocateGatewayPort(this.openclawDir, {
+      excludePort: currentPortReady ? this.hostPort : undefined,
+    })
     if (hostPort !== this.hostPort) {
       logProgress?.(`Allocated OpenClaw gateway host port ${hostPort}`)
       logger.info('Allocated OpenClaw gateway host port', { hostPort })
@@ -1025,7 +1033,10 @@ export class OpenClawService {
 
   private async isGatewayAvailable(hostPort: number): Promise<boolean> {
     if (!(await this.isGatewayPortReady(hostPort))) return false
+    return this.isGatewayAuthenticated(hostPort)
+  }
 
+  private async isGatewayAuthenticated(hostPort: number): Promise<boolean> {
     if (!this.tokenLoaded) {
       logger.debug(
         'OpenClaw gateway port is ready before auth token is loaded',
@@ -1512,8 +1523,14 @@ export class OpenClawService {
     })
     await previous.catch(() => undefined)
     try {
-      logger.debug('OpenClaw lifecycle operation started', { operation })
-      return await fn()
+      return await withProcessLock(
+        'openclaw-lifecycle',
+        { lockDir: join(this.openclawDir, '.locks') },
+        async () => {
+          logger.debug('OpenClaw lifecycle operation started', { operation })
+          return await fn()
+        },
+      )
     } finally {
       release()
     }

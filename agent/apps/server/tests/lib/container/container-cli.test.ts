@@ -4,10 +4,20 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { join } from 'node:path'
 import { ContainerCli } from '../../../src/lib/container/container-cli'
-import { ContainerCliError } from '../../../src/lib/vm/errors'
+import {
+  ContainerCliError,
+  ContainerNameInUseError,
+} from '../../../src/lib/vm/errors'
 import { fakeSsh } from '../../__helpers__/fake-ssh'
 
 describe('ContainerCli', () => {
@@ -163,6 +173,92 @@ describe('ContainerCli', () => {
     )
   })
 
+  it('inspects a container by name', async () => {
+    const sshPath = await fakeSsh(
+      {
+        stdout: JSON.stringify({
+          ID: 'abc123',
+          Name: 'gateway',
+          Config: { Image: 'openclaw:v1' },
+          State: { Status: 'running', Running: true },
+        }),
+      },
+      logPath,
+    )
+    const cli = await createCli(sshPath, tempDir)
+
+    await expect(cli.inspectContainer('gateway')).resolves.toEqual({
+      id: 'abc123',
+      name: 'gateway',
+      image: 'openclaw:v1',
+      status: 'running',
+      running: true,
+    })
+
+    await expect(readFile(logPath, 'utf8')).resolves.toContain(
+      "lima-browseros-vm 'nerdctl' 'container' 'inspect' '--format' '{{json .}}' 'gateway'",
+    )
+  })
+
+  it('returns null when inspected containers are absent', async () => {
+    const sshPath = await fakeSsh(
+      { stderr: 'no such container', exit: 1 },
+      logPath,
+    )
+    const cli = await createCli(sshPath, tempDir)
+
+    await expect(cli.inspectContainer('gateway')).resolves.toBeNull()
+  })
+
+  it('does not treat unrelated not found errors as absent containers', async () => {
+    const sshPath = await fakeSsh(
+      { stderr: 'network interface not found', exit: 1 },
+      logPath,
+    )
+    const cli = await createCli(sshPath, tempDir)
+
+    await expect(cli.inspectContainer('gateway')).rejects.toBeInstanceOf(
+      ContainerCliError,
+    )
+  })
+
+  it('waits until a container name is no longer resolvable', async () => {
+    const sshPath = await fakeSshContainerExistsThenMissing(tempDir, logPath)
+    const cli = await createCli(sshPath, tempDir)
+
+    await expect(
+      cli.waitForContainerNameRelease('gateway', {
+        timeoutMs: 500,
+        intervalMs: 5,
+      }),
+    ).resolves.toBeUndefined()
+
+    const inspectCalls = (await readFile(logPath, 'utf8'))
+      .split('\n')
+      .filter((line) => line.includes("'container' 'inspect'"))
+    expect(inspectCalls).toHaveLength(2)
+  })
+
+  it('classifies create name-store collisions as name-in-use errors', async () => {
+    const sshPath = await fakeSsh(
+      {
+        stderr:
+          'name-store error\nname "gateway" is already used by ID "abc123"',
+        exit: 1,
+      },
+      logPath,
+    )
+    const cli = await createCli(sshPath, tempDir)
+
+    const error = await cli
+      .createContainer({ name: 'gateway', image: 'openclaw:v1' })
+      .catch((err) => err)
+
+    expect(error).toBeInstanceOf(ContainerNameInUseError)
+    expect(error.containerName).toBe('gateway')
+    expect(error.stderr).toContain('name "gateway" is already used')
+  })
+
   it('tolerates removal when the container is already absent', async () => {
     const sshPath = await fakeSsh(
       { stderr: 'no such container', exit: 1 },
@@ -214,4 +310,32 @@ function sshConfigPath(tempDir: string): string {
 
 function sshPrefix(configPath: string): string {
   return `ARGS:-F ${configPath} lima-browseros-vm`
+}
+
+async function fakeSshContainerExistsThenMissing(
+  tempDir: string,
+  logPath: string,
+): Promise<string> {
+  const path = join(tempDir, 'ssh-container-exists-then-missing')
+  const counterPath = join(tempDir, 'ssh-container-exists-then-missing.count')
+  const body = `#!/usr/bin/env bash
+set -u
+echo "ARGS:$*" >> "${logPath}"
+count="$(cat "${counterPath}" 2>/dev/null || echo 0)"
+next=$((count + 1))
+printf '%s' "$next" > "${counterPath}"
+case "$count" in
+  0)
+    printf '{"ID":"abc123","Name":"gateway","Config":{"Image":"openclaw:v1"},"State":{"Status":"exited","Running":false}}'
+    exit 0
+    ;;
+  *)
+    echo "no such container" >&2
+    exit 1
+    ;;
+esac
+`
+  await writeFile(path, body)
+  await chmod(path, 0o755)
+  return path
 }

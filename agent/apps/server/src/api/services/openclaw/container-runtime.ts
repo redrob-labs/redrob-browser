@@ -15,18 +15,26 @@ import type {
   ContainerCommandResult,
   ContainerSpec,
   LogFn,
+  WaitForContainerNameReleaseOptions,
 } from '../../../lib/container'
+import { isContainerNameInUse } from '../../../lib/container'
 import { logger } from '../../../lib/logger'
 import {
   GUEST_VM_STATE,
   hostPathToGuest,
   type VmRuntime,
 } from '../../../lib/vm'
+import { ContainerNameInUseError } from '../../../lib/vm/errors'
 
 const GATEWAY_CONTAINER_HOME = '/home/node'
 const GATEWAY_STATE_DIR = `${GATEWAY_CONTAINER_HOME}/.openclaw`
 const GUEST_OPENCLAW_HOME = `${GUEST_VM_STATE}/openclaw`
 const GATEWAY_NPM_PREFIX = `${GATEWAY_CONTAINER_HOME}/.npm-global`
+const CREATE_CONTAINER_MAX_ATTEMPTS = 3
+const OPENCLAW_NAME_RELEASE_WAIT: WaitForContainerNameReleaseOptions = {
+  timeoutMs: 10_000,
+  intervalMs: 100,
+}
 // Prepend user-installed bin so tools like `claude` / `gemini` CLI that
 // are installed via npm into the mounted home are discoverable by
 // OpenClaw's child-process spawns (no login shell is involved).
@@ -121,10 +129,9 @@ export class ContainerRuntime {
     input: GatewayContainerSpec,
     onLog?: LogFn,
   ): Promise<void> {
-    await this.removeGatewayContainer(onLog)
     const image = await this.ensureGatewayImageLoaded(onLog)
     const container = await this.buildGatewayContainerSpec(input, image)
-    await this.shell.createContainer(container, onLog)
+    await this.createContainerWithNameReconcile(container, onLog)
     await this.shell.startContainer(container.name)
   }
 
@@ -208,10 +215,11 @@ export class ContainerRuntime {
     onLog?: LogFn,
   ): Promise<number> {
     const setupContainerName = `${OPENCLAW_GATEWAY_CONTAINER_NAME}-setup`
-    await this.shell.removeContainer(setupContainerName, { force: true }, onLog)
+    await this.removeContainerAndWait(setupContainerName, onLog)
     const image = await this.ensureGatewayImageLoaded(onLog)
     const setupArgs = command[0] === 'node' ? command.slice(1) : command
-    const createResult = await this.shell.runCommand(
+    const createResult = await this.runSetupCreateWithNameReconcile(
+      setupContainerName,
       [
         'create',
         '--name',
@@ -252,10 +260,74 @@ export class ContainerRuntime {
   }
 
   private async removeGatewayContainer(onLog?: LogFn): Promise<void> {
-    await this.shell.removeContainer(
-      OPENCLAW_GATEWAY_CONTAINER_NAME,
-      { force: true },
-      onLog,
+    await this.removeContainerAndWait(OPENCLAW_GATEWAY_CONTAINER_NAME, onLog)
+  }
+
+  /** Create the fixed-name gateway after reconciling stale nerdctl name ownership. */
+  private async createContainerWithNameReconcile(
+    container: ContainerSpec,
+    onLog?: LogFn,
+  ): Promise<void> {
+    let attempt = 1
+    while (true) {
+      await this.removeContainerAndWait(container.name, onLog)
+      try {
+        await this.shell.createContainer(container, onLog)
+        return
+      } catch (err) {
+        if (
+          !(err instanceof ContainerNameInUseError) ||
+          attempt >= CREATE_CONTAINER_MAX_ATTEMPTS
+        ) {
+          throw err
+        }
+        logger.warn('OpenClaw container name still in use; retrying create', {
+          containerName: container.name,
+          attempt,
+          maxAttempts: CREATE_CONTAINER_MAX_ATTEMPTS,
+        })
+        attempt++
+      }
+    }
+  }
+
+  private async runSetupCreateWithNameReconcile(
+    setupContainerName: string,
+    createArgs: string[],
+    onLog?: LogFn,
+  ): Promise<ContainerCommandResult> {
+    let attempt = 1
+    while (true) {
+      const result = await this.shell.runCommand(createArgs, onLog)
+      if (
+        result.exitCode === 0 ||
+        !isContainerNameInUse(result.stderr) ||
+        attempt >= CREATE_CONTAINER_MAX_ATTEMPTS
+      ) {
+        return result
+      }
+
+      logger.warn(
+        'OpenClaw setup container name still in use; retrying create',
+        {
+          containerName: setupContainerName,
+          attempt,
+          maxAttempts: CREATE_CONTAINER_MAX_ATTEMPTS,
+        },
+      )
+      await this.removeContainerAndWait(setupContainerName, onLog)
+      attempt++
+    }
+  }
+
+  private async removeContainerAndWait(
+    containerName: string,
+    onLog?: LogFn,
+  ): Promise<void> {
+    await this.shell.removeContainer(containerName, { force: true }, onLog)
+    await this.shell.waitForContainerNameRelease(
+      containerName,
+      OPENCLAW_NAME_RELEASE_WAIT,
     )
   }
 
