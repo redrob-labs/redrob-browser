@@ -59,6 +59,11 @@ export function getCacheDir(): string {
   return join(getBrowserosDir(), PATHS.CACHE_DIR_NAME)
 }
 
+/** Returns the durable SQLite database path for local BrowserOS server state. */
+export function getDbPath(): string {
+  return join(getBrowserosDir(), PATHS.DB_DIR_NAME, PATHS.DB_FILE_NAME)
+}
+
 export function getVmCacheDir(): string {
   return join(getCacheDir(), 'vm')
 }

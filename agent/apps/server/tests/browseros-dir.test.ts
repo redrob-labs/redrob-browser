@@ -10,6 +10,7 @@ import { PATHS } from '@browseros/shared/constants/paths'
 import {
   getBrowserosDir,
   getCacheDir,
+  getDbPath,
   getVmCacheDir,
   logDevelopmentBrowserosDir,
 } from '../src/lib/browseros-dir'
@@ -88,6 +89,32 @@ describe('getBrowserosDir', () => {
     process.env.NODE_ENV = 'development'
 
     expect(getCacheDir()).toBe(join(homedir(), '.browseros-dev', 'cache'))
+  })
+
+  it('uses the BrowserOS directory for the sqlite database', () => {
+    process.env.NODE_ENV = 'development'
+
+    expect(getDbPath()).toBe(
+      join(
+        homedir(),
+        PATHS.DEV_BROWSEROS_DIR_NAME,
+        PATHS.DB_DIR_NAME,
+        PATHS.DB_FILE_NAME,
+      ),
+    )
+  })
+
+  it('uses the standard BrowserOS directory for the sqlite database outside development', () => {
+    process.env.NODE_ENV = 'test'
+
+    expect(getDbPath()).toBe(
+      join(
+        homedir(),
+        PATHS.BROWSEROS_DIR_NAME,
+        PATHS.DB_DIR_NAME,
+        PATHS.DB_FILE_NAME,
+      ),
+    )
   })
 
   it('uses the standard cache directory outside development', () => {
