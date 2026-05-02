@@ -13,6 +13,7 @@ from ...common.utils import log_info, log_error, log_warning
 from .utils import (
     FilePatch,
     FileOperation,
+    GitError,
     run_git_command,
     parse_diff_output,
     write_patch_file,
@@ -21,6 +22,22 @@ from .utils import (
     log_extraction_summary,
     get_commit_changed_files_with_status,
 )
+
+
+def resolve_base_commit(ctx: Context, base: Optional[str]) -> str:
+    """Return an explicit base or the package BASE_COMMIT used for Chromium patches."""
+    if base:
+        return base
+
+    base_path = ctx.root_dir / "BASE_COMMIT"
+    try:
+        resolved = base_path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError as exc:
+        raise GitError(f"BASE_COMMIT not found: {base_path}") from exc
+
+    if not resolved:
+        raise GitError(f"BASE_COMMIT is empty: {base_path}")
+    return resolved
 
 
 def check_overwrite(ctx: Context, file_patches: Dict, verbose: bool) -> bool:
@@ -135,45 +152,6 @@ def write_patches(
         log_info(f"Skipped {skip_count} files")
 
     return success_count, extracted_files
-
-
-def extract_normal(
-    ctx: Context,
-    commit_hash: str,
-    verbose: bool,
-    force: bool,
-    include_binary: bool,
-) -> Tuple[int, List[str]]:
-    """Extract patches normally (diff against parent).
-
-    Returns:
-        Tuple of (count, list of extracted file paths)
-    """
-    from .utils import GitError
-
-    # Get diff against parent
-    diff_cmd = ["git", "diff", f"{commit_hash}^..{commit_hash}"]
-    if include_binary:
-        diff_cmd.append("--binary")
-
-    result = run_git_command(diff_cmd, cwd=ctx.chromium_src)
-
-    if result.returncode != 0:
-        raise GitError(f"Failed to get diff for commit {commit_hash}: {result.stderr}")
-
-    # Parse diff into file patches
-    file_patches = parse_diff_output(result.stdout)
-
-    if not file_patches:
-        log_warning("No changes found in commit")
-        return 0, []
-
-    # Check for existing patches
-    if not force and not check_overwrite(ctx, file_patches, verbose):
-        return 0, []
-
-    # Write patches
-    return write_patches(ctx, file_patches, verbose, include_binary)
 
 
 def extract_with_base(

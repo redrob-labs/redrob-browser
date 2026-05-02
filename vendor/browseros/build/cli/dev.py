@@ -166,9 +166,13 @@ def extract_commit(
         True, "--interactive/--no-interactive", "-i/-n", help="Interactive mode"
     ),
     force: bool = Option(False, "--force", "-f", help="Overwrite existing patches"),
-    include_binary: bool = Option(False, "--include-binary", help="Include binary files"),
+    include_binary: bool = Option(
+        False, "--include-binary", help="Include binary files"
+    ),
     base: Optional[str] = Option(
-        None, "--base", help="Extract full diff from base commit for files in COMMIT"
+        None,
+        "--base",
+        help="Base commit to diff from for BASE_COMMIT-relative extraction (defaults to BASE_COMMIT)",
     ),
     feature: bool = Option(
         False, "--feature", help="Add extracted files to a feature in features.yaml"
@@ -202,9 +206,18 @@ def extract_commit(
 
 @extract_app.command(name="patch")
 def extract_patch_cmd(
-    chromium_path: str = Argument(..., help="Chromium file path (e.g., chrome/common/foo.h)"),
-    base: str = Option(..., "--base", "-b", help="Base commit to diff against"),
-    force: bool = Option(False, "--force", "-f", help="Overwrite existing patch without prompting"),
+    chromium_path: str = Argument(
+        ..., help="Chromium file path (e.g., chrome/common/foo.h)"
+    ),
+    base: Optional[str] = Option(
+        None,
+        "--base",
+        "-b",
+        help="Base commit to diff against (defaults to BASE_COMMIT)",
+    ),
+    force: bool = Option(
+        False, "--force", "-f", help="Overwrite existing patch without prompting"
+    ),
     feature: bool = Option(
         False, "--feature", help="Add extracted file to a feature in features.yaml"
     ),
@@ -224,9 +237,17 @@ def extract_patch_cmd(
 
     # Handle --feature flag
     if feature:
+        from ..modules.extract.common import resolve_base_commit
+        from ..modules.extract.utils import GitError
         from ..modules.feature import prompt_feature_selection, add_files_to_feature
 
-        result = prompt_feature_selection(ctx, base[:12], None)
+        try:
+            resolved_base = resolve_base_commit(ctx, base)
+        except GitError as e:
+            log_error(str(e))
+            raise typer.Exit(1)
+
+        result = prompt_feature_selection(ctx, resolved_base[:12], None)
         if result is None:
             log_warning("Skipped adding file to feature")
         else:
@@ -243,12 +264,16 @@ def extract_range(
         True, "--interactive/--no-interactive", "-i/-n", help="Interactive mode"
     ),
     force: bool = Option(False, "--force", "-f", help="Overwrite existing patches"),
-    include_binary: bool = Option(False, "--include-binary", help="Include binary files"),
-    squash: bool = Option(False, "--squash", help="Squash all commits into single patches"),
+    include_binary: bool = Option(
+        False, "--include-binary", help="Include binary files"
+    ),
+    squash: bool = Option(
+        False, "--squash", help="Squash all commits into single patches"
+    ),
     base: Optional[str] = Option(
         None,
         "--base",
-        help="Use different base for diff (full diff from base for files in range)",
+        help="Base commit to diff from (defaults to BASE_COMMIT)",
     ),
     feature: bool = Option(
         False, "--feature", help="Add extracted files to a feature in features.yaml"
