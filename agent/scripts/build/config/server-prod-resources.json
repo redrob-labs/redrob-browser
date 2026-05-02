@@ -51,6 +51,17 @@
       "destination": "resources/vm/browseros-vm.yaml",
       "os": ["macos"],
       "arch": ["arm64", "x64"]
+    },
+    {
+      "name": "Drizzle migrations",
+      "source": {
+        "type": "local",
+        "path": "apps/server/src/lib/db/migrations"
+      },
+      "destination": "resources/db/migrations",
+      "recursive": true,
+      "os": ["macos"],
+      "arch": ["arm64", "x64"]
     }
   ]
 }

@@ -57,6 +57,7 @@ export interface ResourceRule {
   source: ResourceSource
   destination: string
   executable?: boolean
+  recursive?: boolean
   os?: TargetOs[]
   arch?: TargetArch[]
 }

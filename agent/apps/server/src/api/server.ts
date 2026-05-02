@@ -18,7 +18,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { HttpAgentError } from '../agent/errors'
 import { INLINED_ENV } from '../env'
 import { KlavisClient } from '../lib/clients/klavis/klavis-client'
-import { initializeOAuth } from '../lib/clients/oauth'
+import { initializeOAuth, shutdownOAuth } from '../lib/clients/oauth'
 import { getDb } from '../lib/db'
 import { logger } from '../lib/logger'
 import { Sentry } from '../lib/sentry'
@@ -88,11 +88,10 @@ export async function createHttpServer(config: HttpServerConfig) {
   } = config
 
   const { onShutdown } = config
-
-  // Initialize OAuth token manager (callback server binds lazily on first PKCE login)
   const tokenManager = browserosId
     ? initializeOAuth(getDb(), browserosId)
     : null
+  if (!browserosId) shutdownOAuth()
 
   const aclPolicyService = new GlobalAclPolicyService()
   await aclPolicyService.load()
@@ -171,7 +170,7 @@ export async function createHttpServer(config: HttpServerConfig) {
       '/shutdown',
       createShutdownRoute({
         onShutdown: () => {
-          tokenManager?.stopCallbackServer()
+          shutdownOAuth()
           stopKlavisBackground()
           klavisRef.handle?.close().catch((err) =>
             logger.warn('Failed to close Klavis proxy transport', {

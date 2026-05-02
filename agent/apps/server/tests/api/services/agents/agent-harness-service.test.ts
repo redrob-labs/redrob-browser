@@ -5,8 +5,8 @@
 
 import { describe, expect, it } from 'bun:test'
 import { AgentHarnessService } from '../../../../src/api/services/agents/agent-harness-service'
+import type { AgentStore } from '../../../../src/lib/agents/agent-store'
 import type { AgentDefinition } from '../../../../src/lib/agents/agent-types'
-import type { FileAgentStore } from '../../../../src/lib/agents/file-agent-store'
 import type {
   AgentRuntime,
   AgentStreamEvent,
@@ -44,7 +44,7 @@ describe('AgentHarnessService', () => {
     }
 
     const service = new AgentHarnessService({
-      agentStore: agentStore as FileAgentStore,
+      agentStore: agentStore as AgentStore,
       runtime,
     })
 
@@ -128,7 +128,7 @@ describe('AgentHarnessService', () => {
       },
     }
     const service = new AgentHarnessService({
-      agentStore: createAgentStore([agent]) as FileAgentStore,
+      agentStore: createAgentStore([agent]) as AgentStore,
       runtime,
     })
 
@@ -158,7 +158,7 @@ describe('AgentHarnessService', () => {
       },
     }
     const service = new AgentHarnessService({
-      agentStore: createAgentStore(agents) as FileAgentStore,
+      agentStore: createAgentStore(agents) as AgentStore,
       runtime: stubRuntime(),
       openclawProvisioner: provisioner,
     })
@@ -206,7 +206,7 @@ describe('AgentHarnessService', () => {
       },
     }
     const service = new AgentHarnessService({
-      agentStore: createAgentStore(agents) as FileAgentStore,
+      agentStore: createAgentStore(agents) as AgentStore,
       runtime: stubRuntime(),
       openclawProvisioner: provisioner,
     })
@@ -220,7 +220,7 @@ describe('AgentHarnessService', () => {
   it('refuses to create an OpenClaw agent when no provisioner is wired', async () => {
     const agents: AgentDefinition[] = []
     const service = new AgentHarnessService({
-      agentStore: createAgentStore(agents) as FileAgentStore,
+      agentStore: createAgentStore(agents) as AgentStore,
       runtime: stubRuntime(),
     })
 
@@ -247,7 +247,7 @@ describe('AgentHarnessService', () => {
       },
     }
     const service = new AgentHarnessService({
-      agentStore: createAgentStore(agents) as FileAgentStore,
+      agentStore: createAgentStore(agents) as AgentStore,
       runtime: stubRuntime(),
       openclawProvisioner: provisioner,
     })
@@ -289,7 +289,7 @@ describe('AgentHarnessService', () => {
       },
     }
     const service = new AgentHarnessService({
-      agentStore: createAgentStore(agents) as FileAgentStore,
+      agentStore: createAgentStore(agents) as AgentStore,
       runtime: stubRuntime(),
       openclawProvisioner: provisioner,
     })
@@ -329,7 +329,7 @@ describe('AgentHarnessService', () => {
       },
     }
     const service = new AgentHarnessService({
-      agentStore: createAgentStore(agents) as FileAgentStore,
+      agentStore: createAgentStore(agents) as AgentStore,
       runtime: stubRuntime(),
       openclawProvisioner: provisioner,
     })
@@ -383,7 +383,7 @@ describe('AgentHarnessService', () => {
       },
     }
     const service = new AgentHarnessService({
-      agentStore: createAgentStore([agent]) as FileAgentStore,
+      agentStore: createAgentStore([agent]) as AgentStore,
       runtime,
     })
 
@@ -432,7 +432,7 @@ describe('AgentHarnessService', () => {
       },
     }
     const service = new AgentHarnessService({
-      agentStore: createAgentStore([agent]) as FileAgentStore,
+      agentStore: createAgentStore([agent]) as AgentStore,
       runtime,
     })
 
@@ -511,7 +511,7 @@ function createAgentStore(agents: AgentDefinition[]) {
       agents.push(agent)
       return agent
     },
-  } satisfies Partial<FileAgentStore>
+  } satisfies Partial<AgentStore>
 }
 
 async function collectStream(

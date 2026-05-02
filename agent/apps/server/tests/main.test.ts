@@ -121,7 +121,15 @@ async function setupApplicationTest() {
   spyOn(browserosDir, 'writeServerConfig').mockImplementation(async () => {})
   spyOn(browserosDir, 'removeServerConfigSync').mockImplementation(() => {})
 
-  spyOn(dbModule, 'initializeDb').mockImplementation(() => ({}) as never)
+  spyOn(dbModule, 'initializeDb').mockImplementation(
+    () =>
+      ({
+        path: '/tmp/browseros-execution/db/browseros.sqlite',
+        migrationsDir: '/tmp/browseros-resources/db/migrations',
+        sqlite: { close: () => {} },
+        db: {},
+      }) as never,
+  )
   spyOn(identityModule.identity, 'initialize').mockImplementation(() => {})
   spyOn(identityModule.identity, 'getBrowserOSId').mockImplementation(
     () => 'browseros-id',

@@ -20,6 +20,11 @@ function validateRule(rule: ResourceRule): void {
       `Manifest rule ${rule.name} is missing source path or destination`,
     )
   }
+  if (rule.recursive && rule.source.type !== 'local') {
+    throw new Error(
+      `Manifest rule ${rule.name} uses recursive with non-local source`,
+    )
+  }
 }
 
 function parseSource(raw: unknown): ResourceRule['source'] {
@@ -54,6 +59,7 @@ function parseRule(raw: unknown): ResourceRule {
     source: parseSource(item.source),
     destination: String(item.destination ?? ''),
     executable: item.executable === true,
+    recursive: item.recursive === true,
   }
   if (isStringArray(item.os)) {
     rule.os = item.os as ResourceRule['os']

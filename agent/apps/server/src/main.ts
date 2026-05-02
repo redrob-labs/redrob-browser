@@ -8,7 +8,6 @@
  * Manages server lifecycle: initialization, startup, and shutdown.
  */
 
-import type { Database } from 'bun:sqlite'
 import fs from 'node:fs'
 import path from 'node:path'
 import { EXIT_CODES } from '@browseros/shared/constants/exit-codes'
@@ -46,7 +45,6 @@ import { VERSION } from './version'
 
 export class Application {
   private config: ServerConfig
-  private db: Database | null = null
 
   constructor(config: ServerConfig) {
     this.config = config
@@ -181,15 +179,19 @@ export class Application {
     await migrateBuiltinSkills()
     await syncBuiltinSkills()
 
-    const dbPath = path.join(
-      this.config.executionDir || this.config.resourcesDir,
-      'browseros.db',
-    )
-    this.db = initializeDb(dbPath)
+    const dbPath = path.join(this.config.executionDir, 'db', 'browseros.sqlite')
+    initializeDb({
+      dbPath,
+      resourcesDir: this.config.resourcesDir,
+    })
 
     identity.initialize({
       installId: this.config.instanceInstallId,
-      db: this.db,
+      statePath: path.join(
+        this.config.executionDir,
+        'identity',
+        'browseros-id.json',
+      ),
     })
 
     const browserosId = identity.getBrowserOSId()

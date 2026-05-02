@@ -13,11 +13,12 @@ import {
   type TurnFrame,
   TurnRegistry,
 } from '../../../lib/agents/active-turn-registry'
+import type {
+  AgentStore,
+  CreateAgentInput,
+} from '../../../lib/agents/agent-store'
 import type { AgentDefinition } from '../../../lib/agents/agent-types'
-import {
-  type CreateAgentInput,
-  FileAgentStore,
-} from '../../../lib/agents/file-agent-store'
+import { DbAgentStore } from '../../../lib/agents/db-agent-store'
 import {
   FileMessageQueue,
   type QueuedMessage,
@@ -152,7 +153,7 @@ export interface GatewayStatusSnapshot {
 }
 
 export class AgentHarnessService {
-  private readonly agentStore: FileAgentStore
+  private readonly agentStore: AgentStore
   private readonly runtime: AgentRuntime
   private readonly openclawProvisioner: OpenClawProvisioner | null
   private readonly turnRegistry: TurnRegistry
@@ -169,7 +170,7 @@ export class AgentHarnessService {
 
   constructor(
     deps: {
-      agentStore?: FileAgentStore
+      agentStore?: AgentStore
       runtime?: AgentRuntime
       browserosServerPort?: number
       openclawGateway?: OpenclawGatewayAccessor
@@ -179,7 +180,7 @@ export class AgentHarnessService {
       messageQueue?: FileMessageQueue
     } = {},
   ) {
-    this.agentStore = deps.agentStore ?? new FileAgentStore()
+    this.agentStore = deps.agentStore ?? new DbAgentStore()
     this.runtime =
       deps.runtime ??
       new AcpxRuntime({
