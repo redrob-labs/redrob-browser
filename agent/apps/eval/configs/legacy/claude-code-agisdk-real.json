@@ -1,7 +1,8 @@
 {
   "agent": {
     "type": "claude-code",
-    "model": "opus"
+    "model": "opus",
+    "extraArgs": ["--permission-mode", "bypassPermissions"]
   },
   "dataset": "../../data/agisdk-real.jsonl",
   "num_workers": 1,
