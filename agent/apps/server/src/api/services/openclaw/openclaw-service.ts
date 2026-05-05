@@ -40,6 +40,7 @@ import {
   type OpenClawAgentRecord,
   OpenClawCliClient,
   type OpenClawConfigBatchEntry,
+  type OpenClawSessionEntry,
 } from './openclaw-cli-client'
 import {
   buildOpenClawCliProviderModelRef,
@@ -61,6 +62,7 @@ import {
   OpenClawHttpClient,
   type OpenClawSessionHistory,
   type OpenClawSessionHistoryEvent,
+  type OpenClawSessionHistoryMessage,
 } from './openclaw-http-client'
 import { OpenClawObserver } from './openclaw-observer'
 import {
@@ -232,6 +234,104 @@ export function normalizeBrowserOSChatSessionKey(
 
 function getOpenClawBrowserOSSessionPrefix(agentId: string): string {
   return `agent:${agentId}:openai-user:browseros:${agentId}:`
+}
+
+const MAIN_SESSION_KEY_PATTERN = /^agent:([^:]+):main$/
+
+/**
+ * Extract the agent id from a main-session key (e.g. `agent:research:main`
+ * → `research`). Returns null when the key isn't a top-level main session,
+ * which signals the caller to use the per-session fetch path.
+ */
+function extractAgentIdFromMainSessionKey(sessionKey: string): string | null {
+  const match = MAIN_SESSION_KEY_PATTERN.exec(sessionKey)
+  return match?.[1] ?? null
+}
+
+/**
+ * Classify a session key by its source. The pattern is `agent:<id>:<kind>:...`;
+ * the third segment identifies how the session was started.
+ */
+function parseSessionSource(
+  sessionKey: string,
+): NonNullable<OpenClawSessionHistoryMessage['source']> {
+  const parts = sessionKey.split(':')
+  if (parts[0] !== 'agent' || parts.length < 3) return 'other'
+  switch (parts[2]) {
+    case 'main':
+      return 'main'
+    case 'cron':
+      return 'cron'
+    case 'hook':
+      return 'hook'
+    case 'channel':
+      return 'channel'
+    default:
+      return 'other'
+  }
+}
+
+/**
+ * Per-session monotonic sequence. Gateway encodes it inside the
+ * `__openclaw` extension envelope; the legacy top-level `messageSeq`
+ * field exists in the type but is rarely populated.
+ */
+function resolveMessageSeq(msg: OpenClawSessionHistoryMessage): number | null {
+  const fromEnvelope = msg.__openclaw?.seq
+  if (typeof fromEnvelope === 'number' && Number.isFinite(fromEnvelope)) {
+    return fromEnvelope
+  }
+  if (typeof msg.messageSeq === 'number' && Number.isFinite(msg.messageSeq)) {
+    return msg.messageSeq
+  }
+  return null
+}
+
+/**
+ * Stable chronological order across sessions. Falls back to seq
+ * when timestamps tie or are missing, preserving intra-session order.
+ */
+function compareMessageOrder(
+  a: OpenClawSessionHistoryMessage,
+  b: OpenClawSessionHistoryMessage,
+): number {
+  const aTs = a.timestamp ?? 0
+  const bTs = b.timestamp ?? 0
+  if (aTs !== bTs) return aTs - bTs
+  return (resolveMessageSeq(a) ?? 0) - (resolveMessageSeq(b) ?? 0)
+}
+
+/**
+ * Compound cursor for the aggregated history endpoint. Maps each
+ * session key to either:
+ *   - a `messageSeq` to fetch BEFORE on the next page (more historical),
+ *   - or `null` meaning the session is exhausted and should be skipped.
+ *
+ * Encoded as base64url JSON for URL-safe transport in `?cursor=`.
+ */
+type CompoundCursor = Record<string, number | null>
+
+function decodeCompoundCursor(encoded: string | undefined): CompoundCursor {
+  if (!encoded) return {}
+  try {
+    const json = Buffer.from(encoded, 'base64url').toString('utf8')
+    const parsed = JSON.parse(json)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const out: CompoundCursor = {}
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === 'number' || v === null) out[k] = v
+      }
+      return out
+    }
+  } catch {
+    // Malformed cursors are treated as "first page" — preferable to
+    // erroring out the entire history fetch on a bad client cursor.
+  }
+  return {}
+}
+
+function encodeCompoundCursor(cursor: CompoundCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url')
 }
 
 export interface AgentOverview {
@@ -794,9 +894,155 @@ export class OpenClawService {
     input: { limit?: number; cursor?: string; signal?: AbortSignal } = {},
   ): Promise<OpenClawSessionHistory> {
     await this.assertGatewayReady()
-    return this.runControlPlaneCall(() =>
-      this.httpClient.getSessionHistory(sessionKey, input),
+    return this.runControlPlaneCall(async () => {
+      const agentId = extractAgentIdFromMainSessionKey(sessionKey)
+      if (!agentId) {
+        return this.httpClient.getSessionHistory(sessionKey, input)
+      }
+      return this.fetchAggregatedAgentHistory(sessionKey, agentId, input)
+    })
+  }
+
+  /**
+   * Aggregates the agent's main session and every sub-session (cron,
+   * hook, channel) into a single chronological response. The main
+   * session's own messages are included; each sub-session's messages
+   * are tagged with `source` and `subSessionKey` so the UI can
+   * distinguish autonomous turns from user-driven turns.
+   *
+   * Pagination uses a compound cursor that encodes a per-session seq
+   * for each session in scope (`{<sessionKey>: seq | null}`). Each page
+   * fetches each non-exhausted session with its own per-session cursor,
+   * merges messages across sessions by timestamp, slices to `limit`,
+   * and emits a fresh compound cursor reflecting where each session
+   * should resume on the next page. A session with `null` in the
+   * cursor is exhausted and skipped.
+   *
+   * Sub-session fetches that fail are logged and dropped — partial
+   * timelines are preferable to a hard failure that hides the main
+   * session.
+   */
+  private async fetchAggregatedAgentHistory(
+    mainSessionKey: string,
+    agentId: string,
+    input: { limit?: number; cursor?: string; signal?: AbortSignal },
+  ): Promise<OpenClawSessionHistory> {
+    const compoundIn = decodeCompoundCursor(input.cursor)
+    const sessions = await this.cliClient
+      .listSessions(agentId)
+      .catch((err): OpenClawSessionEntry[] => {
+        logger.warn(
+          'Failed to list OpenClaw sub-sessions; falling back to main only',
+          { agentId, error: err instanceof Error ? err.message : String(err) },
+        )
+        return []
+      })
+
+    // Build the candidate set from the agent's session directory plus
+    // the main key (which may not appear in `sessions.list` if the file
+    // hasn't been written yet for a fresh agent).
+    const targetKeys = new Set<string>([mainSessionKey])
+    for (const entry of sessions) {
+      if (entry.key?.startsWith(`agent:${agentId}:`)) {
+        targetKeys.add(entry.key)
+      }
+    }
+
+    // Only fetch sessions that aren't exhausted by the inbound cursor.
+    // A session with `null` in the cursor is fully read; skip it on
+    // subsequent pages.
+    const activeKeys = Array.from(targetKeys).filter(
+      (k) => compoundIn[k] !== null,
     )
+
+    const fetchedHistories = await Promise.all(
+      activeKeys.map(async (key) => {
+        const sessionCursor = compoundIn[key]
+        try {
+          const history = await this.httpClient.getSessionHistory(key, {
+            limit: input.limit,
+            cursor:
+              typeof sessionCursor === 'number'
+                ? String(sessionCursor)
+                : undefined,
+            signal: input.signal,
+          })
+          return { key, history }
+        } catch (err) {
+          logger.warn('Failed to fetch OpenClaw sub-session history', {
+            sessionKey: key,
+            error: err instanceof Error ? err.message : String(err),
+          })
+          return null
+        }
+      }),
+    )
+
+    type Annotated = OpenClawSessionHistoryMessage & { __sessionKey: string }
+    const merged: Annotated[] = []
+    let truncated = false
+    for (const result of fetchedHistories) {
+      if (!result) continue
+      const source = parseSessionSource(result.key)
+      const isMain = result.key === mainSessionKey
+      for (const msg of result.history.messages) {
+        merged.push({
+          ...msg,
+          source,
+          ...(isMain ? {} : { subSessionKey: result.key }),
+          __sessionKey: result.key,
+        })
+      }
+      if (result.history.truncated) truncated = true
+    }
+
+    merged.sort(compareMessageOrder)
+
+    // The merged window contains the latest portion fetched. We emit
+    // up to `limit` messages from the END (newest), and compute the
+    // resume position for each session as the seq of the EARLIEST
+    // emitted message that came from that session.
+    const limited =
+      typeof input.limit === 'number' && input.limit > 0
+        ? merged.slice(-input.limit)
+        : merged
+
+    const compoundOut: CompoundCursor = {}
+    // Carry forward exhausted sessions so subsequent pages keep skipping them.
+    for (const key of Array.from(targetKeys)) {
+      if (compoundIn[key] === null) {
+        compoundOut[key] = null
+      }
+    }
+    for (const result of fetchedHistories) {
+      if (!result) continue
+      const key = result.key
+      const earliestEmitted = limited.find((m) => m.__sessionKey === key)
+      const sessionFetchHasMore = Boolean(result.history.hasMore)
+      const droppedFromMerge =
+        result.history.messages.length >
+        limited.filter((m) => m.__sessionKey === key).length
+      const sessionHasMore = sessionFetchHasMore || droppedFromMerge
+      if (!sessionHasMore) {
+        compoundOut[key] = null
+        continue
+      }
+      const seq = earliestEmitted ? resolveMessageSeq(earliestEmitted) : null
+      compoundOut[key] = seq
+    }
+
+    const hasMore = Object.values(compoundOut).some(
+      (v) => typeof v === 'number',
+    )
+    const messages = limited.map(({ __sessionKey: _drop, ...rest }) => rest)
+
+    return {
+      sessionKey: mainSessionKey,
+      messages,
+      cursor: hasMore ? encodeCompoundCursor(compoundOut) : null,
+      hasMore,
+      truncated: truncated || limited.length < merged.length,
+    }
   }
 
   async streamSessionHistory(

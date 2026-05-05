@@ -133,6 +133,15 @@ export interface OpenClawProvisioner {
    * gateway is not configured at all).
    */
   getStatus?(): Promise<GatewayStatusSnapshot | null>
+  /**
+   * Optional. When wired, the harness uses this for `getHistory` on
+   * openclaw-adapter agents so the chat panel sees autonomous
+   * (cron / hook / channel) turns alongside user-typed turns. Without
+   * this, history reads come from AcpxRuntime's local session record
+   * which only contains user-initiated turns — autonomous activity
+   * fires correctly but stays invisible to the panel.
+   */
+  getAgentHistory?(agentId: string): Promise<AgentHistoryPage>
 }
 
 /**
@@ -624,6 +633,16 @@ export class AgentHarnessService {
 
   async getHistory(agentId: string): Promise<AgentHistoryPage> {
     const agent = await this.requireAgent(agentId)
+    // OpenClaw agents persist conversation in the gateway, not in the
+    // AcpxRuntime's local session record. Reading the local record
+    // would miss autonomous (cron / hook / channel) turns. Route
+    // through the provisioner so the panel sees the full history.
+    if (
+      agent.adapter === 'openclaw' &&
+      this.openclawProvisioner?.getAgentHistory
+    ) {
+      return this.openclawProvisioner.getAgentHistory(agentId)
+    }
     return this.runtime.getHistory({ agent, sessionId: 'main' })
   }
 

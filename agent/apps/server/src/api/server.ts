@@ -46,6 +46,7 @@ import {
   connectKlavisInBackground,
   type KlavisProxyRef,
 } from './services/klavis/strata-proxy'
+import { convertOpenClawHistoryToAgentHistory } from './services/openclaw/history-mapper'
 import { OpenClawGatewayChatClient } from './services/openclaw/openclaw-gateway-chat-client'
 import { getOpenClawService } from './services/openclaw/openclaw-service'
 import type { Env, HttpServerConfig } from './types'
@@ -159,6 +160,15 @@ export async function createHttpServer(config: HttpServerConfig) {
             }))
           },
           getStatus: () => getOpenClawService().getStatus(),
+          getAgentHistory: async (agentId) => {
+            // Aggregated across the agent's main + every sub-session
+            // (cron / hook / channel) so autonomous turns surface in
+            // the chat panel alongside user-initiated ones.
+            const raw = await getOpenClawService().getSessionHistory(
+              `agent:${agentId}:main`,
+            )
+            return convertOpenClawHistoryToAgentHistory(agentId, raw)
+          },
         },
       }),
     )
