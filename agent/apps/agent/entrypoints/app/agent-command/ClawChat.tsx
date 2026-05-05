@@ -1,12 +1,14 @@
 import { Bot, Loader2, RefreshCw } from 'lucide-react'
-import { type FC, useEffect, useRef } from 'react'
+import { type FC, Fragment, useEffect, useRef } from 'react'
 import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
 import type { AgentConversationTurn } from '@/lib/agent-conversations/types'
+import type { ProducedFilesRailGroup } from '@/lib/agent-files'
 import { cn } from '@/lib/utils'
+import { FileCardStrip } from './agent-conversation.file-card-strip'
 import { ClawChatMessage } from './ClawChatMessage'
 import { ConversationMessage } from './ConversationMessage'
 import type { ClawChatMessage as ClawChatMessageModel } from './claw-chat-types'
@@ -15,6 +17,29 @@ interface ClawChatProps {
   agentName: string
   historyMessages: ClawChatMessageModel[]
   turns: AgentConversationTurn[]
+  /**
+   * Persisted turns that still need to render their FileCardStrip
+   * because the history items they were filtered against don't
+   * carry produced-files data. Rendered between history and the
+   * live `turns` so the strip lands at the bottom of the
+   * corresponding assistant turn.
+   */
+  stripOnlyTurns?: AgentConversationTurn[]
+  /**
+   * Maps each assistant history message id → the produced-files
+   * group that came from its turn. Built by
+   * `mapHistoryToProducedFilesGroups` upstream so the strip
+   * renders directly under the matching message instead of
+   * stacking at the conversation tail.
+   */
+  filesByAssistantId?: Map<string, ProducedFilesRailGroup>
+  /**
+   * Produced-files groups that didn't match any persisted history
+   * pair (e.g. orphaned turns where history loaded after the
+   * group was attributed). Rendered at the conversation tail as
+   * a fallback so the user can still see them.
+   */
+  tailStripGroups?: ReadonlyArray<ProducedFilesRailGroup>
   streaming: boolean
   isInitialLoading: boolean
   error: Error | null
@@ -22,6 +47,8 @@ interface ClawChatProps {
   isFetchingNextPage: boolean
   onFetchNextPage: () => void
   onRetry: () => void
+  /** Wired through to the inline file-card strip on each assistant turn. */
+  onOpenOutputsRail?: ((turnId?: string | null) => void) | null
   className?: string
 }
 
@@ -78,6 +105,9 @@ export const ClawChat: FC<ClawChatProps> = ({
   agentName,
   historyMessages,
   turns,
+  stripOnlyTurns,
+  filesByAssistantId,
+  tailStripGroups,
   streaming,
   isInitialLoading,
   error,
@@ -85,6 +115,7 @@ export const ClawChat: FC<ClawChatProps> = ({
   isFetchingNextPage,
   onFetchNextPage,
   onRetry,
+  onOpenOutputsRail,
   className,
 }) => {
   const topSentinelRef = useRef<HTMLDivElement>(null)
@@ -147,14 +178,44 @@ export const ClawChat: FC<ClawChatProps> = ({
                   Start of conversation
                 </div>
               ) : null}
-              {historyMessages.map((message) => (
-                <ClawChatMessage key={message.id} message={message} />
+              {historyMessages.map((message) => {
+                const matched = filesByAssistantId?.get(message.id)
+                return (
+                  <Fragment key={message.id}>
+                    <ClawChatMessage message={message} />
+                    {matched ? (
+                      <FileCardStrip
+                        turnId={matched.turnId}
+                        files={matched.files}
+                        onOpenRail={onOpenOutputsRail ?? (() => {})}
+                      />
+                    ) : null}
+                  </Fragment>
+                )
+              })}
+              {(tailStripGroups ?? []).map((group) => (
+                <FileCardStrip
+                  key={`tail-strip-${group.turnId}`}
+                  turnId={group.turnId}
+                  files={group.files}
+                  onOpenRail={onOpenOutputsRail ?? (() => {})}
+                />
+              ))}
+              {(stripOnlyTurns ?? []).map((turn) => (
+                <ConversationMessage
+                  key={`strip-${turn.id}`}
+                  turn={turn}
+                  streaming={false}
+                  stripOnly
+                  onOpenOutputsRail={onOpenOutputsRail}
+                />
               ))}
               {turns.map((turn, index) => (
                 <ConversationMessage
                   key={turn.id}
                   turn={turn}
                   streaming={streaming && index === turns.length - 1}
+                  onOpenOutputsRail={onOpenOutputsRail}
                 />
               ))}
               {error ? (
