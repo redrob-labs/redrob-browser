@@ -159,6 +159,31 @@ describe('ContainerRuntime', () => {
     )
   })
 
+  it('passes private-ingress no-auth only when requested', async () => {
+    const deps = createDeps()
+    const runtime = new ContainerRuntime({
+      vm: deps.vm,
+      shell: deps.shell,
+      loader: deps.loader,
+      projectDir: PROJECT_DIR,
+    })
+
+    await runtime.startGateway({
+      ...defaultSpec,
+      gatewayToken: undefined,
+      privateIngressNoAuth: true,
+    })
+
+    expect(deps.shell.createContainer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          OPENCLAW_GATEWAY_PRIVATE_INGRESS_NO_AUTH: '1',
+        }),
+      }),
+      undefined,
+    )
+  })
+
   it('delegates ensureReady and stopVm to VmRuntime', async () => {
     const deps = createDeps()
     const runtime = new ContainerRuntime({

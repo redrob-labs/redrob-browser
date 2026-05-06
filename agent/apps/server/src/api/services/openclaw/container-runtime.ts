@@ -52,7 +52,6 @@ export type GatewayContainerSpec = {
   hostPort: number
   hostHome: string
   envFilePath: string
-  gatewayToken?: string
   timezone: string
 }
 
@@ -414,9 +413,7 @@ export class ContainerRuntime {
       TZ: input.timezone,
       PATH: GATEWAY_PATH,
       NPM_CONFIG_PREFIX: GATEWAY_NPM_PREFIX,
-      ...(input.gatewayToken
-        ? { OPENCLAW_GATEWAY_TOKEN: input.gatewayToken }
-        : {}),
+      OPENCLAW_GATEWAY_PRIVATE_INGRESS_NO_AUTH: '1',
     }
   }
 
