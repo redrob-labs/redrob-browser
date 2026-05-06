@@ -1043,8 +1043,9 @@ Use the BrowserOS MCP server for all browser tasks, including browsing the web, 
     expect(command).toContain(
       'nerdctl exec -i -e OPENCLAW_HIDE_BANNER=1 -e OPENCLAW_SUPPRESS_NOTES=1 browseros-openclaw-openclaw-gateway-1',
     )
-    expect(command).toContain('openclaw acp --url ws://127.0.0.1:18789')
-    expect(command).not.toContain('--token')
+    expect(command).toContain(
+      'openclaw acp --url ws://127.0.0.1:18789 --token test-token-abc',
+    )
     // sessionKey routing: the bridge needs --session <key> to map newSession
     // requests to the matching gateway agent (acpx does not forward
     // sessionKey via ACP newSession params).
@@ -1251,6 +1252,142 @@ Use the BrowserOS MCP server for all browser tasks, including browsing the web, 
         .filter((call) => call.method === 'startTurn')
         .map((call) => (call.input as { timeoutMs?: number }).timeoutMs),
     ).toEqual([1_000, 2_000])
+  })
+
+  it('diverts OpenClaw image turns to the gateway chat client and persists them to the session record', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'browseros-acpx-runtime-'))
+    const stateDir = await mkdtemp(join(tmpdir(), 'browseros-acpx-state-'))
+    tempDirs.push(cwd, stateDir)
+    // Pre-seed the session record so persistence has somewhere to land.
+    // (First-turn-image-only sessions deliberately skip persistence; that
+    // path is covered by the empty-record test below.)
+    const sessionStore = createRuntimeStore({ stateDir })
+    const seedTimestamp = '2026-04-28T20:00:00.000Z'
+    const seedRecord: AcpSessionRecord = {
+      schema: 'acpx.session.v1',
+      acpxRecordId: 'agent:img-bot:main',
+      acpSessionId: 'sid-img',
+      agentSessionId: 'inner-img',
+      agentCommand: 'env LIMA_HOME=/tmp limactl shell vm -- nerdctl exec',
+      cwd,
+      name: 'agent:img-bot:main',
+      createdAt: seedTimestamp,
+      lastUsedAt: seedTimestamp,
+      lastSeq: 0,
+      eventLog: {
+        active_path: '',
+        segment_count: 0,
+        max_segment_bytes: 0,
+        max_segments: 0,
+      },
+      closed: false,
+      messages: [
+        {
+          User: {
+            id: 'prior-user',
+            content: [{ Text: 'literal &amp; &lt;tag&gt;' } as never],
+          },
+        },
+        { Agent: { content: [{ Text: 'Prior answer.' }], tool_results: {} } },
+      ],
+      updated_at: seedTimestamp,
+      cumulative_token_usage: {},
+      request_token_usage: {},
+      acpx: {},
+    }
+    await sessionStore.save(seedRecord)
+
+    const gatewayCalls: Array<{ method: string; input: unknown }> = []
+    const openclawGatewayChat = {
+      streamTurn: async (input: unknown) => {
+        gatewayCalls.push({ method: 'streamTurn', input })
+        return new ReadableStream<AgentStreamEvent>({
+          start(controller) {
+            controller.enqueue({
+              type: 'text_delta',
+              text: 'Red.',
+              stream: 'output',
+            })
+            controller.enqueue({ type: 'done', stopReason: 'end_turn' })
+            controller.close()
+          },
+        })
+      },
+    } as never
+    const calls: Array<{ method: string; input: unknown }> = []
+    const runtime = new AcpxRuntime({
+      cwd,
+      stateDir,
+      openclawGatewayChat,
+      // Provide a runtime factory that would fail loudly if reached —
+      // image turns must NOT fall through to the ACP path.
+      runtimeFactory: (options) => {
+        calls.push({ method: 'createRuntime', input: options })
+        throw new Error('ACP path should not be reached for image turns')
+      },
+    })
+
+    const agent: AgentDefinition = {
+      id: 'img-bot',
+      name: 'OpenClaw image bot',
+      adapter: 'openclaw',
+      permissionMode: 'approve-all',
+      sessionKey: 'agent:img-bot:main',
+      createdAt: 1000,
+      updatedAt: 1000,
+    }
+
+    const events = await collectStream(
+      await runtime.send({
+        agent,
+        sessionId: 'main',
+        sessionKey: agent.sessionKey,
+        message: 'What color is this?',
+        attachments: [{ mediaType: 'image/png', data: 'BASE64DATA' }],
+        permissionMode: 'approve-all',
+      }),
+    )
+
+    expect(events).toEqual([
+      { type: 'text_delta', text: 'Red.', stream: 'output' },
+      { type: 'done', stopReason: 'end_turn' },
+    ])
+    expect(gatewayCalls).toHaveLength(1)
+    expect(
+      calls.filter((call) => call.method === 'createRuntime'),
+    ).toHaveLength(0)
+    const gatewayInput = gatewayCalls[0]?.input as {
+      agentId: string
+      sessionKey: string
+      messages: Array<{
+        role: string
+        content: string | Array<{ type: string }>
+      }>
+    }
+    expect(gatewayInput.agentId).toBe('img-bot')
+    expect(gatewayInput.messages[0]).toEqual({
+      role: 'user',
+      content: 'literal &amp; &lt;tag&gt;',
+    })
+    expect(gatewayInput.messages.at(-1)?.role).toBe('user')
+    const userContent = gatewayInput.messages.at(-1)?.content
+    expect(Array.isArray(userContent)).toBe(true)
+    expect(
+      (userContent as Array<{ type: string }>).filter(
+        (p) => p.type === 'image_url',
+      ),
+    ).toHaveLength(1)
+
+    // Persistence check: history should now show the user+assistant turn.
+    const history = await runtime.getHistory({
+      agent,
+      sessionId: 'main',
+    })
+    expect(history.items.slice(-2).map((item) => item.role)).toEqual([
+      'user',
+      'assistant',
+    ])
+    expect(history.items.at(-1)?.text).toBe('Red.')
   })
 })
 

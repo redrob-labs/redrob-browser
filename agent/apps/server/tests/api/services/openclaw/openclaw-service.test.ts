@@ -338,7 +338,7 @@ describe('OpenClawService', () => {
     expect(runOnboard).toHaveBeenCalledWith({
       acceptRisk: true,
       authChoice: 'skip',
-      gatewayAuth: 'none',
+      gatewayAuth: 'token',
       gatewayBind: 'lan',
       gatewayPort: 18789,
       installDaemon: false,
@@ -377,6 +377,7 @@ describe('OpenClawService', () => {
         hostPort: expect.any(Number),
         hostHome: tempDir,
         envFilePath: join(tempDir, '.openclaw', '.env'),
+        gatewayToken: undefined,
       }),
       expect.any(Function),
     )
@@ -431,6 +432,66 @@ describe('OpenClawService', () => {
     })
     expect(startGateway).toHaveBeenCalledTimes(1)
     expect(restartGateway).not.toHaveBeenCalled()
+  })
+
+  it('loads the persisted gateway token from the mounted config before control plane calls', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.openclaw', 'openclaw.json'),
+      JSON.stringify({
+        gateway: {
+          auth: {
+            token: 'cli-token',
+          },
+        },
+      }),
+    )
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.token = 'random-token'
+    service.runtime = {
+      isReady: async () => true,
+    }
+    service.cliClient = {
+      listAgents: mock(async () => {
+        expect(service.token).toBe('cli-token')
+        return []
+      }),
+    }
+
+    await service.listAgents()
+  })
+
+  it('caches the loaded gateway token from config across steady-state control plane calls', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
+    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.openclaw', 'openclaw.json'),
+      JSON.stringify({
+        gateway: {
+          auth: {
+            token: 'cli-token',
+          },
+        },
+      }),
+    )
+    const listAgents = mock(async () => [])
+    const service = new OpenClawService() as MutableOpenClawService
+
+    service.openclawDir = tempDir
+    service.runtime = {
+      isReady: async () => true,
+    }
+    service.cliClient = {
+      listAgents,
+    }
+
+    await service.listAgents()
+    await service.listAgents()
+
+    expect(listAgents).toHaveBeenCalledTimes(2)
   })
 
   it('writes provider credentials into the mounted state env file during setup', async () => {
@@ -611,6 +672,7 @@ describe('OpenClawService', () => {
         hostPort: expect.any(Number),
         hostHome: tempDir,
         envFilePath: join(tempDir, '.openclaw', '.env'),
+        gatewayToken: 'cli-token',
       }),
       expect.any(Function),
     )
@@ -825,6 +887,7 @@ describe('OpenClawService', () => {
         hostPort: expect.any(Number),
         hostHome: tempDir,
         envFilePath: join(tempDir, '.openclaw', '.env'),
+        gatewayToken: 'cli-token',
       }),
       expect.any(Function),
     )
@@ -1033,6 +1096,7 @@ describe('OpenClawService', () => {
         hostPort: expect.any(Number),
         hostHome: tempDir,
         envFilePath: join(tempDir, '.openclaw', '.env'),
+        gatewayToken: 'cli-token',
       }),
     )
     expect(waitForReady).toHaveBeenCalledTimes(1)
@@ -1069,53 +1133,6 @@ describe('OpenClawService', () => {
     expect(ensureReady).toHaveBeenCalledTimes(1)
     expect(isGatewayCurrent).toHaveBeenCalledTimes(1)
     expect(startGateway).not.toHaveBeenCalled()
-    expect(probe).toHaveBeenCalledTimes(1)
-  })
-
-  it('tryAutoStart reuses a ready no-auth gateway without Authorization', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'openclaw-service-'))
-    await mkdir(join(tempDir, '.openclaw'), { recursive: true })
-    await writeFile(
-      join(tempDir, '.openclaw', 'openclaw.json'),
-      JSON.stringify({
-        gateway: {
-          auth: {
-            mode: 'none',
-            token: 'stale-token',
-          },
-        },
-      }),
-    )
-    const ensureReady = mock(async () => {})
-    const isReady = mock(async () => true)
-    const isGatewayCurrent = mock(async () => true)
-    const startGateway = mock(async () => {})
-    const probe = mock(async () => {})
-    const fetchMock = mock(() =>
-      Promise.resolve(new Response('', { status: 200 })),
-    )
-    globalThis.fetch = fetchMock as typeof globalThis.fetch
-    const service = new OpenClawService() as MutableOpenClawService
-
-    service.openclawDir = tempDir
-    service.runtime = {
-      ensureReady,
-      isReady,
-      isGatewayCurrent,
-      startGateway,
-    }
-    service.cliClient = { probe }
-
-    await service.tryAutoStart()
-
-    expect(startGateway).not.toHaveBeenCalled()
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      'http://127.0.0.1:18789/v1/models',
-    )
-    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
-      method: 'GET',
-    })
-    expect(fetchHeaders(fetchMock)).not.toHaveProperty('Authorization')
     expect(probe).toHaveBeenCalledTimes(1)
   })
 
@@ -1702,11 +1719,4 @@ function mockGatewayAuth(status = 200): ReturnType<typeof mock> {
   const fetchMock = mock(() => Promise.resolve(new Response('', { status })))
   globalThis.fetch = fetchMock as typeof globalThis.fetch
   return fetchMock
-}
-
-function fetchHeaders(
-  fetchMock: ReturnType<typeof mock>,
-): Record<string, string> {
-  return ((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.headers ??
-    {}) as Record<string, string>
 }

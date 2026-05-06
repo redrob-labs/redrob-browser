@@ -17,7 +17,6 @@ import {
   OPENCLAW_IMAGE,
 } from '@browseros/shared/constants/openclaw'
 import { DEFAULT_PORTS } from '@browseros/shared/constants/ports'
-import type { AgentStreamEvent } from '../../../lib/agents/types'
 import { getOpenClawDir } from '../../../lib/browseros-dir'
 import { logger } from '../../../lib/logger'
 import { withProcessLock } from '../../../lib/process-lock'
@@ -65,6 +64,7 @@ import {
   type OpenClawSessionHistoryEvent,
   type OpenClawSessionHistoryMessage,
 } from './openclaw-http-client'
+import { OpenClawObserver } from './openclaw-observer'
 import {
   type ResolvedOpenClawProviderConfig,
   resolveSupportedOpenClawProvider,
@@ -360,6 +360,8 @@ export class OpenClawService {
   private httpClient: OpenClawHttpClient
   private openclawDir: string
   private hostPort = OPENCLAW_GATEWAY_CONTAINER_PORT
+  private token: string
+  private tokenLoaded = false
   private lastError: string | null = null
   private browserosServerPort: number
   private resourcesDir: string | null
@@ -370,6 +372,7 @@ export class OpenClawService {
   private stopLogTail: (() => void) | null = null
   private lifecycleLock: Promise<void> = Promise.resolve()
   private clawSession = new ClawSession()
+  private observer = new OpenClawObserver(this.clawSession)
 
   constructor(config: OpenClawServiceConfig = {}) {
     this.openclawDir = getOpenClawDir()
@@ -378,9 +381,13 @@ export class OpenClawService {
       projectDir: this.openclawDir,
       browserosRoot: config.browserosDir,
     })
+    this.token = crypto.randomUUID()
     this.cliClient = new OpenClawCliClient(this.runtime)
     this.bootstrapCliClient = this.buildBootstrapCliClient()
-    this.httpClient = new OpenClawHttpClient(this.hostPort)
+    this.httpClient = new OpenClawHttpClient(
+      this.hostPort,
+      async () => this.token,
+    )
     this.browserosServerPort =
       config.browserosServerPort ?? DEFAULT_PORTS.server
     this.resourcesDir = config.resourcesDir ?? null
@@ -416,6 +423,19 @@ export class OpenClawService {
     return this.hostPort
   }
 
+  /**
+   * Current gateway auth token. The token string is loaded from
+   * `gateway.auth.token` in the persisted openclaw.json during setup,
+   * with a freshly generated UUID as fallback. Exposed so the ACPx
+   * harness can pass it to spawned `openclaw acp` child processes via
+   * the documented `OPENCLAW_GATEWAY_TOKEN` env var (avoids both the
+   * `--token` process-listing leak and reliance on a token-file path
+   * that doesn't exist as a discrete file inside the container).
+   */
+  getGatewayToken(): string {
+    return this.token
+  }
+
   /** Subscribe to real-time agent status changes from the ClawSession state machine. */
   onAgentStatusChange(
     listener: (agentId: string, state: AgentSessionState) => void,
@@ -426,70 +446,6 @@ export class OpenClawService {
   /** Read the current ClawSession state for an agent (read-only snapshot). */
   getAgentState(agentId: string): AgentSessionState {
     return this.clawSession.getState(agentId)
-  }
-
-  /**
-   * Drive the live-status state machine from a turn lifecycle event the
-   * AgentHarnessService observed. Replaces the previous WS observer
-   * pipeline that re-tapped the same gateway events; the harness already
-   * sees them as ACP `session/update` notifications, so we forward those
-   * here. Caller passes the stream events verbatim.
-   *
-   * `tool_call` and `tool_call_update` populate `currentTool` so the
-   * dashboard SSE keeps its existing payload shape. `done` clears
-   * working state to `idle`; `error` keeps a sticky error badge.
-   */
-  recordAgentTurnEvent(
-    agentId: string,
-    sessionKey: string,
-    event:
-      | { type: 'turn_started' }
-      | { type: 'turn_event'; event: AgentStreamEvent }
-      | { type: 'turn_ended'; error?: string },
-  ): void {
-    if (event.type === 'turn_started') {
-      this.clawSession.transition(agentId, 'working', { sessionKey })
-      return
-    }
-    if (event.type === 'turn_ended') {
-      if (event.error !== undefined) {
-        this.clawSession.transition(agentId, 'error', {
-          sessionKey,
-          error: event.error,
-        })
-      } else {
-        this.clawSession.transition(agentId, 'idle', { sessionKey })
-      }
-      return
-    }
-    const inner = event.event
-    if (inner.type === 'tool_call') {
-      this.clawSession.transition(agentId, 'working', {
-        sessionKey,
-        currentTool: inner.title ?? null,
-      })
-      return
-    }
-    if (inner.type === 'error') {
-      this.clawSession.transition(agentId, 'error', {
-        sessionKey,
-        error: inner.message,
-      })
-      return
-    }
-    if (inner.type === 'done') {
-      this.clawSession.transition(agentId, 'idle', { sessionKey })
-      return
-    }
-    if (inner.type === 'text_delta') {
-      // Heartbeat — keep the existing `working` row fresh; preserve
-      // the last-known currentTool by passing it through.
-      const prev = this.clawSession.getState(agentId)
-      this.clawSession.transition(agentId, 'working', {
-        sessionKey,
-        currentTool: prev.currentTool,
-      })
-    }
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────────
@@ -538,13 +494,14 @@ export class OpenClawService {
         providerKeyCount: Object.keys(provider.envValues).length,
       })
 
+      await this.refreshGatewayAuthToken()
       await this.ensureGatewayPortAllocated(logProgress)
 
       logProgress('Bootstrapping OpenClaw config...')
       await this.bootstrapCliClient.runOnboard({
         acceptRisk: true,
         authChoice: 'skip',
-        gatewayAuth: 'none',
+        gatewayAuth: 'token',
         gatewayBind: 'lan',
         gatewayPort: OPENCLAW_GATEWAY_CONTAINER_PORT,
         installDaemon: false,
@@ -560,6 +517,8 @@ export class OpenClawService {
 
       logProgress('Validating OpenClaw config...')
       await this.assertConfigValid(this.bootstrapCliClient)
+
+      await this.refreshGatewayAuthToken()
 
       logProgress('Starting OpenClaw gateway...')
       await this.runtime.startGateway(
@@ -619,6 +578,8 @@ export class OpenClawService {
 
       await this.runtime.ensureReady(logProgress)
 
+      logProgress('Refreshing gateway auth token...')
+      await this.refreshGatewayAuthToken()
       await this.ensureStateEnvFile()
 
       await this.ensureGatewayPortAllocated(logProgress)
@@ -672,6 +633,7 @@ export class OpenClawService {
     return this.withLifecycleLock('stop', async () => {
       logger.info('Stopping OpenClaw service', { hostPort: this.hostPort })
       this.controlPlaneStatus = 'disconnected'
+      this.observer.disconnect()
       this.stopGatewayLogTail()
       await this.runtime.stopGateway()
       logger.info('OpenClaw container stopped')
@@ -688,6 +650,8 @@ export class OpenClawService {
       this.controlPlaneStatus = 'reconnecting'
       await this.runtime.ensureReady(logProgress)
       this.stopGatewayLogTail()
+      logProgress('Refreshing gateway auth token...')
+      await this.refreshGatewayAuthToken()
       await this.ensureStateEnvFile()
       await this.ensureGatewayPortAllocated(logProgress)
       logProgress('Restarting OpenClaw gateway...')
@@ -732,6 +696,8 @@ export class OpenClawService {
         throw new Error('OpenClaw gateway is not ready')
       }
 
+      logProgress('Reloading gateway auth token...')
+      await this.refreshGatewayAuthToken()
       this.controlPlaneStatus = 'reconnecting'
       logProgress('Reconnecting control plane...')
       await this.runControlPlaneCall(() => this.cliClient.probe())
@@ -741,6 +707,7 @@ export class OpenClawService {
 
   async shutdown(): Promise<void> {
     this.controlPlaneStatus = 'disconnected'
+    this.observer.disconnect()
     this.stopGatewayLogTail()
     try {
       await this.runtime.stopGateway()
@@ -1150,6 +1117,7 @@ export class OpenClawService {
       try {
         await this.runtime.ensureReady()
 
+        await this.refreshGatewayAuthToken()
         await this.ensureStateEnvFile()
 
         const persistedPort = await readPersistedGatewayPort(this.openclawDir)
@@ -1279,7 +1247,10 @@ export class OpenClawService {
   private setPort(hostPort: number): void {
     if (hostPort === this.hostPort) return
     this.hostPort = hostPort
-    this.httpClient = new OpenClawHttpClient(this.hostPort)
+    this.httpClient = new OpenClawHttpClient(
+      this.hostPort,
+      async () => this.token,
+    )
   }
 
   private async ensureGatewayPortAllocated(
@@ -1312,13 +1283,25 @@ export class OpenClawService {
   }
 
   private async isGatewayAuthenticated(hostPort: number): Promise<boolean> {
+    if (!this.tokenLoaded) {
+      logger.debug(
+        'OpenClaw gateway port is ready before auth token is loaded',
+        {
+          hostPort,
+        },
+      )
+      return false
+    }
+
     const client =
       hostPort === this.hostPort
         ? this.httpClient
-        : new OpenClawHttpClient(hostPort)
+        : new OpenClawHttpClient(hostPort, async () => this.token)
     const authenticated = await client.isAuthenticated()
     if (!authenticated) {
-      logger.warn('OpenClaw gateway readiness probe failed', { hostPort })
+      logger.warn('OpenClaw gateway port rejected current auth token', {
+        hostPort,
+      })
     }
     return authenticated
   }
@@ -1359,10 +1342,12 @@ export class OpenClawService {
 
   private async runControlPlaneCall<T>(fn: () => Promise<T>): Promise<T> {
     try {
+      await this.ensureTokenLoaded()
       const result = await fn()
       this.controlPlaneStatus = 'connected'
       this.lastGatewayError = null
       this.lastRecoveryReason = null
+      this.ensureObserverConnected()
       return result
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -1374,10 +1359,20 @@ export class OpenClawService {
     }
   }
 
+  private ensureObserverConnected(): void {
+    if (this.observer.isConnected()) return
+    // ClawSession starts empty after the JSONL seed was removed; the WS
+    // observer fills in agent status as events arrive.
+    const url = `http://127.0.0.1:${this.hostPort}`
+    this.observer.connect(url, this.token)
+  }
+
   private classifyControlPlaneError(
     error: unknown,
   ): OpenClawGatewayRecoveryReason {
     const message = error instanceof Error ? error.message : String(error)
+    if (message.includes('Unauthorized')) return 'token_mismatch'
+    if (message.includes('token')) return 'token_mismatch'
     if (message.includes('not ready')) return 'container_not_ready'
     return 'unknown'
   }
@@ -1605,6 +1600,7 @@ export class OpenClawService {
       hostPort: this.hostPort,
       hostHome: this.openclawDir,
       envFilePath: this.getStateEnvPath(),
+      gatewayToken: this.tokenLoaded ? this.token : undefined,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     }
   }
@@ -1707,6 +1703,50 @@ export class OpenClawService {
       providerId: provider.customProvider.providerId,
     })
     return true
+  }
+
+  private async ensureTokenLoaded(): Promise<void> {
+    if (this.tokenLoaded) {
+      return
+    }
+    if (!existsSync(this.getStateConfigPath())) {
+      return
+    }
+
+    await this.loadTokenFromConfig()
+  }
+
+  private async refreshGatewayAuthToken(): Promise<void> {
+    this.tokenLoaded = false
+    if (!existsSync(this.getStateConfigPath())) {
+      return
+    }
+
+    await this.loadTokenFromConfig()
+  }
+
+  private async loadTokenFromConfig(): Promise<void> {
+    try {
+      const config = JSON.parse(
+        await readFile(this.getStateConfigPath(), 'utf-8'),
+      ) as {
+        gateway?: {
+          auth?: {
+            token?: unknown
+          }
+        }
+      }
+      const token = config.gateway?.auth?.token
+      if (typeof token === 'string' && token) {
+        this.token = token
+        this.tokenLoaded = true
+        logger.info('Loaded OpenClaw gateway token from mounted config')
+      }
+    } catch (err) {
+      logger.warn('Failed to load OpenClaw gateway token from mounted config', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
   }
 
   private createProgressLogger(

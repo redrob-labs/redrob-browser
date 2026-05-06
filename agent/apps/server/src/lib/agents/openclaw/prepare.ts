@@ -14,6 +14,8 @@ import {
   resolveAgentRuntimePaths,
 } from '../acpx-runtime-context'
 
+export { maybeHandleOpenClawTurn } from './image-turn'
+
 const OPENCLAW_BROWSEROS_ACP_INSTRUCTIONS =
   '<role>You are running inside BrowserOS through the OpenClaw ACP adapter. Use your OpenClaw identity, memory, and browser tools.</role>'
 
