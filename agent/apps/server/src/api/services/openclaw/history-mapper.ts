@@ -21,6 +21,7 @@
  * resulting AgentHistoryToolCall has both input and output.
  */
 
+import { unwrapBrowserosAcpUserMessage } from '../../../lib/agents/acpx-runtime'
 import type {
   AgentHistoryEntry,
   AgentHistoryToolCall,
@@ -35,40 +36,36 @@ const CRON_PROMPT_PREFIX_PATTERN =
   /^\[cron:[0-9a-f-]+ ([^\]]+)\]\s*([\s\S]*?)\n*Current time:[^\n]*(?:\n[\s\S]*)?$/
 const CRON_DELIVERY_TRAILER =
   /\n*Use the message tool if you need to notify the user directly[\s\S]*$/
-const BROWSEROS_WORKING_DIR_PREFIX = /^\[Working directory:[^\]]*\]\n+/
-const BROWSEROS_ROLE_BLOCK = /<role>[\s\S]*?<\/role>\n+/
-const BROWSEROS_USER_REQUEST_BLOCK =
-  /<user_request>\n?([\s\S]*?)\n?<\/user_request>/
-const BROWSEROS_SYSTEM_REMINDER_BLOCK =
-  /\n*<system-reminder>[\s\S]*?<\/system-reminder>\s*$/
 const QUEUED_MARKER_LINE =
   /^\[Queued user message that arrived while the previous turn was still active\]\s*$/m
 const SUBAGENT_CONTEXT_PREFIX = /^\[Subagent Context\][\s\S]*$/
+// Emitted by OpenClaw's acp-cli (`[Working directory: <path>]\n\n` before
+// the user text — see /app/dist/acp-cli-*.js in the gateway image). We
+// strip the line as a unit by anchoring on the closing bracket + double
+// newline so any path content is consumed without a content-shape regex.
+const OPENCLAW_WORKDIR_PREFIX = /^\[Working directory: [^\]]*\]\n\n/
 
 /**
  * Strip OpenClaw + BrowserOS scaffolding from a "user" message before
- * showing it in the chat panel. The raw prompts contain:
+ * showing it in the chat panel.
  *
- *   - OpenClaw cron payload prefix:
- *       `[cron:<uuid> <name>] <payload>\nCurrent time: ...\nUse the
- *       message tool if you need to notify the user directly...`
- *   - BrowserOS ACP prefix:
- *       `[Working directory: ...]\n\n<role>...</role>\n\n<user_request>
- *       <actual user text>\n</user_request>\n\n<system-reminder>...</system-reminder>`
- *   - Queued-marker concatenation: when multiple prompts queue while a
- *     turn is active, BrowserOS joins them with the marker line
- *     `[Queued user message that arrived while the previous turn was
- *     still active]`. We split on those markers and clean each chunk
- *     independently, then re-join the non-empty results.
- *   - Subagent context prefix: when an agent invokes a nested subagent,
- *     OpenClaw seeds the subagent's session with `[Subagent Context]
- *     You are running as a subagent (depth N/M). ...` followed by
- *     internal task framing. The actual task lives in the system prompt;
- *     this user message is pure scaffolding and gets dropped entirely.
+ * BrowserOS-side envelope (`<role>…</role>\n\n<user_request>…</user_request>`)
+ * is delegated to `unwrapBrowserosAcpUserMessage`, which performs an
+ * exact-string match against the same constants `buildBrowserosAcpPrompt`
+ * uses to wrap. Matcher and wrapper live in the same repo, so the two
+ * always travel together.
  *
- * For each, we extract just the user-facing text. Non-matching messages
- * fall through unchanged so any future pattern we don't recognize stays
- * visible rather than getting silently dropped.
+ * OpenClaw's acp-cli prepends a `[Working directory: <path>]\n\n` line
+ * before the BrowserOS envelope (see /app/dist/acp-cli-*.js, line 1361).
+ * We strip that single line up-front so the `^<role>` anchor in
+ * `unwrapBrowserosAcpUserMessage` matches.
+ *
+ * OpenClaw-injected scaffolding (cron prefix, queued-marker, subagent
+ * context) is still pattern-matched here. Removing those requires either
+ * an OpenClaw schema change exposing the structured trigger payload, or a
+ * BrowserOS-side side-channel (cache cron payloads on `cron.add` and look
+ * up by jobId). Tracked as the next cleanup; until then this is best-
+ * effort with text-level patterns.
  */
 export function cleanHistoryUserText(raw: string): string {
   if (!raw) return raw
@@ -102,15 +99,10 @@ function cleanSingleUserMessage(raw: string): string {
     const payload = cronMatch[2] ?? ''
     return payload.replace(CRON_DELIVERY_TRAILER, '').trim()
   }
-  let text = trimmed
-  text = text.replace(BROWSEROS_WORKING_DIR_PREFIX, '')
-  text = text.replace(BROWSEROS_ROLE_BLOCK, '')
-  text = text.replace(BROWSEROS_SYSTEM_REMINDER_BLOCK, '')
-  const userReq = BROWSEROS_USER_REQUEST_BLOCK.exec(text)
-  if (userReq) {
-    return (userReq[1] ?? '').trim()
-  }
-  return text.trim()
+  // Strip OpenClaw's acp-cli workdir prefix before delegating, so the
+  // BrowserOS unwrap helper's `^<role>` anchor matches.
+  const withoutWorkdir = trimmed.replace(OPENCLAW_WORKDIR_PREFIX, '')
+  return unwrapBrowserosAcpUserMessage(withoutWorkdir).trim()
 }
 
 type RichBlock =
