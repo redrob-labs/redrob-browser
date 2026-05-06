@@ -4,16 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import type { createRuntimeStore } from 'acpx/runtime'
-import type { OpenClawGatewayChatClient } from '../../api/services/openclaw/openclaw-gateway-chat-client'
 import type { AgentDefinition } from './agent-types'
 import { prepareClaudeCodeContext } from './claude-code/prepare'
 import { prepareCodexContext } from './codex/prepare'
-import {
-  maybeHandleOpenClawTurn,
-  prepareOpenClawContext,
-} from './openclaw/prepare'
-import type { AgentPromptInput, AgentStreamEvent } from './types'
+import { prepareOpenClawContext } from './openclaw/prepare'
 
 export interface PreparedAcpxAgentContext {
   cwd: string
@@ -35,29 +29,16 @@ export interface PrepareAcpxAgentContextInput {
   message: string
 }
 
-export interface AcpxAdapterTurnInput {
-  prompt: AgentPromptInput
-  prepared: PreparedAcpxAgentContext
-  sessionStore: ReturnType<typeof createRuntimeStore>
-  openclawGatewayChat: OpenClawGatewayChatClient | null
-}
-
 export interface AcpxAgentAdapter {
   prepare(
     input: PrepareAcpxAgentContextInput,
   ): Promise<PreparedAcpxAgentContext>
-  maybeHandleTurn?(
-    input: AcpxAdapterTurnInput,
-  ): Promise<ReadableStream<AgentStreamEvent> | null>
 }
 
 const ADAPTERS: Record<AgentDefinition['adapter'], AcpxAgentAdapter> = {
   claude: { prepare: prepareClaudeCodeContext },
   codex: { prepare: prepareCodexContext },
-  openclaw: {
-    prepare: prepareOpenClawContext,
-    maybeHandleTurn: maybeHandleOpenClawTurn,
-  },
+  openclaw: { prepare: prepareOpenClawContext },
 }
 
 export function getAcpxAgentAdapter(

@@ -47,7 +47,6 @@ import {
   type KlavisProxyRef,
 } from './services/klavis/strata-proxy'
 import { convertOpenClawHistoryToAgentHistory } from './services/openclaw/history-mapper'
-import { OpenClawGatewayChatClient } from './services/openclaw/openclaw-gateway-chat-client'
 import { getOpenClawService } from './services/openclaw/openclaw-service'
 import type { Env, HttpServerConfig } from './types'
 import { defaultCorsConfig } from './utils/cors'
@@ -138,16 +137,11 @@ export async function createHttpServer(config: HttpServerConfig) {
         browserosServerPort: port,
         browser,
         openclawGateway: {
-          getGatewayToken: () => getOpenClawService().getGatewayToken(),
           getContainerName: () => OPENCLAW_GATEWAY_CONTAINER_NAME,
           getLimaHomeDir: () => getLimaHomeDir(),
           getLimactlPath: () => resolveBundledLimactl(resourcesDir),
           getVmName: () => VM_NAME,
         },
-        openclawGatewayChat: new OpenClawGatewayChatClient(
-          () => getOpenClawService().getPort(),
-          async () => getOpenClawService().getGatewayToken(),
-        ),
         openclawProvisioner: {
           createAgent: (input) => getOpenClawService().createAgent(input),
           removeAgent: (agentId) => getOpenClawService().removeAgent(agentId),
@@ -169,6 +163,14 @@ export async function createHttpServer(config: HttpServerConfig) {
             )
             return convertOpenClawHistoryToAgentHistory(agentId, raw)
           },
+        },
+        onTurnLifecycle: (agent, event) => {
+          if (agent.adapter !== 'openclaw') return
+          getOpenClawService().recordAgentTurnEvent(
+            agent.id,
+            agent.sessionKey,
+            event,
+          )
         },
       }),
     )

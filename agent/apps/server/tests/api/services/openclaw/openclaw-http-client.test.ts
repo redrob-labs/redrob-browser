@@ -14,10 +14,10 @@ describe('OpenClawHttpClient', () => {
     globalThis.fetch = originalFetch
   })
 
-  it('checks gateway authentication with the current bearer token', async () => {
+  it('checks no-auth gateway availability without an Authorization header', async () => {
     const fetchMock = mock(() => Promise.resolve(new Response('{}')))
     globalThis.fetch = fetchMock as typeof globalThis.fetch
-    const client = new OpenClawHttpClient(18789, async () => 'gateway-token')
+    const client = new OpenClawHttpClient(18789)
 
     await expect(client.isAuthenticated()).resolves.toBe(true)
 
@@ -26,17 +26,15 @@ describe('OpenClawHttpClient', () => {
     )
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       method: 'GET',
-      headers: {
-        Authorization: 'Bearer gateway-token',
-      },
     })
+    expect(fetchHeaders(fetchMock)).not.toHaveProperty('Authorization')
   })
 
   it('treats rejected gateway authentication as unavailable', async () => {
     globalThis.fetch = mock(() =>
       Promise.resolve(new Response('Unauthorized', { status: 401 })),
     ) as typeof globalThis.fetch
-    const client = new OpenClawHttpClient(18789, async () => 'gateway-token')
+    const client = new OpenClawHttpClient(18789)
 
     await expect(client.isAuthenticated()).resolves.toBe(false)
   })
@@ -45,13 +43,13 @@ describe('OpenClawHttpClient', () => {
     globalThis.fetch = mock(() =>
       Promise.reject(new Error('connect ECONNREFUSED')),
     ) as typeof globalThis.fetch
-    const client = new OpenClawHttpClient(18789, async () => 'gateway-token')
+    const client = new OpenClawHttpClient(18789)
 
     await expect(client.isAuthenticated()).resolves.toBe(false)
   })
 
   describe('getSessionHistory', () => {
-    it('sends GET with bearer auth and forwards limit/cursor as query params', async () => {
+    it('sends GET and forwards limit/cursor as query params', async () => {
       const fetchMock = mock(() =>
         Promise.resolve(
           new Response(
@@ -69,7 +67,7 @@ describe('OpenClawHttpClient', () => {
         ),
       )
       globalThis.fetch = fetchMock as typeof globalThis.fetch
-      const client = new OpenClawHttpClient(18789, async () => 'gateway-token')
+      const client = new OpenClawHttpClient(18789)
 
       const result = await client.getSessionHistory('agent:main:main', {
         limit: 50,
@@ -79,10 +77,8 @@ describe('OpenClawHttpClient', () => {
       expect(fetchMock.mock.calls[0]?.[0]).toBe(
         'http://127.0.0.1:18789/sessions/agent%3Amain%3Amain/history?limit=50&cursor=abc',
       )
-      expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
-        method: 'GET',
-        headers: { Authorization: 'Bearer gateway-token' },
-      })
+      expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'GET' })
+      expect(fetchHeaders(fetchMock)).not.toHaveProperty('Authorization')
       expect(result).toEqual({
         sessionKey: 'agent:main:main',
         messages: [
@@ -94,6 +90,25 @@ describe('OpenClawHttpClient', () => {
       })
     })
 
+    it('sends no Authorization header when no token provider is configured', async () => {
+      const fetchMock = mock(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ sessionKey: 'k', messages: [] }), {
+            status: 200,
+          }),
+        ),
+      )
+      globalThis.fetch = fetchMock as typeof globalThis.fetch
+      const client = new OpenClawHttpClient(18789)
+
+      await client.getSessionHistory('k')
+
+      expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+        method: 'GET',
+      })
+      expect(fetchHeaders(fetchMock)).not.toHaveProperty('Authorization')
+    })
+
     it('omits limit and cursor from the query when undefined', async () => {
       const fetchMock = mock(() =>
         Promise.resolve(
@@ -103,7 +118,7 @@ describe('OpenClawHttpClient', () => {
         ),
       )
       globalThis.fetch = fetchMock as typeof globalThis.fetch
-      const client = new OpenClawHttpClient(18789, async () => 'gateway-token')
+      const client = new OpenClawHttpClient(18789)
 
       await client.getSessionHistory('k')
 
@@ -116,7 +131,7 @@ describe('OpenClawHttpClient', () => {
       globalThis.fetch = mock(() =>
         Promise.resolve(new Response('not found', { status: 404 })),
       ) as typeof globalThis.fetch
-      const client = new OpenClawHttpClient(18789, async () => 'gateway-token')
+      const client = new OpenClawHttpClient(18789)
 
       await expect(
         client.getSessionHistory('missing-key'),
@@ -127,7 +142,7 @@ describe('OpenClawHttpClient', () => {
       globalThis.fetch = mock(() =>
         Promise.resolve(new Response('boom', { status: 500 })),
       ) as typeof globalThis.fetch
-      const client = new OpenClawHttpClient(18789, async () => 'gateway-token')
+      const client = new OpenClawHttpClient(18789)
 
       await expect(client.getSessionHistory('k')).rejects.toThrow('boom')
     })
@@ -142,7 +157,7 @@ describe('OpenClawHttpClient', () => {
       )
       globalThis.fetch = fetchMock as typeof globalThis.fetch
       const controller = new AbortController()
-      const client = new OpenClawHttpClient(18789, async () => 'gateway-token')
+      const client = new OpenClawHttpClient(18789)
 
       await client.getSessionHistory('k', { signal: controller.signal })
 
@@ -179,7 +194,7 @@ describe('OpenClawHttpClient', () => {
         ),
       )
       globalThis.fetch = fetchMock as typeof globalThis.fetch
-      const client = new OpenClawHttpClient(18789, async () => 'gateway-token')
+      const client = new OpenClawHttpClient(18789)
 
       const stream = await client.streamSessionHistory('k', { limit: 20 })
 
@@ -189,11 +204,9 @@ describe('OpenClawHttpClient', () => {
       )
       expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
         method: 'GET',
-        headers: {
-          Accept: 'text/event-stream',
-          Authorization: 'Bearer gateway-token',
-        },
+        headers: { Accept: 'text/event-stream' },
       })
+      expect(fetchHeaders(fetchMock)).not.toHaveProperty('Authorization')
       expect(events).toEqual([
         {
           type: 'history',
@@ -215,6 +228,33 @@ describe('OpenClawHttpClient', () => {
       ])
     })
 
+    it('keeps SSE Accept without Authorization when no token provider is configured', async () => {
+      const fetchMock = mock(() =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.close()
+              },
+            }),
+            { status: 200 },
+          ),
+        ),
+      )
+      globalThis.fetch = fetchMock as typeof globalThis.fetch
+      const client = new OpenClawHttpClient(18789)
+
+      await client.streamSessionHistory('k')
+
+      expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+        method: 'GET',
+        headers: {
+          Accept: 'text/event-stream',
+        },
+      })
+      expect(fetchHeaders(fetchMock)).not.toHaveProperty('Authorization')
+    })
+
     it('forwards upstream error frames and closes', async () => {
       globalThis.fetch = mock(() =>
         Promise.resolve(
@@ -234,7 +274,7 @@ describe('OpenClawHttpClient', () => {
           ),
         ),
       ) as typeof globalThis.fetch
-      const client = new OpenClawHttpClient(18789, async () => 'gateway-token')
+      const client = new OpenClawHttpClient(18789)
 
       const stream = await client.streamSessionHistory('k')
 
@@ -247,7 +287,7 @@ describe('OpenClawHttpClient', () => {
       globalThis.fetch = mock(() =>
         Promise.resolve(new Response('not found', { status: 404 })),
       ) as typeof globalThis.fetch
-      const client = new OpenClawHttpClient(18789, async () => 'gateway-token')
+      const client = new OpenClawHttpClient(18789)
 
       await expect(client.streamSessionHistory('k')).rejects.toBeInstanceOf(
         OpenClawSessionNotFoundError,
@@ -284,7 +324,7 @@ describe('OpenClawHttpClient', () => {
           ),
         ),
       ) as typeof globalThis.fetch
-      const client = new OpenClawHttpClient(18789, async () => 'gateway-token')
+      const client = new OpenClawHttpClient(18789)
 
       const stream = await client.streamSessionHistory('k', {
         signal: ac.signal,
@@ -314,4 +354,11 @@ async function readEvents(
   }
 
   return events
+}
+
+function fetchHeaders(
+  fetchMock: ReturnType<typeof mock>,
+): Record<string, string> {
+  return ((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.headers ??
+    {}) as Record<string, string>
 }
