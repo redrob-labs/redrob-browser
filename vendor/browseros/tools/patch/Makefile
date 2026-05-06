@@ -1,12 +1,8 @@
 BINARY := browseros-patch
-GOBIN := $(shell go env GOBIN)
-ifeq ($(GOBIN),)
-GOBIN := $(shell go env GOPATH)/bin
-endif
-PREFIX ?= $(GOBIN)
+PREFIX ?= /usr/local/bin
 VERSION ?= dev
 
-.PHONY: build install uninstall clean test fmt
+.PHONY: build install clean test fmt
 
 build:
 	go build -ldflags "-X github.com/browseros-ai/BrowserOS/packages/browseros/tools/patch/cmd.Version=$(VERSION)" -o $(BINARY) .
@@ -20,10 +16,6 @@ else
 	codesign --force --sign - $(PREFIX)/$(BINARY)
 endif
 	@echo "Installed $(BINARY) to $(PREFIX)/$(BINARY)"
-
-uninstall:
-	rm -f $(PREFIX)/$(BINARY)
-	@echo "Removed $(PREFIX)/$(BINARY)"
 
 test:
 	go test ./...

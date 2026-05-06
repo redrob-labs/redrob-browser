@@ -16,12 +16,11 @@ var Version = "dev"
 var (
 	jsonOut  bool
 	verbose  bool
-	llmTxt   bool
 	appState *app.App
 )
 
 var groupOrder = []string{
-	"Chromium Checkouts:",
+	"Workspace:",
 	"Core:",
 	"Conflict:",
 	"Remote:",
@@ -85,37 +84,17 @@ const usageTemplate = `{{helpHeader "Usage:"}}{{if .Runnable}}
 `
 
 var rootCmd = &cobra.Command{
-	Use:   "browseros-patch",
-	Short: "BrowserOS patch tooling for Chromium checkouts",
-	Long: `browseros-patch moves changes between two places:
-  patch repo: the BrowserOS repo containing chromium_patches/
-  Chromium checkout: a named local Chromium src tree, such as ch1
-
-Pass a checkout name to run from anywhere, for example "browseros-patch diff ch1".`,
-	Example: `  browseros-patch add ch1 /path/to/chromium/src
-  browseros-patch list
-  browseros-patch diff ch1
-  browseros-patch sync ch1
-  browseros-patch extract ch1`,
+	Use:           "browseros-patch",
+	Short:         "Workspace-centric BrowserOS patch tooling for Chromium checkouts",
 	Version:       Version,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if llmTxt {
-			if cmd.Parent() != nil {
-				return fmt.Errorf("--llm-txt is only valid without a subcommand")
-			}
-			return nil
-		}
 		var err error
 		appState, err = app.Load(jsonOut, verbose, "")
 		return err
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if llmTxt {
-			fmt.Fprint(cmd.OutOrStdout(), llmTxtGuide())
-			return nil
-		}
 		return cmd.Help()
 	},
 }
@@ -128,7 +107,6 @@ func init() {
 	cobra.AddTemplateFunc("groupedHelp", groupedHelp)
 	rootCmd.SetUsageTemplate(usageTemplate)
 	rootCmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "Emit JSON output")
-	rootCmd.Flags().BoolVar(&llmTxt, "llm-txt", false, "Print concise plain-text guidance for coding agents")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 }

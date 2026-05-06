@@ -11,14 +11,12 @@ import (
 func init() {
 	var src string
 	command := &cobra.Command{
-		Use:         "status [checkout]",
+		Use:         "status [workspace]",
 		Annotations: map[string]string{"group": "Core:"},
-		Short:       "Show checkout sync state",
-		Example: `  browseros-patch status ch1
-  browseros-patch status --src /path/to/chromium/src`,
-		Args: cobra.MaximumNArgs(1),
+		Short:       "Show workspace sync state",
+		Args:        cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, err := resolveWorkspace(cmd, args, src)
+			ws, err := resolveWorkspace(args, src)
 			if err != nil {
 				return err
 			}
@@ -46,6 +44,6 @@ func init() {
 			})
 		},
 	}
-	command.Flags().StringVar(&src, "src", "", srcFlagUsage)
+	command.Flags().StringVar(&src, "src", "", "Chromium checkout path to operate on directly")
 	rootCmd.AddCommand(command)
 }

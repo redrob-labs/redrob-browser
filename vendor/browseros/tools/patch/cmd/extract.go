@@ -15,13 +15,10 @@ func init() {
 	var squash bool
 	var base string
 	command := &cobra.Command{
-		Use:         "extract [checkout] [--range <start> <end>] [-- files...]",
+		Use:         "extract [workspace] [--range <start> <end>] [-- files...]",
 		Annotations: map[string]string{"group": "Core:"},
-		Short:       "Extract checkout changes back to chromium_patches",
-		Example: `  browseros-patch extract ch1
-  browseros-patch extract ch1 --range HEAD~2 HEAD
-  browseros-patch extract --src /path/to/chromium/src`,
-		Args: cobra.ArbitraryArgs,
+		Short:       "Extract workspace changes back to chromium_patches",
+		Args:        cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			positional, filters := splitWorkspaceAndFilters(cmd, args)
 			workspaceArgs := positional
@@ -29,16 +26,16 @@ func init() {
 			rangeEnd := ""
 			if rangeMode {
 				if len(positional) < 2 || len(positional) > 3 {
-					return fmt.Errorf(`range mode expects "browseros-patch extract [checkout] --range <start> <end>"`)
+					return fmt.Errorf(`range mode expects "browseros-patch extract [workspace] --range <start> <end>"`)
 				}
 				rangeStart = positional[len(positional)-2]
 				rangeEnd = positional[len(positional)-1]
 				workspaceArgs = positional[:len(positional)-2]
 			}
 			if len(workspaceArgs) > 1 {
-				return fmt.Errorf("expected at most one checkout name")
+				return fmt.Errorf("expected at most one workspace name")
 			}
-			ws, err := resolveWorkspace(cmd, workspaceArgs, src)
+			ws, err := resolveWorkspace(workspaceArgs, src)
 			if err != nil {
 				return err
 			}
@@ -68,7 +65,7 @@ func init() {
 			})
 		},
 	}
-	command.Flags().StringVar(&src, "src", "", srcFlagUsage)
+	command.Flags().StringVar(&src, "src", "", "Chromium checkout path to operate on directly")
 	command.Flags().StringVar(&commit, "commit", "", "Extract from a single commit")
 	command.Flags().BoolVar(&rangeMode, "range", false, "Extract from a commit range")
 	command.Flags().BoolVar(&squash, "squash", false, "Squash a range into a cumulative diff")

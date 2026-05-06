@@ -13,14 +13,12 @@ func init() {
 	var rebase bool
 	var remote string
 	command := &cobra.Command{
-		Use:         "sync [checkout]",
+		Use:         "sync [workspace]",
 		Annotations: map[string]string{"group": "Core:"},
-		Short:       "Sync a checkout with the latest patch repo state",
-		Example: `  browseros-patch sync ch1
-  browseros-patch sync --src /path/to/chromium/src`,
-		Args: cobra.MaximumNArgs(1),
+		Short:       "Sync a workspace with the latest patch repo state",
+		Args:        cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, err := resolveWorkspace(cmd, args, src)
+			ws, err := resolveWorkspace(args, src)
 			if err != nil {
 				return err
 			}
@@ -54,7 +52,7 @@ func init() {
 			})
 		},
 	}
-	command.Flags().StringVar(&src, "src", "", srcFlagUsage)
+	command.Flags().StringVar(&src, "src", "", "Chromium checkout path to operate on directly")
 	command.Flags().BoolVar(&rebase, "rebase", false, "Re-apply stashed local changes after syncing")
 	command.Flags().StringVar(&remote, "remote", "origin", "Remote to pull from")
 	rootCmd.AddCommand(command)
