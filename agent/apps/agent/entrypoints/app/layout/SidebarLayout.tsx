@@ -85,7 +85,8 @@ export const SidebarLayout: FC = () => {
 
   return (
     <RpcClientProvider>
-      <div className="relative min-h-screen bg-background">
+      {/* pl-14 offsets all content by the collapsed sidebar width (w-14 = 56px) so it never sits under the rail */}
+      <div className="relative min-h-screen bg-background pl-14">
         {/* Sidebar - fixed overlay */}
         {/* biome-ignore lint/a11y/noStaticElementInteractions: hover interactions needed */}
         <div
@@ -96,7 +97,6 @@ export const SidebarLayout: FC = () => {
           <AppSidebar expanded={sidebarOpen} onOpenShortcuts={openShortcuts} />
         </div>
 
-        {/* Main content - full width, centered */}
         {location.pathname === '/home/chat' ? (
           <main className="relative h-dvh overflow-hidden">
             <Outlet />
