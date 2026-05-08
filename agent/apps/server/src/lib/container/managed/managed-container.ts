@@ -18,10 +18,11 @@
 
 import { logger } from '../../logger'
 import { withProcessLock } from '../../process-lock'
+import { ContainerNameInUseError } from '../../vm/errors'
 import type { VmRuntime } from '../../vm/vm-runtime'
-import type { ContainerCli } from '../container-cli'
+import { type ContainerCli, isNoSuchContainer } from '../container-cli'
 import type { ImageLoader } from '../image-loader'
-import type { ContainerSpec } from '../types'
+import type { ContainerSpec, LogFn } from '../types'
 import {
   ContainerNotReadyError,
   PathOutsideMountsError,
@@ -266,6 +267,152 @@ export abstract class ManagedContainer {
       level,
       `reset(${level}) is not implemented yet — wired in a follow-up PR`,
     )
+  }
+
+  // ── Image / logs ────────────────────────────────────────────────
+
+  /** True iff the existing container's image matches `descriptor.defaultImage`; treats SHA-pinned variants as a match. */
+  async isImageCurrent(): Promise<boolean> {
+    const actual = await this.deps.cli.containerImageRef(
+      this.descriptor.containerName,
+    )
+    if (!actual) return false
+    const expected = this.descriptor.defaultImage
+    return actual === expected || actual.startsWith(`${expected}@sha256:`)
+  }
+
+  /** Tail the last `n` log lines; returns [] if the container is missing, throws on other CLI failures. */
+  async getLogs(tail = 50): Promise<string[]> {
+    const lines: string[] = []
+    const args = ['logs', '-n', String(tail), this.descriptor.containerName]
+    const result = await this.deps.cli.runCommand(args, (line) =>
+      lines.push(line),
+    )
+    if (result.exitCode === 0) return lines
+    if (isNoSuchContainer(result.stderr)) return []
+    throw new Error(
+      `nerdctl ${args.join(' ')} exited ${result.exitCode}: ${result.stderr.trim() || '(no stderr)'}`,
+    )
+  }
+
+  /** Stream container logs until the returned handle is invoked. */
+  tailLogs(onLine: LogFn): () => void {
+    return this.deps.cli.tailLogs(this.descriptor.containerName, onLine)
+  }
+
+  // ── Sibling-container one-shot ──────────────────────────────────
+
+  /** Run `argv` in a throwaway `<name>-setup` sibling using the same image+mounts; force-removes after, including on throw or timeout. */
+  async runOneShot(
+    argv: ReadonlyArray<string>,
+    opts: {
+      onLog?: LogFn
+      env?: Record<string, string>
+      processTimeoutMs?: number
+    } = {},
+  ): Promise<ExecResult> {
+    return this.withLifecycleLock('run-one-shot', async () => {
+      const setupName = `${this.descriptor.containerName}-setup`
+      const liveSpec = await this.buildContainerSpec()
+      const setupSpec: ContainerSpec = {
+        ...liveSpec,
+        name: setupName,
+        restart: 'no',
+        ports: undefined,
+        health: undefined,
+        env: { ...liveSpec.env, ...opts.env },
+        command: [...argv] as [string, ...string[]],
+      }
+      try {
+        await this.createOneShotContainer(setupSpec, opts.onLog)
+        const result = await this.runWithOptionalTimeout(
+          ['start', '-a', setupName],
+          opts.onLog,
+          opts.processTimeoutMs,
+        )
+        return {
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+        }
+      } finally {
+        await this.deps.cli.removeContainer(
+          setupName,
+          { force: true },
+          opts.onLog,
+        )
+      }
+    })
+  }
+
+  /** nerdctl occasionally lags releasing a name after `rm`; retry to absorb that. */
+  private async createOneShotContainer(
+    spec: ContainerSpec,
+    onLog?: LogFn,
+  ): Promise<void> {
+    const maxAttempts = 3
+    let attempt = 1
+    while (true) {
+      await this.deps.cli.removeContainer(spec.name, { force: true }, onLog)
+      await this.deps.cli.waitForContainerNameRelease(spec.name, {
+        timeoutMs: 10_000,
+        intervalMs: 100,
+      })
+      try {
+        await this.deps.cli.createContainer(spec, onLog)
+        return
+      } catch (err) {
+        if (
+          !(err instanceof ContainerNameInUseError) ||
+          attempt >= maxAttempts
+        ) {
+          throw err
+        }
+        logger.warn('One-shot container name still in use; retrying', {
+          adapterId: this.descriptor.adapterId,
+          containerName: spec.name,
+          attempt,
+          maxAttempts,
+        })
+        attempt += 1
+      }
+    }
+  }
+
+  private async runWithOptionalTimeout(
+    args: string[],
+    onLog: LogFn | undefined,
+    timeoutMs: number | undefined,
+  ): Promise<ExecResult> {
+    if (timeoutMs === undefined) return this.deps.cli.runCommand(args, onLog)
+    // The underlying runCommand keeps streaming onLog after a timeout
+    // until removeContainer kills `nerdctl start -a`. Gate the wrapped
+    // callback so callers don't see stale lines after rejection.
+    let active = true
+    const guardedOnLog: LogFn | undefined = onLog
+      ? (line) => {
+          if (active) onLog(line)
+        }
+      : undefined
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const timeoutPromise = new Promise<ExecResult>((_, reject) => {
+      timer = setTimeout(() => {
+        active = false
+        reject(
+          new Error(
+            `One-shot exceeded timeout of ${timeoutMs}ms for ${args.join(' ')}`,
+          ),
+        )
+      }, timeoutMs)
+    })
+    try {
+      return await Promise.race([
+        this.deps.cli.runCommand(args, guardedOnLog),
+        timeoutPromise,
+      ])
+    } finally {
+      if (timer !== null) clearTimeout(timer)
+    }
   }
 
   // ── Execute family ──────────────────────────────────────────────
