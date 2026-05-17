@@ -965,7 +965,7 @@ Use the BrowserOS MCP server for all browser tasks, including browsing the web, 
     expect(command).toContain('/runtime/codex-home')
     // Spawn must go through acpx-core's npx wrapper for the official
     // codex-acp package, not a bare `codex` binary.
-    expect(command).toContain('codex-acp')
+    expect(command).toContain('npx -y @zed-industries/codex-acp')
   })
 
   it('resolves the Hermes adapter to a container `nerdctl exec hermes acp` command when a HermesContainerRuntime is registered', async () => {
