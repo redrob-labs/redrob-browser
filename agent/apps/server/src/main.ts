@@ -40,7 +40,6 @@ import { logger } from './lib/logger'
 import { metrics } from './lib/metrics'
 import { isPortInUseError } from './lib/port-binding'
 import { Sentry } from './lib/sentry'
-import { seedSoulTemplate } from './lib/soul'
 import { registry } from './tools/registry'
 import { VERSION } from './version'
 
@@ -181,7 +180,6 @@ export class Application {
     this.configureLogDirectory()
     await ensureBrowserosDir()
     await cleanOldSessions()
-    await seedSoulTemplate()
 
     initializeDb({
       dbPath: getDbPath(),

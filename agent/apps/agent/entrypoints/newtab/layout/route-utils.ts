@@ -1,9 +1,4 @@
-const HIDE_FOCUS_GRID_PATHS = new Set([
-  '/home',
-  '/home/soul',
-  '/home/memory',
-  '/home/chat',
-])
+const HIDE_FOCUS_GRID_PATHS = new Set(['/home', '/home/chat'])
 
 export function isAgentCommandPath(pathname: string): boolean {
   return pathname === '/home' || isAgentConversationPath(pathname)

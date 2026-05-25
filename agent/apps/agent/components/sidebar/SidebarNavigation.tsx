@@ -1,12 +1,10 @@
 import {
-  Brain,
   CalendarClock,
   Cpu,
   Home,
   PlugZap,
   Settings,
   Shield,
-  Sparkles,
 } from 'lucide-react'
 import type { FC } from 'react'
 import { NavLink, useLocation } from 'react-router'
@@ -45,18 +43,6 @@ const primaryNavItems: NavItem[] = [
     to: '/agents',
     icon: Cpu,
     feature: Feature.ALPHA_FEATURES_SUPPORT,
-  },
-  {
-    name: 'Memory',
-    to: '/home/memory',
-    icon: Brain,
-    feature: Feature.MEMORY_SUPPORT,
-  },
-  {
-    name: 'Soul',
-    to: '/home/soul',
-    icon: Sparkles,
-    feature: Feature.SOUL_SUPPORT,
   },
   {
     name: 'Governance',

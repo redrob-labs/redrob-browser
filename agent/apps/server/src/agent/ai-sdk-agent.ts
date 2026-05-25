@@ -23,10 +23,8 @@ import {
 import type { Browser } from '../browser/browser'
 import { logger } from '../lib/logger'
 import { metrics } from '../lib/metrics'
-import { isSoulBootstrap, readSoul } from '../lib/soul'
 import { buildFilesystemToolSet } from '../tools/filesystem/build-toolset'
 import type { ToolContext } from '../tools/framework'
-import { buildMemoryToolSet } from '../tools/memory/build-toolset'
 import type { ToolRegistry } from '../tools/tool-registry'
 import { CHAT_MODE_ALLOWED_TOOLS } from './chat-mode'
 import { createCompactionPrepareStep, type StepWithUsage } from './compaction'
@@ -37,6 +35,7 @@ import {
 } from './message-normalization'
 import { buildSystemPrompt } from './prompt'
 import { createLanguageModel } from './provider-factory'
+import { readSoulPrompt } from './soul-prompt'
 import { buildBrowserToolSet } from './tool-adapter'
 import type { ResolvedAgentConfig } from './types'
 
@@ -184,14 +183,10 @@ export class AiSdkAgent {
       !config.resolvedConfig.chatMode && config.resolvedConfig.workingDir
         ? buildFilesystemToolSet(config.resolvedConfig.workingDir)
         : {}
-    const memoryTools = config.resolvedConfig.chatMode
-      ? {}
-      : buildMemoryToolSet()
     const tools = {
       ...browserTools,
       ...externalMcpTools,
       ...filesystemTools,
-      ...memoryTools,
     }
 
     if (
@@ -210,8 +205,7 @@ export class AiSdkAgent {
     ) {
       excludeSections.push('nudges')
     }
-    const soulContent = await readSoul()
-    const isBootstrap = await isSoulBootstrap()
+    const soulContent = await readSoulPrompt()
 
     const instructions = buildSystemPrompt({
       userSystemPrompt: config.resolvedConfig.userSystemPrompt,
@@ -220,7 +214,6 @@ export class AiSdkAgent {
       scheduledTaskPageId: config.browserContext?.activeTab?.pageId,
       workspaceDir: config.resolvedConfig.workingDir,
       soulContent,
-      isSoulBootstrap: isBootstrap,
       chatMode: config.resolvedConfig.chatMode,
       connectedApps: config.browserContext?.enabledMcpServers,
       declinedApps: config.resolvedConfig.declinedApps,

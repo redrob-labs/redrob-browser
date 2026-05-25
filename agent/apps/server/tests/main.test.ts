@@ -128,7 +128,6 @@ async function setupApplicationTest() {
   const loggerModule = await import('../src/lib/logger')
   const metricsModule = await import('../src/lib/metrics')
   const sentryModule = await import('../src/lib/sentry')
-  const soulModule = await import('../src/lib/soul')
 
   const createHttpServer = spyOn(apiServer, 'createHttpServer')
   createHttpServer.mockImplementation(async () => ({}) as never)
@@ -176,8 +175,6 @@ async function setupApplicationTest() {
   spyOn(sentryModule.Sentry, 'setContext').mockImplementation(() => {})
   spyOn(sentryModule.Sentry, 'setUser').mockImplementation(() => {})
   spyOn(sentryModule.Sentry, 'captureException').mockImplementation(() => {})
-
-  spyOn(soulModule, 'seedSoulTemplate').mockImplementation(async () => {})
 
   const prewarm = mock(async () => {})
   const tryAutoStart = mock(async () => {})
