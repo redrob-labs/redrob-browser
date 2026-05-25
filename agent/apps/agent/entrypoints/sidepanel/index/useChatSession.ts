@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import useDeepCompareEffect from 'use-deep-compare-effect'
 import type { Provider } from '@/components/chat/chatComponentTypes'
-import { aclRulesStorage } from '@/lib/acl/storage'
 import { Capabilities, Feature } from '@/lib/browseros/capabilities'
 import { useAgentServerUrl } from '@/lib/browseros/useBrowserOSProviders'
 import type { ChatAction } from '@/lib/chat-actions/types'
@@ -366,8 +365,6 @@ export const useChatSession = (options?: ChatSessionOptions) => {
         })
 
         const declinedApps = await declinedAppsStorage.getValue()
-        const allAclRules = await aclRulesStorage.getValue()
-        const enabledAclRules = allAclRules.filter((r) => r.enabled)
         const approvalConfig = normalizeToolApprovalConfig(
           await toolApprovalConfigStorage.getValue(),
         )
@@ -400,7 +397,6 @@ export const useChatSession = (options?: ChatSessionOptions) => {
           userWorkingDir: workingDirRef.current,
           previousConversation,
           declinedApps,
-          aclRules: enabledAclRules,
           toolApprovalConfig: approvalConfig,
         }
 
@@ -575,7 +571,7 @@ export const useChatSession = (options?: ChatSessionOptions) => {
     if (chatError) invalidateCredits()
   }, [chatError, invalidateCredits])
 
-  // Sync pending tool approvals to shared storage for the admin dashboard
+  // Sync pending tool approvals to shared storage
   useEffect(() => {
     let isCancelled = false
 
@@ -603,7 +599,7 @@ export const useChatSession = (options?: ChatSessionOptions) => {
     }
   }, [messages])
 
-  // Watch for approval responses from the admin dashboard
+  // Watch for approval responses
   // biome-ignore lint/correctness/useExhaustiveDependencies: only set up once
   useEffect(() => {
     const handleResponses = async (responses: ApprovalResponse[]) => {
