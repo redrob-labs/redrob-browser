@@ -102,6 +102,7 @@ export async function createHttpServer(config: HttpServerConfig) {
       '/',
       createAgentRoutes({
         browserosServerPort: port,
+        resourcesDir,
         browser,
         ensureVmRuntimeReady: async (adapter) => {
           switch (adapter) {

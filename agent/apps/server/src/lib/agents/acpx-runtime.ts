@@ -23,6 +23,7 @@ import { logger } from '../logger'
 import { prepareAcpxAgentContext } from './acpx-agent-adapter'
 import {
   resolveAgentRuntimePaths,
+  shellQuote,
   wrapCommandWithEnv,
 } from './acpx-runtime-context'
 import { loadLatestRuntimeState } from './acpx-runtime-state'
@@ -31,6 +32,7 @@ import type {
   AgentHistoryEntry,
   AgentHistoryToolCall,
 } from './agent-types'
+import { buildMacosAcpAdapterPath, resolveBundledBun } from './bundled-bun'
 import { getHermesRuntime } from './runtime'
 import type {
   AgentHistoryPage,
@@ -45,10 +47,15 @@ import type {
 const CLAUDE_ACP_ADAPTER_COMMAND =
   'npx -y @agentclientprotocol/claude-agent-acp@^0.31.0'
 const CODEX_ACP_ADAPTER_COMMAND = 'npx -y @zed-industries/codex-acp@^0.12.0'
+const CLAUDE_ACP_PACKAGE = '@agentclientprotocol/claude-agent-acp@^0.31.0'
+const CLAUDE_ACP_BIN = 'claude-agent-acp'
+const CODEX_ACP_PACKAGE = '@zed-industries/codex-acp@^0.12.0'
+const CODEX_ACP_BIN = 'codex-acp'
 
 type AcpxRuntimeOptions = {
   cwd?: string
   browserosDir?: string
+  resourcesDir?: string
   stateDir?: string
   browserosServerPort?: number
   runtimeFactory?: (options: AcpRuntimeOptions) => AcpxCoreRuntime
@@ -67,6 +74,7 @@ interface PreparedRuntimeContext {
 export class AcpxRuntime implements AgentRuntime {
   private readonly defaultCwd: string | null
   private readonly browserosDir: string
+  private readonly resourcesDir: string | null
   private readonly stateDir: string
   private readonly browserosServerPort: number
   private readonly runtimeFactory: (
@@ -78,6 +86,7 @@ export class AcpxRuntime implements AgentRuntime {
   constructor(options: AcpxRuntimeOptions = {}) {
     this.defaultCwd = options.cwd ?? null
     this.browserosDir = options.browserosDir ?? getBrowserosDir()
+    this.resourcesDir = options.resourcesDir ?? null
     this.stateDir =
       options.stateDir ??
       process.env.BROWSEROS_ACPX_STATE_DIR ??
@@ -245,6 +254,8 @@ export class AcpxRuntime implements AgentRuntime {
       sessionStore: this.sessionStore,
       agentRegistry: createBrowserosAgentRegistry({
         commandEnv: input.commandEnv,
+        resourcesDir: this.resourcesDir,
+        browserosDir: this.browserosDir,
       }),
       mcpServers: input.useBrowserosMcp
         ? createBrowserosMcpServers(this.browserosServerPort, mcpHost)
@@ -648,6 +659,8 @@ function createBrowserosMcpServers(
 
 function createBrowserosAgentRegistry(input: {
   commandEnv: Record<string, string>
+  resourcesDir: string | null
+  browserosDir: string
 }): AcpRuntimeOptions['agentRegistry'] {
   const registry = createAgentRegistry()
 
@@ -668,9 +681,15 @@ function createBrowserosAgentRegistry(input: {
       }
 
       if (lower === 'claude' || lower === 'codex') {
+        const launch = resolveBrowserosHostAcpAdapterCommand({
+          adapter: lower,
+          resourcesDir: input.resourcesDir,
+        })
         return wrapCommandWithEnv(
-          resolveBrowserosHostAcpAdapterCommand(lower),
-          input.commandEnv,
+          launch.command,
+          launch.addMacosAdapterEnv
+            ? withMacosAcpAdapterEnv(input.commandEnv, input.browserosDir)
+            : input.commandEnv,
         )
       }
 
@@ -681,17 +700,47 @@ function createBrowserosAgentRegistry(input: {
 
 /**
  * Resolve host-spawned Claude/Codex ACP adapters without asking acpx
- * to discover package bins. BrowserOS prefixes commands with `env`;
- * that hides acpx's built-in command from its package launcher, and
- * in Bun standalone builds that launcher may also see `$bunfs` paths
- * plus the compiled BrowserOS binary as `process.execPath`.
+ * to discover package bins. Packaged macOS builds prefer BrowserOS's
+ * bundled Bun so adapter package execution doesn't depend on host
+ * `npx` or the app launch environment.
  */
-function resolveBrowserosHostAcpAdapterCommand(
-  adapter: 'claude' | 'codex',
-): string {
-  return adapter === 'claude'
-    ? CLAUDE_ACP_ADAPTER_COMMAND
-    : CODEX_ACP_ADAPTER_COMMAND
+function resolveBrowserosHostAcpAdapterCommand(input: {
+  adapter: 'claude' | 'codex'
+  resourcesDir: string | null
+}): { command: string; addMacosAdapterEnv: boolean } {
+  const bun = resolveBundledBun({ resourcesDir: input.resourcesDir })
+  if (bun) {
+    const pkg =
+      input.adapter === 'claude' ? CLAUDE_ACP_PACKAGE : CODEX_ACP_PACKAGE
+    const bin = input.adapter === 'claude' ? CLAUDE_ACP_BIN : CODEX_ACP_BIN
+    return {
+      command: `${shellQuote(bun)} x --bun --silent --package ${shellQuote(pkg)} ${shellQuote(bin)}`,
+      addMacosAdapterEnv: true,
+    }
+  }
+
+  return {
+    command:
+      input.adapter === 'claude'
+        ? CLAUDE_ACP_ADAPTER_COMMAND
+        : CODEX_ACP_ADAPTER_COMMAND,
+    addMacosAdapterEnv: false,
+  }
+}
+
+/** Adds the minimum macOS env needed for bundled Bun and native CLI lookup. */
+function withMacosAcpAdapterEnv(
+  env: Record<string, string>,
+  browserosDir: string,
+): Record<string, string> {
+  return {
+    ...env,
+    BUN_INSTALL_CACHE_DIR: join(browserosDir, 'cache', 'bun-install'),
+    PATH: buildMacosAcpAdapterPath({
+      basePath: env.PATH ?? process.env.PATH,
+      home: env.HOME ?? process.env.HOME,
+    }),
+  }
 }
 
 async function applyRuntimeControls(

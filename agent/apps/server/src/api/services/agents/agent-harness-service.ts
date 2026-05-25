@@ -138,6 +138,7 @@ export class AgentHarnessService {
       agentStore?: AgentStore
       runtime?: AgentRuntime
       browserosDir?: string
+      resourcesDir?: string
       browserosServerPort?: number
       ensureVmRuntimeReady?: EnsureVmRuntimeReady
       turnRegistry?: TurnRegistry
@@ -150,6 +151,7 @@ export class AgentHarnessService {
       deps.runtime ??
       new AcpxRuntime({
         browserosDir: this.browserosDir,
+        resourcesDir: deps.resourcesDir,
         browserosServerPort: deps.browserosServerPort,
       })
     this.ensureVmRuntimeReady = deps.ensureVmRuntimeReady ?? null

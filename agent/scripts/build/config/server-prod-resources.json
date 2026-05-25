@@ -43,6 +43,28 @@
       "arch": ["x64"]
     },
     {
+      "name": "Bun - macOS ARM64",
+      "source": {
+        "type": "r2",
+        "key": "third_party/bun/bun-darwin-arm64"
+      },
+      "destination": "resources/bin/third_party/bun",
+      "os": ["macos"],
+      "arch": ["arm64"],
+      "executable": true
+    },
+    {
+      "name": "Bun - macOS x64",
+      "source": {
+        "type": "r2",
+        "key": "third_party/bun/bun-darwin-x64"
+      },
+      "destination": "resources/bin/third_party/bun",
+      "os": ["macos"],
+      "arch": ["x64"],
+      "executable": true
+    },
+    {
       "name": "BrowserOS VM Lima template",
       "source": {
         "type": "local",

@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { S3Client } from '@aws-sdk/client-s3'
 import { loadManifest } from './manifest'
-import { stageCompiledArtifact } from './stage'
-import type { BuildTarget, ResourceRule } from './types'
+import { stageCompiledArtifact, stageTargetArtifact } from './stage'
+import type { BuildTarget, R2Config, ResourceRule } from './types'
 
 describe('server artifact staging', () => {
   let tempDir: string | null = null
@@ -90,6 +91,36 @@ describe('server artifact staging', () => {
       ),
     ).toBe('{"entries":[]}')
   })
+
+  it('downloads R2 executable resources and marks them executable', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'browseros-stage-test-'))
+    const sourceRoot = join(tempDir, 'source')
+    const distRoot = join(tempDir, 'dist')
+    const binaryPath = join(tempDir, 'browseros-server')
+    const payload = new TextEncoder().encode('#!/bin/sh\n')
+    await writeFile(binaryPath, 'server')
+
+    const artifact = await stageTargetArtifact(
+      distRoot,
+      binaryPath,
+      testTarget,
+      [bunRule],
+      sourceRoot,
+      {
+        send: async () => ({
+          Body: {
+            transformToByteArray: async () => payload,
+          },
+        }),
+      } as unknown as S3Client,
+      fakeR2Config,
+      '0.0.0-test',
+    )
+
+    const bunPath = join(artifact.resourcesDir, 'bin/third_party/bun')
+    expect(await readFile(bunPath, 'utf8')).toBe('#!/bin/sh\n')
+    expect((await stat(bunPath)).mode & 0o111).not.toBe(0)
+  })
 })
 
 const testTarget: BuildTarget = {
@@ -111,4 +142,25 @@ const migrationRule: ResourceRule = {
   recursive: true,
   os: ['macos'],
   arch: ['arm64', 'x64'],
+}
+
+const bunRule: ResourceRule = {
+  name: 'Bun - macOS ARM64',
+  source: {
+    type: 'r2',
+    key: 'third_party/bun/bun-darwin-arm64',
+  },
+  destination: 'resources/bin/third_party/bun',
+  os: ['macos'],
+  arch: ['arm64'],
+  executable: true,
+}
+
+const fakeR2Config: R2Config = {
+  accountId: 'test',
+  accessKeyId: 'test',
+  secretAccessKey: 'test',
+  bucket: 'browseros-test',
+  downloadPrefix: 'artifacts/vendor',
+  uploadPrefix: 'server/prod-resources',
 }

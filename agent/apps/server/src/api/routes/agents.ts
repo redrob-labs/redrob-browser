@@ -97,6 +97,7 @@ type AgentRouteDeps = {
   service?: AgentRouteService
   browser?: Pick<Browser, 'resolveTabIds'>
   browserosServerPort?: number
+  resourcesDir?: string
   /** Optional hook for harness-owned VM/container runtimes. */
   ensureVmRuntimeReady?: EnsureVmRuntimeReady
   /** Optional override; defaults to a fresh in-memory checker. */
@@ -119,6 +120,7 @@ export function createAgentRoutes(deps: AgentRouteDeps = {}) {
     deps.service ??
     new AgentHarnessService({
       browserosServerPort: deps.browserosServerPort,
+      resourcesDir: deps.resourcesDir,
       ensureVmRuntimeReady: deps.ensureVmRuntimeReady,
     })
   if (deps.onTurnLifecycle && service instanceof AgentHarnessService) {

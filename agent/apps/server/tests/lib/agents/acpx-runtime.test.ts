@@ -4,9 +4,9 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type {
   AcpRuntimeEvent,
   AcpRuntimeHandle,
@@ -31,6 +31,7 @@ import type { ManagedContainerDeps } from '../../../src/lib/container/managed'
 
 describe('AcpxRuntime', () => {
   const tempDirs: string[] = []
+  const macosIt = process.platform === 'darwin' ? it : it.skip
 
   afterEach(async () => {
     await Promise.all(
@@ -960,6 +961,56 @@ Use the BrowserOS MCP server for all browser tasks, including browsing the web, 
     expect(command).toContain('npx -y @zed-industries/codex-acp')
   })
 
+  macosIt(
+    'runs Claude and Codex ACP adapter packages through bundled Bun on macOS',
+    async () => {
+      const browserosDir = await mkdtemp(
+        join(tmpdir(), 'browseros-acpx-browseros-'),
+      )
+      const stateDir = await mkdtemp(join(tmpdir(), 'browseros-acpx-state-'))
+      const resourcesDir = await mkdtemp(
+        join(tmpdir(), 'browseros-acpx-resources-'),
+      )
+      tempDirs.push(browserosDir, stateDir, resourcesDir)
+      const bunPath = await writeFakeBundledBun(resourcesDir)
+      const calls: Array<{ method: string; input: unknown }> = []
+      const runtime = new AcpxRuntime({
+        browserosDir,
+        resourcesDir,
+        stateDir,
+        runtimeFactory: (options) => {
+          calls.push({ method: 'createRuntime', input: options })
+          return createFakeAcpRuntime(calls)
+        },
+      })
+      const agent = makeAgent({ id: 'agent-1', adapter: 'codex' })
+
+      await collectStream(
+        await runtime.send({
+          agent,
+          sessionId: 'main',
+          sessionKey: agent.sessionKey,
+          message: 'hi',
+          permissionMode: 'approve-all',
+        }),
+      )
+
+      const registry = getCreateRuntimeOptions(calls).agentRegistry
+      const claudeCommand = registry.resolve('claude')
+      const codexCommand = registry.resolve('codex')
+      expect(claudeCommand).toContain(
+        `'${bunPath}' x --bun --silent --package '@agentclientprotocol/claude-agent-acp@^0.31.0' 'claude-agent-acp'`,
+      )
+      expect(codexCommand).toContain(
+        `'${bunPath}' x --bun --silent --package '@zed-industries/codex-acp@^0.12.0' 'codex-acp'`,
+      )
+      expect(codexCommand).toContain('BUN_INSTALL_CACHE_DIR=')
+      expect(codexCommand).toContain('PATH=')
+      expect(codexCommand).toContain('/opt/homebrew/bin')
+      expect(codexCommand).not.toContain('npx -y')
+    },
+  )
+
   it('resolves the Hermes adapter to a container `nerdctl exec hermes acp` command when a HermesContainerRuntime is registered', async () => {
     const browserosDir = await mkdtemp(
       join(tmpdir(), 'browseros-acpx-browseros-'),
@@ -1296,6 +1347,14 @@ async function createLatestRuntimeStateForTest(input: {
       updatedAt: 1234,
     },
   )
+}
+
+async function writeFakeBundledBun(resourcesDir: string): Promise<string> {
+  const bunPath = join(resourcesDir, 'bin', 'third_party', 'bun')
+  await mkdir(dirname(bunPath), { recursive: true })
+  await writeFile(bunPath, '#!/bin/sh\n')
+  await chmod(bunPath, 0o755)
+  return bunPath
 }
 
 function makeSessionRecord(input: {
