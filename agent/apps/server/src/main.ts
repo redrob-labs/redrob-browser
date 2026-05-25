@@ -20,7 +20,6 @@ import {
   configureClaudeRuntime,
   configureCodexRuntime,
   getHermesRuntime,
-  startHermesRuntimeBestEffort,
 } from './lib/agents/runtime'
 import {
   cleanOldSessions,
@@ -52,7 +51,6 @@ export class Application {
       resourcesDir: path.resolve(this.config.resourcesDir),
     })
 
-    const resourcesDir = path.resolve(this.config.resourcesDir)
     configureClaudeRuntime()
     configureCodexRuntime()
     await this.initCoreServices()
@@ -117,8 +115,6 @@ export class Application {
     )
 
     this.logStartupSummary()
-
-    startHermesRuntimeBestEffort({ resourcesDir })
 
     metrics.log('http_server.started', { version: VERSION })
   }

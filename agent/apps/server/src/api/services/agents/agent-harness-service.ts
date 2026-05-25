@@ -16,7 +16,10 @@ import type {
 } from '../../../lib/agents/agent-store'
 import type { AgentDefinition } from '../../../lib/agents/agent-types'
 import { DbAgentStore } from '../../../lib/agents/db-agent-store'
-import { writeHermesPerAgentProvider } from '../../../lib/agents/hermes/hermes-paths'
+import {
+  getHermesHarnessHostDir,
+  writeHermesPerAgentProvider,
+} from '../../../lib/agents/hermes/hermes-paths'
 import { getHermesProviderMapping } from '../../../lib/agents/hermes/hermes-provider-map'
 import {
   FileMessageQueue,
@@ -30,6 +33,7 @@ export {
   type QueuedMessageAttachment,
 } from '../../../lib/agents/message-queue'
 
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type {
   AgentHistoryPage,
@@ -102,10 +106,21 @@ export type TurnLifecycleListener = (
   event: TurnLifecycleEvent,
 ) => void
 
+export type HarnessManagedVmAdapter = Extract<
+  AgentDefinition['adapter'],
+  'hermes'
+>
+
+/** Starts harness-owned VM/container runtimes at the agent creation boundary. */
+export type EnsureVmRuntimeReady = (
+  adapter: HarnessManagedVmAdapter,
+) => Promise<void>
+
 export class AgentHarnessService {
   private readonly agentStore: AgentStore
   private readonly runtime: AgentRuntime
   private readonly browserosDir: string
+  private readonly ensureVmRuntimeReady: EnsureVmRuntimeReady | null
   private readonly turnRegistry: TurnRegistry
   private readonly messageQueue: FileMessageQueue
   private readonly turnLifecycleListeners = new Set<TurnLifecycleListener>()
@@ -124,6 +139,7 @@ export class AgentHarnessService {
       runtime?: AgentRuntime
       browserosDir?: string
       browserosServerPort?: number
+      ensureVmRuntimeReady?: EnsureVmRuntimeReady
       turnRegistry?: TurnRegistry
       messageQueue?: FileMessageQueue
     } = {},
@@ -136,6 +152,7 @@ export class AgentHarnessService {
         browserosDir: this.browserosDir,
         browserosServerPort: deps.browserosServerPort,
       })
+    this.ensureVmRuntimeReady = deps.ensureVmRuntimeReady ?? null
     this.turnRegistry = deps.turnRegistry ?? new TurnRegistry()
     this.messageQueue =
       deps.messageQueue ??
@@ -408,8 +425,20 @@ export class AgentHarnessService {
     if (agent.adapter === 'hermes') {
       try {
         await this.writeHermesPerAgentProvider(agent.id, input)
+        await this.ensureVmRuntimeReady?.(agent.adapter)
       } catch (err) {
         await this.agentStore.delete(agent.id).catch(() => {})
+        await this.deleteHermesPerAgentProvider(agent.id).catch(
+          (cleanupErr) => {
+            logger.warn('Hermes provider config cleanup failed', {
+              agentId: agent.id,
+              error:
+                cleanupErr instanceof Error
+                  ? cleanupErr.message
+                  : String(cleanupErr),
+            })
+          },
+        )
         throw err
       }
       return agent
@@ -444,6 +473,13 @@ export class AgentHarnessService {
       apiKey: (input.apiKey as string).trim(),
       modelId: (input.modelId as string).trim(),
       baseUrl: input.baseUrl?.trim() || mapping.defaultBaseUrl,
+    })
+  }
+
+  private async deleteHermesPerAgentProvider(agentId: string): Promise<void> {
+    await rm(join(getHermesHarnessHostDir(this.browserosDir), agentId), {
+      recursive: true,
+      force: true,
     })
   }
 

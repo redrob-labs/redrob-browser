@@ -26,12 +26,11 @@ export { ActionNotSupportedError, RuntimeNotReadyError } from './errors'
 export {
   type ConfigureHermesRuntimeOptions,
   configureHermesRuntime,
+  ensureHermesRuntimeReady,
   getHermesRuntime,
   HermesContainerRuntime,
   type HermesContainerRuntimeConfig,
   prepareHermesContext,
-  type StartHermesRuntimeBestEffortOptions,
-  startHermesRuntimeBestEffort,
 } from './hermes-container-runtime'
 export {
   HostProcessAgentRuntime,
