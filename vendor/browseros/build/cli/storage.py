@@ -6,6 +6,7 @@ import json
 import os
 import tarfile
 import tempfile
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,7 +26,11 @@ from ..modules.storage.r2 import (
 LIMA_RELEASE_BASE = "https://github.com/lima-vm/lima/releases/download"
 LIMA_R2_PREFIX = "artifacts/vendor/third_party/lima"
 LIMA_MANIFEST_KEY = f"{LIMA_R2_PREFIX}/manifest.json"
-LIMA_HTTP_TIMEOUT_S = 60
+HTTP_TIMEOUT_S = 60
+BUN_RELEASE_BASE = "https://github.com/oven-sh/bun/releases/download"
+BUN_R2_PREFIX = "artifacts/vendor/third_party/bun"
+BUN_MANIFEST_KEY = f"{BUN_R2_PREFIX}/manifest.json"
+BUN_HTTP_TIMEOUT_S = 120
 
 
 @dataclass(frozen=True)
@@ -40,6 +45,20 @@ class LimaArch:
 LIMA_ARCHES: Tuple[LimaArch, ...] = (
     LimaArch(internal="arm64", upstream="Darwin-arm64", linux_guest_arch="aarch64"),
     LimaArch(internal="x64", upstream="Darwin-x86_64", linux_guest_arch="x86_64"),
+)
+
+
+@dataclass(frozen=True)
+class BunArch:
+    """Arch-pair: the suffix Bun uses upstream and the suffix we use in R2."""
+
+    internal: str  # "arm64" | "x64" — how our R2 keys name it
+    upstream: str  # "darwin-aarch64" | "darwin-x64" — Bun's zip suffix
+
+
+BUN_ARCHES: Tuple[BunArch, ...] = (
+    BunArch(internal="arm64", upstream="darwin-aarch64"),
+    BunArch(internal="x64", upstream="darwin-x64"),
 )
 
 
@@ -111,7 +130,9 @@ def upload_lima(
         # roll back prior arch uploads so R2 never holds a mixed-version pair.
         except Exception as exc:
             if not dry_run and uploaded_keys:
-                log_warning(f"Upload failed — rolling back {len(uploaded_keys)} object(s)")
+                log_warning(
+                    f"Upload failed — rolling back {len(uploaded_keys)} object(s)"
+                )
                 _rollback(client, env.r2_bucket, uploaded_keys)
             log_error(f"Lima upload aborted: {exc}")
             raise typer.Exit(1)
@@ -119,13 +140,98 @@ def upload_lima(
     log_success(f"Lima {tag} uploaded for {[a.internal for a in LIMA_ARCHES]}")
 
 
+@app.command("bun")
+def upload_bun(
+    version: str = typer.Option(
+        ...,
+        "--version",
+        "-v",
+        help="Bun release tag, e.g. bun-v1.2.15",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Download + verify only; skip R2 uploads.",
+    ),
+) -> None:
+    """Download Bun from an upstream GitHub release and push macOS binaries to R2."""
+    if not BOTO3_AVAILABLE:
+        log_error("boto3 not installed — run: pip install boto3")
+        raise typer.Exit(1)
+
+    env = EnvConfig()
+    if not env.has_r2_config():
+        log_error(
+            "R2 configuration missing. Required: "
+            "R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY"
+        )
+        raise typer.Exit(1)
+
+    tag = _normalize_bun_version_tag(version)
+    client = None if dry_run else get_r2_client(env)
+    if not dry_run and client is None:
+        log_error("Failed to create R2 client")
+        raise typer.Exit(1)
+
+    with tempfile.TemporaryDirectory(prefix="bun-upload-") as tmp:
+        tmp_dir = Path(tmp)
+        checksums = _fetch_bun_checksums(tag, tmp_dir)
+        uploaded_keys: List[str] = []
+        object_shas: Dict[str, str] = {}
+        zip_shas: Dict[str, str] = {}
+
+        try:
+            for arch in BUN_ARCHES:
+                zip_sha, binary_sha, _ = _process_bun_arch(
+                    tag,
+                    arch,
+                    tmp_dir,
+                    checksums,
+                    client,
+                    env,
+                    dry_run,
+                    uploaded_keys,
+                )
+                zip_shas[arch.internal] = zip_sha
+                object_shas[arch.internal] = binary_sha
+
+            manifest = _build_bun_manifest(tag, zip_shas, object_shas)
+            _upload_bun_manifest(client, env, manifest, tmp_dir, dry_run)
+        except Exception as exc:
+            if not dry_run and uploaded_keys:
+                log_warning(
+                    f"Upload failed — rolling back {len(uploaded_keys)} object(s)"
+                )
+                _rollback(client, env.r2_bucket, uploaded_keys)
+            log_error(f"Bun upload aborted: {exc}")
+            raise typer.Exit(1)
+
+    log_success(f"Bun {tag} uploaded for {[a.internal for a in BUN_ARCHES]}")
+
+
 def _normalize_version_tag(version: str) -> str:
     return version if version.startswith("v") else f"v{version}"
+
+
+def _normalize_bun_version_tag(version: str) -> str:
+    if version.startswith("bun-v"):
+        return version
+    if version.startswith("bun-"):
+        return f"bun-v{version[len('bun-') :]}"
+    return f"bun-{_normalize_version_tag(version)}"
 
 
 def _fetch_checksums(tag: str, tmp_dir: Path) -> Dict[str, str]:
     url = f"{LIMA_RELEASE_BASE}/{tag}/SHA256SUMS"
     dest = tmp_dir / "SHA256SUMS"
+    log_info(f"Fetching {url}")
+    _download(url, dest)
+    return _parse_checksums(dest.read_text(encoding="utf-8"))
+
+
+def _fetch_bun_checksums(tag: str, tmp_dir: Path) -> Dict[str, str]:
+    url = f"{BUN_RELEASE_BASE}/{tag}/SHASUMS256.txt"
+    dest = tmp_dir / "SHASUMS256.txt"
     log_info(f"Fetching {url}")
     _download(url, dest)
     return _parse_checksums(dest.read_text(encoding="utf-8"))
@@ -213,6 +319,49 @@ def _process_arch(
     return actual_sha, object_shas, r2_keys
 
 
+def _process_bun_arch(
+    tag: str,
+    arch: BunArch,
+    tmp_dir: Path,
+    checksums: Dict[str, str],
+    client: Any,
+    env: EnvConfig,
+    dry_run: bool,
+    uploaded_keys: Optional[List[str]] = None,
+) -> Tuple[str, str, str]:
+    zip_name = f"bun-{arch.upstream}.zip"
+    expected_sha = checksums.get(zip_name)
+    if not expected_sha:
+        raise RuntimeError(
+            f"{zip_name} missing from SHASUMS256.txt (is the version tag correct?)"
+        )
+
+    zip_path = tmp_dir / zip_name
+    url = f"{BUN_RELEASE_BASE}/{tag}/{zip_name}"
+    log_info(f"Downloading {url}")
+    _download(url, zip_path, timeout=BUN_HTTP_TIMEOUT_S)
+
+    actual_sha = _sha256_file(zip_path)
+    if actual_sha != expected_sha:
+        raise RuntimeError(
+            f"sha256 mismatch for {zip_name}: expected {expected_sha}, got {actual_sha}"
+        )
+
+    local_path = tmp_dir / f"bun-darwin-{arch.internal}"
+    r2_key = f"{BUN_R2_PREFIX}/bun-darwin-{arch.internal}"
+    _extract_bun_file(zip_path, local_path)
+    binary_sha = _sha256_file(local_path)
+
+    if dry_run:
+        log_info(f"[dry-run] skipped upload of {r2_key}")
+    elif not upload_file_to_r2(client, local_path, r2_key, env.r2_bucket):
+        raise RuntimeError(f"Failed to upload {r2_key}")
+    elif uploaded_keys is not None:
+        uploaded_keys.append(r2_key)
+
+    return actual_sha, binary_sha, r2_key
+
+
 def _extract_lima_file(tarball_path: Path, logical_path: str, dest: Path) -> None:
     with tarfile.open(tarball_path, "r:gz") as tar:
         for member in tar.getmembers():
@@ -232,9 +381,32 @@ def _extract_lima_file(tarball_path: Path, logical_path: str, dest: Path) -> Non
     raise RuntimeError(f"{logical_path} not found in Lima tarball")
 
 
+def _extract_bun_file(zip_path: Path, dest: Path) -> None:
+    with zipfile.ZipFile(zip_path) as archive:
+        for member in archive.infolist():
+            if member.is_dir():
+                continue
+            if _logical_bun_path(member.filename) != "bun":
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as src, open(dest, "wb") as out:
+                while chunk := src.read(1024 * 1024):
+                    out.write(chunk)
+            dest.chmod(0o755)
+            return
+    raise RuntimeError("bun binary not found in Bun zip")
+
+
 def _logical_lima_path(member_name: str) -> str:
     parts = Path(member_name.lstrip("./")).parts
     if len(parts) > 1 and parts[0].startswith("lima-"):
+        parts = parts[1:]
+    return "/".join(parts)
+
+
+def _logical_bun_path(member_name: str) -> str:
+    parts = Path(member_name.lstrip("./")).parts
+    if len(parts) > 1 and parts[0].startswith("bun-"):
         parts = parts[1:]
     return "/".join(parts)
 
@@ -255,6 +427,20 @@ def _build_manifest(
     }
 
 
+def _build_bun_manifest(
+    tag: str,
+    zip_shas: Dict[str, str],
+    object_shas: Dict[str, str],
+) -> Dict[str, Any]:
+    return {
+        "bun_version": tag,
+        "zip_shas_upstream": zip_shas,
+        "r2_object_shas": object_shas,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "uploaded_by": os.environ.get("GITHUB_ACTOR") or "local",
+    }
+
+
 def _upload_manifest(
     client: Any,
     env: EnvConfig,
@@ -263,14 +449,28 @@ def _upload_manifest(
     dry_run: bool,
 ) -> None:
     manifest_path = tmp_dir / "manifest.json"
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-    )
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     if dry_run:
         log_info(f"[dry-run] manifest would be: {manifest}")
         return
     if not upload_file_to_r2(client, manifest_path, LIMA_MANIFEST_KEY, env.r2_bucket):
         raise RuntimeError(f"Failed to upload {LIMA_MANIFEST_KEY}")
+
+
+def _upload_bun_manifest(
+    client: Any,
+    env: EnvConfig,
+    manifest: Dict[str, Any],
+    tmp_dir: Path,
+    dry_run: bool,
+) -> None:
+    manifest_path = tmp_dir / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    if dry_run:
+        log_info(f"[dry-run] manifest would be: {manifest}")
+        return
+    if not upload_file_to_r2(client, manifest_path, BUN_MANIFEST_KEY, env.r2_bucket):
+        raise RuntimeError(f"Failed to upload {BUN_MANIFEST_KEY}")
 
 
 def _rollback(client: Any, bucket: str, keys: List[str]) -> None:
@@ -283,7 +483,7 @@ def _rollback(client: Any, bucket: str, keys: List[str]) -> None:
 
 
 def _download(url: str, dest: Path, *, timeout: Optional[int] = None) -> None:
-    response = requests.get(url, stream=True, timeout=timeout or LIMA_HTTP_TIMEOUT_S)
+    response = requests.get(url, stream=True, timeout=timeout or HTTP_TIMEOUT_S)
     response.raise_for_status()
     dest.parent.mkdir(parents=True, exist_ok=True)
     with open(dest, "wb") as out:

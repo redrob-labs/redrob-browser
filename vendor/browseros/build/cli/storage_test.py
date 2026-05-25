@@ -6,6 +6,7 @@ import io
 import tarfile
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from unittest import mock
@@ -50,6 +51,14 @@ def _add_tar_file(
     tar.addfile(info, io.BytesIO(payload))
 
 
+def _build_bun_zip(payload: bytes) -> bytes:
+    """Return a Bun release zip with the upstream directory layout."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("bun-darwin-aarch64/bun", payload)
+    return buffer.getvalue()
+
+
 class ParseChecksumsTest(unittest.TestCase):
     def test_parses_two_column_lines(self) -> None:
         contents = (
@@ -86,6 +95,26 @@ class NormalizeVersionTagTest(unittest.TestCase):
 
     def test_adds_v_prefix_when_missing(self) -> None:
         self.assertEqual(storage._normalize_version_tag("1.2.3"), "v1.2.3")
+
+
+class NormalizeBunVersionTagTest(unittest.TestCase):
+    def test_keeps_existing_bun_prefix(self) -> None:
+        self.assertEqual(
+            storage._normalize_bun_version_tag("bun-v1.2.3"),
+            "bun-v1.2.3",
+        )
+
+    def test_accepts_plain_semver(self) -> None:
+        self.assertEqual(storage._normalize_bun_version_tag("1.2.3"), "bun-v1.2.3")
+
+    def test_accepts_v_prefixed_semver(self) -> None:
+        self.assertEqual(storage._normalize_bun_version_tag("v1.2.3"), "bun-v1.2.3")
+
+    def test_accepts_bun_prefixed_semver_without_v(self) -> None:
+        self.assertEqual(
+            storage._normalize_bun_version_tag("bun-1.2.3"),
+            "bun-v1.2.3",
+        )
 
 
 class ExtractLimaFileTest(unittest.TestCase):
@@ -140,7 +169,9 @@ class ExtractLimaFileTest(unittest.TestCase):
             tarball_path.write_bytes(buffer.getvalue())
 
             with self.assertRaisesRegex(RuntimeError, "bin/limactl not found"):
-                storage._extract_lima_file(tarball_path, "bin/limactl", tmp_path / "out")
+                storage._extract_lima_file(
+                    tarball_path, "bin/limactl", tmp_path / "out"
+                )
 
     def test_raises_when_guest_agent_missing(self) -> None:
         tarball = _build_lima_tarball("1.2.3", b"limactl")
@@ -161,6 +192,32 @@ class ExtractLimaFileTest(unittest.TestCase):
                 )
 
 
+class ExtractBunFileTest(unittest.TestCase):
+    def test_extracts_bun_binary(self) -> None:
+        payload = b"bun-binary-" + b"b" * 100
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            zip_path = tmp_path / "bun.zip"
+            zip_path.write_bytes(_build_bun_zip(payload))
+            dest = tmp_path / "bun"
+
+            storage._extract_bun_file(zip_path, dest)
+
+            self.assertEqual(dest.read_bytes(), payload)
+            self.assertTrue(dest.stat().st_mode & 0o100, "should be executable")
+
+    def test_raises_when_bun_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            zip_path = tmp_path / "bun.zip"
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("bun-darwin-aarch64/README.md", b"missing")
+
+            with self.assertRaisesRegex(RuntimeError, "bun binary not found"):
+                storage._extract_bun_file(zip_path, tmp_path / "bun")
+
+
 class RollbackTest(unittest.TestCase):
     def test_rollback_deletes_all_keys(self) -> None:
         deleted: List[Tuple[str, str]] = []
@@ -170,7 +227,9 @@ class RollbackTest(unittest.TestCase):
                 deleted.append((kwargs["Bucket"], kwargs["Key"]))
 
         storage._rollback(FakeClient(), "browseros", ["a", "b", "c"])
-        self.assertEqual(deleted, [("browseros", "a"), ("browseros", "b"), ("browseros", "c")])
+        self.assertEqual(
+            deleted, [("browseros", "a"), ("browseros", "b"), ("browseros", "c")]
+        )
 
     def test_rollback_tolerates_delete_failures(self) -> None:
         class FakeClient:
@@ -195,6 +254,18 @@ class BuildManifestTest(unittest.TestCase):
         self.assertEqual(manifest["tarball_shas_upstream"]["arm64"], "a" * 64)
         self.assertEqual(manifest["r2_object_shas"]["x64"]["limactl"], "e" * 64)
         self.assertEqual(manifest["r2_object_shas"]["x64"]["guest_agent"], "f" * 64)
+        self.assertIn("uploaded_at", manifest)
+        self.assertIn("uploaded_by", manifest)
+
+    def test_bun_manifest_shape(self) -> None:
+        manifest = storage._build_bun_manifest(
+            "bun-v1.2.3",
+            {"arm64": "a" * 64, "x64": "b" * 64},
+            {"arm64": "c" * 64, "x64": "d" * 64},
+        )
+        self.assertEqual(manifest["bun_version"], "bun-v1.2.3")
+        self.assertEqual(manifest["zip_shas_upstream"]["arm64"], "a" * 64)
+        self.assertEqual(manifest["r2_object_shas"]["x64"], "d" * 64)
         self.assertIn("uploaded_at", manifest)
         self.assertIn("uploaded_by", manifest)
 
@@ -223,7 +294,9 @@ class ProcessArchTest(unittest.TestCase):
     def test_happy_path_uploads_and_returns_shas(self) -> None:
         uploads: List[Tuple[str, str, bytes]] = []
 
-        def fake_upload(_client: Any, local_path: Path, r2_key: str, bucket: str) -> bool:
+        def fake_upload(
+            _client: Any, local_path: Path, r2_key: str, bucket: str
+        ) -> bool:
             uploads.append((r2_key, bucket, local_path.read_bytes()))
             return True
 
@@ -231,8 +304,14 @@ class ProcessArchTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            with mock.patch.object(storage, "_download", side_effect=self._fake_download), \
-                 mock.patch.object(storage, "upload_file_to_r2", side_effect=fake_upload):
+            with (
+                mock.patch.object(
+                    storage, "_download", side_effect=self._fake_download
+                ),
+                mock.patch.object(
+                    storage, "upload_file_to_r2", side_effect=fake_upload
+                ),
+            ):
                 tarball_sha, object_shas, r2_keys = storage._process_arch(
                     tag="v1.2.3",
                     arch=storage.LimaArch(
@@ -276,14 +355,16 @@ class ProcessArchTest(unittest.TestCase):
                     "artifacts/vendor/third_party/lima/lima-guestagent.Linux-aarch64.gz",
                     "browseros",
                     self.guest_agent_payload,
-                )
+                ),
             ],
         )
 
     def test_sha_mismatch_aborts_before_upload(self) -> None:
         uploads: List[Tuple[str, str]] = []
 
-        def fake_upload(_client: Any, _local_path: Path, r2_key: str, bucket: str) -> bool:
+        def fake_upload(
+            _client: Any, _local_path: Path, r2_key: str, bucket: str
+        ) -> bool:
             uploads.append((r2_key, bucket))
             return True
 
@@ -291,8 +372,14 @@ class ProcessArchTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            with mock.patch.object(storage, "_download", side_effect=self._fake_download), \
-                 mock.patch.object(storage, "upload_file_to_r2", side_effect=fake_upload):
+            with (
+                mock.patch.object(
+                    storage, "_download", side_effect=self._fake_download
+                ),
+                mock.patch.object(
+                    storage, "upload_file_to_r2", side_effect=fake_upload
+                ),
+            ):
                 with self.assertRaisesRegex(RuntimeError, "sha256 mismatch"):
                     storage._process_arch(
                         tag="v1.2.3",
@@ -341,8 +428,14 @@ class ProcessArchTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            with mock.patch.object(storage, "_download", side_effect=self._fake_download), \
-                 mock.patch.object(storage, "upload_file_to_r2", side_effect=fake_upload):
+            with (
+                mock.patch.object(
+                    storage, "_download", side_effect=self._fake_download
+                ),
+                mock.patch.object(
+                    storage, "upload_file_to_r2", side_effect=fake_upload
+                ),
+            ):
                 _, _, r2_keys = storage._process_arch(
                     tag="v1.2.3",
                     arch=storage.LimaArch(
@@ -377,7 +470,9 @@ class ProcessArchTest(unittest.TestCase):
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(tarball_bytes)
 
-        def fake_upload(_client: Any, _local_path: Path, r2_key: str, bucket: str) -> bool:
+        def fake_upload(
+            _client: Any, _local_path: Path, r2_key: str, bucket: str
+        ) -> bool:
             uploads.append((r2_key, bucket))
             return True
 
@@ -385,8 +480,12 @@ class ProcessArchTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            with mock.patch.object(storage, "_download", side_effect=fake_download), \
-                 mock.patch.object(storage, "upload_file_to_r2", side_effect=fake_upload):
+            with (
+                mock.patch.object(storage, "_download", side_effect=fake_download),
+                mock.patch.object(
+                    storage, "upload_file_to_r2", side_effect=fake_upload
+                ),
+            ):
                 with self.assertRaisesRegex(
                     RuntimeError,
                     "share/lima/lima-guestagent.Linux-aarch64.gz not found",
@@ -399,15 +498,162 @@ class ProcessArchTest(unittest.TestCase):
                             linux_guest_arch="aarch64",
                         ),
                         tmp_dir=tmp_path,
-                        checksums={
-                            "lima-1.2.3-Darwin-arm64.tar.gz": expected_sha
-                        },
+                        checksums={"lima-1.2.3-Darwin-arm64.tar.gz": expected_sha},
                         client=mock.Mock(),
                         env=env,
                         dry_run=False,
                     )
 
         self.assertEqual(uploads, [])
+
+
+class ProcessBunArchTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.bun_payload = b"bun-binary-" + b"z" * 200
+        self.zip_bytes = _build_bun_zip(self.bun_payload)
+        self.expected_zip_sha = hashlib.sha256(self.zip_bytes).hexdigest()
+        self.expected_bun_sha = hashlib.sha256(self.bun_payload).hexdigest()
+
+    def _fake_download(self, _url: str, dest: Path, **_kwargs: Any) -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(self.zip_bytes)
+
+    def test_happy_path_uploads_and_returns_shas(self) -> None:
+        uploads: List[Tuple[str, str, bytes]] = []
+
+        def fake_upload(
+            _client: Any, local_path: Path, r2_key: str, bucket: str
+        ) -> bool:
+            uploads.append((r2_key, bucket, local_path.read_bytes()))
+            return True
+
+        env = mock.Mock(r2_bucket="browseros")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            with (
+                mock.patch.object(
+                    storage, "_download", side_effect=self._fake_download
+                ),
+                mock.patch.object(
+                    storage, "upload_file_to_r2", side_effect=fake_upload
+                ),
+            ):
+                zip_sha, binary_sha, r2_key = storage._process_bun_arch(
+                    tag="bun-v1.2.3",
+                    arch=storage.BunArch(internal="arm64", upstream="darwin-aarch64"),
+                    tmp_dir=tmp_path,
+                    checksums={"bun-darwin-aarch64.zip": self.expected_zip_sha},
+                    client=mock.Mock(),
+                    env=env,
+                    dry_run=False,
+                )
+
+        self.assertEqual(zip_sha, self.expected_zip_sha)
+        self.assertEqual(binary_sha, self.expected_bun_sha)
+        self.assertEqual(r2_key, "artifacts/vendor/third_party/bun/bun-darwin-arm64")
+        self.assertEqual(
+            uploads,
+            [
+                (
+                    "artifacts/vendor/third_party/bun/bun-darwin-arm64",
+                    "browseros",
+                    self.bun_payload,
+                )
+            ],
+        )
+
+    def test_uses_bun_download_timeout(self) -> None:
+        download_kwargs: List[Dict[str, Any]] = []
+
+        def fake_download(_url: str, dest: Path, **kwargs: Any) -> None:
+            download_kwargs.append(kwargs)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(self.zip_bytes)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            with mock.patch.object(storage, "_download", side_effect=fake_download):
+                storage._process_bun_arch(
+                    tag="bun-v1.2.3",
+                    arch=storage.BunArch(internal="arm64", upstream="darwin-aarch64"),
+                    tmp_dir=tmp_path,
+                    checksums={"bun-darwin-aarch64.zip": self.expected_zip_sha},
+                    client=None,
+                    env=mock.Mock(r2_bucket="browseros"),
+                    dry_run=True,
+                )
+
+        self.assertEqual(download_kwargs, [{"timeout": storage.BUN_HTTP_TIMEOUT_S}])
+
+    def test_sha_mismatch_aborts_before_upload(self) -> None:
+        uploads: List[Tuple[str, str]] = []
+
+        def fake_upload(
+            _client: Any, _local_path: Path, r2_key: str, bucket: str
+        ) -> bool:
+            uploads.append((r2_key, bucket))
+            return True
+
+        env = mock.Mock(r2_bucket="browseros")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            with (
+                mock.patch.object(
+                    storage, "_download", side_effect=self._fake_download
+                ),
+                mock.patch.object(
+                    storage, "upload_file_to_r2", side_effect=fake_upload
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "sha256 mismatch"):
+                    storage._process_bun_arch(
+                        tag="bun-v1.2.3",
+                        arch=storage.BunArch(
+                            internal="arm64",
+                            upstream="darwin-aarch64",
+                        ),
+                        tmp_dir=tmp_path,
+                        checksums={"bun-darwin-aarch64.zip": "0" * 64},
+                        client=mock.Mock(),
+                        env=env,
+                        dry_run=False,
+                    )
+
+        self.assertEqual(uploads, [])
+
+    def test_dry_run_skips_upload(self) -> None:
+        uploads: List[Tuple[str, str]] = []
+
+        def fake_upload(*args: Any, **kwargs: Any) -> bool:
+            uploads.append(("called", ""))
+            return True
+
+        env = mock.Mock(r2_bucket="browseros")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            with (
+                mock.patch.object(
+                    storage, "_download", side_effect=self._fake_download
+                ),
+                mock.patch.object(
+                    storage, "upload_file_to_r2", side_effect=fake_upload
+                ),
+            ):
+                _, _, r2_key = storage._process_bun_arch(
+                    tag="bun-v1.2.3",
+                    arch=storage.BunArch(internal="arm64", upstream="darwin-aarch64"),
+                    tmp_dir=tmp_path,
+                    checksums={"bun-darwin-aarch64.zip": self.expected_zip_sha},
+                    client=None,
+                    env=env,
+                    dry_run=True,
+                )
+
+        self.assertEqual(uploads, [])
+        self.assertEqual(r2_key, "artifacts/vendor/third_party/bun/bun-darwin-arm64")
 
 
 if __name__ == "__main__":
