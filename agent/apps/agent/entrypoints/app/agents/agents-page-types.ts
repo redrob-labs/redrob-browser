@@ -22,6 +22,3 @@ export interface AgentListItem {
   canChat: boolean
   canDelete: boolean
 }
-
-export const DEFAULT_HARNESS_ADAPTER: HarnessAgentAdapter = 'claude'
-export const DEFAULT_CREATE_RUNTIME: CreateAgentRuntime = 'claude'

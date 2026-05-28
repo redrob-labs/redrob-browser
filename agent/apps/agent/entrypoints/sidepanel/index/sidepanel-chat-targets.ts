@@ -4,6 +4,9 @@ import type {
   HarnessAgentAdapter,
 } from '@/entrypoints/app/agents/agent-harness-types'
 import type { LlmProviderConfig, ProviderType } from '@/lib/llm-providers/types'
+// Relative (not `@/`) so this module stays loadable under `bun test`, which
+// resolves tsconfig `@/` aliases for erased type imports only, not values.
+import { isAdapterHidden } from '../../../lib/chat/adapter-visibility'
 
 export type SidepanelTargetKind = 'llm' | 'acp'
 
@@ -70,7 +73,9 @@ export function buildSidepanelChatTargets({
 }: BuildSidepanelChatTargetsInput): SidepanelChatTarget[] {
   return [
     ...providers.map(toLlmTarget),
-    ...agents.map((agent) => toAcpTargetForAgent(agent, adapters)),
+    ...agents
+      .filter((agent) => !isAdapterHidden(agent.adapter))
+      .map((agent) => toAcpTargetForAgent(agent, adapters)),
   ]
 }
 

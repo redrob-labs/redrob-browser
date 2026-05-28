@@ -20,23 +20,3 @@ export function toHarnessListItem(agent: HarnessAgent): AgentListItem {
     canDelete: true,
   }
 }
-
-export function getAgentsLoading(input: {
-  adaptersLoading: boolean
-  harnessAgentsLoading: boolean
-}): boolean {
-  return input.adaptersLoading || input.harnessAgentsLoading
-}
-
-export function getInlineError(input: {
-  pageError: string | null
-  adaptersError: Error | null
-  harnessAgentsError: Error | null
-}): string | null {
-  return (
-    input.pageError ??
-    input.adaptersError?.message ??
-    input.harnessAgentsError?.message ??
-    null
-  )
-}

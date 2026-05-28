@@ -59,7 +59,7 @@ const primarySettingsSections: NavSection[] = [
   {
     label: 'Provider Settings',
     items: [
-      { name: 'BrowserOS AI', to: '/settings/ai', icon: Bot },
+      { name: 'AI & Agents', to: '/settings/ai', icon: Bot },
       {
         name: 'Chat & Council Provider',
         to: '/settings/chat',

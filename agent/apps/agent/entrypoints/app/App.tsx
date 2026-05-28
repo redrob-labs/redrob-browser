@@ -13,7 +13,6 @@ import { StepsLayout } from '../onboarding/steps/StepsLayout'
 import { AgentCommandConversation } from './agent-command/AgentCommandConversation'
 import { AgentCommandHome } from './agent-command/AgentCommandHome'
 import { AgentCommandLayout } from './agent-command/agent-command-layout'
-import { AgentsPage } from './agents/AgentsPage'
 import { AISettingsPage } from './ai-settings/AISettingsPage'
 import { ConnectMCP } from './connect-mcp/ConnectMCP'
 import { CustomizationPage } from './customization/CustomizationPage'
@@ -36,6 +35,13 @@ function getSurveyParams(): { maxTurns?: number; experimentId?: string } {
   const experimentId = params.get('experimentId') ?? 'default'
   const maxTurns = maxTurnsStr ? Number.parseInt(maxTurnsStr, 10) : 7
   return { maxTurns, experimentId }
+}
+
+// Agent management moved into AI & Agents settings; conversations live under
+// /home/agents. Keep old /agents links alive.
+const LegacyAgentRedirect: FC = () => {
+  const params = useParams()
+  return <Navigate to={`/home/agents/${params.agentId ?? ''}`} replace />
 }
 
 const OptionsRedirect: FC = () => {
@@ -100,24 +106,6 @@ export const App: FC = () => {
           {/* Primary nav routes */}
           <Route path="connect-apps" element={<ConnectMCP />} />
           <Route path="scheduled" element={<ScheduledTasksPage />} />
-          {alphaEnabled ? (
-            <>
-              <Route path="agents" element={<AgentsPage />} />
-              <Route element={<AgentCommandLayout />}>
-                <Route
-                  path="agents/:agentId"
-                  element={
-                    <AgentCommandConversation
-                      variant="page"
-                      backPath="/agents"
-                      agentPathPrefix="/agents"
-                      createAgentPath="/agents"
-                    />
-                  }
-                />
-              </Route>
-            </>
-          ) : null}
         </Route>
 
         {/* Settings with dedicated sidebar */}
@@ -167,6 +155,11 @@ export const App: FC = () => {
           element={<Navigate to="/home" replace />}
         />
         <Route path="/executions" element={<Navigate to="/home" replace />} />
+        <Route
+          path="/agents"
+          element={<Navigate to="/settings/ai?section=claude" replace />}
+        />
+        <Route path="/agents/:agentId" element={<LegacyAgentRedirect />} />
         <Route path="/options/*" element={<OptionsRedirect />} />
 
         {/* Fallback to home */}
