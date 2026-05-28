@@ -95,6 +95,7 @@ export class Application {
     try {
       await writeServerConfig({
         server_port: this.config.serverPort,
+        cdp_port: this.config.cdpPort ?? undefined,
         url: `http://127.0.0.1:${this.config.serverPort}`,
         server_version: VERSION,
         browseros_version: this.config.instanceBrowserosVersion,
