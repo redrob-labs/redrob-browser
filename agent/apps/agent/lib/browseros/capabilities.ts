@@ -50,6 +50,8 @@ export enum Feature {
   QWEN_CODE_SUPPORT = 'QWEN_CODE_SUPPORT',
   // Credit-based usage tracking
   CREDITS_SUPPORT = 'CREDITS_SUPPORT',
+  // Claude Code / Codex agent-harness adapters in the unified picker + settings
+  AGENT_HARNESS_SUPPORT = 'AGENT_HARNESS_SUPPORT',
 }
 
 /**
@@ -79,6 +81,7 @@ const FEATURE_CONFIG: { [K in Feature]: FeatureConfig } = {
   [Feature.GITHUB_COPILOT_SUPPORT]: { minServerVersion: '0.0.77' },
   [Feature.QWEN_CODE_SUPPORT]: { minServerVersion: '0.0.77' },
   [Feature.CREDITS_SUPPORT]: { minServerVersion: '0.0.78' },
+  [Feature.AGENT_HARNESS_SUPPORT]: { minBrowserOSVersion: '0.46.0.0' },
 }
 
 function parseVersion(version: string): number[] {
@@ -189,7 +192,9 @@ function ensureInitialized(): Promise<CapabilitiesState> {
   return initPromise
 }
 
-function checkFeatureSupport(
+// Exported for unit tests: resolves a feature's version gate directly,
+// bypassing the dev-mode/static short-circuit in `supports`.
+export function checkFeatureSupport(
   state: CapabilitiesState,
   feature: Feature,
 ): boolean {

@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Feature } from '@/lib/browseros/capabilities'
 import { getAgentServerUrl } from '@/lib/browseros/helpers'
 import { useAgentServerUrl } from '@/lib/browseros/useBrowserOSProviders'
+import { useCapabilities } from '@/lib/browseros/useCapabilities'
 import { buildAgentApiUrl } from './agent-api-url'
 import {
   type AgentHarnessStreamEvent,
@@ -41,6 +43,8 @@ export async function agentsFetch<T>(
 }
 
 export function useAgentAdapters(enabled = true) {
+  const { supports, isLoading: capabilitiesLoading } = useCapabilities()
+  const agentsSupported = supports(Feature.AGENT_HARNESS_SUPPORT)
   const {
     baseUrl,
     isLoading: urlLoading,
@@ -56,18 +60,22 @@ export function useAgentAdapters(enabled = true) {
       )
       return data.adapters ?? []
     },
-    enabled: Boolean(baseUrl) && !urlLoading && enabled,
+    enabled: Boolean(baseUrl) && !urlLoading && enabled && agentsSupported,
   })
 
   return {
-    adapters: query.data ?? [],
-    loading: query.isLoading || urlLoading,
-    error: query.error ?? urlError,
+    adapters: agentsSupported ? (query.data ?? []) : [],
+    loading:
+      capabilitiesLoading ||
+      (agentsSupported && (query.isLoading || urlLoading)),
+    error: agentsSupported ? (query.error ?? urlError) : null,
     refetch: query.refetch,
   }
 }
 
 export function useHarnessAgents(enabled = true) {
+  const { supports, isLoading: capabilitiesLoading } = useCapabilities()
+  const agentsSupported = supports(Feature.AGENT_HARNESS_SUPPORT)
   const {
     baseUrl,
     isLoading: urlLoading,
@@ -85,7 +93,7 @@ export function useHarnessAgents(enabled = true) {
         agents: data.agents ?? [],
       }
     },
-    enabled: Boolean(baseUrl) && !urlLoading && enabled,
+    enabled: Boolean(baseUrl) && !urlLoading && enabled && agentsSupported,
     // Poll every 5s so the per-agent liveness state (working / idle /
     // asleep / error) and last-used timestamps stay fresh without a
     // websocket. `refetchIntervalInBackground: false` lets a hidden
@@ -95,10 +103,14 @@ export function useHarnessAgents(enabled = true) {
   })
 
   return {
-    agents: (query.data?.agents ?? []).map(mapHarnessAgentToEntry),
-    harnessAgents: query.data?.agents ?? [],
-    loading: query.isLoading || urlLoading,
-    error: query.error ?? urlError,
+    agents: agentsSupported
+      ? (query.data?.agents ?? []).map(mapHarnessAgentToEntry)
+      : [],
+    harnessAgents: agentsSupported ? (query.data?.agents ?? []) : [],
+    loading:
+      capabilitiesLoading ||
+      (agentsSupported && (query.isLoading || urlLoading)),
+    error: agentsSupported ? (query.error ?? urlError) : null,
     refetch: query.refetch,
   }
 }
