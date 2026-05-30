@@ -13,14 +13,24 @@ import {
 } from '../../../tools/framework'
 import type { ToolRegistry } from '../../../tools/tool-registry'
 
-// True when the tool's zod input schema is a ZodObject with a `windowId`
-// field. Schema-driven so any future tool that takes a windowId
-// participates automatically — no per-tool allowlist.
-function inputHasWindowIdField(tool: ToolDefinition): boolean {
+// True when the tool's zod input schema is a ZodObject with the given
+// optional field. Schema-driven so any future tool that adds the same
+// field participates automatically — no per-tool allowlist.
+function inputHasField(tool: ToolDefinition, field: string): boolean {
   const input = tool.input
   if (!(input instanceof z.ZodObject)) return false
-  return 'windowId' in (input as z.AnyZodObject).shape
+  return field in (input as z.AnyZodObject).shape
 }
+
+// Tools whose only purpose is to mutate the window topology — agents
+// in single-window mode (i.e., the host pinned defaultWindowId) must
+// not call these, or they'd break the host's invariant.
+const SINGLE_WINDOW_BLOCKED_TOOLS = new Set([
+  'create_window',
+  'create_hidden_window',
+  'close_window',
+  'set_window_visibility',
+])
 
 export function registerTools(
   mcpServer: McpServer,
@@ -29,12 +39,22 @@ export function registerTools(
     observer?: ToolExecutionObserver
     // Default windowId from X-BrowserOS-Default-Window-Id. When set,
     // tool calls without an explicit args.windowId have this value
-    // injected — provided the tool's schema actually accepts one.
+    // injected — provided the tool's schema actually accepts one. When
+    // set, window-mutating tools are also filtered out — see
+    // SINGLE_WINDOW_BLOCKED_TOOLS.
     defaultWindowId?: number
+    // Default tabGroupId from X-BrowserOS-Default-Tab-Group-Id. Same
+    // injection pattern as defaultWindowId, applied to tools whose
+    // schema accepts tabGroupId (new_page, new_hidden_page, show_page,
+    // move_page today).
+    defaultTabGroupId?: string
   },
 ): void {
+  const singleWindowMode = ctx.defaultWindowId !== undefined
   for (const tool of registry.all()) {
-    const acceptsWindowId = inputHasWindowIdField(tool)
+    if (singleWindowMode && SINGLE_WINDOW_BLOCKED_TOOLS.has(tool.name)) continue
+    const acceptsWindowId = inputHasField(tool, 'windowId')
+    const acceptsTabGroupId = inputHasField(tool, 'tabGroupId')
     const handler = async (
       args: Record<string, unknown>,
       extra: { signal: AbortSignal },
@@ -50,6 +70,13 @@ export function registerTools(
         args.windowId === undefined
       ) {
         args.windowId = ctx.defaultWindowId
+      }
+      if (
+        ctx.defaultTabGroupId !== undefined &&
+        acceptsTabGroupId &&
+        args.tabGroupId === undefined
+      ) {
+        args.tabGroupId = ctx.defaultTabGroupId
       }
       const startTime = performance.now()
       const toolCallId = crypto.randomUUID()

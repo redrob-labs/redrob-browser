@@ -68,12 +68,19 @@ export function createMcpRoutes(deps: McpRouteDeps) {
       c.req.header('X-BrowserOS-Default-Window-Id'),
     )
 
+    // Same pattern for tab groups — the host pins every page-creating
+    // call to a specific tab group so concurrent agents don't race for
+    // the window's active group.
+    const defaultTabGroupId =
+      c.req.header('X-BrowserOS-Default-Tab-Group-Id') ?? undefined
+
     // Per-request server + transport: no shared state, no race conditions,
     // no ID collisions. Required by MCP SDK 1.26.0+ security fix (GHSA-345p-7cg4-v4c7).
     const mcpServer = createMcpServer({
       ...deps,
       observer,
       defaultWindowId,
+      defaultTabGroupId,
     })
     const transport = new StreamableHTTPTransport({
       sessionIdGenerator: undefined,

@@ -1,5 +1,28 @@
 import { z } from 'zod'
-import { defineTool } from './framework'
+import { logger } from '../lib/logger'
+import { defineTool, type ToolContext } from './framework'
+
+// Best-effort: attach a page to a tab group. Failure is logged but
+// never propagated — the caller already created/moved the page and
+// the agent should see its tool succeed. Stale groupIds from the
+// agent-company side reconcile at boot, so a one-off miss is
+// recoverable.
+async function joinTabGroup(
+  ctx: ToolContext,
+  pageId: number,
+  tabGroupId: string | undefined,
+): Promise<void> {
+  if (!tabGroupId) return
+  try {
+    await ctx.browser.groupTabs([pageId], { groupId: tabGroupId })
+  } catch (err) {
+    logger.warn('Failed to attach tab to default tab group', {
+      pageId,
+      tabGroupId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
 
 const pageParam = z.number().describe('Page ID (from list_pages)')
 const pageInfoSchema = z.object({
@@ -144,6 +167,10 @@ export const new_page = defineTool({
         'Open in background without stealing focus. Set to false only when user needs to see the tab immediately.',
       ),
     windowId: z.number().optional().describe('Window ID to create tab in'),
+    tabGroupId: z
+      .string()
+      .optional()
+      .describe('Tab group to place the new tab into'),
   }),
   output: z.object({
     pageId: z.number(),
@@ -158,6 +185,7 @@ export const new_page = defineTool({
       background: args.background !== false,
       windowId: args.windowId,
     })
+    await joinTabGroup(ctx, pageId, args.tabGroupId)
     response.text(`Opened new page: ${args.url}\nPage ID: ${pageId}`)
     response.data({
       pageId,
@@ -177,6 +205,10 @@ export const new_hidden_page = defineTool({
   input: z.object({
     url: z.string().describe('URL to open'),
     windowId: z.number().optional().describe('Window ID to create tab in'),
+    tabGroupId: z
+      .string()
+      .optional()
+      .describe('Tab group the page joins when later shown'),
   }),
   output: z.object({
     pageId: z.number(),
@@ -191,6 +223,7 @@ export const new_hidden_page = defineTool({
       background: true,
       windowId: args.windowId,
     })
+    await joinTabGroup(ctx, pageId, args.tabGroupId)
     response.text(`Opened hidden page: ${args.url}\nPage ID: ${pageId}`)
     response.data({
       pageId,
@@ -221,6 +254,10 @@ export const show_page = defineTool({
       .boolean()
       .default(true)
       .describe('Activate (focus) the tab after showing'),
+    tabGroupId: z
+      .string()
+      .optional()
+      .describe('Tab group to place the now-visible tab into'),
   }),
   output: z.object({ page: pageInfoSchema }),
   handler: async (args, ctx, response) => {
@@ -229,6 +266,7 @@ export const show_page = defineTool({
       index: args.index,
       activate: args.activate,
     })
+    await joinTabGroup(ctx, args.page, args.tabGroupId)
     response.text(
       `Page ${args.page} is now visible in window ${updated.windowId}`,
     )
@@ -251,6 +289,10 @@ export const move_page = defineTool({
       .number()
       .optional()
       .describe('Tab position index within the target window'),
+    tabGroupId: z
+      .string()
+      .optional()
+      .describe('Tab group to place the moved tab into'),
   }),
   output: z.object({ page: pageInfoSchema }),
   handler: async (args, ctx, response) => {
@@ -258,6 +300,7 @@ export const move_page = defineTool({
       windowId: args.windowId,
       index: args.index,
     })
+    await joinTabGroup(ctx, args.page, args.tabGroupId)
     response.text(
       `Moved page ${args.page} to window ${updated.windowId} at index ${updated.index}`,
     )

@@ -5,7 +5,7 @@ import {
   ScreencastManager,
   type ScreencastOutboundMessage,
 } from '../../src/api/services/screencast/screencast-manager'
-import { close_window, create_hidden_window } from '../../src/tools/windows'
+import { close_window, create_window } from '../../src/tools/windows'
 import { withBrowser } from '../__helpers__/with-browser'
 
 interface FakeWs {
@@ -52,10 +52,14 @@ async function waitForFrame(
 }
 
 describe('ScreencastManager', () => {
-  it('subscribes, emits frames for a hidden window, and stops on last unsubscribe', async () => {
+  // Uses a visible window — bringToFront wakes the compositor reliably
+  // there. Hidden-window subscribers get the connected status but
+  // depend on subsequent invalidations for frames (Chromium pauses
+  // composition for off-screen windows).
+  it('subscribes, emits frames, displaces a prior subscriber, and stops on unsubscribe', async () => {
     await withBrowser(async ({ browser, execute }) => {
-      const created = await execute(create_hidden_window, {})
-      assert.ok(!created.isError, 'create_hidden_window failed')
+      const created = await execute(create_window, {})
+      assert.ok(!created.isError, 'create_window failed')
       const windowId = (
         created.structuredContent as { window: { windowId: number } }
       ).window.windowId
@@ -82,6 +86,12 @@ describe('ScreencastManager', () => {
             (m) => m.type === 'status' && m.status === 'connected',
           ),
           'second subscriber should receive status',
+        )
+        assert.ok(
+          subA.inbox.some(
+            (m) => m.type === 'status' && m.status === 'detached',
+          ),
+          'first subscriber should be told it was detached when displaced',
         )
 
         manager.unsubscribe(handleA, subA.ws)

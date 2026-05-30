@@ -31,6 +31,11 @@ export interface McpServiceDeps {
   // bind every browser tool call to a specific window without the
   // agent needing to be aware of it.
   defaultWindowId?: number
+  // Same pattern for tab groups, via X-BrowserOS-Default-Tab-Group-Id.
+  // Tools that accept `tabGroupId` (currently new_page, new_hidden_page,
+  // show_page, move_page) get this auto-injected so every tab a given
+  // agent opens lands in that agent's group without explicit routing.
+  defaultTabGroupId?: string
 }
 
 export function createMcpServer(deps: McpServiceDeps): McpServer {
@@ -56,6 +61,7 @@ export function createMcpServer(deps: McpServiceDeps): McpServer {
     },
     observer: deps.observer,
     defaultWindowId: deps.defaultWindowId,
+    defaultTabGroupId: deps.defaultTabGroupId,
   })
 
   // Register Klavis proxy tools (if connected via background init)
