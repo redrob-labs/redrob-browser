@@ -5,8 +5,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import useDeepCompareEffect from 'use-deep-compare-effect'
 import type { Provider } from '@/components/chat/chatComponentTypes'
+import { useAgentServerUrl } from '@/hooks/useAgentServerUrl'
 import { Capabilities, Feature } from '@/lib/browseros/capabilities'
-import { useAgentServerUrl } from '@/lib/browseros/useBrowserOSProviders'
 import type { ChatAction } from '@/lib/chat-actions/types'
 import {
   CONVERSATION_RESET_EVENT,
@@ -180,10 +180,17 @@ export const useChatSession = (options?: ChatSessionOptions) => {
   const conversationIdParam = searchParams.get('conversationId')
 
   const agentUrlRef = useRef(agentServerUrl)
+  const agentUrlErrorRef = useRef(agentUrlError)
 
   useEffect(() => {
     agentUrlRef.current = agentServerUrl
   }, [agentServerUrl])
+
+  useEffect(() => {
+    agentUrlErrorRef.current = agentUrlError
+  }, [agentUrlError])
+
+  const canSend = !isLoadingAgentUrl && !agentUrlError && !!agentServerUrl
 
   const providers: Provider[] = chatTargets.map(toProviderOption)
 
@@ -356,8 +363,16 @@ export const useChatSession = (options?: ChatSessionOptions) => {
 
         const message = getLastMessageText(messages)
 
+        const currentAgentServerUrl = agentUrlRef.current
+        if (!currentAgentServerUrl) {
+          throw (
+            agentUrlErrorRef.current ??
+            new Error('Agent server URL not configured.')
+          )
+        }
+
         const result = buildSidepanelPreparedSendMessagesRequest({
-          agentServerUrl: agentUrlRef.current ?? undefined,
+          agentServerUrl: currentAgentServerUrl,
           target,
           fallbackProvider,
           message,
@@ -513,39 +528,7 @@ export const useChatSession = (options?: ChatSessionOptions) => {
     action?: ChatAction
   } | null>(null)
 
-  const dispatchMessage = useCallback(
-    (text: string) => {
-      startExecutionTask({
-        conversationId: conversationIdRef.current,
-        promptText: text,
-      })
-      baseSendMessage({ text })
-    },
-    [baseSendMessage, startExecutionTask],
-  )
-
-  useEffect(() => {
-    isIntegrationsSyncedRef.current = isIntegrationsSynced
-  }, [isIntegrationsSynced])
-
-  // Flush pending message when integrations sync completes
-  useEffect(() => {
-    if (isIntegrationsSynced && pendingMessageRef.current) {
-      const pending = pendingMessageRef.current
-      pendingMessageRef.current = null
-      if (pending.action) {
-        setTextToAction((prev) => {
-          const next = new Map(prev)
-          // biome-ignore lint/style/noNonNullAssertion: guarded by if (pending.action) above
-          next.set(pending.text, pending.action!)
-          return next
-        })
-      }
-      dispatchMessage(pending.text)
-    }
-  }, [dispatchMessage, isIntegrationsSynced])
-
-  const sendMessage = (params: { text: string; action?: ChatAction }) => {
+  const trackMessageSent = useCallback(() => {
     const target = selectedChatTargetRef.current
     const llmTargetProvider = toLlmProviderConfig(target)
     const agentTarget = target?.kind === 'acp' ? target : undefined
@@ -563,9 +546,42 @@ export const useChatSession = (options?: ChatSessionOptions) => {
         llmTargetProvider?.modelId ??
         selectedLlmProvider?.modelId,
     })
+  }, [mode, selectedChatTargetRef, selectedLlmProvider])
 
-    if (!isIntegrationsSyncedRef.current) {
-      // Queue the message — will be sent when sync completes
+  const dispatchMessage = useCallback(
+    (text: string) => {
+      trackMessageSent()
+      startExecutionTask({
+        conversationId: conversationIdRef.current,
+        promptText: text,
+      })
+      baseSendMessage({ text })
+    },
+    [baseSendMessage, startExecutionTask, trackMessageSent],
+  )
+
+  useEffect(() => {
+    isIntegrationsSyncedRef.current = isIntegrationsSynced
+  }, [isIntegrationsSynced])
+
+  useEffect(() => {
+    if (isIntegrationsSynced && agentServerUrl && pendingMessageRef.current) {
+      const pending = pendingMessageRef.current
+      pendingMessageRef.current = null
+      const { action } = pending
+      if (action) {
+        setTextToAction((prev) => {
+          const next = new Map(prev)
+          next.set(pending.text, action)
+          return next
+        })
+      }
+      dispatchMessage(pending.text)
+    }
+  }, [agentServerUrl, dispatchMessage, isIntegrationsSynced])
+
+  const sendMessage = (params: { text: string; action?: ChatAction }) => {
+    if (!isIntegrationsSyncedRef.current || !agentUrlRef.current) {
       pendingMessageRef.current = params
       return
     }
@@ -681,6 +697,7 @@ export const useChatSession = (options?: ChatSessionOptions) => {
     providers,
     selectedProvider,
     isLoading: isLoadingProviders || isLoadingAgentUrl,
+    canSend,
     isSyncing: !isIntegrationsSynced,
     isRestoringConversation,
     agentUrlError,
