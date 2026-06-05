@@ -27,10 +27,6 @@ export const McpPromoBanner: FC = () => {
           <span className="text-[var(--accent-orange)] text-xs">
             (66+ tools)
           </span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-orange)]/10 px-2.5 py-1 font-semibold text-[var(--accent-orange)] text-xs">
-            <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-orange)]" />
-            New
-          </span>
         </p>
         <p className="text-muted-foreground text-xs">
           Connect your favorite coding tools to BrowserOS as an MCP server

@@ -159,7 +159,7 @@ export const App: FC = () => {
         <Route path="/executions" element={<Navigate to="/home" replace />} />
         <Route
           path="/agents"
-          element={<Navigate to="/settings/ai?section=claude" replace />}
+          element={<Navigate to="/settings/ai" replace />}
         />
         <Route path="/agents/:agentId" element={<LegacyAgentRedirect />} />
         <Route path="/options/*" element={<OptionsRedirect />} />

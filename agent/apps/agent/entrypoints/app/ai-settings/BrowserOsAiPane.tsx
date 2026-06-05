@@ -37,6 +37,7 @@ import {
   useOAuthProviderFlow,
 } from '@/lib/llm-providers/useOAuthProviderFlow'
 import { track } from '@/lib/metrics/track'
+import { CodingAgentsSection } from './CodingAgentsSection'
 import { ConfiguredProvidersList } from './ConfiguredProvidersList'
 import { DeviceCodeDialog } from './DeviceCodeDialog'
 import {
@@ -359,6 +360,8 @@ export const BrowserOsAiPane: FC = () => {
       />
 
       <McpPromoBanner />
+
+      <CodingAgentsSection />
 
       <ProviderTemplatesSection onUseTemplate={handleUseTemplate} />
 
