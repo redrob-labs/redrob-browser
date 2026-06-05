@@ -37,7 +37,7 @@ import {
   useOAuthProviderFlow,
 } from '@/lib/llm-providers/useOAuthProviderFlow'
 import { track } from '@/lib/metrics/track'
-import { CodingAgentsSection } from './CodingAgentsSection'
+import { CodingAgentsManager } from './CodingAgentsManager'
 import { ConfiguredProvidersList } from './ConfiguredProvidersList'
 import { DeviceCodeDialog } from './DeviceCodeDialog'
 import {
@@ -50,6 +50,7 @@ import { LlmProvidersHeader } from './LlmProvidersHeader'
 import { McpPromoBanner } from './McpPromoBanner'
 import { NewProviderDialog } from './NewProviderDialog'
 import { ProviderTemplatesSection } from './ProviderTemplatesSection'
+import { useCodingAgents } from './useCodingAgents'
 
 // All OAuth providers share the same flow via useOAuthProviderFlow
 const OAUTH_PROVIDERS_CONFIG: Record<string, OAuthProviderFlowConfig> = {
@@ -106,6 +107,7 @@ export const BrowserOsAiPane: FC = () => {
   const { baseUrl: agentServerUrl } = useAgentServerUrl()
   const { sessionInfo } = useSessionInfo()
   const queryClient = useQueryClient()
+  const coding = useCodingAgents()
 
   const userId = sessionInfo.user?.id
 
@@ -361,9 +363,11 @@ export const BrowserOsAiPane: FC = () => {
 
       <McpPromoBanner />
 
-      <CodingAgentsSection />
-
-      <ProviderTemplatesSection onUseTemplate={handleUseTemplate} />
+      <ProviderTemplatesSection
+        codingAdapters={coding.adapters}
+        onCreateAgent={coding.openCreate}
+        onUseTemplate={handleUseTemplate}
+      />
 
       <ConfiguredProvidersList
         providers={providers}
@@ -380,6 +384,8 @@ export const BrowserOsAiPane: FC = () => {
         onAddKeys={handleAddKeysToIncomplete}
         onDelete={handleDeleteIncompleteProvider}
       />
+
+      <CodingAgentsManager controller={coding} />
 
       <NewProviderDialog
         open={isNewDialogOpen}
