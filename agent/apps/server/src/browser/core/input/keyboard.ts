@@ -1,10 +1,13 @@
 import { platform } from 'node:os'
 import type { ProtocolApi } from '@browseros/cdp-protocol/protocol-api'
 
-// Meta (Cmd) on macOS, Control on everything else
+// Meta (Cmd) on macOS, Control on everything else.
 const PLATFORM_MODIFIER = platform() === 'darwin' ? 4 : 2
 
-type KeyInfo = { code: string; keyCode: number | undefined }
+interface KeyInfo {
+  code: string
+  keyCode: number | undefined
+}
 
 const KEY_MAP: Record<string, KeyInfo> = {
   Backspace: { code: 'Backspace', keyCode: 8 },
@@ -55,32 +58,22 @@ const KEY_ALIASES: Record<string, string> = {
   Down: 'ArrowDown',
 }
 
-// Case-insensitive lookup: lowercase → canonical key name
 const KEY_NORMALIZE = new Map<string, string>()
-for (const key of Object.keys(KEY_MAP)) {
+for (const key of Object.keys(KEY_MAP))
   KEY_NORMALIZE.set(key.toLowerCase(), key)
-}
 for (const [alias, canonical] of Object.entries(KEY_ALIASES)) {
   KEY_NORMALIZE.set(alias.toLowerCase(), canonical)
 }
 
 export function normalizeKey(key: string): string {
   if (KEY_MAP[key]) return key
-  const normalized = KEY_NORMALIZE.get(key.toLowerCase())
-  if (normalized) return normalized
-  return key
+  return KEY_NORMALIZE.get(key.toLowerCase()) ?? key
 }
 
 const VALID_NAMED_KEYS = Object.keys(KEY_MAP).filter((k) => k.length > 1)
 
-function isValidKey(key: string): boolean {
-  if (KEY_MAP[key]) return true
-  if (key.length === 1) return true
-  return false
-}
-
 function validateKey(key: string): void {
-  if (isValidKey(key)) return
+  if (KEY_MAP[key] || key.length === 1) return
   const aliases = Object.entries(KEY_ALIASES)
     .map(([alias, canonical]) => `${alias} → ${canonical}`)
     .join(', ')
@@ -90,7 +83,6 @@ function validateKey(key: string): void {
   )
 }
 
-// Text produced by character-generating keys (matches Playwright's usKeyboardLayout)
 const KEY_TEXT: Record<string, string> = {
   Enter: '\r',
   Tab: '\t',
@@ -100,8 +92,7 @@ const KEY_TEXT: Record<string, string> = {
 
 function getCharText(key: string): string {
   if (KEY_TEXT[key]) return KEY_TEXT[key]
-  if (key.length === 1) return key
-  return ''
+  return key.length === 1 ? key : ''
 }
 
 const MODIFIER_BIT: Record<string, number> = {
@@ -113,78 +104,58 @@ const MODIFIER_BIT: Record<string, number> = {
 
 export function getKeyInfo(key: string): KeyInfo {
   if (KEY_MAP[key]) return KEY_MAP[key]
-
   if (key.length === 1) {
-    if (key >= 'a' && key <= 'z')
+    if (key >= 'a' && key <= 'z') {
       return {
         code: `Key${key.toUpperCase()}`,
         keyCode: key.toUpperCase().charCodeAt(0),
       }
+    }
     if (key >= 'A' && key <= 'Z')
       return { code: `Key${key}`, keyCode: key.charCodeAt(0) }
     if (key >= '0' && key <= '9')
       return { code: `Digit${key}`, keyCode: key.charCodeAt(0) }
   }
-
   return { code: key, keyCode: undefined }
 }
 
 export function modifierBitmask(modifiers: string[]): number {
   let mask = 0
-  for (const mod of modifiers) {
-    mask |= MODIFIER_BIT[mod] ?? 0
-  }
+  for (const mod of modifiers) mask |= MODIFIER_BIT[mod] ?? 0
   return mask
 }
 
+/** Types literal text character-by-character, emitting keydown/char/keyup so frameworks observe it. */
 export async function typeText(
   session: ProtocolApi,
   text: string,
 ): Promise<void> {
   for (const char of text) {
-    if (char === '\n') {
-      await session.Input.dispatchKeyEvent({
-        type: 'keyDown',
-        key: 'Enter',
-        code: 'Enter',
-        windowsVirtualKeyCode: 13,
-      })
-      await session.Input.dispatchKeyEvent({
-        type: 'char',
-        text: '\r',
-        key: 'Enter',
-      })
-      await session.Input.dispatchKeyEvent({
-        type: 'keyUp',
-        key: 'Enter',
-        code: 'Enter',
-        windowsVirtualKeyCode: 13,
-      })
-    } else {
-      const info = getKeyInfo(char)
-      await session.Input.dispatchKeyEvent({
-        type: 'keyDown',
-        key: char,
-        code: info.code,
-        windowsVirtualKeyCode: info.keyCode,
-      })
-      await session.Input.dispatchKeyEvent({
-        type: 'char',
-        text: char,
-        key: char,
-      })
-      await session.Input.dispatchKeyEvent({
-        type: 'keyUp',
-        key: char,
-        code: info.code,
-        windowsVirtualKeyCode: info.keyCode,
-      })
-    }
+    const isNewline = char === '\n'
+    const key = isNewline ? 'Enter' : char
+    const info = getKeyInfo(key)
+    await session.Input.dispatchKeyEvent({
+      type: 'keyDown',
+      key,
+      code: info.code,
+      windowsVirtualKeyCode: info.keyCode,
+    })
+    await session.Input.dispatchKeyEvent({
+      type: 'char',
+      text: isNewline ? '\r' : char,
+      key,
+    })
+    await session.Input.dispatchKeyEvent({
+      type: 'keyUp',
+      key,
+      code: info.code,
+      windowsVirtualKeyCode: info.keyCode,
+    })
   }
 }
 
+/** Select-all + backspace, using the platform's primary modifier. */
 export async function clearField(session: ProtocolApi): Promise<void> {
-  // Select all: Cmd+A on macOS, Ctrl+A on others
   await session.Input.dispatchKeyEvent({
     type: 'keyDown',
     key: 'a',
@@ -199,7 +170,6 @@ export async function clearField(session: ProtocolApi): Promise<void> {
     modifiers: PLATFORM_MODIFIER,
     windowsVirtualKeyCode: 65,
   })
-  // Backspace to delete selection (more reliable cross-platform than Delete)
   await session.Input.dispatchKeyEvent({
     type: 'keyDown',
     key: 'Backspace',
@@ -214,14 +184,10 @@ export async function clearField(session: ProtocolApi): Promise<void> {
   })
 }
 
-function parseKeyCombo(input: string): {
-  key: string
-  modifiers: string[]
-} {
+function parseKeyCombo(input: string): { key: string; modifiers: string[] } {
   const parts: string[] = []
   let current = ''
   for (const ch of input) {
-    // Only split on '+' when there's accumulated text (so literal '+' works)
     if (ch === '+' && current) {
       parts.push(current)
       current = ''
@@ -231,10 +197,10 @@ function parseKeyCombo(input: string): {
   }
   if (current) parts.push(current)
   if (parts.length === 0) throw new Error('Empty key input')
-  const key = parts[parts.length - 1]
-  return { key, modifiers: parts.slice(0, -1) }
+  return { key: parts[parts.length - 1], modifiers: parts.slice(0, -1) }
 }
 
+/** Presses a key or combo like "Enter" / "Control+a" / "Meta+Shift+z". */
 export async function pressCombo(
   session: ProtocolApi,
   key: string,
@@ -247,7 +213,6 @@ export async function pressCombo(
   for (const mod of modifiers) validateKey(mod)
 
   const modBitmask = modifierBitmask(modifiers)
-
   for (const mod of modifiers) {
     const info = getKeyInfo(mod)
     await session.Input.dispatchKeyEvent({
@@ -259,15 +224,12 @@ export async function pressCombo(
   }
 
   const mainInfo = getKeyInfo(mainKey)
-
-  // Control/Alt/Meta suppress character generation (Shift does not)
+  // Control/Alt/Meta suppress character generation; Shift does not.
   const suppressChar = modifiers.some(
     (m) => m === 'Control' || m === 'Alt' || m === 'Meta',
   )
   const text = suppressChar ? '' : getCharText(mainKey)
 
-  // keyDown with text → Chrome generates both keydown + keypress DOM events
-  // keyDown without text → Chrome generates only keydown
   await session.Input.dispatchKeyEvent({
     type: 'keyDown',
     key: mainKey,
@@ -276,7 +238,6 @@ export async function pressCombo(
     windowsVirtualKeyCode: mainInfo.keyCode,
     ...(text && { text }),
   })
-
   await session.Input.dispatchKeyEvent({
     type: 'keyUp',
     key: mainKey,

@@ -1,20 +1,21 @@
 import type { ProtocolApi } from '@browseros/cdp-protocol/protocol-api'
 
+export type MouseButton = 'left' | 'middle' | 'right'
+
 export async function dispatchClick(
   session: ProtocolApi,
   x: number,
   y: number,
-  button: string,
+  button: MouseButton,
   clickCount: number,
   modifiers: number,
 ): Promise<void> {
-  const btn = button as 'left' | 'middle' | 'right'
   await session.Input.dispatchMouseEvent({ type: 'mouseMoved', x, y })
   await session.Input.dispatchMouseEvent({
     type: 'mousePressed',
     x,
     y,
-    button: btn,
+    button,
     clickCount,
     modifiers,
   })
@@ -22,7 +23,7 @@ export async function dispatchClick(
     type: 'mouseReleased',
     x,
     y,
-    button: btn,
+    button,
     clickCount,
     modifiers,
   })
@@ -34,6 +35,22 @@ export async function dispatchHover(
   y: number,
 ): Promise<void> {
   await session.Input.dispatchMouseEvent({ type: 'mouseMoved', x, y })
+}
+
+export async function dispatchScroll(
+  session: ProtocolApi,
+  x: number,
+  y: number,
+  deltaX: number,
+  deltaY: number,
+): Promise<void> {
+  await session.Input.dispatchMouseEvent({
+    type: 'mouseWheel',
+    x,
+    y,
+    deltaX,
+    deltaY,
+  })
 }
 
 export async function dispatchDrag(
@@ -64,21 +81,5 @@ export async function dispatchDrag(
     y: to.y,
     button: 'left',
     clickCount: 1,
-  })
-}
-
-export async function dispatchScroll(
-  session: ProtocolApi,
-  x: number,
-  y: number,
-  deltaX: number,
-  deltaY: number,
-): Promise<void> {
-  await session.Input.dispatchMouseEvent({
-    type: 'mouseWheel',
-    x,
-    y,
-    deltaX,
-    deltaY,
   })
 }

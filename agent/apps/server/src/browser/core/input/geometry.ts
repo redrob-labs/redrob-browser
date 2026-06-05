@@ -6,45 +6,39 @@ function quadCenter(q: number[]): { x: number; y: number } {
   return { x, y }
 }
 
-/** 3-tier fallback: getContentQuads -> getBoxModel -> getBoundingClientRect */
+/**
+ * Click point for an element, in the coordinate basis of `session`. Three-tier fallback:
+ * getContentQuads → getBoxModel → getBoundingClientRect. The caller dispatches input on the
+ * same session, so OOPIF coordinates resolve correctly without a manual transform.
+ */
 export async function getElementCenter(
   session: ProtocolApi,
   backendNodeId: number,
 ): Promise<{ x: number; y: number }> {
   try {
-    const quadsResult = await session.DOM.getContentQuads({ backendNodeId })
-    if (quadsResult.quads?.length) {
-      const q = quadsResult.quads[0] as unknown as number[]
-      if (q && q.length >= 8) return quadCenter(q)
-    }
+    const quads = await session.DOM.getContentQuads({ backendNodeId })
+    const q = quads.quads?.[0] as unknown as number[] | undefined
+    if (q && q.length >= 8) return quadCenter(q)
   } catch {
     // fall through
   }
 
   try {
-    const boxResult = await session.DOM.getBoxModel({ backendNodeId })
-    const content = boxResult.model?.content as unknown as number[] | undefined
+    const box = await session.DOM.getBoxModel({ backendNodeId })
+    const content = box.model?.content as unknown as number[] | undefined
     if (content && content.length >= 8) return quadCenter(content)
   } catch {
     // fall through
   }
 
-  const resolved = await session.DOM.resolveNode({ backendNodeId })
-  const objectId = resolved.object?.objectId
-  if (!objectId) {
-    throw new Error(
-      'Could not resolve element — it may have been removed from the page.',
-    )
-  }
-
-  const boundsResult = await session.Runtime.callFunctionOn({
+  const objectId = await resolveObjectId(session, backendNodeId)
+  const bounds = await session.Runtime.callFunctionOn({
     functionDeclaration:
       'function(){var r=this.getBoundingClientRect();return{x:r.left,y:r.top,w:r.width,h:r.height}}',
     objectId,
     returnByValue: true,
   })
-
-  const rect = boundsResult.result?.value as
+  const rect = bounds.result?.value as
     | { x: number; y: number; w: number; h: number }
     | undefined
   if (!rect) throw new Error('Could not get element bounds.')
@@ -58,7 +52,7 @@ export async function scrollIntoView(
   try {
     await session.DOM.scrollIntoViewIfNeeded({ backendNodeId })
   } catch {
-    // not critical
+    // best-effort
   }
 }
 
@@ -66,10 +60,10 @@ export async function focusElement(
   session: ProtocolApi,
   backendNodeId: number,
 ): Promise<void> {
-  const pushResult = await session.DOM.pushNodesByBackendIdsToFrontend({
+  const pushed = await session.DOM.pushNodesByBackendIdsToFrontend({
     backendNodeIds: [backendNodeId],
   })
-  await session.DOM.focus({ nodeId: pushResult.nodeIds[0] })
+  await session.DOM.focus({ nodeId: pushed.nodeIds[0] })
 }
 
 export async function jsClick(
@@ -94,7 +88,6 @@ export async function resolveObjectId(
   return objectId
 }
 
-/** Read the current value/textContent of an input, textarea, or contenteditable element. */
 export async function getInputValue(
   session: ProtocolApi,
   backendNodeId: number,
@@ -122,9 +115,7 @@ export async function callOnElement(
     functionDeclaration: fn,
     objectId,
     returnByValue: true,
-    ...(args && {
-      arguments: args.map((v) => ({ value: v })),
-    }),
+    ...(args && { arguments: args.map((value) => ({ value })) }),
   })
   return result.result?.value
 }
