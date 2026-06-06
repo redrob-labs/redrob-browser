@@ -72,6 +72,9 @@ export const NewAgentDialog: FC<NewAgentDialogProps> = ({
 }) => {
   const selectedHarnessAdapter =
     adapters.find((adapter) => adapter.id === harnessAdapterId) ?? adapters[0]
+  // When scoped to a single adapter (opened from a specific coding-agent card),
+  // the picker is redundant — the runtime is already implied.
+  const showAdapterPicker = adapters.length > 1
   const isHermesRuntime = createRuntime === 'hermes'
   const isClassicHarnessRuntime = !isHermesRuntime
   const hermesBlocked =
@@ -112,33 +115,35 @@ export const NewAgentDialog: FC<NewAgentDialogProps> = ({
             />
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="agent-runtime">Adapter</Label>
-            <Select
-              value={createRuntime}
-              onValueChange={(value) => {
-                if (
-                  value === 'claude' ||
-                  value === 'codex' ||
-                  value === 'hermes'
-                ) {
-                  onRuntimeChange(value)
-                  onHarnessAdapterChange(value)
-                }
-              }}
-            >
-              <SelectTrigger id="agent-runtime">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {adapters.map((adapter) => (
-                  <SelectItem key={adapter.id} value={adapter.id}>
-                    {adapter.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {showAdapterPicker ? (
+            <div className="grid gap-2">
+              <Label htmlFor="agent-runtime">Adapter</Label>
+              <Select
+                value={createRuntime}
+                onValueChange={(value) => {
+                  if (
+                    value === 'claude' ||
+                    value === 'codex' ||
+                    value === 'hermes'
+                  ) {
+                    onRuntimeChange(value)
+                    onHarnessAdapterChange(value)
+                  }
+                }}
+              >
+                <SelectTrigger id="agent-runtime">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {adapters.map((adapter) => (
+                    <SelectItem key={adapter.id} value={adapter.id}>
+                      {adapter.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
 
           {isHermesRuntime ? (
             <ProviderSelector

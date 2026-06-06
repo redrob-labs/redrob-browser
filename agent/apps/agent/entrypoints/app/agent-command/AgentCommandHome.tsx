@@ -1,12 +1,6 @@
 import { type FC, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import type { Provider } from '@/components/chat/chatComponentTypes'
-import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
-import type {
-  HarnessAdapterDescriptor,
-  HarnessAgent,
-} from '@/entrypoints/app/agents/agent-harness-types'
 import {
   useAgentAdapters,
   useHarnessAgents,
@@ -22,60 +16,13 @@ import {
 import { toProviderOption } from '@/entrypoints/sidepanel/index/useChatSessionRequest'
 import { Feature } from '@/lib/browseros/capabilities'
 import { useCapabilities } from '@/lib/browseros/useCapabilities'
-import { visibleHarnessAgents } from '@/lib/chat/adapter-visibility'
 import { useLlmProviders } from '@/lib/llm-providers/useLlmProviders'
-import { AgentCardDock } from './AgentCardDock'
 import {
   ConversationInput,
   type ConversationInputSendInput,
 } from './ConversationInput'
-import { orderHomeAgents } from './home-agent-card.helpers'
 import { routeHomeSend } from './home-compose.helpers'
 import { setPendingInitialMessage } from './pending-initial-message'
-
-function RecentThreads({
-  activeAgentId,
-  agents,
-  adapters,
-  onOpenAgents,
-  onSelectAgent,
-}: {
-  activeAgentId?: string | null
-  agents: HarnessAgent[]
-  adapters: HarnessAdapterDescriptor[]
-  onOpenAgents: () => void
-  onSelectAgent: (agentId: string) => void
-}) {
-  if (agents.length === 0) return null
-
-  return (
-    <section className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h2 className="font-semibold text-base">Recent agents</h2>
-          <p className="text-muted-foreground text-sm">
-            Continue from where you left off.
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          onClick={onOpenAgents}
-          className="rounded-xl"
-          size="sm"
-        >
-          Manage agents
-        </Button>
-      </div>
-      <AgentCardDock
-        agents={agents}
-        adapters={adapters}
-        activeAgentId={activeAgentId ?? undefined}
-        onSelectAgent={onSelectAgent}
-        onCreateAgent={onOpenAgents}
-      />
-    </section>
-  )
-}
 
 export const AgentCommandHome: FC = () => {
   const navigate = useNavigate()
@@ -124,22 +71,6 @@ export const AgentCommandHome: FC = () => {
     const fallback = resolveSidepanelChatTarget({ targets, defaultProviderId })
     setSelectedProvider(fallback ? toProviderOption(fallback) : null)
   }, [targets, providerOptions, selectedProvider, defaultProviderId])
-
-  const orderedAgents = useMemo(
-    () => orderHomeAgents(harnessAgents),
-    [harnessAgents],
-  )
-
-  // "Manage agents" opens the settings pane for an adapter the user actually
-  // has agents under (the most recent visible one), not a hardcoded adapter —
-  // otherwise a Codex-only user would land on an empty Claude pane.
-  const manageAgentsPath = useMemo(() => {
-    const adapter = visibleHarnessAgents(
-      orderedAgents,
-      hermesAgentSupported,
-    ).at(0)?.adapter
-    return adapter ? `/settings/ai?section=${adapter}` : '/settings/ai'
-  }, [orderedAgents, hermesAgentSupported])
 
   const handleSend = async (input: ConversationInputSendInput) => {
     if (!selectedProvider) return
@@ -213,25 +144,6 @@ export const AgentCommandHome: FC = () => {
             />
           </div>
         </div>
-
-        {orderedAgents.length > 0 ? (
-          <>
-            <Separator />
-            <RecentThreads
-              activeAgentId={selectedProvider?.agentId ?? null}
-              agents={orderedAgents}
-              adapters={adapters}
-              onOpenAgents={() => navigate(manageAgentsPath)}
-              onSelectAgent={(agentId) => {
-                const agent = orderedAgents.find(
-                  (entry) => entry.id === agentId,
-                )
-                const sessionId = agent?.latestSessionId ?? crypto.randomUUID()
-                navigate(`/home/agents/${agentId}/sessions/${sessionId}`)
-              }}
-            />
-          </>
-        ) : null}
       </div>
 
       {activeHint === 'signin' ? <SignInHint /> : null}

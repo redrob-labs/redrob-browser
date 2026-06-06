@@ -4,11 +4,7 @@ import type { HarnessAgent } from './agent-harness-types'
  * Stable ordering for index-shaped agent surfaces (the `/agents` rail
  * and the chat-screen rail at `/agents/:agentId`). Pinned rows float
  * to the top, then recency desc, with never-used agents falling to
- * the bottom in id-stable order.
- *
- * NOT the same rule as the home grid (`orderHomeAgents`): home is
- * action-shaped — active-turn floats to the top — so users can
- * resume what's running. The chat rail keeps recency stable so it
+ * the bottom in id-stable order. The rail keeps recency stable so it
  * doesn't reshuffle as turns transition every 5s.
  */
 export function orderAgentsByPinThenRecency(

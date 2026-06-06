@@ -5,6 +5,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import type {
+  HarnessAdapterDescriptor,
+  HarnessAgentAdapter,
+} from '@/entrypoints/app/agents/agent-harness-types'
 import { Feature } from '@/lib/browseros/capabilities'
 import { useCapabilities } from '@/lib/browseros/useCapabilities'
 import {
@@ -12,13 +16,19 @@ import {
   providerTemplates,
 } from '@/lib/llm-providers/providerTemplates'
 import { cn } from '@/lib/utils'
+import { CodingAgentTemplateCard } from './CodingAgentTemplateCard'
 import { ProviderTemplateCard } from './ProviderTemplateCard'
 
 interface ProviderTemplatesSectionProps {
+  /** Coding-agent runtimes (Claude Code / Codex) shown first in the grid. */
+  codingAdapters: HarnessAdapterDescriptor[]
+  onCreateAgent: (adapterId: HarnessAgentAdapter) => void
   onUseTemplate: (template: ProviderTemplate) => void
 }
 
 export const ProviderTemplatesSection: FC<ProviderTemplatesSectionProps> = ({
+  codingAdapters,
+  onCreateAgent,
   onUseTemplate,
 }) => {
   const { supports } = useCapabilities()
@@ -42,7 +52,8 @@ export const ProviderTemplatesSection: FC<ProviderTemplatesSectionProps> = ({
           <div>
             <h3 className="font-semibold text-lg">Quick provider templates</h3>
             <p className="text-muted-foreground text-sm">
-              {filteredTemplates.length} templates available
+              {codingAdapters.length + filteredTemplates.length} templates
+              available
             </p>
           </div>
           <ChevronDown
@@ -55,20 +66,20 @@ export const ProviderTemplatesSection: FC<ProviderTemplatesSectionProps> = ({
 
         <CollapsibleContent>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredTemplates.map((template) => {
-              const isNew =
-                template.id === 'chatgpt-pro' ||
-                template.id === 'github-copilot' ||
-                template.id === 'qwen-code'
-              return (
-                <ProviderTemplateCard
-                  key={template.id}
-                  template={template}
-                  isNew={isNew}
-                  onUseTemplate={onUseTemplate}
-                />
-              )
-            })}
+            {codingAdapters.map((adapter) => (
+              <CodingAgentTemplateCard
+                key={`coding-${adapter.id}`}
+                adapter={adapter}
+                onCreate={onCreateAgent}
+              />
+            ))}
+            {filteredTemplates.map((template) => (
+              <ProviderTemplateCard
+                key={template.id}
+                template={template}
+                onUseTemplate={onUseTemplate}
+              />
+            ))}
           </div>
         </CollapsibleContent>
       </div>
