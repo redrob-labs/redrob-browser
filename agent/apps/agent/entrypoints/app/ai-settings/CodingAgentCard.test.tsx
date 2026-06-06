@@ -1,8 +1,42 @@
-import { describe, expect, it } from 'bun:test'
-import { createElement } from 'react'
+import { beforeAll, describe, expect, it, mock } from 'bun:test'
+import { type ComponentProps, createElement, type FC } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { AgentListItem } from '../agents/agents-page-types'
-import { CodingAgentCard } from './CodingAgentCard'
+
+type CodingAgentCardProps = {
+  agent: AgentListItem
+  adapter: 'codex'
+  modelLabel: string | null
+  reasoningEffort: string | null
+  deleting: boolean
+  onDelete: (agent: AgentListItem) => void
+}
+
+type MockButtonProps = ComponentProps<'button'> & {
+  variant?: string
+  size?: string
+}
+
+mock.module('@/lib/utils', () => ({
+  cn: (...inputs: Array<string | false | null | undefined>) =>
+    inputs.filter(Boolean).join(' '),
+}))
+
+mock.module('@/components/ui/button', () => ({
+  Button: ({
+    children,
+    variant: _variant,
+    size: _size,
+    ...props
+  }: MockButtonProps) =>
+    createElement('button', { type: 'button', ...props }, children),
+}))
+
+let CodingAgentCard: FC<CodingAgentCardProps>
+
+beforeAll(async () => {
+  CodingAgentCard = (await import('./CodingAgentCard')).CodingAgentCard
+})
 
 const codexAgent: AgentListItem = {
   key: 'agent:codex-1',
@@ -16,9 +50,7 @@ const codexAgent: AgentListItem = {
   canDelete: true,
 }
 
-function renderCard(
-  props: Partial<Parameters<typeof CodingAgentCard>[0]> = {},
-) {
+function renderCard(props: Partial<CodingAgentCardProps> = {}) {
   return renderToStaticMarkup(
     createElement(CodingAgentCard, {
       agent: codexAgent,

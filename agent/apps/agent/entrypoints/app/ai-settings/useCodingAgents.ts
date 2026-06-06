@@ -12,7 +12,6 @@ import {
   useCreateHarnessAgent,
   useDeleteHarnessAgent,
   useHarnessAgents,
-  useUpdateHarnessAgent,
 } from '@/entrypoints/app/agents/useAgents'
 import {
   AGENT_CREATED_EVENT,
@@ -48,7 +47,6 @@ export interface CodingAgentsController {
   closeCreate: () => void
   handleCreate: () => Promise<void>
   handleDelete: (item: AgentListItem) => Promise<void>
-  handlePinToggle: (item: AgentListItem, next: boolean) => void
   setNewName: (value: string) => void
   setModelId: (value: string) => void
   setReasoningEffort: (value: string) => void
@@ -65,7 +63,6 @@ export function useCodingAgents(): CodingAgentsController {
   const { harnessAgents, loading } = useHarnessAgents()
   const createHarnessAgent = useCreateHarnessAgent()
   const deleteHarnessAgent = useDeleteHarnessAgent()
-  const updateHarnessAgent = useUpdateHarnessAgent()
 
   const adapters = useMemo(
     () => allAdapters.filter((adapter) => adapter.id !== 'hermes'),
@@ -135,6 +132,7 @@ export function useCodingAgents(): CodingAgentsController {
   const closeCreate = () => {
     setCreateAdapterId(null)
     setCreateError(null)
+    setNewName('')
     createHarnessAgent.reset()
   }
 
@@ -176,14 +174,6 @@ export function useCodingAgents(): CodingAgentsController {
     }
   }
 
-  const handlePinToggle = (item: AgentListItem, next: boolean) => {
-    if (!harnessAgentLookup.has(item.agentId)) return
-    updateHarnessAgent.mutate({
-      agentId: item.agentId,
-      patch: { pinned: next },
-    })
-  }
-
   return {
     adapters,
     agents,
@@ -207,7 +197,6 @@ export function useCodingAgents(): CodingAgentsController {
     closeCreate,
     handleCreate,
     handleDelete,
-    handlePinToggle,
     setNewName,
     setModelId,
     setReasoningEffort,

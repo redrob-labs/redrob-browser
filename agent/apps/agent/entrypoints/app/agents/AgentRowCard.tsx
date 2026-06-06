@@ -89,7 +89,7 @@ export const AgentRowCard: FC<AgentRowCardProps> = ({
 
         <AgentActions
           agent={data.agent}
-          status={data.status}
+          activeTurnId={data.activeTurnId}
           deleting={deleting}
           onDelete={onDelete}
         />

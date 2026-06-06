@@ -1,6 +1,7 @@
 import { Loader2, Trash2 } from 'lucide-react'
 import type { FC } from 'react'
-import { cn } from '../../../lib/utils'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { AdapterIcon, adapterLabel } from '../agents/AdapterIcon'
 import {
   canDelete as canDeleteAgent,
@@ -54,23 +55,20 @@ export const CodingAgentCard: FC<CodingAgentCardProps> = ({
         <p className="truncate text-muted-foreground text-sm">{metadata}</p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon-sm"
           aria-label={`Delete ${name}`}
           disabled={!allowDelete || deleting}
           onClick={() => onDelete(agent)}
-          className={cn(
-            'inline-flex size-8 shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium text-sm outline-none transition-all',
-            'disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0',
-            'text-muted-foreground hover:bg-destructive/10 hover:text-destructive',
-          )}
+          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
         >
           {deleting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <Trash2 className="h-4 w-4" />
           )}
-        </button>
+        </Button>
       </div>
     </div>
   )

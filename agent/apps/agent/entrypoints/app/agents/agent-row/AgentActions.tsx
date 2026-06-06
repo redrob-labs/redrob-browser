@@ -1,95 +1,160 @@
-import { Loader2, Trash2 } from 'lucide-react'
+import {
+  Copy,
+  Loader2,
+  MessageSquare,
+  MoreHorizontal,
+  Pencil,
+  RotateCcw,
+  Trash2,
+} from 'lucide-react'
 import type { FC } from 'react'
+import { useNavigate } from 'react-router'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import {
   canDelete as canDeleteAgent,
+  canRename as canRenameAgent,
   displayName,
 } from '../agent-display.helpers'
 import type { AgentListItem } from '../agents-page-types'
-import type { AgentLiveness } from '../LivenessDot'
 
 interface AgentActionsProps {
   agent: AgentListItem
-  status: AgentLiveness
+  activeTurnId: string | null
   deleting?: boolean
   onDelete: (agent: AgentListItem) => void
 }
 
 /**
- * Right-hand controls for an agent row in the "Your agents" list: a live
- * status pill ("Running" while the runtime is up) plus a delete button that
- * matches the configured-provider cards. Chatting happens from the composer's
- * provider picker, so there's no per-row chat affordance here.
+ * Single primary CTA per row: `Resume` (filled, accent-orange, with a
+ * pulsing dot) when an active turn exists; otherwise `Chat` (outline).
+ * Both navigate to the same place — the chat hook auto-attaches via
+ * `/chat/active` when there's a live turn — but the row signals which
+ * action the user is actually taking.
  */
 export const AgentActions: FC<AgentActionsProps> = ({
   agent,
-  status,
+  activeTurnId,
   deleting,
   onDelete,
 }) => {
+  const navigate = useNavigate()
   const allowDelete = canDeleteAgent(agent)
+  const allowRename = canRenameAgent(agent)
+
+  const handleChat = () => navigate(`/agents/${agent.agentId}`)
+  const handleCopyId = async () => {
+    try {
+      await navigator.clipboard.writeText(agent.agentId)
+      toast.success('Agent id copied')
+    } catch {
+      toast.error('Could not copy agent id')
+    }
+  }
 
   return (
-    <div className="flex shrink-0 items-center gap-2">
-      <AgentStatusPill status={status} />
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label={`Delete ${displayName(agent)}`}
-        disabled={!allowDelete || deleting}
-        onClick={() => onDelete(agent)}
-        className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-      >
-        {deleting ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Trash2 className="h-4 w-4" />
-        )}
-      </Button>
+    <div className="flex shrink-0 items-center gap-1.5">
+      {activeTurnId ? (
+        <Button
+          variant="default"
+          size="sm"
+          onClick={handleChat}
+          className="gap-2 bg-[var(--accent-orange)] text-white shadow-sm hover:bg-[var(--accent-orange)]/90"
+        >
+          <span className="relative flex size-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/70 opacity-75" />
+            <span className="relative inline-flex size-2 rounded-full bg-white" />
+          </span>
+          Resume
+        </Button>
+      ) : (
+        <Button variant="outline" size="sm" onClick={handleChat}>
+          <MessageSquare className="mr-1.5 size-3" />
+          Chat
+        </Button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`More actions for ${displayName(agent)}`}
+            className="size-8 text-muted-foreground hover:text-foreground"
+          >
+            <MoreHorizontal className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem onSelect={() => void handleCopyId()}>
+            <Copy className="mr-2 size-3.5" />
+            Copy id
+          </DropdownMenuItem>
+          <ComingSoonItem
+            icon={Pencil}
+            label="Rename"
+            disabled={!allowRename}
+          />
+          <ComingSoonItem icon={RotateCcw} label="Reset history" disabled />
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => onDelete(agent)}
+            disabled={!allowDelete || deleting}
+            className="text-destructive focus:text-destructive"
+          >
+            {deleting ? (
+              <Loader2 className="mr-2 size-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="mr-2 size-3.5" />
+            )}
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 }
 
-const STATUS_PILL: Record<
-  AgentLiveness,
-  { label: string; pill: string; dot: string } | null
-> = {
-  working: {
-    label: 'Running',
-    pill: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-    dot: 'bg-emerald-500 animate-pulse',
-  },
-  idle: {
-    label: 'Running',
-    pill: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-    dot: 'bg-emerald-500',
-  },
-  asleep: {
-    label: 'Asleep',
-    pill: 'bg-muted text-muted-foreground',
-    dot: 'bg-muted-foreground/40',
-  },
-  error: {
-    label: 'Error',
-    pill: 'bg-destructive/10 text-destructive',
-    dot: 'bg-destructive',
-  },
-  unknown: null,
+interface ComingSoonItemProps {
+  icon: typeof Pencil
+  label: string
+  disabled: boolean
 }
 
-function AgentStatusPill({ status }: { status: AgentLiveness }) {
-  const variant = STATUS_PILL[status]
-  if (!variant) return null
+const ComingSoonItem: FC<ComingSoonItemProps> = ({
+  icon: Icon,
+  label,
+  disabled,
+}) => {
+  const item = (
+    <DropdownMenuItem disabled className="text-muted-foreground">
+      <Icon className="mr-2 size-3.5" />
+      {label}
+    </DropdownMenuItem>
+  )
+  if (!disabled) return item
   return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium text-xs',
-        variant.pill,
-      )}
-    >
-      <span className={cn('size-1.5 rounded-full', variant.dot)} />
-      {variant.label}
-    </span>
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="block w-full">{item}</span>
+        </TooltipTrigger>
+        <TooltipContent side="left" className="text-xs">
+          {label} coming soon
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
