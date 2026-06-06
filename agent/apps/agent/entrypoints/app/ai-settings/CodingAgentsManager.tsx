@@ -1,29 +1,16 @@
 import type { FC } from 'react'
-import { AgentList } from '@/entrypoints/app/agents/AgentList'
 import { NewAgentDialog } from '@/entrypoints/app/agents/NewAgentDialog'
-import { InlineErrorAlert } from '@/entrypoints/app/agents/PageAlerts'
 import type { CodingAgentsController } from './useCodingAgents'
 
 /**
- * Bottom-of-page management surface for coding agents: the list of existing
- * Claude Code / Codex agents plus the shared New Agent dialog (opened from the
- * provider-template cards). The list is hidden when there are no agents, but
- * the dialog is always mounted so creation works from the cards.
+ * Shared New Agent dialog opened from provider-template cards. Agent rows live
+ * with configured LLM providers in `CodingAgentsList`; the dialog stays mounted
+ * here so creation works regardless of whether any agents already exist.
  */
 export const CodingAgentsManager: FC<{
   controller: CodingAgentsController
 }> = ({ controller }) => {
   const {
-    adapters,
-    agents,
-    listItems,
-    activity,
-    harnessAgentLookup,
-    loading,
-    pageError,
-    dismissPageError,
-    deletingAgentKey,
-    deleteIsPending,
     createOpen,
     createAdapter,
     createAdapterId,
@@ -32,11 +19,8 @@ export const CodingAgentsManager: FC<{
     reasoningEffort,
     createError,
     creating,
-    openCreate,
     closeCreate,
     handleCreate,
-    handleDelete,
-    handlePinToggle,
     setNewName,
     setModelId,
     setReasoningEffort,
@@ -44,38 +28,6 @@ export const CodingAgentsManager: FC<{
 
   return (
     <>
-      {agents.length > 0 ? (
-        <section className="space-y-3">
-          <div>
-            <h2 className="font-semibold text-lg">Your agents</h2>
-            <p className="text-muted-foreground text-sm">
-              Claude Code and Codex agents you've created.
-            </p>
-          </div>
-          {pageError ? (
-            <InlineErrorAlert
-              message={pageError}
-              onDismiss={dismissPageError}
-            />
-          ) : null}
-          <AgentList
-            agents={listItems}
-            activity={activity}
-            harnessAgentLookup={harnessAgentLookup}
-            adapters={adapters}
-            loading={loading}
-            deletingAgentKey={deleteIsPending ? deletingAgentKey : null}
-            onCreateAgent={() => {
-              if (adapters[0]) openCreate(adapters[0].id)
-            }}
-            onDeleteAgent={(agent) => {
-              void handleDelete(agent)
-            }}
-            onPinToggle={handlePinToggle}
-          />
-        </section>
-      ) : null}
-
       <NewAgentDialog
         adapters={createAdapter ? [createAdapter] : []}
         createError={createError}

@@ -37,6 +37,7 @@ import {
   useOAuthProviderFlow,
 } from '@/lib/llm-providers/useOAuthProviderFlow'
 import { track } from '@/lib/metrics/track'
+import { CodingAgentsList } from './CodingAgentsList'
 import { CodingAgentsManager } from './CodingAgentsManager'
 import { ConfiguredProvidersList } from './ConfiguredProvidersList'
 import { DeviceCodeDialog } from './DeviceCodeDialog'
@@ -378,6 +379,8 @@ export const BrowserOsAiPane: FC = () => {
         onEditProvider={handleEditProvider}
         onDeleteProvider={handleDeleteProvider}
       />
+
+      <CodingAgentsList controller={coding} />
 
       <IncompleteProvidersList
         providers={incompleteProviders}
