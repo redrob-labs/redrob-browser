@@ -17,6 +17,7 @@ from ...common.utils import (
     IS_WINDOWS,
 )
 from ...common.notify import get_notifier, COLOR_GREEN
+from ..compile.standard import autoninja_command
 
 
 class WindowsPackageModule(CommandModule):
@@ -49,7 +50,7 @@ class WindowsPackageModule(CommandModule):
         notifier = get_notifier()
         notifier.notify(
             "📦 Package Created",
-            f"Windows packages created successfully",
+            "Windows packages created successfully",
             {
                 "Artifacts": f"{installer_path.name}, {zip_path.name}",
                 "Version": ctx.semantic_version,
@@ -118,17 +119,7 @@ def build_mini_installer(ctx: Context) -> bool:
 
     # Build mini_installer using autoninja
     try:
-        # Use autoninja.bat on Windows
-        autoninja_cmd = "autoninja.bat" if IS_WINDOWS else "autoninja"
-
-        # Build the mini_installer target
-        cmd = [
-            autoninja_cmd,
-            "-C",
-            ctx.out_dir,  # Use relative path like in compile.py
-            "setup",
-            "mini_installer",
-        ]
+        cmd = autoninja_command(ctx.out_dir, ["setup", "mini_installer"])
 
         # Change to chromium_src directory before running (like compile.py does)
         import os
