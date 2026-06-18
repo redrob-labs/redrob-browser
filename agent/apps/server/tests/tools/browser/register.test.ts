@@ -103,7 +103,7 @@ describe('registerBrowserTools', () => {
     registerBrowserTools(fake.server as never, session)
 
     expect([...fake.handlers.keys()]).toEqual(BROWSER_TOOLS.map((t) => t.name))
-    expect(fake.handlers.size).toBe(13)
+    expect(fake.handlers.size).toBe(16)
     expect(fake.configs.get('tabs')?.inputSchema).toBeDefined()
   })
 
@@ -942,9 +942,18 @@ return 'late'
         landscape: true,
         background: false,
       })
+      const upstreamOptions = await fake.handlers.get('pdf')?.({
+        page: 1,
+        printBackground: false,
+        preferCSSPageSize: true,
+      })
 
       expect(result?.isError).toBeFalsy()
-      expect(printCalls).toEqual([{ landscape: true, printBackground: false }])
+      expect(upstreamOptions?.isError).toBeFalsy()
+      expect(printCalls).toEqual([
+        { landscape: true, printBackground: false, preferCSSPageSize: false },
+        { landscape: false, printBackground: false, preferCSSPageSize: true },
+      ])
       const data = result?.structuredContent as
         | { page?: number; path?: string; bytes?: number }
         | undefined
@@ -1016,6 +1025,46 @@ return 'late'
         realpathSync(outputDir),
       )
       expect(data?.path?.endsWith('report.csv')).toBe(true)
+    })
+  })
+
+  it('uploads files into a ref-resolved file input', async () => {
+    const fake = createFakeServer()
+    const uploads: Array<{ ref: string; files: string[] }> = []
+    const session = {
+      input: () => ({
+        uploadFile: async (ref: string, files: string[]) => {
+          uploads.push({ ref, files })
+        },
+      }),
+      pages: {},
+    } as unknown as BrowserSession
+
+    registerBrowserTools(fake.server as never, session)
+    expect(fake.handlers.has('upload')).toBe(true)
+
+    const multiple = await fake.handlers.get('upload')?.({
+      page: 1,
+      ref: 'e12',
+      files: ['/tmp/a.txt', '/tmp/b.txt'],
+    })
+    const single = await fake.handlers.get('upload')?.({
+      page: 1,
+      ref: 'e13',
+      file: '/tmp/c.txt',
+    })
+
+    expect(multiple?.isError).toBeFalsy()
+    expect(single?.isError).toBeFalsy()
+    expect(uploads).toEqual([
+      { ref: 'e12', files: ['/tmp/a.txt', '/tmp/b.txt'] },
+      { ref: 'e13', files: ['/tmp/c.txt'] },
+    ])
+    expect(single?.structuredContent).toEqual({
+      page: 1,
+      ref: 'e13',
+      files: ['/tmp/c.txt'],
+      uploaded: 1,
     })
   })
 
