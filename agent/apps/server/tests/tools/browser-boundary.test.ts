@@ -18,6 +18,7 @@ const compactBrowserToolFiles = [
   'run.ts',
   'screenshot.ts',
   'snapshot.ts',
+  'tab-groups.ts',
   'tabs.ts',
   'trust-boundary.ts',
   'wait.ts',
@@ -73,7 +74,13 @@ describe('browser tool boundary', () => {
         existsSync(join(toolsDir, 'legacy/browser', file)),
         `Expected legacy/browser/${file}`,
       )
-      if (file !== 'snapshot.ts' && file !== 'windows.ts') {
+      // snapshot.ts, tab-groups.ts, and windows.ts intentionally exist in both surfaces:
+      // the compact browser tools provide consolidated replacements alongside the legacy reference.
+      if (
+        file !== 'snapshot.ts' &&
+        file !== 'tab-groups.ts' &&
+        file !== 'windows.ts'
+      ) {
         assert.ok(
           !existsSync(join(toolsDir, 'browser', file)),
           `Unexpected active legacy browser module ${file}`,
