@@ -118,8 +118,12 @@ describe('registerBrowserTools', () => {
 
   it('captures JPEG screenshots with default and custom quality', async () => {
     const fake = createFakeServer()
-    const captureParams: unknown[] = []
+    const captureOptions: unknown[] = []
     const session = {
+      screenshot: async (_page: number, options: unknown) => {
+        captureOptions.push(options)
+        return { data: 'jpeg-data', mimeType: 'image/jpeg', annotations: [] }
+      },
       pages: {
         getSession: async () => ({
           session: {
@@ -138,10 +142,6 @@ describe('registerBrowserTools', () => {
                   clientHeight: 1536,
                 },
               }),
-              captureScreenshot: async (params: unknown) => {
-                captureParams.push(params)
-                return { data: 'jpeg-data' }
-              },
             },
           },
         }),
@@ -164,12 +164,12 @@ describe('registerBrowserTools', () => {
     ).resolves.toEqual({
       content: [{ type: 'image', data: 'jpeg-data', mimeType: 'image/jpeg' }],
     })
-    expect(captureParams).toEqual([
+    expect(captureOptions).toEqual([
       {
         format: 'jpeg',
         quality: 80,
-        fromSurface: true,
-        captureBeyondViewport: false,
+        fullPage: false,
+        annotate: true,
         clip: {
           x: 5,
           y: 7,
@@ -181,8 +181,8 @@ describe('registerBrowserTools', () => {
       {
         format: 'jpeg',
         quality: 60,
-        fromSurface: true,
-        captureBeyondViewport: false,
+        fullPage: false,
+        annotate: true,
         clip: {
           x: 5,
           y: 7,
@@ -196,9 +196,17 @@ describe('registerBrowserTools', () => {
 
   it('omits quality for PNG screenshots and skips size clips for full page', async () => {
     const fake = createFakeServer()
-    const captureParams: unknown[] = []
+    const captureOptions: unknown[] = []
     let layoutMetricCalls = 0
     const session = {
+      screenshot: async (_page: number, options: { format?: string }) => {
+        captureOptions.push(options)
+        return {
+          data: `${options.format}-data`,
+          mimeType: `image/${options.format}`,
+          annotations: [],
+        }
+      },
       pages: {
         getSession: async () => ({
           session: {
@@ -220,10 +228,6 @@ describe('registerBrowserTools', () => {
                   },
                 }
               },
-              captureScreenshot: async (params: unknown) => {
-                captureParams.push(params)
-                return { data: 'png-data' }
-              },
             },
           },
         }),
@@ -244,15 +248,15 @@ describe('registerBrowserTools', () => {
     await expect(
       fake.handlers.get('screenshot')?.({ page: 1, fullPage: true }),
     ).resolves.toEqual({
-      content: [{ type: 'image', data: 'png-data', mimeType: 'image/jpeg' }],
+      content: [{ type: 'image', data: 'jpeg-data', mimeType: 'image/jpeg' }],
     })
 
     expect(layoutMetricCalls).toBe(1)
-    expect(captureParams).toEqual([
+    expect(captureOptions).toEqual([
       {
         format: 'png',
-        fromSurface: true,
-        captureBeyondViewport: false,
+        fullPage: false,
+        annotate: true,
         clip: {
           x: 0,
           y: 0,
@@ -264,8 +268,8 @@ describe('registerBrowserTools', () => {
       {
         format: 'jpeg',
         quality: 80,
-        fromSurface: true,
-        captureBeyondViewport: true,
+        fullPage: true,
+        annotate: true,
       },
     ])
   })
@@ -1642,6 +1646,11 @@ return 'late'
         },
       }),
       input: () => input,
+      screenshot: async () => ({
+        data: 'image-data',
+        mimeType: 'image/jpeg',
+        annotations: [],
+      }),
       pages: {
         getInfo: () => ({ url: 'https://example.com' }),
         refresh: async () => ({ url: 'https://example.com' }),

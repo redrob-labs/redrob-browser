@@ -1,9 +1,7 @@
-import type {
-  CaptureScreenshotParams,
-  Viewport,
-} from '@browseros/cdp-protocol/domains/page'
+import type { Viewport } from '@browseros/cdp-protocol/domains/page'
 import type { ProtocolApi } from '@browseros/cdp-protocol/protocol-api'
 import { z } from 'zod'
+import type { ScreenshotCaptureOptions } from '../../browser/core/screenshot'
 import { defineTool } from './framework'
 
 const DEFAULT_SCREENSHOT_FORMAT = 'jpeg'
@@ -60,30 +58,40 @@ export const screenshot = defineTool({
       .optional()
       .describe('Max viewport capture size. Defaults to 1024x768.'),
     fullPage: z.boolean().optional().describe('Capture beyond the viewport.'),
+    annotate: z
+      .boolean()
+      .optional()
+      .describe('Overlay numbered refs from a fresh snapshot. Defaults true.'),
   }),
   annotations: { readOnlyHint: true },
   handler: async (args, ctx) => {
-    const { session } = await ctx.session.pages.getSession(args.page)
     const fullPage = args.fullPage ?? false
-    const params: CaptureScreenshotParams = {
+    const captureOptions: ScreenshotCaptureOptions = {
       format: args.format,
-      fromSurface: true,
-      captureBeyondViewport: fullPage,
+      fullPage,
+      annotate: args.annotate ?? true,
     }
     const quality = screenshotQuality(args.format, args.quality)
-    if (quality !== undefined) params.quality = quality
+    if (quality !== undefined) captureOptions.quality = quality
     if (!fullPage) {
-      params.clip = await buildScreenshotClip(
+      const { session } = await ctx.session.pages.getSession(args.page)
+      captureOptions.clip = await buildScreenshotClip(
         session,
         args.size ?? DEFAULT_SCREENSHOT_SIZE,
       )
     }
 
-    const result = await session.Page.captureScreenshot(params)
+    const result = await ctx.session.screenshot(args.page, captureOptions)
     return {
       content: [
-        { type: 'image', data: result.data, mimeType: `image/${args.format}` },
+        { type: 'image', data: result.data, mimeType: result.mimeType },
       ],
+      ...(result.annotations.length > 0 && {
+        structuredContent: {
+          page: args.page,
+          annotations: result.annotations,
+        },
+      }),
     }
   },
 })
