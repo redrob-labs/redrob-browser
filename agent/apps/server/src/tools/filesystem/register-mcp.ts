@@ -6,13 +6,13 @@
  * Bridges the AI-SDK filesystem toolset onto the laptop's MCP server.
  * The AI-SDK and MCP tool registries are independent (the local agent
  * loop never dials /mcp for its own tools), so registering here only
- * affects external MCP callers — today that's remote-hermes via the
- * WS RPC bridge.
+ * affects external remote-harness MCP callers.
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { z } from 'zod'
 import { logger } from '../../lib/logger'
+import type { BrowserOutputFileAccess } from '../browser/output-file'
 import { shouldLogToolRegistration } from '../registration-log-sampling'
 import { buildFilesystemToolSet } from './build-toolset'
 import type { FilesystemToolResult } from './utils'
@@ -43,15 +43,22 @@ type McpRegisterFn = (
   }>,
 ) => void
 
+export interface RegisterFilesystemMcpToolsOptions {
+  outputFileAccess?: BrowserOutputFileAccess
+}
+
 export function registerFilesystemMcpTools(
   server: McpServer,
   cwd: string,
+  options: RegisterFilesystemMcpToolsOptions = {},
 ): void {
   const register = server.registerTool.bind(server) as unknown as McpRegisterFn
-  const tools = buildFilesystemToolSet(cwd) as unknown as Record<
-    string,
-    AiSdkToolLike
-  >
+  const tools = buildFilesystemToolSet(cwd, {
+    read: {
+      allowedOutputPaths: options.outputFileAccess?.paths,
+      requireAllowedOutputPath: Boolean(options.outputFileAccess),
+    },
+  }) as unknown as Record<string, AiSdkToolLike>
 
   for (const [name, tool] of Object.entries(tools)) {
     register(
