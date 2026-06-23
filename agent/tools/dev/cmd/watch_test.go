@@ -5,7 +5,52 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"browseros-dev/proc"
 )
+
+func TestWatchModeRejectsManualBrowserOSForAgentsCombination(t *testing.T) {
+	oldManual, oldBrowserOSForAgents := watchManual, watchBrowserOSForAgents
+	watchManual = true
+	watchBrowserOSForAgents = true
+	t.Cleanup(func() {
+		watchManual = oldManual
+		watchBrowserOSForAgents = oldBrowserOSForAgents
+	})
+
+	_, err := watchMode()
+	if err == nil {
+		t.Fatal("expected incompatible watch flags to return an error")
+	}
+	if !strings.Contains(err.Error(), "--manual cannot be combined with --agent-mcp") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWatchRunLockModeIsSharedAcrossWatchVariants(t *testing.T) {
+	if watchRunLockMode != "watch" {
+		t.Fatalf("expected shared watch lock mode, got %q", watchRunLockMode)
+	}
+}
+
+func TestBuildBrowserOSForAgentsWatchEnvIncludesSelectedPorts(t *testing.T) {
+	env := buildBrowserOSForAgentsWatchEnv([]string{"BASE=1"}, proc.Ports{
+		CDP:       9012,
+		Server:    9123,
+		Extension: 9321,
+	})
+
+	for _, want := range []string{
+		"BASE=1",
+		"BROWSEROS_AGENT_MCP_INTERFACE_PORT=9123",
+		"BROWSEROS_COCKPIT_CDP_PORT=9012",
+		"VITE_BROWSEROS_AGENT_MCP_API_URL=http://127.0.0.1:9123/cockpit",
+	} {
+		if !hasEnvEntry(env, want) {
+			t.Fatalf("expected env to contain %q, got %#v", want, env)
+		}
+	}
+}
 
 func TestEnsureLimactlPresentMissingMessage(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
@@ -35,4 +80,13 @@ func TestEnsureLimactlPresentFindsPathBinary(t *testing.T) {
 	if err := ensureLimactlPresent(); err != nil {
 		t.Fatalf("expected limactl to resolve, got %v", err)
 	}
+}
+
+func hasEnvEntry(env []string, want string) bool {
+	for _, got := range env {
+		if got == want {
+			return true
+		}
+	}
+	return false
 }
