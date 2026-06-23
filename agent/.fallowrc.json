@@ -3,6 +3,7 @@
   "entry": [
     "apps/server/src/index.ts",
     "apps/server/src/compiled-bootstrap.ts",
+    "apps/agent-mcp-interface/src/main.ts",
     "apps/agent/entrypoints/app/main.tsx",
     "apps/agent/entrypoints/sidepanel/main.tsx",
     "apps/agent/entrypoints/background/index.ts",

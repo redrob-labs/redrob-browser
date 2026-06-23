@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+import { createCockpitRoutes } from '@browseros/agent-mcp-interface/cockpit'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import type { OAuthTokenManager } from '../../lib/clients/oauth/token-manager'
@@ -93,6 +94,13 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       '/mcp-manager',
       createMcpManagerRoutes({
         getMcpUrl: () => `http://127.0.0.1:${port}/mcp`,
+      }),
+    )
+    .route(
+      '/cockpit',
+      createCockpitRoutes({
+        browserSession,
+        serverPort: port,
       }),
     )
     .route(

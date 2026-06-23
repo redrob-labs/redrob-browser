@@ -107,7 +107,8 @@ export class SingleAgentEvaluator implements AgentEvaluator {
             prompt,
             abortSignal: signal,
 
-            onStepFinish: async (step) => {
+            // biome-ignore lint/suspicious/noExplicitAny: ai-sdk option-type widening under this branch's mixed-zod workspace; see tool-loop-executor-backend.ts for the longer note.
+            onStepFinish: async (step: any) => {
               const { toolCalls, toolResults, text } = step
               addTokenUsageFromAiSdkStep(tokenUsage, step)
               if (toolCalls) {
@@ -197,7 +198,8 @@ export class SingleAgentEvaluator implements AgentEvaluator {
                 capture.emitEvent(task.query_id, deltaEvent)
               }
             },
-          })
+            // biome-ignore lint/suspicious/noExplicitAny: ai-sdk option-type widening under mixed workspace zod versions; see tool-loop-executor-backend.ts.
+          } as any)
 
           finalText = result.text || null
         },
