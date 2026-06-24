@@ -30,7 +30,10 @@ var (
 	watchClaw   bool
 )
 
-const watchRunLockMode = "watch"
+const (
+	watchRunLockMode           = "watch"
+	defaultClawWatchServerPort = 9200
+)
 
 func init() {
 	watchCmd.Flags().BoolVar(&watchNew, "new", false, "Use random available ports in 9000-9999 and create a fresh user-data directory")
@@ -53,7 +56,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	defaultPorts, err := resolveTargetPorts(root, "")
+	defaultPorts, err := resolveWatchDefaultPorts(root, watchClaw)
 	if err != nil {
 		return err
 	}
@@ -66,7 +69,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	var runLock *proc.WatchRunLock
 	acquireRunLock := func(ports proc.Ports) error {
 		lock, stopped, err := proc.AcquireWatchRunLock(proc.WatchRunIdentity{
-			// All watch variants share one identity so they cannot supervise the same profile and ports concurrently.
+			// All watch variants share one owner so they cannot supervise the same profile concurrently.
 			Mode:    watchRunLockMode,
 			Profile: userDataDir,
 			Ports:   ports,
@@ -117,7 +120,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 			proc.LogMsgf(proc.TagInfo, "Stopped %d BrowserOS process(es) for profile %s", killedBrowsers, userDataDir)
 		}
 
-		p, reservations, err = proc.ResolveWatchPorts(false)
+		p, reservations, err = proc.ResolveWatchPortsWithDefaults(defaultPorts, false)
 		if err != nil {
 			return err
 		}
@@ -204,6 +207,18 @@ func watchMode() (string, error) {
 		return "BrowserOS manual", nil
 	}
 	return "BrowserOS", nil
+}
+
+// resolveWatchDefaultPorts picks preferred watch ports for the selected app stack.
+func resolveWatchDefaultPorts(root string, claw bool) (proc.Ports, error) {
+	ports, err := resolveTargetPorts(root, "")
+	if err != nil {
+		return proc.Ports{}, err
+	}
+	if claw {
+		ports.Server = defaultClawWatchServerPort
+	}
+	return ports, nil
 }
 
 // buildClawWatchEnv bridges shared dev ports into the standalone BrowserClaw apps.
