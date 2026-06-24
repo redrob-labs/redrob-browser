@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"browseros-cli/mcp"
+
+	"github.com/spf13/cobra"
 )
 
 func TestCompactToolMappings(t *testing.T) {
@@ -70,6 +72,28 @@ func TestCompactToolMappings(t *testing.T) {
 				"ref":  "e12",
 			},
 		},
+		{
+			name: "fill",
+			got:  fillToolArgs(7, "e12", "hello", true),
+			want: map[string]any{
+				"page":  7,
+				"kind":  "fill",
+				"ref":   "e12",
+				"value": "hello",
+				"clear": true,
+			},
+		},
+		{
+			name: "fill without clear",
+			got:  fillToolArgs(7, "e12", "hello", false),
+			want: map[string]any{
+				"page":  7,
+				"kind":  "fill",
+				"ref":   "e12",
+				"value": "hello",
+				"clear": false,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -103,6 +127,26 @@ func TestTabsListResultKeepsLegacyShape(t *testing.T) {
 	}
 	if got := numberValue(page["pageId"]); got != 42 {
 		t.Fatalf("pageId = %d, want 42", got)
+	}
+}
+
+func TestFillToolArgsFromNoClearFlag(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("no-clear", false, "")
+	if err := cmd.Flags().Parse([]string{"--no-clear"}); err != nil {
+		t.Fatalf("parse --no-clear: %v", err)
+	}
+
+	got := fillToolArgsFromCommand(cmd, 7, "e12", "hello")
+	want := map[string]any{
+		"page":  7,
+		"kind":  "fill",
+		"ref":   "e12",
+		"value": "hello",
+		"clear": false,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("fill args = %#v, want %#v", got, want)
 	}
 }
 
