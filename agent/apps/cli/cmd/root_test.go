@@ -36,6 +36,7 @@ func TestCommandName(t *testing.T) {
 	}{
 		{"empty args", nil, "unknown"},
 		{"known command", []string{"health"}, "browseros-cli health"},
+		{"diff command", []string{"diff"}, "browseros-cli diff"},
 		{"unknown command", []string{"nonexistent"}, "unknown"},
 		{"subcommand", []string{"bookmark", "search"}, "browseros-cli bookmark search"},
 		{"strata subcommand", []string{"strata", "check"}, "browseros-cli strata check"},
@@ -48,6 +49,22 @@ func TestCommandName(t *testing.T) {
 				t.Errorf("commandName(%v) = %q, want %q", tt.args, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDiffCommandShape(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"diff"})
+	if err != nil {
+		t.Fatalf("rootCmd.Find(diff) error = %v", err)
+	}
+	if cmd.Name() != "diff" {
+		t.Fatalf("command name = %q, want diff", cmd.Name())
+	}
+	if err := cmd.Args(cmd, []string{"extra"}); err == nil {
+		t.Fatal("diff Args accepted a positional argument")
+	}
+	if cmd.LocalFlags().HasAvailableFlags() {
+		t.Fatal("diff command exposes local flags")
 	}
 }
 
