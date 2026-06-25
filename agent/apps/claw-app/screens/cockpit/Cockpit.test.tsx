@@ -20,6 +20,16 @@ mock.module('./cockpit.data', () => ({
   }),
 }))
 
+// RecentActivity now consumes useTasks directly. Stub it to return an
+// empty page so the empty-state branch renders.
+mock.module('@/modules/api/audit.hooks', () => ({
+  useTasks: () => ({
+    data: { pages: [{ tasks: [], nextCursor: null }] },
+    isPending: false,
+  }),
+  taskScreenshotUrl: (id: number) => `/audit/screenshot/${id}`,
+}))
+
 const { Cockpit } = await import('./Cockpit')
 
 function renderApp(): string {
@@ -36,11 +46,12 @@ function renderApp(): string {
 }
 
 describe('Cockpit (v2)', () => {
-  it('renders the hero, running grid header, and activity header', () => {
+  it('renders the hero and activity header (running grid hides when no agents)', () => {
     const html = renderApp()
     expect(html).toContain('working on')
-    expect(html).toContain('Running now')
     expect(html).toContain('Recent activity')
+    // No agents in the stub data means RunningGrid returns null.
+    expect(html).not.toContain('Running now')
   })
 
   it('does NOT render the WaitingStrip in the default v2 build', () => {
@@ -54,9 +65,10 @@ describe('Cockpit (v2)', () => {
     expect(html).not.toContain('harness . logins . guardrails')
   })
 
-  it('renders both empty-state cards when registry is empty', () => {
+  it('shows only the recent-activity empty state when registry is empty (Running now hides)', () => {
     const html = renderApp()
-    expect(html).toContain('No agents connected')
+    expect(html).not.toContain('No agents connected')
+    expect(html).not.toContain('Running now')
     expect(html).toContain('No recent activity')
   })
 })
