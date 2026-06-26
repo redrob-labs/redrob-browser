@@ -1,3 +1,5 @@
+import type { BunPlugin } from 'bun'
+
 export type TargetId =
   | 'linux-x64'
   | 'linux-arm64'
@@ -14,7 +16,6 @@ export interface BuildTarget {
   os: TargetOs
   arch: TargetArch
   bunTarget: string
-  serverBinaryName: string
 }
 
 export interface BuildArgs {
@@ -31,6 +32,35 @@ export interface R2Config {
   bucket: string
   downloadPrefix: string
   uploadPrefix: string
+}
+
+export interface BuildEnvSpec {
+  prodEnvPath: string
+  prodEnvTemplatePath?: string
+  requireProdEnvFile?: boolean
+  requiredInlineEnvKeys: readonly string[]
+  inlineEnvKeys: readonly string[]
+  ciInlineEnvDefaults?: Record<string, string>
+  defaultR2UploadPrefix: string
+}
+
+export interface BundleOptions {
+  external?: readonly string[]
+  plugins?: BunPlugin[]
+}
+
+export interface BuildProductDescriptor {
+  label: string
+  packageDir: string
+  entrypoint: string
+  distRoot: string
+  rawBinaryBaseName: string
+  stagedBinaryBaseName: string
+  archiveBaseName: string
+  defaultManifestPath: string
+  defaultUpload?: boolean
+  env: BuildEnvSpec
+  bundle?: BundleOptions
 }
 
 export interface BuildConfig {

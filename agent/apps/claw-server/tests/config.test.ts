@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { loadClawConfig } from '../src/config'
+import { dirname, join } from 'node:path'
+import { loadClawConfig, resolveDefaultResourcesDir } from '../src/config'
 import {
   CLAW_API_PORT_DEFAULT,
   CLAW_CDP_PORT_DEFAULT,
@@ -16,6 +16,15 @@ async function writeConfig(contents: string): Promise<string> {
 }
 
 describe('loadClawConfig', () => {
+  test('resolves default resources next to the packaged executable', () => {
+    expect(
+      resolveDefaultResourcesDir('/service/workdir', {
+        execPath: '/opt/browseros-claw/resources/bin/browseros-claw-server',
+        isStandalone: true,
+      }),
+    ).toBe('/opt/browseros-claw/resources')
+  })
+
   test('loads the checked-in sample config', () => {
     const result = loadClawConfig({
       argv: ['--config', join(import.meta.dir, '..', 'config.sample.json')],
@@ -28,6 +37,7 @@ describe('loadClawConfig', () => {
       value: {
         port: CLAW_API_PORT_DEFAULT,
         cdpPort: CLAW_CDP_PORT_DEFAULT,
+        resourcesDir: '/resources',
       },
     })
   })
@@ -40,6 +50,7 @@ describe('loadClawConfig', () => {
       value: {
         port: CLAW_API_PORT_DEFAULT,
         cdpPort: CLAW_CDP_PORT_DEFAULT,
+        resourcesDir: '/resources',
       },
     })
   })
@@ -59,6 +70,26 @@ describe('loadClawConfig', () => {
       value: {
         port: 9310,
         cdpPort: 9010,
+        resourcesDir: '/resources',
+      },
+    })
+  })
+
+  test('reads Claw-specific resources dir env values', () => {
+    const result = loadClawConfig({
+      argv: [],
+      cwd: '/tmp/claw',
+      env: {
+        BROWSEROS_CLAW_RESOURCES_DIR: 'resources',
+      },
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        port: CLAW_API_PORT_DEFAULT,
+        cdpPort: CLAW_CDP_PORT_DEFAULT,
+        resourcesDir: '/tmp/claw/resources',
       },
     })
   })
@@ -84,6 +115,32 @@ describe('loadClawConfig', () => {
       value: {
         port: 9420,
         cdpPort: 9020,
+        resourcesDir: '/resources',
+      },
+    })
+  })
+
+  test('reads resources dir from a JSON config file relative to the config', async () => {
+    const configPath = await writeConfig(
+      JSON.stringify({
+        directories: {
+          resources: '../resources',
+        },
+      }),
+    )
+
+    const result = loadClawConfig({
+      argv: ['--config', configPath],
+      cwd: '/',
+      env: {},
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        port: CLAW_API_PORT_DEFAULT,
+        cdpPort: CLAW_CDP_PORT_DEFAULT,
+        resourcesDir: join(dirname(configPath), '../resources'),
       },
     })
   })
@@ -113,6 +170,34 @@ describe('loadClawConfig', () => {
       value: {
         port: 9310,
         cdpPort: 9010,
+        resourcesDir: '/resources',
+      },
+    })
+  })
+
+  test('--resources-dir overrides env and JSON config values', async () => {
+    const configPath = await writeConfig(
+      JSON.stringify({
+        directories: {
+          resources: 'config-resources',
+        },
+      }),
+    )
+
+    const result = loadClawConfig({
+      argv: ['--config', configPath, '--resources-dir', 'cli-resources'],
+      cwd: '/tmp/claw',
+      env: {
+        BROWSEROS_CLAW_RESOURCES_DIR: 'env-resources',
+      },
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        port: CLAW_API_PORT_DEFAULT,
+        cdpPort: CLAW_CDP_PORT_DEFAULT,
+        resourcesDir: '/tmp/claw/cli-resources',
       },
     })
   })
@@ -146,7 +231,21 @@ describe('loadClawConfig', () => {
       value: {
         port: 9600,
         cdpPort: 9200,
+        resourcesDir: '/resources',
       },
+    })
+  })
+
+  test('rejects an explicitly empty --resources-dir value', () => {
+    const result = loadClawConfig({
+      argv: ['--resources-dir='],
+      cwd: '/',
+      env: {},
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      error: '--resources-dir requires a path',
     })
   })
 
@@ -239,6 +338,28 @@ describe('loadClawConfig', () => {
     if (!result.ok) {
       expect(result.error).toContain('ports')
       expect(result.error).toContain('cdpPort')
+    }
+  })
+
+  test('returns a clear error for unknown JSON directory keys', async () => {
+    const configPath = await writeConfig(
+      JSON.stringify({
+        directories: {
+          data: './data',
+        },
+      }),
+    )
+
+    const result = loadClawConfig({
+      argv: ['--config', configPath],
+      cwd: '/',
+      env: {},
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toContain('directories')
+      expect(result.error).toContain('data')
     }
   })
 

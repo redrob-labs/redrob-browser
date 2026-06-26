@@ -7,7 +7,6 @@ const TARGETS: Record<TargetId, BuildTarget> = {
     os: 'linux',
     arch: 'x64',
     bunTarget: 'bun-linux-x64-baseline',
-    serverBinaryName: 'browseros_server',
   },
   'linux-arm64': {
     id: 'linux-arm64',
@@ -15,7 +14,6 @@ const TARGETS: Record<TargetId, BuildTarget> = {
     os: 'linux',
     arch: 'arm64',
     bunTarget: 'bun-linux-arm64',
-    serverBinaryName: 'browseros_server',
   },
   'windows-x64': {
     id: 'windows-x64',
@@ -23,7 +21,6 @@ const TARGETS: Record<TargetId, BuildTarget> = {
     os: 'windows',
     arch: 'x64',
     bunTarget: 'bun-windows-x64-baseline',
-    serverBinaryName: 'browseros_server.exe',
   },
   'darwin-arm64': {
     id: 'darwin-arm64',
@@ -31,7 +28,6 @@ const TARGETS: Record<TargetId, BuildTarget> = {
     os: 'macos',
     arch: 'arm64',
     bunTarget: 'bun-darwin-arm64',
-    serverBinaryName: 'browseros_server',
   },
   'darwin-x64': {
     id: 'darwin-x64',
@@ -39,7 +35,6 @@ const TARGETS: Record<TargetId, BuildTarget> = {
     os: 'macos',
     arch: 'x64',
     bunTarget: 'bun-darwin-x64',
-    serverBinaryName: 'browseros_server',
   },
 }
 

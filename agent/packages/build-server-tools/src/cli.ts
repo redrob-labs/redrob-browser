@@ -1,11 +1,12 @@
 import { Command } from 'commander'
 
 import { resolveTargets } from './targets'
-import type { BuildArgs } from './types'
+import type { BuildArgs, BuildProductDescriptor } from './types'
 
-const DEFAULT_MANIFEST_PATH = 'scripts/build/config/server-prod-resources.json'
-
-export function parseBuildArgs(argv: string[]): BuildArgs {
+export function parseBuildArgs(
+  argv: string[],
+  product: BuildProductDescriptor,
+): BuildArgs {
   const program = new Command()
   program
     .allowUnknownOption(false)
@@ -17,7 +18,7 @@ export function parseBuildArgs(argv: string[]): BuildArgs {
     .option(
       '--manifest <path>',
       'Resource manifest path',
-      DEFAULT_MANIFEST_PATH,
+      product.defaultManifestPath,
     )
     .option('--upload', 'Upload artifact zips to R2')
     .option('--no-upload', 'Skip zip upload to R2')
@@ -41,7 +42,7 @@ export function parseBuildArgs(argv: string[]): BuildArgs {
   return {
     targets: resolveTargets(options.target),
     manifestPath: options.manifest,
-    upload: ci ? false : (options.upload ?? true),
+    upload: ci ? false : (options.upload ?? product.defaultUpload ?? true),
     ci,
   }
 }

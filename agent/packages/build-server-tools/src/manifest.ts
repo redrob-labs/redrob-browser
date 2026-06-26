@@ -1,6 +1,15 @@
 import { readFileSync } from 'node:fs'
 
-import type { BuildTarget, ResourceManifest, ResourceRule } from './types'
+import type {
+  BuildTarget,
+  ResourceManifest,
+  ResourceRule,
+  TargetArch,
+  TargetOs,
+} from './types'
+
+const TARGET_OS_VALUES = new Set<TargetOs>(['linux', 'macos', 'windows'])
+const TARGET_ARCH_VALUES = new Set<TargetArch>(['x64', 'arm64'])
 
 function isStringArray(value: unknown): value is string[] {
   return (
@@ -62,13 +71,28 @@ function parseRule(raw: unknown): ResourceRule {
     recursive: item.recursive === true,
   }
   if (isStringArray(item.os)) {
+    validateStringUnion(item.os, TARGET_OS_VALUES, 'os')
     rule.os = item.os as ResourceRule['os']
   }
   if (isStringArray(item.arch)) {
+    validateStringUnion(item.arch, TARGET_ARCH_VALUES, 'arch')
     rule.arch = item.arch as ResourceRule['arch']
   }
   validateRule(rule)
   return rule
+}
+
+function validateStringUnion<T extends string>(
+  values: string[],
+  allowed: Set<T>,
+  field: string,
+): void {
+  const invalid = values.filter((value) => !allowed.has(value as T))
+  if (invalid.length > 0) {
+    throw new Error(
+      `Manifest rule has invalid ${field} value(s): ${invalid.join(', ')}`,
+    )
+  }
 }
 
 export function loadManifest(path: string): ResourceManifest {

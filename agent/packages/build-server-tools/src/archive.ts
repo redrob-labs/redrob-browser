@@ -7,10 +7,13 @@ import { runCommand } from './command'
 import { joinObjectKey, uploadFileToObject } from './r2'
 import type { R2Config, StagedArtifact, UploadResult } from './types'
 
-function zipPathForArtifact(artifact: StagedArtifact): string {
+function zipPathForArtifact(
+  artifact: StagedArtifact,
+  archiveBaseName: string,
+): string {
   return join(
     dirname(artifact.rootDir),
-    `browseros-server-resources-${artifact.target.id}.zip`,
+    `${archiveBaseName}-${artifact.target.id}.zip`,
   )
 }
 
@@ -36,8 +39,9 @@ export async function archiveAndUploadArtifacts(
   client: S3Client,
   r2: R2Config,
   upload: boolean,
+  archiveBaseName: string,
 ): Promise<UploadResult[]> {
-  const results = await archiveArtifacts(artifacts)
+  const results = await archiveArtifacts(artifacts, archiveBaseName)
   if (!upload) {
     return results
   }
@@ -62,11 +66,12 @@ export async function archiveAndUploadArtifacts(
 
 export async function archiveArtifacts(
   artifacts: StagedArtifact[],
+  archiveBaseName: string,
 ): Promise<UploadResult[]> {
   const results: UploadResult[] = []
 
   for (const artifact of artifacts) {
-    const zipPath = zipPathForArtifact(artifact)
+    const zipPath = zipPathForArtifact(artifact, archiveBaseName)
     await zipArtifactRoot(artifact.rootDir, zipPath)
     results.push({ targetId: artifact.target.id, zipPath })
   }

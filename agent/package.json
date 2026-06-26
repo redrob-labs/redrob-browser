@@ -33,6 +33,9 @@
     "build:server": "FORCE_COLOR=1 bun scripts/build/server.ts --target=all",
     "build:server:ci": "FORCE_COLOR=1 bun scripts/build/server.ts --target=all --ci",
     "build:server:test": "FORCE_COLOR=1 bun scripts/build/server.ts --target=darwin-arm64 --no-upload",
+    "build:claw-server": "FORCE_COLOR=1 bun scripts/build/claw-server.ts --target=all",
+    "build:claw-server:ci": "FORCE_COLOR=1 bun scripts/build/claw-server.ts --target=all --ci",
+    "build:claw-server:test": "FORCE_COLOR=1 bun scripts/build/claw-server.ts --target=darwin-arm64 --no-upload",
     "upload:cli-installers": "bun scripts/build/cli.ts",
     "start:server:test": "bun run build:server:test && set -a && . apps/server/.env.development && set +a && dist/prod/server/.tmp/binaries/browseros-server-darwin-arm64",
     "build:claw-onboard": "bun run --filter @browseros/claw-onboard build",
@@ -61,6 +64,7 @@
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",
     "@biomejs/biome": "2.5.0",
+    "@browseros/build-server-tools": "workspace:*",
     "@sentry/cli": "^2.58.6",
     "@types/bun": "^1.3.14",
     "@types/node": "^24.13.2",
