@@ -1,0 +1,285 @@
+#!/usr/bin/env python3
+"""Pipeline planning: presets + switches replace per-config module lists.
+
+The 20 release.*.yaml files this replaces encoded ~5 booleans as
+hand-copied module lists. Pipeline shapes now live here as one pure
+function; runtime variation is a flat Switches value (product, archs,
+clean, provision, sign, upload) resolved CLI > profile > preset default.
+The step orders produced are golden-tested against the old YAMLs.
+"""
+
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
+
+from .step import all_steps
+from .utils import get_platform, get_platform_arch
+
+PRESETS = ("release", "debug")
+PROVISION_MODES = ("none", "full", "shallow")
+VALID_ARCHITECTURES = ("x64", "arm64", "universal")
+
+
+@dataclass(frozen=True)
+class Switches:
+    """Resolved run configuration; None fields mean 'preset default'."""
+
+    preset: str = "release"
+    product: str = "browseros"
+    architectures: Tuple[str, ...] = ()
+    clean: Optional[bool] = None
+    provision: Optional[str] = None
+    download: Optional[bool] = None
+    sign: Optional[bool] = None
+    upload: Optional[bool] = None
+
+    def resolved(self) -> "Switches":
+        """Fill None fields with the preset's defaults."""
+        if self.preset not in PRESETS:
+            raise ValueError(
+                f"Unknown preset '{self.preset}'. Valid: {', '.join(PRESETS)}"
+            )
+        defaults = _PRESET_DEFAULTS[self.preset]
+        resolved = replace(
+            self,
+            architectures=self.architectures or (get_platform_arch(),),
+            clean=self.clean if self.clean is not None else defaults["clean"],
+            provision=self.provision or defaults["provision"],
+            download=self.download if self.download is not None else True,
+            sign=self.sign if self.sign is not None else defaults["sign"],
+            upload=self.upload if self.upload is not None else defaults["upload"],
+        )
+        for arch in resolved.architectures:
+            if arch not in VALID_ARCHITECTURES:
+                raise ValueError(
+                    f"Invalid architecture '{arch}'. "
+                    f"Valid: {', '.join(VALID_ARCHITECTURES)}"
+                )
+        if resolved.provision not in PROVISION_MODES:
+            raise ValueError(
+                f"Invalid provision mode '{resolved.provision}'. "
+                f"Valid: {', '.join(PROVISION_MODES)}"
+            )
+        return resolved
+
+    @property
+    def build_type(self) -> str:
+        return "debug" if self.preset == "debug" else "release"
+
+
+_PRESET_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "release": {"clean": True, "provision": "full", "sign": True, "upload": True},
+    "debug": {"clean": False, "provision": "full", "sign": False, "upload": False},
+}
+
+
+def plan(switches: Switches, arch: str, platform: Optional[str] = None) -> List[str]:
+    """Compose the ordered step list for one architecture.
+
+    Encodes what the release.*.yaml matrix used to spell out per file:
+    sparkle_setup is a macOS build dependency even unsigned; WinSparkle
+    setup and the post-package sparkle_sign only exist on signed Windows
+    builds; unsigned Windows builds get mini_installer instead of
+    sign_windows; universal replaces everything after patches with
+    universal_build (which builds/signs/packages/uploads per arch
+    internally) and skips the resources copy.
+    """
+    platform = platform or get_platform()
+    switches = switches.resolved()
+
+    if switches.preset == "debug":
+        return _plan_debug(switches, arch, platform)
+    return _plan_release(switches, arch, platform)
+
+
+def _plan_release(switches: Switches, arch: str, platform: str) -> List[str]:
+    steps: List[str] = []
+    steps.extend(_provision_steps(switches))
+    if platform == "macos":
+        steps.append("sparkle_setup")
+    if platform == "windows" and switches.sign:
+        steps.append("winsparkle_setup")
+
+    if switches.download:
+        steps.append("download_resources")
+    if arch != "universal":
+        steps.append("resources")
+    steps.extend(
+        [
+            "bundled_extensions",
+            "chromium_replace",
+            "string_replaces",
+            "series_patches",
+            "patches",
+        ]
+    )
+
+    if arch == "universal":
+        if platform != "macos":
+            raise ValueError("universal architecture is only supported on macos")
+        steps.append("universal_build")
+        return steps
+
+    steps.extend(["configure", "compile"])
+
+    if platform == "macos" and switches.sign:
+        steps.append("sign_macos")
+    if platform == "windows":
+        steps.append("sign_windows" if switches.sign else "mini_installer")
+
+    steps.append(f"package_{platform}")
+
+    if platform == "windows" and switches.sign:
+        steps.append("sparkle_sign")
+    if switches.upload:
+        steps.append("upload")
+    return steps
+
+
+def _plan_debug(switches: Switches, arch: str, platform: str) -> List[str]:
+    if arch == "universal":
+        raise ValueError("universal architecture is not supported for debug builds")
+    steps: List[str] = []
+    steps.extend(_provision_steps(switches))
+    if switches.download:
+        steps.append("download_resources")
+    steps.extend(
+        [
+            "resources",
+            "chromium_replace",
+            "string_replaces",
+            "patches",
+            "configure",
+            "compile",
+        ]
+    )
+    if platform == "macos" and switches.sign:
+        steps.append("sign_macos")
+    steps.append(f"package_{platform}")
+    if switches.upload:
+        steps.append("upload")
+    return steps
+
+
+def _provision_steps(switches: Switches) -> List[str]:
+    """Provisioning prefix per strategy.
+
+    shallow interleaves clean BETWEEN checkout and sync: clean deletes
+    hook-managed toolchains (third_party/llvm-build) that sync restores.
+    """
+    if switches.provision == "shallow":
+        steps = ["source_checkout"]
+        if switches.clean:
+            steps.append("clean")
+        steps.append("source_sync")
+        return steps
+
+    steps = []
+    if switches.clean:
+        steps.append("clean")
+    if switches.provision == "full":
+        steps.append("git_setup")
+    return steps
+
+
+def required_env(step_names: List[str]) -> List[str]:
+    """Union of env vars declared by the selected steps, in step order."""
+    registry = all_steps()
+    seen: List[str] = []
+    for name in step_names:
+        cls = registry.get(name)
+        if cls is None:
+            continue
+        for var in cls.env:
+            if var not in seen:
+                seen.append(var)
+    return seen
+
+
+def load_profile(path: Path) -> Switches:
+    """Load a flat profile file into Switches.
+
+    A profile is saved CLI switches, nothing else — no module lists,
+    no inheritance. Unknown keys are rejected so typos fail loudly.
+    """
+    with open(path) as f:
+        data = yaml.safe_load(f) or {}
+
+    if not isinstance(data, dict):
+        raise ValueError(f"Profile {path} must be a flat mapping")
+
+    known = {"preset", "product", "arch", "clean", "provision", "download", "sign", "upload"}
+    unknown = set(data) - known
+    if unknown:
+        raise ValueError(
+            f"Unknown profile keys in {path}: {', '.join(sorted(unknown))}. "
+            f"Valid: {', '.join(sorted(known))}"
+        )
+
+    arch = data.get("arch")
+    architectures: Tuple[str, ...]
+    if arch is None:
+        architectures = ()
+    elif isinstance(arch, list):
+        architectures = tuple(arch)
+    else:
+        architectures = (arch,)
+
+    return Switches(
+        preset=data.get("preset", "release"),
+        product=data.get("product", "browseros"),
+        architectures=architectures,
+        clean=data.get("clean"),
+        provision=data.get("provision"),
+        download=data.get("download"),
+        sign=data.get("sign"),
+        upload=data.get("upload"),
+    )
+
+
+def preflight(step_names: List[str], platform: Optional[str] = None, ctx=None) -> None:
+    """Static whole-pipeline checks before anything executes.
+
+    Fails fast (listing every problem, not just the first) on: planned
+    steps that don't apply to this platform, missing env vars from step
+    metadata, and per-step preflight() hooks. Dynamic state produced
+    mid-run is deliberately NOT checked here — that stays in each
+    step's just-in-time validate().
+    """
+    import os
+
+    platform = platform or get_platform()
+    registry = all_steps()
+    problems: List[str] = []
+
+    for name in step_names:
+        cls = registry.get(name)
+        if cls is None:
+            problems.append(f"unknown step: {name}")
+            continue
+        if cls.platforms is not None and platform not in cls.platforms:
+            problems.append(
+                f"step '{name}' does not apply to platform '{platform}' "
+                f"(applies to: {', '.join(cls.platforms)})"
+            )
+
+    for var in required_env(step_names):
+        if not os.environ.get(var):
+            problems.append(f"missing required environment variable: {var}")
+
+    if ctx is not None:
+        for name in step_names:
+            cls = registry.get(name)
+            if cls is None:
+                continue
+            try:
+                cls().preflight(ctx)
+            except Exception as e:
+                problems.append(f"preflight failed for '{name}': {e}")
+
+    if problems:
+        raise ValueError(
+            "Preflight failed:\n" + "\n".join(f"  - {p}" for p in problems)
+        )
