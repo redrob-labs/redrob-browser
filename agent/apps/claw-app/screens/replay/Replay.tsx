@@ -24,16 +24,16 @@ import { ArrowLeft, History } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { StatusBadge } from '@/components/cockpit/StatusBadge'
 import { Spinner } from '@/components/ui/spinner'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EventTimeline } from './EventTimeline'
 import { PlaybackTransport } from './PlaybackTransport'
 import { type ReplayPlayerHandle, ReplayViewport } from './ReplayViewport'
-import { useReplayData } from './replay.data'
+import { buildTabView, EMPTY_TAB_VIEW, useReplayData } from './replay.data'
 import { frameIndexAt } from './replay.helpers'
 import { usePlayback } from './use-playback'
 
 export function Replay() {
   const { replay, isLoading, navigate } = useReplayData()
-  const playback = usePlayback(replay?.totalSeconds ?? 0)
   const [selectedTabPageId, setSelectedTabPageId] = useState<number | null>(
     null,
   )
@@ -46,10 +46,30 @@ export function Replay() {
     setSelectedTabPageId(replay.tabPageIds[0])
   }, [replay, selectedTabPageId])
 
-  const eventsForSelectedTab = useMemo(() => {
-    if (!replay || selectedTabPageId === null) return []
-    return replay.eventsForTab(selectedTabPageId)
-  }, [replay, selectedTabPageId])
+  // Per-tab view: frames + events + duration scoped to the
+  // currently-selected tab, with frames time-shifted to tab-
+  // relative t=0. Every panel below (viewport, timeline, scrubber)
+  // reads from this and only this. Must be declared BEFORE the
+  // isLoading early-return so rules-of-hooks stays honest.
+  const perTabView = useMemo(
+    () =>
+      replay
+        ? buildTabView(
+            {
+              frames: replay.frames,
+              eventsForTab: replay.eventsForTab,
+              startedAtMs: replay.startedAtMs,
+            },
+            selectedTabPageId,
+          )
+        : EMPTY_TAB_VIEW,
+    [replay, selectedTabPageId],
+  )
+
+  // Tab-scoped clock. Its totalSeconds changes when the operator
+  // switches tabs; the seek-to-0 effect below lands the playhead
+  // at the start of the new tab's story.
+  const playback = usePlayback(perTabView.totalSeconds)
 
   // When playback's time changes (driven by the scaffold's
   // setInterval clock), forward to the rrweb-player. Without this
@@ -58,6 +78,15 @@ export function Replay() {
   useEffect(() => {
     playerHandleRef.current?.goto(playback.time * 1000)
   }, [playback.time])
+
+  // On tab switch, reset the clock to 0 so the operator lands at
+  // the tab's start (Option A: per-tab clocks). usePlayback's
+  // internal useState would otherwise keep the previous tab's
+  // position, which is meaningless in the new tab's timeline.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally scoped to selectedTabPageId; `playback.seek` is a new reference every render and would cause an infinite loop.
+  useEffect(() => {
+    playback.seek(0)
+  }, [selectedTabPageId])
 
   // Mirror play/pause to the rrweb-player. The player still has
   // its own internal clock for rendering frames between our seek
@@ -81,8 +110,11 @@ export function Replay() {
   }
 
   const back = () => navigate(`/audit/${replay.sessionId}`)
-  const currentFrameIndex = frameIndexAt(replay.frames, playback.time)
-  const currentFrame = replay.frames[currentFrameIndex]
+  // Everything below is tab-scoped: frame index, current frame,
+  // scrubber ticks, timeline actions. Playback.time is already in
+  // tab-relative seconds thanks to the per-tab usePlayback wiring.
+  const currentTabFrameIndex = frameIndexAt(perTabView.frames, playback.time)
+  const currentTabFrame = perTabView.frames[currentTabFrameIndex]
 
   const stats: { label: string; value: string }[] = [
     { label: 'Duration', value: replay.duration },
@@ -132,24 +164,35 @@ export function Replay() {
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
+          {replay.tabPageIds.length > 1 && selectedTabPageId !== null && (
+            <Tabs
+              value={String(selectedTabPageId)}
+              onValueChange={(v) => setSelectedTabPageId(Number(v))}
+            >
+              <TabsList variant="line">
+                {replay.tabPageIds.map((id, idx) => (
+                  <TabsTrigger key={id} value={String(id)}>
+                    Tab {idx + 1}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+          )}
           <ReplayViewport
             site={replay.site}
-            frame={currentFrame}
-            events={eventsForSelectedTab}
-            tabPageIds={replay.tabPageIds}
-            selectedTabPageId={selectedTabPageId}
-            onTabPageIdChange={setSelectedTabPageId}
+            frame={currentTabFrame}
+            events={perTabView.events}
             onPlayerReady={onPlayerReady}
           />
           <PlaybackTransport
             playback={playback}
-            totalSeconds={replay.totalSeconds}
-            frames={replay.frames}
+            totalSeconds={perTabView.totalSeconds}
+            frames={perTabView.frames}
           />
         </div>
         <EventTimeline
-          frames={replay.frames}
-          currentFrameIndex={currentFrameIndex}
+          frames={perTabView.frames}
+          currentFrameIndex={currentTabFrameIndex}
           currentTime={playback.time}
           onSeek={playback.seek}
         />

@@ -50,6 +50,13 @@ export interface ReplayData {
   status: RunStatus
   site: string
   startedAt: string
+  /**
+   * Raw session start in ms since epoch. Used by `buildTabView` to
+   * translate a frame's session-relative `t` into tab-relative time.
+   * `startedAt` above is the formatted date string; this is the
+   * machine-readable original.
+   */
+  startedAtMs: number
   duration: string
   /** Stat strip displayed in the header. Strings are presentation. */
   tokens: string
@@ -63,6 +70,16 @@ export interface ReplayData {
   /** Filter helper: events scoped to one tabPageId. */
   eventsForTab: (tabPageId: number) => ReplayEvent[]
 }
+
+// `buildTabView` and the `TabView` shape live in `./tab-view.ts` so
+// tests can import them without dragging the react-query-kit hook
+// graph. Re-exported here for backward-compat with existing
+// callers that reach it through this module.
+export {
+  buildTabView,
+  EMPTY_TAB_VIEW,
+  type TabView,
+} from './tab-view'
 
 export interface UseReplayDataResult {
   replay: ReplayData | null
@@ -110,13 +127,21 @@ function buildReplayData(task: TaskDetail, events: ReplayEvent[]): ReplayData {
     mapDispatchToFrame(row, sessionStartMs),
   )
 
-  const tabsForEvents = new Set<number>()
+  // Preserve first-appearance order for the tab list so per-tab
+  // labels (Tab 1, Tab 2, ...) match the operator's mental
+  // narrative and align with the audit view's sequential
+  // numbering. The raw BrowserOS pageId is non-contiguous and not
+  // useful to surface as a label.
+  const tabsInOrder: number[] = []
   const eventsByTab = new Map<number, ReplayEvent[]>()
   for (const ev of events) {
-    tabsForEvents.add(ev.tabPageId)
     const list = eventsByTab.get(ev.tabPageId)
-    if (list) list.push(ev)
-    else eventsByTab.set(ev.tabPageId, [ev])
+    if (list) {
+      list.push(ev)
+    } else {
+      eventsByTab.set(ev.tabPageId, [ev])
+      tabsInOrder.push(ev.tabPageId)
+    }
   }
 
   return {
@@ -127,13 +152,14 @@ function buildReplayData(task: TaskDetail, events: ReplayEvent[]): ReplayData {
     status: mapTaskStatus(task.status),
     site: task.site ?? 'about:blank',
     startedAt: formatStartedAt(task.startedAt),
+    startedAtMs: sessionStartMs,
     duration: formatDuration(totalMs),
     tokens: '-',
     steps: String(task.dispatchCount),
     approvals: String(countApprovals(task.dispatches)),
     totalSeconds: totalMs / 1000,
     frames,
-    tabPageIds: [...tabsForEvents].sort((a, b) => a - b),
+    tabPageIds: tabsInOrder,
     eventsForTab: (id) => eventsByTab.get(id) ?? [],
   }
 }
@@ -177,6 +203,8 @@ function mapDispatchToFrame(
     verb,
     node,
     caption,
+    url: row.url,
+    pageId: row.pageId,
     note,
     dispatchId: row.id,
   }

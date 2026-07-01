@@ -6,9 +6,9 @@
  * Replay viewport for the audit page. The original scaffold drew a
  * fake browser chrome with a tinted page region and a caption pill.
  * This version mounts rrweb-player inside that chrome so the actual
- * recorded DOM mutations play back. A tab selector above the chrome
- * lets the operator switch between tabs the agent drove in the same
- * session.
+ * recorded DOM mutations play back. Tab selection lives at the
+ * page level (see `Replay.tsx`) as a prominent shadcn Tabs bar; the
+ * viewport itself just renders the currently-selected tab's events.
  *
  * The player's built-in controller is hidden via `showController:
  * false`; PlaybackTransport (see use-playback wiring) is the single
@@ -49,10 +49,6 @@ interface ReplayViewportProps {
   frame: ReplayFrame | undefined
   /** rrweb events for the currently-selected tabPageId. */
   events: ReplayEvent[]
-  /** Distinct tabPageIds the operator can pick from. */
-  tabPageIds: number[]
-  selectedTabPageId: number | null
-  onTabPageIdChange: (id: number) => void
   /** Called once the rrweb-player has mounted with usable controls. */
   onPlayerReady: (handle: ReplayPlayerHandle) => void
 }
@@ -61,19 +57,16 @@ export function ReplayViewport({
   site,
   frame,
   events,
-  tabPageIds,
-  selectedTabPageId,
-  onTabPageIdChange,
   onPlayerReady,
 }: ReplayViewportProps) {
+  // Prefer the current frame's full URL so the address bar shows
+  // exactly where the agent was at this instant. Falls back to the
+  // task-level site (a hostname) when the frame carries no url
+  // (e.g. `run`, `windows`, `tab_groups` dispatches).
+  const addressBar = frame?.url ?? site
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden rounded-2xl border border-border-2 bg-card shadow-sm">
-      <Chrome
-        site={site}
-        tabPageIds={tabPageIds}
-        selectedTabPageId={selectedTabPageId}
-        onTabPageIdChange={onTabPageIdChange}
-      />
+      <Chrome url={addressBar} />
       <div className="relative flex flex-1 items-stretch justify-center overflow-hidden bg-bg-sunken">
         <PlayerCanvas events={events} onReady={onPlayerReady} />
         {frame && <Caption frame={frame} />}
@@ -82,19 +75,7 @@ export function ReplayViewport({
   )
 }
 
-interface ChromeProps {
-  site: string
-  tabPageIds: number[]
-  selectedTabPageId: number | null
-  onTabPageIdChange: (id: number) => void
-}
-
-function Chrome({
-  site,
-  tabPageIds,
-  selectedTabPageId,
-  onTabPageIdChange,
-}: ChromeProps) {
+function Chrome({ url }: { url: string }) {
   return (
     <div className="flex h-9 shrink-0 items-center gap-2 border-border border-b bg-bg-sunken px-3">
       <span className="flex gap-1.5">
@@ -104,25 +85,8 @@ function Chrome({
       </span>
       <div className="ml-3 flex h-6 flex-1 items-center gap-2 rounded-md border border-border-2 bg-card px-3 font-mono text-ink-2 text-xs">
         <Lock className="size-3 text-ink-3" />
-        <span className="truncate">{site}</span>
+        <span className="truncate">{url}</span>
       </div>
-      {tabPageIds.length > 1 && (
-        <select
-          aria-label="Tab to replay"
-          value={selectedTabPageId ?? ''}
-          onChange={(e) => onTabPageIdChange(Number(e.target.value))}
-          className="h-6 rounded-md border border-border-2 bg-card px-2 font-mono text-[11px] text-ink-2"
-        >
-          {tabPageIds.map((id) => (
-            <option key={id} value={id}>
-              Tab {id}
-            </option>
-          ))}
-        </select>
-      )}
-      <span className="rounded-full bg-bg-sunken px-2 py-0.5 font-bold text-[10px] text-ink-3 uppercase tracking-wide">
-        rrweb
-      </span>
     </div>
   )
 }
@@ -130,6 +94,30 @@ function Chrome({
 interface PlayerCanvasProps {
   events: ReplayEvent[]
   onReady: (handle: ReplayPlayerHandle) => void
+}
+
+/**
+ * Fallback DOM viewport for pages that never emitted a meta event.
+ * rrweb ALWAYS emits type 4 as its first event under normal
+ * conditions, so this is defensive.
+ */
+const DEFAULT_RECORDED_SIZE = { width: 1280, height: 720 }
+
+function readRecordedSize(events: ReplayEvent[]): {
+  width: number
+  height: number
+} {
+  const meta = events.find((e) => e.type === 4)
+  const data = meta?.data as { width?: unknown; height?: unknown } | undefined
+  const width =
+    typeof data?.width === 'number' && data.width > 0
+      ? data.width
+      : DEFAULT_RECORDED_SIZE.width
+  const height =
+    typeof data?.height === 'number' && data.height > 0
+      ? data.height
+      : DEFAULT_RECORDED_SIZE.height
+  return { width, height }
 }
 
 function PlayerCanvas({ events, onReady }: PlayerCanvasProps) {
@@ -153,8 +141,7 @@ function PlayerCanvas({ events, onReady }: PlayerCanvasProps) {
       type: e.type,
       data: e.data,
       timestamp: e.ts,
-      // biome-ignore lint/suspicious/noExplicitAny: rrweb's event
-      // union is wide; we trust the recorder's output shape.
+      // biome-ignore lint/suspicious/noExplicitAny: rrweb's event union is wide; we trust the recorder's output shape.
     })) as any[]
 
     mount.replaceChildren()
@@ -171,6 +158,36 @@ function PlayerCanvas({ events, onReady }: PlayerCanvasProps) {
       console.warn('[browseros-claw replay] Replayer ctor threw', err)
       return
     }
+
+    // rrweb-player normally handles fit-to-container scaling; we
+    // mount the raw Replayer (see notes at the top of the file) so
+    // we do it ourselves. Read the recorded viewport from the meta
+    // event, absolute-position the .replayer-wrapper at 0,0 of the
+    // mount, and apply a uniform transform so it fits regardless of
+    // the player pane's size. A ResizeObserver keeps the scale in
+    // sync with layout changes (window resize, split-pane drags,
+    // tab switch narrowing the viewport, etc.).
+    const { width: recordedW, height: recordedH } = readRecordedSize(events)
+    const wrapper = mount.querySelector<HTMLElement>('.replayer-wrapper')
+    let observer: ResizeObserver | null = null
+    if (wrapper) {
+      wrapper.style.position = 'absolute'
+      wrapper.style.transformOrigin = 'top left'
+      const applyScale = (): void => {
+        const rect = mount.getBoundingClientRect()
+        if (rect.width === 0 || rect.height === 0) return
+        const scale = Math.min(rect.width / recordedW, rect.height / recordedH)
+        const scaledW = recordedW * scale
+        const scaledH = recordedH * scale
+        wrapper.style.transform = `scale(${scale})`
+        wrapper.style.left = `${Math.max(0, (rect.width - scaledW) / 2)}px`
+        wrapper.style.top = `${Math.max(0, (rect.height - scaledH) / 2)}px`
+      }
+      applyScale()
+      observer = new ResizeObserver(applyScale)
+      observer.observe(mount)
+    }
+
     onReady({
       // `pause(timeOffset)` jumps to that time and pauses. We pause
       // rather than play so our scaffold's playback clock stays the
@@ -180,6 +197,7 @@ function PlayerCanvas({ events, onReady }: PlayerCanvasProps) {
       pause: () => replayer.pause(replayer.getCurrentTime()),
     })
     return () => {
+      observer?.disconnect()
       try {
         replayer.destroy()
       } catch {
@@ -192,7 +210,7 @@ function PlayerCanvas({ events, onReady }: PlayerCanvasProps) {
   return (
     <div
       ref={mountRef}
-      className="flex flex-1 items-center justify-center"
+      className="relative flex-1 overflow-hidden"
       data-replay-canvas
     />
   )
