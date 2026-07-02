@@ -7,18 +7,18 @@ from typing import Optional
 import typer
 
 from ..core.context import Context
-from ..core.env import EnvConfig
-from ..core.notify import slack_subscriber
+from ..lib.env import EnvConfig
+from ..lib.notify import slack_subscriber
 from ..core.runner import StepExecutionError, run as run_steps
-from ..core.sparkle import sparkle_sign_file
-from ..core.utils import log_info, log_error, log_success
+from ..lib.sparkle import sparkle_sign_file
+from ..lib.utils import log_info, log_error, log_success
 
-from ..steps.ota import ServerOTAModule
-from ..steps.ota.common import (
+from ..release.ota import ServerOTAModule
+from ..release.ota.common import (
     get_appcast_path,
     SERVER_PLATFORMS,
 )
-from ..steps.storage import get_r2_client, upload_file_to_r2
+from ..lib.r2 import get_r2_client, upload_file_to_r2
 
 app = typer.Typer(
     help="OTA (Over-The-Air) update automation",

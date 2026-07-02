@@ -4,7 +4,7 @@
 Single-sourced by design — the earlier PathConfig/BuildConfig
 sub-objects and SCREAMING name fields duplicated this state and had to
 be manually synced; they are gone. App names derive from the product
-descriptor on access, version data is parsed by core.versions, and the
+descriptor on access, version data is parsed by lib.versions, and the
 artifact registry is the only artifact channel.
 """
 
@@ -13,15 +13,15 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
-from . import versions as versions_mod
-from .env import EnvConfig
-from .paths import get_package_root
+from ..lib import versions as versions_mod
+from ..lib.env import EnvConfig
+from ..lib.paths import get_package_root
 from .products import (
     ProductDescriptor,
     default_product_descriptor,
     get_product_descriptor,
 )
-from .utils import (
+from ..lib.utils import (
     get_platform,
     get_platform_arch,
     get_executable_extension,
@@ -256,7 +256,7 @@ class Context:
         """Update feed version compared by Sparkle/WinSparkle.
 
         Epoch-prefixed BrowserOS version (see the derivation notes in
-        core/versions.py). Stamped into CFBundleVersion at signing,
+        lib/versions.py). Stamped into CFBundleVersion at signing,
         mirrored by chrome/browser/win/winsparkle_glue.cc, and carried in
         the appcast's sparkle:version — the three must stay in lockstep.
         Returns: e.g., "10000.0.47.0.2"

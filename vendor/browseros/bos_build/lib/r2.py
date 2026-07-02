@@ -9,8 +9,8 @@ import json
 from pathlib import Path
 from typing import Dict, Optional
 
-from ...core.env import EnvConfig
-from ...core.utils import log_info, log_error, log_success, log_warning
+from .env import EnvConfig
+from .utils import log_info, log_error, log_success, log_warning
 
 # Try to import boto3 for R2 (S3-compatible)
 try:

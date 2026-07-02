@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 
 from ...core.step import Step, ValidationError, step
 from ...core.context import Context
-from ...core.utils import (
+from ...lib.utils import (
     log_info,
     log_error,
     log_success,
@@ -16,9 +16,9 @@ from ...core.utils import (
     IS_WINDOWS,
     IS_MACOS,
 )
-from ...core.notify import get_notifier, COLOR_GREEN
+from ...lib.notify import get_notifier, COLOR_GREEN
 
-from .r2 import (
+from ...lib.r2 import (
     BOTO3_AVAILABLE,
     get_r2_client,
     get_release_json,
