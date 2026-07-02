@@ -7,11 +7,14 @@ import unittest
 from pathlib import Path
 
 from bos_build.core.planner import (
+    Profile,
     Switches,
     load_profile,
     plan,
     plan_runs,
     required_env,
+    slice_from,
+    slice_runs_from,
 )
 
 RELEASE = Switches(preset="release")
@@ -256,6 +259,162 @@ class SwitchesTest(unittest.TestCase):
         self.assertEqual(Switches(preset="debug").build_type, "debug")
 
 
+class SkipTest(unittest.TestCase):
+    def test_skip_subtracts_from_composed_plan(self):
+        steps = plan(
+            Switches(preset="release", skip=("upload", "series_patches")),
+            "arm64",
+            "macos",
+        )
+        self.assertEqual(
+            steps,
+            [
+                s
+                for s in plan(RELEASE, "arm64", "macos")
+                if s not in ("upload", "series_patches")
+            ],
+        )
+
+    def test_skip_is_subtraction_not_switch_flip(self):
+        # Skipping sign_windows must not resurrect mini_installer or drop
+        # the other signing-conditional steps — composition already ran.
+        steps = plan(
+            Switches(preset="release", skip=("sign_windows",)), "x64", "windows"
+        )
+        self.assertNotIn("sign_windows", steps)
+        self.assertNotIn("mini_installer", steps)
+        self.assertIn("winsparkle_setup", steps)
+        self.assertIn("sparkle_sign", steps)
+
+    def test_skip_applies_to_universal_runs(self):
+        runs = plan_runs(
+            Switches(
+                preset="release",
+                architectures=("universal",),
+                skip=("series_patches",),
+            ),
+            "macos",
+        )
+        for arch, steps in runs:
+            self.assertNotIn("series_patches", steps, arch)
+        self.assertIn("merge_universal", runs[2][1])
+
+    def test_skip_absent_step_is_noop(self):
+        # mini_installer never appears in a signed windows plan; upload is
+        # already absent when upload=False. Both subtract to nothing.
+        self.assertEqual(
+            plan(
+                Switches(preset="release", skip=("mini_installer",)), "x64", "windows"
+            ),
+            plan(RELEASE, "x64", "windows"),
+        )
+        steps = plan(
+            Switches(preset="release", upload=False, skip=("upload",)),
+            "arm64",
+            "macos",
+        )
+        self.assertNotIn("upload", steps)
+
+    def test_skip_unknown_step_rejected_listing_valid(self):
+        with self.assertRaises(ValueError) as err:
+            plan(Switches(preset="release", skip=("uplod",)), "arm64", "macos")
+        message = str(err.exception)
+        self.assertIn("uplod", message)
+        self.assertIn("compile", message)
+
+    def test_skip_non_string_entry_rejected_not_typeerror(self):
+        # yaml `skip: [upload: true]` parses to a dict entry
+        with self.assertRaisesRegex(ValueError, "Unknown step"):
+            plan(
+                Switches(preset="release", skip=({"upload": True},)),
+                "arm64",
+                "macos",
+            )
+
+
+class SliceFromTest(unittest.TestCase):
+    def test_slices_composed_plan_from_step(self):
+        self.assertEqual(
+            slice_from(plan(RELEASE, "arm64", "macos"), "sign_macos"),
+            ["sign_macos", "package_macos", "upload"],
+        )
+
+    def test_slice_from_first_step_is_identity(self):
+        full = plan(RELEASE, "arm64", "macos")
+        self.assertEqual(slice_from(full, full[0]), full)
+
+    def test_unknown_step_rejected_listing_valid(self):
+        with self.assertRaises(ValueError) as err:
+            slice_from(plan(RELEASE, "arm64", "macos"), "sing_macos")
+        message = str(err.exception)
+        self.assertIn("sing_macos", message)
+        self.assertIn("compile", message)
+
+    def test_step_absent_from_plan_rejected_showing_plan(self):
+        with self.assertRaises(ValueError) as err:
+            slice_from(plan(RELEASE, "arm64", "macos"), "mini_installer")
+        message = str(err.exception)
+        self.assertIn("mini_installer", message)
+        self.assertIn("sign_macos", message)
+
+    def test_from_a_skipped_step_rejected(self):
+        steps = plan(
+            Switches(preset="release", skip=("sign_macos",)), "arm64", "macos"
+        )
+        with self.assertRaisesRegex(ValueError, "not in the composed plan"):
+            slice_from(steps, "sign_macos")
+
+
+class SliceRunsFromTest(unittest.TestCase):
+    def test_single_arch_run_sliced(self):
+        runs = plan_runs(
+            Switches(preset="release", architectures=("arm64",)), "macos"
+        )
+        self.assertEqual(
+            slice_runs_from(runs, "sign_macos"),
+            [("arm64", ["sign_macos", "package_macos", "upload"])],
+        )
+
+    def test_universal_merge_failure_resumes_without_recompiling(self):
+        runs = slice_runs_from(plan_runs(UNIVERSAL, "macos"), "merge_universal")
+        self.assertEqual(
+            runs,
+            [
+                (
+                    "universal",
+                    ["merge_universal", "sign_macos", "package_macos", "upload"],
+                )
+            ],
+        )
+
+    def test_first_run_containing_step_wins_later_runs_stay_whole(self):
+        full = plan_runs(UNIVERSAL, "macos")
+        runs = slice_runs_from(full, "resources")
+        self.assertEqual(runs[0][0], "arm64")
+        self.assertEqual(
+            runs[0][1],
+            ["resources", "configure", "compile", "sign_macos", "package_macos", "upload"],
+        )
+        self.assertEqual(runs[1:], full[1:])
+
+    def test_multi_arch_timeline(self):
+        runs = plan_runs(
+            Switches(preset="release", architectures=("x64", "arm64")), "linux"
+        )
+        sliced = slice_runs_from(runs, "compile")
+        self.assertEqual(sliced[0][0], "x64")
+        self.assertEqual(sliced[0][1][0], "compile")
+        self.assertEqual(sliced[1], runs[1])
+
+    def test_unknown_step_rejected_listing_valid(self):
+        with self.assertRaisesRegex(ValueError, "Unknown step"):
+            slice_runs_from(plan_runs(UNIVERSAL, "macos"), "sing_macos")
+
+    def test_step_absent_from_all_runs_rejected(self):
+        with self.assertRaisesRegex(ValueError, "not in the composed plan"):
+            slice_runs_from(plan_runs(UNIVERSAL, "macos"), "mini_installer")
+
+
 class RequiredEnvTest(unittest.TestCase):
     def test_signed_macos_requires_cert_and_notarization(self):
         # parity with release.*.macos.*.yaml required_envs
@@ -290,7 +449,7 @@ class RequiredEnvTest(unittest.TestCase):
 
 
 class ProfileTest(unittest.TestCase):
-    def _load(self, text: str) -> Switches:
+    def _load(self, text: str) -> Profile:
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write(text)
             path = Path(f.name)
@@ -298,20 +457,80 @@ class ProfileTest(unittest.TestCase):
         return load_profile(path)
 
     def test_nightly_ci_profile_maps_to_switches(self):
-        sw = self._load(
+        prof = self._load(
             "preset: release\nclean: false\nprovision: none\nsign: false\nupload: false\n"
         )
         self.assertEqual(
-            plan(sw, "arm64", "macos"), plan(CI, "arm64", "macos")
+            plan(prof.switches, "arm64", "macos"), plan(CI, "arm64", "macos")
         )
 
     def test_arch_list(self):
-        sw = self._load("preset: release\narch: [x64, arm64]\n")
-        self.assertEqual(sw.architectures, ("x64", "arm64"))
+        prof = self._load("preset: release\narch: [x64, arm64]\n")
+        self.assertEqual(prof.switches.architectures, ("x64", "arm64"))
 
     def test_unknown_key_rejected(self):
         with self.assertRaisesRegex(ValueError, "Unknown profile keys"):
-            self._load("preset: release\nmodules: [clean]\n")
+            self._load("preset: release\nbogus: 1\n")
+
+    def test_skip_key_parses_list_and_scalar(self):
+        prof = self._load("preset: release\nskip: [upload, series_patches]\n")
+        self.assertEqual(prof.switches.skip, ("upload", "series_patches"))
+        self.assertEqual(self._load("skip: upload\n").switches.skip, ("upload",))
+
+    def test_flat_profile_has_no_modules(self):
+        self.assertIsNone(self._load("preset: release\n").modules)
+
+    def test_modules_profile_parses(self):
+        prof = self._load(
+            "modules: [clean, compile]\n"
+            "product: browserclaw\n"
+            "arch: arm64\n"
+            "build_type: release\n"
+        )
+        self.assertEqual(prof.modules, ("clean", "compile"))
+        self.assertEqual(prof.build_type, "release")
+        self.assertEqual(prof.switches.product, "browserclaw")
+        self.assertEqual(prof.switches.architectures, ("arm64",))
+
+    def test_modules_profile_defaults(self):
+        prof = self._load("modules: [compile]\n")
+        self.assertEqual(prof.modules, ("compile",))
+        self.assertIsNone(prof.build_type)
+        self.assertEqual(prof.switches.architectures, ())
+
+    def test_modules_rejects_planner_keys(self):
+        for key, value in (
+            ("preset", "release"),
+            ("clean", "false"),
+            ("provision", "none"),
+            ("download", "false"),
+            ("sign", "false"),
+            ("upload", "false"),
+            ("skip", "[upload]"),
+        ):
+            with self.assertRaisesRegex(ValueError, "do not combine", msg=key):
+                self._load(f"modules: [compile]\n{key}: {value}\n")
+
+    def test_build_type_requires_modules(self):
+        with self.assertRaisesRegex(ValueError, "requires 'modules:'"):
+            self._load("preset: release\nbuild_type: release\n")
+
+    def test_invalid_build_type_rejected(self):
+        with self.assertRaisesRegex(ValueError, "build_type"):
+            self._load("modules: [compile]\nbuild_type: fast\n")
+
+    def test_empty_modules_rejected(self):
+        with self.assertRaisesRegex(ValueError, "non-empty"):
+            self._load("modules: []\n")
+
+    def test_non_string_modules_entry_rejected(self):
+        # yaml `modules: [clean: true]` parses to a dict entry
+        with self.assertRaisesRegex(ValueError, "list of step names"):
+            self._load("modules: [{clean: true}]\n")
+
+    def test_modules_arch_list_rejected(self):
+        with self.assertRaisesRegex(ValueError, "single-arch"):
+            self._load("modules: [compile]\narch: [x64, arm64]\n")
 
 
 
@@ -392,10 +611,12 @@ class DownloadSwitchTest(unittest.TestCase):
         shipped = (
             Path(__file__).resolve().parents[1] / "profiles" / "nightly-ci.yaml"
         )
-        sw = load_profile(shipped)
+        prof = load_profile(shipped)
+        # Shipped profiles stay switch-based; modules: is a local-only opt-in.
+        self.assertIsNone(prof.modules)
         for platform, arch in (("macos", "arm64"), ("windows", "x64"), ("linux", "x64")):
             self.assertEqual(
-                plan(sw, arch, platform),
+                plan(prof.switches, arch, platform),
                 plan(CI, arch, platform),
                 f"profile drift on {platform}/{arch}",
             )

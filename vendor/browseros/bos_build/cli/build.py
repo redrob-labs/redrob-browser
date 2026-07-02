@@ -3,16 +3,25 @@
 
 import os
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import typer
 
 from ..core.context import Context
 from ..core.paths import get_package_root
 from ..core.pipeline import validate_pipeline, show_available_modules
-from ..core.planner import Switches, load_profile, plan_runs, preflight
+from ..core.planner import (
+    Profile,
+    Switches,
+    VALID_ARCHITECTURES,
+    load_profile,
+    plan_runs,
+    preflight,
+    required_env,
+    slice_runs_from,
+)
 from ..core.resolver import resolve_config, resolve_pipeline
 from ..core.notify import (
     notify_pipeline_end,
@@ -26,6 +35,8 @@ from ..core.step import (
     phase_steps,
 )
 from ..core.utils import (
+    get_platform,
+    get_platform_arch,
     log_error,
     log_info,
     log_warning,
@@ -121,6 +132,23 @@ def main(
         "--download/--no-download",
         help="Preset mode: toggle downloading server resources from R2",
     ),
+    skip: Optional[str] = typer.Option(
+        None,
+        "--skip",
+        help="Preset mode: comma-separated steps to subtract from the composed "
+        "plan (unions with the profile's skip:)",
+    ),
+    from_: Optional[str] = typer.Option(
+        None,
+        "--from",
+        help="Preset mode: resume from this step (slices the composed plan)",
+    ),
+    show_plan: bool = typer.Option(
+        False,
+        "--show-plan",
+        help="Print the composed step list + required env vars and exit "
+        "(needs no chromium checkout)",
+    ),
     # Global options
     arch: Optional[str] = typer.Option(
         None,
@@ -152,6 +180,12 @@ def main(
       browseros build --preset release --product browserclaw --no-upload
       browseros build --profile nightly-ci --arch x64
       browseros build --preset debug
+
+    \b
+    Plan Visibility & Subtraction:
+      browseros build --preset release --show-plan
+      browseros build --preset release --skip upload,series_patches
+      browseros build --preset release --from sign_macos
 
     \b
     Phase Flags (Auto-Ordered):
@@ -196,16 +230,17 @@ def main(
         log_error("  browseros build --modules clean,compile")
         raise typer.Exit(1)
 
-    log_info("🚀 BrowserOS Build System")
-    log_info("=" * 70)
+    if (skip is not None or from_ is not None) and not has_preset:
+        log_error(
+            "--skip/--from apply to preset/profile mode — they subtract from "
+            "the planner-composed pipeline; edit --modules lists directly"
+        )
+        raise typer.Exit(1)
 
-    root_dir = get_package_root()
-
+    # Plan projection happens before the banner and before anything touches
+    # the chromium checkout, so --show-plan works on a machine without one.
     if has_preset:
-        if build_type is not None:
-            log_error("--build-type is owned by the preset (release/debug); drop it")
-            raise typer.Exit(1)
-        runs = _resolve_preset_runs(
+        projection = _resolve_preset(
             preset=preset,
             profile=profile,
             product=product,
@@ -215,8 +250,14 @@ def main(
             download=download,
             sign=sign,
             upload=upload,
+            build_type=build_type,
+            skip=skip,
+            from_=from_,
             chromium_src=chromium_src,
         )
+        if show_plan:
+            _print_plan(projection)
+            return
     else:
         cli_args = {
             "chromium_src": chromium_src,
@@ -232,8 +273,41 @@ def main(
             "upload": phase_upload,
         }
         try:
+            pipeline = resolve_pipeline(
+                cli_args, execution_order=EXECUTION_ORDER, quiet=show_plan
+            )
+        except ValueError as e:
+            log_error(str(e))
+            raise typer.Exit(1)
+        if show_plan:
+            validate_pipeline(pipeline, AVAILABLE_MODULES)
+            from ..core.env import EnvConfig
+
+            label_arch = arch or EnvConfig().arch or get_platform_arch()
+            if label_arch not in VALID_ARCHITECTURES:
+                log_error(
+                    f"Invalid architecture '{label_arch}'. "
+                    f"Valid: {', '.join(VALID_ARCHITECTURES)}"
+                )
+                raise typer.Exit(1)
+            _print_plan(
+                _PlanProjection(
+                    header=["Direct pipeline (--modules/phase flags)"],
+                    arch_plans=[(label_arch, pipeline)],
+                )
+            )
+            return
+
+    log_info("🚀 BrowserOS Build System")
+    log_info("=" * 70)
+
+    root_dir = get_package_root()
+
+    if has_preset:
+        runs = projection.build_runs()
+    else:
+        try:
             arch_ctxs = resolve_config(cli_args)
-            pipeline = resolve_pipeline(cli_args, execution_order=EXECUTION_ORDER)
         except ValueError as e:
             log_error(str(e))
             raise typer.Exit(1)
@@ -339,7 +413,24 @@ def main(
                 )
 
 
-def _resolve_preset_runs(
+def _display_only_runs() -> List[Tuple[Context, List[str]]]:
+    raise RuntimeError("plan projection is display-only; no run builder attached")
+
+
+@dataclass(frozen=True)
+class _PlanProjection:
+    """Composed plan, printable without a chromium checkout.
+
+    build_runs defers Context construction (and thus chromium_src
+    resolution) so --show-plan can exit before either happens.
+    """
+
+    header: List[str]
+    arch_plans: List[Tuple[str, List[str]]]
+    build_runs: Callable[[], List[Tuple[Context, List[str]]]] = _display_only_runs
+
+
+def _resolve_preset(
     *,
     preset: Optional[str],
     profile: Optional[Path],
@@ -350,15 +441,44 @@ def _resolve_preset_runs(
     download: Optional[bool],
     sign: Optional[bool],
     upload: Optional[bool],
+    build_type: Optional[str],
+    skip: Optional[str],
+    from_: Optional[str],
     chromium_src: Optional[Path],
-) -> List[Tuple[Context, List[str]]]:
-    """Resolve preset/profile + CLI overrides into per-run (ctx, steps) pairs.
+) -> _PlanProjection:
+    """Resolve preset/profile + CLI overrides into a plan projection.
 
-    Precedence: CLI > profile > preset defaults. Universal yields three
-    runs (see core/planner.plan_runs); everything else one run per arch.
+    Precedence: CLI > profile > preset defaults, except --skip which
+    UNIONS with the profile's skip: (both are commented-out sets). A
+    profile carrying modules: routes to the DIRECT-mode machinery.
     """
     try:
-        switches = load_profile(_resolve_profile_path(profile)) if profile else Switches()
+        prof = (
+            load_profile(_resolve_profile_path(profile))
+            if profile
+            else Profile(Switches())
+        )
+        if prof.modules is not None:
+            return _resolve_modules_profile(
+                prof,
+                preset=preset,
+                product=product,
+                arch=arch,
+                clean=clean,
+                provision=provision,
+                download=download,
+                sign=sign,
+                upload=upload,
+                build_type=build_type,
+                skip=skip,
+                from_=from_,
+                chromium_src=chromium_src,
+            )
+        if build_type is not None:
+            raise ValueError(
+                "--build-type is owned by the preset (release/debug); drop it"
+            )
+        switches = prof.switches
         overrides = {}
         if preset is not None:
             overrides["preset"] = preset
@@ -376,38 +496,188 @@ def _resolve_preset_runs(
             overrides["sign"] = sign
         if upload is not None:
             overrides["upload"] = upload
-        switches = replace(switches, **overrides).resolved()
-
-        # Plan before resolving chromium_src so an invalid invocation
-        # (e.g. universal --no-sign) fails on the planning error, not on
-        # missing environment.
-        planned = plan_runs(switches)
-
-        # Shallow provisioning creates the checkout itself, so the src
-        # dir may not exist yet on a fresh runner.
-        src = _resolve_chromium_src(
-            chromium_src, allow_missing=switches.provision == "shallow"
-        )
-
-        log_info(f"✓ PRESET MODE: preset={switches.preset} product={switches.product}")
-        log_info(
-            f"✓ PRESET MODE: clean={switches.clean} provision={switches.provision} "
-            f"download={switches.download} sign={switches.sign} upload={switches.upload}"
-        )
-
-        runs: List[Tuple[Context, List[str]]] = []
-        for run_arch, run_steps in planned:
-            ctx = Context(
-                chromium_src=src,
-                architecture=run_arch,
-                build_type=switches.build_type,
-                product=switches.product,
+        switches = replace(switches, **overrides)
+        cli_skip = _parse_steps_csv(skip)
+        if cli_skip:
+            switches = replace(
+                switches, skip=tuple(dict.fromkeys((*switches.skip, *cli_skip)))
             )
-            runs.append((ctx, run_steps))
-        return runs
+        switches = switches.resolved()
+
+        # Runs execute sequentially (universal is three runs on one tree),
+        # so --from resumes the run timeline, not each run.
+        arch_plans = plan_runs(switches)
+        if from_ is not None:
+            arch_plans = slice_runs_from(arch_plans, from_)
+
+        header = [
+            f"Preset plan: preset={switches.preset} product={switches.product} "
+            f"platform={get_platform()}",
+            f"Switches: clean={switches.clean} provision={switches.provision} "
+            f"download={switches.download} sign={switches.sign} "
+            f"upload={switches.upload}",
+        ]
+        if switches.skip:
+            header.append(f"Skip: {', '.join(switches.skip)}")
+        if from_ is not None:
+            header.append(f"From: {from_}")
+
+        def build_runs() -> List[Tuple[Context, List[str]]]:
+            try:
+                for run_arch, steps in arch_plans:
+                    if not steps:
+                        raise ValueError(
+                            f"plan for {run_arch} is empty after skip — "
+                            "nothing to run"
+                        )
+                # Shallow provisioning creates the checkout itself, so the
+                # src dir may not exist yet on a fresh runner.
+                src = _resolve_chromium_src(
+                    chromium_src, allow_missing=switches.provision == "shallow"
+                )
+                log_info(
+                    f"✓ PRESET MODE: preset={switches.preset} "
+                    f"product={switches.product}"
+                )
+                log_info(
+                    f"✓ PRESET MODE: clean={switches.clean} "
+                    f"provision={switches.provision} download={switches.download} "
+                    f"sign={switches.sign} upload={switches.upload}"
+                )
+                if switches.skip:
+                    log_info(f"✓ PRESET MODE: skip={','.join(switches.skip)}")
+                if from_ is not None:
+                    log_info(f"✓ PRESET MODE: from={from_}")
+                return [
+                    (
+                        Context(
+                            chromium_src=src,
+                            architecture=run_arch,
+                            build_type=switches.build_type,
+                            product=switches.product,
+                        ),
+                        steps,
+                    )
+                    for run_arch, steps in arch_plans
+                ]
+            except ValueError as e:
+                log_error(str(e))
+                raise typer.Exit(1)
+
+        return _PlanProjection(header, arch_plans, build_runs)
     except ValueError as e:
         log_error(str(e))
         raise typer.Exit(1)
+
+
+def _resolve_modules_profile(
+    prof: Profile,
+    *,
+    preset: Optional[str],
+    product: Optional[str],
+    arch: Optional[str],
+    clean: Optional[bool],
+    provision: Optional[str],
+    download: Optional[bool],
+    sign: Optional[bool],
+    upload: Optional[bool],
+    build_type: Optional[str],
+    skip: Optional[str],
+    from_: Optional[str],
+    chromium_src: Optional[Path],
+) -> _PlanProjection:
+    """Project a modules: profile through the DIRECT-mode machinery.
+
+    The profile owns its pipeline, so planner flags (including --skip and
+    --from) are rejected; only --product/--arch/--build-type override the
+    file (CLI > profile).
+    """
+    rejected = {
+        "--preset": preset,
+        "--clean/--no-clean": clean,
+        "--provision": provision,
+        "--download/--no-download": download,
+        "--sign/--no-sign": sign,
+        "--upload/--no-upload": upload,
+        "--skip": skip,
+        "--from": from_,
+    }
+    given = sorted(flag for flag, value in rejected.items() if value is not None)
+    if given:
+        raise ValueError(
+            f"{', '.join(given)}: planner flags do not combine with a modules "
+            "profile — it owns its pipeline; edit the modules list instead"
+        )
+
+    from ..core.env import EnvConfig
+
+    steps = list(prof.modules or ())
+    validate_pipeline(steps, AVAILABLE_MODULES)
+    eff_product = product or prof.switches.product
+    profile_arch = (
+        prof.switches.architectures[0] if prof.switches.architectures else None
+    )
+    # Fully resolve arch at projection time (CLI > profile > env >
+    # platform) so the printed label can never disagree with the run.
+    eff_arch = arch or profile_arch or EnvConfig().arch or get_platform_arch()
+    if eff_arch not in VALID_ARCHITECTURES:
+        raise ValueError(
+            f"Invalid architecture '{eff_arch}'. "
+            f"Valid: {', '.join(VALID_ARCHITECTURES)}"
+        )
+    eff_build_type = build_type or prof.build_type or "debug"
+    if eff_build_type not in ("debug", "release"):
+        raise ValueError(
+            f"Invalid build type '{eff_build_type}'. Valid: debug, release"
+        )
+
+    header = [
+        "Modules profile (enumerated pipeline — you own this list)",
+        f"product={eff_product} arch={eff_arch} build_type={eff_build_type}",
+    ]
+
+    def build_runs() -> List[Tuple[Context, List[str]]]:
+        try:
+            arch_ctxs = resolve_config(
+                {
+                    "chromium_src": chromium_src,
+                    "arch": eff_arch,
+                    "build_type": eff_build_type,
+                    "product": eff_product,
+                }
+            )
+        except ValueError as e:
+            log_error(str(e))
+            raise typer.Exit(1)
+        return [(ctx, steps) for ctx in arch_ctxs]
+
+    return _PlanProjection(header, [(eff_arch, steps)], build_runs)
+
+
+def _parse_steps_csv(value: Optional[str]) -> Tuple[str, ...]:
+    if not value:
+        return ()
+    return tuple(s.strip() for s in value.split(",") if s.strip())
+
+
+def _print_plan(projection: _PlanProjection) -> None:
+    """Print the composed steps + required env; env values never shown."""
+    for line in projection.header:
+        typer.echo(line)
+    for arch_name, steps in projection.arch_plans:
+        typer.echo("")
+        typer.echo(f"{arch_name} ({len(steps)} steps):")
+        for i, name in enumerate(steps, start=1):
+            typer.echo(f"  {i:2}. {name}")
+        env_vars = required_env(steps)
+        typer.echo("")
+        if not env_vars:
+            typer.echo(f"Required env ({arch_name}): none")
+            continue
+        typer.echo(f"Required env ({arch_name}):")
+        for var in env_vars:
+            marker = "✓ set" if os.environ.get(var) else "✗ MISSING"
+            typer.echo(f"  {var}  {marker}")
 
 
 def _resolve_profile_path(profile: Path) -> Path:

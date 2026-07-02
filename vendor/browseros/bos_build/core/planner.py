@@ -34,6 +34,7 @@ class Switches:
     download: Optional[bool] = None
     sign: Optional[bool] = None
     upload: Optional[bool] = None
+    skip: Tuple[str, ...] = ()
 
     def resolved(self) -> "Switches":
         """Fill None fields with the preset's defaults."""
@@ -62,6 +63,15 @@ class Switches:
                 f"Invalid provision mode '{resolved.provision}'. "
                 f"Valid: {', '.join(PROVISION_MODES)}"
             )
+        registry = all_steps()
+        for name in resolved.skip:
+            # isinstance guards yaml surprises like `skip: [upload: true]`
+            # (a dict entry), which would TypeError on the dict lookup.
+            if not isinstance(name, str) or name not in registry:
+                raise ValueError(
+                    f"Unknown step '{name}' in skip. "
+                    f"Valid steps: {', '.join(sorted(registry))}"
+                )
         return resolved
 
     @property
@@ -91,8 +101,10 @@ def plan(switches: Switches, arch: str, platform: Optional[str] = None) -> List[
     switches = switches.resolved()
 
     if switches.preset == "debug":
-        return _plan_debug(switches, platform)
-    return _plan_release(switches, platform)
+        steps = _plan_debug(switches, platform)
+    else:
+        steps = _plan_release(switches, platform)
+    return _apply_skip(steps, switches.skip)
 
 
 def plan_runs(
@@ -109,7 +121,11 @@ def plan_runs(
     if "universal" in switches.architectures:
         if len(switches.architectures) > 1:
             raise ValueError("universal cannot be combined with other architectures")
-        return _plan_universal_runs(switches, platform)
+        # plan() applies skip itself; the universal composer doesn't.
+        return [
+            (arch, _apply_skip(steps, switches.skip))
+            for arch, steps in _plan_universal_runs(switches, platform)
+        ]
     return [(arch, plan(switches, arch, platform)) for arch in switches.architectures]
 
 
@@ -241,6 +257,57 @@ def _provision_steps(switches: Switches) -> List[str]:
     return steps
 
 
+def _apply_skip(steps: List[str], skip: Tuple[str, ...]) -> List[str]:
+    """Subtract skip AFTER composition: removing a step never re-triggers
+    composition rules (skipping sign_windows won't add mini_installer)."""
+    if not skip:
+        return steps
+    skipped = set(skip)
+    return [s for s in steps if s not in skipped]
+
+
+def slice_from(steps: List[str], start: str) -> List[str]:
+    """Resume slice for --from: one run's composed plan from `start` onward.
+
+    Applied after skip subtraction, so resuming from a skipped step fails
+    with the absent-step error.
+    """
+    registry = all_steps()
+    if start not in registry:
+        raise ValueError(
+            f"Unknown step '{start}'. Valid steps: {', '.join(sorted(registry))}"
+        )
+    if start not in steps:
+        raise ValueError(
+            f"Step '{start}' is not in the composed plan "
+            f"({' → '.join(steps)}); nothing to resume from"
+        )
+    return steps[steps.index(start) :]
+
+
+def slice_runs_from(
+    runs: List[Tuple[str, List[str]]], start: str
+) -> List[Tuple[str, List[str]]]:
+    """Resume the run TIMELINE from `start`: runs execute sequentially, so
+    earlier runs are dropped, the first run containing the step is sliced,
+    and later runs stay whole (a universal merge failure resumes with just
+    merge_universal → sign → package, no recompiles).
+    """
+    registry = all_steps()
+    if start not in registry:
+        raise ValueError(
+            f"Unknown step '{start}'. Valid steps: {', '.join(sorted(registry))}"
+        )
+    for i, (arch, steps) in enumerate(runs):
+        if start in steps:
+            return [(arch, slice_from(steps, start))] + runs[i + 1 :]
+    composed = "; ".join(f"{arch}: {' → '.join(steps)}" for arch, steps in runs)
+    raise ValueError(
+        f"Step '{start}' is not in the composed plan "
+        f"({composed}); nothing to resume from"
+    )
+
+
 def required_env(step_names: List[str]) -> List[str]:
     """Union of env vars declared by the selected steps, in step order."""
     registry = all_steps()
@@ -255,11 +322,27 @@ def required_env(step_names: List[str]) -> List[str]:
     return seen
 
 
-def load_profile(path: Path) -> Switches:
-    """Load a flat profile file into Switches.
+@dataclass(frozen=True)
+class Profile:
+    """Parsed profile file: saved switches, or an explicit modules pipeline."""
 
-    A profile is saved CLI switches, nothing else — no module lists,
-    no inheritance. Unknown keys are rejected so typos fail loudly.
+    switches: Switches
+    modules: Optional[Tuple[str, ...]] = None
+    build_type: Optional[str] = None
+
+
+# Planner-owned keys: meaningless once modules: enumerates the pipeline.
+_PLANNER_KEYS = ("preset", "clean", "provision", "download", "sign", "upload", "skip")
+
+
+def load_profile(path: Path) -> Profile:
+    """Load a profile file.
+
+    The default shape is saved CLI switches — no module lists, no
+    inheritance. `modules:` is the explicit enumerated-pipeline opt-in
+    ("you own this list now"): it replaces the planner, so every
+    planner-owned key is rejected beside it and only product/arch/
+    build_type remain. Unknown keys are rejected so typos fail loudly.
     """
     with open(path) as f:
         data = yaml.safe_load(f) or {}
@@ -267,7 +350,7 @@ def load_profile(path: Path) -> Switches:
     if not isinstance(data, dict):
         raise ValueError(f"Profile {path} must be a flat mapping")
 
-    known = {"preset", "product", "arch", "clean", "provision", "download", "sign", "upload"}
+    known = {"product", "arch", "modules", "build_type", *_PLANNER_KEYS}
     unknown = set(data) - known
     if unknown:
         raise ValueError(
@@ -275,25 +358,76 @@ def load_profile(path: Path) -> Switches:
             f"Valid: {', '.join(sorted(known))}"
         )
 
-    arch = data.get("arch")
-    architectures: Tuple[str, ...]
-    if arch is None:
-        architectures = ()
-    elif isinstance(arch, list):
-        architectures = tuple(arch)
-    else:
-        architectures = (arch,)
+    if "modules" in data:
+        return _load_modules_profile(path, data)
 
-    return Switches(
-        preset=data.get("preset", "release"),
-        product=data.get("product", "browseros"),
-        architectures=architectures,
-        clean=data.get("clean"),
-        provision=data.get("provision"),
-        download=data.get("download"),
-        sign=data.get("sign"),
-        upload=data.get("upload"),
+    if "build_type" in data:
+        raise ValueError(
+            f"Profile key 'build_type' in {path} requires 'modules:' — "
+            "the preset owns build type otherwise"
+        )
+
+    return Profile(
+        switches=Switches(
+            preset=data.get("preset", "release"),
+            product=data.get("product", "browseros"),
+            architectures=_as_tuple(data.get("arch")),
+            clean=data.get("clean"),
+            provision=data.get("provision"),
+            download=data.get("download"),
+            sign=data.get("sign"),
+            upload=data.get("upload"),
+            skip=_as_tuple(data.get("skip")),
+        )
     )
+
+
+def _load_modules_profile(path: Path, data: Dict[str, Any]) -> Profile:
+    banned = [k for k in _PLANNER_KEYS if k in data]
+    if banned:
+        raise ValueError(
+            f"Profile keys {', '.join(banned)} in {path} do not combine with "
+            "'modules:' — a modules profile owns its pipeline"
+        )
+
+    modules = data["modules"]
+    if (
+        not isinstance(modules, list)
+        or not modules
+        or not all(isinstance(m, str) for m in modules)
+    ):
+        raise ValueError(
+            f"Profile key 'modules' in {path} must be a non-empty list of step names"
+        )
+
+    if isinstance(data.get("arch"), list):
+        raise ValueError(
+            f"Profile key 'arch' in {path} must be a single value with "
+            "'modules:' — modules profiles are single-arch"
+        )
+
+    build_type = data.get("build_type")
+    if build_type is not None and build_type not in ("debug", "release"):
+        raise ValueError(
+            f"Invalid build_type '{build_type}' in {path}. Valid: debug, release"
+        )
+
+    return Profile(
+        switches=Switches(
+            product=data.get("product", "browseros"),
+            architectures=_as_tuple(data.get("arch")),
+        ),
+        modules=tuple(modules),
+        build_type=build_type,
+    )
+
+
+def _as_tuple(value: Any) -> Tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, list):
+        return tuple(value)
+    return (value,)
 
 
 def preflight(step_names: List[str], platform: Optional[str] = None, ctx=None) -> None:
