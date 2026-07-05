@@ -29,7 +29,6 @@ import { migrateMcpUrls } from './lib/migrate-mcp-urls'
 import { setLocalServerUrl } from './local-server-url'
 import { createServer } from './server'
 import { healClaudeCodeTransportTags } from './services/claude-code-heal'
-import { healLegacyBrowserosEntries } from './services/legacy-mcp-sweep'
 import { startScreencastPoller } from './services/screencast-poller'
 import { publicMcpUrl } from './shared/mcp-url'
 
@@ -114,14 +113,6 @@ async function start(): Promise<void> {
         logger.info('claude-code transport tag heal finished', { healed })
       } catch (err: unknown) {
         logger.error('claude-code transport tag heal failed unexpectedly', {
-          error: err instanceof Error ? err.message : String(err),
-        })
-      }
-      try {
-        const healed = await healLegacyBrowserosEntries()
-        logger.info('legacy BrowserOS MCP entry heal finished', { healed })
-      } catch (err: unknown) {
-        logger.error('legacy BrowserOS MCP entry heal failed unexpectedly', {
           error: err instanceof Error ? err.message : String(err),
         })
       }

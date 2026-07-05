@@ -13,7 +13,6 @@ import type {
   McpServerSpec,
 } from 'agent-mcp-manager'
 import { logger } from '../lib/logger'
-import { sweepLegacyBrowserosEntries } from './legacy-mcp-sweep'
 
 interface RelinkManagedServerOptions {
   mgr: McpManager
@@ -52,15 +51,6 @@ export async function relinkManagedServer({
       ...(allowOverwrite ? { allowOverwrite } : {}),
     })
     await tagClaudeCodeHttpEntry(agent, spec, serverName, link.configPath)
-    await sweepLegacyBrowserosEntries(agent, link.configPath, { mgr }).catch(
-      (err: unknown) =>
-        logger.warn('legacy BrowserOS MCP sweep failed after relink', {
-          agent,
-          serverName,
-          configPath: link.configPath,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-    )
     return link
   } catch (err) {
     if (existingLink && previousSpec) {
