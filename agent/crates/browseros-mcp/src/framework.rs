@@ -4,7 +4,7 @@ use crate::{response::ToolResponse, tools};
 use browseros_core::{BrowserSession, CoreError, PageId, WindowId};
 use futures_util::future::BoxFuture;
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool, ToolAnnotations};
-use schemars::JsonSchema;
+use schemars::{JsonSchema, generate::SchemaSettings};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::{collections::HashSet, path::PathBuf, sync::Arc};
@@ -226,22 +226,149 @@ where
     }
 }
 
+/// Builds the normalized JSON object schema used for MCP tool arguments.
 pub fn input_schema<T>() -> Arc<JsonObject>
 where
     T: JsonSchema + std::any::Any,
 {
-    rmcp::handler::server::tool::schema_for_input::<T>().unwrap_or_else(|err| {
-        panic!("invalid BrowserOS MCP input schema: {err}");
-    })
+    schema_for_mcp_tool::<T>("inputSchema")
 }
 
+/// Builds the normalized JSON object schema used for MCP structured output.
 pub fn output_schema<T>() -> Arc<JsonObject>
 where
     T: JsonSchema + std::any::Any,
 {
-    rmcp::handler::server::tool::schema_for_output::<T>().unwrap_or_else(|err| {
-        panic!("invalid BrowserOS MCP output schema: {err}");
+    schema_for_mcp_tool::<T>("outputSchema")
+}
+
+/// Pins schema generation before applying compatibility rewrites for strict MCP clients.
+fn schema_for_mcp_tool<T>(purpose: &str) -> Arc<JsonObject>
+where
+    T: JsonSchema + std::any::Any,
+{
+    let schema = browseros_schema_settings()
+        .into_generator()
+        .into_root_schema_for::<T>();
+    let Value::Object(mut object) = serde_json::to_value(schema).unwrap_or_else(|err| {
+        panic!("invalid BrowserOS MCP {purpose}: schema should serialize: {err}");
+    }) else {
+        panic!("invalid BrowserOS MCP {purpose}: schema root should be an object");
+    };
+
+    match object.get("type") {
+        Some(Value::String(schema_type)) if schema_type == "object" => {}
+        Some(Value::String(schema_type)) => {
+            panic!(
+                "invalid BrowserOS MCP {purpose}: root type should be object, got {schema_type}"
+            );
+        }
+        Some(schema_type) => {
+            panic!(
+                "invalid BrowserOS MCP {purpose}: root type should be a string, got {schema_type}"
+            );
+        }
+        None => {
+            panic!("invalid BrowserOS MCP {purpose}: root type is missing");
+        }
+    }
+
+    object.remove("title");
+    object.remove("description");
+    normalize_schema_object(object)
+}
+
+fn browseros_schema_settings() -> SchemaSettings {
+    SchemaSettings::draft2020_12().with(|settings| {
+        settings.inline_subschemas = true;
     })
+}
+
+/// Rewrites generated JSON Schema into the object-only form expected by strict MCP clients.
+fn normalize_schema_object(schema: JsonObject) -> Arc<JsonObject> {
+    let mut value = Value::Object(schema);
+    normalize_schema_value(&mut value);
+    if let Some(path) = first_boolean_path(&value) {
+        panic!("unsupported boolean value in BrowserOS MCP schema at {path}");
+    }
+    match value {
+        Value::Object(object) => Arc::new(object),
+        _ => panic!("BrowserOS MCP schema root should remain an object"),
+    }
+}
+
+/// Rewrites boolean schemas and removes boolean default annotations before MCP serialization.
+fn normalize_schema_value(value: &mut Value) {
+    match value {
+        Value::Bool(true) => *value = json!({}),
+        Value::Bool(false) => *value = json!({ "not": {} }),
+        Value::Array(_) => {}
+        Value::Object(object) => {
+            if object.get("default").is_some_and(Value::is_boolean) {
+                object.remove("default");
+            }
+
+            for key in [
+                "additionalItems",
+                "additionalProperties",
+                "contains",
+                "contentSchema",
+                "else",
+                "if",
+                "items",
+                "not",
+                "propertyNames",
+                "then",
+                "unevaluatedItems",
+                "unevaluatedProperties",
+            ] {
+                if let Some(value) = object.get_mut(key) {
+                    normalize_schema_value(value);
+                }
+            }
+
+            for key in ["allOf", "anyOf", "oneOf", "prefixItems"] {
+                if let Some(Value::Array(items)) = object.get_mut(key) {
+                    for item in items {
+                        normalize_schema_value(item);
+                    }
+                }
+            }
+
+            for key in [
+                "$defs",
+                "definitions",
+                "dependentSchemas",
+                "patternProperties",
+                "properties",
+            ] {
+                if let Some(Value::Object(schemas)) = object.get_mut(key) {
+                    for value in schemas.values_mut() {
+                        normalize_schema_value(value);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn first_boolean_path(value: &Value) -> Option<String> {
+    first_boolean_path_inner(value, "$".to_string())
+}
+
+fn first_boolean_path_inner(value: &Value, path: String) -> Option<String> {
+    match value {
+        Value::Bool(_) => Some(path),
+        Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .find_map(|(index, item)| first_boolean_path_inner(item, format!("{path}[{index}]"))),
+        Value::Object(object) => object
+            .iter()
+            .find_map(|(key, value)| first_boolean_path_inner(value, format!("{path}.{key}"))),
+        _ => None,
+    }
 }
 
 #[must_use]
