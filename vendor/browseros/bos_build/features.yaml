@@ -30,9 +30,8 @@ features:
   branding:
     description: "chore: browseros branding and identity"
     files:
-      # Product-generated identity outputs (BRANDING, updater branding,
-      # string replacements, chrome/VERSION, and logo binaries) are owned by
-      # bos_build product overlays/resources and filtered by bpatch annotate.
+      # Generated branding outputs are owned by bos_build overlays/resources;
+      # list paths here only when a chromium_patches patch exists on disk.
       # Version info
       - base/version_info/BUILD.gn
       - base/version_info/version_info.h
