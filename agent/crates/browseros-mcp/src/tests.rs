@@ -4,11 +4,12 @@ use crate::{
     output_file::create_browser_output_file_access,
     response::ToolResponse,
     service::{BROWSER_MCP_INSTRUCTIONS, BrowserMcpService, BrowserMcpServiceOptions},
-    tools::{grep, wait},
+    tools::{grep, snapshot, wait},
 };
 use browseros_cdp::{CdpError, CdpEvent};
 use browseros_core::{
-    BrowserSession, BrowserSessionHooks, CdpConnection, PageId, SessionId, snapshot::SnapshotDiff,
+    BrowserSession, BrowserSessionHooks, CdpConnection, PageId, SessionId,
+    snapshot::{AxNode, AxValue, SnapshotDiff},
 };
 use futures_util::future::BoxFuture;
 use rmcp::handler::server::ServerHandler;
@@ -160,6 +161,19 @@ impl CdpConnection for HarnessConnection {
                 | "Runtime.runIfWaitingForDebugger"
                 | "Target.setAutoAttach"
                 | "Page.handleJavaScriptDialog" => Ok(json!({})),
+                "Page.getFrameTree" => Ok(json!({
+                    "frameTree": {
+                        "frame": {
+                            "id": "main",
+                            "loaderId": "loader-1",
+                            "url": "https://example.test/"
+                        }
+                    }
+                })),
+                "Accessibility.getFullAXTree" => {
+                    assert_eq!(params, json!({}));
+                    Ok(json!({ "nodes": snapshot_nodes() }))
+                }
                 "Runtime.evaluate" => Ok(json!({ "result": { "value": 0 } })),
                 "Input.dispatchKeyEvent" => {
                     if self.emit_console_on_input.swap(false, Ordering::SeqCst) {
@@ -231,6 +245,41 @@ fn harness_tab() -> Value {
         "windowId": 1,
         "index": 0
     })
+}
+
+fn snapshot_nodes() -> Vec<AxNode> {
+    vec![
+        ax("1", "RootWebArea", &["2"]),
+        ax("2", "main", &["3", "4", "5"]),
+        named_ax("3", "paragraph", "Intro", &[]),
+        named_ax("4", "section", "Actions", &["6"]),
+        named_ax("5", "heading", "Title", &[]),
+        button_ax("6", "Save", 10),
+    ]
+}
+
+fn ax(node_id: &str, role: &str, children: &[&str]) -> AxNode {
+    AxNode {
+        node_id: node_id.to_string(),
+        role: Some(AxValue::role(role)),
+        child_ids: (!children.is_empty())
+            .then(|| children.iter().map(|child| (*child).to_string()).collect()),
+        ..AxNode::default()
+    }
+}
+
+fn named_ax(node_id: &str, role: &str, name: &str, children: &[&str]) -> AxNode {
+    AxNode {
+        name: Some(AxValue::string(name)),
+        ..ax(node_id, role, children)
+    }
+}
+
+fn button_ax(node_id: &str, name: &str, backend_id: i64) -> AxNode {
+    AxNode {
+        backend_dom_node_id: Some(backend_id),
+        ..named_ax(node_id, "button", name, &[])
+    }
 }
 
 async fn harness_ctx() -> (ToolCtx, Arc<HarnessConnection>, u32) {
@@ -669,6 +718,33 @@ async fn snapshot_formatter_wraps_small_page_content() {
         formatted.structured.get("writtenToFile"),
         Some(&json!(false))
     );
+}
+
+#[tokio::test]
+async fn snapshot_tool_plumbs_mode_depth_and_structured_fields() {
+    let (ctx, _connection, page) = harness_ctx().await;
+    let result = execute_tool(
+        &snapshot::definition(),
+        json!({ "page": page, "mode": "interactive", "depth": 1.9 }),
+        &ctx,
+    )
+    .await
+    .unwrap_or_else(|err| panic!("snapshot should execute: {err}"));
+
+    let text = result_text(&result);
+    assert!(text.contains("- main"));
+    assert!(text.contains("  - section \"Actions\""));
+    assert!(text.contains("  - heading \"Title\""));
+    assert!(!text.contains("button \"Save\""));
+    assert!(!text.contains("paragraph \"Intro\""));
+
+    let structured = result
+        .structured_content
+        .unwrap_or_else(|| panic!("snapshot should return structured content"));
+    assert_eq!(structured.get("page"), Some(&json!(page)));
+    assert_eq!(structured.get("mode"), Some(&json!("interactive")));
+    assert_eq!(structured.get("depth"), Some(&json!(1)));
+    assert_eq!(structured.get("writtenToFile"), Some(&json!(false)));
 }
 
 #[tokio::test]
