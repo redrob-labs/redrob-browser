@@ -60,7 +60,7 @@ async fn test_app_with_options(
         dev_mode: false,
         auth_token: None,
     });
-    let state = AppState::new_with_home(config, None, dir.path().join("home")).await?;
+    let state = AppState::new_with_home(config, dir.path().join("home")).await?;
     let browser_task = if start_browser {
         Some(state.browser.start())
     } else {
@@ -390,6 +390,44 @@ async fn health_survives_cdp_down() -> anyhow::Result<()> {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ok");
     assert_eq!(body["cdp"]["connected"], false);
+    Ok(())
+}
+
+#[tokio::test]
+async fn system_shutdown_preserves_body_and_requests_runtime_teardown() -> anyhow::Result<()> {
+    let app = test_app().await?;
+    app.state
+        .sessions
+        .insert_for_testing(test_session(
+            SessionId::new("shutdown-session"),
+            "shutdown-agent",
+            "shutdown-convo",
+        ))
+        .await;
+    let request = Request::builder()
+        .method("POST")
+        .uri("/system/shutdown")
+        .header(header::HOST, "localhost")
+        .body(Body::empty())?;
+
+    let response = app.router.clone().oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    assert_eq!(bytes.as_ref(), br#"{"drainedSessions":1,"status":"ok"}"#);
+    tokio::time::timeout(Duration::from_secs(1), app.state.shutdown.requested()).await?;
+
+    let retry = Request::builder()
+        .method("POST")
+        .uri("/system/shutdown")
+        .header(header::HOST, "localhost")
+        .body(Body::empty())?;
+    let retry_response = app.router.clone().oneshot(retry).await?;
+    let retry_bytes = to_bytes(retry_response.into_body(), usize::MAX).await?;
+    assert_eq!(
+        retry_bytes.as_ref(),
+        br#"{"drainedSessions":0,"status":"ok"}"#
+    );
+    assert_eq!(app.state.sessions.shutdown().await?, 0);
     Ok(())
 }
 

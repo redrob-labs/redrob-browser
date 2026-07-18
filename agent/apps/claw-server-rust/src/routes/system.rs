@@ -39,13 +39,7 @@ pub(super) async fn shutdown(
     State(state): State<AppState>,
 ) -> AppResult<WireJson<ShutdownResponse>> {
     let drained = state.sessions.shutdown().await?;
-    state.audit.drain_claim_writes().await;
-    state.recordings.close().await;
-    state.screencast.stop();
-    state.browser.stop();
-    if let Some(tx) = state.shutdown.lock().await.take() {
-        let _ = tx.send(());
-    }
+    state.shutdown.request();
     Ok(WireJson(ShutdownResponse {
         drained_sessions: drained,
         status: "ok",
