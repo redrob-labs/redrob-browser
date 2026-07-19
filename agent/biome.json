@@ -11,7 +11,9 @@
       "**",
       "!.scripts",
       "!**/*.svg",
-      "!packages/claw-api/src/generated"
+      "!packages/claw-api/src/generated",
+      "!contracts/claw-mcp/fixtures/pages",
+      "!crates/browseros-core/tests/data/captured"
     ]
   },
   "formatter": {
