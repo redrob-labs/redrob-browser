@@ -9,8 +9,8 @@ use claw_server_rust::{
     config::Config,
     identity::{ClientIdentity, ConversationIdentity},
     ids::{ConvoId, ProfileId, SessionId},
-    sessions::Session,
-    tabs::{PageOwnership, activity::RecordToolInput},
+    services::sessions::Session,
+    services::{cockpit::RecordToolInput, sessions::PageOwnership},
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -414,7 +414,11 @@ async fn mcp_initialize_list_guard_audit_and_delete() -> anyhow::Result<()> {
             .contains("javascript")
     );
 
-    let dispatches = app.state.audit.list_dispatches(Default::default()).await?;
+    let dispatches = app
+        .state
+        .audit_log
+        .list_dispatches(Default::default())
+        .await?;
     assert!(
         dispatches.rows.is_empty(),
         "guard rejections must skip audit effects"
@@ -678,14 +682,14 @@ async fn mcp_tabs_new_roundtrips_through_mock_cdp() -> anyhow::Result<()> {
 
     let screencast_task = app
         .state
-        .screencast
+        .previews
         .clone()
         .start(app.state.browser.clone(), app.state.tab_activity.clone());
     let _ = request_json(&app.router, "GET", "/api/v1/sessions?status=live", None).await?;
     for _ in 0..50 {
         if app
             .state
-            .screencast
+            .previews
             .frame_for(&session_id, 1, "target-1")
             .await
             .is_some()
@@ -696,7 +700,7 @@ async fn mcp_tabs_new_roundtrips_through_mock_cdp() -> anyhow::Result<()> {
     }
     assert!(
         app.state
-            .screencast
+            .previews
             .frame_for(&session_id, 1, "target-1")
             .await
             .is_some()
@@ -722,7 +726,11 @@ async fn mcp_tabs_new_roundtrips_through_mock_cdp() -> anyhow::Result<()> {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(wait_body["result"]["isError"], false);
 
-    let dispatches = app.state.audit.list_dispatches(Default::default()).await?;
+    let dispatches = app
+        .state
+        .audit_log
+        .list_dispatches(Default::default())
+        .await?;
     let rows = &dispatches.rows;
     assert!(
         rows.iter()
@@ -734,7 +742,7 @@ async fn mcp_tabs_new_roundtrips_through_mock_cdp() -> anyhow::Result<()> {
         rows.iter().any(|row| row.has_screenshot),
         "no dispatch had a persisted screenshot"
     );
-    app.state.screencast.stop();
+    app.state.previews.stop();
     screencast_task.await?;
     drop(mock);
     Ok(())
@@ -862,7 +870,11 @@ async fn screencast_fallback_flag_disables_fallback_screenshots() -> anyhow::Res
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["result"]["isError"], false, "tabs_new body: {body:?}");
 
-    let dispatches = app.state.audit.list_dispatches(Default::default()).await?;
+    let dispatches = app
+        .state
+        .audit_log
+        .list_dispatches(Default::default())
+        .await?;
     let rows = &dispatches.rows;
     assert_eq!(rows.len(), 1);
     assert!(!rows[0].has_screenshot);
@@ -937,7 +949,11 @@ async fn canonical_cancel_endpoint_aborts_in_flight_dispatch() -> anyhow::Result
     );
     assert!(wait_body["result"].get("structuredContent").is_none());
 
-    let dispatches = app.state.audit.list_dispatches(Default::default()).await?;
+    let dispatches = app
+        .state
+        .audit_log
+        .list_dispatches(Default::default())
+        .await?;
     let cancellation_meta = dispatches
         .rows
         .iter()
@@ -1026,7 +1042,7 @@ async fn canonical_live_sessions_enrich_through_profile_identity() -> anyhow::Re
             tool_name: "tabs".to_string(),
         })
         .await;
-    app.state.audit.enqueue_claim_tab_for_session(
+    app.state.session_tabs.enqueue_claim_tab_for_session(
         101,
         Some("target-exact".to_string()),
         stored_session.id().as_str().to_string(),
@@ -1045,7 +1061,7 @@ async fn canonical_live_sessions_enrich_through_profile_identity() -> anyhow::Re
             tool_name: "tabs".to_string(),
         })
         .await;
-    app.state.audit.enqueue_claim_tab_for_session(
+    app.state.session_tabs.enqueue_claim_tab_for_session(
         102,
         Some("target-fallback".to_string()),
         ephemeral_session.id().as_str().to_string(),
@@ -1105,7 +1121,7 @@ async fn live_projection_filters_external_close_and_screencast_frame() -> anyhow
             tool_name: "snapshot".to_string(),
         })
         .await;
-    app.state.audit.enqueue_claim_tab_for_session(
+    app.state.session_tabs.enqueue_claim_tab_for_session(
         101,
         Some("target-old".to_string()),
         session.id().as_str().to_string(),
@@ -1113,12 +1129,12 @@ async fn live_projection_filters_external_close_and_screencast_frame() -> anyhow
         1,
     );
     app.state
-        .screencast
+        .previews
         .cache_frame(
             session.id().as_str(),
             1,
             "target-old",
-            claw_server_rust::tabs::activity::ScreencastFrame {
+            claw_server_rust::services::cockpit::ScreencastFrame {
                 jpeg_base64: "/9g=".to_string(),
                 captured_at: 123,
             },
@@ -1153,24 +1169,24 @@ async fn live_projection_filters_external_close_and_screencast_frame() -> anyhow
 
     let screencast_task = app
         .state
-        .screencast
+        .previews
         .clone()
         .start(app.state.browser.clone(), app.state.tab_activity.clone());
     for _ in 0..100 {
         if app
             .state
-            .screencast
+            .previews
             .frame_for(session.id().as_str(), 1, "target-old")
             .await
             .is_none()
         {
-            app.state.screencast.stop();
+            app.state.previews.stop();
             screencast_task.await?;
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    app.state.screencast.stop();
+    app.state.previews.stop();
     screencast_task.await?;
     anyhow::bail!("stale screencast frame was not garbage-collected")
 }
@@ -1197,7 +1213,7 @@ async fn live_projection_refreshes_metadata_and_rejects_stale_preview_target() -
             tool_name: "navigate".to_string(),
         })
         .await;
-    app.state.audit.enqueue_claim_tab_for_session(
+    app.state.session_tabs.enqueue_claim_tab_for_session(
         101,
         Some("target-old".to_string()),
         session.id().as_str().to_string(),
@@ -1224,12 +1240,12 @@ async fn live_projection_refreshes_metadata_and_rejects_stale_preview_target() -
         "After navigation"
     );
     app.state
-        .screencast
+        .previews
         .cache_frame(
             session.id().as_str(),
             1,
             "target-old",
-            claw_server_rust::tabs::activity::ScreencastFrame {
+            claw_server_rust::services::cockpit::ScreencastFrame {
                 jpeg_base64: "/9g=".to_string(),
                 captured_at: 123,
             },
@@ -1340,7 +1356,7 @@ async fn live_session_reads_wake_polled_screenshot_previews() -> anyhow::Result<
                 tool_name: "tabs".to_string(),
             })
             .await;
-        app.state.audit.enqueue_claim_tab_for_session(
+        app.state.session_tabs.enqueue_claim_tab_for_session(
             i64::from(page_id) + 100,
             Some(target_id.to_string()),
             session.id().as_str().to_string(),
@@ -1351,7 +1367,7 @@ async fn live_session_reads_wake_polled_screenshot_previews() -> anyhow::Result<
 
     let screencast_task = app
         .state
-        .screencast
+        .previews
         .clone()
         .start(app.state.browser.clone(), app.state.tab_activity.clone());
 
@@ -1420,7 +1436,7 @@ async fn live_session_reads_wake_polled_screenshot_previews() -> anyhow::Result<
         );
     }
 
-    app.state.screencast.stop();
+    app.state.previews.stop();
     screencast_task.await?;
     drop(mock);
     Ok(())
@@ -1444,7 +1460,7 @@ fn test_session(session_id: SessionId, agent_id: &str, slug: &str) -> Arc<Sessio
 
 async fn record_session_start(app: &TestApp, session: &Session) -> anyhow::Result<()> {
     app.state
-        .audit
+        .audit_log
         .record_session_start(
             session.id().as_str(),
             session.convo_id().as_str(),

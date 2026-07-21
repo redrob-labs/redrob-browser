@@ -2,7 +2,7 @@ use anyhow::Context;
 use axum::Router;
 use clap::Parser;
 use claw_server_rust::{
-    AppRuntime, AppState, ShutdownHandle, build_router, config::Cli, mcp::browser_mcp_service,
+    AppRuntime, AppState, ShutdownHandle, api::mcp::browser_mcp_service, build_router, config::Cli,
 };
 use rmcp::{serve_server, transport::stdio};
 use std::{future::Future, io, net::SocketAddr, sync::Arc};
@@ -39,7 +39,7 @@ async fn run(
     let state = runtime.state();
     state.browser.wait_for_initial_attempt().await;
     let initial_browser = state.browser.state();
-    if initial_browser.connected && !state.tab_targets.is_ready(initial_browser.epoch) {
+    if initial_browser.connected && !state.tab_registry.is_ready(initial_browser.epoch) {
         anyhow::bail!("failed to seed tab target identities before server startup");
     }
     if stdio_mode {
