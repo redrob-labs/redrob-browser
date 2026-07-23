@@ -10,7 +10,7 @@ pub enum Error {
     AgentNotSupported { agent: String },
 
     #[error(
-        "Entry \"{server_name}\" in {} was not written by agent-mcp-manager for agent \"{agent}\". Refusing to remove.",
+        "Entry \"{server_name}\" in {} was not written by harness-integrations for agent \"{agent}\". Refusing to remove.",
         config_path.display()
     )]
     ForeignEntry {
@@ -35,6 +35,12 @@ pub enum Error {
 
     #[error("Invalid MCP server spec: {reason}")]
     InvalidServerSpec { reason: String },
+
+    #[error("Invalid managed skill spec: {reason}")]
+    InvalidSkillSpec { reason: String },
+
+    #[error("Cannot resolve skill target for agent \"{agent}\": {reason}")]
+    UnresolvedSkillTarget { agent: AgentId, reason: String },
 
     #[error(
         "Agent \"{agent}\" does not appear to be installed on this machine. The library needs \"{}\" or its parent directory \"{}\" to exist before it can write an MCP entry. Install {agent} and launch it at least once, or pass an explicit \"configPath\" to write to a custom location.",
