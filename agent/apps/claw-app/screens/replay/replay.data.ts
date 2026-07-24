@@ -56,10 +56,10 @@ export interface ReplayData {
   site: string
   startedAt: string
   /**
-   * Raw session start in ms since epoch. Used by `buildTabView` to
-   * translate a frame's session-relative `t` into tab-relative time.
-   * `startedAt` above is the formatted date string; this is the
-   * machine-readable original.
+   * Raw session start in ms since epoch. `session-replay.ts` adds it to a
+   * frame's session-relative `t` to recover the absolute timestamp it needs to
+   * place actions against rrweb's absolute event stream. `startedAt` above is
+   * the formatted date string; this is the machine-readable original.
    */
   startedAtMs: number
   duration: string
@@ -75,16 +75,6 @@ export interface ReplayData {
   eventsLoaded: boolean
   eventsForTab: (tabId: number) => readonly ReplayEvent[]
 }
-
-// `buildTabView` and the `TabView` shape live in `./tab-view.ts` so
-// tests can import them without dragging the react-query-kit hook
-// graph. Re-exported here for backward-compat with existing
-// callers that reach it through this module.
-export {
-  buildTabView,
-  EMPTY_TAB_VIEW,
-  type TabView,
-} from './tab-view'
 
 export interface UseReplayDataResult {
   replay: ReplayData | null
@@ -319,7 +309,12 @@ const TOOL_TO_VERB: Record<string, ReplayVerb> = {
   evaluate: 'type',
 }
 
-function mapDispatchToFrame(
+/**
+ * One audit row as a replay frame. `t` is completion; `durationMs` rides along
+ * untouched so `session-replay.ts` can approximate when the tool began without
+ * a second source of truth for timing.
+ */
+export function mapDispatchToFrame(
   row: ToolDispatchRow,
   sessionStartMs: number,
   targetTabs: ReadonlyMap<string, number>,
@@ -336,6 +331,7 @@ function mapDispatchToFrame(
   const caption = buildCaption(row, verb, isError, cancelled)
   return {
     t,
+    durationMs: row.durationMs,
     kind,
     verb,
     node,
