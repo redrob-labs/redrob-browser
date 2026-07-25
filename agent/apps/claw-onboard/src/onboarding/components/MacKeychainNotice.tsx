@@ -7,9 +7,10 @@ export function MacKeychainNotice() {
       <Lock className="mt-0.5 size-[18px] shrink-0 text-blue" />
       <div className="text-[12.5px] text-ink-2 leading-[1.5]">
         <span className="font-semibold text-ink">macOS will ask</span> to read
-        Chrome&rsquo;s saved data. That&rsquo;s expected. Click{' '}
-        <span className="font-semibold text-ink">Allow</span> on the Keychain
-        prompt.
+        Chrome&rsquo;s saved data. That&rsquo;s expected &mdash; it&rsquo;s how
+        passwords and cookies get copied. Click{' '}
+        <span className="font-semibold text-ink">Always Allow</span> so it only
+        asks once.
       </div>
     </div>
   )
