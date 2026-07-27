@@ -149,7 +149,8 @@ describe('ImportStep', () => {
     // without fighting the JSX structure.
     expect(html).toContain('macOS will ask')
     expect(html).not.toContain('macOS will ask permission')
-    expect(html).toContain('Always Allow')
+    expect(html).toContain('Allow')
+    expect(html).not.toContain('Always Allow')
     expect(html).toContain('Copy logins from Work')
     expect(html).not.toContain('Chrome is open')
     expect(html).not.toContain('Quit Chrome for me')
