@@ -3,6 +3,7 @@ import { CockpitOnboarding } from '@/components/cockpit/CockpitOnboarding'
 import { RecentActivity } from '@/components/cockpit/RecentActivity'
 import { RunningGrid } from '@/components/cockpit/RunningGrid'
 import { SavedStatsBand } from '@/components/cockpit/SavedStatsBand'
+import { VideoRail } from '@/components/cockpit/VideoRail'
 import { isUserFacingHarness } from '@/components/harness/harness.types'
 import { useSessions } from '@/modules/api/audit.hooks'
 import { useCockpitStats } from '@/modules/api/cockpit.hooks'
@@ -42,6 +43,10 @@ export function Cockpit() {
     connections.data?.items.some(
       (c) => c.installed && isUserFacingHarness(c.harness),
     ) ?? false
+  const connectedHarnesses =
+    connections.data?.items
+      .filter((c) => c.installed && isUserFacingHarness(c.harness))
+      .map((c) => c.harness) ?? []
   const hasHistoricalActivity = (taskProbe.data?.pages ?? []).some(
     (p) => p.items.length > 0,
   )
@@ -69,7 +74,10 @@ export function Cockpit() {
   if (state !== 'ready') {
     return (
       <div className="mx-auto flex max-w-7xl flex-col px-8 pt-8 pb-16">
-        <CockpitOnboarding state={state} />
+        <CockpitOnboarding
+          state={state}
+          connectedHarnesses={connectedHarnesses}
+        />
       </div>
     )
   }
@@ -82,7 +90,7 @@ export function Cockpit() {
       ) : (
         <RunningGrid sessions={sessions} />
       )}
-      <RecentActivity />
+      <RecentActivity interlude={<VideoRail />} />
     </div>
   )
 }
