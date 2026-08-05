@@ -4,7 +4,11 @@ import { resolve } from 'node:path'
 
 const repoRoot = resolve(import.meta.dir, '../../../..')
 const workflow = readFileSync(
-  resolve(repoRoot, '.github/workflows/release-claw-server-rust.yml'),
+  resolve(repoRoot, '.github/workflows/release-claw-server.yml'),
+  'utf8',
+)
+const browserclawWorkflow = readFileSync(
+  resolve(repoRoot, '.github/workflows/release-browserclaw.yml'),
   'utf8',
 )
 const localStaging = readFileSync(
@@ -24,13 +28,19 @@ function section(start: string, end?: string): string {
   return workflow.slice(startIndex, endIndex === -1 ? undefined : endIndex)
 }
 
-describe('release-claw-server-rust workflow', () => {
+describe('release-claw-server workflow', () => {
   it('exposes the reusable build/finalize interface and outputs', () => {
     const call = section('  workflow_call:', '\npermissions:')
+    const publishOta = call.slice(
+      call.indexOf('      publish_ota:'),
+      call.indexOf('    outputs:'),
+    )
     expect(call).toContain('mode:')
     expect(call).toContain('default: "build"')
     expect(call).toContain('defer_finalize:')
     expect(call).toContain('default: false')
+    expect(call).toContain('publish_ota:')
+    expect(publishOta).toContain('default: false')
     expect(call).toContain(`value: ${dollar}{{ jobs.prepare.outputs.version }}`)
     expect(call).toContain(`value: ${dollar}{{ jobs.prepare.outputs.tag }}`)
     expect(call).toContain(
@@ -86,7 +96,7 @@ describe('release-claw-server-rust workflow', () => {
     expect(publish).toContain('actions/setup-python@v6')
     expect(publish).toContain('python -m pip install "boto3>=1.35.1,<2"')
     expect(publish).not.toContain('pip install --user')
-    expect(publish).toContain('Expected 5 Rust server resource zips')
+    expect(publish).toContain('Expected 5 BrowserClaw server resource zips')
     expect(publish).toContain('IfNoneMatch')
     expect(publish).toContain('status not in {409, 412}')
     expect(publish).toContain('Metadata={')
@@ -158,10 +168,27 @@ describe('release-claw-server-rust workflow', () => {
   it('gates OTA publication on successful finalization', () => {
     const ota = section('  publish-ota:', '  reflect-version:')
     expect(ota).toContain('- finalize')
+    expect(ota).toContain("github.event_name != 'push'")
     expect(ota).toContain('inputs.publish_ota == true')
+    expect(ota).toContain('uses: ./.github/workflows/publish-server-ota.yml')
+    expect(ota).toContain('product: browserclaw')
     expect(ota).toContain(
-      'uv run browseros ota server release --version "$VERSION" --channel alpha --product browserclaw',
+      `version: ${dollar}{{ needs.prepare.outputs.version }}`,
     )
+    expect(ota).toContain(
+      `release_sha: ${dollar}{{ needs.prepare.outputs.release_sha }}`,
+    )
+    expect(ota).toContain('secrets: inherit')
+  })
+
+  it('publishes and persists standalone alpha releases by default', () => {
+    const dispatch = section('  workflow_dispatch:', '  workflow_call:')
+    const ota = section('  publish-ota:', '  reflect-version:')
+    expect(dispatch).toContain('publish_ota:')
+    expect(dispatch).toContain('default: true')
+    expect(browserclawWorkflow.match(/publish_ota: false/g)).toHaveLength(2)
+    expect(ota).toContain('updates/server/appcast-claw-server.alpha.xml')
+    expect(ota).not.toContain('updates/server/appcast-server.alpha.xml')
   })
 
   it('reflects the version only after finalization', () => {

@@ -8,6 +8,10 @@ const workflow = readFileSync(
   resolve(repoRoot, '.github/workflows/release-server.yml'),
   'utf8',
 )
+const browserosWorkflow = readFileSync(
+  resolve(repoRoot, '.github/workflows/release-browseros.yml'),
+  'utf8',
+)
 const dollar = '$'
 
 function section(start: string, end?: string): string {
@@ -21,12 +25,18 @@ function section(start: string, end?: string): string {
 describe('release-server workflow', () => {
   it('exposes the reusable build/finalize interface and outputs', () => {
     const call = section('  workflow_call:', '\npermissions:')
+    const publishOta = call.slice(
+      call.indexOf('      publish_ota:'),
+      call.indexOf('    outputs:'),
+    )
     expect(call).toContain('mode:')
     expect(call).toContain('default: "build"')
     expect(call).toContain('defer_finalize:')
     expect(call).toContain('default: false')
     expect(call).toContain('version:')
     expect(call).toContain('ref:')
+    expect(call).toContain('publish_ota:')
+    expect(publishOta).toContain('default: false')
     expect(call).toContain('outputs:')
     expect(call).toContain(`value: ${dollar}{{ jobs.prepare.outputs.version }}`)
     expect(call).toContain(`value: ${dollar}{{ jobs.prepare.outputs.tag }}`)
@@ -91,8 +101,8 @@ describe('release-server workflow', () => {
     const latestIndex = finalize.indexOf('Copy versioned objects to latest')
     expect(verifyIndex).toBeGreaterThanOrEqual(0)
     expect(tagIndex).toBeGreaterThan(verifyIndex)
-    expect(publishIndex).toBeGreaterThan(tagIndex)
-    expect(latestIndex).toBeGreaterThan(publishIndex)
+    expect(latestIndex).toBeGreaterThan(tagIndex)
+    expect(publishIndex).toBeGreaterThan(latestIndex)
   })
 
   it('defers finalization for full releases and gates side effects on it', () => {
@@ -103,5 +113,26 @@ describe('release-server workflow', () => {
       '- finalize',
     )
     expect(section('  reflect-version:')).toContain('- finalize')
+    expect(browserosWorkflow.match(/publish_ota: false/g)).toHaveLength(2)
+  })
+
+  it('publishes and persists standalone alpha releases by default', () => {
+    const dispatch = section('  workflow_dispatch:', '  workflow_call:')
+    const ota = section('  publish-ota:', '  reflect-version:')
+    expect(dispatch).toContain('publish_ota:')
+    expect(dispatch).toContain('default: true')
+    expect(ota).toContain("github.event_name != 'push'")
+    expect(ota).toContain('inputs.publish_ota == true')
+    expect(ota).toContain('uses: ./.github/workflows/publish-server-ota.yml')
+    expect(ota).toContain('product: browseros')
+    expect(ota).toContain(
+      `version: ${dollar}{{ needs.prepare.outputs.version }}`,
+    )
+    expect(ota).toContain(
+      `release_sha: ${dollar}{{ needs.prepare.outputs.release_sha }}`,
+    )
+    expect(ota).toContain('secrets: inherit')
+    expect(ota).toContain('updates/server/appcast-server.alpha.xml')
+    expect(ota).not.toContain('updates/server/appcast-claw-server.alpha.xml')
   })
 })
