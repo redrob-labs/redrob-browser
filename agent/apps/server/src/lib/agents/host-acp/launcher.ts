@@ -12,7 +12,7 @@ import { HOST_ACP_ADAPTER_CONFIG } from './config'
 export type AcpLauncherSource = 'bundled-bun' | 'host-npx-fallback'
 
 export interface AcpLauncherResolution {
-  command: string
+  argv: string[]
   source: AcpLauncherSource
 }
 
@@ -30,16 +30,25 @@ export function resolveAcpSpawnCommand(
   input: ResolveAcpSpawnCommandInput,
 ): AcpLauncherResolution {
   const config = HOST_ACP_ADAPTER_CONFIG[input.agentType]
+  const platform = input.platform ?? process.platform
 
   const resolve = input.resolveBundledBun ?? resolveBundledBun
   const bunPath = resolve({
     resourcesDir: input.resourcesDir,
-    platform: input.platform,
+    platform,
   })
   if (bunPath) {
     return {
-      command: wrapCommandWithEnv(
-        `${quoteAcpCommandToken(bunPath)} x --bun --silent --package ${quoteAcpCommandToken(config.acpPackageSpec)} ${quoteAcpCommandToken(config.acpBin)}`,
+      argv: withSpawnEnvironment(
+        [
+          bunPath,
+          'x',
+          '--bun',
+          '--silent',
+          '--package',
+          config.acpPackageSpec,
+          config.acpBin,
+        ],
         {
           ...withBundledNativeBinaryPath({
             resourcesDir: input.resourcesDir,
@@ -47,31 +56,43 @@ export function resolveAcpSpawnCommand(
               bunPath,
               browserosDir: input.browserosDir,
               env: input.env,
-              platform: input.platform,
+              platform,
             }),
-            platform: input.platform,
+            platform,
           }),
           ...input.spawnEnv,
         },
+        platform,
+        bunPath,
       ),
       source: 'bundled-bun',
     }
   }
-  const hostPath = inheritedPath(input.env ?? process.env, input.platform)
+  const hostPath = inheritedPath(input.env ?? process.env, platform)
   const hostEnv = withBundledNativeBinaryPath({
     resourcesDir: input.resourcesDir,
     env: hostPath,
-    platform: input.platform,
+    platform,
   })
   const bundledNativePathAdded =
-    pathValue(hostEnv, input.platform) !== pathValue(hostPath, input.platform)
+    pathValue(hostEnv, platform) !== pathValue(hostPath, platform)
   const spawnEnv = {
     ...(bundledNativePathAdded ? hostEnv : {}),
     ...input.spawnEnv,
   }
+  const hostArgv =
+    platform === 'win32'
+      ? windowsNpxArgv([...config.acpArgv], input.env ?? process.env)
+      : [...config.acpArgv]
 
   return {
-    command: wrapCommandWithEnv(config.acpCommand, spawnEnv),
+    argv: withSpawnEnvironment(
+      hostArgv,
+      spawnEnv,
+      platform,
+      'node',
+      platform === 'win32',
+    ),
     source: 'host-npx-fallback',
   }
 }
@@ -99,18 +120,61 @@ function pathValue(
   return key ? env[key] : undefined
 }
 
-/** Quotes a token for acpx command splitting while preserving Windows backslashes. */
-function quoteAcpCommandToken(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`
+const ENVIRONMENT_LAUNCHER_SOURCE = [
+  "const { spawn } = require('node:child_process')",
+  "const payload = JSON.parse(Buffer.from(process.argv[1], 'base64url').toString('utf8'))",
+  "const child = spawn(payload.argv[0], payload.argv.slice(1), { env: { ...process.env, ...payload.env }, stdio: 'inherit', windowsHide: true, windowsVerbatimArguments: payload.windowsVerbatimArguments === true })",
+  "child.once('error', error => { console.error(error); process.exit(1) })",
+  "child.once('exit', code => process.exit(code ?? 1))",
+  "for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal))",
+].join(';')
+
+function withSpawnEnvironment(
+  argv: string[],
+  env: Record<string, string>,
+  platform: NodeJS.Platform,
+  environmentRunner: string,
+  windowsVerbatimArguments = false,
+): string[] {
+  const entries = Object.entries(env).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )
+  if (entries.length === 0 && !windowsVerbatimArguments) return argv
+  if (platform !== 'win32') {
+    return ['env', ...entries.map(([key, value]) => `${key}=${value}`), ...argv]
+  }
+  const payload = Buffer.from(
+    JSON.stringify({ argv, env, windowsVerbatimArguments }),
+  ).toString('base64url')
+  return [environmentRunner, '--eval', ENVIRONMENT_LAUNCHER_SOURCE, payload]
 }
 
-function wrapCommandWithEnv(
-  command: string,
-  env: Record<string, string>,
-): string {
-  const prefix = Object.entries(env)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `${key}=${quoteAcpCommandToken(value)}`)
-    .join(' ')
-  return prefix ? `env ${prefix} ${command}` : command
+const WINDOWS_CMD_META_CHARACTERS = /([()\][%!^"`<>&|;, *?])/gu
+const WINDOWS_CMD_BACKSLASH_QUOTE = /(?=(\\+?)?)\1"/gu
+const WINDOWS_CMD_TRAILING_BACKSLASH = /(?=(\\+?)?)\1$/gu
+
+function windowsNpxArgv(argv: string[], env: NodeJS.ProcessEnv): string[] {
+  const [command, ...args] = argv
+  if (!command) return argv
+  const shellCommand = [
+    command.replace(WINDOWS_CMD_META_CHARACTERS, '^$1'),
+    ...args.map((argument) =>
+      `"${argument
+        .replace(WINDOWS_CMD_BACKSLASH_QUOTE, '$1$1\\"')
+        .replace(WINDOWS_CMD_TRAILING_BACKSLASH, '$1$1')}"`.replace(
+        WINDOWS_CMD_META_CHARACTERS,
+        '^$1',
+      ),
+    ),
+  ].join(' ')
+  const comSpecKey = Object.keys(env).find(
+    (key) => key.toLowerCase() === 'comspec',
+  )
+  return [
+    (comSpecKey ? env[comSpecKey] : undefined) ?? 'cmd.exe',
+    '/d',
+    '/s',
+    '/c',
+    `"${shellCommand}"`,
+  ]
 }

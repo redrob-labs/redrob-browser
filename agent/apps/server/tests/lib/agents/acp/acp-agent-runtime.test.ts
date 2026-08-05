@@ -20,7 +20,9 @@ import type {
   AcpRuntimeTurn,
   AcpRuntimeTurnInput,
   AcpRuntimeTurnResult,
+  AcpSessionRecord,
 } from 'acpx/runtime'
+import { createFileSessionStore } from 'acpx/runtime'
 import type { UIMessage, UIMessageChunk } from 'ai'
 import {
   AcpAgentPreparationError,
@@ -72,11 +74,12 @@ async function runtimeFixture(options: {
   }
   const acpRuntime = options.runtime ?? new RecordingAcpRuntime()
   const providerSettings: AcpxProviderSettings[] = []
+  const stateDir = join(root, 'state')
   const runtime = new AcpAgentRuntime({
     serverPort: 9100,
     browserosDir: root,
     resourcesDir,
-    stateDir: join(root, 'state'),
+    stateDir,
     idleTimeoutMs: options.idleTimeoutMs,
     createProvider(settings) {
       providerSettings.push(settings)
@@ -84,7 +87,7 @@ async function runtimeFixture(options: {
     },
   })
 
-  return { acpRuntime, agent, providerSettings, runtime }
+  return { acpRuntime, agent, providerSettings, runtime, stateDir }
 }
 
 function textMessage(
@@ -216,6 +219,65 @@ describe('AcpAgentRuntime', () => {
     expect(fixture.providerSettings).toHaveLength(1)
   })
 
+  it('sends complete history when ACPX replaces a legacy session during prepare', async () => {
+    const fixture = await runtimeFixture({})
+    const sessionKey = 'acp:claude-agent-id:legacy-conversation'
+    const store = createFileSessionStore({ stateDir: fixture.stateDir })
+    const timestamp = new Date(0).toISOString()
+    const legacyRecord: AcpSessionRecord = {
+      schema: 'acpx.session.v1',
+      acpxRecordId: sessionKey,
+      acpSessionId: 'legacy-session',
+      agentCommand: 'npx -y @agentclientprotocol/claude-agent-acp@^0.31.0',
+      cwd: process.cwd(),
+      createdAt: timestamp,
+      lastUsedAt: timestamp,
+      lastSeq: 1,
+      eventLog: {
+        active_path: 'events.jsonl',
+        segment_count: 0,
+        max_segment_bytes: 1024,
+        max_segments: 1,
+      },
+      messages: [
+        { User: { id: 'legacy-user', content: [{ Text: 'old prompt' }] } },
+      ],
+      updated_at: timestamp,
+      cumulative_token_usage: {},
+      request_token_usage: {},
+    }
+    await store.save(legacyRecord)
+    fixture.acpRuntime.ensureSessionHook = async () => {
+      await store.save({
+        ...legacyRecord,
+        acpSessionId: 'fresh-session',
+        agentCommand: 'env PATH=/bin claude-agent-acp',
+        agentArgv: ['env', 'PATH=/bin', 'claude-agent-acp'],
+        messages: [],
+      })
+    }
+
+    await collect(
+      await fixture.runtime.stream({
+        agent: fixture.agent,
+        conversationId: 'legacy-conversation',
+        messages: [
+          textMessage('user-old', 'user', 'previous UI prompt'),
+          textMessage('assistant-old', 'assistant', 'previous UI answer'),
+          textMessage('user-new', 'user', 'new prompt'),
+        ],
+      }),
+    )
+
+    expect(fixture.acpRuntime.startTurnCalls[0]?.text).toContain(
+      'previous UI prompt',
+    )
+    expect(fixture.acpRuntime.startTurnCalls[0]?.text).toContain(
+      'previous UI answer',
+    )
+    expect(fixture.acpRuntime.startTurnCalls[0]?.text).toContain('new prompt')
+  })
+
   it('uses Codex config and falls back across full-access mode ids', async () => {
     const acpRuntime = new RecordingAcpRuntime({
       rejectedModes: ['agent-full-access'],
@@ -242,8 +304,11 @@ describe('AcpAgentRuntime', () => {
       { key: 'reasoning_effort', value: 'xhigh' },
     ])
     expect(fixture.providerSettings[0]?.sessionOptions).toEqual({})
-    const codexCommand =
+    const codexOverride =
       fixture.providerSettings[0]?.agentRegistryOverrides?.codex ?? ''
+    const codexCommand = Array.isArray(codexOverride)
+      ? codexOverride.join('\n')
+      : codexOverride
     expect(codexCommand).toContain('CODEX_CONFIG=')
     expect(codexCommand).toContain('"model":"gpt-5.4"')
     expect(codexCommand).toContain('"model_reasoning_effort":"xhigh"')
@@ -442,6 +507,7 @@ class RecordingAcpRuntime implements AcpRuntime {
     reason: string
     discardPersistentState?: boolean
   }> = []
+  ensureSessionHook?: (input: AcpRuntimeEnsureInput) => Promise<void>
   private turnIndex = 0
 
   constructor(private options: RecordingAcpRuntimeOptions = {}) {}
@@ -449,6 +515,7 @@ class RecordingAcpRuntime implements AcpRuntime {
   async ensureSession(input: AcpRuntimeEnsureInput): Promise<AcpRuntimeHandle> {
     this.ensureSessionCalls.push(input)
     if (this.options.ensureError) throw this.options.ensureError
+    await this.ensureSessionHook?.(input)
     return {
       sessionKey: input.sessionKey,
       backend: 'test',

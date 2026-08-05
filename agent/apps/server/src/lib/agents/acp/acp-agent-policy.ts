@@ -30,7 +30,7 @@ export interface AcpAgentPolicy {
   adapter: AcpAgentType
   cwd: string
   sessionKey: string
-  agentRegistryOverrides: Record<string, string>
+  agentRegistryOverrides: Record<string, string | string[]>
   mcpServers: AcpxMcpServerConfig[]
   sessionOptions: SessionAgentOptions
   fullAccessModeCandidates: readonly string[]
@@ -51,7 +51,7 @@ export async function buildAcpAgentPolicy(
     adapter: input.agent.type,
     cwd: input.agent.workingDirectory?.trim() || homedir(),
     sessionKey: deriveAcpSessionKey(input.agent.id, input.conversationId),
-    agentRegistryOverrides: { [input.agent.type]: launcher.command },
+    agentRegistryOverrides: { [input.agent.type]: launcher.argv },
     mcpServers: buildAcpMcpServers({
       serverPort: input.serverPort,
       conversationId: input.conversationId,
@@ -83,7 +83,7 @@ function buildSpawnEnvironment(
   if (agent.type !== 'codex') return undefined
 
   // acpx applies its snake_case record policy to SessionAgentOptions.env, so
-  // uppercase process variables must stay on the launcher command.
+  // uppercase process variables must stay at the process-launch boundary.
   return {
     CODEX_CONFIG: JSON.stringify(buildCodexConfig(agent, skill)),
     INITIAL_AGENT_MODE: 'agent-full-access',
