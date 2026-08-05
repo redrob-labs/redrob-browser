@@ -20,7 +20,7 @@ preflight
 ```
 
 BrowserOS prepares the BrowserOS server and agent extension. BrowserClaw
-prepares the Rust server, onboarding resources, and BrowserClaw extension.
+prepares the BrowserClaw server, onboarding resources, and BrowserClaw extension.
 Preparation uploads immutable versioned objects and leaves private GitHub
 drafts. Public component tags/releases and mutable server `latest` aliases are
 not created or moved until every selected browser build and the feed preview
@@ -261,8 +261,23 @@ separate explicit operation.
 Full browser releases pass `publish_ota=false`. A successful server finalizer
 publishes its component release and promotes versioned browser resources to the
 resource `latest` alias, but it does not publish `updates/server` OTA appcasts.
-Server OTA promotion remains an explicit standalone operation with the
-appropriate server workflow or OTA command.
+Production server promotion remains explicit.
+
+A bare dispatch of either standalone server workflow defaults
+`publish_ota=true`. After finalization has updated every resource `latest` alias,
+the workflow signs macOS and Windows payloads on native runners, generates both
+Linux payloads, and requires all five appcast fragments. Each job reads the
+immutable versioned resource whose metadata matches the finalized source SHA;
+a same-version retry reuses the live signed payload instead of replacing it.
+The final job publishes the product's live alpha appcast through the guarded
+feed publisher and commits the deployed snapshot under `updates/server/`. Pass `publish_ota=false` only when a
+standalone run should stop after component finalization. Reusable calls remain
+opt-in, and the release tag created by finalization cannot enter the OTA
+publication job.
+
+Promote the live alpha appcast to production only with the product-specific
+`browseros ota server promote --product <browseros|browserclaw> --publish`
+command.
 
 The server finalizers also enforce monotonic publication. If a newer version
 became public while browsers were building, an older prepared release cannot
@@ -272,8 +287,8 @@ move `latest` backward.
 
 | Workflow | Purpose |
 | --- | --- |
-| `release-server.yml` | BrowserOS server resources and optional server OTA |
-| `release-claw-server-rust.yml` | BrowserClaw Rust server resources and optional server OTA |
+| `release-server.yml` | BrowserOS server resources and live alpha OTA by default |
+| `release-claw-server.yml` | BrowserClaw server resources and live alpha OTA by default |
 | `release-claw-onboard.yml` | BrowserClaw onboarding resources |
 | `release-extensions.yml` | CRX preparation/finalization without feed publication |
 | `release-extension-feeds.yml` | Extension feed preview or explicit publication |

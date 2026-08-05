@@ -122,7 +122,7 @@ def _strict_appcast_versions(content: str) -> Optional[List[str]]:
         if len(version_elements) != 1:
             return None
         value = version_elements[0].text
-        if _strict_dotted_version(value) is None:
+        if value is None or _strict_dotted_version(value) is None:
             return None
         versions.append(value.strip())
     return versions
@@ -435,6 +435,11 @@ class FeedPublisher:
             repair_invalid_live,
         ):
             return False
+
+        if publish and live == content:
+            staging = self.stage(spec, content)
+            log_success(f"Already published {spec.url} (staging: {staging})")
+            return True
 
         if verbose:
             self._print_content_and_diff(spec, content, live)
