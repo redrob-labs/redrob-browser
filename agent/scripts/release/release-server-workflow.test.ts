@@ -8,10 +8,6 @@ const workflow = readFileSync(
   resolve(repoRoot, '.github/workflows/release-server.yml'),
   'utf8',
 )
-const browserosWorkflow = readFileSync(
-  resolve(repoRoot, '.github/workflows/release-browseros.yml'),
-  'utf8',
-)
 const dollar = '$'
 
 function section(start: string, end?: string): string {
@@ -47,8 +43,9 @@ describe('release-server workflow', () => {
 
   it('reserves a private draft without creating a public tag', () => {
     const prepare = section('  prepare:', '  build-publish:')
-    expect(prepare).toContain('gh api --paginate --slurp')
-    expect(prepare).toContain('--release-records "$RELEASE_RECORDS"')
+    expect(prepare).toContain('browseros release component resolve')
+    expect(prepare).toContain('--component server')
+    expect(prepare).not.toContain('prepare-server-release.sh')
     expect(prepare).toContain('gh release create "$RELEASE_TAG"')
     expect(prepare).toContain('--draft')
     expect(prepare).toContain('--target "$RELEASE_SHA"')
@@ -59,7 +56,8 @@ describe('release-server workflow', () => {
   it('checks public allocations under the component lock before mutations', () => {
     const prepare = section('  prepare:', '  build-publish:')
     expect(workflow).toContain('group: release-server')
-    expect(prepare.indexOf('Read allocated GitHub releases')).toBeLessThan(
+    expect(prepare).toContain('browseros release component resolve')
+    expect(prepare.indexOf('Setup uv')).toBeLessThan(
       prepare.indexOf('Resolve release'),
     )
     expect(prepare.indexOf('Resolve release')).toBeLessThan(
@@ -81,6 +79,10 @@ describe('release-server workflow', () => {
       `gh release upload "$RELEASE_TAG" "${dollar}{assets[@]}" --clobber`,
     )
     expect(build).not.toContain('artifacts/server/latest/')
+    expect(build).toContain(
+      'browseros release component stamp --component server',
+    )
+    expect(build).not.toContain('package["version"] = version')
   })
 
   it('finalizes only after verifying assets and versioned objects', () => {
@@ -105,7 +107,7 @@ describe('release-server workflow', () => {
     expect(publishIndex).toBeGreaterThan(latestIndex)
   })
 
-  it('defers finalization for full releases and gates side effects on it', () => {
+  it('defers finalization for reusable callers and gates side effects on it', () => {
     const finalize = section('  finalize:', '  publish-ota:')
     expect(finalize).toContain("needs.prepare.outputs.mode == 'finalize'")
     expect(finalize).toContain('inputs.defer_finalize != true')
@@ -113,7 +115,6 @@ describe('release-server workflow', () => {
       '- finalize',
     )
     expect(section('  reflect-version:')).toContain('- finalize')
-    expect(browserosWorkflow.match(/publish_ota: false/g)).toHaveLength(2)
   })
 
   it('publishes and persists standalone alpha releases by default', () => {

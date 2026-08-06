@@ -66,9 +66,9 @@ describe('release-extensions workflow', () => {
 
   it('reserves only private drafts before the extension build', () => {
     const prepare = section('  prepare:', '  build:')
-    expect(prepare).toContain('resolve-version')
-    expect(prepare).toContain('tag_object: $object')
-    expect(prepare).toContain('tag_object: ($tag.tag_object // "missing")')
+    expect(prepare).toContain('browseros release component resolve')
+    expect(prepare).toContain('--component "$EXTENSION"')
+    expect(prepare).not.toContain('extension-release-records')
     expect(prepare).toContain('--draft')
     expect(prepare).not.toContain('git tag -a')
     expect(prepare).not.toContain('--draft=false')
@@ -98,6 +98,7 @@ describe('release-extensions workflow', () => {
     expect(build).toContain('gh release upload')
     expect(build).toContain('needs.prepare.outputs.version')
     expect(build).toContain('needs.prepare.outputs.release_sha')
+    expect(build).toContain('browseros release component stamp')
     expect(build).toContain(
       `${'$'}{{ github.run_id }}-${'$'}{{ github.run_attempt }}`,
     )
@@ -225,31 +226,31 @@ describe('release-extensions workflow', () => {
     )
   })
 
-  it('forwards BrowserClaw PostHog values to local bundled builds', () => {
-    expect(browserBuildWorkflow).toContain(
-      `VITE_CLAW_POSTHOG_KEY: ${'$'}{{ secrets.VITE_CLAW_POSTHOG_KEY }}`,
-    )
-    expect(browserBuildWorkflow).toContain(
-      `VITE_CLAW_POSTHOG_HOST: ${'$'}{{ secrets.VITE_CLAW_POSTHOG_HOST }}`,
-    )
-    expect(browserBuildWorkflow).toContain('write_env VITE_CLAW_POSTHOG_KEY')
-    expect(browserBuildWorkflow).toContain('write_env VITE_CLAW_POSTHOG_HOST')
-  })
-
-  it('preflights selected BrowserClaw keys in the full release caller', () => {
-    const start = browserClawWorkflow.indexOf(
-      '- name: Validate selected lane configuration',
-    )
-    const end = browserClawWorkflow.indexOf('  build_onboarding:', start)
+  it('forwards BrowserClaw PostHog values to the common producer', () => {
+    const start = browserClawWorkflow.indexOf('  common:')
+    const end = browserClawWorkflow.indexOf('  linux:', start)
     expect(start).toBeGreaterThanOrEqual(0)
     expect(end).toBeGreaterThan(start)
-    const preflight = browserClawWorkflow.slice(start, end)
+    const common = browserClawWorkflow.slice(start, end)
 
-    expect(preflight).toContain(
+    expect(common).toContain(
       `VITE_CLAW_POSTHOG_KEY: ${'$'}{{ secrets.VITE_CLAW_POSTHOG_KEY }}`,
     )
-    expect(preflight).toMatch(
-      /INPUT_EXTENSIONS[\s\S]*require_value VITE_CLAW_POSTHOG_KEY/,
+    expect(common).toContain(
+      `VITE_CLAW_POSTHOG_HOST: ${'$'}{{ secrets.VITE_CLAW_POSTHOG_HOST }}`,
+    )
+    expect(common).toContain('browseros release resources prepare')
+  })
+
+  it('keeps extension build secrets out of native browser lanes', () => {
+    expect(browserBuildWorkflow).not.toContain(
+      `VITE_CLAW_POSTHOG_KEY: ${'$'}{{ secrets.VITE_CLAW_POSTHOG_KEY }}`,
+    )
+    expect(browserBuildWorkflow).not.toContain(
+      `VITE_CLAW_POSTHOG_HOST: ${'$'}{{ secrets.VITE_CLAW_POSTHOG_HOST }}`,
+    )
+    expect(browserBuildWorkflow).not.toContain(
+      `BROWSERCLAW_KEY: ${'$'}{{ secrets.BROWSERCLAW_KEY }}`,
     )
   })
 })
