@@ -73,6 +73,21 @@
   --color-accent-tint: var(--accent-tint);
   --color-accent-tint-2: var(--accent-tint-2);
 
+  /* Ledger surfaces: the cobalt-headed data table introduced on the audit
+     screen. Kept as its own role set (not folded into accent/border) so the
+     table can be rolled onto other screens without dragging the whole
+     accent chain with it. */
+  --color-ledger-head: var(--ledger-head);
+  --color-ledger-head-ink: var(--ledger-head-ink);
+  --color-ledger-band: var(--ledger-band);
+  --color-ledger-band-ink: var(--ledger-band-ink);
+  --color-ledger-border: var(--ledger-border);
+  --color-ledger-divider: var(--ledger-divider);
+  --color-ledger-link: var(--ledger-link);
+  --color-ledger-ink: var(--ledger-ink);
+  --color-ledger-ink-2: var(--ledger-ink-2);
+  --color-ledger-ink-3: var(--ledger-ink-3);
+
   /* Status palette */
   --color-green: var(--green);
   --color-green-tint: var(--green-tint);
@@ -117,6 +132,11 @@
   --radius-2xl: 16px;
   --radius-3xl: 20px;
   --radius-4xl: 9999px;
+  /* The corner radius the material-design pass standardises on. Sits
+     between --radius-lg and --radius-xl rather than replacing either, so
+     screens can adopt it one at a time instead of the ramp shifting under
+     every existing component at once. */
+  --radius-9: 9px;
 }
 
 /* Keyframes lifted from the design prototype's \3c style> block */
@@ -326,6 +346,22 @@ body {
   --red: #e11d48;
   --red-tint: hsl(4 65% 95%);
   --blue: #0e7490;
+
+  /* Ledger table. A deeper cobalt than --primary #0254ec: the header is a
+     filled bar, not a CTA, so it carries more weight without competing
+     with the buttons on the same screen. The three ledger inks are a
+     blue-shifted parallel of the neutral ink scale, so column text reads
+     as one family with the cobalt chrome rather than as grey on blue. */
+  --ledger-head: #0043cd;
+  --ledger-head-ink: #ffffff;
+  --ledger-band: #eaf1fd;
+  --ledger-band-ink: #0043cd;
+  --ledger-border: #c8d4e0;
+  --ledger-divider: #dfe7ee;
+  --ledger-link: #155da8;
+  --ledger-ink: #0c2742;
+  --ledger-ink-2: #4a6480;
+  --ledger-ink-3: #5f7794;
 }
 /* Dark theme values. The app is locked to light mode today (the theme
    toggle was removed) but the shadcn token surface expects a coherent
@@ -421,4 +457,18 @@ body {
   --red: #ff5a75;
   --red-tint: #2b1414;
   --blue: #56b8d8;
+
+  /* Ledger table, dark. The header bar drops to a deep cobalt that still
+     reads as a filled band against --card, and the link / ink roles
+     invert to the light end of the blue ramp. */
+  --ledger-head: #16306e;
+  --ledger-head-ink: #eaf1ff;
+  --ledger-band: #16203a;
+  --ledger-band-ink: #8fb4ff;
+  --ledger-border: #212c40;
+  --ledger-divider: #1b2537;
+  --ledger-link: #8fb4ff;
+  --ledger-ink: #f8f8fa;
+  --ledger-ink-2: #c1c8d8;
+  --ledger-ink-3: #a4acbd;
 }

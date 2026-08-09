@@ -25,13 +25,11 @@ const baseData: AuditScreenData = {
     status: null,
     site: null,
     search: '',
-    sort: null,
   },
   setAgentFilter: () => undefined,
   setStatusFilter: () => undefined,
   setSiteFilter: () => undefined,
   setSearch: () => undefined,
-  setSort: () => undefined,
 }
 
 let dataOverride: AuditScreenData = baseData
@@ -121,9 +119,8 @@ describe('Audit screen', () => {
     const html = renderApp()
     expect(html).toContain('Claude Code')
     expect(html).toContain('Browsed example.com')
-    // DONE is the silent default in the editorial cockpit; the row's
-    // identity carries state (LIVE / FAILED / STOPPED render inline dots), so
-    // no visible 'Done' text renders here anymore.
+    // DONE is the silent default; only the exceptional states
+    // (LIVE / FAILED / STOPPED) render a chip in the agent cell.
   })
 
   it('hides token usage from the task list', () => {
@@ -159,8 +156,8 @@ describe('Audit screen', () => {
       filters: { ...baseData.filters, status: 'cancelled' },
     }
     const html = renderApp()
-    expect(html).toContain('STOPPED')
-    expect(html).toContain('Stopped')
+    // Inline chip in the agent cell + the FilterBar's selected-status pill.
+    expect(html.match(/Stopped/g)?.length).toBe(2)
   })
 
   it('keeps the FilterBar visible when a filter yields zero results', () => {
@@ -172,7 +169,6 @@ describe('Audit screen', () => {
         status: null,
         site: null,
         search: 'nothing-matches',
-        sort: null,
       },
     }
     const html = renderApp()
@@ -204,7 +200,6 @@ describe('Audit screen', () => {
         status: 'live',
         site: null,
         search: '',
-        sort: null,
       },
     }
     const html = renderApp()

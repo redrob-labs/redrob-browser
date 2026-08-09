@@ -70,7 +70,7 @@ export function FilterBar({
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 gap-1.5 font-mono text-[11px] text-ink-2 uppercase tracking-[0.08em] hover:bg-card-tint"
+              className="h-8 gap-1.5 rounded-9 px-2.5 font-medium text-[13px] text-ink-2 hover:bg-card-tint"
             />
           }
         >
@@ -111,7 +111,7 @@ export function FilterBar({
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 gap-1.5 font-mono text-[11px] text-ink-2 uppercase tracking-[0.08em] hover:bg-card-tint"
+              className="h-8 gap-1.5 rounded-9 px-2.5 font-medium text-[13px] text-ink-2 hover:bg-card-tint"
             />
           }
         >
@@ -145,7 +145,7 @@ export function FilterBar({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-8 gap-1.5 font-mono text-[11px] text-ink-2 uppercase tracking-[0.08em] hover:bg-card-tint"
+                className="h-8 gap-1.5 rounded-9 px-2.5 font-medium text-[13px] text-ink-2 hover:bg-card-tint"
               />
             }
           >
@@ -179,14 +179,17 @@ export function FilterBar({
       )}
 
       <div className="relative ml-auto flex items-center">
-        <Search className="absolute left-2.5 size-3.5 text-ink-3" aria-hidden />
+        <Search
+          className="absolute left-2.5 z-10 size-3.5 text-ink-3"
+          aria-hidden
+        />
         <Input
           value={localSearch}
           onChange={(e) => setLocalSearch(e.target.value)}
           placeholder="search sessions..."
           // pr-7 reserves space for the inline clear button so the
           // text never sits under the icon.
-          className="h-8 w-64 border-none bg-transparent pr-7 pl-8 font-mono text-[11.5px] text-ink placeholder:text-ink-3 focus-visible:bg-card-tint focus-visible:ring-0"
+          className="h-8 w-64 rounded-9 border-none bg-card pr-7 pl-8 font-mono text-[13px] text-ink shadow-xs placeholder:text-ink-3 focus-visible:ring-0"
         />
         {localSearch.length > 0 && (
           <button
