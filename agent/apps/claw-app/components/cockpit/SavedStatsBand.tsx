@@ -166,7 +166,10 @@ function SavedStatsPanel({
             style={{ width: `${usedRatio * 100}%` }}
           />
         </div>
-        <p className="mt-2.5 text-[12px] text-cyanotype-soft leading-4">
+        <p
+          className="mt-2.5 text-[12px] text-cyanotype-soft leading-4"
+          data-saved-stats-caption
+        >
           compact DOM &amp; tool responses instead of a screenshot per call
         </p>
       </div>
@@ -193,7 +196,10 @@ function SavedStatsPanel({
           <div className="mb-1.5 text-[12px] text-cyanotype-muted leading-4">
             Sessions · tool calls
           </div>
-          <div className="font-extrabold text-[28px] text-cyanotype-ink tabular-nums leading-none tracking-[-0.02em]">
+          <div
+            className="min-w-0 max-w-full break-all font-extrabold text-[28px] text-cyanotype-ink tabular-nums leading-none tracking-[-0.02em]"
+            data-session-tool-metrics
+          >
             <span data-stat="sessions">
               {formatWhole(windowStats.sessionCount)}
             </span>{' '}

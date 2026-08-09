@@ -232,14 +232,26 @@ describe('Cockpit (v2)', () => {
       'working on',
       'right now?',
     ])
-    expect(hero?.getAttribute('class')).toContain('items-baseline')
-    expect(hero?.getAttribute('class')).toContain('flex-wrap')
-    expect(hero?.getAttribute('class')).toContain('gap-[9px]')
-    expect(hero?.getAttribute('class')).toContain('text-[36px]')
-    expect(hero?.getAttribute('class')).toContain('tracking-[-0.025em]')
-    expect(segments[1]?.getAttribute('class')).toContain('font-bold')
-    expect(segments[1]?.getAttribute('class')).toContain('text-cyanotype-blue')
-    expect(segments[1]?.getAttribute('class')).toContain('italic')
+    const heroClasses = hero?.getAttribute('class') ?? ''
+    for (const className of [
+      'flex',
+      'flex-wrap',
+      'items-baseline',
+      'gap-[9px]',
+      'pt-1',
+      'font-sans',
+      'font-extrabold',
+      'text-[36px]',
+      'text-cyanotype-ink',
+      'leading-[1.15]',
+      'tracking-[-0.025em]',
+    ]) {
+      expect(heroClasses).toContain(className)
+    }
+    const accentClasses = segments[1]?.getAttribute('class') ?? ''
+    for (const className of ['font-bold', 'text-cyanotype-blue', 'italic']) {
+      expect(accentClasses).toContain(className)
+    }
   })
 
   it('renders measured idle stats between the hero and recent activity', () => {
