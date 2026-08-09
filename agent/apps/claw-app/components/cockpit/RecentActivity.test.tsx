@@ -102,4 +102,24 @@ describe('RecentActivity', () => {
     const html = render()
     expect(html.match(/STOPPED/g)?.length).toBe(6)
   })
+
+  it('renders the cyanotype overflow table and counts historical sessions', () => {
+    const tasks = Array.from({ length: 12 }, (_, index) => ({
+      ...sampleTask,
+      sessionId: `cyanotype-${index}`,
+      name: `Task ${index}`,
+      startedAt: sampleTask.startedAt - index,
+      status: index === 0 ? ('live' as const) : ('done' as const),
+    }))
+    queryOverride = { isPending: false, data: { pages: [{ items: tasks }] } }
+
+    const html = render()
+    expect(html).toContain('11 sessions')
+    expect(html).toContain('data-testid="recent-activity-table"')
+    expect(html).toContain('bg-[#0043CD]')
+    expect(html).toContain('bg-[#E3EAF1]')
+    expect(html).toContain('md:grid-rows-[216px_216px]')
+    expect(html).toContain('>Tool chain<')
+    expect(html.match(/data-testid="run-row-/g)?.length).toBe(7)
+  })
 })

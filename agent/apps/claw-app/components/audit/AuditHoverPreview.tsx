@@ -17,9 +17,8 @@ interface AuditHoverPreviewProps {
  * list; content swaps as they move between rows without an unmount.
  *
  * When a session has no captured screenshot, the panel switches to a
- * typographic composition of the tool sequence (same treatment as
- * the cockpit's SupportingTile no-shot variant) so the panel is
- * never a grey placeholder.
+ * typographic composition of the tool sequence so the panel is never
+ * a grey placeholder.
  */
 export function AuditHoverPreview({ task }: AuditHoverPreviewProps) {
   const screenshotId = task?.latestScreenshotId ?? null

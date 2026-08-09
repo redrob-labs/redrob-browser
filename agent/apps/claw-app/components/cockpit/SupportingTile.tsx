@@ -1,12 +1,6 @@
-import { ArrowUpRight } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router'
-import { AgentDot } from '@/components/audit/AgentDot'
 import { cn } from '@/lib/utils'
-import {
-  type TaskSummary,
-  taskScreenshotUrl,
-  useTaskScreenshotBaseUrl,
-} from '@/modules/api/audit.hooks'
+import type { TaskSummary } from '@/modules/api/audit.hooks'
 import { formatDuration, formatRelative } from '@/screens/audit/audit.helpers'
 
 interface SupportingTileProps {
@@ -16,19 +10,12 @@ interface SupportingTileProps {
 }
 
 /**
- * Supporting tile in the cockpit editorial bento. Mirrors the
- * lead's split-zone structure (visual on top, dark caption block
- * at the bottom) at a smaller scale so all four supporting cells
- * share the lead's visual language. Two variants driven by data:
- * with-screenshot fills the top zone with the captured image;
- * without-screenshot renders the tool sequence as a small
- * typographic composition in place of the image.
+ * Cyanotype supporting tile. Mirrors the lead's pale media well
+ * and saturated blue caption at a compact scale.
  */
 export function SupportingTile({ task, now, className }: SupportingTileProps) {
   const isLive = task.status === 'live'
   const isStopped = task.status === 'cancelled'
-  const screenshotId = task.latestScreenshotId ?? null
-  const screenshotBaseUrl = useTaskScreenshotBaseUrl()
   const location = useLocation()
   return (
     <NavLink
@@ -36,32 +23,11 @@ export function SupportingTile({ task, now, className }: SupportingTileProps) {
       state={{ from: location.pathname }}
       data-testid={`support-tile-${task.sessionId}`}
       className={cn(
-        'group relative flex flex-col overflow-hidden rounded-2xl border border-border-2 bg-bg-sunken transition-[border-color] duration-150 hover:border-accent/40',
+        'group relative flex flex-col overflow-hidden rounded-[9px] border border-[#C8D4E0] bg-white transition-[border-color,box-shadow] duration-150 hover:border-[#0043CD] hover:shadow-sm',
         className,
       )}
     >
-      <div className="relative flex-1 overflow-hidden">
-        {screenshotId !== null && screenshotBaseUrl !== null ? (
-          <img
-            src={taskScreenshotUrl(
-              task.sessionId,
-              screenshotId,
-              screenshotBaseUrl,
-            )}
-            alt={`Session preview from ${task.label}`}
-            loading="lazy"
-            decoding="async"
-            className="absolute inset-0 h-full w-full object-cover object-top"
-          />
-        ) : screenshotId !== null ? (
-          <div className="absolute inset-0 animate-pulse bg-card-tint" />
-        ) : (
-          <NoShotComposition task={task} />
-        )}
-        <span className="pointer-events-none absolute top-2.5 right-2.5 flex size-6 items-center justify-center rounded-full bg-white/85 text-ink opacity-0 shadow-sm backdrop-blur-md transition-[opacity,transform] duration-200 group-hover:-translate-y-0.5 group-hover:opacity-100">
-          <ArrowUpRight className="size-3.5" />
-        </span>
-      </div>
+      <div className="flex-1 border-[#C8D4E0] border-b bg-[#E3EAF1]" />
       <Caption task={task} now={now} isLive={isLive} isStopped={isStopped} />
     </NavLink>
   )
@@ -79,59 +45,23 @@ function Caption({
   isStopped: boolean
 }) {
   return (
-    <div className="flex flex-col gap-0.5 bg-ink-deep px-3.5 py-2 text-white">
-      <div className="flex items-center gap-2 font-mono text-[9.5px] text-white/75 uppercase tracking-[0.08em]">
-        <AgentDot slug={task.slug} />
-        <span className="truncate text-white/95">{task.label}</span>
+    <div className="flex flex-col gap-[7px] bg-[#0043CD] px-5 pt-4 pb-[18px] text-white">
+      <div className="flex items-center gap-2 font-medium text-[11.5px] text-white leading-[14px]">
+        <span className="truncate">{task.label}</span>
         {isLive && (
-          <span className="inline-flex items-center gap-1 text-[#8fb4ff]">
-            <span
-              aria-hidden
-              className="inline-block size-1.5 animate-[pulse-dot_1.4s_ease-in-out_infinite] rounded-full bg-[#8fb4ff]"
-            />
+          <span className="rounded-full bg-[#2FE08C] px-2 py-0.5 font-semibold text-[#04331D] text-[10px]">
             LIVE
           </span>
         )}
-        {isStopped && (
-          <span className="inline-flex items-center gap-1 text-white/60">
-            <span
-              aria-hidden
-              className="inline-block size-1.5 rounded-full bg-white/45"
-            />
-            STOPPED
-          </span>
-        )}
+        {isStopped && <span className="text-white/70">STOPPED</span>}
       </div>
-      <h3 className="truncate font-semibold text-[12.5px] text-white leading-tight">
+      <h3 className="truncate font-bold text-[16px] text-white leading-5 tracking-[-0.02em]">
         {task.name}
       </h3>
-      <p className="font-mono text-[10.5px] text-white/65 tabular-nums">
-        {formatDuration(task.durationMs)}{' '}
-        <span className="text-white/35">·</span> {task.dispatchCount}t{' '}
-        <span className="text-white/35">·</span>{' '}
+      <p className="text-[11.5px] text-white tabular-nums leading-[14px]">
+        {formatDuration(task.durationMs)} · {task.dispatchCount}t ·{' '}
         {formatRelative(task.startedAt, now)}
       </p>
-    </div>
-  )
-}
-
-function NoShotComposition({ task }: { task: TaskSummary }) {
-  // The wash follows the theme: pale in light mode, deep in dark mode.
-  const verbs = task.toolSequence.slice(0, 4)
-  return (
-    <div className="absolute inset-0 bg-gradient-to-br from-accent-tint via-secondary to-muted">
-      <div className="pointer-events-none absolute inset-0 flex flex-col justify-center gap-0.5 pl-4 font-mono text-[14px] text-ink/18 leading-tight tracking-tight">
-        {verbs.map((verb, idx) => (
-          <span
-            // biome-ignore lint/suspicious/noArrayIndexKey: tool sequence is stable-ordered per session, not a reorderable list
-            key={`${verb}-${idx}`}
-            style={{ marginLeft: `${idx * 6}px` }}
-            className="truncate"
-          >
-            {verb}
-          </span>
-        ))}
-      </div>
     </div>
   )
 }
