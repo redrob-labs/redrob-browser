@@ -73,7 +73,7 @@ export function SavedStatsBand({ runningCount, stats }: SavedStatsBandProps) {
 
       {WINDOWS.map((windowDefinition) => (
         <TabsContent
-          className="flex min-w-0 flex-col items-stretch gap-6 rounded-[9px] border border-cyanotype-border bg-white px-7 py-6 shadow-card md:flex-row md:items-center md:gap-8"
+          className="flex min-w-0 flex-col items-stretch gap-6 rounded-[9px] border border-cyanotype-border bg-card px-7 py-6 shadow-card md:flex-row md:items-center md:gap-8"
           data-saved-stats-card
           key={windowDefinition.key}
           value={windowDefinition.key}
@@ -142,7 +142,7 @@ function SavedStatsPanel({
             or clip them. */}
         <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
           <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-[12px] text-cyanotype-blue leading-4">
-            used
+            used{' '}
             <span className="tabular-nums" data-stat="browserclaw-tokens">
               {formatCompact(windowStats.browserClawTokenEstimate)}
             </span>

@@ -233,6 +233,9 @@ describe('SavedStatsBand', () => {
     const savingsPill = container.querySelector('[data-savings-pill]')
     const track = container.querySelector('[data-budget-track]')
     const fill = container.querySelector('[data-used-fill]')
+    const usedLabel = container.querySelector(
+      '[data-stat="browserclaw-tokens"]',
+    )?.parentElement
 
     expect(section?.getAttribute('class')).toContain('gap-4')
     expect(header?.getAttribute('class')).toContain('gap-3')
@@ -248,6 +251,7 @@ describe('SavedStatsBand', () => {
     )
     expect(card?.getAttribute('class')).toContain('rounded-[9px]')
     expect(card?.getAttribute('class')).toContain('border-cyanotype-border')
+    expect(card?.getAttribute('class')).toContain('bg-card')
     expect(card?.getAttribute('class')).toContain('px-7')
     expect(card?.getAttribute('class')).toContain('py-6')
     expect(card?.getAttribute('class')).toContain('md:gap-8')
@@ -261,6 +265,7 @@ describe('SavedStatsBand', () => {
     )
     expect(track?.getAttribute('class')).toContain('h-3')
     expect(fill?.getAttribute('class')).toContain('bg-cyanotype-blue')
+    expect(usedLabel?.textContent).toBe('used 100')
   })
 
   it('switches with arrow keys and click, including a zero recent window', async () => {
