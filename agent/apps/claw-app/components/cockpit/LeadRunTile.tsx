@@ -92,7 +92,7 @@ function Caption({
       <div className="flex items-center gap-2 font-medium text-[11.5px] text-white leading-[14px]">
         <span className="truncate">{task.label}</span>
         {isFailed && (
-          <span className="rounded-full bg-red-tint px-2 py-0.5 font-bold text-[10px] text-red">
+          <span className="rounded-full bg-red-tint px-2 py-0.5 font-bold text-[10px] text-cyanotype-error">
             FAILED
           </span>
         )}

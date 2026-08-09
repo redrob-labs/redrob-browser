@@ -138,11 +138,11 @@ function ActivityTable({ tail, now }: { tail: TaskSummary[]; now: number }) {
       data-testid="recent-activity-table"
     >
       <div>
-        <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)_64px] items-center gap-3 bg-cyanotype-blue px-4 py-2 text-[11px] text-white leading-[14px] md:grid-cols-[236px_minmax(0,1fr)_240px_72px_64px] md:gap-4">
+        <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)_64px_64px] items-center gap-3 bg-cyanotype-blue px-4 py-2 text-[11px] text-white leading-[14px] md:grid-cols-[236px_minmax(0,1fr)_240px_72px_64px] md:gap-4">
           <span>Agent</span>
           <span>Target</span>
           <span className="hidden md:block">Tool chain</span>
-          <span className="hidden text-right md:block">Duration</span>
+          <span className="text-right">Duration</span>
           <span className="text-right">When</span>
         </div>
         <div>
@@ -159,10 +159,10 @@ function BentoSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-12 md:grid-rows-[216px_216px]">
       <Skeleton className="min-h-[360px] rounded-[9px] md:col-span-6 md:row-span-2 md:min-h-0" />
-      <Skeleton className="rounded-[9px] md:col-span-3 md:col-start-7 md:row-start-1" />
-      <Skeleton className="rounded-[9px] md:col-span-3 md:col-start-10 md:row-start-1" />
-      <Skeleton className="rounded-[9px] md:col-span-3 md:col-start-7 md:row-start-2" />
-      <Skeleton className="rounded-[9px] md:col-span-3 md:col-start-10 md:row-start-2" />
+      <Skeleton className="min-h-[216px] rounded-[9px] md:col-span-3 md:col-start-7 md:row-start-1 md:min-h-0" />
+      <Skeleton className="min-h-[216px] rounded-[9px] md:col-span-3 md:col-start-10 md:row-start-1 md:min-h-0" />
+      <Skeleton className="min-h-[216px] rounded-[9px] md:col-span-3 md:col-start-7 md:row-start-2 md:min-h-0" />
+      <Skeleton className="min-h-[216px] rounded-[9px] md:col-span-3 md:col-start-10 md:row-start-2 md:min-h-0" />
     </div>
   )
 }
