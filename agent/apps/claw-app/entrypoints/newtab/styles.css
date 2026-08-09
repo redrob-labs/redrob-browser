@@ -73,6 +73,20 @@
   --color-accent-tint: var(--accent-tint);
   --color-accent-tint-2: var(--accent-tint-2);
 
+  /* Cyanotype activity surface */
+  --color-cyanotype-blue: var(--cyanotype-blue);
+  --color-cyanotype-blue-hover: var(--cyanotype-blue-hover);
+  --color-cyanotype-well: var(--cyanotype-well);
+  --color-cyanotype-border: var(--cyanotype-border);
+  --color-cyanotype-ink: var(--cyanotype-ink);
+  --color-cyanotype-muted: var(--cyanotype-muted);
+  --color-cyanotype-soft: var(--cyanotype-soft);
+  --color-cyanotype-rule: var(--cyanotype-rule);
+  --color-cyanotype-hover: var(--cyanotype-hover);
+  --color-cyanotype-live: var(--cyanotype-live);
+  --color-cyanotype-live-ink: var(--cyanotype-live-ink);
+  --color-cyanotype-live-text: var(--cyanotype-live-text);
+
   /* Status palette */
   --color-green: var(--green);
   --color-green-tint: var(--green-tint);
@@ -319,6 +333,18 @@ body {
   --accent-ink: #0143c4;
   --accent-tint: #eaf1ff;
   --accent-tint-2: #d3e2ff;
+  --cyanotype-blue: #0043cd;
+  --cyanotype-blue-hover: #0036a6;
+  --cyanotype-well: #e3eaf1;
+  --cyanotype-border: #c8d4e0;
+  --cyanotype-ink: #0c2742;
+  --cyanotype-muted: #4a6480;
+  --cyanotype-soft: #5f7794;
+  --cyanotype-rule: #dfe7ee;
+  --cyanotype-hover: #f3f6f9;
+  --cyanotype-live: #2fe08c;
+  --cyanotype-live-ink: #04331d;
+  --cyanotype-live-text: #00713e;
   --green: #16a34a;
   --green-tint: #e6f6ec;
   --amber: hsl(35 85% 42%);
@@ -414,6 +440,18 @@ body {
   --accent-ink: #8fb4ff;
   --accent-tint: #1e2842;
   --accent-tint-2: #253355;
+  --cyanotype-blue: #0043cd;
+  --cyanotype-blue-hover: #155da8;
+  --cyanotype-well: #1e2842;
+  --cyanotype-border: #334159;
+  --cyanotype-ink: #f8f8fa;
+  --cyanotype-muted: #d5dded;
+  --cyanotype-soft: #a4acbd;
+  --cyanotype-rule: #212c40;
+  --cyanotype-hover: #1e2842;
+  --cyanotype-live: #2fe08c;
+  --cyanotype-live-ink: #04331d;
+  --cyanotype-live-text: #34c26b;
   --green: #34c26b;
   --green-tint: #10281a;
   --amber: hsl(38 85% 58%);

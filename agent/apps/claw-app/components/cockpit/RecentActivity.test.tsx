@@ -11,6 +11,7 @@ interface MockQueryShape {
 }
 
 let queryOverride: MockQueryShape = { isPending: true }
+let screenshotBaseUrl: string | null = null
 
 // Spread the real audit-hooks module so unrelated tests that import
 // useTaskDetail / useDispatches / useAuditCleanupCandidates keep
@@ -20,9 +21,9 @@ let queryOverride: MockQueryShape = { isPending: true }
 mock.module('@/modules/api/audit.hooks', () => ({
   ..._auditHooks,
   useSessions: () => queryOverride,
-  taskScreenshotUrl: (sessionId: string, id: number) =>
-    `/api/v1/sessions/${sessionId}/screenshots/${id}`,
-  useTaskScreenshotBaseUrl: () => null,
+  taskScreenshotUrl: (sessionId: string, id: number, baseUrl?: string) =>
+    `${baseUrl ?? ''}/api/v1/sessions/${sessionId}/screenshots/${id}`,
+  useTaskScreenshotBaseUrl: () => screenshotBaseUrl,
 }))
 
 const { RecentActivity } = await import('./RecentActivity')
@@ -70,6 +71,7 @@ describe('RecentActivity', () => {
   })
 
   it('renders the freshest task as the lead tile with title, agent, and meta', () => {
+    screenshotBaseUrl = null
     queryOverride = {
       isPending: false,
       data: { pages: [{ items: [sampleTask] }] },
@@ -81,6 +83,35 @@ describe('RecentActivity', () => {
     // DONE is the silent default in the editorial cockpit; the tile
     // instead carries a mono meta line with the dispatch count.
     expect(html).toContain('4 tools')
+  })
+
+  it('preserves lead and supporting session screenshots with useful alt text', () => {
+    screenshotBaseUrl = 'http://127.0.0.1:9200'
+    queryOverride = {
+      isPending: false,
+      data: {
+        pages: [
+          {
+            items: [
+              sampleTask,
+              {
+                ...sampleTask,
+                sessionId: 'sess-2',
+                label: 'Codex',
+                startedAt: sampleTask.startedAt - 1,
+              },
+            ],
+          },
+        ],
+      },
+    }
+
+    const html = render()
+    expect(html).toContain('alt="Session hero from Claude Code"')
+    expect(html).toContain('alt="Session preview from Codex"')
+    expect(html).toContain(
+      'http://127.0.0.1:9200/api/v1/sessions/sess-1/screenshots/7',
+    )
   })
 
   it('renders the section header + view-all CTA in the empty state', () => {
@@ -103,7 +134,8 @@ describe('RecentActivity', () => {
     expect(html.match(/STOPPED/g)?.length).toBe(6)
   })
 
-  it('renders the cyanotype overflow table and counts historical sessions', () => {
+  it('renders the cyanotype activity table and counts all visible sessions', () => {
+    screenshotBaseUrl = null
     const tasks = Array.from({ length: 12 }, (_, index) => ({
       ...sampleTask,
       sessionId: `cyanotype-${index}`,
@@ -114,11 +146,8 @@ describe('RecentActivity', () => {
     queryOverride = { isPending: false, data: { pages: [{ items: tasks }] } }
 
     const html = render()
-    expect(html).toContain('11 sessions')
+    expect(html).toContain('12 sessions')
     expect(html).toContain('data-testid="recent-activity-table"')
-    expect(html).toContain('bg-[#0043CD]')
-    expect(html).toContain('bg-[#E3EAF1]')
-    expect(html).toContain('md:grid-rows-[216px_216px]')
     expect(html).toContain('>Tool chain<')
     expect(html.match(/data-testid="run-row-/g)?.length).toBe(7)
   })

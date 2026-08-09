@@ -22,10 +22,8 @@ const HOME_TASK_LIMIT = 12
  *   │                        │  s3    │  s4    │
  *   └────────────────────────┴────────┴────────┘
  *
- * Rows are locked to `auto-rows-[150px]` so every supporting cell
- * is the same size regardless of internal content. The lead spans
- * both rows so it doubles that height (~300px) without ballooning.
- * At mobile: everything single-column.
+ * Rows are locked to 216px at the bento breakpoint. At mobile the
+ * cards stack into a single column and keep an explicit media area.
  */
 export function RecentActivity() {
   const query = useSessions({
@@ -41,13 +39,10 @@ export function RecentActivity() {
   const lead = ordered[0]
   const supporting = ordered.slice(1, 5)
   const tail = ordered.slice(5)
-  const historicalCount = ordered.filter(
-    (task) => task.status !== 'live',
-  ).length
 
   return (
     <section className="ph-no-capture space-y-5">
-      <SectionHeader sessionCount={historicalCount} />
+      <SectionHeader sessionCount={ordered.length} />
       {query.isPending ? (
         <BentoSkeleton />
       ) : !lead ? (
@@ -65,7 +60,7 @@ export function RecentActivity() {
       <div className="pt-0.5">
         <NavLink
           to="/audit"
-          className="group inline-flex items-center gap-2.5 font-medium text-[#0043CD] text-[12px] leading-4 transition-colors hover:text-[#0036A6]"
+          className="group inline-flex items-center gap-2.5 font-medium text-[12px] text-cyanotype-blue leading-4 transition-colors hover:text-cyanotype-blue-hover"
         >
           <span>View all activity</span>
           <span
@@ -81,11 +76,11 @@ export function RecentActivity() {
 function SectionHeader({ sessionCount }: { sessionCount: number }) {
   return (
     <header className="flex items-center gap-3.5 pb-1">
-      <h2 className="shrink-0 font-medium text-[#0C2742] text-[15px] leading-[18px]">
+      <h2 className="shrink-0 font-medium text-[15px] text-cyanotype-ink leading-[18px]">
         Recent activity
       </h2>
-      <span aria-hidden className="h-px flex-1 bg-[#C8D4E0]" />
-      <span className="shrink-0 text-[#4A6480] text-[11px] tabular-nums leading-[14px]">
+      <span aria-hidden className="h-px flex-1 bg-cyanotype-border" />
+      <span className="shrink-0 text-[11px] text-cyanotype-muted tabular-nums leading-[14px]">
         {sessionCount} {sessionCount === 1 ? 'session' : 'sessions'}
       </span>
     </header>
@@ -104,7 +99,7 @@ function BentoGrid({ lead, supporting, now }: BentoGridProps) {
       <LeadRunTile
         task={lead}
         now={now}
-        className="md:col-span-6 md:row-span-2"
+        className="min-h-[360px] md:col-span-6 md:row-span-2 md:min-h-0"
       />
       {supporting.map((task, idx) => (
         <SupportingTile
@@ -139,15 +134,15 @@ function supportingSlotClass(idx: number): string {
 function ActivityTable({ tail, now }: { tail: TaskSummary[]; now: number }) {
   return (
     <div
-      className="overflow-x-auto rounded-[9px] border border-[#C8D4E0] bg-white"
+      className="overflow-hidden rounded-[9px] border border-cyanotype-border bg-card"
       data-testid="recent-activity-table"
     >
-      <div className="min-w-[900px]">
-        <div className="grid grid-cols-[236px_minmax(0,1fr)_240px_72px_64px] items-center gap-4 bg-[#0043CD] px-4 py-2 text-[11px] text-white leading-[14px]">
+      <div>
+        <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)_64px] items-center gap-3 bg-cyanotype-blue px-4 py-2 text-[11px] text-white leading-[14px] md:grid-cols-[236px_minmax(0,1fr)_240px_72px_64px] md:gap-4">
           <span>Agent</span>
           <span>Target</span>
-          <span>Tool chain</span>
-          <span className="text-right">Duration</span>
+          <span className="hidden md:block">Tool chain</span>
+          <span className="hidden text-right md:block">Duration</span>
           <span className="text-right">When</span>
         </div>
         <div>
@@ -163,7 +158,7 @@ function ActivityTable({ tail, now }: { tail: TaskSummary[]; now: number }) {
 function BentoSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-12 md:grid-rows-[216px_216px]">
-      <Skeleton className="rounded-[9px] md:col-span-6 md:row-span-2" />
+      <Skeleton className="min-h-[360px] rounded-[9px] md:col-span-6 md:row-span-2 md:min-h-0" />
       <Skeleton className="rounded-[9px] md:col-span-3 md:col-start-7 md:row-start-1" />
       <Skeleton className="rounded-[9px] md:col-span-3 md:col-start-10 md:row-start-1" />
       <Skeleton className="rounded-[9px] md:col-span-3 md:col-start-7 md:row-start-2" />
