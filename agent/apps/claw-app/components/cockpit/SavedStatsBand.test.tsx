@@ -157,8 +157,13 @@ afterEach(async () => {
   Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT')
 })
 
-async function render(value: CockpitStats = stats()): Promise<void> {
-  await act(async () => root.render(<SavedStatsBand stats={value} />))
+async function render(
+  value: CockpitStats = stats(),
+  runningCount = 0,
+): Promise<void> {
+  await act(async () =>
+    root.render(<SavedStatsBand runningCount={runningCount} stats={value} />),
+  )
 }
 
 function tab(label: string): HTMLElement {
@@ -204,6 +209,60 @@ function displayedNumbers(): string[] {
 }
 
 describe('SavedStatsBand', () => {
+  it('derives the running status from the live session count', async () => {
+    await render(stats(), 0)
+    const status = container.querySelector('[data-running-status]')
+    expect(status?.textContent).toBe('Nothing running')
+
+    await render(stats(), 2)
+    expect(status?.textContent).toBe('2 running')
+    expect(container.textContent).not.toContain('Nothing running')
+  })
+
+  it('uses the Cyanotype range control and responsive stats composition', async () => {
+    await render()
+
+    const section = container.querySelector('[data-saved-stats]')
+    const header = container.querySelector('[data-saved-stats-header]')
+    const tablist = container.querySelector('[role="tablist"]')
+    const card = container.querySelector('[data-saved-stats-card]')
+    const primary = container.querySelector('[data-stats-primary]')
+    const divider = container.querySelector('[data-stats-divider]')
+    const secondary = container.querySelector('[data-stats-secondary]')
+    const savedValue = container.querySelector('[data-stat="tokens-saved"]')
+    const savingsPill = container.querySelector('[data-savings-pill]')
+    const track = container.querySelector('[data-budget-track]')
+    const fill = container.querySelector('[data-used-fill]')
+
+    expect(section?.getAttribute('class')).toContain('gap-4')
+    expect(header?.getAttribute('class')).toContain('gap-3')
+    expect(header?.querySelector('h2')?.getAttribute('class')).toContain(
+      'leading-7',
+    )
+    expect(tablist?.getAttribute('class')).toContain('h-9')
+    expect(tablist?.getAttribute('class')).toContain('rounded-[9px]')
+    expect(tablist?.getAttribute('class')).toContain('bg-cyanotype-well')
+    expect(tab('All time').getAttribute('class')).toContain('text-[12px]')
+    expect(tab('All time').getAttribute('class')).toContain(
+      'data-active:bg-white',
+    )
+    expect(card?.getAttribute('class')).toContain('rounded-[9px]')
+    expect(card?.getAttribute('class')).toContain('border-cyanotype-border')
+    expect(card?.getAttribute('class')).toContain('px-7')
+    expect(card?.getAttribute('class')).toContain('py-6')
+    expect(card?.getAttribute('class')).toContain('md:gap-8')
+    expect(primary?.getAttribute('class')).toContain('flex-[2]')
+    expect(divider?.getAttribute('class')).toContain('md:w-px')
+    expect(divider?.getAttribute('class')).toContain('md:self-stretch')
+    expect(secondary?.getAttribute('class')).toContain('flex-1')
+    expect(savedValue?.getAttribute('class')).toContain('text-[46px]')
+    expect(savingsPill?.getAttribute('class')).toContain(
+      'border-cyanotype-border',
+    )
+    expect(track?.getAttribute('class')).toContain('h-3')
+    expect(fill?.getAttribute('class')).toContain('bg-cyanotype-blue')
+  })
+
   it('switches with arrow keys and click, including a zero recent window', async () => {
     await render()
 
@@ -416,17 +475,19 @@ describe('SavedStatsBand', () => {
     )
   })
 
-  it('stacks at narrow widths and disables the decorative loop for reduced motion', async () => {
+  it('stacks at narrow widths and keeps the bounded progress fill responsive', async () => {
     await render()
 
     const card = container.querySelector('[data-saved-stats-card]')
     const track = container.querySelector('[data-budget-track]')
-    const ping = container.querySelector('[data-used-marker-ping]')
+    const fill = container.querySelector('[data-used-fill]')
     expect(card?.getAttribute('class')).toContain('flex-col')
     expect(card?.getAttribute('class')).toContain('md:flex-row')
     expect(track?.getAttribute('class')).toContain('overflow-hidden')
-    expect(ping?.getAttribute('class')).toContain('animate-ping')
-    expect(ping?.getAttribute('class')).toContain('motion-reduce:animate-none')
+    expect(fill?.getAttribute('class')).toContain('transition-[width]')
+    expect(fill?.getAttribute('class')).toContain(
+      'motion-reduce:transition-none',
+    )
     expect(container.querySelector('[data-stat="tokens-saved"]')).not.toBeNull()
   })
 })

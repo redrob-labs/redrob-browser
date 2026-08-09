@@ -83,7 +83,7 @@ export function Cockpit() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-8 pt-8 pb-16">
         <CockpitHero />
         {shouldLoadStats && stats.data?.hasMeasuredStats ? (
-          <SavedStatsBand stats={stats.data} />
+          <SavedStatsBand runningCount={sessions.length} stats={stats.data} />
         ) : (
           <RunningGrid sessions={sessions} />
         )}
