@@ -1,4 +1,5 @@
 import { AgentDot } from '@/components/audit/AgentDot'
+import { activityCardCaptionTones } from '@/components/cockpit/activityCardTone'
 import { cn } from '@/lib/utils'
 import {
   type TaskSummary,
@@ -49,7 +50,13 @@ export function AuditHoverPreview({ task }: AuditHoverPreviewProps) {
         ) : null}
       </div>
       {task && (
-        <div className="flex flex-col gap-0.5 bg-ink-deep px-4 py-3 text-white">
+        <div
+          className={cn(
+            'flex flex-col gap-0.5 px-4 py-3',
+            activityCardCaptionTones.blue.surface,
+          )}
+          data-caption-tone="blue"
+        >
           <div className="flex items-center gap-2 font-mono text-[10px] text-white/75 uppercase tracking-[0.08em]">
             <AgentDot slug={task.slug} />
             <span className="truncate text-white/95">{task.label}</span>

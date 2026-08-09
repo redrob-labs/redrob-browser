@@ -7,18 +7,28 @@ import {
   useTaskScreenshotBaseUrl,
 } from '@/modules/api/audit.hooks'
 import { formatDuration, formatRelative } from '@/screens/audit/audit.helpers'
+import {
+  type ActivityCardCaptionTone,
+  activityCardCaptionTones,
+} from './activityCardTone'
 
 interface SupportingTileProps {
   task: TaskSummary
   now: number
   className?: string
+  captionTone?: ActivityCardCaptionTone
 }
 
 /**
  * Cyanotype supporting tile. Mirrors the lead's captured-media well
- * and saturated blue caption at a compact scale.
+ * and tone-switchable caption at a compact scale.
  */
-export function SupportingTile({ task, now, className }: SupportingTileProps) {
+export function SupportingTile({
+  task,
+  now,
+  className,
+  captionTone = 'light',
+}: SupportingTileProps) {
   const isLive = task.status === 'live'
   const isStopped = task.status === 'cancelled'
   const screenshotId = task.latestScreenshotId ?? null
@@ -56,7 +66,13 @@ export function SupportingTile({ task, now, className }: SupportingTileProps) {
           <ArrowUpRight className="size-3.5" />
         </span>
       </div>
-      <Caption task={task} now={now} isLive={isLive} isStopped={isStopped} />
+      <Caption
+        task={task}
+        now={now}
+        isLive={isLive}
+        isStopped={isStopped}
+        tone={captionTone}
+      />
     </NavLink>
   )
 }
@@ -66,27 +82,36 @@ function Caption({
   now,
   isLive,
   isStopped,
+  tone,
 }: {
   task: TaskSummary
   now: number
   isLive: boolean
   isStopped: boolean
+  tone: ActivityCardCaptionTone
 }) {
+  const toneClasses = activityCardCaptionTones[tone]
   return (
-    <div className="flex flex-col gap-[7px] bg-cyanotype-blue px-5 pt-4 pb-[18px] text-white">
-      <div className="flex items-center gap-2 font-medium text-[11.5px] text-white leading-[14px]">
+    <div
+      className={cn(
+        'flex flex-col gap-[7px] px-5 pt-4 pb-[18px]',
+        toneClasses.surface,
+      )}
+      data-caption-tone={tone}
+    >
+      <div className="flex items-center gap-2 font-medium text-[11.5px] leading-[14px]">
         <span className="truncate">{task.label}</span>
         {isLive && (
           <span className="rounded-full bg-cyanotype-live px-2 py-0.5 font-semibold text-[10px] text-cyanotype-live-ink">
             LIVE
           </span>
         )}
-        {isStopped && <span className="text-white/70">STOPPED</span>}
+        {isStopped && <span className={toneClasses.subdued}>STOPPED</span>}
       </div>
-      <h3 className="truncate font-bold text-[16px] text-white leading-5 tracking-[-0.02em]">
+      <h3 className="truncate font-bold text-[16px] leading-5 tracking-[-0.02em]">
         {task.name}
       </h3>
-      <p className="text-[11.5px] text-white tabular-nums leading-[14px]">
+      <p className="text-[11.5px] tabular-nums leading-[14px]">
         {formatDuration(task.durationMs)} · {task.dispatchCount}t ·{' '}
         {formatRelative(task.startedAt, now)}
       </p>

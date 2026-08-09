@@ -11,20 +11,31 @@ import {
   formatDuration,
   formatRelative,
 } from '@/screens/audit/audit.helpers'
+import {
+  type ActivityCardCaptionTone,
+  activityCardCaptionTones,
+} from './activityCardTone'
 
 interface LeadRunTileProps {
   task: TaskSummary
   now: number
   className?: string
+  captionTone?: ActivityCardCaptionTone
 }
 
 /**
  * Lead-story tile for the cockpit editorial layout.
  *
  * Cyanotype lead tile: captured session media in a quiet well over
- * a saturated blue information panel. The whole tile remains a link.
+ * a tone-switchable caption. The new-tab default is the light tone;
+ * hover previews can retain the saturated blue treatment.
  */
-export function LeadRunTile({ task, now, className }: LeadRunTileProps) {
+export function LeadRunTile({
+  task,
+  now,
+  className,
+  captionTone = 'light',
+}: LeadRunTileProps) {
   const isLive = task.status === 'live'
   const isFailed = task.status === 'failed'
   const isStopped = task.status === 'cancelled'
@@ -69,6 +80,7 @@ export function LeadRunTile({ task, now, className }: LeadRunTileProps) {
         isLive={isLive}
         isFailed={isFailed}
         isStopped={isStopped}
+        tone={captionTone}
       />
     </NavLink>
   )
@@ -80,30 +92,39 @@ function Caption({
   isLive,
   isFailed,
   isStopped,
+  tone,
 }: {
   task: TaskSummary
   now: number
   isLive: boolean
   isFailed: boolean
   isStopped: boolean
+  tone: ActivityCardCaptionTone
 }) {
+  const toneClasses = activityCardCaptionTones[tone]
   return (
-    <div className="relative flex flex-col gap-[7px] bg-cyanotype-blue px-5 pt-4 pb-[18px] text-white">
-      <div className="flex items-center gap-2 font-medium text-[11.5px] text-white leading-[14px]">
+    <div
+      className={cn(
+        'relative flex flex-col gap-[7px] px-5 pt-4 pb-[18px]',
+        toneClasses.surface,
+      )}
+      data-caption-tone={tone}
+    >
+      <div className="flex items-center gap-2 font-medium text-[11.5px] leading-[14px]">
         <span className="truncate">{task.label}</span>
         {isFailed && (
           <span className="rounded-full bg-red-tint px-2 py-0.5 font-bold text-[10px] text-cyanotype-error">
             FAILED
           </span>
         )}
-        {isStopped && <span className="text-white/70">STOPPED</span>}
+        {isStopped && <span className={toneClasses.subdued}>STOPPED</span>}
       </div>
-      <h2 className="truncate font-bold text-[22px] text-white leading-[1.2] tracking-[-0.02em]">
+      <h2 className="truncate font-bold text-[22px] leading-[1.2] tracking-[-0.02em]">
         {task.name}
       </h2>
       <p
         className={cn(
-          'text-[11.5px] text-white tabular-nums leading-[1.5]',
+          'text-[11.5px] tabular-nums leading-[1.5]',
           isLive && 'pr-16',
         )}
       >
@@ -114,10 +135,7 @@ function Caption({
           : `started ${formatRelative(task.startedAt, now)}`}
       </p>
       <p
-        className={cn(
-          'truncate text-[11px] text-white leading-[1.5]',
-          isLive && 'pr-16',
-        )}
+        className={cn('truncate text-[11px] leading-[1.5]', isLive && 'pr-16')}
       >
         {abbreviateSequence(task.toolSequence)}
       </p>

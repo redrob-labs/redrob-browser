@@ -27,6 +27,7 @@ mock.module('@/modules/api/audit.hooks', () => ({
 }))
 
 const { RecentActivity } = await import('./RecentActivity')
+const { AuditHoverPreview } = await import('../audit/AuditHoverPreview')
 
 function render(): string {
   const client = new QueryClient({
@@ -80,9 +81,16 @@ describe('RecentActivity', () => {
     expect(html).toContain('Browsed example.com')
     expect(html).toContain('Claude Code')
     expect(html).toContain('ph-no-capture')
+    expect(html).toContain('data-caption-tone="light"')
     // DONE is the silent default in the editorial cockpit; the tile
-    // instead carries a mono meta line with the dispatch count.
+    // instead carries a compact meta line with the dispatch count.
     expect(html).toContain('4 tools')
+  })
+
+  it('keeps the saturated blue caption tone for audit hover previews', () => {
+    screenshotBaseUrl = null
+    const html = renderToStaticMarkup(<AuditHoverPreview task={sampleTask} />)
+    expect(html).toContain('data-caption-tone="blue"')
   })
 
   it('preserves lead and supporting session screenshots with useful alt text', () => {
