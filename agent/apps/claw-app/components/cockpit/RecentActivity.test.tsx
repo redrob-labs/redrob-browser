@@ -81,7 +81,7 @@ describe('RecentActivity', () => {
     expect(html).toContain('Browsed example.com')
     expect(html).toContain('Claude Code')
     expect(html).toContain('ph-no-capture')
-    expect(html).toContain('data-caption-tone="light"')
+    expect(html).toContain('data-caption-tone="blue"')
     // DONE is the silent default in the editorial cockpit; the tile
     // instead carries a compact meta line with the dispatch count.
     expect(html).toContain('4 tools')
@@ -117,6 +117,8 @@ describe('RecentActivity', () => {
     const html = render()
     expect(html).toContain('alt="Session hero from Claude Code"')
     expect(html).toContain('alt="Session preview from Codex"')
+    expect(html.match(/data-caption-tone="blue"/g)?.length).toBe(1)
+    expect(html.match(/data-caption-tone="light"/g)?.length).toBe(1)
     expect(html).toContain(
       'http://127.0.0.1:9200/api/v1/sessions/sess-1/screenshots/7',
     )

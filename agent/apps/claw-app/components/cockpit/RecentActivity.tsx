@@ -99,6 +99,7 @@ function BentoGrid({ lead, supporting, now }: BentoGridProps) {
       <LeadRunTile
         task={lead}
         now={now}
+        captionTone="blue"
         className="min-h-[360px] md:col-span-6 md:row-span-2 md:min-h-0"
       />
       {supporting.map((task, idx) => (
