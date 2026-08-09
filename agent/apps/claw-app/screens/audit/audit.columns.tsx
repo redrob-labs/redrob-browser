@@ -1,4 +1,5 @@
 import type { ColumnDef } from '@tanstack/react-table'
+import { cn } from '@/lib/utils'
 import type { TaskSummary } from '@/modules/api/audit.hooks'
 import {
   abbreviateSequence,
@@ -28,7 +29,7 @@ export const TASK_COLUMNS: ColumnDef<TaskSummary>[] = [
     accessorKey: 'agentLabel',
     cell: ({ row }) => (
       <div className="flex items-center gap-2">
-        <span className="min-w-0 truncate text-[11px] text-ledger-link">
+        <span className="min-w-0 truncate text-[12px] text-ledger-link">
           {row.original.label}
         </span>
         {row.original.status === 'live' && <LiveInlineChip />}
@@ -61,7 +62,7 @@ export const TASK_COLUMNS: ColumnDef<TaskSummary>[] = [
     // rendering bug next to the explicit trailing ellipsis. The wider
     // cockpit tiles keep the default.
     cell: ({ row }) => (
-      <span className="block truncate text-[11px] text-ledger-ink-3">
+      <span className="block truncate text-[12px] text-ledger-ink-3">
         {abbreviateSequence(row.original.toolSequence, 4)}
       </span>
     ),
@@ -79,7 +80,7 @@ export const TASK_COLUMNS: ColumnDef<TaskSummary>[] = [
     header: 'Duration',
     accessorFn: (t) => t.durationMs,
     cell: ({ getValue }) => (
-      <span className="text-[11px] text-ledger-ink-2 tabular-nums">
+      <span className="text-[12px] text-ledger-ink-2 tabular-nums">
         {formatDuration(getValue<number>())}
       </span>
     ),
@@ -90,7 +91,7 @@ export const TASK_COLUMNS: ColumnDef<TaskSummary>[] = [
     header: 'When',
     accessorKey: 'startedAt',
     cell: ({ getValue }) => (
-      <span className="text-[11px] text-ledger-ink-3 tabular-nums">
+      <span className="text-[12px] text-ledger-ink-3 tabular-nums">
         {formatRelative(getValue<number>(), Date.now())}
       </span>
     ),
@@ -120,7 +121,7 @@ export const NUMERIC_COLUMN_IDS = new Set(['tokens', 'duration', 'when'])
  */
 export const COLUMN_WIDTHS: Record<string, string> = {
   agent: 'w-[260px]',
-  sequence: 'w-[256px]',
+  sequence: 'w-[288px]',
   tokens: 'w-[88px]',
   duration: 'w-[88px]',
   when: 'w-[88px]',
@@ -136,7 +137,7 @@ function TokensCell({ task }: { task: TaskSummary }) {
   if (!usage) {
     return (
       <span
-        className="text-[11px] text-ledger-ink-3 tabular-nums"
+        className="text-[12px] text-ledger-ink-3 tabular-nums"
         title="Token usage not measured for this session"
       >
         —
@@ -145,7 +146,7 @@ function TokensCell({ task }: { task: TaskSummary }) {
   }
   return (
     <span
-      className="text-[11px] text-ledger-ink-2 tabular-nums"
+      className="text-[12px] text-ledger-ink-2 tabular-nums"
       title={`${formatTokensFull(usage.totalTokenEstimate)} tokens`}
     >
       {formatTokensCompact(usage.totalTokenEstimate)}
@@ -153,30 +154,30 @@ function TokensCell({ task }: { task: TaskSummary }) {
   )
 }
 
+/**
+ * Exceptional-state pills. One geometry for all three so they read as a
+ * family; only Live carries a saturated fill. No dot and no animation —
+ * a run being live is a state to notice, not an alarm to chase.
+ */
+const STATE_CHIP =
+  '-my-[3px] inline-flex shrink-0 items-center rounded-full px-2.5 py-[3px] font-semibold text-[11px] leading-[14px]'
+
 function LiveInlineChip() {
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-green-tint px-1.5 py-px font-semibold text-[9.5px] text-green uppercase tracking-[0.06em]">
-      <span
-        aria-hidden
-        className="inline-block size-1.5 animate-[pulse-dot_1.4s_ease-in-out_infinite] rounded-full bg-green"
-      />
+    <span
+      className={cn(STATE_CHIP, 'bg-cyanotype-live text-cyanotype-live-ink')}
+    >
       Live
     </span>
   )
 }
 
 function FailedInlineChip() {
-  return (
-    <span className="inline-flex shrink-0 items-center rounded-full bg-red-tint px-1.5 py-px font-semibold text-[9.5px] text-red uppercase tracking-[0.06em]">
-      Failed
-    </span>
-  )
+  return <span className={cn(STATE_CHIP, 'bg-red-tint text-red')}>Failed</span>
 }
 
 function StoppedInlineChip() {
   return (
-    <span className="inline-flex shrink-0 items-center rounded-full bg-card-tint px-1.5 py-px font-semibold text-[9.5px] text-ink-3 uppercase tracking-[0.06em]">
-      Stopped
-    </span>
+    <span className={cn(STATE_CHIP, 'bg-card-tint text-ink-3')}>Stopped</span>
   )
 }
