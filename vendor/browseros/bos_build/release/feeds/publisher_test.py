@@ -108,9 +108,7 @@ def _browserclaw_appcast(sparkle_version="10000.0.47.0.2"):
 
 
 def _legacy_browserclaw_appcast(sparkle_version="10000.0.47.0.2"):
-    return _browserclaw_appcast(sparkle_version).replace(
-        "BrowserOS neo", "BrowserClaw"
-    )
+    return _browserclaw_appcast(sparkle_version).replace("BrowserOS neo", "BrowserClaw")
 
 
 def _empty_mac_appcast():
