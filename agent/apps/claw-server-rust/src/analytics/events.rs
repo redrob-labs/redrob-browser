@@ -58,6 +58,8 @@ const CLIENT_ALIASES: [(&str, &str); 4] = [
     ("browserclaw-claude-desktop-wrapper", "claude-desktop"),
 ];
 
+const UNRECOGNIZED_EMPTY: &str = "unrecognized-empty";
+
 pub(crate) const HARNESS_VALUES: [&str; 7] = [
     "Claude Code",
     "Codex",
@@ -300,9 +302,16 @@ fn bucket_client_name(raw: &str) -> String {
     }
 
     if KNOWN_CLIENTS.contains(&slug.as_str()) {
-        slug
+        return slug;
+    }
+
+    // Not allowlisted: record the client's own slug so the long tail is visible
+    // instead of collapsed into one opaque bucket. A blank name has nothing to
+    // record, so it is reported as empty.
+    if slug.is_empty() {
+        UNRECOGNIZED_EMPTY.to_string()
     } else {
-        "unrecognized-client".to_string()
+        slug
     }
 }
 
@@ -432,21 +441,29 @@ mod tests {
     }
 
     #[test]
-    fn unknown_or_content_shaped_client_names_become_unrecognized_client() {
-        for raw in [
-            "",
-            "my-secret-internal-tool",
-            "https://example.com",
-            "user@example.com",
-            "/home/user/secret",
-            r"C:\Users\someone",
-            "codex@example.com",
-            "codex://private",
-            "/codex/home/user",
+    fn blank_client_names_report_as_unrecognized_empty() {
+        for raw in ["", "   ", "!!!", "…"] {
+            assert_eq!(
+                AGENT_SESSION_STARTED.sanitize(&json!({ "client_name": raw })),
+                Some(json!({ "client_name": "unrecognized-empty" })),
+                "{raw:?} should bucket as empty"
+            );
+        }
+    }
+
+    #[test]
+    fn unlisted_client_names_surface_their_slug() {
+        for (raw, expected) in [
+            ("Roo Code", "roo-code"),
+            ("LibreChat", "librechat"),
+            ("5ire", "5ire"),
+            ("Cherry Studio", "cherry-studio"),
+            ("claude-code-router", "claude-code-router"),
         ] {
             assert_eq!(
                 AGENT_SESSION_STARTED.sanitize(&json!({ "client_name": raw })),
-                Some(json!({ "client_name": "unrecognized-client" }))
+                Some(json!({ "client_name": expected })),
+                "{raw:?} should surface its slug"
             );
         }
     }
