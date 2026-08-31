@@ -55,7 +55,11 @@ SUITE_RELEASE_COMPONENTS = (
     "claw-server-rust",
     "browserclaw",
 )
-SUITE_COMPONENTS = (*SUITE_RELEASE_COMPONENTS, "claw-onboard")
+# Onboarding SPAs release independently from the family transaction. The suite
+# still freezes both committed versions so each product build receives the
+# matching immutable resource pin from the same source snapshot.
+SUITE_ONBOARDING_COMPONENTS = ("app-onboard", "claw-onboard")
+SUITE_COMPONENTS = (*SUITE_RELEASE_COMPONENTS, *SUITE_ONBOARDING_COMPONENTS)
 SUITE_STATE_PATHS = (
     "updates/extensions/bundled-manifest.xml",
     "updates/extensions/extensions.alpha.json",
@@ -553,9 +557,10 @@ def reconcile_transaction(
                     candidate_id=branch,
                 )
             )
-        versions["claw-onboard"] = normalize_component_version(
-            "claw-onboard", committed["claw-onboard"]
-        )
+        for component in SUITE_ONBOARDING_COMPONENTS:
+            versions[component] = normalize_component_version(
+                component, committed[component]
+            )
         browser_version, build_offset = _allocate_browser(
             transaction_id(request.mode, request.source_sha),
             backend.read_browser_version(),

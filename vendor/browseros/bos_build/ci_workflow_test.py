@@ -1027,6 +1027,7 @@ class ReleaseIntegrityWorkflowTest(unittest.TestCase):
             "release-server.yml",
             "release-claw-server.yml",
             "release-claw-onboard.yml",
+            "release-app-onboard.yml",
             "release-extensions.yml",
         )
         for workflow_name in workflows:
@@ -1046,6 +1047,7 @@ class ReleaseIntegrityWorkflowTest(unittest.TestCase):
             "release-server.yml",
             "release-claw-server.yml",
             "release-claw-onboard.yml",
+            "release-app-onboard.yml",
             "release-extensions.yml",
         ):
             text = (WORKFLOW_DIR / workflow_name).read_text(encoding="utf-8")
@@ -1063,6 +1065,7 @@ class ReleaseIntegrityWorkflowTest(unittest.TestCase):
             "release-server.yml",
             "release-claw-server.yml",
             "release-claw-onboard.yml",
+            "release-app-onboard.yml",
             "release-extensions.yml",
             "release-extension-feeds.yml",
             "release-linux.yml",
@@ -1316,6 +1319,7 @@ print(json.dumps({
             ("release-server.yml", "prepare", "Resolve release"),
             ("release-claw-server.yml", "prepare", "Resolve release"),
             ("release-claw-onboard.yml", "prepare", "Resolve release"),
+            ("release-app-onboard.yml", "prepare", "Resolve release"),
             ("release-extensions.yml", "prepare", "Resolve extension release"),
         )
         for workflow_name, job_name, step_name in jobs:
@@ -1503,6 +1507,10 @@ class FamilyNightlyWorkflowTest(unittest.TestCase):
                 "queue": "max",
             },
         )
+        self.assertEqual(
+            transaction["outputs"]["app_onboarding_version"],
+            "${{ steps.transaction.outputs.app_onboarding_version }}",
+        )
         for token in (
             '"$DEFAULT_BRANCH" != "main"',
             '"$SOURCE_REF" != "refs/heads/main"',
@@ -1601,6 +1609,14 @@ class FamilyNightlyWorkflowTest(unittest.TestCase):
         self.assertEqual(
             jobs["build-browserclaw"]["with"]["server_version"],
             "${{ needs.transaction.outputs.claw_server_version }}",
+        )
+        self.assertEqual(
+            jobs["build-browseros"]["with"]["onboarding_version"],
+            "${{ needs.transaction.outputs.app_onboarding_version }}",
+        )
+        self.assertEqual(
+            jobs["build-browserclaw"]["with"]["onboarding_version"],
+            "${{ needs.transaction.outputs.onboarding_version }}",
         )
 
     def test_public_finalization_and_state_merge_follow_both_builds(self):

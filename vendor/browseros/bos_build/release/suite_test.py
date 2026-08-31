@@ -14,6 +14,7 @@ from bos_build.release.suite import (
     BrowserAllocation,
     GitHubSuiteBackend,
     SUITE_COMPONENTS,
+    SUITE_ONBOARDING_COMPONENTS,
     SUITE_RELEASE_COMPONENTS,
     SUITE_STATE_PATHS,
     SuitePullRequest,
@@ -54,6 +55,7 @@ def suite_record(
             "agent": "0.0.121.0",
             "claw-server-rust": "0.0.46",
             "browserclaw": "0.0.83.0",
+            "app-onboard": "0.0.0",
             "claw-onboard": "0.0.15",
         },
         pull_request_number=77,
@@ -115,6 +117,7 @@ class FakeBackend:
             "agent": "0.0.120.0",
             "claw-server-rust": "0.0.45",
             "browserclaw": "0.0.82.0",
+            "app-onboard": "0.0.0",
             "claw-onboard": "0.0.15",
         }
 
@@ -406,6 +409,7 @@ class SuiteReconcileTest(unittest.TestCase):
                 "agent": "0.0.122.0",
                 "claw-server-rust": "0.0.47",
                 "browserclaw": "0.0.84.0",
+                "app-onboard": "0.0.0",
                 "claw-onboard": "0.0.15",
             },
         )
@@ -707,6 +711,7 @@ class GitHubSuiteBackendTest(unittest.TestCase):
             "packages/browseros-agent/apps/app/package.json",
             "packages/browseros-agent/apps/claw-server-rust/Cargo.toml",
             "packages/browseros-agent/apps/claw-app/package.json",
+            "packages/browseros-agent/apps/app-onboard/package.json",
             "packages/browseros-agent/apps/claw-onboard/package.json",
             "packages/browseros-agent/bun.lock",
             "packages/browseros-agent/Cargo.lock",
@@ -729,7 +734,7 @@ class GitHubSuiteBackendTest(unittest.TestCase):
             versions = {
                 component: (
                     committed[component]
-                    if component == "claw-onboard"
+                    if component in SUITE_ONBOARDING_COMPONENTS
                     else increment_component_version(component, committed[component])
                 )
                 for component in SUITE_COMPONENTS
@@ -843,7 +848,7 @@ class GitHubSuiteBackendTest(unittest.TestCase):
             versions = {
                 component: (
                     committed[component]
-                    if component == "claw-onboard"
+                    if component in SUITE_ONBOARDING_COMPONENTS
                     else increment_component_version(component, committed[component])
                 )
                 for component in SUITE_COMPONENTS
@@ -872,7 +877,7 @@ class GitHubSuiteBackendTest(unittest.TestCase):
             versions = {
                 component: (
                     committed[component]
-                    if component == "claw-onboard"
+                    if component in SUITE_ONBOARDING_COMPONENTS
                     else increment_component_version(component, committed[component])
                 )
                 for component in SUITE_COMPONENTS

@@ -113,6 +113,7 @@ class SuiteCliTest(unittest.TestCase):
             self.assertEqual(outputs["claw_server_version"], "0.0.46")
             self.assertEqual(outputs["browserclaw_version"], "0.0.83.0")
             self.assertEqual(outputs["onboarding_version"], "0.0.15")
+            self.assertEqual(outputs["app_onboarding_version"], "0.0.0")
             self.assertIn("family release transaction", github_summary.read_text())
             reconcile.assert_called_once()
             backend.assert_called_once()

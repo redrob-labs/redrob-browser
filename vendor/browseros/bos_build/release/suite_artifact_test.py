@@ -55,7 +55,7 @@ def _write_artifact(root: Path, *, product: str = "browseros") -> None:
         {
             "server": record.component_versions["server"],
             "agent": record.component_versions["agent"],
-            "claw-onboard": record.component_versions["claw-onboard"],
+            "app-onboard": record.component_versions["app-onboard"],
         }
         if product == "browseros"
         else {

@@ -82,7 +82,10 @@ def _write_outputs(path: Optional[Path], record: SuiteRecord) -> None:
         "agent_version": versions["agent"],
         "claw_server_version": versions["claw-server-rust"],
         "browserclaw_version": versions["browserclaw"],
+        # The historical output name belongs to BrowserOS neo. BrowserOS has a
+        # separate onboarding app and therefore needs its own workflow output.
         "onboarding_version": versions["claw-onboard"],
+        "app_onboarding_version": versions["app-onboard"],
         "component_versions": json.dumps(dict(versions), sort_keys=True),
         "pull_request_number": str(record.pull_request_number),
         "pull_request_url": record.pull_request_url,
