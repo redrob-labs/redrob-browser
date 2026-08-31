@@ -132,6 +132,21 @@ def _empty_item_mac_appcast():
     )
 
 
+def _empty_browserclaw_win_arm_appcast():
+    spec = feed_by_key("appcast-claw-win-arm64.xml")
+    return f"""\
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>{spec.title}</title>
+    <link>{spec.link}</link>
+    <item>
+    </item>
+  </channel>
+</rss>
+"""
+
+
 def _server_appcast(bundle_id, channel, version):
     spec = server_feed(bundle_id, channel)
     artifact = SignedArtifact(
@@ -473,6 +488,66 @@ class PublisherTestCase(unittest.TestCase):
                 ("put", spec.key, "application/xml"),
             ],
         )
+
+    def test_browserclaw_legacy_title_migrates_on_empty_placeholder(self):
+        spec = feed_by_key("appcast-claw-win-arm64.xml")
+        canonical = _empty_browserclaw_win_arm_appcast()
+        legacy = canonical.replace(spec.title, spec.legacy_titles[0])
+        publisher = self._publisher({spec.key: legacy.encode()})
+
+        ok = publisher.publish(spec, canonical, publish=True)
+
+        self.assertTrue(ok)
+        self.assertEqual(
+            self.client.calls,
+            [
+                (
+                    "copy",
+                    spec.key,
+                    f"feeds-history/{spec.key}.20260701T120000Z",
+                ),
+                ("put", spec.key, "application/xml"),
+            ],
+        )
+
+    def test_empty_placeholder_migration_rejects_release_markers(self):
+        spec = feed_by_key("appcast-claw-win-arm64.xml")
+        canonical = _empty_browserclaw_win_arm_appcast()
+        legacy = canonical.replace(spec.title, spec.legacy_titles[0])
+        malformed_live = {
+            "channel release children": legacy.replace(
+                "    <item>\n    </item>",
+                "    <sparkle:version>10000.0.99.0</sparkle:version>\n"
+                '    <enclosure url="https://cdn.browseros.com/release.dmg"/>',
+            ),
+            "root release child": legacy.replace(
+                "</rss>",
+                "  <sparkle:version>10000.0.99.0</sparkle:version>\n</rss>",
+            ),
+            "root release attribute": legacy.replace(
+                '<rss version="2.0"',
+                '<rss version="2.0" release-version="10000.0.99.0"',
+            ),
+            "channel release attribute": legacy.replace(
+                "  <channel>", '  <channel release-version="10000.0.99.0">'
+            ),
+            "channel mixed content": legacy.replace(
+                "  <channel>\n", "  <channel>release-version=10000.0.99.0\n"
+            ),
+            "metadata tail content": legacy.replace(
+                f"<title>{spec.legacy_titles[0]}</title>",
+                f"<title>{spec.legacy_titles[0]}</title>release-version=10000.0.99.0",
+            ),
+        }
+
+        for label, live in malformed_live.items():
+            with self.subTest(shape=label):
+                publisher = self._publisher({spec.key: live.encode()})
+
+                ok = publisher.publish(spec, canonical, publish=True)
+
+                self.assertFalse(ok)
+                self.assertEqual(self.client.calls, [])
 
     def test_browserclaw_legacy_title_migration_refuses_downgrade(self):
         spec = feed_by_key("appcast-claw.xml")
