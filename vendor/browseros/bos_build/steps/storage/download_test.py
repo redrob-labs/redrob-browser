@@ -216,7 +216,7 @@ class ManagedBinaryFamiliesTest(unittest.TestCase):
                 },
                 {
                     "name": "Onboard",
-                    "destination": "resources/binaries/browseros_claw_onboard",
+                    "destination": "resources/binaries/browseros_onboarding",
                 },
                 {
                     "name": "Elsewhere",
@@ -230,7 +230,7 @@ class ManagedBinaryFamiliesTest(unittest.TestCase):
             config_path.write_text(yaml.safe_dump(config))
 
             self.assertEqual(
-                {"browseros_server", "browseros_claw_onboard"},
+                {"browseros_server", "browseros_onboarding"},
                 managed_binary_families(config_path),
             )
 
@@ -259,7 +259,9 @@ class ManagedBinaryFamiliesTest(unittest.TestCase):
 
         self.assertIn("browseros_server", families)
         self.assertIn("browseros_claw_server_rust", families)
-        self.assertIn("browseros_claw_onboard", families)
+        self.assertIn("browseros_onboarding", families)
+        self.assertNotIn("browseros_app_onboard", families)
+        self.assertNotIn("browseros_claw_onboard", families)
         # Retired by #1948; its leftover dir is exactly what pruning removes.
         self.assertNotIn("browseros_claw_server", families)
 
@@ -389,7 +391,7 @@ class ResourceVersionOverrideTest(unittest.TestCase):
                 env=SimpleNamespace(
                     browseros_server_resource_version=browseros,
                     browserclaw_server_resource_version=browserclaw,
-                    browserclaw_onboard_resource_version=onboard,
+                    onboarding_resource_version=onboard,
                 )
             ),
         )
@@ -431,7 +433,7 @@ class ResourceVersionOverrideTest(unittest.TestCase):
                         r2_bucket="browseros",
                         browseros_server_resource_version=override,
                         browserclaw_server_resource_version="",
-                        browserclaw_onboard_resource_version="",
+                        onboarding_resource_version="",
                     ),
                     get_download_resources_config=lambda: config_path,
                 ),
@@ -617,12 +619,12 @@ class DownloadResourceConfigTest(unittest.TestCase):
             "browseros": (
                 "BrowserOS Onboarding Resources",
                 "app-onboard/prod-resources/latest/browseros-app-onboard-resources.zip",
-                "resources/binaries/browseros_app_onboard",
+                "resources/binaries/browseros_onboarding",
             ),
             "browserclaw": (
                 "BrowserOS Claw Onboarding Resources",
                 "claw-onboard/prod-resources/latest/browseros-claw-onboard-resources.zip",
-                "resources/binaries/browseros_claw_onboard",
+                "resources/binaries/browseros_onboarding",
             ),
         }
         onboard_names = {value[0] for value in expected_by_product.values()}
