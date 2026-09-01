@@ -328,17 +328,7 @@ impl ClawMcpService {
 
     async fn set_client_info(&self, request: &InitializeRequestParams) {
         let mut lifecycle = self.lifecycle.lock().await;
-        lifecycle.client_info = Some(ClientInfo {
-            name: clean_client_field(&request.client_info.name, "agent"),
-            version: clean_client_field(&request.client_info.version, "unknown"),
-            title: request
-                .client_info
-                .title
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string),
-        });
+        lifecycle.client_info = Some(client_info_from_implementation(&request.client_info));
     }
 
     /// Looks up an existing store session for `session_id` or mints one under it.
@@ -423,16 +413,27 @@ impl ClawMcpService {
     async fn resolve_modern_session(
         &self,
         provided: Option<SessionId>,
+        client: Option<ClientInfo>,
     ) -> Result<(StartedSession, SessionId), McpError> {
-        let client = ClientInfo {
-            name: "agent".to_string(),
-            version: "unknown".to_string(),
-            title: None,
-        };
+        // 2026-07-28 removed `initialize`, so a stateless call carries no handshake
+        // clientInfo. Use the per-request inline `_meta` clientInfo when the client
+        // sends it; otherwise fall back to the anonymous "agent" identity.
+        let client = client.unwrap_or_else(default_agent_client_info);
         if let Some(handle) = provided
             && let Some(session) = self.state.sessions.lookup(&handle).await
         {
-            return Ok((started_session_from(session, &client), handle));
+            // A reused session keeps the identity it was minted with. This request's
+            // inline clientInfo is optional and may be absent or differ, so relabeling
+            // from it would flip the same session's audit attribution between the real
+            // client and "agent" across dispatches; take the label from the session.
+            let agent_label = session.agent().label().to_string();
+            return Ok((
+                StartedSession {
+                    session,
+                    agent_label,
+                },
+                handle,
+            ));
         }
         let handle = SessionId::new(Uuid::new_v4().to_string());
         let started = self.start_session_in_store(handle.clone(), client).await?;
@@ -610,7 +611,15 @@ impl ServerHandler for ClawMcpService {
             .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28)
             && session_id_from_extensions(&context.extensions).is_none();
         let (started, session_handle) = if modern {
-            let (started, handle) = self.resolve_modern_session(provided_handle).await?;
+            let modern_client = request
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.client_info())
+                .as_ref()
+                .map(client_info_from_implementation);
+            let (started, handle) = self
+                .resolve_modern_session(provided_handle, modern_client)
+                .await?;
             (started, Some(handle))
         } else {
             (self.learn_session_from_request(&context).await?, None)
@@ -927,6 +936,31 @@ fn clean_client_field(value: &str, fallback: &str) -> String {
     }
 }
 
+/// Maps an MCP `Implementation` (from `initialize` clientInfo or a stateless
+/// request's inline `_meta` clientInfo) into the session `ClientInfo`, so both
+/// paths derive the same agent name, slug, and tab-group prefix for a client.
+fn client_info_from_implementation(source: &Implementation) -> ClientInfo {
+    ClientInfo {
+        name: clean_client_field(&source.name, "agent"),
+        version: clean_client_field(&source.version, "unknown"),
+        title: source
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+    }
+}
+
+/// The anonymous fallback identity for a stateless client that sends no clientInfo.
+fn default_agent_client_info() -> ClientInfo {
+    ClientInfo {
+        name: "agent".to_string(),
+        version: "unknown".to_string(),
+        title: None,
+    }
+}
+
 async fn finish_local_dispatch(
     session: &Session,
     dispatch_id: &DispatchId,
@@ -1093,12 +1127,12 @@ mod tests {
         let service = ClawMcpService::new(call.state);
 
         let (first, minted) = service
-            .resolve_modern_session(None)
+            .resolve_modern_session(None, None)
             .await
             .map_err(|error| anyhow::anyhow!("{error:?}"))?;
 
         let (again, reused) = service
-            .resolve_modern_session(Some(minted.clone()))
+            .resolve_modern_session(Some(minted.clone()), None)
             .await
             .map_err(|error| anyhow::anyhow!("{error:?}"))?;
         assert_eq!(reused.to_string(), minted.to_string());
@@ -1109,7 +1143,7 @@ mod tests {
 
         let client_chosen = SessionId::new("client-picked-id");
         let (other, other_handle) = service
-            .resolve_modern_session(Some(client_chosen.clone()))
+            .resolve_modern_session(Some(client_chosen.clone()), None)
             .await
             .map_err(|error| anyhow::anyhow!("{error:?}"))?;
         assert_ne!(other_handle.to_string(), client_chosen.to_string());
@@ -1117,6 +1151,43 @@ mod tests {
             other.session.id().to_string(),
             first.session.id().to_string()
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn modern_session_adopts_the_inline_client_name() -> anyhow::Result<()> {
+        let call = crate::api::mcp::test_support::tool_call("tabs", json!({})).await?;
+        let service = ClawMcpService::new(call.state);
+
+        // A stateless client that sends inline clientInfo is named after it, so its
+        // tabs group under the real client slug rather than the anonymous "agent".
+        let client = ClientInfo {
+            name: "test-harness-client".to_string(),
+            version: "9.9.9".to_string(),
+            title: None,
+        };
+        let (named, handle) = service
+            .resolve_modern_session(None, Some(client))
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+        assert_eq!(named.session.agent().slug(), "test-harness-client");
+        assert_eq!(named.agent_label, "test-harness-client");
+
+        // Reusing that handle without clientInfo keeps the minted identity and label,
+        // so a session's audit attribution never flips to "agent" mid-conversation.
+        let (reused, _) = service
+            .resolve_modern_session(Some(handle), None)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+        assert_eq!(reused.session.agent().slug(), "test-harness-client");
+        assert_eq!(reused.agent_label, "test-harness-client");
+
+        // A stateless client that sends no clientInfo falls back to "agent".
+        let (anon, _) = service
+            .resolve_modern_session(None, None)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+        assert_eq!(anon.session.agent().slug(), "agent");
         Ok(())
     }
 
