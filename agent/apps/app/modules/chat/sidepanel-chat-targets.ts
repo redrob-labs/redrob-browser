@@ -121,24 +121,39 @@ export type RepairSelectionDecision =
   | { repair: true; selection: SidepanelChatTargetSelection | null }
 
 /**
- * Decides whether a persisted sidebar selection needs repair. It never repairs
- * an ACP selection: the agents list is fetch-backed and can be stale (a
- * persisted react-query cache, or a different extension context that has not
- * refetched a newly-created agent), so repairing here would wipe a valid ACP
- * default and silently downgrade it to the LLM fallback. Stale ACP selections
- * are cleaned by `clearSidepanelChatTargetSelectionForAgent` on delete, and
- * `resolveSidepanelChatTarget` already falls back non-destructively at render.
- * Only LLM selections are repaired, since providers load reliably from local
- * storage, and only once loads are settled.
+ * Decides whether a persisted sidebar selection needs repair.
+ *
+ * Repair exists for one case: the selection names something that has been
+ * deleted, so the sidebar would otherwise point at nothing. Absence from the
+ * list in hand is not evidence of that. Each extension surface holds its own
+ * query cache of a list that lives on the server, so a provider added in
+ * another surface is missing here until this one refetches, and rewriting the
+ * selection then destroys a choice the user just made. That is what made
+ * picking a new provider appear to revert to BrowserOS while picking an agent
+ * worked, since ACP selections were already exempt.
+ *
+ * So a selection is only repaired when the list is known to be complete, and a
+ * selection this list cannot confirm is left alone for the next render, when
+ * the revision signal will have brought the list up to date.
+ * `resolveSidepanelChatTarget` already falls back non-destructively for
+ * display, so nothing is broken while that happens. Stale entries are still
+ * cleaned on delete by `clearSidepanelChatTargetSelectionForAgent`.
  */
 export function resolveRepairedSelection({
   selection,
   resolvedTarget,
   ready,
+  knownIds,
 }: {
   selection: SidepanelChatTargetSelection | null
   resolvedTarget: SidepanelChatTarget | undefined
   ready: boolean
+  /**
+   * Every id this surface currently knows about, of either kind. A selection
+   * naming something absent from it is treated as not yet loaded rather than
+   * as deleted.
+   */
+  knownIds?: ReadonlySet<string>
 }): RepairSelectionDecision {
   if (!ready || !selection) return { repair: false }
   if (selection.kind === 'acp') return { repair: false }
@@ -149,6 +164,8 @@ export function resolveRepairedSelection({
   ) {
     return { repair: false }
   }
+  // Inconclusive rather than deleted: this surface has not seen it yet.
+  if (knownIds && !knownIds.has(selection.id)) return { repair: false }
   return {
     repair: true,
     selection: resolvedTarget
@@ -187,13 +204,22 @@ export async function saveSidepanelChatTargetSelection(
  * target, also updates the default-provider id so both stores stay consistent.
  * Keeping this in one place is what prevents surfaces from drifting apart.
  */
+/**
+ * Records the chosen chat target.
+ *
+ * One write, for either kind. While llm providers and acp agents were separate
+ * tables the default could only name an llm one, so this wrote the selection
+ * unconditionally and the default only when the kind happened to be llm.
+ * Choosing an agent left the default pointing at whichever provider was
+ * selected before it, a stale shadow of the real choice.
+ */
 export async function commitChatTargetSelection(
   selection: SidepanelChatTargetSelection | null,
   deps: { setDefaultProvider: (providerId: string) => Promise<void> },
   store?: SidepanelChatTargetSelectionWriter,
 ): Promise<void> {
   await saveSidepanelChatTargetSelection(selection, store)
-  if (selection?.kind === 'llm') await deps.setDefaultProvider(selection.id)
+  if (selection) await deps.setDefaultProvider(selection.id)
 }
 
 export async function clearSidepanelChatTargetSelectionForAgent(

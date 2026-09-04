@@ -2,7 +2,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
 import { type FC, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import { CloudSyncRetiredNotice } from '@/components/cloud-sync/CloudSyncRetiredNotice'
 import { BrowserClawPromoBanner } from '@/components/promo/BrowserClawPromoBanner'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -50,6 +52,7 @@ export const BrowserOsAiPane: FC = () => {
     saveProvider,
     setDefaultProvider,
     deleteProvider,
+    isUnavailable: providersUnavailable,
   } = useLlmProviders()
   const { baseUrl: agentServerUrl } = useAgentServerUrl()
   const { sessionInfo } = useSessionInfo()
@@ -254,6 +257,8 @@ export const BrowserOsAiPane: FC = () => {
         </p>
       </div>
 
+      <CloudSyncRetiredNotice />
+
       <BrowserClawPromoBanner />
 
       <section className="space-y-3">
@@ -269,6 +274,15 @@ export const BrowserOsAiPane: FC = () => {
             Add
           </Button>
         </div>
+
+        {providersUnavailable ? (
+          <Alert variant="destructive">
+            <AlertDescription>
+              Your providers could not be loaded because the BrowserOS server is
+              not reachable. They are still saved on this device.
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         <ConfiguredTargetsList
           providers={providers}

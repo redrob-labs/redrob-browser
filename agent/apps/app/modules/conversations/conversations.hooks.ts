@@ -58,24 +58,6 @@ export async function fetchServerConversation(
   return { id: data.conversation.id, messages }
 }
 
-export async function importServerConversation(conversation: {
-  id: string
-  messages: UIMessage[]
-  lastMessagedAt: number
-}): Promise<void> {
-  const client = await conversationsClient()
-  const response = await client[':conversationId'].$put({
-    param: { conversationId: conversation.id },
-    json: {
-      messages: conversation.messages,
-      lastMessagedAt: conversation.lastMessagedAt,
-    },
-  })
-  if (!response.ok) {
-    throw new Error(`Failed to import conversation (${response.status})`)
-  }
-}
-
 /** Deletes only the server row (tolerating 404); leaves execution history. */
 export async function deleteServerConversationRow(
   conversationId: string,

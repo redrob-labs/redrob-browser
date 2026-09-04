@@ -26,7 +26,10 @@ import { createMcpRoutes } from './mcp'
 import { createMcpManagerRoutes } from './mcp-manager'
 import { createOAuthRoutes } from './oauth'
 import { createProviderRoutes } from './provider'
+import { createProvidersRoutes } from './providers'
 import { createRefinePromptRoutes } from './refine-prompt'
+import { createScheduledJobRunRoutes } from './scheduled-job-runs'
+import { createScheduledJobRoutes } from './scheduled-jobs'
 import { createShutdownRoute } from './shutdown'
 import { createStatusRoute } from './status'
 
@@ -134,9 +137,19 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .use('/acpx/probe/*', requireTrustedAppOrigin())
       .use('/agents/*', requireTrustedAppOrigin())
       .use('/conversations/*', requireTrustedAppOrigin())
+      // These carry provider credentials in the clear, so they need the
+      // localhost + extension-origin check. The blanket requireTrustedOrigin
+      // above only rejects a request that carries a disallowed Origin header;
+      // one with no Origin at all passes it.
+      .use('/providers/*', requireTrustedAppOrigin())
+      .use('/scheduled-jobs/*', requireTrustedAppOrigin())
+      .use('/scheduled-job-runs/*', requireTrustedAppOrigin())
       .route('/acpx/probe', createAcpxProbeRoutes({ resourcesDir }))
       .route('/agents', resolvedAgentRoutes)
       .route('/conversations', createConversationRoutes())
+      .route('/providers', createProvidersRoutes())
+      .route('/scheduled-jobs', createScheduledJobRoutes())
+      .route('/scheduled-job-runs', createScheduledJobRunRoutes())
   )
 }
 

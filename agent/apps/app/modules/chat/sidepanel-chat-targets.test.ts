@@ -204,7 +204,11 @@ describe('commitChatTargetSelection', () => {
     expect(setDefaultProvider).toHaveBeenCalledWith(provider.id)
   })
 
-  it('persists an ACP selection without touching the default provider id', async () => {
+  // Selecting an agent used to leave the default pointing at whichever llm
+  // provider was chosen before it, because the two lived in separate tables and
+  // the default could only name the llm one. They are one table now, so there
+  // is one selection and it records whatever was picked.
+  it('records an ACP selection as the default too', async () => {
     const store = createSelectionStore()
     const setDefaultProvider = mock(async (_id: string) => {})
 
@@ -215,7 +219,7 @@ describe('commitChatTargetSelection', () => {
     )
 
     expect(await store.getValue()).toEqual({ kind: 'acp', id: agent.id })
-    expect(setDefaultProvider).not.toHaveBeenCalled()
+    expect(setDefaultProvider).toHaveBeenCalledWith(agent.id)
   })
 
   it('clears the selection without touching the default provider id', async () => {
@@ -241,3 +245,51 @@ function createSelectionStore(
     watch: () => () => {},
   }
 }
+
+// Each extension surface holds its own cache of a list that lives on the
+// server, so one can be a refetch behind another. Repairing against a list
+// that has not caught up destroys a choice the user just made, which is what
+// made selecting a new provider appear to revert to BrowserOS.
+describe('resolveRepairedSelection with an incomplete list', () => {
+  const browserosTarget = {
+    kind: 'llm' as const,
+    id: 'browseros',
+    name: 'BrowserOS',
+    type: 'browseros' as const,
+    provider: {} as never,
+  }
+
+  it('leaves a selection this surface has not seen yet alone', () => {
+    expect(
+      resolveRepairedSelection({
+        selection: { kind: 'llm', id: 'just-created' },
+        resolvedTarget: browserosTarget,
+        ready: true,
+        knownIds: new Set(['browseros']),
+      }).repair,
+    ).toBe(false)
+  })
+
+  // The case repair exists for: the provider is gone from a list that does
+  // know about it, so the selection genuinely dangles.
+  it('still repairs a selection the list can account for', () => {
+    expect(
+      resolveRepairedSelection({
+        selection: { kind: 'llm', id: 'deleted-but-known' },
+        resolvedTarget: browserosTarget,
+        ready: true,
+        knownIds: new Set(['browseros', 'deleted-but-known']),
+      }),
+    ).toEqual({ repair: true, selection: { kind: 'llm', id: 'browseros' } })
+  })
+
+  it('repairs as before when no list is given', () => {
+    expect(
+      resolveRepairedSelection({
+        selection: { kind: 'llm', id: 'gone' },
+        resolvedTarget: browserosTarget,
+        ready: true,
+      }).repair,
+    ).toBe(true)
+  })
+})
