@@ -46,19 +46,25 @@ def version() -> str:
     return (ROOT / "CHROMIUM_VERSION").read_text().strip()
 
 
-def env() -> dict[str, str]:
-    """depot_tools on PATH, and its own bundled tools preferred over anything on the host."""
+def env(allow_update: bool = False) -> dict[str, str]:
+    """depot_tools on PATH, and its own bundled tools preferred over anything on the host.
+
+    `DEPOT_TOOLS_UPDATE=0` normally: depot_tools would otherwise update itself mid-command, which turns
+    a build into a moving target. The exception is its own first run, which is when it fetches the
+    python and cipd binaries it needs -- with updates disabled that never happens and every later
+    command fails on `python3_bin_reldir.txt not found`, which reads like a broken checkout rather than
+    an uninitialised tool.
+    """
     merged = dict(os.environ)
     merged["PATH"] = f"{DEPOT_TOOLS}{os.pathsep}{merged.get('PATH', '')}"
-    # depot_tools would otherwise try to update itself mid-command, which turns a build into a moving
-    # target and has broken a checkout for us before.
-    merged["DEPOT_TOOLS_UPDATE"] = "0"
+    if not allow_update:
+        merged["DEPOT_TOOLS_UPDATE"] = "0"
     return merged
 
 
-def run(cmd: list[str], cwd: Path, check: bool = True) -> int:
+def run(cmd: list[str], cwd: Path, check: bool = True, allow_update: bool = False) -> int:
     print(f"\n$ {' '.join(cmd)}\n  in {cwd}", flush=True)
-    result = subprocess.run(cmd, cwd=cwd, env=env())
+    result = subprocess.run(cmd, cwd=cwd, env=env(allow_update))
     if check and result.returncode != 0:
         sys.exit(f"failed ({result.returncode}): {' '.join(cmd)}")
     return result.returncode
@@ -75,10 +81,12 @@ def patch_name(relative: str) -> str:
 
 
 def cmd_bootstrap(_: argparse.Namespace) -> None:
-    if DEPOT_TOOLS.exists():
-        print(f"depot_tools already at {DEPOT_TOOLS}")
-        return
-    run(["git", "clone", "--depth", "1", DEPOT_TOOLS_URL, str(DEPOT_TOOLS)], ROOT)
+    if not DEPOT_TOOLS.exists():
+        run(["git", "clone", "--depth", "1", DEPOT_TOOLS_URL, str(DEPOT_TOOLS)], ROOT)
+    # Its own first run, with updates allowed, is what fetches the python and cipd binaries every later
+    # command needs. Cloning alone leaves a depot_tools that cannot run anything.
+    run([str(DEPOT_TOOLS / "ensure_bootstrap")], DEPOT_TOOLS, allow_update=True)
+    run(["gclient", "--version"], ROOT, allow_update=True)
 
 
 def cmd_sync(args: argparse.Namespace) -> None:
