@@ -13,6 +13,8 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "chrome/browser/redrob/oauth_flow.h"
 #include "components/os_crypt/async/common/encryptor.h"
 
 class Profile;
@@ -39,11 +41,19 @@ class ModelStore : public KeyedService {
     std::string model;
     // Must be https. An OpenAI-compatible base URL; the browser appends the completions path.
     std::string endpoint;
-    // Whether a key is on file. Never the key itself.
+    // Whether a credential is on file. Never the credential itself.
     bool has_secret = false;
+    // True when the credential is an OAuth token pair rather than a key the user pasted. The
+    // difference matters to the surface: an OAuth connection can expire and be renewed silently, a key
+    // cannot, and telling the user "connected" for a connection that has stopped working is the failure
+    // mode worth avoiding here.
+    bool is_oauth = false;
+    // OAuth only, and none of it secret: the endpoints and the client id the user entered.
+    OAuthFlow::Config oauth;
   };
 
-  explicit ModelStore(Profile* profile);
+  ModelStore(Profile* profile,
+             scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
   ModelStore(const ModelStore&) = delete;
   ModelStore& operator=(const ModelStore&) = delete;
   ~ModelStore() override;
@@ -61,6 +71,23 @@ class ModelStore : public KeyedService {
                   const std::string& secret);
   bool Remove(const std::string& id);
 
+  // Starts an OAuth sign-in for a NEW provider. `on_authorize_url` receives the URL the caller should
+  // open in a tab -- ModelStore does not navigate, because which window is not its decision. The entry
+  // is written only once tokens actually arrive: a half-created provider the user could select and then
+  // fail every task with is worse than no provider.
+  void BeginOAuth(const std::string& label,
+                  const std::string& model,
+                  const std::string& endpoint,
+                  const OAuthFlow::Config& config,
+                  OAuthFlow::ReadyCallback on_authorize_url);
+
+  // The bearer token to use for `id`, refreshing first if it has expired. Asynchronous because a
+  // refresh is a network round trip; a synchronous accessor could only ever return a stale token or
+  // block the UI thread. Nullopt means there is no usable credential and the caller should fall back to
+  // the built-in engine and say so.
+  using TokenCallback = base::OnceCallback<void(std::optional<std::string>)>;
+  void EnsureToken(const std::string& id, TokenCallback callback);
+
   // The selected provider, resolved for use by the turn builder. Nullopt means "use the built-in
   // engine" -- either because nothing is selected or because what was selected no longer decrypts,
   // which is the honest answer when a keystore has moved under us.
@@ -75,9 +102,27 @@ class ModelStore : public KeyedService {
 
  private:
   void OnEncryptor(scoped_refptr<os_crypt_async::Encryptor> encryptor);
+  void OnOAuthComplete(const std::string& label,
+                       const std::string& model,
+                       const std::string& endpoint,
+                       const OAuthFlow::Config& config,
+                       const OAuthFlow::Tokens& tokens,
+                       const std::string& error);
+  void OnRefreshed(const std::string& id,
+                   TokenCallback callback,
+                   const OAuthFlow::Tokens& tokens,
+                   const std::string& error);
+  // Encrypts and base64s, or returns empty when the keystore is not available.
+  std::string Seal(const std::string& plaintext) const;
+  std::optional<std::string> Unseal(const std::string& encoded) const;
+  bool WriteTokens(const std::string& id, const OAuthFlow::Tokens& tokens);
 
   raw_ptr<Profile> profile_;
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   scoped_refptr<os_crypt_async::Encryptor> encryptor_;
+  // One at a time. A second sign-in while one is open would race two loopback listeners against one
+  // stored entry.
+  std::unique_ptr<OAuthFlow> flow_;
   base::WeakPtrFactory<ModelStore> weak_factory_{this};
 };
 

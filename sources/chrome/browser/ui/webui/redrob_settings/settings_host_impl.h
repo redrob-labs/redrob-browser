@@ -9,6 +9,7 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/webui/redrob_settings/redrob_settings.mojom.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -56,6 +57,14 @@ class SettingsHostImpl : public settings::mojom::SettingsHost,
                    const std::string& endpoint,
                    const std::string& secret,
                    AddProviderCallback callback) override;
+  void BeginProviderSignIn(const std::string& label,
+                           const std::string& model,
+                           const std::string& endpoint,
+                           const std::string& authorize_url,
+                           const std::string& token_url,
+                           const std::string& client_id,
+                           const std::string& scopes,
+                           BeginProviderSignInCallback callback) override;
   void RemoveProvider(const std::string& id, RemoveProviderCallback callback) override;
   void SelectProvider(const std::string& id, SelectProviderCallback callback) override;
   void SetOfferToSavePasswords(bool enabled) override;
@@ -77,6 +86,8 @@ class SettingsHostImpl : public settings::mojom::SettingsHost,
 
   scoped_refptr<ui::SelectFileDialog> folder_dialog_;
   ChooseWorkingFolderCallback folder_dialog_callback_;
+
+  base::WeakPtrFactory<SettingsHostImpl> weak_factory_{this};
 };
 
 }  // namespace redrob

@@ -1,0 +1,327 @@
+#!/usr/bin/env python3
+"""redrob -- run a browser task from a terminal, and get the answer back here.
+
+    redrob "summarise the release notes on the page I have open"
+    redrob --effort ultrabrowse "compare these three pricing pages"
+    redrob --mode read-only "what does this page say about refunds"
+    redrob --follow-up <task-id> "also check the annual plan"
+    redrob --status <task-id>
+    redrob --cancel <task-id>
+    redrob --mcp            # print the MCP endpoint and token for an MCP client
+
+Standard library only, on purpose: a CLI that needs `pip install` before it can talk to a browser you
+already have running is a CLI people work around instead of using.
+
+HOW IT FINDS THE BROWSER, and why the handshake looks the way it does.
+
+The browser writes an owner-readable handle file into its profile directory when its local endpoint is
+enabled, holding the loopback address, a token generated fresh each launch, and the pid that bound it.
+A browser killed outright never gets to delete that file, so the address in it can be a port some
+unrelated process has since taken -- and a client that just opened with `Authorization: Bearer` would
+hand that process the token. So this asks the UNAUTHENTICATED `/hello` route who is listening first, and
+sends the token only once the pid and profile in the answer match the file. If they do not, it says the
+file is stale rather than trying anyway.
+
+WHEN THE ENDPOINT IS OFF. It is off by default, because a local socket that can drive the browser is,
+to any other process on this machine, the browser -- with your logins. If it is off, this falls back to
+the command-line switch, which needs no setup and reaches the browser you already have open. That path
+carries the prompt one way: the channel answers with an acknowledgement and no payload, so the task
+starts and opens its tab and NOTHING can be printed here. This says so instead of pretending to wait.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+HANDLE_NAME = "redrob-cli.json"
+TIMEOUT_SECONDS = 20
+
+
+def eprint(*args: object) -> None:
+    print(*args, file=sys.stderr)
+
+
+def default_user_data_dir() -> Path:
+    """Where this browser keeps its profiles, per platform."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Redrob"
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(local) / "Redrob" / "User Data"
+    config = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(config) / "redrob"
+
+
+def find_handle(user_data_dir: Path, profile: str) -> tuple[Path, dict] | tuple[None, None]:
+    path = user_data_dir / profile / HANDLE_NAME
+    if not path.exists():
+        return None, None
+    try:
+        return path, json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        eprint(f"redrob: {path} could not be read ({exc})")
+        return None, None
+
+
+def pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        # No signal 0 on Windows; asking the task list is enough for a staleness check.
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                             capture_output=True, text=True, check=False).stdout
+        return str(pid) in out
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Alive, and owned by somebody else. Not ours to talk to.
+        return True
+    return True
+
+
+def request(endpoint: str, path: str, token: str | None, body: dict | None = None,
+            method: str | None = None) -> dict:
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(endpoint + path, data=data,
+                                 method=method or ("POST" if data is not None else "GET"))
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as response:
+        return json.loads(response.read() or b"{}")
+
+
+def verified_connection(args: argparse.Namespace) -> tuple[tuple[str, str] | None, str]:
+    """(endpoint, token) once the browser at that address has proved it is the one in the file.
+
+    The second element says why not, when not: "off" for no handle file at all, "stale" for a file
+    that names something which is not this browser. The difference matters to the user -- one is a
+    setting they can turn on, the other is a leftover file -- so it is not collapsed into None.
+    """
+    user_data_dir = Path(args.user_data_dir) if args.user_data_dir else default_user_data_dir()
+    path, handle = find_handle(user_data_dir, args.profile)
+    if not handle:
+        return None, "off"
+
+    endpoint = handle.get("endpoint", "")
+    token = handle.get("token", "")
+    pid = int(handle.get("pid", 0) or 0)
+    if not endpoint or not token:
+        eprint(f"redrob: {path} is incomplete")
+        return None, "stale"
+    if pid and not pid_is_alive(pid):
+        eprint(f"redrob: {path} names process {pid}, which is not running -- the browser was killed "
+               f"without shutting down, so this file is stale.")
+        return None, "stale"
+
+    # The one request that carries no secret.
+    try:
+        hello = request(endpoint, "/hello", token=None)
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        eprint(f"redrob: nothing answered at {endpoint} ({exc}) -- the file is stale.")
+        return None, "stale"
+    if hello.get("server") != "redrob":
+        eprint(f"redrob: something else is listening on {endpoint}. Not sending the token.")
+        return None, "stale"
+    if pid and hello.get("pid") != pid:
+        eprint(f"redrob: {endpoint} is a different process ({hello.get('pid')}) than the file says "
+               f"({pid}). Not sending the token.")
+        return None, "stale"
+    if hello.get("profile") and hello.get("profile") != args.profile:
+        eprint(f"redrob: {endpoint} is serving profile {hello.get('profile')!r}, not {args.profile!r}.")
+        return None, "stale"
+    return (endpoint, token), ""
+
+
+def stream_task(endpoint: str, token: str, task_id: str, as_json: bool) -> int:
+    """Follows one task's event stream, printing prose as it arrives. Returns a process exit code."""
+    req = urllib.request.Request(f"{endpoint}/task/{task_id}/stream")
+    req.add_header("Authorization", f"Bearer {token}")
+    printed = 0
+    seen_steps = 0
+    state = "queued"
+    # Prose goes to stdout and steps to stderr, so piping gives you the answer rather than a transcript.
+    # In a terminal both land in the same place, so this tracks whether stdout is mid-line and breaks it
+    # before a step -- without that, prose and steps collide mid-sentence ("Noting that for later. ·
+    # Thinking"), which is unreadable in exactly the case people will actually use.
+    at_line_start = True
+
+    def break_line() -> None:
+        nonlocal at_line_start
+        if not at_line_start:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            at_line_start = True
+
+    try:
+        with urllib.request.urlopen(req) as response:
+            for raw in response:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                try:
+                    task = json.loads(line[5:].strip())
+                except ValueError:
+                    continue
+                if as_json:
+                    print(json.dumps(task, ensure_ascii=False), flush=True)
+                else:
+                    steps = task.get("steps", [])
+                    if len(steps) > seen_steps:
+                        break_line()
+                        for step in steps[seen_steps:]:
+                            eprint(f"  · {step.get('label', '')}")
+                        seen_steps = len(steps)
+                    answer = task.get("answer") or ""
+                    if len(answer) > printed:
+                        fresh = answer[printed:]
+                        printed = len(answer)
+                        # The browser separates turns with a blank line. If a step has just put us at
+                        # the start of a line, that separator would stack into two blank ones.
+                        if at_line_start:
+                            fresh = fresh.lstrip("\n")
+                        if fresh:
+                            sys.stdout.write(fresh)
+                            sys.stdout.flush()
+                            at_line_start = fresh.endswith("\n")
+                state = task.get("state", state)
+                if task.get("done"):
+                    if not as_json:
+                        break_line()
+                    if task.get("error"):
+                        eprint(f"redrob: {task['error']}")
+                    return 0 if state == "done" else 1
+    except KeyboardInterrupt:
+        eprint(f"\nredrob: detached. The task is still running -- `redrob --status {task_id}`.")
+        return 130
+    except (urllib.error.URLError, OSError) as exc:
+        eprint(f"redrob: the stream ended ({exc})")
+        return 1
+    return 1
+
+
+def fall_back_to_switch(prompt: str, args: argparse.Namespace, reason: str) -> int:
+    """No usable endpoint: use the command-line switch, and be clear about what that cannot do."""
+    if reason == "stale":
+        eprint("redrob: the handle file does not describe a browser that is listening now, so the")
+        eprint("        answer cannot be streamed here. No token was sent to whatever is on that port.")
+    else:
+        eprint("redrob: this browser's local endpoint is off, so the answer cannot come back here.")
+        eprint("        Turn it on in Settings -> Command line.")
+    binary = args.browser or os.environ.get("REDROB_BINARY") or shutil.which("redrob-browser")
+    if not binary:
+        eprint("        Point REDROB_BINARY at the browser binary and this will at least start the")
+        eprint("        task in it.")
+        return 2
+    command = [binary, f"--redrob-task={prompt}"]
+    if args.user_data_dir:
+        command.append(f"--user-data-dir={args.user_data_dir}")
+    result = subprocess.run(command, check=False)
+    eprint("redrob: started it in the browser. The answer is in that tab -- the channel that carries a")
+    eprint("        command line to a running browser answers with an acknowledgement and no payload,")
+    eprint("        so there is nothing to print here.")
+    return result.returncode
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="redrob",
+        description="Run a browser task from a terminal and read the answer here.")
+    parser.add_argument("prompt", nargs="*", help="What the browser should do.")
+    parser.add_argument("--mode", choices=["read-only", "guard", "full-access"], default="guard",
+                        help="What the task may do. Defaults to guard, the narrowest mode that can "
+                             "still act on a page.")
+    parser.add_argument("--effort", choices=["quick", "standard", "ultrabrowse"], default="standard")
+    parser.add_argument("--profile", default="Default", help="Which browser profile to use.")
+    parser.add_argument("--user-data-dir", help="Override where profiles live.")
+    parser.add_argument("--browser", help="Path to the browser binary, for the fallback path.")
+    parser.add_argument("--json", action="store_true",
+                        help="Emit the raw task JSON per update instead of prose.")
+    parser.add_argument("--no-stream", action="store_true",
+                        help="Print the task id and exit instead of waiting.")
+    parser.add_argument("--status", metavar="TASK_ID", help="Print one task's current state.")
+    parser.add_argument("--follow-up", nargs=2, metavar=("TASK_ID", "TEXT"),
+                        help="Send more instructions to an existing task.")
+    parser.add_argument("--now", action="store_true",
+                        help="With --follow-up: interrupt the task instead of waiting for its current "
+                             "step to finish.")
+    parser.add_argument("--cancel", metavar="TASK_ID", help="Stop a task.")
+    parser.add_argument("--mcp", action="store_true",
+                        help="Print the MCP endpoint and token for an MCP client.")
+    args = parser.parse_args()
+
+    prompt = " ".join(args.prompt).strip()
+    connection, reason = verified_connection(args)
+
+    if args.mcp:
+        if not connection:
+            eprint("redrob: the local endpoint is off. Turn it on in Settings -> Command line.")
+            return 2
+        endpoint, token = connection
+        print(json.dumps({"url": f"{endpoint}/mcp", "transport": "http",
+                          "headers": {"Authorization": f"Bearer {token}"}}, indent=2))
+        return 0
+
+    for flag, needs in (("status", args.status), ("cancel", args.cancel),
+                        ("follow_up", args.follow_up)):
+        if needs and not connection:
+            eprint(f"redrob: --{flag.replace('_', '-')} needs the local endpoint, which is off. "
+                   f"Turn it on in Settings -> Command line.")
+            return 2
+
+    if connection:
+        endpoint, token = connection
+        if args.status:
+            print(json.dumps(request(endpoint, f"/task/{args.status}", token), indent=2,
+                             ensure_ascii=False))
+            return 0
+        if args.cancel:
+            request(endpoint, f"/task/{args.cancel}/cancel", token, body={})
+            eprint("redrob: cancelled.")
+            return 0
+        if args.follow_up:
+            task_id, text = args.follow_up
+            answer = request(endpoint, f"/task/{task_id}/follow-up", token,
+                             body={"prompt": text, "when": "now" if args.now else "next"})
+            eprint(f"redrob: {answer.get('outcome', 'sent')}.")
+            return stream_task(endpoint, token, task_id, args.json)
+
+    if not prompt:
+        parser.print_help()
+        return 2
+
+    if not connection:
+        return fall_back_to_switch(prompt, args, reason)
+
+    endpoint, token = connection
+    try:
+        started = request(endpoint, "/task", token,
+                          body={"prompt": prompt, "mode": args.mode, "effort": args.effort})
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")
+        eprint(f"redrob: the browser refused the task ({exc.code}) {detail}")
+        return 1
+    task_id = started.get("task_id")
+    if not task_id:
+        eprint(f"redrob: no task was started ({started})")
+        return 1
+    if args.no_stream:
+        print(task_id)
+        return 0
+    eprint(f"redrob: task {task_id}")
+    return stream_task(endpoint, token, task_id, args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

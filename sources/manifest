@@ -98,3 +98,7 @@ sources/chrome/utility/importer/chromium_importer.cc  chrome/utility/importer/ch
 # The loopback RPC that serves the CLI, the MCP server and the REPL. Off by default.
 sources/chrome/browser/redrob/rpc_server.h   chrome/browser/redrob/rpc_server.h
 sources/chrome/browser/redrob/rpc_server.cc  chrome/browser/redrob/rpc_server.cc
+
+# OAuth 2.0 + PKCE for connecting a model provider the user has an account with.
+sources/chrome/browser/redrob/oauth_flow.h   chrome/browser/redrob/oauth_flow.h
+sources/chrome/browser/redrob/oauth_flow.cc  chrome/browser/redrob/oauth_flow.cc

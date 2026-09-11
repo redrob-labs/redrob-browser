@@ -10,6 +10,7 @@
 #include "chrome/browser/redrob/agent_service_factories.h"
 #include "chrome/browser/redrob/memory_store.h"
 #include "chrome/browser/redrob/model_store.h"
+#include "chrome/browser/redrob/oauth_flow.h"
 #include "chrome/browser/redrob/redrob_prefs.h"
 #include "chrome/browser/redrob/routine_store.h"
 #include "chrome/browser/redrob/rpc_server.h"
@@ -153,6 +154,7 @@ void SettingsHostImpl::GetSettings(GetSettingsCallback callback) {
     wire->model = provider.model;
     wire->endpoint = provider.endpoint;
     wire->has_secret = provider.has_secret;
+    wire->is_oauth = provider.is_oauth;
     out->model->providers.push_back(std::move(wire));
   }
 
@@ -246,6 +248,41 @@ void SettingsHostImpl::AddProvider(const std::string& label,
   const std::string id =
       ModelStoreFactory::GetForProfile(profile_)->Add(label, model, endpoint, secret);
   std::move(callback).Run(id.empty() ? std::nullopt : std::optional<std::string>(id));
+}
+
+void SettingsHostImpl::BeginProviderSignIn(const std::string& label,
+                                          const std::string& model,
+                                          const std::string& endpoint,
+                                          const std::string& authorize_url,
+                                          const std::string& token_url,
+                                          const std::string& client_id,
+                                          const std::string& scopes,
+                                          BeginProviderSignInCallback callback) {
+  OAuthFlow::Config config;
+  config.authorize_url = GURL(authorize_url);
+  config.token_url = GURL(token_url);
+  config.client_id = client_id;
+  config.scopes = scopes;
+  ModelStoreFactory::GetForProfile(profile_)->BeginOAuth(
+      label, model, endpoint, config,
+      base::BindOnce(
+          [](base::WeakPtr<SettingsHostImpl> host, BeginProviderSignInCallback callback,
+             const GURL& authorize, const std::string& error) {
+            if (!authorize.is_valid() || !error.empty()) {
+              std::move(callback).Run(error.empty() ? "The sign-in could not be started." : error);
+              return;
+            }
+            if (!host) {
+              return;
+            }
+            // Opened by the browser, in a tab, because that is what this product is. A page cannot be
+            // trusted to have navigated somewhere the user can see.
+            NavigateParams params(host->profile_, authorize, ui::PAGE_TRANSITION_AUTO_BOOKMARK);
+            params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
+            Navigate(&params);
+            std::move(callback).Run(std::nullopt);
+          },
+          weak_factory_.GetWeakPtr(), std::move(callback)));
 }
 
 void SettingsHostImpl::RemoveProvider(const std::string& id, RemoveProviderCallback callback) {

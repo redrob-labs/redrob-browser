@@ -121,6 +121,58 @@
           provider needs a key, which is stored through this machine's keystore and is never shown
           again — not to this page, and not to any page.</p>
         <ol id="provider-list" class="rows"></ol>
+        <form id="signin-form" class="plate" autocomplete="off">
+          <h3>Sign in to a provider</h3>
+          <div class="field-row">
+            <label class="field">
+              <span>Name</span>
+              <input id="signin-label" type="text" placeholder="My ChatGPT account" maxlength="100">
+            </label>
+            <label class="field">
+              <span>Model</span>
+              <input id="signin-model" type="text" placeholder="gpt-5.1" maxlength="100">
+            </label>
+          </div>
+          <label class="field">
+            <span>API endpoint</span>
+            <input id="signin-endpoint" type="url" placeholder="https://api.openai.com/v1">
+          </label>
+          <div class="field-row">
+            <label class="field">
+              <span>Authorize URL</span>
+              <input id="signin-authorize" type="url" placeholder="https://auth.openai.com/oauth/authorize">
+            </label>
+            <label class="field">
+              <span>Token URL</span>
+              <input id="signin-token" type="url" placeholder="https://auth.openai.com/oauth/token">
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field">
+              <span>Client ID</span>
+              <input id="signin-client" type="text" placeholder="your own registered OAuth client">
+            </label>
+            <label class="field">
+              <span>Scopes</span>
+              <input id="signin-scopes" type="text" placeholder="openid profile offline_access">
+            </label>
+          </div>
+          <div class="actions">
+            <button type="submit" class="pill pill-solid">Sign in…</button>
+            <span id="signin-status" class="status" role="status"></span>
+          </div>
+          <p class="note">Opens the provider's own sign-in page in a tab. The browser keeps the tokens
+            encrypted through this machine's keystore and renews them when they expire; nothing is
+            readable back by this page.</p>
+          <p class="note"><strong>The client ID has to be your own.</strong> Two things are worth knowing
+            before you try someone else's. Anthropic prohibited subscription sign-in outside Claude Code
+            in February 2026 and rejects those tokens at the server, so a Claude subscription cannot be
+            connected here at all — use an API key above, which works. OpenAI does allow ChatGPT
+            subscription sign-in in third-party tools and its endpoints are public, but a client ID that
+            is not their own first-party one is refused at the token endpoint. If that happens you will
+            see the provider's own error, not ours.</p>
+        </form>
+
         <form id="provider-form" class="plate" autocomplete="off">
           <h3>Connect a provider</h3>
           <div class="field-row">

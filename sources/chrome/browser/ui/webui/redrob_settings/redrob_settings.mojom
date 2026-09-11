@@ -71,8 +71,11 @@ struct Provider {
   string label;
   string model;
   string endpoint;
-  // Whether a key is on file. NEVER the key.
+  // Whether a credential is on file. NEVER the credential.
   bool has_secret;
+  // Signed in, rather than a pasted key. Shown differently because an OAuth connection renews itself
+  // and a key does not.
+  bool is_oauth;
 };
 
 struct ModelSettings {
@@ -139,6 +142,12 @@ interface SettingsHost {
 
   // `secret` crosses ONE way. It is encrypted through the platform keystore and never returned.
   AddProvider(string label, string model, string endpoint, string secret) => (string? id);
+
+  // Starts an OAuth sign-in and opens the provider's page in a tab. Returns the reason it could not
+  // start, or null when the tab was opened -- the provider appears in the list only once tokens have
+  // actually arrived, so the page polls rather than being told "connected" before it is true.
+  BeginProviderSignIn(string label, string model, string endpoint, string authorize_url,
+                      string token_url, string client_id, string scopes) => (string? error);
   RemoveProvider(string id) => (bool ok);
   SelectProvider(string id) => (bool ok);
 

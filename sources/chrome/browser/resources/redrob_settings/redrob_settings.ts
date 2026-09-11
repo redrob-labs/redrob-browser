@@ -189,7 +189,8 @@ function renderProviders(settings: AgentSettings) {
   // The built-in engine is a row like any other, because "which model" should have one list rather
   // than a default hidden behind the absence of a selection.
   list.append(providerRow(
-      {id: '', label: 'Redrob engine', model: 'redrob/auto', endpoint: '', hasSecret: false},
+      {id: '', label: 'Redrob engine', model: 'redrob/auto', endpoint: '', hasSecret: false,
+       isOauth: false},
       settings.model.selectedId === '', /*builtIn=*/ true));
   for (const provider of settings.model.providers) {
     list.append(providerRow(provider, settings.model.selectedId === provider.id, false));
@@ -213,7 +214,9 @@ function providerRow(provider: Provider, selected: boolean, builtIn: boolean): H
   meta.className = 'row-meta';
   meta.textContent = builtIn
       ? 'runs on this machine · no key needed'
-      : `${provider.model} · ${provider.endpoint}` + (provider.hasSecret ? ' · key stored' : ' · no key');
+      : `${provider.model} · ${provider.endpoint} · ` +
+        (provider.isOauth ? 'signed in, renews itself'
+                          : provider.hasSecret ? 'key stored' : 'no key');
   body.append(title, meta);
 
   const actions = document.createElement('div');
@@ -361,6 +364,41 @@ $<HTMLInputElement>('password-autosignin').addEventListener('change', () => {
 
 $<HTMLButtonElement>('password-open').addEventListener('click', () => {
   host.openPasswordManager();
+});
+
+// The provider appears in the list only once tokens have actually arrived, so this watches for it
+// rather than claiming success when the tab opens. Bounded: a sign-in nobody finishes should not leave
+// the page polling for the rest of the session.
+async function waitForSignIn(label: string) {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const {settings} = await host.getSettings();
+    if (settings.model.providers.some((p) => p.label === label && p.hasSecret)) {
+      $('signin-status').textContent = 'Signed in.';
+      await refresh();
+      return;
+    }
+  }
+  $('signin-status').textContent =
+      'Still not signed in. If the provider showed an error, it was theirs — check the client ID.';
+}
+
+$<HTMLFormElement>('signin-form').addEventListener('submit', async (event: Event) => {
+  event.preventDefault();
+  const label = $<HTMLInputElement>('signin-label').value.trim();
+  const {error} = await host.beginProviderSignIn(
+      label, $<HTMLInputElement>('signin-model').value.trim(),
+      $<HTMLInputElement>('signin-endpoint').value.trim(),
+      $<HTMLInputElement>('signin-authorize').value.trim(),
+      $<HTMLInputElement>('signin-token').value.trim(),
+      $<HTMLInputElement>('signin-client').value.trim(),
+      $<HTMLInputElement>('signin-scopes').value.trim());
+  if (error) {
+    $('signin-status').textContent = error;
+    return;
+  }
+  $('signin-status').textContent = 'Waiting for you to finish signing in, in the tab that just opened…';
+  void waitForSignIn(label);
 });
 
 $<HTMLInputElement>('rpc-enabled').addEventListener('change', async () => {

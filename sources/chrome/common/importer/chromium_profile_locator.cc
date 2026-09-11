@@ -10,6 +10,7 @@
 #include "base/json/json_reader.h"
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
+#include "chrome/common/chrome_paths.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -148,10 +149,22 @@ std::vector<ChromiumSource> DetectChromiumSources() {
     return sources;
   }
 
+  // This browser's OWN user-data directory, so it never appears in its own import list. The default
+  // directory name is Redrob's rather than upstream's, which already prevents the common case -- but a
+  // --user-data-dir launch can put us anywhere, including inside a directory named for another product,
+  // and "import your bookmarks from yourself" is a confusing enough offer to be worth one comparison.
+  base::FilePath own_user_data;
+  base::PathService::Get(chrome::DIR_USER_DATA, &own_user_data);
+
   for (const Product& product : kProducts) {
     const base::FilePath user_data_dir =
         root.Append(base::FilePath::FromUTF8Unsafe(product.relative_path));
     if (!base::DirectoryExists(user_data_dir)) {
+      continue;
+    }
+    if (!own_user_data.empty() &&
+        (user_data_dir == own_user_data || user_data_dir.IsParent(own_user_data) ||
+         own_user_data.IsParent(user_data_dir))) {
       continue;
     }
     const bool running = AppearsRunning(user_data_dir);

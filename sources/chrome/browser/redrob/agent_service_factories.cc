@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "chrome/browser/profiles/profile.h"
+#include "content/public/browser/storage_partition.h"
 #include "chrome/browser/redrob/memory_store.h"
 #include "chrome/browser/redrob/model_store.h"
 #include "base/command_line.h"
@@ -62,7 +63,11 @@ ModelStoreFactory::~ModelStoreFactory() = default;
 
 std::unique_ptr<KeyedService> ModelStoreFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* context) const {
-  return std::make_unique<ModelStore>(Profile::FromBrowserContext(context));
+  Profile* profile = Profile::FromBrowserContext(context);
+  // The browser's own loader factory: an OAuth token exchange is the browser's request and must
+  // not inherit anything a renderer could influence.
+  return std::make_unique<ModelStore>(
+      profile, context->GetDefaultStoragePartition()->GetURLLoaderFactoryForBrowserProcess());
 }
 
 // static

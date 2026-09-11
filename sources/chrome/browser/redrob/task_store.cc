@@ -580,11 +580,27 @@ void TaskStore::StartTurn(const std::string& task_id) {
   Notify(task_id);
 
   if (provider) {
-    // The decrypted key exists only for the duration of this call. It is fetched here, at the moment
-    // the request is built, rather than held on this object where every other method could reach it.
-    const std::optional<std::string> key = models_->SecretFor(provider->id);
-    sidecar_->StartDirectCompletion(provider->endpoint, key.value_or(std::string()),
-                                    std::move(body).value(), this);
+    // The credential is fetched at the moment the request is built, and asynchronously, because an
+    // OAuth connection may need refreshing first. It exists for the duration of this hop and is not
+    // held on this object where every other method could reach it.
+    models_->EnsureToken(
+        provider->id,
+        base::BindOnce(
+            [](base::WeakPtr<TaskStore> store, std::string task_id, std::string endpoint,
+               std::string body, std::optional<std::string> token) {
+              if (!store) {
+                return;
+              }
+              if (!token.has_value() || token->empty()) {
+                store->FinishTask(task_id, mojom::TaskState::kFailed,
+                                  "That provider has no usable credential on this machine any more. "
+                                  "Reconnect it in Settings, or switch back to the built-in engine.");
+                return;
+              }
+              store->sidecar_->StartDirectCompletion(endpoint, token.value(), std::move(body),
+                                                     store.get());
+            },
+            weak_factory_.GetWeakPtr(), task_id, provider->endpoint, std::move(body).value()));
     return;
   }
   sidecar_->StartCompletion(std::move(body).value(), this);
