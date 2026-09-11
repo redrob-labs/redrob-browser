@@ -5,6 +5,8 @@
 # `export`'s "untracked files, move them into this repo" report, because they already are in it.
 #
 # Every path under sources/ mirrors its destination, so the mapping is checkable by eye.
+#
+# Format: SOURCE  TARGET
 
 # The sidecar transport. Browser-process only: it launches the local Redrob Code engine on loopback,
 # holds its generated credentials and never hands either to a renderer. See docs/AI_SURFACE.md.
