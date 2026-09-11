@@ -1,5 +1,5 @@
 diff --git a/chrome/common/importer/BUILD.gn b/chrome/common/importer/BUILD.gn
-index bc73d6fe724c9..88ec930b0d45a 100644
+index bc73d6fe724c9..14c0883b56f5d 100644
 --- a/chrome/common/importer/BUILD.gn
 +++ b/chrome/common/importer/BUILD.gn
 @@ -81,6 +81,8 @@ mojom("interfaces") {
@@ -11,3 +11,11 @@ index bc73d6fe724c9..88ec930b0d45a 100644
      "firefox_importer_utils.cc",
      "firefox_importer_utils.h",
      "importer_autofill_form_data_entry.cc",
+@@ -111,6 +113,7 @@ source_set("importer") {
+   deps = [
+     "//base",
+     "//chrome/app:generated_resources",
++    "//chrome/common:constants",
+     "//chrome/common:ini_parser",
+     "//components/favicon_base",
+     "//components/user_data_importer/common",
