@@ -3,13 +3,20 @@
 # `./scripts/redrob.py brand` copies each SOURCE over its TARGET in chromium/src.
 # KIND decides what happens at `export` time, and the distinction is the point:
 #
-#   text    the file is ours in full, and the change is still recorded in patches/
-#           so `ls patches/` stays a true inventory of what we alter about Chromium.
-#   binary  the file is replaced but NOT exported. A binary patch is unreviewable
-#           and would destroy that inventory property; this manifest is the record
-#           instead. Icons are the only case.
+# `./scripts/redrob.py brand` copies each SOURCE over its TARGET in chromium/src.
+# Every row here is applied by `brand` and excluded from `export`: the file in this
+# directory IS the review surface, and also emitting a patch for it would give the
+# same content two sources of truth. KIND records what kind of file it is, which is
+# what tells a reader whether the diff below is readable at all:
 #
-# Files Chromium does not have at all are not branding and are not patches; they live under
+#   text    a small configuration file we own in full. Reviewable here.
+#   binary  an icon. Reviewable only by looking at it; branding/make-icons.sh is how
+#           it was produced, and that script is the thing to review instead.
+#
+# The bump sequence is therefore sync -> brand -> apply -> export: `brand` lays down
+# these files, `apply` puts the hand-written patches on top.
+#
+# Files Chromium does not have at all are neither branding nor patches; they live under
 # sources/ and are declared in sources/manifest, which `redrob.py apply` copies in.
 #
 # Format: SOURCE  TARGET  KIND

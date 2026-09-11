@@ -1,0 +1,18 @@
+diff --git a/tools/gritsettings/resource_ids.spec b/tools/gritsettings/resource_ids.spec
+index 322591a3aa40b..cdbfaf894e2bd 100644
+--- a/tools/gritsettings/resource_ids.spec
++++ b/tools/gritsettings/resource_ids.spec
+@@ -920,6 +920,13 @@
+     "META": {"sizes": {"includes": [30]}},
+     "includes": [5370],
+   },
++  # Redrob: chrome://redrob, the AI surface. Last in the WebUI section and above the 5500 the
++  # next section starts at, so this fork does not sit on an id range upstream is about to use.
++  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/redrob/resources.grd": {
++    "META": {"sizes": {"includes": [20]}},
++    "includes": [5400],
++  },
++
+   # END chrome/ WebUI resources section
+ 
+   # START chrome/ miscellaneous section.

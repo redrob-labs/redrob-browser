@@ -4,7 +4,7 @@
 
 :root {
   color-scheme: light dark;
-  --surface: light-dark(#ffffff, #10131a);
+  --surface: light-dark(#fff, #10131a);
   --ink: light-dark(#000921, #eef1f6);
   --muted: light-dark(#5b6472, #9aa4b2);
   --line: light-dark(#dfe3ea, #262c38);

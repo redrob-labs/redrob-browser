@@ -317,8 +317,11 @@ def cmd_export(_: argparse.Namespace) -> None:
     """Rewrite patches/ from whatever the checkout currently differs by."""
     if not SRC.exists():
         sys.exit("no checkout: run sync first")
+    # `git diff HEAD` rather than `git diff`: `apply --3way` stages what it resolves, so an
+    # unstaged-only diff silently drops every patch that was applied that way. That is how an export
+    # can look like it succeeded while producing three patches out of nine.
     changed = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=M"],
+        ["git", "diff", "HEAD", "--name-only", "--diff-filter=M"],
         cwd=SRC,
         env=env(),
         capture_output=True,
@@ -352,7 +355,7 @@ def cmd_export(_: argparse.Namespace) -> None:
             print(f"skipped {relative} (overlay, owned by branding/manifest)")
             continue
         diff = subprocess.run(
-            ["git", "diff", "--src-prefix=a/", "--dst-prefix=b/", "--", relative],
+            ["git", "diff", "HEAD", "--src-prefix=a/", "--dst-prefix=b/", "--", relative],
             cwd=SRC,
             env=env(),
             capture_output=True,

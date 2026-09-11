@@ -15,6 +15,8 @@
 #include "base/rand_util.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "base/task/thread_pool.h"
 
 namespace redrob {
@@ -30,6 +32,17 @@ constexpr char kApiKeyEnvVar[] = "REDROB_API_KEY";
 // the engine; they are not a user secret and are regenerated on every launch.
 std::string GenerateBasicCredentials() {
   return base::Base64Encode(base::RandBytesAsVector(32));
+}
+
+// `base::EnvironmentMap` is keyed by the platform's native string type -- std::string on POSIX,
+// std::wstring on Windows -- and there is no ready-made converter, so this fork carries a small one
+// rather than a #if at every call site.
+base::NativeEnvironmentString ToNative(std::string_view value) {
+#if BUILDFLAG(IS_WIN)
+  return base::UTF8ToWide(value);
+#else
+  return base::NativeEnvironmentString(value);
+#endif
 }
 
 }  // namespace
@@ -102,11 +115,11 @@ void SidecarClient::EnsureStarted(StatusCallback on_status_change) {
   // command line and not stored on disk by this class.
   if (std::optional<std::string> key = env->GetVar(kApiKeyEnvVar);
       key.has_value() && !key->empty()) {
-    child_env[base::ToNativeEnvironmentString(kApiKeyEnvVar)] =
-        base::ToNativeEnvironmentString(*key);
+    child_env[ToNative(kApiKeyEnvVar)] =
+        ToNative(*key);
   }
-  child_env[base::ToNativeEnvironmentString("XDG_DATA_HOME")] =
-      base::ToNativeEnvironmentString(data_dir_.AsUTF8Unsafe());
+  child_env[ToNative("XDG_DATA_HOME")] =
+      ToNative(data_dir_.AsUTF8Unsafe());
   options.environment = std::move(child_env);
   options.clear_environment = false;
 

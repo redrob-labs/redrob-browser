@@ -5,24 +5,25 @@
 # `export`'s "untracked files, move them into this repo" report, because they already are in it.
 #
 # Every path under sources/ mirrors its destination, so the mapping is checkable by eye.
-#
-# Format: SOURCE  TARGET
 
-# chrome://redrob, the AI surface. See docs/AI_SURFACE.md. The only Chromium files this needs are the
-# two one-line registrations in patches/, which is the whole point of putting the product in a WebUI.
-sources/chrome/browser/ui/webui/redrob/BUILD.gn      chrome/browser/ui/webui/redrob/BUILD.gn
-sources/chrome/browser/ui/webui/redrob/redrob_ui.h   chrome/browser/ui/webui/redrob/redrob_ui.h
-sources/chrome/browser/ui/webui/redrob/redrob_ui.cc  chrome/browser/ui/webui/redrob/redrob_ui.cc
+# The sidecar transport. Browser-process only: it launches the local Redrob Code engine on loopback,
+# holds its generated credentials and never hands either to a renderer. See docs/AI_SURFACE.md.
+sources/chrome/browser/redrob/BUILD.gn            chrome/browser/redrob/BUILD.gn
+sources/chrome/browser/redrob/sidecar_client.h    chrome/browser/redrob/sidecar_client.h
+sources/chrome/browser/redrob/sidecar_client.cc   chrome/browser/redrob/sidecar_client.cc
 
-# Deliberately NOT installed yet, and this is the note that says so rather than leaving two files in
-# sources/ that nothing copies and nothing references:
-#
-#   redrob.mojom       the browser <-> page interface docs/AI_SURFACE.md specifies. Wiring it means a
-#                      mojom("mojo_bindings") target in the BUILD.gn above, the interface in
-#                      chrome/browser/chrome_browser_interface_binders_webui.cc, and
-#                      WebUIController::BindInterface on RedrobUI. Three more registration patches.
-#   task_host_impl.h   the browser-side implementation of that interface, which also owns the sidecar
-#                      handle. It cannot compile before the bindings exist.
-#
-# The page is a served, rendering scaffold without them. Add both rows here in the same commit that
-# adds the bindings target -- a source file installed before the target that builds it is a broken tree.
+# chrome://redrob, the AI surface, and the Mojo boundary in front of it. The only Chromium files this
+# needs are the one-line registrations in patches/, which is the whole point of a WebUI.
+sources/chrome/browser/ui/webui/redrob/BUILD.gn          chrome/browser/ui/webui/redrob/BUILD.gn
+sources/chrome/browser/ui/webui/redrob/redrob.mojom      chrome/browser/ui/webui/redrob/redrob.mojom
+sources/chrome/browser/ui/webui/redrob/redrob_ui.h       chrome/browser/ui/webui/redrob/redrob_ui.h
+sources/chrome/browser/ui/webui/redrob/redrob_ui.cc      chrome/browser/ui/webui/redrob/redrob_ui.cc
+sources/chrome/browser/ui/webui/redrob/task_host_impl.h  chrome/browser/ui/webui/redrob/task_host_impl.h
+sources/chrome/browser/ui/webui/redrob/task_host_impl.cc chrome/browser/ui/webui/redrob/task_host_impl.cc
+
+# The page itself: a build_webui() target, so the TypeScript build and the generated Mojo bindings
+# come with it. This is what replaced the scaffold's string literals.
+sources/chrome/browser/resources/redrob/BUILD.gn    chrome/browser/resources/redrob/BUILD.gn
+sources/chrome/browser/resources/redrob/redrob.html chrome/browser/resources/redrob/redrob.html
+sources/chrome/browser/resources/redrob/redrob.css  chrome/browser/resources/redrob/redrob.css
+sources/chrome/browser/resources/redrob/redrob.ts   chrome/browser/resources/redrob/redrob.ts

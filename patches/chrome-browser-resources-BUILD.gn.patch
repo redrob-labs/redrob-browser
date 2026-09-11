@@ -1,0 +1,28 @@
+diff --git a/chrome/browser/resources/BUILD.gn b/chrome/browser/resources/BUILD.gn
+index e66dc00a9a34f..49bf9cf5becd4 100644
+--- a/chrome/browser/resources/BUILD.gn
++++ b/chrome/browser/resources/BUILD.gn
+@@ -23,6 +23,7 @@ group("resources") {
+     "glic:resources",
+     "glic/experimental_opt_in:resources",
+     "saved_tab_groups_unsupported:resources",
++    "redrob:resources",
+     "segmentation_internals:resources",
+     "//components/enterprise/connectors/resources",
+   ]
+@@ -422,6 +423,7 @@ group("dev_ui_resources") {
+     "net_internals:resources",
+     "omnibox:resources",
+     "predictors:resources",
++    "redrob:resources",
+     "segmentation_internals:resources",
+     "subresource_filter:resources",
+     "suggest_internals:resources",
+@@ -513,6 +515,7 @@ repack("dev_ui_paks") {
+     "$root_gen_dir/chrome/net_internals_resources.pak",
+     "$root_gen_dir/chrome/omnibox_resources.pak",
+     "$root_gen_dir/chrome/predictors_resources.pak",
++    "$root_gen_dir/chrome/redrob_resources.pak",
+     "$root_gen_dir/chrome/segmentation_internals_resources.pak",
+     "$root_gen_dir/chrome/subresource_filter_internals_resources.pak",
+     "$root_gen_dir/chrome/suggest_internals_resources.pak",
