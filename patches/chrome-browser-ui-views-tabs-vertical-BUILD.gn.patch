@@ -1,0 +1,30 @@
+diff --git a/chrome/browser/ui/views/tabs/vertical/BUILD.gn b/chrome/browser/ui/views/tabs/vertical/BUILD.gn
+index 6ff7745f13856..753c217123efe 100644
+--- a/chrome/browser/ui/views/tabs/vertical/BUILD.gn
++++ b/chrome/browser/ui/views/tabs/vertical/BUILD.gn
+@@ -7,6 +7,7 @@ import("//chrome/common/features.gni")
+ 
+ source_set("vertical") {
+   sources = [
++    "redrob_sidebar_sections.h",
+     "top_container_button.h",
+     "vertical_tab_strip_bottom_container.h",
+     "vertical_tab_strip_expand_on_hover_lock.h",
+@@ -36,6 +37,7 @@ source_set("vertical") {
+ 
+ source_set("impl") {
+   sources = [
++    "redrob_sidebar_sections.cc",
+     "top_container_button.cc",
+     "vertical_tab_strip_bottom_container.cc",
+     "vertical_tab_strip_expand_on_hover_lock.cc",
+@@ -45,6 +47,9 @@ source_set("impl") {
+   ]
+ 
+   deps = [
++    "//chrome/browser/bookmarks",
++    "//chrome/browser/ui/navigator",
++    "//components/bookmarks/browser",
+     "//chrome/browser:primitives",
+     "//chrome/browser/glic",
+     "//chrome/browser/glic/browser_ui:glow",
