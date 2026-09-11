@@ -75,6 +75,66 @@ PROTECTED_PHRASES = (
 #
 # Ordered most-visible first so the log reads usefully. A file upstream has moved or renamed is reported
 # rather than skipped -- silently branding fewer files is exactly the failure this list exists to end.
+# The shared strings files -- the ones BOTH branding variants use -- hardcode the short name "Chrome" in
+# user-visible text. That is an upstream defect rather than a branding hook: an actual Chromium build also
+# says "Chrome just blocked a dangerous file", even though its product is called Chromium. For us it is
+# worse than the Chromium leaks were, because it names a different company's product.
+#
+# Substituting the SHORT name is far more dangerous than substituting "Chromium", so it gets its own
+# protected list, and every entry below is a name that is genuinely NOT us:
+#
+#   * chrome:// URLs, which are the browser's own scheme and cannot be renamed by editing prose.
+#   * Google's products and platforms -- Google Chrome, ChromeOS, Chromebook, Chromecast, the Web Store,
+#     Chrome Enterprise, Chrome Remote Desktop, release channels.
+#   * Chrome Apps, a deprecated upstream platform we do not ship.
+#   * Chrome Updater and the Chrome Root Store/Program, components that are upstream's and are named in
+#     enterprise policy and PKI text where renaming them would make the text false.
+#
+# The UA string is untouched by this because it is assembled in C++, not in a strings file -- and it must
+# stay, since Korean banking and government sites sniff for the Chrome token.
+SHARED_STRINGS_FILES = (
+    "chrome/app/generated_resources.grd",
+    "chrome/app/settings_strings.grdp",
+)
+UPSTREAM_SHORT_NAME = "Chrome"
+SHORT_NAME_PROTECTED_PHRASES = (
+    "chrome://",
+    "Google Chrome",
+    "ChromeOS",
+    "Chrome OS",
+    "Chromebook",
+    "Chromecast",
+    "Chrome Web Store",
+    "Chrome Web",
+    "Chrome Apps",
+    "Chrome App",
+    "Chrome Enterprise",
+    "Chrome Remote Desktop",
+    "Chrome Updater",
+    "Chrome Root Store",
+    "Chrome Root Program",
+    "Chrome Beta",
+    "Chrome Dev",
+    "Chrome Canary",
+    "Chrome Frame",
+    "Chrome Cleanup",
+    "chrome.google.com",
+    "Chrome/",
+    # Hyphenated, as the ChromeOS section comments spell it.
+    "Chrome-OS",
+    # Google's own legal text and its mobile app. Substituting these does not rebrand a string, it makes
+    # a false statement: our terms of service did not change on a date Google chose, and there is no
+    # Redrob for iOS to download. A string that sends the user to fetch a product we do not publish is
+    # worse than one that names someone else's.
+    "Chrome's Terms of Service",
+    "Chrome for iOS",
+    "Chrome for Android",
+    "Download Chrome",
+    "download Chrome",
+    "Get Chrome",
+    "get Chrome on",
+)
+
 STRINGS_FILES = (
     "chrome/app/chromium_strings.grd",
     "chrome/app/settings_chromium_strings.grdp",
@@ -249,6 +309,25 @@ def overlay_targets() -> set[str]:
     return {target for _, target, _ in read_manifest()}
 
 
+def substitute_short_name(text: str) -> tuple[str, int]:
+    """`Chrome` -> `Redrob`, leaving every phrase where "Chrome" names something that is not us.
+
+    Same masking trick as the long name, with its own phrase list. Ordered longest-first when masking so
+    that "Chrome Web Store" is protected before the shorter "Chrome Web" can claim part of it.
+    """
+    masks = {}
+    for index, phrase in enumerate(sorted(SHORT_NAME_PROTECTED_PHRASES, key=len, reverse=True)):
+        token = f"\x00SHORT{index}\x00"
+        if phrase in text:
+            masks[token] = phrase
+            text = text.replace(phrase, token)
+    replaced = text.count(UPSTREAM_SHORT_NAME)
+    text = text.replace(UPSTREAM_SHORT_NAME, PRODUCT_NAME)
+    for token, phrase in masks.items():
+        text = text.replace(token, phrase)
+    return text, replaced
+
+
 def substitute_product_name(text: str) -> tuple[str, int]:
     """`Chromium` -> `Redrob`, except inside the phrases that are about upstream, not about us.
 
@@ -344,6 +423,20 @@ def cmd_derive(_: argparse.Namespace) -> None:
         print(f"strings   {name}: {replaced}")
     print(f"strings   {total} occurrence(s) of {UPSTREAM_NAME} -> {PRODUCT_NAME} "
           f"across {len(STRINGS_FILES)} file(s)")
+
+    missing_shared = [name for name in SHARED_STRINGS_FILES if not (SRC / name).exists()]
+    if missing_shared:
+        sys.exit("shared strings file(s) not found; upstream moved them:\n  " + "\n  ".join(missing_shared))
+    shared_total = 0
+    for name in SHARED_STRINGS_FILES:
+        path = SRC / name
+        text, replaced = substitute_short_name(path.read_text())
+        if replaced:
+            path.write_text(text)
+        shared_total += replaced
+        print(f"shortname {name}: {replaced}")
+    print(f"shortname {shared_total} occurrence(s) of {UPSTREAM_SHORT_NAME} -> {PRODUCT_NAME} "
+          f"across {len(SHARED_STRINGS_FILES)} file(s)")
 
     ua = SRC / USER_AGENT_CC
     if not ua.exists():

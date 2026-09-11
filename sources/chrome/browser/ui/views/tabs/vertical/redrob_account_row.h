@@ -12,6 +12,10 @@
 class AvatarToolbarButton;
 class BrowserWindowInterface;
 
+namespace views {
+class LabelButton;
+}  // namespace views
+
 namespace redrob {
 
 // The account control, at the foot of the sidebar.
@@ -32,7 +36,11 @@ class RedrobAccountRow : public views::View {
   ~RedrobAccountRow() override;
 
  private:
+  void OpenSettings();
+
+  raw_ptr<BrowserWindowInterface> browser_;
   raw_ptr<AvatarToolbarButton> avatar_ = nullptr;
+  raw_ptr<views::LabelButton> settings_button_ = nullptr;
 };
 
 }  // namespace redrob
