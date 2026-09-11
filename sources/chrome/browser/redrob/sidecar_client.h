@@ -81,8 +81,45 @@ class SidecarClient {
   // The loopback base URL, e.g. http://127.0.0.1:48213. Empty until kReady.
   const std::string& base_url() const { return base_url_; }
 
+  // Receives one streamed turn, already framed and parsed but NOT interpreted. The split is the one
+  // this class's comment promises: text and proposed tool calls come out here, and whether the browser
+  // is willing to run any of those calls is decided by the delegate, never in here.
+  class CompletionDelegate {
+   public:
+    // Assistant prose, in the fragments the engine emitted. Callers must not assume sentence or even
+    // UTF-8 codepoint boundaries between calls.
+    virtual void OnCompletionText(std::string_view text) = 0;
+    // The engine's private reasoning, which is deliberately routed separately: it is not the answer and
+    // a surface that renders it as prose would be misrepresenting it.
+    virtual void OnCompletionReasoning(std::string_view text) = 0;
+    // A tool the engine WANTS run, with its arguments as the JSON text the engine produced. Delivered
+    // only once the arguments are complete -- they arrive in fragments on the wire and a half-parsed
+    // argument list is not something a caller should ever have to defend against.
+    virtual void OnCompletionToolCall(const std::string& id,
+                                      const std::string& name,
+                                      const std::string& arguments_json) = 0;
+    // "stop", "tool_calls", "length" -- the engine's own reason, passed through unchanged.
+    virtual void OnCompletionFinished(const std::string& finish_reason) = 0;
+    virtual void OnCompletionFailed(const std::string& message) = 0;
+
+   protected:
+    virtual ~CompletionDelegate() = default;
+  };
+
+  // Streams POST /experimental/external/chat/completions. `request_json` is the OpenAI-compatible body
+  // the caller composed; this class does not build it, because the message history and the tool list
+  // are exactly the parts a caller must stay responsible for.
+  //
+  // One turn at a time per client: a second call cancels the first. `delegate` must outlive the turn or
+  // cancel it in its destructor.
+  void StartCompletion(std::string request_json, CompletionDelegate* delegate);
+  void CancelCompletion();
+
  private:
   struct LaunchResult;
+  // SSE framing and delta accumulation. Defined in the .cc: the wire format is an implementation
+  // detail of talking to the engine, not part of this class's contract.
+  class CompletionStream;
 
   void SetStatus(Status status);
   void OnLaunched(std::unique_ptr<LaunchResult> result);
@@ -101,6 +138,7 @@ class SidecarClient {
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   std::unique_ptr<network::SimpleURLLoader> health_loader_;
   int health_attempts_ = 0;
+  std::unique_ptr<CompletionStream> completion_;
 
   base::WeakPtrFactory<SidecarClient> weak_factory_{this};
 };

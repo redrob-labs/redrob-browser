@@ -7,6 +7,9 @@
 #include <utility>
 
 #include "base/base64.h"
+#include "base/json/json_reader.h"
+#include "base/values.h"
+#include "base/memory/raw_ptr.h"
 #include "base/containers/span.h"
 #include "base/environment.h"
 #include "base/files/file.h"
@@ -27,6 +30,7 @@
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/cpp/simple_url_loader_stream_consumer.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "url/gurl.h"
 
@@ -84,6 +88,219 @@ struct SidecarClient::LaunchResult {
   std::optional<std::string> base_url;
   bool engine_missing = false;
   std::string failure;
+};
+
+// The engine answers a completion as OpenAI-compatible server-sent events. Its exact emission is the
+// contract this parser is written against, not a general SSE reader:
+//
+//   data: {"choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+//   data: {"choices":[{"index":0,"delta":{"content":"..."},"finish_reason":null}]}
+//   data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"...","type":"function",
+//                                                       "function":{"name":"...","arguments":"..."}}]}}]}
+//   data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+//   data: [DONE]
+//
+// Two properties of that stream drive the whole design here. A tool call's `arguments` is streamed in
+// fragments and its `name` appears only on the fragment that introduces the index, so calls must be
+// accumulated per index and emitted whole. And a chunk boundary is not a line boundary: one
+// OnDataReceived can carry half a line, several lines, or both.
+class SidecarClient::CompletionStream : public network::SimpleURLLoaderStreamConsumer {
+ public:
+  CompletionStream(CompletionDelegate* delegate, std::unique_ptr<network::SimpleURLLoader> loader)
+      : delegate_(delegate), loader_(std::move(loader)) {}
+  ~CompletionStream() override = default;
+
+  void Start(network::SharedURLLoaderFactory* factory) {
+    loader_->DownloadAsStream(factory, this);
+  }
+
+  // network::SimpleURLLoaderStreamConsumer
+  void OnDataReceived(std::string_view chunk, base::OnceClosure resume) override {
+    buffer_.append(chunk);
+    // A local process could still stream a line without end, and this buffer is browser-process memory.
+    // Refusing is better than growing until something else fails.
+    if (buffer_.size() > kMaxBufferedBytes) {
+      Fail("The engine sent a malformed response.");
+      std::move(resume).Run();
+      return;
+    }
+    size_t newline = std::string::npos;
+    while ((newline = buffer_.find('\n')) != std::string::npos) {
+      std::string line = buffer_.substr(0, newline);
+      buffer_.erase(0, newline + 1);
+      if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
+      }
+      HandleLine(line);
+    }
+    std::move(resume).Run();
+  }
+
+  void OnComplete(bool success) override {
+    if (failed_) {
+      return;
+    }
+    if (!success) {
+      Fail("The connection to the engine ended before the answer did.");
+      return;
+    }
+    // A stream that stops cleanly without a finish_reason still ended the turn, and the caller needs to
+    // stop showing it as running. Reported as the engine's own default rather than as an error.
+    if (!finished_) {
+      FlushToolCalls();
+      finished_ = true;
+      delegate_->OnCompletionFinished("stop");
+    }
+  }
+
+  void OnRetry(base::OnceClosure start_retry) override {
+    // Not configured for retries. Replaying a half-delivered turn would double the prose the caller has
+    // already been handed, and re-propose tool calls it may already have run.
+    Fail("The engine's answer was interrupted.");
+  }
+
+ private:
+  static constexpr size_t kMaxBufferedBytes = 1024 * 1024;
+
+  struct PendingToolCall {
+    std::string id;
+    std::string name;
+    std::string arguments;
+  };
+
+  void HandleLine(const std::string& line) {
+    if (failed_ || finished_) {
+      return;
+    }
+    // Comments and the event/id fields of the SSE format are not part of this contract; ignoring them is
+    // deliberate rather than an omission.
+    static constexpr std::string_view kDataPrefix = "data:";
+    if (!line.starts_with(kDataPrefix)) {
+      return;
+    }
+    std::string_view payload = std::string_view(line).substr(kDataPrefix.size());
+    while (!payload.empty() && payload.front() == ' ') {
+      payload.remove_prefix(1);
+    }
+    if (payload.empty()) {
+      return;
+    }
+    if (payload == "[DONE]") {
+      FlushToolCalls();
+      if (!finished_) {
+        finished_ = true;
+        delegate_->OnCompletionFinished(finish_reason_.empty() ? "stop" : finish_reason_);
+      }
+      return;
+    }
+
+    std::optional<base::DictValue> parsed = base::JSONReader::ReadDict(payload, base::JSON_PARSE_RFC);
+    if (!parsed) {
+      // One unreadable frame does not invalidate the turn: skipping it keeps a stream alive that is
+      // otherwise fine, and the engine's own error frames arrive through the branch below.
+      return;
+    }
+    const base::DictValue& dict = *parsed;
+
+    if (const base::DictValue* error = dict.FindDict("error")) {
+      const std::string* message = error->FindString("message");
+      Fail(message && !message->empty() ? *message : "The engine reported an error.");
+      return;
+    }
+
+    const base::ListValue* choices = dict.FindList("choices");
+    if (!choices || choices->empty()) {
+      return;
+    }
+    const base::DictValue* choice = choices->front().GetIfDict();
+    if (!choice) {
+      return;
+    }
+
+    if (const base::DictValue* delta = choice->FindDict("delta")) {
+      if (const std::string* content = delta->FindString("content")) {
+        if (!content->empty()) {
+          delegate_->OnCompletionText(*content);
+        }
+      }
+      if (const std::string* reasoning = delta->FindString("reasoning_content")) {
+        if (!reasoning->empty()) {
+          delegate_->OnCompletionReasoning(*reasoning);
+        }
+      }
+      if (const base::ListValue* tool_calls = delta->FindList("tool_calls")) {
+        for (const base::Value& entry : *tool_calls) {
+          AccumulateToolCall(entry.GetIfDict());
+        }
+      }
+    }
+
+    if (const std::string* reason = choice->FindString("finish_reason")) {
+      // Recorded rather than acted on. [DONE] is what ends the turn, and tool calls whose last argument
+      // fragment shares this frame must be flushed before anyone is told the turn is over.
+      finish_reason_ = *reason;
+    }
+  }
+
+  void AccumulateToolCall(const base::DictValue* entry) {
+    if (!entry) {
+      return;
+    }
+    // The index is the wire's identity for a call across fragments. Without it, two calls proposed in one
+    // turn would concatenate into one unparseable argument string.
+    const std::optional<int> index = entry->FindInt("index");
+    if (!index.has_value() || *index < 0 || *index > kMaxToolCallsPerTurn) {
+      return;
+    }
+    PendingToolCall& pending = pending_tool_calls_[*index];
+    if (const std::string* id = entry->FindString("id")) {
+      pending.id = *id;
+    }
+    if (const base::DictValue* function = entry->FindDict("function")) {
+      if (const std::string* name = function->FindString("name")) {
+        pending.name = *name;
+      }
+      if (const std::string* arguments = function->FindString("arguments")) {
+        if (pending.arguments.size() + arguments->size() <= kMaxArgumentBytes) {
+          pending.arguments.append(*arguments);
+        }
+      }
+    }
+  }
+
+  void FlushToolCalls() {
+    // Ordered by wire index so the caller runs the tools in the order the engine proposed them.
+    for (auto& [index, pending] : pending_tool_calls_) {
+      if (pending.name.empty()) {
+        continue;
+      }
+      delegate_->OnCompletionToolCall(pending.id, pending.name,
+                                      pending.arguments.empty() ? "{}" : pending.arguments);
+    }
+    pending_tool_calls_.clear();
+  }
+
+  void Fail(const std::string& message) {
+    if (failed_ || finished_) {
+      return;
+    }
+    failed_ = true;
+    // Deliberately dropped: a turn that failed must not also deliver tool calls. Running a tool proposed
+    // by an answer that never completed is the one outcome worth ruling out structurally.
+    pending_tool_calls_.clear();
+    delegate_->OnCompletionFailed(message);
+  }
+
+  static constexpr int kMaxToolCallsPerTurn = 64;
+  static constexpr size_t kMaxArgumentBytes = 64 * 1024;
+
+  raw_ptr<CompletionDelegate> delegate_;
+  std::unique_ptr<network::SimpleURLLoader> loader_;
+  std::string buffer_;
+  std::map<int, PendingToolCall> pending_tool_calls_;
+  std::string finish_reason_;
+  bool finished_ = false;
+  bool failed_ = false;
 };
 
 SidecarClient::SidecarClient() = default;
@@ -338,6 +555,57 @@ void SidecarClient::OnHealthResponse(std::optional<std::string> body) {
   base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
       FROM_HERE, base::BindOnce(&SidecarClient::PollHealth, weak_factory_.GetWeakPtr()),
       kHealthRetryDelay);
+}
+
+
+void SidecarClient::StartCompletion(std::string request_json, CompletionDelegate* delegate) {
+  CHECK(delegate);
+  // Refused rather than queued. A caller that starts a turn while the engine is not ready has a bug in
+  // its own state machine, and answering it with a failure says so.
+  if (status_ != Status::kReady || base_url_.empty()) {
+    delegate->OnCompletionFailed("The Redrob Code engine is not ready.");
+    return;
+  }
+
+  static constexpr net::NetworkTrafficAnnotationTag kAnnotation =
+      net::DefineNetworkTrafficAnnotation("redrob_sidecar_completion", R"(
+        semantics {
+          sender: "Redrob AI surface"
+          description:
+            "Sends the task the user typed on the Redrob new tab page, and the task's history, to the "
+            "locally launched Redrob Code engine, which answers as a stream. The request never leaves "
+            "the machine; the engine itself contacts the model provider the user configured."
+          trigger: "The user starts or replies to a task on the Redrob AI surface."
+          data:
+            "The user's prompt, the task's previous messages, results of tools the browser ran for the "
+            "task, and a generated per-launch credential for the local process."
+          destination: LOCAL
+        }
+        policy {
+          cookies_allowed: NO
+          setting: "Tied to using the Redrob AI surface; no separate setting."
+          policy_exception_justification: "Does not contact a remote server."
+        })");
+
+  auto request = std::make_unique<network::ResourceRequest>();
+  request->url = GURL(base_url_ + "/experimental/external/chat/completions");
+  request->method = "POST";
+  // The engine is a local process reached over loopback and authenticated by a per-launch credential.
+  // Anything the cookie jar would add is at best irrelevant and at worst a profile secret sent to a
+  // process that has no business seeing it.
+  request->credentials_mode = network::mojom::CredentialsMode::kOmit;
+  request->headers.SetHeader(net::HttpRequestHeaders::kAuthorization,
+                             "Basic " + base::Base64Encode("redrob:" + basic_credentials_));
+
+  auto loader = network::SimpleURLLoader::Create(std::move(request), kAnnotation);
+  loader->AttachStringForUpload(std::move(request_json), "application/json");
+  // Replaces any turn in flight, which also destroys its loader and stops its delivery.
+  completion_ = std::make_unique<CompletionStream>(delegate, std::move(loader));
+  completion_->Start(url_loader_factory_.get());
+}
+
+void SidecarClient::CancelCompletion() {
+  completion_.reset();
 }
 
 }  // namespace redrob

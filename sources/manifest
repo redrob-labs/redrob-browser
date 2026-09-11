@@ -11,6 +11,8 @@
 # The sidecar transport. Browser-process only: it launches the local Redrob Code engine on loopback,
 # holds its generated credentials and never hands either to a renderer. See docs/AI_SURFACE.md.
 sources/chrome/browser/redrob/BUILD.gn            chrome/browser/redrob/BUILD.gn
+sources/chrome/browser/redrob/agent_tabs.h        chrome/browser/redrob/agent_tabs.h
+sources/chrome/browser/redrob/agent_tabs.cc       chrome/browser/redrob/agent_tabs.cc
 sources/chrome/browser/redrob/sidecar_client.h    chrome/browser/redrob/sidecar_client.h
 sources/chrome/browser/redrob/sidecar_client.cc   chrome/browser/redrob/sidecar_client.cc
 sources/chrome/browser/redrob/task_store.h        chrome/browser/redrob/task_store.h

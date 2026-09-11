@@ -4,6 +4,8 @@
 
 source_set("sidecar") {
   sources = [
+    "agent_tabs.cc",
+    "agent_tabs.h",
     "sidecar_client.cc",
     "sidecar_client.h",
     "task_store.cc",
@@ -19,6 +21,10 @@ source_set("sidecar") {
   deps = [
     "//base",
     "//chrome/browser/profiles:profile",
+    "//chrome/browser/ui/browser_window",
+    "//chrome/browser/ui/navigator",
+    "//chrome/browser/ui/tabs:tab_strip",
+    "//components/tab_groups",
     "//content/public/browser",
     "//net",
     "//net/traffic_annotation",

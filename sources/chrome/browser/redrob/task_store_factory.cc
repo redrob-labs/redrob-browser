@@ -34,8 +34,9 @@ std::unique_ptr<KeyedService> TaskStoreFactory::BuildServiceInstanceForBrowserCo
     content::BrowserContext* context) const {
   // The loader factory is the browser's, taken here rather than from a page: the sidecar health probe
   // is the browser's request and must not inherit anything a renderer could influence.
+  Profile* profile = Profile::FromBrowserContext(context);
   return std::make_unique<TaskStore>(
-      context->GetDefaultStoragePartition()->GetURLLoaderFactoryForBrowserProcess());
+      profile, context->GetDefaultStoragePartition()->GetURLLoaderFactoryForBrowserProcess());
 }
 
 }  // namespace redrob
