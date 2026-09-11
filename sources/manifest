@@ -59,3 +59,7 @@ sources/chrome/browser/resources/redrob_onboarding/redrob-mark.svg  chrome/brows
 sources/chrome/browser/resources/redrob_onboarding/BUILD.gn  chrome/browser/resources/redrob_onboarding/BUILD.gn
 sources/chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.h  chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.h
 sources/chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.cc  chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.cc
+sources/chrome/browser/redrob/page_tools.h  chrome/browser/redrob/page_tools.h
+sources/chrome/browser/redrob/page_tools.cc  chrome/browser/redrob/page_tools.cc
+sources/chrome/browser/redrob/file_tools.h  chrome/browser/redrob/file_tools.h
+sources/chrome/browser/redrob/file_tools.cc  chrome/browser/redrob/file_tools.cc

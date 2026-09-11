@@ -19,10 +19,21 @@ enum TaskState {
   kCancelled,
 };
 
-enum RoutingMode {
-  // `Local` and `Guard` in the design. These are sidecar policy, not browser features.
-  kLocal,
+// What a task is allowed to make the browser do. Real, not decorative: the browser refuses a tool
+// call this mode does not cover, and the refusal is reported back to the engine as a tool result so
+// it can choose another route instead of retrying.
+//
+// The narrowest mode that can do the job is the right default, which is why kGuard rather than
+// kFullAccess is what the composer starts on.
+enum PermissionMode {
+  // Open and read pages. Nothing that changes a page and nothing that touches the disk.
+  kReadOnly,
+  // Also click and type, and write files -- but only files the browser names, inside one folder the
+  // user chose. The model never supplies a path.
   kGuard,
+  // Also write outside that folder. Deliberately not the default and deliberately not what a task
+  // gets by asking for it: a mode this wide is a decision the user makes, not the agent.
+  kFullAccess,
 };
 
 // What kind of step this is. The page picks an icon from this rather than parsing the label, so a
@@ -32,7 +43,13 @@ enum StepKind {
   kSearchedMemory,
   kOpenedPage,
   kCapturedScreenshot,
+  kReadPage,
+  kClicked,
+  kTyped,
   kSavedArtifact,
+  // A tool the task's permission mode does not allow. Rendered as a refusal rather than hidden,
+  // because a user watching a trace should see what the agent wanted to do and did not get to do.
+  kRefused,
   kUsedCredential,
   kSpawnedSubagents,
 };
@@ -68,6 +85,10 @@ struct Task {
   // Set only in kFailed. Carries the sidecar's reason, never a raw transport error: a 401 from the
   // engine must not reach a renderer as anything a page could learn a credential from.
   string? error;
+  // What this task is allowed to do, and where it may write. Sent to the page so the task tab shows
+  // the posture it is actually running under rather than what the composer was set to at some point.
+  PermissionMode mode;
+  string? working_folder;
 };
 
 // Why a task could not be started. Separate from Task.error because this answers a call rather than
@@ -86,7 +107,7 @@ interface Page {
 interface TaskHost {
   // `context_refs` are opaque handles the browser process resolves -- a tab, a selection, a
   // bookmark. Not URLs and not paths: a renderer that asks for /etc/passwd gets a rejected ref.
-  StartTask(string prompt, array<string> context_refs)
+  StartTask(string prompt, array<string> context_refs, PermissionMode mode)
       => (string? task_id, StartError? error);
   CancelTask(string task_id);
   ListTasks() => (array<Task> tasks);
@@ -94,7 +115,12 @@ interface TaskHost {
   GetTask(string task_id) => (Task? task);
   // A follow-up turn on an existing task. The task tab's composer, not a new task.
   Reply(string task_id, string prompt) => (bool accepted);
-  SetRouting(RoutingMode mode) => (bool accepted);
+  // Changes an existing task's mode. Narrowing always succeeds; WIDENING is refused mid-task, because
+  // a task that has already been running is not the moment to hand it more of the machine.
+  SetPermissionMode(string task_id, PermissionMode mode) => (bool accepted);
+  // The folder a Guard-mode task may write into. Chosen by the user through the browser's own picker,
+  // so the returned path is one they saw and agreed to. Null when they cancelled.
+  ChooseWorkingFolder(string task_id) => (string? display_path);
 };
 
 interface PageHandlerFactory {

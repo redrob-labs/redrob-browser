@@ -11,9 +11,11 @@
 #include <vector>
 
 #include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
+#include "base/files/file_path.h"
 #include "chrome/browser/redrob/sidecar_client.h"
 #include "chrome/browser/ui/thumbnails/thumbnail_image.h"
 #include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
@@ -59,12 +61,15 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   // so this is where the bounds live.
   std::pair<std::optional<std::string>, std::optional<mojom::StartError>> StartTask(
       const std::string& prompt,
-      const std::vector<std::string>& context_refs);
+      const std::vector<std::string>& context_refs,
+      mojom::PermissionMode mode);
   void CancelTask(const std::string& task_id);
+  bool SetPermissionMode(const std::string& task_id, mojom::PermissionMode mode);
+  void ChooseWorkingFolder(const std::string& task_id,
+                          base::OnceCallback<void(const std::optional<std::string>&)> callback);
   bool Reply(const std::string& task_id, const std::string& prompt);
   std::vector<mojom::TaskPtr> ListTasks() const;
   mojom::TaskPtr GetTask(const std::string& task_id) const;
-  bool SetRouting(mojom::RoutingMode mode);
 
   // SidecarClient::CompletionDelegate
   void OnCompletionText(std::string_view text) override;
@@ -91,13 +96,26 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
     int tool_rounds = 0;
     std::string assistant_text;
     std::vector<ProposedToolCall> proposed;
+    // The tab the agent most recently opened. Every page tool acts on this rather than on whatever the
+    // user happens to be looking at -- a task must not read or click the tab in front of the person.
+    base::WeakPtr<content::WebContents> page;
+    // Tool calls still waiting on an async result. A turn cannot continue until they are all answered,
+    // because the engine expects one tool message per call it proposed.
+    int pending_tools = 0;
   };
 
   void OnSidecarStatusChanged(SidecarClient::Status status);
   void StartTurn(const std::string& task_id);
-  // Runs one proposed call, returns what the engine is told about the outcome. A refusal is reported
-  // back to the engine as a result rather than hidden, so it can react instead of retrying blindly.
-  std::string RunTool(const std::string& task_id, const ProposedToolCall& call);
+  // Dispatches one proposed call. Synchronous tools answer immediately through `FinishTool`;
+  // asynchronous ones answer from their own callback. Either way the turn resumes only once every
+  // call it proposed has an answer.
+  void RunTool(const std::string& task_id, const ProposedToolCall& call);
+  // Records the engine's answer for one call and, when the last one lands, starts the next turn.
+  void FinishTool(const std::string& task_id,
+                  const ProposedToolCall& call,
+                  const std::string& result);
+  // True when `mode` covers `tool`. The single place this question is answered.
+  static bool ModeAllows(mojom::PermissionMode mode, const std::string& tool);
   void FinishTask(const std::string& task_id, mojom::TaskState state, const std::string& error);
   mojom::Step* AddStep(const std::string& task_id, mojom::StepKind kind, const std::string& label);
   void AddStepDetail(const std::string& task_id, const std::string& text, const std::string& source);
@@ -119,16 +137,24 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
     std::unique_ptr<ThumbnailImage::Subscription> subscription;
   };
   std::map<std::string, std::vector<PreviewWatch>> previews_;
+  // Where each task may write. Kept here rather than on mojom::Task: the page is shown the folder's
+  // NAME so the user can see where files go, and never the path -- a renderer with the absolute path
+  // has learned something about the machine it has no use for.
+  std::map<std::string, base::FilePath> working_folders_;
   // The task whose turn the sidecar is currently answering. Only one runs at a time because one client
   // holds one stream; queueing is what kMaxConcurrentTasks bounds.
   std::string active_task_id_;
-  mojom::RoutingMode routing_ = mojom::RoutingMode::kLocal;
+
   raw_ptr<Profile> profile_;
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   std::unique_ptr<SidecarClient> sidecar_;
   base::OneShotTimer notify_timer_;
   std::string pending_notify_task_id_;
   base::ObserverList<Observer> observers_;
+
+  // Tool results arrive from callbacks the store may not outlive -- a page closed, a write
+  // finishing after the profile went away.
+  base::WeakPtrFactory<TaskStore> weak_factory_{this};
 };
 
 }  // namespace redrob

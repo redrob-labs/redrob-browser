@@ -35,6 +35,7 @@ class TaskHostImpl : public mojom::TaskHost, public TaskStore::Observer {
   // mojom::TaskHost
   void StartTask(const std::string& prompt,
                  const std::vector<std::string>& context_refs,
+                 mojom::PermissionMode mode,
                  StartTaskCallback callback) override;
   void CancelTask(const std::string& task_id) override;
   void ListTasks(ListTasksCallback callback) override;
@@ -42,7 +43,11 @@ class TaskHostImpl : public mojom::TaskHost, public TaskStore::Observer {
   void Reply(const std::string& task_id,
              const std::string& prompt,
              ReplyCallback callback) override;
-  void SetRouting(mojom::RoutingMode mode, SetRoutingCallback callback) override;
+  void SetPermissionMode(const std::string& task_id,
+                        mojom::PermissionMode mode,
+                        SetPermissionModeCallback callback) override;
+  void ChooseWorkingFolder(const std::string& task_id,
+                          ChooseWorkingFolderCallback callback) override;
 
   // TaskStore::Observer
   void OnTaskChanged(const mojom::Task& task) override;

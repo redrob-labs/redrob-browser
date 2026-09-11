@@ -23,8 +23,12 @@
       </div>
       <div class="composer-controls">
         <button type="button" class="chip chip-icon" id="attach" aria-label="Add context">+</button>
-        <button type="button" class="chip" id="routing-local" aria-pressed="true">Local</button>
-        <button type="button" class="chip" id="routing-guard" aria-pressed="false">Guard</button>
+        <button type="button" class="chip" id="mode-read" aria-pressed="false"
+                title="Open and read pages. Nothing is changed and nothing is written.">Read only</button>
+        <button type="button" class="chip" id="mode-guard" aria-pressed="true"
+                title="Also click, fill fields and save files into one folder you choose.">Guard</button>
+        <button type="button" class="chip" id="mode-full" aria-pressed="false"
+                title="Also write outside that folder.">Full access</button>
         <span class="spacer"></span>
         <label class="chip chip-select">
           <span class="visually-hidden">Model</span>
@@ -74,8 +78,12 @@
         <button type="submit" id="reply-send" class="send" aria-label="Send reply"></button>
       </div>
       <div class="composer-controls">
-        <button type="button" class="chip" id="reply-local" aria-pressed="true">Local</button>
-        <button type="button" class="chip" id="reply-guard" aria-pressed="false">Guard</button>
+        <button type="button" class="chip" id="mode-read" aria-pressed="false"
+                title="Open and read pages. Nothing is changed and nothing is written.">Read only</button>
+        <button type="button" class="chip" id="mode-guard" aria-pressed="true"
+                title="Also click, fill fields and save files into one folder you choose.">Guard</button>
+        <button type="button" class="chip" id="mode-full" aria-pressed="false"
+                title="Also write outside that folder.">Full access</button>
         <span class="spacer"></span>
         <span class="chip chip-static" id="reply-model">redrob/auto</span>
         <span class="chip chip-static">High</span>

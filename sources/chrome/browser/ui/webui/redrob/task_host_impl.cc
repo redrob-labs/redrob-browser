@@ -21,8 +21,9 @@ TaskHostImpl::~TaskHostImpl() {
 
 void TaskHostImpl::StartTask(const std::string& prompt,
                              const std::vector<std::string>& context_refs,
+                             mojom::PermissionMode mode,
                              StartTaskCallback callback) {
-  auto [task_id, error] = store_->StartTask(prompt, context_refs);
+  auto [task_id, error] = store_->StartTask(prompt, context_refs, mode);
   std::move(callback).Run(std::move(task_id), std::move(error));
 }
 
@@ -46,8 +47,15 @@ void TaskHostImpl::Reply(const std::string& task_id,
   std::move(callback).Run(store_->Reply(task_id, prompt));
 }
 
-void TaskHostImpl::SetRouting(mojom::RoutingMode mode, SetRoutingCallback callback) {
-  std::move(callback).Run(store_->SetRouting(mode));
+void TaskHostImpl::SetPermissionMode(const std::string& task_id,
+                                    mojom::PermissionMode mode,
+                                    SetPermissionModeCallback callback) {
+  std::move(callback).Run(store_->SetPermissionMode(task_id, mode));
+}
+
+void TaskHostImpl::ChooseWorkingFolder(const std::string& task_id,
+                                       ChooseWorkingFolderCallback callback) {
+  store_->ChooseWorkingFolder(task_id, std::move(callback));
 }
 
 void TaskHostImpl::OnTaskChanged(const mojom::Task& task) {

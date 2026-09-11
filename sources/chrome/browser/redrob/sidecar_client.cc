@@ -15,6 +15,7 @@
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/logging.h"
 #include "base/process/launch.h"
 #include "base/threading/platform_thread.h"
@@ -599,13 +600,24 @@ void SidecarClient::StartCompletion(std::string request_json, CompletionDelegate
 
   auto loader = network::SimpleURLLoader::Create(std::move(request), kAnnotation);
   loader->AttachStringForUpload(std::move(request_json), "application/json");
-  // Replaces any turn in flight, which also destroys its loader and stops its delivery.
+  // The outgoing stream is retired on a later task rather than freed here. A caller can reach this
+  // from inside the previous stream's own delivery callback -- a tool that answers synchronously does
+  // exactly that -- and freeing it under itself is a use-after-free that only shows up once a task runs
+  // enough rounds to hit it.
+  if (completion_) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::DoNothingWithBoundArgs(std::move(completion_)));
+  }
   completion_ = std::make_unique<CompletionStream>(delegate, std::move(loader));
   completion_->Start(url_loader_factory_.get());
 }
 
 void SidecarClient::CancelCompletion() {
-  completion_.reset();
+  // Same reason as above: a cancel can arrive from within the stream's own callback.
+  if (completion_) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::DoNothingWithBoundArgs(std::move(completion_)));
+  }
 }
 
 }  // namespace redrob

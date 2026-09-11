@@ -5,7 +5,7 @@
 import {
   PageCallbackRouter,
   PageHandlerFactory,
-  RoutingMode,
+  PermissionMode,
   StepKind,
   TaskHostRemote,
   TaskState,
@@ -258,24 +258,48 @@ router.onTaskChanged.addListener((task: Task) => {
   render();
 });
 
-function bindRoutingPair(localId: string, guardId: string) {
-  const local = $<HTMLButtonElement>(localId);
-  const guard = $<HTMLButtonElement>(guardId);
-  const set = async (mode: RoutingMode) => {
-    const accepted = await host.setRouting(mode);
-    if (!accepted) {
-      return;  // The sidecar refused the mode; leave the buttons showing the truth.
-    }
-    local.setAttribute('aria-pressed', String(mode === RoutingMode.kLocal));
-    guard.setAttribute('aria-pressed', String(mode === RoutingMode.kGuard));
-  };
-  local.addEventListener('click', () => void set(RoutingMode.kLocal));
-  guard.addEventListener('click', () => void set(RoutingMode.kGuard));
+// The mode a NEW task starts in. Guard, not full access: the narrowest posture that can still do the
+// job is the right default, and widening is a decision the user makes deliberately.
+let composerMode: PermissionMode = PermissionMode.kGuard;
+
+const MODE_BUTTONS: Array<[string, PermissionMode]> = [
+  ['mode-read', PermissionMode.kReadOnly],
+  ['mode-guard', PermissionMode.kGuard],
+  ['mode-full', PermissionMode.kFullAccess],
+];
+
+function paintModeButtons(current: PermissionMode) {
+  for (const [id, mode] of MODE_BUTTONS) {
+    const button = document.getElementById(id);
+    button?.setAttribute('aria-pressed', String(mode === current));
+  }
+}
+
+// On the home composer the mode is just picked. On a task tab it is a REQUEST: the browser refuses to
+// widen a task that is already running, so the buttons are repainted from what it accepted rather than
+// from what was clicked.
+function bindModeButtons(taskId: string|null) {
+  for (const [id, mode] of MODE_BUTTONS) {
+    const button = document.getElementById(id);
+    button?.addEventListener('click', async () => {
+      if (!taskId) {
+        composerMode = mode;
+        paintModeButtons(composerMode);
+        return;
+      }
+      const accepted = await host.setPermissionMode(taskId, mode);
+      if (!accepted) {
+        $('task-status').textContent =
+            'A running task cannot be given more access. Start a new task instead.';
+      }
+    });
+  }
+  paintModeButtons(composerMode);
 }
 
 if (openTaskId) {
   $('task').hidden = false;
-  bindRoutingPair('reply-local', 'reply-guard');
+  bindModeButtons(openTaskId);
 
   $<HTMLFormElement>('reply').addEventListener('submit', async (event: Event) => {
     event.preventDefault();
@@ -296,7 +320,8 @@ if (openTaskId) {
   render();
 } else {
   $('home').hidden = false;
-  bindRoutingPair('routing-local', 'routing-guard');
+  bindModeButtons(null);
+  bindModeButtons(null);
 
   // Search is the browser's job, not the agent's. Handing the omnibox the query keeps one search
   // path in the product rather than a second one that only works on this page.
@@ -316,7 +341,7 @@ if (openTaskId) {
     }
     // Context refs are opaque handles the browser resolves. None are collected yet -- the `@` picker
     // is later work -- and sending a URL here instead would be exactly the shortcut the design forbids.
-    const {taskId, error} = await host.startTask(prompt, []);
+    const {taskId, error} = await host.startTask(prompt, [], composerMode);
     if (error !== null && error !== undefined) {
       $('home-status').textContent =
           'Could not start the task: the Redrob Code engine is not available.';
