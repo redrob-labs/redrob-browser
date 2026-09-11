@@ -1,0 +1,13 @@
+diff --git a/chrome/browser/ui/color/BUILD.gn b/chrome/browser/ui/color/BUILD.gn
+index f3f7ea8c06809..deffdb997e7fa 100644
+--- a/chrome/browser/ui/color/BUILD.gn
++++ b/chrome/browser/ui/color/BUILD.gn
+@@ -18,6 +18,8 @@ source_set("color_headers") {
+ 
+ source_set("mixers") {
+   sources = [
++    "redrob_color_mixer.cc",
++    "redrob_color_mixer.h",
+     "chrome_color_mixer.cc",
+     "chrome_color_mixer.h",
+     "chrome_color_mixers.cc",

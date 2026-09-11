@@ -1,16 +1,59 @@
+/* Pretendard Variable, vendored. SIL Open Font License 1.1 -- see PretendardVariable-LICENSE.txt.
+   Loaded from the resource pack rather than a CDN: the new tab page is the first thing drawn, often
+   before any network exists, and a brand that arrives a second late is a brand that flickers. */
+@font-face {
+  font-display: swap;
+  font-family: 'Pretendard Variable';
+  font-style: normal;
+  font-weight: 45 920;
+  src: url(PretendardVariable.woff2) format('woff2-variations');
+}
+
 /* Copyright 2026 Redrob. Portions copyright The Chromium Authors.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
 :root {
   color-scheme: light dark;
-  --surface: light-dark(#f4f8fd, #0d1017);
-  --raised: light-dark(#fff, #151922);
-  --ink: light-dark(#000921, #eef1f6);
-  --muted: light-dark(#5b6472, #9aa4b2);
-  --line: light-dark(#dbe2ec, #242b37);
-  --accent: light-dark(#2440ff, #6f86ff);
-  --warn: light-dark(#a33, #f88);
+  /* Redrob's canonical tokens, transcribed from @redrob-design/brand rather than approximated. The
+     previous values here were hand-picked lookalikes -- #2440ff for an accent that is really #2b52ff --
+     which is how a product ends up almost-branded on one surface and correctly branded on the next. */
+  --rr-blue-1: #eff4ff;
+  --rr-blue-3: #bad2ff;
+  --rr-blue-5: #507fff;
+  --rr-blue-6: #2b52ff;
+  --rr-blue-7: #1733d5;
+  --rr-blue-9: #061460;
+  --rr-blue-10: #030c34;
+  --rr-gray-1: #f8f9fb;
+  --rr-gray-2: #eff1f4;
+  --rr-gray-3: #dfe2e8;
+  --rr-gray-4: #cbcfd7;
+  --rr-gray-5: #aab0bb;
+  --rr-gray-6: #7c8390;
+  --rr-gray-7: #576071;
+  --rr-gray-8: #292e37;
+  --rr-gray-9: #141719;
+  --rr-black: #0a0b0c;
+  --rr-red-3: #ff5452;
+  --rr-red-4: #a31310;
+
+  --surface: light-dark(var(--rr-gray-1), var(--rr-gray-9));
+  --raised: light-dark(#fff, color-mix(in srgb, var(--rr-gray-8) 45%, var(--rr-gray-9)));
+  --ink: light-dark(var(--rr-gray-9), var(--rr-gray-1));
+  --muted: light-dark(var(--rr-gray-7), var(--rr-gray-5));
+  --line: light-dark(var(--rr-gray-3), var(--rr-gray-8));
+  --accent: light-dark(var(--rr-blue-6), var(--rr-blue-5));
+  --accent-soft: light-dark(var(--rr-blue-1), var(--rr-blue-10));
+  --accent-muted: light-dark(var(--rr-blue-3), var(--rr-blue-9));
+  --warn: light-dark(var(--rr-red-4), var(--rr-red-3));
+
+  /* 10px for controls, 14px for panels -- the pairing the brand actually uses. */
+  --radius-control: 10px;
+  --radius-panel: 14px;
+
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 * {
@@ -20,7 +63,10 @@
 body {
   background: var(--surface);
   color: var(--ink);
-  font: 13px/1.55 system-ui, sans-serif;
+  /* The brand's body role: 400 weight, 1.62 line height, slight negative tracking. Scaled down from the
+     sheet's 17px because this is browser UI sitting next to 13px native controls, not a web page. */
+  font: 400 13px/1.62 var(--font-sans);
+  letter-spacing: -0.004em;
   margin: 0;
 }
 
@@ -41,19 +87,21 @@ body {
   padding: 96px 24px 48px;
 }
 
+/* The logo, drawn as the logo. It was previously used as a CSS mask at 18% opacity, which threw away
+   its own paint -- the mark carries a blue-to-violet gradient of its own and a mask keeps only the
+   silhouette, so the brand rendered as a grey smudge. */
 .mark {
-  background: currentcolor;
+  /* An img is inline, so margin auto only centres it once it is a block. */
+  display: block;
   height: 44px;
   margin: 0 auto 28px;
-  mask: url(redrob-mark.svg) center / contain no-repeat;
-  opacity: 0.18;
   width: 44px;
 }
 
 .composer {
   background: var(--raised);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--radius-panel);
   box-shadow: 0 1px 2px light-dark(rgb(0 9 33 / 6%), rgb(0 0 0 / 40%));
   margin: 0 auto;
   max-width: 620px;
@@ -308,7 +356,7 @@ h2 {
 
 .step {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   margin-bottom: 8px;
   padding: 9px 11px;
 }
@@ -368,7 +416,7 @@ h2 {
   align-self: flex-start;
   background: var(--raised);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   flex: none;
   overflow: hidden;
   width: 340px;
@@ -404,7 +452,7 @@ h2 {
 }
 
 .composer-foot {
-  border-radius: 14px;
+  border-radius: var(--radius-panel);
   margin: 0 20px 16px;
   max-width: none;
 }

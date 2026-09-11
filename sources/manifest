@@ -35,8 +35,12 @@ sources/chrome/browser/resources/redrob/BUILD.gn    chrome/browser/resources/red
 sources/chrome/browser/resources/redrob/redrob.html chrome/browser/resources/redrob/redrob.html
 sources/chrome/browser/resources/redrob/redrob.css  chrome/browser/resources/redrob/redrob.css
 sources/chrome/browser/resources/redrob/redrob.ts   chrome/browser/resources/redrob/redrob.ts
+sources/chrome/browser/resources/redrob/PretendardVariable.woff2  chrome/browser/resources/redrob/PretendardVariable.woff2
+sources/chrome/browser/resources/redrob/PretendardVariable-LICENSE.txt chrome/browser/resources/redrob/PretendardVariable-LICENSE.txt
 sources/chrome/browser/resources/redrob/redrob-mark.svg chrome/browser/resources/redrob/redrob-mark.svg
 sources/chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.h  chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.h
 sources/chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.cc chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.cc
 sources/chrome/browser/ui/views/tabs/vertical/redrob_account_row.h  chrome/browser/ui/views/tabs/vertical/redrob_account_row.h
 sources/chrome/browser/ui/views/tabs/vertical/redrob_account_row.cc chrome/browser/ui/views/tabs/vertical/redrob_account_row.cc
+sources/chrome/browser/ui/color/redrob_color_mixer.h   chrome/browser/ui/color/redrob_color_mixer.h
+sources/chrome/browser/ui/color/redrob_color_mixer.cc  chrome/browser/ui/color/redrob_color_mixer.cc

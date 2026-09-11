@@ -9,6 +9,7 @@ build_webui("build") {
   static_files = [
     "redrob.html",
     "redrob.css",
+    "PretendardVariable.woff2",
     "redrob-mark.svg",
   ]
   ts_files = [ "redrob.ts" ]

@@ -1,0 +1,22 @@
+diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
+index 86f985f073e88..356303e0bdd3a 100644
+--- a/chrome/browser/chrome_browser_main.cc
++++ b/chrome/browser/chrome_browser_main.cc
+@@ -76,6 +76,7 @@
+ #include "chrome/browser/translate/translate_service.h"
+ #include "chrome/browser/ui/actions/chrome_actions.h"
+ #include "chrome/browser/ui/color/chrome_color_mixers.h"
++#include "chrome/browser/ui/color/redrob_color_mixer.h"
+ #include "chrome/browser/ui/javascript_dialogs/chrome_javascript_app_modal_dialog_view_factory.h"
+ #include "chrome/browser/ui/profiles/profile_error_dialog.h"
+ #include "chrome/browser/ui/startup/bad_flags_prompt.h"
+@@ -1060,6 +1061,9 @@ void ChromeBrowserMainParts::ToolkitInitialized() {
+       base::BindRepeating(color::AddComponentsColorMixers));
+   ui::ColorProviderManager::Get().AppendColorProviderInitializer(
+       base::BindRepeating(AddChromeColorMixers));
++  // Last, so Redrob's palette is the final word on the ids it names and silent on every id it does not.
++  ui::ColorProviderManager::Get().AppendColorProviderInitializer(
++      base::BindRepeating(redrob::AddRedrobColorMixer));
+ 
+   InitializeActionIdStringMapping();
+ }

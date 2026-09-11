@@ -54,13 +54,45 @@ PRODUCT_NAME = "Redrob"
 PROTECTED_PHRASES = (
     "The Chromium Authors",
     "Chromium OS",
+    # No space, as ChromeOS strings spell it. Without this the substitution invents a "RedrobOS", which
+    # is not a product that exists -- the OS is upstream's, and naming it after us would be a false claim
+    # rather than branding.
+    "ChromiumOS",
     "Chromium Projects",
     "chromium.org",
     "chromium.googlesource.com",
 )
 
-# The one strings file that carries the unbranded product name, and the UA assembly point.
-STRINGS_GRD = "chrome/app/chromium_strings.grd"
+# Every strings file that carries the unbranded product name.
+#
+# There is not one. Upstream deliberately collects Chromium-branded literals into files named for that
+# branding -- chromium_strings, components_chromium_strings, settings_chromium_strings -- and builds the
+# Google Chrome variant from parallel files. So a fork does not have hardcoding bugs to fix; it has a SET
+# of files to substitute, and substituting only the top-level one leaves the rest untouched. That is why
+# Settings said "About Chromium" and the restore bubble said "Chromium didn't shut down correctly" long
+# after chromium_strings.grd was clean: the first lives in an included .grdp, the second in the separate
+# components bundle.
+#
+# Ordered most-visible first so the log reads usefully. A file upstream has moved or renamed is reported
+# rather than skipped -- silently branding fewer files is exactly the failure this list exists to end.
+STRINGS_FILES = (
+    "chrome/app/chromium_strings.grd",
+    "chrome/app/settings_chromium_strings.grdp",
+    "components/components_chromium_strings.grd",
+    "extensions/strings/extensions_chromium_strings.grdp",
+    "chrome/app/password_manager_ui_strings.grdp",
+    "components/password_manager_strings.grdp",
+    "components/search_engine_choice_strings.grdp",
+    "components/page_info_strings.grdp",
+    "components/autofill_strings.grdp",
+    "components/autofill_payments_strings.grdp",
+    "components/security_interstitials_strings.grdp",
+    "components/ssl_errors_strings.grdp",
+    "components/management_strings.grdp",
+    "components/privacy_sandbox_strings.grd",
+    "components/new_or_sad_tab_strings.grdp",
+    "components/reset_password_strings.grdp",
+)
 USER_AGENT_CC = "components/embedder_support/user_agent_utils.cc"
 
 
@@ -296,12 +328,22 @@ def cmd_derive(_: argparse.Namespace) -> None:
     if not SRC.exists():
         sys.exit("no checkout: run sync first")
 
-    grd = SRC / STRINGS_GRD
-    if not grd.exists():
-        sys.exit(f"strings file not found: {STRINGS_GRD}; upstream moved it")
-    text, replaced = substitute_product_name(grd.read_text())
-    grd.write_text(text)
-    print(f"strings   {STRINGS_GRD}: {replaced} occurrence(s) of {UPSTREAM_NAME} -> {PRODUCT_NAME}")
+    missing = [name for name in STRINGS_FILES if not (SRC / name).exists()]
+    if missing:
+        # Loud, not tolerant. A renamed strings file means the next build ships a half-branded browser,
+        # and that is far harder to notice than a failure here.
+        sys.exit("strings file(s) not found; upstream moved them:\n  " + "\n  ".join(missing))
+
+    total = 0
+    for name in STRINGS_FILES:
+        path = SRC / name
+        text, replaced = substitute_product_name(path.read_text())
+        if replaced:
+            path.write_text(text)
+        total += replaced
+        print(f"strings   {name}: {replaced}")
+    print(f"strings   {total} occurrence(s) of {UPSTREAM_NAME} -> {PRODUCT_NAME} "
+          f"across {len(STRINGS_FILES)} file(s)")
 
     ua = SRC / USER_AGENT_CC
     if not ua.exists():
