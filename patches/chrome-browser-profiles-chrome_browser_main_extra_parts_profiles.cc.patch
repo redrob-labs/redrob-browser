@@ -1,0 +1,20 @@
+diff --git a/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc b/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc
+index de5cbeb641bb5..c1b6253d8f771 100644
+--- a/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc
++++ b/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc
+@@ -395,6 +395,7 @@
+ #include "chrome/browser/profile_resetter/reset_report_uploader_factory.h"
+ #include "chrome/browser/record_replay/task_parameters_extractor_factory.h"
+ #include "chrome/browser/record_replay/task_service_factory.h"
++#include "chrome/browser/redrob/task_store_factory.h"
+ #include "chrome/browser/record_replay/task_store_factory.h"
+ #include "chrome/browser/screen_ai/screen_ai_service_router_factory.h"
+ #include "chrome/browser/search/instant_service_factory.h"
+@@ -732,6 +733,7 @@ void ChromeBrowserMainExtraPartsProfiles::
+   // ---------------------------------------------------------------------------
+   // Common factory registrations (Please keep this list ordered without taking
+   // into consideration buildflags, repeating buildflags is ok):
++  redrob::TaskStoreFactory::GetInstance();
+   AboutSigninInternalsFactory::GetInstance();
+   AboutThisSiteServiceFactory::GetInstance();
+   AcceptLanguagesServiceFactory::GetInstance();

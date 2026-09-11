@@ -1,0 +1,17 @@
+diff --git a/chrome/browser/search/search.cc b/chrome/browser/search/search.cc
+index 621d90a7410a4..4bf92f1b3d2fa 100644
+--- a/chrome/browser/search/search.cc
++++ b/chrome/browser/search/search.cc
+@@ -172,6 +172,12 @@ struct NewTabURLDetails {
+       return NewTabURLDetails(GURL(), NEW_TAB_URL_INCOGNITO);
+     }
+ 
++    // Redrob: the AI surface is the new tab page. This is the whole reason the composer is a WebUI --
++    // reaching it by typing chrome://redrob is the unwired state, not the product. Off-the-record
++    // windows keep Chromium's incognito NTP above, deliberately: an agent surface that offered to run
++    // tasks in a window whose whole promise is leaving no trace would be lying about which it is.
++    return NewTabURLDetails(GURL(chrome::kChromeUIRedrobURL), NEW_TAB_URL_VALID);
++
+ #if BUILDFLAG(IS_ANDROID)
+     const GURL local_url;
+ #else

@@ -7,26 +7,82 @@
   <link rel="stylesheet" href="redrob.css">
 </head>
 <body>
-  <main>
-    <h1>Ask AI a task</h1>
-    <form id="composer" autocomplete="off">
-      <textarea id="prompt" rows="3" aria-label="Task for the agent"
-                placeholder="Ask AI a task, @ for context"></textarea>
-      <div class="controls">
-        <fieldset>
-          <legend class="visually-hidden">Routing</legend>
-          <label><input type="radio" name="routing" value="local" checked> Local</label>
-          <label><input type="radio" name="routing" value="guard"> Guard</label>
-        </fieldset>
-        <button type="submit" id="run">Run task</button>
+  <!-- Two views in one document. The new tab shows #home; a task opens at ?task=<id> and shows
+       #task. One document because a task tab and a new tab are the same WebUI host, and routing in
+       the page costs nothing next to registering a second one. -->
+  <main id="home" hidden>
+    <div class="mark" aria-hidden="true"></div>
+    <form id="composer" class="composer" autocomplete="off">
+      <div class="composer-row">
+        <input id="prompt" type="text" aria-label="Task for the agent"
+               placeholder="Ask AI a task, @ for context">
+        <div class="segmented" role="group" aria-label="Mode">
+          <button type="button" id="mode-search" class="seg">Search</button>
+          <button type="submit" id="mode-ask" class="seg seg-on">Ask AI</button>
+        </div>
+      </div>
+      <div class="composer-controls">
+        <button type="button" class="chip chip-icon" id="attach" aria-label="Add context">+</button>
+        <button type="button" class="chip" id="routing-local" aria-pressed="true">Local</button>
+        <button type="button" class="chip" id="routing-guard" aria-pressed="false">Guard</button>
+        <span class="spacer"></span>
+        <label class="chip chip-select">
+          <span class="visually-hidden">Model</span>
+          <select id="model">
+            <option value="auto" selected>redrob/auto</option>
+            <option value="claude-opus-5">claude-opus-5</option>
+          </select>
+        </label>
+        <label class="chip chip-select">
+          <span class="visually-hidden">Effort</span>
+          <select id="effort">
+            <option value="high" selected>High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
       </div>
     </form>
-    <section aria-labelledby="recent-heading">
+
+    <section class="recent" aria-labelledby="recent-heading">
       <h2 id="recent-heading">Recent tasks</h2>
-      <ol id="tasks" class="cards"></ol>
-      <p id="status" role="status"></p>
+      <ol id="cards" class="cards"></ol>
+      <p id="home-status" role="status"></p>
     </section>
   </main>
+
+  <main id="task" hidden>
+    <header class="task-head">
+      <h1 id="task-title"></h1>
+      <span id="task-state" class="task-state"></span>
+    </header>
+    <div class="task-body">
+      <article id="trace" class="trace" aria-live="polite"></article>
+      <aside id="preview" class="preview" hidden>
+        <div class="preview-head">
+          <span id="preview-title"></span>
+          <button type="button" id="preview-close" aria-label="Close preview">&times;</button>
+        </div>
+        <img id="preview-image" alt="">
+      </aside>
+    </div>
+    <form id="reply" class="composer composer-foot" autocomplete="off">
+      <div class="composer-row">
+        <button type="button" class="chip chip-icon" aria-label="Add context">+</button>
+        <input id="reply-prompt" type="text" aria-label="Reply to the agent"
+               placeholder="Reply, @ for context">
+        <button type="submit" id="reply-send" class="send" aria-label="Send reply"></button>
+      </div>
+      <div class="composer-controls">
+        <button type="button" class="chip" id="reply-local" aria-pressed="true">Local</button>
+        <button type="button" class="chip" id="reply-guard" aria-pressed="false">Guard</button>
+        <span class="spacer"></span>
+        <span class="chip chip-static" id="reply-model">redrob/auto</span>
+        <span class="chip chip-static">High</span>
+      </div>
+    </form>
+  </main>
+
   <script type="module" src="redrob.js"></script>
 </body>
 </html>

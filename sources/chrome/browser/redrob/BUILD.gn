@@ -6,10 +6,20 @@ source_set("sidecar") {
   sources = [
     "sidecar_client.cc",
     "sidecar_client.h",
+    "task_store.cc",
+    "task_store.h",
+    "task_store_factory.cc",
+    "task_store_factory.h",
   ]
-  public_deps = [ "//services/network/public/cpp" ]
+  public_deps = [
+    "//chrome/browser/ui/webui/redrob:mojo_bindings",
+    "//components/keyed_service/core",
+    "//services/network/public/cpp",
+  ]
   deps = [
     "//base",
+    "//chrome/browser/profiles:profile",
+    "//content/public/browser",
     "//net",
     "//net/traffic_annotation",
     "//url",

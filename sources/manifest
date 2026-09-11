@@ -13,6 +13,10 @@
 sources/chrome/browser/redrob/BUILD.gn            chrome/browser/redrob/BUILD.gn
 sources/chrome/browser/redrob/sidecar_client.h    chrome/browser/redrob/sidecar_client.h
 sources/chrome/browser/redrob/sidecar_client.cc   chrome/browser/redrob/sidecar_client.cc
+sources/chrome/browser/redrob/task_store.h        chrome/browser/redrob/task_store.h
+sources/chrome/browser/redrob/task_store.cc       chrome/browser/redrob/task_store.cc
+sources/chrome/browser/redrob/task_store_factory.h  chrome/browser/redrob/task_store_factory.h
+sources/chrome/browser/redrob/task_store_factory.cc chrome/browser/redrob/task_store_factory.cc
 
 # chrome://redrob, the AI surface, and the Mojo boundary in front of it. The only Chromium files this
 # needs are the one-line registrations in patches/, which is the whole point of a WebUI.
@@ -29,3 +33,4 @@ sources/chrome/browser/resources/redrob/BUILD.gn    chrome/browser/resources/red
 sources/chrome/browser/resources/redrob/redrob.html chrome/browser/resources/redrob/redrob.html
 sources/chrome/browser/resources/redrob/redrob.css  chrome/browser/resources/redrob/redrob.css
 sources/chrome/browser/resources/redrob/redrob.ts   chrome/browser/resources/redrob/redrob.ts
+sources/chrome/browser/resources/redrob/redrob-mark.svg chrome/browser/resources/redrob/redrob-mark.svg

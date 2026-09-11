@@ -5,29 +5,29 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_REDROB_TASK_HOST_IMPL_H_
 #define CHROME_BROWSER_UI_WEBUI_REDROB_TASK_HOST_IMPL_H_
 
-#include <map>
-#include <memory>
 #include <string>
 #include <vector>
 
-#include "chrome/browser/redrob/sidecar_client.h"
+#include "base/memory/raw_ptr.h"
+#include "chrome/browser/redrob/task_store.h"
 #include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
-#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace redrob {
 
-// Browser-process side of chrome://redrob. Owns the sidecar and the task list; runs no model itself.
+// Per-document Mojo endpoint for chrome://redrob. Deliberately thin: it validates nothing and stores
+// nothing, because both belong to the profile's TaskStore -- a task opens as a tab, so its state has
+// to outlive the document that started it.
 //
-// Every method here is reachable from a renderer, so each one treats its arguments as untrusted:
-// prompts are length-capped, context refs are resolved rather than dereferenced, and a task id that
-// does not exist is a no-op rather than a lookup failure worth reporting back.
-class TaskHostImpl : public mojom::TaskHost {
+// Every method here is reachable from a renderer. The bounds are in TaskStore so that a second
+// surface (an agent tab, a side panel) cannot get a laxer version of them by talking to the store
+// through a different handler.
+class TaskHostImpl : public mojom::TaskHost, public TaskStore::Observer {
  public:
   TaskHostImpl(mojo::PendingReceiver<mojom::TaskHost> receiver,
                mojo::PendingRemote<mojom::Page> page,
-               scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
+               TaskStore* store);
   TaskHostImpl(const TaskHostImpl&) = delete;
   TaskHostImpl& operator=(const TaskHostImpl&) = delete;
   ~TaskHostImpl() override;
@@ -38,20 +38,19 @@ class TaskHostImpl : public mojom::TaskHost {
                  StartTaskCallback callback) override;
   void CancelTask(const std::string& task_id) override;
   void ListTasks(ListTasksCallback callback) override;
+  void GetTask(const std::string& task_id, GetTaskCallback callback) override;
+  void Reply(const std::string& task_id,
+             const std::string& prompt,
+             ReplyCallback callback) override;
   void SetRouting(mojom::RoutingMode mode, SetRoutingCallback callback) override;
 
- private:
-  void OnSidecarStatusChanged(SidecarClient::Status status);
-  void NotifyPage(const std::string& task_id);
+  // TaskStore::Observer
+  void OnTaskChanged(const mojom::Task& task) override;
 
+ private:
   mojo::Receiver<mojom::TaskHost> receiver_;
   mojo::Remote<mojom::Page> page_;
-
-  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
-
-  std::map<std::string, mojom::TaskPtr> tasks_;
-  mojom::RoutingMode routing_ = mojom::RoutingMode::kLocal;
-  std::unique_ptr<SidecarClient> sidecar_;
+  raw_ptr<TaskStore> store_;
 };
 
 }  // namespace redrob

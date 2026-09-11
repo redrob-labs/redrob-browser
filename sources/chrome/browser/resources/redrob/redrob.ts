@@ -6,10 +6,11 @@ import {
   PageCallbackRouter,
   PageHandlerFactory,
   RoutingMode,
+  StepKind,
   TaskHostRemote,
   TaskState,
 } from './redrob.mojom-webui.js';
-import type {Task} from './redrob.mojom-webui.js';
+import type {Step, Task} from './redrob.mojom-webui.js';
 
 // The page talks to the browser process and to nothing else. There is no fetch here and no key here:
 // see docs/AI_SURFACE.md. A compromised renderer gets this method surface, not the engine.
@@ -18,14 +19,16 @@ const host = new TaskHostRemote();
 PageHandlerFactory.getRemote().createTaskHost(
     router.$.bindNewPipeAndPassRemote(), host.$.bindNewPipeAndPassReceiver());
 
-const form = document.querySelector<HTMLFormElement>('#composer')!;
-const promptField = document.querySelector<HTMLTextAreaElement>('#prompt')!;
-const list = document.querySelector<HTMLOListElement>('#tasks')!;
-const status = document.querySelector<HTMLParagraphElement>('#status')!;
-
 // Rendered state is derived from what the browser process reports, never from what we just sent. A
-// task card that showed "running" because the page asked for it would be lying about the engine.
+// card that showed "running" because the page asked for it would be lying about the engine.
 const tasks = new Map<string, Task>();
+
+// One document, two views. `?task=<id>` is a task tab; no query is the new tab.
+const openTaskId = new URLSearchParams(location.search).get('task');
+
+function $<T extends HTMLElement>(id: string): T {
+  return document.querySelector<T>(`#${id}`)!;
+}
 
 function stateLabel(state: TaskState): string {
   switch (state) {
@@ -46,73 +49,288 @@ function stateLabel(state: TaskState): string {
   }
 }
 
-function render() {
-  list.textContent = '';
-  for (const task of [...tasks.values()].reverse()) {
-    const card = document.createElement('li');
+// The icon comes from the step's kind, which is a mojom enum, rather than from matching its label.
+// A label match is a string comparison that silently stops matching when the wording changes.
+function stepIcon(kind: StepKind): string {
+  switch (kind) {
+    case StepKind.kSearchedMemory:
+      return '🕘';
+    case StepKind.kOpenedPage:
+      return '🗔';
+    case StepKind.kCapturedScreenshot:
+      return '📷';
+    case StepKind.kSavedArtifact:
+      return '🗎';
+    case StepKind.kUsedCredential:
+      return '🔑';
+    case StepKind.kSpawnedSubagents:
+      return '⑃';
+    case StepKind.kThinking:
+    default:
+      return '•';
+  }
+}
 
-    const head = document.createElement('div');
-    head.className = 'card-head';
-    const prompt = document.createElement('span');
-    prompt.textContent = task.prompt;
-    const state = document.createElement('span');
-    state.className = 'card-state';
-    state.textContent = stateLabel(task.state);
-    head.append(prompt, state);
-    card.append(head);
-
-    if (task.steps.length > 0) {
-      const steps = document.createElement('ul');
-      steps.className = 'card-steps';
-      for (const step of task.steps) {
-        const item = document.createElement('li');
-        item.textContent = step.label;
-        steps.append(item);
-      }
-      card.append(steps);
+function elapsed(task: Task): string {
+  const running = task.state === TaskState.kQueued || task.state === TaskState.kRunning;
+  const ms = Date.now() - Number(task.startedAtMs);
+  if (!running) {
+    const mins = Math.floor(ms / 60000);
+    if (mins < 1) {
+      return 'just now';
     }
+    return mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
+  }
+  const secs = Math.floor(ms / 1000);
+  return secs < 60 ? `Working for ${secs}s`
+                   : `Working for ${Math.floor(secs / 60)}m ${secs % 60}s`;
+}
 
-    if (task.error) {
-      const error = document.createElement('p');
-      error.className = 'card-error';
-      error.textContent = task.error;
-      card.append(error);
+function renderStep(step: Step): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'step';
+
+  const head = document.createElement('div');
+  head.className = 'step-head';
+  const icon = document.createElement('span');
+  icon.className = 'step-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = stepIcon(step.kind);
+  const label = document.createElement('span');
+  label.className = 'step-label';
+  label.textContent = step.label;
+  head.append(icon, label);
+  wrap.append(head);
+
+  if (step.details.length > 0) {
+    const list = document.createElement('ul');
+    list.className = 'step-details';
+    for (const detail of step.details) {
+      const item = document.createElement('li');
+      const text = document.createElement('span');
+      text.textContent = detail.text;
+      item.append(text);
+      if (detail.source) {
+        const source = document.createElement('span');
+        source.className = 'step-source';
+        source.textContent = detail.source;
+        item.append(source);
+      }
+      if (detail.timing) {
+        const timing = document.createElement('span');
+        timing.className = 'step-timing';
+        timing.textContent = detail.timing;
+        item.append(timing);
+      }
+      list.append(item);
+    }
+    wrap.append(list);
+  }
+
+  // A frame the browser captured, handed over as a data URL it produced. The page renders exactly
+  // what it is given; it never resolves a path or a token of its own.
+  if (step.previewDataUrl) {
+    const shot = document.createElement('img');
+    shot.className = 'step-shot';
+    shot.src = step.previewDataUrl;
+    shot.alt = `Captured frame: ${step.label}`;
+    wrap.append(shot);
+  }
+
+  return wrap;
+}
+
+// ---------- new tab ----------
+
+function renderHome() {
+  const list = $<HTMLOListElement>('cards');
+  list.textContent = '';
+  const ordered = [...tasks.values()].sort(
+      (a, b) => Number(b.startedAtMs) - Number(a.startedAtMs));
+
+  for (const task of ordered) {
+    const card = document.createElement('li');
+    const open = document.createElement('button');
+    open.className = 'card-open';
+    open.type = 'button';
+    open.addEventListener('click', () => {
+      // A task opens as a tab, which is the design: the trace is a place you go back to, not a
+      // panel that disappears when the composer is used again.
+      location.href = `chrome://redrob/?task=${encodeURIComponent(task.id)}`;
+    });
+
+    const when = document.createElement('div');
+    when.className = 'card-elapsed';
+    when.textContent = elapsed(task);
+    const title = document.createElement('div');
+    title.className = 'card-title';
+    title.textContent = task.prompt;
+    open.append(when, title);
+
+    const steps = document.createElement('ul');
+    steps.className = 'card-steps';
+    for (const step of task.steps.slice(-3)) {
+      const item = document.createElement('li');
+      const icon = document.createElement('span');
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = stepIcon(step.kind);
+      const label = document.createElement('span');
+      label.textContent = step.label;
+      item.append(icon, label);
+      steps.append(item);
+    }
+    open.append(steps);
+    card.append(open);
+
+    const shot = [...task.steps].reverse().find((s) => s.previewDataUrl);
+    if (shot?.previewDataUrl) {
+      const img = document.createElement('img');
+      img.className = 'card-shot';
+      img.src = shot.previewDataUrl;
+      img.alt = `Latest frame: ${task.prompt}`;
+      card.append(img);
     }
 
     list.append(card);
   }
-  status.textContent = tasks.size === 0 ? 'No tasks yet.' : '';
+
+  $('home-status').textContent = tasks.size === 0 ? 'No tasks yet.' : '';
 }
+
+// ---------- task tab ----------
+
+function renderTask() {
+  const task = openTaskId ? tasks.get(openTaskId) : undefined;
+  if (!task) {
+    $('task-title').textContent = 'Task not found';
+    $('task-state').textContent = '';
+    return;
+  }
+
+  document.title = `${task.prompt} · Redrob`;
+  $('task-title').textContent = task.prompt;
+  $('task-state').textContent = stateLabel(task.state);
+
+  const trace = $('trace');
+  trace.textContent = '';
+  if (task.narration) {
+    const prose = document.createElement('p');
+    prose.className = 'narration';
+    prose.textContent = task.narration;
+    trace.append(prose);
+  }
+  for (const step of task.steps) {
+    trace.append(renderStep(step));
+  }
+  if (task.error) {
+    const error = document.createElement('p');
+    error.className = 'task-error';
+    error.textContent = task.error;
+    trace.append(error);
+  }
+
+  // The preview beside the trace is the newest frame the browser captured. A real embedded view of
+  // the agent's tab is a guest view and is deliberately later work -- see docs/UI.md step 8.
+  const latest = [...task.steps].reverse().find((s) => s.previewDataUrl);
+  const preview = $('preview');
+  if (latest?.previewDataUrl) {
+    $<HTMLImageElement>('preview-image').src = latest.previewDataUrl;
+    $<HTMLImageElement>('preview-image').alt = `Captured frame: ${latest.label}`;
+    $('preview-title').textContent = latest.label;
+    preview.hidden = false;
+  } else {
+    preview.hidden = true;
+  }
+}
+
+function render() {
+  if (openTaskId) {
+    renderTask();
+  } else {
+    renderHome();
+  }
+}
+
+// ---------- wiring ----------
 
 router.onTaskChanged.addListener((task: Task) => {
   tasks.set(task.id, task);
   render();
 });
 
-form.addEventListener('submit', async (event: Event) => {
-  event.preventDefault();
-  const prompt = promptField.value.trim();
-  if (!prompt) {
-    return;
-  }
-  const mode = (form.elements.namedItem('routing') as RadioNodeList).value;
-  await host.setRouting(mode === 'guard' ? RoutingMode.kGuard : RoutingMode.kLocal);
-
-  // Context refs are opaque handles the browser resolves. None are collected yet -- the `@` picker is
-  // a later step -- and sending a URL here instead would be exactly the shortcut the design forbids.
-  const {taskId, error} = await host.startTask(prompt, []);
-  if (error !== null && error !== undefined) {
-    // The engine is a separate process that a dev build has not downloaded, which is the common case.
-    status.textContent = 'Could not start the task: the Redrob Code engine is not available.';
-    return;
-  }
-  if (taskId) {
-    promptField.value = '';
-  }
-});
-
-const {tasks: existing} = await host.listTasks();
-for (const task of existing) {
-  tasks.set(task.id, task);
+function bindRoutingPair(localId: string, guardId: string) {
+  const local = $<HTMLButtonElement>(localId);
+  const guard = $<HTMLButtonElement>(guardId);
+  const set = async (mode: RoutingMode) => {
+    const accepted = await host.setRouting(mode);
+    if (!accepted) {
+      return;  // The sidecar refused the mode; leave the buttons showing the truth.
+    }
+    local.setAttribute('aria-pressed', String(mode === RoutingMode.kLocal));
+    guard.setAttribute('aria-pressed', String(mode === RoutingMode.kGuard));
+  };
+  local.addEventListener('click', () => void set(RoutingMode.kLocal));
+  guard.addEventListener('click', () => void set(RoutingMode.kGuard));
 }
-render();
+
+if (openTaskId) {
+  $('task').hidden = false;
+  bindRoutingPair('reply-local', 'reply-guard');
+
+  $<HTMLFormElement>('reply').addEventListener('submit', async (event: Event) => {
+    event.preventDefault();
+    const field = $<HTMLInputElement>('reply-prompt');
+    const prompt = field.value.trim();
+    if (!prompt) {
+      return;
+    }
+    if (await host.reply(openTaskId, prompt)) {
+      field.value = '';
+    }
+  });
+
+  const {task} = await host.getTask(openTaskId);
+  if (task) {
+    tasks.set(task.id, task);
+  }
+  render();
+} else {
+  $('home').hidden = false;
+  bindRoutingPair('routing-local', 'routing-guard');
+
+  // Search is the browser's job, not the agent's. Handing the omnibox the query keeps one search
+  // path in the product rather than a second one that only works on this page.
+  $<HTMLButtonElement>('mode-search').addEventListener('click', () => {
+    const query = $<HTMLInputElement>('prompt').value.trim();
+    if (query) {
+      location.href = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+    }
+  });
+
+  $<HTMLFormElement>('composer').addEventListener('submit', async (event: Event) => {
+    event.preventDefault();
+    const field = $<HTMLInputElement>('prompt');
+    const prompt = field.value.trim();
+    if (!prompt) {
+      return;
+    }
+    // Context refs are opaque handles the browser resolves. None are collected yet -- the `@` picker
+    // is later work -- and sending a URL here instead would be exactly the shortcut the design forbids.
+    const {taskId, error} = await host.startTask(prompt, []);
+    if (error !== null && error !== undefined) {
+      $('home-status').textContent =
+          'Could not start the task: the Redrob Code engine is not available.';
+      return;
+    }
+    field.value = '';
+    if (taskId) {
+      location.href = `chrome://redrob/?task=${encodeURIComponent(taskId)}`;
+    }
+  });
+
+  const {tasks: existing} = await host.listTasks();
+  for (const task of existing) {
+    tasks.set(task.id, task);
+  }
+  render();
+}

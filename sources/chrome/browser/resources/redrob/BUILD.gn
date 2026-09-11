@@ -9,6 +9,7 @@ build_webui("build") {
   static_files = [
     "redrob.html",
     "redrob.css",
+    "redrob-mark.svg",
   ]
   ts_files = [ "redrob.ts" ]
   mojo_files_deps =

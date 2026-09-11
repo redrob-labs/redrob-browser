@@ -1,0 +1,12 @@
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index eaa7929a31667..3e917caa7cd09 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -773,6 +773,7 @@ if (is_chromeos) {
+       "//chrome/browser/policy",
+       "//chrome/browser/prefs:util",
+       "//chrome/browser/profiles:profile",
++    "//chrome/browser/redrob:sidecar",
+       "//chrome/browser/profiles:profile_io_data",
+       "//chrome/browser/sessions",
+       "//chrome/browser/sync",

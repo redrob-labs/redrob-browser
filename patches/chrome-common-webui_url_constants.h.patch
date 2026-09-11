@@ -1,12 +1,13 @@
 diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_constants.h
-index 329de0b6b578b..8e01645da668e 100644
+index 329de0b6b578b..28b03580749b2 100644
 --- a/chrome/common/webui_url_constants.h
 +++ b/chrome/common/webui_url_constants.h
-@@ -357,6 +357,7 @@ inline constexpr char kChromeUIUserEducationInternalsHost[] =
+@@ -357,6 +357,8 @@ inline constexpr char kChromeUIUserEducationInternalsHost[] =
      "user-education-internals";
  inline constexpr char kChromeUIUserEducationInternalsURL[] =
      "chrome://user-education-internals";
 +inline constexpr char kChromeUIRedrobHost[] = "redrob";
++inline constexpr char kChromeUIRedrobURL[] = "chrome://redrob/";
  inline constexpr char kChromeUIVersionHost[] = "version";
  inline constexpr char kChromeUIVersionURL[] = "chrome://version/";
  inline constexpr char16_t kChromeUIVersionURL16[] = u"chrome://version/";

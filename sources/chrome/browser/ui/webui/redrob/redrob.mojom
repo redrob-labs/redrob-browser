@@ -25,10 +25,35 @@ enum RoutingMode {
   kGuard,
 };
 
+// What kind of step this is. The page picks an icon from this rather than parsing the label, so a
+// new step kind is a mojom change and not a string match that silently stops matching.
+enum StepKind {
+  kThinking,
+  kSearchedMemory,
+  kOpenedPage,
+  kCapturedScreenshot,
+  kSavedArtifact,
+  kUsedCredential,
+  kSpawnedSubagents,
+};
+
 // One step the agent took, as the page needs to render it.
 struct Step {
+  StepKind kind;
   string label;
   int64 started_at_ms;
+  // Rows shown under the step when it is expanded -- the search hits, the files touched. Plain text
+  // and a source label, never a URL the page could be tricked into following.
+  array<StepDetail> details;
+  // A frame the browser captured for this step, as a data URL the browser produced. Not a file path
+  // and not a token the renderer resolves: the page renders exactly what it is given.
+  string? preview_data_url;
+};
+
+struct StepDetail {
+  string text;
+  string? source;
+  string? timing;
 };
 
 struct Task {
@@ -36,6 +61,10 @@ struct Task {
   string prompt;
   TaskState state;
   array<Step> steps;
+  // The agent's prose, interleaved before the steps it explains. One string because the page renders
+  // it as one block; a transcript model belongs in the sidecar's session store, not here.
+  string? narration;
+  int64 started_at_ms;
   // Set only in kFailed. Carries the sidecar's reason, never a raw transport error: a 401 from the
   // engine must not reach a renderer as anything a page could learn a credential from.
   string? error;
@@ -61,6 +90,10 @@ interface TaskHost {
       => (string? task_id, StartError? error);
   CancelTask(string task_id);
   ListTasks() => (array<Task> tasks);
+  // One task, for the task tab view. Null when the id is unknown, which a renderer can ask for.
+  GetTask(string task_id) => (Task? task);
+  // A follow-up turn on an existing task. The task tab's composer, not a new task.
+  Reply(string task_id, string prompt) => (bool accepted);
   SetRouting(RoutingMode mode) => (bool accepted);
 };
 
