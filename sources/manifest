@@ -87,3 +87,10 @@ sources/chrome/browser/resources/redrob_settings/redrob_settings.html  chrome/br
 sources/chrome/browser/resources/redrob_settings/redrob_settings.css   chrome/browser/resources/redrob_settings/redrob_settings.css
 sources/chrome/browser/resources/redrob_settings/redrob_settings.ts    chrome/browser/resources/redrob_settings/redrob_settings.ts
 sources/chrome/browser/resources/redrob_settings/PretendardVariable.woff2  chrome/browser/resources/redrob_settings/PretendardVariable.woff2
+
+# The Chromium-family importer. Chromium 153 has no importer for Chrome, Edge or Brave at all -- the
+# type enum stops at Edge's legacy favourites -- so both the detection and the reading are ours.
+sources/chrome/common/importer/chromium_profile_locator.h   chrome/common/importer/chromium_profile_locator.h
+sources/chrome/common/importer/chromium_profile_locator.cc  chrome/common/importer/chromium_profile_locator.cc
+sources/chrome/utility/importer/chromium_importer.h   chrome/utility/importer/chromium_importer.h
+sources/chrome/utility/importer/chromium_importer.cc  chrome/utility/importer/chromium_importer.cc

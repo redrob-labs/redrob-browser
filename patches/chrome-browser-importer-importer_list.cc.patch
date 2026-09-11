@@ -1,0 +1,55 @@
+diff --git a/chrome/browser/importer/importer_list.cc b/chrome/browser/importer/importer_list.cc
+index 62546b572bab8..ed42c8ea219c5 100644
+--- a/chrome/browser/importer/importer_list.cc
++++ b/chrome/browser/importer/importer_list.cc
+@@ -12,9 +12,11 @@
+ #include "base/threading/scoped_blocking_call.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/shell_integration.h"
++#include "chrome/common/importer/chromium_profile_locator.h"
+ #include "chrome/common/importer/firefox_importer_utils.h"
+ #include "chrome/common/importer/importer_bridge.h"
+ #include "chrome/grit/generated_resources.h"
++#include "base/strings/utf_string_conversions.h"
+ #include "components/user_data_importer/common/importer_data_types.h"
+ #include "ui/base/l10n/l10n_util.h"
+ 
+@@ -157,6 +159,27 @@ void DetectFirefoxProfiles(
+   }
+ }
+ 
++// Every Chromium-family profile this user has. `services_supported` is the honest list and not
++// user_data_importer::ALL: ALL includes COOKIES, which upstream cannot carry and this importer
++// deliberately does not, and PASSWORDS, which means reimplementing another program's key
++// derivation -- the import step points at the CSV route for those instead.
++void DetectChromiumBasedProfiles(
++    std::vector<user_data_importer::SourceProfile>* profiles) {
++  base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
++                                                base::BlockingType::MAY_BLOCK);
++  for (const redrob::ChromiumSource& source : redrob::DetectChromiumSources()) {
++    user_data_importer::SourceProfile profile;
++    profile.importer_name = source.product_name;
++    profile.profile = source.profile_name;
++    profile.importer_type = user_data_importer::TYPE_CHROMIUM_BASED;
++    profile.source_path = source.profile_path;
++    profile.services_supported = user_data_importer::HISTORY |
++                                 user_data_importer::FAVORITES |
++                                 user_data_importer::SEARCH_ENGINES;
++    profiles->push_back(std::move(profile));
++  }
++}
++
+ std::vector<user_data_importer::SourceProfile> DetectSourceProfilesWorker(
+     const std::string& locale,
+     bool include_interactive_profiles) {
+@@ -165,6 +188,10 @@ std::vector<user_data_importer::SourceProfile> DetectSourceProfilesWorker(
+ 
+   std::vector<user_data_importer::SourceProfile> profiles;
+ 
++  // Chromium-family sources first. This fork's users are overwhelmingly arriving from one, and
++  // first-run import takes the first profile detected.
++  DetectChromiumBasedProfiles(&profiles);
++
+   // The first run import will automatically take settings from the first
+   // profile detected, which should be the user's current default.
+ #if BUILDFLAG(IS_WIN)

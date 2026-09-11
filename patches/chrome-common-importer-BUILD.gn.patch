@@ -1,0 +1,13 @@
+diff --git a/chrome/common/importer/BUILD.gn b/chrome/common/importer/BUILD.gn
+index bc73d6fe724c9..88ec930b0d45a 100644
+--- a/chrome/common/importer/BUILD.gn
++++ b/chrome/common/importer/BUILD.gn
+@@ -81,6 +81,8 @@ mojom("interfaces") {
+ 
+ source_set("importer") {
+   sources = [
++    "chromium_profile_locator.cc",
++    "chromium_profile_locator.h",
+     "firefox_importer_utils.cc",
+     "firefox_importer_utils.h",
+     "importer_autofill_form_data_entry.cc",

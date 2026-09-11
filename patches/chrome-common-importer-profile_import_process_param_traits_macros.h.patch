@@ -1,0 +1,23 @@
+diff --git a/chrome/common/importer/profile_import_process_param_traits_macros.h b/chrome/common/importer/profile_import_process_param_traits_macros.h
+index b19a5aa8cee27..1de09beae03bd 100644
+--- a/chrome/common/importer/profile_import_process_param_traits_macros.h
++++ b/chrome/common/importer/profile_import_process_param_traits_macros.h
+@@ -20,15 +20,11 @@
+ #undef IPC_MESSAGE_EXPORT
+ #define IPC_MESSAGE_EXPORT
+ 
+-#if BUILDFLAG(IS_WIN)
++// One range on every platform now: TYPE_CHROMIUM_BASED is 7 and is the maximum everywhere,
++// which also removes the Windows/non-Windows split this used to need.
+ IPC_ENUM_TRAITS_MIN_MAX_VALUE(user_data_importer::ImporterType,
+                               user_data_importer::TYPE_UNKNOWN,
+-                              user_data_importer::TYPE_EDGE)
+-#else
+-IPC_ENUM_TRAITS_MIN_MAX_VALUE(user_data_importer::ImporterType,
+-                              user_data_importer::TYPE_UNKNOWN,
+-                              user_data_importer::TYPE_BOOKMARKS_FILE)
+-#endif
++                              user_data_importer::TYPE_CHROMIUM_BASED)
+ 
+ IPC_ENUM_TRAITS_MIN_MAX_VALUE(user_data_importer::ImportItem,
+                               user_data_importer::NONE,
