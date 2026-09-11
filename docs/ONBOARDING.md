@@ -57,15 +57,58 @@ registration and its two BUILD.gn targets rather than inventing a shape.
 
 ## 2. Importing from another browser
 
-**Blocked on a finding, not on effort.** The reference advertises importing history, cookies and bookmarks,
-and cookies are the interesting one because they are what carries a logged-in session over. Whether
-Chromium's own importer can do cookies at all is being checked; if it cannot, the honest options are
-to import what it does support and say so, or to read Chrome's cookie database directly -- which
-depends on whether the encryption key is per-application or per-user, and is a decision to take
-deliberately rather than discover halfway through.
+This is the one place where the reference promises something this fork cannot promise everywhere, so
+the finding is recorded in full rather than as a task.
 
-Whatever the answer, the UI copy must match what actually happens. A step that says it brought your
-logins across when it did not is worse than one that says it brought bookmarks.
+**Chromium 153 has no Chrome importer at all.** Not "no cookie support" -- no Chrome. The importer
+type enum is only:
+
+    TYPE_IE = 0, TYPE_FIREFOX = 2, TYPE_SAFARI = 3, TYPE_BOOKMARKS_FILE = 5, TYPE_EDGE = 6
+    components/user_data_importer/common/importer_type.h:16
+
+There is no `TYPE_CHROME`, no Chrome detector in `ImporterList`, and no Chrome importer to inspect. So
+importing a Chrome profile's bookmarks, history, passwords or search engines is not "call the existing
+importer from a new surface" -- it means writing a new Chromium-family importer. That is ordinary work
+and worth doing.
+
+Cookies are not importable through that machinery either, by upstream's own admission:
+
+    COOKIES = 1 << 2,  // Not supported yet.
+    components/user_data_importer/common/importer_data_types.h:27
+
+and the importer bridge carries bookmarks, home page, favicons, history, search keywords, passwords
+and autofill -- nothing for cookies or sessions. `ALL` includes the COOKIES bit anyway, so `ALL` must
+never be read as "everything has an implementation".
+
+That leaves reading Chrome's cookie database directly, and the answer differs by platform in a way
+that decides the product rather than the implementation:
+
+* **Windows: do not build it.** Modern Chrome cookies are App-Bound Encrypted (`v20`) and decryption
+  validates the calling application's path, so a different executable cannot decrypt them through
+  ordinary OSCrypt. That check exists specifically to stop other programs stealing session cookies.
+  Working around it would mean defeating an anti-credential-theft protection, which is not a feature
+  regardless of how convenient it would be.
+* **macOS and Linux: technically feasible, deliberately scoped.** The key is per OS user and per
+  product branding, so a source-aware provider could ask for Google Chrome's Keychain or keyring entry
+  with the user's explicit authorisation. Feasible is not the same as advisable, and it must be the
+  user's decision at the moment it happens, not a checkbox in a wizard.
+
+Two further limits apply even where it is feasible. Session cookies held only in the source process's
+memory are not in its SQLite at all, so "close Chrome first" improves the snapshot but cannot make it
+complete. And device-bound sessions live in a separate database with cryptographic binding that
+copying cookies does not transfer -- for those sites the user will be signed out no matter what.
+
+Also worth knowing: the "close the other browser and try again" behaviour is not upstream's. The lock
+check is Firefox-only and returns true for everything else, because there is no upstream Chrome
+importer to have needed it. Requiring Chrome to be closed is still the right behaviour for a new
+importer -- it avoids an inconsistent SQLite/WAL snapshot -- but it is ours to implement.
+
+**Product consequence.** The reference product is macOS-only, and carrying logins across is one of the
+reasons it can be. This fork targets Windows, where that capability is off the table. So the import
+step must report per-source capabilities truthfully rather than advertise a fixed list -- which is why
+`ImportSource` carries `has_cookies` as its own explicit flag, and why it will be false for Chrome on
+Windows. A step that says it brought your logins over when it did not is worse than one that says it
+brought your bookmarks.
 
 ## 3. The agent's tools
 
