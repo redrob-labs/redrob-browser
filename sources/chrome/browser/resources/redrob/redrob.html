@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Redrob</title>
+  <link rel="stylesheet" href="redrob.css">
+</head>
+<body>
+  <main>
+    <h1>Ask AI a task</h1>
+    <form id="composer" autocomplete="off">
+      <textarea id="prompt" rows="3" aria-label="Task for the agent"
+                placeholder="Ask AI a task, @ for context"></textarea>
+      <div class="controls">
+        <fieldset>
+          <legend class="visually-hidden">Routing</legend>
+          <label><input type="radio" name="routing" value="local" checked> Local</label>
+          <label><input type="radio" name="routing" value="guard"> Guard</label>
+        </fieldset>
+        <button type="submit" id="run">Run task</button>
+      </div>
+    </form>
+    <section aria-labelledby="recent-heading">
+      <h2 id="recent-heading">Recent tasks</h2>
+      <ol id="tasks" class="cards"></ol>
+      <p id="status" role="status"></p>
+    </section>
+  </main>
+  <script type="module" src="redrob.js"></script>
+</body>
+</html>

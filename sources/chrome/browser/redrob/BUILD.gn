@@ -1,0 +1,11 @@
+# Copyright 2026 Redrob. Portions copyright The Chromium Authors.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+source_set("sidecar") {
+  sources = [
+    "sidecar_client.cc",
+    "sidecar_client.h",
+  ]
+  deps = [ "//base" ]
+}

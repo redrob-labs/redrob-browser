@@ -13,3 +13,16 @@
 sources/chrome/browser/ui/webui/redrob/BUILD.gn      chrome/browser/ui/webui/redrob/BUILD.gn
 sources/chrome/browser/ui/webui/redrob/redrob_ui.h   chrome/browser/ui/webui/redrob/redrob_ui.h
 sources/chrome/browser/ui/webui/redrob/redrob_ui.cc  chrome/browser/ui/webui/redrob/redrob_ui.cc
+
+# Deliberately NOT installed yet, and this is the note that says so rather than leaving two files in
+# sources/ that nothing copies and nothing references:
+#
+#   redrob.mojom       the browser <-> page interface docs/AI_SURFACE.md specifies. Wiring it means a
+#                      mojom("mojo_bindings") target in the BUILD.gn above, the interface in
+#                      chrome/browser/chrome_browser_interface_binders_webui.cc, and
+#                      WebUIController::BindInterface on RedrobUI. Three more registration patches.
+#   task_host_impl.h   the browser-side implementation of that interface, which also owns the sidecar
+#                      handle. It cannot compile before the bindings exist.
+#
+# The page is a served, rendering scaffold without them. Add both rows here in the same commit that
+# adds the bindings target -- a source file installed before the target that builds it is a broken tree.

@@ -5,31 +5,29 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_REDROB_REDROB_UI_H_
 #define CHROME_BROWSER_UI_WEBUI_REDROB_REDROB_UI_H_
 
+#include <memory>
+
+#include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
 #include "chrome/common/webui_url_constants.h"
-#include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/webui_config.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "ui/webui/mojo_web_ui_controller.h"
 
 namespace redrob {
 
 class RedrobUI;
+class TaskHostImpl;
 
-// chrome://redrob. See docs/AI_SURFACE.md: this page is the AI surface, and it is web technology
-// precisely so that the AI product does not live in C++ and does not move at Chromium's release pace.
+// chrome://redrob. See docs/AI_SURFACE.md: the AI surface is web technology precisely so the product
+// does not live in C++ and does not move at Chromium's release pace.
 class RedrobUIConfig : public content::DefaultWebUIConfig<RedrobUI> {
  public:
   RedrobUIConfig()
       : DefaultWebUIConfig(content::kChromeUIScheme, chrome::kChromeUIRedrobHost) {}
 };
 
-// The scaffold stage. The page is served from string literals through a request filter rather than
-// from a .grd resource pack, which keeps the GN surface to one source_set while the page is still
-// small. When the composer grows a TypeScript build -- and it will, this is the layer the product
-// lives in -- the move is to a resource pack plus `AddResourcePaths`, and this class keeps its shape.
-//
-// There is deliberately no Mojo interface yet. `TaskHost` is specified in docs/AI_SURFACE.md and
-// arrives with the sidecar client; a scaffold that could already start a task would be a scaffold
-// that had to answer for model routing, credentials and the policy gate before any of them exist.
-class RedrobUI : public content::WebUIController {
+class RedrobUI : public ui::MojoWebUIController, public mojom::PageHandlerFactory {
  public:
   explicit RedrobUI(content::WebUI* web_ui);
 
@@ -37,6 +35,18 @@ class RedrobUI : public content::WebUIController {
   RedrobUI& operator=(const RedrobUI&) = delete;
 
   ~RedrobUI() override;
+
+  void BindInterface(mojo::PendingReceiver<mojom::PageHandlerFactory> receiver);
+
+ private:
+  // mojom::PageHandlerFactory
+  void CreateTaskHost(mojo::PendingRemote<mojom::Page> page,
+                      mojo::PendingReceiver<mojom::TaskHost> host) override;
+
+  std::unique_ptr<TaskHostImpl> task_host_;
+  mojo::Receiver<mojom::PageHandlerFactory> factory_receiver_{this};
+
+  WEB_UI_CONTROLLER_TYPE_DECL();
 };
 
 }  // namespace redrob

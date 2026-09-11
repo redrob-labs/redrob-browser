@@ -9,21 +9,25 @@ Chromium browser satisfies.
 
 ```
 CHROMIUM_VERSION    the release we build, and the only place it is written down
-patches/            our delta against that release, one patch per file it touches
+patches/            surgical edits to files that stay Chromium's, one patch per file
+branding/           files we replace wholesale: the BRANDING file and every icon
+sources/            code we own outright, mirrored at its destination path
 build/args/         gn args per build flavour
-scripts/redrob.py   the whole fork workflow: bootstrap, sync, apply, build, run, export
+scripts/redrob.py   the whole fork workflow: bootstrap, sync, brand, apply, build, run, export, derive
 ```
 
 The Chromium checkout is **fetched, never committed**. That is the lesson from the last fork: a tree with
 258 patches buried in it could not answer "what do we own" without counting files. Here `ls patches/`
-is the answer.
+plus `branding/manifest` is the answer, and each file has exactly one owner -- a change that lives in
+both is what made the first clean reproduce fail with `git apply: does not match index`.
 
 ## Getting to a build
 
 ```sh
 ./scripts/redrob.py bootstrap     # depot_tools into ./depot_tools (once)
 ./scripts/redrob.py sync          # fetch Chromium at CHROMIUM_VERSION, run its hooks
-./scripts/redrob.py apply         # apply patches/ (a no-op while the set is empty)
+./scripts/redrob.py apply         # our own sources, then patches/
+./scripts/redrob.py brand         # overlay branding/: BRANDING and the icons
 ./scripts/redrob.py build         # gn gen + autoninja, dev flavour
 ./scripts/redrob.py run           # launch it with a scratch profile
 ```
@@ -42,6 +46,20 @@ Edit the checkout in `chromium/src` like a normal tree, then:
 `patches/` is rewritten from what you actually changed. Patches are never hand-maintained, and a new
 file you added is reported rather than patched in -- files that are ours belong in this repository as
 files, not as a diff against Chromium.
+
+## Moving to a new Chromium
+
+```sh
+# edit CHROMIUM_VERSION, then
+./scripts/redrob.py sync
+./scripts/redrob.py apply          # conflicts here name the files to look at
+./scripts/redrob.py derive         # re-generate the branding edits against the new tree
+./scripts/redrob.py export         # store them as patches again
+```
+
+`derive` exists so that a 768-substitution strings patch is never conflict-resolved by hand: it is
+generated from the new tree instead, and it fails loudly if upstream moved the file rather than
+producing a stale patch. `brand` is not part of this -- overlay files do not conflict, they just land.
 
 ## Where the product lives
 

@@ -1,0 +1,69 @@
+// Copyright 2026 Redrob. Portions copyright The Chromium Authors.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+module redrob.mojom;
+
+// The boundary between chrome://redrob and the browser process. See docs/AI_SURFACE.md.
+//
+// Deliberately small. Everything expensive -- inference, model routing, the policy gate -- is on the
+// sidecar's side of the browser process, not on the page's side of this interface. The page states
+// intent and receives a decision; it never chooses a model, holds a credential or reaches the network.
+
+enum TaskState {
+  kQueued,
+  kRunning,
+  kBlockedOnPolicy,
+  kSucceeded,
+  kFailed,
+  kCancelled,
+};
+
+enum RoutingMode {
+  // `Local` and `Guard` in the design. These are sidecar policy, not browser features.
+  kLocal,
+  kGuard,
+};
+
+// One step the agent took, as the page needs to render it.
+struct Step {
+  string label;
+  int64 started_at_ms;
+};
+
+struct Task {
+  string id;
+  string prompt;
+  TaskState state;
+  array<Step> steps;
+  // Set only in kFailed. Carries the sidecar's reason, never a raw transport error: a 401 from the
+  // engine must not reach a renderer as anything a page could learn a credential from.
+  string? error;
+};
+
+// Why a task could not be started. Separate from Task.error because this answers a call rather than
+// describing a run, and the page treats them differently.
+enum StartError {
+  kEmptyPrompt,
+  kSidecarUnavailable,
+  kTooManyRunningTasks,
+};
+
+interface Page {
+  // Streamed rather than polled: a task card updates step by step.
+  OnTaskChanged(Task task);
+};
+
+interface TaskHost {
+  // `context_refs` are opaque handles the browser process resolves -- a tab, a selection, a
+  // bookmark. Not URLs and not paths: a renderer that asks for /etc/passwd gets a rejected ref.
+  StartTask(string prompt, array<string> context_refs)
+      => (string? task_id, StartError? error);
+  CancelTask(string task_id);
+  ListTasks() => (array<Task> tasks);
+  SetRouting(RoutingMode mode) => (bool accepted);
+};
+
+interface PageHandlerFactory {
+  CreateTaskHost(pending_remote<Page> page, pending_receiver<TaskHost> host);
+};

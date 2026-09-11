@@ -212,8 +212,9 @@ def copy_sources() -> int:
 
 
 
-def overlay_binary_targets() -> set[str]:
-    return {target for _, target, kind in read_manifest() if kind == "binary"}
+def overlay_targets() -> set[str]:
+    """Every checkout path branding/manifest replaces wholesale, regardless of kind."""
+    return {target for _, target, _ in read_manifest()}
 
 
 def substitute_product_name(text: str) -> tuple[str, int]:
@@ -253,10 +254,21 @@ def append_user_agent_token(text: str) -> tuple[str, bool]:
 
 
 def cmd_brand(_: argparse.Namespace) -> None:
-    """Re-derive the branding delta onto the checkout: assets, product name, user agent.
+    """Overlay the files this fork substitutes wholesale: the BRANDING file and the icons.
 
-    Idempotent, so running it twice is a no-op rather than a doubled UA token. It writes into
-    chromium/src and nothing else; `export` is what turns the text half into patches/.
+    Overlay only. It used to also run the string substitution and the user-agent edit, which made two
+    sources of truth for one change: `brand` wrote them into the checkout and `export` had already
+    stored them in patches/, so a clean reproduce ran both and `git apply` refused with
+    `does not match index`. The fork was not reproducible from its own repository, which is the one
+    property the patch model exists to give.
+
+    So the split is now by mechanism, and each file has exactly one owner:
+
+      branding/manifest   files replaced wholesale. Reviewing them means reading branding/, not a diff.
+      patches/            surgical edits to files that stay Chromium's.
+
+    `derive` is the generator that produces the surgical branding edits when the pin moves. It is not
+    part of getting a build: sync -> apply -> brand -> build needs nothing regenerated.
     """
     if not SRC.exists():
         sys.exit("no checkout: run sync first")
@@ -270,6 +282,19 @@ def cmd_brand(_: argparse.Namespace) -> None:
             sys.exit(f"target directory gone, upstream moved it: {target}")
         shutil.copyfile(source_path, target_path)
         print(f"overlay [{kind}] {target}")
+
+
+def cmd_derive(_: argparse.Namespace) -> None:
+    """Regenerate the surgical branding edits in the checkout, for `export` to turn into patches.
+
+    Run this when CHROMIUM_VERSION moves and the stored patches no longer apply -- rather than fixing a
+    768-hunk conflict by hand, re-derive it against the new tree and export. Both steps fail loudly if
+    upstream has moved the file, which is the signal to look rather than a reason to force the patch.
+
+    Not part of a normal build. `apply` already carries what this produces.
+    """
+    if not SRC.exists():
+        sys.exit("no checkout: run sync first")
 
     grd = SRC / STRINGS_GRD
     if not grd.exists():
@@ -285,6 +310,7 @@ def cmd_brand(_: argparse.Namespace) -> None:
     if changed:
         ua.write_text(text)
     print(f"useragent {USER_AGENT_CC}: {'token appended' if changed else 'already branded'}")
+    print("\nNow run: ./scripts/redrob.py export")
 
 
 def cmd_export(_: argparse.Namespace) -> None:
@@ -308,9 +334,10 @@ def cmd_export(_: argparse.Namespace) -> None:
         check=True,
     ).stdout.split()
 
-    # Binary overlays are declared in branding/manifest and deliberately never become patches: a
-    # binary diff cannot be reviewed, and patches/ is supposed to read as an inventory.
-    skipped = overlay_binary_targets()
+    # Every file branding/manifest owns is skipped, text as well as binary. It is replaced wholesale, so
+    # the file in branding/ IS the review surface, and exporting a patch for it too would recreate the
+    # two-sources-of-truth bug that made a clean reproduce fail on `git apply`.
+    skipped = overlay_targets()
 
     if PATCHES.exists():
         # Clear only the generated output. Deleting the directory takes README.md with it -- which is
@@ -322,7 +349,7 @@ def cmd_export(_: argparse.Namespace) -> None:
     exported = 0
     for relative in changed:
         if relative in skipped:
-            print(f"skipped {relative} (binary overlay, see branding/manifest)")
+            print(f"skipped {relative} (overlay, owned by branding/manifest)")
             continue
         diff = subprocess.run(
             ["git", "diff", "--src-prefix=a/", "--dst-prefix=b/", "--", relative],
@@ -392,7 +419,13 @@ def main() -> None:
     sync.add_argument("--no-hooks", action="store_true", help="skip gclient sync/runhooks")
     sync.set_defaults(func=cmd_sync)
 
-    sub.add_parser("brand", help="re-derive the branding delta onto the checkout").set_defaults(func=cmd_brand)
+    sub.add_parser("brand", help="overlay branding/ files onto the checkout").set_defaults(
+        func=cmd_brand
+    )
+
+    sub.add_parser(
+        "derive", help="regenerate the surgical branding edits (run when the pin moves, then export)"
+    ).set_defaults(func=cmd_derive)
 
     apply_ = sub.add_parser("apply", help="apply patches/ onto the checkout")
     apply_.add_argument("--keep-going", action="store_true", help="report failures instead of stopping")
