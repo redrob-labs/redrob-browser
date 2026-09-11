@@ -1,20 +1,22 @@
 diff --git a/chrome/browser/ui/webui/BUILD.gn b/chrome/browser/ui/webui/BUILD.gn
-index 9ba5323722b00..e5c44dbddf351 100644
+index 9ba5323722b00..b32533bbf3330 100644
 --- a/chrome/browser/ui/webui/BUILD.gn
 +++ b/chrome/browser/ui/webui/BUILD.gn
-@@ -99,6 +99,7 @@ source_set("configs") {
+@@ -99,6 +99,8 @@ source_set("configs") {
      "//chrome/browser/ui/webui/sync_internals",
      "//chrome/browser/ui/webui/translate_internals",
      "//chrome/browser/ui/webui/usb_internals",
 +    "//chrome/browser/ui/webui/redrob",
++    "//chrome/browser/ui/webui/redrob_onboarding",
      "//chrome/browser/ui/webui/version",
      "//components/compose:buildflags",
      "//components/lens:buildflags",
-@@ -591,6 +592,7 @@ source_set("chrome_web_ui_controller_factory") {
+@@ -591,6 +593,8 @@ source_set("chrome_web_ui_controller_factory") {
      "//chrome/browser/ui/webui/crashes",
      "//chrome/browser/ui/webui/download_internals",
      "//chrome/browser/ui/webui/flags",
 +    "//chrome/browser/ui/webui/redrob",
++    "//chrome/browser/ui/webui/redrob_onboarding",
      "//chrome/browser/ui/webui/version",
      "//chrome/common",
      "//chrome/common:constants",

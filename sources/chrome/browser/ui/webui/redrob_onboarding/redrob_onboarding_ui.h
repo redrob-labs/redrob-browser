@@ -11,6 +11,8 @@
 #include "chrome/common/webui_url_constants.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/webui_config.h"
+#include "base/functional/callback.h"
+#include "base/memory/weak_ptr.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "ui/webui/mojo_web_ui_controller.h"
@@ -33,14 +35,24 @@ class RedrobOnboardingUI : public ui::MojoWebUIController,
   void BindInterface(
       mojo::PendingReceiver<onboarding::mojom::PageHandlerFactory> receiver);
 
+  // Installed by the first-run step controller once this page is showing. Set AFTER the page has
+  // already bound its Mojo pipe, which is why the host is given an indirection through this class
+  // rather than a copy of the closure: a copy taken at bind time would always be the empty one.
+  void SetCompleteCallback(base::RepeatingClosure callback);
+
  private:
   // onboarding::mojom::PageHandlerFactory
   void CreateOnboardingHost(
       mojo::PendingReceiver<onboarding::mojom::OnboardingHost> host,
       mojo::PendingRemote<onboarding::mojom::Page> page) override;
 
+  void OnComplete();
+
+  base::RepeatingClosure complete_callback_;
   std::unique_ptr<OnboardingHostImpl> onboarding_host_;
   mojo::Receiver<onboarding::mojom::PageHandlerFactory> factory_receiver_{this};
+
+  base::WeakPtrFactory<RedrobOnboardingUI> weak_factory_{this};
 
   WEB_UI_CONTROLLER_TYPE_DECL();
 };

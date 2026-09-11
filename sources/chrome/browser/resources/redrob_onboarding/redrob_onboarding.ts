@@ -38,7 +38,7 @@ function render() {
 
   const dots = $('dots');
   dots.textContent = '';
-  STEPS.forEach((step, i) => {
+  STEPS.forEach((_step, i) => {
     const dot = document.createElement('button');
     dot.className = 'dot';
     dot.role = 'tab';

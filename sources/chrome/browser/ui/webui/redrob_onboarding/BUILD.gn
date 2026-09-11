@@ -1,0 +1,32 @@
+import("//chrome/common/features.gni")
+import("//mojo/public/tools/bindings/mojom.gni")
+
+mojom("mojo_bindings") {
+  sources = [ "redrob_onboarding.mojom" ]
+  webui_module_path = "/"
+}
+
+source_set("redrob_onboarding") {
+  sources = [
+    "onboarding_host_impl.cc",
+    "onboarding_host_impl.h",
+    "redrob_onboarding_ui.cc",
+    "redrob_onboarding_ui.h",
+  ]
+
+  public_deps = [
+    ":mojo_bindings",
+    "//content/public/browser",
+    "//mojo/public/cpp/bindings",
+    "//ui/webui",
+  ]
+
+  deps = [
+    "//base",
+    "//chrome/browser/profiles:profile",
+    "//chrome/browser/ui/webui:webui_util",
+    "//chrome/common",
+    "//components/prefs",
+    "//components/user_data_importer/common",
+  ]
+}
