@@ -1,8 +1,8 @@
 diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_constants.h
-index 329de0b6b578b..f98e129930a0e 100644
+index 329de0b6b578b..a8ffa9f38c706 100644
 --- a/chrome/common/webui_url_constants.h
 +++ b/chrome/common/webui_url_constants.h
-@@ -357,6 +357,10 @@ inline constexpr char kChromeUIUserEducationInternalsHost[] =
+@@ -357,6 +357,12 @@ inline constexpr char kChromeUIUserEducationInternalsHost[] =
      "user-education-internals";
  inline constexpr char kChromeUIUserEducationInternalsURL[] =
      "chrome://user-education-internals";
@@ -10,6 +10,8 @@ index 329de0b6b578b..f98e129930a0e 100644
 +inline constexpr char kChromeUIRedrobURL[] = "chrome://redrob/";
 +inline constexpr char kChromeUIRedrobOnboardingHost[] = "redrob-onboarding";
 +inline constexpr char kChromeUIRedrobOnboardingURL[] = "chrome://redrob-onboarding/";
++inline constexpr char kChromeUIRedrobSettingsHost[] = "redrob-settings";
++inline constexpr char kChromeUIRedrobSettingsURL[] = "chrome://redrob-settings/";
  inline constexpr char kChromeUIVersionHost[] = "version";
  inline constexpr char kChromeUIVersionURL[] = "chrome://version/";
  inline constexpr char16_t kChromeUIVersionURL16[] = u"chrome://version/";

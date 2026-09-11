@@ -78,6 +78,10 @@ class SidecarClient {
   void EnsureStarted(scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
                      StatusCallback on_status_change);
 
+  // A task answered by the user's OWN provider never launches the local engine, so the factory cannot
+  // arrive via EnsureStarted. Set once by the owner at construction.
+  void SetLoaderFactory(scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
+
   // The loopback base URL, e.g. http://127.0.0.1:48213. Empty until kReady.
   const std::string& base_url() const { return base_url_; }
 
@@ -113,6 +117,19 @@ class SidecarClient {
   // One turn at a time per client: a second call cancels the first. `delegate` must outlive the turn or
   // cancel it in its destructor.
   void StartCompletion(std::string request_json, CompletionDelegate* delegate);
+
+  // The same streamed turn, but against a provider the USER configured instead of the local engine.
+  // `endpoint` is their base URL and `bearer_token` their key; both come from ModelStore, which is the
+  // only thing that ever holds the decrypted key, and neither is stored here.
+  //
+  // Deliberately a second entry point rather than a flag on the first. The two differ in every way
+  // that matters -- destination LOCAL versus a third party, a per-launch loopback credential versus the
+  // user's own long-lived key -- and a network traffic annotation that claimed one while doing the other
+  // would be a lie told in the one place Chromium requires the truth.
+  void StartDirectCompletion(const std::string& endpoint,
+                             const std::string& bearer_token,
+                             std::string request_json,
+                             CompletionDelegate* delegate);
   void CancelCompletion();
 
  private:

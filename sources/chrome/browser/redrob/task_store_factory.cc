@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/redrob/agent_service_factories.h"
 #include "chrome/browser/redrob/task_store.h"
 #include "content/public/browser/storage_partition.h"
 
@@ -26,7 +27,12 @@ TaskStoreFactory* TaskStoreFactory::GetInstance() {
 
 TaskStoreFactory::TaskStoreFactory()
     : ProfileKeyedServiceFactory("RedrobTaskStore",
-                                 ProfileSelections::BuildForRegularProfile()) {}
+                                 ProfileSelections::BuildForRegularProfile()) {
+  // A task searches memory before its first turn and asks which provider answers it, so both stores
+  // have to be built first and torn down after.
+  DependsOn(MemoryStoreFactory::GetInstance());
+  DependsOn(ModelStoreFactory::GetInstance());
+}
 
 TaskStoreFactory::~TaskStoreFactory() = default;
 
@@ -36,7 +42,8 @@ std::unique_ptr<KeyedService> TaskStoreFactory::BuildServiceInstanceForBrowserCo
   // is the browser's request and must not inherit anything a renderer could influence.
   Profile* profile = Profile::FromBrowserContext(context);
   return std::make_unique<TaskStore>(
-      profile, context->GetDefaultStoragePartition()->GetURLLoaderFactoryForBrowserProcess());
+      profile, context->GetDefaultStoragePartition()->GetURLLoaderFactoryForBrowserProcess(),
+      MemoryStoreFactory::GetForProfile(profile), ModelStoreFactory::GetForProfile(profile));
 }
 
 }  // namespace redrob

@@ -17,6 +17,8 @@
 #include "base/path_service.h"
 #include "base/task/sequenced_task_runner.h"
 #include "chrome/browser/redrob/agent_tabs.h"
+#include "chrome/browser/redrob/memory_store.h"
+#include "chrome/browser/redrob/model_store.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/browser/redrob/file_tools.h"
 #include "chrome/browser/redrob/page_tools.h"
@@ -89,6 +91,12 @@ constexpr char kToolClick[] = "click";
 constexpr char kToolType[] = "type_text";
 constexpr char kToolSaveFile[] = "save_file";
 constexpr char kToolPlan[] = "plan_research";
+constexpr char kToolRemember[] = "remember";
+constexpr char kToolRecall[] = "recall";
+
+// How many remembered entries a new task is given unasked, and how many `recall` returns. Small on
+// purpose: memory that fills the context is memory that crowds out the task.
+constexpr size_t kMemoryHits = 5;
 
 int64_t NowMs() {
   return base::Time::Now().InMillisecondsSinceUnixEpoch();
@@ -157,7 +165,7 @@ base::DictValue StringArrayProperty(const std::string& description) {
   return property;
 }
 
-base::ListValue BrowserTools(mojom::PermissionMode mode, mojom::Effort effort) {
+base::ListValue BrowserTools(mojom::PermissionMode mode, mojom::Effort effort, bool memory_enabled) {
   base::ListValue tools;
 
   {
@@ -196,6 +204,36 @@ base::ListValue BrowserTools(mojom::PermissionMode mode, mojom::Effort effort) {
                           "Call this once, first. The user reads it to decide whether you understood "
                           "the question, so name real sources rather than describing method.",
                           std::move(properties), std::move(required)));
+  }
+
+  // Memory, when the user has it on. Declared in every permission mode because it touches nothing
+  // outside the profile's own memory list -- and it is the ONE thing the agent stores that the user can
+  // read back, edit and delete in Settings, which is what makes storing it defensible at all.
+  if (memory_enabled) {
+    {
+      base::DictValue properties;
+      properties.Set("fact", StringProperty(
+          "One durable fact or preference about the user, in a sentence they would recognise as true "
+          "about themselves. Not a page's contents and not a fact about the world."));
+      base::ListValue required;
+      required.Append("fact");
+      tools.Append(MakeTool(kToolRemember,
+                            "Remember something about this user for future tasks. Use it for a stated "
+                            "preference or a stable detail they will not want to repeat -- never for "
+                            "what a page said, and never for anything they did not tell you.",
+                            std::move(properties), std::move(required)));
+    }
+    {
+      base::DictValue properties;
+      properties.Set("query", StringProperty("What you are trying to recall."));
+      base::ListValue required;
+      required.Append("query");
+      tools.Append(MakeTool(kToolRecall,
+                            "Look through what you already remember about this user. The most relevant "
+                            "entries are given to you at the start of a task, so use this only when you "
+                            "need something the task did not begin with.",
+                            std::move(properties), std::move(required)));
+    }
   }
 
   if (mode != mojom::PermissionMode::kReadOnly) {
@@ -280,10 +318,17 @@ std::string SystemPrompt(mojom::Effort effort) {
 }  // namespace
 
 TaskStore::TaskStore(Profile* profile,
-                     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
+                     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+                     MemoryStore* memory,
+                     ModelStore* models)
     : profile_(profile),
+      memory_(memory),
+      models_(models),
       url_loader_factory_(std::move(url_loader_factory)),
       sidecar_(std::make_unique<SidecarClient>()) {
+  // A task answered by the user's own provider never launches the local engine, so the loader
+  // factory has to arrive by a path that does not go through EnsureStarted.
+  sidecar_->SetLoaderFactory(url_loader_factory_);
   // Looked up once here rather than per write: the blocking-thread check needs it, and PathService is
   // not something to call from a write path on every save.
   base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir_);
@@ -327,6 +372,39 @@ std::string TaskStore::CreateTask(const std::string& prompt,
 
   Conversation conversation;
   conversation.messages.Append(TextMessage("system", SystemPrompt(effort)));
+
+  // What we already know, searched with the task's own words. Given to the engine as a system message
+  // AND recorded as a step, because an answer shaped by something the user told the browser weeks ago
+  // is only fair if they can see that it was.
+  if (memory_ && memory_->enabled()) {
+    const std::vector<MemoryStore::Entry> hits = memory_->Search(prompt, kMemoryHits);
+    if (!hits.empty()) {
+      std::string recalled =
+          "Things this user has told you before, which may or may not be relevant here:";
+      for (const MemoryStore::Entry& entry : hits) {
+        recalled += "\n- " + entry.text;
+      }
+      conversation.messages.Append(TextMessage("system", recalled));
+      // The step is added after the task is in the map, which it now is.
+      mojom::Step* step = nullptr;
+      {
+        mojom::StepPtr owned = mojom::Step::New();
+        owned->kind = mojom::StepKind::kSearchedMemory;
+        owned->label = "Recalled " + base::NumberToString(hits.size()) +
+                       (hits.size() == 1 ? " thing you told me" : " things you told me");
+        owned->started_at_ms = NowMs();
+        tasks_[task_id]->steps.push_back(std::move(owned));
+        step = tasks_[task_id]->steps.back().get();
+      }
+      for (const MemoryStore::Entry& entry : hits) {
+        mojom::StepDetailPtr detail = mojom::StepDetail::New();
+        detail->text = entry.text;
+        detail->source = entry.source;
+        step->details.push_back(std::move(detail));
+      }
+    }
+  }
+
   conversation.messages.Append(TextMessage("user", prompt));
   conversations_[task_id] = std::move(conversation);
 
@@ -376,8 +454,11 @@ std::pair<std::optional<std::string>, std::optional<mojom::StartError>> TaskStor
   sidecar_->EnsureStarted(
       url_loader_factory_,
       base::BindRepeating(&TaskStore::OnSidecarStatusChanged, base::Unretained(this)));
-  if (sidecar_->status() == SidecarClient::Status::kUnavailable ||
-      sidecar_->status() == SidecarClient::Status::kFailed) {
+  // Only the built-in engine has to be there. A user answering tasks with their own provider gets no
+  // benefit from being told a sidecar binary is missing.
+  const bool direct = models_ && models_->Selected().has_value();
+  if (!direct && (sidecar_->status() == SidecarClient::Status::kUnavailable ||
+                  sidecar_->status() == SidecarClient::Status::kFailed)) {
     return {std::nullopt, mojom::StartError::kSidecarUnavailable};
   }
 
@@ -408,8 +489,9 @@ std::string TaskStore::StartRoutineTask(const std::string& title,
   sidecar_->EnsureStarted(
       url_loader_factory_,
       base::BindRepeating(&TaskStore::OnSidecarStatusChanged, base::Unretained(this)));
-  if (sidecar_->status() == SidecarClient::Status::kUnavailable ||
-      sidecar_->status() == SidecarClient::Status::kFailed) {
+  const bool direct = models_ && models_->Selected().has_value();
+  if (!direct && (sidecar_->status() == SidecarClient::Status::kUnavailable ||
+                  sidecar_->status() == SidecarClient::Status::kFailed)) {
     return std::string();
   }
 
@@ -463,19 +545,26 @@ void TaskStore::StartTurn(const std::string& task_id) {
     return;
   }
 
-  if (sidecar_->status() != SidecarClient::Status::kReady) {
-    // Still handshaking. The status callback brings us back here.
+  // Whose model answers this. Resolved per turn rather than per task, so switching provider in
+  // Settings takes effect on the next turn instead of at the next browser launch.
+  const std::optional<ModelStore::Provider> provider =
+      models_ ? models_->Selected() : std::nullopt;
+
+  if (!provider && sidecar_->status() != SidecarClient::Status::kReady) {
+    // Still handshaking. The status callback brings us back here. Skipped entirely for a user's own
+    // provider: that path never launches the local engine, so waiting on it would be waiting forever.
     task->second->state = mojom::TaskState::kQueued;
     Notify(task_id);
     return;
   }
 
   base::DictValue request;
-  request.Set("model", kModel);
+  request.Set("model", provider ? provider->model : kModel);
   request.Set("stream", true);
   request.Set("reasoning_effort", ReasoningEffort(task->second->effort));
   request.Set("messages", conversation->second.messages.Clone());
-  request.Set("tools", BrowserTools(task->second->mode, task->second->effort));
+  request.Set("tools", BrowserTools(task->second->mode, task->second->effort,
+                                   memory_ && memory_->enabled()));
 
   std::optional<std::string> body = base::WriteJson(request);
   if (!body.has_value()) {
@@ -489,6 +578,15 @@ void TaskStore::StartTurn(const std::string& task_id) {
   conversation->second.turn_text_started = false;
   task->second->state = mojom::TaskState::kRunning;
   Notify(task_id);
+
+  if (provider) {
+    // The decrypted key exists only for the duration of this call. It is fetched here, at the moment
+    // the request is built, rather than held on this object where every other method could reach it.
+    const std::optional<std::string> key = models_->SecretFor(provider->id);
+    sidecar_->StartDirectCompletion(provider->endpoint, key.value_or(std::string()),
+                                    std::move(body).value(), this);
+    return;
+  }
   sidecar_->StartCompletion(std::move(body).value(), this);
 }
 
@@ -619,6 +717,11 @@ bool TaskStore::ModeAllows(mojom::PermissionMode mode, const std::string& tool) 
   if (tool == kToolPlan) {
     return true;
   }
+  // Memory is the profile's own list, reviewable and deletable in Settings. Gated by the memory
+  // setting -- which is why these are not even declared when it is off -- not by permission mode.
+  if (tool == kToolRemember || tool == kToolRecall) {
+    return true;
+  }
   if (tool == kToolClick || tool == kToolType || tool == kToolSaveFile) {
     return mode != mojom::PermissionMode::kReadOnly;
   }
@@ -649,6 +752,66 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
       base::JSONReader::ReadDict(call.arguments_json, base::JSON_PARSE_RFC);
   if (!arguments) {
     FinishTool(task_id, call, "Those arguments were not readable JSON.");
+    return;
+  }
+
+  if (call.name == kToolRemember) {
+    const std::string* fact = arguments->FindString("fact");
+    if (!fact) {
+      FinishTool(task_id, call, "remember needs a fact argument.");
+      return;
+    }
+    if (!memory_ || !memory_->enabled()) {
+      FinishTool(task_id, call,
+                 "Memory is switched off for this browser, so nothing was stored. Do not ask again "
+                 "during this task.");
+      return;
+    }
+    // The task's own prompt is the entry's source, so Settings can answer "why do you know this".
+    const std::string id = memory_->Remember(*fact, task->second->prompt);
+    if (id.empty()) {
+      FinishTool(task_id, call, "That could not be remembered.");
+      return;
+    }
+    mojom::Step* step = AddStep(task_id, mojom::StepKind::kSearchedMemory, "Remembered a detail");
+    if (step) {
+      mojom::StepDetailPtr detail = mojom::StepDetail::New();
+      detail->text = *fact;
+      step->details.push_back(std::move(detail));
+    }
+    Notify(task_id);
+    FinishTool(task_id, call,
+               "Remembered. The user can see and delete it in Settings, so do not treat it as private "
+               "to you.");
+    return;
+  }
+
+  if (call.name == kToolRecall) {
+    const std::string* query = arguments->FindString("query");
+    if (!query) {
+      FinishTool(task_id, call, "recall needs a query argument.");
+      return;
+    }
+    if (!memory_ || !memory_->enabled()) {
+      FinishTool(task_id, call, "Memory is switched off for this browser. There is nothing to recall.");
+      return;
+    }
+    const std::vector<MemoryStore::Entry> hits = memory_->Search(*query, kMemoryHits);
+    mojom::Step* step = AddStep(task_id, mojom::StepKind::kSearchedMemory,
+                                "Looked back for \"" + *query + "\"");
+    std::string answer;
+    for (const MemoryStore::Entry& entry : hits) {
+      answer += "- " + entry.text + "\n";
+      if (step) {
+        mojom::StepDetailPtr detail = mojom::StepDetail::New();
+        detail->text = entry.text;
+        detail->source = entry.source;
+        step->details.push_back(std::move(detail));
+      }
+    }
+    Notify(task_id);
+    FinishTool(task_id, call,
+               answer.empty() ? "Nothing remembered matches that." : answer);
     return;
   }
 

@@ -612,8 +612,83 @@ void SidecarClient::StartCompletion(std::string request_json, CompletionDelegate
   completion_->Start(url_loader_factory_.get());
 }
 
+void SidecarClient::SetLoaderFactory(
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
+  if (!url_loader_factory_) {
+    url_loader_factory_ = std::move(url_loader_factory);
+  }
+}
+
+void SidecarClient::StartDirectCompletion(const std::string& endpoint,                                          const std::string& bearer_token,
+                                          std::string request_json,
+                                          CompletionDelegate* delegate) {
+  CHECK(delegate);
+  const GURL base(endpoint);
+  // Re-checked here even though ModelStore already refused anything else when the provider was saved.
+  // This is the function that puts the user's page text on the wire, so it is the right place for the
+  // check that says it goes there encrypted.
+  if (!base.is_valid() || !base.SchemeIs("https")) {
+    delegate->OnCompletionFailed("That provider's endpoint is not a valid https address.");
+    return;
+  }
+  if (bearer_token.empty()) {
+    delegate->OnCompletionFailed(
+        "There is no key for that provider on this machine. Reconnect it in Settings.");
+    return;
+  }
+
+  static constexpr net::NetworkTrafficAnnotationTag kAnnotation =
+      net::DefineNetworkTrafficAnnotation("redrob_direct_provider_completion", R"(
+        semantics {
+          sender: "Redrob AI surface"
+          description:
+            "Sends the task the user typed on the Redrob new tab page, the task's history, and the text "
+            "of pages the task read, to the model provider the user connected in Redrob settings. This "
+            "request leaves the machine and goes to that provider, not to Google and not to Redrob."
+          trigger:
+            "The user connected their own model provider in Redrob settings, selected it, and started or "
+            "replied to a task."
+          data:
+            "The user's prompt, the task's previous messages, the visible text of pages the task opened, "
+            "results of tools the browser ran, and the API key the user supplied for that provider."
+          destination: OTHER
+          destination_other: "The model provider whose endpoint the user entered in Redrob settings."
+        }
+        policy {
+          cookies_allowed: NO
+          setting:
+            "Off unless the user adds a provider in Redrob settings and selects it. Selecting the "
+            "built-in engine stops these requests."
+          policy_exception_justification: "No policy yet; the fork's enterprise story is not built."
+        })");
+
+  auto request = std::make_unique<network::ResourceRequest>();
+  // Appended to whatever path the user's base URL already has, the way every OpenAI-compatible client
+  // does it: their `/v1` plus our `/chat/completions`.
+  std::string spec = base.spec();
+  while (!spec.empty() && spec.back() == '/') {
+    spec.pop_back();
+  }
+  request->url = GURL(spec + "/chat/completions");
+  request->method = "POST";
+  // No cookies to a third party, ever. The key is the credential; a cookie jar entry for that host
+  // would be an unrelated secret sent along for no reason.
+  request->credentials_mode = network::mojom::CredentialsMode::kOmit;
+  request->headers.SetHeader(net::HttpRequestHeaders::kAuthorization, "Bearer " + bearer_token);
+
+  auto loader = network::SimpleURLLoader::Create(std::move(request), kAnnotation);
+  loader->AttachStringForUpload(std::move(request_json), "application/json");
+  if (completion_) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::DoNothingWithBoundArgs(std::move(completion_)));
+  }
+  completion_ = std::make_unique<CompletionStream>(delegate, std::move(loader));
+  completion_->Start(url_loader_factory_.get());
+}
+
 void SidecarClient::CancelCompletion() {
-  // Same reason as above: a cancel can arrive from within the stream's own callback.
+  // A cancel can arrive from within the stream's own callback, so the stream is retired on a later task
+  // rather than freed here.
   if (completion_) {
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::DoNothingWithBoundArgs(std::move(completion_)));

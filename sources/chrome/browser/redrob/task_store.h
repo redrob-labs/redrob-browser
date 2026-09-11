@@ -30,6 +30,9 @@ class WebContents;
 
 namespace redrob {
 
+class MemoryStore;
+class ModelStore;
+
 // The tasks of one profile, the sidecar that answers them, and the tool loop between the two.
 //
 // This is a profile service rather than state on the WebUI's Mojo handler, and that is the whole
@@ -49,7 +52,9 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   };
 
   TaskStore(Profile* profile,
-            scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
+            scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+            MemoryStore* memory,
+            ModelStore* models);
   TaskStore(const TaskStore&) = delete;
   TaskStore& operator=(const TaskStore&) = delete;
   ~TaskStore() override;
@@ -179,6 +184,9 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   std::string active_task_id_;
 
   raw_ptr<Profile> profile_;
+  // Both outlive this service: the factory declares the dependency, so these are raw.
+  raw_ptr<MemoryStore> memory_;
+  raw_ptr<ModelStore> models_;
   // Resolved once, on this thread, so the blocking-thread write check compares against a value it did
   // not have to go and look up. Never sent anywhere near a renderer.
   base::FilePath user_data_dir_;

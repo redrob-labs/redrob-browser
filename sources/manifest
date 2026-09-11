@@ -65,3 +65,25 @@ sources/chrome/browser/redrob/page_tools.h  chrome/browser/redrob/page_tools.h
 sources/chrome/browser/redrob/page_tools.cc  chrome/browser/redrob/page_tools.cc
 sources/chrome/browser/redrob/file_tools.h  chrome/browser/redrob/file_tools.h
 sources/chrome/browser/redrob/file_tools.cc  chrome/browser/redrob/file_tools.cc
+sources/chrome/browser/redrob/memory_store.h    chrome/browser/redrob/memory_store.h
+sources/chrome/browser/redrob/memory_store.cc   chrome/browser/redrob/memory_store.cc
+sources/chrome/browser/redrob/routine_store.h   chrome/browser/redrob/routine_store.h
+sources/chrome/browser/redrob/routine_store.cc  chrome/browser/redrob/routine_store.cc
+sources/chrome/browser/redrob/model_store.h     chrome/browser/redrob/model_store.h
+sources/chrome/browser/redrob/model_store.cc    chrome/browser/redrob/model_store.cc
+sources/chrome/browser/redrob/agent_service_factories.h   chrome/browser/redrob/agent_service_factories.h
+sources/chrome/browser/redrob/agent_service_factories.cc  chrome/browser/redrob/agent_service_factories.cc
+
+# chrome://redrob-settings, the product's own settings. A separate host rather than four sections
+# inside upstream's chrome://settings, which would be six files of upstream churn per release.
+sources/chrome/browser/ui/webui/redrob_settings/BUILD.gn  chrome/browser/ui/webui/redrob_settings/BUILD.gn
+sources/chrome/browser/ui/webui/redrob_settings/redrob_settings.mojom  chrome/browser/ui/webui/redrob_settings/redrob_settings.mojom
+sources/chrome/browser/ui/webui/redrob_settings/redrob_settings_ui.h   chrome/browser/ui/webui/redrob_settings/redrob_settings_ui.h
+sources/chrome/browser/ui/webui/redrob_settings/redrob_settings_ui.cc  chrome/browser/ui/webui/redrob_settings/redrob_settings_ui.cc
+sources/chrome/browser/ui/webui/redrob_settings/settings_host_impl.h   chrome/browser/ui/webui/redrob_settings/settings_host_impl.h
+sources/chrome/browser/ui/webui/redrob_settings/settings_host_impl.cc  chrome/browser/ui/webui/redrob_settings/settings_host_impl.cc
+sources/chrome/browser/resources/redrob_settings/BUILD.gn  chrome/browser/resources/redrob_settings/BUILD.gn
+sources/chrome/browser/resources/redrob_settings/redrob_settings.html  chrome/browser/resources/redrob_settings/redrob_settings.html
+sources/chrome/browser/resources/redrob_settings/redrob_settings.css   chrome/browser/resources/redrob_settings/redrob_settings.css
+sources/chrome/browser/resources/redrob_settings/redrob_settings.ts    chrome/browser/resources/redrob_settings/redrob_settings.ts
+sources/chrome/browser/resources/redrob_settings/PretendardVariable.woff2  chrome/browser/resources/redrob_settings/PretendardVariable.woff2

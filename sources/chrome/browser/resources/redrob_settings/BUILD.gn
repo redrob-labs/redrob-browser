@@ -1,0 +1,24 @@
+# Copyright 2026 Redrob. Portions copyright The Chromium Authors.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//ui/webui/resources/tools/build_webui.gni")
+
+build_webui("build") {
+  grd_prefix = "redrob_settings"
+  static_files = [
+    "redrob_settings.html",
+    "redrob_settings.css",
+    "PretendardVariable.woff2",
+  ]
+  ts_files = [ "redrob_settings.ts" ]
+  mojo_files_deps = [
+    "//chrome/browser/ui/webui/redrob_settings:mojo_bindings_ts__generator",
+  ]
+  mojo_files = [ "$root_gen_dir/chrome/browser/ui/webui/redrob_settings/redrob_settings.mojom-webui.ts" ]
+  ts_deps = [
+    "//ui/webui/resources/js:build_ts",
+    "//ui/webui/resources/mojo:build_ts",
+  ]
+  webui_context_type = "trusted"
+}

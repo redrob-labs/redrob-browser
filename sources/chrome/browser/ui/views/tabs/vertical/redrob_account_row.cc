@@ -74,7 +74,7 @@ void RedrobAccountRow::OpenSettings() {
   }
   // A singleton tab, which is what every other route into settings uses: pressing this twice should
   // return to the settings tab rather than accumulate copies of it.
-  NavigateParams params(browser_, GURL(chrome::kChromeUISettingsURL),
+  NavigateParams params(browser_, GURL(chrome::kChromeUIRedrobSettingsURL),
                         ui::PAGE_TRANSITION_AUTO_BOOKMARK);
   params.disposition = WindowOpenDisposition::SINGLETON_TAB;
   Navigate(&params);

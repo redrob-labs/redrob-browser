@@ -1,0 +1,371 @@
+/* Pretendard Variable, vendored. SIL Open Font License 1.1 -- see the licence beside the new tab's
+   copy of this font. */
+@font-face {
+  font-display: swap;
+  font-family: 'Pretendard Variable';
+  font-style: normal;
+  font-weight: 45 920;
+  src: url(PretendardVariable.woff2) format('woff2-variations');
+}
+
+/* Copyright 2026 Redrob. Portions copyright The Chromium Authors.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
+:root {
+  color-scheme: light dark;
+  --rr-blue-1: #eff4ff;
+  --rr-blue-3: #bad2ff;
+  --rr-blue-5: #507fff;
+  --rr-blue-6: #2b52ff;
+  --rr-blue-9: #061460;
+  --rr-blue-10: #030c34;
+  --rr-gray-1: #f8f9fb;
+  --rr-gray-3: #dfe2e8;
+  --rr-gray-5: #aab0bb;
+  --rr-gray-7: #576071;
+  --rr-gray-8: #292e37;
+  --rr-gray-9: #141719;
+  --rr-red-3: #ff5452;
+  --rr-red-4: #a31310;
+
+  --surface: light-dark(var(--rr-gray-1), var(--rr-gray-9));
+  --raised: light-dark(#fff, color-mix(in srgb, var(--rr-gray-8) 45%, var(--rr-gray-9)));
+  --ink: light-dark(var(--rr-gray-9), var(--rr-gray-1));
+  --muted: light-dark(var(--rr-gray-7), var(--rr-gray-5));
+  --line: light-dark(var(--rr-gray-3), var(--rr-gray-8));
+  --accent: light-dark(var(--rr-blue-6), var(--rr-blue-5));
+  --accent-soft: light-dark(var(--rr-blue-1), var(--rr-blue-10));
+  --accent-muted: light-dark(var(--rr-blue-3), var(--rr-blue-9));
+  --warn: light-dark(var(--rr-red-4), var(--rr-red-3));
+
+  --radius-control: 10px;
+  --radius-panel: 14px;
+
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  background: var(--surface);
+  color: var(--ink);
+  font: 400 13px/1.62 var(--font-sans);
+  letter-spacing: -0.004em;
+  margin: 0;
+}
+
+/* The same dotted field as every other Redrob surface, so this page belongs to the product rather
+   than to the browser it is bolted onto. */
+#field {
+  background-image: radial-gradient(var(--accent-muted) 1px, transparent 1px);
+  background-size: 22px 22px;
+  inset: 0;
+  opacity: 0.25;
+  pointer-events: none;
+  position: fixed;
+  z-index: 0;
+}
+
+.shell {
+  display: flex;
+  margin: 0 auto;
+  max-width: 1100px;
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+/* Sticky, because the sections are long: a nav that scrolls away with the content is a nav you can
+   only use once. */
+.nav {
+  align-self: flex-start;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 2px;
+  max-height: 100vh;
+  padding: 22px 16px;
+  position: sticky;
+  top: 0;
+  width: 220px;
+}
+
+.nav h1 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  margin: 0 0 14px 10px;
+  text-transform: uppercase;
+}
+
+.nav-link {
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  font-size: 13px;
+  padding: 7px 10px;
+  text-decoration: none;
+}
+
+.nav-link:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.nav-foot {
+  color: var(--muted);
+  margin-top: auto;
+}
+
+.pages {
+  flex: 1;
+  min-width: 0;
+  padding: 22px 28px 80px;
+}
+
+.page {
+  margin: 0 0 44px;
+  scroll-margin-top: 20px;
+}
+
+.page h2 {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+
+.page h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+
+.lede {
+  color: var(--muted);
+  margin: 0 0 16px;
+  max-width: 62ch;
+}
+
+.plate {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 1px 2px light-dark(rgb(20 23 25 / 4%), rgb(0 0 0 / 25%));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 16px 18px;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+}
+
+.row {
+  align-items: flex-start;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.row-title {
+  font-weight: 600;
+}
+
+.row-detail {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* No uppercase transform here: these rows carry endpoints, model ids and the user's own prompts, and
+   HTTPS://API.OPENAI.COM/V1 is not a URL anyone typed. */
+.row-meta {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+
+.row-warn {
+  color: var(--warn);
+}
+
+.row-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field > span {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.field input,
+.field textarea,
+.field select {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: inherit;
+  font: inherit;
+  padding: 7px 10px;
+  width: 100%;
+}
+
+.field input:focus-visible,
+.field textarea:focus-visible,
+.field select:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.field-row .field {
+  flex: 1;
+  min-width: 140px;
+}
+
+.toggle {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+}
+
+.actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.pill {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 14px;
+}
+
+.pill:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pill-solid {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
+}
+
+.pill-solid:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.pill-warn:hover {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.pill-on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.status {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.note {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0 0;
+  max-width: 62ch;
+}
+
+.empty {
+  color: var(--muted);
+  margin: 0 0 16px;
+}
+
+.choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.choice {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  font: inherit;
+  gap: 4px;
+  min-width: 200px;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.choice[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.choice-title {
+  font-weight: 600;
+}
+
+.choice-detail {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.folder {
+  margin: 0;
+}
