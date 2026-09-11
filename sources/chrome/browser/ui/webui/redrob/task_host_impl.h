@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace redrob {
 
@@ -25,7 +26,8 @@ namespace redrob {
 class TaskHostImpl : public mojom::TaskHost {
  public:
   TaskHostImpl(mojo::PendingReceiver<mojom::TaskHost> receiver,
-               mojo::PendingRemote<mojom::Page> page);
+               mojo::PendingRemote<mojom::Page> page,
+               scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
   TaskHostImpl(const TaskHostImpl&) = delete;
   TaskHostImpl& operator=(const TaskHostImpl&) = delete;
   ~TaskHostImpl() override;
@@ -44,6 +46,8 @@ class TaskHostImpl : public mojom::TaskHost {
 
   mojo::Receiver<mojom::TaskHost> receiver_;
   mojo::Remote<mojom::Page> page_;
+
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
 
   std::map<std::string, mojom::TaskPtr> tasks_;
   mojom::RoutingMode routing_ = mojom::RoutingMode::kLocal;

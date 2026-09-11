@@ -8,11 +8,19 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "base/files/file_path.h"
 #include "base/functional/callback.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
+#include "base/time/time.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+
+namespace network {
+class SimpleURLLoader;
+}  // namespace network
 
 namespace redrob {
 
@@ -25,8 +33,8 @@ namespace redrob {
 //  * loopback only, on a port the OS chose. Nothing routable is ever bound.
 //  * Basic credentials generated per launch, held here and never given to a renderer.
 //  * the API key is passed in the child's environment, not on a command line where `ps` would show it.
-//  * the sidecar's storage is redirected to a per-profile temporary path, so a browser profile and an
-//    Office session cannot read each other's history.
+//  * the sidecar's storage is redirected to a per-launch temporary path, so a browser profile and an
+//    Office session cannot see each other's sessions.
 //
 // This class does not parse model output and does not execute tools. The sidecar proposes tool calls;
 // deciding which of them the browser is willing to run is the caller's business, and that division is
@@ -37,10 +45,13 @@ class SidecarClient {
     // Not started. The engine binary was not found, which is the normal state of a dev build that has
     // not downloaded it -- Work packages Redrob Code as a downloaded sidecar and this follows suit.
     kUnavailable,
+    // Launched, but not answering yet. Readiness is a two-step handshake and this is the gap between
+    // its halves: the process is up, the port is not necessarily bound.
     kStarting,
     kReady,
-    // Started and then stopped answering. Distinguished from kUnavailable because it is worth
-    // surfacing differently: one is "not installed", the other is "it died".
+    // Started and then stopped answering, or never finished the handshake. Distinguished from
+    // kUnavailable because it is worth surfacing differently: one is "not installed", the other is
+    // "it is there and it is broken".
     kFailed,
   };
 
@@ -55,16 +66,28 @@ class SidecarClient {
   // development build uses; otherwise the packaged sidecar path is consulted.
   static std::optional<base::FilePath> FindEngineBinary();
 
+  // The startup line the engine prints, parsed into a base URL. Static and exposed because this is the
+  // one piece of the handshake that depends on an upstream output format rather than on our own code,
+  // so it is worth being pinnable without launching a process.
+  static std::optional<std::string> ParseStartupLine(std::string_view line);
+
   Status status() const { return status_; }
 
   // Idempotent: a second call while the process is healthy is a no-op rather than a second engine.
-  void EnsureStarted(StatusCallback on_status_change);
+  // `url_loader_factory` is used for the loopback health probe.
+  void EnsureStarted(scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+                     StatusCallback on_status_change);
 
   // The loopback base URL, e.g. http://127.0.0.1:48213. Empty until kReady.
   const std::string& base_url() const { return base_url_; }
 
  private:
-  void OnProcessLaunched(bool launched);
+  struct LaunchResult;
+
+  void SetStatus(Status status);
+  void OnLaunched(std::unique_ptr<LaunchResult> result);
+  void PollHealth();
+  void OnHealthResponse(std::optional<std::string> body);
 
   Status status_ = Status::kUnavailable;
   std::string base_url_;
@@ -74,6 +97,11 @@ class SidecarClient {
   base::FilePath data_dir_;
   base::Process process_;
   StatusCallback on_status_change_;
+
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
+  std::unique_ptr<network::SimpleURLLoader> health_loader_;
+  int health_attempts_ = 0;
+
   base::WeakPtrFactory<SidecarClient> weak_factory_{this};
 };
 

@@ -9,6 +9,8 @@
 #include "chrome/browser/ui/webui/redrob/task_host_impl.h"
 #include "chrome/grit/redrob_resources.h"
 #include "chrome/grit/redrob_resources_map.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
@@ -35,7 +37,12 @@ void RedrobUI::BindInterface(mojo::PendingReceiver<mojom::PageHandlerFactory> re
 void RedrobUI::CreateTaskHost(mojo::PendingRemote<mojom::Page> page,
                               mojo::PendingReceiver<mojom::TaskHost> host) {
   // One host per document. A reload replaces it, which also drops the sidecar handle the old one held.
-  task_host_ = std::make_unique<TaskHostImpl>(std::move(host), std::move(page));
+  // The loader factory comes from the browser context rather than the page: the health probe is the
+  // browser's request, not the renderer's, and must not inherit anything the page could influence.
+  content::BrowserContext* context = web_ui()->GetWebContents()->GetBrowserContext();
+  task_host_ = std::make_unique<TaskHostImpl>(
+      std::move(host), std::move(page),
+      context->GetDefaultStoragePartition()->GetURLLoaderFactoryForBrowserProcess());
 }
 
 WEB_UI_CONTROLLER_TYPE_IMPL(RedrobUI)

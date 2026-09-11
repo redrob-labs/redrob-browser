@@ -7,5 +7,11 @@ source_set("sidecar") {
     "sidecar_client.cc",
     "sidecar_client.h",
   ]
-  deps = [ "//base" ]
+  public_deps = [ "//services/network/public/cpp" ]
+  deps = [
+    "//base",
+    "//net",
+    "//net/traffic_annotation",
+    "//url",
+  ]
 }

@@ -41,9 +41,11 @@ bool IsTerminal(mojom::TaskState state) {
 }  // namespace
 
 TaskHostImpl::TaskHostImpl(mojo::PendingReceiver<mojom::TaskHost> receiver,
-                           mojo::PendingRemote<mojom::Page> page)
+                           mojo::PendingRemote<mojom::Page> page,
+                           scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
     : receiver_(this, std::move(receiver)),
       page_(std::move(page)),
+      url_loader_factory_(std::move(url_loader_factory)),
       sidecar_(std::make_unique<SidecarClient>()) {}
 
 TaskHostImpl::~TaskHostImpl() = default;
@@ -73,8 +75,9 @@ void TaskHostImpl::StartTask(const std::string& prompt,
     return;
   }
 
-  sidecar_->EnsureStarted(base::BindRepeating(&TaskHostImpl::OnSidecarStatusChanged,
-                                             base::Unretained(this)));
+  sidecar_->EnsureStarted(url_loader_factory_,
+                          base::BindRepeating(&TaskHostImpl::OnSidecarStatusChanged,
+                                              base::Unretained(this)));
   if (sidecar_->status() == SidecarClient::Status::kUnavailable ||
       sidecar_->status() == SidecarClient::Status::kFailed) {
     std::move(callback).Run(std::nullopt, mojom::StartError::kSidecarUnavailable);
