@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="redrob.css">
 </head>
 <body>
+  <div id="field" aria-hidden="true"></div>
   <!-- Two views in one document. The new tab shows #home; a task opens at ?task=<id> and shows
        #task. One document because a task tab and a new tab are the same WebUI host, and routing in
        the page costs nothing next to registering a second one. -->
@@ -48,8 +49,26 @@
       </div>
     </form>
 
-    <section class="recent" aria-labelledby="recent-heading">
-      <h2 id="recent-heading">Recent tasks</h2>
+    <section class="suggested" aria-labelledby="suggested-heading">
+      <h2 id="suggested-heading">Suggested tasks</h2>
+      <div class="tiles">
+        <button type="button" class="tile" data-prompt="Summarise this page in one sentence and list the links I can see.">
+          <span class="tile-kind">Read</span>
+          <span class="tile-title">Summarise a page</span>
+          <span class="tile-detail">Open something and get the gist, with nothing changed.</span>
+        </button>
+        <button type="button" class="tile" data-prompt="Compare these two pages and put the differences in a table. Say &quot;not stated&quot; where a page does not say.">
+          <span class="tile-kind">Compare</span>
+          <span class="tile-title">Compare two sources</span>
+          <span class="tile-detail">A table of differences, with the gaps marked as gaps.</span>
+        </button>
+        <button type="button" class="tile" data-prompt="Fill this form with my details but do not submit it, and tell me what you put where.">
+          <span class="tile-kind">Act</span>
+          <span class="tile-title">Fill a form, don't send it</span>
+          <span class="tile-detail">Filled and left for you to check before submitting.</span>
+        </button>
+      </div>
+      <h2 id="recent-heading" class="recent-heading" hidden>Recent tasks</h2>
       <ol id="cards" class="cards"></ol>
       <p id="home-status" role="status"></p>
     </section>

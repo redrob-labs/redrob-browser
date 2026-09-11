@@ -13,6 +13,7 @@
 #include "base/uuid.h"
 #include "components/bookmarks/browser/base_bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "chrome/browser/redrob/task_store.h"
 #include "components/saved_tab_groups/public/tab_group_sync_service.h"
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/menus/simple_menu_model.h"
@@ -41,6 +42,7 @@ namespace redrob {
 class RedrobSidebarSections : public views::View,
                               public bookmarks::BaseBookmarkModelObserver,
                               public tab_groups::TabGroupSyncService::Observer,
+                              public redrob::TaskStore::Observer,
                               public ui::SimpleMenuModel::Delegate {
   METADATA_HEADER(RedrobSidebarSections, views::View)
 
@@ -67,11 +69,16 @@ class RedrobSidebarSections : public views::View,
   void OnTabGroupLocalIdChanged(const base::Uuid& sync_id,
                                 const std::optional<tab_groups::LocalTabGroupID>& local_id) override;
 
+  // redrob::TaskStore::Observer
+  void OnTaskChanged(const mojom::Task& task) override;
+
   // ui::SimpleMenuModel::Delegate
   void ExecuteCommand(int command_id, int event_flags) override;
 
  private:
   void RebuildBookmarks();
+  void RebuildChats();
+  void OpenChat(std::string task_id);
   void OpenBookmark(GURL url);
   void UpdateWorkspaceButton();
   void ShowWorkspaceMenu();
@@ -83,6 +90,8 @@ class RedrobSidebarSections : public views::View,
   raw_ptr<views::LabelButton> workspace_button_ = nullptr;
   raw_ptr<views::Label> bookmarks_heading_ = nullptr;
   raw_ptr<views::View> bookmarks_list_ = nullptr;
+  raw_ptr<views::Label> chats_heading_ = nullptr;
+  raw_ptr<views::View> chats_list_ = nullptr;
   raw_ptr<views::Label> tabs_heading_ = nullptr;
   bool collapsed_ = false;
 
@@ -95,6 +104,7 @@ class RedrobSidebarSections : public views::View,
   base::ScopedObservation<tab_groups::TabGroupSyncService,
                           tab_groups::TabGroupSyncService::Observer>
       tab_group_observation_{this};
+  base::ScopedObservation<redrob::TaskStore, redrob::TaskStore::Observer> task_observation_{this};
 };
 
 }  // namespace redrob

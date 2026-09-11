@@ -81,16 +81,32 @@ body {
 
 /* ---------- new tab ---------- */
 
+/* An author `display` beats the UA stylesheet's `[hidden] { display: none }`, so giving #home a flex
+   display quietly un-hid it -- the task tab kept rendering the home view and pushed its own trace off
+   the bottom of the page. Restated here rather than avoiding flex, because centring is what the layout
+   wants and this is the one line that keeps `hidden` meaning hidden. */
+[hidden] {
+  display: none !important;
+}
+
+/* Centred rather than top-stacked. The composer is the one thing this surface is for, so it belongs
+   where the eye lands, with the suggestions under it instead of the page trailing off. */
 #home {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   margin: 0 auto;
   max-width: 900px;
-  padding: 96px 24px 48px;
+  min-height: 100vh;
+  padding: 0 24px;
 }
 
 /* The logo, drawn as the logo. It was previously used as a CSS mask at 18% opacity, which threw away
    its own paint -- the mark carries a blue-to-violet gradient of its own and a mask keeps only the
    silhouette, so the brand rendered as a grey smudge. */
 .mark {
+  filter: drop-shadow(0 14px 26px color-mix(in srgb, var(--rr-blue-6) 26%, transparent));
   /* An img is inline, so margin auto only centres it once it is a block. */
   display: block;
   height: 44px;
@@ -99,10 +115,11 @@ body {
 }
 
 .composer {
+  box-shadow: 0 18px 40px -20px color-mix(in srgb, var(--rr-blue-6) 30%, transparent),
+    0 2px 6px -2px color-mix(in srgb, var(--rr-black) 14%, transparent);
   background: var(--raised);
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
-  box-shadow: 0 1px 2px light-dark(rgb(0 9 33 / 6%), rgb(0 0 0 / 40%));
   margin: 0 auto;
   max-width: 620px;
   padding: 10px 12px;
@@ -149,9 +166,10 @@ body {
 }
 
 .seg-on {
-  background: var(--raised);
+  background: light-dark(var(--rr-gray-9), var(--rr-gray-1));
+  border-color: transparent;
+  color: light-dark(#fff, var(--rr-black));
   box-shadow: inset 0 0 0 1px var(--line);
-  color: var(--ink);
   font-weight: 500;
 }
 
@@ -183,7 +201,8 @@ body {
 }
 
 .chip[aria-pressed='true'] {
-  background: light-dark(#e6ebff, #1e2540);
+  background: var(--accent-soft);
+  border-color: var(--accent);
   color: var(--accent);
 }
 
@@ -355,6 +374,7 @@ h2 {
 }
 
 .step {
+  box-shadow: 0 10px 24px -20px color-mix(in srgb, var(--rr-black) 26%, transparent);
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   margin-bottom: 8px;
@@ -413,10 +433,11 @@ h2 {
 }
 
 .preview {
+  border-radius: var(--radius-panel);
+  box-shadow: 0 18px 40px -24px color-mix(in srgb, var(--rr-black) 34%, transparent);
   align-self: flex-start;
   background: var(--raised);
   border: 1px solid var(--line);
-  border-radius: var(--radius-control);
   flex: none;
   overflow: hidden;
   width: 340px;
@@ -455,4 +476,135 @@ h2 {
   border-radius: var(--radius-panel);
   margin: 0 20px 16px;
   max-width: none;
+}
+
+/* ---------------------------------------------------------------------------
+   The reference's visual language, the same one the onboarding uses.
+   The structure here was already right; what was missing was the language --
+   flat utility panels where the product has plates, hairline borders where it
+   has soft shadows, and 13px system-ui where it has a real type scale.
+   --------------------------------------------------------------------------- */
+
+/* The dotted field. Identical treatment to the onboarding's, deliberately: the first screen a user
+   sees and the one they see every day afterwards should not look like two products. It fades before
+   the bottom so the composer sits on calm ground rather than on texture. */
+#field {
+  background:
+    radial-gradient(circle at center, var(--line) 1px, transparent 1.2px) 0 0 / 22px 22px;
+  inset: 0;
+  mask-image: linear-gradient(to bottom, #000 0%, #000 62%, transparent 95%);
+  opacity: 0.8;
+  pointer-events: none;
+  position: fixed;
+  z-index: 0;
+}
+
+#home,
+#task {
+  position: relative;
+  z-index: 1;
+}
+
+
+
+
+.composer-row input {
+  /* The brand's subhead role rather than body: this is the one field the whole surface is about. */
+  font-size: 17px;
+  letter-spacing: -0.012em;
+}
+
+/* Pills, as the reference uses everywhere for actions. */
+.seg,
+.chip {
+  border-radius: 999px;
+}
+
+
+
+/* Section headings: the brand's label role -- small, heavy, wide-tracked, quiet. */
+.suggested h2,
+.trace h2 {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  margin: 0 0 12px;
+  text-transform: uppercase;
+}
+
+.suggested {
+  margin: 36px auto 0;
+  max-width: 760px;
+  width: 100%;
+}
+
+.tiles {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+/* Each suggestion is a plate. Same silhouette as the composer above it, which is what makes the
+   surface read as one thing rather than a form with a list under it. */
+.tile {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 10px 24px -18px color-mix(in srgb, var(--rr-black) 30%, transparent);
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  text-align: left;
+  transition: box-shadow 140ms ease, transform 140ms ease;
+}
+
+.tile:hover {
+  box-shadow: 0 16px 30px -18px color-mix(in srgb, var(--rr-blue-6) 34%, transparent);
+  transform: translateY(-1px);
+}
+
+.tile-kind {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tile-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+
+.tile-detail {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.recent-heading {
+  margin-top: 28px;
+}
+
+/* The trace's steps become plates too, and the task title gets the heading role. */
+.task-title {
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.022em;
+}
+
+
+
+@media (prefers-reduced-motion: reduce) {
+  .tile {
+    transition: none;
+  }
+
+  .tile:hover {
+    transform: none;
+  }
 }

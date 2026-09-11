@@ -194,7 +194,9 @@ function renderHome() {
     list.append(card);
   }
 
-  $('home-status').textContent = tasks.size === 0 ? 'No tasks yet.' : '';
+  // Left empty when there are no tasks. The suggested tiles above already answer an empty state, and a
+  // sentence on top of them saying it is empty is noise rather than information.
+  $('home-status').textContent = '';
 }
 
 // ---------- task tab ----------
@@ -321,6 +323,17 @@ if (openTaskId) {
 } else {
   $('home').hidden = false;
   bindModeButtons(null);
+
+  // The reason this surface exists is to be typed into.
+  $<HTMLInputElement>('prompt').focus();
+
+  for (const tile of document.querySelectorAll<HTMLElement>('.tile')) {
+    tile.addEventListener('click', () => {
+      const field = $<HTMLInputElement>('prompt');
+      field.value = tile.dataset['prompt'] ?? '';
+      field.focus();
+    });
+  }
   bindModeButtons(null);
 
   // Search is the browser's job, not the agent's. Handing the omnibox the query keeps one search

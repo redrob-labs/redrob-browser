@@ -15,10 +15,12 @@
 #include "chrome/browser/ui/navigator/browser_navigator.h"
 #include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/browser/redrob/agent_tabs.h"
+#include "chrome/browser/redrob/task_store_factory.h"
 #include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/webui_url_constants.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/saved_tab_groups/public/saved_tab_group.h"
 #include "components/saved_tab_groups/public/types.h"
@@ -41,6 +43,8 @@ namespace {
 // scrolled: a long bookmark bar would otherwise push the tab list off the bottom, and the tabs are what
 // the column is primarily for.
 constexpr size_t kMaxBookmarkRows = 8;
+// Same reasoning as the bookmark cap: the column is 240px and the tab list must stay visible.
+constexpr size_t kMaxChatRows = 6;
 
 constexpr int kSectionInset = 8;
 constexpr int kRowHeight = 28;
@@ -73,6 +77,11 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   bookmarks_list_->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kVertical, gfx::Insets(), 0));
 
+  chats_heading_ = AddChildView(MakeHeading("Chats"));
+  chats_list_ = AddChildView(std::make_unique<views::View>());
+  chats_list_->SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::Orientation::kVertical, gfx::Insets(), 0));
+
   tabs_heading_ = AddChildView(MakeHeading("Tabs"));
 
   if (browser_) {
@@ -82,6 +91,14 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
     }
   }
   UpdateWorkspaceButton();
+
+  if (browser_) {
+    if (redrob::TaskStore* store =
+            redrob::TaskStoreFactory::GetForProfile(browser_->GetProfile())) {
+      task_observation_.Observe(store);
+      RebuildChats();
+    }
+  }
 
   if (browser_) {
     bookmarks::BookmarkModel* model =
@@ -95,6 +112,58 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
 
 RedrobSidebarSections::~RedrobSidebarSections() = default;
 
+void RedrobSidebarSections::OnTaskChanged(const mojom::Task& task) {
+  // Rebuilt wholesale rather than patched. A task changes state several times a second while it runs,
+  // and reconciling rows against a list this short costs more code than it saves work.
+  RebuildChats();
+}
+
+void RedrobSidebarSections::RebuildChats() {
+  chats_list_->RemoveAllChildViews();
+  if (!browser_) {
+    return;
+  }
+  redrob::TaskStore* store = redrob::TaskStoreFactory::GetForProfile(browser_->GetProfile());
+  if (!store) {
+    return;
+  }
+
+  std::vector<mojom::TaskPtr> tasks = store->ListTasks();
+  // Newest first, and capped: this is a sidebar, not a history page. The full list is on the new tab.
+  std::sort(tasks.begin(), tasks.end(), [](const mojom::TaskPtr& a, const mojom::TaskPtr& b) {
+    return a->started_at_ms > b->started_at_ms;
+  });
+  size_t shown = 0;
+  for (const mojom::TaskPtr& task : tasks) {
+    if (shown >= kMaxChatRows) {
+      break;
+    }
+    // The prompt is the name, because that is what the user typed and therefore what they will
+    // recognise. Elided by the label rather than truncated here, so the full text stays in the tooltip.
+    auto* row = chats_list_->AddChildView(std::make_unique<views::LabelButton>(
+        base::BindRepeating(&RedrobSidebarSections::OpenChat, base::Unretained(this), task->id),
+        base::UTF8ToUTF16(task->prompt)));
+    row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    row->SetMinSize(gfx::Size(0, kRowHeight));
+    row->SetTooltipText(base::UTF8ToUTF16(task->prompt));
+    ++shown;
+  }
+  InvalidateLayout();
+}
+
+void RedrobSidebarSections::OpenChat(std::string task_id) {
+  if (!browser_) {
+    return;
+  }
+  // The same URL the new tab page navigates to, so a chat opened from here and one opened from a card
+  // are the same tab rather than two views of one task.
+  NavigateParams params(browser_,
+                        GURL(std::string(chrome::kChromeUIRedrobURL) + "?task=" + task_id),
+                        ui::PAGE_TRANSITION_AUTO_BOOKMARK);
+  params.disposition = WindowOpenDisposition::SINGLETON_TAB;
+  Navigate(&params);
+}
+
 void RedrobSidebarSections::SetCollapsed(bool collapsed) {
   if (collapsed_ == collapsed) {
     return;
@@ -103,6 +172,8 @@ void RedrobSidebarSections::SetCollapsed(bool collapsed) {
   // Hidden as a block. At 56px there is no width for a label, and half-drawn text would read as a
   // rendering bug rather than as a collapsed sidebar.
   workspace_button_->SetVisible(!collapsed);
+  chats_heading_->SetVisible(!collapsed);
+  chats_list_->SetVisible(!collapsed);
   bookmarks_heading_->SetVisible(!collapsed);
   bookmarks_list_->SetVisible(!collapsed);
   tabs_heading_->SetVisible(!collapsed);
