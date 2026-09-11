@@ -28,6 +28,10 @@ const tasks = new Map<string, Task>();
 
 // One document, two views. `?task=<id>` is a task tab; no query is the new tab.
 const openTaskId = new URLSearchParams(location.search).get('task');
+// `?ask=<prompt>` is how `redrob "..."` from a terminal arrives: the process singleton forwards the
+// command line to the running browser, which opens this surface with the prompt already in it. Started
+// here rather than in C++ so there is ONE StartTask path with one set of bounds and one permission gate.
+const askedFromCommandLine = new URLSearchParams(location.search).get('ask');
 
 function $<T extends HTMLElement>(id: string): T {
   return document.querySelector<T>(`#${id}`)!;
@@ -498,4 +502,20 @@ if (openTaskId) {
     tasks.set(task.id, task);
   }
   render();
+
+  // A task that came from the command line runs at Guard and Standard: the terminal cannot say
+  // otherwise, and a switch that silently granted more than the composer's own default would be the
+  // widest permission in the product hiding in the narrowest-looking place.
+  if (askedFromCommandLine) {
+    const {taskId, error} = await host.startTask(
+        askedFromCommandLine, [], PermissionMode.kGuard, Effort.kStandard);
+    if (error !== null && error !== undefined) {
+      $('home-status').textContent =
+          'That command could not be run: the Redrob Code engine is not available.';
+    } else if (taskId) {
+      // Replaced, not pushed: the prompt should not stay in this tab's URL, and Back should not re-run
+      // the task.
+      location.replace(`chrome://redrob/?task=${encodeURIComponent(taskId)}`);
+    }
+  }
 }

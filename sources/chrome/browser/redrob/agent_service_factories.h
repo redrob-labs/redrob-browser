@@ -15,6 +15,7 @@ namespace redrob {
 class MemoryStore;
 class ModelStore;
 class RoutineStore;
+class RpcServer;
 
 // The three services that sit beside TaskStore, in one file because they are one decision: what the
 // agent keeps, what starts it on a schedule, and which model answers it. All three are regular-profile
@@ -63,6 +64,23 @@ class RoutineStoreFactory : public ProfileKeyedServiceFactory {
       content::BrowserContext* context) const override;
   // Unlike the other two, this one must EXIST to do its job: nothing opens a routine, so a lazily
   // created scheduler would never arm its timer and every routine would silently never run.
+  bool ServiceIsCreatedWithBrowserContext() const override;
+};
+
+class RpcServerFactory : public ProfileKeyedServiceFactory {
+ public:
+  static RpcServer* GetForProfile(Profile* profile);
+  static RpcServerFactory* GetInstance();
+
+ private:
+  friend base::NoDestructor<RpcServerFactory>;
+  RpcServerFactory();
+  ~RpcServerFactory() override;
+
+  std::unique_ptr<KeyedService> BuildServiceInstanceForBrowserContext(
+      content::BrowserContext* context) const override;
+  // Same reason as the scheduler: a socket nobody has asked for is a socket that never gets bound. The
+  // service is created at startup and decides for itself whether to listen.
   bool ServiceIsCreatedWithBrowserContext() const override;
 };
 

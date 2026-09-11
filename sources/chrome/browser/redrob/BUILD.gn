@@ -20,6 +20,8 @@ source_set("sidecar") {
     "redrob_prefs.h",
     "routine_store.cc",
     "routine_store.h",
+    "rpc_server.cc",
+    "rpc_server.h",
     "sidecar_client.cc",
     "sidecar_client.h",
     "task_store.cc",

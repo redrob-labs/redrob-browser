@@ -94,3 +94,7 @@ sources/chrome/common/importer/chromium_profile_locator.h   chrome/common/import
 sources/chrome/common/importer/chromium_profile_locator.cc  chrome/common/importer/chromium_profile_locator.cc
 sources/chrome/utility/importer/chromium_importer.h   chrome/utility/importer/chromium_importer.h
 sources/chrome/utility/importer/chromium_importer.cc  chrome/utility/importer/chromium_importer.cc
+
+# The loopback RPC that serves the CLI, the MCP server and the REPL. Off by default.
+sources/chrome/browser/redrob/rpc_server.h   chrome/browser/redrob/rpc_server.h
+sources/chrome/browser/redrob/rpc_server.cc  chrome/browser/redrob/rpc_server.cc

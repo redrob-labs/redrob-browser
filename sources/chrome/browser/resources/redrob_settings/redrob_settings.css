@@ -369,3 +369,15 @@ body {
 .folder {
   margin: 0;
 }
+
+.mono {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  display: inline-block;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  margin: 0;
+  padding: 6px 10px;
+  overflow-wrap: anywhere;
+}

@@ -67,6 +67,7 @@ async function refresh() {
   renderProviders(settings);
   renderPasswords(settings);
   renderFiles(settings);
+  renderRpc(settings);
 }
 
 function renderRoutines(routines: Routine[], chats: AgentSettings['chats']) {
@@ -244,6 +245,12 @@ function renderPasswords(settings: AgentSettings) {
   }
 }
 
+function renderRpc(settings: AgentSettings) {
+  $<HTMLInputElement>('rpc-enabled').checked = settings.rpc.enabled;
+  $('rpc-endpoint').textContent = settings.rpc.endpoint || 'nothing';
+  $('rpc-handle').textContent = settings.rpc.handleFileName;
+}
+
 function renderFiles(settings: AgentSettings) {
   $('folder-name').textContent = settings.workingFolder || 'none';
 }
@@ -354,6 +361,16 @@ $<HTMLInputElement>('password-autosignin').addEventListener('change', () => {
 
 $<HTMLButtonElement>('password-open').addEventListener('click', () => {
   host.openPasswordManager();
+});
+
+$<HTMLInputElement>('rpc-enabled').addEventListener('change', async () => {
+  const wanted = $<HTMLInputElement>('rpc-enabled').checked;
+  const {endpoint} = await host.setRpcEnabled(wanted);
+  $('rpc-status').textContent = wanted
+      ? (endpoint ? `Listening on ${endpoint}.`
+                  : 'The socket could not be bound, so nothing is listening.')
+      : 'Stopped listening, and the token file is gone.';
+  await refresh();
 });
 
 $<HTMLButtonElement>('folder-pick').addEventListener('click', async () => {

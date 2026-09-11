@@ -44,6 +44,10 @@ inline constexpr char kSelectedProviderId[] = "redrob.model.selected_provider_id
 // "external" (they keep another one, so stop offering to save), or "skip".
 inline constexpr char kPasswordManagerChoice[] = "redrob.passwords.choice";
 
+// The loopback RPC endpoint that serves the CLI, the MCP server and the REPL. Off by default:
+// a local socket that can drive the browser is, to any other local process, the browser.
+inline constexpr char kRpcEnabled[] = "redrob.rpc.enabled";
+
 // Set once the import step has run, so a second first-run does not re-offer it. Records what was
 // imported, honestly: a source that could not bring cookies says so rather than being listed.
 inline constexpr char kImportCompleted[] = "redrob.import.completed";

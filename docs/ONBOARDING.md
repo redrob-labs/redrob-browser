@@ -12,7 +12,45 @@ tab as the task composer, a task opening as a tab with its trace, the engine's s
 the tool loop, agent tabs as real grouped tabs, captured-frame previews, workspaces on saved tab
 groups, and the branding.
 
-Not built: everything below.
+Then, in order, everything §5 used to list as not built:
+
+* **Chats** in the sidebar, listing the profile's real tasks.
+* **Suggested tasks** on the new tab, filling the composer rather than launching.
+* **Steer and Queue.** One call with a mode, because the timing question is the feature: Enter queues,
+  interrupting is a button you have to mean. Queued messages land at a boundary where the engine has
+  been answered for everything it proposed; interrupting commits the partial answer WITHOUT the tool
+  calls that were still arriving, since recording those leaves the engine holding calls that will never
+  be answered.
+* **Routines**, cron and heartbeat, on a wall-clock timer so a suspended machine still fires. Skipped
+  rather than queued when four tasks are already running; a routine overdue because the browser was
+  closed runs once, not once per interval missed.
+* **Memory**, prefs-backed and capped at 200 entries so it stays reviewable in one screen, with each
+  entry carrying the task that produced it. Searched at the start of every task, and what it found
+  becomes a step in the trace.
+* **Ultrabrowse**, which is a real tool budget (3 / 8 / 32 rounds), the `reasoning_effort` the engine is
+  told, and `plan_research` -- somewhere to write a plan into the trace before the tabs start opening.
+* **CLI, MCP and REPL.** `--redrob-task="..."` works with no setup through the process singleton;
+  everything that needs an answer back goes through a loopback RPC that also serves MCP at `POST /mcp`.
+* **Password manager**: the three-way choice, told truthfully -- "another manager" stops save prompts
+  and does not stop filling, and nothing is migrated.
+* **Model providers**: an API key per provider, encrypted through the platform keystore, never readable
+  back by any page, with turns routed to that provider through a second entry point rather than a flag.
+* **The Chromium-family importer**, because 153 has none at all.
+
+Not built, and named rather than implied:
+
+* **OAuth model providers.** API keys work; connecting a ChatGPT or Claude *subscription* needs a
+  loopback PKCE flow, and there is no reusable PKCE client in the tree (`OAuth2AccessTokenFetcherImpl`
+  has no `redirect_uri` or `code_verifier` and parses a Google-shaped response). The pieces are now all
+  here -- `net::HttpServer` for the loopback listener, ModelStore for the encrypted token -- but the flow
+  itself is unwritten.
+* **The `@` context picker.** `StartTask` accepts `context_refs` and nothing produces them yet.
+* **A packaged `redrob` binary on PATH.** The switch and the endpoint both work; what is missing is the
+  small wrapper that finds the handle file, does the `/hello` handshake and streams `/task/<id>/stream`
+  to a terminal.
+* **macOS `Assets.car` / `AppIcon.icon`**, which need `actool` and therefore a mac host.
+* **A cold-cache full build**, never validated: every build since the first has been incremental.
+
 
 ## 1. First run
 
@@ -149,30 +187,40 @@ Chromium already has a path-scoped grant primitive to build on rather than inven
 File writes themselves are UI-thread authorization followed by `base::ThreadPool` blocking I/O, with
 only the already-authorized destination copied into the posted closure.
 
-## 5. The rest, in the order it should land
+## 5. The rest, and what each turned out to cost
 
-Each of these is a feature the reference has and we do not.
+Each of these was a feature the reference has and we did not. All are built now; what is recorded here
+is the seam each hangs off and the decision inside it that a future reader would otherwise re-litigate.
 
-1. **Chats section.** The reference's sidebar is Bookmarks / Chats / Tabs, where Chats is the list of
-   agent tasks. Ours says Workspaces and has no Chats. Our task list currently lives only on the new
-   tab page.
-2. **Suggested tasks** on the new tab, instead of "No tasks yet" -- the reference uses it to lead
-   people to Memory, Routines and settings.
-3. **Steer and Queue** for a task already running. We have a stop button and nothing else, so the
-   only way to correct a running task is to kill it.
-4. **Routines**: cron routines that start a new task on a schedule, and heartbeat routines that wake
-   an existing chat with its context. Managed from Settings.
-5. **Memory**: preferences and context carried between tasks, reviewable and editable, with a
-   retention setting.
-6. **Ultrabrowse**: a deeper research effort that plans sub-tasks across many sources. Our effort
-   picker already has the affordance and no behaviour behind it.
-7. **CLI, MCP and REPL**: a `redrob` command that runs a browser task from a terminal, an MCP server
-   so other agents can call this browser as a tool, and a REPL for deterministic page automation.
-   Redrob Code already ships a CLI, so the shape is known.
-8. **Password manager**: the reference offers its own, connecting an existing one, or skipping.
-   Relevant to us mainly because logged-in sites are where the agent is useful.
-9. **Model providers**: connecting a ChatGPT, Claude or Copilot subscription by OAuth, or an API key.
-   Ours is hardcoded to `redrob/auto`.
+1. **Chats section.** The reference's sidebar is Bookmarks / Chats / Tabs. Ours is Workspaces /
+   Bookmarks / Chats / Tabs, listing the profile's tasks newest first via `TaskStore::Observer`, capped
+   because the column is 240px and the tab list has to stay visible.
+2. **Suggested tasks** on the new tab. A tile FILLS the composer rather than launching: the user should
+   see and be able to change the words about to be sent on their behalf.
+3. **Steer and Queue.** `SendFollowUp(task_id, prompt, FollowUpMode)`. Draining happens in
+   `OnCompletionFinished` (turn produced prose, not another call) and in `FinishTool` (all proposed
+   calls answered) -- the two points where inserting a user message does not corrupt a turn the engine is
+   mid-answer on.
+4. **Routines.** `RoutineStore`, a profile service created *with* the browser context, because a lazily
+   created scheduler never arms its timer. `base::WallClockTimer`, not `OneShotTimer`: the latter is
+   TimeTicks-based and freezes across suspend.
+5. **Memory.** `MemoryStore` over prefs. The 200-entry cap is the design, not a shortcut -- memory that
+   outgrows the list that shows it has stopped being reviewable.
+6. **Ultrabrowse.** Effort decides the tool budget, the `reasoning_effort` field, and whether
+   `plan_research` is declared. Not a sentence in a prompt claiming depth.
+7. **CLI, MCP and REPL.** Two paths, because the process singleton is one-way: it forwards a command
+   line and answers with an ACK, no payload and no exit code (`process_singleton_posix.cc` sends the ACK
+   the moment the callback accepts, before the work is even posted). So `--redrob-task=` covers the
+   fire-and-forget case with zero setup, and a loopback `net::HttpServer` covers everything needing an
+   answer back. That server must run on a thread with an IO message pump -- `SocketPosix::Accept`
+   DCHECKs otherwise, which is a crash on the first connection rather than a startup failure.
+   `GET /hello` is unauthenticated on purpose: a browser killed outright leaves its handle file behind,
+   and a client that opened with the token would hand it to whatever process later bound that port.
+8. **Password manager.** `kCredentialsEnableService` false stops *offering*, not filling. The UI says so.
+9. **Model providers.** `os_crypt_async::Encryptor` -- the sync `components/os_crypt/sync/os_crypt.h`
+   this was first written against no longer exists in 153. The key crosses to the browser once and never
+   comes back; a settings page can set one and see that one is set, and cannot read it.
+
 
 ## What "the same design" means
 

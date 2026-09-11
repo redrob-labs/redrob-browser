@@ -62,6 +62,7 @@ class SettingsHostImpl : public settings::mojom::SettingsHost,
   void SetPasswordAutoSignin(bool enabled) override;
   void SetPasswordManagerChoice(const std::string& choice) override;
   void OpenPasswordManager() override;
+  void SetRpcEnabled(bool enabled, SetRpcEnabledCallback callback) override;
   void ChooseWorkingFolder(ChooseWorkingFolderCallback callback) override;
   void ClearWorkingFolder() override;
 

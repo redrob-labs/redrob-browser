@@ -26,6 +26,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterListPref(kModelProviders);
   registry->RegisterStringPref(kSelectedProviderId, std::string());
 
+  registry->RegisterBooleanPref(kRpcEnabled, false);
   registry->RegisterStringPref(kPasswordManagerChoice, std::string());
   registry->RegisterBooleanPref(kImportCompleted, false);
 }

@@ -9,7 +9,12 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/redrob/memory_store.h"
 #include "chrome/browser/redrob/model_store.h"
+#include "base/command_line.h"
+#include "chrome/browser/redrob/redrob_prefs.h"
 #include "chrome/browser/redrob/routine_store.h"
+#include "chrome/browser/redrob/rpc_server.h"
+#include "chrome/common/chrome_switches.h"
+#include "components/prefs/pref_service.h"
 #include "chrome/browser/redrob/task_store_factory.h"
 
 namespace redrob {
@@ -88,6 +93,47 @@ std::unique_ptr<KeyedService> RoutineStoreFactory::BuildServiceInstanceForBrowse
 }
 
 bool RoutineStoreFactory::ServiceIsCreatedWithBrowserContext() const {
+  return true;
+}
+
+// static
+RpcServer* RpcServerFactory::GetForProfile(Profile* profile) {
+  return static_cast<RpcServer*>(
+      GetInstance()->GetServiceForBrowserContext(profile, /*create=*/true));
+}
+
+// static
+RpcServerFactory* RpcServerFactory::GetInstance() {
+  static base::NoDestructor<RpcServerFactory> instance;
+  return instance.get();
+}
+
+RpcServerFactory::RpcServerFactory()
+    : ProfileKeyedServiceFactory("RedrobRpcServer",
+                                 ProfileSelections::BuildForRegularProfile()) {
+  DependsOn(TaskStoreFactory::GetInstance());
+}
+
+RpcServerFactory::~RpcServerFactory() = default;
+
+std::unique_ptr<KeyedService> RpcServerFactory::BuildServiceInstanceForBrowserContext(
+    content::BrowserContext* context) const {
+  Profile* profile = Profile::FromBrowserContext(context);
+  auto server =
+      std::make_unique<RpcServer>(profile, TaskStoreFactory::GetForProfile(profile));
+  // Two ways in, and both are the user asking: the setting, or the switch on this launch. The switch
+  // exists so the endpoint can be turned on for one run without leaving it on -- which is what you want
+  // when the reason you are enabling it is a script.
+  const bool by_pref = profile->GetPrefs()->GetBoolean(prefs::kRpcEnabled);
+  const bool by_switch =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kRedrobRpc);
+  if (by_pref || by_switch) {
+    server->Start();
+  }
+  return server;
+}
+
+bool RpcServerFactory::ServiceIsCreatedWithBrowserContext() const {
   return true;
 }
 

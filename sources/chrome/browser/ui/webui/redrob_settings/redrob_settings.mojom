@@ -98,6 +98,16 @@ struct ChatSummary {
   string prompt;
 };
 
+// The loopback endpoint that serves the CLI, the MCP server and the REPL.
+struct RpcSettings {
+  bool enabled;
+  // Bound address, empty when not listening. Loopback only, on a port the OS chose.
+  string endpoint;
+  // Where the CLI reads the address and the per-launch token from. A NAME, not a path: the page
+  // is told which file to mention, not where this profile lives on disk.
+  string handle_file_name;
+};
+
 struct AgentSettings {
   // The folder tasks write into, as a display name. Never the path.
   string working_folder;
@@ -106,6 +116,7 @@ struct AgentSettings {
   PasswordSettings passwords;
   array<Routine> routines;
   array<ChatSummary> chats;
+  RpcSettings rpc;
 };
 
 interface SettingsHost {
@@ -139,6 +150,10 @@ interface SettingsHost {
   OpenPasswordManager();
 
   // The browser's own folder picker, so the path is one the user saw. Returns the display name.
+  // Turning this on binds the socket now; turning it off closes it and deletes the handle
+  // file. Returns the endpoint it bound, or null.
+  SetRpcEnabled(bool enabled) => (string? endpoint);
+
   ChooseWorkingFolder() => (string? display_path);
   ClearWorkingFolder();
 };

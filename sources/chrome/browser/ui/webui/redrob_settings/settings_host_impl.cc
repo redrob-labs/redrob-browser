@@ -12,6 +12,7 @@
 #include "chrome/browser/redrob/model_store.h"
 #include "chrome/browser/redrob/redrob_prefs.h"
 #include "chrome/browser/redrob/routine_store.h"
+#include "chrome/browser/redrob/rpc_server.h"
 #include "chrome/browser/redrob/task_store.h"
 #include "chrome/browser/redrob/task_store_factory.h"
 #include "chrome/browser/ui/navigator/browser_navigator.h"
@@ -176,6 +177,12 @@ void SettingsHostImpl::GetSettings(GetSettingsCallback callback) {
     out->chats.push_back(std::move(chat));
   }
 
+  RpcServer* rpc = RpcServerFactory::GetForProfile(profile_);
+  out->rpc = settings::mojom::RpcSettings::New();
+  out->rpc->enabled = rpc->running();
+  out->rpc->endpoint = rpc->endpoint();
+  out->rpc->handle_file_name = "redrob-cli.json";
+
   std::move(callback).Run(std::move(out));
 }
 
@@ -279,6 +286,23 @@ void SettingsHostImpl::OpenPasswordManager() {
                         ui::PAGE_TRANSITION_AUTO_BOOKMARK);
   params.disposition = WindowOpenDisposition::SINGLETON_TAB;
   Navigate(&params);
+}
+
+void SettingsHostImpl::SetRpcEnabled(bool enabled, SetRpcEnabledCallback callback) {
+  profile_->GetPrefs()->SetBoolean(prefs::kRpcEnabled, enabled);
+  RpcServer* rpc = RpcServerFactory::GetForProfile(profile_);
+  // Applied now rather than at the next launch. A setting whose effect you have to
+  // restart to see is a setting people toggle twice and then distrust.
+  if (enabled) {
+    if (!rpc->Start()) {
+      std::move(callback).Run(std::nullopt);
+      return;
+    }
+    std::move(callback).Run(rpc->endpoint());
+    return;
+  }
+  rpc->Stop();
+  std::move(callback).Run(std::nullopt);
 }
 
 void SettingsHostImpl::ChooseWorkingFolder(ChooseWorkingFolderCallback callback) {
