@@ -8,6 +8,7 @@ nobody could answer "what do we actually own" without counting files.
 
     ./scripts/redrob.py bootstrap    # depot_tools, once
     ./scripts/redrob.py sync         # fetch Chromium at CHROMIUM_VERSION and run its hooks
+    ./scripts/redrob.py brand        # re-derive the branding delta onto the checkout
     ./scripts/redrob.py apply        # apply patches/ onto the checkout
     ./scripts/redrob.py build        # gn gen + ninja
     ./scripts/redrob.py run          # launch what was built
@@ -15,6 +16,12 @@ nobody could answer "what do we actually own" without counting files.
 
 `export` is the half that keeps the fork honest: you edit the Chromium tree like a normal tree, then
 export, and the patch set is whatever you actually changed. Nothing is hand-maintained.
+
+`brand` is the other half of that idea applied to the one delta that is too mechanical to hand-maintain:
+Chromium's product name appears 683 times in one strings file, so after a version bump the branding
+patch is re-derived from the new checkout rather than conflict-resolved. The sequence on a bump is
+sync -> brand -> apply -> export, and `brand` must run before `apply` so hand-written patches land on
+top of it.
 
 Standard library only, and nothing is installed outside this directory: depot_tools brings its own
 clang, gn and ninja, and Chromium's own sysroot supplies the C libraries, so no system packages are
@@ -35,7 +42,27 @@ CHROMIUM = ROOT / "chromium"
 SRC = CHROMIUM / "src"
 DEPOT_TOOLS = ROOT / "depot_tools"
 PATCHES = ROOT / "patches"
+BRANDING = ROOT / "branding"
+SOURCES = ROOT / "sources"
 DEPOT_TOOLS_URL = "https://chromium.googlesource.com/chromium/tools/depot_tools.git"
+
+# What the product is called, and what upstream calls it. The substitution runs over Chromium's own
+# strings file, so it has to leave alone the places where "Chromium" is a fact about upstream rather
+# than a name for our product -- the BSD notice above all, which we are required to retain.
+UPSTREAM_NAME = "Chromium"
+PRODUCT_NAME = "Redrob"
+PROTECTED_PHRASES = (
+    "The Chromium Authors",
+    "Chromium OS",
+    "Chromium Projects",
+    "chromium.org",
+    "chromium.googlesource.com",
+)
+
+# The one strings file that carries the unbranded product name, and the UA assembly point.
+STRINGS_GRD = "chrome/app/chromium_strings.grd"
+USER_AGENT_CC = "components/embedder_support/user_agent_utils.cc"
+
 
 # Which gn args file each build flavour uses. `dev` is the one to use for a first build: an official
 # build turns on LTO and PGO and roughly doubles a wall-clock that is already hours long.
@@ -122,14 +149,142 @@ def cmd_sync(args: argparse.Namespace) -> None:
 def cmd_apply(args: argparse.Namespace) -> None:
     if not SRC.exists():
         sys.exit("no checkout: run sync first")
+    # Our own files first: a registration patch that references chrome/browser/ui/webui/redrob would
+    # otherwise apply against a directory that does not exist yet.
+    copied = copy_sources()
     patches = sorted(PATCHES.glob("*.patch"))
     if not patches:
-        print("no patches yet, which is a valid state for the scaffold")
+        print(f"{copied} source file(s) copied; no patches yet, which is a valid state for the scaffold")
         return
     for patch in patches:
         # --3way so a patch that has drifted against a new Chromium reports a real conflict instead of
         # refusing wholesale, which is the difference between a rebase you can finish and one you redo.
         run(["git", "apply", "--3way", "--whitespace=nowarn", str(patch)], SRC, check=not args.keep_going)
+
+
+def read_manifest() -> list[tuple[str, str, str]]:
+    """branding/manifest as (source, target, kind) rows, comments and blanks dropped."""
+    path = BRANDING / "manifest"
+    if not path.exists():
+        return []
+    rows = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) != 3:
+            sys.exit(f"malformed manifest row (want SOURCE TARGET KIND): {line}")
+        rows.append((parts[0], parts[1], parts[2]))
+    return rows
+
+
+def read_sources_manifest() -> list[tuple[str, str]]:
+    """sources/manifest as (source, target) rows: code we own, not a delta against Chromium."""
+    path = SOURCES / "manifest"
+    if not path.exists():
+        return []
+    rows = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            sys.exit(f"malformed sources row (want SOURCE TARGET): {line}")
+        rows.append((parts[0], parts[1]))
+    return rows
+
+
+def copy_sources() -> int:
+    """Put the files we own into the checkout. Directories are created as needed."""
+    count = 0
+    for source, target in read_sources_manifest():
+        source_path = ROOT / source
+        target_path = SRC / target
+        if not source_path.exists():
+            sys.exit(f"missing source: {source}")
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source_path, target_path)
+        print(f"source   {target}")
+        count += 1
+    return count
+
+
+
+def overlay_binary_targets() -> set[str]:
+    return {target for _, target, kind in read_manifest() if kind == "binary"}
+
+
+def substitute_product_name(text: str) -> tuple[str, int]:
+    """`Chromium` -> `Redrob`, except inside the phrases that are about upstream, not about us.
+
+    Done by masking the protected phrases out, substituting, then restoring them. Regex lookarounds
+    would need one alternative per phrase and would still miss overlaps; masking cannot.
+    """
+    masks = {}
+    for index, phrase in enumerate(PROTECTED_PHRASES):
+        token = f"\x00PROTECTED{index}\x00"
+        if phrase in text:
+            masks[token] = phrase
+            text = text.replace(phrase, token)
+    replaced = text.count(UPSTREAM_NAME)
+    text = text.replace(UPSTREAM_NAME, PRODUCT_NAME)
+    for token, phrase in masks.items():
+        text = text.replace(token, phrase)
+    return text, replaced
+
+
+def append_user_agent_token(text: str) -> tuple[str, bool]:
+    """Add a `Redrob/<version>` token AFTER the Safari token, leaving `Chrome/<version>` intact.
+
+    This is deliberately additive. The whole reason for moving off Firefox was that Korean banking and
+    government sites sniff the UA and refuse anything that does not look like Chrome, so replacing the
+    Chrome token would reintroduce the exact defect the base swap was meant to fix. Edge and Brave
+    append their own token in the same position for the same reason.
+    """
+    old = '"%s Safari/537.36",'
+    new = '"%s Safari/537.36 Redrob/" PRODUCT_VERSION,'
+    if new in text:
+        return text, False
+    if old not in text:
+        sys.exit(f"UA assembly point not found in {USER_AGENT_CC}; upstream moved it")
+    return text.replace(old, new, 1), True
+
+
+def cmd_brand(_: argparse.Namespace) -> None:
+    """Re-derive the branding delta onto the checkout: assets, product name, user agent.
+
+    Idempotent, so running it twice is a no-op rather than a doubled UA token. It writes into
+    chromium/src and nothing else; `export` is what turns the text half into patches/.
+    """
+    if not SRC.exists():
+        sys.exit("no checkout: run sync first")
+
+    for source, target, kind in read_manifest():
+        source_path = ROOT / source
+        target_path = SRC / target
+        if not source_path.exists():
+            sys.exit(f"missing branding source: {source}")
+        if not target_path.parent.exists():
+            sys.exit(f"target directory gone, upstream moved it: {target}")
+        shutil.copyfile(source_path, target_path)
+        print(f"overlay [{kind}] {target}")
+
+    grd = SRC / STRINGS_GRD
+    if not grd.exists():
+        sys.exit(f"strings file not found: {STRINGS_GRD}; upstream moved it")
+    text, replaced = substitute_product_name(grd.read_text())
+    grd.write_text(text)
+    print(f"strings   {STRINGS_GRD}: {replaced} occurrence(s) of {UPSTREAM_NAME} -> {PRODUCT_NAME}")
+
+    ua = SRC / USER_AGENT_CC
+    if not ua.exists():
+        sys.exit(f"user agent file not found: {USER_AGENT_CC}; upstream moved it")
+    text, changed = append_user_agent_token(ua.read_text())
+    if changed:
+        ua.write_text(text)
+    print(f"useragent {USER_AGENT_CC}: {'token appended' if changed else 'already branded'}")
 
 
 def cmd_export(_: argparse.Namespace) -> None:
@@ -153,11 +308,22 @@ def cmd_export(_: argparse.Namespace) -> None:
         check=True,
     ).stdout.split()
 
-    if PATCHES.exists():
-        shutil.rmtree(PATCHES)
-    PATCHES.mkdir(parents=True)
+    # Binary overlays are declared in branding/manifest and deliberately never become patches: a
+    # binary diff cannot be reviewed, and patches/ is supposed to read as an inventory.
+    skipped = overlay_binary_targets()
 
+    if PATCHES.exists():
+        # Clear only the generated output. Deleting the directory takes README.md with it -- which is
+        # documentation, not output, and is exactly what happened the first time this ran.
+        for stale in PATCHES.glob("*.patch"):
+            stale.unlink()
+    PATCHES.mkdir(parents=True, exist_ok=True)
+
+    exported = 0
     for relative in changed:
+        if relative in skipped:
+            print(f"skipped {relative} (binary overlay, see branding/manifest)")
+            continue
         diff = subprocess.run(
             ["git", "diff", "--src-prefix=a/", "--dst-prefix=b/", "--", relative],
             cwd=SRC,
@@ -167,17 +333,33 @@ def cmd_export(_: argparse.Namespace) -> None:
             check=True,
         ).stdout
         (PATCHES / patch_name(relative)).write_text(diff)
+        exported += 1
         print(f"exported {relative}")
 
-    if added:
+    # Only the files that could plausibly be ours. A synced checkout carries tens of thousands of
+    # untracked third_party and node_modules files, and listing them buries the line that matters.
+    # Files we deliberately copied in are already in this repository, so they are not news either.
+    copied_in = {target for _, target in read_sources_manifest()}
+    ours = [
+        relative
+        for relative in added
+        if not relative.startswith("third_party/")
+        and "/node_modules/" not in relative
+        and relative not in copied_in
+    ]
+    if ours:
         # New files are ours outright rather than a delta, so they belong in the repository as files.
         # Naming them here rather than silently patching them in is the point: a fork should be able to
         # say which files are Chromium's and which are its own.
         print("\nUntracked files in the checkout, which are not patches. Move them into this repo:")
-        for relative in added:
+        for relative in ours:
             print(f"  {relative}")
+    hidden = len(added) - len(ours)
+    if hidden:
+        print(f"\n({hidden} untracked third_party/node_modules files not listed -- upstream's, not ours.)")
 
-    print(f"\n{len(changed)} patch(es) in {PATCHES}")
+    print(f"\n{exported} patch(es) in {PATCHES}")
+
 
 
 def cmd_build(args: argparse.Namespace) -> None:
@@ -209,6 +391,8 @@ def main() -> None:
     sync = sub.add_parser("sync", help="fetch Chromium at CHROMIUM_VERSION")
     sync.add_argument("--no-hooks", action="store_true", help="skip gclient sync/runhooks")
     sync.set_defaults(func=cmd_sync)
+
+    sub.add_parser("brand", help="re-derive the branding delta onto the checkout").set_defaults(func=cmd_brand)
 
     apply_ = sub.add_parser("apply", help="apply patches/ onto the checkout")
     apply_.add_argument("--keep-going", action="store_true", help="report failures instead of stopping")

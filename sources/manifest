@@ -1,0 +1,15 @@
+# sources/manifest — code this fork owns outright, and where it goes in the checkout.
+#
+# `patches/README.md` is explicit that a file we add is not a patch, so these are copied into
+# chromium/src by `./scripts/redrob.py apply` rather than diffed. They are also excluded from
+# `export`'s "untracked files, move them into this repo" report, because they already are in it.
+#
+# Every path under sources/ mirrors its destination, so the mapping is checkable by eye.
+#
+# Format: SOURCE  TARGET
+
+# chrome://redrob, the AI surface. See docs/AI_SURFACE.md. The only Chromium files this needs are the
+# two one-line registrations in patches/, which is the whole point of putting the product in a WebUI.
+sources/chrome/browser/ui/webui/redrob/BUILD.gn      chrome/browser/ui/webui/redrob/BUILD.gn
+sources/chrome/browser/ui/webui/redrob/redrob_ui.h   chrome/browser/ui/webui/redrob/redrob_ui.h
+sources/chrome/browser/ui/webui/redrob/redrob_ui.cc  chrome/browser/ui/webui/redrob/redrob_ui.cc

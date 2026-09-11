@@ -1,0 +1,85 @@
+# branding/manifest — files this fork substitutes wholesale into the checkout.
+#
+# `./scripts/redrob.py brand` copies each SOURCE over its TARGET in chromium/src.
+# KIND decides what happens at `export` time, and the distinction is the point:
+#
+#   text    the file is ours in full, and the change is still recorded in patches/
+#           so `ls patches/` stays a true inventory of what we alter about Chromium.
+#   binary  the file is replaced but NOT exported. A binary patch is unreviewable
+#           and would destroy that inventory property; this manifest is the record
+#           instead. Icons are the only case.
+#
+# Files Chromium does not have at all are not branding and are not patches; they live under
+# sources/ and are declared in sources/manifest, which `redrob.py apply` copies in.
+#
+# Format: SOURCE  TARGET  KIND
+
+
+branding/BRANDING                    chrome/app/theme/chromium/BRANDING                    text
+
+branding/redrob-mark.svg             chrome/app/theme/chromium/product_logo.svg            binary
+branding/icons/product_logo_16.png   chrome/app/theme/chromium/product_logo_16.png         binary
+branding/icons/product_logo_22_mono.png chrome/app/theme/chromium/product_logo_22_mono.png binary
+branding/icons/product_logo_24.png   chrome/app/theme/chromium/product_logo_24.png         binary
+branding/icons/product_logo_48.png   chrome/app/theme/chromium/product_logo_48.png         binary
+branding/icons/product_logo_64.png   chrome/app/theme/chromium/product_logo_64.png         binary
+branding/icons/product_logo_128.png  chrome/app/theme/chromium/product_logo_128.png        binary
+branding/icons/product_logo_256.png  chrome/app/theme/chromium/product_logo_256.png        binary
+
+branding/icons/product_logo_24.png   chrome/app/theme/chromium/linux/product_logo_24.png   binary
+branding/icons/product_logo_48.png   chrome/app/theme/chromium/linux/product_logo_48.png   binary
+branding/icons/product_logo_64.png   chrome/app/theme/chromium/linux/product_logo_64.png   binary
+branding/icons/product_logo_128.png  chrome/app/theme/chromium/linux/product_logo_128.png  binary
+branding/icons/product_logo_256.png  chrome/app/theme/chromium/linux/product_logo_256.png  binary
+branding/icons/product_logo_32.xpm   chrome/app/theme/chromium/linux/product_logo_32.xpm   binary
+
+# The scaled sets. theme_resources.grd resolves IDR_PRODUCT_LOGO_16 / _32 out of
+# default_{100,200}_percent, so the window and tab icon come from here rather than from the
+# unscaled directory above -- replacing only the latter leaves a Chromium icon in the tab strip.
+branding/icons/product_logo_16.png      chrome/app/theme/default_100_percent/chromium/product_logo_16.png       binary
+branding/icons/product_logo_32.png      chrome/app/theme/default_100_percent/chromium/product_logo_32.png       binary
+branding/icons/product_logo_16.png      chrome/app/theme/default_100_percent/chromium/linux/product_logo_16.png binary
+branding/icons/product_logo_16@2x.png   chrome/app/theme/default_200_percent/chromium/product_logo_16.png       binary
+branding/icons/product_logo_32@2x.png   chrome/app/theme/default_200_percent/chromium/product_logo_32.png       binary
+
+# The wordmark beside the logo on the about pages, from the Console's long lockup.
+branding/icons/product_logo_name_22.png          chrome/app/theme/default_100_percent/chromium/product_logo_name_22.png       binary
+branding/icons/product_logo_name_22_white.png    chrome/app/theme/default_100_percent/chromium/product_logo_name_22_white.png binary
+branding/icons/product_logo_name_22@2x.png       chrome/app/theme/default_200_percent/chromium/product_logo_name_22.png       binary
+branding/icons/product_logo_name_22_white@2x.png chrome/app/theme/default_200_percent/chromium/product_logo_name_22_white.png binary
+
+# The about pages' lockup. It is NOT under chrome/app/theme at all -- version_ui.cc resolves
+# IDR_PRODUCT_LOGO through components/resources/version_ui_scaled_resources.grdp, so the logo and
+# wordmark on chrome://version come from this second tree. Replacing only chrome/app/theme leaves a
+# Chromium circle and the word "chromium" on the one page users open to check what they are running.
+branding/icons/about_product_logo.png          components/resources/default_100_percent/chromium/product_logo.png        binary
+branding/icons/about_product_logo_white.png    components/resources/default_100_percent/chromium/product_logo_white.png  binary
+branding/icons/favicon_product.png             components/resources/default_100_percent/chromium/favicon_product.png     binary
+branding/icons/about_product_logo@2x.png       components/resources/default_200_percent/chromium/product_logo.png        binary
+branding/icons/about_product_logo_white@2x.png components/resources/default_200_percent/chromium/product_logo_white.png  binary
+branding/icons/favicon_product@2x.png          components/resources/default_200_percent/chromium/favicon_product.png     binary
+
+# Windows. The .ico carries 16/32/48/256 in one file, which is the set upstream ships.
+# incognito.ico and app_list.ico stay upstream's: they are concept icons, not the product mark.
+branding/icons/win/redrob.ico          chrome/app/theme/chromium/win/chromium.ico          binary
+branding/icons/win/redrob_doc.ico      chrome/app/theme/chromium/win/chromium_doc.ico      binary
+branding/icons/win/redrob_pdf.ico      chrome/app/theme/chromium/win/chromium_pdf.ico      binary
+branding/icons/win/tiles/Logo.png      chrome/app/theme/chromium/win/tiles/Logo.png        binary
+branding/icons/win/tiles/SmallLogo.png chrome/app/theme/chromium/win/tiles/SmallLogo.png   binary
+
+# macOS. app.icns and the two catalogues below it are what a .app bundle shows in Finder and the Dock.
+# Assets.car and AppIcon.icon are deliberately absent -- see the note at the end of make-icons.sh:
+# they are actool output and cannot be produced on Linux, so a mac build has to regenerate them.
+branding/icons/mac/app.icns                          chrome/app/theme/chromium/mac/app.icns                                              binary
+branding/icons/mac/appiconset/appicon_16.png         chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_16.png     binary
+branding/icons/mac/appiconset/appicon_32.png         chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_32.png     binary
+branding/icons/mac/appiconset/appicon_64.png         chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_64.png     binary
+branding/icons/mac/appiconset/appicon_128.png        chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_128.png    binary
+branding/icons/mac/appiconset/appicon_256.png        chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_256.png    binary
+branding/icons/mac/appiconset/appicon_512.png        chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_512.png    binary
+branding/icons/mac/appiconset/appicon_1024.png       chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_1024.png   binary
+branding/icons/mac/iconset/icon_256x256.png          chrome/app/theme/chromium/mac/Assets.xcassets/Icon.iconset/icon_256x256.png         binary
+branding/icons/mac/iconset/icon_256x256@2x.png       chrome/app/theme/chromium/mac/Assets.xcassets/Icon.iconset/icon_256x256@2x.png      binary
+
+
+

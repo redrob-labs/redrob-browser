@@ -1,0 +1,16 @@
+# Copyright 2026 Redrob. Portions copyright The Chromium Authors.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+source_set("redrob") {
+  sources = [
+    "redrob_ui.cc",
+    "redrob_ui.h",
+  ]
+  public_deps = [ "//content/public/browser" ]
+  deps = [
+    "//base",
+    "//chrome/common",
+    "//services/network/public/mojom",
+  ]
+}
