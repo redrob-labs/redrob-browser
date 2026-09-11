@@ -1,0 +1,346 @@
+/* Pretendard Variable, vendored. SIL Open Font License 1.1 -- see PretendardVariable-LICENSE.txt.
+   Loaded from the resource pack rather than a CDN: this is the first screen of a browser that has not
+   necessarily reached a network yet. */
+@font-face {
+  font-display: swap;
+  font-family: 'Pretendard Variable';
+  font-style: normal;
+  font-weight: 45 920;
+  src: url(PretendardVariable.woff2) format('woff2-variations');
+}
+
+/* Redrob's canonical tokens, from @redrob-design/brand. The same values the new tab page uses, so the
+   first screen and the second cannot disagree about what the brand looks like. */
+:root {
+  --rr-blue-1: #eff4ff;
+  --rr-blue-3: #bad2ff;
+  --rr-blue-5: #507fff;
+  --rr-blue-6: #2b52ff;
+  --rr-blue-9: #061460;
+  --rr-blue-10: #030c34;
+  --rr-gray-1: #f8f9fb;
+  --rr-gray-2: #eff1f4;
+  --rr-gray-3: #dfe2e8;
+  --rr-gray-5: #aab0bb;
+  --rr-gray-6: #7c8390;
+  --rr-gray-7: #576071;
+  --rr-gray-8: #292e37;
+  --rr-gray-9: #141719;
+  --rr-black: #0a0b0c;
+
+  --surface: light-dark(var(--rr-gray-1), var(--rr-gray-9));
+  --raised: light-dark(#fff, color-mix(in srgb, var(--rr-gray-8) 45%, var(--rr-gray-9)));
+  --ink: light-dark(var(--rr-gray-9), var(--rr-gray-1));
+  --muted: light-dark(var(--rr-gray-7), var(--rr-gray-5));
+  --line: light-dark(var(--rr-gray-3), var(--rr-gray-8));
+  --accent: light-dark(var(--rr-blue-6), var(--rr-blue-5));
+  --accent-soft: light-dark(var(--rr-blue-1), var(--rr-blue-10));
+  --on-solid: light-dark(#fff, var(--rr-black));
+  --solid: light-dark(var(--rr-gray-9), var(--rr-gray-1));
+
+  --radius-control: 10px;
+  --radius-panel: 14px;
+
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+body {
+  background: var(--surface);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  /* The brand's body role, scaled for a window-filling surface rather than a 240px sidebar. */
+  font: 400 15px/1.62 var(--font-sans);
+  height: 100vh;
+  letter-spacing: -0.004em;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* The dotted field. A repeating radial gradient rather than an image so it stays crisp at any zoom and
+   costs nothing to ship, and it fades toward the bottom so the action bar sits on calm ground. */
+#field {
+  background:
+    radial-gradient(circle at center, var(--line) 1px, transparent 1.2px) 0 0 / 22px 22px;
+  inset: 0;
+  mask-image: linear-gradient(to bottom, #000 0%, #000 55%, transparent 92%);
+  opacity: 0.85;
+  position: fixed;
+  z-index: 0;
+}
+
+#stage {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  padding: 40px 24px 0;
+  position: relative;
+  text-align: center;
+  z-index: 1;
+}
+
+.step {
+  animation: rise 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 520px;
+}
+
+.step[hidden] {
+  display: none;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step { animation: none; }
+}
+
+h1 {
+  /* The brand's heading role: 600, tight tracking. */
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.022em;
+  line-height: 1.24;
+  margin: 0 0 8px;
+}
+
+p {
+  color: var(--muted);
+  margin: 0 0 4px;
+  max-width: 44ch;
+}
+
+/* The illustration. One large centred plate with a soft shadow, which is the composition the whole
+   flow is built around -- every step gets the same silhouette so the steps read as one sequence. */
+.art {
+  align-items: center;
+  display: flex;
+  height: 210px;
+  justify-content: center;
+  margin-bottom: 28px;
+  position: relative;
+  width: 210px;
+}
+
+.art::before {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 34px;
+  box-shadow: 0 22px 50px -18px color-mix(in srgb, var(--rr-blue-6) 38%, transparent),
+    0 3px 10px -4px color-mix(in srgb, var(--rr-black) 22%, transparent);
+  content: '';
+  height: 150px;
+  position: absolute;
+  transform: rotate(-4deg);
+  width: 150px;
+}
+
+.art img,
+.art > div {
+  position: relative;
+  z-index: 1;
+}
+
+.art-mark img {
+  height: 84px;
+  width: 84px;
+}
+
+/* Steps without their own artwork get a tinted glyph plate rather than an empty one, so no step looks
+   unfinished next to the others. */
+.art-account::after,
+.art-agent::after,
+.art-passwords::after,
+.art-model::after {
+  background: var(--accent);
+  content: '';
+  height: 64px;
+  mask: var(--glyph) center / contain no-repeat;
+  position: relative;
+  width: 64px;
+  z-index: 1;
+}
+
+.art-account { --glyph: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" fill="black"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8z" fill="black"/></svg>'); }
+.art-agent { --glyph: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2l2.2 5.8L20 10l-5.8 2.2L12 18l-2.2-5.8L4 10l5.8-2.2z" fill="black"/></svg>'); }
+.art-passwords { --glyph: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M6 10V8a6 6 0 1112 0v2h1a1 1 0 011 1v9a1 1 0 01-1 1H5a1 1 0 01-1-1v-9a1 1 0 011-1zm2 0h8V8a4 4 0 10-8 0z" fill="black"/></svg>'); }
+.art-model { --glyph: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 5h16v3H4zm0 5.5h16v3H4zm0 5.5h16v3H4z" fill="black"/></svg>'); }
+
+/* The import step stacks two plates: where the data is now, and where it is going. */
+.art-import .plate {
+  border-radius: 26px;
+  height: 116px;
+  position: absolute;
+  width: 116px;
+}
+
+.art-import .plate-source {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-shadow: 0 16px 34px -14px color-mix(in srgb, var(--rr-black) 30%, transparent);
+  top: 14px;
+  transform: rotate(-6deg);
+}
+
+.art-import .plate-target {
+  background: linear-gradient(140deg, var(--accent-soft), color-mix(in srgb, var(--accent) 30%, transparent));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  bottom: 12px;
+  transform: rotate(5deg);
+}
+
+.art-import::before {
+  display: none;
+}
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+  width: 320px;
+}
+
+input {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  font: inherit;
+  padding: 11px 13px;
+}
+
+input:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: 1px;
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+  width: 360px;
+}
+
+.choice {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font: inherit;
+  gap: 2px;
+  padding: 11px 13px;
+  text-align: left;
+}
+
+.choice span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.choice[aria-checked='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.shortcut {
+  margin-top: 14px;
+}
+
+kbd {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: 500 12px/1 var(--font-sans);
+  padding: 4px 6px;
+}
+
+.status {
+  color: var(--muted);
+  margin-top: 16px;
+}
+
+.status[data-tone='error'] {
+  color: light-dark(#a31310, #ff5452);
+}
+
+#bar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  padding: 20px 28px 28px;
+  position: relative;
+  z-index: 1;
+}
+
+#dots {
+  display: flex;
+  gap: 7px;
+}
+
+.dot {
+  background: var(--line);
+  border: 0;
+  border-radius: 999px;
+  height: 7px;
+  padding: 0;
+  transition: width 160ms ease, background 160ms ease;
+  width: 7px;
+}
+
+.dot[aria-selected='true'] {
+  background: var(--solid);
+  width: 20px;
+}
+
+button {
+  font: inherit;
+}
+
+.primary {
+  background: var(--solid);
+  border: 0;
+  border-radius: 999px;
+  color: var(--on-solid);
+  cursor: pointer;
+  font-weight: 500;
+  padding: 11px 22px;
+}
+
+.primary:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.quiet {
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 11px 14px;
+}
+
+.quiet:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.quiet:disabled {
+  cursor: default;
+  opacity: 0;
+  pointer-events: none;
+}
