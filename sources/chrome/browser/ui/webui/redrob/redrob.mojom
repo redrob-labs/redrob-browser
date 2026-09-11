@@ -36,6 +36,21 @@ enum PermissionMode {
   kFullAccess,
 };
 
+// How much work the user is asking for. Real, not decorative: it decides the tool budget, whether
+// the agent is asked to plan before it browses, and what reasoning effort the engine is told to use.
+//
+// The names describe the ANSWER rather than the machinery. "Ultrabrowse" is the deep one because that
+// is what the surface calls it.
+enum Effort {
+  // One or two pages, no plan. What a lookup should cost.
+  kQuick,
+  // The default: enough rounds to open a few sources and reconcile them.
+  kStandard,
+  // Ultrabrowse. The agent writes a plan into the trace first, then works through it across many
+  // sources with a much larger budget.
+  kUltrabrowse,
+};
+
 // What kind of step this is. The page picks an icon from this rather than parsing the label, so a
 // new step kind is a mojom change and not a string match that silently stops matching.
 enum StepKind {
@@ -52,6 +67,15 @@ enum StepKind {
   kRefused,
   kUsedCredential,
   kSpawnedSubagents,
+  // The user interrupted a running task with a new instruction. In the trace because the reason the
+  // agent changed direction should be visible next to the direction it changed to.
+  kSteered,
+  // The user's instruction arrived mid-run and is waiting for the current step to finish.
+  kQueuedMessage,
+  // Ultrabrowse's plan, one detail row per intended step.
+  kPlanned,
+  // A routine started this task, or woke it.
+  kRoutine,
 };
 
 // One step the agent took, as the page needs to render it.
@@ -89,6 +113,33 @@ struct Task {
   // the posture it is actually running under rather than what the composer was set to at some point.
   PermissionMode mode;
   string? working_folder;
+  // How much work was asked for. On the task rather than only on the request, so a task tab reopened
+  // later still shows the effort it actually ran at.
+  Effort effort;
+  // Instructions the user typed while this task was mid-run, still waiting for a safe boundary. Their
+  // own words, echoed back so they can see what is pending rather than wondering if it was lost.
+  array<string> queued;
+};
+
+// What happened to a message typed into a running task's composer.
+enum FollowUpOutcome {
+  // The task was idle, so this simply became its next turn.
+  kStartedTurn,
+  // The task was mid-run and was interrupted: the current completion was dropped and this took over.
+  kInterrupted,
+  // The task was mid-run and this is waiting for the current step to finish.
+  kQueued,
+  kRejected,
+};
+
+// What to do with a message typed while a task is running.
+enum FollowUpMode {
+  // Let the browser decide: start a turn if idle, queue if not. What pressing Enter does.
+  kAuto,
+  // Stop what it is doing now and take this instead.
+  kInterrupt,
+  // Let it finish the step it is on, then take this.
+  kQueue,
 };
 
 // Why a task could not be started. Separate from Task.error because this answers a call rather than
@@ -107,19 +158,23 @@ interface Page {
 interface TaskHost {
   // `context_refs` are opaque handles the browser process resolves -- a tab, a selection, a
   // bookmark. Not URLs and not paths: a renderer that asks for /etc/passwd gets a rejected ref.
-  StartTask(string prompt, array<string> context_refs, PermissionMode mode)
+  StartTask(string prompt, array<string> context_refs, PermissionMode mode, Effort effort)
       => (string? task_id, StartError? error);
   CancelTask(string task_id);
   ListTasks() => (array<Task> tasks);
   // One task, for the task tab view. Null when the id is unknown, which a renderer can ask for.
   GetTask(string task_id) => (Task? task);
-  // A follow-up turn on an existing task. The task tab's composer, not a new task.
-  Reply(string task_id, string prompt) => (bool accepted);
+  // A message typed into an existing task's composer. When the task is idle this is its next turn.
+  // When it is mid-run the user chooses between interrupting it and letting it finish the step first,
+  // which is the difference between steering and queueing -- and is why this is one call with a mode
+  // rather than a `Reply` that silently means something different depending on timing.
+  SendFollowUp(string task_id, string prompt, FollowUpMode mode) => (FollowUpOutcome outcome);
   // Changes an existing task's mode. Narrowing always succeeds; WIDENING is refused mid-task, because
   // a task that has already been running is not the moment to hand it more of the machine.
   SetPermissionMode(string task_id, PermissionMode mode) => (bool accepted);
-  // The folder a Guard-mode task may write into. Chosen by the user through the browser's own picker,
-  // so the returned path is one they saw and agreed to. Null when they cancelled.
+  // The folder a task may write into, chosen through the browser's own picker so the returned path is
+  // one the user saw and agreed to. Null when they cancelled. Only the folder's NAME comes back: a
+  // renderer with the absolute path has learned something about the machine it has no use for.
   ChooseWorkingFolder(string task_id) => (string? display_path);
 };
 

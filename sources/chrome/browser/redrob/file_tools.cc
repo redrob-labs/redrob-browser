@@ -38,6 +38,40 @@ base::FilePath WriteOnBlockingThread(base::FilePath folder,
   return path;
 }
 
+// True when this directory is one a full-access task may write into. Runs on the blocking thread, on
+// the same sequence as the write, for the same reason the existence check does.
+bool DirectoryIsPermissible(const base::FilePath& folder,
+                            const base::FilePath& user_data_dir) {
+  if (folder.empty() || !folder.IsAbsolute() || folder.ReferencesParent()) {
+    return false;
+  }
+  // The profile's own passwords, cookies and prefs live here. A task that can write into it can
+  // rewrite the very prefs that decide what tasks may do.
+  if (!user_data_dir.empty() &&
+      (folder == user_data_dir || user_data_dir.IsParent(folder))) {
+    return false;
+  }
+  // Any dot-directory anywhere in the path. This is where credentials live on every platform we ship
+  // on, and it is a rule a user can predict without reading a list. A bare root component ("/", or
+  // "C:") is one character or has no leading dot, so it never trips this.
+  for (const base::FilePath::StringType& component : folder.GetComponents()) {
+    if (component.size() > 1 && component[0] == FILE_PATH_LITERAL('.')) {
+      return false;
+    }
+  }
+  return base::DirectoryExists(folder);
+}
+
+base::FilePath WriteAtPathOnBlockingThread(base::FilePath folder,
+                                           std::string name,
+                                           std::string contents,
+                                           base::FilePath user_data_dir) {
+  if (!DirectoryIsPermissible(folder, user_data_dir)) {
+    return base::FilePath();
+  }
+  return WriteOnBlockingThread(std::move(folder), std::move(name), std::move(contents));
+}
+
 }  // namespace
 
 // static
@@ -83,6 +117,24 @@ void FileTools::WriteInFolder(const base::FilePath& folder,
   base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
       base::BindOnce(&WriteOnBlockingThread, folder, name, contents), std::move(callback));
+}
+
+// static
+void FileTools::WriteAtPath(const base::FilePath& folder,
+                            const std::string& name,
+                            const std::string& contents,
+                            const base::FilePath& user_data_dir,
+                            WriteCallback callback) {
+  // The name rules are the same ones the guarded path uses. Full access is about the directory; a file
+  // called `../../.bashrc` is not a file name in either mode.
+  if (!IsAcceptableFileName(name) || contents.size() > kMaxContentBytes) {
+    std::move(callback).Run(base::FilePath());
+    return;
+  }
+  base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+      base::BindOnce(&WriteAtPathOnBlockingThread, folder, name, contents, user_data_dir),
+      std::move(callback));
 }
 
 }  // namespace redrob

@@ -19,6 +19,8 @@ sources/chrome/browser/redrob/task_store.h        chrome/browser/redrob/task_sto
 sources/chrome/browser/redrob/task_store.cc       chrome/browser/redrob/task_store.cc
 sources/chrome/browser/redrob/task_store_factory.h  chrome/browser/redrob/task_store_factory.h
 sources/chrome/browser/redrob/task_store_factory.cc chrome/browser/redrob/task_store_factory.cc
+sources/chrome/browser/redrob/redrob_prefs.h      chrome/browser/redrob/redrob_prefs.h
+sources/chrome/browser/redrob/redrob_prefs.cc     chrome/browser/redrob/redrob_prefs.cc
 
 # chrome://redrob, the AI surface, and the Mojo boundary in front of it. The only Chromium files this
 # needs are the one-line registrations in patches/, which is the whole point of a WebUI.

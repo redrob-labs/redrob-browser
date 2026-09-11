@@ -21,9 +21,11 @@ source_set("redrob") {
     "//base",
     "//chrome/browser/redrob:sidecar",
     "//chrome/browser/resources/redrob:resources",
+    "//chrome/browser/ui/select_file_policy",
     "//chrome/common",
     "//content/public/browser",
     "//mojo/public/cpp/bindings",
+    "//ui/shell_dialogs",
     "//ui/webui",
   ]
 }

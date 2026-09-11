@@ -24,26 +24,25 @@
       </div>
       <div class="composer-controls">
         <button type="button" class="chip chip-icon" id="attach" aria-label="Add context">+</button>
-        <button type="button" class="chip" id="mode-read" aria-pressed="false"
+        <button type="button" class="chip" data-mode="read" aria-pressed="false"
                 title="Open and read pages. Nothing is changed and nothing is written.">Read only</button>
-        <button type="button" class="chip" id="mode-guard" aria-pressed="true"
+        <button type="button" class="chip" data-mode="guard" aria-pressed="true"
                 title="Also click, fill fields and save files into one folder you choose.">Guard</button>
-        <button type="button" class="chip" id="mode-full" aria-pressed="false"
-                title="Also write outside that folder.">Full access</button>
+        <button type="button" class="chip" data-mode="full" aria-pressed="false"
+                title="Also write to a folder the agent names. Hidden folders and the browser's own profile are still refused.">Full access</button>
         <span class="spacer"></span>
         <label class="chip chip-select">
           <span class="visually-hidden">Model</span>
           <select id="model">
             <option value="auto" selected>redrob/auto</option>
-            <option value="claude-opus-5">claude-opus-5</option>
           </select>
         </label>
         <label class="chip chip-select">
           <span class="visually-hidden">Effort</span>
           <select id="effort">
-            <option value="high" selected>High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
+            <option value="ultra">Ultrabrowse</option>
+            <option value="standard" selected>Standard</option>
+            <option value="quick">Quick</option>
           </select>
         </label>
       </div>
@@ -78,6 +77,9 @@
     <header class="task-head">
       <h1 id="task-title"></h1>
       <span id="task-state" class="task-state"></span>
+      <span class="spacer"></span>
+      <span id="task-effort" class="task-effort"></span>
+      <button type="button" id="task-stop" class="pill pill-quiet" hidden>Stop</button>
     </header>
     <div class="task-body">
       <article id="trace" class="trace" aria-live="polite"></article>
@@ -90,23 +92,28 @@
       </aside>
     </div>
     <form id="reply" class="composer composer-foot" autocomplete="off">
+      <ol id="queued" class="queued" hidden></ol>
       <div class="composer-row">
         <button type="button" class="chip chip-icon" aria-label="Add context">+</button>
         <input id="reply-prompt" type="text" aria-label="Reply to the agent"
                placeholder="Reply, @ for context">
+        <!-- Two buttons while it runs, not one. Enter queues, because throwing away work in progress
+             should be something you ask for by name rather than something Enter might mean. -->
+        <button type="button" id="reply-steer" class="pill pill-quiet" hidden>Steer now</button>
         <button type="submit" id="reply-send" class="send" aria-label="Send reply"></button>
       </div>
       <div class="composer-controls">
-        <button type="button" class="chip" id="mode-read" aria-pressed="false"
+        <button type="button" class="chip" data-mode="read" aria-pressed="false"
                 title="Open and read pages. Nothing is changed and nothing is written.">Read only</button>
-        <button type="button" class="chip" id="mode-guard" aria-pressed="true"
+        <button type="button" class="chip" data-mode="guard" aria-pressed="true"
                 title="Also click, fill fields and save files into one folder you choose.">Guard</button>
-        <button type="button" class="chip" id="mode-full" aria-pressed="false"
-                title="Also write outside that folder.">Full access</button>
+        <button type="button" class="chip" data-mode="full" aria-pressed="false"
+                title="Also write to a folder the agent names. Hidden folders and the browser's own profile are still refused.">Full access</button>
+        <button type="button" class="chip" id="pick-folder">Choose folder…</button>
         <span class="spacer"></span>
         <span class="chip chip-static" id="reply-model">redrob/auto</span>
-        <span class="chip chip-static">High</span>
       </div>
+      <p id="task-status" class="task-status" role="status"></p>
     </form>
   </main>
 

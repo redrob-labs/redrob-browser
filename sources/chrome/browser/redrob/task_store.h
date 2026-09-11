@@ -62,14 +62,32 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   std::pair<std::optional<std::string>, std::optional<mojom::StartError>> StartTask(
       const std::string& prompt,
       const std::vector<std::string>& context_refs,
-      mojom::PermissionMode mode);
+      mojom::PermissionMode mode,
+      mojom::Effort effort);
   void CancelTask(const std::string& task_id);
   bool SetPermissionMode(const std::string& task_id, mojom::PermissionMode mode);
-  void ChooseWorkingFolder(const std::string& task_id,
-                          base::OnceCallback<void(const std::optional<std::string>&)> callback);
-  bool Reply(const std::string& task_id, const std::string& prompt);
+  // Records a folder the USER picked. The picker itself lives on the WebUI handler, which is the only
+  // place with a window to parent a native dialog to; this is where the choice becomes state. Returns
+  // the display name the page may show, or nullopt if the task is unknown.
+  std::optional<std::string> SetWorkingFolder(const std::string& task_id,
+                                              const base::FilePath& folder);
+  // A message typed into a task's own composer. See mojom::FollowUpMode.
+  mojom::FollowUpOutcome SendFollowUp(const std::string& task_id,
+                                      const std::string& prompt,
+                                      mojom::FollowUpMode mode);
   std::vector<mojom::TaskPtr> ListTasks() const;
   mojom::TaskPtr GetTask(const std::string& task_id) const;
+
+  // Starts a task the way a ROUTINE starts one: same bounds, same loop, but marked in the trace as
+  // something the browser did on a schedule rather than something the user just typed. Returns the new
+  // task's id, or empty when it could not start.
+  std::string StartRoutineTask(const std::string& title,
+                               const std::string& prompt,
+                               mojom::PermissionMode mode,
+                               mojom::Effort effort);
+  // Wakes an existing task with its context intact -- a heartbeat routine, as distinct from a cron
+  // routine that starts a fresh one. False when the id is unknown.
+  bool WakeTask(const std::string& task_id, const std::string& prompt);
 
   // SidecarClient::CompletionDelegate
   void OnCompletionText(std::string_view text) override;
@@ -102,6 +120,14 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
     // Tool calls still waiting on an async result. A turn cannot continue until they are all answered,
     // because the engine expects one tool message per call it proposed.
     int pending_tools = 0;
+    // Instructions the user typed while the task was mid-run, waiting for a safe boundary. Delivered
+    // BETWEEN turns rather than into one: a message appended while the engine is mid-completion would
+    // land in a history the engine is already answering.
+    std::vector<std::string> queued;
+    // Whether the current turn has said anything yet. A turn's prose is a paragraph of its own -- two
+    // turns' text appended to one string ran together mid-sentence, which read as one confused
+    // statement rather than as an answer and then a correction.
+    bool turn_text_started = false;
   };
 
   void OnSidecarStatusChanged(SidecarClient::Status status);
@@ -116,6 +142,13 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
                   const std::string& result);
   // True when `mode` covers `tool`. The single place this question is answered.
   static bool ModeAllows(mojom::PermissionMode mode, const std::string& tool);
+  // Moves anything the user queued into the conversation, at a boundary where doing so is safe.
+  // Returns true when something was moved, which is what tells the caller a turn is owed.
+  bool DrainQueued(const std::string& task_id);
+  // The shared tail of StartTask and StartRoutineTask: id, task record, conversation, history trim.
+  std::string CreateTask(const std::string& prompt,
+                         mojom::PermissionMode mode,
+                         mojom::Effort effort);
   void FinishTask(const std::string& task_id, mojom::TaskState state, const std::string& error);
   mojom::Step* AddStep(const std::string& task_id, mojom::StepKind kind, const std::string& label);
   void AddStepDetail(const std::string& task_id, const std::string& text, const std::string& source);
@@ -146,6 +179,9 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   std::string active_task_id_;
 
   raw_ptr<Profile> profile_;
+  // Resolved once, on this thread, so the blocking-thread write check compares against a value it did
+  // not have to go and look up. Never sent anywhere near a renderer.
+  base::FilePath user_data_dir_;
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   std::unique_ptr<SidecarClient> sidecar_;
   base::OneShotTimer notify_timer_;

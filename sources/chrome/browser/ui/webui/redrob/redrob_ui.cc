@@ -40,7 +40,8 @@ void RedrobUI::CreateTaskHost(mojo::PendingRemote<mojom::Page> page,
   // handler dies with the document, the tasks do not.
   task_host_ = std::make_unique<TaskHostImpl>(
       std::move(host), std::move(page),
-      TaskStoreFactory::GetForProfile(Profile::FromWebUI(web_ui())));
+      TaskStoreFactory::GetForProfile(Profile::FromWebUI(web_ui())),
+      web_ui()->GetWebContents());
 }
 
 WEB_UI_CONTROLLER_TYPE_IMPL(RedrobUI)

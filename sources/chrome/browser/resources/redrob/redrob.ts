@@ -3,6 +3,9 @@
 // found in the LICENSE file.
 
 import {
+  Effort,
+  FollowUpMode,
+  FollowUpOutcome,
   PageCallbackRouter,
   PageHandlerFactory,
   PermissionMode,
@@ -65,10 +68,36 @@ function stepIcon(kind: StepKind): string {
       return '🔑';
     case StepKind.kSpawnedSubagents:
       return '⑃';
+    case StepKind.kRefused:
+      return '⊘';
+    case StepKind.kSteered:
+      return '↺';
+    case StepKind.kQueuedMessage:
+      return '⋯';
+    case StepKind.kPlanned:
+      return '☰';
+    case StepKind.kRoutine:
+      return '⏱';
     case StepKind.kThinking:
     default:
       return '•';
   }
+}
+
+function effortLabel(effort: Effort): string {
+  switch (effort) {
+    case Effort.kQuick:
+      return 'Quick';
+    case Effort.kUltrabrowse:
+      return 'Ultrabrowse';
+    case Effort.kStandard:
+    default:
+      return 'Standard';
+  }
+}
+
+function isRunning(task: Task): boolean {
+  return task.state === TaskState.kQueued || task.state === TaskState.kRunning;
 }
 
 function elapsed(task: Task): string {
@@ -212,14 +241,46 @@ function renderTask() {
   document.title = `${task.prompt} · Redrob`;
   $('task-title').textContent = task.prompt;
   $('task-state').textContent = stateLabel(task.state);
+  $('task-effort').textContent =
+      task.workingFolder ? `${effortLabel(task.effort)} · ${task.workingFolder}`
+                         : effortLabel(task.effort);
+
+  // Stop only exists while there is something to stop, and the composer's second button appears with
+  // it: interrupting is only a question when the task is mid-run.
+  const running = isRunning(task);
+  $('task-stop').hidden = !running;
+  $('reply-steer').hidden = !running;
+  $<HTMLButtonElement>('reply-send').setAttribute(
+      'aria-label', running ? 'Queue this for the next step' : 'Send reply');
+
+  const queued = $<HTMLOListElement>('queued');
+  queued.textContent = '';
+  queued.hidden = task.queued.length === 0;
+  for (const pending of task.queued) {
+    const item = document.createElement('li');
+    item.textContent = pending;
+    queued.append(item);
+  }
+  paintModeButtons(task.mode);
 
   const trace = $('trace');
+  // Whether the user was already reading the newest part. A live task appends to the bottom, and
+  // yanking the view down while someone is reading further up is worse than letting them scroll.
+  const wasAtBottom =
+      trace.scrollHeight - trace.scrollTop - trace.clientHeight < 40;
   trace.textContent = '';
   if (task.narration) {
-    const prose = document.createElement('p');
-    prose.className = 'narration';
-    prose.textContent = task.narration;
-    trace.append(prose);
+    // One paragraph per turn. The browser separates turns with a blank line, so a steered task reads
+    // as an answer, an instruction and then a different answer.
+    for (const paragraph of task.narration.split('\n\n')) {
+      if (!paragraph) {
+        continue;
+      }
+      const prose = document.createElement('p');
+      prose.className = 'narration';
+      prose.textContent = paragraph;
+      trace.append(prose);
+    }
   }
   for (const step of task.steps) {
     trace.append(renderStep(step));
@@ -229,6 +290,20 @@ function renderTask() {
     error.className = 'task-error';
     error.textContent = task.error;
     trace.append(error);
+  }
+  if (wasAtBottom) {
+    // Twice, and then again per image. A captured frame arrives as a data URL that has not been
+    // decoded yet, so its box grows AFTER this function returns -- scrolling only here left the view
+    // sitting near the top of a trace that had just got taller, which is how the steer and queue steps
+    // ended up off-screen.
+    const stick = () => {
+      trace.scrollTop = trace.scrollHeight;
+    };
+    stick();
+    requestAnimationFrame(stick);
+    for (const image of trace.querySelectorAll('img')) {
+      image.addEventListener('load', stick, {once: true});
+    }
   }
 
   // The preview beside the trace is the newest frame the browser captured. A real embedded view of
@@ -264,16 +339,23 @@ router.onTaskChanged.addListener((task: Task) => {
 // job is the right default, and widening is a decision the user makes deliberately.
 let composerMode: PermissionMode = PermissionMode.kGuard;
 
-const MODE_BUTTONS: Array<[string, PermissionMode]> = [
-  ['mode-read', PermissionMode.kReadOnly],
-  ['mode-guard', PermissionMode.kGuard],
-  ['mode-full', PermissionMode.kFullAccess],
-];
+const MODES: Record<string, PermissionMode> = {
+  read: PermissionMode.kReadOnly,
+  guard: PermissionMode.kGuard,
+  full: PermissionMode.kFullAccess,
+};
+
+// Scoped to the visible view. Both composers carry the same three chips, so addressing them by id
+// meant every lookup found the home form's copy and the task tab's chips did nothing at all.
+function modeButtons(): HTMLButtonElement[] {
+  const root = openTaskId ? $('task') : $('home');
+  return [...root.querySelectorAll<HTMLButtonElement>('[data-mode]')];
+}
 
 function paintModeButtons(current: PermissionMode) {
-  for (const [id, mode] of MODE_BUTTONS) {
-    const button = document.getElementById(id);
-    button?.setAttribute('aria-pressed', String(mode === current));
+  for (const button of modeButtons()) {
+    const mode = MODES[button.dataset['mode'] ?? ''];
+    button.setAttribute('aria-pressed', String(mode === current));
   }
 }
 
@@ -281,15 +363,18 @@ function paintModeButtons(current: PermissionMode) {
 // widen a task that is already running, so the buttons are repainted from what it accepted rather than
 // from what was clicked.
 function bindModeButtons(taskId: string|null) {
-  for (const [id, mode] of MODE_BUTTONS) {
-    const button = document.getElementById(id);
-    button?.addEventListener('click', async () => {
+  for (const button of modeButtons()) {
+    const mode = MODES[button.dataset['mode'] ?? ''];
+    if (mode === undefined) {
+      continue;
+    }
+    button.addEventListener('click', async () => {
       if (!taskId) {
         composerMode = mode;
         paintModeButtons(composerMode);
         return;
       }
-      const accepted = await host.setPermissionMode(taskId, mode);
+      const {accepted} = await host.setPermissionMode(taskId, mode);
       if (!accepted) {
         $('task-status').textContent =
             'A running task cannot be given more access. Start a new task instead.';
@@ -303,16 +388,55 @@ if (openTaskId) {
   $('task').hidden = false;
   bindModeButtons(openTaskId);
 
-  $<HTMLFormElement>('reply').addEventListener('submit', async (event: Event) => {
-    event.preventDefault();
+  $<HTMLButtonElement>('task-stop').addEventListener('click', () => {
+    host.cancelTask(openTaskId);
+  });
+
+  $<HTMLButtonElement>('pick-folder').addEventListener('click', async () => {
+    const {displayPath} = await host.chooseWorkingFolder(openTaskId);
+    $('task-status').textContent = displayPath
+        ? `Files from this task go in "${displayPath}".`
+        : 'No folder was chosen, so this task still cannot write files.';
+  });
+
+  const send = async (mode: FollowUpMode) => {
     const field = $<HTMLInputElement>('reply-prompt');
     const prompt = field.value.trim();
     if (!prompt) {
       return;
     }
-    if (await host.reply(openTaskId, prompt)) {
-      field.value = '';
+    const {outcome} = await host.sendFollowUp(openTaskId, prompt, mode);
+    if (outcome === FollowUpOutcome.kRejected) {
+      $('task-status').textContent =
+          'That could not be sent. There may already be too many messages waiting.';
+      return;
     }
+    field.value = '';
+    // Said plainly, because "queued" and "interrupted" are genuinely different things to have just
+    // done and the trace will show them differently too.
+    switch (outcome) {
+      case FollowUpOutcome.kInterrupted:
+        $('task-status').textContent = 'Interrupted — it is working on this instead.';
+        break;
+      case FollowUpOutcome.kQueued:
+        $('task-status').textContent = 'Waiting for the current step to finish.';
+        break;
+      default:
+        $('task-status').textContent = 'Sent.';
+        break;
+    }
+  };
+
+  // Enter queues. It is the safe one, and the destructive alternative is a button you have to mean.
+  $<HTMLFormElement>('reply').addEventListener('submit', (event: Event) => {
+    event.preventDefault();
+    void send(FollowUpMode.kAuto);
+  });
+  $<HTMLButtonElement>('reply-steer').addEventListener('click', () => {
+    void send(FollowUpMode.kInterrupt);
+  });
+  $<HTMLButtonElement>('preview-close').addEventListener('click', () => {
+    $('preview').hidden = true;
   });
 
   const {task} = await host.getTask(openTaskId);
@@ -334,7 +458,6 @@ if (openTaskId) {
       field.focus();
     });
   }
-  bindModeButtons(null);
 
   // Search is the browser's job, not the agent's. Handing the omnibox the query keeps one search
   // path in the product rather than a second one that only works on this page.
@@ -352,9 +475,13 @@ if (openTaskId) {
     if (!prompt) {
       return;
     }
+    const chosen = $<HTMLSelectElement>('effort').value;
+    const effort = chosen === 'ultra' ? Effort.kUltrabrowse
+                 : chosen === 'quick' ? Effort.kQuick
+                                      : Effort.kStandard;
     // Context refs are opaque handles the browser resolves. None are collected yet -- the `@` picker
     // is later work -- and sending a URL here instead would be exactly the shortcut the design forbids.
-    const {taskId, error} = await host.startTask(prompt, [], composerMode);
+    const {taskId, error} = await host.startTask(prompt, [], composerMode, effort);
     if (error !== null && error !== undefined) {
       $('home-status').textContent =
           'Could not start the task: the Redrob Code engine is not available.';

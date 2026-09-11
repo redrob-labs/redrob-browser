@@ -35,6 +35,28 @@ class FileTools {
                             const std::string& name,
                             const std::string& contents,
                             WriteCallback callback);
+
+  // Full-access only: `folder` came from the MODEL rather than from the user's picker, so this is the
+  // one entry point where the destination directory is untrusted input. The name rules are unchanged --
+  // full access widens WHERE a file may go, not what may be called a file.
+  //
+  // What full access deliberately does NOT include, and why:
+  //   * a relative path, or one containing `..` -- neither can be reasoned about by the person who
+  //     granted the access;
+  //   * any path with a dot-directory in it -- ~/.ssh, ~/.aws, ~/.config and everything like them.
+  //     "Full access to my files" is a statement about documents, and reading it as permission to
+  //     rewrite the credentials sitting next to them is not a reading the user made;
+  //   * anything inside the browser's own user-data directory, which is where this profile's
+  //     passwords, cookies and prefs live -- an agent that can rewrite its own permission prefs has
+  //     no permission model at all;
+  //   * overwriting an existing file, exactly as in the guarded path.
+  // `user_data_dir` is passed in rather than looked up here so the check runs on the blocking thread
+  // against a value the caller resolved on the UI thread.
+  static void WriteAtPath(const base::FilePath& folder,
+                          const std::string& name,
+                          const std::string& contents,
+                          const base::FilePath& user_data_dir,
+                          WriteCallback callback);
 };
 
 }  // namespace redrob

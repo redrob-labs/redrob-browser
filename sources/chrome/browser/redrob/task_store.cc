@@ -10,6 +10,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/strings/escape.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "base/uuid.h"
 #include "base/base64.h"
@@ -19,7 +20,10 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/browser/redrob/file_tools.h"
 #include "chrome/browser/redrob/page_tools.h"
+#include "chrome/browser/redrob/redrob_prefs.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/thumbnails/thumbnail_tab_helper.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
 
@@ -40,8 +44,37 @@ constexpr size_t kMaxDetailsPerStep = 40;
 constexpr size_t kMaxPreviewBytes = 512 * 1024;
 
 // How many times one task may go engine -> tool -> engine. The loop is driven by model output, so
-// without a ceiling a model that keeps proposing tools keeps the browser opening tabs forever.
-constexpr int kMaxToolRounds = 8;
+// without a ceiling a model that keeps proposing tools keeps the browser opening tabs forever. The
+// ceiling is what the effort setting actually BUYS -- the difference between a lookup and Ultrabrowse
+// is how many sources the browser will let one task walk through, not a word in a prompt.
+int ToolBudget(mojom::Effort effort) {
+  switch (effort) {
+    case mojom::Effort::kQuick:
+      return 3;
+    case mojom::Effort::kStandard:
+      return 8;
+    case mojom::Effort::kUltrabrowse:
+      return 32;
+  }
+}
+
+// What the engine is told about the effort, in the field an OpenAI-compatible endpoint already has for
+// it. If the engine ignores it, the budget and the plan step still make the setting mean something --
+// which is why effort is not implemented as this line alone.
+const char* ReasoningEffort(mojom::Effort effort) {
+  switch (effort) {
+    case mojom::Effort::kQuick:
+      return "low";
+    case mojom::Effort::kStandard:
+      return "medium";
+    case mojom::Effort::kUltrabrowse:
+      return "high";
+  }
+}
+
+// The number of user messages one task may have waiting. A queue is a courtesy, not a buffer for
+// everything someone types while they wait.
+constexpr size_t kMaxQueuedFollowUps = 8;
 
 // The group the agent's tabs are collected under. Matches the sidebar's "Agent tabs" section.
 constexpr char kAgentTabGroupTitle[] = "Agent tabs";
@@ -55,6 +88,7 @@ constexpr char kToolReadPage[] = "read_page";
 constexpr char kToolClick[] = "click";
 constexpr char kToolType[] = "type_text";
 constexpr char kToolSaveFile[] = "save_file";
+constexpr char kToolPlan[] = "plan_research";
 
 int64_t NowMs() {
   return base::Time::Now().InMillisecondsSinceUnixEpoch();
@@ -113,7 +147,17 @@ base::DictValue StringProperty(const std::string& description) {
   return property;
 }
 
-base::ListValue BrowserTools(mojom::PermissionMode mode) {
+base::DictValue StringArrayProperty(const std::string& description) {
+  base::DictValue items;
+  items.Set("type", "string");
+  base::DictValue property;
+  property.Set("type", "array");
+  property.Set("items", std::move(items));
+  property.Set("description", description);
+  return property;
+}
+
+base::ListValue BrowserTools(mojom::PermissionMode mode, mojom::Effort effort) {
   base::ListValue tools;
 
   {
@@ -135,6 +179,23 @@ base::ListValue BrowserTools(mojom::PermissionMode mode) {
     tools.Append(MakeTool(kToolReadPage,
                           "Read the visible text of the page you most recently opened.",
                           std::move(properties), base::ListValue()));
+  }
+
+  // Ultrabrowse's one extra capability, and it is not a capability over the machine: it is somewhere to
+  // put a plan so the person watching can see the shape of the work before the tabs start opening.
+  if (effort == mojom::Effort::kUltrabrowse) {
+    base::DictValue properties;
+    properties.Set("goal", StringProperty("What the finished answer will establish, in one line."));
+    properties.Set("steps", StringArrayProperty(
+        "The sources you intend to consult and what you expect each to settle, one per entry."));
+    base::ListValue required;
+    required.Append("goal");
+    required.Append("steps");
+    tools.Append(MakeTool(kToolPlan,
+                          "Write your research plan into the task's trace before you start browsing. "
+                          "Call this once, first. The user reads it to decide whether you understood "
+                          "the question, so name real sources rather than describing method.",
+                          std::move(properties), std::move(required)));
   }
 
   if (mode != mojom::PermissionMode::kReadOnly) {
@@ -171,21 +232,49 @@ base::ListValue BrowserTools(mojom::PermissionMode mode) {
       base::ListValue required;
       required.Append("name");
       required.Append("contents");
-      tools.Append(MakeTool(kToolSaveFile,
-                            "Save text as a file in the folder the user chose for this task.",
-                            std::move(properties), std::move(required)));
+      std::string description = "Save text as a file in the folder the user chose for this task.";
+      if (mode == mojom::PermissionMode::kFullAccess) {
+        // The ONE argument full access adds. Declared with its limits in the description, because a
+        // model that learns them by being refused spends a turn to learn each one.
+        properties.Set("folder", StringProperty(
+            "Optional. An absolute directory path to write into instead of the user's chosen folder. "
+            "The browser refuses hidden directories, its own profile directory, and overwriting a "
+            "file that already exists."));
+        description +=
+            " In this task the user granted full access, so you may also pass an absolute folder.";
+      }
+      tools.Append(MakeTool(kToolSaveFile, description, std::move(properties),
+                            std::move(required)));
     }
   }
 
   return tools;
 }
 
-std::string SystemPrompt() {
-  return
+std::string SystemPrompt(mojom::Effort effort) {
+  std::string prompt =
       "You are the agent inside the Redrob browser. You are answering a task the user typed on their "
       "new tab page. When you need to look at a page on the web, call open_page: it opens a real tab "
       "in the user's own browser, which they can see and take over. Explain what you are doing as you "
       "go, in short prose -- the user reads it as the task's trace.";
+  switch (effort) {
+    case mojom::Effort::kQuick:
+      prompt +=
+          " The user asked for a quick answer: open at most one or two pages and answer from them "
+          "rather than surveying the subject.";
+      break;
+    case mojom::Effort::kStandard:
+      break;
+    case mojom::Effort::kUltrabrowse:
+      prompt +=
+          " The user asked for Ultrabrowse, a deep pass. Call plan_research FIRST, then work through "
+          "your own plan across several independent sources, and say where two sources disagree "
+          "instead of picking one silently. Where nothing you found settles a point, say that it is "
+          "unsettled -- an answer that reads as complete when it is not is the failure this depth was "
+          "meant to avoid.";
+      break;
+  }
+  return prompt;
 }
 
 }  // namespace
@@ -194,7 +283,11 @@ TaskStore::TaskStore(Profile* profile,
                      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
     : profile_(profile),
       url_loader_factory_(std::move(url_loader_factory)),
-      sidecar_(std::make_unique<SidecarClient>()) {}
+      sidecar_(std::make_unique<SidecarClient>()) {
+  // Looked up once here rather than per write: the blocking-thread check needs it, and PathService is
+  // not something to call from a write path on every save.
+  base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir_);
+}
 
 TaskStore::~TaskStore() = default;
 
@@ -206,10 +299,63 @@ void TaskStore::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
 }
 
+std::string TaskStore::CreateTask(const std::string& prompt,
+                                  mojom::PermissionMode mode,
+                                  mojom::Effort effort) {
+  // The id is generated here rather than by the engine: the page needs something to render against
+  // before any request has been answered, and a browser-side id cannot be forged by the renderer.
+  const std::string task_id = base::Uuid::GenerateRandomV4().AsLowercaseString();
+
+  mojom::TaskPtr task = mojom::Task::New();
+  task->id = task_id;
+  task->prompt = prompt;
+  task->state = mojom::TaskState::kQueued;
+  task->started_at_ms = NowMs();
+  task->mode = mode;
+  task->effort = effort;
+
+  // The folder the user last chose, carried forward. Asking again for every task would train people to
+  // click through the picker, which is the opposite of what a picker is for -- and the folder is still
+  // theirs to change per task from the task's own composer.
+  const base::FilePath remembered =
+      profile_ ? profile_->GetPrefs()->GetFilePath(prefs::kWorkingFolder) : base::FilePath();
+  if (!remembered.empty()) {
+    working_folders_[task_id] = remembered;
+    task->working_folder = remembered.BaseName().AsUTF8Unsafe();
+  }
+  tasks_[task_id] = std::move(task);
+
+  Conversation conversation;
+  conversation.messages.Append(TextMessage("system", SystemPrompt(effort)));
+  conversation.messages.Append(TextMessage("user", prompt));
+  conversations_[task_id] = std::move(conversation);
+
+  // Bounded history. Without this the map is a renderer-driven allocation for the life of the profile.
+  while (tasks_.size() > kMaxTasks) {
+    auto oldest = tasks_.begin();
+    for (auto it = tasks_.begin(); it != tasks_.end(); ++it) {
+      if (IsTerminal(it->second->state) &&
+          it->second->started_at_ms < oldest->second->started_at_ms) {
+        oldest = it;
+      }
+    }
+    if (!IsTerminal(oldest->second->state)) {
+      break;
+    }
+    conversations_.erase(oldest->first);
+    working_folders_.erase(oldest->first);
+    previews_.erase(oldest->first);
+    tasks_.erase(oldest);
+  }
+
+  return task_id;
+}
+
 std::pair<std::optional<std::string>, std::optional<mojom::StartError>> TaskStore::StartTask(
     const std::string& prompt,
     const std::vector<std::string>& context_refs,
-    mojom::PermissionMode mode) {
+    mojom::PermissionMode mode,
+    mojom::Effort effort) {
   if (prompt.empty() || prompt.size() > kMaxPromptBytes ||
       context_refs.size() > kMaxContextRefs) {
     // Dropping the extra refs silently would make the page's view of its own request wrong, which is
@@ -235,41 +381,71 @@ std::pair<std::optional<std::string>, std::optional<mojom::StartError>> TaskStor
     return {std::nullopt, mojom::StartError::kSidecarUnavailable};
   }
 
-  // The id is generated here rather than by the engine: the page needs something to render against
-  // before any request has been answered, and a browser-side id cannot be forged by the renderer.
-  const std::string task_id = base::Uuid::GenerateRandomV4().AsLowercaseString();
-
-  mojom::TaskPtr task = mojom::Task::New();
-  task->id = task_id;
-  task->prompt = prompt;
-  task->state = mojom::TaskState::kQueued;
-  task->started_at_ms = NowMs();
-  task->mode = mode;
-  tasks_[task_id] = std::move(task);
-
-  Conversation conversation;
-  conversation.messages.Append(TextMessage("system", SystemPrompt()));
-  conversation.messages.Append(TextMessage("user", prompt));
-  conversations_[task_id] = std::move(conversation);
-
-  // Bounded history. Without this the map is a renderer-driven allocation for the life of the profile.
-  while (tasks_.size() > kMaxTasks) {
-    auto oldest = tasks_.begin();
-    for (auto it = tasks_.begin(); it != tasks_.end(); ++it) {
-      if (IsTerminal(it->second->state) &&
-          it->second->started_at_ms < oldest->second->started_at_ms) {
-        oldest = it;
-      }
-    }
-    if (!IsTerminal(oldest->second->state)) {
-      break;
-    }
-    conversations_.erase(oldest->first);
-    tasks_.erase(oldest);
-  }
-
+  const std::string task_id = CreateTask(prompt, mode, effort);
   StartTurn(task_id);
   return {task_id, std::nullopt};
+}
+
+std::string TaskStore::StartRoutineTask(const std::string& title,
+                                        const std::string& prompt,
+                                        mojom::PermissionMode mode,
+                                        mojom::Effort effort) {
+  if (prompt.empty() || prompt.size() > kMaxPromptBytes) {
+    return std::string();
+  }
+  size_t running = 0;
+  for (const auto& [id, task] : tasks_) {
+    if (!IsTerminal(task->state)) {
+      ++running;
+    }
+  }
+  // A routine that fires while the user has four tasks going does not get to push one of them out.
+  // It is skipped and its next run is scheduled as usual -- a missed routine is recoverable, a task
+  // the user was watching being evicted is not.
+  if (running >= kMaxConcurrentTasks) {
+    return std::string();
+  }
+  sidecar_->EnsureStarted(
+      url_loader_factory_,
+      base::BindRepeating(&TaskStore::OnSidecarStatusChanged, base::Unretained(this)));
+  if (sidecar_->status() == SidecarClient::Status::kUnavailable ||
+      sidecar_->status() == SidecarClient::Status::kFailed) {
+    return std::string();
+  }
+
+  const std::string task_id = CreateTask(prompt, mode, effort);
+  // First step in the trace, before any model output: a task the user did not type needs to say where
+  // it came from, or its tabs appear out of nowhere.
+  AddStep(task_id, mojom::StepKind::kRoutine,
+          title.empty() ? "Started by a routine" : "Started by the routine \"" + title + "\"");
+  StartTurn(task_id);
+  return task_id;
+}
+
+bool TaskStore::WakeTask(const std::string& task_id, const std::string& prompt) {
+  auto task = tasks_.find(task_id);
+  auto conversation = conversations_.find(task_id);
+  if (task == tasks_.end() || conversation == conversations_.end() || prompt.empty() ||
+      prompt.size() > kMaxPromptBytes) {
+    return false;
+  }
+  AddStep(task_id, mojom::StepKind::kRoutine, "Woken by a routine");
+  // Queued rather than forced when the task happens to be mid-run: a heartbeat is a nudge, and a nudge
+  // that interrupts work in progress is not a nudge.
+  if (!IsTerminal(task->second->state)) {
+    if (conversation->second.queued.size() < kMaxQueuedFollowUps) {
+      conversation->second.queued.push_back(prompt);
+    }
+    Notify(task_id);
+    return true;
+  }
+  conversation->second.messages.Append(TextMessage("user", prompt));
+  conversation->second.tool_rounds = 0;
+  task->second->error.reset();
+  Notify(task_id);
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&TaskStore::StartTurn, weak_factory_.GetWeakPtr(), task_id));
+  return true;
 }
 
 void TaskStore::StartTurn(const std::string& task_id) {
@@ -297,8 +473,9 @@ void TaskStore::StartTurn(const std::string& task_id) {
   base::DictValue request;
   request.Set("model", kModel);
   request.Set("stream", true);
+  request.Set("reasoning_effort", ReasoningEffort(task->second->effort));
   request.Set("messages", conversation->second.messages.Clone());
-  request.Set("tools", BrowserTools(task->second->mode));
+  request.Set("tools", BrowserTools(task->second->mode, task->second->effort));
 
   std::optional<std::string> body = base::WriteJson(request);
   if (!body.has_value()) {
@@ -309,6 +486,7 @@ void TaskStore::StartTurn(const std::string& task_id) {
   active_task_id_ = task_id;
   conversation->second.assistant_text.clear();
   conversation->second.proposed.clear();
+  conversation->second.turn_text_started = false;
   task->second->state = mojom::TaskState::kRunning;
   Notify(task_id);
   sidecar_->StartCompletion(std::move(body).value(), this);
@@ -324,6 +502,15 @@ void TaskStore::OnCompletionText(std::string_view text) {
   // from having empty narration.
   if (!task->second->narration.has_value()) {
     task->second->narration = std::string();
+  }
+  // A turn's first words start a new paragraph rather than continuing the previous turn's sentence.
+  // Without this a steered task read as "...the phone numberTaking the new instruction" -- two answers
+  // presented as one, which misrepresents both.
+  if (!conversation->second.turn_text_started) {
+    conversation->second.turn_text_started = true;
+    if (!task->second->narration->empty()) {
+      task->second->narration->append("\n\n");
+    }
   }
   if (task->second->narration->size() + text.size() <= kMaxNarrationBytes) {
     task->second->narration->append(text);
@@ -392,13 +579,22 @@ void TaskStore::OnCompletionFinished(const std::string& finish_reason) {
   conversation->second.messages.Append(std::move(assistant));
 
   if (conversation->second.proposed.empty()) {
+    // The turn produced an answer rather than another tool call, which is the moment a queued
+    // instruction was waiting for. Taking it here rather than finishing and starting a second task is
+    // what makes "queue" mean the same conversation.
+    if (DrainQueued(task_id)) {
+      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE, base::BindOnce(&TaskStore::StartTurn, weak_factory_.GetWeakPtr(), task_id));
+      return;
+    }
     FinishTask(task_id, mojom::TaskState::kSucceeded, std::string());
     return;
   }
 
-  if (conversation->second.tool_rounds >= kMaxToolRounds) {
+  if (conversation->second.tool_rounds >= ToolBudget(task->second->effort)) {
     FinishTask(task_id, mojom::TaskState::kFailed,
-               "The task kept asking for more pages than one task is allowed to open.");
+               "The task reached the number of steps this effort setting allows. Ask again with a "
+               "deeper effort, or narrow the question.");
     return;
   }
   ++conversation->second.tool_rounds;
@@ -416,6 +612,11 @@ bool TaskStore::ModeAllows(mojom::PermissionMode mode, const std::string& tool) 
   // Opening and reading are allowed everywhere. Everything that CHANGES something -- a page or the
   // disk -- needs more than read-only. One switch, so a new tool cannot quietly default to allowed.
   if (tool == kToolOpenPage || tool == kToolReadPage) {
+    return true;
+  }
+  // Writing a plan into the trace changes nothing outside the trace, so it needs no more than the
+  // narrowest mode. It is gated by EFFORT, not by permission, and the two are different questions.
+  if (tool == kToolPlan) {
     return true;
   }
   if (tool == kToolClick || tool == kToolType || tool == kToolSaveFile) {
@@ -448,6 +649,32 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
       base::JSONReader::ReadDict(call.arguments_json, base::JSON_PARSE_RFC);
   if (!arguments) {
     FinishTool(task_id, call, "Those arguments were not readable JSON.");
+    return;
+  }
+
+  if (call.name == kToolPlan) {
+    const std::string* goal = arguments->FindString("goal");
+    const base::ListValue* steps = arguments->FindList("steps");
+    if (!goal || !steps) {
+      FinishTool(task_id, call, "plan_research needs a goal and a list of steps.");
+      return;
+    }
+    mojom::Step* step = AddStep(task_id, mojom::StepKind::kPlanned, *goal);
+    if (step) {
+      int index = 0;
+      for (const base::Value& entry : *steps) {
+        if (!entry.is_string() || step->details.size() >= 20) {
+          continue;
+        }
+        mojom::StepDetailPtr detail = mojom::StepDetail::New();
+        detail->text = entry.GetString();
+        detail->source = base::NumberToString(++index);
+        step->details.push_back(std::move(detail));
+      }
+    }
+    Notify(task_id);
+    FinishTool(task_id, call,
+               "The plan is in the task's trace where the user can see it. Work through it now.");
     return;
   }
 
@@ -557,7 +784,53 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
       FinishTool(task_id, call, "save_file needs a name and contents.");
       return;
     }
-    // No folder means the user has not chosen one, and Guard mode does not invent a destination.
+    // A destination the MODEL supplied. Honoured only in full access, and even then only through the
+    // entry point that re-checks the directory on the thread that writes.
+    const std::string* folder_argument = arguments->FindString("folder");
+    const bool full = task->second->mode == mojom::PermissionMode::kFullAccess;
+    if (folder_argument && !folder_argument->empty() && !full) {
+      AddStep(task_id, mojom::StepKind::kRefused,
+              "Refused: a folder was named, and this task may only write to the chosen one");
+      Notify(task_id);
+      FinishTool(task_id, call,
+                 "This task cannot choose where files go. Save it by name and the browser will put it "
+                 "in the folder the user chose.");
+      return;
+    }
+
+    auto done = base::BindOnce(
+        [](base::WeakPtr<TaskStore> store, std::string task_id, ProposedToolCall call,
+           std::string name, base::FilePath written) {
+          if (!store) {
+            return;
+          }
+          if (written.empty()) {
+            store->FinishTool(task_id, call,
+                              "That file could not be written. A file of that name may already "
+                              "exist, or that folder is one the browser will not write into -- "
+                              "hidden directories and the browser's own profile are refused even in "
+                              "full access. Choose another name or another folder.");
+            return;
+          }
+          mojom::Step* step =
+              store->AddStep(task_id, mojom::StepKind::kSavedArtifact, "Saved " + name);
+          if (step) {
+            mojom::StepDetailPtr detail = mojom::StepDetail::New();
+            detail->text = written.AsUTF8Unsafe();
+            step->details.push_back(std::move(detail));
+          }
+          store->Notify(task_id);
+          store->FinishTool(task_id, call, "Saved as " + name + ".");
+        },
+        weak_factory_.GetWeakPtr(), task_id, call, *name);
+
+    if (folder_argument && !folder_argument->empty()) {
+      ++conversation->second.pending_tools;
+      FileTools::WriteAtPath(base::FilePath::FromUTF8Unsafe(*folder_argument), *name, *contents,
+                             user_data_dir_, std::move(done));
+      return;
+    }
+    // No folder means the user has not chosen one, and no mode invents a destination.
     // Answering with what to ask for is more useful than refusing blankly.
     if (task->second->working_folder.value_or(std::string()).empty()) {
       FinishTool(task_id, call,
@@ -565,31 +838,7 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
       return;
     }
     ++conversation->second.pending_tools;
-    FileTools::WriteInFolder(
-        working_folders_[task_id], *name, *contents,
-        base::BindOnce(
-            [](base::WeakPtr<TaskStore> store, std::string task_id, ProposedToolCall call,
-               std::string name, base::FilePath written) {
-              if (!store) {
-                return;
-              }
-              if (written.empty()) {
-                store->FinishTool(task_id, call,
-                                  "That file could not be written. A file of that name may already "
-                                  "exist -- choose another name.");
-                return;
-              }
-              mojom::Step* step =
-                  store->AddStep(task_id, mojom::StepKind::kSavedArtifact, "Saved " + name);
-              if (step) {
-                mojom::StepDetailPtr detail = mojom::StepDetail::New();
-                detail->text = written.AsUTF8Unsafe();
-                step->details.push_back(std::move(detail));
-              }
-              store->Notify(task_id);
-              store->FinishTool(task_id, call, "Saved as " + name + ".");
-            },
-            weak_factory_.GetWeakPtr(), task_id, call, *name));
+    FileTools::WriteInFolder(working_folders_[task_id], *name, *contents, std::move(done));
     return;
   }
 
@@ -618,9 +867,32 @@ void TaskStore::FinishTool(const std::string& task_id,
   // the stack, and starting a turn replaces that stream -- destroying the object whose method we are
   // inside. This crashed as a use-after-free the moment a task ran more than two tool rounds.
   if (conversation->second.pending_tools == 0) {
+    // Between tool rounds is the other safe boundary: the engine has been answered for everything it
+    // proposed, so an instruction inserted here changes what it does next rather than corrupting the
+    // turn it is in the middle of.
+    DrainQueued(task_id);
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(&TaskStore::StartTurn, weak_factory_.GetWeakPtr(), task_id));
   }
+}
+
+bool TaskStore::DrainQueued(const std::string& task_id) {
+  auto task = tasks_.find(task_id);
+  auto conversation = conversations_.find(task_id);
+  if (task == tasks_.end() || conversation == conversations_.end() ||
+      conversation->second.queued.empty()) {
+    return false;
+  }
+  for (const std::string& prompt : conversation->second.queued) {
+    conversation->second.messages.Append(TextMessage("user", prompt));
+  }
+  conversation->second.queued.clear();
+  task->second->queued.clear();
+  // The user asking for more work is exactly the consent the step ceiling was protecting, so it
+  // resets -- otherwise a long task's queue would be answered by "out of steps".
+  conversation->second.tool_rounds = 0;
+  Notify(task_id);
+  return true;
 }
 
 void TaskStore::OnCompletionFailed(const std::string& message) {
@@ -662,22 +934,67 @@ void TaskStore::CancelTask(const std::string& task_id) {
   Notify(task_id);
 }
 
-bool TaskStore::Reply(const std::string& task_id, const std::string& prompt) {
+mojom::FollowUpOutcome TaskStore::SendFollowUp(const std::string& task_id,
+                                              const std::string& prompt,
+                                              mojom::FollowUpMode mode) {
   auto task = tasks_.find(task_id);
   auto conversation = conversations_.find(task_id);
   if (task == tasks_.end() || conversation == conversations_.end() || prompt.empty() ||
       prompt.size() > kMaxPromptBytes) {
-    return false;
+    return mojom::FollowUpOutcome::kRejected;
   }
-  // A reply continues the same conversation rather than starting a new one, which is what the task
-  // tab's composer means. The tool budget resets with it: the user asking for more work is exactly the
-  // consent the ceiling was protecting.
+
+  // An idle task just takes its next turn. This is what a follow-up on a finished task has always
+  // meant, and it is the only case where the timing question does not arise.
+  if (IsTerminal(task->second->state)) {
+    conversation->second.messages.Append(TextMessage("user", prompt));
+    conversation->second.tool_rounds = 0;
+    task->second->error.reset();
+    task->second->state = mojom::TaskState::kQueued;
+    Notify(task_id);
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(&TaskStore::StartTurn, weak_factory_.GetWeakPtr(), task_id));
+    return mojom::FollowUpOutcome::kStartedTurn;
+  }
+
+  const bool interrupt = mode == mojom::FollowUpMode::kInterrupt;
+  if (!interrupt) {
+    // Queued, including for kAuto: pressing Enter on a running task should not throw away the work it
+    // is in the middle of. Interrupting is a thing the user asks for by name.
+    if (conversation->second.queued.size() >= kMaxQueuedFollowUps) {
+      return mojom::FollowUpOutcome::kRejected;
+    }
+    conversation->second.queued.push_back(prompt);
+    task->second->queued.push_back(prompt);
+    AddStep(task_id, mojom::StepKind::kQueuedMessage, "Queued: " + prompt);
+    Notify(task_id);
+    return mojom::FollowUpOutcome::kQueued;
+  }
+
+  // Interrupting. The partial answer is committed to history first, WITHOUT the tool calls the engine
+  // was in the middle of proposing: those were never sent to the browser as a complete turn, so
+  // recording them would leave the engine holding calls that will never be answered -- which is
+  // exactly the shape of history an OpenAI-compatible endpoint rejects.
+  if (active_task_id_ == task_id) {
+    if (!conversation->second.assistant_text.empty()) {
+      conversation->second.messages.Append(
+          TextMessage("assistant", conversation->second.assistant_text));
+    }
+    conversation->second.proposed.clear();
+    conversation->second.pending_tools = 0;
+    sidecar_->CancelCompletion();
+    active_task_id_.clear();
+  }
   conversation->second.messages.Append(TextMessage("user", prompt));
   conversation->second.tool_rounds = 0;
   task->second->error.reset();
-  task->second->narration.reset();
-  StartTurn(task_id);
-  return true;
+  AddStep(task_id, mojom::StepKind::kSteered, "Steered: " + prompt);
+  Notify(task_id);
+  // Posted for the same reason FinishTool posts: this can be reached while the stream that
+  // CancelCompletion just retired is still unwinding.
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&TaskStore::StartTurn, weak_factory_.GetWeakPtr(), task_id));
+  return mojom::FollowUpOutcome::kInterrupted;
 }
 
 std::vector<mojom::TaskPtr> TaskStore::ListTasks() const {
@@ -711,26 +1028,23 @@ bool TaskStore::SetPermissionMode(const std::string& task_id, mojom::PermissionM
   return true;
 }
 
-void TaskStore::ChooseWorkingFolder(
-    const std::string& task_id,
-    base::OnceCallback<void(const std::optional<std::string>&)> callback) {
+std::optional<std::string> TaskStore::SetWorkingFolder(const std::string& task_id,
+                                                      const base::FilePath& folder) {
   auto it = tasks_.find(task_id);
-  if (it == tasks_.end()) {
-    std::move(callback).Run(std::nullopt);
-    return;
-  }
-  // Downloads, until the picker is wired: a real directory the user already knows about and can find,
-  // rather than a path this code invented. It is recorded on the task so the tab shows where its files
-  // go, and the model is never told the path -- only that a folder exists.
-  base::FilePath folder;
-  if (!base::PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &folder) || folder.empty()) {
-    std::move(callback).Run(std::nullopt);
-    return;
+  if (it == tasks_.end() || folder.empty() || !folder.IsAbsolute()) {
+    return std::nullopt;
   }
   working_folders_[task_id] = folder;
+  // The NAME, not the path. The page shows the user where their files go; the absolute path stays in
+  // the browser process, because a renderer holding it has learned the shape of this machine's disk for
+  // no benefit to the person using it.
   it->second->working_folder = folder.BaseName().AsUTF8Unsafe();
+  // Remembered for the next task. This is the pref a settings screen shows and can clear.
+  if (profile_) {
+    profile_->GetPrefs()->SetFilePath(prefs::kWorkingFolder, folder);
+  }
   Notify(task_id);
-  std::move(callback).Run(it->second->working_folder);
+  return it->second->working_folder;
 }
 
 void TaskStore::OnSidecarStatusChanged(SidecarClient::Status status) {

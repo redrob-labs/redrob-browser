@@ -1,0 +1,23 @@
+diff --git a/chrome/browser/prefs/browser_prefs.cc b/chrome/browser/prefs/browser_prefs.cc
+index b0923f5e9cd91..fc7efb1174996 100644
+--- a/chrome/browser/prefs/browser_prefs.cc
++++ b/chrome/browser/prefs/browser_prefs.cc
+@@ -76,6 +76,7 @@
+ #include "chrome/browser/push_messaging/push_messaging_app_identifier.h"
+ #include "chrome/browser/push_messaging/push_messaging_service_impl.h"
+ #include "chrome/browser/push_messaging/push_messaging_unsubscribed_entry.h"
++#include "chrome/browser/redrob/redrob_prefs.h"
+ #include "chrome/browser/rlz/chrome_rlz_tracker_delegate.h"
+ #include "chrome/browser/search/background/ntp_custom_background_service.h"
+ #include "chrome/browser/search/search.h"
+@@ -2280,6 +2281,10 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
+ #endif  // BUILDFLAG(IS_ANDROID)
+ 
+   registry->RegisterBooleanPref(prefs::kStaticStorageQuotaEnabled, false);
++
++  // Everything the agent keeps between runs, registered from one place so that the settings screen
++  // claiming to list all of it can be checked against a single file.
++  redrob::prefs::RegisterProfilePrefs(registry);
+ }
+ 
+ void RegisterUserProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
