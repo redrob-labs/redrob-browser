@@ -61,11 +61,11 @@ std::optional<tab_groups::TabGroupId> AgentTabs::GroupForProfile(Profile* profil
 }
 
 // static
-bool AgentTabs::OpenInAgentGroup(Profile* profile,
-                                 const GURL& url,
-                                 const std::string& group_title) {
+content::WebContents* AgentTabs::OpenInAgentGroup(Profile* profile,
+                                                  const GURL& url,
+                                                  const std::string& group_title) {
   if (!profile || !IsUrlAgentMayOpen(url)) {
-    return false;
+    return nullptr;
   }
 
   BrowserWindowInterface* browser =
@@ -73,7 +73,7 @@ bool AgentTabs::OpenInAgentGroup(Profile* profile,
   // No ordinary window to put a tab in. Refusing beats opening one: a task running in the background
   // must not conjure a window the user did not ask for.
   if (!browser) {
-    return false;
+    return nullptr;
   }
 
   NavigateParams params(browser, url, ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
@@ -84,12 +84,12 @@ bool AgentTabs::OpenInAgentGroup(Profile* profile,
   // rather than assumed to be the one asked.
   BrowserWindowInterface* actual = params.browser;
   if (!actual || !params.navigated_or_inserted_contents) {
-    return false;
+    return nullptr;
   }
   TabStripModel* model = actual->GetTabStripModel();
   const int index = model->GetIndexOfWebContents(params.navigated_or_inserted_contents);
   if (index == TabStripModel::kNoTab) {
-    return false;
+    return nullptr;
   }
 
   std::optional<tab_groups::TabGroupId> existing = GroupForProfile(profile);
@@ -102,7 +102,7 @@ bool AgentTabs::OpenInAgentGroup(Profile* profile,
 
   if (existing.has_value()) {
     model->AddToExistingGroup({index}, existing.value());
-    return true;
+    return params.navigated_or_inserted_contents;
   }
 
   const tab_groups::TabGroupId group = model->AddToNewGroup({index});
@@ -111,7 +111,7 @@ bool AgentTabs::OpenInAgentGroup(Profile* profile,
                                             tab_groups::TabGroupColorId::kBlue,
                                             /*is_collapsed=*/false));
   GroupRegistry().insert_or_assign(profile, group);
-  return true;
+  return params.navigated_or_inserted_contents;
 }
 
 }  // namespace redrob

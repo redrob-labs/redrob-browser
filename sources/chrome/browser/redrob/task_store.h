@@ -15,11 +15,16 @@
 #include "base/timer/timer.h"
 #include "base/values.h"
 #include "chrome/browser/redrob/sidecar_client.h"
+#include "chrome/browser/ui/thumbnails/thumbnail_image.h"
 #include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 class Profile;
+
+namespace content {
+class WebContents;
+}  // namespace content
 
 namespace redrob {
 
@@ -97,12 +102,23 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   mojom::Step* AddStep(const std::string& task_id, mojom::StepKind kind, const std::string& label);
   void AddStepDetail(const std::string& task_id, const std::string& text, const std::string& source);
   void Notify(const std::string& task_id);
+  // Subscribes to the frames Chromium already captures for a tab, and files each one on the step that
+  // opened it. Nothing new is captured for us: subscribing is what makes the existing thumbnail
+  // machinery keep a backgrounded tab's image fresh.
+  void WatchTabFrames(const std::string& task_id, content::WebContents* contents, size_t step_index);
+  void OnTabFrame(std::string task_id, size_t step_index, ThumbnailImage::CompressedThumbnailData data);
   // Prose arrives token by token; a Mojo message per token would send the whole task hundreds of times
   // for one paragraph. Coalesced so the page updates promptly without that traffic.
   void ScheduleNotify(const std::string& task_id);
 
   std::map<std::string, mojom::TaskPtr> tasks_;
   std::map<std::string, Conversation> conversations_;
+  // Held for the life of the task: the subscription IS the request, so dropping it stops the frames.
+  struct PreviewWatch {
+    scoped_refptr<ThumbnailImage> image;
+    std::unique_ptr<ThumbnailImage::Subscription> subscription;
+  };
+  std::map<std::string, std::vector<PreviewWatch>> previews_;
   // The task whose turn the sidecar is currently answering. Only one runs at a time because one client
   // holds one stream; queueing is what kMaxConcurrentTasks bounds.
   std::string active_task_id_;

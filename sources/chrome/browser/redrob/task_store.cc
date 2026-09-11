@@ -12,7 +12,10 @@
 #include "base/strings/escape.h"
 #include "base/time/time.h"
 #include "base/uuid.h"
+#include "base/base64.h"
 #include "chrome/browser/redrob/agent_tabs.h"
+#include "chrome/browser/ui/thumbnails/thumbnail_tab_helper.h"
+#include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
 
 namespace redrob {
@@ -27,6 +30,9 @@ constexpr size_t kMaxTasks = 200;
 constexpr size_t kMaxNarrationBytes = 256 * 1024;
 constexpr size_t kMaxStepsPerTask = 200;
 constexpr size_t kMaxDetailsPerStep = 40;
+// A frame is base64 in a Mojo message. Thumbnails are a few KB; this is the ceiling past which we would
+// rather show no picture than send that much through a pipe on every update.
+constexpr size_t kMaxPreviewBytes = 512 * 1024;
 
 // How many times one task may go engine -> tool -> engine. The loop is driven by model output, so
 // without a ceiling a model that keeps proposing tools keeps the browser opening tabs forever.
@@ -349,7 +355,8 @@ std::string TaskStore::RunTool(const std::string& task_id, const ProposedToolCal
   const GURL url(*url_string);
   const std::string* reason = arguments->FindString("reason");
 
-  if (!AgentTabs::OpenInAgentGroup(profile_, url, kAgentTabGroupTitle)) {
+  content::WebContents* contents = AgentTabs::OpenInAgentGroup(profile_, url, kAgentTabGroupTitle);
+  if (!contents) {
     // Reported back so the engine can choose another route instead of retrying the same refusal.
     return "That page could not be opened. Only http and https pages can be opened, and a normal "
            "browser window must be open.";
@@ -362,6 +369,9 @@ std::string TaskStore::RunTool(const std::string& task_id, const ProposedToolCal
     detail->text = url.spec();
     detail->source = url.host();
     step->details.push_back(std::move(detail));
+    // Indexed, not pointed at: steps live in a vector that later steps push onto, and a raw pointer
+    // into it would dangle the moment the agent does anything else.
+    WatchTabFrames(task_id, contents, tasks_[task_id]->steps.size() - 1);
   }
   Notify(task_id);
   return "Opened " + url.spec() + " as a tab in the user's browser.";
@@ -503,6 +513,47 @@ void TaskStore::AddStepDetail(const std::string& task_id,
   detail->text = text;
   detail->source = source;
   step->details.push_back(std::move(detail));
+}
+
+
+void TaskStore::WatchTabFrames(const std::string& task_id,
+                               content::WebContents* contents,
+                               size_t step_index) {
+  ThumbnailTabHelper* helper = ThumbnailTabHelper::FromWebContents(contents);
+  if (!helper) {
+    return;
+  }
+  scoped_refptr<ThumbnailImage> image = helper->thumbnail();
+  if (!image) {
+    return;
+  }
+
+  PreviewWatch watch;
+  watch.image = image;
+  watch.subscription = image->Subscribe();
+  // Compressed, because the alternative is converting an SkBitmap per frame on the UI thread purely to
+  // re-encode it for a data URL. The thumbnail machinery has already produced a JPEG.
+  watch.subscription->SetCompressedImageCallback(
+      base::BindRepeating(&TaskStore::OnTabFrame, base::Unretained(this), task_id, step_index));
+  previews_[task_id].push_back(std::move(watch));
+}
+
+void TaskStore::OnTabFrame(std::string task_id,
+                           size_t step_index,
+                           ThumbnailImage::CompressedThumbnailData data) {
+  auto task = tasks_.find(task_id);
+  if (task == tasks_.end() || !data || step_index >= task->second->steps.size()) {
+    return;
+  }
+  const std::vector<uint8_t>& bytes = data->data;
+  if (bytes.empty() || bytes.size() > kMaxPreviewBytes) {
+    return;
+  }
+  // Replaces rather than accumulates: this is the step's current picture of its page, and keeping every
+  // frame a long-lived tab produced would grow without bound for no gain.
+  task->second->steps[step_index]->preview_data_url =
+      "data:image/jpeg;base64," + base::Base64Encode(bytes);
+  ScheduleNotify(task_id);
 }
 
 void TaskStore::ScheduleNotify(const std::string& task_id) {

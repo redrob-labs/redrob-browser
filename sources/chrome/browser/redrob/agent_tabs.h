@@ -13,6 +13,10 @@
 
 class Profile;
 
+namespace content {
+class WebContents;
+}  // namespace content
+
 namespace redrob {
 
 // Opens the pages an agent asked for as REAL tabs, collected in one named tab group.
@@ -24,12 +28,18 @@ namespace redrob {
 class AgentTabs {
  public:
   // Opens `url` in the background, in this profile's agent group, creating the group on first use.
-  // Returns false without opening anything when the URL is one an agent may not be handed (see the
-  // implementation's scheme check) or when the profile has no ordinary browser window to put a tab in.
+  // Returns the tab's contents, or nullptr without opening anything when the URL is one an agent may
+  // not be handed (see the implementation's scheme check) or when the profile has no ordinary browser
+  // window to put a tab in.
+  //
+  // The contents come back so a caller can capture frames of it. Not owned -- the tab strip owns the
+  // tab, and the user can close it at any moment, so a caller must not store this raw.
   //
   // Background, never foreground: a task running while the user reads something else must not steal
   // what they are looking at.
-  static bool OpenInAgentGroup(Profile* profile, const GURL& url, const std::string& group_title);
+  static content::WebContents* OpenInAgentGroup(Profile* profile,
+                                               const GURL& url,
+                                               const std::string& group_title);
 
   // The agent group for this profile, if one is open. Exposed for tests and for callers that want to
   // report how many tabs a task has open.

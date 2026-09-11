@@ -24,6 +24,7 @@ source_set("sidecar") {
     "//chrome/browser/ui/browser_window",
     "//chrome/browser/ui/navigator",
     "//chrome/browser/ui/tabs:tab_strip",
+    "//chrome/browser/ui/thumbnails",
     "//components/tab_groups",
     "//content/public/browser",
     "//net",
