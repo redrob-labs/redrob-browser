@@ -18,6 +18,8 @@ source_set("sidecar") {
     "file_tools.h",
     "page_tools.cc",
     "page_tools.h",
+    "redrob_fonts.cc",
+    "redrob_fonts.h",
     "redrob_prefs.cc",
     "redrob_prefs.h",
     "routine_store.cc",
@@ -37,6 +39,7 @@ source_set("sidecar") {
     "//services/network/public/cpp",
   ]
   deps = [
+    ":ui_font",
     "//base",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/ui/browser_window",
@@ -56,4 +59,18 @@ source_set("sidecar") {
     "//net/traffic_annotation",
     "//url",
   ]
+}
+
+# The UI typeface, beside the executable.
+#
+# A copy target rather than a resource-pack entry: the platform font systems all take a PATH, so a font that
+# only exists as bytes inside a .pak cannot be registered without standing up a font manager of our own. See
+# redrob_fonts.cc.
+#
+# The same face the WebUI bundles, as a plain TTF rather than the woff2 those use -- Skia's FreeType backend
+# cannot open a woff2 container, and the WebUI cannot use a bare TTF without paying for the compression it
+# would otherwise get. So the two forms coexist deliberately, from one upstream file.
+copy("ui_font") {
+  sources = [ "fonts/PretendardVariable.ttf" ]
+  outputs = [ "$root_out_dir/fonts/{{source_file_part}}" ]
 }

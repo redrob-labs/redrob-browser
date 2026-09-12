@@ -1,0 +1,16 @@
+diff --git a/chrome/browser/ui/tabs/vertical_tab_strip_state.h b/chrome/browser/ui/tabs/vertical_tab_strip_state.h
+index b46ad7ecdfff7..f4cdcd62db6c8 100644
+--- a/chrome/browser/ui/tabs/vertical_tab_strip_state.h
++++ b/chrome/browser/ui/tabs/vertical_tab_strip_state.h
+@@ -7,7 +7,10 @@
+ 
+ namespace tabs {
+ 
+-inline constexpr int kVerticalTabStripDefaultUncollapsedWidth = 240;
++// Redrob: 254, measured off the reference -- the column's tint ends at x=253. Every row metric in
++// redrob_sidebar_tokens.h was derived at this width, so 240 made the rows correct in proportion and
++// wrong in absolute size. The user can still drag it; this is only where it starts.
++inline constexpr int kVerticalTabStripDefaultUncollapsedWidth = 254;
+ 
+ // Per-window state for the vertical tab strip.
+ struct VerticalTabStripState {
