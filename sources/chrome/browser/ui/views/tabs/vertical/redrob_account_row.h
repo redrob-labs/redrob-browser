@@ -39,7 +39,6 @@ class RedrobAccountRow : public views::View {
   void OpenSettings();
 
   raw_ptr<BrowserWindowInterface> browser_;
-  raw_ptr<AvatarToolbarButton> avatar_ = nullptr;
   raw_ptr<views::LabelButton> settings_button_ = nullptr;
 };
 

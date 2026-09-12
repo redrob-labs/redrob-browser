@@ -1,0 +1,22 @@
+diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+index 92aca7476b3fa..83e3a95005407 100644
+--- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
++++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+@@ -900,6 +900,17 @@ bool BrowserWebContentsDelegate::ShouldFocusLocationBarByDefault(
+       return false;
+     }
+ 
++    // Redrob: the new tab IS the AI composer, and its prompt field is what should hold the caret.
++    // Upstream focuses the omnibox on the NTP because the NTP's search box IS the omnibox; here they are
++    // two different fields, so focusing the wrong one sends the first thing you type to a search engine
++    // instead of to the agent. This has to come BEFORE the kChromeUINewTabHost branch below: our surface
++    // is reached through chrome://newtab, which stays the entry's VIRTUAL url, so that branch would see a
++    // new tab page and answer true.
++    if (url.host() == chrome::kChromeUIRedrobHost ||
++        virtual_url.host() == chrome::kChromeUIRedrobHost) {
++      return false;
++    }
++
+     if ((url.SchemeIs(content::kChromeUIScheme) &&
+          url.host() == chrome::kChromeUINewTabHost) ||
+         (virtual_url.SchemeIs(content::kChromeUIScheme) &&

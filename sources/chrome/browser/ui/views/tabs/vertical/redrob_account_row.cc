@@ -24,8 +24,9 @@
 namespace redrob {
 
 RedrobAccountRow::RedrobAccountRow(BrowserWindowInterface* browser) : browser_(browser) {
-  // Stacked, not side by side. The column is 240px and can be dragged to 126; the account pill carries a
-  // display name of unknown length, so putting anything beside it means clipping whichever loses.
+  // The foot of the sidebar, and only Settings lives here now. The avatar moved to the header row at the
+  // TOP, where the reference puts it beside the workspace name -- see RedrobSidebarSections, which also
+  // took over registering it with the toolbar.
   auto* layout = SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kVertical, gfx::Insets::VH(4, 8), 2));
   layout->set_cross_axis_alignment(views::BoxLayout::CrossAxisAlignment::kStart);
@@ -33,40 +34,17 @@ RedrobAccountRow::RedrobAccountRow(BrowserWindowInterface* browser) : browser_(b
   if (!browser_) {
     return;
   }
-  avatar_ = AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
-  // Shown whatever the sign-in state: signed out, this IS the sign-in control, and hiding it would
-  // leave a browser with no way to sign in at all now that the toolbar is gone.
-  avatar_->SetVisible(true);
 
-  // This row's button is the browser's ONE avatar, not a second copy of it. Features that anchor a
-  // bubble to "the avatar" -- sign-in interception, sync errors, IPH -- ask ToolbarButtonProvider for
-  // it, so without this they would anchor to the hidden toolbar's instance and open a bubble pointing
-  // at the top of the window where nothing is drawn.
-  if (BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
-    if (ToolbarView* toolbar = browser_view->toolbar()) {
-      toolbar->SetRedrobAvatarButton(avatar_);
-    }
-  }
-
-  // Settings. Without a toolbar there is no app menu and no omnibox, so this is the only way in -- a
-  // browser whose settings cannot be reached is not a shell decision, it is a broken browser.
+  // Settings. There is no app menu in this product and the address row carries navigation only, so this
+  // is the only way in -- a browser whose settings cannot be reached is not a shell decision, it is a
+  // broken browser.
   settings_button_ = AddChildView(std::make_unique<views::LabelButton>(
       base::BindRepeating(&RedrobAccountRow::OpenSettings, base::Unretained(this)),
       base::UTF8ToUTF16(std::string("Settings"))));
   settings_button_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 }
 
-RedrobAccountRow::~RedrobAccountRow() {
-  // The toolbar holds a raw pointer to a button THIS row owns, so it has to be told before the button
-  // goes away. Views are destroyed in an order neither of them chooses.
-  if (browser_) {
-    if (BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
-      if (ToolbarView* toolbar = browser_view->toolbar()) {
-        toolbar->SetRedrobAvatarButton(nullptr);
-      }
-    }
-  }
-}
+RedrobAccountRow::~RedrobAccountRow() = default;
 
 void RedrobAccountRow::OpenSettings() {
   if (!browser_) {

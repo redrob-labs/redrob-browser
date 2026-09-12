@@ -20,11 +20,16 @@
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/profiles/avatar_toolbar_button.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/saved_tab_groups/public/saved_tab_group.h"
 #include "components/saved_tab_groups/public/types.h"
+#include "ui/base/models/image_model.h"
 #include "ui/base/mojom/menu_source_type.mojom-shared.h"
+#include "ui/gfx/image/image.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/page_transition_types.h"
@@ -34,6 +39,7 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/flex_layout.h"
+#include "ui/views/layout/layout_types.h"
 #include "ui/views/view_class_properties.h"
 
 namespace redrob {
@@ -48,6 +54,8 @@ constexpr size_t kMaxChatRows = 6;
 
 constexpr int kSectionInset = 8;
 constexpr int kRowHeight = 28;
+// The reference sets a bookmark's mark 8px from its name. Wider and the two stop reading as one row.
+constexpr int kFaviconLabelSpacing = 8;
 
 std::unique_ptr<views::Label> MakeHeading(const std::string& text) {
   auto label = std::make_unique<views::Label>(base::UTF8ToUTF16(text));
@@ -63,14 +71,45 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kVertical, gfx::Insets::VH(4, kSectionInset), 2));
 
+  // The header: the account and the workspace, on ONE row, at the TOP. Both were elsewhere before -- the
+  // avatar at the foot and the workspace here -- and the reference puts them together because they answer
+  // the same question, which is whose browser this is and which of their workspaces you are in.
+  auto* header = AddChildView(std::make_unique<views::View>());
+  auto* header_layout = header->SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::Orientation::kHorizontal, gfx::Insets(), 6));
+  header_layout->set_cross_axis_alignment(views::BoxLayout::CrossAxisAlignment::kCenter);
+
+  if (browser_) {
+    avatar_ = header->AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
+    // Shown whatever the sign-in state: signed out, this IS the sign-in control, and the top row has no
+    // avatar of its own, so hiding it would leave a browser with no way to sign in at all.
+    avatar_->SetVisible(true);
+
+    // This is the browser's ONE avatar, not a second copy. Anything that anchors a bubble to "the avatar"
+    // -- sign-in interception, sync errors, IPH -- asks ToolbarButtonProvider for it, so without this
+    // they would anchor to the toolbar's instance, which this product never builds, and open a bubble
+    // pointing at a corner where nothing is drawn.
+    if (BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
+      if (ToolbarView* toolbar = browser_view->toolbar()) {
+        toolbar->SetRedrobAvatarButton(avatar_);
+      }
+    }
+  }
+
   // The workspace switcher. A workspace IS a saved tab group -- the browser already has the concept,
   // persists it, and syncs it, so inventing a parallel one would mean two things the user has to keep
   // in step by hand.
-  workspace_button_ = AddChildView(std::make_unique<views::LabelButton>(
+  workspace_button_ = header->AddChildView(std::make_unique<views::LabelButton>(
       base::BindRepeating(&RedrobSidebarSections::ShowWorkspaceMenu, base::Unretained(this)),
       std::u16string()));
   workspace_button_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   workspace_button_->SetMinSize(gfx::Size(0, kRowHeight));
+  header->SetProperty(
+      views::kFlexBehaviorKey,
+      views::FlexSpecification(views::LayoutOrientation::kHorizontal,
+                               views::MinimumFlexSizeRule::kScaleToZero,
+                               views::MaximumFlexSizeRule::kUnbounded));
+  header_ = header;
 
   bookmarks_heading_ = AddChildView(MakeHeading("Bookmarks"));
   bookmarks_list_ = AddChildView(std::make_unique<views::View>());
@@ -110,7 +149,17 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   }
 }
 
-RedrobSidebarSections::~RedrobSidebarSections() = default;
+RedrobSidebarSections::~RedrobSidebarSections() {
+  // The toolbar holds a raw pointer to a button THIS view owns, so it has to be told before the button
+  // goes away. Views are destroyed in an order neither of them chooses.
+  if (browser_) {
+    if (BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
+      if (ToolbarView* toolbar = browser_view->toolbar()) {
+        toolbar->SetRedrobAvatarButton(nullptr);
+      }
+    }
+  }
+}
 
 void RedrobSidebarSections::OnTaskChanged(const mojom::Task& task) {
   // Rebuilt wholesale rather than patched. A task changes state several times a second while it runs,
@@ -170,7 +219,8 @@ void RedrobSidebarSections::SetCollapsed(bool collapsed) {
   }
   collapsed_ = collapsed;
   // Hidden as a block. At 56px there is no width for a label, and half-drawn text would read as a
-  // rendering bug rather than as a collapsed sidebar.
+  // rendering bug rather than as a collapsed sidebar. The avatar is the one thing that STAYS: it is
+  // 28px square, it needs no label, and it is the only sign-in control this browser has.
   workspace_button_->SetVisible(!collapsed);
   chats_heading_->SetVisible(!collapsed);
   chats_list_->SetVisible(!collapsed);
@@ -219,6 +269,17 @@ void RedrobSidebarSections::RebuildBookmarks() {
     row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     row->SetMinSize(gfx::Size(0, kRowHeight));
     row->SetEnabled(node->is_url());
+    // The favicon is what makes this list scannable -- the reference identifies a bookmark by its mark
+    // before its name. GetFavicon starts the load if it has not happened; the result arrives as a model
+    // change, which lands back here and rebuilds, so there is no separate callback to hold.
+    if (node->is_url()) {
+      const gfx::Image& favicon = model->GetFavicon(node);
+      if (!favicon.IsEmpty()) {
+        row->SetImageModel(views::Button::STATE_NORMAL,
+                           ui::ImageModel::FromImage(favicon));
+      }
+      row->SetImageLabelSpacing(kFaviconLabelSpacing);
+    }
     ++shown;
   }
   InvalidateLayout();

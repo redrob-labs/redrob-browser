@@ -36,6 +36,14 @@ sources/chrome/browser/ui/webui/redrob/task_host_impl.cc chrome/browser/ui/webui
 sources/chrome/browser/resources/redrob/BUILD.gn    chrome/browser/resources/redrob/BUILD.gn
 sources/chrome/browser/resources/redrob/redrob.html chrome/browser/resources/redrob/redrob.html
 sources/chrome/browser/resources/redrob/redrob.css  chrome/browser/resources/redrob/redrob.css
+# tokens.css is ONE file copied into all three WebUI bundles. build_webui's static_files are
+# per-target and relative to the target's own directory, so a bundle cannot reference a file in
+# another bundle's folder -- which is why the font is already duplicated three ways. Mapping one
+# source to three destinations here means the duplication is in the copy step rather than on disk,
+# so the design tokens have exactly one place they can be edited.
+sources/chrome/browser/resources/redrob/tokens.css  chrome/browser/resources/redrob/tokens.css
+sources/chrome/browser/resources/redrob/tokens.css  chrome/browser/resources/redrob_settings/tokens.css
+sources/chrome/browser/resources/redrob/tokens.css  chrome/browser/resources/redrob_onboarding/tokens.css
 sources/chrome/browser/resources/redrob/redrob.ts   chrome/browser/resources/redrob/redrob.ts
 sources/chrome/browser/resources/redrob/PretendardVariable.woff2  chrome/browser/resources/redrob/PretendardVariable.woff2
 sources/chrome/browser/resources/redrob/PretendardVariable-LICENSE.txt chrome/browser/resources/redrob/PretendardVariable-LICENSE.txt

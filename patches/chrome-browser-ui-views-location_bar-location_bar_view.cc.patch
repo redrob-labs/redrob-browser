@@ -1,0 +1,35 @@
+diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/browser/ui/views/location_bar/location_bar_view.cc
+index 335b2902fd430..00cfbb24b30ec 100644
+--- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
++++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
+@@ -232,6 +232,11 @@ LocationBarView::LocationBarView(Browser* browser,
+                  !v->GetOmniboxController()->IsPopupOpen();
+         }));
+     views::FocusRing::Get(this)->SetOutsetFocusRingDisabled(true);
++    // Redrob: and then never satisfied. With a flat address row the ring would be the ONLY thing drawing
++    // a box there, at 2px in the accent colour -- louder than anything else on the new tab. A text field
++    // announces its own focus with a caret, which is what the reference relies on.
++    views::FocusRing::Get(this)->SetHasFocusPredicate(
++        base::BindRepeating([](const View* view) { return false; }));
+     views::InstallPillHighlightPathGenerator(this);
+ 
+ #if BUILDFLAG(OS_LEVEL_GEOLOCATION_PERMISSION_SUPPORTED)
+@@ -1361,10 +1366,14 @@ void LocationBarView::RefreshBackground() {
+   if (is_popup_mode_) {
+     SetBackground(views::CreateSolidBackground(background_color_));
+   } else {
+-    SetBackground(CreateRoundRectBackground(
+-        background_color_, border_color, size(),
+-        /*blend_mode=*/SkBlendMode::kSrcOver,
+-        /*antialias=*/true, /*should_border_scale=*/true));
++    // Redrob: the address row is FLAT. No fill, no border, no focused fill -- the row is the top edge of
++    // the content area, and a filled pill there puts a second card above the page. Chromium's logic above
++    // picks between three fills and two border colours; "paint nothing" is not a fourth case to thread
++    // through it, so the choice is made here instead. `background_color_` still has to be a real colour:
++    // the omnibox is a views::Textfield and needs an opaque background behind it to get subpixel AA, and
++    // several child views ask this class what colour they are sitting on.
++    background_color_ = color_provider->GetColor(kColorToolbar);
++    SetBackground(nullptr);
+   }
+ 
+   // Keep the views::Textfield in sync. It needs an opaque background to

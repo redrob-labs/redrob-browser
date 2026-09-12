@@ -1,0 +1,124 @@
+/* Redrob's design tokens, in shadcn/ui's shape.
+ *
+ * Two layers, and the split is the point. The `--rr-*` PRIMITIVES are transcribed from
+ * @redrob-design/brand and are the only place a raw hex appears -- they are the brand, and they are named
+ * after the token so a reader can check them against the sheet without translating. Everything below is
+ * SEMANTIC: it says what a colour is FOR, and a rule that wants "the border of an input" asks for
+ * `--input` rather than picking a grey that happens to look right. That indirection is what stops the
+ * fifth surface from drifting from the first.
+ *
+ * The names, the radius arithmetic and the shadow scale are shadcn/ui's, deliberately: it is the vocabulary
+ * the team already reads, and adopting the vocabulary is separable from adopting the toolchain. We do NOT
+ * take React, Tailwind or Radix -- this is a Chromium WebUI built by `build_webui` (TypeScript and Lit),
+ * and vendoring that stack into third_party would mean re-fitting the GN integration on every Chromium
+ * roll for a set of class names that resolve to these variables anyway.
+ *
+ * Dark mode is expressed with light-dark() rather than a duplicated :root block, so a token can only be
+ * defined once and cannot be updated in one mode and forgotten in the other.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* ---------- primitives: @redrob-design/brand ---------- */
+  --rr-blue-1: #eff4ff;
+  --rr-blue-3: #bad2ff;
+  --rr-blue-5: #507fff;
+  --rr-blue-6: #2b52ff;
+  --rr-blue-7: #1733d5;
+  --rr-blue-9: #061460;
+  --rr-blue-10: #030c34;
+  --rr-gray-1: #f8f9fb;
+  --rr-gray-2: #eff1f4;
+  --rr-gray-3: #dfe2e8;
+  --rr-gray-4: #cbcfd7;
+  --rr-gray-5: #aab0bb;
+  --rr-gray-6: #7c8390;
+  --rr-gray-7: #576071;
+  --rr-gray-8: #292e37;
+  --rr-gray-9: #141719;
+  --rr-black: #0a0b0c;
+  --rr-red-3: #ff5452;
+  --rr-red-4: #a31310;
+  /* The shell's own two, measured off the product rather than taken from the sheet: the content area is
+     near-white with a hint of the sidebar's cyan, and the sidebar is that cyan. */
+  --rr-page: #fcfeff;
+  --rr-wash: #e9fbff;
+
+  /* ---------- semantic colour ---------- */
+  --background: light-dark(var(--rr-page), var(--rr-gray-9));
+  --foreground: light-dark(var(--rr-gray-9), var(--rr-gray-1));
+  /* A card is white on a near-white page. That is the reference's relationship and it depends on the page
+     NOT being white -- which is why --background is #fcfeff and not #fff. */
+  --card: light-dark(#fff, color-mix(in srgb, var(--rr-gray-8) 45%, var(--rr-gray-9)));
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --primary: light-dark(var(--rr-gray-9), var(--rr-gray-1));
+  --primary-foreground: light-dark(#fff, var(--rr-black));
+  --secondary: light-dark(var(--rr-gray-2), var(--rr-gray-8));
+  --secondary-foreground: var(--foreground);
+  /* `--muted` is a SURFACE in shadcn and `--muted-foreground` is the text. This file used to use --muted
+     for the text, so both names exist and the alias block below keeps the old one working. */
+  --muted: light-dark(#ececec, var(--rr-gray-8));
+  --muted-foreground: light-dark(var(--rr-gray-7), var(--rr-gray-5));
+  --accent: light-dark(var(--rr-blue-6), var(--rr-blue-5));
+  --accent-foreground: light-dark(#fff, var(--rr-black));
+  --accent-subtle: light-dark(var(--rr-blue-1), var(--rr-blue-10));
+  --destructive: light-dark(var(--rr-red-4), var(--rr-red-3));
+  --destructive-foreground: light-dark(#fff, var(--rr-black));
+  --border: light-dark(var(--rr-gray-3), var(--rr-gray-8));
+  /* Lighter than --border: a card's edge is a hairline in the reference, and the brand grey-3 reads as a
+     drawn line at card scale. */
+  --border-subtle: light-dark(#f0f1f2, var(--rr-gray-8));
+  --input: var(--border);
+  --ring: var(--accent);
+
+  /* ---------- radius: shadcn's arithmetic off one base ---------- */
+  /* 10px, which is what the measured control radii come out at: the segmented track is md, its thumb is
+     sm, and a card or the composer is xl. One base means a change to the product's roundness is one edit
+     rather than seven. */
+  --radius: 10px;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-full: 999px;
+
+  /* ---------- elevation ---------- */
+  /* Neutral, never tinted. A brand-coloured shadow washes whatever sits under it, which is how the
+     composer ended up tinting the middle of the new tab. Dark mode drops the wide ambient layers: on a
+     dark surface they read as haze rather than as height. */
+  --shadow-2xs: 0 1px 2px light-dark(rgb(0 0 0 / 4%), transparent);
+  --shadow-xs: 0 1px 2px light-dark(rgb(0 0 0 / 10%), rgb(0 0 0 / 40%));
+  --shadow-sm: 0 1px 2px light-dark(rgb(0 0 0 / 4%), transparent),
+    0 8px 22px -16px light-dark(rgb(0 0 0 / 16%), transparent);
+  --shadow-md: 0 1px 2px light-dark(rgb(0 0 0 / 4%), transparent),
+    0 10px 24px -14px light-dark(rgb(0 0 0 / 14%), transparent);
+  --shadow-lg: 0 2px 4px light-dark(rgb(0 0 0 / 5%), transparent),
+    0 16px 40px -20px light-dark(rgb(0 0 0 / 20%), rgb(0 0 0 / 50%));
+
+  /* ---------- type ---------- */
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  /* Pretendard rather than the reference's own face: it is the brand's, and it is the one in this family
+     that draws Korean at the same weights -- the whole reason for this browser is a Korean-language user. */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-lg: 16px;
+  --text-xl: 21px;
+
+  /* ---------- aliases kept for the rules written before this block ---------- */
+  /* Not deprecated shims -- these are the names most of this file already uses, and rewriting several
+     hundred declarations to prove a point would be a change with no visible effect and a real chance of
+     a typo. New rules should use the semantic names above. */
+  --surface: var(--background);
+  --raised: var(--card);
+  --ink: var(--foreground);
+  --line: var(--border);
+  --accent-soft: var(--accent-subtle);
+  --accent-muted: light-dark(var(--rr-blue-3), var(--rr-blue-9));
+  --warn: var(--destructive);
+  --radius-control: var(--radius-lg);
+  --radius-panel: var(--radius-xl);
+}

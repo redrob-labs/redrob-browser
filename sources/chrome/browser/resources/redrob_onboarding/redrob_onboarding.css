@@ -11,38 +11,14 @@
 
 /* Redrob's canonical tokens, from @redrob-design/brand. The same values the new tab page uses, so the
    first screen and the second cannot disagree about what the brand looks like. */
+/* Design tokens live in tokens.css, linked before this sheet. */
+
+/* Two names this sheet uses that are shadcn's `--primary` pair under different labels. Aliased locally
+   rather than added to the shared token file: they are this page's own vocabulary, and the token file
+   should carry the product's names, not each surface's synonyms for them. */
 :root {
-  --rr-blue-1: #eff4ff;
-  --rr-blue-3: #bad2ff;
-  --rr-blue-5: #507fff;
-  --rr-blue-6: #2b52ff;
-  --rr-blue-9: #061460;
-  --rr-blue-10: #030c34;
-  --rr-gray-1: #f8f9fb;
-  --rr-gray-2: #eff1f4;
-  --rr-gray-3: #dfe2e8;
-  --rr-gray-5: #aab0bb;
-  --rr-gray-6: #7c8390;
-  --rr-gray-7: #576071;
-  --rr-gray-8: #292e37;
-  --rr-gray-9: #141719;
-  --rr-black: #0a0b0c;
-
-  --surface: light-dark(var(--rr-gray-1), var(--rr-gray-9));
-  --raised: light-dark(#fff, color-mix(in srgb, var(--rr-gray-8) 45%, var(--rr-gray-9)));
-  --ink: light-dark(var(--rr-gray-9), var(--rr-gray-1));
-  --muted: light-dark(var(--rr-gray-7), var(--rr-gray-5));
-  --line: light-dark(var(--rr-gray-3), var(--rr-gray-8));
-  --accent: light-dark(var(--rr-blue-6), var(--rr-blue-5));
-  --accent-soft: light-dark(var(--rr-blue-1), var(--rr-blue-10));
-  --on-solid: light-dark(#fff, var(--rr-black));
-  --solid: light-dark(var(--rr-gray-9), var(--rr-gray-1));
-
-  --radius-control: 10px;
-  --radius-panel: 14px;
-
-  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui,
-    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --solid: var(--primary);
+  --on-solid: var(--primary-foreground);
 }
 
 body {
@@ -120,7 +96,7 @@ h1 {
 }
 
 p {
-  color: var(--muted);
+  color: var(--muted-foreground);
   margin: 0 0 4px;
   max-width: 44ch;
 }
@@ -258,7 +234,7 @@ input:focus-visible {
 }
 
 .choice span {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 13px;
 }
 
@@ -280,7 +256,7 @@ kbd {
 }
 
 .status {
-  color: var(--muted);
+  color: var(--muted-foreground);
   margin-top: 16px;
 }
 
@@ -340,7 +316,7 @@ button {
   background: none;
   border: 0;
   border-radius: 999px;
-  color: var(--muted);
+  color: var(--muted-foreground);
   cursor: pointer;
   padding: 11px 14px;
 }

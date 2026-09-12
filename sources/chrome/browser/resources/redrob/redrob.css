@@ -13,48 +13,7 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-:root {
-  color-scheme: light dark;
-  /* Redrob's canonical tokens, transcribed from @redrob-design/brand rather than approximated. The
-     previous values here were hand-picked lookalikes -- #2440ff for an accent that is really #2b52ff --
-     which is how a product ends up almost-branded on one surface and correctly branded on the next. */
-  --rr-blue-1: #eff4ff;
-  --rr-blue-3: #bad2ff;
-  --rr-blue-5: #507fff;
-  --rr-blue-6: #2b52ff;
-  --rr-blue-7: #1733d5;
-  --rr-blue-9: #061460;
-  --rr-blue-10: #030c34;
-  --rr-gray-1: #f8f9fb;
-  --rr-gray-2: #eff1f4;
-  --rr-gray-3: #dfe2e8;
-  --rr-gray-4: #cbcfd7;
-  --rr-gray-5: #aab0bb;
-  --rr-gray-6: #7c8390;
-  --rr-gray-7: #576071;
-  --rr-gray-8: #292e37;
-  --rr-gray-9: #141719;
-  --rr-black: #0a0b0c;
-  --rr-red-3: #ff5452;
-  --rr-red-4: #a31310;
-
-  --surface: light-dark(#fcfeff, var(--rr-gray-9));
-  --raised: light-dark(#fff, color-mix(in srgb, var(--rr-gray-8) 45%, var(--rr-gray-9)));
-  --ink: light-dark(var(--rr-gray-9), var(--rr-gray-1));
-  --muted: light-dark(var(--rr-gray-7), var(--rr-gray-5));
-  --line: light-dark(var(--rr-gray-3), var(--rr-gray-8));
-  --accent: light-dark(var(--rr-blue-6), var(--rr-blue-5));
-  --accent-soft: light-dark(var(--rr-blue-1), var(--rr-blue-10));
-  --accent-muted: light-dark(var(--rr-blue-3), var(--rr-blue-9));
-  --warn: light-dark(var(--rr-red-4), var(--rr-red-3));
-
-  /* 10px for controls, 14px for panels -- the pairing the brand actually uses. */
-  --radius-control: 10px;
-  --radius-panel: 14px;
-
-  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui,
-    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-}
+/* Design tokens live in tokens.css, linked before this sheet. */
 
 * {
   box-sizing: border-box;
@@ -130,10 +89,9 @@ body {
    product -- a coloured shadow is a decoration, and the reference spends none. */
 .composer {
   background: var(--raised);
-  border: 1px solid light-dark(#f0f1f2, var(--rr-gray-8));
-  border-radius: var(--radius-panel);
-  box-shadow: 0 1px 2px light-dark(rgb(0 0 0 / 4%), transparent),
-    0 10px 24px -14px light-dark(rgb(0 0 0 / 14%), transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
   height: 44px;
   padding: 0 6px 0 16px;
 }
@@ -156,7 +114,7 @@ body {
 }
 
 .composer input::placeholder {
-  color: var(--muted);
+  color: var(--muted-foreground);
 }
 
 .composer input:focus-visible {
@@ -168,8 +126,8 @@ body {
    transparent track with a solid black active segment, which put the heaviest ink in the composer on a
    toggle rather than on what you typed. */
 .segmented {
-  background: light-dark(#ececec, var(--rr-gray-8));
-  border-radius: 8px;
+  background: var(--muted);
+  border-radius: var(--radius-md);
   display: flex;
   flex: none;
   gap: 2px;
@@ -180,17 +138,17 @@ body {
 .seg {
   background: transparent;
   border: 0;
-  border-radius: 6px;
-  color: var(--muted);
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
   cursor: pointer;
-  font: 500 13px/1 var(--font-sans);
+  font: 500 var(--text-sm)/1 var(--font-sans);
   padding: 0 12px;
 }
 
 .seg-on {
-  background: var(--raised);
-  box-shadow: 0 1px 2px light-dark(rgb(0 0 0 / 10%), rgb(0 0 0 / 40%));
-  color: var(--ink);
+  background: var(--card);
+  box-shadow: var(--shadow-xs);
+  color: var(--foreground);
   font-weight: 600;
 }
 
@@ -213,11 +171,11 @@ body {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
-  color: var(--muted);
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
   cursor: pointer;
   display: inline-flex;
-  font: 500 13px/1 var(--font-sans);
+  font: 500 var(--text-sm)/1 var(--font-sans);
   gap: 5px;
   padding: 3px 2px;
 }
@@ -308,8 +266,8 @@ body {
    12px uppercase muted with wide tracking, which is the styling of a form field's label: it made the
    page's own structure quieter than the tiles underneath it. */
 h2 {
-  color: var(--ink);
-  font-size: 16px;
+  color: var(--foreground);
+  font-size: var(--text-lg);
   font-weight: 700;
   letter-spacing: -0.01em;
   margin: 0 0 14px;
@@ -334,10 +292,9 @@ h2 {
    because `.card-steps li` happened to reset the three properties it set at the time. */
 .cards > li {
   background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
-  box-shadow: 0 1px 2px light-dark(rgb(0 0 0 / 4%), transparent),
-    0 8px 22px -16px light-dark(rgb(0 0 0 / 16%), transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
   /* A column, so the preview takes the space the text does not and every card in the row is the same
      height. `overflow: hidden` is what clips the preview at the card's bottom edge. */
   display: flex;
@@ -359,20 +316,20 @@ h2 {
 }
 
 .card-elapsed {
-  color: var(--muted);
-  font-size: 13px;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
 }
 
 .card-title {
-  font-size: 15px;
+  font-size: var(--text-base);
   font-weight: 600;
   letter-spacing: -0.01em;
   margin: 3px 0 10px;
 }
 
 .card-steps {
-  color: var(--muted);
-  font-size: 13px;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
   line-height: 1.95;
   list-style: none;
   margin: 0;
@@ -405,7 +362,7 @@ h2 {
    a glimpse of the page, not a footer image. `flex: 1` makes it absorb whatever height the text left
    over, which is what keeps a row of cards the same height without a fixed one. */
 .card-shot {
-  border-radius: 10px 10px 0 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   display: block;
   flex: 1;
   margin: 10px 8px 0;
@@ -416,7 +373,7 @@ h2 {
 }
 
 #home-status {
-  color: var(--muted);
+  color: var(--muted-foreground);
 }
 
 /* ---------- task tab ---------- */
@@ -442,21 +399,21 @@ h2 {
 }
 
 .task-state {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 11px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
 .task-effort {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 11px;
 }
 
 .pill {
   background: var(--raised);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--ink);
   cursor: pointer;
   font: inherit;
@@ -470,12 +427,12 @@ h2 {
 }
 
 .pill-quiet {
-  color: var(--muted);
+  color: var(--muted-foreground);
 }
 
 .queued {
   border-left: 2px solid var(--accent);
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 12px;
   list-style: none;
   margin: 0 0 8px;
@@ -483,7 +440,7 @@ h2 {
 }
 
 .task-status {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 12px;
   margin: 6px 0 0;
   min-height: 1em;
@@ -509,7 +466,7 @@ h2 {
 }
 
 .step {
-  box-shadow: 0 10px 24px -20px color-mix(in srgb, var(--rr-black) 26%, transparent);
+  box-shadow: var(--shadow-sm);
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   margin-bottom: 8px;
@@ -518,7 +475,7 @@ h2 {
 
 .step-head {
   align-items: center;
-  color: var(--muted);
+  color: var(--muted-foreground);
   display: flex;
   gap: 7px;
 }
@@ -547,17 +504,17 @@ h2 {
 }
 
 .step-source {
-  color: var(--muted);
+  color: var(--muted-foreground);
 }
 
 .step-timing {
-  color: var(--muted);
+  color: var(--muted-foreground);
   margin-left: auto;
 }
 
 .step-shot {
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   display: block;
   margin-top: 8px;
   max-width: 280px;
@@ -569,7 +526,7 @@ h2 {
 
 .preview {
   border-radius: var(--radius-panel);
-  box-shadow: 0 18px 40px -24px color-mix(in srgb, var(--rr-black) 34%, transparent);
+  box-shadow: var(--shadow-lg);
   align-self: flex-start;
   background: var(--raised);
   border: 1px solid var(--line);
@@ -596,7 +553,7 @@ h2 {
 .preview-head button {
   background: transparent;
   border: 0;
-  color: var(--muted);
+  color: var(--muted-foreground);
   cursor: pointer;
   font-size: 15px;
   line-height: 1;
@@ -638,7 +595,7 @@ h2 {
 .composer-row input {
   /* 15px, measured. 17px was chosen to make this "the one field the surface is about", but the reference
      gets that emphasis from the card and the space around it, not from outsizing the text. */
-  font-size: 15px;
+  font-size: var(--text-base);
   letter-spacing: -0.012em;
 }
 
@@ -648,7 +605,7 @@ h2 {
 /* The trace's own heading stays a small label -- it sits inside a task panel and is naming a column, not
    opening a section. The home page's section headings are the heading role, set once on `h2` above. */
 .trace h2 {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -674,7 +631,7 @@ h2 {
   background: var(--raised);
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
-  box-shadow: 0 10px 24px -18px color-mix(in srgb, var(--rr-black) 30%, transparent);
+  box-shadow: var(--shadow-md);
   color: var(--ink);
   cursor: pointer;
   display: flex;
@@ -686,7 +643,7 @@ h2 {
 }
 
 .tile:hover {
-  box-shadow: 0 16px 30px -18px color-mix(in srgb, var(--rr-blue-6) 34%, transparent);
+  box-shadow: var(--shadow-lg);
   transform: translateY(-1px);
 }
 
@@ -705,7 +662,7 @@ h2 {
 }
 
 .tile-detail {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 13px;
 }
 

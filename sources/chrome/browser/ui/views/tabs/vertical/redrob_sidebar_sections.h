@@ -20,6 +20,7 @@
 #include "ui/views/view.h"
 
 class BrowserWindowInterface;
+class AvatarToolbarButton;
 
 namespace views {
 class Label;
@@ -87,6 +88,10 @@ class RedrobSidebarSections : public views::View,
   std::vector<base::Uuid> WorkspaceIds() const;
 
   raw_ptr<BrowserWindowInterface> browser_;
+  raw_ptr<views::View> header_ = nullptr;
+  // The browser's ONE avatar. Owned here because the header row is where it is drawn, and registered with
+  // the toolbar so every bubble that anchors to "the avatar" finds this one.
+  raw_ptr<AvatarToolbarButton> avatar_ = nullptr;
   raw_ptr<views::LabelButton> workspace_button_ = nullptr;
   raw_ptr<views::Label> bookmarks_heading_ = nullptr;
   raw_ptr<views::View> bookmarks_list_ = nullptr;

@@ -8,6 +8,7 @@ build_webui("build") {
   grd_prefix = "redrob_onboarding"
   static_files = [
     "redrob_onboarding.html",
+    "tokens.css",
     "redrob_onboarding.css",
     "PretendardVariable.woff2",
     "redrob-mark.svg",

@@ -12,39 +12,7 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-:root {
-  color-scheme: light dark;
-  --rr-blue-1: #eff4ff;
-  --rr-blue-3: #bad2ff;
-  --rr-blue-5: #507fff;
-  --rr-blue-6: #2b52ff;
-  --rr-blue-9: #061460;
-  --rr-blue-10: #030c34;
-  --rr-gray-1: #f8f9fb;
-  --rr-gray-3: #dfe2e8;
-  --rr-gray-5: #aab0bb;
-  --rr-gray-7: #576071;
-  --rr-gray-8: #292e37;
-  --rr-gray-9: #141719;
-  --rr-red-3: #ff5452;
-  --rr-red-4: #a31310;
-
-  --surface: light-dark(var(--rr-gray-1), var(--rr-gray-9));
-  --raised: light-dark(#fff, color-mix(in srgb, var(--rr-gray-8) 45%, var(--rr-gray-9)));
-  --ink: light-dark(var(--rr-gray-9), var(--rr-gray-1));
-  --muted: light-dark(var(--rr-gray-7), var(--rr-gray-5));
-  --line: light-dark(var(--rr-gray-3), var(--rr-gray-8));
-  --accent: light-dark(var(--rr-blue-6), var(--rr-blue-5));
-  --accent-soft: light-dark(var(--rr-blue-1), var(--rr-blue-10));
-  --accent-muted: light-dark(var(--rr-blue-3), var(--rr-blue-9));
-  --warn: light-dark(var(--rr-red-4), var(--rr-red-3));
-
-  --radius-control: 10px;
-  --radius-panel: 14px;
-
-  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui,
-    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-}
+/* Design tokens live in tokens.css, linked before this sheet. */
 
 * {
   box-sizing: border-box;
@@ -62,17 +30,8 @@ body {
   margin: 0;
 }
 
-/* The same dotted field as every other Redrob surface, so this page belongs to the product rather
-   than to the browser it is bolted onto. */
-#field {
-  background-image: radial-gradient(var(--accent-muted) 1px, transparent 1px);
-  background-size: 22px 22px;
-  inset: 0;
-  opacity: 0.25;
-  pointer-events: none;
-  position: fixed;
-  z-index: 0;
-}
+/* The dot field is gone here too. It was ours rather than the reference's, and a 22px grid behind a
+   settings form puts texture under every label on the page. */
 
 .shell {
   display: flex;
@@ -121,7 +80,7 @@ body {
 }
 
 .nav-foot {
-  color: var(--muted);
+  color: var(--muted-foreground);
   margin-top: auto;
 }
 
@@ -150,7 +109,7 @@ body {
 }
 
 .lede {
-  color: var(--muted);
+  color: var(--muted-foreground);
   margin: 0 0 16px;
   max-width: 62ch;
 }
@@ -196,14 +155,14 @@ body {
 }
 
 .row-detail {
-  color: var(--muted);
+  color: var(--muted-foreground);
   overflow-wrap: anywhere;
 }
 
 /* No uppercase transform here: these rows carry endpoints, model ids and the user's own prompts, and
    HTTPS://API.OPENAI.COM/V1 is not a URL anyone typed. */
 .row-meta {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 11px;
   letter-spacing: 0.01em;
 }
@@ -226,7 +185,7 @@ body {
 }
 
 .field > span {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -315,19 +274,19 @@ body {
 }
 
 .status {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 12px;
 }
 
 .note {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 12px;
   margin: 4px 0 0;
   max-width: 62ch;
 }
 
 .empty {
-  color: var(--muted);
+  color: var(--muted-foreground);
   margin: 0 0 16px;
 }
 
@@ -362,7 +321,7 @@ body {
 }
 
 .choice-detail {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 12px;
 }
 

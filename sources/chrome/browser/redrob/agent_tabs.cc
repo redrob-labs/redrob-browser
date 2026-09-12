@@ -106,9 +106,12 @@ content::WebContents* AgentTabs::OpenInAgentGroup(Profile* profile,
   }
 
   const tab_groups::TabGroupId group = model->AddToNewGroup({index});
+  // Grey, not blue. The group header is a filled row in the sidebar, and at kBlue it was the single
+  // loudest element in a column of quiet text -- the agent's tabs were shouting louder than the tab the
+  // user is actually looking at. Grey still groups them; it just does not rank them first.
   model->ChangeTabGroupVisuals(
       group, tab_groups::TabGroupVisualData(base::UTF8ToUTF16(group_title),
-                                            tab_groups::TabGroupColorId::kBlue,
+                                            tab_groups::TabGroupColorId::kGrey,
                                             /*is_collapsed=*/false));
   GroupRegistry().insert_or_assign(profile, group);
   return params.navigated_or_inserted_contents;
