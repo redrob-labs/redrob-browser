@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
-index 15393d6b279d5..9d87a349f1673 100644
+index 15393d6b279d5..207e45bbdea8b 100644
 --- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
 +++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
 @@ -64,6 +64,13 @@ VerticalTabStripTopContainer::VerticalTabStripTopContainer(
@@ -16,3 +16,24 @@ index 15393d6b279d5..9d87a349f1673 100644
  }
  
  VerticalTabStripTopContainer::~VerticalTabStripTopContainer() = default;
+@@ -241,7 +248,19 @@ views::ProposedLayout VerticalTabStripTopContainer::CalculateProposedLayout(
+ 
+     if (collapse_button_ && collapse_button_->GetVisible()) {
+       const gfx::Size pref_size = collapse_button_->GetPreferredSize();
+-      gfx::Rect bounds(left_alignment,
++      // Redrob: TRAILING, not leading. The reference puts the sidebar's collapse toggle at the column's
++      // top-RIGHT -- its glyph measures x 226..241 in a 254px column, so the button's own right edge sits at
++      // the strip's horizontal padding. Upstream anchors it left, beside the caption buttons, which on this
++      // product leaves it directly above the workspace name and reads as part of that row.
++      //
++      // The trailing slot is free because the combo button that used to occupy it is hidden -- see the
++      // constructor. If that ever comes back the two would collide, which is why this reads the same
++      // padding constant rather than a number of its own.
++      const int trailing_x = std::max(
++          left_alignment,
++          host_size.width() - pref_size.width() -
++              GetLayoutConstant(LayoutConstant::kVerticalTabStripHorizontalPadding));
++      gfx::Rect bounds(trailing_x,
+                        std::max(0, y_baseline - pref_size.height() / 2),
+                        pref_size.width(), pref_size.height());
+       layout.child_layouts.emplace_back(collapse_button_.get(),
