@@ -203,7 +203,8 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
       u"New Tab"));
   new_tab_row_->SetImageModel(
       views::Button::STATE_NORMAL,
-      ui::ImageModel::FromVectorIcon(kAddIcon, sidebar_tokens::kMutedForeground,
+      ui::ImageModel::FromVectorIcon(vector_icons::kAdd2Icon,
+                                     sidebar_tokens::kMutedForeground,
                                      sidebar_tokens::kFaviconSize));
   new_tab_row_->SetTextColor(views::Button::STATE_NORMAL, sidebar_tokens::kMutedForeground);
   new_tab_row_->SetTextColor(views::Button::STATE_HOVERED, sidebar_tokens::kRowForeground);
