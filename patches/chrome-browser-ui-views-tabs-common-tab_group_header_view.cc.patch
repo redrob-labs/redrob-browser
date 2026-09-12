@@ -1,0 +1,25 @@
+diff --git a/chrome/browser/ui/views/tabs/common/tab_group_header_view.cc b/chrome/browser/ui/views/tabs/common/tab_group_header_view.cc
+index cfaf18f54f721..3bbbfae4dc604 100644
+--- a/chrome/browser/ui/views/tabs/common/tab_group_header_view.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_group_header_view.cc
+@@ -50,6 +50,11 @@ namespace {
+ constexpr int kGroupHeaderCornerRadius = 8;
+ constexpr int kGroupHeaderHorizontalInset = 8;
+ constexpr int kIconSize = 16;
++// Redrob: the collapse chevron alone is smaller. At kIconSize it renders 8x4 of ink where the reference draws
++// 6x3 -- on a glyph this small that is a third too big, and it is the only element on the row's trailing edge,
++// so it reads as heavy. Separate constant rather than shrinking kIconSize, which also sizes the sync and
++// overflow icons.
++constexpr int kCollapseIconSize = 12;
+ constexpr int kFocusRingInset = 2;
+ constexpr int kAttentionIndicatorWidth = 8;
+ // The amount of padding between the label and any sync icon.
+@@ -566,7 +571,7 @@ void TabGroupHeaderView::OnDataChanged(
+           : features::IsRoundedIconsEnabled()
+               ? vector_icons::kKeyboardArrowUpIcon
+               : kKeyboardArrowUpChromeRefreshOldIcon,
+-          foreground_color, kIconSize));
++          foreground_color, kCollapseIconSize));
+     }
+ 
+     // Update background.

@@ -1,0 +1,15 @@
+diff --git a/chrome/browser/ui/views/tabs/vertical_tab_style_views.h b/chrome/browser/ui/views/tabs/vertical_tab_style_views.h
+index 763816b21777f..d982b33df2939 100644
+--- a/chrome/browser/ui/views/tabs/vertical_tab_style_views.h
++++ b/chrome/browser/ui/views/tabs/vertical_tab_style_views.h
+@@ -29,6 +29,10 @@ class VerticalTabStyleViews : public TabStyleViews {
+                  const TabPathFlags& flags) const override;
+   void PaintTab(gfx::Canvas* canvas) const override;
+ 
++  // The raised-card shadow under a selected tab. Separate because it has to run before the fill clips to
++  // the tab's path.
++  void PaintTabShadow(gfx::Canvas* canvas) const;
++
+   gfx::Insets GetContentsInsets() const override;
+   int GetStrokeThickness() const override;
+ 

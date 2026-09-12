@@ -1,0 +1,110 @@
+diff --git a/chrome/browser/ui/views/tabs/vertical_tab_style_views.cc b/chrome/browser/ui/views/tabs/vertical_tab_style_views.cc
+index cbec9de4fa9c6..3eaabc90d0ebc 100644
+--- a/chrome/browser/ui/views/tabs/vertical_tab_style_views.cc
++++ b/chrome/browser/ui/views/tabs/vertical_tab_style_views.cc
+@@ -20,11 +20,25 @@
+ #include "third_party/skia/include/core/SkRRect.h"
+ #include "ui/base/theme_provider.h"
+ #include "ui/gfx/canvas.h"
++#include "ui/gfx/skia_paint_util.h"
++#include "ui/gfx/shadow_value.h"
+ #include "ui/gfx/geometry/skia_conversions.h"
+ #include "ui/gfx/scoped_canvas.h"
+ #include "ui/views/view_utils.h"
+ #include "ui/views/widget/widget.h"
+ 
++namespace {
++
++// Redrob: the strip at the bottom of a tab's bounds that exists only so its shadow has somewhere to land.
++// The reference's shadow reaches 8px below the pill; 4 is what carries the part that reads, and every pixel
++// of it is bought from the row's height, so it is not free.
++//
++// This works only because TabView's own clip path was widened from the fill path to the view's bounds -- a
++// vertical tab clips its painting, and while that clip was the pill this room was unreachable.
++constexpr int kVerticalTabShadowRoom = 4;
++
++}  // namespace
++
+ VerticalTabStyleViews::VerticalTabStyleViews(
+     std::unique_ptr<TabStyleViewDelegate> delegate)
+     : delegate_(std::move(delegate)) {
+@@ -50,6 +64,8 @@ SkPath VerticalTabStyleViews::GetPath(TabStyle::PathType path_type,
+                                       const TabPathFlags& flags) const {
+   const SkScalar corner_radius = GetCornerRadius();
+   gfx::RectF bounds(delegate_->GetView()->GetLocalBounds());
++  // The pill is the TOP of the view; the rest is the shadow's.
++  bounds.Inset(gfx::InsetsF::TLBR(0, 0, kVerticalTabShadowRoom, 0));
+ 
+   if (flags.render_units == TabStyle::RenderUnits::kPixels) {
+     bounds.Scale(scale);
+@@ -76,15 +92,54 @@ void VerticalTabStyleViews::PaintTab(gfx::Canvas* canvas) const {
+                                BrowserFrameActiveState::kUseCurrent)
+                          : std::nullopt;
+ 
++  // Redrob: the selected tab is a raised card, so it casts a shadow. Before the fill, because
++  // PaintTabBackgroundFill clips to the tab's own path first and a shadow drawn inside that clip is entirely
++  // outside the path and therefore entirely discarded.
++  //
++  // Only for the states that read as raised. An inactive tab is flush with the column, and giving every row a
++  // shadow would make the list look embossed rather than telling one row from the rest.
++  const TabStyle::TabSelectionState selection_state = GetSelectionState();
++  if (selection_state == TabStyle::TabSelectionState::kActive ||
++      selection_state == TabStyle::TabSelectionState::kSelected) {
++    PaintTabShadow(canvas);
++  }
++
+   if (active_tab_fill_id.has_value() || inactive_tab_fill_id.has_value()) {
+     PaintTabBackgroundWithImages(canvas, active_tab_fill_id,
+                                  inactive_tab_fill_id);
+   } else {
+-    PaintTabBackgroundFill(canvas, GetSelectionState(),
++    PaintTabBackgroundFill(canvas, selection_state,
+                            delegate_->IsHoverAnimationActive(), std::nullopt);
+   }
+ }
+ 
++void VerticalTabStyleViews::PaintTabShadow(gfx::Canvas* canvas) const {
++  // Measured off the reference: a 1px hairline at the pill's top edge (#e3ebec on a #f4fdfe wash) and, under
++  // its bottom edge, a fade starting at #d7dede that reaches the wash eight pixels down. Against that
++  // background the darkest step is about 11% black, which is where these alphas come from.
++  //
++  // Two layers, the same shape as the WebUI's --shadow-sm: the tight one draws the edge, the soft one the
++  // height. Neutral black rather than a themed colour -- a tinted shadow washes what is under it, and this
++  // sits on the sidebar's own tint.
++  gfx::ShadowValues shadows;
++  // Tuned against the measurement rather than guessed: at 0x16/0x1c the first step under the pill came out
++  // #c5d4d8, a drop of 36 from the wash, where the reference's #d7dede is a drop of 29.
++  shadows.emplace_back(gfx::Vector2d(0, 1), 2, SkColorSetA(SK_ColorBLACK, 0x12));
++  shadows.emplace_back(gfx::Vector2d(0, 2), 6, SkColorSetA(SK_ColorBLACK, 0x17));
++
++  cc::PaintFlags flags;
++  flags.setAntiAlias(true);
++  flags.setStyle(cc::PaintFlags::kFill_Style);
++  flags.setColor(GetCurrentTabBackgroundColor(GetSelectionState()));
++  flags.setLooper(gfx::CreateShadowDrawLooper(shadows));
++
++  // The pill's own rect -- the same inset GetPath applies -- so the shadow is cast by exactly the shape that
++  // gets filled.
++  gfx::RectF pill(delegate_->GetView()->GetLocalBounds());
++  pill.Inset(gfx::InsetsF::TLBR(0, 0, kVerticalTabShadowRoom, 0));
++  canvas->DrawRoundRect(pill, GetCornerRadius(), flags);
++}
++
+ void VerticalTabStyleViews::PaintTabBackgroundWithImages(
+     gfx::Canvas* canvas,
+     std::optional<int> active_tab_fill_id,
+@@ -212,8 +267,13 @@ SkScalar VerticalTabStyleViews::GetCornerRadius() const {
+ }
+ 
+ gfx::Insets VerticalTabStyleViews::GetContentsInsets() const {
+-  return gfx::Insets::VH(
++  // The extra bottom inset keeps the label centred in the PILL rather than in the view, which is taller by
++  // the shadow's room. Without it the favicon and title sit low in every tab, which reads as the text being
++  // off rather than the box being big.
++  return gfx::Insets::TLBR(
+       GetLayoutConstant(LayoutConstant::kTabVerticalPadding),
++      GetLayoutConstant(LayoutConstant::kTabHorizontalPadding),
++      GetLayoutConstant(LayoutConstant::kTabVerticalPadding) + kVerticalTabShadowRoom,
+       GetLayoutConstant(LayoutConstant::kTabHorizontalPadding));
+ }
+ 
