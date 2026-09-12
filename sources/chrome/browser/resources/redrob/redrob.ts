@@ -181,6 +181,11 @@ function renderHome() {
   const ordered = [...tasks.values()].sort(
       (a, b) => Number(b.startedAtMs) - Number(a.startedAtMs));
 
+  // Suggested tiles answer an EMPTY state. Once real tasks exist the empty state is over, so the tiles
+  // go rather than sit above them -- three prompts we invented should not outrank three the user ran.
+  $('suggested').hidden = ordered.length > 0;
+  $('recent').hidden = ordered.length === 0;
+
   for (const task of ordered) {
     const card = document.createElement('li');
     const open = document.createElement('button');
@@ -266,7 +271,7 @@ function renderTask() {
     item.textContent = pending;
     queued.append(item);
   }
-  paintModeButtons(task.mode);
+  paintModeSelects(task.mode);
 
   const trace = $('trace');
   // Whether the user was already reading the newest part. A live task appends to the bottom, and
@@ -350,33 +355,52 @@ const MODES: Record<string, PermissionMode> = {
   full: PermissionMode.kFullAccess,
 };
 
-// Scoped to the visible view. Both composers carry the same three chips, so addressing them by id
-// meant every lookup found the home form's copy and the task tab's chips did nothing at all.
-function modeButtons(): HTMLButtonElement[] {
-  const root = openTaskId ? $('task') : $('home');
-  return [...root.querySelectorAll<HTMLButtonElement>('[data-mode]')];
+// A <select> is laid out at the width of its WIDEST option, so "Guard" occupied the width of "Full
+// access" and left a hole before the chevron. Each control draws its value as ordinary text and hides the
+// real select on top of it, so this keeps the width honest and the native popup and keyboard intact.
+function syncSelectLabel(select: HTMLSelectElement) {
+  const value = select.parentElement?.querySelector<HTMLElement>('.ctl-value');
+  if (value) {
+    value.textContent = select.selectedOptions[0]?.textContent ?? '';
+  }
 }
 
-function paintModeButtons(current: PermissionMode) {
-  for (const button of modeButtons()) {
-    const mode = MODES[button.dataset['mode'] ?? ''];
-    button.setAttribute('aria-pressed', String(mode === current));
+function bindSelectLabels() {
+  for (const select of document.querySelectorAll<HTMLSelectElement>('.ctl-select select')) {
+    select.addEventListener('change', () => syncSelectLabel(select));
+    syncSelectLabel(select);
+  }
+}
+
+// Scoped to the visible view. Both composers carry the same control, so addressing it by id meant every
+// lookup found the home form's copy and the task tab's did nothing at all.
+function modeSelects(): HTMLSelectElement[] {
+  const root = openTaskId ? $('task') : $('home');
+  return [...root.querySelectorAll<HTMLSelectElement>('[data-mode-select]')];
+}
+
+function paintModeSelects(current: PermissionMode) {
+  const name = Object.keys(MODES).find((key) => MODES[key] === current) ?? 'guard';
+  for (const select of modeSelects()) {
+    select.value = name;
+    // Setting .value in script fires no change event, so the drawn label has to be told.
+    syncSelectLabel(select);
   }
 }
 
 // On the home composer the mode is just picked. On a task tab it is a REQUEST: the browser refuses to
-// widen a task that is already running, so the buttons are repainted from what it accepted rather than
-// from what was clicked.
-function bindModeButtons(taskId: string|null) {
-  for (const button of modeButtons()) {
-    const mode = MODES[button.dataset['mode'] ?? ''];
-    if (mode === undefined) {
-      continue;
-    }
-    button.addEventListener('click', async () => {
+// widen a task that is already running, so the control is repainted from what it accepted rather than
+// from what was chosen. A select left showing a mode the task was refused is worse than a failed click,
+// because it keeps claiming the task has access it does not.
+function bindModeSelects(taskId: string|null) {
+  for (const select of modeSelects()) {
+    select.addEventListener('change', async () => {
+      const mode = MODES[select.value];
+      if (mode === undefined) {
+        return;
+      }
       if (!taskId) {
         composerMode = mode;
-        paintModeButtons(composerMode);
         return;
       }
       const {accepted} = await host.setPermissionMode(taskId, mode);
@@ -384,14 +408,18 @@ function bindModeButtons(taskId: string|null) {
         $('task-status').textContent =
             'A running task cannot be given more access. Start a new task instead.';
       }
+      const task = tasks.get(taskId);
+      paintModeSelects(task ? task.mode : composerMode);
     });
   }
-  paintModeButtons(composerMode);
+  paintModeSelects(composerMode);
 }
+
+bindSelectLabels();
 
 if (openTaskId) {
   $('task').hidden = false;
-  bindModeButtons(openTaskId);
+  bindModeSelects(openTaskId);
 
   $<HTMLButtonElement>('task-stop').addEventListener('click', () => {
     host.cancelTask(openTaskId);
@@ -451,7 +479,7 @@ if (openTaskId) {
   render();
 } else {
   $('home').hidden = false;
-  bindModeButtons(null);
+  bindModeSelects(null);
 
   // The reason this surface exists is to be typed into.
   $<HTMLInputElement>('prompt').focus();

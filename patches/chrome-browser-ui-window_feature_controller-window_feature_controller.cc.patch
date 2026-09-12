@@ -1,26 +1,24 @@
 diff --git a/chrome/browser/ui/window_feature_controller/window_feature_controller.cc b/chrome/browser/ui/window_feature_controller/window_feature_controller.cc
-index ec7bd3ea6cd00..6d6fcf9f29a5a 100644
+index ec7bd3ea6cd00..2c537a66b2555 100644
 --- a/chrome/browser/ui/window_feature_controller/window_feature_controller.cc
 +++ b/chrome/browser/ui/window_feature_controller/window_feature_controller.cc
-@@ -81,9 +81,20 @@ bool WindowFeatureController::NormalBrowserSupportsWindowFeature(
+@@ -81,8 +81,19 @@ bool WindowFeatureController::NormalBrowserSupportsWindowFeature(
      case WindowFeature::kFeatureBookmarkBar:
        return true;
      case WindowFeature::kFeatureTabStrip:
 +      return check_can_support || !IsFullscreen();
      case WindowFeature::kFeatureToolbar:
      case WindowFeature::kFeatureLocationBar:
--      return check_can_support || !IsFullscreen();
-+      // Redrob has no toolbar row: the sidebar carries everything a toolbar used to, and the content
-+      // area starts at the top of the window.
++      // Redrob DOES have a top row -- back, forward, reload, a magnifier and the address field, with
++      // nothing else in it. An earlier reading of the reference concluded there was no toolbar at all,
++      // which was wrong: the row is so quiet (no fill, no border, no box around the address) that it
++      // does not look like one, but it is there and it is where you type a URL.
 +      //
-+      // Declared as an unsupported window FEATURE rather than by not building the views. ToolbarView
-+      // and LocationBarView stay alive and hidden, because a surprising amount of Chromium reaches
-+      // through them without a null check -- every layout pass touches location_bar()->
-+      // UpdateFocusBehavior, every tab switch calls GetLocationBar()->SaveStateToContents, and the
-+      // omnibox popup closer CHECKs the location bar exists. Removing them would mean auditing all of
-+      // that on every version bump; withdrawing the feature is one decision the rest of the code
-+      // already knows how to read, and it disables Ctrl+L and the omnibox's focus behaviour for free.
-+      return false;
++      // The row is the standard ToolbarView with its trailing half withdrawn rather than a new view: it
++      // is what owns back/forward/reload state, the omnibox, Ctrl+L, and the drop targets for a dragged
++      // link, and a hand-rolled row would have to re-earn all of it on every version bump. What we take
++      // out is done in ToolbarView itself -- the avatar (the sidebar owns it) and the app menu (the
++      // sidebar owns Settings).
+       return check_can_support || !IsFullscreen();
      case WindowFeature::kFeatureTitleBar:
      case WindowFeature::kFeatureNone:
-       return false;

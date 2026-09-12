@@ -38,7 +38,7 @@
   --rr-red-3: #ff5452;
   --rr-red-4: #a31310;
 
-  --surface: light-dark(var(--rr-gray-1), var(--rr-gray-9));
+  --surface: light-dark(#fcfeff, var(--rr-gray-9));
   --raised: light-dark(#fff, color-mix(in srgb, var(--rr-gray-8) 45%, var(--rr-gray-9)));
   --ink: light-dark(var(--rr-gray-9), var(--rr-gray-1));
   --muted: light-dark(var(--rr-gray-7), var(--rr-gray-5));
@@ -97,38 +97,52 @@ body {
   flex-direction: column;
   justify-content: center;
   margin: 0 auto;
-  max-width: 900px;
+  /* 792px of cards (3 x 254 + 2 x 14) plus the gutter. The composer is narrower than the card block in
+     the reference and both are centred, so they are sized separately rather than sharing one width. */
+  max-width: 840px;
   min-height: 100vh;
   padding: 0 24px;
 }
 
 /* The logo, drawn as the logo. It was previously used as a CSS mask at 18% opacity, which threw away
    its own paint -- the mark carries a blue-to-violet gradient of its own and a mask keeps only the
-   silhouette, so the brand rendered as a grey smudge. */
+   silhouette, so the brand rendered as a grey smudge. The heavy blue drop-shadow went with it: at 44px
+   it read as a glowing badge, where the reference is a calm mark sitting well above the prompt. */
 .mark {
-  filter: drop-shadow(0 14px 26px color-mix(in srgb, var(--rr-blue-6) 26%, transparent));
   /* An img is inline, so margin auto only centres it once it is a block. */
   display: block;
-  height: 44px;
-  margin: 0 auto 28px;
-  width: 44px;
+  height: 52px;
+  margin: 0 auto 30px;
+  /* Faded rather than masked: opacity keeps the mark's own gradient, where a CSS mask would keep only
+     the silhouette and paint it flat grey. */
+  opacity: 0.5;
+  width: 52px;
 }
 
-.composer {
-  box-shadow: 0 18px 40px -20px color-mix(in srgb, var(--rr-blue-6) 30%, transparent),
-    0 2px 6px -2px color-mix(in srgb, var(--rr-black) 14%, transparent);
-  background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
+.composer-wrap {
   margin: 0 auto;
   max-width: 620px;
-  padding: 10px 12px;
+  width: 100%;
+}
+
+/* Measured off the reference: 620 x 44, radius 14, pure white, and a NEUTRAL shadow. The shadow here
+   used to be 30% brand blue, which tinted the whole prompt area and is why this looked like a different
+   product -- a coloured shadow is a decoration, and the reference spends none. */
+.composer {
+  background: var(--raised);
+  border: 1px solid light-dark(#f0f1f2, var(--rr-gray-8));
+  border-radius: var(--radius-panel);
+  box-shadow: 0 1px 2px light-dark(rgb(0 0 0 / 4%), transparent),
+    0 10px 24px -14px light-dark(rgb(0 0 0 / 14%), transparent);
+  height: 44px;
+  padding: 0 6px 0 16px;
 }
 
 .composer-row {
   align-items: center;
   display: flex;
   gap: 8px;
+  height: 100%;
 }
 
 .composer input[type='text'] {
@@ -138,7 +152,7 @@ body {
   flex: 1;
   font: inherit;
   min-width: 0;
-  padding: 6px 2px;
+  padding: 0;
 }
 
 .composer input::placeholder {
@@ -149,78 +163,118 @@ body {
   outline: 0;
 }
 
+/* A filled track with a white thumb, 130 x 28 at radius 8 -- a rounded RECTANGLE, not a pill, and the
+   active half is white-on-dark-text rather than a black slug. The previous version inverted this: a
+   transparent track with a solid black active segment, which put the heaviest ink in the composer on a
+   toggle rather than on what you typed. */
 .segmented {
-  border: 1px solid var(--line);
+  background: light-dark(#ececec, var(--rr-gray-8));
   border-radius: 8px;
   display: flex;
-  overflow: hidden;
+  flex: none;
+  gap: 2px;
+  height: 28px;
+  padding: 2px;
 }
 
 .seg {
   background: transparent;
   border: 0;
+  border-radius: 6px;
   color: var(--muted);
   cursor: pointer;
-  font: inherit;
-  padding: 5px 12px;
+  font: 500 13px/1 var(--font-sans);
+  padding: 0 12px;
 }
 
 .seg-on {
-  background: light-dark(var(--rr-gray-9), var(--rr-gray-1));
-  border-color: transparent;
-  color: light-dark(#fff, var(--rr-black));
-  box-shadow: inset 0 0 0 1px var(--line);
-  font-weight: 500;
+  background: var(--raised);
+  box-shadow: 0 1px 2px light-dark(rgb(0 0 0 / 10%), rgb(0 0 0 / 40%));
+  color: var(--ink);
+  font-weight: 600;
 }
 
+/* Outside the card, on the page. No top border, because there is no box to divide. */
 .composer-controls {
   align-items: center;
-  border-top: 1px solid var(--line);
   display: flex;
-  gap: 6px;
-  margin-top: 8px;
-  padding-top: 8px;
+  gap: 14px;
+  margin: 10px 0 0;
+  padding: 0 2px;
 }
 
 .spacer {
   flex: 1;
 }
 
-.chip {
+/* Plain text and a chevron. These are not chips: the reference gives them no fill, no border and no
+   pressed state, because the composer already tells you what is selected by showing its name. */
+.ctl {
+  align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   color: var(--muted);
   cursor: pointer;
-  font: inherit;
-  padding: 4px 9px;
+  display: inline-flex;
+  font: 500 13px/1 var(--font-sans);
+  gap: 5px;
+  padding: 3px 2px;
 }
 
-.chip:hover {
-  background: light-dark(#eef2f8, #1c222c);
+.ctl:hover {
+  color: var(--ink);
 }
 
-.chip[aria-pressed='true'] {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
+.ctl svg {
+  fill: none;
+  flex: none;
+  height: 15px;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.4;
+  width: 15px;
 }
 
-.chip-icon {
-  font-size: 15px;
-  line-height: 1;
-  padding: 4px 8px;
+.ctl-icon {
+  padding: 3px;
 }
 
-.chip-static {
+.ctl-static {
   cursor: default;
 }
 
-.chip-select select {
-  background: transparent;
+/* The chevron belongs to the control, not to the native select: a UA arrow is a different size and
+   colour on every platform, and this row is measured. */
+.ctl-select::after {
+  border-bottom: 1.4px solid currentcolor;
+  border-right: 1.4px solid currentcolor;
+  content: '';
+  height: 5px;
+  margin-left: 1px;
+  rotate: 45deg;
+  translate: 0 -2px;
+  width: 5px;
+}
+
+/* A <select> is as wide as its WIDEST option, so "Guard" was laid out at the width of "Full access" and
+   left a hole between the label and the chevron. The value is drawn as ordinary text and the real select
+   is laid over the whole control invisibly: exact width, native popup, native keyboard. */
+.ctl-select {
+  position: relative;
+}
+
+.ctl-select select {
+  appearance: none;
   border: 0;
-  color: inherit;
+  cursor: pointer;
   font: inherit;
+  inset: 0;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  width: 100%;
 }
 
 .send {
@@ -246,31 +300,49 @@ body {
 /* ---------- recent tasks ---------- */
 
 .recent {
-  margin-top: 56px;
+  margin-top: 40px;
+  width: 100%;
 }
 
+/* Section headings are sentence case, near-black and 16px -- the size of a heading. They used to be
+   12px uppercase muted with wide tracking, which is the styling of a form field's label: it made the
+   page's own structure quieter than the tiles underneath it. */
 h2 {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  margin: 0 0 12px;
-  text-transform: uppercase;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 14px;
 }
 
+/* Fixed 254px columns with a 14px gutter, centred -- measured, not fluid. `minmax(240px, 1fr)` let a
+   single card stretch to the full 792px, so the same card was a different shape depending on how many
+   others happened to exist. */
 .cards {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, 254px);
+  justify-content: start;
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.cards li {
+/* DIRECT children only. `.cards li` also matched every step <li> inside `.card-steps`, so each trace
+   line was given the card's border, shadow, 254px min-height and column direction -- which is why a step
+   rendered as a tall bordered box with its icon stacked above its label. The old rule survived that only
+   because `.card-steps li` happened to reset the three properties it set at the time. */
+.cards > li {
   background: var(--raised);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
+  box-shadow: 0 1px 2px light-dark(rgb(0 0 0 / 4%), transparent),
+    0 8px 22px -16px light-dark(rgb(0 0 0 / 16%), transparent);
+  /* A column, so the preview takes the space the text does not and every card in the row is the same
+     height. `overflow: hidden` is what clips the preview at the card's bottom edge. */
+  display: flex;
+  flex-direction: column;
+  height: 262px;
   overflow: hidden;
 }
 
@@ -281,23 +353,27 @@ h2 {
   cursor: pointer;
   display: block;
   font: inherit;
-  padding: 12px 12px 0;
+  padding: 14px 14px 0;
   text-align: left;
   width: 100%;
 }
 
 .card-elapsed {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .card-title {
+  font-size: 15px;
   font-weight: 600;
-  margin: 2px 0 8px;
+  letter-spacing: -0.01em;
+  margin: 3px 0 10px;
 }
 
 .card-steps {
   color: var(--muted);
+  font-size: 13px;
+  line-height: 1.95;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -305,11 +381,8 @@ h2 {
 
 .card-steps li {
   align-items: center;
-  background: none;
-  border: 0;
-  border-radius: 0;
   display: flex;
-  gap: 6px;
+  gap: 7px;
 }
 
 /* The ellipsis has to live on the TEXT, not on the flex row. `text-overflow` needs a block container
@@ -328,10 +401,18 @@ h2 {
   flex: none;
 }
 
+/* Inset from the card's sides, rounded at the top, and clipped at the bottom by the card -- the frame is
+   a glimpse of the page, not a footer image. `flex: 1` makes it absorb whatever height the text left
+   over, which is what keeps a row of cards the same height without a fixed one. */
 .card-shot {
+  border-radius: 10px 10px 0 0;
   display: block;
-  margin-top: 10px;
-  width: 100%;
+  flex: 1;
+  margin: 10px 8px 0;
+  min-height: 96px;
+  object-fit: cover;
+  object-position: top center;
+  width: calc(100% - 16px);
 }
 
 #home-status {
@@ -542,16 +623,8 @@ h2 {
 /* The dotted field. Identical treatment to the onboarding's, deliberately: the first screen a user
    sees and the one they see every day afterwards should not look like two products. It fades before
    the bottom so the composer sits on calm ground rather than on texture. */
-#field {
-  background:
-    radial-gradient(circle at center, var(--line) 1px, transparent 1.2px) 0 0 / 22px 22px;
-  inset: 0;
-  mask-image: linear-gradient(to bottom, #000 0%, #000 62%, transparent 95%);
-  opacity: 0.8;
-  pointer-events: none;
-  position: fixed;
-  z-index: 0;
-}
+/* The dot field is gone. It was ours, not the reference's: a 22px grid at 0.8 opacity behind everything
+   put texture under every card and reading on this surface is the whole job. */
 
 #home,
 #task {
@@ -563,21 +636,17 @@ h2 {
 
 
 .composer-row input {
-  /* The brand's subhead role rather than body: this is the one field the whole surface is about. */
-  font-size: 17px;
+  /* 15px, measured. 17px was chosen to make this "the one field the surface is about", but the reference
+     gets that emphasis from the card and the space around it, not from outsizing the text. */
+  font-size: 15px;
   letter-spacing: -0.012em;
-}
-
-/* Pills, as the reference uses everywhere for actions. */
-.seg,
-.chip {
-  border-radius: 999px;
 }
 
 
 
 /* Section headings: the brand's label role -- small, heavy, wide-tracked, quiet. */
-.suggested h2,
+/* The trace's own heading stays a small label -- it sits inside a task panel and is naming a column, not
+   opening a section. The home page's section headings are the heading role, set once on `h2` above. */
 .trace h2 {
   color: var(--muted);
   font-size: 12px;
@@ -640,9 +709,6 @@ h2 {
   font-size: 13px;
 }
 
-.recent-heading {
-  margin-top: 28px;
-}
 
 /* The trace's steps become plates too, and the task title gets the heading role. */
 .task-title {

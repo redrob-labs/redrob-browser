@@ -7,38 +7,56 @@
   <link rel="stylesheet" href="redrob.css">
 </head>
 <body>
-  <div id="field" aria-hidden="true"></div>
   <!-- Two views in one document. The new tab shows #home; a task opens at ?task=<id> and shows
        #task. One document because a task tab and a new tab are the same WebUI host, and routing in
        the page costs nothing next to registering a second one. -->
   <main id="home" hidden>
     <img class="mark" src="redrob-mark.svg" alt="" aria-hidden="true">
-    <form id="composer" class="composer" autocomplete="off">
-      <div class="composer-row">
-        <input id="prompt" type="text" aria-label="Task for the agent"
-               placeholder="Ask AI a task, @ for context">
-        <div class="segmented" role="group" aria-label="Mode">
-          <button type="button" id="mode-search" class="seg">Search</button>
-          <button type="submit" id="mode-ask" class="seg seg-on">Ask AI</button>
+    <!-- The card holds the input row ONLY. The controls sit BELOW it on the page, not inside a divided
+         card: measured off the reference, the card is 620x44 and the control row is outside its shadow.
+         Putting them in one bordered box is what made this read as a form rather than a prompt. -->
+    <div class="composer-wrap">
+      <form id="composer" class="composer" autocomplete="off">
+        <div class="composer-row">
+          <input id="prompt" type="text" aria-label="Task for the agent"
+                 placeholder="Ask AI a task, @ for context">
+          <div class="segmented" role="group" aria-label="Mode">
+            <button type="button" id="mode-search" class="seg">Search</button>
+            <button type="submit" id="mode-ask" class="seg seg-on">Ask AI</button>
+          </div>
         </div>
-      </div>
+      </form>
       <div class="composer-controls">
-        <button type="button" class="chip chip-icon" id="attach" aria-label="Add context">+</button>
-        <button type="button" class="chip" data-mode="read" aria-pressed="false"
-                title="Open and read pages. Nothing is changed and nothing is written.">Read only</button>
-        <button type="button" class="chip" data-mode="guard" aria-pressed="true"
-                title="Also click, fill fields and save files into one folder you choose.">Guard</button>
-        <button type="button" class="chip" data-mode="full" aria-pressed="false"
-                title="Also write to a folder the agent names. Hidden folders and the browser's own profile are still refused.">Full access</button>
+        <button type="button" class="ctl ctl-icon" id="attach" aria-label="Add context">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>
+        </button>
+        <!-- One control showing the mode in force, not three segments competing for the eye. The
+             narrow-by-default decision is unchanged; what changed is that the two modes you are NOT in
+             no longer take up as much room as the one you are. -->
+        <label class="ctl ctl-select">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 1.8l4.6 1.7v4.1c0 3-2 5.2-4.6 6.6-2.6-1.4-4.6-3.6-4.6-6.6V3.5L8 1.8z"/>
+            <path d="M5.9 8.1l1.5 1.5 2.8-3"/>
+          </svg>
+          <span class="visually-hidden">Permission mode</span>
+          <span class="ctl-value"></span>
+          <select id="mode" data-mode-select>
+            <option value="read">Read only</option>
+            <option value="guard" selected>Guard</option>
+            <option value="full">Full access</option>
+          </select>
+        </label>
         <span class="spacer"></span>
-        <label class="chip chip-select">
+        <label class="ctl ctl-select">
           <span class="visually-hidden">Model</span>
+          <span class="ctl-value"></span>
           <select id="model">
             <option value="auto" selected>redrob/auto</option>
           </select>
         </label>
-        <label class="chip chip-select">
+        <label class="ctl ctl-select">
           <span class="visually-hidden">Effort</span>
+          <span class="ctl-value"></span>
           <select id="effort">
             <option value="ultra">Ultrabrowse</option>
             <option value="standard" selected>Standard</option>
@@ -46,9 +64,12 @@
           </select>
         </label>
       </div>
-    </form>
+    </div>
 
-    <section class="suggested" aria-labelledby="suggested-heading">
+    <!-- Suggested tiles answer an EMPTY state. Once there are recent tasks the empty state is over, so
+         the tiles are hidden rather than stacked above real work -- three invented prompts should never
+         outrank three things you actually ran. -->
+    <section id="suggested" class="suggested" aria-labelledby="suggested-heading">
       <h2 id="suggested-heading">Suggested tasks</h2>
       <div class="tiles">
         <button type="button" class="tile" data-prompt="Summarise this page in one sentence and list the links I can see.">
@@ -67,10 +88,13 @@
           <span class="tile-detail">Filled and left for you to check before submitting.</span>
         </button>
       </div>
-      <h2 id="recent-heading" class="recent-heading" hidden>Recent tasks</h2>
-      <ol id="cards" class="cards"></ol>
-      <p id="home-status" role="status"></p>
     </section>
+
+    <section id="recent" class="recent" aria-labelledby="recent-heading" hidden>
+      <h2 id="recent-heading">Recent tasks</h2>
+      <ol id="cards" class="cards"></ol>
+    </section>
+    <p id="home-status" role="status"></p>
   </main>
 
   <main id="task" hidden>
@@ -94,7 +118,9 @@
     <form id="reply" class="composer composer-foot" autocomplete="off">
       <ol id="queued" class="queued" hidden></ol>
       <div class="composer-row">
-        <button type="button" class="chip chip-icon" aria-label="Add context">+</button>
+        <button type="button" class="ctl ctl-icon" aria-label="Add context">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>
+        </button>
         <input id="reply-prompt" type="text" aria-label="Reply to the agent"
                placeholder="Reply, @ for context">
         <!-- Two buttons while it runs, not one. Enter queues, because throwing away work in progress
@@ -103,15 +129,25 @@
         <button type="submit" id="reply-send" class="send" aria-label="Send reply"></button>
       </div>
       <div class="composer-controls">
-        <button type="button" class="chip" data-mode="read" aria-pressed="false"
-                title="Open and read pages. Nothing is changed and nothing is written.">Read only</button>
-        <button type="button" class="chip" data-mode="guard" aria-pressed="true"
-                title="Also click, fill fields and save files into one folder you choose.">Guard</button>
-        <button type="button" class="chip" data-mode="full" aria-pressed="false"
-                title="Also write to a folder the agent names. Hidden folders and the browser's own profile are still refused.">Full access</button>
-        <button type="button" class="chip" id="pick-folder">Choose folder…</button>
+        <button type="button" class="ctl ctl-icon" aria-label="Add context">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>
+        </button>
+        <label class="ctl ctl-select">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 1.8l4.6 1.7v4.1c0 3-2 5.2-4.6 6.6-2.6-1.4-4.6-3.6-4.6-6.6V3.5L8 1.8z"/>
+            <path d="M5.9 8.1l1.5 1.5 2.8-3"/>
+          </svg>
+          <span class="visually-hidden">Permission mode</span>
+          <span class="ctl-value"></span>
+          <select data-mode-select>
+            <option value="read">Read only</option>
+            <option value="guard" selected>Guard</option>
+            <option value="full">Full access</option>
+          </select>
+        </label>
+        <button type="button" class="ctl" id="pick-folder">Choose folder…</button>
         <span class="spacer"></span>
-        <span class="chip chip-static" id="reply-model">redrob/auto</span>
+        <span class="ctl ctl-static" id="reply-model">redrob/auto</span>
       </div>
       <p id="task-status" class="task-status" role="status"></p>
     </form>
