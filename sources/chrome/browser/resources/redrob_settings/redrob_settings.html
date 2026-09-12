@@ -245,7 +245,7 @@
           is a local socket, and it is off until you turn it on.</p>
         <div class="plate">
           <h3>From a terminal, with no setup</h3>
-          <p class="mono">redrob --redrob-task="summarise the page I have open"</p>
+          <p class="mono">redrob-browser --redrob-task="summarise the page I have open"</p>
           <p class="note">Starts the task in the browser you already have running and opens its tab.
             Nothing is printed back: the channel that carries a command line to a running browser
             answers with an acknowledgement and no payload, so there is no output and no exit code to
@@ -259,12 +259,13 @@
             <span>Let local programs drive this browser</span>
           </label>
           <p class="folder">Listening on <strong id="rpc-endpoint">nothing</strong></p>
-          <p class="note">Serves three things: a CLI that can stream a task's answer back, an MCP
-            server at <span class="mono">POST /mcp</span> so another agent can call this browser as a
-            tool, and the same verbs one at a time for scripts. Loopback only, on a port the system
-            picks, and every request needs a token generated fresh each launch — programs read the
-            address and the token from <span class="mono" id="rpc-handle">redrob-cli.json</span> in
-            this profile's folder.</p>
+          <p class="note">Serves three things: an HTTP endpoint that can stream a task's answer back to a
+            script, an MCP server at <span class="mono">POST /mcp</span> so another agent — Redrob Code
+            included — can call this browser as a tool, and the same verbs one at a time. Loopback only,
+            on a port the system picks, and every request needs a token generated fresh each launch —
+            programs read the address and the token from
+            <span class="mono" id="rpc-handle">redrob-cli.json</span> in this profile's folder. See
+            docs/AUTOMATION.md.</p>
           <p class="note">Off by default on purpose. Any program on this machine that can read that
             file can then do anything you can do in this browser, including on sites you are signed
             in to. Turn it on when you have a reason to, and turn it off after.</p>

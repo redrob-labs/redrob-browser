@@ -30,7 +30,8 @@ Then, in order, everything §5 used to list as not built:
 * **Ultrabrowse**, which is a real tool budget (3 / 8 / 32 rounds), the `reasoning_effort` the engine is
   told, and `plan_research` -- somewhere to write a plan into the trace before the tabs start opening.
 * **CLI, MCP and REPL.** `--redrob-task="..."` works with no setup through the process singleton;
-  everything that needs an answer back goes through a loopback RPC that also serves MCP at `POST /mcp`.
+  everything that needs an answer back goes through a loopback endpoint that also serves MCP at
+  `POST /mcp`, which is how Redrob Code drives this browser. See docs/AUTOMATION.md.
 * **Password manager**: the three-way choice, told truthfully -- "another manager" stops save prompts
   and does not stop filling, and nothing is migrated.
 * **Model providers**: an API key per provider, encrypted through the platform keystore, never readable
@@ -45,9 +46,14 @@ Not built, and named rather than implied:
   here -- `net::HttpServer` for the loopback listener, ModelStore for the encrypted token -- but the flow
   itself is unwritten.
 * **The `@` context picker.** `StartTask` accepts `context_refs` and nothing produces them yet.
-* **A packaged `redrob` binary on PATH.** The switch and the endpoint both work; what is missing is the
-  small wrapper that finds the handle file, does the `/hello` handshake and streams `/task/<id>/stream`
-  to a terminal.
+* **A packaged `redrob` binary on PATH.** Deliberately not built, and the reasoning is in
+  docs/AUTOMATION.md: Redrob Code's binary is already `redrob`, and it speaks MCP as a client, so the way
+  to drive this browser from a terminal is to point the agent you already have at `POST /mcp` rather than
+  to ship a second command with the same name doing a worse version of the same job. A wrapper existed
+  briefly and was deleted.
+* **An end-to-end run with Redrob Code as the MCP client.** The browser side is verified with an HTTP
+  client and against the reference transport's requirements; the config shape in docs/AUTOMATION.md is
+  transcribed from the engine's schema rather than from a session that worked.
 * **macOS `Assets.car` / `AppIcon.icon`**, which need `actool` and therefore a mac host.
 * **A cold-cache full build**, never validated: every build since the first has been incremental.
 

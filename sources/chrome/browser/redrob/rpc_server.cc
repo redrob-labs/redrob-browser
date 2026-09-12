@@ -209,6 +209,15 @@ class RpcServer::Listener : public net::HttpServer::Delegate {
     std::vector<std::string> segments = base::SplitString(
         path, "/", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
 
+    // GET /mcp is answered 405, not 404, and the difference is not cosmetic. MCP's streamable-HTTP
+    // transport opens an optional GET stream for server-initiated messages, and the reference client
+    // treats 405 as "this server does not offer one" and anything else as an error it reports. A 404
+    // here makes every connect log a failure for a stream we were never going to have.
+    if (info.method == "GET" && segments.size() == 1 && segments[0] == "mcp") {
+      Respond(connection_id, 405, "{\"error\":\"this server does not offer a GET event stream\"}");
+      return;
+    }
+
     // GET /hello is the ONE route that does not need the token, and it exists to stop the token being
     // sent somewhere it should not go. A browser killed outright never deletes its handle file, so a
     // client can find a file naming a port that some unrelated process has since bound -- and a client
@@ -411,7 +420,9 @@ void RpcServer::HandleRequest(const std::string& method,
     reply.body.Set("error", "no such route");
   }
   std::optional<std::string> body = base::WriteJson(reply.body);
-  std::move(respond).Run(reply.status, body.value_or("{}"));
+  // A 202 carries no body: the empty dict would serialise to "{}", which is a body.
+  std::move(respond).Run(reply.status,
+                         reply.status == 202 ? std::string() : body.value_or("{}"));
 }
 
 base::DictValue RpcServer::TaskToDict(const mojom::Task& task) const {
@@ -533,6 +544,15 @@ RpcServer::Reply RpcServer::HandleMcp(const base::DictValue& request) {
   const std::string* method = request.FindString("method");
   if (!method) {
     reply.body = JsonRpcError(id, -32600, "method is required");
+    return reply;
+  }
+
+  // A JSON-RPC NOTIFICATION has no id and expects no answer. MCP sends `notifications/initialized`
+  // immediately after initialize, and answering it with a response -- an error response, in the first
+  // version of this -- is a protocol violation the reference client surfaces as a transport error. 202
+  // with an empty body is what the transport is looking for.
+  if (!id && base::StartsWith(*method, "notifications/")) {
+    reply.status = 202;
     return reply;
   }
 
