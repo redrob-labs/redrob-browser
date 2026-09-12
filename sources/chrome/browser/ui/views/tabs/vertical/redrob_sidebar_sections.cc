@@ -22,19 +22,26 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/profiles/avatar_toolbar_button.h"
+#include "chrome/browser/ui/views/tab_search_bubble_host.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/saved_tab_groups/public/saved_tab_group.h"
 #include "components/saved_tab_groups/public/types.h"
+#include "components/vector_icons/vector_icons.h"
 #include "ui/base/models/image_model.h"
 #include "ui/base/mojom/menu_source_type.mojom-shared.h"
+#include "ui/color/color_id.h"
 #include "ui/gfx/image/image.h"
+#include "ui/views/accessibility/view_accessibility.h"
+#include "ui/views/background.h"
+#include "ui/views/controls/highlight_path_generator.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/font_list.h"
+#include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
@@ -56,6 +63,13 @@ constexpr int kSectionInset = 8;
 constexpr int kRowHeight = 28;
 // The reference sets a bookmark's mark 8px from its name. Wider and the two stop reading as one row.
 constexpr int kFaviconLabelSpacing = 8;
+// Measured: both trailing glyphs are 12px, and the compose button's circle is 28px around its own.
+constexpr int kTrailingGlyphSize = 12;
+constexpr int kComposeButtonSize = 28;
+// Signed out the avatar expands into a "Sign in to Redrob?" pill. 160px is what is left of a 238px row once
+// the two trailing controls have their 28px each -- the workspace name yields entirely while the pill is up,
+// so the pill does not have to share with it. Signed in the button is a circle and this never binds.
+constexpr int kAvatarMaxWidth = 160;
 
 std::unique_ptr<views::Label> MakeHeading(const std::string& text) {
   auto label = std::make_unique<views::Label>(base::UTF8ToUTF16(text));
@@ -84,6 +98,16 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
     // Shown whatever the sign-in state: signed out, this IS the sign-in control, and the top row has no
     // avatar of its own, so hiding it would leave a browser with no way to sign in at all.
     avatar_->SetVisible(true);
+    // Capped, because signed out this button expands into a "Sign in to Redrob?" pill and at ~190px of a
+    // 238px row it took the whole header -- the workspace name elided to "W…" and the two trailing controls
+    // were pushed out of the row entirely. Signed in it is a 28px circle and the cap never binds.
+    avatar_->SetMaxSize(gfx::Size(kAvatarMaxWidth, kRowHeight));
+    // The pill and the workspace name are competing for one row, and only ONE of them is load-bearing at a
+    // time: while the pill is asking you to sign in there is no signed-in profile to have workspaces in, and
+    // a fresh profile has no saved groups either -- which is why the name was falling back to the literal
+    // word "Workspaces". So the name yields while the label is up and returns when it collapses.
+    // OnViewPreferredSizeChanged is the signal for that: the avatar's preferred width IS its label state.
+    avatar_observation_.Observe(avatar_.get());
 
     // This is the browser's ONE avatar, not a second copy. Anything that anchors a bubble to "the avatar"
     // -- sign-in interception, sync errors, IPH -- asks ToolbarButtonProvider for it, so without this
@@ -104,11 +128,47 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
       std::u16string()));
   workspace_button_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   workspace_button_->SetMinSize(gfx::Size(0, kRowHeight));
-  header->SetProperty(
-      views::kFlexBehaviorKey,
-      views::FlexSpecification(views::LayoutOrientation::kHorizontal,
-                               views::MinimumFlexSizeRule::kScaleToZero,
-                               views::MaximumFlexSizeRule::kUnbounded));
+  // The workspace name absorbs the row's slack, which is what puts the two controls below hard against the
+  // trailing edge. A separate spacer view would do the same thing and be one more child to lay out; this
+  // way the empty space belongs to the name, which is what shrinks when the row runs out of room.
+  header_layout->SetFlexForView(workspace_button_, 1);
+
+  // The two controls at the trailing edge, measured off the reference: a bare 12px magnifier, then the
+  // compose glyph inside a 28px raised white circle. The asymmetry is the design and not an oversight --
+  // starting something is the primary action on this row and finding a tab is the secondary one, so only
+  // one of them is given a surface.
+  //
+  // Upstream puts the same PAIR of actions -- tab search and new tab, as a TabStripComboButton -- one row
+  // up, next to the collapse toggle. That button is hidden and these replace it rather than both existing,
+  // because two ways to open tab search in one column is two things to keep in step.
+  search_button_ = header->AddChildView(std::make_unique<views::ImageButton>(
+      base::BindRepeating(&RedrobSidebarSections::ShowTabSearch, base::Unretained(this))));
+  search_button_->SetImageModel(
+      views::Button::STATE_NORMAL,
+      ui::ImageModel::FromVectorIcon(vector_icons::kSearchIcon,
+                                     ui::kColorLabelForegroundSecondary, kTrailingGlyphSize));
+  search_button_->SetImageHorizontalAlignment(views::ImageButton::ALIGN_CENTER);
+  search_button_->SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
+  search_button_->SetPreferredSize(gfx::Size(kRowHeight, kRowHeight));
+  search_button_->GetViewAccessibility().SetName(u"Search tabs");
+  search_button_->SetTooltipText(u"Search tabs");
+  views::InstallCircleHighlightPathGenerator(search_button_);
+
+  compose_button_ = header->AddChildView(std::make_unique<views::ImageButton>(
+      base::BindRepeating(&RedrobSidebarSections::StartNewTask, base::Unretained(this))));
+  compose_button_->SetImageModel(
+      views::Button::STATE_NORMAL,
+      ui::ImageModel::FromVectorIcon(vector_icons::kEditSquareIcon, ui::kColorSysOnSurface,
+                                     kTrailingGlyphSize));
+  compose_button_->SetImageHorizontalAlignment(views::ImageButton::ALIGN_CENTER);
+  compose_button_->SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
+  compose_button_->SetPreferredSize(gfx::Size(kComposeButtonSize, kComposeButtonSize));
+  compose_button_->SetBackground(views::CreateRoundedRectBackground(
+      ui::kColorSysBaseContainerElevated, kComposeButtonSize / 2));
+  compose_button_->GetViewAccessibility().SetName(u"New task");
+  compose_button_->SetTooltipText(u"New task");
+  views::InstallCircleHighlightPathGenerator(compose_button_);
+
   header_ = header;
 
   bookmarks_heading_ = AddChildView(MakeHeading("Bookmarks"));
@@ -221,7 +281,11 @@ void RedrobSidebarSections::SetCollapsed(bool collapsed) {
   // Hidden as a block. At 56px there is no width for a label, and half-drawn text would read as a
   // rendering bug rather than as a collapsed sidebar. The avatar is the one thing that STAYS: it is
   // 28px square, it needs no label, and it is the only sign-in control this browser has.
-  workspace_button_->SetVisible(!collapsed);
+  search_button_->SetVisible(!collapsed);
+  compose_button_->SetVisible(!collapsed);
+  // Goes through the same decision as the avatar's, so expanding the column does not put the workspace name
+  // back beside a sign-in pill that is still up.
+  UpdateHeaderForAvatarState();
   chats_heading_->SetVisible(!collapsed);
   chats_list_->SetVisible(!collapsed);
   bookmarks_heading_->SetVisible(!collapsed);
@@ -291,6 +355,45 @@ void RedrobSidebarSections::OpenBookmark(GURL url) {
   }
   // Foreground, unlike an agent's tab: this one the user asked for by clicking it.
   NavigateParams params(browser_, url, ui::PAGE_TRANSITION_AUTO_BOOKMARK);
+  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
+  Navigate(&params);
+}
+
+void RedrobSidebarSections::ShowTabSearch() {
+  if (!browser_) {
+    return;
+  }
+  // The browser owns ONE tab search bubble host and anchors it at construction, so this asks that host to
+  // show rather than making a second one -- and BrowserView anchors it to THIS button, which is why the
+  // bubble appears under the magnifier instead of under the hidden control it used to hang from.
+  if (BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
+    if (TabSearchBubbleHost* host = browser_view->GetTabSearchBubbleHost()) {
+      host->ShowTabSearchBubble();
+    }
+  }
+}
+
+void RedrobSidebarSections::OnViewPreferredSizeChanged(views::View* observed) {
+  UpdateHeaderForAvatarState();
+}
+
+void RedrobSidebarSections::UpdateHeaderForAvatarState() {
+  if (!workspace_button_ || !avatar_) {
+    return;
+  }
+  workspace_button_->SetVisible(!collapsed_ && !avatar_->IsLabelPresentAndVisible());
+  InvalidateLayout();
+}
+
+void RedrobSidebarSections::StartNewTask() {
+  if (!browser_) {
+    return;
+  }
+  // A new tab, which in this product IS the composer -- so "new task" and "new tab" are the same action
+  // and there is no second thing to keep in step. Not a singleton: two tasks at once is normal, and each
+  // wants its own tab.
+  NavigateParams params(browser_, GURL(chrome::kChromeUIRedrobURL),
+                        ui::PAGE_TRANSITION_AUTO_BOOKMARK);
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   Navigate(&params);
 }

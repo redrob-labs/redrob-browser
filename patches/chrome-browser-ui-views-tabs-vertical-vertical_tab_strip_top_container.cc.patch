@@ -1,0 +1,18 @@
+diff --git a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
+index 15393d6b279d5..9d87a349f1673 100644
+--- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
++++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
+@@ -64,6 +64,13 @@ VerticalTabStripTopContainer::VerticalTabStripTopContainer(
+       combo_button_orientation_ = state_controller->IsCollapsed()
+                                       ? views::LayoutOrientation::kVertical
+                                       : views::LayoutOrientation::kHorizontal);
++  // Redrob: built and hidden. Its two actions -- tab search and new tab -- are drawn in the sidebar's
++  // header row beside the workspace name, which is where the reference puts them, and two ways to open tab
++  // search in one column is two things to keep in step. It is HIDDEN rather than not built because it
++  // still owns the tab-search host's observation and BrowserView reaches for `end_button()` without a null
++  // check; an invisible child is skipped by the layout, so the row is right and no caller has to be
++  // audited on every version bump.
++  combo_button_->SetVisible(false);
+ }
+ 
+ VerticalTabStripTopContainer::~VerticalTabStripTopContainer() = default;
