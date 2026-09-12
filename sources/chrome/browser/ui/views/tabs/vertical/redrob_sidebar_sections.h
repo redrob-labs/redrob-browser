@@ -104,6 +104,7 @@ class RedrobSidebarSections : public views::View,
   raw_ptr<views::Label> chats_heading_ = nullptr;
   raw_ptr<views::View> chats_list_ = nullptr;
   raw_ptr<views::Label> tabs_heading_ = nullptr;
+  raw_ptr<views::LabelButton> new_tab_row_ = nullptr;
   bool collapsed_ = false;
 
   std::vector<base::Uuid> menu_workspace_ids_;

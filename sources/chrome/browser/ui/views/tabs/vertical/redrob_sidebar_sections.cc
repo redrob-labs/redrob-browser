@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.h"
 
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/views/tabs/vertical/redrob_sidebar_tokens.h"
 
 #include <memory>
@@ -45,6 +46,7 @@
 #include "ui/gfx/font_list.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/label_button.h"
+#include "ui/views/border.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/flex_layout.h"
@@ -67,7 +69,41 @@ std::unique_ptr<views::Label> MakeHeading(const std::string& text) {
   label->SetEnabledColor(sidebar_tokens::kMutedForeground);
   label->SetFontList(
       label->font_list().DeriveWithSizeDelta(sidebar_tokens::kSectionLabelSizeDelta));
+  // A heading sits at the same leading edge as the rows under it. Without this it is inset by the list's
+  // own padding and the rows by the button's, and the two disagree by however much those differ -- which is
+  // how the labels ended up at x=17 and the rows at x=23 when the reference has both at 15.
+  label->SetBorder(views::CreateEmptyBorder(
+      gfx::Insets::TLBR(sidebar_tokens::kSectionGapAbove, sidebar_tokens::kRowPaddingLeading,
+                        sidebar_tokens::kSectionGapBelow, 0)));
   return label;
+}
+
+// THE one place a sidebar row is built.
+//
+// Every row -- a bookmark, a chat -- comes from here, so a row cannot disagree with the tokens by being
+// constructed at a call site that forgot one of them. That is the whole point of having tokens: before this,
+// each site set its own alignment and min-height and inherited everything else from upstream's defaults,
+// which is why the measured left edge was 23px against the reference's 15 and the text was #1f1f1f against
+// #090b0c.
+//
+// The insets in particular have to be stated. views::LabelButton takes its own from the LayoutProvider,
+// which is tuned for dialog buttons -- generous, symmetric, and nothing to do with a 32px list row.
+std::unique_ptr<views::LabelButton> MakeRow(views::Button::PressedCallback callback,
+                                            const std::u16string& text) {
+  auto row = std::make_unique<views::LabelButton>(std::move(callback), text);
+  row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  row->SetBorder(views::CreateEmptyBorder(gfx::Insets::TLBR(
+      0, sidebar_tokens::kRowPaddingLeading, 0, sidebar_tokens::kRowPaddingLeading)));
+  row->SetMinSize(gfx::Size(0, sidebar_tokens::kRowHeight));
+  row->SetTextColor(views::Button::STATE_NORMAL, sidebar_tokens::kRowForeground);
+  row->SetTextColor(views::Button::STATE_HOVERED, sidebar_tokens::kRowForeground);
+  row->SetImageLabelSpacing(sidebar_tokens::kFaviconLabelSpacing);
+  // A row is one line. A bookmark title or a task prompt is arbitrarily long, so the choice is between
+  // eliding and wrapping, and wrapping would break the rhythm the tokens exist to hold. Set through the
+  // button rather than its label, which is protected -- LabelButton owns that and exposes the behaviour.
+  row->SetElideBehavior(gfx::ELIDE_TAIL);
+  row->SetTooltipText(text);
+  return row;
 }
 
 }  // namespace
@@ -153,6 +189,25 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
 
   tabs_heading_ = AddChildView(MakeHeading("Tabs"));
 
+  // "+ New Tab" as the FIRST ROW of the Tabs section, which is where the reference puts it -- a row in the
+  // list, left-aligned, its text in the muted ink, not a centred glyph floating under the list. Upstream's
+  // own new-tab control is a bare icon button in the strip's bottom container; it is hidden and this replaces
+  // it.
+  //
+  // This IS a second way to open a new tab, alongside the compose button in the header, and the reference has
+  // both. That is not the objection raised against upstream's combo button: both of these call one function
+  // and hold no state, where two tab-search entry points meant two anchors and two visibility rules to keep
+  // in step.
+  new_tab_row_ = AddChildView(MakeRow(
+      base::BindRepeating(&RedrobSidebarSections::StartNewTask, base::Unretained(this)),
+      u"New Tab"));
+  new_tab_row_->SetImageModel(
+      views::Button::STATE_NORMAL,
+      ui::ImageModel::FromVectorIcon(kAddIcon, sidebar_tokens::kMutedForeground,
+                                     sidebar_tokens::kFaviconSize));
+  new_tab_row_->SetTextColor(views::Button::STATE_NORMAL, sidebar_tokens::kMutedForeground);
+  new_tab_row_->SetTextColor(views::Button::STATE_HOVERED, sidebar_tokens::kRowForeground);
+
   if (browser_) {
     if (tab_groups::TabGroupSyncService* groups =
             tab_groups::TabGroupSyncServiceFactory::GetForProfile(browser_->GetProfile())) {
@@ -208,13 +263,10 @@ void RedrobSidebarSections::RebuildChats() {
       break;
     }
     // The prompt is the name, because that is what the user typed and therefore what they will
-    // recognise. Elided by the label rather than truncated here, so the full text stays in the tooltip.
-    auto* row = chats_list_->AddChildView(std::make_unique<views::LabelButton>(
+    // recognise. Elided by the row rather than truncated here, so the full text stays in the tooltip.
+    auto* row = chats_list_->AddChildView(MakeRow(
         base::BindRepeating(&RedrobSidebarSections::OpenChat, base::Unretained(this), task->id),
         base::UTF8ToUTF16(task->prompt)));
-    row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    row->SetMinSize(gfx::Size(0, sidebar_tokens::kRowHeight));
-    row->SetTooltipText(base::UTF8ToUTF16(task->prompt));
     ++shown;
   }
   InvalidateLayout();
@@ -249,6 +301,7 @@ void RedrobSidebarSections::SetCollapsed(bool collapsed) {
   bookmarks_heading_->SetVisible(!collapsed);
   bookmarks_list_->SetVisible(!collapsed);
   tabs_heading_->SetVisible(!collapsed);
+  new_tab_row_->SetVisible(!collapsed);
   InvalidateLayout();
 }
 
@@ -283,13 +336,11 @@ void RedrobSidebarSections::RebuildBookmarks() {
     const bookmarks::BookmarkNode* node = child.get();
     // Folders are listed but not opened: a folder needs a menu, and a row that silently does nothing
     // when clicked is worse than one that is plainly not a link yet.
-    auto* row = bookmarks_list_->AddChildView(std::make_unique<views::LabelButton>(
+    auto* row = bookmarks_list_->AddChildView(MakeRow(
         node->is_url() ? base::BindRepeating(&RedrobSidebarSections::OpenBookmark,
                                              base::Unretained(this), node->url())
                        : views::Button::PressedCallback(),
         std::u16string(node->GetTitle())));
-    row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    row->SetMinSize(gfx::Size(0, sidebar_tokens::kRowHeight));
     row->SetEnabled(node->is_url());
     // The favicon is what makes this list scannable -- the reference identifies a bookmark by its mark
     // before its name. GetFavicon starts the load if it has not happened; the result arrives as a model
@@ -304,8 +355,14 @@ void RedrobSidebarSections::RebuildBookmarks() {
             ui::ImageModel::FromImageSkia(gfx::ImageSkiaOperations::CreateResizedImage(
                 favicon.AsImageSkia(), skia::ImageOperations::RESIZE_BEST,
                 gfx::Size(sidebar_tokens::kFaviconSize, sidebar_tokens::kFaviconSize))));
+      } else {
+        // No favicon yet, but the row still has to hold its place: without a reserved box the label starts
+        // at the icon's position and jumps 24px sideways the moment the favicon loads.
+        row->SetImageModel(views::Button::STATE_NORMAL,
+                           ui::ImageModel::FromVectorIcon(
+                               vector_icons::kGlobeIcon, sidebar_tokens::kMutedForeground,
+                               sidebar_tokens::kFaviconSize));
       }
-      row->SetImageLabelSpacing(sidebar_tokens::kFaviconLabelSpacing);
     }
     ++shown;
   }

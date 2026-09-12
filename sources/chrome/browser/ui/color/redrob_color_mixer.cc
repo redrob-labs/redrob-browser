@@ -97,6 +97,21 @@ void AddRedrobColorMixer(ui::ColorProvider* provider, const ui::ColorProviderKey
 
   mixer[ui::kColorFocusableBorderFocused] = {accent};
   mixer[ui::kColorButtonBackgroundProminent] = {accent};
+
+  // The two the sidebar reads through its token roles, measured against the reference and found too dark:
+  // a section label came out #474747 where the reference is #737373, and a row's text #1f1f1f where the
+  // reference is #090b0c. Restated here rather than passed as literals at the call site, because a views
+  // colour has to come from the provider to follow dark mode at all.
+  //
+  // These ids are GENERIC -- every secondary label and every on-surface glyph in the browser reads them, not
+  // just the sidebar. That breadth is intended: our secondary text should be our grey everywhere, and this
+  // mixer only runs when the user has NOT chosen a theme of their own.
+  mixer[ui::kColorLabelForegroundSecondary] = {dark ? SkColorSetRGB(0xaa, 0xb0, 0xbb)
+                                                   : SkColorSetRGB(0x7c, 0x83, 0x90)};
+  mixer[ui::kColorSysOnSurface] = {ink};
+  // The compose button's raised circle: white on the wash, which is the same relationship a card has to a
+  // page on the web surfaces.
+  mixer[ui::kColorSysBaseContainerElevated] = {surface};
 }
 
 }  // namespace redrob

@@ -1,0 +1,17 @@
+diff --git a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
+index 08d127e8a47a4..9456f5c783e47 100644
+--- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
++++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
+@@ -41,6 +41,12 @@ VerticalTabStripBottomContainer::VerticalTabStripBottomContainer(
+           record_new_tab_button_pressed);
+ 
+   new_tab_button_ = AddChildView(std::move(new_tab_button));
++  // Redrob: built and hidden. The reference draws "+ New Tab" as the first ROW of the Tabs section --
++  // left-aligned, labelled, in the list -- not as a centred glyph under it, so RedrobSidebarSections
++  // owns that row and this control would be a second one. Hidden rather than not built because the
++  // container registers a callback on it and IsPositionInWindowCaption walks it; an invisible child is
++  // skipped by the layout and by that walk, so nothing has to be audited on a version bump.
++  new_tab_button_->SetVisible(false);
+ 
+   OnCollapseStateChanged(state_controller->GetCollapseState());
+   collapsed_state_change_subscription_ =
