@@ -310,9 +310,22 @@ h2 {
   border-radius: 0;
   display: flex;
   gap: 6px;
+}
+
+/* The ellipsis has to live on the TEXT, not on the flex row. `text-overflow` needs a block container
+   with inline content that overflows, so on the row itself it does nothing and the label is simply cut
+   off mid-word -- which is how "Refused: save_file is not allowed in" shipped. And `min-width: 0` is
+   what lets a flex item shrink below its content at all: without it the label refuses to narrow, so
+   there is nothing for the ellipsis to do. */
+.card-step-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.card-steps li > span[aria-hidden] {
+  flex: none;
 }
 
 .card-shot {

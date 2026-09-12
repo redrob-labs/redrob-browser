@@ -156,18 +156,32 @@ have:
 `browse` returns rather than blocks because a browsing task is not instantaneous; an agent is expected to
 call `browse_status` until `done`.
 
-### What is verified, and what is not
+### What is verified
 
-Verified directly against the running browser with an HTTP client: `/hello` answers unauthenticated, a
-missing and a wrong credential are both 401, `initialize` and `tools/list` return the two tools with their
-schemas, `tools/call` starts a task, and the SSE stream carries it live through to the answer.
+**End to end with Redrob Code as the client.** The built `redrob` binary was pointed at a running browser
+using exactly the `redrob.jsonc` above. `redrob mcp list` reports `✓ browser connected`. An agent turn
+(`redrob run --model redrob/claude-opus-5`) then chose the `browse` tool on its own, polled `browse_status`
+until `done`, and reported the answer back in the terminal -- while the browser opened a real tab for the
+page and recorded the task in its own Chats list, watchable the whole time.
 
-Verified against the transport's requirements by reading the reference client Redrob Code uses
-(`@modelcontextprotocol/sdk`, `StreamableHTTPClientTransport`): it POSTs `application/json` with
-`accept: application/json, text/event-stream`, tolerates a JSON response, treats 405 on the optional
-`GET` stream as "not offered", and expects 202 for a notification. Two defects were found and fixed that
-way -- `GET /mcp` used to answer 404, which the client reports as an error on every connect, and
-`notifications/initialized` used to get a JSON-RPC error back, which is a protocol violation.
+Two things that run showed which are worth knowing:
 
-NOT verified: an end-to-end run with Redrob Code as the client. The config shape above is transcribed
-from `ConfigMCPV1.Remote` in the engine source rather than from a session that worked.
+* **The agent picked `read-only` itself.** Nothing told it to; the default had it been silent would have
+  been `guard`. So the mode descriptions in the tool schema are doing their job -- a summarise task got
+  the narrowest mode the product has.
+* **The permission boundary held against the caller.** The browser's own engine tried `save_file`, was
+  refused, and the refusal is in the trace as a step rather than swallowed -- so an external caller
+  cannot reach a capability the agent inside the browser does not have, and a person watching can see
+  what was attempted.
+
+**The transport, against the reference client's requirements** (`@modelcontextprotocol/sdk`,
+`StreamableHTTPClientTransport`): it POSTs `application/json` with
+`accept: application/json, text/event-stream`, tolerates a JSON response, treats 405 on the optional `GET`
+stream as "not offered", and expects 202 for a notification. Two defects were found by reading it and
+fixed -- `GET /mcp` used to answer 404, which the client reports as an error on every connect, and
+`notifications/initialized` used to get a JSON-RPC error back, which is a protocol violation. An unknown
+method WITH an id still errors rather than being swallowed as a notification.
+
+**The endpoint itself, with an HTTP client**: `/hello` answers unauthenticated, a missing and a wrong
+credential are both 401, `tools/list` returns the two tools with their schemas, and the SSE stream carries
+a task live through to its answer.

@@ -208,6 +208,7 @@ function renderHome() {
       icon.setAttribute('aria-hidden', 'true');
       icon.textContent = stepIcon(step.kind);
       const label = document.createElement('span');
+      label.className = 'card-step-label';
       label.textContent = step.label;
       item.append(icon, label);
       steps.append(item);

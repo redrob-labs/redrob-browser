@@ -50,10 +50,8 @@ Not built, and named rather than implied:
   docs/AUTOMATION.md: Redrob Code's binary is already `redrob`, and it speaks MCP as a client, so the way
   to drive this browser from a terminal is to point the agent you already have at `POST /mcp` rather than
   to ship a second command with the same name doing a worse version of the same job. A wrapper existed
-  briefly and was deleted.
-* **An end-to-end run with Redrob Code as the MCP client.** The browser side is verified with an HTTP
-  client and against the reference transport's requirements; the config shape in docs/AUTOMATION.md is
-  transcribed from the engine's schema rather than from a session that worked.
+  briefly and was deleted. Verified end to end -- `redrob mcp list` reports connected and an agent turn
+  calls `browse` and reads the answer back.
 * **macOS `Assets.car` / `AppIcon.icon`**, which need `actool` and therefore a mac host.
 * **A cold-cache full build**, never validated: every build since the first has been incremental.
 
