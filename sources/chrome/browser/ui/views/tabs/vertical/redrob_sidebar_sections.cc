@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.h"
 
+#include "chrome/browser/ui/views/tabs/vertical/redrob_sidebar_tokens.h"
+
 #include <memory>
 #include <utility>
 
@@ -21,9 +23,7 @@
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/profiles/avatar_toolbar_button.h"
 #include "chrome/browser/ui/views/tab_search_bubble_host.h"
-#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/saved_tab_groups/public/saved_tab_group.h"
@@ -32,7 +32,9 @@
 #include "ui/base/models/image_model.h"
 #include "ui/base/mojom/menu_source_type.mojom-shared.h"
 #include "ui/color/color_id.h"
+#include "skia/ext/image_operations.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia_operations.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/highlight_path_generator.h"
@@ -59,23 +61,12 @@ constexpr size_t kMaxBookmarkRows = 8;
 // Same reasoning as the bookmark cap: the column is 240px and the tab list must stay visible.
 constexpr size_t kMaxChatRows = 6;
 
-constexpr int kSectionInset = 8;
-constexpr int kRowHeight = 28;
-// The reference sets a bookmark's mark 8px from its name. Wider and the two stop reading as one row.
-constexpr int kFaviconLabelSpacing = 8;
-// Measured: both trailing glyphs are 12px, and the compose button's circle is 28px around its own.
-constexpr int kTrailingGlyphSize = 12;
-constexpr int kComposeButtonSize = 28;
-// Signed out the avatar expands into a "Sign in to Redrob?" pill. 160px is what is left of a 238px row once
-// the two trailing controls have their 28px each -- the workspace name yields entirely while the pill is up,
-// so the pill does not have to share with it. Signed in the button is a circle and this never binds.
-constexpr int kAvatarMaxWidth = 160;
-
 std::unique_ptr<views::Label> MakeHeading(const std::string& text) {
   auto label = std::make_unique<views::Label>(base::UTF8ToUTF16(text));
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  label->SetEnabledColor(ui::kColorLabelForegroundSecondary);
-  label->SetFontList(label->font_list().DeriveWithSizeDelta(-1));
+  label->SetEnabledColor(sidebar_tokens::kMutedForeground);
+  label->SetFontList(
+      label->font_list().DeriveWithSizeDelta(sidebar_tokens::kSectionLabelSizeDelta));
   return label;
 }
 
@@ -83,42 +74,17 @@ std::unique_ptr<views::Label> MakeHeading(const std::string& text) {
 
 RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : browser_(browser) {
   SetLayoutManager(std::make_unique<views::BoxLayout>(
-      views::BoxLayout::Orientation::kVertical, gfx::Insets::VH(4, kSectionInset), 2));
+      views::BoxLayout::Orientation::kVertical,
+      gfx::Insets::VH(4, sidebar_tokens::kRowInset), sidebar_tokens::kRowSpacing));
 
-  // The header: the account and the workspace, on ONE row, at the TOP. Both were elsewhere before -- the
-  // avatar at the foot and the workspace here -- and the reference puts them together because they answer
-  // the same question, which is whose browser this is and which of their workspaces you are in.
+  // The header: the workspace name, then the two controls at the trailing edge. The ACCOUNT is not here --
+  // it is at the foot of the column with Settings, which is where Janghoon put it. An earlier version moved
+  // the avatar up here beside the name because the reference shows it there; the reference combines it with
+  // its own workspace switcher, and that is not the shape this product wants.
   auto* header = AddChildView(std::make_unique<views::View>());
   auto* header_layout = header->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kHorizontal, gfx::Insets(), 6));
   header_layout->set_cross_axis_alignment(views::BoxLayout::CrossAxisAlignment::kCenter);
-
-  if (browser_) {
-    avatar_ = header->AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
-    // Shown whatever the sign-in state: signed out, this IS the sign-in control, and the top row has no
-    // avatar of its own, so hiding it would leave a browser with no way to sign in at all.
-    avatar_->SetVisible(true);
-    // Capped, because signed out this button expands into a "Sign in to Redrob?" pill and at ~190px of a
-    // 238px row it took the whole header -- the workspace name elided to "W…" and the two trailing controls
-    // were pushed out of the row entirely. Signed in it is a 28px circle and the cap never binds.
-    avatar_->SetMaxSize(gfx::Size(kAvatarMaxWidth, kRowHeight));
-    // The pill and the workspace name are competing for one row, and only ONE of them is load-bearing at a
-    // time: while the pill is asking you to sign in there is no signed-in profile to have workspaces in, and
-    // a fresh profile has no saved groups either -- which is why the name was falling back to the literal
-    // word "Workspaces". So the name yields while the label is up and returns when it collapses.
-    // OnViewPreferredSizeChanged is the signal for that: the avatar's preferred width IS its label state.
-    avatar_observation_.Observe(avatar_.get());
-
-    // This is the browser's ONE avatar, not a second copy. Anything that anchors a bubble to "the avatar"
-    // -- sign-in interception, sync errors, IPH -- asks ToolbarButtonProvider for it, so without this
-    // they would anchor to the toolbar's instance, which this product never builds, and open a bubble
-    // pointing at a corner where nothing is drawn.
-    if (BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
-      if (ToolbarView* toolbar = browser_view->toolbar()) {
-        toolbar->SetRedrobAvatarButton(avatar_);
-      }
-    }
-  }
 
   // The workspace switcher. A workspace IS a saved tab group -- the browser already has the concept,
   // persists it, and syncs it, so inventing a parallel one would mean two things the user has to keep
@@ -127,16 +93,16 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
       base::BindRepeating(&RedrobSidebarSections::ShowWorkspaceMenu, base::Unretained(this)),
       std::u16string()));
   workspace_button_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  workspace_button_->SetMinSize(gfx::Size(0, kRowHeight));
+  workspace_button_->SetMinSize(gfx::Size(0, sidebar_tokens::kRowHeight));
   // The workspace name absorbs the row's slack, which is what puts the two controls below hard against the
   // trailing edge. A separate spacer view would do the same thing and be one more child to lay out; this
   // way the empty space belongs to the name, which is what shrinks when the row runs out of room.
   header_layout->SetFlexForView(workspace_button_, 1);
 
   // The two controls at the trailing edge, measured off the reference: a bare 12px magnifier, then the
-  // compose glyph inside a 28px raised white circle. The asymmetry is the design and not an oversight --
-  // starting something is the primary action on this row and finding a tab is the secondary one, so only
-  // one of them is given a surface.
+  // compose glyph inside a 28px raised circle. The asymmetry is the design and not an oversight -- starting
+  // something is the primary action on this row and finding a tab is the secondary one, so only one of them
+  // is given a surface.
   //
   // Upstream puts the same PAIR of actions -- tab search and new tab, as a TabStripComboButton -- one row
   // up, next to the collapse toggle. That button is hidden and these replace it rather than both existing,
@@ -146,10 +112,12 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   search_button_->SetImageModel(
       views::Button::STATE_NORMAL,
       ui::ImageModel::FromVectorIcon(vector_icons::kSearchIcon,
-                                     ui::kColorLabelForegroundSecondary, kTrailingGlyphSize));
+                                     sidebar_tokens::kMutedForeground,
+                                     sidebar_tokens::kHeaderGlyphSize));
   search_button_->SetImageHorizontalAlignment(views::ImageButton::ALIGN_CENTER);
   search_button_->SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
-  search_button_->SetPreferredSize(gfx::Size(kRowHeight, kRowHeight));
+  search_button_->SetPreferredSize(
+      gfx::Size(sidebar_tokens::kRowHeight, sidebar_tokens::kRowHeight));
   search_button_->GetViewAccessibility().SetName(u"Search tabs");
   search_button_->SetTooltipText(u"Search tabs");
   views::InstallCircleHighlightPathGenerator(search_button_);
@@ -158,13 +126,15 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
       base::BindRepeating(&RedrobSidebarSections::StartNewTask, base::Unretained(this))));
   compose_button_->SetImageModel(
       views::Button::STATE_NORMAL,
-      ui::ImageModel::FromVectorIcon(vector_icons::kEditSquareIcon, ui::kColorSysOnSurface,
-                                     kTrailingGlyphSize));
+      ui::ImageModel::FromVectorIcon(vector_icons::kEditSquareIcon,
+                                     sidebar_tokens::kRowForeground,
+                                     sidebar_tokens::kHeaderGlyphSize));
   compose_button_->SetImageHorizontalAlignment(views::ImageButton::ALIGN_CENTER);
   compose_button_->SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
-  compose_button_->SetPreferredSize(gfx::Size(kComposeButtonSize, kComposeButtonSize));
+  compose_button_->SetPreferredSize(
+      gfx::Size(sidebar_tokens::kComposeButtonSize, sidebar_tokens::kComposeButtonSize));
   compose_button_->SetBackground(views::CreateRoundedRectBackground(
-      ui::kColorSysBaseContainerElevated, kComposeButtonSize / 2));
+      sidebar_tokens::kRaisedSurface, sidebar_tokens::kComposeButtonSize / 2));
   compose_button_->GetViewAccessibility().SetName(u"New task");
   compose_button_->SetTooltipText(u"New task");
   views::InstallCircleHighlightPathGenerator(compose_button_);
@@ -174,12 +144,12 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   bookmarks_heading_ = AddChildView(MakeHeading("Bookmarks"));
   bookmarks_list_ = AddChildView(std::make_unique<views::View>());
   bookmarks_list_->SetLayoutManager(std::make_unique<views::BoxLayout>(
-      views::BoxLayout::Orientation::kVertical, gfx::Insets(), 0));
+      views::BoxLayout::Orientation::kVertical, gfx::Insets(), sidebar_tokens::kRowSpacing));
 
   chats_heading_ = AddChildView(MakeHeading("Chats"));
   chats_list_ = AddChildView(std::make_unique<views::View>());
   chats_list_->SetLayoutManager(std::make_unique<views::BoxLayout>(
-      views::BoxLayout::Orientation::kVertical, gfx::Insets(), 0));
+      views::BoxLayout::Orientation::kVertical, gfx::Insets(), sidebar_tokens::kRowSpacing));
 
   tabs_heading_ = AddChildView(MakeHeading("Tabs"));
 
@@ -209,17 +179,7 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   }
 }
 
-RedrobSidebarSections::~RedrobSidebarSections() {
-  // The toolbar holds a raw pointer to a button THIS view owns, so it has to be told before the button
-  // goes away. Views are destroyed in an order neither of them chooses.
-  if (browser_) {
-    if (BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
-      if (ToolbarView* toolbar = browser_view->toolbar()) {
-        toolbar->SetRedrobAvatarButton(nullptr);
-      }
-    }
-  }
-}
+RedrobSidebarSections::~RedrobSidebarSections() = default;
 
 void RedrobSidebarSections::OnTaskChanged(const mojom::Task& task) {
   // Rebuilt wholesale rather than patched. A task changes state several times a second while it runs,
@@ -253,7 +213,7 @@ void RedrobSidebarSections::RebuildChats() {
         base::BindRepeating(&RedrobSidebarSections::OpenChat, base::Unretained(this), task->id),
         base::UTF8ToUTF16(task->prompt)));
     row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    row->SetMinSize(gfx::Size(0, kRowHeight));
+    row->SetMinSize(gfx::Size(0, sidebar_tokens::kRowHeight));
     row->SetTooltipText(base::UTF8ToUTF16(task->prompt));
     ++shown;
   }
@@ -281,11 +241,9 @@ void RedrobSidebarSections::SetCollapsed(bool collapsed) {
   // Hidden as a block. At 56px there is no width for a label, and half-drawn text would read as a
   // rendering bug rather than as a collapsed sidebar. The avatar is the one thing that STAYS: it is
   // 28px square, it needs no label, and it is the only sign-in control this browser has.
+  workspace_button_->SetVisible(!collapsed);
   search_button_->SetVisible(!collapsed);
   compose_button_->SetVisible(!collapsed);
-  // Goes through the same decision as the avatar's, so expanding the column does not put the workspace name
-  // back beside a sign-in pill that is still up.
-  UpdateHeaderForAvatarState();
   chats_heading_->SetVisible(!collapsed);
   chats_list_->SetVisible(!collapsed);
   bookmarks_heading_->SetVisible(!collapsed);
@@ -331,7 +289,7 @@ void RedrobSidebarSections::RebuildBookmarks() {
                        : views::Button::PressedCallback(),
         std::u16string(node->GetTitle())));
     row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    row->SetMinSize(gfx::Size(0, kRowHeight));
+    row->SetMinSize(gfx::Size(0, sidebar_tokens::kRowHeight));
     row->SetEnabled(node->is_url());
     // The favicon is what makes this list scannable -- the reference identifies a bookmark by its mark
     // before its name. GetFavicon starts the load if it has not happened; the result arrives as a model
@@ -339,10 +297,15 @@ void RedrobSidebarSections::RebuildBookmarks() {
     if (node->is_url()) {
       const gfx::Image& favicon = model->GetFavicon(node);
       if (!favicon.IsEmpty()) {
-        row->SetImageModel(views::Button::STATE_NORMAL,
-                           ui::ImageModel::FromImage(favicon));
+        // Sized by the token rather than by whatever the site shipped: favicons arrive at 16, 32 and 48,
+        // and an unsized ImageModel makes the row as tall as the biggest one it happens to hold.
+        row->SetImageModel(
+            views::Button::STATE_NORMAL,
+            ui::ImageModel::FromImageSkia(gfx::ImageSkiaOperations::CreateResizedImage(
+                favicon.AsImageSkia(), skia::ImageOperations::RESIZE_BEST,
+                gfx::Size(sidebar_tokens::kFaviconSize, sidebar_tokens::kFaviconSize))));
       }
-      row->SetImageLabelSpacing(kFaviconLabelSpacing);
+      row->SetImageLabelSpacing(sidebar_tokens::kFaviconLabelSpacing);
     }
     ++shown;
   }
@@ -371,18 +334,6 @@ void RedrobSidebarSections::ShowTabSearch() {
       host->ShowTabSearchBubble();
     }
   }
-}
-
-void RedrobSidebarSections::OnViewPreferredSizeChanged(views::View* observed) {
-  UpdateHeaderForAvatarState();
-}
-
-void RedrobSidebarSections::UpdateHeaderForAvatarState() {
-  if (!workspace_button_ || !avatar_) {
-    return;
-  }
-  workspace_button_->SetVisible(!collapsed_ && !avatar_->IsLabelPresentAndVisible());
-  InvalidateLayout();
 }
 
 void RedrobSidebarSections::StartNewTask() {

@@ -19,10 +19,8 @@
 #include "ui/menus/simple_menu_model.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/view.h"
-#include "ui/views/view_observer.h"
 
 class BrowserWindowInterface;
-class AvatarToolbarButton;
 
 namespace views {
 class Button;
@@ -47,7 +45,6 @@ class RedrobSidebarSections : public views::View,
                               public bookmarks::BaseBookmarkModelObserver,
                               public tab_groups::TabGroupSyncService::Observer,
                               public redrob::TaskStore::Observer,
-                              public views::ViewObserver,
                               public ui::SimpleMenuModel::Delegate {
   METADATA_HEADER(RedrobSidebarSections, views::View)
 
@@ -81,10 +78,6 @@ class RedrobSidebarSections : public views::View,
   // redrob::TaskStore::Observer
   void OnTaskChanged(const mojom::Task& task) override;
 
-  // views::ViewObserver -- the avatar's preferred WIDTH is its label state, so this is the signal for
-  // "the sign-in pill appeared or collapsed".
-  void OnViewPreferredSizeChanged(views::View* observed) override;
-
   // ui::SimpleMenuModel::Delegate
   void ExecuteCommand(int command_id, int event_flags) override;
 
@@ -95,7 +88,6 @@ class RedrobSidebarSections : public views::View,
   void OpenBookmark(GURL url);
   void ShowTabSearch();
   void StartNewTask();
-  void UpdateHeaderForAvatarState();
   void UpdateWorkspaceButton();
   void ShowWorkspaceMenu();
   // The saved groups a switcher should offer, in menu order. Rebuilt per menu rather than cached: the
@@ -104,9 +96,6 @@ class RedrobSidebarSections : public views::View,
 
   raw_ptr<BrowserWindowInterface> browser_;
   raw_ptr<views::View> header_ = nullptr;
-  // The browser's ONE avatar. Owned here because the header row is where it is drawn, and registered with
-  // the toolbar so every bubble that anchors to "the avatar" finds this one.
-  raw_ptr<AvatarToolbarButton> avatar_ = nullptr;
   raw_ptr<views::LabelButton> workspace_button_ = nullptr;
   raw_ptr<views::ImageButton> search_button_ = nullptr;
   raw_ptr<views::ImageButton> compose_button_ = nullptr;
@@ -127,7 +116,6 @@ class RedrobSidebarSections : public views::View,
                           tab_groups::TabGroupSyncService::Observer>
       tab_group_observation_{this};
   base::ScopedObservation<redrob::TaskStore, redrob::TaskStore::Observer> task_observation_{this};
-  base::ScopedObservation<views::View, views::ViewObserver> avatar_observation_{this};
 };
 
 }  // namespace redrob

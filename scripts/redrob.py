@@ -63,6 +63,21 @@ PROTECTED_PHRASES = (
     "chromium.googlesource.com",
 )
 
+# Strings where the name has to become GOOGLE, not us and not upstream.
+#
+# Protection is not enough for these. A protected "Sign in to Chromium?" would keep saying Chromium, which
+# is wrong for a different reason: the button signs the user into a GOOGLE ACCOUNT, for Google's own sync
+# service. Upstream's own wording is imprecise there and our substitution made it a false claim -- there is
+# no Redrob account to sign in to, so the string was offering a product that does not exist.
+#
+# Applied as an exact-phrase rewrite before the product-name substitution runs, so the phrase never reaches
+# it. Kept to whole user-visible phrases rather than a general "Chromium near sign-in" rule: this is a claim
+# about what a specific control does, and that is a judgement per string, not a pattern.
+GOOGLE_OWNED_REWRITES = (
+    ("Sign in to Chromium?", "Sign in to Google?"),
+    ("Sign In to Chromium?", "Sign In to Google?"),
+)
+
 # Every strings file that carries the unbranded product name.
 #
 # There is not one. Upstream deliberately collects Chromium-branded literals into files named for that
@@ -335,6 +350,10 @@ def substitute_product_name(text: str) -> tuple[str, int]:
     would need one alternative per phrase and would still miss overlaps; masking cannot.
     """
     masks = {}
+    # Google's, before anything else looks at the text: these phrases must not reach the substitution at
+    # all, because the right answer for them is neither our name nor upstream's.
+    for phrase, replacement in GOOGLE_OWNED_REWRITES:
+        text = text.replace(phrase, replacement)
     for index, phrase in enumerate(PROTECTED_PHRASES):
         token = f"\x00PROTECTED{index}\x00"
         if phrase in text:

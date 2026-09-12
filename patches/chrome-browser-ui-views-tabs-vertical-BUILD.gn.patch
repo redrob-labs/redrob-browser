@@ -1,17 +1,18 @@
 diff --git a/chrome/browser/ui/views/tabs/vertical/BUILD.gn b/chrome/browser/ui/views/tabs/vertical/BUILD.gn
-index 6ff7745f13856..b0e0ed45302dd 100644
+index 6ff7745f13856..3a208c9cc2af9 100644
 --- a/chrome/browser/ui/views/tabs/vertical/BUILD.gn
 +++ b/chrome/browser/ui/views/tabs/vertical/BUILD.gn
-@@ -7,6 +7,8 @@ import("//chrome/common/features.gni")
+@@ -7,6 +7,9 @@ import("//chrome/common/features.gni")
  
  source_set("vertical") {
    sources = [
 +    "redrob_account_row.h",
 +    "redrob_sidebar_sections.h",
++    "redrob_sidebar_tokens.h",
      "top_container_button.h",
      "vertical_tab_strip_bottom_container.h",
      "vertical_tab_strip_expand_on_hover_lock.h",
-@@ -36,6 +38,8 @@ source_set("vertical") {
+@@ -36,6 +39,8 @@ source_set("vertical") {
  
  source_set("impl") {
    sources = [
@@ -20,7 +21,7 @@ index 6ff7745f13856..b0e0ed45302dd 100644
      "top_container_button.cc",
      "vertical_tab_strip_bottom_container.cc",
      "vertical_tab_strip_expand_on_hover_lock.cc",
-@@ -45,6 +49,11 @@ source_set("impl") {
+@@ -45,6 +50,11 @@ source_set("impl") {
    ]
  
    deps = [
