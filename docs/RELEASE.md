@@ -39,6 +39,33 @@ release-capable; an EXISTING checkout needs the flag added and `gclient runhooks
 This was found on the day of the first tag, by trying. It is the reason (3) is on this list as its own gate
 rather than folded into (2).
 
+## The signing key
+
+`redrob.py repo` builds a signed apt repository from `out/artifacts`, and the key is the one thing this
+repository must never contain. A signing key in a git repo is not a signing key, it is a published secret — the
+entire value of the signature is that only the publisher can produce it.
+
+The key reaches the tooling at run time, two ways:
+
+- `REDROB_SIGNING_KEY` — the ASCII-armoured private key. It is imported through stdin into a **throwaway
+  GNUPGHOME** under a temporary directory, never written to a file and never passed as an argument (a key on the
+  command line is in the process table for every other user on the machine). The temporary keyring dies with the
+  run, so a CI job does not leave a private key behind for the next job on that runner.
+- `REDROB_SIGNING_KEY_ID` — a key already in the host's keyring, named by id. For a machine where the key lives
+  in an HSM or an agent and never exists as a file at all.
+
+In CI it is `secrets.REDROB_SIGNING_KEY`, and the repository step is skipped when that secret is absent. It does
+**not** fall back to an unsigned repository: that would publish an update channel where every future update is
+whatever the network hands the user, and the workflow would look green while doing it. `--unsigned` exists for
+local testing and says so loudly.
+
+What is printed is the fingerprint, never the key. The fingerprint is public by definition — it is what a user
+pins in `/etc/apt/keyrings` — and it is the one thing about the key that belongs in a log.
+
+Verified end to end with a throwaway key and a synthetic package, not by inspection: both `InRelease` and
+`Release.gpg` produce a good signature, every index file's SHA256 and size match what `Release` claims, and the
+`Filename` in `Packages` is repository-relative and resolves into `pool/`.
+
 ## Steps
 
 1. `redrob.py version` — confirm both numbers are what you mean to ship.
@@ -50,10 +77,10 @@ rather than folded into (2).
 
 ## What this repo cannot do yet
 
-- **No signing and no update channel.** `redrob.py package` produces a real `.deb`, named and versioned as
-  Redrob (`redrob-browser-stable_<ours>+<chromium>-1_amd64.deb`), which is installable — but nothing signs it and
-  nothing serves an apt repository, so a user who installs it has no upgrade path. The repo package name
-  (`redrob-browser-repo`) is branded and the repository it would point at does not exist.
+- **Nowhere to serve the repository.** `redrob.py repo` produces a signed apt repository — `pool/`, `Packages`,
+  `Release`, `InRelease` and `Release.gpg`, verified against a throwaway key — but nothing hosts it, and the
+  `redrob-browser-repo` package that would write a user's `sources.list` points at a URL that does not answer.
+  The machinery is done; the domain and the bucket are a decision, not code.
 - **No `.rpm`.** Upstream's combined `:stable` target needs rpm tooling on the host, which this build
   deliberately does not install; `package` targets `:stable_deb` alone.
 - **Linux only.** macOS needs `Assets.car` and `AppIcon.icon`, which need `actool` on a mac host; the Windows

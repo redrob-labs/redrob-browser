@@ -98,6 +98,23 @@ jobs:
           path: out/artifacts/*
           if-no-files-found: error
 
+      - name: signed apt repository
+        # Only when a signing key exists. A step that fell back to an UNSIGNED repository when the secret was
+        # missing would publish an update channel whose every future update is whatever the network hands the
+        # user -- and it would look green while doing it. Skipping is the safe failure; `redrob.py repo` also
+        # refuses to build signed with no key rather than guessing.
+        if: ${{ env.REDROB_SIGNING_KEY != '' }}
+        env:
+          REDROB_SIGNING_KEY: ${{ secrets.REDROB_SIGNING_KEY }}
+        run: python3 scripts/redrob.py repo
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ hashFiles('out/repo/dists/stable/InRelease') != '' }}
+        with:
+          name: redrob-apt-repo
+          path: out/repo/**
+          if-no-files-found: error
+
       - name: draft the GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         # A DRAFT, not a publish. Everything above is machine-checkable; whether a version is fit to hand to

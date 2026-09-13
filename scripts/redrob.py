@@ -317,6 +317,14 @@ def cmd_package(args: argparse.Namespace) -> None:
         print(f"{path.relative_to(ROOT)}  {path.stat().st_size // (1024 * 1024)} MB")
 
 
+def cmd_repo(args: argparse.Namespace) -> None:
+    """Build a signed apt repository from out/artifacts. See scripts/build_repo.py for the key handling."""
+    cmd = [sys.executable, str(ROOT / "scripts" / "build_repo.py")]
+    if args.unsigned:
+        cmd.append("--unsigned")
+    run(cmd, ROOT)
+
+
 def cmd_bootstrap(_: argparse.Namespace) -> None:
     if not DEPOT_TOOLS.exists():
         run(["git", "clone", "--depth", "1", DEPOT_TOOLS_URL, str(DEPOT_TOOLS)], ROOT)
@@ -700,6 +708,12 @@ def main() -> None:
     package.add_argument("--allow-dev", action="store_true",
                          help="package a dev build anyway, for testing the packaging path itself")
     package.set_defaults(func=cmd_package)
+
+    repo = sub.add_parser("repo", help="build a signed apt repository from out/artifacts")
+    repo.add_argument("--unsigned", action="store_true",
+                      help="build it without signing. An unsigned repository means every future update is "
+                           "whatever the network hands the user, so it has to be asked for")
+    repo.set_defaults(func=cmd_repo)
 
     sync = sub.add_parser("sync", help="fetch Chromium at CHROMIUM_VERSION")
     sync.add_argument("--no-hooks", action="store_true", help="skip gclient sync/runhooks")
