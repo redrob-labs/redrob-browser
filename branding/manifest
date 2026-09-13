@@ -46,6 +46,13 @@ branding/icons/product_logo_32.xpm   chrome/app/theme/chromium/linux/product_log
 branding/icons/product_logo_16.png      chrome/app/theme/default_100_percent/chromium/product_logo_16.png       binary
 branding/icons/product_logo_32.png      chrome/app/theme/default_100_percent/chromium/product_logo_32.png       binary
 branding/icons/product_logo_16.png      chrome/app/theme/default_100_percent/chromium/linux/product_logo_16.png binary
+# The 32px LINUX icon, which was missing and shipped Chromium's blue globe in the .deb.
+#
+# Line 47 covers default_100_percent/chromium/product_logo_32.png and line 41 covers linux/product_logo_32.xpm,
+# so the set LOOKED complete from either direction -- there was a 32 and there was a linux/32. The one the
+# installer actually copies is default_100_percent/chromium/linux/product_logo_32.png, a fourth path, and at
+# standard DPI it is the icon a Linux desktop shows in the launcher and the window title.
+branding/icons/product_logo_32.png      chrome/app/theme/default_100_percent/chromium/linux/product_logo_32.png binary
 branding/icons/product_logo_16@2x.png   chrome/app/theme/default_200_percent/chromium/product_logo_16.png       binary
 branding/icons/product_logo_32@2x.png   chrome/app/theme/default_200_percent/chromium/product_logo_32.png       binary
 

@@ -1,31 +1,36 @@
 diff --git a/chrome/installer/linux/common/chromium-browser.info b/chrome/installer/linux/common/chromium-browser.info
-index 395c019f7dd5f..daf775c4e42a7 100644
+index 395c019f7dd5f..5659d16b9afce 100644
 --- a/chrome/installer/linux/common/chromium-browser.info
 +++ b/chrome/installer/linux/common/chromium-browser.info
-@@ -2,41 +2,53 @@
+@@ -2,41 +2,58 @@
  # Use of this source code is governed by a BSD-style license that can be
  # found in the LICENSE file.
  #
 -# This file provides common configuration information for building
 -# chromium-browser packages for various platforms.
-+# Redrob: this file is upstream's, rewritten in place rather than replaced by a new one.
++# Redrob: upstream file, rewritten in place rather than replaced by a new one.
 +#
-+# installer.py picks between google-chrome.info and chromium-browser.info on is_chrome_branded, so a fork that
-+# is neither lands here. Adding a redrob-browser.info would have meant patching that selection too; putting our
++# installer.py chooses between google-chrome.info and chromium-browser.info on is_chrome_branded, so a fork that
++# is neither lands here. Adding a redrob-browser.info would have meant patching that choice too; putting our
 +# values where they are already read from leaves the logic alone.
 +#
-+# Every field below is user-visible somewhere apt, a desktop menu or a package manager shows it, and every one
-+# of them said Chromium before this. The install directory mattered most: at /opt/chromium.org/chromium a real
-+# Chromium install and ours would have been the same files on disk.
++# WRITE COMMENTS HERE WITHOUT APOSTROPHES OR QUOTES. installer.py parses this file with shlex.split, which does
++# NOT treat a leading hash as a comment: every word becomes a token, and one apostrophe opens a quoted string
++# that swallows the rest of the file. A comment containing the word "upstreams" with an apostrophe in it made
++# PACKAGE vanish and the deb build died on KeyError: PACKAGE, forty seconds in, naming neither the file nor the
++# quote. Keep this block plain.
++#
++# Every field below is user-visible where apt, a desktop menu or a package manager shows it, and every one of
++# them said Chromium before this. INSTALLDIR mattered most: at /opt/chromium.org/chromium a real Chromium
++# install and ours are the same files on disk.
  
  # Base name of the package.
 -PACKAGE="chromium-browser"
 +PACKAGE="redrob-browser"
-+
  
  # Filename of the main executable (for generating launcher scripts, etc.)
-+# Still `chrome`. The binary's name is load-bearing across the tree -- the sandbox helper, the launcher scripts
-+# and the crash handler all look for it -- and renaming it buys a cosmetic win for a wide blast radius.
++# Still chrome. The binary name is load-bearing across the sandbox helper, the launcher scripts and the crash
++# handler, and renaming it buys a cosmetic win for a wide blast radius.
  PROGNAME=chrome
  
  # Base directory for package installation.
@@ -48,16 +53,17 @@ index 395c019f7dd5f..daf775c4e42a7 100644
 -FULLDESC="Chromium is a browser that combines a minimal design with sophisticated technology to make the web faster, safer, and easier."
 +FULLDESC="Redrob is a Chromium-based browser whose sidebar carries an agent that can read, click, type and fill on the page you have open, under a permission model you choose per task."
  
- # Package maintainer information.
+-# Package maintainer information.
 -MAINTNAME="Chromium Linux Team"
 -MAINTMAIL="chromium-packagers@chromium.org"
 -PRODUCTURL="https://www.chromium.org/Home"
++# Package maintainer information. Confirmed by Janghoon.
 +MAINTNAME="Redrob"
-+MAINTMAIL="packages@redrob.ai"  # confirmed
++MAINTMAIL="packages@redrob.ai"
 +PRODUCTURL="https://redrob.ai/"
  
-+# Unchanged, and deliberately so: this describes the licences of the code in the binary, which the fork does not
-+# alter. Trimming it to look tidier would be a false statement about what is being shipped.
++# Unchanged, deliberately: this describes the licences of the code in the binary, which the fork does not alter.
++# Trimming it to look tidier would be a false statement about what is being shipped.
  PROJECT_LICENSE="BSD-3-Clause and LGPL-2.1+ and Apache-2.0 and IJG and MIT and GPL-2.0+ and ISC and OpenSSL and (MPL-1.1 or GPL-2.0 or LGPL-2.0)"
  
 -DEVELOPER_NAME="The Chromium Authors"

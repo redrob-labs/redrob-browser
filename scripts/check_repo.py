@@ -60,9 +60,31 @@ def check_branding(problems: list[str]) -> None:
     manifest = ROOT / "branding" / "manifest"
     if not manifest.exists():
         return
-    for src, dst, n in manifest_pairs(manifest):
+    pairs = manifest_pairs(manifest)
+    for src, dst, n in pairs:
         if not (ROOT / src).exists():
             problems.append(f"branding/manifest:{n} names a source that does not exist: {src}")
+
+    # Every icon the LINUX INSTALLER ships must be one we own.
+    #
+    # This list is mirrored from chrome/installer/linux/BUILD.gn's theme_files target, and a Chromium roll can
+    # change it -- re-read that target when the pin moves. It is hardcoded anyway because the failure it catches
+    # is invisible from every other angle: product_logo_32.png under default_100_percent/chromium/linux/ was
+    # missing while a 32px icon and a linux/32 icon both existed at other paths, so the set looked complete and
+    # the .deb shipped Chromium's blue globe at the size a Linux launcher actually shows.
+    installer_icons = {
+        "chrome/app/theme/chromium/linux/product_logo_24.png",
+        "chrome/app/theme/chromium/linux/product_logo_48.png",
+        "chrome/app/theme/chromium/linux/product_logo_64.png",
+        "chrome/app/theme/chromium/linux/product_logo_128.png",
+        "chrome/app/theme/chromium/linux/product_logo_256.png",
+        "chrome/app/theme/default_100_percent/chromium/linux/product_logo_16.png",
+        "chrome/app/theme/default_100_percent/chromium/linux/product_logo_32.png",
+    }
+    covered = {dst for _, dst, _ in pairs}
+    for icon in sorted(installer_icons - covered):
+        problems.append(f"the Linux installer ships {icon} and branding/manifest does not overwrite it, so the "
+                        f"package would carry Chromium's icon")
 
 
 def check_patch_names(problems: list[str]) -> None:
