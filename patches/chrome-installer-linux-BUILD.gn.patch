@@ -1,5 +1,5 @@
 diff --git a/chrome/installer/linux/BUILD.gn b/chrome/installer/linux/BUILD.gn
-index b3b233d16abe0..f9f1588345c0d 100644
+index b3b233d16abe0..15b768f8ff71b 100644
 --- a/chrome/installer/linux/BUILD.gn
 +++ b/chrome/installer/linux/BUILD.gn
 @@ -322,7 +322,9 @@ action("deb_repo_package") {
@@ -13,7 +13,20 @@ index b3b233d16abe0..f9f1588345c0d 100644
    }
  
    outputs = [ "$root_out_dir/${package}_${deb_arch}.deb" ]
-@@ -557,7 +559,14 @@ template("linux_package") {
+@@ -554,10 +556,27 @@ template("linux_package") {
+   assert(defined(invoker.channel))
+   channel = invoker.channel
+ 
++  # Redrob: the same version installer.py will put in the control file, from the same file. Declaring a
++  # different filename here than build.py produces makes ninja fail with "output not produced" and name a
++  # filename rather than the disagreement, so these two must read ONE value.
++  #
++  # read_file rather than exec_script: exec_script is allowlisted in //.gn and widening that allowlist to
++  # compute one string would trade an intentional restriction for a convenience. read_file has no such gate
++  # because it cannot run anything.
++  redrob_version =
++      read_file("//chrome/installer/linux/common/redrob-version.txt", "trim string")
++
    if (is_chrome_branded) {
      package = "google-chrome"
    } else {
@@ -29,3 +42,12 @@ index b3b233d16abe0..f9f1588345c0d 100644
    }
  
    deb_target_name = "${target_name}_deb"
+@@ -566,7 +585,7 @@ template("linux_package") {
+     script = "debian/build.py"
+ 
+     inputs = packaging_files
+-    outputs = [ "$root_out_dir/${package}-${channel}_${chrome_version_full}-1_${deb_arch}.deb" ]
++    outputs = [ "$root_out_dir/${package}-${channel}_${redrob_version}+${chrome_version_full}-1_${deb_arch}.deb" ]
+ 
+     args = [
+       "-a",

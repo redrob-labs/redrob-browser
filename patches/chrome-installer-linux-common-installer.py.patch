@@ -1,0 +1,30 @@
+diff --git a/chrome/installer/linux/common/installer.py b/chrome/installer/linux/common/installer.py
+index 0396c0fb5cb4d..ec8e5288ec525 100644
+--- a/chrome/installer/linux/common/installer.py
++++ b/chrome/installer/linux/common/installer.py
+@@ -440,7 +440,24 @@ class InstallerConfig:
+         # Verify channel
+         channel, data["releasenotes"] = normalize_channel(channel)
+         data["channel"] = channel
+-        data["versionfull"] = f"{data['version']}-{data['package_release']}"
++        # Redrob: the package version is OURS, with Chromium's carried after a plus.
++        #
++        # Upstream's version here is Chromium's, which for Chrome is correct and for a fork is a lie a user
++        # reads: `apt show` reported 153.0.8010.36 for a product whose release is 0.1.0, which is the exact
++        # confusion REDROB_VERSION exists to prevent, in the one place a package manager shows it.
++        #
++        # `<ours>+<chromium>` rather than ours alone, because dropping Chromium's would delete a
++        # security-relevant fact from the metadata -- which upstream release this binary carries is the first
++        # thing an auditor asks. It also orders correctly in both dimensions: 0.2.0+153 > 0.1.0+154 because our
++        # version dominates, and 0.1.0+153.0.8010.37 > 0.1.0+153.0.8010.36 for a security-only rebase.
++        redrob_version_file = pathlib.Path(__file__).resolve().parent / "redrob-version.txt"
++        if not redrob_version_file.exists():
++            raise RuntimeError(
++                f"{redrob_version_file} is missing; the package version would silently fall back to Chromium's "
++                f"{data['version']}, which is the thing this exists to prevent")
++        redrob_version = redrob_version_file.read_text().strip()
++        data["versionfull"] = (
++            f"{redrob_version}+{data['version']}-{data['package_release']}")
+         data["package_orig"] = data["info_vars"]["PACKAGE"]
+         data["usr_bin_symlink_name"] = (
+             f"{data['info_vars']['PACKAGE']}-{channel}"

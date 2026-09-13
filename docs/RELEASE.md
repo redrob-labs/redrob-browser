@@ -50,8 +50,11 @@ rather than folded into (2).
 
 ## What this repo cannot do yet
 
-- **No packaging.** `redrob.py` builds and runs; nothing produces a `.deb`, a tarball, or an installer. A
-  release today is a source tag plus a binary someone built, not an artifact a user can install.
+- **No signing and no update channel.** `redrob.py package` produces a real `.deb`, named and versioned as
+  Redrob (`redrob-browser-stable_<ours>+<chromium>-1_amd64.deb`), which is installable — but nothing signs it and
+  nothing serves an apt repository, so a user who installs it has no upgrade path. The repo package name
+  (`redrob-browser-repo`) is branded and the repository it would point at does not exist.
+- **No `.rpm`.** Upstream's combined `:stable` target needs rpm tooling on the host, which this build
+  deliberately does not install; `package` targets `:stable_deb` alone.
 - **Linux only.** macOS needs `Assets.car` and `AppIcon.icon`, which need `actool` on a mac host; the Windows
   and macOS font registration paths are stubs that log their own absence by name.
-- **No signing or update channel**, which follow from having no packaging.

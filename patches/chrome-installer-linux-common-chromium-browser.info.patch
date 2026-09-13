@@ -1,8 +1,8 @@
 diff --git a/chrome/installer/linux/common/chromium-browser.info b/chrome/installer/linux/common/chromium-browser.info
-index 395c019f7dd5f..08985ecaa26a4 100644
+index 395c019f7dd5f..daf775c4e42a7 100644
 --- a/chrome/installer/linux/common/chromium-browser.info
 +++ b/chrome/installer/linux/common/chromium-browser.info
-@@ -2,41 +2,52 @@
+@@ -2,41 +2,53 @@
  # Use of this source code is governed by a BSD-style license that can be
  # found in the LICENSE file.
  #
@@ -21,6 +21,7 @@ index 395c019f7dd5f..08985ecaa26a4 100644
  # Base name of the package.
 -PACKAGE="chromium-browser"
 +PACKAGE="redrob-browser"
++
  
  # Filename of the main executable (for generating launcher scripts, etc.)
 +# Still `chrome`. The binary's name is load-bearing across the tree -- the sandbox helper, the launcher scripts
@@ -52,7 +53,7 @@ index 395c019f7dd5f..08985ecaa26a4 100644
 -MAINTMAIL="chromium-packagers@chromium.org"
 -PRODUCTURL="https://www.chromium.org/Home"
 +MAINTNAME="Redrob"
-+MAINTMAIL="packages@redrob.ai"
++MAINTMAIL="packages@redrob.ai"  # confirmed
 +PRODUCTURL="https://redrob.ai/"
  
 +# Unchanged, and deliberately so: this describes the licences of the code in the binary, which the fork does not

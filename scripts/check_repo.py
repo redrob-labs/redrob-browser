@@ -107,6 +107,18 @@ def check_versions(problems: list[str]) -> None:
     elif f"## {version}" not in changelog.read_text():
         problems.append(f"CHANGELOG.md has no '## {version}' section for the current REDROB_VERSION")
 
+    # The installer reads the same version from a file inside the Chromium checkout, because that checkout has
+    # to be buildable without reaching outside itself. That makes this the one duplicated constant in the repo,
+    # so it gets a check: a mismatch would ship a .deb whose version is not the version we tagged, GN and
+    # installer.py would still agree with each other, and nothing else would notice.
+    info = ROOT / "sources" / "chrome" / "installer" / "linux" / "common" / "redrob-version.txt"
+    if not info.exists():
+        problems.append("sources/chrome/installer/linux/common/redrob-version.txt is missing; the .deb's "
+                        "version would fall back to Chromium's")
+    elif info.read_text().strip() != version:
+        problems.append(f"redrob-version.txt says {info.read_text().strip()!r} but REDROB_VERSION says "
+                        f"{version!r} -- the .deb would be versioned differently from the tag")
+
 
 def main() -> int:
     problems: list[str] = []

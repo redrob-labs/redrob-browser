@@ -64,5 +64,10 @@ sync sign-in is a Google account and calling it a Redrob account offers somethin
 
 - Linux only. macOS needs `Assets.car`/`AppIcon.icon`, which needs `actool` on a mac host, and the Windows and
   macOS font registration paths are stubs.
-- No packaging step: `redrob.py` builds and runs, and produces no installable artifact.
+- Packaged but not distributable: `redrob.py package` produces a real `.deb`
+  (`redrob-browser-stable_0.1.0+153.0.8010.36-1_amd64.deb`), and there is no signing and no update channel, so
+  installing it is a manual act with no upgrade path.
+- The packaging step needs `debchange`, `dpkg-deb` and `fakeroot` on the host, which is why the release workflow
+  is self-hosted. See `docs/RUNNER.md`. No `.rpm`: upstream's combined target needs rpm tooling this build
+  deliberately does not install.
 - The `@` context picker is not implemented — `StartTask` accepts `context_refs` and nothing produces them.
