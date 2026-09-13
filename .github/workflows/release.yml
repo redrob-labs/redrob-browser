@@ -98,6 +98,12 @@ jobs:
           path: out/artifacts/*
           if-no-files-found: error
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: redrob-browser-cdn
+          path: out/cdn/*
+          if-no-files-found: error
+
       - name: signed apt repository
         # Only when a signing key exists. A step that fell back to an UNSIGNED repository when the secret was
         # missing would publish an update channel whose every future update is whatever the network hands the
@@ -118,7 +124,7 @@ jobs:
       - name: draft the GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         # A DRAFT, not a publish. Everything above is machine-checkable; whether a version is fit to hand to
-        # people is not, and the gaps in CHANGELOG.md -- no signing, no update channel, Linux only -- are
+        # people is not, and the gaps in CHANGELOG.md -- Linux only, no other platform's update channel -- are
         # exactly the kind of thing a human should have to look at before this goes out.
         env:
           GH_TOKEN: ${{ github.token }}
@@ -129,3 +135,49 @@ jobs:
             --draft \
             --title "Redrob Browser $version" \
             --notes "Chromium $(cat CHROMIUM_VERSION). See CHANGELOG.md for what is in this version and what is missing from it."
+
+  # A separate job on a hosted runner, for the reason redrob-design gives for the same split: a failed upload can
+  # be retried without repeating the build it publishes -- and here that build is measured in HOURS, so the
+  # argument is stronger than it is for a twenty-minute one.
+  publish-cdn:
+    name: publish to cdn.redrob.ai
+    needs: build
+    if: github.repository == 'redrob-labs/redrob-browser'
+    runs-on: ubuntu-latest
+    env:
+      # The same variable names as every other product in this organisation. They are the convention rather than
+      # a choice being made here -- see .github/scripts/cdn-publish.sh.
+      REDROB_CDN_BUCKET: ${{ vars.REDROB_CDN_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.REDROB_CDN_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.REDROB_CDN_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+      CDN_PUBLIC_HOST: cdn.redrob.ai
+      CDN_PREFIX: browser
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: version
+        run: echo "version=$(cat REDROB_VERSION)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: redrob-browser-cdn
+          path: staging
+
+      - name: Publish the .deb to cdn.redrob.ai
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: bash .github/scripts/cdn-publish.sh staging
+
+      - uses: actions/download-artifact@v4
+        # The repository only exists when the signing key does, and the build job skips it otherwise, so this
+        # download must not be fatal: an unprovisioned key should leave the .deb published and the update channel
+        # absent, not redden a release that built correctly.
+        continue-on-error: true
+        with:
+          name: redrob-apt-repo
+          path: repo
+
+      - name: Publish the apt repository to cdn.redrob.ai
+        if: ${{ hashFiles('repo/dists/stable/InRelease') != '' }}
+        run: bash .github/scripts/cdn-publish-apt.sh repo

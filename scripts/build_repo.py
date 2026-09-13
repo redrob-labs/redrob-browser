@@ -146,6 +146,15 @@ def main() -> int:
                 shutil.rmtree(home, ignore_errors=True)
                 home = pathlib.Path(os.environ.get("GNUPGHOME", pathlib.Path.home() / ".gnupg"))
             sign(dists, release, key_id, home)
+            # The PUBLIC key, beside the repository, because a signed repository nobody can verify is no better
+            # than an unsigned one: apt needs this file in /etc/apt/keyrings before it will accept the InRelease
+            # next to it. Public by definition, so unlike the private half it belongs in the published tree.
+            env = os.environ | {"GNUPGHOME": str(home)}
+            public = subprocess.run(["gpg", "--batch", "--armor", "--export", key_id],
+                                    env=env, text=True, capture_output=True, check=True).stdout
+            if not public.strip():
+                sys.exit(f"exported no public key for {key_id}; the repository would be unverifiable")
+            (args.out / "redrob-signing-key.asc").write_text(public)
         # The fingerprint, never the key. It is public by definition and it is what a user pins.
         print(f"signed with {key_id}")
 

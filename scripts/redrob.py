@@ -300,20 +300,36 @@ def cmd_package(args: argparse.Namespace) -> None:
     run(["autoninja", "-C", f"out/{args.flavour}", "chrome/installer/linux:stable_deb"], SRC)
 
     artifacts = ROOT / "out" / "artifacts"
+    cdn = ROOT / "out" / "cdn"
     artifacts.mkdir(parents=True, exist_ok=True)
+    cdn.mkdir(parents=True, exist_ok=True)
     found = []
-    for pattern in ("*.deb", "*.rpm"):
-        for built in sorted(out.glob(pattern)):
-            # Named with OUR version, not Chromium's. The package upstream builds is named after
-            # PRODUCT_VERSION, which is the Chromium release -- correct for Chrome and wrong for us, because
-            # two different Redrob releases can sit on one Chromium tag and would then produce two files with
-            # the same name.
-            target = artifacts / f"redrob-browser_{product_version()}_{built.name}"
-            shutil.copy2(built, target)
-            found.append(target)
+    for built in sorted(out.glob("*.deb")):
+        # TWO names, because two consumers want different things and neither is wrong.
+        #
+        # out/artifacts keeps the Debian name exactly as built. That name is the convention inside a repository's
+        # pool/ and it is what `redrob.py repo` copies, so it must not be prettified.
+        #
+        # Earlier this directory got a `redrob-browser_<ours>_` prefix bolted on, from when the built name carried
+        # CHROMIUM's version and ours appeared nowhere. Now that the installer stamps our version into the package
+        # itself, that prefix only produced
+        # redrob-browser_0.1.0_redrob-browser-stable_0.1.0+153.0.8010.36-1_amd64.deb -- the version twice and the
+        # product name twice. Removed.
+        target = artifacts / built.name
+        shutil.copy2(built, target)
+        found.append(target)
+
+        # out/cdn is for .github/scripts/cdn-publish.sh, which derives the version-free `latest/` alias by
+        # deleting a `-<version>` segment from the filename. A Debian name separates fields with underscores, so
+        # that segment does not exist in it and the script correctly refuses the file. This is the same shape the
+        # other products publish under -- redrob-design-x64-<version>-setup.exe aliasing to
+        # redrob-design-x64-setup.exe -- so a download page links a name that does not go stale.
+        arch = built.stem.rsplit("_", 1)[-1]
+        shutil.copy2(built, cdn / f"redrob-browser-{arch}-{product_version()}.deb")
+
     if not found:
-        sys.exit(f"the installer target produced no .deb or .rpm in out/{args.flavour}")
-    for path in found:
+        sys.exit(f"the installer target produced no .deb in out/{args.flavour}")
+    for path in found + sorted(cdn.glob("*.deb")):
         print(f"{path.relative_to(ROOT)}  {path.stat().st_size // (1024 * 1024)} MB")
 
 

@@ -77,11 +77,45 @@ Verified end to end with a throwaway key and a synthetic package, not by inspect
 
 ## What this repo cannot do yet
 
-- **Nowhere to serve the repository.** `redrob.py repo` produces a signed apt repository — `pool/`, `Packages`,
-  `Release`, `InRelease` and `Release.gpg`, verified against a throwaway key — but nothing hosts it, and the
-  `redrob-browser-repo` package that would write a user's `sources.list` points at a URL that does not answer.
-  The machinery is done; the domain and the bucket are a decision, not code.
+- **The CDN is not provisioned from here.** `publish-cdn` uploads to `cdn.redrob.ai/browser/` using the same
+  `REDROB_CDN_BUCKET` variable and `REDROB_CDN_ACCESS_KEY_ID` / `REDROB_CDN_SECRET_ACCESS_KEY` secrets as every
+  other product in the organisation, and both publish scripts exit 0 with a notice when they are absent — an
+  unprovisioned CDN must not redden a release. Setting them is an org decision, not code.
 - **No `.rpm`.** Upstream's combined `:stable` target needs rpm tooling on the host, which this build
   deliberately does not install; `package` targets `:stable_deb` alone.
 - **Linux only.** macOS needs `Assets.car` and `AppIcon.icon`, which need `actool` on a mac host; the Windows
-  and macOS font registration paths are stubs that log their own absence by name.
+  and macOS font registration paths are stubs that log their own absence by name. The other platforms therefore
+  have no download and no update channel.
+
+## Publishing
+
+Two things go to `cdn.redrob.ai/browser/`, and they are published by different scripts because they are different
+shapes.
+
+**The download** goes through `.github/scripts/cdn-publish.sh`, copied verbatim from redrob-design. Same host,
+same variables, same versioned-then-aliased ordering: the immutable copy at
+`browser/<version>/redrob-browser-amd64-<version>.deb` is read back through CloudFront and checksum-compared
+before the alias at `browser/latest/redrob-browser-amd64.deb` moves. A page links the alias.
+
+This is why `redrob.py package` writes the same package under two names. `out/artifacts` keeps the Debian name,
+because that is the convention inside a repository's `pool/`; `out/cdn` holds
+`redrob-browser-amd64-<version>.deb`, because the publish script derives the alias by deleting a `-<version>`
+segment and a Debian filename separates its fields with underscores, so it has none and the script correctly
+refuses it.
+
+**The apt repository** goes through `.github/scripts/cdn-publish-apt.sh`, which cannot use the same model: a
+user's `sources.list` names one URL forever, so the tree lands at the fixed `browser/apt/` prefix. `pool/` is
+immutable — a Debian filename carries its version, so those bytes never change — and `dists/` is short-cached,
+because every release rewrites `Packages`, `Release`, `InRelease` and `Release.gpg`, and a client that cached
+those for a year would never see another update. `pool/` is uploaded first: `Release` promises checksums for an
+index that promises checksums for the packages, so publishing the indexes first would leave a window where apt
+reports a hash mismatch rather than a missing file.
+
+A user adds the channel with:
+
+```
+curl -fsSL https://cdn.redrob.ai/browser/apt/redrob-signing-key.asc \
+  | sudo tee /etc/apt/keyrings/redrob.asc >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/redrob.asc] https://cdn.redrob.ai/browser/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/redrob.list
+```
