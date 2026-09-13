@@ -20,6 +20,7 @@
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/view.h"
 
+class AvatarToolbarButton;
 class BrowserWindowInterface;
 
 namespace views {
@@ -107,6 +108,10 @@ class RedrobSidebarSections : public views::View,
 
   raw_ptr<BrowserWindowInterface> browser_;
   raw_ptr<views::View> header_ = nullptr;
+  // The browser's ONE avatar, in the header because the profile and the workspace are one feature. Registered
+  // with the toolbar, and cleared in the destructor -- the toolbar holds a raw pointer to a button this view
+  // owns, and views are destroyed in an order neither of them chooses.
+  raw_ptr<AvatarToolbarButton> avatar_ = nullptr;
   raw_ptr<views::LabelButton> workspace_button_ = nullptr;
   // The chevron that makes the workspace name read as a picker rather than a heading.
   raw_ptr<views::ImageView> workspace_chevron_ = nullptr;

@@ -9,7 +9,6 @@
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/views/view.h"
 
-class AvatarToolbarButton;
 class BrowserWindowInterface;
 
 namespace views {
@@ -39,9 +38,6 @@ class RedrobAccountRow : public views::View {
   void OpenSettings();
 
   raw_ptr<BrowserWindowInterface> browser_;
-  // The browser's ONE avatar. Owned here, at the foot, and registered with the toolbar so every
-  // bubble that anchors to "the avatar" finds this one.
-  raw_ptr<AvatarToolbarButton> avatar_ = nullptr;
   raw_ptr<views::LabelButton> settings_button_ = nullptr;
 };
 

@@ -46,6 +46,8 @@
 #include "ui/gfx/font_list.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/image_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
+#include "chrome/browser/ui/views/profiles/avatar_toolbar_button.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/label.h"
@@ -123,6 +125,20 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   auto* header_layout = header->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kHorizontal, gfx::Insets(), 6));
   header_layout->set_cross_axis_alignment(views::BoxLayout::CrossAxisAlignment::kCenter);
+
+  // The avatar LEADS the workspace name, because in this product the profile and the workspace are the same
+  // feature -- so this glyph is the workspace's mark, not a second account control. It is also still the
+  // browser's ONE avatar: registered with the toolbar below, so every bubble that anchors to "the avatar"
+  // finds it here instead of pointing at a corner where nothing is drawn.
+  if (browser_) {
+    avatar_ = header->AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
+    avatar_->SetVisible(true);
+    if (BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
+      if (ToolbarView* toolbar = browser_view->toolbar()) {
+        toolbar->SetRedrobAvatarButton(avatar_);
+      }
+    }
+  }
 
   // The workspace switcher. A workspace IS a saved tab group -- the browser already has the concept,
   // persists it, and syncs it, so inventing a parallel one would mean two things the user has to keep
@@ -249,7 +265,18 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   }
 }
 
-RedrobSidebarSections::~RedrobSidebarSections() = default;
+RedrobSidebarSections::~RedrobSidebarSections() {
+  // The toolbar holds a raw pointer to a button THIS view owns, so it has to be told before the button goes
+  // away. Views are destroyed in an order neither of them chooses, and this moved here with the avatar -- the
+  // account row used to carry it, and leaving it behind would have left the toolbar pointing at freed memory.
+  if (browser_ && avatar_) {
+    if (BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
+      if (ToolbarView* toolbar = browser_view->toolbar()) {
+        toolbar->SetRedrobAvatarButton(nullptr);
+      }
+    }
+  }
+}
 
 void RedrobSidebarSections::OnTaskChanged(const mojom::Task& task) {
   // Rebuilt wholesale rather than patched. A task changes state several times a second while it runs,
@@ -319,6 +346,9 @@ void RedrobSidebarSections::SetCollapsed(bool collapsed) {
   workspace_button_->SetVisible(!collapsed);
   if (workspace_chevron_) {
     workspace_chevron_->SetVisible(!collapsed);
+  }
+  if (avatar_) {
+    avatar_->SetVisible(!collapsed);
   }
   search_button_->SetVisible(!collapsed);
   compose_button_->SetVisible(!collapsed);
