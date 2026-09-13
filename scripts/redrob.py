@@ -180,6 +180,21 @@ def version() -> str:
     return (ROOT / "CHROMIUM_VERSION").read_text().strip()
 
 
+def product_version() -> str:
+    """Redrob's OWN version, which is not Chromium's.
+
+    Two versions exist and they answer different questions. `CHROMIUM_VERSION` is the upstream tag this fork
+    is cut from -- it is a security statement, and it moves every four weeks whether we do anything or not.
+    `REDROB_VERSION` is what WE released, and it moves when our own work does.
+
+    It is deliberately NOT in the user agent. The UA's `Redrob/` token carries PRODUCT_VERSION, Chromium's
+    own, because the whole point of that token is to sit beside an untouched `Chrome/` token for sites that
+    sniff it -- see append_user_agent_token. A fork version there would tell a bank something it has no way
+    to interpret.
+    """
+    return (ROOT / "REDROB_VERSION").read_text().strip()
+
+
 def env(allow_update: bool = False) -> dict[str, str]:
     """depot_tools on PATH, and its own bundled tools preferred over anything on the host.
 
@@ -214,6 +229,32 @@ def patch_name(relative: str) -> str:
     return relative.replace("/", "-") + ".patch"
 
 
+def ensure_pgo_profiles_checkout() -> None:
+    """Set checkout_pgo_profiles in the .gclient's custom_vars, if it is not already there.
+
+    Returns quietly when the file is missing -- `fetch chromium` has not run yet, and cmd_sync calls this
+    before and after that step for exactly that reason.
+    """
+    gclient_file = CHROMIUM / ".gclient"
+    if not gclient_file.exists():
+        return
+    text = gclient_file.read_text()
+    if "checkout_pgo_profiles" in text:
+        return
+    if '"custom_vars": {},' not in text:
+        print("WARNING: .gclient custom_vars is not the shape this expects; set "
+              "checkout_pgo_profiles=True by hand or the release build cannot be generated")
+        return
+    gclient_file.write_text(
+        text.replace('"custom_vars": {},', '"custom_vars": {"checkout_pgo_profiles": True},', 1))
+    print("set checkout_pgo_profiles=True in .gclient (needed by the release build)")
+
+
+def cmd_version(_: argparse.Namespace) -> None:
+    print(f"redrob   {product_version()}")
+    print(f"chromium {version()}")
+
+
 def cmd_bootstrap(_: argparse.Namespace) -> None:
     if not DEPOT_TOOLS.exists():
         run(["git", "clone", "--depth", "1", DEPOT_TOOLS_URL, str(DEPOT_TOOLS)], ROOT)
@@ -236,6 +277,18 @@ def cmd_sync(args: argparse.Namespace) -> None:
 
     if not SRC.exists():
         run(["fetch", "--nohooks", "chromium"], CHROMIUM)
+
+    # PGO profiles are opt-in and the release build cannot be generated without them.
+    #
+    # `fetch chromium` writes a .gclient with an EMPTY custom_vars, and with checkout_pgo_profiles unset the
+    # profile is never downloaded. Nothing notices until `gn gen` on an is_official_build=true directory dies
+    # inside update_pgo_profiles.py -- so a repo can look perfectly healthy, build and run for months on dev
+    # flavours, and only discover at release time that it cannot produce a shippable binary at all. That is
+    # exactly what happened here, on the day of the first tag.
+    #
+    # Written idempotently into the existing file rather than by regenerating it, because gclient owns that
+    # file and a fresh one would drop anything else it has recorded.
+    ensure_pgo_profiles_checkout()
 
     run(["git", "fetch", "--tags", "origin"], SRC)
     branch = f"redrob-{tag}"
@@ -571,6 +624,11 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("bootstrap", help="clone depot_tools into this directory").set_defaults(func=cmd_bootstrap)
+
+    # Both versions, because a release note that quotes one of them and calls it "the version" is how a
+    # security question ("which Chromium are we on?") gets answered with a product number.
+    sub.add_parser("version", help="print Redrob's version and the Chromium tag it is cut from").set_defaults(
+        func=cmd_version)
 
     sync = sub.add_parser("sync", help="fetch Chromium at CHROMIUM_VERSION")
     sync.add_argument("--no-hooks", action="store_true", help="skip gclient sync/runhooks")
