@@ -65,6 +65,10 @@ class RedrobSidebarSections : public views::View,
   // bookmarks::BaseBookmarkModelObserver
   void BookmarkModelChanged() override;
   void BookmarkModelLoaded(bool ids_reassigned) override;
+  // Favicons need their OWN override. BaseBookmarkModelObserver deliberately swallows this callback --
+  // "observers typically don't care as much about favicons" -- and routes nothing to BookmarkModelChanged, so
+  // a row that asked for a favicon and got an empty image was never told when the real one arrived.
+  void BookmarkNodeFaviconChanged(const bookmarks::BookmarkNode* node) override;
 
   // tab_groups::TabGroupSyncService::Observer
   void OnInitialized() override;

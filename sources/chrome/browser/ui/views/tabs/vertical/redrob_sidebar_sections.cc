@@ -330,6 +330,23 @@ void RedrobSidebarSections::BookmarkModelLoaded(bool ids_reassigned) {
   RebuildBookmarks();
 }
 
+void RedrobSidebarSections::BookmarkNodeFaviconChanged(
+    const bookmarks::BookmarkNode* node) {
+  // The favicon is loaded lazily and asynchronously: GetFavicon STARTS the fetch and returns an empty image,
+  // and this is the only callback that says it finished. BaseBookmarkModelObserver overrides it to do nothing
+  // on the grounds that most observers do not care about favicons -- which is true of most observers and is
+  // exactly wrong for a list whose rows are identified by their mark before their name.
+  //
+  // Verified rather than assumed: with a favicon served, fetched and written to the Favicons database, both
+  // bookmark rows still measured #7c8390 -- the muted role that tints the fallback globe -- because nothing
+  // ever asked the row to draw again.
+  //
+  // A full rebuild rather than repainting the one row. Every favicon arrives once, early, and the list is a
+  // handful of rows; a targeted update would mean holding a node-to-view map whose only job is to save a
+  // rebuild the user cannot perceive.
+  RebuildBookmarks();
+}
+
 void RedrobSidebarSections::RebuildBookmarks() {
   bookmarks_list_->RemoveAllChildViews();
   if (!browser_) {
