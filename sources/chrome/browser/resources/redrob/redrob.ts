@@ -345,6 +345,50 @@ router.onTaskChanged.addListener((task: Task) => {
   render();
 });
 
+// A URL typed on its own is a navigation, not a task. Nothing else in a browser treats it otherwise, and the
+// composer replaced the omnibox on this page -- so before this, typing an address and pressing Enter filed it
+// as work for the agent and the address was never opened. It was found by a test that typed two URLs to visit
+// two pages: both became tasks and neither page was ever loaded.
+//
+// The boundary is WHITESPACE, and it is doing real work rather than only guarding the parse. A URL alone is an
+// address. A URL with words around it -- "summarise https://example.com/pricing" -- is an instruction that
+// happens to contain an address, and stays a task. That is a rule a user can predict without being taught it.
+//
+// Only http and https. A text field that navigates to whatever scheme it is handed is a way to reach
+// javascript:, file: and chrome: from typed input, so the scheme is ALLOW-LISTED rather than merely inspected.
+const kNavigableSchemes = ['http:', 'https:'];
+
+// Labels joined by dots, optional port and path, and a final label of at least two letters -- so "e.g." and
+// "etc." stay prose rather than becoming hostnames.
+const kBareHost =
+    /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}(:\d{1,5})?(\/\S*)?$/i;
+// Loopback has no dotted TLD, so it needs its own rule -- and it is the case a developer types most.
+const kLoopback = /^(localhost|127(\.\d{1,3}){3}|\[::1\])(:\d{1,5})?(\/\S*)?$/i;
+
+function navigationTarget(input: string): string|null {
+  const text = input.trim();
+  if (!text || /\s/.test(text)) {
+    return null;
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(text)) {
+    let url: URL;
+    try {
+      url = new URL(text);
+    } catch {
+      return null;
+    }
+    return kNavigableSchemes.includes(url.protocol) ? url.href : null;
+  }
+  // https for a public host, http for loopback: guessing https for 127.0.0.1 fails on every local dev server.
+  if (kBareHost.test(text)) {
+    return `https://${text}`;
+  }
+  if (kLoopback.test(text)) {
+    return `http://${text}`;
+  }
+  return null;
+}
+
 // The mode a NEW task starts in. Guard, not full access: the narrowest posture that can still do the
 // job is the right default, and widening is a decision the user makes deliberately.
 let composerMode: PermissionMode = PermissionMode.kGuard;
@@ -496,9 +540,14 @@ if (openTaskId) {
   // path in the product rather than a second one that only works on this page.
   $<HTMLButtonElement>('mode-search').addEventListener('click', () => {
     const query = $<HTMLInputElement>('prompt').value.trim();
-    if (query) {
-      location.href = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+    if (!query) {
+      return;
     }
+    // An address goes to the address even under Search: searching the web for a URL the user has already
+    // typed in full is never what was meant.
+    const target = navigationTarget(query);
+    location.href =
+        target ?? `https://www.google.com/search?q=${encodeURIComponent(query)}`;
   });
 
   $<HTMLFormElement>('composer').addEventListener('submit', async (event: Event) => {
@@ -506,6 +555,15 @@ if (openTaskId) {
     const field = $<HTMLInputElement>('prompt');
     const prompt = field.value.trim();
     if (!prompt) {
+      return;
+    }
+    // Before anything else: an address is OPENED, not filed as work. This runs whichever segment looks
+    // selected, because Enter reaches this handler either way -- mode-ask is the form's submit button, so the
+    // segmented control never governed the keyboard at all and a URL typed under "Ask AI" still became a task.
+    const target = navigationTarget(prompt);
+    if (target) {
+      field.value = '';
+      location.href = target;
       return;
     }
     const chosen = $<HTMLSelectElement>('effort').value;
