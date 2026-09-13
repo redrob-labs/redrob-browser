@@ -1,0 +1,114 @@
+# The release pipeline: tag -> official build -> .deb -> GitHub release.
+#
+# SELF-HOSTED, and not by preference. The official build measured 40-60 GB of output and hours of CPU, and the
+# packaging step needs debchange from devscripts on the host. Neither fits a GitHub-hosted runner, so this
+# workflow declares the runner it actually needs rather than pretending.
+#
+# The runner must have: ~150 GB free disk, the depot_tools prerequisites, and devscripts installed. That is a
+# machine-provisioning requirement, not something a workflow step can fix -- this build installs no system
+# packages by design (docs/BUILD.md), so a step that apt-installed devscripts would be violating the same
+# constraint the build is built around.
+#
+# Manual dispatch as well as tags, because the first thing you want after fixing a release blocker is to run the
+# pipeline WITHOUT minting a tag for it.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build (defaults to the triggering ref)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: official build and package
+    runs-on: [self-hosted, linux, x64, chromium-build]
+    # Eight hours: docs/BUILD.md budgets 4-8h for the release flavour with LTO and PGO, and a cold checkout adds
+    # the sync on top. A timeout under that turns a slow build into a red pipeline.
+    timeout-minutes: 700
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: repo integrity first
+        # The same checks as checks.yml, run again here on purpose: a tag can point at a commit that never went
+        # through a pull request, and eight hours is a long time to spend finding out the manifest was broken.
+        run: python3 scripts/check_repo.py
+
+      - name: the tag and REDROB_VERSION must agree
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/v}"
+          file="$(cat REDROB_VERSION)"
+          if [ "$tag" != "$file" ]; then
+            echo "tag v$tag does not match REDROB_VERSION $file" >&2
+            exit 1
+          fi
+
+      - name: bootstrap depot_tools
+        run: python3 scripts/redrob.py bootstrap
+
+      - name: sync Chromium at the pinned tag
+        # Also what sets checkout_pgo_profiles, without which gn gen on an official build dies inside
+        # update_pgo_profiles.py. See docs/RELEASE.md.
+        run: python3 scripts/redrob.py sync
+
+      - name: apply the patch set
+        run: |
+          python3 scripts/redrob.py apply
+          python3 scripts/redrob.py brand
+
+      - name: official build
+        run: python3 scripts/redrob.py build --flavour release
+
+      - name: package
+        run: python3 scripts/redrob.py package --flavour release
+
+      - name: launch it once
+        # A binary that links is not a binary that starts. Xvfb because the runner is headless; the flags are the
+        # ones the probe scripts use.
+        run: |
+          set -euo pipefail
+          Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
+          sleep 3
+          DISPLAY=:99 timeout 60 chromium/src/out/release/chrome \
+            --no-sandbox --test-type --no-first-run --no-default-browser-check \
+            --enable-unsafe-swiftshader --user-data-dir="$(mktemp -d)" >launch.log 2>&1 &
+          sleep 30
+          if grep -qiE "SIGSEGV|Check failed|FATAL" launch.log; then
+            echo "the release binary did not start cleanly:" >&2
+            tail -30 launch.log >&2
+            exit 1
+          fi
+          pkill -f "out/release/chrome" || true
+          pkill -f "Xvfb :99" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: redrob-browser-deb
+          path: out/artifacts/*
+          if-no-files-found: error
+
+      - name: draft the GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        # A DRAFT, not a publish. Everything above is machine-checkable; whether a version is fit to hand to
+        # people is not, and the gaps in CHANGELOG.md -- no signing, no update channel, Linux only -- are
+        # exactly the kind of thing a human should have to look at before this goes out.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(cat REDROB_VERSION)"
+          gh release create "v$version" out/artifacts/* \
+            --draft \
+            --title "Redrob Browser $version" \
+            --notes "Chromium $(cat CHROMIUM_VERSION). See CHANGELOG.md for what is in this version and what is missing from it."

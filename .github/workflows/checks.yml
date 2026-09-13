@@ -1,0 +1,50 @@
+# Fast checks, on every push and pull request.
+#
+# Deliberately does NOT build the browser. A Chromium build needs 40-60 GB of disk, tens of GB of RAM and
+# hours of CPU; a GitHub-hosted runner has 14 GB of disk, 16 GB of RAM and a 6-hour job ceiling. A workflow
+# here that claimed to build would fail on every run, and a workflow that "builds" something smaller to look
+# green is worse than none. The heavy gates live in release.yml on a self-hosted runner.
+#
+# What IS worth checking in seconds is whether the repository is internally consistent, because that is where a
+# patch-based fork actually rots -- a source file nobody copies, a patch named after a path that moved, a
+# version the changelog has never heard of. Each of those looks fine on the machine that made it and breaks the
+# next clean build.
+name: checks
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  repo:
+    name: repo integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The default fetch-depth of 1 is fine: every check reads the working tree, not history.
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: sources, branding, patch names, versions
+        run: python3 scripts/check_repo.py
+
+      - name: the tooling itself parses
+        # A syntax error in redrob.py is a broken release pipeline, and it is invisible until someone runs the
+        # one subcommand that reaches the broken line.
+        run: python3 -m compileall -q scripts/
+
+      - name: version and changelog agree
+        run: |
+          set -euo pipefail
+          python3 scripts/redrob.py version
+          echo "REDROB_VERSION=$(cat REDROB_VERSION)"
+          echo "CHROMIUM_VERSION=$(cat CHROMIUM_VERSION)"

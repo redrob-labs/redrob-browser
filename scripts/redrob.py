@@ -255,6 +255,68 @@ def cmd_version(_: argparse.Namespace) -> None:
     print(f"chromium {version()}")
 
 
+def cmd_check(_: argparse.Namespace) -> None:
+    """Repo integrity, with no Chromium checkout needed. See scripts/check_repo.py for what and why."""
+    run([sys.executable, str(ROOT / "scripts" / "check_repo.py")], ROOT)
+
+
+def cmd_package(args: argparse.Namespace) -> None:
+    """Build the Linux installer packages and collect them under out/artifacts.
+
+    `chrome/installer/linux:stable_deb` is upstream's own packaging target and produces the .deb. Using it rather
+    than assembling an archive by hand is the difference between a package that installs, registers a .desktop
+    entry and a sandbox helper with the right mode, and a tarball that happens to contain a binary.
+
+    The DEB target specifically, not `:stable`, which builds the .rpm too and fails on a host without rpm
+    tooling: `FileNotFoundError: /usr/lib/rpm/find-requires`. That is not a host to fix -- installing no system
+    packages is a stated constraint of this build (docs/BUILD.md), so an rpm needs a container that ships
+    rpm-build, and asking for one here would make packaging impossible on the machine that does the building.
+
+    Refuses the dev flavour by default. A dev build has no LTO and no PGO -- docs/BUILD.md is explicit that it
+    must not even be benchmarked against Chrome -- so packaging one produces an artifact that looks shippable
+    and is not. `--allow-dev` exists for testing the packaging path itself, which is a different job from
+    producing a release.
+    """
+    if not SRC.exists():
+        sys.exit("no checkout: run sync first")
+    if args.flavour == "dev" and not args.allow_dev:
+        sys.exit("refusing to package a dev build: no LTO, no PGO. Use --flavour release, "
+                 "or --allow-dev if you are testing the packaging path itself")
+    out = SRC / "out" / args.flavour
+    if not (out / "chrome").exists():
+        sys.exit(f"nothing built in out/{args.flavour}: run build first")
+
+    # Pre-flight the HOST tools, because upstream's packaging scripts do not. Without this the failure is a
+    # FileNotFoundError raised from inside a ninja action, forty seconds into a build, naming one binary and
+    # explaining nothing -- which is exactly how it was first hit here.
+    missing = [tool for tool in ("debchange", "dpkg-deb", "fakeroot") if shutil.which(tool) is None]
+    if missing:
+        sys.exit(
+            "cannot package: this host is missing " + ", ".join(missing) + ".\n"
+            "debchange ships in devscripts. This build installs NO system packages by design "
+            "(docs/BUILD.md), so the packaging step belongs on a machine or container image that already "
+            "has them -- see .github/workflows/release.yml, which is why that job is self-hosted.")
+
+    run(["autoninja", "-C", f"out/{args.flavour}", "chrome/installer/linux:stable_deb"], SRC)
+
+    artifacts = ROOT / "out" / "artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    found = []
+    for pattern in ("*.deb", "*.rpm"):
+        for built in sorted(out.glob(pattern)):
+            # Named with OUR version, not Chromium's. The package upstream builds is named after
+            # PRODUCT_VERSION, which is the Chromium release -- correct for Chrome and wrong for us, because
+            # two different Redrob releases can sit on one Chromium tag and would then produce two files with
+            # the same name.
+            target = artifacts / f"redrob-browser_{product_version()}_{built.name}"
+            shutil.copy2(built, target)
+            found.append(target)
+    if not found:
+        sys.exit(f"the installer target produced no .deb or .rpm in out/{args.flavour}")
+    for path in found:
+        print(f"{path.relative_to(ROOT)}  {path.stat().st_size // (1024 * 1024)} MB")
+
+
 def cmd_bootstrap(_: argparse.Namespace) -> None:
     if not DEPOT_TOOLS.exists():
         run(["git", "clone", "--depth", "1", DEPOT_TOOLS_URL, str(DEPOT_TOOLS)], ROOT)
@@ -629,6 +691,15 @@ def main() -> None:
     # security question ("which Chromium are we on?") gets answered with a product number.
     sub.add_parser("version", help="print Redrob's version and the Chromium tag it is cut from").set_defaults(
         func=cmd_version)
+
+    sub.add_parser("check", help="repo integrity: manifest, patch names, versions (no checkout needed)"
+                   ).set_defaults(func=cmd_check)
+
+    package = sub.add_parser("package", help="build the Linux installer packages into out/artifacts")
+    package.add_argument("--flavour", choices=sorted(FLAVOURS), default="release")
+    package.add_argument("--allow-dev", action="store_true",
+                         help="package a dev build anyway, for testing the packaging path itself")
+    package.set_defaults(func=cmd_package)
 
     sync = sub.add_parser("sync", help="fetch Chromium at CHROMIUM_VERSION")
     sync.add_argument("--no-hooks", action="store_true", help="skip gclient sync/runhooks")
