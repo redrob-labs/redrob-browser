@@ -32,6 +32,12 @@ class MenuRunner;
 
 namespace redrob {
 
+// THE one place a sidebar row is built -- shared so the foot's Settings row is the same object as a bookmark
+// row rather than a second construction that has to be kept in step with the tokens by hand. It was declared
+// here the moment a second file needed a row, which is the point at which "one place" stops being a comment.
+std::unique_ptr<views::LabelButton> MakeRow(views::Button::PressedCallback callback,
+                                            const std::u16string& text);
+
 // The part of the sidebar above the tab list: a workspace switcher, the user's bookmarks, and the
 // heading the tabs themselves sit under.
 //

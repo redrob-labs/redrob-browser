@@ -5,6 +5,9 @@
 #include "chrome/browser/ui/views/tabs/vertical/redrob_account_row.h"
 
 #include "chrome/browser/ui/views/tabs/vertical/redrob_sidebar_tokens.h"
+#include "ui/base/models/image_model.h"
+#include "components/vector_icons/vector_icons.h"
+#include "chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.h"
 
 #include <memory>
 
@@ -64,11 +67,19 @@ RedrobAccountRow::RedrobAccountRow(BrowserWindowInterface* browser) : browser_(b
   // Settings. There is no app menu in this product and the address row carries navigation only, so this
   // is the only way in -- a browser whose settings cannot be reached is not a shell decision, it is a
   // broken browser.
-  settings_button_ = AddChildView(std::make_unique<views::LabelButton>(
+  //
+  // Built by MakeRow, like every other row in the column, rather than by a second construction here. Before
+  // this it was a bare LabelButton with a label and no mark, so the foot read as an icon with no label sitting
+  // above a label with no icon -- the exact inverse of every row above it. The gear also makes it findable by
+  // its glyph, which is how the rest of the list is meant to be scanned.
+  settings_button_ = AddChildView(MakeRow(
       base::BindRepeating(&RedrobAccountRow::OpenSettings, base::Unretained(this)),
       base::UTF8ToUTF16(std::string("Settings"))));
-  settings_button_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  settings_button_->SetMinSize(gfx::Size(0, sidebar_tokens::kRowHeight));
+  settings_button_->SetImageModel(
+      views::Button::STATE_NORMAL,
+      ui::ImageModel::FromVectorIcon(vector_icons::kSettingsIcon,
+                                     sidebar_tokens::kMutedForeground,
+                                     sidebar_tokens::kFaviconSize));
 }
 
 RedrobAccountRow::~RedrobAccountRow() {

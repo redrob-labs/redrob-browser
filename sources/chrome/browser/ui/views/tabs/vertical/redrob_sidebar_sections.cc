@@ -79,6 +79,8 @@ std::unique_ptr<views::Label> MakeHeading(const std::string& text) {
   return label;
 }
 
+}  // namespace
+
 // THE one place a sidebar row is built.
 //
 // Every row -- a bookmark, a chat -- comes from here, so a row cannot disagree with the tokens by being
@@ -107,7 +109,6 @@ std::unique_ptr<views::LabelButton> MakeRow(views::Button::PressedCallback callb
   return row;
 }
 
-}  // namespace
 
 RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : browser_(browser) {
   SetLayoutManager(std::make_unique<views::BoxLayout>(
@@ -281,6 +282,14 @@ void RedrobSidebarSections::RebuildChats() {
     auto* row = chats_list_->AddChildView(MakeRow(
         base::BindRepeating(&RedrobSidebarSections::OpenChat, base::Unretained(this), task->id),
         base::UTF8ToUTF16(task->prompt)));
+    // A mark, because without one this was the ONLY row type in the column whose label started at the row's
+    // own edge while every bookmark and tab beside it started 24px in -- so a list that is supposed to scan as
+    // one column had two left margins. chat_spark rather than plain chat: these rows are agent tasks, and the
+    // spark is what upstream uses to mean exactly that.
+    row->SetImageModel(views::Button::STATE_NORMAL,
+                       ui::ImageModel::FromVectorIcon(vector_icons::kChatSparkIcon,
+                                                      sidebar_tokens::kMutedForeground,
+                                                      sidebar_tokens::kFaviconSize));
     ++shown;
   }
   InvalidateLayout();
