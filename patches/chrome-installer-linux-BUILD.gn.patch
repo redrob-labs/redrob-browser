@@ -1,0 +1,31 @@
+diff --git a/chrome/installer/linux/BUILD.gn b/chrome/installer/linux/BUILD.gn
+index b3b233d16abe0..f9f1588345c0d 100644
+--- a/chrome/installer/linux/BUILD.gn
++++ b/chrome/installer/linux/BUILD.gn
+@@ -322,7 +322,9 @@ action("deb_repo_package") {
+   if (is_chrome_branded) {
+     package = "google-chrome-repo"
+   } else {
+-    package = "chromium-browser-repo"
++    # The apt-source package, renamed for the same reason and not just for consistency: it owns the
++    # sources.list entry, so a name collision here points a real machine's updates at someone else's repo.
++    package = "redrob-browser-repo"
+   }
+ 
+   outputs = [ "$root_out_dir/${package}_${deb_arch}.deb" ]
+@@ -557,7 +559,14 @@ template("linux_package") {
+   if (is_chrome_branded) {
+     package = "google-chrome"
+   } else {
+-    package = "chromium-browser"
++    # Redrob: this tree IS Redrob, so the package it produces says so.
++    #
++    # The branch is chosen by is_chrome_branded, which asks "are you Google's Chrome" -- and a fork that is
++    # neither Chrome nor Chromium falls into the Chromium branch and ships a .deb called chromium-browser. That
++    # is not a cosmetic slip: the package NAME is the identity apt installs, upgrades and removes by, so a
++    # machine with real Chromium installed would have seen the two packages as one and the same and replaced
++    # it. Everything else about the branding was done; this was the one name still speaking for someone else.
++    package = "redrob-browser"
+   }
+ 
+   deb_target_name = "${target_name}_deb"

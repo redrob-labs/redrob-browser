@@ -1,0 +1,72 @@
+diff --git a/chrome/installer/linux/common/chromium-browser.info b/chrome/installer/linux/common/chromium-browser.info
+index 395c019f7dd5f..08985ecaa26a4 100644
+--- a/chrome/installer/linux/common/chromium-browser.info
++++ b/chrome/installer/linux/common/chromium-browser.info
+@@ -2,41 +2,52 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ #
+-# This file provides common configuration information for building
+-# chromium-browser packages for various platforms.
++# Redrob: this file is upstream's, rewritten in place rather than replaced by a new one.
++#
++# installer.py picks between google-chrome.info and chromium-browser.info on is_chrome_branded, so a fork that
++# is neither lands here. Adding a redrob-browser.info would have meant patching that selection too; putting our
++# values where they are already read from leaves the logic alone.
++#
++# Every field below is user-visible somewhere apt, a desktop menu or a package manager shows it, and every one
++# of them said Chromium before this. The install directory mattered most: at /opt/chromium.org/chromium a real
++# Chromium install and ours would have been the same files on disk.
+ 
+ # Base name of the package.
+-PACKAGE="chromium-browser"
++PACKAGE="redrob-browser"
+ 
+ # Filename of the main executable (for generating launcher scripts, etc.)
++# Still `chrome`. The binary's name is load-bearing across the tree -- the sandbox helper, the launcher scripts
++# and the crash handler all look for it -- and renaming it buys a cosmetic win for a wide blast radius.
+ PROGNAME=chrome
+ 
+ # Base directory for package installation.
+-INSTALLDIR=/opt/chromium.org/chromium
++INSTALLDIR=/opt/redrob/redrob-browser
+ 
+ # Directory for device policy enrollments.
+-ENROLLMENTDIR=/etc/chromium/policies/enrollment
++ENROLLMENTDIR=/etc/redrob/policies/enrollment
+ 
+ # Display string for desktop menu/icon.
+-MENUNAME="Chromium Web Browser"
++MENUNAME="Redrob Browser"
+ 
+ # Brief package description.
+-SHORTDESC="The web browser from the Chromium projects"
++SHORTDESC="Browser with an agent that can act on the page"
+ 
+ # Detailed package description.
+-FULLDESC="Chromium is a browser that combines a minimal design with sophisticated technology to make the web faster, safer, and easier."
++FULLDESC="Redrob is a Chromium-based browser whose sidebar carries an agent that can read, click, type and fill on the page you have open, under a permission model you choose per task."
+ 
+ # Package maintainer information.
+-MAINTNAME="Chromium Linux Team"
+-MAINTMAIL="chromium-packagers@chromium.org"
+-PRODUCTURL="https://www.chromium.org/Home"
++MAINTNAME="Redrob"
++MAINTMAIL="packages@redrob.ai"
++PRODUCTURL="https://redrob.ai/"
+ 
++# Unchanged, and deliberately so: this describes the licences of the code in the binary, which the fork does not
++# alter. Trimming it to look tidier would be a false statement about what is being shipped.
+ PROJECT_LICENSE="BSD-3-Clause and LGPL-2.1+ and Apache-2.0 and IJG and MIT and GPL-2.0+ and ISC and OpenSSL and (MPL-1.1 or GPL-2.0 or LGPL-2.0)"
+ 
+-DEVELOPER_NAME="The Chromium Authors"
++DEVELOPER_NAME="Redrob"
+ 
+-BUGTRACKERURL="https://www.chromium.org/for-testers/bug-reporting-guidelines"
++BUGTRACKERURL="https://github.com/redrob-labs/redrob-browser/issues"
+ 
+-HELPURL="https://chromium.googlesource.com/chromium/src/+/main/docs/linux/debugging.md"
++HELPURL="https://github.com/redrob-labs/redrob-browser"
+ 
+-RDN="org.chromium.Chromium"
++RDN="ai.redrob.Browser"
