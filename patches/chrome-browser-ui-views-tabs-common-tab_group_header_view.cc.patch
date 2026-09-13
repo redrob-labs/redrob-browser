@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/tabs/common/tab_group_header_view.cc b/chrome/browser/ui/views/tabs/common/tab_group_header_view.cc
-index cfaf18f54f721..dcc13fa127a05 100644
+index cfaf18f54f721..eaea0375cd470 100644
 --- a/chrome/browser/ui/views/tabs/common/tab_group_header_view.cc
 +++ b/chrome/browser/ui/views/tabs/common/tab_group_header_view.cc
 @@ -17,6 +17,7 @@
@@ -10,7 +10,16 @@ index cfaf18f54f721..dcc13fa127a05 100644
  #include "chrome/grit/generated_resources.h"
  #include "components/data_sharing/public/features.h"
  #include "components/strings/grit/components_strings.h"
-@@ -50,6 +51,11 @@ namespace {
+@@ -33,6 +34,8 @@
+ #include "ui/views/accessibility/view_accessibility.h"
+ #include "ui/views/animation/ink_drop.h"
+ #include "ui/views/background.h"
++#include "ui/views/vector_icons.h"
++#include "base/strings/string_number_conversions.h"
+ #include "ui/views/border.h"
+ #include "ui/views/controls/button/button_controller.h"
+ #include "ui/views/controls/button/label_button.h"
+@@ -50,6 +53,34 @@ namespace {
  constexpr int kGroupHeaderCornerRadius = 8;
  constexpr int kGroupHeaderHorizontalInset = 8;
  constexpr int kIconSize = 16;
@@ -19,10 +28,86 @@ index cfaf18f54f721..dcc13fa127a05 100644
 +// so it reads as heavy. Separate constant rather than shrinking kIconSize, which also sizes the sync and
 +// overflow icons.
 +constexpr int kCollapseIconSize = 12;
++// Redrob: the leading mark and the tab count, both vertical-only, both measured off the reference -- a 14x10
++// mark whose ink starts at x=15 with the label at 38, and the count as a bare number at x 211..216 with the
++// chevron after it at 229. 22 rather than 16 because tab.icon draws its ink across x4..20 of a 24 canvas, so
++// the nominal size overstates the glyph by half. 22 was the arithmetic's answer and MEASURED 17x13, so this is
++// the measured one: 18 lands the ink's RIGHT edge on the reference's x=28 exactly, 2px narrower than its 14.
++// Same trade as the + on the New Tab row -- an icon whose ink is a fixed fraction of its canvas cannot match
++// both edges and a width at once, and the shared right edge is what the eye follows down the column.
++constexpr int kVerticalLeadingMarkSize = 18;
++
++// The gap between the mark and the label. The reference's is 10px (mark ends 28, label starts 38); the mark's
++// own box supplies 3, so 7 is what has to be added. Without it the mark crowds the label and the pair reads as
++// one smudge rather than as an icon and a name.
++constexpr int kVerticalMarkLabelGap = 7;
++
++// The vertical row's insets are ASYMMETRIC, unlike the horizontal row's. Leading 6 rather than 8 because the
++// mark's ink starts 9px into the row -- the interior inset plus the icon's own padding -- and the reference
++// puts it at 15. The trailing 8 is left alone: it is what lands the chevron's right edge on the reference's
++// x=234 exactly, so widening both sides to fix the left would break a side that is already correct.
++constexpr int kVerticalLeadingInset = 6;
++
++// The count sits hard against the chevron without this: measured 8px right of where the reference puts it,
++// which on a row whose other three elements line up is the one that looks wrong.
++constexpr int kVerticalCountTrailingMargin = 8;
  constexpr int kFocusRingInset = 2;
  constexpr int kAttentionIndicatorWidth = 8;
  // The amount of padding between the label and any sync icon.
-@@ -566,12 +572,30 @@ void TabGroupHeaderView::OnDataChanged(
+@@ -153,6 +184,22 @@ TabGroupHeaderView::TabGroupHeaderView(
+       delegate_(delegate),
+       orientation_(orientation),
+       editor_bubble_tracker_(state_controller) {
++  // Redrob: two children the reference's row has and upstream's does not. Added here rather than in the
++  // initializer list because their POSITION matters -- the mark leads the label and the count trails it -- and
++  // the list fixes the order of every other child.
++  if (orientation == TabStripOrientation::kVertical) {
++    leading_mark_ = AddChildViewAt(std::make_unique<views::ImageView>(), 0);
++    tab_count_label_ = AddChildViewAt(std::make_unique<views::Label>(),
++                                      GetIndexOf(collapse_icon_).value());
++    tab_count_label_->SetHorizontalAlignment(gfx::ALIGN_RIGHT);
++    tab_count_label_->SetProperty(
++        views::kMarginsKey,
++        gfx::Insets::TLBR(0, 0, 0, kVerticalCountTrailingMargin));
++    leading_mark_->SetProperty(
++        views::kMarginsKey,
++        gfx::Insets::TLBR(0, 0, 0, kVerticalMarkLabelGap));
++  }
++
+   SetProperty(views::kElementIdentifierKey, kTabGroupHeaderElementId);
+   attention_indicator_->SetProperty(views::kElementIdentifierKey,
+                                     kTabGroupHeaderAttentionIndicatorElementId);
+@@ -170,7 +217,11 @@ TabGroupHeaderView::TabGroupHeaderView(
+           &TabGroupHeaderView::OnBubbleClosed, base::Unretained(this)));
+ 
+   SetCrossAxisAlignment(views::LayoutAlignment::kCenter);
+-  SetInteriorMargin(gfx::Insets::VH(0, kGroupHeaderHorizontalInset));
++  SetInteriorMargin(
++      orientation == TabStripOrientation::kVertical
++          ? gfx::Insets::TLBR(0, kVerticalLeadingInset, 0,
++                              kGroupHeaderHorizontalInset)
++          : gfx::Insets::VH(0, kGroupHeaderHorizontalInset));
+   SetDefault(views::kFlexBehaviorKey,
+              views::FlexSpecification(
+                  views::MinimumFlexSizeRule::kScaleToMinimumSnapToZero,
+@@ -555,6 +606,16 @@ void TabGroupHeaderView::OnDataChanged(
+       UpdateEditorBubbleButtonVisibility();
+     }
+ 
++    // Update the leading mark and the count.
++    if (leading_mark_) {
++      leading_mark_->SetImage(ui::ImageModel::FromVectorIcon(
++          views::kTabIcon, foreground_color, kVerticalLeadingMarkSize));
++    }
++    if (tab_count_label_) {
++      tab_count_label_->SetEnabledColor(foreground_color);
++      UpdateTabCountLabel();
++    }
++
+     // Update collapse icon.
+     if (collapse_icon_) {
+       collapse_icon_->SetVisible(!delegate_->IsGroupFocused());
+@@ -566,12 +627,30 @@ void TabGroupHeaderView::OnDataChanged(
            : features::IsRoundedIconsEnabled()
                ? vector_icons::kKeyboardArrowUpIcon
                : kKeyboardArrowUpChromeRefreshOldIcon,
@@ -56,8 +141,29 @@ index cfaf18f54f721..dcc13fa127a05 100644
      UpdateAttentionState(
          data_sharing::features::IsDataSharingFunctionalityEnabled() &&
          tab_group_data.needs_attention);
-@@ -673,6 +697,16 @@ void TabGroupHeaderView::UpdateAccessibleName() {
+@@ -671,8 +750,37 @@ void TabGroupHeaderView::UpdateAccessibleName() {
+   GetViewAccessibility().SetName(final_name);
+ }
  
++void TabGroupHeaderView::UpdateTabCountLabel() {
++  if (!tab_count_label_) {
++    return;
++  }
++  // Read the count from the group rather than from TabGroupData, which does not carry one -- that is also why
++  // this is called from Layout and not only from OnDataChanged: the data observer never fires when a tab joins
++  // or leaves the group, so a count refreshed only there would be stale exactly when it matters.
++  const int count = delegate_->GetTabGroup().tab_count();
++  tab_count_label_->SetText(count > 0 ? base::NumberToString16(count)
++                                     : std::u16string());
++}
++
++void TabGroupHeaderView::Layout(PassKey key) {
++  // Safe against a layout loop: Label::SetText early-returns on identical text, so a settled count sets
++  // nothing and invalidates nothing. A CHANGED count costs one extra pass, which then settles.
++  UpdateTabCountLabel();
++  LayoutSuperclass<views::View>(this);
++}
++
  SkColor TabGroupHeaderView::GetForegroundColor() const {
    if (GetColorProvider()) {
 +    // Redrob: in the vertical strip the label sits on the sidebar, so its colour comes from the sidebar's own

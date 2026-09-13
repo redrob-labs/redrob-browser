@@ -24,6 +24,7 @@ class BrowserWindowInterface;
 
 namespace views {
 class Button;
+class ImageView;
 class Label;
 class LabelButton;
 class MenuRunner;
@@ -97,6 +98,8 @@ class RedrobSidebarSections : public views::View,
   raw_ptr<BrowserWindowInterface> browser_;
   raw_ptr<views::View> header_ = nullptr;
   raw_ptr<views::LabelButton> workspace_button_ = nullptr;
+  // The chevron that makes the workspace name read as a picker rather than a heading.
+  raw_ptr<views::ImageView> workspace_chevron_ = nullptr;
   raw_ptr<views::ImageButton> search_button_ = nullptr;
   raw_ptr<views::ImageButton> compose_button_ = nullptr;
   raw_ptr<views::Label> bookmarks_heading_ = nullptr;

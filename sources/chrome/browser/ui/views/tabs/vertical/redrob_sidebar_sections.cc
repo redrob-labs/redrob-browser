@@ -45,6 +45,7 @@
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/font_list.h"
 #include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/image_view.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/label.h"
@@ -130,10 +131,22 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
       std::u16string()));
   workspace_button_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   workspace_button_->SetMinSize(gfx::Size(0, sidebar_tokens::kRowHeight));
-  // The workspace name absorbs the row's slack, which is what puts the two controls below hard against the
-  // trailing edge. A separate spacer view would do the same thing and be one more child to lay out; this
-  // way the empty space belongs to the name, which is what shrinks when the row runs out of room.
-  header_layout->SetFlexForView(workspace_button_, 1);
+  // A chevron after the name, because without it the name is indistinguishable from a section heading -- which
+  // is exactly how it read next to the reference: our header said "Workspaces" in the same weight and colour
+  // as "Bookmarks" one row below, so the row that SWITCHES workspaces looked like the row that labels them.
+  //
+  // No avatar beside it, though the reference has one. The reference's chip combines the account and the
+  // workspace; this product splits them and the account deliberately lives at the column's foot, so a second
+  // avatar up here would be a second sign-in affordance for the one account.
+  workspace_chevron_ = header->AddChildView(std::make_unique<views::ImageView>());
+  workspace_chevron_->SetImage(ui::ImageModel::FromVectorIcon(
+      vector_icons::kKeyboardArrowDownIcon, sidebar_tokens::kMutedForeground,
+      sidebar_tokens::kHeaderGlyphSize));
+
+  // The slack now belongs to a spacer rather than to the name, so the name and its chevron stay together at
+  // the leading edge instead of the chevron being pushed across the column by a stretched button.
+  auto* spacer = header->AddChildView(std::make_unique<views::View>());
+  header_layout->SetFlexForView(spacer, 1);
 
   // The two controls at the trailing edge, measured off the reference: a bare 12px magnifier, then the
   // compose glyph inside a 28px raised circle. The asymmetry is the design and not an oversight -- starting
@@ -295,6 +308,9 @@ void RedrobSidebarSections::SetCollapsed(bool collapsed) {
   // rendering bug rather than as a collapsed sidebar. The avatar is the one thing that STAYS: it is
   // 28px square, it needs no label, and it is the only sign-in control this browser has.
   workspace_button_->SetVisible(!collapsed);
+  if (workspace_chevron_) {
+    workspace_chevron_->SetVisible(!collapsed);
+  }
   search_button_->SetVisible(!collapsed);
   compose_button_->SetVisible(!collapsed);
   chats_heading_->SetVisible(!collapsed);
