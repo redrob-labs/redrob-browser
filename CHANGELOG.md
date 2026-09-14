@@ -4,7 +4,28 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
-## 0.1.0 — unreleased
+## 0.1.1 — 2026-09-14
+
+One fix, and it is the reason 0.1.0 should not be installed.
+
+**The package configured Google's apt repository and installed Google's signing key.** An installed 0.1.0 wrote
+`URIs: https://dl.google.com/linux/chrome-stable/deb/` into the user's apt sources and filled
+`/usr/share/keyrings/redrob-browser.gpg` with Google Inc's Linux Packages Signing Authority key. Both were
+inherited from upstream, where they are correct because upstream's package is Chrome.
+
+Both hardcodings now come from one string, and the channel is off until Redrob has its own signing key: with no
+key the package adds no source at all and says why. `scripts/update_signing_key.py` turns it on.
+
+If you installed 0.1.0, remove what it added:
+
+```
+sudo rm -f /etc/apt/sources.list.d/redrob-browser.sources \
+           /etc/apt/sources.list.d/redrob-browser.list \
+           /usr/share/keyrings/redrob-browser.gpg
+sudo apt-get update
+```
+
+## 0.1.0 — 2026-09-13
 
 First tagged version. Chromium 153.0.8010.36, Linux, 72 patches.
 

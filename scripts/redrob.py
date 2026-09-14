@@ -304,7 +304,16 @@ def cmd_package(args: argparse.Namespace) -> None:
     artifacts.mkdir(parents=True, exist_ok=True)
     cdn.mkdir(parents=True, exist_ok=True)
     found = []
-    for built in sorted(out.glob("*.deb")):
+    # ONLY this version's package. The installer target writes into the output directory and leaves what it wrote
+    # there, so after a version bump the previous release's .deb is still sitting beside the new one -- and a glob
+    # collected both, which is how a download page ends up offering a version nobody meant to ship. Matching on
+    # the version is also a check: if the expected name is absent, something upstream changed the naming and the
+    # error says so rather than shipping whatever happened to match.
+    expected = f"_{product_version()}+"
+    stale = [p.name for p in sorted(out.glob("*.deb")) if expected not in p.name]
+    if stale:
+        print(f"ignoring {len(stale)} stale package(s) from an earlier version: {', '.join(stale)}")
+    for built in sorted(p for p in out.glob("*.deb") if expected in p.name):
         # TWO names, because two consumers want different things and neither is wrong.
         #
         # out/artifacts keeps the Debian name exactly as built. That name is the convention inside a repository's
