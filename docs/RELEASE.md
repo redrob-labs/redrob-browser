@@ -39,6 +39,30 @@ release-capable; an EXISTING checkout needs the flag added and `gclient runhooks
 This was found on the day of the first tag, by trying. It is the reason (3) is on this list as its own gate
 rather than folded into (2).
 
+## Turning the update channel on
+
+The package configures apt for itself on install — that is how a browser gets automatic updates on Linux — and
+two values have to exist before it will. Until both do, the guard in `apt.include` adds **no** source and says so,
+which is the only safe default: no auto-update is a documented gap, whereas pointing a machine at a repository we
+cannot verify is a defect.
+
+**1. The public signing key**, which the package embeds and installs to `/usr/share/keyrings/redrob-browser.gpg`:
+
+```
+./scripts/update_signing_key.py branding/redrob-signing-key.asc
+./scripts/redrob.py export
+```
+
+The PUBLIC half only, and the script refuses a private key rather than trusting the filename. It must be the key
+that signs the repository — `build_repo.py` signs with `REDROB_SIGNING_KEY`, so they are two halves of one pair,
+and a mismatch shows up as apt rejecting the repository for a bad signature.
+
+**2. The bucket**, so `cdn.redrob.ai/browser/apt` answers: `REDROB_CDN_BUCKET` plus the two credential secrets.
+
+The URL is already wired. Both `REPOCONFIG` and the deb822 `URIs:` field come from one string,
+`InstallerConfig.REDROB_REPO_BASE` — they were two independent hardcodings of Chrome's URL, and fixing only the
+one named `REPOCONFIG` left the `.sources` file apt actually reads still pointing at `dl.google.com`.
+
 ## The signing key
 
 `redrob.py repo` builds a signed apt repository from `out/artifacts`, and the key is the one thing this
