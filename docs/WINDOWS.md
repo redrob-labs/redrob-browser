@@ -56,11 +56,38 @@ A self-hosted Windows runner needs:
                         --includeRecommended
   ```
 
-- **Windows 11 SDK 10.0.28000.2270**, from the Visual Studio installer or on its own.
-- **SDK Debugging Tools 10.0.26100.3323 or higher**, which the SDK does *not* install by default: Control Panel
-  → Programs and Features → Windows Software Development Kit → Change → *Debugging Tools for Windows*. Chrome's
-  PDBs exceed 4 GiB and are built as large-page PDBs, which older debugging tools cannot read, so this is a
-  build requirement rather than a debugging convenience.
+- **Windows 11 SDK 10.0.28000**, and no other version will do. `build/vs_toolchain.py` at this pin hardcodes
+  `SDK_VERSION = '10.0.28000.0'`, so a machine with only the SDK the C++ workload installs by default —
+  10.0.26100 as of writing — does not satisfy it. The Visual Studio installer does offer it: *Individual
+  components* → search `Windows 11 SDK` → tick the **10.0.28000** entry. Leave any other SDK ticked; extra
+  versions are harmless.
+
+  Watch the two numbers, which do not match: the installer names the build (`10.0.28000.2270`), and the folder on
+  disk is `10.0.28000.0`. Verify against the folder, not the installer:
+
+  ```powershell
+  Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" | Select-Object -ExpandProperty Name
+  ```
+
+- **Debugging Tools for Windows**, which the Visual Studio installer's SDK component does **not** include and
+  which cannot be selected from it. Control Panel → Programs and Features → Windows Software Development Kit →
+  Change → *Debugging Tools for Windows*. Or install the SDK standalone, whose own installer has the checkbox.
+
+  This is a build requirement, not a debugging convenience — Chrome's PDBs exceed 4 GiB and are built as
+  large-page PDBs, which older debugging tools cannot read. Missing it fails the build with the exact message
+  `vs_toolchain.py` raises:
+
+  ```
+  dbghelp.dll not found in "...\Debuggers\x64"
+  You must install Windows 10 SDK version 10.0.28000.0 including the
+  "Debugging Tools for Windows" feature.
+  ```
+
+  Check it directly, because nothing earlier in the build does:
+
+  ```powershell
+  Test-Path "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\dbghelp.dll"
+  ```
 - **`DEPOT_TOOLS_WIN_TOOLCHAIN=0`** in the environment. The hermetic toolchain Google publishes is reachable only
   from inside Google; without this variable `gclient` tries to download it and the error names a storage bucket
   rather than a missing dependency.
