@@ -3,12 +3,13 @@
 # Same standing as build/args/mac.gn: the question this flavour answers is "does the fork compile and launch on
 # Windows", which nothing has ever answered. So it is deliberately the DEV shape -- no LTO, no PGO, symbols off.
 #
-# The numbers behind that. The Linux release build measured a peak RSS of 19.9 GB across the LTO link; a
-# GitHub-hosted windows runner has 16 GB, so a release-flavour build there is killed by the linker rather than
-# failing for a reason worth reading. The Linux DEV build peaked at 7.1 GB and fits. Disk is the tighter
-# constraint on Windows than RAM: a Chromium checkout plus a dev build is around 100 GB against a hosted
-# runner's ~90 GB across C: and D:, so the first hosted run is more likely to run out of space than to fail to
-# compile -- and that is itself the answer that a self-hosted Windows machine is needed. See docs/WINDOWS.md.
+# The numbers behind that, MEASURED on a hosted windows-2022 runner rather than assumed -- an earlier version
+# of this comment guessed both of them wrong, in opposite directions. The runner has 8,187 MB of RAM and
+# 185 GiB of free disk (C: 81.6 of 255, D: 104 of 110). So disk is NOT the tight constraint it was claimed to
+# be: a Chromium checkout plus a dev build fits with room. RAM is. The Linux DEV build peaked at 7.1 GB, which
+# leaves 8 GB no margin for the OS, and the release flavour's 19.9 GB LTO link is out of reach by a factor of
+# two. That is what makes this flavour the dev shape and what makes a shipped Windows build need a self-hosted
+# machine. See docs/WINDOWS.md.
 is_debug = false
 symbol_level = 0
 blink_symbol_level = 0

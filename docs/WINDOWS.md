@@ -19,18 +19,32 @@ guessing.
 
 ## The machine
 
-A hosted GitHub `windows-2022` runner will probably fail on **disk**, not RAM. A Chromium checkout is around
-50 GB before a build and a dev build adds roughly 40 GB; a hosted runner has about 90 GB across `C:` and `D:`
-with roughly 30 GB already taken by the image. That failure is a useful answer rather than a bug — it is the
-measurement that says a self-hosted machine is required — so `windows.yml` offers a `runner` input and defaults
-to `hosted` for exactly one run.
+**Measured on a hosted `windows-2022` runner, 2026-09-14** — and it contradicts what this document predicted
+before anyone ran it:
+
+| | measured | this document had claimed |
+|---|---|---|
+| RAM | **8,187 MB** | 16 GB |
+| disk | **185 GiB free** — `C:` 81.6 of 255 GiB, `D:` 104 of 110 GiB | ~60 GB free |
+| OS | Windows Server 2022 Datacenter, build 20348 | — |
+
+So **disk is not the constraint**. A Chromium checkout (~50 GB) plus a dev build (~40 GB) fits on a hosted
+runner with room to spare, and the `D:` drive — where the workspace lives — is nearly empty.
+
+**RAM is.** 8 GB against a dev build whose peak RSS measured **7.1 GB** on Linux leaves no margin for the OS,
+and the release flavour's **19.9 GB** LTO link is out of reach by a factor of two. A hosted runner can plausibly
+*sync* and will struggle to *link*.
+
+The lesson worth keeping is not the numbers, it is that both of them were guessed wrong in the same document,
+in opposite directions. `windows.yml` takes a `runner` input so the hosted path stays runnable and cheap to
+re-measure when GitHub changes the image.
 
 A self-hosted Windows runner needs:
 
 - **≥ 200 GB free disk.** Checkout plus one build directory, with room for a second.
 - **≥ 32 GB RAM** for a release-flavour build. The Linux release build measured a **19.9 GB peak RSS** across
-  the LTO link, so 16 GB is not enough for a shipped build and the dev flavour (7.1 GB peak on Linux) is what
-  fits on less.
+  the LTO link, so 16 GB is not enough for a shipped build. This is the requirement a hosted runner's 8 GB
+  cannot meet, and it is why a self-hosted machine is needed — disk turned out not to be.
 - **Visual Studio 2022** with *Desktop development with C++*, the **Windows 11 SDK** including the *Debugging
   Tools for Windows*, and ATL/MFC. Chromium's `//docs/windows_build_instructions.md` is authoritative and moves;
   read it at the pinned tag rather than trusting this list.
