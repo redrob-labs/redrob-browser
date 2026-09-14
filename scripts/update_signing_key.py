@@ -48,7 +48,7 @@ def main() -> int:
     if not source.exists():
         print(f"no such key file: {source}", file=sys.stderr)
         return 1
-    text = source.read_text()
+    text = source.read_text(encoding="utf-8")
     if "PRIVATE KEY" in text:
         print("that is a PRIVATE key. Only the public half belongs in a package; the private half must never "
               "be in this repository.", file=sys.stderr)
@@ -77,7 +77,7 @@ def main() -> int:
 
     encoded = base64.b64encode(keyring).decode()
     payload = "\n".join(encoded[i:i + 64] for i in range(0, len(encoded), 64)) + "\n"
-    KEY_INCLUDE.write_text(TEMPLATE.format(comment=f"# key {fingerprints[0]}\n", payload=payload))
+    KEY_INCLUDE.write_text(TEMPLATE.format(comment=f"# key {fingerprints[0]}\n", payload=payload), encoding="utf-8")
     print(f"key.include now carries {fingerprints[0]} ({len(keyring)} bytes)")
     print("run `./scripts/redrob.py export` to regenerate the patch, then rebuild the package")
     return 0

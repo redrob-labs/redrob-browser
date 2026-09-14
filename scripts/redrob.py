@@ -187,7 +187,7 @@ FLAVOUR_PLATFORM = {"dev": "linux", "release": "linux", "mac": "darwin", "window
 
 
 def version() -> str:
-    return (ROOT / "CHROMIUM_VERSION").read_text().strip()
+    return (ROOT / "CHROMIUM_VERSION").read_text(encoding="utf-8").strip()
 
 
 def product_version() -> str:
@@ -202,7 +202,7 @@ def product_version() -> str:
     sniff it -- see append_user_agent_token. A fork version there would tell a bank something it has no way
     to interpret.
     """
-    return (ROOT / "REDROB_VERSION").read_text().strip()
+    return (ROOT / "REDROB_VERSION").read_text(encoding="utf-8").strip()
 
 
 def env(allow_update: bool = False) -> dict[str, str]:
@@ -254,7 +254,7 @@ def ensure_pgo_profiles_checkout() -> None:
     gclient_file = CHROMIUM / ".gclient"
     if not gclient_file.exists():
         return
-    text = gclient_file.read_text()
+    text = gclient_file.read_text(encoding="utf-8")
     if "checkout_pgo_profiles" in text:
         return
     if '"custom_vars": {},' not in text:
@@ -262,7 +262,8 @@ def ensure_pgo_profiles_checkout() -> None:
               "checkout_pgo_profiles=True by hand or the release build cannot be generated")
         return
     gclient_file.write_text(
-        text.replace('"custom_vars": {},', '"custom_vars": {"checkout_pgo_profiles": True},', 1))
+        text.replace('"custom_vars": {},', '"custom_vars": {"checkout_pgo_profiles": True},', 1),
+        encoding="utf-8")
     print("set checkout_pgo_profiles=True in .gclient (needed by the release build)")
 
 
@@ -489,7 +490,7 @@ def read_manifest() -> list[tuple[str, str, str]]:
     if not path.exists():
         return []
     rows = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -506,7 +507,7 @@ def read_sources_manifest() -> list[tuple[str, str]]:
     if not path.exists():
         return []
     rows = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -649,9 +650,9 @@ def cmd_derive(_: argparse.Namespace) -> None:
     total = 0
     for name in STRINGS_FILES:
         path = SRC / name
-        text, replaced = substitute_product_name(path.read_text())
+        text, replaced = substitute_product_name(path.read_text(encoding="utf-8"))
         if replaced:
-            path.write_text(text)
+            path.write_text(text, encoding="utf-8")
         total += replaced
         print(f"strings   {name}: {replaced}")
     print(f"strings   {total} occurrence(s) of {UPSTREAM_NAME} -> {PRODUCT_NAME} "
@@ -663,9 +664,9 @@ def cmd_derive(_: argparse.Namespace) -> None:
     shared_total = 0
     for name in SHARED_STRINGS_FILES:
         path = SRC / name
-        text, replaced = substitute_short_name(path.read_text())
+        text, replaced = substitute_short_name(path.read_text(encoding="utf-8"))
         if replaced:
-            path.write_text(text)
+            path.write_text(text, encoding="utf-8")
         shared_total += replaced
         print(f"shortname {name}: {replaced}")
     print(f"shortname {shared_total} occurrence(s) of {UPSTREAM_SHORT_NAME} -> {PRODUCT_NAME} "
@@ -674,9 +675,9 @@ def cmd_derive(_: argparse.Namespace) -> None:
     ua = SRC / USER_AGENT_CC
     if not ua.exists():
         sys.exit(f"user agent file not found: {USER_AGENT_CC}; upstream moved it")
-    text, changed = append_user_agent_token(ua.read_text())
+    text, changed = append_user_agent_token(ua.read_text(encoding="utf-8"))
     if changed:
-        ua.write_text(text)
+        ua.write_text(text, encoding="utf-8")
     print(f"useragent {USER_AGENT_CC}: {'token appended' if changed else 'already branded'}")
     print("\nNow run: ./scripts/redrob.py export")
 
@@ -730,7 +731,7 @@ def cmd_export(_: argparse.Namespace) -> None:
             text=True,
             check=True,
         ).stdout
-        (PATCHES / patch_name(relative)).write_text(diff)
+        (PATCHES / patch_name(relative)).write_text(diff, encoding="utf-8")
         exported += 1
         print(f"exported {relative}")
 
@@ -769,9 +770,9 @@ def cmd_build(args: argparse.Namespace) -> None:
                  f"cross-compile support does not cover this pair without a toolchain that is not in the\n"
                  f"checkout, so the build would fail deep inside it. Use --force-platform if you have one.")
     out = SRC / "out" / args.flavour
-    args_gn = (ROOT / FLAVOURS[args.flavour]).read_text()
+    args_gn = (ROOT / FLAVOURS[args.flavour]).read_text(encoding="utf-8")
     out.mkdir(parents=True, exist_ok=True)
-    (out / "args.gn").write_text(args_gn)
+    (out / "args.gn").write_text(args_gn, encoding="utf-8")
     run(["gn", "gen", f"out/{args.flavour}"], SRC)
     run(["autoninja", "-C", f"out/{args.flavour}", args.target], SRC)
 

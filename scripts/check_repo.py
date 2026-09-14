@@ -11,6 +11,7 @@ Run it directly, or as `redrob.py check`. Exits non-zero with one line per probl
 """
 from __future__ import annotations
 
+import ast
 import pathlib
 import re
 import sys
@@ -22,7 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # up, and importing the CLI drags in its whole environment contract.
 def manifest_pairs(path: pathlib.Path) -> list[tuple[str, str, int]]:
     pairs = []
-    for n, line in enumerate(path.read_text().splitlines(), start=1):
+    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -98,7 +99,7 @@ def check_patch_names(problems: list[str]) -> None:
     if not patches.exists():
         return
     for patch in sorted(patches.glob("*.patch")):
-        text = patch.read_text(errors="replace")
+        text = patch.read_text(encoding="utf-8", errors="replace")
         match = re.search(r"^\+\+\+ b/(.+)$", text, re.MULTILINE)
         if not match:
             problems.append(f"{patch.name} has no +++ b/ header; it is not a usable patch")
@@ -113,20 +114,20 @@ def check_versions(problems: list[str]) -> None:
     if not version_file.exists():
         problems.append("REDROB_VERSION is missing")
         return
-    version = version_file.read_text().strip()
+    version = version_file.read_text(encoding="utf-8").strip()
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         problems.append(f"REDROB_VERSION is not x.y.z: {version!r}")
     chromium = ROOT / "CHROMIUM_VERSION"
     if not chromium.exists():
         problems.append("CHROMIUM_VERSION is missing")
-    elif not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", chromium.read_text().strip()):
-        problems.append(f"CHROMIUM_VERSION is not a Chromium tag: {chromium.read_text().strip()!r}")
+    elif not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", chromium.read_text(encoding="utf-8").strip()):
+        problems.append(f"CHROMIUM_VERSION is not a Chromium tag: {chromium.read_text(encoding="utf-8").strip()!r}")
 
     # A release whose changelog does not mention it is a release nobody can read.
     changelog = ROOT / "CHANGELOG.md"
     if not changelog.exists():
         problems.append("CHANGELOG.md is missing")
-    elif f"## {version}" not in changelog.read_text():
+    elif f"## {version}" not in changelog.read_text(encoding="utf-8"):
         problems.append(f"CHANGELOG.md has no '## {version}' section for the current REDROB_VERSION")
 
     # The installer reads the same version from a file inside the Chromium checkout, because that checkout has
@@ -137,8 +138,8 @@ def check_versions(problems: list[str]) -> None:
     if not info.exists():
         problems.append("sources/chrome/installer/linux/common/redrob-version.txt is missing; the .deb's "
                         "version would fall back to Chromium's")
-    elif info.read_text().strip() != version:
-        problems.append(f"redrob-version.txt says {info.read_text().strip()!r} but REDROB_VERSION says "
+    elif info.read_text(encoding="utf-8").strip() != version:
+        problems.append(f"redrob-version.txt says {info.read_text(encoding="utf-8").strip()!r} but REDROB_VERSION says "
                         f"{version!r} -- the .deb would be versioned differently from the tag")
 
 
@@ -212,6 +213,38 @@ def check_sources_match_checkout(problems: list[str]) -> None:
                             f"before the next apply throws it away")
 
 
+def check_script_encodings(problems: list[str]) -> None:
+    """Every file read and write in scripts/ must name its encoding.
+
+    Python's default is locale-dependent, and on Windows that locale is cp1252 -- so a bare
+    `path.read_text()` works on Linux and raises UnicodeDecodeError on Windows the moment any file it
+    touches contains a non-Latin-1 byte. That is not hypothetical: the first Windows CI run died three
+    steps in, reading a CHANGELOG.md that had just gained Korean, with
+
+        UnicodeDecodeError: 'charmap' codec can't decode byte 0x90 in position 542
+
+    Checked with ast rather than a grep, so a call split across lines is judged by its keywords rather
+    than by which line the method name happens to sit on.
+    """
+    scripts = ROOT / "scripts"
+    if not scripts.exists():
+        return
+    for path in sorted(scripts.glob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError as exc:
+            problems.append(f"scripts/{path.name} does not parse: {exc}")
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr not in ("read_text", "write_text"):
+                continue
+            if not any(kw.arg == "encoding" for kw in node.keywords):
+                problems.append(f"scripts/{path.name}:{node.lineno} calls {node.func.attr}() with no "
+                                f"encoding=; that is cp1252 on Windows and breaks on any non-Latin-1 byte")
+
+
 def main() -> int:
     problems: list[str] = []
     check_sources(problems)
@@ -219,13 +252,14 @@ def main() -> int:
     check_patch_names(problems)
     check_versions(problems)
     check_strings(problems)
+    check_script_encodings(problems)
     check_sources_match_checkout(problems)
     if problems:
         for problem in problems:
             print(f"FAIL {problem}")
         print(f"\n{len(problems)} problem(s)")
         return 1
-    print("ok: sources, branding, patch names, versions and strings are consistent")
+    print("ok: sources, branding, patch names, versions, strings and script encodings are consistent")
     return 0
 
 

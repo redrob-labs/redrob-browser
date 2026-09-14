@@ -113,12 +113,12 @@ def main() -> int:
     # sources.list URL -- an absolute path here produces a repository that resolves to nothing.
     packages = run(["dpkg-scanpackages", "--multiversion", str(pool.relative_to(args.out)), "/dev/null"],
                    cwd=args.out)
-    (binary / "Packages").write_text(packages)
+    (binary / "Packages").write_text(packages, encoding="utf-8")
     run(["gzip", "-9", "-k", "-f", str(binary / "Packages")])
 
     dists = args.out / "dists" / SUITE
     release = dists / "Release"
-    release.write_text(build_release(dists, sorted(p for p in binary.iterdir() if p.name != "Release")))
+    release.write_text(build_release(dists, sorted(p for p in binary.iterdir() if p.name != "Release")), encoding="utf-8")
 
     if args.unsigned:
         print("WARNING: repository is UNSIGNED. apt will refuse it without [trusted=yes], and a user who adds "
@@ -154,7 +154,7 @@ def main() -> int:
                                     env=env, text=True, capture_output=True, check=True).stdout
             if not public.strip():
                 sys.exit(f"exported no public key for {key_id}; the repository would be unverifiable")
-            (args.out / "redrob-signing-key.asc").write_text(public)
+            (args.out / "redrob-signing-key.asc").write_text(public, encoding="utf-8")
         # The fingerprint, never the key. It is public by definition and it is what a user pins.
         print(f"signed with {key_id}")
 
