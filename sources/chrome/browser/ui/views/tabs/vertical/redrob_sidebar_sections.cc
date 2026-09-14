@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/navigator/browser_navigator.h"
 #include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/browser/redrob/agent_tabs.h"
+#include "chrome/browser/redrob/resources/grit/redrob_strings.h"
 #include "chrome/browser/redrob/task_store_factory.h"
 #include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
@@ -30,6 +31,7 @@
 #include "components/saved_tab_groups/public/saved_tab_group.h"
 #include "components/saved_tab_groups/public/types.h"
 #include "components/vector_icons/vector_icons.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/image_model.h"
 #include "ui/base/mojom/menu_source_type.mojom-shared.h"
 #include "ui/color/color_id.h"
@@ -66,8 +68,8 @@ constexpr size_t kMaxBookmarkRows = 8;
 // Same reasoning as the bookmark cap: the column is 240px and the tab list must stay visible.
 constexpr size_t kMaxChatRows = 6;
 
-std::unique_ptr<views::Label> MakeHeading(const std::string& text) {
-  auto label = std::make_unique<views::Label>(base::UTF8ToUTF16(text));
+std::unique_ptr<views::Label> MakeHeading(int message_id) {
+  auto label = std::make_unique<views::Label>(l10n_util::GetStringUTF16(message_id));
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   label->SetEnabledColor(sidebar_tokens::kMutedForeground);
   label->SetFontList(
@@ -196,8 +198,8 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   search_button_->SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
   search_button_->SetPreferredSize(
       gfx::Size(sidebar_tokens::kRowHeight, sidebar_tokens::kRowHeight));
-  search_button_->GetViewAccessibility().SetName(u"Search tabs");
-  search_button_->SetTooltipText(u"Search tabs");
+  search_button_->GetViewAccessibility().SetName(l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_SEARCH_TABS));
+  search_button_->SetTooltipText(l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_SEARCH_TABS));
   views::InstallCircleHighlightPathGenerator(search_button_);
 
   compose_button_ = header->AddChildView(std::make_unique<views::ImageButton>(
@@ -213,23 +215,23 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
       gfx::Size(sidebar_tokens::kComposeButtonSize, sidebar_tokens::kComposeButtonSize));
   compose_button_->SetBackground(views::CreateRoundedRectBackground(
       sidebar_tokens::kRaisedSurface, sidebar_tokens::kComposeButtonSize / 2));
-  compose_button_->GetViewAccessibility().SetName(u"New task");
-  compose_button_->SetTooltipText(u"New task");
+  compose_button_->GetViewAccessibility().SetName(l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_NEW_TASK));
+  compose_button_->SetTooltipText(l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_NEW_TASK));
   views::InstallCircleHighlightPathGenerator(compose_button_);
 
   header_ = header;
 
-  bookmarks_heading_ = AddChildView(MakeHeading("Bookmarks"));
+  bookmarks_heading_ = AddChildView(MakeHeading(IDS_REDROB_SIDEBAR_BOOKMARKS));
   bookmarks_list_ = AddChildView(std::make_unique<views::View>());
   bookmarks_list_->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kVertical, gfx::Insets(), sidebar_tokens::kRowSpacing));
 
-  chats_heading_ = AddChildView(MakeHeading("Chats"));
+  chats_heading_ = AddChildView(MakeHeading(IDS_REDROB_SIDEBAR_CHATS));
   chats_list_ = AddChildView(std::make_unique<views::View>());
   chats_list_->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kVertical, gfx::Insets(), sidebar_tokens::kRowSpacing));
 
-  tabs_heading_ = AddChildView(MakeHeading("Tabs"));
+  tabs_heading_ = AddChildView(MakeHeading(IDS_REDROB_SIDEBAR_TABS));
 
   // "+ New Tab" as the FIRST ROW of the Tabs section, which is where the reference puts it -- a row in the
   // list, left-aligned, its text in the muted ink, not a centred glyph floating under the list. Upstream's
@@ -242,7 +244,7 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   // in step.
   new_tab_row_ = AddChildView(MakeRow(
       base::BindRepeating(&RedrobSidebarSections::StartNewTask, base::Unretained(this)),
-      u"New Tab"));
+      l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_NEW_TAB)));
   new_tab_row_->SetImageModel(
       views::Button::STATE_NORMAL,
       ui::ImageModel::FromVectorIcon(vector_icons::kAdd2Icon,
@@ -525,7 +527,7 @@ void RedrobSidebarSections::UpdateWorkspaceButton() {
   if (!workspace_button_) {
     return;
   }
-  std::u16string label = u"Workspaces";
+  std::u16string label = l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_WORKSPACES);
   size_t count = 0;
 
   if (browser_) {
@@ -553,7 +555,8 @@ void RedrobSidebarSections::UpdateWorkspaceButton() {
   workspace_button_->SetText(label);
   workspace_button_->SetEnabled(count > 0);
   workspace_button_->SetTooltipText(
-      count > 0 ? u"Switch workspace" : u"Save a tab group to make it a workspace");
+      l10n_util::GetStringUTF16(count > 0 ? IDS_REDROB_SIDEBAR_SWITCH_WORKSPACE
+                                          : IDS_REDROB_SIDEBAR_SAVE_GROUP_FOR_WORKSPACE));
 }
 
 void RedrobSidebarSections::ShowWorkspaceMenu() {
@@ -574,7 +577,9 @@ void RedrobSidebarSections::ShowWorkspaceMenu() {
       continue;
     }
     std::u16string title =
-        group->title().empty() ? u"Untitled workspace" : group->title();
+        group->title().empty()
+            ? l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_UNTITLED_WORKSPACE)
+            : group->title();
     workspace_menu_model_->AddItem(static_cast<int>(i), title);
   }
 

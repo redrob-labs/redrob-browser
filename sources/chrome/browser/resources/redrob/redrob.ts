@@ -14,6 +14,7 @@ import {
   TaskState,
 } from './redrob.mojom-webui.js';
 import type {Step, Task} from './redrob.mojom-webui.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 
 // The page talks to the browser process and to nothing else. There is no fetch here and no key here:
 // see docs/AI_SURFACE.md. A compromised renderer gets this method surface, not the engine.
@@ -40,19 +41,19 @@ function $<T extends HTMLElement>(id: string): T {
 function stateLabel(state: TaskState): string {
   switch (state) {
     case TaskState.kQueued:
-      return 'queued';
+      return loadTimeData.getString('taskStateQueued');
     case TaskState.kRunning:
-      return 'running';
+      return loadTimeData.getString('taskStateRunning');
     case TaskState.kBlockedOnPolicy:
-      return 'blocked';
+      return loadTimeData.getString('taskStateBlocked');
     case TaskState.kSucceeded:
-      return 'done';
+      return loadTimeData.getString('taskStateDone');
     case TaskState.kFailed:
-      return 'failed';
+      return loadTimeData.getString('taskStateFailed');
     case TaskState.kCancelled:
-      return 'cancelled';
+      return loadTimeData.getString('taskStateCancelled');
     default:
-      return 'unknown';
+      return loadTimeData.getString('taskStateUnknown');
   }
 }
 
@@ -91,12 +92,12 @@ function stepIcon(kind: StepKind): string {
 function effortLabel(effort: Effort): string {
   switch (effort) {
     case Effort.kQuick:
-      return 'Quick';
+      return loadTimeData.getString('newTabEffortQuick');
     case Effort.kUltrabrowse:
-      return 'Ultrabrowse';
+      return loadTimeData.getString('newTabEffortUltra');
     case Effort.kStandard:
     default:
-      return 'Standard';
+      return loadTimeData.getString('newTabEffortStandard');
   }
 }
 
@@ -110,13 +111,14 @@ function elapsed(task: Task): string {
   if (!running) {
     const mins = Math.floor(ms / 60000);
     if (mins < 1) {
-      return 'just now';
+      return loadTimeData.getString('taskJustNow');
     }
-    return mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
+    return mins < 60 ? loadTimeData.getStringF('taskMinutesAgo', mins)
+                     : loadTimeData.getStringF('taskHoursAgo', Math.floor(mins / 60));
   }
   const secs = Math.floor(ms / 1000);
-  return secs < 60 ? `Working for ${secs}s`
-                   : `Working for ${Math.floor(secs / 60)}m ${secs % 60}s`;
+  return secs < 60 ? loadTimeData.getStringF('taskWorkingSeconds', secs)
+                   : loadTimeData.getStringF('taskWorkingMinutes', Math.floor(secs / 60), secs % 60);
 }
 
 function renderStep(step: Step): HTMLElement {
@@ -166,7 +168,7 @@ function renderStep(step: Step): HTMLElement {
     const shot = document.createElement('img');
     shot.className = 'step-shot';
     shot.src = step.previewDataUrl;
-    shot.alt = `Captured frame: ${step.label}`;
+    shot.alt = loadTimeData.getStringF('taskCapturedFrame', step.label);
     wrap.append(shot);
   }
 
@@ -226,7 +228,7 @@ function renderHome() {
       const img = document.createElement('img');
       img.className = 'card-shot';
       img.src = shot.previewDataUrl;
-      img.alt = `Latest frame: ${task.prompt}`;
+      img.alt = loadTimeData.getStringF('taskLatestFrame', task.prompt);
       card.append(img);
     }
 
@@ -243,7 +245,7 @@ function renderHome() {
 function renderTask() {
   const task = openTaskId ? tasks.get(openTaskId) : undefined;
   if (!task) {
-    $('task-title').textContent = 'Task not found';
+    $('task-title').textContent = loadTimeData.getString('taskNotFound');
     $('task-state').textContent = '';
     return;
   }
@@ -261,7 +263,7 @@ function renderTask() {
   $('task-stop').hidden = !running;
   $('reply-steer').hidden = !running;
   $<HTMLButtonElement>('reply-send').setAttribute(
-      'aria-label', running ? 'Queue this for the next step' : 'Send reply');
+      'aria-label', running ? loadTimeData.getString('taskQueueReply') : loadTimeData.getString('taskSendReply'));
 
   const queued = $<HTMLOListElement>('queued');
   queued.textContent = '';
@@ -322,7 +324,7 @@ function renderTask() {
   const preview = $('preview');
   if (latest?.previewDataUrl) {
     $<HTMLImageElement>('preview-image').src = latest.previewDataUrl;
-    $<HTMLImageElement>('preview-image').alt = `Captured frame: ${latest.label}`;
+    $<HTMLImageElement>('preview-image').alt = loadTimeData.getStringF('taskCapturedFrame', latest.label);
     $('preview-title').textContent = latest.label;
     preview.hidden = false;
   } else {
@@ -450,7 +452,7 @@ function bindModeSelects(taskId: string|null) {
       const {accepted} = await host.setPermissionMode(taskId, mode);
       if (!accepted) {
         $('task-status').textContent =
-            'A running task cannot be given more access. Start a new task instead.';
+            loadTimeData.getString('taskNoMoreAccess');
       }
       const task = tasks.get(taskId);
       paintModeSelects(task ? task.mode : composerMode);
@@ -472,8 +474,8 @@ if (openTaskId) {
   $<HTMLButtonElement>('pick-folder').addEventListener('click', async () => {
     const {displayPath} = await host.chooseWorkingFolder(openTaskId);
     $('task-status').textContent = displayPath
-        ? `Files from this task go in "${displayPath}".`
-        : 'No folder was chosen, so this task still cannot write files.';
+        ? loadTimeData.getStringF('taskFilesGoIn', displayPath)
+        : loadTimeData.getString('taskNoFolderChosen');
   });
 
   const send = async (mode: FollowUpMode) => {
@@ -485,7 +487,7 @@ if (openTaskId) {
     const {outcome} = await host.sendFollowUp(openTaskId, prompt, mode);
     if (outcome === FollowUpOutcome.kRejected) {
       $('task-status').textContent =
-          'That could not be sent. There may already be too many messages waiting.';
+          loadTimeData.getString('taskReplyRejected');
       return;
     }
     field.value = '';
@@ -493,13 +495,13 @@ if (openTaskId) {
     // done and the trace will show them differently too.
     switch (outcome) {
       case FollowUpOutcome.kInterrupted:
-        $('task-status').textContent = 'Interrupted — it is working on this instead.';
+        $('task-status').textContent = loadTimeData.getString('taskSteered');
         break;
       case FollowUpOutcome.kQueued:
-        $('task-status').textContent = 'Waiting for the current step to finish.';
+        $('task-status').textContent = loadTimeData.getString('taskReplyQueued');
         break;
       default:
-        $('task-status').textContent = 'Sent.';
+        $('task-status').textContent = loadTimeData.getString('taskReplySent');
         break;
     }
   };
@@ -575,7 +577,7 @@ if (openTaskId) {
     const {taskId, error} = await host.startTask(prompt, [], composerMode, effort);
     if (error !== null && error !== undefined) {
       $('home-status').textContent =
-          'Could not start the task: the Redrob Code engine is not available.';
+          loadTimeData.getString('taskEngineUnavailable');
       return;
     }
     field.value = '';
@@ -598,7 +600,7 @@ if (openTaskId) {
         askedFromCommandLine, [], PermissionMode.kGuard, Effort.kStandard);
     if (error !== null && error !== undefined) {
       $('home-status').textContent =
-          'That command could not be run: the Redrob Code engine is not available.';
+          loadTimeData.getString('taskCommandUnavailable');
     } else if (taskId) {
       // Replaced, not pushed: the prompt should not stay in this tab's URL, and Back should not re-run
       // the task.

@@ -4,6 +4,46 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
+## 0.1.3 — 2026-09-14
+
+Korean actually translated, and a Windows build path.
+
+**Our own UI was not translated, and the mixed window made that look like a bug.** Chromium ships `ko.pak` with
+440 locales, so with `LANG=ko` the address bar read `Google에서 검색하거나 URL을 입력하세요.` above a sidebar
+saying `Bookmarks`, `Chats`, `Tabs` — and `chrome://settings` showed `설정` in its tab title while our own foot
+row said `Settings`, two words for the same thing in one window. There were zero `IDS_` uses in this fork and no
+`.grd` at all. Now there are 242 strings behind grit, all of them Korean: the sidebar, the new tab and task view,
+the settings page, and the first-run flow. `docs/L10N.md` has the whole path.
+
+Everything derives from `l10n/*.tsv`, one row per string, because a localized string otherwise has to be kept in
+step in three places — the English in a `.grd`, the Korean in a `.xtb` keyed by a **hash** of that English, and
+the id at the use site. `scripts/gen_strings.py` generates all three and `redrob.py check` fails on drift. The
+xtb fingerprint is reimplemented so `check` needs no checkout, and cross-checked against grit's own module when
+one is present — a wrong id is dropped **silently** and ships English on a green build.
+
+Two things cost a build each and are worth knowing before touching this. **`$i18n{}` does not work in
+TypeScript**: `EnableReplaceI18nInJS` substitutes only inside Lit/Polymer HTML template literals, so a
+`'$i18n{key}'` literal in a hand-written `.ts` reached the page as the visible text `$i18n{obContinue}` on the
+onboarding button. The path there is `UseStringsJs()` plus `loadTimeData`. And **a sentence split around
+`<strong>` breaks in Korean** — the newline between two fragments renders as a space, so `일정은` came out
+`일정 은`; those sentences are now single strings carrying their own markup behind `$i18nRaw{}`.
+
+**Windows.** `build/args/windows.gn`, `redrob.py build/run/package --flavour windows` (the packaging target is
+upstream's own `mini_installer`, staged as `redrob-browser-x64-<version>-setup.exe` — the name the sibling repos
+already publish under, so the CDN script's `latest/` alias needs no change), the `AddFontResourceExW` /
+`FR_PRIVATE` font registration, and `.github/workflows/windows.yml`. None of it has been compiled: the workflow
+is manual dispatch and expected to fail on **disk** first, which is the measurement that says a self-hosted
+machine is needed. Signing, an update channel and the app icon are absent and listed as absent in
+`docs/WINDOWS.md`. `redrob.py build` now refuses a flavour whose platform is not the host's, instead of failing
+deep inside a toolchain.
+
+**The macOS build would have failed at `gn gen` on a target that no longer existed.** `ui_font_bundle_data` was
+added to the checkout and never copied back into `sources/`, while `patches/chrome-BUILD.gn.patch` depends on it
+— and `apply` copies `sources/` **over** the checkout, so the next apply would have deleted the target its own
+patch requires. `export` could not catch this by design, because a `sources/`-owned file is excluded from its
+untracked-file report. `check_repo.py` now compares every manifest source against the checkout when one is
+present.
+
 ## 0.1.2 — 2026-09-14
 
 Korean, and a header that stopped losing two buttons.

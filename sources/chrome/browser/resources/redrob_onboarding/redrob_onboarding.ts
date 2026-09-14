@@ -5,6 +5,7 @@
 import {ImportState, OnboardingHostRemote, PageCallbackRouter, PageHandlerFactory} from
     './redrob_onboarding.mojom-webui.js';
 import type {ImportSource} from './redrob_onboarding.mojom-webui.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 
 // The page talks to the browser process and to nothing else. It cannot end its own flow, write the
 // first-run pref, or read another browser's profile -- all of that is on the other side of this pipe.
@@ -59,13 +60,13 @@ function render() {
   const next = $<HTMLButtonElement>('next');
   const onImport = STEPS[index] === 'import';
   if (onImport && importState === ImportState.kSourceBusy) {
-    next.textContent = 'Try again';
+    next.textContent = loadTimeData.getString('obTryAgain');
   } else if (onImport) {
-    next.textContent = importSources.length ? 'Import' : 'Finish';
+    next.textContent = importSources.length ? loadTimeData.getString('obImport') : loadTimeData.getString('obFinish');
   } else if (index === STEPS.length - 1) {
-    next.textContent = 'Finish';
+    next.textContent = loadTimeData.getString('obFinish');
   } else {
-    next.textContent = 'Continue';
+    next.textContent = loadTimeData.getString('obContinue');
   }
   next.disabled = importState === ImportState.kRunning;
 }
@@ -99,15 +100,15 @@ function describeSource(source: ImportSource): string {
     parts.push('history');
   }
   if (source.hasPasswords) {
-    parts.push('saved passwords');
+    parts.push(loadTimeData.getString('obImportSavedPasswords'));
   }
   if (source.hasSearchEngines) {
-    parts.push('search engines');
+    parts.push(loadTimeData.getString('obImportSearchEngines'));
   }
   if (source.hasCookies) {
-    parts.push('signed-in sessions');
+    parts.push(loadTimeData.getString('obImportSignedInSessions'));
   }
-  return parts.length ? parts.join(', ') : 'nothing this browser can read';
+  return parts.length ? parts.join(', ') : loadTimeData.getString('obImportNothingReadable');
 }
 
 function renderImportSources() {
@@ -116,11 +117,11 @@ function renderImportSources() {
 
   if (!importSources.length) {
     $('import-detail').textContent =
-        'No other browser with importable data was found on this computer.';
+        loadTimeData.getString('obImportNothingFound');
     return;
   }
 
-  $('import-detail').textContent = 'Choose where to bring your data from.';
+  $('import-detail').textContent = loadTimeData.getString('obImportChooseSource');
   importSources.forEach((source, i) => {
     const button = document.createElement('button');
     button.className = 'choice';
@@ -144,8 +145,8 @@ function showImportStatus(state: ImportState, message: string|null) {
     [ImportState.kIdle]: '',
     [ImportState.kRunning]: 'Importing…',
     [ImportState.kSucceeded]: 'Imported.',
-    [ImportState.kSourceBusy]: message ?? 'Close the other browser and try the import again.',
-    [ImportState.kFailed]: message ?? 'The import did not finish.',
+    [ImportState.kSourceBusy]: message ?? loadTimeData.getString('obImportSourceBusy'),
+    [ImportState.kFailed]: message ?? loadTimeData.getString('obImportFailed'),
   }[state];
   status.textContent = text;
   status.hidden = !text;
@@ -159,7 +160,7 @@ async function main() {
 
   // The shortcut is the platform's, not a guess: a Mac says Command where everything else says Ctrl.
   if (navigator.platform.startsWith('Mac')) {
-    $('agent-shortcut').textContent = 'Command';
+    $('agent-shortcut').textContent = loadTimeData.getString('obShortcutCommand');
   }
 
   wireChoiceGroup(

@@ -1,0 +1,124 @@
+# Does this fork compile, launch and package on Windows? Nothing has ever answered that, and this workflow
+# exists to.
+#
+# It is NOT a release. The flavour is dev, and the assertions are that chrome.exe starts and stays up, that the
+# UI font landed beside it, and that mini_installer produces a setup.exe. A Windows RELEASE build needs LTO
+# (19.9 GB peak RSS measured on Linux, against a hosted runner's 16 GB), plus Authenticode signing, plus a
+# hardened update channel. Each is a separate problem and pretending otherwise would produce a workflow that is
+# red for three reasons at once.
+#
+# Manual dispatch only, deliberately. The first runs WILL fail -- the AddFontResourceExW branch in
+# redrob_fonts.cc was written on a Linux host and has never been compiled -- and a workflow that reddens every
+# push while that is worked through teaches everyone to ignore it.
+#
+# DISK is the expected failure, not RAM. A Chromium checkout is ~50 GB before a build and a dev build adds
+# ~40 GB; a hosted windows runner has ~90 GB across C: and D: with ~30 GB already used by the image. So the
+# honest expectation is that `runner: hosted` runs out of space, and that IS the answer: it says a self-hosted
+# Windows machine is required, which docs/WINDOWS.md specifies. Run it with `runner: self-hosted` once one
+# exists.
+name: windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build (defaults to the default branch)"
+        required: false
+      runner:
+        description: "Which runner to use"
+        required: false
+        default: hosted
+        type: choice
+        options: [hosted, self-hosted]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: compile, launch and package
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted","windows","x64","chromium-build"]') || 'windows-2022' }}
+    timeout-minutes: 700
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The hermetic toolchain Google publishes is Google-internal. Everyone else builds against the Visual
+      # Studio and Windows SDK on the machine, which is what this selects. Without it gclient tries to download
+      # a toolchain it has no access to and the failure names a storage bucket, not a missing dependency.
+      DEPOT_TOOLS_WIN_TOOLCHAIN: "0"
+      DEPOT_TOOLS_UPDATE: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: what we are working with
+        # Recorded first because the two numbers that decide whether this can work are the machine's, and a
+        # failed run is only useful if the log says which resource ran out.
+        run: |
+          systeminfo | grep -E "OS Name|OS Version|Total Physical Memory" || true
+          wmic logicaldisk get name,freespace,size 2>/dev/null || Get-PSDrive -PSProvider FileSystem || true
+          "/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -property catalog_productDisplayVersion || true
+
+      - name: repo integrity
+        run: python scripts/check_repo.py
+
+      - name: bootstrap depot_tools
+        run: python scripts/redrob.py bootstrap
+
+      - name: sync Chromium at the pinned tag
+        run: python scripts/redrob.py sync
+
+      - name: apply the patch set
+        run: |
+          python scripts/redrob.py apply
+          python scripts/redrob.py brand
+
+      - name: build
+        run: python scripts/redrob.py build --flavour windows
+
+      - name: the font actually landed beside the executable
+        # The specific thing most likely to be silently wrong. On Windows DIR_MODULE is the directory holding
+        # chrome.exe, which is where copy("ui_font") puts the file -- but the copy target is skipped on mac and a
+        # future change could skip it here too, and the failure mode is a window that quietly falls back to the
+        # system face.
+        run: |
+          set -euo pipefail
+          f="chromium/src/out/windows/fonts/PretendardVariable.ttf"
+          if [ ! -f "$f" ]; then
+            echo "::error::$f is missing; the ui_font copy target did not run for this platform"
+            ls -la chromium/src/out/windows | head -20
+            exit 1
+          fi
+          echo "font at: $f  ($(stat -c%s "$f") bytes)"
+
+      - name: launch it
+        run: |
+          set -uo pipefail
+          cd chromium/src/out/windows
+          ./chrome.exe --no-first-run --no-default-browser-check \
+            --user-data-dir="$(mktemp -d)" "chrome://redrob" >launch.log 2>&1 &
+          pid=$!
+          sleep 45
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "::error::the browser exited within 45 seconds"
+            tail -40 launch.log
+            exit 1
+          fi
+          # The font line is the interesting one either way: it says whether AddFontResourceExW took the face.
+          grep -i "Redrob UI font" launch.log || echo "(no font log line -- check the VLOG level)"
+          taskkill //PID "$pid" //F 2>/dev/null || kill "$pid" || true
+
+      - name: package
+        run: python scripts/redrob.py package --flavour windows
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-setup
+          path: |
+            out/artifacts/*.exe
+            chromium/src/out/windows/launch.log
+          if-no-files-found: warn

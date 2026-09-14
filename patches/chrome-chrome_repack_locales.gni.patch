@@ -1,0 +1,23 @@
+diff --git a/chrome/chrome_repack_locales.gni b/chrome/chrome_repack_locales.gni
+index 226c91dd847f5..c5c3033f8dd61 100644
+--- a/chrome/chrome_repack_locales.gni
++++ b/chrome/chrome_repack_locales.gni
+@@ -23,6 +23,10 @@ template("chrome_repack_locales") {
+     # Each input pak file should also have a deps line.
+     source_patterns = [
+       "${root_gen_dir}/chrome/branded_strings_",
++      # Redrob's own strings. Without this line the per-locale pak is built and then not folded into
++      # <locale>.pak, so every IDS_REDROB_* resolves to English at runtime while the build stays green
++      # -- the whole point of this fork's l10n is that this line exists.
++      "${root_gen_dir}/chrome/browser/redrob/resources/redrob_strings_",
+       "${root_gen_dir}/chrome/generated_resources_",
+       "${root_gen_dir}/chrome/locale_settings_",
+       "${root_gen_dir}/chrome/platform_locale_settings_",
+@@ -51,6 +55,7 @@ template("chrome_repack_locales") {
+       "//chrome/app:generated_resources",
+       "//chrome/app/resources:locale_settings",
+       "//chrome/app/resources:platform_locale_settings",
++      "//chrome/browser/redrob/resources:redrob_strings",
+       "//components/omnibox/resources:omnibox_pedal_synonyms",
+       "//components/strings:components_branded_strings",
+       "//components/strings:components_locale_settings",

@@ -24,6 +24,9 @@ source_set("redrob_onboarding") {
   deps = [
     "//base",
     "//chrome/browser/profiles:profile",
+    # Redrob: the IDS_REDROB_* header behind kRedrobLocalizedStrings.
+    "//chrome/browser/redrob/resources:redrob_strings",
+    "//chrome/browser:browser_process",
     "//chrome/browser/ui/webui:webui_util",
     "//chrome/common",
     "//components/prefs",

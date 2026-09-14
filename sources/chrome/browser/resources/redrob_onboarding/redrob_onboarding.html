@@ -1,9 +1,9 @@
 <!doctype html>
-<html dir="ltr" lang="en">
+<html dir="$i18n{textdirection}" lang="$i18n{language}">
 <head>
   <meta charset="utf-8">
   <meta name="color-scheme" content="light dark">
-  <title>Welcome to Redrob</title>
+  <title>$i18n{obWelcomeTitle}</title>
   <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="redrob_onboarding.css">
 </head>
@@ -15,69 +15,68 @@
   <main id="stage">
     <section class="step" data-step="welcome">
       <div class="art art-mark"><img src="redrob-mark.svg" alt=""></div>
-      <h1>Welcome to Redrob</h1>
-      <p>A browser that can do the work, not just show you the page.</p>
+      <h1>$i18n{obWelcomeTitle}</h1>
+      <p>$i18n{obWelcomeBody}</p>
     </section>
 
     <section class="step" data-step="account" hidden>
       <div class="art art-account" aria-hidden="true"></div>
-      <h1>Create your Redrob account</h1>
-      <p>Your tasks, memory and routines follow the account, not the machine.</p>
+      <h1>$i18n{obAccountTitle}</h1>
+      <p>$i18n{obAccountBody}</p>
       <div class="fields">
         <input id="email" type="email" placeholder="you@example.com" autocomplete="email"
-               aria-label="Email address">
-        <button id="have-account" class="quiet">I already have an account</button>
+               aria-label="$i18n{obEmailLabel}">
+        <button id="have-account" class="quiet">$i18n{obHaveAccount}</button>
       </div>
     </section>
 
     <section class="step" data-step="agent" hidden>
       <div class="art art-agent" aria-hidden="true"></div>
-      <h1>Hand the browser a task</h1>
-      <p>Ask for an outcome and Redrob works in real tabs you can watch, take over, or close.</p>
-      <p class="shortcut">Press <kbd id="agent-shortcut">Ctrl</kbd> <kbd>Shift</kbd> <kbd>E</kbd>
-        anywhere to ask about what you are looking at.</p>
+      <h1>$i18n{obAgentTitle}</h1>
+      <p>$i18n{obAgentBody}</p>
+      <p class="shortcut">$i18n{obAgentShortcutBefore} <kbd id="agent-shortcut">$i18n{obShortcutCtrl}</kbd>
+        <kbd>Shift</kbd> <kbd>E</kbd> $i18n{obAgentShortcutAfter}</p>
     </section>
 
     <section class="step" data-step="passwords" hidden>
       <div class="art art-passwords" aria-hidden="true"></div>
-      <h1>Signing in to sites</h1>
-      <p>An agent is most useful on sites you are already signed in to. Passwords are filled by the
-        browser and are never shown to the model.</p>
-      <div class="choices" role="radiogroup" aria-label="Password manager">
+      <h1>$i18n{obPasswordsTitle}</h1>
+      <p>$i18n{obPasswordsBody}</p>
+      <div class="choices" role="radiogroup" aria-label="$i18n{obPasswordsGroup}">
         <button class="choice" data-choice="redrob" role="radio" aria-checked="false">
-          <strong>Use Redrob's password manager</strong>
-          <span>Bring saved logins in from another browser.</span>
+          <strong>$i18n{obPasswordsUseRedrob}</strong>
+          <span>$i18n{obPasswordsUseRedrobDetail}</span>
         </button>
         <button class="choice" data-choice="external" role="radio" aria-checked="false">
-          <strong>Connect the one I use</strong>
-          <span>Keep your current manager and let it fill.</span>
+          <strong>$i18n{obPasswordsExternal}</strong>
+          <span>$i18n{obPasswordsExternalDetail}</span>
         </button>
         <button class="choice" data-choice="skip" role="radio" aria-checked="true">
-          <strong>Skip for now</strong>
-          <span>Set this up later in Settings.</span>
+          <strong>$i18n{obPasswordsSkip}</strong>
+          <span>$i18n{obPasswordsSkipDetail}</span>
         </button>
       </div>
     </section>
 
     <section class="step" data-step="model" hidden>
       <div class="art art-model" aria-hidden="true"></div>
-      <h1>Choose what thinks for you</h1>
-      <p>Use the models included with Redrob, or bring a subscription you already pay for.</p>
-      <div class="choices" role="radiogroup" aria-label="Model provider">
+      <h1>$i18n{obModelTitle}</h1>
+      <p>$i18n{obModelBody}</p>
+      <div class="choices" role="radiogroup" aria-label="$i18n{obModelGroup}">
         <button class="choice" data-choice="redrob" role="radio" aria-checked="true">
-          <strong>Redrob</strong>
-          <span>Included with your plan.</span>
+          <strong>$i18n{obModelRedrob}</strong>
+          <span>$i18n{obModelRedrobDetail}</span>
         </button>
         <button class="choice" data-choice="chatgpt" role="radio" aria-checked="false">
-          <strong>ChatGPT</strong>
-          <span>Connect a Plus or Pro subscription.</span>
+          <strong>$i18n{obModelChatgpt}</strong>
+          <span>$i18n{obModelChatgptDetail}</span>
         </button>
         <button class="choice" data-choice="claude" role="radio" aria-checked="false">
-          <strong>Claude</strong>
-          <span>Connect a Pro or Max subscription.</span>
+          <strong>$i18n{obModelClaude}</strong>
+          <span>$i18n{obModelClaudeDetail}</span>
         </button>
       </div>
-      <button id="more-providers" class="quiet">Show more options</button>
+      <button id="more-providers" class="quiet">$i18n{obMoreProviders}</button>
     </section>
 
     <section class="step" data-step="import" hidden>
@@ -87,19 +86,22 @@
         <div class="plate plate-source"></div>
         <div class="plate plate-target"></div>
       </div>
-      <h1 id="import-title">Bring your browser with you</h1>
-      <p id="import-detail">Bookmarks, history and saved passwords can come across.</p>
-      <div id="import-sources" class="choices" role="radiogroup" aria-label="Import source"></div>
+      <h1 id="import-title">$i18n{obImportTitle}</h1>
+      <p id="import-detail">$i18n{obImportBody}</p>
+      <div id="import-sources" class="choices" role="radiogroup" aria-label="$i18n{obImportGroup}"></div>
       <p id="import-status" class="status" role="status" hidden></p>
     </section>
   </main>
 
   <footer id="bar">
-    <button id="back" class="quiet">Back</button>
-    <div id="dots" role="tablist" aria-label="Setup progress"></div>
-    <button id="next" class="primary">Continue</button>
+    <button id="back" class="quiet">$i18n{obBack}</button>
+    <div id="dots" role="tablist" aria-label="$i18n{obProgress}"></div>
+    <button id="next" class="primary">$i18n{obContinue}</button>
   </footer>
 
+  <!-- The localized-string dictionary, served by UseStringsJs. Module scripts run in order, so
+       this has to come first: the page module reads loadTimeData at import time. -->
+  <script type="module" src="strings.m.js"></script>
   <script type="module" src="redrob_onboarding.js"></script>
 </body>
 </html>

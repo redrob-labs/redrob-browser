@@ -7,8 +7,11 @@
 #include <utility>
 
 #include "base/functional/bind.h"
+#include "base/values.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/redrob_onboarding/onboarding_host_impl.h"
+#include "chrome/browser/redrob/resources/redrob_localized_strings.h"
 #include "chrome/grit/redrob_onboarding_resources.h"
 #include "chrome/grit/redrob_onboarding_resources_map.h"
 #include "content/public/browser/web_contents.h"
@@ -24,6 +27,21 @@ RedrobOnboardingUI::RedrobOnboardingUI(content::WebUI* web_ui)
       web_ui->GetWebContents()->GetBrowserContext(), chrome::kChromeUIRedrobOnboardingHost);
   webui::SetupWebUIDataSource(source, kRedrobOnboardingResources,
                               IDR_REDROB_ONBOARDING_REDROB_ONBOARDING_HTML);
+  // Localization, in two halves because the page needs both. AddLocalizedStrings makes every $i18n{key} in the
+  // served HTML resolve, which text/html gets template replacement for free. UseStringsJs serves the same
+  // dictionary as strings.m.js, which is how the strings built in TypeScript are read.
+  //
+  // NOT EnableReplaceI18nInJS: that substitutes only inside HTML template literals, so in a WebUI with no
+  // template library it is a no-op that leaves $i18n{} visible on the page as literal text.
+  source->AddLocalizedStrings(kRedrobLocalizedStrings);
+  source->UseStringsJs();
+
+  // language and textdirection, which are not ours but are not supplied either: without them the document
+  // still says lang="en" in a Korean UI, and the font fallback and line breaking a browser picks from that
+  // attribute are chosen for the wrong language.
+  base::DictValue locale_defaults;
+  webui::SetLoadTimeDataDefaults(g_browser_process->GetApplicationLocale(), &locale_defaults);
+  source->AddLocalizedStrings(locale_defaults);
 }
 
 RedrobOnboardingUI::~RedrobOnboardingUI() = default;

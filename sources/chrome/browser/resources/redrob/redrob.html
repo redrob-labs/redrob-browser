@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="$i18n{language}" dir="$i18n{textdirection}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -19,16 +19,16 @@
     <div class="composer-wrap">
       <form id="composer" class="composer" autocomplete="off">
         <div class="composer-row">
-          <input id="prompt" type="text" aria-label="Task for the agent"
-                 placeholder="Ask AI a task, @ for context">
-          <div class="segmented" role="group" aria-label="Mode">
-            <button type="button" id="mode-search" class="seg">Search</button>
-            <button type="submit" id="mode-ask" class="seg seg-on">Ask AI</button>
+          <input id="prompt" type="text" aria-label="$i18n{newTabPromptLabel}"
+                 placeholder="$i18n{newTabPromptPlaceholder}">
+          <div class="segmented" role="group" aria-label="$i18n{newTabModeGroup}">
+            <button type="button" id="mode-search" class="seg">$i18n{newTabModeSearch}</button>
+            <button type="submit" id="mode-ask" class="seg seg-on">$i18n{newTabModeAsk}</button>
           </div>
         </div>
       </form>
       <div class="composer-controls">
-        <button type="button" class="ctl ctl-icon" id="attach" aria-label="Add context">
+        <button type="button" class="ctl ctl-icon" id="attach" aria-label="$i18n{newTabAddContext}">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>
         </button>
         <!-- One control showing the mode in force, not three segments competing for the eye. The
@@ -39,29 +39,29 @@
             <path d="M8 1.8l4.6 1.7v4.1c0 3-2 5.2-4.6 6.6-2.6-1.4-4.6-3.6-4.6-6.6V3.5L8 1.8z"/>
             <path d="M5.9 8.1l1.5 1.5 2.8-3"/>
           </svg>
-          <span class="visually-hidden">Permission mode</span>
+          <span class="visually-hidden">$i18n{newTabPermissionMode}</span>
           <span class="ctl-value"></span>
           <select id="mode" data-mode-select>
-            <option value="read">Read only</option>
-            <option value="guard" selected>Guard</option>
-            <option value="full">Full access</option>
+            <option value="read">$i18n{newTabPermissionRead}</option>
+            <option value="guard" selected>$i18n{newTabPermissionGuard}</option>
+            <option value="full">$i18n{newTabPermissionFull}</option>
           </select>
         </label>
         <span class="spacer"></span>
         <label class="ctl ctl-select">
-          <span class="visually-hidden">Model</span>
+          <span class="visually-hidden">$i18n{newTabModel}</span>
           <span class="ctl-value"></span>
           <select id="model">
             <option value="auto" selected>redrob/auto</option>
           </select>
         </label>
         <label class="ctl ctl-select">
-          <span class="visually-hidden">Effort</span>
+          <span class="visually-hidden">$i18n{newTabEffort}</span>
           <span class="ctl-value"></span>
           <select id="effort">
-            <option value="ultra">Ultrabrowse</option>
-            <option value="standard" selected>Standard</option>
-            <option value="quick">Quick</option>
+            <option value="ultra">$i18n{newTabEffortUltra}</option>
+            <option value="standard" selected>$i18n{newTabEffortStandard}</option>
+            <option value="quick">$i18n{newTabEffortQuick}</option>
           </select>
         </label>
       </div>
@@ -71,28 +71,28 @@
          the tiles are hidden rather than stacked above real work -- three invented prompts should never
          outrank three things you actually ran. -->
     <section id="suggested" class="suggested" aria-labelledby="suggested-heading">
-      <h2 id="suggested-heading">Suggested tasks</h2>
+      <h2 id="suggested-heading">$i18n{newTabSuggested}</h2>
       <div class="tiles">
-        <button type="button" class="tile" data-prompt="Summarise this page in one sentence and list the links I can see.">
-          <span class="tile-kind">Read</span>
-          <span class="tile-title">Summarise a page</span>
-          <span class="tile-detail">Open something and get the gist, with nothing changed.</span>
+        <button type="button" class="tile" data-prompt="$i18n{newTabTileReadPrompt}">
+          <span class="tile-kind">$i18n{newTabTileKindRead}</span>
+          <span class="tile-title">$i18n{newTabTileReadTitle}</span>
+          <span class="tile-detail">$i18n{newTabTileReadDetail}</span>
         </button>
-        <button type="button" class="tile" data-prompt="Compare these two pages and put the differences in a table. Say &quot;not stated&quot; where a page does not say.">
-          <span class="tile-kind">Compare</span>
-          <span class="tile-title">Compare two sources</span>
-          <span class="tile-detail">A table of differences, with the gaps marked as gaps.</span>
+        <button type="button" class="tile" data-prompt="$i18n{newTabTileComparePrompt}">
+          <span class="tile-kind">$i18n{newTabTileKindCompare}</span>
+          <span class="tile-title">$i18n{newTabTileCompareTitle}</span>
+          <span class="tile-detail">$i18n{newTabTileCompareDetail}</span>
         </button>
-        <button type="button" class="tile" data-prompt="Fill this form with my details but do not submit it, and tell me what you put where.">
-          <span class="tile-kind">Act</span>
-          <span class="tile-title">Fill a form, don't send it</span>
-          <span class="tile-detail">Filled and left for you to check before submitting.</span>
+        <button type="button" class="tile" data-prompt="$i18n{newTabTileActPrompt}">
+          <span class="tile-kind">$i18n{newTabTileKindAct}</span>
+          <span class="tile-title">$i18n{newTabTileActTitle}</span>
+          <span class="tile-detail">$i18n{newTabTileActDetail}</span>
         </button>
       </div>
     </section>
 
     <section id="recent" class="recent" aria-labelledby="recent-heading" hidden>
-      <h2 id="recent-heading">Recent tasks</h2>
+      <h2 id="recent-heading">$i18n{newTabRecent}</h2>
       <ol id="cards" class="cards"></ol>
     </section>
     <p id="home-status" role="status"></p>
@@ -104,14 +104,14 @@
       <span id="task-state" class="task-state"></span>
       <span class="spacer"></span>
       <span id="task-effort" class="task-effort"></span>
-      <button type="button" id="task-stop" class="pill pill-quiet" hidden>Stop</button>
+      <button type="button" id="task-stop" class="pill pill-quiet" hidden>$i18n{taskStop}</button>
     </header>
     <div class="task-body">
       <article id="trace" class="trace" aria-live="polite"></article>
       <aside id="preview" class="preview" hidden>
         <div class="preview-head">
           <span id="preview-title"></span>
-          <button type="button" id="preview-close" aria-label="Close preview">&times;</button>
+          <button type="button" id="preview-close" aria-label="$i18n{taskClosePreview}">&times;</button>
         </div>
         <img id="preview-image" alt="">
       </aside>
@@ -119,18 +119,18 @@
     <form id="reply" class="composer composer-foot" autocomplete="off">
       <ol id="queued" class="queued" hidden></ol>
       <div class="composer-row">
-        <button type="button" class="ctl ctl-icon" aria-label="Add context">
+        <button type="button" class="ctl ctl-icon" aria-label="$i18n{newTabAddContext}">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>
         </button>
-        <input id="reply-prompt" type="text" aria-label="Reply to the agent"
-               placeholder="Reply, @ for context">
+        <input id="reply-prompt" type="text" aria-label="$i18n{taskReplyLabel}"
+               placeholder="$i18n{taskReplyPlaceholder}">
         <!-- Two buttons while it runs, not one. Enter queues, because throwing away work in progress
              should be something you ask for by name rather than something Enter might mean. -->
-        <button type="button" id="reply-steer" class="pill pill-quiet" hidden>Steer now</button>
-        <button type="submit" id="reply-send" class="send" aria-label="Send reply"></button>
+        <button type="button" id="reply-steer" class="pill pill-quiet" hidden>$i18n{taskSteerNow}</button>
+        <button type="submit" id="reply-send" class="send" aria-label="$i18n{taskSendReply}"></button>
       </div>
       <div class="composer-controls">
-        <button type="button" class="ctl ctl-icon" aria-label="Add context">
+        <button type="button" class="ctl ctl-icon" aria-label="$i18n{newTabAddContext}">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>
         </button>
         <label class="ctl ctl-select">
@@ -138,15 +138,15 @@
             <path d="M8 1.8l4.6 1.7v4.1c0 3-2 5.2-4.6 6.6-2.6-1.4-4.6-3.6-4.6-6.6V3.5L8 1.8z"/>
             <path d="M5.9 8.1l1.5 1.5 2.8-3"/>
           </svg>
-          <span class="visually-hidden">Permission mode</span>
+          <span class="visually-hidden">$i18n{newTabPermissionMode}</span>
           <span class="ctl-value"></span>
           <select data-mode-select>
-            <option value="read">Read only</option>
-            <option value="guard" selected>Guard</option>
-            <option value="full">Full access</option>
+            <option value="read">$i18n{newTabPermissionRead}</option>
+            <option value="guard" selected>$i18n{newTabPermissionGuard}</option>
+            <option value="full">$i18n{newTabPermissionFull}</option>
           </select>
         </label>
-        <button type="button" class="ctl" id="pick-folder">Choose folder…</button>
+        <button type="button" class="ctl" id="pick-folder">$i18n{taskChooseFolder}</button>
         <span class="spacer"></span>
         <span class="ctl ctl-static" id="reply-model">redrob/auto</span>
       </div>
@@ -154,6 +154,9 @@
     </form>
   </main>
 
+  <!-- The localized-string dictionary, served by UseStringsJs. Module scripts run in order, so
+       this has to come first: the page module reads loadTimeData at import time. -->
+  <script type="module" src="strings.m.js"></script>
   <script type="module" src="redrob.js"></script>
 </body>
 </html>

@@ -38,8 +38,15 @@ source_set("sidecar") {
     "//components/keyed_service/core",
     "//services/network/public/cpp",
   ]
-  deps = [
-    ":ui_font",
+  deps = []
+
+  # Not on macOS: there the font travels as bundle_data inside the framework, and building the copy as well would
+  # leave a file in the build root that nothing reads and nothing ships.
+  if (!is_mac) {
+    deps += [ ":ui_font" ]
+  }
+
+  deps += [
     "//base",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/ui/browser_window",
@@ -70,7 +77,22 @@ source_set("sidecar") {
 # The same face the WebUI bundles, as a plain TTF rather than the woff2 those use -- Skia's FreeType backend
 # cannot open a woff2 container, and the WebUI cannot use a bare TTF without paying for the compression it
 # would otherwise get. So the two forms coexist deliberately, from one upstream file.
+# Linux and Windows: beside the executable, which is where DIR_MODULE points on both.
 copy("ui_font") {
   sources = [ "fonts/PretendardVariable.ttf" ]
   outputs = [ "$root_out_dir/fonts/{{source_file_part}}" ]
+}
+
+# macOS needs the same file in a different place, and a copy into the build root does not reach it.
+#
+# DIR_MODULE for the browser process on macOS is the versioned framework directory inside the .app, so a font in
+# $root_out_dir is not merely in the wrong folder -- it is outside the bundle the running binary can see, and it
+# does not get shipped either. bundle_data is how a file becomes part of a framework, and the framework target has
+# to depend on it; a bundle_data nobody depends on builds fine and copies nothing, which is the failure mode to
+# watch for when this is first built on a mac.
+if (is_mac) {
+  bundle_data("ui_font_bundle_data") {
+    sources = [ "fonts/PretendardVariable.ttf" ]
+    outputs = [ "{{bundle_resources_dir}}/fonts/{{source_file_part}}" ]
+  }
 }

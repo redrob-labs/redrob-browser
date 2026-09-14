@@ -1,0 +1,36 @@
+# Windows, for a first build rather than a shipped one.
+#
+# Same standing as build/args/mac.gn: the question this flavour answers is "does the fork compile and launch on
+# Windows", which nothing has ever answered. So it is deliberately the DEV shape -- no LTO, no PGO, symbols off.
+#
+# The numbers behind that. The Linux release build measured a peak RSS of 19.9 GB across the LTO link; a
+# GitHub-hosted windows runner has 16 GB, so a release-flavour build there is killed by the linker rather than
+# failing for a reason worth reading. The Linux DEV build peaked at 7.1 GB and fits. Disk is the tighter
+# constraint on Windows than RAM: a Chromium checkout plus a dev build is around 100 GB against a hosted
+# runner's ~90 GB across C: and D:, so the first hosted run is more likely to run out of space than to fail to
+# compile -- and that is itself the answer that a self-hosted Windows machine is needed. See docs/WINDOWS.md.
+is_debug = false
+symbol_level = 0
+blink_symbol_level = 0
+
+# One binary rather than a few hundred DLLs, for the same reason as every other flavour: a component build
+# links faster on iteration but produces something awkward to launch, and launching it is the whole test.
+is_component_build = false
+
+target_cpu = "x64"
+
+# Off: a large chunk of build for a plugin technology we do not ship.
+enable_nacl = false
+
+# The media story the product needs. See docs/BUILD.md -- Widevine is a licensing question before it is a flag.
+proprietary_codecs = true
+ffmpeg_branding = "Chrome"
+
+# The hermetic toolchain Google publishes is only available inside Google. A build outside it uses the Visual
+# Studio and Windows SDK already installed on the machine, which is what DEPOT_TOOLS_WIN_TOOLCHAIN=0 selects --
+# set in the environment, not here, because gn cannot reach it. windows.yml sets it and docs/WINDOWS.md says
+# which VS components have to be present.
+
+# A fork does not get to treat upstream's warnings as its own errors, and a FIRST build on a new platform will
+# have plenty of them.
+treat_warnings_as_errors = false

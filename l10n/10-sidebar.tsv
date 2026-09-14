@@ -1,0 +1,21 @@
+# The sidebar: the shell's own strings, which are on screen from the moment the window opens.
+#
+# key <TAB> English <TAB> Korean [<TAB> description]
+#
+# Terminology is fixed here and every other table follows it, because the same word appearing as two
+# different Korean words in one window is worse than leaving it in English:
+#   task 작업 / tab 탭 / workspace 워크스페이스 / chat 채팅 / bookmark 북마크 / agent 에이전트
+#   folder 폴더 / model 모델 / routine 루틴 / memory 메모리 / permission 권한 / effort 처리 강도
+#
+# Product names are NOT translated: Redrob, Redrob Code, Google, ChatGPT, Claude, MCP.
+sidebarBookmarks	Bookmarks	북마크	Sidebar section heading above the bookmark rows
+sidebarChats	Chats	채팅	Sidebar section heading above the agent chat rows
+sidebarTabs	Tabs	탭	Sidebar section heading above the vertical tab strip
+sidebarNewTab	New Tab	새 탭	First row of the Tabs section; opens a new tab
+sidebarSettings	Settings	설정	Row at the foot of the sidebar; opens the product's settings
+sidebarSearchTabs	Search tabs	탭 검색	Tooltip on the magnifier in the sidebar header
+sidebarNewTask	New task	새 작업	Tooltip on the compose button in the sidebar header
+sidebarWorkspaces	Workspaces	워크스페이스	Sidebar header button when no workspace is open in this window
+sidebarSwitchWorkspace	Switch workspace	워크스페이스 전환	Tooltip on the workspace button when there is at least one workspace
+sidebarSaveGroupForWorkspace	Save a tab group to make it a workspace	탭 그룹을 저장하면 워크스페이스가 됩니다	Tooltip on the workspace button when the user has no workspaces yet
+sidebarUntitledWorkspace	Untitled workspace	이름 없는 워크스페이스	Menu entry for a saved tab group the user never named

@@ -10,6 +10,7 @@ import {
   SettingsHostRemote,
 } from './redrob_settings.mojom-webui.js';
 import type {AgentSettings, MemoryEntry, Provider, Routine} from './redrob_settings.mojom-webui.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 
 // One remote, no page-observer interface: settings state changes because THIS page changed it, so it
 // refetches rather than subscribing. A routine firing in the background is the one exception, and a
@@ -29,7 +30,7 @@ function relative(ms: number): string {
   const future = delta < 0;
   const mins = Math.round(Math.abs(delta) / 60000);
   if (mins < 1) {
-    return future ? 'in under a minute' : 'just now';
+    return future ? loadTimeData.getString('seInUnderAMinute') : loadTimeData.getString('taskJustNow');
   }
   const text = mins < 60 ? `${mins}m`
              : mins < 1440 ? `${Math.round(mins / 60)}h`
@@ -40,11 +41,13 @@ function relative(ms: number): string {
 function everyLabel(minutes: number): string {
   if (minutes % 1440 === 0) {
     const days = minutes / 1440;
-    return days === 1 ? 'every day' : days === 7 ? 'every week' : `every ${days} days`;
+    return days === 1 ? loadTimeData.getString('seEveryDay')
+       : days === 7 ? loadTimeData.getString('seEveryWeek')
+                    : loadTimeData.getStringF('seEveryDays', days);
   }
   if (minutes % 60 === 0) {
     const hours = minutes / 60;
-    return hours === 1 ? 'every hour' : `every ${hours} hours`;
+    return hours === 1 ? loadTimeData.getString('seEveryHour') : loadTimeData.getStringF('seEveryHours', hours);
   }
   return `every ${minutes} minutes`;
 }
@@ -89,7 +92,8 @@ function renderRoutines(routines: Routine[], chats: AgentSettings['chats']) {
     detail.textContent = routine.prompt;
     const meta = document.createElement('div');
     meta.className = 'row-meta';
-    const kind = routine.kind === RoutineKind.kHeartbeat ? 'wakes a chat' : 'new task';
+    const kind = routine.kind === RoutineKind.kHeartbeat ? loadTimeData.getString('seRoutineKindWakes')
+                                                        : loadTimeData.getString('seRoutineKindNew');
     meta.textContent = `${kind} · ${everyLabel(routine.everyMinutes)} · ` +
         `last ${relative(routine.lastRunMs)} · next ${relative(routine.nextRunMs)}` +
         (routine.enabled ? '' : ' · paused');
@@ -105,18 +109,18 @@ function renderRoutines(routines: Routine[], chats: AgentSettings['chats']) {
     const actions = document.createElement('div');
     actions.className = 'row-actions';
     actions.append(
-        button('Run now', 'pill', async () => {
+        button(loadTimeData.getString('seRoutineRunNow'), 'pill', async () => {
           const {taskId} = await host.runRoutineNow(routine.id);
           $('routine-status').textContent = taskId
-              ? 'Started. It is in Chats.'
-              : 'Not started — check the reason on the routine.';
+              ? loadTimeData.getString('seRoutineStarted')
+              : loadTimeData.getString('seRoutineNotStarted');
           await refresh();
         }),
-        button(routine.enabled ? 'Pause' : 'Resume', 'pill', async () => {
+        button(routine.enabled ? loadTimeData.getString('seRoutinePause') : loadTimeData.getString('seRoutineResume'), 'pill', async () => {
           await host.setRoutineEnabled(routine.id, !routine.enabled);
           await refresh();
         }),
-        button('Delete', 'pill pill-warn', async () => {
+        button(loadTimeData.getString('seRoutineDelete'), 'pill pill-warn', async () => {
           await host.removeRoutine(routine.id);
           await refresh();
         }));
@@ -169,11 +173,12 @@ function renderMemoryRow(entry: MemoryEntry): HTMLElement {
   const actions = document.createElement('div');
   actions.className = 'row-actions';
   actions.append(
-      button(entry.pinned ? 'Unpin' : 'Pin', entry.pinned ? 'pill pill-on' : 'pill', async () => {
+      button(entry.pinned ? loadTimeData.getString('seMemoryUnpin') : loadTimeData.getString('seMemoryPin'),
+                     entry.pinned ? 'pill pill-on' : 'pill', async () => {
         await host.setMemoryPinned(entry.id, !entry.pinned);
         await refresh();
       }),
-      button('Delete', 'pill pill-warn', async () => {
+      button(loadTimeData.getString('seRoutineDelete'), 'pill pill-warn', async () => {
         await host.removeMemory(entry.id);
         await refresh();
       }));
@@ -189,7 +194,7 @@ function renderProviders(settings: AgentSettings) {
   // The built-in engine is a row like any other, because "which model" should have one list rather
   // than a default hidden behind the absence of a selection.
   list.append(providerRow(
-      {id: '', label: 'Redrob engine', model: 'redrob/auto', endpoint: '', hasSecret: false,
+      {id: '', label: loadTimeData.getString('seProviderRedrobEngine'), model: 'redrob/auto', endpoint: '', hasSecret: false,
        isOauth: false},
       settings.model.selectedId === '', /*builtIn=*/ true));
   for (const provider of settings.model.providers) {
@@ -198,7 +203,7 @@ function renderProviders(settings: AgentSettings) {
 
   if (!settings.model.encryptionReady) {
     $('provider-status').textContent =
-        'This machine\u2019s keystore has not answered yet, so a key cannot be stored safely. Try again in a moment.';
+        loadTimeData.getString('seKeystoreNotReady');
   }
 }
 
@@ -213,15 +218,16 @@ function providerRow(provider: Provider, selected: boolean, builtIn: boolean): H
   const meta = document.createElement('div');
   meta.className = 'row-meta';
   meta.textContent = builtIn
-      ? 'runs on this machine · no key needed'
+      ? loadTimeData.getString('seProviderNoKeyNeeded')
       : `${provider.model} · ${provider.endpoint} · ` +
-        (provider.isOauth ? 'signed in, renews itself'
-                          : provider.hasSecret ? 'key stored' : 'no key');
+        (provider.isOauth ? loadTimeData.getString('seProviderOauthOk')
+                          : provider.hasSecret ? loadTimeData.getString('seProviderKeyStored') : loadTimeData.getString('seProviderNoKey'));
   body.append(title, meta);
 
   const actions = document.createElement('div');
   actions.className = 'row-actions';
-  actions.append(button(selected ? 'In use' : 'Use', selected ? 'pill pill-on' : 'pill', async () => {
+  actions.append(button(selected ? loadTimeData.getString('seProviderInUse') : loadTimeData.getString('seProviderUse'),
+                        selected ? 'pill pill-on' : 'pill', async () => {
     if (selected) {
       return;
     }
@@ -229,7 +235,7 @@ function providerRow(provider: Provider, selected: boolean, builtIn: boolean): H
     await refresh();
   }));
   if (!builtIn) {
-    actions.append(button('Remove', 'pill pill-warn', async () => {
+    actions.append(button(loadTimeData.getString('seProviderRemove'), 'pill pill-warn', async () => {
       await host.removeProvider(provider.id);
       await refresh();
     }));
@@ -269,14 +275,14 @@ $<HTMLFormElement>('routine-form').addEventListener('submit', async (event: Even
   event.preventDefault();
   const prompt = $<HTMLTextAreaElement>('routine-prompt').value.trim();
   if (!prompt) {
-    $('routine-status').textContent = 'A routine needs something to do.';
+    $('routine-status').textContent = loadTimeData.getString('seRoutineNeedsPrompt');
     return;
   }
   const heartbeat = $<HTMLSelectElement>('routine-kind').value === 'heartbeat';
   const taskId = $<HTMLSelectElement>('routine-chat').value;
   if (heartbeat && !taskId) {
     $('routine-status').textContent =
-        'There is no chat to wake yet. Start a task first, then point a heartbeat at it.';
+        loadTimeData.getString('seRoutineNeedsChat');
     return;
   }
   const routine: Routine = {
@@ -295,7 +301,7 @@ $<HTMLFormElement>('routine-form').addEventListener('submit', async (event: Even
   };
   const {id} = await host.addRoutine(routine);
   if (!id) {
-    $('routine-status').textContent = 'That could not be added.';
+    $('routine-status').textContent = loadTimeData.getString('seRoutineAddFailed');
     return;
   }
   $<HTMLInputElement>('routine-title').value = '';
@@ -311,14 +317,14 @@ $<HTMLInputElement>('memory-enabled').addEventListener('change', async () => {
 
 $<HTMLSelectElement>('memory-retention').addEventListener('change', async () => {
   host.setMemoryRetentionDays(Number($<HTMLSelectElement>('memory-retention').value));
-  $('memory-status').textContent = 'Older entries were removed straight away.';
+  $('memory-status').textContent = loadTimeData.getString('seMemoryTrimmed');
   await refresh();
 });
 
 $<HTMLButtonElement>('memory-forget').addEventListener('click', async () => {
   host.forgetEverything();
   // Everything, pinned included -- said out loud, because the point of the button is certainty.
-  $('memory-status').textContent = 'Everything was deleted, pinned entries included.';
+  $('memory-status').textContent = loadTimeData.getString('seMemoryCleared');
   await refresh();
 });
 
@@ -333,13 +339,13 @@ $<HTMLFormElement>('provider-form').addEventListener('submit', async (event: Eve
   secretField.value = '';
   if (!id) {
     $('provider-status').textContent =
-        'That could not be saved. The endpoint must be https, and the name, model and key are all required.';
+        loadTimeData.getString('seProviderSaveFailed');
     return;
   }
   $<HTMLInputElement>('provider-label').value = '';
   $<HTMLInputElement>('provider-model').value = '';
   $<HTMLInputElement>('provider-endpoint').value = '';
-  $('provider-status').textContent = 'Connected. The key is stored encrypted and cannot be read back.';
+  $('provider-status').textContent = loadTimeData.getString('seProviderConnected');
   await refresh();
 });
 
@@ -348,7 +354,7 @@ for (const choice of document.querySelectorAll<HTMLButtonElement>('.choice')) {
     const value = choice.dataset['choice'] ?? '';
     host.setPasswordManagerChoice(value);
     $('password-status').textContent = value === 'external'
-        ? 'Saving is off. Passwords already saved here are still there and can still be filled.'
+        ? loadTimeData.getString('sePasswordsSavingOff')
         : '';
     await refresh();
   });
@@ -374,13 +380,13 @@ async function waitForSignIn(label: string) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     const {settings} = await host.getSettings();
     if (settings.model.providers.some((p) => p.label === label && p.hasSecret)) {
-      $('signin-status').textContent = 'Signed in.';
+      $('signin-status').textContent = loadTimeData.getString('seSigninDone');
       await refresh();
       return;
     }
   }
   $('signin-status').textContent =
-      'Still not signed in. If the provider showed an error, it was theirs — check the client ID.';
+      loadTimeData.getString('seSigninNotDone');
 }
 
 $<HTMLFormElement>('signin-form').addEventListener('submit', async (event: Event) => {
@@ -397,7 +403,7 @@ $<HTMLFormElement>('signin-form').addEventListener('submit', async (event: Event
     $('signin-status').textContent = error;
     return;
   }
-  $('signin-status').textContent = 'Waiting for you to finish signing in, in the tab that just opened…';
+  $('signin-status').textContent = loadTimeData.getString('seSigninWaiting');
   void waitForSignIn(label);
 });
 
@@ -405,9 +411,9 @@ $<HTMLInputElement>('rpc-enabled').addEventListener('change', async () => {
   const wanted = $<HTMLInputElement>('rpc-enabled').checked;
   const {endpoint} = await host.setRpcEnabled(wanted);
   $('rpc-status').textContent = wanted
-      ? (endpoint ? `Listening on ${endpoint}.`
-                  : 'The socket could not be bound, so nothing is listening.')
-      : 'Stopped listening, and the token file is gone.';
+      ? (endpoint ? loadTimeData.getStringF('seCliListeningAt', endpoint)
+                  : loadTimeData.getString('seCliBindFailed'))
+      : loadTimeData.getString('seCliStopped');
   await refresh();
 });
 
@@ -415,7 +421,7 @@ $<HTMLButtonElement>('folder-pick').addEventListener('click', async () => {
   const {displayPath} = await host.chooseWorkingFolder();
   $('folder-status').textContent = displayPath
       ? ''
-      : 'No folder was chosen. On Linux this needs a desktop file-chooser to be available.';
+      : loadTimeData.getString('seFilesNoFolderChosen');
   await refresh();
 });
 

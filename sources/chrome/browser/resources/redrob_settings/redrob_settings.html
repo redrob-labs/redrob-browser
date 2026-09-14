@@ -1,274 +1,242 @@
 <!doctype html>
-<html lang="en">
+<html lang="$i18n{language}" dir="$i18n{textdirection}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Redrob settings</title>
+  <title>$i18n{seDocumentTitle}</title>
   <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="redrob_settings.css">
 </head>
 <body>
   <div class="shell">
-    <nav class="nav" aria-label="Settings sections">
-      <h1>Settings</h1>
-      <a class="nav-link" href="#routines">Routines</a>
-      <a class="nav-link" href="#memory">Memory</a>
-      <a class="nav-link" href="#models">Models</a>
-      <a class="nav-link" href="#passwords">Passwords</a>
-      <a class="nav-link" href="#cli">Command line</a>
-      <a class="nav-link" href="#files">Files</a>
-      <a class="nav-link nav-foot" href="chrome://settings/">Browser settings</a>
+    <nav class="nav" aria-label="$i18n{seNav}">
+      <h1>$i18n{sidebarSettings}</h1>
+      <a class="nav-link" href="#routines">$i18n{seNavRoutines}</a>
+      <a class="nav-link" href="#memory">$i18n{seNavMemory}</a>
+      <a class="nav-link" href="#models">$i18n{seNavModels}</a>
+      <a class="nav-link" href="#passwords">$i18n{seNavPasswords}</a>
+      <a class="nav-link" href="#cli">$i18n{seNavCli}</a>
+      <a class="nav-link" href="#files">$i18n{seNavFiles}</a>
+      <a class="nav-link nav-foot" href="chrome://settings/">$i18n{seNavBrowserSettings}</a>
     </nav>
 
     <main class="pages">
       <section id="routines" class="page">
-        <h2>Routines</h2>
-        <p class="lede">Tasks the browser starts on its own. A <strong>schedule</strong> starts a new
-          task each time; a <strong>heartbeat</strong> wakes one of your existing chats with its
-          context intact.</p>
+        <h2>$i18n{seNavRoutines}</h2>
+        <p class="lede">$i18nRaw{seRoutinesLede}</p>
         <ol id="routine-list" class="rows"></ol>
-        <p id="routine-empty" class="empty" hidden>No routines yet.</p>
+        <p id="routine-empty" class="empty" hidden>$i18n{seRoutinesEmpty}</p>
 
         <form id="routine-form" class="plate" autocomplete="off">
-          <h3>New routine</h3>
+          <h3>$i18n{seRoutineNew}</h3>
           <label class="field">
-            <span>Name</span>
-            <input id="routine-title" type="text" placeholder="Morning news check" maxlength="200">
+            <span>$i18n{seRoutineName}</span>
+            <input id="routine-title" type="text" placeholder="$i18n{seRoutineNamePlaceholder}" maxlength="200">
           </label>
           <label class="field">
-            <span>What it should do</span>
+            <span>$i18n{seRoutineWhat}</span>
             <textarea id="routine-prompt" rows="3"
-                      placeholder="Check the three sites I follow and tell me what changed since yesterday."></textarea>
+                      placeholder="$i18n{seRoutineWhatPlaceholder}"></textarea>
           </label>
           <div class="field-row">
             <label class="field">
-              <span>Kind</span>
+              <span>$i18n{seRoutineKind}</span>
               <select id="routine-kind">
-                <option value="cron" selected>Start a new task</option>
-                <option value="heartbeat">Wake an existing chat</option>
+                <option value="cron" selected>$i18n{seRoutineKindCron}</option>
+                <option value="heartbeat">$i18n{seRoutineKindHeartbeat}</option>
               </select>
             </label>
             <label class="field" id="routine-chat-field" hidden>
-              <span>Which chat</span>
+              <span>$i18n{seRoutineWhichChat}</span>
               <select id="routine-chat"></select>
             </label>
             <label class="field">
-              <span>Every</span>
+              <span>$i18n{seRoutineEvery}</span>
               <select id="routine-every">
-                <option value="60">hour</option>
-                <option value="240">4 hours</option>
-                <option value="720">12 hours</option>
-                <option value="1440" selected>day</option>
-                <option value="10080">week</option>
+                <option value="60">$i18n{seRoutineEveryHour}</option>
+                <option value="240">$i18n{seRoutineEvery4Hours}</option>
+                <option value="720">$i18n{seRoutineEvery12Hours}</option>
+                <option value="1440" selected>$i18n{seRoutineEveryDay}</option>
+                <option value="10080">$i18n{seRoutineEveryWeek}</option>
               </select>
             </label>
             <label class="field">
-              <span>Permission</span>
+              <span>$i18n{seRoutinePermission}</span>
               <select id="routine-mode">
-                <option value="0">Read only</option>
-                <option value="1" selected>Guard</option>
-                <option value="2">Full access</option>
+                <option value="0">$i18n{newTabPermissionRead}</option>
+                <option value="1" selected>$i18n{newTabPermissionGuard}</option>
+                <option value="2">$i18n{newTabPermissionFull}</option>
               </select>
             </label>
             <label class="field">
-              <span>Effort</span>
+              <span>$i18n{newTabEffort}</span>
               <select id="routine-effort">
-                <option value="0">Quick</option>
-                <option value="1" selected>Standard</option>
-                <option value="2">Ultrabrowse</option>
+                <option value="0">$i18n{newTabEffortQuick}</option>
+                <option value="1" selected>$i18n{newTabEffortStandard}</option>
+                <option value="2">$i18n{newTabEffortUltra}</option>
               </select>
             </label>
           </div>
           <div class="actions">
-            <button type="submit" class="pill pill-solid">Add routine</button>
+            <button type="submit" class="pill pill-solid">$i18n{seRoutineAdd}</button>
             <span id="routine-status" class="status" role="status"></span>
           </div>
-          <p class="note">Routines run at most every 10 minutes, are skipped rather than queued when
-            four tasks are already running, and a routine that came due while the browser was closed
-            runs once — not once per interval missed.</p>
+          <p class="note">$i18n{seRoutineNote}</p>
         </form>
       </section>
 
       <section id="memory" class="page">
-        <h2>Memory</h2>
-        <p class="lede">What the agent may carry from one task to the next. Nothing is remembered
-          unless a task explicitly stored it, and every entry shows the task it came from.</p>
+        <h2>$i18n{seNavMemory}</h2>
+        <p class="lede">$i18n{seMemoryLede}</p>
         <div class="plate">
           <label class="toggle">
             <input id="memory-enabled" type="checkbox">
-            <span>Let tasks remember things</span>
+            <span>$i18n{seMemoryEnabled}</span>
           </label>
           <label class="field">
-            <span>Keep entries for</span>
+            <span>$i18n{seMemoryRetention}</span>
             <select id="memory-retention">
-              <option value="30">30 days</option>
-              <option value="90">90 days</option>
-              <option value="0">Until I delete them</option>
+              <option value="30">$i18n{seMemory30Days}</option>
+              <option value="90">$i18n{seMemory90Days}</option>
+              <option value="0">$i18n{seMemoryForever}</option>
             </select>
           </label>
           <div class="actions">
-            <button type="button" id="memory-forget" class="pill pill-warn">Forget everything</button>
+            <button type="button" id="memory-forget" class="pill pill-warn">$i18n{seMemoryForget}</button>
             <span id="memory-status" class="status" role="status"></span>
           </div>
         </div>
         <ol id="memory-list" class="rows"></ol>
-        <p id="memory-empty" class="empty" hidden>Nothing remembered yet.</p>
+        <p id="memory-empty" class="empty" hidden>$i18n{seMemoryEmpty}</p>
       </section>
 
       <section id="models" class="page">
-        <h2>Models</h2>
-        <p class="lede">Which model answers your tasks. The built-in engine needs no setup. Your own
-          provider needs a key, which is stored through this machine's keystore and is never shown
-          again — not to this page, and not to any page.</p>
+        <h2>$i18n{seNavModels}</h2>
+        <p class="lede">$i18n{seModelsLede}</p>
         <ol id="provider-list" class="rows"></ol>
         <form id="signin-form" class="plate" autocomplete="off">
-          <h3>Sign in to a provider</h3>
+          <h3>$i18n{seSigninHeading}</h3>
           <div class="field-row">
             <label class="field">
-              <span>Name</span>
-              <input id="signin-label" type="text" placeholder="My ChatGPT account" maxlength="100">
+              <span>$i18n{seRoutineName}</span>
+              <input id="signin-label" type="text" placeholder="$i18n{seSigninNamePlaceholder}" maxlength="100">
             </label>
             <label class="field">
-              <span>Model</span>
+              <span>$i18n{newTabModel}</span>
               <input id="signin-model" type="text" placeholder="gpt-5.1" maxlength="100">
             </label>
           </div>
           <label class="field">
-            <span>API endpoint</span>
+            <span>$i18n{seSigninEndpointLabel}</span>
             <input id="signin-endpoint" type="url" placeholder="https://api.openai.com/v1">
           </label>
           <div class="field-row">
             <label class="field">
-              <span>Authorize URL</span>
+              <span>$i18n{seSigninAuthorizeUrl}</span>
               <input id="signin-authorize" type="url" placeholder="https://auth.openai.com/oauth/authorize">
             </label>
             <label class="field">
-              <span>Token URL</span>
+              <span>$i18n{seSigninTokenUrl}</span>
               <input id="signin-token" type="url" placeholder="https://auth.openai.com/oauth/token">
             </label>
           </div>
           <div class="field-row">
             <label class="field">
-              <span>Client ID</span>
-              <input id="signin-client" type="text" placeholder="your own registered OAuth client">
+              <span>$i18n{seSigninClientId}</span>
+              <input id="signin-client" type="text" placeholder="$i18n{seSigninClientPlaceholder}">
             </label>
             <label class="field">
-              <span>Scopes</span>
+              <span>$i18n{seSigninScopes}</span>
               <input id="signin-scopes" type="text" placeholder="openid profile offline_access">
             </label>
           </div>
           <div class="actions">
-            <button type="submit" class="pill pill-solid">Sign in…</button>
+            <button type="submit" class="pill pill-solid">$i18n{seSigninSubmit}</button>
             <span id="signin-status" class="status" role="status"></span>
           </div>
-          <p class="note">Opens the provider's own sign-in page in a tab. The browser keeps the tokens
-            encrypted through this machine's keystore and renews them when they expire; nothing is
-            readable back by this page.</p>
-          <p class="note"><strong>The client ID has to be your own.</strong> Two things are worth knowing
-            before you try someone else's. Anthropic prohibited subscription sign-in outside Claude Code
-            in February 2026 and rejects those tokens at the server, so a Claude subscription cannot be
-            connected here at all — use an API key above, which works. OpenAI does allow ChatGPT
-            subscription sign-in in third-party tools and its endpoints are public, but a client ID that
-            is not their own first-party one is refused at the token endpoint. If that happens you will
-            see the provider's own error, not ours.</p>
+          <p class="note">$i18n{seSigninNote}</p>
+          <p class="note">$i18nRaw{seSigninClientWarn}</p>
         </form>
 
         <form id="provider-form" class="plate" autocomplete="off">
-          <h3>Connect a provider</h3>
+          <h3>$i18n{seProviderHeading}</h3>
           <div class="field-row">
             <label class="field">
-              <span>Name</span>
-              <input id="provider-label" type="text" placeholder="My OpenAI account" maxlength="100">
+              <span>$i18n{seRoutineName}</span>
+              <input id="provider-label" type="text" placeholder="$i18n{seProviderNamePlaceholder}" maxlength="100">
             </label>
             <label class="field">
-              <span>Model</span>
+              <span>$i18n{newTabModel}</span>
               <input id="provider-model" type="text" placeholder="gpt-5.1" maxlength="100">
             </label>
           </div>
           <label class="field">
-            <span>Endpoint</span>
+            <span>$i18n{seProviderEndpoint}</span>
             <input id="provider-endpoint" type="url" placeholder="https://api.openai.com/v1">
           </label>
           <label class="field">
-            <span>API key</span>
+            <span>$i18n{seProviderApiKey}</span>
             <input id="provider-secret" type="password" autocomplete="off"
-                   placeholder="Stored encrypted; never displayed again">
+                   placeholder="$i18n{seProviderSecretPlaceholder}">
           </label>
           <div class="actions">
-            <button type="submit" class="pill pill-solid">Connect</button>
+            <button type="submit" class="pill pill-solid">$i18n{seProviderConnect}</button>
             <span id="provider-status" class="status" role="status"></span>
           </div>
-          <p class="note">Must be an https endpoint that speaks the OpenAI chat-completions shape.
-            Tasks you run against your own provider send that provider the pages they read.</p>
+          <p class="note">$i18n{seProviderNote}</p>
         </form>
       </section>
 
       <section id="passwords" class="page">
-        <h2>Passwords</h2>
-        <p class="lede">Logged-in sites are where the agent is most useful, so how passwords are
-          handled matters here. The credentials themselves live in this browser's own password
-          manager — this page decides whether it offers to save them.</p>
+        <h2>$i18n{seNavPasswords}</h2>
+        <p class="lede">$i18n{sePasswordsLede}</p>
         <div class="plate">
-          <div class="choice-row" role="radiogroup" aria-label="Password manager">
+          <div class="choice-row" role="radiogroup" aria-label="$i18n{obPasswordsGroup}">
             <button type="button" class="choice" data-choice="redrob">
-              <span class="choice-title">Use Redrob's manager</span>
-              <span class="choice-detail">Save and fill passwords in this browser.</span>
+              <span class="choice-title">$i18n{sePasswordsUseRedrob}</span>
+              <span class="choice-detail">$i18n{sePasswordsUseRedrobDetail}</span>
             </button>
             <button type="button" class="choice" data-choice="external">
-              <span class="choice-title">I use another manager</span>
-              <span class="choice-detail">Stop offering to save. Passwords already saved here stay
-                saved and can still be filled — nothing is migrated or deleted.</span>
+              <span class="choice-title">$i18n{sePasswordsExternal}</span>
+              <span class="choice-detail">$i18n{sePasswordsExternalDetail}</span>
             </button>
             <button type="button" class="choice" data-choice="skip">
-              <span class="choice-title">Decide later</span>
-              <span class="choice-detail">Leave it as it is.</span>
+              <span class="choice-title">$i18n{sePasswordsLater}</span>
+              <span class="choice-detail">$i18n{sePasswordsLaterDetail}</span>
             </button>
           </div>
           <label class="toggle">
             <input id="password-save" type="checkbox">
-            <span>Offer to save passwords</span>
+            <span>$i18n{sePasswordsOfferToSave}</span>
           </label>
           <label class="toggle">
             <input id="password-autosignin" type="checkbox">
-            <span>Sign in automatically where I have saved a password</span>
+            <span>$i18n{sePasswordsAutoSignin}</span>
           </label>
           <div class="actions">
-            <button type="button" id="password-open" class="pill">Open password manager</button>
+            <button type="button" id="password-open" class="pill">$i18n{sePasswordsOpenManager}</button>
             <span id="password-status" class="status" role="status"></span>
           </div>
         </div>
       </section>
 
       <section id="cli" class="page">
-        <h2>Command line, MCP and scripts</h2>
-        <p class="lede">Two ways to drive this browser from outside it. One needs no setup; the other
-          is a local socket, and it is off until you turn it on.</p>
+        <h2>$i18n{seCliHeading}</h2>
+        <p class="lede">$i18n{seCliLede}</p>
         <div class="plate">
-          <h3>From a terminal, with no setup</h3>
-          <p class="mono">redrob-browser --redrob-task="summarise the page I have open"</p>
-          <p class="note">Starts the task in the browser you already have running and opens its tab.
-            Nothing is printed back: the channel that carries a command line to a running browser
-            answers with an acknowledgement and no payload, so there is no output and no exit code to
-            read. That is the channel's shape, not a missing feature — use the endpoint below when the
-            answer has to come back to the terminal.</p>
+          <h3>$i18n{seCliNoSetupHeading}</h3>
+          <p class="mono">$i18n{seCliExample}</p>
+          <p class="note">$i18n{seCliNoSetupNote}</p>
         </div>
         <div class="plate">
-          <h3>Local endpoint</h3>
+          <h3>$i18n{seCliEndpointHeading}</h3>
           <label class="toggle">
             <input id="rpc-enabled" type="checkbox">
-            <span>Let local programs drive this browser</span>
+            <span>$i18n{seCliRpcEnabled}</span>
           </label>
-          <p class="folder">Listening on <strong id="rpc-endpoint">nothing</strong></p>
-          <p class="note">Serves three things: an HTTP endpoint that can stream a task's answer back to a
-            script, an MCP server at <span class="mono">POST /mcp</span> so another agent — Redrob Code
-            included — can call this browser as a tool, and the same verbs one at a time. Loopback only,
-            on a port the system picks, and every request needs a token generated fresh each launch —
-            programs read the address and the token from
-            <span class="mono" id="rpc-handle">redrob-cli.json</span> in this profile's folder. See
-            docs/AUTOMATION.md.</p>
-          <p class="note">Off by default on purpose. Any program on this machine that can read that
-            file can then do anything you can do in this browser, including on sites you are signed
-            in to. Turn it on when you have a reason to, and turn it off after.</p>
+          <p class="folder">$i18n{seCliListeningOn} <strong id="rpc-endpoint">$i18n{seCliNothing}</strong></p>
+          <p class="note">$i18nRaw{seCliRpcNote}</p>
+          <p class="note">$i18n{seCliRpcWarn}</p>
           <div class="actions">
             <span id="rpc-status" class="status" role="status"></span>
           </div>
@@ -276,23 +244,24 @@
       </section>
 
       <section id="files" class="page">
-        <h2>Files</h2>
-        <p class="lede">Where tasks write. A task with no folder refuses to write rather than picking
-          somewhere for you.</p>
+        <h2>$i18n{seNavFiles}</h2>
+        <p class="lede">$i18n{seFilesLede}</p>
         <div class="plate">
-          <p class="folder">Current folder: <strong id="folder-name">none</strong></p>
+          <p class="folder">$i18n{seFilesCurrentFolder} <strong id="folder-name">$i18n{seFilesNone}</strong></p>
           <div class="actions">
-            <button type="button" id="folder-pick" class="pill pill-solid">Choose folder…</button>
-            <button type="button" id="folder-clear" class="pill">Clear</button>
+            <button type="button" id="folder-pick" class="pill pill-solid">$i18n{taskChooseFolder}</button>
+            <button type="button" id="folder-clear" class="pill">$i18n{seFilesClear}</button>
             <span id="folder-status" class="status" role="status"></span>
           </div>
-          <p class="note">Even in Full access, the browser refuses to write into hidden folders, into
-            its own profile directory, and over a file that already exists.</p>
+          <p class="note">$i18n{seFilesNote}</p>
         </div>
       </section>
     </main>
   </div>
 
+  <!-- The localized-string dictionary, served by UseStringsJs. Module scripts run in order, so
+       this has to come first: the page module reads loadTimeData at import time. -->
+  <script type="module" src="strings.m.js"></script>
   <script type="module" src="redrob_settings.js"></script>
 </body>
 </html>

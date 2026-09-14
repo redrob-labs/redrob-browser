@@ -1,0 +1,71 @@
+# chrome://redrob -- the new tab and the task view. Terminology is fixed in 10-sidebar.tsv.
+#
+# The three data-prompt strings are translated too: they are what gets SENT to the model when the tile
+# is clicked, and a Korean user pressing a Korean tile should not be sending English.
+
+# --- composer -------------------------------------------------------------------------------------
+newTabPromptLabel	Task for the agent	에이전트에게 맡길 작업	Accessible name of the new tab's main input
+newTabPromptPlaceholder	Ask AI a task, @ for context	AI에게 작업을 맡기세요. @로 컨텍스트 추가	Placeholder in the new tab's main input
+newTabModeGroup	Mode	모드	Accessible name of the Search / Ask AI pair
+newTabModeSearch	Search	검색	Button that treats what was typed as a web search
+newTabModeAsk	Ask AI	AI에게 요청	Button that hands what was typed to the agent as a task
+newTabAddContext	Add context	컨텍스트 추가	Accessible name of the + button that attaches context
+newTabPermissionMode	Permission mode	권한 모드	Label of the control that picks how much the agent may do
+newTabPermissionRead	Read only	읽기 전용	Permission level: the agent may read pages and change nothing
+newTabPermissionGuard	Guard	보호	Permission level: the agent asks before anything that changes something
+newTabPermissionFull	Full access	전체 허용	Permission level: the agent acts without asking
+newTabModel	Model	모델	Label of the model picker
+newTabEffort	Effort	처리 강도	Label of the control that picks how hard the agent works
+newTabEffortQuick	Quick	빠름	Effort level: least work, fastest answer
+newTabEffortStandard	Standard	표준	Effort level: the default
+newTabEffortUltra	Ultrabrowse	울트라브라우즈	Effort level: most work, slowest answer
+
+# --- suggested tiles ------------------------------------------------------------------------------
+newTabSuggested	Suggested tasks	추천 작업	Heading above the three example tiles on an empty new tab
+newTabTileKindRead	Read	읽기	Tile category: the task only reads
+newTabTileKindCompare	Compare	비교	Tile category: the task compares two things
+newTabTileKindAct	Act	실행	Tile category: the task changes something
+newTabTileReadTitle	Summarise a page	페이지 요약하기	Title of the summarise tile
+newTabTileReadDetail	Open something and get the gist, with nothing changed.	페이지를 열어 요점만 파악하고, 아무것도 바꾸지 않습니다.	Body of the summarise tile
+newTabTileReadPrompt	Summarise this page in one sentence and list the links I can see.	이 페이지를 한 문장으로 요약하고, 보이는 링크를 나열해 주세요.	The task text the summarise tile sends
+newTabTileCompareTitle	Compare two sources	두 자료 비교하기	Title of the compare tile
+newTabTileCompareDetail	A table of differences, with the gaps marked as gaps.	차이를 표로 정리하고, 빠진 것은 빠졌다고 표시합니다.	Body of the compare tile
+newTabTileComparePrompt	Compare these two pages and put the differences in a table. Say "not stated" where a page does not say.	이 두 페이지를 비교해 차이를 표로 정리해 주세요. 페이지에 없는 항목은 "명시되지 않음"으로 적어 주세요.	The task text the compare tile sends
+newTabTileActTitle	Fill a form, don't send it	양식 채우고 보내지 않기	Title of the form-filling tile
+newTabTileActDetail	Filled and left for you to check before submitting.	채워만 두고, 제출 전에 확인하도록 남겨둡니다.	Body of the form-filling tile
+newTabTileActPrompt	Fill this form with my details but do not submit it, and tell me what you put where.	이 양식을 내 정보로 채우되 제출하지는 말고, 어디에 무엇을 넣었는지 알려 주세요.	The task text the form-filling tile sends
+newTabRecent	Recent tasks	최근 작업	Heading above the list of tasks the user actually ran
+
+# --- task view ------------------------------------------------------------------------------------
+taskStop	Stop	중지	Button that stops a running task
+taskClosePreview	Close preview	미리보기 닫기	Accessible name of the preview pane's close button
+taskReplyLabel	Reply to the agent	에이전트에게 답장	Accessible name of the task view's reply input
+taskReplyPlaceholder	Reply, @ for context	답장, @로 컨텍스트 추가	Placeholder in the task view's reply input
+taskSteerNow	Steer now	지금 방향 바꾸기	Button that interrupts the current step with the typed reply
+taskSendReply	Send reply	답장 보내기	Accessible name of the send button when the task is idle
+taskQueueReply	Queue this for the next step	다음 단계로 예약	Accessible name of the send button while the task is running
+taskChooseFolder	Choose folder…	폴더 선택…	Button that picks the folder a task may write into
+taskNotFound	Task not found	작업을 찾을 수 없습니다	Shown instead of a title when the task id in the URL is unknown
+taskStateQueued	queued	대기 중	Task state
+taskStateRunning	running	실행 중	Task state
+taskStateBlocked	blocked	차단됨	Task state: stopped because the permission mode forbids the next step
+taskStateDone	done	완료	Task state
+taskStateFailed	failed	실패	Task state
+taskStateCancelled	cancelled	취소됨	Task state
+taskStateUnknown	unknown	알 수 없음	Task state the page does not recognise
+taskJustNow	just now	방금	Relative time for something that happened under a minute ago
+taskMinutesAgo	$1m ago	$1분 전	Relative time in minutes
+taskHoursAgo	$1h ago	$1시간 전	Relative time in hours
+taskWorkingSeconds	Working for $1s	$1초 진행 중	How long the running task has been working, under a minute
+taskWorkingMinutes	Working for $1m $2s	$1분 $2초 진행 중	How long the running task has been working, over a minute
+taskCapturedFrame	Captured frame: $1	캡처된 화면: $1	Alt text of a screenshot the agent took, $1 is the step's label
+taskLatestFrame	Latest frame: $1	최근 화면: $1	Alt text of the newest screenshot, $1 is the task's prompt
+taskNoMoreAccess	A running task cannot be given more access. Start a new task instead.	실행 중인 작업에는 권한을 더 줄 수 없습니다. 새 작업을 시작하세요.	Shown when the permission control is raised mid-task
+taskFilesGoIn	Files from this task go in "$1".	이 작업의 파일은 "$1"에 저장됩니다.	Confirms the folder a task may write into
+taskNoFolderChosen	No folder was chosen, so this task still cannot write files.	폴더를 고르지 않아 이 작업은 파일을 쓸 수 없습니다.	Shown when the folder picker was dismissed
+taskReplyRejected	That could not be sent. There may already be too many messages waiting.	보내지 못했습니다. 대기 중인 메시지가 너무 많을 수 있습니다.	Shown when a queued reply is refused
+taskSteered	Interrupted — it is working on this instead.	중단했습니다. 이제 이 작업을 합니다.	Shown after Steer now takes effect
+taskReplyQueued	Waiting for the current step to finish.	현재 단계가 끝나기를 기다립니다.	Shown after a reply is queued behind the running step
+taskReplySent	Sent.	보냈습니다.	Shown after a reply reaches an idle task
+taskEngineUnavailable	Could not start the task: the Redrob Code engine is not available.	작업을 시작할 수 없습니다. Redrob Code 엔진을 사용할 수 없습니다.	Shown when the sidecar is not running
+taskCommandUnavailable	That command could not be run: the Redrob Code engine is not available.	명령을 실행할 수 없습니다. Redrob Code 엔진을 사용할 수 없습니다.	Shown when a slash command cannot reach the sidecar

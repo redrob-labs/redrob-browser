@@ -15,6 +15,10 @@
 #include <fontconfig/fontconfig.h>
 #endif
 
+#if BUILDFLAG(IS_WIN)
+#include <windows.h>
+#endif
+
 #if BUILDFLAG(IS_MAC)
 #include <CoreText/CoreText.h>
 
@@ -83,6 +87,27 @@ void RegisterUiFont() {
                  << "; views will keep the platform default face";
     return;
   }
+#elif BUILDFLAG(IS_WIN)
+  // NOT YET COMPILED ANYWHERE. Same standing as the macOS branch below: written on a Linux host, first
+  // compiled by .github/workflows/windows.yml. Treat a failure here as expected work.
+  //
+  // FR_PRIVATE, deliberately, and it is the same argument as kCTFontManagerScopeProcess on macOS: without
+  // it the face is installed for every process on the desktop until reboot, and a browser that changes the
+  // fonts available to unrelated programs is doing something it was not asked to. FR_PRIVATE also means no
+  // cleanup -- the registration dies with the process.
+  //
+  // The path goes in as UTF-16 with no conversion, because base::FilePath::value() on Windows already IS
+  // std::wstring. That is the one line of this function that cannot be written the same way on all three
+  // platforms, which is why UiFontPath returns a FilePath rather than a string.
+  if (AddFontResourceExW(path.value().c_str(), FR_PRIVATE, /*reserved=*/nullptr) == 0) {
+    LOG(WARNING) << "AddFontResourceExW refused " << path
+                 << "; views will keep the platform default face";
+    return;
+  }
+  // GDI is told the font table changed. Skia's DirectWrite backend builds its own font collection and does
+  // not watch the private font set, so without this broadcast the family can stay unresolvable in the very
+  // process that just registered it.
+  ::SendNotifyMessage(HWND_BROADCAST, WM_FONTCHANGE, 0, 0);
 #elif BUILDFLAG(IS_MAC)
   // NOT YET COMPILED ANYWHERE. This is written on a Linux host and no macOS build of this fork exists, so the
   // first CI run on a mac is its first compile -- treat a failure here as expected work rather than a surprise.
@@ -102,9 +127,9 @@ void RegisterUiFont() {
     return;
   }
 #else
-  // Not implemented, and named rather than implied. Windows wants AddFontResourceExW with
-  // FR_PRIVATE, and it cannot be written blind on a Linux host -- an untested font registration that silently
-  // fails is worse than one that says it is missing, because the fallback face looks deliberate.
+  // Not implemented, and named rather than implied. Linux, Windows and macOS are all handled above; anything
+  // else reaching this line gets the platform default face and says so, because a fallback that happens
+  // silently looks deliberate.
   LOG(WARNING) << "Redrob UI font registration is not implemented on this platform; "
                << "views will keep the platform default face";
   return;

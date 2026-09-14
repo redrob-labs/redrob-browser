@@ -21,6 +21,9 @@ source_set("redrob_settings") {
     "//base",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/redrob:sidecar",
+    # Redrob: the IDS_REDROB_* header behind kRedrobLocalizedStrings.
+    "//chrome/browser/redrob/resources:redrob_strings",
+    "//chrome/browser:browser_process",
     "//chrome/browser/resources/redrob_settings:resources",
     "//chrome/browser/ui/navigator",
     "//chrome/browser/ui/select_file_policy",

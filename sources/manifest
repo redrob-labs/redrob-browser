@@ -114,4 +114,12 @@ sources/chrome/browser/redrob/rpc_server.cc  chrome/browser/redrob/rpc_server.cc
 # OAuth 2.0 + PKCE for connecting a model provider the user has an account with.
 sources/chrome/browser/redrob/oauth_flow.h   chrome/browser/redrob/oauth_flow.h
 sources/chrome/browser/redrob/oauth_flow.cc  chrome/browser/redrob/oauth_flow.cc
+
+# The fork's own translatable strings. GENERATED from l10n/*.tsv by scripts/gen_strings.py -- edit the
+# TSV, not these. A grd of our own rather than messages in generated_resources.grd, so a Chromium tag
+# bump is not 85 files of conflict; see the BUILD.gn for the whole argument.
+sources/chrome/browser/redrob/resources/BUILD.gn  chrome/browser/redrob/resources/BUILD.gn
+sources/chrome/browser/redrob/resources/redrob_strings.grd  chrome/browser/redrob/resources/redrob_strings.grd
+sources/chrome/browser/redrob/resources/redrob_localized_strings.h  chrome/browser/redrob/resources/redrob_localized_strings.h
+sources/chrome/browser/redrob/resources/translations/redrob_strings_ko.xtb  chrome/browser/redrob/resources/translations/redrob_strings_ko.xtb
 sources/chrome/installer/linux/common/redrob-version.txt	chrome/installer/linux/common/redrob-version.txt

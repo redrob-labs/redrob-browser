@@ -5,6 +5,8 @@
 #include "chrome/browser/ui/views/tabs/vertical/redrob_account_row.h"
 
 #include "chrome/browser/ui/views/tabs/vertical/redrob_sidebar_tokens.h"
+#include "chrome/browser/redrob/resources/grit/redrob_strings.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/image_model.h"
 #include "components/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.h"
@@ -57,7 +59,7 @@ RedrobAccountRow::RedrobAccountRow(BrowserWindowInterface* browser) : browser_(b
   // its glyph, which is how the rest of the list is meant to be scanned.
   settings_button_ = AddChildView(MakeRow(
       base::BindRepeating(&RedrobAccountRow::OpenSettings, base::Unretained(this)),
-      base::UTF8ToUTF16(std::string("Settings"))));
+      l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_SETTINGS)));
   settings_button_->SetImageModel(
       views::Button::STATE_NORMAL,
       ui::ImageModel::FromVectorIcon(vector_icons::kSettingsIcon,

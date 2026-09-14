@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/tabs/vertical/BUILD.gn b/chrome/browser/ui/views/tabs/vertical/BUILD.gn
-index 6ff7745f13856..3a208c9cc2af9 100644
+index 6ff7745f13856..19f9a8d7c20c8 100644
 --- a/chrome/browser/ui/views/tabs/vertical/BUILD.gn
 +++ b/chrome/browser/ui/views/tabs/vertical/BUILD.gn
 @@ -7,6 +7,9 @@ import("//chrome/common/features.gni")
@@ -21,12 +21,17 @@ index 6ff7745f13856..3a208c9cc2af9 100644
      "top_container_button.cc",
      "vertical_tab_strip_bottom_container.cc",
      "vertical_tab_strip_expand_on_hover_lock.cc",
-@@ -45,6 +50,11 @@ source_set("impl") {
+@@ -45,6 +50,16 @@ source_set("impl") {
    ]
  
    deps = [
 +    "//chrome/browser/bookmarks",
 +    "//chrome/browser/redrob:sidecar",
++    # Redrob: IDS_REDROB_* for the sidebar's own labels. The header is generated, so this dep is what
++    # orders grit before the compile -- without it the failure is a missing
++    # chrome/browser/redrob/resources/grit/redrob_strings.h, and whether it appears at all depends on
++    # which target ninja happens to build first.
++    "//chrome/browser/redrob/resources:redrob_strings",
 +    "//chrome/browser/tab_group_sync:factories",
 +    "//chrome/browser/ui/navigator",
 +    "//components/bookmarks/browser",

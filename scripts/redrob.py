@@ -173,7 +173,17 @@ USER_AGENT_CC = "components/embedder_support/user_agent_utils.cc"
 
 # Which gn args file each build flavour uses. `dev` is the one to use for a first build: an official
 # build turns on LTO and PGO and roughly doubles a wall-clock that is already hours long.
-FLAVOURS = {"dev": "build/args/dev.gn", "release": "build/args/release.gn", "mac": "build/args/mac.gn"}
+FLAVOURS = {
+    "dev": "build/args/dev.gn",
+    "release": "build/args/release.gn",
+    "mac": "build/args/mac.gn",
+    "windows": "build/args/windows.gn",
+}
+
+# Which flavours are for which host. A flavour is not a cross-compile: `mac` and `windows` name the gn
+# args a build ON that platform uses, and running them anywhere else fails inside the toolchain rather
+# than here -- so the mapping is stated once and checked, instead of being discovered from a link error.
+FLAVOUR_PLATFORM = {"dev": "linux", "release": "linux", "mac": "darwin", "windows": "win32"}
 
 
 def version() -> str:
@@ -255,6 +265,11 @@ def cmd_version(_: argparse.Namespace) -> None:
     print(f"chromium {version()}")
 
 
+def cmd_strings(_: argparse.Namespace) -> None:
+    """Regenerate the grd, the translations and the WebUI table from l10n/*.tsv. See scripts/gen_strings.py."""
+    run([sys.executable, str(ROOT / "scripts" / "gen_strings.py")], ROOT)
+
+
 def cmd_check(_: argparse.Namespace) -> None:
     """Repo integrity, with no Chromium checkout needed. See scripts/check_repo.py for what and why."""
     run([sys.executable, str(ROOT / "scripts" / "check_repo.py")], ROOT)
@@ -279,6 +294,9 @@ def cmd_package(args: argparse.Namespace) -> None:
     """
     if not SRC.exists():
         sys.exit("no checkout: run sync first")
+    if FLAVOUR_PLATFORM[args.flavour] == "win32":
+        package_windows(args)
+        return
     if args.flavour == "dev" and not args.allow_dev:
         sys.exit("refusing to package a dev build: no LTO, no PGO. Use --flavour release, "
                  "or --allow-dev if you are testing the packaging path itself")
@@ -340,6 +358,42 @@ def cmd_package(args: argparse.Namespace) -> None:
         sys.exit(f"the installer target produced no .deb in out/{args.flavour}")
     for path in found + sorted(cdn.glob("*.deb")):
         print(f"{path.relative_to(ROOT)}  {path.stat().st_size // (1024 * 1024)} MB")
+
+
+def package_windows(args: argparse.Namespace) -> None:
+    """Build the Windows installer and stage it the way the CDN script expects.
+
+    `chrome/installer/mini_installer` is upstream's own packaging target, the same choice as
+    chrome/installer/linux:stable_deb on Linux and for the same reason: it produces the self-extracting
+    setup.exe that registers the browser, rather than a zip that happens to contain a binary.
+
+    There is no --allow-dev gate here, unlike the Linux path. That gate exists because a Linux dev build has no
+    LTO and no PGO and would be mistaken for shippable; on Windows nothing has been built AT ALL yet, so the
+    only useful thing to package is exactly the dev flavour this produces. When a Windows release flavour
+    exists the gate belongs here too -- see docs/WINDOWS.md.
+    """
+    out = SRC / "out" / args.flavour
+    if not (out / "chrome.exe").exists():
+        sys.exit(f"nothing built in out/{args.flavour}: run build first")
+
+    run(["autoninja", "-C", f"out/{args.flavour}", "chrome/installer/mini_installer"], SRC)
+
+    built = out / "mini_installer.exe"
+    if not built.exists():
+        sys.exit(f"the installer target produced no mini_installer.exe in out/{args.flavour}")
+
+    artifacts = ROOT / "out" / "artifacts"
+    cdn = ROOT / "out" / "cdn"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    cdn.mkdir(parents=True, exist_ok=True)
+
+    # The name the sibling repos already publish under: redrob-design-x64-<version>-setup.exe, which
+    # cdn-publish.sh aliases to redrob-design-x64-setup.exe by deleting the -<version> segment. Copying that
+    # convention rather than inventing one is the whole reason the alias works without touching the script.
+    name = f"redrob-browser-x64-{product_version()}-setup.exe"
+    for target in (artifacts / name, cdn / name):
+        shutil.copy2(built, target)
+        print(f"{target.relative_to(ROOT)}  {target.stat().st_size // (1024 * 1024)} MB")
 
 
 def cmd_repo(args: argparse.Namespace) -> None:
@@ -697,6 +751,11 @@ def cmd_export(_: argparse.Namespace) -> None:
 def cmd_build(args: argparse.Namespace) -> None:
     if not SRC.exists():
         sys.exit("no checkout: run sync first")
+    want = FLAVOUR_PLATFORM[args.flavour]
+    if sys.platform != want and not args.force_platform:
+        sys.exit(f"flavour {args.flavour!r} is for {want}, and this host is {sys.platform}. Chromium's own\n"
+                 f"cross-compile support does not cover this pair without a toolchain that is not in the\n"
+                 f"checkout, so the build would fail deep inside it. Use --force-platform if you have one.")
     out = SRC / "out" / args.flavour
     args_gn = (ROOT / FLAVOURS[args.flavour]).read_text()
     out.mkdir(parents=True, exist_ok=True)
@@ -705,8 +764,23 @@ def cmd_build(args: argparse.Namespace) -> None:
     run(["autoninja", "-C", f"out/{args.flavour}", args.target], SRC)
 
 
+def built_binary(flavour: str) -> pathlib.Path:
+    """The launchable thing a build produces, which is a different path on each platform.
+
+    Linux leaves `chrome` in the output directory. Windows leaves `chrome.exe` beside it. macOS produces an
+    .app bundle whose executable is several directories inside it and carries the BRANDED name, so it does not
+    even share a stem with the other two.
+    """
+    out = SRC / "out" / flavour
+    if sys.platform == "win32":
+        return out / "chrome.exe"
+    if sys.platform == "darwin":
+        return out / "Redrob Browser.app" / "Contents" / "MacOS" / "Redrob Browser"
+    return out / "chrome"
+
+
 def cmd_run(args: argparse.Namespace) -> None:
-    binary = SRC / "out" / args.flavour / "chrome"
+    binary = built_binary(args.flavour)
     if not binary.exists():
         sys.exit(f"not built: {binary}")
     profile = ROOT / "out" / "profile"
@@ -724,6 +798,9 @@ def main() -> None:
     # security question ("which Chromium are we on?") gets answered with a product number.
     sub.add_parser("version", help="print Redrob's version and the Chromium tag it is cut from").set_defaults(
         func=cmd_version)
+
+    sub.add_parser("strings", help="regenerate the strings grd and translations from l10n/*.tsv"
+                   ).set_defaults(func=cmd_strings)
 
     sub.add_parser("check", help="repo integrity: manifest, patch names, versions (no checkout needed)"
                    ).set_defaults(func=cmd_check)
@@ -761,6 +838,8 @@ def main() -> None:
     build = sub.add_parser("build", help="gn gen + ninja")
     build.add_argument("--flavour", choices=sorted(FLAVOURS), default="dev")
     build.add_argument("--target", default="chrome")
+    build.add_argument("--force-platform", action="store_true",
+                       help="build a flavour whose platform is not this host's, if you have a cross toolchain")
     build.set_defaults(func=cmd_build)
 
     run_ = sub.add_parser("run", help="launch the build with a scratch profile")

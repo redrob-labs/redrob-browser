@@ -142,18 +142,90 @@ def check_versions(problems: list[str]) -> None:
                         f"{version!r} -- the .deb would be versioned differently from the tag")
 
 
+def check_strings(problems: list[str]) -> None:
+    """The generated grd/xtb/header must match l10n/*.tsv, and every $i18n{} key must exist.
+
+    Both failures are SILENT by construction, which is why they are checked rather than trusted. A stale .grd
+    still compiles and still ships -- with the previous release's strings. A $i18n{key} nothing defines is
+    served to the page as literal text, so the user sees `$i18n{obContinue}` on a button and the build is green.
+    """
+    if not (ROOT / "l10n").exists():
+        return
+    sys.path.insert(0, str(ROOT / "scripts"))
+    try:
+        import gen_strings  # noqa: PLC0415
+    except Exception as exc:  # pragma: no cover
+        problems.append(f"scripts/gen_strings.py is not importable: {exc}")
+        return
+    try:
+        files, rows = gen_strings.generate()
+    except SystemExit as exc:
+        problems.append(f"l10n/*.tsv is not valid: {exc}")
+        return
+    for path, text in files.items():
+        rel = path.relative_to(ROOT).as_posix()
+        if not path.exists():
+            problems.append(f"{rel} is missing; run scripts/gen_strings.py")
+        elif path.read_text(encoding="utf-8") != text:
+            problems.append(f"{rel} is stale against l10n/*.tsv; run scripts/gen_strings.py")
+
+    keys = {key for key, *_ in rows}
+    # Supplied by webui::SetLoadTimeDataDefaults rather than by our own table.
+    keys |= {"language", "textdirection", "fontfamily", "fontfamilyMd", "fontsize",
+             "roundedIconsAttribute", "webuiRoundedIconsEnabled", "webuiRoundedIconsAttribute"}
+    resources = ROOT / "sources" / "chrome" / "browser" / "resources"
+    for path in sorted(list(resources.rglob("*.html")) + list(resources.rglob("*.ts"))):
+        text = path.read_text(encoding="utf-8")
+        # (?:Raw)? and not Raw?: the second form makes the "Ra" mandatory, so it matches $i18nRaw{} and
+        # NOTHING else -- the check passed on every file while seeing none of the ordinary $i18n{} keys.
+        used = set(re.findall(r"\$i18n(?:Raw)?\{([^}]+)\}", text))
+        used |= set(re.findall(r"loadTimeData\.getStringF?\('([^']+)'", text))
+        for key in sorted(used - keys):
+            problems.append(f"{path.relative_to(ROOT).as_posix()} uses the string {key!r}, which no "
+                            f"l10n/*.tsv row defines")
+
+
+def check_sources_match_checkout(problems: list[str]) -> None:
+    """When a checkout is present, every manifest source must equal what is in it.
+
+    `apply` copies sources/ INTO the checkout, so an edit made in the checkout to a file this repo owns is
+    silently discarded by the next apply -- and `export` does not catch it, because a sources/-owned file is
+    deliberately excluded from its untracked-file report. That is not hypothetical: the macOS
+    ui_font_bundle_data target lived only in the checkout for a whole release, while chrome/BUILD.gn's patch
+    depended on it, so the first macOS build would have failed at gn gen on a target that no longer existed.
+
+    Skipped entirely with no checkout, which is the normal case in CI -- this is a local-work check.
+    """
+    src_root = ROOT / "chromium" / "src"
+    if not src_root.exists():
+        return
+    manifest = ROOT / "sources" / "manifest"
+    if not manifest.exists():
+        return
+    for src, dst, n in manifest_pairs(manifest):
+        ours, theirs = ROOT / src, src_root / dst
+        if not ours.exists() or not theirs.exists():
+            continue
+        if ours.read_bytes() != theirs.read_bytes():
+            problems.append(f"{src} differs from the checkout's {dst}. sources/ is authoritative and apply "
+                            f"overwrites the checkout, so if the checkout has the newer edit, copy it back "
+                            f"before the next apply throws it away")
+
+
 def main() -> int:
     problems: list[str] = []
     check_sources(problems)
     check_branding(problems)
     check_patch_names(problems)
     check_versions(problems)
+    check_strings(problems)
+    check_sources_match_checkout(problems)
     if problems:
         for problem in problems:
             print(f"FAIL {problem}")
         print(f"\n{len(problems)} problem(s)")
         return 1
-    print("ok: sources, branding, patch names and versions are consistent")
+    print("ok: sources, branding, patch names, versions and strings are consistent")
     return 0
 
 

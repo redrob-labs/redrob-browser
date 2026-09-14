@@ -14,7 +14,7 @@ installs no system packages by design* (`docs/BUILD.md`).
 | | Minimum | Comfortable | Why |
 |---|---|---|---|
 | Disk | 200 GB free | 400 GB | The checkout is ~50 GB before any build. `out/release` measured 13 GB, and a second output directory for a cold-build gate doubles that. `git gc` on the Chromium checkout needs headroom of its own. |
-| RAM | 16 GB | 32 GB+ | The cold build's peak RSS measured **7.1 GB** with 27 concurrent clang processes. Linking is the spike, not compiling. |
+| RAM | 32 GB | 48 GB+ | The DEV build's peak RSS measured **7.1 GB** with 27 concurrent clang processes, which is where the old 16 GB minimum came from. The **official** build — `is_official_build=true`, LTO and PGO, the one a release is actually cut from — measured a **19.9 GB peak** across the link, so 16 GB cannot produce a shippable binary. Linking is the spike, not compiling. |
 | Cores | 8 | 16+ | The 3h33m figure is on 16 cores at 1588% CPU. Halve the cores and expect to roughly double the wall clock. |
 | Network | — | — | The sync pulls tens of GB, and `checkout_pgo_profiles` adds an 86 MB download that unpacks to 327 MB. |
 
