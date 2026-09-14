@@ -55,22 +55,134 @@ A self-hosted Windows runner needs:
 - **Long paths enabled** (`git config --system core.longpaths true`, and the registry's `LongPathsEnabled`).
   Chromium has paths past 260 characters and the failure without this is a checkout that half-completes.
 
-## Running it
+## Running it, step by step
+
+Nothing here has ever run. Work through it in order and stop at the first failure — a later step cannot be
+diagnosed from a state an earlier one did not reach.
+
+### 0. Check the machine before starting anything
+
+```powershell
+# Free space on the drive the checkout will live on. Needs 200 GB; the git clone ALONE is 64.75 GiB.
+Get-PSDrive C | Select-Object Used,Free
+# Needs 32 GB for a release build, 16 GB for this dev flavour.
+(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB
+# Both must answer. Visual Studio 2022 with "Desktop development with C++" and the Windows 11 SDK.
+python --version
+git --version
+& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property catalog_productDisplayVersion
+```
+
+### 1. Two git settings, in an ADMINISTRATOR PowerShell
+
+Both are required and both fail confusingly if skipped.
+
+```powershell
+git config --system core.longpaths true
+git config --global core.autocrlf false
+```
+
+`core.longpaths` — Chromium has paths past 260 characters. Without it the checkout half-completes and the error
+names whichever file happened to be too long rather than the limit.
+
+`core.autocrlf false` — Git for Windows converts line endings on checkout by default. Every patch in `patches/`
+was generated on Linux with LF, so with conversion on, `git apply` finds no matching context and step 4 fails on
+patches that are perfectly correct.
+
+### 2. One environment variable, in the shell you will build from
+
+```powershell
+$env:DEPOT_TOOLS_WIN_TOOLCHAIN = "0"
+```
+
+The hermetic toolchain Google publishes is reachable only from inside Google. This selects the Visual Studio and
+Windows SDK on the machine instead. Without it `gclient` tries to download a toolchain it has no access to and
+the error names a storage bucket rather than a missing dependency.
+
+### 3. Clone this repository
+
+Private, so this needs credentials — `gh auth login` first, or an SSH key already on the account.
+
+```powershell
+gh repo clone redrob-labs/redrob-browser
+cd redrob-browser
+git checkout chromium
+```
+
+`chromium` is the default branch and an orphan branch; there is no `main` to switch from.
+
+### 4. Fetch Chromium — the long one
 
 ```powershell
 python scripts\redrob.py bootstrap
 python scripts\redrob.py sync
+```
+
+`sync` downloads **64.75 GiB** of git history and then the toolchain hooks on top. Expect one to three hours on a
+fast connection, and expect the progress bar to sit at 100% for a long while afterwards while git builds the pack
+index — that is not a hang.
+
+### 5. Put this fork on top of it
+
+```powershell
 python scripts\redrob.py apply
 python scripts\redrob.py brand
+```
+
+`apply` copies the files this repo owns and then applies `patches/` with `--3way`. A conflict here means a patch
+has drifted against the pinned Chromium, which is a real finding and not a local problem.
+
+### 6. Build — the part nobody has done
+
+```powershell
 python scripts\redrob.py build --flavour windows
-python scripts\redrob.py run   --flavour windows
+```
+
+Hours. `treat_warnings_as_errors = false` is already set in `build/args/windows.gn`, so upstream's own warnings
+will not stop it. If it fails, the last 30 lines of output are what identify the cause; the most likely one is
+the `AddFontResourceExW` branch in `redrob_fonts.cc`, which has never been compiled.
+
+### 7. Prove it exists and starts
+
+```powershell
+# The UI font has to be BESIDE chrome.exe -- that is where DIR_MODULE points on Windows.
+Test-Path chromium\src\out\windows\fonts\PretendardVariable.ttf
+cd chromium\src\out\windows
+.\chrome.exe --no-first-run --no-default-browser-check --user-data-dir="$env:TEMP\redrob-probe" "chrome://redrob"
+```
+
+The window should come up with the sidebar in it. Two things to look at: whether the interface is in Korean
+(it follows the system language), and whether the type is Pretendard rather than the system face — the second is
+what says the font registration worked. `--enable-logging=stderr --v=1` prints the `Redrob UI font` line that
+settles it either way.
+
+### 8. Package it
+
+```powershell
+cd ..\..\..\
 python scripts\redrob.py package --flavour windows
 ```
 
-`package` writes `out/artifacts/redrob-browser-x64-<version>-setup.exe` and the same name into `out/cdn/`. That
-name is the convention the sibling repos already publish under — `redrob-design-x64-<version>-setup.exe` aliasing
-to `redrob-design-x64-setup.exe` — so `.github/scripts/cdn-publish.sh` derives the version-free `latest/` link by
+This writes `out/artifacts/redrob-browser-x64-<version>-setup.exe` and the same name into `out/cdn/`. That name is
+the convention the sibling repos already publish under — `redrob-design-x64-<version>-setup.exe` aliasing to
+`redrob-design-x64-setup.exe` — so `.github/scripts/cdn-publish.sh` derives the version-free `latest/` link by
 deleting the `-<version>` segment with no change to the script.
+
+### 9. Hand it to CI to sign
+
+The installer is unsigned at this point. `.github/workflows/sign-and-publish.yml` signs it on a hosted runner
+with the organisation's Authenticode certificate — which works precisely because signing needs no Chromium
+checkout, so the disk wall that stops a CI build does not apply.
+
+```powershell
+gh release create v0.1.4 --draft --title "Redrob Browser 0.1.4" --notes "..." out\artifacts\redrob-browser-x64-0.1.4-setup.exe
+gh workflow run sign-and-publish.yml -f tag=v0.1.4
+```
+
+A DRAFT release, so no user sees the unsigned file. The workflow replaces the asset with the signed one,
+publishes to the CDN, and undrafts last. The tag must match `REDROB_VERSION` or the publish job refuses — bump
+`REDROB_VERSION` and `sources/chrome/installer/linux/common/redrob-version.txt` together, and add the
+`CHANGELOG.md` section, before building for a release.
 
 ## What to expect the first time
 
