@@ -216,14 +216,20 @@ def env(allow_update: bool = False) -> dict[str, str]:
     """
     merged = dict(os.environ)
     merged["PATH"] = f"{DEPOT_TOOLS}{os.pathsep}{merged.get('PATH', '')}"
-    if not allow_update:
+    if allow_update:
+        merged.pop("DEPOT_TOOLS_UPDATE", None)
+    else:
         merged["DEPOT_TOOLS_UPDATE"] = "0"
     return merged
 
 
 def run(cmd: list[str], cwd: Path, check: bool = True, allow_update: bool = False) -> int:
     print(f"\n$ {' '.join(cmd)}\n  in {cwd}", flush=True)
-    result = subprocess.run(cmd, cwd=cwd, env=env(allow_update))
+    merged = env(allow_update)
+    resolved = shutil.which(cmd[0], path=merged["PATH"])
+    if resolved:
+        cmd = [resolved, *cmd[1:]]
+    result = subprocess.run(cmd, cwd=cwd, env=merged)
     if check and result.returncode != 0:
         sys.exit(f"failed ({result.returncode}): {' '.join(cmd)}")
     return result.returncode
@@ -409,7 +415,13 @@ def cmd_bootstrap(_: argparse.Namespace) -> None:
         run(["git", "clone", "--depth", "1", DEPOT_TOOLS_URL, str(DEPOT_TOOLS)], ROOT)
     # Its own first run, with updates allowed, is what fetches the python and cipd binaries every later
     # command needs. Cloning alone leaves a depot_tools that cannot run anything.
-    run([str(DEPOT_TOOLS / "ensure_bootstrap")], DEPOT_TOOLS, allow_update=True)
+    #
+    # `ensure_bootstrap` is a POSIX shell script and depot_tools ships no Windows counterpart: there the
+    # bootstrap is bootstrap/win_tools.bat, which every .bat wrapper runs for itself. So on Windows the
+    # `gclient --version` below IS the bootstrap, and calling ensure_bootstrap first would only fail on a
+    # file the OS cannot execute.
+    if sys.platform != "win32":
+        run([str(DEPOT_TOOLS / "ensure_bootstrap")], DEPOT_TOOLS, allow_update=True)
     run(["gclient", "--version"], ROOT, allow_update=True)
 
 

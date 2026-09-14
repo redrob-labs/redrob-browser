@@ -38,7 +38,9 @@ jobs:
   build:
     name: compile, launch and package
     runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted","windows","x64","chromium-build"]') || 'windows-2022' }}
-    timeout-minutes: 700
+    # 350 on hosted because the PLATFORM caps a hosted job at 6 hours; a larger number here just means the
+    # run is killed by GitHub with no timeout message of ours. Self-hosted has no such cap.
+    timeout-minutes: ${{ inputs.runner == 'self-hosted' && 700 || 350 }}
     defaults:
       run:
         shell: bash
@@ -47,7 +49,10 @@ jobs:
       # Studio and Windows SDK on the machine, which is what this selects. Without it gclient tries to download
       # a toolchain it has no access to and the failure names a storage bucket, not a missing dependency.
       DEPOT_TOOLS_WIN_TOOLCHAIN: "0"
-      DEPOT_TOOLS_UPDATE: "0"
+      # DEPOT_TOOLS_UPDATE is deliberately NOT pinned here. redrob.py sets it per command and clears it for
+      # the one command that must update -- depot_tools' own first run, which is what fetches the bundled
+      # python and cipd. Pinning it at job level defeats that and every later command dies on
+      # "python3_bin_reldir.txt not found", which reads like a broken checkout.
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,6 +66,13 @@ jobs:
           systeminfo | grep -E "OS Name|OS Version|Total Physical Memory" || true
           wmic logicaldisk get name,freespace,size 2>/dev/null || Get-PSDrive -PSProvider FileSystem || true
           "/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -property catalog_productDisplayVersion || true
+
+      - name: long paths
+        # Chromium has paths past 260 characters. Without this the checkout half-completes and the error names
+        # whichever file happened to be too long, not the limit -- so this comes before anything clones.
+        run: |
+          git config --global core.longpaths true
+          git config --system core.longpaths true || true
 
       - name: repo integrity
         run: python scripts/check_repo.py
