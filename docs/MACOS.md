@@ -43,7 +43,7 @@ artwork exists — `branding/icons/mac/` — and turning it into the bundle's ic
 builds. Until it does, the `.app` carries Chromium's icon, which is the same class of defect as the 32px Linux
 logo that shipped in 0.1.0: cosmetic to describe, and it is the first thing anyone sees.
 
-## 4. Signing and notarization are org secrets, and the names already exist
+## 4. Signing and notarization — WIRED, never run
 
 Not needed to answer "does it launch", needed before anyone else can run it: unsigned and unnotarized, Gatekeeper
 refuses a downloaded `.app` outright.
@@ -52,6 +52,35 @@ The organisation already does this elsewhere. `redrob-design` uses `APPLE_CODESI
 `APPLE_CODESIGN_CERT_PASSWORD`; the browser repo's own Firefox-era workflow uses
 `macOS_CERTIFICATES_P12_For_App_BASE64`, `macOS_CERTIFICATES_P12_PASSWORD` and `macOS_PROVISIONING_PROFILE`. Pick
 one set rather than inventing a third — the CDN publish script was copied verbatim for exactly this reason.
+
+**As of 2026-09-14 `macos.yml` does this.** `.github/workflows/preflight.yml` confirmed all five names reach this
+repository, so the remaining work was wiring, not procurement. The workflow:
+
+1. Checks the five secrets **first**, before the hours-long build, so a missing credential costs ten seconds
+   rather than four hours. That loop is copied from `redrob-design`'s own step of the same name.
+2. Imports the `.p12` into a throwaway keychain and adds it to the user keychain **search list**. The search list
+   is the part that matters: `sign_chrome.py` has no `--keychain` flag (its whole accepted set is `--channel`,
+   `--development`, `--disable-packaging`, `--embed-development-provisioning-profile`, `--identity`, `--input`,
+   `--installer-identity`, `--notarize`, `--output`, `--skip-brand`), so `codesign` finds the identity only
+   through that list. `security set-key-partition-list` is the other easily-omitted step — without it `codesign`
+   prompts for keychain access, and on a runner with no UI a prompt is a hang rather than an error.
+3. Signs with **upstream's own `chrome/installer/mac/sign_chrome.py`**, not a hand-rolled `codesign`. Chromium's
+   bundle has to be signed inside-out — helpers, then the framework's versioned directory, then the app — with
+   per-part entitlements, and the signing module already encodes that order. Getting the order wrong produces a
+   bundle `codesign` accepts and Gatekeeper rejects. Same reasoning as using
+   `chrome/installer/linux:stable_deb` for the `.deb`.
+4. Notarizes and staples via `--notarize staple`, passing the API key through repeated `--notary-arg` flags, which
+   the driver hands straight to `xcrun notarytool`.
+5. Verifies with **three** checks, the same three `redrob-design` runs: `codesign --verify --deep --strict` says
+   the bundle is signed, `xcrun stapler validate` says the ticket is actually attached, and `spctl --assess` says
+   the machine would run it. A signing step that silently no-ops passes the first and fails the third.
+6. Deletes the keychain and the key file in an `always()` step.
+
+`--disable-packaging` is deliberate: a DMG additionally needs `pkg-dmg` and `universalizer`, and the question this
+run answers is whether the fork can be signed and notarized at all. The DMG is the next question.
+
+The signing steps are gated on a `sign` input, defaulting true, so the build can still be exercised alone when
+the interesting failure is the compile.
 
 ## What does not transfer from the existing macOS CI
 
