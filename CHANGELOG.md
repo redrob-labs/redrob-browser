@@ -4,6 +4,25 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
+## Unreleased
+
+**The package created an empty signing keyring on every machine that installed it.** With no update channel
+configured, `install_deb822_sources` correctly refused to add an apt source — but `install_key` ran anyway, and
+with `PGP_KEY_DATA` empty its body is silent rather than failing: `echo "" | base64 -d` exits 0 and produces
+zero bytes. So `/usr/share/keyrings/redrob-browser.gpg` was created empty, and `/usr/share/keyrings` with it.
+Nothing broke, because nothing referenced the file. What was wrong is what the file claimed: a keyring exists,
+so the first thing to add a sources file — by hand, or a later version of this package — would get a signature
+failure instead of a channel that is cleanly and visibly off. The guard now lives in `install_key` itself
+rather than at its three call sites, because a guard per call site is a guard someone will add two of.
+
+Present in v0.1.3, which is not being re-released for it: the file is inert there, and moving a published
+release is worse than carrying a known-harmless artefact until the next one.
+
+Linux auto-update stays deliberately off. The CDN half is configured — `vars.REDROB_CDN_BUCKET` and its two
+credential secrets are org values this repository can see, confirmed by `.github/workflows/preflight.yml` — and
+the apt repository's own GPG key is the one thing absent. Wiring it is a later decision, not a missing piece
+of this build.
+
 ## 0.1.3 — 2026-09-14
 
 Korean actually translated, and a Windows build path.
