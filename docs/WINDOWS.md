@@ -45,9 +45,22 @@ A self-hosted Windows runner needs:
 - **≥ 32 GB RAM** for a release-flavour build. The Linux release build measured a **19.9 GB peak RSS** across
   the LTO link, so 16 GB is not enough for a shipped build. This is the requirement a hosted runner's 8 GB
   cannot meet, and it is why a self-hosted machine is needed — disk turned out not to be.
-- **Visual Studio 2022** with *Desktop development with C++*, the **Windows 11 SDK** including the *Debugging
-  Tools for Windows*, and ATL/MFC. Chromium's `//docs/windows_build_instructions.md` is authoritative and moves;
-  read it at the pinned tag rather than trusting this list.
+- **Visual Studio 2026**, version 18.0.0 or later. **Not 2022** — the pinned tree's own
+  `chromium/src/docs/windows_build_instructions.md` requires 2026, and that file is authoritative and moves with
+  the pin, so re-read it when `CHROMIUM_VERSION` changes rather than trusting this list. Community Edition is
+  fine if its licence suits. Installed non-interactively with exactly the arguments that document gives:
+
+  ```
+  PATH_TO_INSTALLER.EXE --add Microsoft.VisualStudio.Workload.NativeDesktop ^
+                        --add Microsoft.VisualStudio.Component.VC.ATLMFC ^
+                        --includeRecommended
+  ```
+
+- **Windows 11 SDK 10.0.28000.2270**, from the Visual Studio installer or on its own.
+- **SDK Debugging Tools 10.0.26100.3323 or higher**, which the SDK does *not* install by default: Control Panel
+  → Programs and Features → Windows Software Development Kit → Change → *Debugging Tools for Windows*. Chrome's
+  PDBs exceed 4 GiB and are built as large-page PDBs, which older debugging tools cannot read, so this is a
+  build requirement rather than a debugging convenience.
 - **`DEPOT_TOOLS_WIN_TOOLCHAIN=0`** in the environment. The hermetic toolchain Google publishes is reachable only
   from inside Google; without this variable `gclient` tries to download it and the error names a storage bucket
   rather than a missing dependency.
@@ -67,10 +80,13 @@ diagnosed from a state an earlier one did not reach.
 Get-PSDrive C | Select-Object Used,Free
 # Needs 32 GB for a release build, 16 GB for this dev flavour.
 (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB
-# Both must answer. Visual Studio 2022 with "Desktop development with C++" and the Windows 11 SDK.
 python --version
 git --version
+# Must print 18.x -- Visual Studio 2026. An EMPTY line means no Visual Studio is installed, which is the
+# usual answer on a fresh machine and is a prerequisite rather than a failure.
 & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property catalog_productDisplayVersion
+# The Debugging Tools, which the SDK does not install by default. Must list a 10.0.26100.3323+ directory.
+Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers" -ErrorAction SilentlyContinue
 ```
 
 ### 1. Two git settings, in an ADMINISTRATOR PowerShell

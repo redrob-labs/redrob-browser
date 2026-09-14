@@ -37,7 +37,11 @@ permissions:
 jobs:
   build:
     name: compile, launch and package
-    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted","windows","x64","chromium-build"]') || 'windows-2022' }}
+    # windows-2025, not windows-2022: the pinned tree requires Visual Studio 2026 (>=18.0.0) and a
+    # windows-2022 image carries VS 2022, so that label could not have compiled this checkout even with
+    # disk to spare. Whether the 2025 image carries 2026 yet is the next thing this workflow measures --
+    # its first step prints the version rather than assuming it.
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted","windows","x64","chromium-build"]') || 'windows-2025' }}
     # 350 on hosted because the PLATFORM caps a hosted job at 6 hours; a larger number here just means the
     # run is killed by GitHub with no timeout message of ours. Self-hosted has no such cap.
     timeout-minutes: ${{ inputs.runner == 'self-hosted' && 700 || 350 }}
