@@ -1,0 +1,101 @@
+# Does this fork compile and launch on macOS? Nothing has ever answered that, and this workflow exists to.
+#
+# It is NOT a release. The target is `chrome`, the flavour is dev, and the only assertion is that the .app starts
+# and stays up. A macOS release build needs LTO, which measured a 19.9 GB peak RSS on Linux against a hosted
+# runner's 14 GB, plus code signing and notarization, plus actool for the app icon. Each of those is a separate
+# problem and pretending otherwise would produce a workflow that is red for four reasons at once.
+#
+# Manual dispatch only, deliberately. The first runs of this will fail -- the macOS font registration and the
+# framework bundle_data were written on a Linux host and have never been compiled -- and a workflow that reddens
+# every push while that is worked through teaches everyone to ignore it.
+name: macos
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build (defaults to the default branch)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: compile and launch
+    # Hosted, because the point is to get an answer on hardware that exists today. Disk is the risk rather than
+    # RAM: the checkout is ~50 GB before a build and a hosted macOS runner is not generous, so if this fails it is
+    # likely to fail on space -- which is itself the answer that a self-hosted mac is needed, and a useful one.
+    runs-on: macos-15
+    timeout-minutes: 700
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: what we are working with
+        # Recorded first because the two numbers that decide whether this can work are the machine's, and a failed
+        # run is only useful if the log says which resource ran out.
+        run: |
+          sw_vers
+          xcodebuild -version || true
+          sysctl -n hw.memsize | awk '{printf "RAM: %.1f GB\n", $1/1024/1024/1024}'
+          df -h / | tail -1
+
+      - name: repo integrity
+        run: python3 scripts/check_repo.py
+
+      - name: bootstrap depot_tools
+        run: python3 scripts/redrob.py bootstrap
+
+      - name: sync Chromium at the pinned tag
+        run: python3 scripts/redrob.py sync
+
+      - name: apply the patch set
+        run: |
+          python3 scripts/redrob.py apply
+          python3 scripts/redrob.py brand
+
+      - name: build
+        run: python3 scripts/redrob.py build --flavour mac
+
+      - name: the font actually landed in the framework
+        # The specific thing most likely to be silently wrong. bundle_data that no bundle depends on builds green
+        # and copies nothing, so the absence of this file is the difference between a font that registers and a
+        # window that quietly falls back to the system face.
+        run: |
+          set -euo pipefail
+          app="chromium/src/out/mac/Redrob Browser.app"
+          found="$(find "$app" -name PretendardVariable.ttf -print -quit || true)"
+          if [ -z "$found" ]; then
+            echo "::error::PretendardVariable.ttf is not in the bundle; ui_font_bundle_data copied nothing"
+            find "$app/Contents/Frameworks" -maxdepth 4 -type d | head -20
+            exit 1
+          fi
+          echo "font at: $found"
+
+      - name: launch it
+        run: |
+          set -euo pipefail
+          app="chromium/src/out/mac/Redrob Browser.app"
+          "$app/Contents/MacOS/Redrob Browser" \
+            --no-first-run --no-default-browser-check \
+            --user-data-dir="$(mktemp -d)" "chrome://newtab" >launch.log 2>&1 &
+          pid=$!
+          sleep 30
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "::error::the browser exited within 30 seconds"
+            tail -40 launch.log
+            exit 1
+          fi
+          # The font warning is the interesting line either way: it is what says whether CoreText took the face.
+          grep -i "Redrob UI font" launch.log || echo "(no font log line -- check the VLOG level)"
+          kill "$pid" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-launch-log
+          path: launch.log
+          if-no-files-found: warn

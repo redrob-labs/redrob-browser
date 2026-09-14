@@ -15,6 +15,13 @@
 #include <fontconfig/fontconfig.h>
 #endif
 
+#if BUILDFLAG(IS_MAC)
+#include <CoreText/CoreText.h>
+
+#include "base/apple/foundation_util.h"
+#include "base/apple/scoped_cftyperef.h"
+#endif
+
 namespace redrob {
 namespace {
 
@@ -34,12 +41,25 @@ constexpr char kUiFontDescription[] = "Pretendard Variable, 13px";
 // fontconfig file, a Windows font resource, a macOS font URL -- so a font that only exists as bytes in a .pak
 // cannot be registered without standing up a font manager of our own, which is a great deal of machinery to
 // avoid copying one file.
+//
+// "Beside the executable" means two different places, which is the blocker the registration code alone does not
+// fix. On Linux DIR_MODULE is the output directory, where copy("ui_font") puts the file. On macOS DIR_MODULE is
+// inside the framework -- Redrob Browser.app/Contents/Frameworks/Redrob Framework.framework/Versions/A -- and a
+// file in the build root is simply not there. The bundle_data target in chrome/browser/redrob/BUILD.gn puts it
+// under Resources/fonts of that framework, which is what this resolves to.
 base::FilePath UiFontPath() {
   base::FilePath dir;
   if (!base::PathService::Get(base::DIR_MODULE, &dir)) {
     return base::FilePath();
   }
+#if BUILDFLAG(IS_MAC)
+  // Versions/A/Resources/fonts, reached from Versions/A. DIR_MODULE for the browser process is the versioned
+  // framework directory, so this is one hop rather than a walk up the bundle.
+  return dir.AppendASCII("Resources").AppendASCII("fonts").AppendASCII(
+      "PretendardVariable.ttf");
+#else
   return dir.AppendASCII("fonts").AppendASCII("PretendardVariable.ttf");
+#endif
 }
 
 }  // namespace
@@ -63,11 +83,28 @@ void RegisterUiFont() {
                  << "; views will keep the platform default face";
     return;
   }
+#elif BUILDFLAG(IS_MAC)
+  // NOT YET COMPILED ANYWHERE. This is written on a Linux host and no macOS build of this fork exists, so the
+  // first CI run on a mac is its first compile -- treat a failure here as expected work rather than a surprise.
+  // It is written now because the alternative was leaving a stub that made the platform look further away than
+  // it is: the remaining blockers are the bundle path below, actool for the app icon, and a machine.
+  //
+  // kCTFontManagerScopeProcess, deliberately. Session scope would register the face for every application the
+  // user is running until they log out, and a browser that changes the fonts available to unrelated programs is
+  // doing something it was not asked to. Process scope also means no cleanup: it dies with us.
+  base::apple::ScopedCFTypeRef<CFURLRef> url(
+      base::apple::FilePathToCFURL(path));
+  base::apple::ScopedCFTypeRef<CFErrorRef> error;
+  if (!CTFontManagerRegisterFontsForURL(url.get(), kCTFontManagerScopeProcess,
+                                        error.InitializeInto())) {
+    LOG(WARNING) << "CoreText refused " << path
+                 << "; views will keep the platform default face";
+    return;
+  }
 #else
   // Not implemented, and named rather than implied. Windows wants AddFontResourceExW with
-  // FR_PRIVATE, macOS wants CTFontManagerRegisterFontsForURL, and neither can be written blind on a Linux
-  // host -- an untested font registration that silently fails is worse than one that says it is missing,
-  // because the fallback face looks deliberate.
+  // FR_PRIVATE, and it cannot be written blind on a Linux host -- an untested font registration that silently
+  // fails is worse than one that says it is missing, because the fallback face looks deliberate.
   LOG(WARNING) << "Redrob UI font registration is not implemented on this platform; "
                << "views will keep the platform default face";
   return;

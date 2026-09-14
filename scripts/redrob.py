@@ -173,7 +173,7 @@ USER_AGENT_CC = "components/embedder_support/user_agent_utils.cc"
 
 # Which gn args file each build flavour uses. `dev` is the one to use for a first build: an official
 # build turns on LTO and PGO and roughly doubles a wall-clock that is already hours long.
-FLAVOURS = {"dev": "build/args/dev.gn", "release": "build/args/release.gn"}
+FLAVOURS = {"dev": "build/args/dev.gn", "release": "build/args/release.gn", "mac": "build/args/mac.gn"}
 
 
 def version() -> str:
