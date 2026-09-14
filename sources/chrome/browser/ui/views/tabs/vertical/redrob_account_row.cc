@@ -44,6 +44,7 @@ RedrobAccountRow::RedrobAccountRow(BrowserWindowInterface* browser) : browser_(b
       views::BoxLayout::Orientation::kVertical,
       gfx::Insets::VH(4, sidebar_tokens::kRowInset), sidebar_tokens::kRowSpacing));
   layout->set_cross_axis_alignment(views::BoxLayout::CrossAxisAlignment::kStart);
+  layout_ = layout;
 
   if (!browser_) {
     return;
@@ -68,6 +69,43 @@ RedrobAccountRow::RedrobAccountRow(BrowserWindowInterface* browser) : browser_(b
 }
 
 RedrobAccountRow::~RedrobAccountRow() = default;
+
+// The foot of a COLLAPSED rail is a glyph, not a row.
+//
+// Measured before this existed: the rail is 56px (x 0..55, so its centre is 27.5), the tab favicon above
+// centred correctly at 27.5, and this gear's ink sat at 22.8 -- because the row kept its expanded leading
+// padding. kRowInset (6) plus kRowPaddingLeading (9) puts a 16px image box at 15..31, whose centre is 23. In a
+// column whose only remaining job is to stack glyphs, 4.7px of leftward drift is the whole visual defect.
+//
+// Fixed by removing what caused it rather than by adding a compensating offset: with the label cleared and the
+// row's own border dropped, the button's preferred width IS its image, and a centred cross-axis alignment then
+// puts that 16px box in the middle of the available width -- which stays correct if the rail is ever resized or
+// the token changes. An offset computed from today's numbers would not.
+void RedrobAccountRow::SetCollapsed(bool collapsed) {
+  if (collapsed_ == collapsed) {
+    return;
+  }
+  collapsed_ = collapsed;
+  if (!settings_button_ || !layout_) {
+    return;
+  }
+  // The text goes because there is no width for it. It was already invisible -- ELIDE_TAIL had eaten it -- but
+  // an elided label still claims its share of the row, which is the other half of why the glyph was off centre.
+  settings_button_->SetText(collapsed
+                                ? std::u16string()
+                                : l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_SETTINGS));
+  settings_button_->SetBorder(views::CreateEmptyBorder(
+      collapsed ? gfx::Insets()
+                : gfx::Insets::TLBR(0, sidebar_tokens::kRowPaddingLeading, 0,
+                                    sidebar_tokens::kRowPaddingLeading)));
+  layout_->set_cross_axis_alignment(
+      collapsed ? views::BoxLayout::CrossAxisAlignment::kCenter
+                : views::BoxLayout::CrossAxisAlignment::kStart);
+  // The tooltip is what carries the name once the label is gone, so a collapsed rail stays readable to a
+  // screen reader and to anyone who has to hover to find out what the gear does.
+  settings_button_->SetTooltipText(l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_SETTINGS));
+  InvalidateLayout();
+}
 
 void RedrobAccountRow::OpenSettings() {
   if (!browser_) {

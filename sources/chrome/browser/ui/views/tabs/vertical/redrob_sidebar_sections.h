@@ -24,6 +24,7 @@ class AvatarToolbarButton;
 class BrowserWindowInterface;
 
 namespace views {
+class BoxLayout;
 class Button;
 class ImageView;
 class Label;
@@ -102,12 +103,18 @@ class RedrobSidebarSections : public views::View,
   void StartNewTask();
   void UpdateWorkspaceButton();
   void ShowWorkspaceMenu();
+  // The tabs in this window that belong to no group. What "save these tabs as a workspace" acts on.
+  std::vector<int> UngroupedTabIndices() const;
   // The saved groups a switcher should offer, in menu order. Rebuilt per menu rather than cached: the
   // service's own documentation says its pointers do not survive model mutation.
   std::vector<base::Uuid> WorkspaceIds() const;
 
   raw_ptr<BrowserWindowInterface> browser_;
   raw_ptr<views::View> header_ = nullptr;
+  // The header's leading group -- avatar, workspace name, chevron. Held by its LAYOUT rather than its view,
+  // because the only thing SetCollapsed does to it is re-align: collapsed it carries the avatar alone and
+  // must centre it in the 56px rail.
+  raw_ptr<views::BoxLayout> header_lead_layout_ = nullptr;
   // The browser's ONE avatar, in the header because the profile and the workspace are one feature. Registered
   // with the toolbar, and cleared in the destructor -- the toolbar holds a raw pointer to a button this view
   // owns, and views are destroyed in an order neither of them chooses.

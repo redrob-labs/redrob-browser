@@ -7,8 +7,9 @@
 newTabPromptLabel	Task for the agent	에이전트에게 맡길 작업	Accessible name of the new tab's main input
 newTabPromptPlaceholder	Ask AI a task, @ for context	AI에게 작업을 맡기세요. @로 컨텍스트 추가	Placeholder in the new tab's main input
 newTabModeGroup	Mode	모드	Accessible name of the Search / Ask AI pair
-newTabModeSearch	Search	검색	Button that treats what was typed as a web search
-newTabModeAsk	Ask AI	AI에게 요청	Button that hands what was typed to the agent as a task
+newTabModeSearch	Search	검색	Segment that selects search mode; what is typed then goes to the web
+newTabModeAsk	Ask AI	AI에게 요청	Segment that selects agent mode; what is typed then becomes a task
+newTabPromptPlaceholderSearch	Search the web or type a URL	웹을 검색하거나 URL을 입력하세요	Placeholder in the new tab's main input while Search mode is selected
 newTabAddContext	Add context	컨텍스트 추가	Accessible name of the + button that attaches context
 newTabPermissionMode	Permission mode	권한 모드	Label of the control that picks how much the agent may do
 newTabPermissionRead	Read only	읽기 전용	Permission level: the agent may read pages and change nothing

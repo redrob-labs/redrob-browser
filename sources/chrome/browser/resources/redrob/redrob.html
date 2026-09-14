@@ -21,10 +21,22 @@
         <div class="composer-row">
           <input id="prompt" type="text" aria-label="$i18n{newTabPromptLabel}"
                  placeholder="$i18n{newTabPromptPlaceholder}">
+          <!-- A real mode toggle: both segments only SELECT, and the form's submit is the one thing that acts.
+               Before this, `Search` performed a search the instant it was clicked and `Ask AI` was the form's
+               submit button, while `seg-on` was a static class in this file that nothing ever moved. Three
+               consequences, all of which a user hit immediately: the control permanently claimed Ask AI was
+               the selected mode, clicking `Search` with an empty field did nothing whatsoever and gave no
+               feedback, and the keyboard was governed by neither segment -- Enter always filed a task. -->
           <div class="segmented" role="group" aria-label="$i18n{newTabModeGroup}">
-            <button type="button" id="mode-search" class="seg">$i18n{newTabModeSearch}</button>
-            <button type="submit" id="mode-ask" class="seg seg-on">$i18n{newTabModeAsk}</button>
+            <button type="button" id="mode-search" class="seg"
+                    aria-pressed="false">$i18n{newTabModeSearch}</button>
+            <button type="button" id="mode-ask" class="seg seg-on"
+                    aria-pressed="true">$i18n{newTabModeAsk}</button>
           </div>
+          <!-- Implicit submission needs a submit control in the form. Both segments are plain buttons now, so
+               without this Enter would do nothing -- and Enter is how this field is actually used. Absolutely
+               positioned by .visually-hidden, so it takes no room in the row's flex. -->
+          <button type="submit" class="visually-hidden" tabindex="-1" aria-hidden="true"></button>
         </div>
       </form>
       <div class="composer-controls">

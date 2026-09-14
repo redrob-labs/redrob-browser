@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
-index 15393d6b279d5..207e45bbdea8b 100644
+index 15393d6b279d5..0eb758f3bbde1 100644
 --- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
 +++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
 @@ -64,6 +64,13 @@ VerticalTabStripTopContainer::VerticalTabStripTopContainer(
@@ -16,7 +16,25 @@ index 15393d6b279d5..207e45bbdea8b 100644
  }
  
  VerticalTabStripTopContainer::~VerticalTabStripTopContainer() = default;
-@@ -241,7 +248,19 @@ views::ProposedLayout VerticalTabStripTopContainer::CalculateProposedLayout(
+@@ -137,9 +144,14 @@ views::ProposedLayout VerticalTabStripTopContainer::CalculateProposedLayout(
+ 
+     if (collapse_button_ && collapse_button_->GetVisible()) {
+       const gfx::Size pref_size = collapse_button_->GetPreferredSize();
+-      int x = is_collapsed
+-                  ? 0
+-                  : std::max(0, (host_size.width() - pref_size.width()) / 2);
++      // Redrob: CENTRED when collapsed, not pinned to 0.
++      //
++      // Upstream's `is_collapsed ? 0 : centre` is backwards for this shell. Measured on the collapsed rail
++      // before the change: the rail is 56px wide (x 0..55, so its true centre is 27.5), the tab favicon's ink
++      // centred correctly at 27.5, and this button's ink sat at 23.0 -- 4.5px left of everything it is stacked
++      // above. Expanded there is a 240px row and a leading edge to align to; collapsed there is only a column
++      // of glyphs, and the one thing they can agree on is the middle.
++      int x = std::max(0, (host_size.width() - pref_size.width()) / 2);
+       gfx::Rect bounds(x, current_y, pref_size.width(), pref_size.height());
+       layout.child_layouts.emplace_back(collapse_button_.get(),
+                                         collapse_button_->GetVisible(), bounds);
+@@ -241,7 +253,19 @@ views::ProposedLayout VerticalTabStripTopContainer::CalculateProposedLayout(
  
      if (collapse_button_ && collapse_button_->GetVisible()) {
        const gfx::Size pref_size = collapse_button_->GetPreferredSize();

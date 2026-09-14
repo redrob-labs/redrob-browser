@@ -24,11 +24,16 @@ inline constexpr webui::LocalizedString kRedrobLocalizedStrings[] = {
     {"sidebarSwitchWorkspace", IDS_REDROB_SIDEBAR_SWITCH_WORKSPACE},
     {"sidebarSaveGroupForWorkspace", IDS_REDROB_SIDEBAR_SAVE_GROUP_FOR_WORKSPACE},
     {"sidebarUntitledWorkspace", IDS_REDROB_SIDEBAR_UNTITLED_WORKSPACE},
+    {"sidebarBookmarksEmpty", IDS_REDROB_SIDEBAR_BOOKMARKS_EMPTY},
+    {"sidebarChatsEmpty", IDS_REDROB_SIDEBAR_CHATS_EMPTY},
+    {"sidebarNoWorkspacesYet", IDS_REDROB_SIDEBAR_NO_WORKSPACES_YET},
+    {"sidebarSaveWorkspace", IDS_REDROB_SIDEBAR_SAVE_WORKSPACE},
     {"newTabPromptLabel", IDS_REDROB_NEW_TAB_PROMPT_LABEL},
     {"newTabPromptPlaceholder", IDS_REDROB_NEW_TAB_PROMPT_PLACEHOLDER},
     {"newTabModeGroup", IDS_REDROB_NEW_TAB_MODE_GROUP},
     {"newTabModeSearch", IDS_REDROB_NEW_TAB_MODE_SEARCH},
     {"newTabModeAsk", IDS_REDROB_NEW_TAB_MODE_ASK},
+    {"newTabPromptPlaceholderSearch", IDS_REDROB_NEW_TAB_PROMPT_PLACEHOLDER_SEARCH},
     {"newTabAddContext", IDS_REDROB_NEW_TAB_ADD_CONTEXT},
     {"newTabPermissionMode", IDS_REDROB_NEW_TAB_PERMISSION_MODE},
     {"newTabPermissionRead", IDS_REDROB_NEW_TAB_PERMISSION_READ},
@@ -255,6 +260,9 @@ inline constexpr webui::LocalizedString kRedrobLocalizedStrings[] = {
     {"seRoutinesLede", IDS_REDROB_SE_ROUTINES_LEDE},
     {"seSigninClientWarn", IDS_REDROB_SE_SIGNIN_CLIENT_WARN},
     {"seCliRpcNote", IDS_REDROB_SE_CLI_RPC_NOTE},
+    {"seNavGettingStarted", IDS_REDROB_SE_NAV_GETTING_STARTED},
+    {"seOnboardingLede", IDS_REDROB_SE_ONBOARDING_LEDE},
+    {"seOnboardingOpen", IDS_REDROB_SE_ONBOARDING_OPEN},
 };
 
 }  // namespace redrob

@@ -11,6 +11,7 @@
   <div class="shell">
     <nav class="nav" aria-label="$i18n{seNav}">
       <h1>$i18n{sidebarSettings}</h1>
+      <a class="nav-link" href="#getting-started">$i18n{seNavGettingStarted}</a>
       <a class="nav-link" href="#routines">$i18n{seNavRoutines}</a>
       <a class="nav-link" href="#memory">$i18n{seNavMemory}</a>
       <a class="nav-link" href="#models">$i18n{seNavModels}</a>
@@ -21,6 +22,18 @@
     </nav>
 
     <main class="pages">
+      <!-- The onboarding used to run once, on first run, and then be unreachable forever -- so the one place
+           that explains this product was the one place a user could not get back to. It is a plain page with
+           no side effects, so re-opening it needs no state and cannot undo anything. -->
+      <section id="getting-started" class="page">
+        <h2>$i18n{seNavGettingStarted}</h2>
+        <p class="lede">$i18n{seOnboardingLede}</p>
+        <div class="actions">
+          <button type="button" id="open-onboarding"
+                  class="pill pill-solid">$i18n{seOnboardingOpen}</button>
+        </div>
+      </section>
+
       <section id="routines" class="page">
         <h2>$i18n{seNavRoutines}</h2>
         <p class="lede">$i18nRaw{seRoutinesLede}</p>

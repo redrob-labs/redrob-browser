@@ -68,6 +68,14 @@ constexpr size_t kMaxBookmarkRows = 8;
 // Same reasoning as the bookmark cap: the column is 240px and the tab list must stay visible.
 constexpr size_t kMaxChatRows = 6;
 
+// Workspace menu command ids that are NOT an index into `menu_workspace_ids_`.
+//
+// Well above any plausible number of saved workspaces, and bounds-checked at the receiving end regardless:
+// ExecuteCommand casts the id to an index, so a sentinel that could collide with a real one would open the
+// wrong workspace rather than fail visibly.
+constexpr int kWorkspaceMenuEmptyCommandId = 100000;
+constexpr int kWorkspaceMenuSaveCommandId = 100001;
+
 std::unique_ptr<views::Label> MakeHeading(int message_id) {
   auto label = std::make_unique<views::Label>(l10n_util::GetStringUTF16(message_id));
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -80,6 +88,30 @@ std::unique_ptr<views::Label> MakeHeading(int message_id) {
   label->SetBorder(views::CreateEmptyBorder(
       gfx::Insets::TLBR(sidebar_tokens::kSectionGapAbove, sidebar_tokens::kRowPaddingLeading,
                         sidebar_tokens::kSectionGapBelow, 0)));
+  return label;
+}
+
+// What a section shows when it has no rows.
+//
+// A heading with nothing under it reads as a half-drawn list rather than as an empty one, and this shell has
+// no other in-place teaching: the note says what would put a row there. Built as a Label rather than through
+// MakeRow because it must not be pressable -- a row that looks like every other row and does nothing when
+// clicked is the defect this is fixing, not a style of fixing it.
+//
+// Aligned with the HEADING's leading edge, not with a row's text. It belongs to the section rather than to the
+// list, and starting it where a row's title starts would make it read as a row whose icon failed to load.
+std::unique_ptr<views::Label> MakeEmptyNote(int message_id) {
+  auto label = std::make_unique<views::Label>(l10n_util::GetStringUTF16(message_id));
+  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  label->SetEnabledColor(sidebar_tokens::kMutedForeground);
+  label->SetFontList(
+      label->font_list().DeriveWithSizeDelta(sidebar_tokens::kSectionLabelSizeDelta));
+  // Multi-line, because the column narrows to 126px and every one of these strings is a sentence. Eliding
+  // would leave the user with the first half of an instruction.
+  label->SetMultiLine(true);
+  label->SetBorder(views::CreateEmptyBorder(
+      gfx::Insets::TLBR(0, sidebar_tokens::kRowPaddingLeading, sidebar_tokens::kSectionGapBelow,
+                        sidebar_tokens::kRowPaddingLeading)));
   return label;
 }
 
@@ -141,6 +173,9 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   auto* lead_layout = lead->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kHorizontal, gfx::Insets(), 4));
   lead_layout->set_cross_axis_alignment(views::BoxLayout::CrossAxisAlignment::kCenter);
+  // Held because SetCollapsed re-aligns it: collapsed, this container carries the avatar alone and has to
+  // centre it in the rail rather than leave it at the expanded row's leading edge.
+  header_lead_layout_ = lead_layout;
 
   if (browser_) {
     avatar_ = lead->AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
@@ -333,6 +368,10 @@ void RedrobSidebarSections::RebuildChats() {
                                                       sidebar_tokens::kFaviconSize));
     ++shown;
   }
+  // Nothing to show is a state this section has to draw, not one it can leave blank.
+  if (shown == 0) {
+    chats_list_->AddChildView(MakeEmptyNote(IDS_REDROB_SIDEBAR_CHATS_EMPTY));
+  }
   InvalidateLayout();
 }
 
@@ -361,13 +400,27 @@ void RedrobSidebarSections::SetCollapsed(bool collapsed) {
   if (workspace_chevron_) {
     workspace_chevron_->SetVisible(!collapsed);
   }
+  // The avatar STAYS, which is what the paragraph above always claimed and what the code did the opposite of:
+  // it read SetVisible(!collapsed) AND hid the leading container the avatar lives in, so the collapsed rail
+  // had no account indication and no sign-in control at all. Measured on the collapsed rail before this, the
+  // only glyphs present were the toggle, the tab favicon and the settings gear.
   if (avatar_) {
-    avatar_->SetVisible(!collapsed);
+    avatar_->SetVisible(true);
   }
-  // The container too: a flexed but empty box still claims the row's width, which would hold the trailing
-  // controls away from the edge in a collapsed column.
-  if (workspace_button_ && workspace_button_->parent()) {
-    workspace_button_->parent()->SetVisible(!collapsed);
+  // The leading container therefore stays too -- hiding it is what actually removed the avatar. Its own
+  // reason for being hidden does not apply in this state: it was hidden so a flexed empty box could not hold
+  // the trailing controls away from the edge, and in a collapsed column there ARE no trailing controls, since
+  // the magnifier and the compose button are hidden a few lines below.
+  //
+  // Centred rather than left-aligned while collapsed. The rail is 56px and this view is inset by kRowInset on
+  // each side, so centring inside the container puts a 28px avatar's leading edge at 6 + (44-28)/2 = 14, which
+  // is the rail's centre for a 28px glyph. Left-aligned it sat at 6 -- the same leftward error the toggle and
+  // the settings gear had, and for the same reason: expanded-state padding surviving into a state that has no
+  // labels left to align to.
+  if (header_lead_layout_) {
+    header_lead_layout_->set_main_axis_alignment(
+        collapsed ? views::BoxLayout::MainAxisAlignment::kCenter
+                  : views::BoxLayout::MainAxisAlignment::kStart);
   }
   search_button_->SetVisible(!collapsed);
   compose_button_->SetVisible(!collapsed);
@@ -457,6 +510,12 @@ void RedrobSidebarSections::RebuildBookmarks() {
       }
     }
     ++shown;
+  }
+  // Nothing to show is a state this section has to draw, not one it can leave blank. Placed after the
+  // model->loaded() guard above deliberately: while the model is still loading the section is not empty,
+  // it is unknown, and telling the user to press Ctrl+D would answer a question nobody has asked yet.
+  if (shown == 0) {
+    bookmarks_list_->AddChildView(MakeEmptyNote(IDS_REDROB_SIDEBAR_BOOKMARKS_EMPTY));
   }
   InvalidateLayout();
 }
@@ -553,7 +612,11 @@ void RedrobSidebarSections::UpdateWorkspaceButton() {
   }
 
   workspace_button_->SetText(label);
-  workspace_button_->SetEnabled(count > 0);
+  // Never disabled. It used to be `SetEnabled(count > 0)`, which made the header's only dropdown a control
+  // that could not be pressed for as long as the user had no workspaces -- i.e. from the moment the browser
+  // was installed, which is exactly when they would press it to find out what a workspace is. The empty case
+  // is a MENU now: it says there are none and offers the one action that makes one. A tooltip cannot carry
+  // that, because a tooltip is the reward for hovering something you already believe works.
   workspace_button_->SetTooltipText(
       l10n_util::GetStringUTF16(count > 0 ? IDS_REDROB_SIDEBAR_SWITCH_WORKSPACE
                                           : IDS_REDROB_SIDEBAR_SAVE_GROUP_FOR_WORKSPACE));
@@ -561,7 +624,7 @@ void RedrobSidebarSections::UpdateWorkspaceButton() {
 
 void RedrobSidebarSections::ShowWorkspaceMenu() {
   menu_workspace_ids_ = WorkspaceIds();
-  if (menu_workspace_ids_.empty() || !browser_) {
+  if (!browser_) {
     return;
   }
   tab_groups::TabGroupSyncService* groups =
@@ -583,6 +646,29 @@ void RedrobSidebarSections::ShowWorkspaceMenu() {
     workspace_menu_model_->AddItem(static_cast<int>(i), title);
   }
 
+  // The empty case says so, in the menu, rather than the menu declining to appear. A dropdown that opens onto
+  // "there are none" is still an answer, and it is the answer the disabled button withheld.
+  const bool has_any = workspace_menu_model_->GetItemCount() > 0;
+  if (!has_any) {
+    workspace_menu_model_->AddItem(kWorkspaceMenuEmptyCommandId,
+                                   l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_NO_WORKSPACES_YET));
+    workspace_menu_model_->SetEnabledAt(workspace_menu_model_->GetItemCount() - 1, false);
+  }
+
+  // And the way OUT of the empty state, in the same menu. Offered only when there is something to group: a
+  // command that would create an empty workspace is the same dead control in a different costume.
+  if (!UngroupedTabIndices().empty()) {
+    if (has_any) {
+      workspace_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
+    }
+    workspace_menu_model_->AddItem(kWorkspaceMenuSaveCommandId,
+                                   l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_SAVE_WORKSPACE));
+  }
+
+  if (workspace_menu_model_->GetItemCount() == 0) {
+    return;
+  }
+
   workspace_menu_runner_ = std::make_unique<views::MenuRunner>(
       workspace_menu_model_.get(), views::MenuRunner::HAS_MNEMONICS);
   workspace_menu_runner_->RunMenuAt(GetWidget(), nullptr,
@@ -591,11 +677,56 @@ void RedrobSidebarSections::ShowWorkspaceMenu() {
                                     ui::mojom::MenuSourceType::kNone);
 }
 
+// The tabs in this window that belong to no group yet.
+//
+// Only these are swept into a new workspace. Tabs already in a group -- the agent's own group included --
+// would be MOVED out of it by AddToNewGroup, so a command whose label says "save these tabs" would quietly
+// dismantle the grouping the user already had.
+std::vector<int> RedrobSidebarSections::UngroupedTabIndices() const {
+  std::vector<int> indices;
+  if (!browser_) {
+    return indices;
+  }
+  TabStripModel* tab_strip = browser_->GetTabStripModel();
+  if (!tab_strip) {
+    return indices;
+  }
+  for (int i = 0; i < tab_strip->count(); ++i) {
+    if (!tab_strip->GetTabGroupForTab(i).has_value()) {
+      indices.push_back(i);
+    }
+  }
+  return indices;
+}
+
 void RedrobSidebarSections::ExecuteCommand(int command_id, int event_flags) {
+  if (!browser_) {
+    return;
+  }
+  // The sentinels first, because the index path below casts the id and would read far past the vector.
+  if (command_id == kWorkspaceMenuEmptyCommandId) {
+    return;  // A disabled item cannot be chosen; handled so it can never fall through to the cast.
+  }
+  if (command_id == kWorkspaceMenuSaveCommandId) {
+    // Grouping the tabs is the whole action: a local group is picked up by TabGroupSyncService, which is the
+    // same service WorkspaceIds() reads, so the new workspace appears in this menu without a second call to
+    // save it. Re-read rather than reusing the list the menu was built from -- a tab can close while a menu
+    // is open, and a stale index here would group the wrong tab.
+    const std::vector<int> indices = UngroupedTabIndices();
+    if (indices.empty()) {
+      return;
+    }
+    if (TabStripModel* tab_strip = browser_->GetTabStripModel()) {
+      tab_strip->AddToNewGroup(indices);
+    }
+    UpdateWorkspaceButton();
+    return;
+  }
+
   const size_t index = static_cast<size_t>(command_id);
   // The menu is torn down and rebuilt per press, but a command can still arrive against a model built
   // before the last change, so the index is bounds-checked rather than trusted.
-  if (index >= menu_workspace_ids_.size() || !browser_) {
+  if (index >= menu_workspace_ids_.size()) {
     return;
   }
   // One call covers both halves of "switch": already open means focus its window and first tab,

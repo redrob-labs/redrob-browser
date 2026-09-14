@@ -6,6 +6,73 @@ upstream's four-week cadence whether we ship anything or not — the two numbers
 
 ## Unreleased
 
+**The settings page told users, under our name, that their data goes to Google and that Google staff read it.**
+`chrome://settings` carried an "AI in Redrob" section — upstream's page for Google's own AI features, with brand
+substitution making every one of them read as ours. Its rows were AI history search, AI suggestions, "Skills in
+Redrob", "Indigo — Manage your Indigo data", and "Google 검색 AI 모드 및 연결된 앱", which offered to connect
+Google Drive and Workspace. This product ships none of them. The disqualifying part was the disclosure above
+those rows: beside a Google logo it stated `관련 데이터가 Google로 전송됩니다`, then in untranslated English that
+"Data sent to Google may be seen by human reviewers to improve Redrob AI's technology". Both are false here —
+this browser's agent talks to whichever provider the user configured, which `sidecar_client.cc` states goes to
+that provider "not to Google and not to Redrob", and no Google reviewer sees any of it. The whole surface is now
+off unconditionally, on both the static and the runtime path: accepting Glic's own first-run used to push
+`showAiPage` back to true. `내 Google 서비스 설정` is deliberately kept, because that one is the real Google
+account and sync home.
+
+**The first-run flow continued into Google's promo carousel after our onboarding finished.** Six Korean steps
+explaining this browser, then upstream's feature showcase: a Gemini step, a Google Lens step, a Password Manager
+step offering to "툴바에 추가" — this product has no toolbar — and a theme picker headed, in English, "Make
+Redrob yours". The English is the same root cause as the disclosure above: those strings come from the
+Chromium-branded variants, which Google never translates. `RedrobFirstRunFlowController` now overrides
+`RegisterPostIdentitySteps` and drops `kFeatureShowcase`, `kFinishOrContinue` and `kDefaultBrowser`, filtering
+the queue rather than skipping registration so the base class keeps the completion wiring it owns.
+`kSearchEngineChoice` is kept: that is a regulatory screen, not a promo.
+
+**The profile bubble opened off the left edge of the screen.** Upstream hardcodes `BubbleBorder::TOP_RIGHT`,
+which extends the bubble's body leftward from its anchor — correct when the avatar is the last button of a
+top-right toolbar, which is where upstream puts it. Ours leads a left-hand sidebar at x≈17, so leftward is off
+the window and off the display: measured on a 1560×860 window at 0,0, the body landed at a negative x and all
+that was on screen was a ~40px slice of its right edge overlapping the sidebar it was anchored to. The arrow is
+now chosen from the anchor's position against the work area, rather than pinned to the other corner, because the
+same class also serves the incognito menu and an anchor near the trailing edge would then clip the other way.
+
+**The workspace button could not be pressed until you already had a workspace.** It was `SetEnabled(count > 0)`,
+and `ShowWorkspaceMenu` returned early on an empty list — so the header's only dropdown was dead from the moment
+the browser was installed, which is exactly when someone presses it to find out what a workspace is. The tooltip
+said to save a tab group first, but a tooltip is the reward for hovering something you already believe works.
+The menu now always opens: with none saved it says so in a disabled row and offers "이 탭들을 워크스페이스로
+저장", which groups the window's ungrouped tabs. Only ungrouped ones, because `AddToNewGroup` would otherwise
+move tabs out of the group they are already in — the agent's own group included.
+
+**An empty section was a heading with nothing under it**, which reads as a half-drawn list rather than an empty
+one. Bookmarks and Chats now each carry a note saying what would put a row there — `Ctrl+D를 누르면 이 페이지가
+여기 담깁니다` and `에이전트에게 맡긴 작업이 여기 쌓입니다` — built as labels, not rows, because a row that looks
+like every other row and does nothing when clicked is the defect being fixed. The bookmarks note sits after the
+`model->loaded()` guard: while the model is loading the section is not empty, it is unknown.
+
+**The search pill had no state to change.** `seg-on` was a static class in the markup that nothing ever moved,
+so the control permanently claimed "AI에게 요청" was selected. `Search` was not a mode at all — it acted the
+instant it was clicked, and returned silently when the field was empty, which is why pressing it appeared to do
+nothing. Enter was governed by neither segment, since `Ask AI` was the form's submit button. Both segments now
+only select; submitting acts, and the placeholder follows the mode. A URL is still opened rather than searched or
+filed as work, in either mode.
+
+**The collapsed rail's glyphs did not line up.** The rail is 56px wide, so its centre is 27.5. Measured: the tab
+favicon was correct at 27.5, the collapse toggle sat at 23.0 and the settings gear at 22.8 — both about 4.6px
+left, because each kept the expanded row's leading padding into a state that has no labels to align to. The
+toggle was explicit about it, reading `is_collapsed ? 0 : centre`, which is backwards. `RedrobAccountRow` did not
+know about collapsing at all. Both are centred now, measured at 28.0 and 27.8.
+
+The avatar was also missing from the collapsed rail entirely, while the comment beside the code that removed it
+said it was "the one thing that STAYS". It is 28px, needs no label, and is this browser's only sign-in control.
+Two things hid it: `SetVisible(!collapsed)` and, more decisively, hiding the container it lives in. It now stays
+and centres, measured at 27.5.
+
+**The onboarding ran once and was then unreachable**, so the one page that explains this product was the one
+page a user could not get back to. Settings has a "시작하기" section that reopens it. Its final button used to
+do nothing outside the first-run flow — there was no callback to run — which would have made the fix ship a dead
+control; it now leaves on the new tab, the same place finishing first run lands.
+
 **The package created an empty signing keyring on every machine that installed it.** With no update channel
 configured, `install_deb822_sources` correctly refused to add an apt source — but `install_key` ran anyway, and
 with `PGP_KEY_DATA` empty its body is silent rather than failing: `echo "" | base64 -d` exits 0 and produces

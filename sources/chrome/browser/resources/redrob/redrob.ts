@@ -395,6 +395,16 @@ function navigationTarget(input: string): string|null {
 // job is the right default, and widening is a decision the user makes deliberately.
 let composerMode: PermissionMode = PermissionMode.kGuard;
 
+// Which of the two segments is selected: does what you type go to the web, or to the agent?
+//
+// Distinct from `composerMode` above, which is the PERMISSION a task runs under (read / guard / full). Two
+// different questions that both used to be called a mode, only one of which the pill was about.
+//
+// Defaults to 'ask', matching the class the markup ships with -- this is an agent browser, and the new tab's
+// field is primarily where work is handed over.
+type Intent = 'search'|'ask';
+let intent: Intent = 'ask';
+
 const MODES: Record<string, PermissionMode> = {
   read: PermissionMode.kReadOnly,
   guard: PermissionMode.kGuard,
@@ -540,17 +550,34 @@ if (openTaskId) {
 
   // Search is the browser's job, not the agent's. Handing the omnibox the query keeps one search
   // path in the product rather than a second one that only works on this page.
-  $<HTMLButtonElement>('mode-search').addEventListener('click', () => {
-    const query = $<HTMLInputElement>('prompt').value.trim();
-    if (!query) {
-      return;
-    }
-    // An address goes to the address even under Search: searching the web for a URL the user has already
-    // typed in full is never what was meant.
-    const target = navigationTarget(query);
-    location.href =
-        target ?? `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-  });
+  //
+  // Both segments now only SELECT a mode; submitting is what acts. That is what makes the pill honest --
+  // `seg-on` moves, so the control reports the mode it is actually in -- and it also puts the keyboard and
+  // the buttons on the same rule, where before Enter filed a task no matter which segment looked selected.
+  const paintIntent = () => {
+    const search = $<HTMLButtonElement>('mode-search');
+    const ask = $<HTMLButtonElement>('mode-ask');
+    search.classList.toggle('seg-on', intent === 'search');
+    ask.classList.toggle('seg-on', intent === 'ask');
+    search.setAttribute('aria-pressed', String(intent === 'search'));
+    ask.setAttribute('aria-pressed', String(intent === 'ask'));
+    // The placeholder follows the mode. Leaving "Ask AI a task, @ for context" under a selected Search
+    // segment would be the same class of lie the static seg-on was.
+    $<HTMLInputElement>('prompt').placeholder = loadTimeData.getString(
+        intent === 'search' ? 'newTabPromptPlaceholderSearch' : 'newTabPromptPlaceholder');
+  };
+
+  const setIntent = (next: Intent) => {
+    intent = next;
+    paintIntent();
+    // Focus returns to the field, because selecting a mode is never the goal -- typing is.
+    $<HTMLInputElement>('prompt').focus();
+  };
+
+  $<HTMLButtonElement>('mode-search').addEventListener(
+      'click', () => setIntent('search'));
+  $<HTMLButtonElement>('mode-ask').addEventListener('click', () => setIntent('ask'));
+  paintIntent();
 
   $<HTMLFormElement>('composer').addEventListener('submit', async (event: Event) => {
     event.preventDefault();
@@ -559,13 +586,25 @@ if (openTaskId) {
     if (!prompt) {
       return;
     }
-    // Before anything else: an address is OPENED, not filed as work. This runs whichever segment looks
-    // selected, because Enter reaches this handler either way -- mode-ask is the form's submit button, so the
-    // segmented control never governed the keyboard at all and a URL typed under "Ask AI" still became a task.
+    // Before anything else: an address is OPENED, not filed as work. This runs in either mode, because
+    // searching the web for a URL the user has already typed in full is never what was meant, and neither is
+    // handing it to an agent as a task.
     const target = navigationTarget(prompt);
     if (target) {
       field.value = '';
       location.href = target;
+      return;
+    }
+    // Search mode stops here. The segment now governs Enter as well as the click, which it never did while
+    // `Ask AI` was the form's submit button.
+    //
+    // TODO: this uses Google explicitly rather than the profile's default search provider, so changing the
+    // default engine in settings does not change what this field does. Fixing it needs the browser side to
+    // hand over the default provider's URL (or to perform the navigation itself), which is a mojo addition
+    // rather than a change here.
+    if (intent === 'search') {
+      field.value = '';
+      location.href = `https://www.google.com/search?q=${encodeURIComponent(prompt)}`;
       return;
     }
     const chosen = $<HTMLSelectElement>('effort').value;

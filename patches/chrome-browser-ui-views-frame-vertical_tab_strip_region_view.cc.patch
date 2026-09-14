@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
-index ab919030ae2fb..a1a5792651058 100644
+index ab919030ae2fb..54f9b402a33cb 100644
 --- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
 +++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
 @@ -49,6 +49,8 @@
@@ -59,7 +59,7 @@ index ab919030ae2fb..a1a5792651058 100644
  
    OnCollapseStateChanged(state_controller_->GetCollapseState());
  }
-@@ -784,6 +807,12 @@ void VerticalTabStripRegionView::OnCollapseStateChanged(
+@@ -784,6 +807,18 @@ void VerticalTabStripRegionView::OnCollapseStateChanged(
      tab_strip_view()->SetCollapsedState(collapsed);
    }
  
@@ -67,6 +67,12 @@ index ab919030ae2fb..a1a5792651058 100644
 +  // their labels, so they hide rather than clip.
 +  if (redrob_sections_) {
 +    redrob_sections_->SetCollapsed(collapsed);
++  }
++
++  // The foot of the column follows it too. It did not before, which is why the settings gear kept the
++  // expanded row's leading padding and sat 4.7px left of the glyphs above it in the collapsed rail.
++  if (redrob_account_row_) {
++    redrob_account_row_->SetCollapsed(collapsed);
 +  }
 +
    if ((state == tabs::VerticalTabStripCollapseState::kCollapsing) ||

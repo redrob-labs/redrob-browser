@@ -107,11 +107,16 @@
       <message name="IDS_REDROB_SIDEBAR_SWITCH_WORKSPACE" desc="Tooltip on the workspace button when there is at least one workspace">Switch workspace</message>
       <message name="IDS_REDROB_SIDEBAR_SAVE_GROUP_FOR_WORKSPACE" desc="Tooltip on the workspace button when the user has no workspaces yet">Save a tab group to make it a workspace</message>
       <message name="IDS_REDROB_SIDEBAR_UNTITLED_WORKSPACE" desc="Menu entry for a saved tab group the user never named">Untitled workspace</message>
+      <message name="IDS_REDROB_SIDEBAR_BOOKMARKS_EMPTY" desc="Shown under the Bookmarks heading when the user has no bookmarks">Press Ctrl+D to keep a page here</message>
+      <message name="IDS_REDROB_SIDEBAR_CHATS_EMPTY" desc="Shown under the Chats heading when the user has no agent tasks">Tasks you give the agent appear here</message>
+      <message name="IDS_REDROB_SIDEBAR_NO_WORKSPACES_YET" desc="Disabled first item of the workspace menu, shown when none exist">No workspaces yet</message>
+      <message name="IDS_REDROB_SIDEBAR_SAVE_WORKSPACE" desc="Workspace menu command that turns the window's tabs into a saved workspace">Save these tabs as a workspace</message>
       <message name="IDS_REDROB_NEW_TAB_PROMPT_LABEL" desc="Accessible name of the new tab's main input">Task for the agent</message>
       <message name="IDS_REDROB_NEW_TAB_PROMPT_PLACEHOLDER" desc="Placeholder in the new tab's main input">Ask AI a task, @ for context</message>
       <message name="IDS_REDROB_NEW_TAB_MODE_GROUP" desc="Accessible name of the Search / Ask AI pair">Mode</message>
-      <message name="IDS_REDROB_NEW_TAB_MODE_SEARCH" desc="Button that treats what was typed as a web search">Search</message>
-      <message name="IDS_REDROB_NEW_TAB_MODE_ASK" desc="Button that hands what was typed to the agent as a task">Ask AI</message>
+      <message name="IDS_REDROB_NEW_TAB_MODE_SEARCH" desc="Segment that selects search mode; what is typed then goes to the web">Search</message>
+      <message name="IDS_REDROB_NEW_TAB_MODE_ASK" desc="Segment that selects agent mode; what is typed then becomes a task">Ask AI</message>
+      <message name="IDS_REDROB_NEW_TAB_PROMPT_PLACEHOLDER_SEARCH" desc="Placeholder in the new tab's main input while Search mode is selected">Search the web or type a URL</message>
       <message name="IDS_REDROB_NEW_TAB_ADD_CONTEXT" desc="Accessible name of the + button that attaches context">Add context</message>
       <message name="IDS_REDROB_NEW_TAB_PERMISSION_MODE" desc="Label of the control that picks how much the agent may do">Permission mode</message>
       <message name="IDS_REDROB_NEW_TAB_PERMISSION_READ" desc="Permission level: the agent may read pages and change nothing">Read only</message>
@@ -338,6 +343,9 @@
       <message name="IDS_REDROB_SE_ROUTINES_LEDE" desc="Explains the routines section. Carries its own &lt;strong&gt; markup so a translation can place it">Tasks the browser starts on its own. A &lt;strong&gt;schedule&lt;/strong&gt; starts a new task each time; a &lt;strong&gt;heartbeat&lt;/strong&gt; wakes one of your existing chats with its context intact.</message>
       <message name="IDS_REDROB_SE_SIGNIN_CLIENT_WARN" desc="Warns that a third-party OAuth client id will be refused. Carries its own &lt;strong&gt; markup">&lt;strong&gt;The client ID has to be your own.&lt;/strong&gt; Two things are worth knowing before you try someone else’s. Anthropic prohibited subscription sign-in outside Claude Code in February 2026 and rejects those tokens at the server, so a Claude subscription cannot be connected here at all — use an API key above, which works. OpenAI does allow ChatGPT subscription sign-in in third-party tools and its endpoints are public, but a client ID that is not their own first-party one is refused at the token endpoint. If that happens you will see the provider’s own error, not ours.</message>
       <message name="IDS_REDROB_SE_CLI_RPC_NOTE" desc="Explains what the local endpoint serves. Carries its own &lt;span&gt; markup">Serves three things: an HTTP endpoint that can stream a task’s answer back to a script, an MCP server at &lt;span class="mono"&gt;POST /mcp&lt;/span&gt; so another agent — Redrob Code included — can call this browser as a tool, and the same verbs one at a time. Loopback only, on a port the system picks, and every request needs a token generated fresh each launch — programs read the address and the token from &lt;span class="mono" id="rpc-handle"&gt;redrob-cli.json&lt;/span&gt; in this profile’s folder. See docs/AUTOMATION.md.</message>
+      <message name="IDS_REDROB_SE_NAV_GETTING_STARTED" desc="Navigation link to the getting-started section">Getting started</message>
+      <message name="IDS_REDROB_SE_ONBOARDING_LEDE" desc="Explains the getting-started section">The short tour this browser showed when it first opened. It only explains things — nothing you do in it changes a setting, so it is safe to reopen whenever.</message>
+      <message name="IDS_REDROB_SE_ONBOARDING_OPEN" desc="Button that opens the onboarding page in a tab">Open the tour</message>
     </messages>
   </release>
 </grit>

@@ -27,6 +27,8 @@ class RedrobFirstRunFlowController : public FirstRunFlowController {
 
   // FirstRunFlowController
   void Init() override;
+  base::queue<ProfileManagementFlowController::Step> RegisterPostIdentitySteps(
+      PostHostClearedCallback post_host_cleared_callback) override;
 
  private:
   void OnOnboardingComplete();

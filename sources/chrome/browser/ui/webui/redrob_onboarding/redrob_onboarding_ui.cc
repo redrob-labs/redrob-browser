@@ -14,10 +14,14 @@
 #include "chrome/browser/redrob/resources/redrob_localized_strings.h"
 #include "chrome/grit/redrob_onboarding_resources.h"
 #include "chrome/grit/redrob_onboarding_resources_map.h"
+#include "chrome/common/webui_url_constants.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/webui/webui_util.h"
+#include "url/gurl.h"
 
 namespace redrob {
 
@@ -65,10 +69,20 @@ void RedrobOnboardingUI::SetCompleteCallback(base::RepeatingClosure callback) {
 }
 
 void RedrobOnboardingUI::OnComplete() {
-  // Empty when this page was opened outside the first-run flow -- by typing its host, say. Doing
-  // nothing is correct there: there is no flow to finish, and no window of ours to close.
   if (complete_callback_) {
     complete_callback_.Run();
+    return;
+  }
+  // No callback means this page was opened as an ORDINARY TAB -- from Settings' "Open the tour", or by typing
+  // the host. There is no flow to finish and no window of ours to close, so this used to do nothing, which was
+  // defensible only while the page was unreachable outside first run. It is reachable now, and a final button
+  // that says it finishes something and then does nothing is the same dead control this shell is being
+  // cleaned of. Leaving on the new tab is what finishing first run lands on, so the two paths agree.
+  if (content::WebContents* contents = web_ui()->GetWebContents()) {
+    contents->GetController().LoadURL(GURL(chrome::kChromeUIRedrobURL),
+                                      content::Referrer(),
+                                      ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
+                                      /*extra_headers=*/std::string());
   }
 }
 

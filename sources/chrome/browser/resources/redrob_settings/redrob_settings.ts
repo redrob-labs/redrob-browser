@@ -368,6 +368,13 @@ $<HTMLInputElement>('password-autosignin').addEventListener('change', () => {
   host.setPasswordAutoSignin($<HTMLInputElement>('password-autosignin').checked);
 });
 
+$<HTMLButtonElement>('open-onboarding').addEventListener('click', () => {
+  // This tab, not a new one: a WebUI page opening a popup is at the mercy of the popup blocker, and the tour
+  // is a full-page flow rather than something to read beside the settings. Its own final button navigates to
+  // the new tab, so there is a way out that does not depend on the back button.
+  location.href = 'chrome://redrob-onboarding/';
+});
+
 $<HTMLButtonElement>('password-open').addEventListener('click', () => {
   host.openPasswordManager();
 });

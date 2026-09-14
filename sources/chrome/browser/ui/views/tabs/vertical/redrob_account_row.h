@@ -12,6 +12,7 @@
 class BrowserWindowInterface;
 
 namespace views {
+class BoxLayout;
 class LabelButton;
 }  // namespace views
 
@@ -34,11 +35,17 @@ class RedrobAccountRow : public views::View {
   RedrobAccountRow& operator=(const RedrobAccountRow&) = delete;
   ~RedrobAccountRow() override;
 
+  // Collapsed, this row is a single centred glyph: the label is dropped and the gear is centred in the rail.
+  void SetCollapsed(bool collapsed);
+
  private:
   void OpenSettings();
 
   raw_ptr<BrowserWindowInterface> browser_;
   raw_ptr<views::LabelButton> settings_button_ = nullptr;
+  // Held because SetCollapsed re-aligns it rather than rebuilding the row.
+  raw_ptr<views::BoxLayout> layout_ = nullptr;
+  bool collapsed_ = false;
 };
 
 }  // namespace redrob

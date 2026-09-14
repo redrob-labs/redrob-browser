@@ -98,3 +98,53 @@ void RedrobFirstRunFlowController::OnOnboardingComplete() {
   HandleIdentityStepsCompleted(onboarding_profile_, PostHostClearedCallback(),
                                /*is_continue_callback=*/false);
 }
+
+// Upstream's promo carousel does not run in this product.
+//
+// What it was: after our own six onboarding steps finished, the first-run window continued into Chrome's
+// "feature showcase" -- a Gemini step, a Google Lens step, a Password Manager step offering to "add the
+// shortcut to the toolbar", a theme picker headed "Make Redrob yours", then an "all set" screen. Three
+// separate problems, any one of which is disqualifying:
+//
+//   1. It advertises Google features this browser does not ship, with Google's own branding, immediately
+//      after an onboarding that explains what this browser actually does.
+//   2. It offers to pin things to a TOOLBAR. This product has no toolbar -- the address row carries
+//      navigation only and there is no app menu -- so the button could not have worked.
+//   3. Its strings come from the Chromium-branded variants, which Google never translates. So a flow whose
+//      first six steps are fully Korean continued in English: "Built into Redrob to help you create, save,
+//      and autofill strong passwords."
+//
+// Done by FILTERING THE QUEUE rather than by not registering the steps. The base class builds them and wires
+// their completion callbacks into its own bookkeeping in the same function; skipping registration would mean
+// reimplementing that wiring, and `finish_flow_callback_` -- which the finish step needs -- is private to it.
+// A registered step that is never queued is never shown, and the completion path we DO want, kFinishFlow,
+// keeps the callback the base class gave it.
+//
+// kSearchEngineChoice is deliberately KEPT. It is not a promo: it is the choice screen shown to users in the
+// regions that require one, and suppressing it would be a regulatory decision rather than a design one.
+base::queue<ProfileManagementFlowController::Step>
+RedrobFirstRunFlowController::RegisterPostIdentitySteps(
+    PostHostClearedCallback post_host_cleared_callback) {
+  base::queue<ProfileManagementFlowController::Step> upstream_steps =
+      FirstRunFlowController::RegisterPostIdentitySteps(
+          std::move(post_host_cleared_callback));
+
+  base::queue<ProfileManagementFlowController::Step> steps;
+  while (!upstream_steps.empty()) {
+    const ProfileManagementFlowController::Step step = upstream_steps.front();
+    upstream_steps.pop();
+    switch (step) {
+      case ProfileManagementFlowController::Step::kFeatureShowcase:
+      case ProfileManagementFlowController::Step::kFinishOrContinue:
+      // kDefaultBrowser is the step upstream shows INSTEAD of the showcase when its revamp flag is off.
+      // Dropped as well, so this flow does not depend on which side of that flag the build lands on --
+      // otherwise flipping a Chromium feature flag would silently put a promo back after our onboarding.
+      case ProfileManagementFlowController::Step::kDefaultBrowser:
+        continue;
+      default:
+        steps.push(step);
+        break;
+    }
+  }
+  return steps;
+}

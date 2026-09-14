@@ -19,3 +19,13 @@ sidebarWorkspaces	Workspaces	워크스페이스	Sidebar header button when no wo
 sidebarSwitchWorkspace	Switch workspace	워크스페이스 전환	Tooltip on the workspace button when there is at least one workspace
 sidebarSaveGroupForWorkspace	Save a tab group to make it a workspace	탭 그룹을 저장하면 워크스페이스가 됩니다	Tooltip on the workspace button when the user has no workspaces yet
 sidebarUntitledWorkspace	Untitled workspace	이름 없는 워크스페이스	Menu entry for a saved tab group the user never named
+
+# Empty sections. A heading with nothing under it reads as a rendering fault, so each empty list says
+# what would put something there -- which is also the only teaching this shell does in place.
+sidebarBookmarksEmpty	Press Ctrl+D to keep a page here	Ctrl+D를 누르면 이 페이지가 여기 담깁니다	Shown under the Bookmarks heading when the user has no bookmarks
+sidebarChatsEmpty	Tasks you give the agent appear here	에이전트에게 맡긴 작업이 여기 쌓입니다	Shown under the Chats heading when the user has no agent tasks
+
+# The workspace menu when the user has none yet. The button used to be disabled in this state, which made
+# the header's only dropdown a control that could not be pressed and never said why.
+sidebarNoWorkspacesYet	No workspaces yet	아직 워크스페이스가 없습니다	Disabled first item of the workspace menu, shown when none exist
+sidebarSaveWorkspace	Save these tabs as a workspace	이 탭들을 워크스페이스로 저장	Workspace menu command that turns the window's tabs into a saved workspace
