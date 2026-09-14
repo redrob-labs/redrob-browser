@@ -4,6 +4,38 @@ No macOS build of this fork has ever existed. This is what stands between here a
 actually bite — written from an audit of our own patches on a Linux host, so everything below is either a fact
 about the code or a number measured on Linux, and nothing is a guess about how a mac will behave.
 
+## Measured: the first hosted run, and disk was the wall
+
+Run 34809642148 on `macos-15`, 2026-09-14. It failed in `sync` after **35 minutes**, cloning `chromium/src`:
+
+```
+fatal: write error: No space left on device
+fatal: fetch-pack: invalid index-pack output
+```
+
+The runner:
+
+| | |
+|---|---|
+| macOS | 15.7.9, Xcode 16.4 |
+| RAM | **7.0 GB** |
+| disk available | **37 GiB** (`df -h /`: 320Gi size, 10Gi used) |
+
+A Chromium checkout is around 50 GB before a single object is compiled, so 37 GiB cannot hold it. This is the
+one prediction in this repository's docs that turned out **right** — `docs/WINDOWS.md` guessed the same thing
+about the Windows runner and was wrong there, where 185 GiB is free and RAM is the constraint instead. The two
+platforms fail for opposite reasons, which is why both now carry measurements rather than expectations.
+
+What the run does establish, because these steps passed before the disk ran out:
+
+- the **Apple credential check passes** — all five secrets reach this repository and the `AuthKey.p8` is written
+- `depot_tools` **bootstraps on macOS**
+- `check_repo.py` runs clean on macOS, so the encoding fixes made for Windows hold here too
+
+Everything from `build` onward is still unanswered, including whether the CoreText registration compiles and
+whether `sign_chrome.py` accepts the arguments the workflow passes it. A self-hosted mac with ≥200 GB free is
+what answers those.
+
 ## 1. A machine, and which kind
 
 The Linux **release** build measured a **19.9 GB peak RSS** across the LTO link. A GitHub-hosted macOS runner has
