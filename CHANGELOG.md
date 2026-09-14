@@ -4,6 +4,27 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
+## 0.1.2 — 2026-09-14
+
+Korean, and a header that stopped losing two buttons.
+
+**Hanja and decomposed Hangul had no font behind them.** The bundled Pretendard covers all 11,172 precomposed
+Hangul syllables — which is why Korean looked fine — and zero of the conjoining Jamo block and zero CJK Han, both
+measured. So Hanja in a document, and the NFD Hangul macOS puts in filenames, were tofu boxes on a minimal
+install. `fonts-noto-cjk` is now a dependency: 256/256 Jamo and 20,976/20,992 Han. Pretendard stays as the UI
+face; swapping the company's typeface to reach a block that only appears in decomposed strings would have cost
+the brand everywhere to fix it in one place. The dependency adds about 60 MB.
+
+**The sign-in promo pushed the magnifier and compose button off the sidebar.** Signed out, the avatar expands into
+a "Sign in to Google?" pill about 145px wide, and in a flat 254px row that width shifted both trailing controls
+past the column's edge — a browser that lost two controls depending on sign-in state. The leading group now
+carries the row's flex, so the workspace name elides and the controls hold their coordinates.
+
+**macOS groundwork**, none of it yet compiled: the CoreText font registration is written, the font travels as
+`bundle_data` inside the framework where `DIR_MODULE` can actually find it, `build/args/mac.gn` is a dev flavour
+sized for a hosted runner, and `.github/workflows/macos.yml` asks one question — does it build and launch. See
+`docs/MACOS.md`.
+
 ## 0.1.1 — 2026-09-14
 
 One fix, and it is the reason 0.1.0 should not be installed.
