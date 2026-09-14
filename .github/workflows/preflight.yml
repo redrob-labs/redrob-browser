@@ -1,0 +1,71 @@
+# Which org credentials does this repository actually see?
+#
+# This exists because the question was answered wrong twice from the outside. `gh secret list --org` returns
+# 403 without org-admin, and this repository has no secrets of its own -- from which it is tempting, and
+# incorrect, to conclude that nothing is configured. Org-level secrets are inherited BY NAME and are simply
+# unlistable; the only place that can answer is a job running inside the repository.
+#
+# It prints PRESENT or ABSENT and nothing else. Never a value, never a length -- a length is a hint, and the
+# whole point of a preflight is that it is safe to run and read. The missing-name loop is copied from
+# redrob-design's own "Require the Windows signing certificate" step so the convention matches the rest of the
+# org rather than being invented here.
+name: preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  credentials:
+    name: which credentials are visible
+    runs-on: ubuntu-latest
+    env:
+      # The CDN triple. These names are not ours: they are what redrob-design/cdn.yml and
+      # redrob-office/release-office-cdn.yml already consume, so the same org values reach us unchanged.
+      REDROB_CDN_BUCKET: ${{ vars.REDROB_CDN_BUCKET }}
+      REDROB_CDN_ACCESS_KEY_ID: ${{ secrets.REDROB_CDN_ACCESS_KEY_ID }}
+      REDROB_CDN_SECRET_ACCESS_KEY: ${{ secrets.REDROB_CDN_SECRET_ACCESS_KEY }}
+      # The apt repository's signing key. Ours alone -- no sibling runs an apt repository, so unlike the three
+      # above there is no other workflow to confirm the name from. This job is the only way to know.
+      REDROB_SIGNING_KEY: ${{ secrets.REDROB_SIGNING_KEY }}
+      # Windows Authenticode, as redrob-design uses it.
+      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      # Apple signing and notarization, as redrob-design uses them.
+      APPLE_CODESIGN_CERT_P12_BASE64: ${{ secrets.APPLE_CODESIGN_CERT_P12_BASE64 }}
+      APPLE_CODESIGN_CERT_PASSWORD: ${{ secrets.APPLE_CODESIGN_CERT_PASSWORD }}
+      APPLE_NOTARY_API_KEY_ID: ${{ secrets.APPLE_NOTARY_API_KEY_ID }}
+      APPLE_NOTARY_API_ISSUER_ID: ${{ secrets.APPLE_NOTARY_API_ISSUER_ID }}
+      APPLE_NOTARY_API_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY_P8_BASE64 }}
+    steps:
+      - name: report presence only
+        run: |
+          set -euo pipefail
+          names="
+          REDROB_CDN_BUCKET
+          REDROB_CDN_ACCESS_KEY_ID
+          REDROB_CDN_SECRET_ACCESS_KEY
+          REDROB_SIGNING_KEY
+          WIN_CSC_LINK
+          WIN_CSC_KEY_PASSWORD
+          APPLE_CODESIGN_CERT_P12_BASE64
+          APPLE_CODESIGN_CERT_PASSWORD
+          APPLE_NOTARY_API_KEY_ID
+          APPLE_NOTARY_API_ISSUER_ID
+          APPLE_NOTARY_API_KEY_P8_BASE64
+          "
+          missing=0
+          for name in $names; do
+            if [ -n "${!name:-}" ]; then
+              printf 'PRESENT  %s\n' "$name"
+            else
+              printf 'ABSENT   %s\n' "$name"
+              missing=$((missing + 1))
+            fi
+          done
+          echo
+          echo "$missing of the names above are not visible to this repository."
+          # Exit 0 regardless. An absent credential is information, not a broken repository, and a red run
+          # would train everyone to stop reading this workflow.
