@@ -130,8 +130,18 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   // feature -- so this glyph is the workspace's mark, not a second account control. It is also still the
   // browser's ONE avatar: registered with the toolbar below, so every bubble that anchors to "the avatar"
   // finds it here instead of pointing at a corner where nothing is drawn.
+  // The leading group -- avatar, name, chevron -- in its own container, because it is the part that has to give
+  // way. Signed out, the avatar expands into a "Sign in to Google?" pill of about 145px, and in a flat row that
+  // width pushed everything after it along: in a 254px column the magnifier and compose button went off the edge
+  // and were not on the row at all while the promo showed. Flexing this container instead means the group shrinks
+  // and the name elides, and the trailing controls keep their size.
+  auto* lead = header->AddChildView(std::make_unique<views::View>());
+  auto* lead_layout = lead->SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::Orientation::kHorizontal, gfx::Insets(), 4));
+  lead_layout->set_cross_axis_alignment(views::BoxLayout::CrossAxisAlignment::kCenter);
+
   if (browser_) {
-    avatar_ = header->AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
+    avatar_ = lead->AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
     avatar_->SetVisible(true);
     if (BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
       if (ToolbarView* toolbar = browser_view->toolbar()) {
@@ -143,7 +153,7 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   // The workspace switcher. A workspace IS a saved tab group -- the browser already has the concept,
   // persists it, and syncs it, so inventing a parallel one would mean two things the user has to keep
   // in step by hand.
-  workspace_button_ = header->AddChildView(std::make_unique<views::LabelButton>(
+  workspace_button_ = lead->AddChildView(std::make_unique<views::LabelButton>(
       base::BindRepeating(&RedrobSidebarSections::ShowWorkspaceMenu, base::Unretained(this)),
       std::u16string()));
   workspace_button_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -155,15 +165,17 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   // No avatar beside it, though the reference has one. The reference's chip combines the account and the
   // workspace; this product splits them and the account deliberately lives at the column's foot, so a second
   // avatar up here would be a second sign-in affordance for the one account.
-  workspace_chevron_ = header->AddChildView(std::make_unique<views::ImageView>());
+  workspace_chevron_ = lead->AddChildView(std::make_unique<views::ImageView>());
   workspace_chevron_->SetImage(ui::ImageModel::FromVectorIcon(
       vector_icons::kKeyboardArrowDownIcon, sidebar_tokens::kMutedForeground,
       sidebar_tokens::kHeaderGlyphSize));
 
-  // The slack now belongs to a spacer rather than to the name, so the name and its chevron stay together at
-  // the leading edge instead of the chevron being pushed across the column by a stretched button.
-  auto* spacer = header->AddChildView(std::make_unique<views::View>());
-  header_layout->SetFlexForView(spacer, 1);
+  // The flex belongs to the LEADING GROUP, not to a spacer. A spacer absorbing the slack kept the name and its
+  // chevron together, which was the point at the time, but it also meant nothing in the row could shrink -- so an
+  // avatar that grew had to push. Flexing the group lets it be the thing that gives way, and the name elides
+  // inside it because a LabelButton at ELIDE_TAIL shrinks where a fixed one would clip.
+  workspace_button_->SetElideBehavior(gfx::ELIDE_TAIL);
+  header_layout->SetFlexForView(lead, 1);
 
   // The two controls at the trailing edge, measured off the reference: a bare 12px magnifier, then the
   // compose glyph inside a 28px raised circle. The asymmetry is the design and not an oversight -- starting
@@ -349,6 +361,11 @@ void RedrobSidebarSections::SetCollapsed(bool collapsed) {
   }
   if (avatar_) {
     avatar_->SetVisible(!collapsed);
+  }
+  // The container too: a flexed but empty box still claims the row's width, which would hold the trailing
+  // controls away from the edge in a collapsed column.
+  if (workspace_button_ && workspace_button_->parent()) {
+    workspace_button_->parent()->SetVisible(!collapsed);
   }
   search_button_->SetVisible(!collapsed);
   compose_button_->SetVisible(!collapsed);
