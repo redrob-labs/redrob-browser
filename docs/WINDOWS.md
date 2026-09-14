@@ -87,9 +87,17 @@ not get to treat upstream's warnings as its own errors, and a first build on a n
 
 ## Not done, and why it is listed rather than attempted
 
-**Signing.** An unsigned `setup.exe` triggers SmartScreen and reaches users as a warning. That needs an EV or
-Authenticode certificate, which is a purchase and a key-custody decision before it is a build step — the same
-shape as the apt signing key in `docs/RELEASE.md`.
+**Signing — the certificate already exists, so this is wiring, not procurement.** An unsigned `setup.exe`
+triggers SmartScreen and reaches users as a warning. This document previously called that a purchase; it is not.
+`redrob-design/cdn.yml` signs its own Windows installer with `secrets.WIN_CSC_LINK` and
+`secrets.WIN_CSC_KEY_PASSWORD`, and `.github/workflows/preflight.yml` confirms both are visible to **this**
+repository. What is missing is the import-certificate and verify-Authenticode steps in `windows.yml`, which
+should be copied from `redrob-design` rather than written fresh — including its habit of verifying the signature
+after producing it, because a signing step that silently no-ops produces an unsigned binary and a green run.
+
+The org also carries the full Apple set (`APPLE_CODESIGN_CERT_P12_BASE64`, `APPLE_CODESIGN_CERT_PASSWORD`,
+`APPLE_NOTARY_API_KEY_ID`, `APPLE_NOTARY_API_ISSUER_ID`, `APPLE_NOTARY_API_KEY_P8_BASE64`), all confirmed
+present — see `docs/MACOS.md`, which had this right before this document did.
 
 **Updates.** The Linux side updates through the apt repository `scripts/build_repo.py` produces. Windows has no
 equivalent here. Chromium's own answer is Omaha, which is a second service to run; until one exists a Windows

@@ -46,6 +46,13 @@ two values have to exist before it will. Until both do, the guard in `apt.includ
 which is the only safe default: no auto-update is a documented gap, whereas pointing a machine at a repository we
 cannot verify is a defect.
 
+**As of 2026-09-14 exactly one of the two is missing, and it is the key.** `.github/workflows/preflight.yml`
+reports which org credentials this repository can see, and the answer is that the CDN triple is already there
+while `REDROB_SIGNING_KEY` is not. Run that workflow rather than reasoning about it: org secrets are inherited
+by name and `gh secret list --org` returns 403 without org-admin, so from outside the repository an inherited
+secret and an absent one look identical — which is how this document came to describe a configured bucket as
+missing.
+
 **1. The public signing key**, which the package embeds and installs to `/usr/share/keyrings/redrob-browser.gpg`:
 
 ```
@@ -58,6 +65,10 @@ that signs the repository — `build_repo.py` signs with `REDROB_SIGNING_KEY`, s
 and a mismatch shows up as apt rejecting the repository for a bad signature.
 
 **2. The bucket**, so `cdn.redrob.ai/browser/apt` answers: `REDROB_CDN_BUCKET` plus the two credential secrets.
+**Already configured** — `vars.REDROB_CDN_BUCKET`, `secrets.REDROB_CDN_ACCESS_KEY_ID` and
+`secrets.REDROB_CDN_SECRET_ACCESS_KEY` are org values that `redrob-design/cdn.yml` and
+`redrob-office/release-office-cdn.yml` already consume, `release.yml` here consumes the same three names, and
+preflight confirms all three reach this repository. Nothing to do for this half.
 
 The URL is already wired. Both `REPOCONFIG` and the deb822 `URIs:` field come from one string,
 `InstallerConfig.REDROB_REPO_BASE` — they were two independent hardcodings of Chrome's URL, and fixing only the
