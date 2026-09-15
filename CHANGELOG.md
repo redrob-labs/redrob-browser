@@ -6,6 +6,38 @@ upstream's four-week cadence whether we ship anything or not — the two numbers
 
 ## Unreleased
 
+### Known issue: one unclean exit and the profile will not start again
+
+Not fixed here, and not caused by anything in this section — reproduced on the **shipped v0.1.3 binary**
+extracted from its own `.deb`, so it is in the published release.
+
+`profile.exit_type` is set to `Crashed` by any unclean exit: a real crash, a `SIGKILL`, a machine losing
+power. On the next start that flag puts the browser on the post-crash recovery path, and this build **traps**
+in that path — `SIGTRAP`, no window, no message, because an official build strips `CHECK` text. The flag is
+only cleared by a *successful* start, so it never clears: every subsequent launch takes the same path and dies
+the same way. One force-quit makes the profile permanently unusable, and a user's only recovery is to delete
+their profile, losing tabs, bookmarks and workspaces.
+
+Reduced to a one-line reproduction. Take any working profile and set that single pref:
+
+```
+profile.exit_type = "Normal"   -> window opens
+profile.exit_type = "Crashed"  -> SIGTRAP, every time, on a brand new profile too
+```
+
+Established by bisection, not inspection: keeping only `profile` out of 57 top-level preference groups
+reproduces it, and inside that group `exit_type` alone is enough. It is independent of the URL on the command
+line, of `--start-maximized`, of the display, and of session and bookmark state. `--hide-crash-restore-bubble`
+avoids it, but that switch makes `HasPendingUncleanExit()` return false and so disables the *whole* recovery
+path — the crash-restore bubble and `is_post_crash_launch` together — so it does not localise the fault.
+
+One lead, from reading rather than measurement: `SessionCrashedBubbleView::ShowBubble` anchors the restore
+prompt to `GetAppMenuControl()`, and this product has no app menu — it is built but never shown — so that
+returns null and the bubble is constructed with a null anchor. Giving it the sidebar avatar instead did NOT
+stop the crash, so the null anchor is either harmless or only part of it; that change was reverted rather than
+shipped, since a fix that cannot be shown to fix anything is worse than none. Diagnosing this properly needs a
+`dcheck_always_on` build to recover the `CHECK` message the official build discards.
+
 **The settings page told users, under our name, that their data goes to Google and that Google staff read it.**
 `chrome://settings` carried an "AI in Redrob" section — upstream's page for Google's own AI features, with brand
 substitution making every one of them read as ours. Its rows were AI history search, AI suggestions, "Skills in
