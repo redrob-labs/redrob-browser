@@ -1,6 +1,6 @@
 # Redrob Browser (Chromium base)
 
-An AI-native browser built as a **patch-based fork of Chromium**. This branch starts from nothing on
+Redrob Browser is an AI-native browser built as a patch-based fork of Chromium. This branch starts from nothing on
 purpose: the previous base was a Zen/Firefox fork, and Korean banking and public-sector sites depend on
 Chrome extensions and native messaging rather than on rendering, which is a dependency only a real
 Chromium browser satisfies.
