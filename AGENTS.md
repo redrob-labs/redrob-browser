@@ -24,6 +24,13 @@ Both branches are protected the same way: pull requests only, force pushes and d
 required reviews, admin enforcement off. The required status check is `repo integrity`, which is the
 job name inside `checks.yml`.
 
+Working branches are `<type>/<short-slug>` and the allowed types are `feat`, `fix`, `docs`, `chore`,
+`test`, `refactor`, `perf`, `hotfix`, `release` and `sync`. `gitflow.yml` now enforces that list on
+every pull request, so a prefix outside it fails the check instead of merging: the `kiro/` branches
+already in this repository are what the rule exists to catch, because a branch name states what the
+change is and not which tool produced it. Nothing in the tracked tree declared a type list before
+this, so this set is the shared default rather than a list copied from a document here.
+
 Two things to know before you trust what you read in the tree. `CONTRIBUTING.md` still describes the
 older model, one long-lived `main` with no `develop`, and says in as many words that this repository
 does not run Git Flow: that text is now stale and `develop` wins. And pull request #5 from another
@@ -72,8 +79,10 @@ the manual pass in `docs/TESTING.md` against an installed `.deb`.
 
 `checks.yml` triggers on `push` to every branch and on `pull_request`, and its single job is named
 `repo integrity`. It deliberately does not build the browser: it runs `check_repo.py`, then
-`compileall` over `scripts/`, then prints both versions. This is the only workflow that runs on a pull
-request, so it is the only one that can be a required check.
+`compileall` over `scripts/`, then prints both versions. It is the only workflow that inspects the
+tree on a pull request, and `gitflow.yml` is the other workflow that runs on one: `gitflow.yml` judges
+the branch name on `pull_request` and, on `push` to `main`, whether `main` is contained in `develop`.
+Both report on a pull request, so either can be a required check.
 
 `release.yml` triggers on tags matching `v*` and on `workflow_dispatch`, runs on a self-hosted runner
 labelled `[self-hosted, linux, x64, chromium-build]` with a 700 minute timeout, and re-runs
