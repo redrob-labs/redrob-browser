@@ -50,7 +50,9 @@ class TaskHostImpl : public mojom::TaskHost,
                  const std::vector<std::string>& context_refs,
                  mojom::PermissionMode mode,
                  mojom::Effort effort,
+                 const std::string& model,
                  StartTaskCallback callback) override;
+  void ListModels(ListModelsCallback callback) override;
   void CancelTask(const std::string& task_id) override;
   void ListTasks(ListTasksCallback callback) override;
   void GetTask(const std::string& task_id, GetTaskCallback callback) override;
@@ -58,6 +60,10 @@ class TaskHostImpl : public mojom::TaskHost,
                     const std::string& prompt,
                     mojom::FollowUpMode mode,
                     SendFollowUpCallback callback) override;
+  void WithdrawQueuedFollowUp(const std::string& task_id,
+                              uint32_t index,
+                              const std::string& expected_prompt,
+                              WithdrawQueuedFollowUpCallback callback) override;
   void SetPermissionMode(const std::string& task_id,
                         mojom::PermissionMode mode,
                         SetPermissionModeCallback callback) override;

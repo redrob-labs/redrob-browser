@@ -10,14 +10,17 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/strings/escape.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "base/uuid.h"
 #include "base/base64.h"
 #include "base/path_service.h"
 #include "base/task/sequenced_task_runner.h"
+#include "chrome/browser/redrob/resources/grit/redrob_strings.h"
 #include "chrome/browser/redrob/agent_tabs.h"
 #include "chrome/browser/redrob/memory_store.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "chrome/browser/redrob/model_store.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/browser/redrob/file_tools.h"
@@ -346,7 +349,8 @@ void TaskStore::RemoveObserver(Observer* observer) {
 
 std::string TaskStore::CreateTask(const std::string& prompt,
                                   mojom::PermissionMode mode,
-                                  mojom::Effort effort) {
+                                  mojom::Effort effort,
+                                  const std::string& model) {
   // The id is generated here rather than by the engine: the page needs something to render against
   // before any request has been answered, and a browser-side id cannot be forged by the renderer.
   const std::string task_id = base::Uuid::GenerateRandomV4().AsLowercaseString();
@@ -358,6 +362,7 @@ std::string TaskStore::CreateTask(const std::string& prompt,
   task->started_at_ms = NowMs();
   task->mode = mode;
   task->effort = effort;
+  task->model = model;
 
   // The folder the user last chose, carried forward. Asking again for every task would train people to
   // click through the picker, which is the opposite of what a picker is for -- and the folder is still
@@ -433,7 +438,8 @@ std::pair<std::optional<std::string>, std::optional<mojom::StartError>> TaskStor
     const std::string& prompt,
     const std::vector<std::string>& context_refs,
     mojom::PermissionMode mode,
-    mojom::Effort effort) {
+    mojom::Effort effort,
+    const std::string& model) {
   if (prompt.empty() || prompt.size() > kMaxPromptBytes ||
       context_refs.size() > kMaxContextRefs) {
     // Dropping the extra refs silently would make the page's view of its own request wrong, which is
@@ -462,7 +468,7 @@ std::pair<std::optional<std::string>, std::optional<mojom::StartError>> TaskStor
     return {std::nullopt, mojom::StartError::kSidecarUnavailable};
   }
 
-  const std::string task_id = CreateTask(prompt, mode, effort);
+  const std::string task_id = CreateTask(prompt, mode, effort, model);
   StartTurn(task_id);
   return {task_id, std::nullopt};
 }
@@ -495,7 +501,9 @@ std::string TaskStore::StartRoutineTask(const std::string& title,
     return std::string();
   }
 
-  const std::string task_id = CreateTask(prompt, mode, effort);
+  // A routine has no chooser, so it takes the default rather than inheriting whatever the new tab
+  // was last set to -- a scheduled task should not change model because someone touched a menu.
+  const std::string task_id = CreateTask(prompt, mode, effort, std::string());
   // First step in the trace, before any model output: a task the user did not type needs to say where
   // it came from, or its tabs appear out of nowhere.
   AddStep(task_id, mojom::StepKind::kRoutine,
@@ -559,7 +567,12 @@ void TaskStore::StartTurn(const std::string& task_id) {
   }
 
   base::DictValue request;
-  request.Set("model", provider ? provider->model : kModel);
+  // Precedence: a user's own provider first (that path never touches the local engine, so its model is
+  // the only one that can work), then the model this task was started with, then the default. kModel is
+  // a WIRE value, not a label -- cycle 37's capture confirmed the engine receives it verbatim.
+  const std::string& task_model = task->second->model;
+  request.Set("model", provider ? provider->model
+                                : (task_model.empty() ? std::string(kModel) : task_model));
   request.Set("stream", true);
   request.Set("reasoning_effort", ReasoningEffort(task->second->effort));
   request.Set("messages", conversation->second.messages.Clone());
@@ -1097,6 +1110,120 @@ void TaskStore::FinishTask(const std::string& task_id,
   Notify(task_id);
 }
 
+std::vector<mojom::ModelOptionPtr> TaskStore::ListModels() const {
+  // The cache, not a fetch: this answers a mojom call that returns a value, and the list is only as
+  // fresh as the last time the engine said it was ready. Empty is a MEANINGFUL answer -- it is what a
+  // machine with no engine should report, and the chooser says so rather than rendering an empty table.
+  std::vector<mojom::ModelOptionPtr> out;
+  out.reserve(model_options_.size());
+  for (const ModelRecord& record : model_options_) {
+    mojom::ModelOptionPtr option = mojom::ModelOption::New();
+    option->id = record.id;
+    option->provider_id = record.provider_id;
+    option->name = record.name;
+    option->capabilities = record.capabilities;
+    option->price_band = record.price_band;
+    out.push_back(std::move(option));
+  }
+  return out;
+}
+
+SidecarClient::Status TaskStore::EngineStatus() const {
+  // No client at all reads as not installed rather than failed: nothing has gone wrong, there is simply
+  // nothing to talk to, and those are different things to tell a user.
+  return sidecar_ ? sidecar_->status() : SidecarClient::Status::kUnavailable;
+}
+
+size_t TaskStore::ModelOptionCount() const {
+  return model_options_.size();
+}
+
+std::string TaskStore::DefaultModel() {
+  return kModel;
+}
+
+void TaskStore::RefreshModels() {
+  if (!sidecar_) {
+    return;
+  }
+  sidecar_->FetchProviders(
+      base::BindOnce(&TaskStore::OnProvidersFetched, weak_factory_.GetWeakPtr()));
+}
+
+void TaskStore::OnProvidersFetched(std::optional<std::string> body) {
+  if (!body) {
+    // Leave whatever was cached. A failed refresh is not evidence that the models went away, and
+    // emptying the chooser because one request timed out would be worse than showing a stale list.
+    return;
+  }
+  std::optional<base::DictValue> parsed =
+      base::JSONReader::ReadDict(*body, base::JSON_PARSE_RFC);
+  if (!parsed) {
+    return;
+  }
+  const base::ListValue* providers = parsed->FindList("providers");
+  if (!providers) {
+    return;
+  }
+  std::vector<ModelRecord> found;
+  for (const base::Value& provider_value : *providers) {
+    const base::DictValue* provider = provider_value.GetIfDict();
+    if (!provider) {
+      continue;
+    }
+    const std::string* provider_id = provider->FindString("id");
+    if (!provider_id) {
+      continue;
+    }
+    // `models` is a RECORD keyed by model id, not an array -- the engine's schema is
+    // Schema.Record(String, Model). This read a list at first and passed its test anyway, because the
+    // stub I verified against had been written with a list too: a fixture that agrees with the code
+    // proves only that they agree. The key is authoritative for the id, since a record's key is what the
+    // engine routes on, and `id` inside the value is only echoed there.
+    const base::DictValue* models = provider->FindDict("models");
+    if (!models) {
+      continue;
+    }
+    for (const auto [model_key, model_value] : *models) {
+      const base::DictValue* model = model_value.GetIfDict();
+      if (!model) {
+        continue;
+      }
+      const std::string* model_id = &model_key;
+      ModelRecord record;
+      // The wire id is provider/model, which is the form the engine routes on and the form the one
+      // hardcoded option already used.
+      record.id = *provider_id + "/" + *model_id;
+      record.provider_id = *provider_id;
+      const std::string* name = model->FindString("name");
+      record.name = name ? *name : *model_id;
+      // Capabilities arrive as a record of flags. Only the TRUE ones are worth carrying: a chooser
+      // filters on what a model can do, and a list of false flags is noise the renderer would have to
+      // re-filter anyway.
+      if (const base::DictValue* capabilities = model->FindDict("capabilities")) {
+        for (const auto [flag, enabled] : *capabilities) {
+          if (enabled.is_bool() && enabled.GetBool()) {
+            record.capabilities.push_back(flag);
+          }
+        }
+      }
+      // A band rather than a number. The engine prices per token in fractions of a cent, which is not a
+      // thing to put in a menu; and a model the engine does not price at all gets NO band rather than a
+      // misleading "free".
+      if (const base::DictValue* cost = model->FindDict("cost")) {
+        const std::optional<double> input = cost->FindDouble("input");
+        const std::optional<double> output = cost->FindDouble("output");
+        if (input && output) {
+          const double total = *input + *output;
+          record.price_band = total == 0 ? "free" : (total < 5.0 ? "standard" : "premium");
+        }
+      }
+      found.push_back(std::move(record));
+    }
+  }
+  model_options_ = std::move(found);
+}
+
 void TaskStore::CancelTask(const std::string& task_id) {
   auto it = tasks_.find(task_id);
   // An unknown id is a no-op. It is reachable from a renderer, so it is not an error condition.
@@ -1145,7 +1272,11 @@ mojom::FollowUpOutcome TaskStore::SendFollowUp(const std::string& task_id,
     }
     conversation->second.queued.push_back(prompt);
     task->second->queued.push_back(prompt);
-    AddStep(task_id, mojom::StepKind::kQueuedMessage, "Queued: " + prompt);
+    // Was the literal "Queued: " + prompt, which put an untranslated English word into the trace of a
+  // Korean task. Same class as the five strings moved out of the stores earlier.
+  AddStep(task_id, mojom::StepKind::kQueuedMessage,
+          l10n_util::GetStringFUTF8(IDS_REDROB_TASK_QUEUED_MESSAGE,
+                                    base::UTF8ToUTF16(prompt)));
     Notify(task_id);
     return mojom::FollowUpOutcome::kQueued;
   }
@@ -1176,6 +1307,40 @@ mojom::FollowUpOutcome TaskStore::SendFollowUp(const std::string& task_id,
   return mojom::FollowUpOutcome::kInterrupted;
 }
 
+bool TaskStore::WithdrawQueuedFollowUp(const std::string& task_id,
+                                       uint32_t index,
+                                       const std::string& expected_prompt) {
+  auto task = tasks_.find(task_id);
+  if (task == tasks_.end()) {
+    return false;
+  }
+  auto conversation = conversations_.find(task_id);
+  if (conversation == conversations_.end()) {
+    return false;
+  }
+  // The queue is held twice: once here, and once mirrored onto the Task the renderer sees. Both are
+  // checked before either is touched, so a disagreement between them cannot leave one of the two edited.
+  std::vector<std::string>& queue = conversation->second.queued;
+  std::vector<std::string>& mirror = task->second->queued;
+  if (index >= queue.size() || index >= mirror.size()) {
+    return false;
+  }
+  if (queue[index] != expected_prompt || mirror[index] != expected_prompt) {
+    // The queue drained or shifted since the page drew it. Refusing is the safe answer: the click was
+    // meant for a message that is no longer at this position, and deleting whatever is there now would
+    // discard something the user never asked to discard.
+    return false;
+  }
+  queue.erase(queue.begin() + index);
+  mirror.erase(mirror.begin() + index);
+  // Recorded in the trace for the same reason queueing is: the transcript should say what the user did,
+  // and a message that silently disappears from the pending list reads like it ran.
+  AddStep(task_id, mojom::StepKind::kQueuedMessage,
+          l10n_util::GetStringFUTF8(IDS_REDROB_TASK_WITHDREW_QUEUED,
+                                    base::UTF8ToUTF16(expected_prompt)));
+  Notify(task_id);
+  return true;
+}
 std::vector<mojom::TaskPtr> TaskStore::ListTasks() const {
   std::vector<mojom::TaskPtr> out;
   out.reserve(tasks_.size());
@@ -1228,6 +1393,9 @@ std::optional<std::string> TaskStore::SetWorkingFolder(const std::string& task_i
 
 void TaskStore::OnSidecarStatusChanged(SidecarClient::Status status) {
   if (status == SidecarClient::Status::kReady) {
+    // Now that it is serving it can be asked what it routes to. Before the handshake this request would
+    // be refused by the client itself.
+    RefreshModels();
     // The handshake finished. Anything queued on it can go now.
     for (const auto& [id, task] : tasks_) {
       if (task->state == mojom::TaskState::kQueued) {

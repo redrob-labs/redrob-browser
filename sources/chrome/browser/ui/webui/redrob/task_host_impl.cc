@@ -34,9 +34,14 @@ void TaskHostImpl::StartTask(const std::string& prompt,
                              const std::vector<std::string>& context_refs,
                              mojom::PermissionMode mode,
                              mojom::Effort effort,
+                             const std::string& model,
                              StartTaskCallback callback) {
-  auto [task_id, error] = store_->StartTask(prompt, context_refs, mode, effort);
+  auto [task_id, error] = store_->StartTask(prompt, context_refs, mode, effort, model);
   std::move(callback).Run(std::move(task_id), std::move(error));
+}
+
+void TaskHostImpl::ListModels(ListModelsCallback callback) {
+  std::move(callback).Run(store_->ListModels());
 }
 
 void TaskHostImpl::CancelTask(const std::string& task_id) {
@@ -58,6 +63,14 @@ void TaskHostImpl::SendFollowUp(const std::string& task_id,
                                 mojom::FollowUpMode mode,
                                 SendFollowUpCallback callback) {
   std::move(callback).Run(store_->SendFollowUp(task_id, prompt, mode));
+}
+
+void TaskHostImpl::WithdrawQueuedFollowUp(const std::string& task_id,
+                                          uint32_t index,
+                                          const std::string& expected_prompt,
+                                          WithdrawQueuedFollowUpCallback callback) {
+  std::move(callback).Run(
+      store_->WithdrawQueuedFollowUp(task_id, index, expected_prompt));
 }
 
 void TaskHostImpl::SetPermissionMode(const std::string& task_id,

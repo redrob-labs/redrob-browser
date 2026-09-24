@@ -48,6 +48,10 @@ source_set("sidecar") {
 
   deps += [
     "//base",
+    # model_store.cc and routine_store.cc report failures to the settings page, so they read the
+    # product's own strings rather than carrying English literals. The grit header is generated, so the
+    # dependency is what makes it exist at all.
+    "//chrome/browser/redrob/resources:redrob_strings",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/ui/browser_window",
     "//chrome/browser/ui/navigator",
@@ -61,6 +65,7 @@ source_set("sidecar") {
     "//components/tab_groups",
     "//content/public/browser",
     "//ui/accessibility",
+    "//ui/base",
     "//crypto",
     "//net",
     "//net/traffic_annotation",

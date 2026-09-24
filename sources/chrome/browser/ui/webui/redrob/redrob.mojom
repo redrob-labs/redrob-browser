@@ -116,9 +116,29 @@ struct Task {
   // How much work was asked for. On the task rather than only on the request, so a task tab reopened
   // later still shows the effort it actually ran at.
   Effort effort;
+  // The wire id this task runs on, for the same reason effort is here: a task tab reopened later should
+  // show the model it ACTUALLY ran at, not whatever the chooser happens to be set to now. Empty for
+  // tasks started before a model could be chosen, which the view renders as the default.
+  string model;
   // Instructions the user typed while this task was mid-run, still waiting for a safe boundary. Their
   // own words, echoed back so they can see what is pending rather than wondering if it was lost.
   array<string> queued;
+};
+
+// One model the local engine says this machine can actually run. Mirrors the fields the engine's
+// /config/providers returns that a chooser needs -- not the whole record, because cost limits and
+// request headers are the engine's business and a renderer has no use for them.
+struct ModelOption {
+  // The wire id, e.g. "redrob/auto" or "provider/model". What goes into StartTask.
+  string id;
+  // The provider half, for grouping.
+  string provider_id;
+  // What a human reads.
+  string name;
+  // Present so the chooser can filter on them rather than inventing categories.
+  array<string> capabilities;
+  // Empty when the engine does not price this model.
+  string price_band;
 };
 
 // What happened to a message typed into a running task's composer.
@@ -158,8 +178,16 @@ interface Page {
 interface TaskHost {
   // `context_refs` are opaque handles the browser process resolves -- a tab, a selection, a
   // bookmark. Not URLs and not paths: a renderer that asks for /etc/passwd gets a rejected ref.
-  StartTask(string prompt, array<string> context_refs, PermissionMode mode, Effort effort)
+  // `model` is the wire id the task runs on. Empty means "let the browser use its default", which is
+  // what every caller sent implicitly before this argument existed -- the store held one hardcoded
+  // constant and no caller could influence it, so a task's model was a fact about the source code
+  // rather than a choice.
+  StartTask(string prompt, array<string> context_refs, PermissionMode mode, Effort effort, string model)
       => (string? task_id, StartError? error);
+  // What the local engine says is available. Empty when no engine is reachable, which is the normal
+  // state on a machine that has never installed one -- the caller shows that rather than an empty list
+  // pretending to be a catalogue.
+  ListModels() => (array<ModelOption> options);
   CancelTask(string task_id);
   ListTasks() => (array<Task> tasks);
   // One task, for the task tab view. Null when the id is unknown, which a renderer can ask for.
@@ -169,6 +197,16 @@ interface TaskHost {
   // which is the difference between steering and queueing -- and is why this is one call with a mode
   // rather than a `Reply` that silently means something different depending on timing.
   SendFollowUp(string task_id, string prompt, FollowUpMode mode) => (FollowUpOutcome outcome);
+  // Withdraws one message the user queued that has not run yet. Queueing was already reversible in
+  // principle -- the words sit in `Task.queued` doing nothing until a boundary -- but there was no way
+  // to take one back, so a typo or a change of mind had to be waited out and then undone by hand.
+  //
+  // Identified by index AND the text the page believes is at it: the queue drains on its own when the
+  // current step finishes, so between a render and a click the entry can already be gone or have
+  // shifted, and an index alone would then withdraw a DIFFERENT message than the one clicked. A
+  // mismatch returns false and changes nothing; the page redraws from the next OnTaskChanged, which is
+  // the authority on what is still pending.
+  WithdrawQueuedFollowUp(string task_id, uint32 index, string expected_prompt) => (bool withdrawn);
   // Changes an existing task's mode. Narrowing always succeeds; WIDENING is refused mid-task, because
   // a task that has already been running is not the moment to hand it more of the machine.
   SetPermissionMode(string task_id, PermissionMode mode) => (bool accepted);
