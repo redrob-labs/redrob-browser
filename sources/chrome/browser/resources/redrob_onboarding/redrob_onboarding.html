@@ -23,19 +23,25 @@
       <div class="art art-account" aria-hidden="true"></div>
       <h1>$i18n{obAccountTitle}</h1>
       <p>$i18n{obAccountBody}</p>
-      <div class="fields">
-        <input id="email" type="email" placeholder="you@example.com" autocomplete="email"
-               aria-label="$i18n{obEmailLabel}">
-        <button id="have-account" class="quiet">$i18n{obHaveAccount}</button>
-      </div>
+      <!-- An email field and an "I already have an account" button stood here. Neither was read by
+           anything: the field's value was collected and discarded, and the button had no handler at all,
+           so the step asked for an address and then threw it away. Until there is a real sign-in to hand
+           them to, this step says what it is -- a note -- rather than miming a form. The strings stay in
+           the dictionary for that flow. -->
     </section>
 
     <section class="step" data-step="agent" hidden>
       <div class="art art-agent" aria-hidden="true"></div>
       <h1>$i18n{obAgentTitle}</h1>
       <p>$i18n{obAgentBody}</p>
-      <p class="shortcut">$i18n{obAgentShortcutBefore} <kbd id="agent-shortcut">$i18n{obShortcutCtrl}</kbd>
-        <kbd>Shift</kbd> <kbd>E</kbd> $i18n{obAgentShortcutAfter}</p>
+      <!-- A hint here taught Ctrl+Shift+E ("press it anywhere to ask about what you are looking at"), and
+           that shortcut does not exist. Nothing binds it: there is no Redrob command id at all, and the
+           accelerator table binds VKEY_E only for Ctrl (focus search) and Alt (app menu). The feature is
+           designed but unbuilt -- redrob.mojom's StartTask already reserves `context_refs` for exactly this
+           ("opaque handles the browser process resolves -- a tab, a selection, a bookmark"), yet the only
+           caller passes an empty array and nothing mints a ref. So the first-run flow was teaching a
+           keystroke the user would press and see nothing happen, which is worse than not mentioning it.
+           The strings stay in the dictionary for when the shortcut is real. -->
     </section>
 
     <section class="step" data-step="passwords" hidden>
@@ -76,7 +82,9 @@
           <span>$i18n{obModelClaudeDetail}</span>
         </button>
       </div>
-      <button id="more-providers" class="quiet">$i18n{obMoreProviders}</button>
+      <!-- A "more providers" button stood here with no handler. The surface it implied is real but it is
+           in Settings > Models, and leaving the flow mid-way to reach it would abandon the choices made
+           so far. Removed rather than wired: the settings page is one click away once the flow ends. -->
     </section>
 
     <section class="step" data-step="import" hidden>

@@ -26,6 +26,9 @@ source_set("redrob_onboarding") {
     "//chrome/browser/profiles:profile",
     # Redrob: the IDS_REDROB_* header behind kRedrobLocalizedStrings.
     "//chrome/browser/redrob/resources:redrob_strings",
+    # Redrob: redrob::prefs::kPasswordManagerChoice, so the first-run decision lands on the pref the
+    # settings page reads rather than on an unregistered path that PrefService drops.
+    "//chrome/browser/redrob:sidecar",
     "//chrome/browser:browser_process",
     "//chrome/browser/ui/webui:webui_util",
     "//chrome/common",
