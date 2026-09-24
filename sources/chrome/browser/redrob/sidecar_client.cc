@@ -25,6 +25,7 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
@@ -48,6 +49,16 @@ constexpr char kApiKeyEnvVar[] = "REDROB_API_KEY";
 // The engine reads its Basic password from here and enforces auth only when it is set. Its username
 // defaults to "redrob", which is the user half this class sends.
 constexpr char kServerPasswordEnvVar[] = "REDROB_SERVER_PASSWORD";
+
+// The engine's file name and this platform's PATH separator. Both differ on Windows, and getting either
+// wrong is a silent "not installed" rather than an error.
+#if BUILDFLAG(IS_WIN)
+constexpr base::FilePath::CharType kEngineFileName[] = FILE_PATH_LITERAL("redrob.exe");
+constexpr char kPathSeparator[] = ";";
+#else
+constexpr base::FilePath::CharType kEngineFileName[] = FILE_PATH_LITERAL("redrob");
+constexpr char kPathSeparator[] = ":";
+#endif
 
 // The engine's own startup contract: `redrob serve` prints this once its listener is bound.
 constexpr std::string_view kStartupPrefix = "redrob server listening on ";
@@ -340,19 +351,31 @@ std::optional<base::FilePath> SidecarClient::FindEngineBinary() {
   // installed reported "not installed" unless the user also knew to set an environment variable.
   base::FilePath home;
   if (base::PathService::Get(base::DIR_HOME, &home)) {
-    base::FilePath installed = home.Append(".redrob").Append("bin").Append("redrob");
+    base::FilePath installed =
+        home.Append(FILE_PATH_LITERAL(".redrob")).Append(FILE_PATH_LITERAL("bin")).Append(kEngineFileName);
     if (base::PathExists(installed)) {
       return installed;
     }
   }
-#if BUILDFLAG(IS_POSIX)
-  // PATH, last. base has no "give me the resolved path" helper -- ExecutableExistsInPath only answers
-  // whether it is there -- so the bare name is returned and LaunchProcess's execvp does the resolving,
-  // which is the same lookup a shell would do. POSIX-guarded because that helper is.
-  if (base::ExecutableExistsInPath(env.get(), "redrob")) {
-    return base::FilePath("redrob");
+
+  // PATH, last, and walked here rather than handed to the launcher. The first version of this asked
+  // base::ExecutableExistsInPath and returned the bare name for execvp to resolve, which is POSIX-only
+  // in two ways at once: that helper does not exist on Windows, so the branch was compiled out and the
+  // engine was findable there ONLY through the environment override -- and the name it looked for had no
+  // .exe, so the install location above could never match on Windows either. Walking PATH ourselves is a
+  // dozen lines, has no platform guard, and returns a real path on every platform instead of trusting a
+  // launcher to repeat the search.
+  std::optional<std::string> path_var = env->GetVar("PATH");
+  if (path_var.has_value()) {
+    for (std::string_view entry :
+         base::SplitStringPiece(*path_var, std::string_view(kPathSeparator), base::TRIM_WHITESPACE,
+                                base::SPLIT_WANT_NONEMPTY)) {
+      base::FilePath candidate = base::FilePath::FromUTF8Unsafe(entry).Append(kEngineFileName);
+      if (base::PathExists(candidate)) {
+        return candidate;
+      }
+    }
   }
-#endif
   return std::nullopt;
 }
 
