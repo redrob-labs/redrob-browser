@@ -79,6 +79,14 @@ body {
   color: var(--accent);
 }
 
+/* The section you are in. `aria-current` rather than a class so the state is one thing, announced and
+   drawn from the same attribute instead of a class the screen reader cannot see. */
+.nav-link[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .nav-foot {
   color: var(--muted-foreground);
   margin-top: auto;
@@ -90,9 +98,18 @@ body {
   padding: 22px 28px 80px;
 }
 
+/* One section at a time. All seven used to render into one long scroll, so the nav was a set of anchor
+   jumps with no current state and no way to tell where you were -- and a link to a section from anywhere
+   else in the product landed you in the middle of a page with six other pages above and below it. The
+   section in view is the one in the URL, which also makes every section linkable. */
 .page {
+  display: none;
   margin: 0 0 44px;
   scroll-margin-top: 20px;
+}
+
+.page.is-current {
+  display: block;
 }
 
 .page h2 {
@@ -210,6 +227,93 @@ body {
   outline: none;
 }
 
+/* One rule for everything clickable on this page. Focus styling here covered only .field inputs, so the
+   pills, the password chooser, the nav links and the row actions fell back to the UA ring drawn against
+   a custom background and radius -- when it showed at all. */
+.pill:focus-visible,
+.choice:focus-visible,
+.nav-link:focus-visible,
+.toggle input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* A list filter, not a page search: the magnifier sits inside the field so the control reads as one
+   thing rather than an icon next to a box. */
+.list-search {
+  align-items: center;
+  background: var(--card);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-control);
+  display: flex;
+  gap: 7px;
+  margin: 0 0 10px;
+  max-width: 320px;
+  padding: 0 10px;
+}
+
+.list-search:focus-within {
+  border-color: var(--accent);
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.list-search svg {
+  fill: none;
+  flex: none;
+  height: 13px;
+  stroke: var(--muted-foreground);
+  stroke-linecap: round;
+  stroke-width: 1.5;
+  width: 13px;
+}
+
+.list-search input {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  outline: none;
+  padding: 7px 0;
+  width: 100%;
+}
+
+.list-search input:disabled {
+  color: var(--muted-foreground);
+}
+
+/* The confirmation. Sized to the text rather than the viewport: this asks one question, and a dialog as
+   wide as the window reads as a page rather than as a stop. */
+.confirm {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  max-width: 380px;
+  padding: 18px 20px 16px;
+}
+
+.confirm::backdrop {
+  background: rgb(0 0 0 / 35%);
+}
+
+.confirm h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.confirm p {
+  color: var(--muted-foreground);
+  font-size: 13px;
+  margin: 0 0 16px;
+}
+
+.actions-end {
+  justify-content: flex-end;
+}
+
 .field-row {
   display: flex;
   flex-wrap: wrap;
@@ -242,12 +346,20 @@ body {
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  padding: 5px 14px;
-}
+  padding: 5px 14px;}
 
 .pill:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* The appearance section's two actions are LINKS, not buttons -- they leave for a browser settings page,
+   so an anchor is the honest element and gives middle-click and open-in-new-tab for free. .pill was
+   written for buttons, and an anchor needs two declarations a button already has: no underline, and a
+   block-ish box so the padding makes a pill rather than an inline run of text. */
+a.pill {
+  display: inline-flex;
+  text-decoration: none;
 }
 
 .pill-solid {
@@ -259,7 +371,9 @@ body {
 .pill-solid:hover {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  /* The accent's own paired foreground, not a literal white: in dark the accent is Blue 5, whose
+     readable partner is the brand black. A hardcoded #fff was white-on-light-blue there. */
+  color: var(--accent-foreground);
 }
 
 .pill-warn:hover {
@@ -311,7 +425,12 @@ body {
   text-align: left;
 }
 
-.choice[aria-pressed='true'] {
+/* Keyed on aria-checked, which is what this chooser actually writes. It was [aria-pressed='true'] --
+   correct when the group announced itself with toggle-button semantics, and dead the moment that was
+   changed to role=radio + aria-checked, because then nothing matched. The selection was still announced
+   to a screen reader and had simply stopped being VISIBLE, which is the half of an accessibility fix
+   that a source diff cannot show you: it took photographing the page to see three identical cards. */
+.choice[aria-checked='true'] {
   background: var(--accent-soft);
   border-color: var(--accent);
 }
