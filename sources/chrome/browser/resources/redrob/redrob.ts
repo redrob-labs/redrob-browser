@@ -29,6 +29,10 @@ const tasks = new Map<string, Task>();
 
 // One document, two views. `?task=<id>` is a task tab; no query is the new tab.
 const openTaskId = new URLSearchParams(location.search).get('task');
+
+// The model the composer will start a task with. Empty means the browser's default, which is what every
+// task got when #model was one hardcoded option nothing read. Filled by the chooser when it lands.
+let chosenModel = '';
 // `?ask=<prompt>` is how `redrob "..."` from a terminal arrives: the process singleton forwards the
 // command line to the running browser, which opens this surface with the prompt already in it. Started
 // here rather than in C++ so there is ONE StartTask path with one set of bounds and one permission gate.
@@ -57,36 +61,91 @@ function stateLabel(state: TaskState): string {
   }
 }
 
-// The icon comes from the step's kind, which is a mojom enum, rather than from matching its label.
-// A label match is a string comparison that silently stops matching when the wording changes.
-function stepIcon(kind: StepKind): string {
+// One drawn glyph per step kind. These were emoji, which is three problems at once: this build ships no
+// colour emoji font, so several fell back to boxes; `⑃`, `⊘`, `↺` and `⋯` are text-presentation glyphs
+// that a text font draws at whatever weight it likes, so the row read unevenly; and none of them could
+// take the product's own stroke weight. Built as elements rather than markup because this is a WebUI
+// under Trusted Types, where assigning innerHTML throws.
+//
+// Keyed off the mojom enum, not the label: a label match is a string comparison that silently stops
+// matching when the wording changes.
+type Glyph = Array<[string, Record<string, string>]>;
+
+function stepGlyph(kind: StepKind): Glyph {
   switch (kind) {
-    case StepKind.kSearchedMemory:
-      return '🕘';
-    case StepKind.kOpenedPage:
-      return '🗔';
-    case StepKind.kCapturedScreenshot:
-      return '📷';
-    case StepKind.kSavedArtifact:
-      return '🗎';
-    case StepKind.kUsedCredential:
-      return '🔑';
-    case StepKind.kSpawnedSubagents:
-      return '⑃';
-    case StepKind.kRefused:
-      return '⊘';
-    case StepKind.kSteered:
-      return '↺';
-    case StepKind.kQueuedMessage:
-      return '⋯';
-    case StepKind.kPlanned:
-      return '☰';
-    case StepKind.kRoutine:
-      return '⏱';
+    case StepKind.kSearchedMemory:  // a clock, for looking back
+      return [['circle', {cx: '8', cy: '8', r: '5.2'}], ['path', {d: 'M8 4.6V8l2.6 1.7'}]];
+    case StepKind.kOpenedPage:  // a window
+      return [
+        ['rect', {x: '2.4', y: '3.2', width: '11.2', height: '9.6', rx: '1.6'}],
+        ['path', {d: 'M2.4 6.2h11.2'}],
+      ];
+    case StepKind.kCapturedScreenshot:  // a camera
+      return [
+        ['rect', {x: '2.2', y: '4.8', width: '11.6', height: '8', rx: '1.6'}],
+        ['circle', {cx: '8', cy: '8.8', r: '2.2'}],
+        ['path', {d: 'M6.3 4.8l.9-1.5h1.6l.9 1.5'}],
+      ];
+    case StepKind.kSavedArtifact:  // a page with a folded corner
+      return [
+        ['path', {d: 'M4.2 2.8h4.4L12 6.2v7H4.2z'}],
+        ['path', {d: 'M8.4 2.8v3.4H12'}],
+      ];
+    case StepKind.kUsedCredential:  // a key
+      return [
+        ['circle', {cx: '5.7', cy: '6.3', r: '2.6'}],
+        ['path', {d: 'M7.7 8.3l5.1 5.1'}],
+        ['path', {d: 'M10.4 11l1.4-1.4'}],
+      ];
+    case StepKind.kSpawnedSubagents:  // one branching into two
+      return [
+        ['path', {d: 'M8 2.8v3'}],
+        ['path', {d: 'M8 5.8L4.5 9.2v3.2'}],
+        ['path', {d: 'M8 5.8l3.5 3.4v3.2'}],
+      ];
+    case StepKind.kRefused:  // a barred circle
+      return [['circle', {cx: '8', cy: '8', r: '5.4'}], ['path', {d: 'M4.6 11.4l6.8-6.8'}]];
+    case StepKind.kSteered:  // a turn taken
+      return [
+        ['path', {d: 'M12.4 8.4A4.6 4.6 0 118 3.8h3.4'}],
+        ['path', {d: 'M9.6 2l1.9 1.8-1.9 1.9'}],
+      ];
+    case StepKind.kQueuedMessage:  // waiting its turn
+      return [
+        ['circle', {cx: '4.2', cy: '8', r: '1.1', fill: 'currentcolor', stroke: 'none'}],
+        ['circle', {cx: '8', cy: '8', r: '1.1', fill: 'currentcolor', stroke: 'none'}],
+        ['circle', {cx: '11.8', cy: '8', r: '1.1', fill: 'currentcolor', stroke: 'none'}],
+      ];
+    case StepKind.kPlanned:  // a list
+      return [
+        ['path', {d: 'M3.2 4.6h9.6'}],
+        ['path', {d: 'M3.2 8h9.6'}],
+        ['path', {d: 'M3.2 11.4h6'}],
+      ];
+    case StepKind.kRoutine:  // a clock with a crown, for something that fires on its own
+      return [
+        ['circle', {cx: '8', cy: '8.9', r: '4.6'}],
+        ['path', {d: 'M8 6.6v2.3l1.7 1.1'}],
+        ['path', {d: 'M6.3 2.6h3.4'}],
+      ];
     case StepKind.kThinking:
     default:
-      return '•';
+      return [['circle', {cx: '8', cy: '8', r: '2.4'}]];
   }
+}
+
+function stepIcon(kind: StepKind): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const [tag, attrs] of stepGlyph(kind)) {
+    const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [name, value] of Object.entries(attrs)) {
+      node.setAttribute(name, value);
+    }
+    svg.append(node);
+  }
+  return svg;
 }
 
 function effortLabel(effort: Effort): string {
@@ -130,7 +189,7 @@ function renderStep(step: Step): HTMLElement {
   const icon = document.createElement('span');
   icon.className = 'step-icon';
   icon.setAttribute('aria-hidden', 'true');
-  icon.textContent = stepIcon(step.kind);
+  icon.append(stepIcon(step.kind));
   const label = document.createElement('span');
   label.className = 'step-label';
   label.textContent = step.label;
@@ -177,9 +236,29 @@ function renderStep(step: Step): HTMLElement {
 
 // ---------- new tab ----------
 
+// Elapsed labels currently on screen, so a running task's timer advances without a push from the
+// browser. Only the text node is rewritten: re-rendering the whole list each second would destroy
+// focus, reset scroll and re-decode every card's frame.
+const ticking: Array<{task: Task, label: HTMLElement}> = [];
+let tickTimer: number|undefined;
+
+function retick() {
+  for (const {task, label} of ticking) {
+    label.textContent = elapsed(task);
+  }
+  if (!ticking.some(({task}) => isRunning(task))) {
+    // Nothing is running, so nothing will change until the browser pushes. Stop rather than wake the
+    // page every second for a list of finished work.
+    clearInterval(tickTimer);
+    tickTimer = undefined;
+  }
+}
+
 function renderHome() {
   const list = $<HTMLOListElement>('cards');
   list.textContent = '';
+  // The old labels belong to elements this render is about to throw away.
+  ticking.length = 0;
   const ordered = [...tasks.values()].sort(
       (a, b) => Number(b.startedAtMs) - Number(a.startedAtMs));
 
@@ -202,6 +281,7 @@ function renderHome() {
     const when = document.createElement('div');
     when.className = 'card-elapsed';
     when.textContent = elapsed(task);
+    ticking.push({task, label: when});
     const title = document.createElement('div');
     title.className = 'card-title';
     title.textContent = task.prompt;
@@ -212,8 +292,9 @@ function renderHome() {
     for (const step of task.steps.slice(-3)) {
       const item = document.createElement('li');
       const icon = document.createElement('span');
+      icon.className = 'step-icon';
       icon.setAttribute('aria-hidden', 'true');
-      icon.textContent = stepIcon(step.kind);
+      icon.append(stepIcon(step.kind));
       const label = document.createElement('span');
       label.className = 'card-step-label';
       label.textContent = step.label;
@@ -238,17 +319,52 @@ function renderHome() {
   // Left empty when there are no tasks. The suggested tiles above already answer an empty state, and a
   // sentence on top of them saying it is empty is noise rather than information.
   $('home-status').textContent = '';
+
+  // One timer for the whole list, armed only while something is actually running.
+  if (tickTimer === undefined && ordered.some(isRunning)) {
+    tickTimer = setInterval(retick, 1000);
+  }
 }
 
 // ---------- task tab ----------
 
+// Which captured frame the user closed the preview on, if any. Page state rather than a DOM flag,
+// because the DOM is rewritten on every push from the browser and a flag set on the element would be
+// undone by the next one.
+let dismissedFrame: string|null = null;
+
+// What is already drawn, so a push appends instead of rebuilding. The trace only grows, and rebuilding
+// it was what re-announced the whole history to a screen reader and destroyed focus inside it.
+let renderedSteps = 0;
+// Nullable to match the mojom field: a task with no narration yet reports null, not an empty string, and
+// conflating the two would redraw on the first push that turned one into the other.
+let lastNarration: string|null = null;
+let lastState: TaskState|undefined;
+
 function renderTask() {
   const task = openTaskId ? tasks.get(openTaskId) : undefined;
   if (!task) {
+    // Not found used to set the title and stop, which left the follow-up form, its permission and
+    // folder controls and its send button live against a task that does not exist -- so a reply could
+    // be typed and sent to nothing. Everything that acts on a task is taken away with the task.
     $('task-title').textContent = loadTimeData.getString('taskNotFound');
     $('task-state').textContent = '';
+    $('task-effort').textContent = '';
+    $('reply-model').textContent = '';
+    $('task-stop').hidden = true;
+    $('narration').textContent = '';
+    $('steps').textContent = '';
+    $('trace-error').hidden = true;
+    $('trace-empty-title').textContent = loadTimeData.getString('taskNotFound');
+    $('trace-empty').hidden = false;
+    renderedSteps = 0;
+    lastNarration = null;
+    $('preview').hidden = true;
+    $('reply').hidden = true;
     return;
   }
+  $('trace-empty').hidden = true;
+  $('reply').hidden = false;
 
   document.title = `${task.prompt} · Redrob`;
   $('task-title').textContent = task.prompt;
@@ -256,6 +372,13 @@ function renderTask() {
   $('task-effort').textContent =
       task.workingFolder ? `${effortLabel(task.effort)} · ${task.workingFolder}`
                          : effortLabel(task.effort);
+
+  // The model this task ACTUALLY ran on, from the task itself. This span was the literal string
+  // "redrob/auto" in the markup, so it kept claiming that id no matter what the task ran on -- and once
+  // a model could be chosen, that markup would have been an outright lie rather than a stale default.
+  // Empty for tasks started before the field existed, which reads as the default.
+  $('reply-model').textContent =
+      task.model || loadTimeData.getString('newTabModelDefault');
 
   // Stop only exists while there is something to stop, and the composer's second button appears with
   // it: interrupting is only a question when the task is mid-run.
@@ -268,11 +391,42 @@ function renderTask() {
   const queued = $<HTMLOListElement>('queued');
   queued.textContent = '';
   queued.hidden = task.queued.length === 0;
-  for (const pending of task.queued) {
+  task.queued.forEach((pending, index) => {
     const item = document.createElement('li');
-    item.textContent = pending;
+    const words = document.createElement('span');
+    words.className = 'queued-words';
+    words.textContent = pending;
+    // Withdraw carries the index AND the text, because the browser refuses the call if the queue has
+    // moved since this list was drawn -- the entry may have started running between the render and the
+    // click, and deleting by position alone would take back a different message than the one clicked.
+    const withdraw = document.createElement('button');
+    withdraw.type = 'button';
+    withdraw.className = 'queued-withdraw';
+    withdraw.setAttribute('aria-label', loadTimeData.getString('taskWithdrawQueued'));
+    // Drawn, not a text glyph: this bundle has no emoji font and a literal x renders at whatever weight
+    // the text font feels like, which is the problem the step icons already had.
+    const mark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    mark.setAttribute('viewBox', '0 0 16 16');
+    mark.setAttribute('aria-hidden', 'true');
+    for (const d of ['M5 5l6 6', 'M11 5l-6 6']) {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      line.setAttribute('d', d);
+      mark.append(line);
+    }
+    withdraw.append(mark);
+    withdraw.addEventListener('click', async () => {
+      withdraw.disabled = true;
+      const {withdrawn} = await host.withdrawQueuedFollowUp(openTaskId!, index, pending);
+      if (!withdrawn) {
+        // Nothing was deleted. Say so rather than leaving a dead click, and let the next OnTaskChanged
+        // redraw the list as it really is.
+        $('task-status').textContent = loadTimeData.getString('taskWithdrawFailed');
+        withdraw.disabled = false;
+      }
+    });
+    item.append(words, withdraw);
     queued.append(item);
-  }
+  });
   paintModeSelects(task.mode);
 
   const trace = $('trace');
@@ -280,29 +434,53 @@ function renderTask() {
   // yanking the view down while someone is reading further up is worse than letting them scroll.
   const wasAtBottom =
       trace.scrollHeight - trace.scrollTop - trace.clientHeight < 40;
-  trace.textContent = '';
-  if (task.narration) {
-    // One paragraph per turn. The browser separates turns with a blank line, so a steered task reads
-    // as an answer, an instruction and then a different answer.
-    for (const paragraph of task.narration.split('\n\n')) {
-      if (!paragraph) {
-        continue;
+
+  // Narration is one string the browser rewrites, so it is replaced only when it actually changed --
+  // rewriting identical paragraphs on every push is what destroyed focus and re-announced the log.
+  const narration = $('narration');
+  if (task.narration !== lastNarration) {
+    lastNarration = task.narration;
+    narration.textContent = '';
+    if (task.narration) {
+      // One paragraph per turn. The browser separates turns with a blank line, so a steered task reads
+      // as an answer, an instruction and then a different answer.
+      for (const paragraph of task.narration.split('\n\n')) {
+        if (!paragraph) {
+          continue;
+        }
+        const prose = document.createElement('p');
+        prose.className = 'narration';
+        prose.textContent = paragraph;
+        narration.append(prose);
       }
-      const prose = document.createElement('p');
-      prose.className = 'narration';
-      prose.textContent = paragraph;
-      trace.append(prose);
     }
   }
-  for (const step of task.steps) {
-    trace.append(renderStep(step));
+
+  // Steps only ever grow, so only the new ones are built. A step already on screen is left alone,
+  // which is what keeps focus and selection inside it alive.
+  const steps = $('steps');
+  const fresh: HTMLElement[] = [];
+  for (const step of task.steps.slice(renderedSteps)) {
+    const element = renderStep(step);
+    fresh.push(element);
+    steps.append(element);
   }
-  if (task.error) {
-    const error = document.createElement('p');
-    error.className = 'task-error';
-    error.textContent = task.error;
-    trace.append(error);
+  renderedSteps = task.steps.length;
+
+  const error = $('trace-error');
+  error.textContent = task.error ?? '';
+  error.hidden = !task.error;
+
+  // One short announcement per change instead of the whole history: the newest step if a step arrived,
+  // otherwise the state if only that moved.
+  const newest = task.steps[task.steps.length - 1];
+  if (fresh.length > 0 && newest) {
+    $('announce').textContent = newest.label;
+  } else if (task.state !== lastState) {
+    $('announce').textContent = stateLabel(task.state);
   }
+  lastState = task.state;
+
   if (wasAtBottom) {
     // Twice, and then again per image. A captured frame arrives as a data URL that has not been
     // decoded yet, so its box grows AFTER this function returns -- scrolling only here left the view
@@ -313,8 +491,12 @@ function renderTask() {
     };
     stick();
     requestAnimationFrame(stick);
-    for (const image of trace.querySelectorAll('img')) {
-      image.addEventListener('load', stick, {once: true});
+    // Only the images just appended: the ones already on screen have decoded, and re-listening to them
+    // on every push added a listener per push per image.
+    for (const element of fresh) {
+      for (const image of element.querySelectorAll('img')) {
+        image.addEventListener('load', stick, {once: true});
+      }
     }
   }
 
@@ -323,10 +505,19 @@ function renderTask() {
   const latest = [...task.steps].reverse().find((s) => s.previewDataUrl);
   const preview = $('preview');
   if (latest?.previewDataUrl) {
-    $<HTMLImageElement>('preview-image').src = latest.previewDataUrl;
-    $<HTMLImageElement>('preview-image').alt = loadTimeData.getStringF('taskCapturedFrame', latest.label);
-    $('preview-title').textContent = latest.label;
-    preview.hidden = false;
+    // Closing it used to last until the next push from the browser -- which is every few seconds on a
+    // running task, because this function set `hidden = false` unconditionally whenever a frame existed.
+    // The dismissal is remembered against the FRAME it dismissed, so a re-render leaves it closed and a
+    // genuinely new capture opens it again. Keyed on the data URL because that is the frame's identity:
+    // the steps array is rebuilt on every push, so an index would not survive.
+    if (dismissedFrame === latest.previewDataUrl) {
+      preview.hidden = true;
+    } else {
+      $<HTMLImageElement>('preview-image').src = latest.previewDataUrl;
+      $<HTMLImageElement>('preview-image').alt = loadTimeData.getStringF('taskCapturedFrame', latest.label);
+      $('preview-title').textContent = latest.label;
+      preview.hidden = false;
+    }
   } else {
     preview.hidden = true;
   }
@@ -435,6 +626,72 @@ function modeSelects(): HTMLSelectElement[] {
   return [...root.querySelectorAll<HTMLSelectElement>('[data-mode-select]')];
 }
 
+// The model chooser is the NATIVE select it always was, filled from what the engine says this machine
+// can route to. The reference builds a full modal here -- facet groups for price band, capability and
+// vendor, a sortable table, a token-wise search -- and that is right for its several hundred models. This
+// list is what ONE machine has configured, which is a handful: the stub answers with three. A faceted
+// table over three rows would be furniture, and a native select already brings the parts that actually
+// matter at this size -- type-ahead, keyboard, touch and screen-reader semantics -- which is the same
+// reason this control was kept native when its focus ring was fixed. <optgroup> gives the grouping by
+// provider that the reference gets from section headers. If a console catalogue ever lands here and the
+// list grows by two orders of magnitude, THAT is when the modal earns its place.
+async function fillModelSelect() {
+  const select = $<HTMLSelectElement>('model');
+  const {options} = await host.listModels();
+  if (!options.length) {
+    // No engine, which is the ordinary state on a machine that never installed one. Say that on the
+    // control rather than leaving the hardcoded id sitting there looking like a choice, and keep the
+    // default working: an empty chosenModel is exactly what the browser already sends.
+    select.textContent = '';
+    const only = document.createElement('option');
+    only.value = '';
+    only.textContent = loadTimeData.getString('newTabModelDefault');
+    select.append(only);
+    chosenModel = '';
+    syncSelectLabel(select);
+    return;
+  }
+
+  // `auto` first, then provider groups in the order the engine listed them. Auto is not just another
+  // row: it is the one entry that means "let the router decide", so burying it alphabetically among
+  // model names would hide the default.
+  select.textContent = '';
+  const auto = options.filter((option) => option.id.endsWith('/auto'));
+  const rest = options.filter((option) => !option.id.endsWith('/auto'));
+  const addOption = (id: string, label: string, parent: HTMLElement) => {
+    const element = document.createElement('option');
+    element.value = id;
+    element.textContent = label;
+    parent.append(element);
+  };
+  for (const option of auto) {
+    addOption(option.id, option.id, select);
+  }
+  const groups = new Map<string, typeof rest>();
+  for (const option of rest) {
+    const list = groups.get(option.providerId) ?? [];
+    list.push(option);
+    groups.set(option.providerId, list);
+  }
+  for (const [providerId, list] of groups) {
+    const group = document.createElement('optgroup');
+    group.label = providerId;
+    for (const option of list) {
+      // Name plus the band when the engine priced it, because "premium" is the fact a person choosing
+      // between two models of the same family actually wants.
+      addOption(option.id, option.priceBand ? `${option.name} · ${option.priceBand}` : option.name,
+                group);
+    }
+    select.append(group);
+  }
+  // Keep whatever was already chosen if the engine still offers it; otherwise fall back to the default
+  // rather than silently running on a model the user did not pick.
+  const available = options.some((option) => option.id === chosenModel);
+  chosenModel = available ? chosenModel : (auto[0]?.id ?? '');
+  select.value = chosenModel;
+  syncSelectLabel(select);
+}
+
 function paintModeSelects(current: PermissionMode) {
   const name = Object.keys(MODES).find((key) => MODES[key] === current) ?? 'guard';
   for (const select of modeSelects()) {
@@ -525,6 +782,9 @@ if (openTaskId) {
     void send(FollowUpMode.kInterrupt);
   });
   $<HTMLButtonElement>('preview-close').addEventListener('click', () => {
+    // Remember WHICH frame was dismissed, not merely that the panel was closed, so the next capture
+    // still earns the panel back.
+    dismissedFrame = $<HTMLImageElement>('preview-image').src || null;
     $('preview').hidden = true;
   });
 
@@ -539,6 +799,14 @@ if (openTaskId) {
 
   // The reason this surface exists is to be typed into.
   $<HTMLInputElement>('prompt').focus();
+
+  // Filled from the engine rather than left as the one hardcoded id. Deliberately not awaited: the
+  // composer must be usable the instant the page draws, and the chooser arriving a moment later changes
+  // nothing about a task started with the default.
+  void fillModelSelect();
+  $<HTMLSelectElement>('model').addEventListener('change', () => {
+    chosenModel = $<HTMLSelectElement>('model').value;
+  });
 
   for (const tile of document.querySelectorAll<HTMLElement>('.tile')) {
     tile.addEventListener('click', () => {
@@ -613,7 +881,7 @@ if (openTaskId) {
                                       : Effort.kStandard;
     // Context refs are opaque handles the browser resolves. None are collected yet -- the `@` picker
     // is later work -- and sending a URL here instead would be exactly the shortcut the design forbids.
-    const {taskId, error} = await host.startTask(prompt, [], composerMode, effort);
+    const {taskId, error} = await host.startTask(prompt, [], composerMode, effort, chosenModel);
     if (error !== null && error !== undefined) {
       $('home-status').textContent =
           loadTimeData.getString('taskEngineUnavailable');
@@ -636,7 +904,9 @@ if (openTaskId) {
   // widest permission in the product hiding in the narrowest-looking place.
   if (askedFromCommandLine) {
     const {taskId, error} = await host.startTask(
-        askedFromCommandLine, [], PermissionMode.kGuard, Effort.kStandard);
+        // Empty model for the same reason as Guard and Standard: the terminal cannot express a choice,
+        // so it takes the product's default rather than whatever this tab's chooser was last set to.
+        askedFromCommandLine, [], PermissionMode.kGuard, Effort.kStandard, '');
     if (error !== null && error !== undefined) {
       $('home-status').textContent =
           loadTimeData.getString('taskCommandUnavailable');
