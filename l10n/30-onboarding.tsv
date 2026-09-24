@@ -2,7 +2,7 @@
 
 obWelcomeTitle	Welcome to Redrob	Redrob 시작하기	Heading of the first step
 obWelcomeBody	A browser that can do the work, not just show you the page.	페이지를 보여주는 데서 끝나지 않고, 일까지 하는 브라우저입니다.	Body of the first step
-obAccountTitle	Create your Redrob account	Redrob 계정 만들기	Heading of the account step
+obAccountTitle	What a Redrob account is for	Redrob 계정이 하는 일	Heading of the account step, which explains the account rather than creating one
 obAccountBody	Your tasks, memory and routines follow the account, not the machine.	작업, 메모리, 루틴은 기기가 아니라 계정을 따라갑니다.	Body of the account step
 obEmailLabel	Email address	이메일 주소	Accessible name of the email field
 obHaveAccount	I already have an account	이미 계정이 있습니다	Button for a returning user
@@ -51,3 +51,6 @@ obFinish	Finish	완료	Button that closes the first-run flow
 obTryAgain	Try again	다시 시도	Button shown after a step failed
 obShortcutCommand	Command	Command	Name of the macOS modifier key
 obShortcutCtrl	Ctrl	Ctrl	Name of the Windows and Linux modifier key
+obStepOf	Step $1 of $2	$2단계 중 $1단계	Accessible name of one progress dot; $1 is this step number, $2 is the total
+obImportRunning	Importing…	가져오는 중…	Shown while a browser import is running
+obImportDone	Imported.	가져왔습니다.	Shown when a browser import finished
