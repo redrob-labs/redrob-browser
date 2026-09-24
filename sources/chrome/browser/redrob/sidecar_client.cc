@@ -50,6 +50,11 @@ constexpr char kApiKeyEnvVar[] = "REDROB_API_KEY";
 // defaults to "redrob", which is the user half this class sends.
 constexpr char kServerPasswordEnvVar[] = "REDROB_SERVER_PASSWORD";
 
+// The chat-completions contract revision this browser is written against. A MINIMUM, not a pin: the
+// engine may answer with a higher one and still be fine, which is the whole point of negotiating on a
+// capability rather than on an engine version.
+constexpr int kMinChatCompletionsVersion = 1;
+
 // The engine's file name and this platform's PATH separator. Both differ on Windows, and getting either
 // wrong is a silent "not installed" rather than an error.
 #if BUILDFLAG(IS_WIN)
@@ -586,6 +591,76 @@ void SidecarClient::PollHealth() {
       /*max_body_size=*/4 * 1024);
 }
 
+void SidecarClient::FetchCapabilities() {
+  auto request = std::make_unique<network::ResourceRequest>();
+  // Still the experimental path: the engine's design promotes it to /capabilities, but the version a user
+  // has installed serves it here, and asking the old path works on both.
+  request->url = GURL(base_url_ + "/experimental/capabilities");
+  request->method = "GET";
+  request->credentials_mode = network::mojom::CredentialsMode::kOmit;
+  request->headers.SetHeader("Authorization",
+                             "Basic " + base::Base64Encode("redrob:" + basic_credentials_));
+
+  static constexpr net::NetworkTrafficAnnotationTag kAnnotation =
+      net::DefineNetworkTrafficAnnotation("redrob_sidecar_capabilities", R"(
+        semantics {
+          sender: "Redrob AI surface"
+          description:
+            "Asks the locally launched Redrob Code engine which parts of its contract it implements, so "
+            "the browser can say the engine is too old instead of sending a request that fails. The "
+            "request never leaves the machine."
+          trigger: "The engine answered a health check during startup."
+          data: "None. A generated per-launch credential authenticates to the local process."
+          destination: LOCAL
+        }
+        policy {
+          cookies_allowed: NO
+          setting: "Tied to using the Redrob AI surface; no separate setting."
+          policy_exception_justification: "Does not contact a remote server."
+        })");
+
+  capabilities_loader_ = network::SimpleURLLoader::Create(std::move(request), kAnnotation);
+  capabilities_loader_->SetTimeoutDuration(base::Seconds(3));
+  capabilities_loader_->DownloadToString(
+      url_loader_factory_.get(),
+      base::BindOnce(&SidecarClient::OnCapabilitiesResponse, weak_factory_.GetWeakPtr()),
+      /*max_body_size=*/16 * 1024);
+}
+
+void SidecarClient::OnCapabilitiesResponse(std::optional<std::string> body) {
+  capabilities_loader_.reset();
+
+  // What we need is one number: the chat-completions contract revision. The engine's own design says to
+  // declare a MINIMUM capability and never a version of the engine, because it auto-updates -- so this
+  // reads the entry and compares, and treats absence as "older than 1" rather than as a transport
+  // problem. Measured against both engines a user can have: the released one answers this path with
+  // {"backgroundSubagents":false} and no entry at all, the current one adds
+  // {"chatCompletions":{"version":1,...}}.
+  int version = 0;
+  if (body) {
+    if (std::optional<base::DictValue> parsed =
+            base::JSONReader::ReadDict(*body, base::JSON_PARSE_RFC)) {
+      if (const base::DictValue* chat = parsed->FindDict("chatCompletions")) {
+        version = chat->FindInt("version").value_or(0);
+      }
+    }
+  }
+
+  if (version < kMinChatCompletionsVersion) {
+    LOG(ERROR) << "the Redrob Code engine does not implement chat completions v"
+               << kMinChatCompletionsVersion << " (found v" << version << ")";
+    base_url_.clear();
+    if (process_.IsValid()) {
+      process_.Terminate(/*exit_code=*/0, /*wait=*/false);
+    }
+    failure_ = Failure::kEngineTooOld;
+    SetStatus(Status::kFailed);
+    return;
+  }
+
+  SetStatus(Status::kReady);
+}
+
 void SidecarClient::FetchProviders(ProvidersCallback callback) {
   if (status_ != Status::kReady || base_url_.empty()) {
     // Not serving. The caller treats this the same as an engine that has none to offer, which is the
@@ -643,7 +718,8 @@ void SidecarClient::OnHealthResponse(std::optional<std::string> body) {
   health_loader_.reset();
 
   if (response_code == net::HTTP_OK) {
-    SetStatus(Status::kReady);
+    // Serving, but not yet known to serve what we need. The capability answer decides.
+    FetchCapabilities();
     return;
   }
 
@@ -651,6 +727,7 @@ void SidecarClient::OnHealthResponse(std::optional<std::string> body) {
   // else during startup is expected to be transient -- the listener is bound before the routes are.
   if (response_code == net::HTTP_UNAUTHORIZED || response_code == net::HTTP_FORBIDDEN) {
     LOG(ERROR) << "the Redrob Code sidecar refused the generated credential";
+    failure_ = Failure::kCredentialRejected;
     base_url_.clear();
     if (process_.IsValid()) {
       process_.Terminate(/*exit_code=*/0, /*wait=*/false);

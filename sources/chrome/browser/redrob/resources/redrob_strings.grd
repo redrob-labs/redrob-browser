@@ -173,6 +173,10 @@
       <message name="IDS_REDROB_TASK_REPLY_SENT" desc="Shown after a reply reaches an idle task">Sent.</message>
       <message name="IDS_REDROB_TASK_ENGINE_UNAVAILABLE" desc="Shown when the sidecar is not running">Could not start the task: the Redrob Code engine is not available.</message>
       <message name="IDS_REDROB_TASK_COMMAND_UNAVAILABLE" desc="Shown when a slash command cannot reach the sidecar">That command could not be run: the Redrob Code engine is not available.</message>
+      <message name="IDS_REDROB_TASK_ENGINE_STOPPED" desc="Task error when the engine died mid-run">The Redrob Code engine stopped responding.</message>
+      <message name="IDS_REDROB_TASK_ENGINE_TOO_OLD" desc="Task error when the engine does not implement the chat-completions contract this browser needs">This browser needs a newer Redrob Code engine. Update it, then start the task again.</message>
+      <message name="IDS_REDROB_TASK_ENGINE_CREDENTIAL" desc="Task error when the engine rejects the per-launch credential">The Redrob Code engine refused this browser's credential.</message>
+      <message name="IDS_REDROB_TASK_ENGINE_NO_ANSWER" desc="Task error when a turn completes with no text and no tool call">The engine ended the task without producing an answer.</message>
       <message name="IDS_REDROB_OB_WELCOME_TITLE" desc="Heading of the first step">Welcome to Redrob</message>
       <message name="IDS_REDROB_OB_WELCOME_BODY" desc="Body of the first step">A browser that can do the work, not just show you the page.</message>
       <message name="IDS_REDROB_OB_ACCOUNT_TITLE" desc="Heading of the account step">Create your Redrob account</message>

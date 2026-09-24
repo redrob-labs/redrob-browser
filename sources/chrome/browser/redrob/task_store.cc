@@ -8,6 +8,7 @@
 
 #include "base/functional/bind.h"
 #include "base/json/json_reader.h"
+#include "base/strings/string_util.h"
 #include "base/json/json_writer.h"
 #include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
@@ -16,8 +17,10 @@
 #include "base/base64.h"
 #include "base/path_service.h"
 #include "base/task/sequenced_task_runner.h"
+#include "chrome/browser/redrob/resources/grit/redrob_strings.h"
 #include "chrome/browser/redrob/agent_tabs.h"
 #include "chrome/browser/redrob/memory_store.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "chrome/browser/redrob/model_store.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/browser/redrob/file_tools.h"
@@ -701,6 +704,20 @@ void TaskStore::OnCompletionFinished(const std::string& finish_reason) {
           FROM_HERE, base::BindOnce(&TaskStore::StartTurn, weak_factory_.GetWeakPtr(), task_id));
       return;
     }
+    // No tool call and nothing said is not success. This used to finish as Succeeded regardless, so a
+    // turn that produced zero bytes showed the user a card reading DONE above an empty trace -- told
+    // that the task worked and shown nothing. Observed against a real engine that answers the
+    // completions route with 200 and an empty stream when it has no account configured, where the
+    // browser cannot tell an empty answer from a silent refusal; either way the user has no answer, so
+    // the honest report is a failure naming what happened. The engine's finish reason goes to the log
+    // rather than the card, since it is a diagnostic and not something a user can act on.
+    if (base::TrimWhitespaceASCII(conversation->second.assistant_text, base::TRIM_ALL).empty()) {
+      LOG(ERROR) << "the engine ended a turn without an answer (finish_reason='" << finish_reason
+                 << "')";
+      FinishTask(task_id, mojom::TaskState::kFailed,
+                 l10n_util::GetStringUTF8(IDS_REDROB_TASK_ENGINE_NO_ANSWER));
+      return;
+    }
     FinishTask(task_id, mojom::TaskState::kSucceeded, std::string());
     return;
   }
@@ -1240,12 +1257,29 @@ void TaskStore::OnSidecarStatusChanged(SidecarClient::Status status) {
   if (status != SidecarClient::Status::kFailed) {
     return;
   }
-  // Fail every non-terminal task rather than leaving cards spinning against a dead engine.
+  // Fail every non-terminal task rather than leaving cards spinning against a dead engine, and say WHICH
+  // failure it was. This used to be one hardcoded English sentence for every cause, so an engine too old
+  // to serve the contract and an engine that died mid-run read identically -- and neither told the user
+  // the one thing that would help. The too-old case is the common one on a machine whose engine has not
+  // been updated: without it, the request 404s and the task reports that the connection ended.
+  int message_id = IDS_REDROB_TASK_ENGINE_STOPPED;
+  switch (sidecar_ ? sidecar_->failure() : SidecarClient::Failure::kOther) {
+    case SidecarClient::Failure::kEngineTooOld:
+      message_id = IDS_REDROB_TASK_ENGINE_TOO_OLD;
+      break;
+    case SidecarClient::Failure::kCredentialRejected:
+      message_id = IDS_REDROB_TASK_ENGINE_CREDENTIAL;
+      break;
+    case SidecarClient::Failure::kNone:
+    case SidecarClient::Failure::kOther:
+      break;
+  }
+  const std::string message = l10n_util::GetStringUTF8(message_id);
   active_task_id_.clear();
   for (auto& [id, task] : tasks_) {
     if (!IsTerminal(task->state)) {
       task->state = mojom::TaskState::kFailed;
-      task->error = "The Redrob Code engine stopped responding.";
+      task->error = message;
       Notify(id);
     }
   }
