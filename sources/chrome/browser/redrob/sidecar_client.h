@@ -130,6 +130,12 @@ class SidecarClient {
                              const std::string& bearer_token,
                              std::string request_json,
                              CompletionDelegate* delegate);
+  // Asks the engine what models it can route to: GET /config/providers, answered with the response body
+  // or nullopt when the engine is not serving or the request fails. One call, not a subscription -- the
+  // list changes when someone edits the engine's own configuration, which is not something this class
+  // can observe, so the caller refetches when the engine becomes ready.
+  using ProvidersCallback = base::OnceCallback<void(std::optional<std::string> body)>;
+  void FetchProviders(ProvidersCallback callback);
   void CancelCompletion();
 
  private:
@@ -142,6 +148,7 @@ class SidecarClient {
   void OnLaunched(std::unique_ptr<LaunchResult> result);
   void PollHealth();
   void OnHealthResponse(std::optional<std::string> body);
+  void OnProvidersResponse(ProvidersCallback callback, std::optional<std::string> body);
 
   Status status_ = Status::kUnavailable;
   std::string base_url_;
@@ -154,6 +161,7 @@ class SidecarClient {
 
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   std::unique_ptr<network::SimpleURLLoader> health_loader_;
+  std::unique_ptr<network::SimpleURLLoader> providers_loader_;
   int health_attempts_ = 0;
   std::unique_ptr<CompletionStream> completion_;
 
