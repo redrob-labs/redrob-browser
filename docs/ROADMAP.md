@@ -145,6 +145,33 @@ rows after all — the inconsistency claimed here earlier was an artefact of the
 
 ### Still open from earlier work
 
+30. **Nothing in CI launches the browser twice on one profile.** FIXED, with the guard sitting alongside
+    the fix it guards. Every job used `--user-data-dir="$(mktemp -d)"` and launched once, so the case that
+    works — a fresh profile's first start — was the only case ever tested. That is why finding 29 survived
+    here as a hypothesis for so long: its failure appears only on the SECOND launch of a profile whose
+    first did not exit cleanly. Both platform jobs now reuse one directory, kill the first launch hard on
+    purpose, and require the second to come up. Note what remains: the Linux `checks` job never launches
+    anything — it is lint and tooling with no build — so every piece of runtime coverage this repository
+    has is Windows and macOS. Nothing verifies Linux behaviour except a human.
+
+31. **The RPC token file is protected on POSIX only.** `WriteHandleFileOnBlockingThread` in
+    `rpc_server.cc` writes the handle file — which holds a 32-byte token that, in that function's own
+    words, "grants control of the browser" — into the profile directory, then narrows it to owner
+    read/write under `#if BUILDFLAG(IS_POSIX)` with no `#else`. On Windows the file keeps whatever ACL it
+    inherits. In practice a profile under the user's own AppData is usually already user-only, so this is
+    weaker than the POSIX case rather than plainly open — but the code makes an explicit security
+    decision on one platform and silently none on the other, which is a thing to decide rather than
+    inherit. Either assert the ACL on Windows too, or say in that comment why inheritance is considered
+    enough there.
+
+32. **The shape to grep for is a lone `IS_POSIX` guard with no `#else`.** Our platform coverage is uneven
+    in a way worth knowing rather than guessing at. `redrob_fonts.cc` and `chromium_profile_locator.cc`
+    are properly three-way — Windows, macOS, and a real `#else` — so that platform work was done
+    deliberately. `sidecar_client.cc` was not: the engine was findable on Windows only through an
+    environment variable, because its install-location branch looked for a name with no `.exe` and its
+    PATH branch was compiled out entirely. `rpc_server.cc` is finding 31. The pattern reads as "POSIX
+    needs this" and behaves as "every other platform gets nothing", and it is silent both times.
+
 27e. **The engine's loopback port was unauthenticated, and our own comment said otherwise.** FIXED.
     `SidecarClient` generates a 32-byte per-launch secret, binds it into the launch task, and sends it as
     HTTP Basic on every request — but never gave it to the engine. The engine enforces Basic only when
