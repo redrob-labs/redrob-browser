@@ -162,8 +162,16 @@ at all, given the console returns 401 unauthenticated and this product has no si
 - **Source: the LOCAL ENGINE, not the console.** `GET /config/providers` returns
   `{providers: Info[], default: DefaultModelIDs}`, and each model carries `id`, `providerID`, `name`,
   `family`, `capabilities`, `cost`, `limit`, `status` and `release_date`. It sits behind the same HTTP
-  Basic we already send, so it needs no new credential and no console round-trip. This also means the
-  list describes what this machine can ACTUALLY run, which a console catalogue would not.
+  Basic we already send, so it needs no new credential and no console round-trip.
+- **Correction, from measuring it (cycle 60): the list is NOT what this machine can currently run.** This
+  item originally claimed the opposite, as the reason to prefer the engine over a console catalogue. The
+  engine advertises `redrob/auto` in that response and then answers the completions route for that same
+  id with `400 model redrob/auto is not available on this engine`, because availability depends on a
+  provider credential the engine can actually use while the list does not. The engine remains the right
+  source — it needs no sign-in and no console round-trip — but the picker must treat an entry as a
+  candidate rather than a promise: a choice can fail on use, and the failure has to read as the engine
+  not being able to run that model, not as the user picking something unsupported. See ROADMAP findings
+  34 and 35.
 - **The facets map onto that shape rather than being invented**: `capabilities` → the capability
   filters, `cost` → the price band, `providerID` (plus a vendor inference) → the vendor filter. The
   reference's picker is a modal with facet groups, a token-wise search, a sortable table and an escape

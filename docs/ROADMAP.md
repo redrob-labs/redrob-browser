@@ -172,6 +172,41 @@ rows after all — the inconsistency claimed here earlier was an artefact of the
     PATH branch was compiled out entirely. `rpc_server.cc` is finding 31. The pattern reads as "POSIX
     needs this" and behaves as "every other platform gets nothing", and it is silent both times.
 
+33. **The engine claims a successful turn while producing nothing, when it has no account configured.**
+    Found by pointing the browser at a real engine instead of a stub. With no Console credential the
+    current engine answers `POST /v1/chat/completions` with a well-formed stream whose `finish_reason` is
+    `stop` and whose content is empty — so from the browser it is indistinguishable from a model that
+    genuinely had nothing to say. Its own design specifies `401` with `engine_not_authenticated` for this
+    case and calls that code load-bearing, telling clients to branch on it to offer a sign-in action; the
+    engine does not emit it. A direct `curl` sees something slightly different again — 200 and zero bytes
+    — so the shape depends on the request. Our side is now honest about it (a turn with no text and no
+    tool call fails saying the engine produced no answer, rather than reporting DONE over an empty
+    trace), but the browser still cannot tell a silent refusal from an empty answer, and it cannot offer
+    sign-in until the engine says which one happened. Worth raising upstream rather than working around
+    further.
+
+34. **A credential that exists but cannot be used is reported as a missing model, not an auth problem.**
+    With `REDROB_API_KEY` set to an invalid value the same route answers `400`
+    `{"error":{"message":"model redrob/auto is not available on this engine","type":"invalid_request_error"}}`.
+    The engine resolves its model list from providers it can actually authenticate, so an unusable
+    credential presents as the model having vanished. Any error mapping we write must not take that
+    message at face value and tell the user their model is unsupported.
+
+35. **`/config/providers` advertises models that completions then refuses.** The providers response lists
+    `redrob/auto` on an engine that answers the completions route for that exact id with "not available
+    on this engine". So the list is what the engine knows about, not what it can currently run, and a
+    model chooser built from it will offer choices that fail on use. Finding 34 is the mechanism; this is
+    the consequence for our UI, and it is corrected in the model-picker item of the UI plan, which
+    claimed the opposite.
+
+36. **`--port 0` is a silent no-op, and our comment claims it does something.** `sidecar_client.cc` passes
+    `--port 0` with a comment saying it avoids racing a second profile for a fixed port. The engine
+    ignores the value and binds its default; `--port 41234` is honoured, so the flag itself works and
+    only `0` is dropped. Two profiles therefore still race for one port, and the comment states a
+    protection that does not exist. Decide between having the browser pick a free port itself and moving
+    to the shared-daemon model the engine's design describes, where one engine is discovered through
+    `$HOME/.redrob/run/server.json` instead of each browser launching its own.
+
 27e. **The engine's loopback port was unauthenticated, and our own comment said otherwise.** FIXED.
     `SidecarClient` generates a 32-byte per-launch secret, binds it into the launch task, and sends it as
     HTTP Basic on every request — but never gave it to the engine. The engine enforces Basic only when
