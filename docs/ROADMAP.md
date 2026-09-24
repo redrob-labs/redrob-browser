@@ -207,6 +207,21 @@ rows after all — the inconsistency claimed here earlier was an artefact of the
     to the shared-daemon model the engine's design describes, where one engine is discovered through
     `$HOME/.redrob/run/server.json` instead of each browser launching its own.
 
+37. **Half the sweep's evidence still rests on a stub, and only an engine with an account can replace
+    it.** The 28 screen-verified items were checked against a stub engine written from our own reading of
+    the API — the same reading the parser was built from, which is why it confirmed a models-as-array
+    mistake instead of catching it. Re-running the probes against the real engine replaced part of that
+    evidence and could not replace the rest. Replaced: the model picker renders the real catalogue, so the
+    record-keyed parse is confirmed on screen and not only by `curl`; engine discovery, the handshake and
+    both failure messages are verified against real binaries. Not replaced: every surface that needs a
+    turn to be IN FLIGHT or to emit a tool call — queueing behind a running task, withdrawal, the stop
+    button, the running trace, and the tool-preview surfaces. An engine with no account configured returns
+    instantly with no content and emits zero tool calls, so there is no running turn to queue behind and
+    no tool call to preview; the stub held a turn open deliberately, which is exactly why those items were
+    verifiable there and are not here. Closing this needs an engine with a working provider credential.
+    Until then, treat those items as stub-verified and say so rather than counting them as screen-verified
+    against a real engine.
+
 27e. **The engine's loopback port was unauthenticated, and our own comment said otherwise.** FIXED.
     `SidecarClient` generates a 32-byte per-launch secret, binds it into the launch task, and sends it as
     HTTP Basic on every request — but never gave it to the engine. The engine enforces Basic only when
