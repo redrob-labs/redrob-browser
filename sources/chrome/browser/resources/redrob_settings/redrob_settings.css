@@ -35,26 +35,28 @@ body {
 
 .shell {
   display: flex;
+  height: 100vh;
   margin: 0 auto;
   max-width: 1100px;
-  min-height: 100vh;
+  overflow: hidden;
   position: relative;
   z-index: 1;
 }
 
-/* Sticky, because the sections are long: a nav that scrolls away with the content is a nav you can
-   only use once. */
+/* Full height by construction rather than by sticking. This was `align-self: flex-start` with
+   `position: sticky`, which sized the nav to its own content -- so its right border stopped under the last
+   link instead of reaching the bottom of the window, and the divider between nav and content just ended in
+   mid-air. Stickiness was the wrong tool: it exists for a column shorter than a scrolling document, and the
+   shell above no longer scrolls -- the content pane does. A stretched nav needs no sticky, no max-height
+   and no top offset, and its border runs the full height at every scroll position. */
 .nav {
-  align-self: flex-start;
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   gap: 2px;
-  max-height: 100vh;
+  overflow-y: auto;
   padding: 22px 16px;
-  position: sticky;
-  top: 0;
   width: 220px;
 }
 
@@ -95,6 +97,7 @@ body {
 .pages {
   flex: 1;
   min-width: 0;
+  overflow-y: auto;
   padding: 22px 28px 80px;
 }
 
