@@ -771,10 +771,51 @@ def cmd_build(args: argparse.Namespace) -> None:
                  f"checkout, so the build would fail deep inside it. Use --force-platform if you have one.")
     out = SRC / "out" / args.flavour
     args_gn = (ROOT / FLAVOURS[args.flavour]).read_text(encoding="utf-8")
+    args_gn += google_api_args()
     out.mkdir(parents=True, exist_ok=True)
     (out / "args.gn").write_text(args_gn, encoding="utf-8")
     run(["gn", "gen", f"out/{args.flavour}"], SRC)
     run(["autoninja", "-C", f"out/{args.flavour}", args.target], SRC)
+
+
+# The three values Google's APIs authenticate a browser with. Kept OUT of build/args/*.gn on purpose: those
+# files are committed, and a committed key is a published key. They arrive from the environment instead --
+# a CI secret on a release build, an exported variable on a developer's machine -- and are appended to the
+# generated args.gn, which lives in the build directory and is not tracked.
+GOOGLE_API_ARGS = (
+    ("GOOGLE_API_KEY", "google_api_key"),
+    ("GOOGLE_DEFAULT_CLIENT_ID", "google_default_client_id"),
+    ("GOOGLE_DEFAULT_CLIENT_SECRET", "google_default_client_secret"),
+)
+
+
+def google_api_args() -> str:
+    """GN args for whichever Google credentials the environment carries, or nothing at all.
+
+    Without these the browser runs with Chromium's unset sentinel, and every Google-backed feature is
+    inert: no sign-in, so no bookmark or password sync, and no Safe Browsing lookups, translate or
+    enhanced spell check. The strings for all of them still ship and read correctly, which is why the
+    absence looks like a bug rather than a missing input.
+
+    Baking them in is what a SHIPPED build needs -- a product cannot ask a user to export a variable
+    before signing in. Be aware of what that means: a key inside a distributed binary is extractable by
+    anyone who has the binary. That is equally true of the official browser and is a matter for the terms
+    the credentials are issued under, not something this script can mitigate.
+
+    Values are never logged, and a partially configured environment is reported by NAME only, because
+    sign-in needs the client id and secret together -- a key alone silently gets a browser that still
+    cannot sign in.
+    """
+    present = [(env, gn) for env, gn in GOOGLE_API_ARGS if os.environ.get(env)]
+    if not present:
+        return ""
+    missing = [env for env, _ in GOOGLE_API_ARGS if not os.environ.get(env)]
+    if missing:
+        print(f"warning: Google credentials incomplete, missing {', '.join(missing)} -- "
+              f"sign-in needs the id and secret together")
+    print(f"baking Google credentials from the environment: {', '.join(env for env, _ in present)}")
+    lines = "".join(f'{gn} = "{os.environ[env]}"\n' for env, gn in present)
+    return "\n# Supplied from the environment at build time; see google_api_args().\n" + lines
 
 
 def built_binary(flavour: str) -> pathlib.Path:
