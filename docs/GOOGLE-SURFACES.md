@@ -49,6 +49,29 @@ Password Manager", "Get the best of Google". There is no iOS app, and per the ro
 run this engine at all. These are a false promise twice over: an app that does not exist, advertising
 Google features this fork does not provide.
 
+**Resolved, and not the way it looked.** Nothing renders them. Searched for a consumer of these ids
+across every `.cc`, `.h`, `.ts` and `.html` in the checkout: the only hit is the generated
+`branded_strings.h`, which is the id header rather than a use. So there is no entry point to remove in
+this Chromium version — they are dormant text in the branding file. Deleting twenty strings out of an
+upstream `.grd` would add merge conflicts at every uprev for no change a user could see, so they stay
+and this paragraph is the record of why. If a future uprev wires those promos up, the entry point is
+what to remove then.
+
+**Glic was the opposite case and is now off.** Upstream's own assistant is not dormant: `kGlic` is
+`FEATURE_ENABLED_BY_DEFAULT` on macOS, Windows and ChromeOS, and only disabled on Linux. What kept it
+out of a macOS or Windows build of this fork was a chain of conditions we do not control — a rollout
+flag, an account capability, country and locale filters — so a change on Google's side could have
+surfaced a second, competing assistant inside a product that ships its own. It is now disabled on every
+platform through one line, upstream's documented kill-switch. Verified that this reaches the entry
+points rather than only the text: the toolbar button, the tab-strip action container, the side panel,
+the profile manager and the profile picker all gate on `GlicEnabling`, whose `IsProfileEligible()` is
+`feature_enabled && is_regular_profile` with `feature_enabled` reading exactly that feature. No upstream
+code is deleted.
+
+Note what the Linux screenshot after that change can and cannot show: Linux had the feature off
+already, so it evidences no regression, not a removal. The change earns its place on the platforms
+whose CI builds and launches the browser — Windows and macOS — and that is where it should be looked at.
+
 ## 4. Already correct, or not reachable
 
 `IDS_PRODUCT_NAME`, `IDS_ABOUT` and the window-title formats have variants reading "Google Chrome for
