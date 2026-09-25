@@ -87,10 +87,54 @@ to check what they are running attributes the product to someone else. `IDS_ABOU
 and `IDS_ABOUT_VERSION_COPYRIGHT` are separate strings from the BRANDING file and were never brought
 into line with it.
 
-## What this does not cover
+## Second pass: `components/` and the settings UI
 
-Only the branding string file. Google's name also reaches the user from the default search engine's
-own name (correct — it is the engine), from `chrome://settings`' Google services page (correct — it
-configures real Google services), and potentially from upstream features whose strings live in other
-grd files. A second pass over `components/` and `chrome/browser/resources/settings/` would be needed
-to call the survey complete.
+The first pass read one string file. This pass covers the rest of the user-visible surface, and it
+found something that changes the first pass's verdicts rather than adding to them.
+
+### This build has no Google API key, and cannot be given one at runtime
+
+Three independent confirmations:
+
+- The browser's own log, at startup: `API key GOOGLE_API_KEY=dummytoken`. That value is
+  `DefaultApiKeys::kUnsetApiToken` — the sentinel meaning "unset".
+- `SUPPORT_EXTERNAL_GOOGLE_API_KEY` is `0` in this build's generated buildflags, so the environment
+  variables that would otherwise supply a key at runtime are not even read.
+- `google_apis/internal/` is absent and no key appears in `build/args/*.gn` or the CI workflows.
+
+The OAuth client id and secret come from the same unset sentinel, and they are what sign-in needs.
+
+**So Chrome Sync cannot work in this build, and neither can Google sign-in.** Upstream evidently knows:
+`chrome://settings/syncSetup` redirects to `chrome://settings/people`, and that page offers **no sign-in
+or turn-on-sync row at all** — the entry point removes itself when there is no client to authenticate
+with. Verified on screen.
+
+This is the real answer to "bookmark sync doesn't work", and it is a level deeper than the first pass
+said. Bookmark sync is not merely gated behind signing in: **there is nothing to sign in with.** Every
+Google-API-backed feature is in the same position — Safe Browsing lookups, the account password store,
+Google Pay autofill, translate, enhanced spell check, image descriptions. The strings for all of them
+ship and read correctly; the services behind them cannot be reached.
+
+The one place that still advertises sign-in is **ours**: our sidebar shows "Sign in to Google?" at
+launch, while upstream's own settings page has already withdrawn the offer. Whatever is decided about
+credentials, that pill should not promise what the build cannot do.
+
+Making it real is not a code change. It needs OAuth credentials for a Chromium-derived browser and
+agreement to the terms attached to them — a product and legal step, and the prerequisite for the whole
+"keep" group above meaning anything.
+
+### Feature-level rulings for the rest
+
+Hundreds of strings mention Google across `components/` (autofill 224, payments 135, omnibox pedals 81,
+passwords 38, browsing data 37, policy 35, security interstitials 34) and the settings UI (196 in
+`settings_strings.grdp`, 92 files under `chrome/browser/resources/settings/`). Ruling per string would
+be noise; the rule applies per feature, and every one of these is the same case: **the feature really is
+Google's, so its name stays, and what is wrong is that it cannot function.** Google Pay, Google Password
+Manager, Safe Browsing, the omnibox pedals that manage a Google Account, Chrome Sync, enterprise policy
+text — all correctly named, all inert without credentials.
+
+Two notes worth keeping from this pass. `settings_chromium_strings.grdp` and
+`settings_google_chrome_strings.grdp` are branding variants and this fork builds the *chromium* one, so
+that is the file to read when settings text looks wrong. And `chrome://settings/people` carries **"Import
+bookmarks and settings"**, a second entry point to the import flow besides onboarding's — worth knowing
+when testing whether import works.
