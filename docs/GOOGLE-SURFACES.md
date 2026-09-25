@@ -138,3 +138,43 @@ Two notes worth keeping from this pass. `settings_chromium_strings.grdp` and
 that is the file to read when settings text looks wrong. And `chrome://settings/people` carries **"Import
 bookmarks and settings"**, a second entry point to the import flow besides onboarding's — worth knowing
 when testing whether import works.
+
+## What should run on our own engine instead
+
+Checked the defaults rather than assuming them, and the answer is not "route everything": two of these
+are already local, one must NOT be routed, and one is worth building.
+
+**Already local, nothing to do.** Enhanced spell check registers `false` — the default spell checker is
+the bundled Hunspell dictionary, which runs on the machine and is *better* at spelling than an inference
+engine would be. Image descriptions register `false` too, so nothing is sent anywhere unless a user asks
+for it per image.
+
+**Worth routing to our engine: image descriptions.** `AccessibilityLabelsService::BindImageAnnotator`
+has an explicit binder override; when one is installed, the Google-backed `ImageAnnotationService` — the
+thing constructed with `google_apis::GetAPIKey()` — is never created. The interface to implement is one
+method, `AnnotateImage(source_id, language_tag, ImageProcessor) => (AnnotateImageResult)`, whose result is
+either an error code or annotations of `{type, text, score}`. And in this build the Google path is dead
+anyway: with no key the request goes out unauthenticated and is refused, so a user who opts in today gets
+nothing. Our engine is not just the private option here, it is the only one that could work.
+
+Two honest caveats before anyone starts: the engine's image input is NOT confirmed — it advertises
+`chatCompletions` with tools and streaming, and says nothing about images — and with no account
+configured it cannot answer at all on this host, so the feature could be written but not verified
+end to end. Writing an unverifiable feature is how the stub problem happened; this one waits for an
+engine that can answer.
+
+**Must not be routed: Safe Browsing.** It is threat intelligence — a continuously maintained list of
+known-bad URLs and hashes — not something to infer. An engine guessing whether a URL is malicious would
+be a downgrade wearing a feature's clothes.
+
+But it is the most serious thing this survey found, because it is not a naming problem. `kSafeBrowsingEnabled`
+registers **`true`**, its protocol managers authenticate with `google_apis::GetAPIKey()`, and that key is
+`dummytoken` — so the lookups cannot authenticate. Meanwhile `chrome://settings/security` says, on the
+default setting, "Provides strong protection", "Google uses less data … to detect threats", and "Google
+Safe Browsing — Protects you from dangerous sites, downloads, and extensions". Verified on screen. The
+browser promises protection it cannot deliver, and unlike a wrong label this one could get somebody hurt.
+It needs the real key; until there is one, the page should not make that claim.
+
+**Not routable at all**: the account password store and Google Pay autofill are an account's contents,
+not a capability. **Large, and not now**: full-page translation has no override seam of this kind, so it
+is a project rather than a switch.
