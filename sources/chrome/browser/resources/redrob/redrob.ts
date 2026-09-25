@@ -866,13 +866,14 @@ if (openTaskId) {
     // Search mode stops here. The segment now governs Enter as well as the click, which it never did while
     // `Ask AI` was the form's submit button.
     //
-    // TODO: this uses Google explicitly rather than the profile's default search provider, so changing the
-    // default engine in settings does not change what this field does. Fixing it needs the browser side to
-    // hand over the default provider's URL (or to perform the navigation itself), which is a mojo addition
-    // rather than a change here.
+    // The browser performs the navigation with the profile's DEFAULT search provider. This used to build
+    // `https://www.google.com/search?q=` here, which meant choosing another engine in settings changed
+    // nothing about what this field did -- our own surface quietly overrode the user's choice. The page
+    // cannot do better on its own: the provider's template owns the query parameter and its encoding, so
+    // the side holding the template has to build the URL.
     if (intent === 'search') {
       field.value = '';
-      location.href = `https://www.google.com/search?q=${encodeURIComponent(prompt)}`;
+      host.searchWithDefaultProvider(prompt);
       return;
     }
     const chosen = $<HTMLSelectElement>('effort').value;

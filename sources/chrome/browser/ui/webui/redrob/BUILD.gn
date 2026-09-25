@@ -24,8 +24,11 @@ source_set("redrob") {
     "//chrome/browser/redrob/resources:redrob_strings",
     "//chrome/browser:browser_process",
     "//chrome/browser/resources/redrob:resources",
+    # Redrob: the default search provider, so our own search field uses the engine the user chose.
+    "//chrome/browser/search_engines",
     "//chrome/browser/ui/select_file_policy",
     "//chrome/common",
+    "//components/search_engines",
     "//content/public/browser",
     "//mojo/public/cpp/bindings",
     "//ui/shell_dialogs",

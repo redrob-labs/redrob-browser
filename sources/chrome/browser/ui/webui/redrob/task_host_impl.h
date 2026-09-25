@@ -69,6 +69,7 @@ class TaskHostImpl : public mojom::TaskHost,
                         SetPermissionModeCallback callback) override;
   void ChooseWorkingFolder(const std::string& task_id,
                           ChooseWorkingFolderCallback callback) override;
+  void SearchWithDefaultProvider(const std::string& query) override;
 
   // TaskStore::Observer
   void OnTaskChanged(const mojom::Task& task) override;

@@ -6,8 +6,14 @@
 
 #include <utility>
 
+#include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/select_file_policy/chrome_select_file_policy.h"
+#include "components/search_engines/template_url.h"
+#include "components/search_engines/template_url_service.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/shell_dialogs/selected_file_info.h"
 
 namespace redrob {
@@ -129,6 +135,37 @@ void TaskHostImpl::FileSelectionCanceled() {
   if (folder_dialog_callback_) {
     std::move(folder_dialog_callback_).Run(std::nullopt);
   }
+}
+
+void TaskHostImpl::SearchWithDefaultProvider(const std::string& query) {
+  if (!web_contents_ || query.empty()) {
+    return;
+  }
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents_->GetBrowserContext());
+  TemplateURLService* service =
+      profile ? TemplateURLServiceFactory::GetForProfile(profile) : nullptr;
+  const TemplateURL* provider =
+      service ? service->GetDefaultSearchProvider() : nullptr;
+  // No default provider is a real state -- enterprise policy can remove it, and the search-engine
+  // choice screen leaves it unset until the user picks. Doing nothing is right: there is no engine to
+  // ask, and substituting one would override exactly the choice this call exists to respect.
+  if (!provider) {
+    return;
+  }
+  const GURL url(provider->url_ref().ReplaceSearchTerms(
+      TemplateURLRef::SearchTermsArgs(base::UTF8ToUTF16(query)),
+      service->search_terms_data()));
+  if (!url.is_valid()) {
+    return;
+  }
+  // Replaces this page rather than opening a tab: the user typed into the new-tab surface and expects
+  // results where they were, which is what assigning location.href used to do.
+  content::OpenURLParams params(url, content::Referrer(),
+                                WindowOpenDisposition::CURRENT_TAB,
+                                ui::PAGE_TRANSITION_GENERATED,
+                                /*is_renderer_initiated=*/false);
+  web_contents_->OpenURL(params, /*navigation_handle_callback=*/{});
 }
 
 void TaskHostImpl::OnTaskChanged(const mojom::Task& task) {

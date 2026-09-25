@@ -214,6 +214,15 @@ interface TaskHost {
   // one the user saw and agreed to. Null when they cancelled. Only the folder's NAME comes back: a
   // renderer with the absolute path has learned something about the machine it has no use for.
   ChooseWorkingFolder(string task_id) => (string? display_path);
+  // Runs a plain web search for `query` in this tab, using the profile's DEFAULT search provider.
+  //
+  // The browser navigates rather than handing a URL back, for two reasons. The page had been building
+  // `https://www.google.com/search?q=` itself, so choosing a different engine in settings changed
+  // nothing about what this field did -- the composer's Search segment silently overrode the user's own
+  // choice. And a search URL is not a string to concatenate: the provider's template owns the query
+  // parameter, the encoding and any extra parameters it requires, so the side that holds the template
+  // is the side that must build the URL.
+  SearchWithDefaultProvider(string query);
 };
 
 interface PageHandlerFactory {
