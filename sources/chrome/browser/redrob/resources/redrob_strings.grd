@@ -181,6 +181,10 @@
       <message name="IDS_REDROB_TASK_WITHDRAW_QUEUED" desc="Accessible name of the button that takes back one queued message">Withdraw</message>
       <message name="IDS_REDROB_TASK_WITHDRAW_FAILED" desc="Shown when withdrawing fails because the queue moved on">That message has already run.</message>
       <message name="IDS_REDROB_NEW_TAB_MODEL_DEFAULT" desc="The only model option when no engine is available to list others">Default model</message>
+      <message name="IDS_REDROB_TASK_ENGINE_STOPPED" desc="Task error when the engine died mid-run">The Redrob Code engine stopped responding.</message>
+      <message name="IDS_REDROB_TASK_ENGINE_TOO_OLD" desc="Task error when the engine does not implement the chat-completions contract this browser needs">This browser needs a newer Redrob Code engine. Update it, then start the task again.</message>
+      <message name="IDS_REDROB_TASK_ENGINE_CREDENTIAL" desc="Task error when the engine rejects the per-launch credential">The Redrob Code engine refused this browser's credential.</message>
+      <message name="IDS_REDROB_TASK_ENGINE_NO_ANSWER" desc="Task error when a turn completes with no text and no tool call">The engine ended the task without producing an answer.</message>
       <message name="IDS_REDROB_OB_WELCOME_TITLE" desc="Heading of the first step">Welcome to Redrob</message>
       <message name="IDS_REDROB_OB_WELCOME_BODY" desc="Body of the first step">A browser that can do the work, not just show you the page.</message>
       <message name="IDS_REDROB_OB_ACCOUNT_TITLE" desc="Heading of the account step, which explains the account rather than creating one">What a Redrob account is for</message>

@@ -78,3 +78,7 @@ taskWithdrewQueued	Withdrawn: $1	철회: $1	Trace line recorded when a queued fo
 taskWithdrawQueued	Withdraw	철회	Accessible name of the button that takes back one queued message
 taskWithdrawFailed	That message has already run.	그 메시지는 이미 실행됐습니다.	Shown when withdrawing fails because the queue moved on
 newTabModelDefault	Default model	기본 모델	The only model option when no engine is available to list others
+taskEngineStopped	The Redrob Code engine stopped responding.	Redrob Code 엔진이 응답을 멈췄습니다.	Task error when the engine died mid-run
+taskEngineTooOld	This browser needs a newer Redrob Code engine. Update it, then start the task again.	이 브라우저에는 더 새로운 Redrob Code 엔진이 필요합니다. 업데이트한 뒤 작업을 다시 시작하세요.	Task error when the engine does not implement the chat-completions contract this browser needs
+taskEngineCredential	The Redrob Code engine refused this browser's credential.	Redrob Code 엔진이 이 브라우저의 자격 증명을 거부했습니다.	Task error when the engine rejects the per-launch credential
+taskEngineNoAnswer	The engine ended the task without producing an answer.	엔진이 답변을 내지 않고 작업을 끝냈습니다.	Task error when a turn completes with no text and no tool call

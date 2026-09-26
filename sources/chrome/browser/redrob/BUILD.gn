@@ -38,7 +38,12 @@ source_set("sidecar") {
     "//components/keyed_service/core",
     "//services/network/public/cpp",
   ]
-  deps = []
+  deps = [
+    # The task failure messages come from the dictionary rather than being written in this code, so this
+    # target needs the generated strings and the loader that reads them.
+    "//chrome/browser/redrob/resources:redrob_strings",
+    "//ui/base",
+  ]
 
   # Not on macOS: there the font travels as bundle_data inside the framework, and building the copy as well would
   # leave a file in the build root that nothing reads and nothing ships.

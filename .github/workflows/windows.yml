@@ -127,6 +127,35 @@ jobs:
           grep -i "Redrob UI font" launch.log || echo "(no font log line -- check the VLOG level)"
           taskkill //PID "$pid" //F 2>/dev/null || kill "$pid" || true
 
+      # The launch above proves a FRESH profile works, and every job in this repository used one, so
+      # nothing here could ever see what happens on the second launch of a profile that did not exit
+      # cleanly. That is not a hypothetical gap: it is exactly the shape of a bug that made a profile
+      # permanently unlaunchable, because `profile.exit_type` stays `Crashed` until an exit is clean and
+      # the browser died on the next start before showing a window. One unclean exit, profile gone.
+      #
+      # So this step reuses ONE profile directory, kills the first launch the way a crash would, and
+      # requires the second launch to come up anyway.
+      - name: launch again on a profile that did not exit cleanly
+        run: |
+          set -uo pipefail
+          cd chromium/src/out/windows
+          profile="$(mktemp -d)"
+          for attempt in 1 2; do
+            ./chrome.exe --no-first-run --no-default-browser-check \
+              --user-data-dir="$profile" "chrome://redrob" >"relaunch-$attempt.log" 2>&1 &
+            pid=$!
+            sleep 30
+            if ! kill -0 "$pid" 2>/dev/null; then
+              echo "::error::launch $attempt on a reused profile exited within 30 seconds"
+              tail -40 "relaunch-$attempt.log"
+              exit 1
+            fi
+            # Killed hard on purpose: a clean shutdown would write exit_type=SessionEnded and the second
+            # launch would prove nothing.
+            taskkill //PID "$pid" //F 2>/dev/null || kill -9 "$pid" || true
+            sleep 5
+          done
+
       - name: package
         run: python scripts/redrob.py package --flavour windows
 
