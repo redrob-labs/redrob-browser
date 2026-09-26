@@ -103,12 +103,26 @@ Verified end to end with a throwaway key and a synthetic package, not by inspect
 
 ## Steps
 
+The build happens on a workstation, and only the artefacts travel. That is not a workaround — no runner carrying
+`self-hosted, linux, x64, chromium-build` is registered, and all four release runs to date queued unclaimed and
+were cancelled by GitHub at 24h, while every published `.deb` was built locally and uploaded by hand. So
+`release.yml` no longer fires on a tag (it is dispatch-only, for the day such a machine exists) and these steps
+are the live path.
+
 1. `redrob.py version` — confirm both numbers are what you mean to ship.
 2. Update `CHANGELOG.md`: move the version's section out of "unreleased" and date it.
 3. Run gate (2) into a fresh output directory, and gate (3).
 4. Launch the release binary once and drive it. A binary that links is not a binary that starts.
-5. Tag annotated, `v<REDROB_VERSION>`, with the Chromium tag in the message.
-6. Push the tag only after (3) has passed. Moving a published tag is worse than tagging late.
+5. `redrob.py package --flavour release` — collects the `.deb` and its `.sha256` under `out/artifacts`. This is
+   the step that needs `devscripts` on the host, for `debchange`.
+6. Tag annotated, `v<REDROB_VERSION>`, with the Chromium tag in the message.
+7. Push the tag only after (3) has passed. Moving a published tag is worse than tagging late.
+8. `gh release create "v$(cat REDROB_VERSION)" out/artifacts/* --draft --title "Redrob Browser $(cat
+   REDROB_VERSION)"` — a DRAFT, because nothing unsigned should be visible to a user.
+9. Dispatch `sign-and-publish.yml` with `tag=v<version>`. It signs what the draft carries, verifies every
+   signature, replaces the assets, undrafts, then publishes to the CDN. On a Linux-only release there is nothing
+   to sign and the job says so — the `.deb`'s integrity is the apt repository's signature, which is a separate
+   key and a separate decision.
 
 ## What this repo cannot do yet
 
