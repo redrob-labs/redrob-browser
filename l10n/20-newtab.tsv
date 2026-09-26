@@ -70,3 +70,7 @@ taskReplyQueued	Waiting for the current step to finish.	현재 단계가 끝나�
 taskReplySent	Sent.	보냈습니다.	Shown after a reply reaches an idle task
 taskEngineUnavailable	Could not start the task: the Redrob Code engine is not available.	작업을 시작할 수 없습니다. Redrob Code 엔진을 사용할 수 없습니다.	Shown when the sidecar is not running
 taskCommandUnavailable	That command could not be run: the Redrob Code engine is not available.	명령을 실행할 수 없습니다. Redrob Code 엔진을 사용할 수 없습니다.	Shown when a slash command cannot reach the sidecar
+taskEngineStopped	The Redrob Code engine stopped responding.	Redrob Code 엔진이 응답을 멈췄습니다.	Task error when the engine died mid-run
+taskEngineTooOld	This browser needs a newer Redrob Code engine. Update it, then start the task again.	이 브라우저에는 더 새로운 Redrob Code 엔진이 필요합니다. 업데이트한 뒤 작업을 다시 시작하세요.	Task error when the engine does not implement the chat-completions contract this browser needs
+taskEngineCredential	The Redrob Code engine refused this browser's credential.	Redrob Code 엔진이 이 브라우저의 자격 증명을 거부했습니다.	Task error when the engine rejects the per-launch credential
+taskEngineNoAnswer	The engine ended the task without producing an answer.	엔진이 답변을 내지 않고 작업을 끝냈습니다.	Task error when a turn completes with no text and no tool call

@@ -55,6 +55,21 @@ class SidecarClient {
     kFailed,
   };
 
+  // WHY a kFailed happened. Deliberately separate from Status rather than another status value: the
+  // status is what the rest of the browser branches on and every one of those branches would have to be
+  // revisited, while this only has to reach the message a user reads.
+  enum class Failure {
+    kNone,
+    // The engine rejected the per-launch credential. Retrying cannot fix it.
+    kCredentialRejected,
+    // The engine is serving but does not advertise the chat-completions contract this browser needs.
+    // Its own design says to negotiate on the capability rather than pin a version, and to tell the user
+    // to upgrade instead of failing with a transport error -- which is what happens without this: the
+    // completion request 404s and the task dies saying the connection ended.
+    kEngineTooOld,
+    kOther,
+  };
+
   using StatusCallback = base::RepeatingCallback<void(Status)>;
 
   SidecarClient();
@@ -72,6 +87,7 @@ class SidecarClient {
   static std::optional<std::string> ParseStartupLine(std::string_view line);
 
   Status status() const { return status_; }
+  Failure failure() const { return failure_; }
 
   // Idempotent: a second call while the process is healthy is a no-op rather than a second engine.
   // `url_loader_factory` is used for the loopback health probe.
@@ -130,6 +146,12 @@ class SidecarClient {
                              const std::string& bearer_token,
                              std::string request_json,
                              CompletionDelegate* delegate);
+  // Asks the engine what models it can route to: GET /config/providers, answered with the response body
+  // or nullopt when the engine is not serving or the request fails. One call, not a subscription -- the
+  // list changes when someone edits the engine's own configuration, which is not something this class
+  // can observe, so the caller refetches when the engine becomes ready.
+  using ProvidersCallback = base::OnceCallback<void(std::optional<std::string> body)>;
+  void FetchProviders(ProvidersCallback callback);
   void CancelCompletion();
 
  private:
@@ -142,8 +164,14 @@ class SidecarClient {
   void OnLaunched(std::unique_ptr<LaunchResult> result);
   void PollHealth();
   void OnHealthResponse(std::optional<std::string> body);
+  // Asked once, after health answers, because a capability the engine does not advertise is a reason to
+  // stop before a task is ever sent rather than after one fails.
+  void FetchCapabilities();
+  void OnCapabilitiesResponse(std::optional<std::string> body);
+  void OnProvidersResponse(ProvidersCallback callback, std::optional<std::string> body);
 
   Status status_ = Status::kUnavailable;
+  Failure failure_ = Failure::kNone;
   std::string base_url_;
   // Generated per launch. Deliberately not exposed: a getter here would be a getter a renderer-facing
   // class could eventually be tempted to call.
@@ -154,6 +182,8 @@ class SidecarClient {
 
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   std::unique_ptr<network::SimpleURLLoader> health_loader_;
+  std::unique_ptr<network::SimpleURLLoader> providers_loader_;
+  std::unique_ptr<network::SimpleURLLoader> capabilities_loader_;
   int health_attempts_ = 0;
   std::unique_ptr<CompletionStream> completion_;
 
