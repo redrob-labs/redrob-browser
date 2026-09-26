@@ -470,47 +470,56 @@ void RedrobSidebarSections::RebuildBookmarks() {
   }
 
   size_t shown = 0;
-  const bookmarks::BookmarkNode* bar = model->bookmark_bar_node();
-  if (!bar) {
-    return;
-  }
-  for (const auto& child : bar->children()) {
-    if (shown >= kMaxBookmarkRows) {
-      break;
+  auto add_children = [&](const bookmarks::BookmarkNode* parent) {
+    if (!parent) {
+      return;
     }
-    const bookmarks::BookmarkNode* node = child.get();
-    // Folders are listed but not opened: a folder needs a menu, and a row that silently does nothing
-    // when clicked is worse than one that is plainly not a link yet.
-    auto* row = bookmarks_list_->AddChildView(MakeRow(
-        node->is_url() ? base::BindRepeating(&RedrobSidebarSections::OpenBookmark,
-                                             base::Unretained(this), node->url())
-                       : views::Button::PressedCallback(),
-        std::u16string(node->GetTitle())));
-    row->SetEnabled(node->is_url());
-    // The favicon is what makes this list scannable -- the reference identifies a bookmark by its mark
-    // before its name. GetFavicon starts the load if it has not happened; the result arrives as a model
-    // change, which lands back here and rebuilds, so there is no separate callback to hold.
-    if (node->is_url()) {
-      const gfx::Image& favicon = model->GetFavicon(node);
-      if (!favicon.IsEmpty()) {
-        // Sized by the token rather than by whatever the site shipped: favicons arrive at 16, 32 and 48,
-        // and an unsized ImageModel makes the row as tall as the biggest one it happens to hold.
-        row->SetImageModel(
-            views::Button::STATE_NORMAL,
-            ui::ImageModel::FromImageSkia(gfx::ImageSkiaOperations::CreateResizedImage(
-                favicon.AsImageSkia(), skia::ImageOperations::RESIZE_BEST,
-                gfx::Size(sidebar_tokens::kFaviconSize, sidebar_tokens::kFaviconSize))));
-      } else {
-        // No favicon yet, but the row still has to hold its place: without a reserved box the label starts
-        // at the icon's position and jumps 24px sideways the moment the favicon loads.
-        row->SetImageModel(views::Button::STATE_NORMAL,
-                           ui::ImageModel::FromVectorIcon(
-                               vector_icons::kGlobeIcon, sidebar_tokens::kMutedForeground,
-                               sidebar_tokens::kFaviconSize));
+    for (const auto& child : parent->children()) {
+      if (shown >= kMaxBookmarkRows) {
+        break;
       }
+      const bookmarks::BookmarkNode* node = child.get();
+      // Folders are listed but not opened: a folder needs a menu, and a row that silently does nothing
+      // when clicked is worse than one that is plainly not a link yet.
+      auto* row = bookmarks_list_->AddChildView(MakeRow(
+          node->is_url() ? base::BindRepeating(&RedrobSidebarSections::OpenBookmark,
+                                               base::Unretained(this), node->url())
+                         : views::Button::PressedCallback(),
+          std::u16string(node->GetTitle())));
+      row->SetEnabled(node->is_url());
+      // The favicon is what makes this list scannable -- the reference identifies a bookmark by its mark
+      // before its name. GetFavicon starts the load if it has not happened; the result arrives as a model
+      // change, which lands back here and rebuilds, so there is no separate callback to hold.
+      if (node->is_url()) {
+        const gfx::Image& favicon = model->GetFavicon(node);
+        if (!favicon.IsEmpty()) {
+          // Sized by the token rather than by whatever the site shipped: favicons arrive at 16, 32 and 48,
+          // and an unsized ImageModel makes the row as tall as the biggest one it happens to hold.
+          row->SetImageModel(
+              views::Button::STATE_NORMAL,
+              ui::ImageModel::FromImageSkia(gfx::ImageSkiaOperations::CreateResizedImage(
+                  favicon.AsImageSkia(), skia::ImageOperations::RESIZE_BEST,
+                  gfx::Size(sidebar_tokens::kFaviconSize, sidebar_tokens::kFaviconSize))));
+        } else {
+          // No favicon yet, but the row still has to hold its place: without a reserved box the label starts
+          // at the icon's position and jumps 24px sideways the moment the favicon loads.
+          row->SetImageModel(views::Button::STATE_NORMAL,
+                             ui::ImageModel::FromVectorIcon(
+                                 vector_icons::kGlobeIcon, sidebar_tokens::kMutedForeground,
+                                 sidebar_tokens::kFaviconSize));
+        }
+      }
+      ++shown;
     }
-    ++shown;
-  }
+  };
+  // Every permanent root, not just the bookmarks bar. The empty note below tells the user to press
+  // Ctrl+D, and in this build that bubble saves into "Other bookmarks" -- so reading the bar alone made
+  // this section answer its own instruction with "nothing here". Measured: a profile whose Bookmarks file
+  // held two Ctrl+D entries drew the empty note, and the list only filled once an import created a folder
+  // inside the bar. Order is bar, other, mobile so the bar keeps the top of a capped list.
+  add_children(model->bookmark_bar_node());
+  add_children(model->other_node());
+  add_children(model->mobile_node());
   // Nothing to show is a state this section has to draw, not one it can leave blank. Placed after the
   // model->loaded() guard above deliberately: while the model is still loading the section is not empty,
   // it is unknown, and telling the user to press Ctrl+D would answer a question nobody has asked yet.
