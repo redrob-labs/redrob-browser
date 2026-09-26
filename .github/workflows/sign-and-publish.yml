@@ -388,6 +388,34 @@ jobs:
             gh release upload "${{ inputs.tag }}" "$f" --clobber
           done
 
+      - name: name the .deb the way the CDN aliases it
+        # cdn-publish.sh derives the version-free `latest/` alias by deleting a `-<version>` segment from the
+        # filename, and a Debian name separates its fields with underscores -- so it correctly REFUSES
+        # `redrob-browser-stable_0.1.4+153.0.8010.36-1_amd64.deb` rather than publishing a `latest/` that does not
+        # update. That refusal is what failed the first real run of this workflow.
+        #
+        # `redrob.py package` already writes this name, into `out/cdn`, and on the release.yml path that directory
+        # is the artefact the CDN job downloads. Here the artefact arrives from the RELEASE instead, where it
+        # carries the Debian name the pool/ convention requires, so the same rule has to exist a second time.
+        # Its first home is `cmd_package` in scripts/redrob.py; keep the two in step.
+        #
+        # Everything else is copied through untouched: mac and Windows artefacts are already named with a
+        # `-<version>` segment, and the .sha256 files are skipped because the script writes its own.
+        run: |
+          set -euo pipefail
+          mkdir -p cdn
+          for f in staging/*.deb; do
+            [ -f "$f" ] || continue
+            arch="$(basename "$f" .deb)"
+            arch="${arch##*_}"
+            cp "$f" "cdn/redrob-browser-${arch}-${{ steps.version.outputs.version }}.deb"
+          done
+          for f in staging/*.zip staging/*.exe staging/*.dmg staging/*.pkg; do
+            [ -f "$f" ] || continue
+            cp "$f" cdn/
+          done
+          ls -l cdn
+
       - name: publish to cdn.redrob.ai
         # The versioned path first, read back through CloudFront and compared, and only then the latest/
         # alias -- that ordering is the script's, copied from redrob-design, and the reason is that a link a
@@ -399,7 +427,7 @@ jobs:
         # the aliasing actually happens -- and not another flag here.
         env:
           APP_VERSION: ${{ steps.version.outputs.version }}
-        run: bash .github/scripts/cdn-publish.sh staging
+        run: bash .github/scripts/cdn-publish.sh cdn
 
       - name: undraft the release
         # Last. Everything before it can fail and leave a draft nobody has seen; once this runs the artefacts
