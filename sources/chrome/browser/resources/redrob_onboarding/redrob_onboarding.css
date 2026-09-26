@@ -40,6 +40,8 @@ body {
   background:
     radial-gradient(circle at center, var(--line) 1px, transparent 1.2px) 0 0 / 22px 22px;
   inset: 0;
+  /* Luminance mask, not a colour: #000 and transparent are the mask's opaque and clear ends, so these
+     two are not themed values and must not become tokens. */
   mask-image: linear-gradient(to bottom, #000 0%, #000 55%, transparent 92%);
   opacity: 0.85;
   position: fixed;
@@ -188,14 +190,6 @@ p {
   display: none;
 }
 
-.fields {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 20px;
-  width: 320px;
-}
-
 input {
   background: var(--raised);
   border: 1px solid var(--line);
@@ -205,9 +199,16 @@ input {
   padding: 11px 13px;
 }
 
-input:focus-visible {
-  border-color: var(--accent);
-  outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+
+/* Everything clickable in the flow. Focus styling here used to cover only the account step's text input
+   -- which no longer exists, since it collected an address nothing read -- leaving the three-way
+   choosers, Back, Continue and the step dots on the UA ring against custom backgrounds. This is the one
+   screen a user cannot skip, so keyboard reach through it has to be visible. */
+.choice:focus-visible,
+.primary:focus-visible,
+.quiet:focus-visible,
+.dot:focus-visible {
+  outline: 2px solid var(--ring);
   outline-offset: 1px;
 }
 
@@ -243,17 +244,6 @@ input:focus-visible {
   border-color: var(--accent);
 }
 
-.shortcut {
-  margin-top: 14px;
-}
-
-kbd {
-  background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  font: 500 12px/1 var(--font-sans);
-  padding: 4px 6px;
-}
 
 .status {
   color: var(--muted-foreground);

@@ -90,6 +90,17 @@ void RedrobFirstRunFlowController::Init() {
                                &RedrobFirstRunFlowController::OnOnboardingComplete,
                                weak_factory_.GetWeakPtr())));
   SwitchToStep(Step::kIntro, /*reset_state=*/true);
+
+  // Upstream puts a circled pause button in the picker's native toolbar -- EffectsControlButton, added by
+  // FirstRunFlowController whenever the desktop-revamp switch is on, bound to ToggleMediaEffects. Its job
+  // is to stop the Lottie animations on Chrome's sign-in promo. This flow never shows that promo, so the
+  // button is a control for animations that do not exist, sitting in the corner of the first screen anyone
+  // ever sees in this product.
+  //
+  // Hidden rather than patched away: the host already exposes this exact toggle, so the same reasoning
+  // that keeps the post-identity steps registered-but-unqueued applies -- leave upstream's wiring intact
+  // and take the furniture off the screen.
+  host()->SetNativeToolbarEffectsControlButtonVisible(false);
 }
 
 void RedrobFirstRunFlowController::OnOnboardingComplete() {

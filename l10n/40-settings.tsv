@@ -142,3 +142,37 @@ seCliRpcNote	Serves three things: an HTTP endpoint that can stream a task’s an
 seNavGettingStarted	Getting started	시작하기	Navigation link to the getting-started section
 seOnboardingLede	The short tour this browser showed when it first opened. It only explains things — nothing you do in it changes a setting, so it is safe to reopen whenever.	이 브라우저를 처음 열었을 때 보여준 짧은 안내입니다. 설명만 하고 설정을 바꾸지 않으니 언제든 다시 열어도 됩니다.	Explains the getting-started section
 seOnboardingOpen	Open the tour	안내 다시 보기	Button that opens the onboarding page in a tab
+seKeystoreNotAnswered	This machine's keystore has not answered yet.	이 기기의 키 저장소가 아직 응답하지 않았습니다.	Error when a provider is added before the OS keystore is ready
+seSigninFieldsRequired	A name, a model and a valid endpoint are all required.	이름, 모델, 올바른 엔드포인트가 모두 필요합니다.	Error when the sign-in form is incomplete
+seTooManyProviders	There are already too many providers.	프로바이더가 이미 너무 많습니다.	Error when the provider limit is reached
+seRoutineEngineUnavailable	The task engine was not available.	작업 엔진을 사용할 수 없었습니다.	Recorded on a routine whose run could not reach the engine
+seRoutineChatGone	That chat no longer exists, so there was nothing to wake.	해당 대화가 더 이상 없어서 깨울 대상이 없었습니다.	Recorded on a heartbeat routine whose chat was deleted
+seConfirmCancel	Cancel	취소	Button that dismisses a confirmation without acting
+seForgetTitle	Forget everything?	전부 지울까요?	Title of the confirmation before all memory is deleted
+seForgetBody	Every entry goes, pinned ones included. This cannot be undone.	고정한 것까지 모든 항목이 사라집니다. 되돌릴 수 없습니다.	Body of the confirmation before all memory is deleted
+seRemoveProviderTitle	Remove $1?	$1을(를) 제거할까요?	Title of the confirmation before a provider is deleted; $1 is the provider's name
+seRemoveProviderBody	Its stored key goes with it. You will need the key again to reconnect.	저장된 키도 함께 사라집니다. 다시 연결하려면 키가 또 필요합니다.	Body of the confirmation before a provider is deleted
+seDeleteRoutineTitle	Delete “$1”?	“$1”을(를) 삭제할까요?	Title of the confirmation before a routine is deleted; $1 is the routine's name
+seDeleteRoutineBody	It stops running and its schedule is gone. This cannot be undone.	더 이상 실행되지 않고 일정도 사라집니다. 되돌릴 수 없습니다.	Body of the confirmation before a routine is deleted
+seMemorySearch	Search what it remembers	기억한 내용 검색	Placeholder of the input that filters the memory list
+seMemoryShowing	$1 of $2 shown	$2개 중 $1개 표시	Count above the memory list while a search is filtering it
+seMemoryNoMatch	Nothing matches that.	일치하는 것이 없습니다.	Shown when a memory search filters everything out
+seRoutineAdded	Added.	추가했습니다.	Shown after a routine is added
+seRoutineEdit	Edit	수정	Button that loads a routine into the form for editing
+seRoutineEditing	Editing “$1”	“$1” 수정 중	Heading of the routine form while an existing routine is being edited
+seRoutineSave	Save changes	변경 저장	Button that saves an edited routine
+seRoutineUpdated	Saved.	저장했습니다.	Shown after an edited routine is saved
+seRoutineUpdateFailed	That could not be saved.	저장하지 못했습니다.	Shown when saving an edited routine fails
+seNavAppearance	Appearance	모양	Settings nav entry for the appearance section
+seAppearanceLede	Theme and language are browser-wide settings, so they live in the browser's own settings and apply to every Redrob surface.	테마와 언어는 브라우저 전체 설정이라 브라우저 설정에 있고, Redrob의 모든 화면에 함께 적용됩니다.	Lede explaining why appearance is not configured on this page
+seAppearanceTheme	Light, dark, or follow the system	밝게, 어둡게, 또는 시스템 설정 따르기	Label of the theme row in the appearance section
+seAppearanceOpenTheme	Open appearance settings	모양 설정 열기	Button that opens the browser's appearance settings page
+seAppearanceThemeNote	This page and the new tab follow whichever mode is chosen there.	이 페이지와 새 탭은 거기서 고른 모드를 그대로 따릅니다.	Note under the theme row
+seAppearanceLanguage	Interface language	인터페이스 언어	Label of the language row in the appearance section
+seAppearanceOpenLanguage	Open language settings	언어 설정 열기	Button that opens the browser's language settings page
+seAppearanceLanguageNote	Changing the language takes effect after the browser restarts.	언어를 바꾸면 브라우저를 다시 시작한 뒤에 적용됩니다.	Note under the language row
+seEngineReady	Running	실행 중	Built-in engine state: serving
+seEngineStarting	Starting up	시작 중	Built-in engine state: launched but not answering yet
+seEngineFailed	Stopped responding	응답이 멈췄습니다	Built-in engine state: was running and broke
+seEngineNotInstalled	Not installed, so tasks cannot run	설치되지 않아 작업을 실행할 수 없습니다	Built-in engine state: no engine binary was found anywhere
+seEngineModelCount	$1 models	모델 $1개	How many models the engine reported; $1 is the count

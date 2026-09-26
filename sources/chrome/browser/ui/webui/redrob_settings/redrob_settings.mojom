@@ -78,10 +78,36 @@ struct Provider {
   bool is_oauth;
 };
 
+// What state the local engine is in. The built-in provider row is this, and it was previously invented
+// in the renderer -- a fixed model id and an empty endpoint -- so the page claimed a configured engine on
+// a machine that had never installed one.
+enum EngineState {
+  // No engine binary found: not at REDROB_CODE_BIN, not where the installer puts it, not on PATH. The
+  // ordinary state on a fresh machine, and the single most useful thing this page can say, because it
+  // explains every task failing at once.
+  kNotInstalled,
+  // Found and starting, or serving.
+  kStarting,
+  kReady,
+  // It was there and stopped answering.
+  kFailed,
+};
+
+struct EngineInfo {
+  EngineState state;
+  // The model id the built-in path routes with when the user picks nothing. A wire value, not a label.
+  string default_model;
+  // How many models the engine last reported it can route to. Zero while it is not serving, which the
+  // page shows as "unknown" rather than "none" -- those are different facts.
+  uint32 model_count;
+};
+
 struct ModelSettings {
   array<Provider> providers;
   // Empty means the built-in Redrob engine.
   string selected_id;
+  // The built-in engine's real state, so the row can report it instead of the renderer inventing one.
+  EngineInfo engine;
   // False until the platform keystore has answered. Adding a key before then is refused rather than
   // stored in the clear, and the page says so instead of failing silently.
   bool encryption_ready;

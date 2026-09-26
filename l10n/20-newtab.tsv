@@ -5,7 +5,7 @@
 
 # --- composer -------------------------------------------------------------------------------------
 newTabPromptLabel	Task for the agent	에이전트에게 맡길 작업	Accessible name of the new tab's main input
-newTabPromptPlaceholder	Ask AI a task, @ for context	AI에게 작업을 맡기세요. @로 컨텍스트 추가	Placeholder in the new tab's main input
+newTabPromptPlaceholder	Ask AI to do something	AI에게 작업을 맡기세요	Placeholder in the new tab's main input
 newTabModeGroup	Mode	모드	Accessible name of the Search / Ask AI pair
 newTabModeSearch	Search	검색	Segment that selects search mode; what is typed then goes to the web
 newTabModeAsk	Ask AI	AI에게 요청	Segment that selects agent mode; what is typed then becomes a task
@@ -39,9 +39,10 @@ newTabRecent	Recent tasks	최근 작업	Heading above the list of tasks the user
 
 # --- task view ------------------------------------------------------------------------------------
 taskStop	Stop	중지	Button that stops a running task
+taskBackHome	Back to the new tab	새 탭으로 돌아가기	Accessible name of the control in a task's header that returns to the new tab
 taskClosePreview	Close preview	미리보기 닫기	Accessible name of the preview pane's close button
 taskReplyLabel	Reply to the agent	에이전트에게 답장	Accessible name of the task view's reply input
-taskReplyPlaceholder	Reply, @ for context	답장, @로 컨텍스트 추가	Placeholder in the task view's reply input
+taskReplyPlaceholder	Reply, or send another instruction	답장하거나 다른 지시를 보내세요	Placeholder in the task view's reply input
 taskSteerNow	Steer now	지금 방향 바꾸기	Button that interrupts the current step with the typed reply
 taskSendReply	Send reply	답장 보내기	Accessible name of the send button when the task is idle
 taskQueueReply	Queue this for the next step	다음 단계로 예약	Accessible name of the send button while the task is running
@@ -70,6 +71,13 @@ taskReplyQueued	Waiting for the current step to finish.	현재 단계가 끝나�
 taskReplySent	Sent.	보냈습니다.	Shown after a reply reaches an idle task
 taskEngineUnavailable	Could not start the task: the Redrob Code engine is not available.	작업을 시작할 수 없습니다. Redrob Code 엔진을 사용할 수 없습니다.	Shown when the sidecar is not running
 taskCommandUnavailable	That command could not be run: the Redrob Code engine is not available.	명령을 실행할 수 없습니다. Redrob Code 엔진을 사용할 수 없습니다.	Shown when a slash command cannot reach the sidecar
+taskNotFoundDetail	It may have been cleared, or the link may be from another profile. Nothing was lost from the tasks you still have.	지워졌거나, 다른 프로필의 링크일 수 있습니다. 남아 있는 작업은 아무것도 사라지지 않았습니다.	Explains a task id that no longer resolves
+taskBackHomeLabel	Go to the new tab	새 탭으로 가기	Label of the action offered when a task is not found
+taskQueuedMessage	Queued: $1	대기: $1	Trace line recorded when a follow-up is queued; $1 is what the user typed
+taskWithdrewQueued	Withdrawn: $1	철회: $1	Trace line recorded when a queued follow-up is taken back; $1 is what the user typed
+taskWithdrawQueued	Withdraw	철회	Accessible name of the button that takes back one queued message
+taskWithdrawFailed	That message has already run.	그 메시지는 이미 실행됐습니다.	Shown when withdrawing fails because the queue moved on
+newTabModelDefault	Default model	기본 모델	The only model option when no engine is available to list others
 taskEngineStopped	The Redrob Code engine stopped responding.	Redrob Code 엔진이 응답을 멈췄습니다.	Task error when the engine died mid-run
 taskEngineTooOld	This browser needs a newer Redrob Code engine. Update it, then start the task again.	이 브라우저에는 더 새로운 Redrob Code 엔진이 필요합니다. 업데이트한 뒤 작업을 다시 시작하세요.	Task error when the engine does not implement the chat-completions contract this browser needs
 taskEngineCredential	The Redrob Code engine refused this browser's credential.	Redrob Code 엔진이 이 브라우저의 자격 증명을 거부했습니다.	Task error when the engine rejects the per-launch credential

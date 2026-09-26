@@ -472,7 +472,10 @@ RpcServer::Reply RpcServer::HandleTask(const base::DictValue& request) {
   // Straight into the same StartTask every other surface uses, so the bounds and the permission gate
   // are the ones already reviewed rather than a second copy of them.
   auto [task_id, error] = tasks_->StartTask(*prompt, {}, ModeFromString(request.FindString("mode")),
-                                            EffortFromString(request.FindString("effort")));
+                                            EffortFromString(request.FindString("effort")),
+                                            // No model over RPC: an external caller choosing the model
+                                            // would be choosing what the user pays for.
+                                            std::string());
   if (!task_id) {
     reply.status = 503;
     reply.body.Set("error", error == mojom::StartError::kSidecarUnavailable

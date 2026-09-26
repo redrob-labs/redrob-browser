@@ -40,9 +40,10 @@
         </div>
       </form>
       <div class="composer-controls">
-        <button type="button" class="ctl ctl-icon" id="attach" aria-label="$i18n{newTabAddContext}">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>
-        </button>
+        <!-- A "+" add-context button stood here, and twice more in the task composer: three copies, none
+             wired to anything, because the `@` context picker they belong to is not built. Every click was
+             swallowed. Deleted rather than hidden -- git holds the markup, and a hidden control that is
+             meant to come back is how dead markup survives a cleanup. It returns with the picker. -->
         <!-- One control showing the mode in force, not three segments competing for the eye. The
              narrow-by-default decision is unchanged; what changed is that the two modes you are NOT in
              no longer take up as much room as the one you are. -->
@@ -112,6 +113,14 @@
 
   <main id="task" hidden>
     <header class="task-head">
+      <!-- The only route out of a task used to be the browser's own Back, which is not an affordance on
+           the page and does not exist at all when the task tab was opened fresh from the command line.
+           A real anchor rather than a scripted button: it is a navigation, so middle-click and
+           open-in-new-tab work, and it still works if the page's module fails to load. -->
+      <a class="task-back" href="chrome://redrob/" aria-label="$i18n{taskBackHome}"
+         title="$i18n{taskBackHome}">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 3.5L5 8l4.5 4.5"/></svg>
+      </a>
       <h1 id="task-title"></h1>
       <span id="task-state" class="task-state"></span>
       <span class="spacer"></span>
@@ -119,7 +128,30 @@
       <button type="button" id="task-stop" class="pill pill-quiet" hidden>$i18n{taskStop}</button>
     </header>
     <div class="task-body">
-      <article id="trace" class="trace" aria-live="polite"></article>
+      <!-- Three children, each owning what it draws, so an update can touch only what changed. The whole
+           article used to be aria-live and was cleared and rebuilt on every push from the browser, so a
+           screen reader re-announced the entire history each time a step arrived and anything focused
+           inside it was destroyed. The announcement now lives in #announce below and says only what is
+           new. -->
+      <article id="trace" class="trace">
+        <div id="narration"></div>
+        <div id="steps"></div>
+        <p id="trace-error" class="task-error" hidden></p>
+        <!-- The one place in this product with a genuinely empty SURFACE rather than an empty list, so it
+             gets the full shape: what happened, what it means, and the way out. A list that is merely
+             empty keeps its one-line note instead -- the section around it already has a heading and a
+             lede, and a centred block there would repeat both. -->
+        <div id="trace-empty" class="empty-block" hidden>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="8" cy="8" r="5.4"/>
+            <path d="M8 5.2v3.4"/>
+            <circle cx="8" cy="11" r="0.6" fill="currentcolor" stroke="none"/>
+          </svg>
+          <p class="empty-title" id="trace-empty-title"></p>
+          <p class="empty-detail">$i18n{taskNotFoundDetail}</p>
+          <a class="pill pill-solid" href="chrome://redrob/">$i18n{taskBackHomeLabel}</a>
+        </div>
+      </article>
       <aside id="preview" class="preview" hidden>
         <div class="preview-head">
           <span id="preview-title"></span>
@@ -131,9 +163,6 @@
     <form id="reply" class="composer composer-foot" autocomplete="off">
       <ol id="queued" class="queued" hidden></ol>
       <div class="composer-row">
-        <button type="button" class="ctl ctl-icon" aria-label="$i18n{newTabAddContext}">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>
-        </button>
         <input id="reply-prompt" type="text" aria-label="$i18n{taskReplyLabel}"
                placeholder="$i18n{taskReplyPlaceholder}">
         <!-- Two buttons while it runs, not one. Enter queues, because throwing away work in progress
@@ -142,9 +171,6 @@
         <button type="submit" id="reply-send" class="send" aria-label="$i18n{taskSendReply}"></button>
       </div>
       <div class="composer-controls">
-        <button type="button" class="ctl ctl-icon" aria-label="$i18n{newTabAddContext}">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>
-        </button>
         <label class="ctl ctl-select">
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="M8 1.8l4.6 1.7v4.1c0 3-2 5.2-4.6 6.6-2.6-1.4-4.6-3.6-4.6-6.6V3.5L8 1.8z"/>
@@ -160,10 +186,14 @@
         </label>
         <button type="button" class="ctl" id="pick-folder">$i18n{taskChooseFolder}</button>
         <span class="spacer"></span>
-        <span class="ctl ctl-static" id="reply-model">redrob/auto</span>
+        <span class="ctl ctl-static" id="reply-model"></span>
       </div>
       <p id="task-status" class="task-status" role="status"></p>
     </form>
+    <!-- What a screen reader hears when the task moves: the newest step, or the new state. One short
+         sentence per change rather than the whole trace re-read, which is what a live region on the log
+         itself produced. Visually hidden because the trace already shows all of this on screen. -->
+    <p id="announce" class="visually-hidden" aria-live="polite"></p>
   </main>
 
   <!-- The localized-string dictionary, served by UseStringsJs. Module scripts run in order, so

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/redrob/resources/grit/redrob_strings.h"
 #include "chrome/browser/redrob/routine_store.h"
 
 #include <algorithm>
@@ -14,6 +15,7 @@
 #include "chrome/browser/redrob/task_store.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace redrob {
 namespace {
@@ -260,12 +262,12 @@ std::string RoutineStore::Fire(Routine& routine) {
   routine.last_run_ms = NowMs();
   routine.last_error.clear();
   if (!tasks_) {
-    routine.last_error = "The task engine was not available.";
+    routine.last_error = l10n_util::GetStringUTF8(IDS_REDROB_SE_ROUTINE_ENGINE_UNAVAILABLE);
     return std::string();
   }
   if (routine.kind == Kind::kHeartbeat) {
     if (!tasks_->WakeTask(routine.task_id, routine.prompt)) {
-      routine.last_error = "That chat no longer exists, so there was nothing to wake.";
+      routine.last_error = l10n_util::GetStringUTF8(IDS_REDROB_SE_ROUTINE_CHAT_GONE);
       return std::string();
     }
     return routine.task_id;

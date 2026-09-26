@@ -12,6 +12,7 @@
 #include "chrome/browser/redrob/model_store.h"
 #include "chrome/browser/redrob/oauth_flow.h"
 #include "chrome/browser/redrob/redrob_prefs.h"
+#include "chrome/browser/redrob/sidecar_client.h"
 #include "chrome/browser/redrob/routine_store.h"
 #include "chrome/browser/redrob/rpc_server.h"
 #include "chrome/browser/redrob/task_store.h"
@@ -147,6 +148,30 @@ void SettingsHostImpl::GetSettings(GetSettingsCallback callback) {
   out->model = settings::mojom::ModelSettings::New();
   out->model->selected_id = model->selected_id();
   out->model->encryption_ready = model->encryption_ready();
+
+  // The built-in engine's real state, read from the store that owns the client, replacing the row the
+  // renderer used to invent. The two "nothing there" cases stay distinct all the way to the page: not
+  // installed is the ordinary state of a machine that never downloaded the engine, while failed means it
+  // was there and stopped answering -- a user can act on the second and only wait for the first.
+  TaskStore* tasks = TaskStoreFactory::GetForProfile(profile_);
+  out->model->engine = settings::mojom::EngineInfo::New();
+  out->model->engine->default_model = TaskStore::DefaultModel();
+  out->model->engine->model_count =
+      tasks ? static_cast<uint32_t>(tasks->ModelOptionCount()) : 0u;
+  switch (tasks ? tasks->EngineStatus() : SidecarClient::Status::kUnavailable) {
+    case SidecarClient::Status::kUnavailable:
+      out->model->engine->state = settings::mojom::EngineState::kNotInstalled;
+      break;
+    case SidecarClient::Status::kStarting:
+      out->model->engine->state = settings::mojom::EngineState::kStarting;
+      break;
+    case SidecarClient::Status::kReady:
+      out->model->engine->state = settings::mojom::EngineState::kReady;
+      break;
+    case SidecarClient::Status::kFailed:
+      out->model->engine->state = settings::mojom::EngineState::kFailed;
+      break;
+  }
   for (const ModelStore::Provider& provider : model->List()) {
     settings::mojom::ProviderPtr wire = settings::mojom::Provider::New();
     wire->id = provider.id;
