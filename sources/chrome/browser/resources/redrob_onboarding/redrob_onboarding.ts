@@ -18,6 +18,12 @@ PageHandlerFactory.getRemote().createOnboardingHost(
 // read from one place -- three separate notions of "where am I" is how a wizard ends up showing the
 // wrong dot.
 const STEPS = ['welcome', 'account', 'agent', 'passwords', 'model', 'import'] as const;
+
+// -1 so the first render counts as a step change and the welcome step gets the keyboard.
+let focusedStep = -1;
+
+// The import chooser's container listeners are installed once; its buttons are rebuilt per render.
+let importChoicesWired = false;
 type Step = typeof STEPS[number];
 
 let index = 0;
@@ -44,7 +50,9 @@ function render() {
     dot.className = 'dot';
     dot.role = 'tab';
     dot.ariaSelected = String(i === index);
-    dot.ariaLabel = `Step ${i + 1} of ${STEPS.length}`;
+    // The only string in this flow that was written in code rather than taken from the dictionary, so a
+    // Korean first run announced its progress in English. getStringF because the numbers move.
+    dot.ariaLabel = loadTimeData.getStringF('obStepOf', i + 1, STEPS.length);
     // Only backwards. Letting someone jump ahead past a choice they have not made yet would leave the
     // flow claiming a decision that was never taken.
     dot.disabled = i > index;
@@ -69,6 +77,19 @@ function render() {
     next.textContent = loadTimeData.getString('obContinue');
   }
   next.disabled = importState === ImportState.kRunning;
+
+  // Where the keyboard lands when a step draws. Nothing was focused before, so the first Tab started from
+  // the top of the document and the step's own controls were several stops away. A step with a chooser
+  // starts on the chosen option, since arrows are what that step is for; a step without one starts on the
+  // action, because continuing is the only thing to do there.
+  //
+  // Guarded on the step CHANGING, not on every render: render() also runs when the import state moves, and
+  // focusing there would snatch the keyboard back to Continue while someone was still choosing a source.
+  if (focusedStep !== index) {
+    focusedStep = index;
+    const chosen = stepEl(STEPS[index]!).querySelector<HTMLElement>('.choice[aria-checked="true"]');
+    (chosen ?? next).focus();
+  }
 }
 
 function selectedChoice(container: HTMLElement): string {
@@ -77,15 +98,56 @@ function selectedChoice(container: HTMLElement): string {
 }
 
 function wireChoiceGroup(container: HTMLElement, onPick: (choice: string) => void) {
+  const choices = () => [...container.querySelectorAll<HTMLElement>('.choice')];
+  // A radiogroup is ONE tab stop: only the checked option is tabbable and the arrows move between the
+  // rest. This group already announced itself correctly with role=radio and aria-checked, but every
+  // option was individually tabbable and the arrow keys did nothing -- so the semantics promised a
+  // radiogroup and the keyboard delivered a row of buttons.
+  const paint = (picked: HTMLElement) => {
+    for (const other of choices()) {
+      const on = other === picked;
+      other.ariaChecked = String(on);
+      other.tabIndex = on ? 0 : -1;
+    }
+  };
+  const initial = choices().find((choice) => choice.ariaChecked === 'true');
+  if (initial) {
+    paint(initial);
+  }
+
   container.addEventListener('click', (event) => {
     const choice = (event.target as HTMLElement).closest<HTMLElement>('.choice');
     if (!choice) {
       return;
     }
-    for (const other of container.querySelectorAll<HTMLElement>('.choice')) {
-      other.ariaChecked = String(other === choice);
-    }
+    paint(choice);
     onPick(choice.dataset['choice'] ?? '');
+  });
+
+  container.addEventListener('keydown', (event: KeyboardEvent) => {
+    const all = choices();
+    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+               : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1
+                                                                     : 0;
+    const from = all.findIndex((choice) => choice === document.activeElement);
+    let next = -1;
+    if (step !== 0 && from !== -1) {
+      next = (from + step + all.length) % all.length;
+    } else if (event.key === 'Home') {
+      next = 0;
+    } else if (event.key === 'End') {
+      next = all.length - 1;
+    }
+    if (next === -1) {
+      return;
+    }
+    // Otherwise the arrows scroll the step under the group.
+    event.preventDefault();
+    const target = all[next]!;
+    target.focus();
+    // Moving to an option selects it: that is the radiogroup pattern, not an extra keypress.
+    paint(target);
+    onPick(target.dataset['choice'] ?? '');
   });
 }
 
@@ -135,7 +197,13 @@ function renderImportSources() {
     button.append(name, detail);
     list.append(button);
   });
-  wireChoiceGroup(list, () => {});
+  // Wired once, not per render. This function runs again whenever the import state changes, and
+  // wireChoiceGroup adds listeners to the CONTAINER -- so re-wiring stacked a click and a keydown handler
+  // per render, and a single arrow key then moved focus once for every render that had happened.
+  if (!importChoicesWired) {
+    importChoicesWired = true;
+    wireChoiceGroup(list, () => {});
+  }
 }
 
 function showImportStatus(state: ImportState, message: string|null) {
@@ -143,8 +211,11 @@ function showImportStatus(state: ImportState, message: string|null) {
   const status = $('import-status');
   const text = {
     [ImportState.kIdle]: '',
-    [ImportState.kRunning]: 'Importing…',
-    [ImportState.kSucceeded]: 'Imported.',
+    // These two were English literals while the two below them came from the dictionary, so a Korean
+    // first run reported its own progress in English -- the same split the stores had before their
+    // strings were moved out, and the same one the routine form had with a literal "Added.".
+    [ImportState.kRunning]: loadTimeData.getString('obImportRunning'),
+    [ImportState.kSucceeded]: loadTimeData.getString('obImportDone'),
     [ImportState.kSourceBusy]: message ?? loadTimeData.getString('obImportSourceBusy'),
     [ImportState.kFailed]: message ?? loadTimeData.getString('obImportFailed'),
   }[state];
@@ -158,11 +229,6 @@ function showImportStatus(state: ImportState, message: string|null) {
 async function main() {
   router.onImportStateChanged.addListener(showImportStatus);
 
-  // The shortcut is the platform's, not a guess: a Mac says Command where everything else says Ctrl.
-  if (navigator.platform.startsWith('Mac')) {
-    $('agent-shortcut').textContent = loadTimeData.getString('obShortcutCommand');
-  }
-
   wireChoiceGroup(
       stepEl('passwords').querySelector<HTMLElement>('.choices')!,
       (choice) => host.setPasswordChoice(choice));
@@ -175,6 +241,23 @@ async function main() {
     render();
   });
 
+  // Enter moves the flow forward, on every step. Nothing handled it before and nothing was focused when a
+  // step drew, so a keyboard user pressed Enter and the flow sat still -- on the one surface a new user
+  // cannot skip, whose whole job is to walk them through.
+  //
+  // It advances from inside a choice group too, which is safe because selection FOLLOWS FOCUS there: by
+  // the time someone has arrowed to an option it is already chosen, so Enter is unambiguously "and now
+  // continue". Only Back is excluded, so Enter on it goes back rather than forward.
+  document.addEventListener('keydown', (event: KeyboardEvent) => {
+    if (event.key !== 'Enter' || event.defaultPrevented) {
+      return;
+    }
+    if ((event.target as HTMLElement|null)?.id === 'back') {
+      return;
+    }
+    event.preventDefault();
+    $<HTMLButtonElement>('next').click();
+  });
   $('next').addEventListener('click', () => {
     const step = STEPS[index];
     if (step !== 'import') {

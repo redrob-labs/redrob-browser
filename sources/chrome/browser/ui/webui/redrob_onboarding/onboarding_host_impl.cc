@@ -13,6 +13,7 @@
 #include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/importer/importer_progress_observer.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/redrob/redrob_prefs.h"
 #include "components/prefs/pref_service.h"
 
 namespace redrob {
@@ -21,7 +22,6 @@ namespace {
 // What the choices are recorded as. Profile prefs rather than page state: the flow's window is
 // destroyed the moment it finishes, so anything only the page remembers is forgotten before the
 // browser it configured has even opened.
-constexpr char kPasswordChoicePref[] = "redrob.onboarding.password_choice";
 constexpr char kModelChoicePref[] = "redrob.onboarding.model_choice";
 
 // Only the choices the flow actually offers are stored. The value arrives from a renderer, and a pref
@@ -79,13 +79,22 @@ void OnboardingHostImpl::SetPasswordChoice(const std::string& choice) {
   if (!IsKnownPasswordChoice(choice)) {
     return;
   }
-  profile_->GetPrefs()->SetString(kPasswordChoicePref, choice);
+  // The registered pref the rest of the product reads -- Settings > Passwords renders from this exact
+  // path. This used to write "redrob.onboarding.password_choice", which is registered nowhere, so
+  // PrefService dropped it (DUMP_WILL_BE_NOTREACHED then return) and the decision made on first run
+  // never reached the settings page: whatever the user picked, Settings showed nothing selected.
+  profile_->GetPrefs()->SetString(redrob::prefs::kPasswordManagerChoice, choice);
 }
 
 void OnboardingHostImpl::SetModelChoice(const std::string& choice) {
   if (!IsKnownModelChoice(choice)) {
     return;
   }
+  // NOTE: kModelChoicePref is registered nowhere either, so this write is also dropped -- but unlike the
+  // password choice there is no registered pref to redirect it to, because nothing in the product reads
+  // a "which model did you pick on first run" value at all. Picking a provider here therefore configures
+  // nothing: a user who chooses a third-party model must still enter an endpoint and a key in
+  // Settings > Models. Making this choice real is provider work, not a pref fix -- see docs/UI-PLAN.md.
   profile_->GetPrefs()->SetString(kModelChoicePref, choice);
 }
 

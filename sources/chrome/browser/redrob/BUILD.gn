@@ -38,7 +38,12 @@ source_set("sidecar") {
     "//components/keyed_service/core",
     "//services/network/public/cpp",
   ]
-  deps = []
+  deps = [
+    # The task failure messages come from the dictionary rather than being written in this code, so this
+    # target needs the generated strings and the loader that reads them.
+    "//chrome/browser/redrob/resources:redrob_strings",
+    "//ui/base",
+  ]
 
   # Not on macOS: there the font travels as bundle_data inside the framework, and building the copy as well would
   # leave a file in the build root that nothing reads and nothing ships.
@@ -48,6 +53,10 @@ source_set("sidecar") {
 
   deps += [
     "//base",
+    # model_store.cc and routine_store.cc report failures to the settings page, so they read the
+    # product's own strings rather than carrying English literals. The grit header is generated, so the
+    # dependency is what makes it exist at all.
+    "//chrome/browser/redrob/resources:redrob_strings",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/ui/browser_window",
     "//chrome/browser/ui/navigator",
@@ -61,6 +70,7 @@ source_set("sidecar") {
     "//components/tab_groups",
     "//content/public/browser",
     "//ui/accessibility",
+    "//ui/base",
     "//crypto",
     "//net",
     "//net/traffic_annotation",

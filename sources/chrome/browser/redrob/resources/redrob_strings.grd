@@ -112,7 +112,7 @@
       <message name="IDS_REDROB_SIDEBAR_NO_WORKSPACES_YET" desc="Disabled first item of the workspace menu, shown when none exist">No workspaces yet</message>
       <message name="IDS_REDROB_SIDEBAR_SAVE_WORKSPACE" desc="Workspace menu command that turns the window's tabs into a saved workspace">Save these tabs as a workspace</message>
       <message name="IDS_REDROB_NEW_TAB_PROMPT_LABEL" desc="Accessible name of the new tab's main input">Task for the agent</message>
-      <message name="IDS_REDROB_NEW_TAB_PROMPT_PLACEHOLDER" desc="Placeholder in the new tab's main input">Ask AI a task, @ for context</message>
+      <message name="IDS_REDROB_NEW_TAB_PROMPT_PLACEHOLDER" desc="Placeholder in the new tab's main input">Ask AI to do something</message>
       <message name="IDS_REDROB_NEW_TAB_MODE_GROUP" desc="Accessible name of the Search / Ask AI pair">Mode</message>
       <message name="IDS_REDROB_NEW_TAB_MODE_SEARCH" desc="Segment that selects search mode; what is typed then goes to the web">Search</message>
       <message name="IDS_REDROB_NEW_TAB_MODE_ASK" desc="Segment that selects agent mode; what is typed then becomes a task">Ask AI</message>
@@ -142,9 +142,10 @@
       <message name="IDS_REDROB_NEW_TAB_TILE_ACT_PROMPT" desc="The task text the form-filling tile sends">Fill this form with my details but do not submit it, and tell me what you put where.</message>
       <message name="IDS_REDROB_NEW_TAB_RECENT" desc="Heading above the list of tasks the user actually ran">Recent tasks</message>
       <message name="IDS_REDROB_TASK_STOP" desc="Button that stops a running task">Stop</message>
+      <message name="IDS_REDROB_TASK_BACK_HOME" desc="Accessible name of the control in a task's header that returns to the new tab">Back to the new tab</message>
       <message name="IDS_REDROB_TASK_CLOSE_PREVIEW" desc="Accessible name of the preview pane's close button">Close preview</message>
       <message name="IDS_REDROB_TASK_REPLY_LABEL" desc="Accessible name of the task view's reply input">Reply to the agent</message>
-      <message name="IDS_REDROB_TASK_REPLY_PLACEHOLDER" desc="Placeholder in the task view's reply input">Reply, @ for context</message>
+      <message name="IDS_REDROB_TASK_REPLY_PLACEHOLDER" desc="Placeholder in the task view's reply input">Reply, or send another instruction</message>
       <message name="IDS_REDROB_TASK_STEER_NOW" desc="Button that interrupts the current step with the typed reply">Steer now</message>
       <message name="IDS_REDROB_TASK_SEND_REPLY" desc="Accessible name of the send button when the task is idle">Send reply</message>
       <message name="IDS_REDROB_TASK_QUEUE_REPLY" desc="Accessible name of the send button while the task is running">Queue this for the next step</message>
@@ -173,9 +174,20 @@
       <message name="IDS_REDROB_TASK_REPLY_SENT" desc="Shown after a reply reaches an idle task">Sent.</message>
       <message name="IDS_REDROB_TASK_ENGINE_UNAVAILABLE" desc="Shown when the sidecar is not running">Could not start the task: the Redrob Code engine is not available.</message>
       <message name="IDS_REDROB_TASK_COMMAND_UNAVAILABLE" desc="Shown when a slash command cannot reach the sidecar">That command could not be run: the Redrob Code engine is not available.</message>
+      <message name="IDS_REDROB_TASK_NOT_FOUND_DETAIL" desc="Explains a task id that no longer resolves">It may have been cleared, or the link may be from another profile. Nothing was lost from the tasks you still have.</message>
+      <message name="IDS_REDROB_TASK_BACK_HOME_LABEL" desc="Label of the action offered when a task is not found">Go to the new tab</message>
+      <message name="IDS_REDROB_TASK_QUEUED_MESSAGE" desc="Trace line recorded when a follow-up is queued; $1 is what the user typed">Queued: <ph name="ARG1">$1<ex>1</ex></ph></message>
+      <message name="IDS_REDROB_TASK_WITHDREW_QUEUED" desc="Trace line recorded when a queued follow-up is taken back; $1 is what the user typed">Withdrawn: <ph name="ARG1">$1<ex>1</ex></ph></message>
+      <message name="IDS_REDROB_TASK_WITHDRAW_QUEUED" desc="Accessible name of the button that takes back one queued message">Withdraw</message>
+      <message name="IDS_REDROB_TASK_WITHDRAW_FAILED" desc="Shown when withdrawing fails because the queue moved on">That message has already run.</message>
+      <message name="IDS_REDROB_NEW_TAB_MODEL_DEFAULT" desc="The only model option when no engine is available to list others">Default model</message>
+      <message name="IDS_REDROB_TASK_ENGINE_STOPPED" desc="Task error when the engine died mid-run">The Redrob Code engine stopped responding.</message>
+      <message name="IDS_REDROB_TASK_ENGINE_TOO_OLD" desc="Task error when the engine does not implement the chat-completions contract this browser needs">This browser needs a newer Redrob Code engine. Update it, then start the task again.</message>
+      <message name="IDS_REDROB_TASK_ENGINE_CREDENTIAL" desc="Task error when the engine rejects the per-launch credential">The Redrob Code engine refused this browser's credential.</message>
+      <message name="IDS_REDROB_TASK_ENGINE_NO_ANSWER" desc="Task error when a turn completes with no text and no tool call">The engine ended the task without producing an answer.</message>
       <message name="IDS_REDROB_OB_WELCOME_TITLE" desc="Heading of the first step">Welcome to Redrob</message>
       <message name="IDS_REDROB_OB_WELCOME_BODY" desc="Body of the first step">A browser that can do the work, not just show you the page.</message>
-      <message name="IDS_REDROB_OB_ACCOUNT_TITLE" desc="Heading of the account step">Create your Redrob account</message>
+      <message name="IDS_REDROB_OB_ACCOUNT_TITLE" desc="Heading of the account step, which explains the account rather than creating one">What a Redrob account is for</message>
       <message name="IDS_REDROB_OB_ACCOUNT_BODY" desc="Body of the account step">Your tasks, memory and routines follow the account, not the machine.</message>
       <message name="IDS_REDROB_OB_EMAIL_LABEL" desc="Accessible name of the email field">Email address</message>
       <message name="IDS_REDROB_OB_HAVE_ACCOUNT" desc="Button for a returning user">I already have an account</message>
@@ -221,6 +233,9 @@
       <message name="IDS_REDROB_OB_TRY_AGAIN" desc="Button shown after a step failed">Try again</message>
       <message name="IDS_REDROB_OB_SHORTCUT_COMMAND" desc="Name of the macOS modifier key">Command</message>
       <message name="IDS_REDROB_OB_SHORTCUT_CTRL" desc="Name of the Windows and Linux modifier key">Ctrl</message>
+      <message name="IDS_REDROB_OB_STEP_OF" desc="Accessible name of one progress dot; $1 is this step number, $2 is the total">Step <ph name="ARG1">$1<ex>1</ex></ph> of <ph name="ARG2">$2<ex>2</ex></ph></message>
+      <message name="IDS_REDROB_OB_IMPORT_RUNNING" desc="Shown while a browser import is running">Importing…</message>
+      <message name="IDS_REDROB_OB_IMPORT_DONE" desc="Shown when a browser import finished">Imported.</message>
       <message name="IDS_REDROB_SE_DOCUMENT_TITLE" desc="Title of the settings page">Redrob settings</message>
       <message name="IDS_REDROB_SE_NAV" desc="Accessible name of the settings navigation">Settings sections</message>
       <message name="IDS_REDROB_SE_NAV_ROUTINES" desc="Navigation link to the routines section">Routines</message>
@@ -346,6 +361,40 @@
       <message name="IDS_REDROB_SE_NAV_GETTING_STARTED" desc="Navigation link to the getting-started section">Getting started</message>
       <message name="IDS_REDROB_SE_ONBOARDING_LEDE" desc="Explains the getting-started section">The short tour this browser showed when it first opened. It only explains things — nothing you do in it changes a setting, so it is safe to reopen whenever.</message>
       <message name="IDS_REDROB_SE_ONBOARDING_OPEN" desc="Button that opens the onboarding page in a tab">Open the tour</message>
+      <message name="IDS_REDROB_SE_KEYSTORE_NOT_ANSWERED" desc="Error when a provider is added before the OS keystore is ready">This machine's keystore has not answered yet.</message>
+      <message name="IDS_REDROB_SE_SIGNIN_FIELDS_REQUIRED" desc="Error when the sign-in form is incomplete">A name, a model and a valid endpoint are all required.</message>
+      <message name="IDS_REDROB_SE_TOO_MANY_PROVIDERS" desc="Error when the provider limit is reached">There are already too many providers.</message>
+      <message name="IDS_REDROB_SE_ROUTINE_ENGINE_UNAVAILABLE" desc="Recorded on a routine whose run could not reach the engine">The task engine was not available.</message>
+      <message name="IDS_REDROB_SE_ROUTINE_CHAT_GONE" desc="Recorded on a heartbeat routine whose chat was deleted">That chat no longer exists, so there was nothing to wake.</message>
+      <message name="IDS_REDROB_SE_CONFIRM_CANCEL" desc="Button that dismisses a confirmation without acting">Cancel</message>
+      <message name="IDS_REDROB_SE_FORGET_TITLE" desc="Title of the confirmation before all memory is deleted">Forget everything?</message>
+      <message name="IDS_REDROB_SE_FORGET_BODY" desc="Body of the confirmation before all memory is deleted">Every entry goes, pinned ones included. This cannot be undone.</message>
+      <message name="IDS_REDROB_SE_REMOVE_PROVIDER_TITLE" desc="Title of the confirmation before a provider is deleted; $1 is the provider's name">Remove <ph name="ARG1">$1<ex>1</ex></ph>?</message>
+      <message name="IDS_REDROB_SE_REMOVE_PROVIDER_BODY" desc="Body of the confirmation before a provider is deleted">Its stored key goes with it. You will need the key again to reconnect.</message>
+      <message name="IDS_REDROB_SE_DELETE_ROUTINE_TITLE" desc="Title of the confirmation before a routine is deleted; $1 is the routine's name">Delete “<ph name="ARG1">$1<ex>1</ex></ph>”?</message>
+      <message name="IDS_REDROB_SE_DELETE_ROUTINE_BODY" desc="Body of the confirmation before a routine is deleted">It stops running and its schedule is gone. This cannot be undone.</message>
+      <message name="IDS_REDROB_SE_MEMORY_SEARCH" desc="Placeholder of the input that filters the memory list">Search what it remembers</message>
+      <message name="IDS_REDROB_SE_MEMORY_SHOWING" desc="Count above the memory list while a search is filtering it"><ph name="ARG1">$1<ex>1</ex></ph> of <ph name="ARG2">$2<ex>2</ex></ph> shown</message>
+      <message name="IDS_REDROB_SE_MEMORY_NO_MATCH" desc="Shown when a memory search filters everything out">Nothing matches that.</message>
+      <message name="IDS_REDROB_SE_ROUTINE_ADDED" desc="Shown after a routine is added">Added.</message>
+      <message name="IDS_REDROB_SE_ROUTINE_EDIT" desc="Button that loads a routine into the form for editing">Edit</message>
+      <message name="IDS_REDROB_SE_ROUTINE_EDITING" desc="Heading of the routine form while an existing routine is being edited">Editing “<ph name="ARG1">$1<ex>1</ex></ph>”</message>
+      <message name="IDS_REDROB_SE_ROUTINE_SAVE" desc="Button that saves an edited routine">Save changes</message>
+      <message name="IDS_REDROB_SE_ROUTINE_UPDATED" desc="Shown after an edited routine is saved">Saved.</message>
+      <message name="IDS_REDROB_SE_ROUTINE_UPDATE_FAILED" desc="Shown when saving an edited routine fails">That could not be saved.</message>
+      <message name="IDS_REDROB_SE_NAV_APPEARANCE" desc="Settings nav entry for the appearance section">Appearance</message>
+      <message name="IDS_REDROB_SE_APPEARANCE_LEDE" desc="Lede explaining why appearance is not configured on this page">Theme and language are browser-wide settings, so they live in the browser's own settings and apply to every Redrob surface.</message>
+      <message name="IDS_REDROB_SE_APPEARANCE_THEME" desc="Label of the theme row in the appearance section">Light, dark, or follow the system</message>
+      <message name="IDS_REDROB_SE_APPEARANCE_OPEN_THEME" desc="Button that opens the browser's appearance settings page">Open appearance settings</message>
+      <message name="IDS_REDROB_SE_APPEARANCE_THEME_NOTE" desc="Note under the theme row">This page and the new tab follow whichever mode is chosen there.</message>
+      <message name="IDS_REDROB_SE_APPEARANCE_LANGUAGE" desc="Label of the language row in the appearance section">Interface language</message>
+      <message name="IDS_REDROB_SE_APPEARANCE_OPEN_LANGUAGE" desc="Button that opens the browser's language settings page">Open language settings</message>
+      <message name="IDS_REDROB_SE_APPEARANCE_LANGUAGE_NOTE" desc="Note under the language row">Changing the language takes effect after the browser restarts.</message>
+      <message name="IDS_REDROB_SE_ENGINE_READY" desc="Built-in engine state: serving">Running</message>
+      <message name="IDS_REDROB_SE_ENGINE_STARTING" desc="Built-in engine state: launched but not answering yet">Starting up</message>
+      <message name="IDS_REDROB_SE_ENGINE_FAILED" desc="Built-in engine state: was running and broke">Stopped responding</message>
+      <message name="IDS_REDROB_SE_ENGINE_NOT_INSTALLED" desc="Built-in engine state: no engine binary was found anywhere">Not installed, so tasks cannot run</message>
+      <message name="IDS_REDROB_SE_ENGINE_MODEL_COUNT" desc="How many models the engine reported; $1 is the count"><ph name="ARG1">$1<ex>1</ex></ph> models</message>
     </messages>
   </release>
 </grit>

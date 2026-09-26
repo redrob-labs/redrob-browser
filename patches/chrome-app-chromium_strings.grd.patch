@@ -1,5 +1,5 @@
 diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
-index a741f89bf54c6..69246c8011353 100644
+index a741f89bf54c6..2bac7653ed22a 100644
 --- a/chrome/app/chromium_strings.grd
 +++ b/chrome/app/chromium_strings.grd
 @@ -278,7 +278,7 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
@@ -174,7 +174,17 @@ index a741f89bf54c6..69246c8011353 100644
        </message>
        <if expr="_is_chrome_for_testing_branded">
          <then>
-@@ -523,14 +523,14 @@ New bookmarks can’t be saved in your account until you delete some. If you sig
+@@ -515,22 +515,22 @@ New bookmarks can’t be saved in your account until you delete some. If you sig
+         </then>
+         <else>
+           <message name="IDS_ABOUT_VERSION_COMPANY_NAME" desc="Company name on the about pages">
+-            The Chromium Authors
++            Redrob
+           </message>
+           <message name="IDS_ABOUT_VERSION_COPYRIGHT" desc="Copyright information on the about pages">
+-            Copyright <ph name="YEAR">{0,date,y}<ex>2016</ex></ph> The Chromium Authors. All rights reserved.
++            Copyright <ph name="YEAR">{0,date,y}<ex>2016</ex></ph> Redrob. Portions copyright The Chromium Authors. All rights reserved.
+           </message>
          </else>
        </if>
        <if expr="is_chromeos">

@@ -4,12 +4,13 @@
 
 import {
   Effort,
+  EngineState,
   PageHandlerFactory,
   PermissionMode,
   RoutineKind,
   SettingsHostRemote,
 } from './redrob_settings.mojom-webui.js';
-import type {AgentSettings, MemoryEntry, Provider, Routine} from './redrob_settings.mojom-webui.js';
+import type {AgentSettings, EngineInfo, MemoryEntry, Provider, Routine} from './redrob_settings.mojom-webui.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 
 // One remote, no page-observer interface: settings state changes because THIS page changed it, so it
@@ -63,8 +64,14 @@ function button(label: string, className: string, onClick: () => void): HTMLButt
 
 // ---------- render ----------
 
+// The settings the page last drew from. Held so a control that only changes what is DISPLAYED -- the
+// memory search -- can redraw without asking the browser process for the whole settings struct again on
+// every keystroke.
+let lastSettings: AgentSettings|undefined;
+
 async function refresh() {
   const {settings} = await host.getSettings();
+  lastSettings = settings;
   renderRoutines(settings.routines, settings.chats);
   renderMemory(settings);
   renderProviders(settings);
@@ -73,8 +80,52 @@ async function refresh() {
   renderRpc(settings);
 }
 
-function renderRoutines(routines: Routine[], chats: AgentSettings['chats']) {
-  const list = $<HTMLOListElement>('routine-list');
+// The routine being edited, or null when the form is adding a new one. UpdateRoutine has existed in the
+// mojom since routines shipped and nothing called it: the form only ever added, so changing a routine's
+// instruction or schedule meant deleting it and retyping the whole thing.
+let editing: Routine|null = null;
+
+function beginEdit(routine: Routine) {
+  editing = routine;
+  $<HTMLInputElement>('routine-title').value = routine.title;
+  $<HTMLTextAreaElement>('routine-prompt').value = routine.prompt;
+  $<HTMLSelectElement>('routine-kind').value =
+      routine.kind === RoutineKind.kHeartbeat ? 'heartbeat' : 'cron';
+  $<HTMLSelectElement>('routine-every').value = String(routine.everyMinutes);
+  $<HTMLSelectElement>('routine-mode').value = String(routine.mode);
+  $<HTMLSelectElement>('routine-effort').value = String(routine.effort);
+  if (routine.taskId) {
+    $<HTMLSelectElement>('routine-chat').value = routine.taskId;
+  }
+  paintFormMode();
+  // The form is below the list, so on a long list the fields it just filled are off-screen.
+  $('routine-form').scrollIntoView({block: 'nearest'});
+  $<HTMLTextAreaElement>('routine-prompt').focus();
+}
+
+function endEdit() {
+  editing = null;
+  $<HTMLInputElement>('routine-title').value = '';
+  $<HTMLTextAreaElement>('routine-prompt').value = '';
+  paintFormMode();
+}
+
+// The same form is the editor, so it has to say which it is. An "Add routine" button that silently
+// overwrites an existing routine would be the worst version of this.
+function paintFormMode() {
+  $('routine-form-title').textContent = editing
+      ? loadTimeData.getStringF('seRoutineEditing', editing.title || editing.prompt.slice(0, 40))
+      : loadTimeData.getString('seRoutineNew');
+  $('routine-submit').textContent = editing
+      ? loadTimeData.getString('seRoutineSave')
+      : loadTimeData.getString('seRoutineAdd');
+  $('routine-cancel-edit').hidden = !editing;
+  // Which chat a heartbeat wakes cannot be moved to a different chat: the routine's accumulated context
+  // lives in that one. Kind is fixed while editing for the same reason.
+  $<HTMLSelectElement>('routine-kind').disabled = editing !== null;
+}
+
+function renderRoutines(routines: Routine[], chats: AgentSettings['chats']) {  const list = $<HTMLOListElement>('routine-list');
   list.textContent = '';
   $('routine-empty').hidden = routines.length > 0;
 
@@ -120,7 +171,17 @@ function renderRoutines(routines: Routine[], chats: AgentSettings['chats']) {
           await host.setRoutineEnabled(routine.id, !routine.enabled);
           await refresh();
         }),
+        button(loadTimeData.getString('seRoutineEdit'), 'pill', () => {
+          beginEdit(routine);
+        }),
         button(loadTimeData.getString('seRoutineDelete'), 'pill pill-warn', async () => {
+          const ok = await confirmDestructive(
+              loadTimeData.getStringF('seDeleteRoutineTitle', routine.title || routine.prompt.slice(0, 40)),
+              loadTimeData.getString('seDeleteRoutineBody'),
+              loadTimeData.getString('seRoutineDelete'));
+          if (!ok) {
+            return;
+          }
           await host.removeRoutine(routine.id);
           await refresh();
         }));
@@ -147,12 +208,30 @@ function renderMemory(settings: AgentSettings) {
   $<HTMLInputElement>('memory-enabled').checked = settings.memory.enabled;
   $<HTMLSelectElement>('memory-retention').value = String(settings.memory.retentionDays);
 
+  const all = settings.memory.entries;
+  // The query filters the entry text and the prompt it came from, because "why do you know this" is as
+  // likely to be what someone is looking for as the fact itself.
+  const query = $<HTMLInputElement>('memory-search').value.trim().toLowerCase();
+  const shown = query
+      ? all.filter((entry) => entry.text.toLowerCase().includes(query) ||
+                              (entry.source ?? '').toLowerCase().includes(query))
+      : all;
+
   const list = $<HTMLOListElement>('memory-list');
   list.textContent = '';
-  $('memory-empty').hidden = settings.memory.entries.length > 0;
-  for (const entry of settings.memory.entries) {
+  for (const entry of shown) {
     list.append(renderMemoryRow(entry));
   }
+
+  // Three different nothings, said differently: nothing remembered, nothing matching, or a count.
+  const emptyStore = all.length === 0;
+  $('memory-empty').hidden = !emptyStore;
+  $('memory-nomatch').hidden = emptyStore || shown.length > 0;
+  const count = $('memory-count');
+  count.hidden = !query || emptyStore;
+  count.textContent = loadTimeData.getStringF('seMemoryShowing', shown.length, all.length);
+  // The search itself is pointless on an empty store, and a disabled control says so without a sentence.
+  $<HTMLInputElement>('memory-search').disabled = emptyStore;
 }
 
 function renderMemoryRow(entry: MemoryEntry): HTMLElement {
@@ -193,10 +272,12 @@ function renderProviders(settings: AgentSettings) {
 
   // The built-in engine is a row like any other, because "which model" should have one list rather
   // than a default hidden behind the absence of a selection.
+  // The model and endpoint here are no longer invented: nothing reads them for the built-in row, which
+  // now reports the engine's real state instead. They stay only because Provider requires them.
   list.append(providerRow(
-      {id: '', label: loadTimeData.getString('seProviderRedrobEngine'), model: 'redrob/auto', endpoint: '', hasSecret: false,
-       isOauth: false},
-      settings.model.selectedId === '', /*builtIn=*/ true));
+      {id: '', label: loadTimeData.getString('seProviderRedrobEngine'), model: '', endpoint: '',
+       hasSecret: false, isOauth: false},
+      settings.model.selectedId === '', /*builtIn=*/ true, settings.model.engine));
   for (const provider of settings.model.providers) {
     list.append(providerRow(provider, settings.model.selectedId === provider.id, false));
   }
@@ -207,7 +288,29 @@ function renderProviders(settings: AgentSettings) {
   }
 }
 
-function providerRow(provider: Provider, selected: boolean, builtIn: boolean): HTMLElement {
+// What the built-in row says about the engine. Status first, because it is the fact a reader can act on:
+// an ephemeral loopback port changes every launch and tells them nothing, while "not installed" explains
+// every task failing at once. The two nothing-there states stay distinct -- not installed is the ordinary
+// condition of a machine that never downloaded the engine, failed means it was there and broke.
+function engineMeta(engine: EngineInfo): string {
+  switch (engine.state) {
+    case EngineState.kReady:
+      // Only here is a model count a fact. Elsewhere zero means "not asked yet", not "none exist", and
+      // printing "0 models" would be inventing an answer the browser does not have.
+      return `${loadTimeData.getString('seEngineReady')} · ${engine.defaultModel} · ` +
+          loadTimeData.getStringF('seEngineModelCount', engine.modelCount);
+    case EngineState.kStarting:
+      return loadTimeData.getString('seEngineStarting');
+    case EngineState.kFailed:
+      return loadTimeData.getString('seEngineFailed');
+    case EngineState.kNotInstalled:
+    default:
+      return loadTimeData.getString('seEngineNotInstalled');
+  }
+}
+
+function providerRow(provider: Provider, selected: boolean, builtIn: boolean,
+                     engine?: EngineInfo): HTMLElement {
   const row = document.createElement('li');
   row.className = 'row';
   const body = document.createElement('div');
@@ -218,7 +321,9 @@ function providerRow(provider: Provider, selected: boolean, builtIn: boolean): H
   const meta = document.createElement('div');
   meta.className = 'row-meta';
   meta.textContent = builtIn
-      ? loadTimeData.getString('seProviderNoKeyNeeded')
+      // Was only ever "no key needed", which is true but says nothing about whether this row can run a
+      // task at all. The engine's state is the part a reader is actually looking for.
+      ? (engine ? engineMeta(engine) : loadTimeData.getString('seProviderNoKeyNeeded'))
       : `${provider.model} · ${provider.endpoint} · ` +
         (provider.isOauth ? loadTimeData.getString('seProviderOauthOk')
                           : provider.hasSecret ? loadTimeData.getString('seProviderKeyStored') : loadTimeData.getString('seProviderNoKey'));
@@ -236,6 +341,13 @@ function providerRow(provider: Provider, selected: boolean, builtIn: boolean): H
   }));
   if (!builtIn) {
     actions.append(button(loadTimeData.getString('seProviderRemove'), 'pill pill-warn', async () => {
+      const ok = await confirmDestructive(
+          loadTimeData.getStringF('seRemoveProviderTitle', provider.label),
+          loadTimeData.getString('seRemoveProviderBody'),
+          loadTimeData.getString('seProviderRemove'));
+      if (!ok) {
+        return;
+      }
       await host.removeProvider(provider.id);
       await refresh();
     }));
@@ -248,10 +360,55 @@ function providerRow(provider: Provider, selected: boolean, builtIn: boolean): H
 function renderPasswords(settings: AgentSettings) {
   $<HTMLInputElement>('password-save').checked = settings.passwords.offerToSave;
   $<HTMLInputElement>('password-autosignin').checked = settings.passwords.autoSignin;
-  for (const choice of document.querySelectorAll<HTMLButtonElement>('.choice')) {
-    choice.setAttribute(
-        'aria-pressed', String(choice.dataset['choice'] === settings.passwords.choice));
+  paintChoiceGroup($('passwords').querySelector<HTMLElement>('.choice-row')!, settings.passwords.choice);
+}
+
+// A radiogroup, drawn and announced as one. This used to write `aria-pressed`, which belongs to a toggle
+// button: a screen reader was told the container held radios and then found none, so the group announced
+// nothing selected however it was drawn. It also reached for every `.choice` on the page rather than the
+// ones in this group, which happens to work while there is one group and stops the moment there are two.
+//
+// Selection is `aria-checked`, and the group is ONE tab stop: only the checked option is tabbable, and
+// the arrows move between them. That is what a radiogroup promises, and buttons do not do it by default.
+function paintChoiceGroup(group: HTMLElement, selected: string) {
+  const choices = [...group.querySelectorAll<HTMLElement>('.choice')];
+  // Nothing matching means nothing selected yet, and the first option has to stay reachable by Tab --
+  // a group where every option is tabindex -1 cannot be entered from the keyboard at all.
+  const hasSelection = choices.some((choice) => choice.dataset['choice'] === selected);
+  for (const [index, choice] of choices.entries()) {
+    const on = choice.dataset['choice'] === selected;
+    choice.ariaChecked = String(on);
+    choice.tabIndex = (hasSelection ? on : index === 0) ? 0 : -1;
   }
+}
+
+// Arrows, Home and End, wrapping at both ends. Space and Enter come free with a <button>.
+function wireChoiceKeys(group: HTMLElement, onPick: (choice: string) => void) {
+  group.addEventListener('keydown', (event: KeyboardEvent) => {
+    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+               : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1
+                                                                     : 0;
+    const choices = [...group.querySelectorAll<HTMLElement>('.choice')];
+    const from = choices.findIndex((choice) => choice === document.activeElement);
+    let next = -1;
+    if (step !== 0 && from !== -1) {
+      next = (from + step + choices.length) % choices.length;
+    } else if (event.key === 'Home') {
+      next = 0;
+    } else if (event.key === 'End') {
+      next = choices.length - 1;
+    }
+    if (next === -1) {
+      return;
+    }
+    // Arrow keys would otherwise scroll the page under the group.
+    event.preventDefault();
+    const target = choices[next]!;
+    target.focus();
+    // In a radiogroup, moving to an option SELECTS it -- that is the pattern, not an extra keypress.
+    target.click();
+    onPick(target.dataset['choice'] ?? '');
+  });
 }
 
 function renderRpc(settings: AgentSettings) {
@@ -286,19 +443,31 @@ $<HTMLFormElement>('routine-form').addEventListener('submit', async (event: Even
     return;
   }
   const routine: Routine = {
-    id: '',
+    id: editing ? editing.id : '',
     title: $<HTMLInputElement>('routine-title').value.trim(),
     prompt,
     kind: heartbeat ? RoutineKind.kHeartbeat : RoutineKind.kCron,
     everyMinutes: Number($<HTMLSelectElement>('routine-every').value),
     mode: Number($<HTMLSelectElement>('routine-mode').value) as PermissionMode,
     effort: Number($<HTMLSelectElement>('routine-effort').value) as Effort,
-    enabled: true,
+    // Editing must not silently resume a routine the user paused.
+    enabled: editing ? editing.enabled : true,
     taskId: heartbeat ? taskId : '',
-    lastRunMs: 0,
-    nextRunMs: 0,
-    lastError: '',
+    lastRunMs: editing ? editing.lastRunMs : 0,
+    nextRunMs: editing ? editing.nextRunMs : 0,
+    lastError: editing ? editing.lastError : '',
   };
+  if (editing) {
+    const {ok} = await host.updateRoutine(routine);
+    $('routine-status').textContent = ok
+        ? loadTimeData.getString('seRoutineUpdated')
+        : loadTimeData.getString('seRoutineUpdateFailed');
+    if (ok) {
+      endEdit();
+    }
+    await refresh();
+    return;
+  }
   const {id} = await host.addRoutine(routine);
   if (!id) {
     $('routine-status').textContent = loadTimeData.getString('seRoutineAddFailed');
@@ -306,8 +475,13 @@ $<HTMLFormElement>('routine-form').addEventListener('submit', async (event: Even
   }
   $<HTMLInputElement>('routine-title').value = '';
   $<HTMLTextAreaElement>('routine-prompt').value = '';
-  $('routine-status').textContent = 'Added.';
+  $('routine-status').textContent = loadTimeData.getString('seRoutineAdded');
   await refresh();
+});
+
+$<HTMLButtonElement>('routine-cancel-edit').addEventListener('click', () => {
+  endEdit();
+  $('routine-status').textContent = '';
 });
 
 $<HTMLInputElement>('memory-enabled').addEventListener('change', async () => {
@@ -321,7 +495,46 @@ $<HTMLSelectElement>('memory-retention').addEventListener('change', async () => 
   await refresh();
 });
 
+// One confirmation for every destructive action here. Resolves true only if the user pressed the
+// action's own button: Escape, the Cancel button and the backdrop all resolve false, because a dialog
+// that treats "dismissed" as "yes" is worse than no dialog. The confirm button is labelled with the
+// action rather than "OK", so the last thing read before the click says what happens.
+function confirmDestructive(title: string, body: string, action: string): Promise<boolean> {
+  const dialog = $<HTMLDialogElement>('confirm');
+  $('confirm-title').textContent = title;
+  $('confirm-body').textContent = body;
+  $('confirm-go').textContent = action;
+  return new Promise((resolve) => {
+    let confirmed = false;
+    const go = () => {
+      confirmed = true;
+      dialog.close();
+    };
+    // A plain <button> inside a <dialog> does not close it, so Cancel needs this. Escape and the
+    // backdrop already fire `close` on their own, and all three land on the same false.
+    const cancel = () => dialog.close();
+    const closed = () => {
+      $('confirm-go').removeEventListener('click', go);
+      $('confirm-cancel').removeEventListener('click', cancel);
+      dialog.removeEventListener('close', closed);
+      resolve(confirmed);
+    };
+    $('confirm-go').addEventListener('click', go);
+    $('confirm-cancel').addEventListener('click', cancel);
+    dialog.addEventListener('close', closed);
+    dialog.showModal();
+    // Focus starts on Cancel, so a stray Enter on a keyboard does the harmless thing.
+    $<HTMLButtonElement>('confirm-cancel').focus();
+  });
+}
+
 $<HTMLButtonElement>('memory-forget').addEventListener('click', async () => {
+  const ok = await confirmDestructive(
+      loadTimeData.getString('seForgetTitle'), loadTimeData.getString('seForgetBody'),
+      loadTimeData.getString('seMemoryForget'));
+  if (!ok) {
+    return;
+  }
   host.forgetEverything();
   // Everything, pinned included -- said out loud, because the point of the button is certainty.
   $('memory-status').textContent = loadTimeData.getString('seMemoryCleared');
@@ -349,7 +562,10 @@ $<HTMLFormElement>('provider-form').addEventListener('submit', async (event: Eve
   await refresh();
 });
 
-for (const choice of document.querySelectorAll<HTMLButtonElement>('.choice')) {
+// Scoped to the password group, not every `.choice` on the page: the selector above was global, which is
+// correct only for as long as this page has exactly one chooser.
+const passwordChoices = $('passwords').querySelector<HTMLElement>('.choice-row')!;
+for (const choice of passwordChoices.querySelectorAll<HTMLButtonElement>('.choice')) {
   choice.addEventListener('click', async () => {
     const value = choice.dataset['choice'] ?? '';
     host.setPasswordManagerChoice(value);
@@ -359,6 +575,8 @@ for (const choice of document.querySelectorAll<HTMLButtonElement>('.choice')) {
     await refresh();
   });
 }
+// The keyboard half. The click handler above does the work, so this only has to move focus and fire it.
+wireChoiceKeys(passwordChoices, () => {});
 
 $<HTMLInputElement>('password-save').addEventListener('change', () => {
   host.setOfferToSavePasswords($<HTMLInputElement>('password-save').checked);
@@ -436,5 +654,48 @@ $<HTMLButtonElement>('folder-clear').addEventListener('click', async () => {
   host.clearWorkingFolder();
   await refresh();
 });
+
+$<HTMLInputElement>('memory-search').addEventListener('input', () => {
+  // Display-only, so it redraws from what the page already has rather than refetching per keystroke.
+  if (lastSettings) {
+    renderMemory(lastSettings);
+  }
+});
+
+// ---------- routing ----------
+
+// Which section is shown, driven by the URL. The nav used to be seven anchor jumps into one long scroll:
+// no current state, and a link to a section from elsewhere in the product landed in the middle of a page
+// with six others above and below. The fragment is the route, so every section is linkable and Back works.
+const SECTIONS = ['getting-started', 'routines', 'memory', 'models', 'passwords', 'cli', 'files', 'appearance'];
+
+function routeTo(id: string) {
+  // An unknown or empty fragment falls back to the first section rather than showing nothing, which is
+  // what a plain :target rule would have done on a first visit with no hash.
+  const current = SECTIONS.includes(id) ? id : SECTIONS[0]!;
+  for (const section of SECTIONS) {
+    $(section).classList.toggle('is-current', section === current);
+  }
+  for (const link of document.querySelectorAll<HTMLAnchorElement>('.nav-link')) {
+    const target = link.getAttribute('href') ?? '';
+    if (target.startsWith('#')) {
+      // Set and removed rather than set to 'false': aria-current has no false value, and the attribute's
+      // absence is what "not current" means.
+      if (target.slice(1) === current) {
+        link.setAttribute('aria-current', 'page');
+      } else {
+        link.removeAttribute('aria-current');
+      }
+    }
+  }
+  // Focus is deliberately NOT moved here. An earlier version set tabIndex = -1 on the section's heading
+  // and focused it, which made the heading focusable and therefore ring-able: the browser drew its focus
+  // ring as a full-width black box around the title on every route. A fragment navigation already moves
+  // focus to the target section, so the code was both unnecessary and visible.
+  document.querySelector('.pages')!.scrollTop = 0;
+}
+
+window.addEventListener('hashchange', () => routeTo(location.hash.slice(1)));
+routeTo(location.hash.slice(1));
 
 await refresh();

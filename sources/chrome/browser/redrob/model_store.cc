@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/redrob/resources/grit/redrob_strings.h"
 #include "chrome/browser/redrob/model_store.h"
 
 #include <algorithm>
@@ -19,6 +20,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "url/gurl.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace redrob {
 namespace {
@@ -257,16 +259,19 @@ void ModelStore::BeginOAuth(const std::string& label,
                             const OAuthFlow::Config& config,
                             OAuthFlow::ReadyCallback on_authorize_url) {
   if (!profile_ || !encryptor_) {
-    std::move(on_authorize_url).Run(GURL(), "This machine's keystore has not answered yet.");
+    std::move(on_authorize_url)
+        .Run(GURL(), l10n_util::GetStringUTF8(IDS_REDROB_SE_KEYSTORE_NOT_ANSWERED));
     return;
   }
   const GURL base(endpoint);
   if (label.empty() || model.empty() || !base.is_valid() || !base.SchemeIsHTTPOrHTTPS()) {
-    std::move(on_authorize_url).Run(GURL(), "A name, a model and a valid endpoint are all required.");
+    std::move(on_authorize_url)
+        .Run(GURL(), l10n_util::GetStringUTF8(IDS_REDROB_SE_SIGNIN_FIELDS_REQUIRED));
     return;
   }
   if (List().size() >= kMaxProviders) {
-    std::move(on_authorize_url).Run(GURL(), "There are already too many providers.");
+    std::move(on_authorize_url)
+        .Run(GURL(), l10n_util::GetStringUTF8(IDS_REDROB_SE_TOO_MANY_PROVIDERS));
     return;
   }
   // Replaces any flow still open. A second sign-in is the user having given up on the first.

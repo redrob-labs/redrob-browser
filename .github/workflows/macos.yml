@@ -136,6 +136,33 @@ jobs:
           grep -i "Redrob UI font" launch.log || echo "(no font log line -- check the VLOG level)"
           kill "$pid" || true
 
+      # Same reasoning as the Windows job: the launch above proves a FRESH profile works, and no job in
+      # this repository ever launched twice on one profile, so nothing could see what happens after an
+      # unclean exit. `profile.exit_type` stays `Crashed` until an exit is clean, and a browser that dies
+      # on the next start loses the profile for good. This reuses one directory and requires the second
+      # launch to come up.
+      - name: launch again on a profile that did not exit cleanly
+        run: |
+          set -uo pipefail
+          app="chromium/src/out/mac/Redrob Browser.app"
+          profile="$(mktemp -d)"
+          for attempt in 1 2; do
+            "$app/Contents/MacOS/Redrob Browser" \
+              --no-first-run --no-default-browser-check \
+              --user-data-dir="$profile" "chrome://redrob" >"relaunch-$attempt.log" 2>&1 &
+            pid=$!
+            sleep 25
+            if ! kill -0 "$pid" 2>/dev/null; then
+              echo "::error::launch $attempt on a reused profile exited within 25 seconds"
+              tail -40 "relaunch-$attempt.log"
+              exit 1
+            fi
+            # SIGKILL on purpose: a clean shutdown writes exit_type=SessionEnded and the second launch
+            # would prove nothing.
+            kill -9 "$pid" || true
+            sleep 5
+          done
+
       - name: import the signing certificate into a throwaway keychain
         # A keychain of our own, deleted in the cleanup step, rather than the login keychain: a hosted runner is
         # discarded anyway, but a named keychain makes the teardown explicit and keeps `security find-identity`

@@ -14,6 +14,8 @@
 #include "base/environment.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
+#include "base/base_paths.h"
+#include "base/path_service.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
@@ -23,6 +25,7 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
@@ -43,6 +46,24 @@ namespace {
 constexpr char kEngineBinaryEnvVar[] = "REDROB_CODE_BIN";
 // Passed through to the child, never read into this process's memory beyond the handoff.
 constexpr char kApiKeyEnvVar[] = "REDROB_API_KEY";
+// The engine reads its Basic password from here and enforces auth only when it is set. Its username
+// defaults to "redrob", which is the user half this class sends.
+constexpr char kServerPasswordEnvVar[] = "REDROB_SERVER_PASSWORD";
+
+// The chat-completions contract revision this browser is written against. A MINIMUM, not a pin: the
+// engine may answer with a higher one and still be fine, which is the whole point of negotiating on a
+// capability rather than on an engine version.
+constexpr int kMinChatCompletionsVersion = 1;
+
+// The engine's file name and this platform's PATH separator. Both differ on Windows, and getting either
+// wrong is a silent "not installed" rather than an error.
+#if BUILDFLAG(IS_WIN)
+constexpr base::FilePath::CharType kEngineFileName[] = FILE_PATH_LITERAL("redrob.exe");
+constexpr char kPathSeparator[] = ";";
+#else
+constexpr base::FilePath::CharType kEngineFileName[] = FILE_PATH_LITERAL("redrob");
+constexpr char kPathSeparator[] = ":";
+#endif
 
 // The engine's own startup contract: `redrob serve` prints this once its listener is bound.
 constexpr std::string_view kStartupPrefix = "redrob server listening on ";
@@ -328,6 +349,38 @@ std::optional<base::FilePath> SidecarClient::FindEngineBinary() {
   }
   // A packaged build ships the engine beside the browser. Until the packaging step exists there is
   // nothing here, and kUnavailable is the correct, honest answer.
+  //
+  // Before concluding that, look where the engine actually installs itself. The shared-install design
+  // gives one resolution order for every product -- the override above, then the install location, then
+  // PATH -- and this function used to stop after the override, so a machine with a perfectly good engine
+  // installed reported "not installed" unless the user also knew to set an environment variable.
+  base::FilePath home;
+  if (base::PathService::Get(base::DIR_HOME, &home)) {
+    base::FilePath installed =
+        home.Append(FILE_PATH_LITERAL(".redrob")).Append(FILE_PATH_LITERAL("bin")).Append(kEngineFileName);
+    if (base::PathExists(installed)) {
+      return installed;
+    }
+  }
+
+  // PATH, last, and walked here rather than handed to the launcher. The first version of this asked
+  // base::ExecutableExistsInPath and returned the bare name for execvp to resolve, which is POSIX-only
+  // in two ways at once: that helper does not exist on Windows, so the branch was compiled out and the
+  // engine was findable there ONLY through the environment override -- and the name it looked for had no
+  // .exe, so the install location above could never match on Windows either. Walking PATH ourselves is a
+  // dozen lines, has no platform guard, and returns a real path on every platform instead of trusting a
+  // launcher to repeat the search.
+  std::optional<std::string> path_var = env->GetVar("PATH");
+  if (path_var.has_value()) {
+    for (std::string_view entry :
+         base::SplitStringPiece(*path_var, std::string_view(kPathSeparator), base::TRIM_WHITESPACE,
+                                base::SPLIT_WANT_NONEMPTY)) {
+      base::FilePath candidate = base::FilePath::FromUTF8Unsafe(entry).Append(kEngineFileName);
+      if (base::PathExists(candidate)) {
+        return candidate;
+      }
+    }
+  }
   return std::nullopt;
 }
 
@@ -408,6 +461,14 @@ void SidecarClient::EnsureStarted(
               child_env[ToNative(kApiKeyEnvVar)] = ToNative(*key);
             }
             child_env[ToNative("XDG_DATA_HOME")] = ToNative(data_dir.AsUTF8Unsafe());
+            // The per-launch credential this class authenticates with, handed to the engine so it
+            // actually ENFORCES it. This was generated, bound into this task, and then never used: the
+            // engine requires HTTP Basic only when a password is configured, so with none configured our
+            // Authorization header was ignored and the loopback port accepted requests from anything on
+            // the machine that found it -- while this file's own comment claimed the engine was
+            // "authenticated by a per-launch credential". It is now. Same route as the API key: the
+            // environment only, never the command line, never a log, never disk.
+            child_env[ToNative(kServerPasswordEnvVar)] = ToNative(credentials);
             options.environment = std::move(child_env);
             options.clear_environment = false;
             options.fds_to_remap.emplace_back(write_end.get(), STDOUT_FILENO);
@@ -530,6 +591,126 @@ void SidecarClient::PollHealth() {
       /*max_body_size=*/4 * 1024);
 }
 
+void SidecarClient::FetchCapabilities() {
+  auto request = std::make_unique<network::ResourceRequest>();
+  // Still the experimental path: the engine's design promotes it to /capabilities, but the version a user
+  // has installed serves it here, and asking the old path works on both.
+  request->url = GURL(base_url_ + "/experimental/capabilities");
+  request->method = "GET";
+  request->credentials_mode = network::mojom::CredentialsMode::kOmit;
+  request->headers.SetHeader("Authorization",
+                             "Basic " + base::Base64Encode("redrob:" + basic_credentials_));
+
+  static constexpr net::NetworkTrafficAnnotationTag kAnnotation =
+      net::DefineNetworkTrafficAnnotation("redrob_sidecar_capabilities", R"(
+        semantics {
+          sender: "Redrob AI surface"
+          description:
+            "Asks the locally launched Redrob Code engine which parts of its contract it implements, so "
+            "the browser can say the engine is too old instead of sending a request that fails. The "
+            "request never leaves the machine."
+          trigger: "The engine answered a health check during startup."
+          data: "None. A generated per-launch credential authenticates to the local process."
+          destination: LOCAL
+        }
+        policy {
+          cookies_allowed: NO
+          setting: "Tied to using the Redrob AI surface; no separate setting."
+          policy_exception_justification: "Does not contact a remote server."
+        })");
+
+  capabilities_loader_ = network::SimpleURLLoader::Create(std::move(request), kAnnotation);
+  capabilities_loader_->SetTimeoutDuration(base::Seconds(3));
+  capabilities_loader_->DownloadToString(
+      url_loader_factory_.get(),
+      base::BindOnce(&SidecarClient::OnCapabilitiesResponse, weak_factory_.GetWeakPtr()),
+      /*max_body_size=*/16 * 1024);
+}
+
+void SidecarClient::OnCapabilitiesResponse(std::optional<std::string> body) {
+  capabilities_loader_.reset();
+
+  // What we need is one number: the chat-completions contract revision. The engine's own design says to
+  // declare a MINIMUM capability and never a version of the engine, because it auto-updates -- so this
+  // reads the entry and compares, and treats absence as "older than 1" rather than as a transport
+  // problem. Measured against both engines a user can have: the released one answers this path with
+  // {"backgroundSubagents":false} and no entry at all, the current one adds
+  // {"chatCompletions":{"version":1,...}}.
+  int version = 0;
+  if (body) {
+    if (std::optional<base::DictValue> parsed =
+            base::JSONReader::ReadDict(*body, base::JSON_PARSE_RFC)) {
+      if (const base::DictValue* chat = parsed->FindDict("chatCompletions")) {
+        version = chat->FindInt("version").value_or(0);
+      }
+    }
+  }
+
+  if (version < kMinChatCompletionsVersion) {
+    LOG(ERROR) << "the Redrob Code engine does not implement chat completions v"
+               << kMinChatCompletionsVersion << " (found v" << version << ")";
+    base_url_.clear();
+    if (process_.IsValid()) {
+      process_.Terminate(/*exit_code=*/0, /*wait=*/false);
+    }
+    failure_ = Failure::kEngineTooOld;
+    SetStatus(Status::kFailed);
+    return;
+  }
+
+  SetStatus(Status::kReady);
+}
+
+void SidecarClient::FetchProviders(ProvidersCallback callback) {
+  if (status_ != Status::kReady || base_url_.empty()) {
+    // Not serving. The caller treats this the same as an engine that has none to offer, which is the
+    // honest answer either way.
+    std::move(callback).Run(std::nullopt);
+    return;
+  }
+
+  auto request = std::make_unique<network::ResourceRequest>();
+  request->url = GURL(base_url_ + "/config/providers");
+  request->method = "GET";
+  request->credentials_mode = network::mojom::CredentialsMode::kOmit;
+  request->headers.SetHeader("Authorization",
+                             "Basic " + base::Base64Encode("redrob:" + basic_credentials_));
+
+  static constexpr net::NetworkTrafficAnnotationTag kAnnotation =
+      net::DefineNetworkTrafficAnnotation("redrob_sidecar_providers", R"(
+        semantics {
+          sender: "Redrob AI surface"
+          description:
+            "Asks the locally launched Redrob Code engine which AI providers and models it is "
+            "configured to route to, so the model chooser offers what this machine can actually run "
+            "instead of a hardcoded entry. The request never leaves the machine."
+          trigger: "The engine becomes ready, or the user opens the model chooser."
+          data: "None. A generated per-launch credential authenticates to the local process."
+          destination: LOCAL
+        }
+        policy {
+          cookies_allowed: NO
+          setting: "Tied to using the Redrob AI surface; no separate setting."
+          policy_exception_justification: "Does not contact a remote server."
+        })");
+
+  providers_loader_ = network::SimpleURLLoader::Create(std::move(request), kAnnotation);
+  providers_loader_->SetTimeoutDuration(base::Seconds(5));
+  providers_loader_->DownloadToString(
+      url_loader_factory_.get(),
+      base::BindOnce(&SidecarClient::OnProvidersResponse, weak_factory_.GetWeakPtr(),
+                     std::move(callback)),
+      // A catalogue of a few hundred models with capability and cost records for each. Generous, but
+      // bounded: an engine that answers this path with something enormous is answering wrongly.
+      /*max_body_size=*/512 * 1024);
+}
+
+void SidecarClient::OnProvidersResponse(ProvidersCallback callback,
+                                        std::optional<std::string> body) {
+  providers_loader_.reset();
+  std::move(callback).Run(std::move(body));
+}
+
 void SidecarClient::OnHealthResponse(std::optional<std::string> body) {
   const int response_code = health_loader_->ResponseInfo() && health_loader_->ResponseInfo()->headers
                                 ? health_loader_->ResponseInfo()->headers->response_code()
@@ -537,7 +718,8 @@ void SidecarClient::OnHealthResponse(std::optional<std::string> body) {
   health_loader_.reset();
 
   if (response_code == net::HTTP_OK) {
-    SetStatus(Status::kReady);
+    // Serving, but not yet known to serve what we need. The capability answer decides.
+    FetchCapabilities();
     return;
   }
 
@@ -545,6 +727,7 @@ void SidecarClient::OnHealthResponse(std::optional<std::string> body) {
   // else during startup is expected to be transient -- the listener is bound before the routes are.
   if (response_code == net::HTTP_UNAUTHORIZED || response_code == net::HTTP_FORBIDDEN) {
     LOG(ERROR) << "the Redrob Code sidecar refused the generated credential";
+    failure_ = Failure::kCredentialRejected;
     base_url_.clear();
     if (process_.IsValid()) {
       process_.Terminate(/*exit_code=*/0, /*wait=*/false);
@@ -589,7 +772,17 @@ void SidecarClient::StartCompletion(std::string request_json, CompletionDelegate
         })");
 
   auto request = std::make_unique<network::ResourceRequest>();
-  request->url = GURL(base_url_ + "/experimental/external/chat/completions");
+  // `/v1/chat/completions`, not the `/experimental/external/...` path this line used to hold. That path
+  // was never served by anything: the engine's experimental group registers capabilities, console, tool,
+  // worktree, session and resource, and the string "external" does not appear in its server at all -- so
+  // every task this browser has ever started went to a 404. The engine's design of record makes the
+  // OpenAI face real at this stable path and names this call site as the browser's half of the migration.
+  //
+  // The contract we are already on the right side of: we declare `tools`, which under that design means
+  // the CALLER owns them and the engine only emits tool_calls -- which is what this client's own tool
+  // loop expects, because a browser's tools drive a live tab and an engine executing them would act on
+  // the wrong machine entirely.
+  request->url = GURL(base_url_ + "/v1/chat/completions");
   request->method = "POST";
   // The engine is a local process reached over loopback and authenticated by a per-launch credential.
   // Anything the cookie jar would add is at best irrelevant and at worst a profile secret sent to a

@@ -68,7 +68,22 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
       const std::string& prompt,
       const std::vector<std::string>& context_refs,
       mojom::PermissionMode mode,
-      mojom::Effort effort);
+      mojom::Effort effort,
+      // The wire model id. Empty falls back to the default, which is what every caller got before this
+      // was a parameter at all.
+      const std::string& model);
+  // What the local engine says this machine can run. Empty when no engine is reachable, which is the
+  // normal state on a machine that never installed one -- the caller must say so rather than render an
+  // empty list as if it were a catalogue.
+  std::vector<mojom::ModelOptionPtr> ListModels() const;
+  // The built-in engine's state, for the settings page's provider row. That row used to be invented in
+  // the renderer -- a fixed model id and an empty endpoint -- so it claimed a configured engine on a
+  // machine that had never installed one.
+  SidecarClient::Status EngineStatus() const;
+  size_t ModelOptionCount() const;
+  // The wire id the built-in path routes with when nothing is chosen.
+  static std::string DefaultModel();
+
   void CancelTask(const std::string& task_id);
   bool SetPermissionMode(const std::string& task_id, mojom::PermissionMode mode);
   // Records a folder the USER picked. The picker itself lives on the WebUI handler, which is the only
@@ -80,6 +95,11 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   mojom::FollowUpOutcome SendFollowUp(const std::string& task_id,
                                       const std::string& prompt,
                                       mojom::FollowUpMode mode);
+  // Removes one not-yet-run queued message. False when `index` does not currently hold
+  // `expected_prompt`, which means the queue moved under the page and nothing should be deleted.
+  bool WithdrawQueuedFollowUp(const std::string& task_id,
+                              uint32_t index,
+                              const std::string& expected_prompt);
   std::vector<mojom::TaskPtr> ListTasks() const;
   mojom::TaskPtr GetTask(const std::string& task_id) const;
 
@@ -153,10 +173,16 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   // The shared tail of StartTask and StartRoutineTask: id, task record, conversation, history trim.
   std::string CreateTask(const std::string& prompt,
                          mojom::PermissionMode mode,
-                         mojom::Effort effort);
+                         mojom::Effort effort,
+                         // Empty for a routine, which has no chooser of its own and takes the default.
+                         const std::string& model);
   void FinishTask(const std::string& task_id, mojom::TaskState state, const std::string& error);
   mojom::Step* AddStep(const std::string& task_id, mojom::StepKind kind, const std::string& label);
   void AddStepDetail(const std::string& task_id, const std::string& text, const std::string& source);
+  // Asks the engine for its providers and replaces the cache. Called when the engine becomes ready
+  // rather than per chooser-open: the list only changes when someone edits the engine's own config.
+  void RefreshModels();
+  void OnProvidersFetched(std::optional<std::string> body);
   void Notify(const std::string& task_id);
   // Subscribes to the frames Chromium already captures for a tab, and files each one on the step that
   // opened it. Nothing new is captured for us: subscribing is what makes the existing thumbnail
@@ -199,6 +225,17 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   // Tool results arrive from callbacks the store may not outlive -- a page closed, a write
   // finishing after the profile went away.
   base::WeakPtrFactory<TaskStore> weak_factory_{this};
+
+  // What the engine last said it can route to. Plain records rather than mojom pointers: those are
+  // move-only, and this is read once per chooser-open and must survive being read twice.
+  struct ModelRecord {
+    std::string id;
+    std::string provider_id;
+    std::string name;
+    std::vector<std::string> capabilities;
+    std::string price_band;
+  };
+  std::vector<ModelRecord> model_options_;
 };
 
 }  // namespace redrob

@@ -19,14 +19,29 @@
 :root {
   color-scheme: light dark;
 
-  /* ---------- primitives: @redrob-design/brand ---------- */
+  /* ---------- primitives: the Console token system ---------- */
+  /* Transcribed verbatim -- same names, same hex -- from the brand's source of truth, so a colour is
+     decided in one place for every Redrob product. This layer carries no meaning and no theme: Blue 6 is
+     Blue 6 in light and in dark, and product code never names it. Only the semantic layer below does.
+     Ramps are complete rather than picked-over: a missing step is what forces a rule to invent a
+     near-miss hex, which is how two surfaces drift apart. */
+  --rr-blue: #2b52ff; /* Redrob Blue, the same value as Blue 6 */
+  --rr-white: #fff;
+  --rr-black: #0a0b0c;
+
+  /* Blue tint, 1 lightest to 10 darkest */
   --rr-blue-1: #eff4ff;
+  --rr-blue-2: #d9e6ff;
   --rr-blue-3: #bad2ff;
+  --rr-blue-4: #8aafff;
   --rr-blue-5: #507fff;
   --rr-blue-6: #2b52ff;
   --rr-blue-7: #1733d5;
+  --rr-blue-8: #09209c;
   --rr-blue-9: #061460;
   --rr-blue-10: #030c34;
+
+  /* Grayscale, 1 lightest to 9 darkest */
   --rr-gray-1: #f8f9fb;
   --rr-gray-2: #eff1f4;
   --rr-gray-3: #dfe2e8;
@@ -36,9 +51,34 @@
   --rr-gray-7: #576071;
   --rr-gray-8: #292e37;
   --rr-gray-9: #141719;
-  --rr-black: #0a0b0c;
+
+  --rr-gradient-primary: linear-gradient(135deg, #f8f9fb 0%, #507fff 100%);
+
+  /* Accent hues, 1 lightest to 5 darkest. The brand scopes the full nine-hue spectrum to contents and
+     graphics rather than product chrome, and defines no product STATUS colours -- so the status roles
+     below draw from these four, and the five purely editorial hues (teal, sky, violet, pink, lime) are
+     left out until a surface needs one. Adding one means copying its five steps verbatim, not mixing. */
+  --rr-red-1: #ffe8e1;
+  --rr-red-2: #ffc2ba;
   --rr-red-3: #ff5452;
   --rr-red-4: #a31310;
+  --rr-red-5: #560100;
+  --rr-orange-1: #ffedda;
+  --rr-orange-2: #ffd5ab;
+  --rr-orange-3: #ff9c1b;
+  --rr-orange-4: #ae5100;
+  --rr-orange-5: #5c2d00;
+  --rr-yellow-1: #fff7cc;
+  --rr-yellow-2: #ffed94;
+  --rr-yellow-3: #ffda1e;
+  --rr-yellow-4: #d2a100;
+  --rr-yellow-5: #734f00;
+  --rr-green-1: #d6ffe1;
+  --rr-green-2: #a6ffbf;
+  --rr-green-3: #29e474;
+  --rr-green-4: #00864a;
+  --rr-green-5: #004829;
+
   /* The shell's own two, measured off the product rather than taken from the sheet: the content area is
      near-white with a hint of the sidebar's cyan, and the sidebar is that cyan. */
   --rr-page: #fcfeff;
@@ -66,6 +106,16 @@
   --accent-subtle: light-dark(var(--rr-blue-1), var(--rr-blue-10));
   --destructive: light-dark(var(--rr-red-4), var(--rr-red-3));
   --destructive-foreground: light-dark(#fff, var(--rr-black));
+  /* Status roles. The product had only --destructive, so every non-failure state -- a routine that ran, a
+     provider that connected, a permission narrowed -- had to borrow the accent or say nothing at all.
+     Step 4 for the mark on a light surface and step 3 on a dark one, which is the same relationship
+     --destructive already uses. */
+  --success: light-dark(var(--rr-green-4), var(--rr-green-3));
+  --success-foreground: light-dark(#fff, var(--rr-black));
+  --success-subtle: light-dark(var(--rr-green-1), var(--rr-green-5));
+  --warning: light-dark(var(--rr-orange-4), var(--rr-orange-3));
+  --warning-foreground: light-dark(#fff, var(--rr-black));
+  --warning-subtle: light-dark(var(--rr-orange-1), var(--rr-orange-5));
   --border: light-dark(var(--rr-gray-3), var(--rr-gray-8));
   /* Lighter than --border: a card's edge is a hairline in the reference, and the brand grey-3 reads as a
      drawn line at card scale. */

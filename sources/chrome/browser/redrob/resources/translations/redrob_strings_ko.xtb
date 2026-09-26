@@ -18,7 +18,7 @@
 <translation id="2993684753266739040">아직 워크스페이스가 없습니다</translation>
 <translation id="5803782246616225275">이 탭들을 워크스페이스로 저장</translation>
 <translation id="4633113322125640806">에이전트에게 맡길 작업</translation>
-<translation id="1072962809551084130">AI에게 작업을 맡기세요. @로 컨텍스트 추가</translation>
+<translation id="7103721484979880839">AI에게 작업을 맡기세요</translation>
 <translation id="7281166215790160128">모드</translation>
 <translation id="1383876407941801731">검색</translation>
 <translation id="4528448763417055244">AI에게 요청</translation>
@@ -48,9 +48,10 @@
 <translation id="3085972363786452669">이 양식을 내 정보로 채우되 제출하지는 말고, 어디에 무엇을 넣었는지 알려 주세요.</translation>
 <translation id="2303684602967133879">최근 작업</translation>
 <translation id="1272079795634619415">중지</translation>
+<translation id="956026618102633110">새 탭으로 돌아가기</translation>
 <translation id="8784961542360102184">미리보기 닫기</translation>
 <translation id="3114930482352345148">에이전트에게 답장</translation>
-<translation id="5523549504908068144">답장, @로 컨텍스트 추가</translation>
+<translation id="4549209653549255116">답장하거나 다른 지시를 보내세요</translation>
 <translation id="8538039433897977373">지금 방향 바꾸기</translation>
 <translation id="7363164521834647158">답장 보내기</translation>
 <translation id="3133679314637937873">다음 단계로 예약</translation>
@@ -79,9 +80,20 @@
 <translation id="2917551499264531211">보냈습니다.</translation>
 <translation id="7119797652078953471">작업을 시작할 수 없습니다. Redrob Code 엔진을 사용할 수 없습니다.</translation>
 <translation id="7867657616836359858">명령을 실행할 수 없습니다. Redrob Code 엔진을 사용할 수 없습니다.</translation>
+<translation id="4152268224409119364">지워졌거나, 다른 프로필의 링크일 수 있습니다. 남아 있는 작업은 아무것도 사라지지 않았습니다.</translation>
+<translation id="7552649348778950978">새 탭으로 가기</translation>
+<translation id="1191182526986000642">대기: <ph name="ARG1"/></translation>
+<translation id="2733001822871154166">철회: <ph name="ARG1"/></translation>
+<translation id="2116055103889534441">철회</translation>
+<translation id="747354034568587645">그 메시지는 이미 실행됐습니다.</translation>
+<translation id="4071849832011229600">기본 모델</translation>
+<translation id="6162839978729913777">Redrob Code 엔진이 응답을 멈췄습니다.</translation>
+<translation id="4012014001858417000">이 브라우저에는 더 새로운 Redrob Code 엔진이 필요합니다. 업데이트한 뒤 작업을 다시 시작하세요.</translation>
+<translation id="3123778915167158807">Redrob Code 엔진이 이 브라우저의 자격 증명을 거부했습니다.</translation>
+<translation id="9068726448942312492">엔진이 답변을 내지 않고 작업을 끝냈습니다.</translation>
 <translation id="4528376918166094974">Redrob 시작하기</translation>
 <translation id="2258327572870166617">페이지를 보여주는 데서 끝나지 않고, 일까지 하는 브라우저입니다.</translation>
-<translation id="508937899545890604">Redrob 계정 만들기</translation>
+<translation id="1720175012154841771">Redrob 계정이 하는 일</translation>
 <translation id="7095357153517975458">작업, 메모리, 루틴은 기기가 아니라 계정을 따라갑니다.</translation>
 <translation id="3699624789011381381">이메일 주소</translation>
 <translation id="4263482106859974089">이미 계정이 있습니다</translation>
@@ -127,6 +139,9 @@
 <translation id="8725066075913043281">다시 시도</translation>
 <translation id="7969046989155602842">Command</translation>
 <translation id="3126026824346185272">Ctrl</translation>
+<translation id="1876394780956893864"><ph name="ARG2"/>단계 중 <ph name="ARG1"/>단계</translation>
+<translation id="5930749448918189991">가져오는 중…</translation>
+<translation id="7159011548667382007">가져왔습니다.</translation>
 <translation id="8285932954573766495">Redrob 설정</translation>
 <translation id="3831877777659444795">설정 항목</translation>
 <translation id="7449480078650729461">루틴</translation>
@@ -252,4 +267,38 @@
 <translation id="5429573677090935330">시작하기</translation>
 <translation id="9071077770055139211">이 브라우저를 처음 열었을 때 보여준 짧은 안내입니다. 설명만 하고 설정을 바꾸지 않으니 언제든 다시 열어도 됩니다.</translation>
 <translation id="3895328414524758916">안내 다시 보기</translation>
+<translation id="4312799925139519554">이 기기의 키 저장소가 아직 응답하지 않았습니다.</translation>
+<translation id="136746640913699504">이름, 모델, 올바른 엔드포인트가 모두 필요합니다.</translation>
+<translation id="8695360500761206463">프로바이더가 이미 너무 많습니다.</translation>
+<translation id="4026040168113939780">작업 엔진을 사용할 수 없었습니다.</translation>
+<translation id="6394262215818338213">해당 대화가 더 이상 없어서 깨울 대상이 없었습니다.</translation>
+<translation id="7658239707568436148">취소</translation>
+<translation id="3310598988526422835">전부 지울까요?</translation>
+<translation id="6455920252929853346">고정한 것까지 모든 항목이 사라집니다. 되돌릴 수 없습니다.</translation>
+<translation id="2447857179500014465"><ph name="ARG1"/>을(를) 제거할까요?</translation>
+<translation id="5195526307526049608">저장된 키도 함께 사라집니다. 다시 연결하려면 키가 또 필요합니다.</translation>
+<translation id="6732891289428170735">“<ph name="ARG1"/>”을(를) 삭제할까요?</translation>
+<translation id="1022257991868551611">더 이상 실행되지 않고 일정도 사라집니다. 되돌릴 수 없습니다.</translation>
+<translation id="5739007183106590886">기억한 내용 검색</translation>
+<translation id="3792736229560351645"><ph name="ARG2"/>개 중 <ph name="ARG1"/>개 표시</translation>
+<translation id="375256097164843734">일치하는 것이 없습니다.</translation>
+<translation id="2232483540243092957">추가했습니다.</translation>
+<translation id="9065203028668620118">수정</translation>
+<translation id="6055381589161180605">“<ph name="ARG1"/>” 수정 중</translation>
+<translation id="6532106788206463496">변경 저장</translation>
+<translation id="3156826526521556673">저장했습니다.</translation>
+<translation id="8892626930247019806">저장하지 못했습니다.</translation>
+<translation id="2433507940547922241">모양</translation>
+<translation id="6348435709129878751">테마와 언어는 브라우저 전체 설정이라 브라우저 설정에 있고, Redrob의 모든 화면에 함께 적용됩니다.</translation>
+<translation id="6322029843718745241">밝게, 어둡게, 또는 시스템 설정 따르기</translation>
+<translation id="214169863967063661">모양 설정 열기</translation>
+<translation id="650898660717434976">이 페이지와 새 탭은 거기서 고른 모드를 그대로 따릅니다.</translation>
+<translation id="3883412518168108894">인터페이스 언어</translation>
+<translation id="8100057926383586173">언어 설정 열기</translation>
+<translation id="6822656047183716172">언어를 바꾸면 브라우저를 다시 시작한 뒤에 적용됩니다.</translation>
+<translation id="6618744767048954150">실행 중</translation>
+<translation id="4638863449219650752">시작 중</translation>
+<translation id="7347428928871851497">응답이 멈췄습니다</translation>
+<translation id="6975159765440984670">설치되지 않아 작업을 실행할 수 없습니다</translation>
+<translation id="2665921124100154890">모델 <ph name="ARG1"/>개</translation>
 </translationbundle>
