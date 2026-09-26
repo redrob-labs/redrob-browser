@@ -4,39 +4,38 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
-## Unreleased
+## 0.1.4 — 2026-09-26
 
-### Known issue: one unclean exit and the profile will not start again
+**One unclean exit no longer makes a profile permanently unlaunchable.** This shipped broken in v0.1.3 and was
+the most expensive defect in it. `profile.exit_type` stays `Crashed` until the browser exits cleanly, and on the
+next launch this build trapped before any window appeared — so the flag never cleared and every launch after did
+the same thing. One force-quit cost the user the whole profile, and their only recovery was to delete it, losing
+tabs, bookmarks and workspaces.
 
-Not fixed here, and not caused by anything in this section — reproduced on the **shipped v0.1.3 binary**
-extracted from its own `.deb`, so it is in the published release.
+The trap is `CHECK(element)` in `AppMenuButton::GetAnchor()`, reached from
+`SessionCrashedBubbleView::ShowBubble()`. Upstream's crash bubble anchors to the app menu button. This fork keeps
+that button built — menu accelerators reach for it without a null check — but permanently invisible, so
+`GetAnchor()` takes upstream's fallback branch, which upstream only reaches in content-fullscreen, and CHECKs on
+an element that is not there. At that point in startup NONE of `BrowserView`'s elements exist, not the fallback
+anchor and not `kBrowserViewElementId`, because a `ViewSubregionAnchor` registers when its view is DRAWN and the
+window has not been shown yet. The two obvious explanations were both wrong, and the diagnostics say so rather
+than the reasoning: timestamped markers show the anchors created 184ms BEFORE the lookup that cannot find them,
+and the element contexts match. Upstream survives only because its app menu button is visible, so it never needs
+the fallback.
 
-`profile.exit_type` is set to `Crashed` by any unclean exit: a real crash, a `SIGKILL`, a machine losing
-power. On the next start that flag puts the browser on the post-crash recovery path, and this build **traps**
-in that path — `SIGTRAP`, no window, no message, because an official build strips `CHECK` text. The flag is
-only cleared by a *successful* start, so it never clears: every subsequent launch takes the same path and dies
-the same way. One force-quit makes the profile permanently unusable, and a user's only recovery is to delete
-their profile, losing tabs, bookmarks and workspaces.
+So the bubble is not shown in this fork. Repairing it instead would mean changing when startup registers view
+elements — blast radius: every bubble anchored that way — to restore a surface this fork never integrated, since
+the sidebar owns tabs and there is no session-restore story for the bubble to belong to. That is the same call
+already made for the sign-in promo's effects control and the feature-showcase carousel. The
+`Startup.CrashBubbleShown` histogram stays, so a crashed start is still recorded, and a restore-after-crash
+affordance can be built later on our own surface where it can anchor to something that exists.
 
-Reduced to a one-line reproduction. Take any working profile and set that single pref:
-
-```
-profile.exit_type = "Normal"   -> window opens
-profile.exit_type = "Crashed"  -> SIGTRAP, every time, on a brand new profile too
-```
-
-Established by bisection, not inspection: keeping only `profile` out of 57 top-level preference groups
-reproduces it, and inside that group `exit_type` alone is enough. It is independent of the URL on the command
-line, of `--start-maximized`, of the display, and of session and bookmark state. `--hide-crash-restore-bubble`
-avoids it, but that switch makes `HasPendingUncleanExit()` return false and so disables the *whole* recovery
-path — the crash-restore bubble and `is_post_crash_launch` together — so it does not localise the fault.
-
-One lead, from reading rather than measurement: `SessionCrashedBubbleView::ShowBubble` anchors the restore
-prompt to `GetAppMenuControl()`, and this product has no app menu — it is built but never shown — so that
-returns null and the bubble is constructed with a null anchor. Giving it the sidebar avatar instead did NOT
-stop the crash, so the null anchor is either harmless or only part of it; that change was reverted rather than
-shipped, since a fix that cannot be shown to fix anything is worse than none. Diagnosing this properly needs a
-`dcheck_always_on` build to recover the `CHECK` message the official build discards.
+Reproduced by writing the state, not by trying to produce it: set `profile.exit_type` to `"Crashed"` in the
+profile's `Preferences` and launch. Killing the browser does not work — `SIGKILL` never flushes the pref, which
+is why an earlier attempt at this concluded the build did not reproduce it — and `--test-type` does not suppress
+the bubble either, because that check sits after it. Verified with three launches from a `Crashed` profile, each
+with a visible window. CI now launches twice on one profile, which is the shape of test that would have caught
+it the first time.
 
 **The settings page told users, under our name, that their data goes to Google and that Google staff read it.**
 `chrome://settings` carried an "AI in Redrob" section — upstream's page for Google's own AI features, with brand
@@ -116,6 +115,47 @@ rather than at its three call sites, because a guard per call site is a guard so
 
 Present in v0.1.3, which is not being re-released for it: the file is inert there, and moving a published
 release is worse than carrying a known-harmless artefact until the next one.
+
+**The port the browser talks to the local engine on was unauthenticated.** `SidecarClient` generates a 32-byte
+per-launch secret, binds it into the launch task and sends it as HTTP Basic on every request — and never gave it
+to the engine. The engine enforces Basic only when `REDROB_SERVER_PASSWORD` is set, so with nothing set our
+`Authorization` header was ignored and an ephemeral loopback port accepted requests from any process on the
+machine that found it, with the user's Console credential and the engine's whole tool surface behind it. The
+launch lambda even took the secret as a parameter and never read it, while the comment beside it claimed the
+engine was "authenticated by a per-launch credential". The secret now reaches the engine through the
+environment, on the same route as the API key: never on the command line, never logged, never on disk. The route
+the client posted to did not exist either, so no task could have run even unauthenticated.
+
+**The engine is now found on Windows, by walking `PATH` here rather than handing the job to the launcher.** Both
+halves of the previous discovery failed silently as "not installed": the install-location branch looked for a
+file named `redrob` with no `.exe`, and the `PATH` branch was `BUILDFLAG(IS_POSIX)`-guarded — `base::
+ExecutableExistsInPath` does not exist on Windows — so it compiled out entirely, leaving `REDROB_CODE_BIN` as
+the only way to find the engine on the platform the change was written to fix. A runtime fault a compile would
+never have caught, on a job that does build and launch the browser.
+
+**Google's name is now on what Google actually does, and off what our own engine does.** The rule, applied to
+every surface in the survey: if Google is doing the work the name stays, and if our engine is doing it the name
+goes. `chrome://version` credited "The Chromium Authors" and their copyright — the one page a user opens to
+check what they are running attributed the product to someone else, contradicting `branding/BRANDING`. The
+composer's Search segment hardcoded `https://www.google.com/search?q=` in the renderer, so choosing another
+engine in settings changed nothing; the navigation now goes through the profile's default provider. Upstream's
+assistant is switched off rather than having its text deleted, because a string edit leaves the feature running.
+`내 Google 서비스 설정` and Google sign-in are both kept: those are Google's own account, and Chromium is where
+they belong.
+
+**Sign-in and sync were never removed from this fork — they are gated on three credentials it does not ship.** An
+API key, an OAuth client id and a secret, which Google's own builds read from `google_apis/internal/`. Without
+them Chromium substitutes the sentinel `dummytoken`, which is exactly what this fork's startup log prints, and
+every Google-backed feature is inert, translation included. A missing input, not a regression. Demonstrated by
+exporting three deliberately fake values: `chrome://settings/people` then renders the sign-in card, where
+without them the page offers no sign-in row at all. The build takes those values from the environment and never
+from a committed file — a key in the repository is a published key.
+
+**Bookmarks you save with Ctrl+D now appear in the sidebar.** The section read only `bookmark_bar_node()`, and
+Ctrl+D in this build files a page under Other bookmarks, so the sidebar contradicted its own empty-state note
+telling users to press Ctrl+D to keep a page there. It now walks the bookmark bar, Other bookmarks and Mobile
+bookmarks, in that order, under the same row cap.
+
 
 Linux auto-update stays deliberately off. The CDN half is configured — `vars.REDROB_CDN_BUCKET` and its two
 credential secrets are org values this repository can see, confirmed by `.github/workflows/preflight.yml` — and
