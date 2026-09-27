@@ -63,6 +63,10 @@ producing a stale patch. `brand` is not part of this -- overlay files do not con
 
 ## Where the product lives
 
+**`docs/ARCHITECTURE.md` is the map of this repository**: what you own and what is merely fetched, which of the
+four owners a file belongs to, how one feature travels from the page to the engine and back, which patches
+register our code into Chromium's build, and where to make a given change. Read it before reading code.
+
 `docs/UI.md` maps the designed interface onto the three layers this fork has -- a WebUI page, the C++
 browser UI, and a local sidecar process -- and says which of them each piece belongs in. The short
 version: the AI surfaces are web technology and should stay that way; only the tab strip and the agent
