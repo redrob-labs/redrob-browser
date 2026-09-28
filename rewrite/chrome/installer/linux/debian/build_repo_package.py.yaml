@@ -1,0 +1,10 @@
+# The repo package's name follows the browser package's.
+
+substitutions:
+  # ---- hunk 0 run 1: 1 removed, 3 added
+  - description: |
+      The name.
+    regex:
+      pattern: "        config.info_vars[\"PACKAGE\"] = \"chromium-browser-repo\""
+      replace: "        # Redrob: the apt-source package owns the sources.list entry, so its name is what a real machine\n        # points its updates at. Renamed for that reason, not for tidiness.\n        config.info_vars[\"PACKAGE\"] = \"redrob-browser-repo\""
+      count: 1

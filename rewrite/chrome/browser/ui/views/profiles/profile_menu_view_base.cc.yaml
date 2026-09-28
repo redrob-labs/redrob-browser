@@ -1,0 +1,81 @@
+# Which corner the profile bubble hangs from, and where the helper deciding it lives.
+#
+# Upstream hardcoded TOP_RIGHT, which is right for upstream: the arrow sits at the bubble top-right, so the
+# BODY extends LEFTWARD from the anchor, and upstream's avatar is the last button of a top-right toolbar.
+# Redrob moved the avatar to the head of a LEFT-hand sidebar at x~17, so leftward is off the window and off
+# the screen. Measured on a 1560x860 window at 0,0: the body landed at a negative x and the only thing on
+# screen was a ~40px slice of the bubble's right edge, overlapping the sidebar it was anchored to. It read
+# as a rendering fault, and the controls inside it could not be reached.
+#
+# NOTE FOR LATER: the helper below is OUR code sitting in an upstream anonymous namespace, which is rung 1
+# material in the wrong place -- it belongs in a file we own, leaving a two-line patch here. That is a
+# separate change: it adds a translation unit and GN deps, so it alters the built binary, whereas this
+# conversion is verified by producing the byte-identical patch. Doing both at once would mean neither is
+# checkable.
+
+substitutions:
+  - description: |
+      Add the arrow-choosing helper to the anonymous namespace, above upstream's "Helpers" banner.
+
+      The banner line is the last line of the replacement rather than being left outside it, and that is
+      load-bearing: the inserted block ends with two blank lines, and a YAML block scalar CHOMPS trailing
+      newlines. Written as a zero-width insertion before the banner, those two blanks were silently
+      dropped and the patch came out two lines short. Keeping the banner inside makes them interior.
+
+      `|-` and not `|`: the banner is the LAST line of the replacement, so the clip newline a plain `|`
+      keeps would land after it and insert a blank line into upstream's file.
+    regex:
+      pattern: '// Helpers --------------------------------------------------------------------'
+      replace: |-
+        // Redrob: which corner the profile bubble hangs from.
+        //
+        // Upstream hardcoded TOP_RIGHT, which puts the arrow at the bubble's top-right and therefore extends its BODY
+        // LEFTWARD from the anchor. That is right for upstream, whose avatar is the last button of a top-right
+        // toolbar. Redrob moved the avatar to the head of a left-hand sidebar at x~17, so leftward is off the window
+        // and off the screen. Measured on a 1560x860 window at 0,0: the body landed at a negative x and the only thing
+        // on screen was a ~40px slice of the bubble's right edge, overlapping the sidebar it was anchored to. It read
+        // as a rendering fault, and the controls inside it could not be reached.
+        //
+        // Decided from the anchor rather than pinned to TOP_LEFT. This class is also the incognito menu's base and the
+        // anchor is whatever registered itself as the avatar, so a bubble that always opened rightward would clip on
+        // the far side as soon as an anchor sat near the trailing edge. Comparing against the work area rather than
+        // the window because the window can itself be positioned near a screen edge.
+        views::BubbleBorder::Arrow ArrowForProfileBubbleAnchor(
+            const views::BubbleAnchor& anchor) {
+          const views::View* anchor_view = nullptr;
+          if (const ui::TrackedElement* tracked_element = anchor.GetIfElement();
+              tracked_element && tracked_element->IsA<views::TrackedElementViews>()) {
+            anchor_view = tracked_element->AsA<views::TrackedElementViews>()->view();
+          } else {
+            anchor_view = anchor.GetIfView();
+          }
+          // No anchor view yet means no position to reason from, so keep upstream's choice rather than guess.
+          if (!anchor_view || !anchor_view->GetWidget()) {
+            return views::BubbleBorder::TOP_RIGHT;
+          }
+          const gfx::Point anchor_centre = anchor_view->GetBoundsInScreen().CenterPoint();
+          // GetDisplayNearestPoint rather than NearestView: the same accessor GetMaxHeight() below already uses, and
+          // it needs no NativeView from a const view.
+          const gfx::Rect work_area =
+              display::Screen::Get()->GetDisplayNearestPoint(anchor_centre).work_area();
+          // Open away from the nearer edge: an anchor in the left half has room to its right, and vice versa.
+          return anchor_centre.x() < work_area.CenterPoint().x()
+                     ? views::BubbleBorder::TOP_LEFT
+                     : views::BubbleBorder::TOP_RIGHT;
+        }
+
+
+        // Helpers --------------------------------------------------------------------
+      count: 1
+
+  - description: |
+      Pass the computed arrow instead of the hardcoded one. Decided from the ANCHOR rather than pinned to
+      TOP_LEFT, because this class is also the incognito menu's base and the anchor is whatever registered
+      itself as the avatar -- a bubble that always opened rightward would clip on the far side as soon as an
+      anchor sat near the trailing edge. count 1 because there is one constructor; if upstream adds a second
+      overload this must be re-read, since a bubble built through the un-rewritten one is unreachable
+      off-screen rather than merely misplaced.
+    regex:
+      pattern: "    : BubbleDialogDelegateView(anchor_element, views::BubbleBorder::TOP_RIGHT),"
+      replace: "    : BubbleDialogDelegateView(anchor_element,\n                               ArrowForProfileBubbleAnchor(anchor_element)),"
+      count: 1

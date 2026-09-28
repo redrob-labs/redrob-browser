@@ -1,0 +1,19 @@
+# The collapse toggle's icon pair: a sidebar-panel glyph, not a hamburger with a chevron.
+#
+# Upstream's kMenuOpenIcon / kMenuCloseCustomIcon draws three lines and an arrow, which says "menu". The thing this button does is show and hide a PANEL, and the reference draws exactly that.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 7 added
+  - description: |
+      The expanded state's glyph.
+    regex:
+      pattern: "  const gfx::VectorIcon& icon = (is_collapsed == base::i18n::IsRTL())"
+      replace: "  // Redrob: a sidebar-panel glyph, not a hamburger-with-a-chevron. Upstream's kMenuOpenIcon /\n  // kMenuCloseCustomIcon pair draws three lines and an arrow, which says \"menu\" -- and the thing this button\n  // does is show and hide a PANEL. The reference draws exactly that: a 16x12 rounded rectangle with its\n  // leading column divided off, which is what dock_to_left / dock_to_right are.\n  //\n  // The pair still flips with state and still respects RTL, because which side the panel docks to is the\n  // whole content of the icon and getting it backwards in Hebrew or Arabic would point at the wrong edge.\n  const gfx::VectorIcon& icon = (is_collapsed == base::i18n::IsRTL())"
+      count: 1
+  # ---- hunk 0 run 2: 4 removed, 2 added
+  - description: |
+      The collapsed state's glyph. The pair still flips with state and still respects RTL, because which side the panel docks to is what the icon describes.
+    regex:
+      pattern: "                                    ? features::IsRoundedIconsEnabled()\n                                          ? views::kMenuOpenIcon\n                                          : views::kMenuOpenOldIcon\n                                    : views::kMenuCloseCustomIcon;"
+      replace: "                                    ? kDockToRightIcon\n                                    : kDockToLeftIcon;"
+      count: 1

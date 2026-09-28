@@ -1,0 +1,41 @@
+# The address row: flat, and with no focus ring.
+#
+# Two changes that look unrelated and are not. Making the row flat removes the opaque fill that every child
+# label was silently relying on for subpixel antialiasing, so the second half of this rule exists only
+# because of the first. That coupling is the reason both live in one file with one explanation.
+
+substitutions:
+  # ---- hunk 0: 0 removed, 5 added
+  - description: |
+      Never satisfy the focus ring. With a flat address row the ring would be the ONLY thing drawing a box
+      there, at 2px in the accent colour -- louder than anything else on the new tab. A text field announces
+      its own focus with a caret, which is what the reference relies on. Disabling the outset ring alone was
+      not enough; the predicate is what stops it painting.
+    regex:
+      pattern: "    views::InstallPillHighlightPathGenerator(this);"
+      replace: "    // Redrob: and then never satisfied. With a flat address row the ring would be the ONLY thing drawing\n    // a box there, at 2px in the accent colour -- louder than anything else on the new tab. A text field\n    // announces its own focus with a caret, which is what the reference relies on.\n    views::FocusRing::Get(this)->SetHasFocusPredicate(\n        base::BindRepeating([](const View* view) { return false; }));\n    views::InstallPillHighlightPathGenerator(this);"
+      count: 1
+  # ---- hunk 1: 5 removed, 30 added
+  - description: |
+      Make the address row FLAT, and give this class's own labels something opaque to sit on.
+
+      No fill, no border, no focused fill: the row is the top edge of the content area, and a filled pill
+      there puts a second card above the page. Chromium's logic picks between three fills and two border
+      colours, and "paint nothing" is not a fourth case to thread through it, so the choice is made here.
+      `background_color_` still has to be a REAL colour -- the omnibox is a views::Textfield and needs an
+      opaque background for subpixel AA, and several child views ask this class what colour they sit on.
+
+      The label half is the part that was missed. This view paints to a layer that does not fill its bounds
+      opaquely, and Views requires subpixel-antialiased text to sit on something opaque: sampling the r,g,b
+      of a transparent pixel gives the wrong answer, which ships as colour fringing on the glyphs. While the
+      class drew a rounded-rect fill every child label inherited that opacity for free; making the row flat
+      removed it. Upstream backgrounds only its IME autocompletion labels, because upstream never has a
+      location bar with no fill at all.
+
+      Found by a DCHECK in Label::PaintText aborting a dev build on a chrome:// navigation -- the additional
+      text renders the "title - url" form, and a paint landing while the title half is still empty is what
+      made it intermittent. In a release build that check is compiled out and the fringing ships instead.
+    regex:
+      pattern: "    SetBackground(CreateRoundRectBackground(\n        background_color_, border_color, size(),\n        /*blend_mode=*/SkBlendMode::kSrcOver,\n        /*antialias=*/true, /*should_border_scale=*/true));\n  }"
+      replace: "    // Redrob: the address row is FLAT. No fill, no border, no focused fill -- the row is the top edge of\n    // the content area, and a filled pill there puts a second card above the page. Chromium's logic above\n    // picks between three fills and two border colours; \"paint nothing\" is not a fourth case to thread\n    // through it, so the choice is made here instead. `background_color_` still has to be a real colour:\n    // the omnibox is a views::Textfield and needs an opaque background behind it to get subpixel AA, and\n    // several child views ask this class what colour they are sitting on.\n    background_color_ = color_provider->GetColor(kColorToolbar);\n    SetBackground(nullptr);\n  }\n\n  // Redrob: the same reason the Textfield below needs `background_color_`, applied to this class's own\n  // LABELS -- which the flat row above left with nothing opaque beneath them.\n  //\n  // This view paints to a layer that does not fill its bounds opaquely (see the constructor), and Views\n  // requires subpixel-antialiased text to sit on an opaque background or an opaque layer: sampling the\n  // r,g,b channels of a transparent pixel gives the wrong answer, which shows up as colour fringing on\n  // the glyphs. While this class drew a rounded-rect fill, every child label inherited that opacity for\n  // free. Making the row flat removed it, and the labels were missed -- upstream backgrounds only its IME\n  // autocompletion labels, because it never has to consider a location bar with no fill at all.\n  //\n  // Found by a DCHECK in Label::PaintText aborting a dev build on a chrome:// navigation: the additional\n  // text renders the \"title - url\" form, and a paint landing while the title half is still empty is what\n  // made it intermittent. In a release build the check is compiled out and the fringing ships instead.\n  const auto label_background = [&](views::Label* label) {\n    if (label) {\n      label->SetBackground(views::CreateSolidBackground(background_color_));\n    }\n  };\n  label_background(omnibox_additional_text_view_);\n  label_background(ai_mode_hint_label_);"
+      count: 1

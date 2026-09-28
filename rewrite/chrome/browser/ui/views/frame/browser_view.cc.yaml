@@ -1,0 +1,23 @@
+# Anchor the tab-search bubble to the sidebar's magnifier.
+#
+# Not cosmetic. The host takes its anchor at CONSTRUCTION and has no setter, so leaving it on the combo
+# button -- which this product hides -- would open the bubble against a view with no on-screen bounds.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 1 added
+  - description: |
+      The sections header this file now reaches into.
+    regex:
+      pattern: "#include \"chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h\""
+      replace: "#include \"chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.h\"\n#include \"chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h\""
+      count: 1
+  # ---- hunk 1 run 2: 2 removed, 13 added
+  - description: |
+      Anchor to the sidebar's magnifier when it exists, falling back to the combo button's end button when it
+      does not. The combo button is still TOLD about the host, because it observes it for its own pressed-state
+      lock; only the anchor moves.
+    regex:
+      # pattern extended upward by 1 context line(s) to be unique (the removed block alone appears more than once)
+      pattern: "        vertical_tab_strip_region_view_->GetTopContainer()->GetComboButton();\n    tab_search_bubble_host_ = std::make_unique<TabSearchBubbleHost>(\n        combo_button->end_button(), browser_.get());"
+      replace: "        vertical_tab_strip_region_view_->GetTopContainer()->GetComboButton();\n    // Redrob: anchored to the SIDEBAR's magnifier. The same two actions -- tab search and new tab -- are\n    // drawn in the header row beside the workspace name, where the reference puts them, and the combo\n    // button they used to live in is hidden. Anchoring is not cosmetic: the host takes its anchor at\n    // construction and has no setter, so leaving it on the hidden button would open the bubble against a\n    // view with no on-screen bounds. The combo button is still TOLD about the host, because it observes it\n    // for its own pressed-state lock.\n    views::Button* anchor = combo_button->end_button();\n    if (redrob::RedrobSidebarSections* sections =\n            vertical_tab_strip_region_view_->GetRedrobSections()) {\n      anchor = sections->search_button();\n    }\n    tab_search_bubble_host_ =\n        std::make_unique<TabSearchBubbleHost>(anchor, browser_.get());"
+      count: 1

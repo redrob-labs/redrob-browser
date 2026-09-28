@@ -1,0 +1,10 @@
+# Expose what the sidebar needs from the toolbar.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 6 added
+  - description: |
+      The accessor.
+    regex:
+      pattern: "  AppMenuIconController* app_menu_icon_controller() {"
+      replace: "\n  // Redrob draws the avatar in the sidebar, because this toolbar is never shown. The button lives\n  // there and is registered here so ToolbarButtonProvider keeps handing out the button the user can\n  // actually see -- one instance, correctly anchored, rather than a visible copy and a hidden original.\n  // Passing nullptr on teardown is required: this class only borrows the pointer.\n  void SetRedrobAvatarButton(AvatarToolbarButton* avatar) { avatar_ = avatar; }\n  AppMenuIconController* app_menu_icon_controller() {"
+      count: 1

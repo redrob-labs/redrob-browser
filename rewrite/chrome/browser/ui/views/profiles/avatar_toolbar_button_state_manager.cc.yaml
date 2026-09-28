@@ -1,0 +1,28 @@
+# The profile avatar draws a neutral silhouette, not the profile-coloured placeholder.
+#
+# The reason is a colour role this product repurposed. The placeholder's fill and stroke come from
+# GetProfileThemeColors, which derives them from ui::kColorFrameActive -- and Redrob uses that role as the
+# SIDEBAR'S TINT. So the avatar was coloured to describe our pale-cyan wash rather than a profile identity,
+# and it came out a saturated #00bfe9 ring: the only saturated pixel in a column where every other glyph is
+# neutral grey.
+
+substitutions:
+  # ---- hunk 0: 0 removed, 3 added
+  - description: |
+      The includes the replacement needs: the vector icon, its painter, and our sidebar tokens.
+    regex:
+      pattern: "#include \"chrome/browser/profiles/profile_keyed_service_factory.h\""
+      replace: "#include \"components/vector_icons/vector_icons.h\"\n#include \"ui/gfx/paint_vector_icon.h\"\n#include \"chrome/browser/ui/views/tabs/vertical/redrob_sidebar_tokens.h\"\n#include \"chrome/browser/profiles/profile_keyed_service_factory.h\""
+      count: 1
+  # ---- hunk 1: 5 removed, 28 added
+  - description: |
+      Replace only the PLACEHOLDER branch, and draw the icon in the same role as every other glyph in the
+      column. A signed-in user with a GAIA picture returned above as kNonPlaceholder, so a real account photo is
+      untouched. Passing different PlaceholderAvatarIconParams does NOT work -- that struct carries padding,
+      background and visibility and no colour at all, which is why the first attempt changed nothing measurable.
+      Scoped to the avatar button rather than profile_colors_util, which the app menu also uses; this product
+      builds exactly one avatar, in the sidebar's foot.
+    regex:
+      pattern: "  return entry->GetAvatarIconWithType(\n      preferred_size, /*use_high_res_file=*/true,\n      GetPlaceholderAvatarIconParamsDependingOnTheme(\n          ThemeServiceFactory::GetForProfile(&profile),\n          /*background_color_id=*/kColorToolbar, color_provider));"
+      replace: "  // Redrob: a neutral silhouette instead of the profile-coloured placeholder.\n  //\n  // The placeholder's colours come from GetProfileThemeColors -- default_avatar_fill_color and\n  // default_avatar_stroke_color -- and GetCurrentProfileThemeColors derives those from\n  // ui::kColorFrameActive, which this product repurposed as the SIDEBAR'S TINT. So the avatar was coloured to\n  // describe our pale-cyan wash rather than a profile identity, and it came out a saturated #00bfe9 ring: the\n  // only saturated pixel anywhere in a column where every other glyph is neutral grey. Passing different\n  // PlaceholderAvatarIconParams does NOT fix it -- that struct carries padding, background and visibility, and\n  // no colour at all, which is why the first attempt at this changed nothing measurable.\n  //\n  // Only the PLACEHOLDER branch is replaced. A signed-in user with a GAIA picture returned above, as\n  // kNonPlaceholder, so a real account photo is untouched; this is the no-picture case, which is precisely\n  // where a generic silhouette is the honest thing to draw. And the icon takes the colour it is PASSED, which\n  // is kColorToolbarButtonIcon -- the same role as every other glyph in the column.\n  //\n  // Scoped to the avatar button rather than to profile_colors_util, which the app menu also uses. This\n  // product builds exactly one avatar, in the sidebar's foot, because it has no toolbar avatar and no app menu.\n  // Rasterised here rather than returned as an ImageModel because this function's contract is a gfx::Image.\n  //\n  // The SIDEBAR's muted role, not kColorToolbarButtonIcon. The toolbar role is the defensible choice for a\n  // toolbar button and was the first thing tried, but it measured #576071 against the Settings gear's #7c8390\n  // directly beneath it -- two neutral greys forty units apart, side by side, which reads as one of them being\n  // a mistake. This avatar is not in a toolbar; it is the top half of a two-row foot, and it has to match the\n  // row under it.\n  return {gfx::Image(gfx::CreateVectorIcon(\n              vector_icons::kAccountCircleIcon, preferred_size,\n              color_provider.GetColor(redrob::sidebar_tokens::kMutedForeground))),\n          AvatarIconType::kPlaceholder};"
+      count: 1

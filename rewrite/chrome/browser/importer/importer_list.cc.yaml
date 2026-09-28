@@ -1,0 +1,38 @@
+# Detect Chromium-family profiles so the onboarding import step has something to offer.
+#
+# This is the Edge-style import: read what another browser left on disk, once, on this machine. It is not
+# sync and it needs no account -- which is worth saying here, because "bookmarks do not sync" and "bookmarks
+# cannot be imported" get conflated and only the first is true.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 1 added
+  - description: |
+      The profile locator this file now calls into.
+    regex:
+      pattern: "#include \"chrome/common/importer/firefox_importer_utils.h\""
+      replace: "#include \"chrome/common/importer/chromium_profile_locator.h\"\n#include \"chrome/common/importer/firefox_importer_utils.h\""
+      count: 1
+  # ---- hunk 0 run 2: 0 removed, 1 added
+  - description: |
+      UTF-8 conversion for the profile names it reports.
+    regex:
+      pattern: "#include \"components/user_data_importer/common/importer_data_types.h\""
+      replace: "#include \"base/strings/utf_string_conversions.h\"\n#include \"components/user_data_importer/common/importer_data_types.h\""
+      count: 1
+  # ---- hunk 1 run 3: 0 removed, 21 added
+  - description: |
+      The detection itself. `services_supported` is the HONEST list and deliberately not
+      user_data_importer::ALL: ALL includes COOKIES, which upstream cannot carry and this importer does not, and
+      PASSWORDS, which would mean reimplementing another program's key derivation. The import step points at the
+      CSV route for those instead, so the list matches what actually arrives.
+    regex:
+      pattern: "std::vector<user_data_importer::SourceProfile> DetectSourceProfilesWorker("
+      replace: "// Every Chromium-family profile this user has. `services_supported` is the honest list and not\n// user_data_importer::ALL: ALL includes COOKIES, which upstream cannot carry and this importer\n// deliberately does not, and PASSWORDS, which means reimplementing another program's key\n// derivation -- the import step points at the CSV route for those instead.\nvoid DetectChromiumBasedProfiles(\n    std::vector<user_data_importer::SourceProfile>* profiles) {\n  base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,\n                                                base::BlockingType::MAY_BLOCK);\n  for (const redrob::ChromiumSource& source : redrob::DetectChromiumSources()) {\n    user_data_importer::SourceProfile profile;\n    profile.importer_name = source.product_name;\n    profile.profile = source.profile_name;\n    profile.importer_type = user_data_importer::TYPE_CHROMIUM_BASED;\n    profile.source_path = source.profile_path;\n    profile.services_supported = user_data_importer::HISTORY |\n                                 user_data_importer::FAVORITES |\n                                 user_data_importer::SEARCH_ENGINES;\n    profiles->push_back(std::move(profile));\n  }\n}\n\nstd::vector<user_data_importer::SourceProfile> DetectSourceProfilesWorker("
+      count: 1
+  # ---- hunk 2 run 4: 0 removed, 4 added
+  - description: |
+      Call it from the detection pass, inside the blocking scope the others use.
+    regex:
+      pattern: "  // The first run import will automatically take settings from the first"
+      replace: "  // Chromium-family sources first. This fork's users are overwhelmingly arriving from one, and\n  // first-run import takes the first profile detected.\n  DetectChromiumBasedProfiles(&profiles);\n\n  // The first run import will automatically take settings from the first"
+      count: 1

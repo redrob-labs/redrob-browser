@@ -1,0 +1,22 @@
+# Grit resource id reservations for our two WebUI surfaces.
+#
+# A mechanical registration, but not a safe one to get wrong: grit ids are a hand-partitioned number space,
+# and an id block that overlaps another grd produces a build that compiles and then serves the wrong
+# resource. The comments in the inserted text record which neighbours each block is wedged between, which is
+# the only thing that makes the numbers reviewable.
+
+substitutions:
+  # ---- hunk 0: 0 removed, 15 added
+  - description: |
+      chrome://redrob's resource block.
+    regex:
+      pattern: "  # END chrome/ WebUI resources section"
+      replace: "  # Redrob: chrome://redrob, the AI surface. Last in the WebUI section and above the 5500 the\n  # next section starts at, so this fork does not sit on an id range upstream is about to use.\n  \"<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/redrob/resources.grd\": {\n    \"META\": {\"sizes\": {\"includes\": [20]}},\n    \"includes\": [5400],\n  },\n  \"<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/redrob_onboarding/resources.grd\": {\n    \"META\": {\"sizes\": {\"includes\": [20]}},\n    \"includes\": [5420],\n  },\n  \"<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/redrob_settings/resources.grd\": {\n    \"META\": {\"sizes\": {\"includes\": [20]}},\n    \"includes\": [5440],\n  },\n\n  # END chrome/ WebUI resources section"
+      count: 1
+  # ---- hunk 1: 0 removed, 15 added
+  - description: |
+      The onboarding surface's resource block.
+    regex:
+      pattern: "  # END \"everything else\" section."
+      replace: "  # Redrob's own strings, deliberately LAST and deliberately far above everything upstream allocates.\n  #\n  # Two constraints decide this position. The id is baked into the .pak, so a range next to upstream's\n  # own means every Chromium tag that adds a grd is a chance of collision -- 13000 sits above the\n  # highest allocation in this file (12000, with 800 reserved) with room for the fork to grow. And\n  # tools/grit/grit/tool/update_resource_ids/assigner.py requires ids to be non-decreasing in file\n  # order unless a jump lands exactly on an id already seen: an entry of 13000 in the alphabetical\n  # chrome/browser/ section makes the NEXT entry a backwards jump to an unvisited id, and\n  # //tools/gritsettings:default_resource_ids fails the build with \"Cannot jump to unvisited\". So the\n  # alphabetical placement the header asks for is not available to a high range; this is.\n  \"chrome/browser/redrob/resources/redrob_strings.grd\": {\n    \"META\": {\"sizes\": {\"messages\": [500]}},\n    \"messages\": [13000],\n  },\n\n  # END \"everything else\" section."
+      count: 1

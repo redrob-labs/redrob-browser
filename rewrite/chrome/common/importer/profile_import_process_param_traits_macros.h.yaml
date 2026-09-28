@@ -1,0 +1,19 @@
+# One IPC enum range on every platform, now that TYPE_CHROMIUM_BASED is the maximum everywhere.
+#
+# This also removes the Windows/non-Windows split the range used to need, which is the kind of conditional that rots quietly: it was correct only because the old maximum differed per platform.
+
+substitutions:
+  # ---- hunk 0 run 1: 1 removed, 2 added
+  - description: |
+      The single range.
+    regex:
+      pattern: "#if BUILDFLAG(IS_WIN)"
+      replace: "// One range on every platform now: TYPE_CHROMIUM_BASED is 7 and is the maximum everywhere,\n// which also removes the Windows/non-Windows split this used to need."
+      count: 1
+  # ---- hunk 0 run 2: 6 removed, 1 added
+  - description: |
+      The note recording why the platform split is gone.
+    regex:
+      pattern: "                              user_data_importer::TYPE_EDGE)\n#else\nIPC_ENUM_TRAITS_MIN_MAX_VALUE(user_data_importer::ImporterType,\n                              user_data_importer::TYPE_UNKNOWN,\n                              user_data_importer::TYPE_BOOKMARKS_FILE)\n#endif"
+      replace: "                              user_data_importer::TYPE_CHROMIUM_BASED)"
+      count: 1

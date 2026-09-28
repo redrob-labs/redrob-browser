@@ -1,0 +1,10 @@
+# Our database name in the histogram variant list, so its metrics are attributed rather than silently dropped.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 1 added
+  - description: |
+      The variant.
+    regex:
+      pattern: "  <variant name=\"ReplayTasks\" summary=\"ReplayTasks\"/>"
+      replace: "  <variant name=\"RedrobChromiumImporter\" summary=\"RedrobChromiumImporter\"/>\n  <variant name=\"ReplayTasks\" summary=\"ReplayTasks\"/>"
+      count: 1

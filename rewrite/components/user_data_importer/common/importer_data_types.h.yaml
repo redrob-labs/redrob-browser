@@ -1,0 +1,10 @@
+# The data-type bit the Chromium-family importer reports.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 1 added
+  - description: |
+      The bit.
+    regex:
+      pattern: "  VISIT_SOURCE_SAFARI_IMPORTED = 3,\n"
+      replace: "  VISIT_SOURCE_SAFARI_IMPORTED = 3,\n  VISIT_SOURCE_CHROMIUM_IMPORTED = 4,\n"
+      count: 1

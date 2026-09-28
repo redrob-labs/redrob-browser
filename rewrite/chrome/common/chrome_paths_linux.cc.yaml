@@ -1,0 +1,12 @@
+# The Linux config directory carries our name, not Chromium's.
+#
+# A path is identity: sharing upstream's directory means a real Chromium install and this one read and write each other's profile.
+
+substitutions:
+  # ---- hunk 0 run 1: 1 removed, 4 added
+  - description: |
+      The directory name.
+    regex:
+      pattern: "  std::string data_dir_basename = \"chromium\";"
+      replace: "  // Redrob, not \"chromium\". A fork that keeps upstream's directory name shares a profile with any\n  // real Chromium install on the machine -- and our own importer, which looks for Chromium-family\n  // profiles by exactly this name, would offer to import from us.\n  std::string data_dir_basename = \"redrob\";"
+      count: 1

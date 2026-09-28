@@ -1,0 +1,10 @@
+# The host and URL constants for our surfaces, declared where every other chrome:// host is.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 6 added
+  - description: |
+      The constants.
+    regex:
+      pattern: "inline constexpr char kChromeUIVersionHost[] = \"version\";"
+      replace: "inline constexpr char kChromeUIRedrobHost[] = \"redrob\";\ninline constexpr char kChromeUIRedrobURL[] = \"chrome://redrob/\";\ninline constexpr char kChromeUIRedrobOnboardingHost[] = \"redrob-onboarding\";\ninline constexpr char kChromeUIRedrobOnboardingURL[] = \"chrome://redrob-onboarding/\";\ninline constexpr char kChromeUIRedrobSettingsHost[] = \"redrob-settings\";\ninline constexpr char kChromeUIRedrobSettingsURL[] = \"chrome://redrob-settings/\";\ninline constexpr char kChromeUIVersionHost[] = \"version\";"
+      count: 1

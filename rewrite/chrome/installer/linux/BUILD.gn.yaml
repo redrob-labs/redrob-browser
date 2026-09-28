@@ -1,0 +1,45 @@
+# The package names and the version the Linux packaging declares.
+#
+# Both are identity, not cosmetics. The package NAME is what apt installs, upgrades and removes by, so a
+# fork that keeps shipping `chromium-browser` is a machine's real Chromium and this one seen as the same
+# package -- and the repo package owns the sources.list entry, so a collision there points real updates at
+# someone else's repository.
+
+substitutions:
+  # ---- hunk 0 run 1: 1 removed, 3 added
+  - description: |
+      The apt-source package name.
+    regex:
+      pattern: "    package = \"chromium-browser-repo\""
+      replace: "    # The apt-source package, renamed for the same reason and not just for consistency: it owns the\n    # sources.list entry, so a name collision here points a real machine's updates at someone else's repo.\n    package = \"redrob-browser-repo\""
+      count: 1
+  # ---- hunk 1 run 2: 0 removed, 10 added
+  - description: |
+      Read the version from the SAME file installer.py reads. Declaring a different filename here than build.py
+      produces makes ninja fail with "output not produced" and name a filename rather than the disagreement, so
+      the two must read one value. read_file and not exec_script: exec_script is allowlisted in //.gn, and
+      widening that allowlist to compute one string would trade an intentional restriction for a convenience.
+
+      Anchored on `channel = invoker.channel` plus the BLANK line after it, not on the
+      `if (is_chrome_branded) {` below: that line appears SIX times in this file, and the blank is
+      context between the anchor and the insertion point.
+    regex:
+      # NEITHER neighbour is unique (after=5, before=653). Anchor this one by hand.
+      pattern: "  channel = invoker.channel\n\n"
+      replace: "  channel = invoker.channel\n\n  # Redrob: the same version installer.py will put in the control file, from the same file. Declaring a\n  # different filename here than build.py produces makes ninja fail with \"output not produced\" and name a\n  # filename rather than the disagreement, so these two must read ONE value.\n  #\n  # read_file rather than exec_script: exec_script is allowlisted in //.gn and widening that allowlist to\n  # compute one string would trade an intentional restriction for a convenience. read_file has no such gate\n  # because it cannot run anything.\n  redrob_version =\n      read_file(\"//chrome/installer/linux/common/redrob-version.txt\", \"trim string\")\n\n"
+      count: 1
+  # ---- hunk 1 run 3: 1 removed, 8 added
+  - description: |
+      The browser package name, in the branch is_chrome_branded leaves for everything that is not Google's
+      Chrome -- which a fork that is neither Chrome nor Chromium falls into.
+    regex:
+      pattern: "    package = \"chromium-browser\""
+      replace: "    # Redrob: this tree IS Redrob, so the package it produces says so.\n    #\n    # The branch is chosen by is_chrome_branded, which asks \"are you Google's Chrome\" -- and a fork that is\n    # neither Chrome nor Chromium falls into the Chromium branch and ships a .deb called chromium-browser. That\n    # is not a cosmetic slip: the package NAME is the identity apt installs, upgrades and removes by, so a\n    # machine with real Chromium installed would have seen the two packages as one and the same and replaced\n    # it. Everything else about the branding was done; this was the one name still speaking for someone else.\n    package = \"redrob-browser\""
+      count: 1
+  # ---- hunk 2 run 4: 1 removed, 1 added
+  - description: |
+      The remaining name in the same family.
+    regex:
+      pattern: "    outputs = [ \"$root_out_dir/${package}-${channel}_${chrome_version_full}-1_${deb_arch}.deb\" ]"
+      replace: "    outputs = [ \"$root_out_dir/${package}-${channel}_${redrob_version}+${chrome_version_full}-1_${deb_arch}.deb\" ]"
+      count: 1

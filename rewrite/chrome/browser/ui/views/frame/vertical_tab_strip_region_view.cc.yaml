@@ -1,0 +1,48 @@
+# Where our sidebar sections and account row are added, and what they follow.
+#
+# Five small edits that together say one thing: our two views are part of this column, so they are added to
+# it, ordered within it, and told about its collapsed state along with everything else. The ordering hunk is
+# the one with teeth -- it anchors on our own view rather than on the separator.
+
+substitutions:
+  # ---- hunk 0: 0 removed, 2 added
+  - description: |
+      The includes for the two views this file now builds.
+    regex:
+      pattern: "#include \"chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h\""
+      replace: "#include \"chrome/browser/ui/views/tabs/vertical/redrob_account_row.h\"\n#include \"chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.h\"\n#include \"chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h\""
+      count: 1
+  # ---- hunk 1: 0 removed, 8 added
+  - description: |
+      Add the sidebar sections between the window controls and the tabs. Switching workspace, reaching a
+      bookmark and picking a tab belong to the same column in that order of scale.
+    regex:
+      pattern: "  // The TopContainer handles the padding distance to the separator so that we"
+      replace: "\n  // Between the window controls and the tabs: switching workspace, reaching a bookmark and\n\n  // picking a tab all belong to the same column, in that order of scale.\n\n  redrob_sections_ = AddChildView(std::make_unique<redrob::RedrobSidebarSections>(\n\n      browser_view->browser()));\n  // The TopContainer handles the padding distance to the separator so that we"
+      count: 1
+  # ---- hunk 2: 0 removed, 8 added
+  - description: |
+      Add the account control at the foot. Redrob has no toolbar for it to sit in, and signing in is not a
+      browsing control, so it belongs with the things about the window rather than the things about the tabs.
+    regex:
+      pattern: "              base::Unretained(this))));"
+      replace: "              base::Unretained(this))));\n\n  // The account control, at the foot. Redrob has no toolbar for it to sit in, and signing in is\n\n  // not a browsing control, so it belongs with the things about the window rather than the tabs.\n\n  redrob_account_row_ = AddChildView(\n\n      std::make_unique<redrob::RedrobAccountRow>(browser_view->browser()));"
+      count: 1
+  # ---- hunk 3: 3 removed, 8 added
+  - description: |
+      Anchor the tab list below OUR sections rather than below the separator. The tab list is what the "Tabs"
+      heading heads, so it has to follow it. Falls back to the separator when our view is absent, and CHECKs
+      after that -- an unanchored tab strip is a column in the wrong order, not a missing nicety.
+    regex:
+      pattern: "  std::optional<size_t> separator_index = GetIndexOf(top_button_separator_);\n  CHECK(separator_index.has_value());\n  ReorderChildView(tab_strip_view(), separator_index.value() + 1);"
+      replace: "  // Anchored below Redrob's sections rather than below the separator: the tab list is what the \"Tabs\"\n  // heading heads, so it has to follow it.\n  std::optional<size_t> anchor_index = GetIndexOf(redrob_sections_);\n  if (!anchor_index.has_value()) {\n    anchor_index = GetIndexOf(top_button_separator_);\n  }\n  CHECK(anchor_index.has_value());\n  ReorderChildView(tab_strip_view(), anchor_index.value() + 1);"
+      count: 1
+  # ---- hunk 4: 0 removed, 12 added
+  - description: |
+      Give both of our views the same collapsed signal the tab list gets. At collapsed width there is no room
+      for their labels, so they hide rather than clip. The account row did not follow before, which is why the
+      settings gear kept the expanded row's leading padding and sat 4.7px left of the glyphs above it.
+    regex:
+      pattern: "  if ((state == tabs::VerticalTabStripCollapseState::kCollapsing) ||"
+      replace: "  // Redrob's sections follow the same signal as the tab list: at collapsed width there is no room for\n  // their labels, so they hide rather than clip.\n  if (redrob_sections_) {\n    redrob_sections_->SetCollapsed(collapsed);\n  }\n\n  // The foot of the column follows it too. It did not before, which is why the settings gear kept the\n  // expanded row's leading padding and sat 4.7px left of the glyphs above it in the collapsed rail.\n  if (redrob_account_row_) {\n    redrob_account_row_->SetCollapsed(collapsed);\n  }\n\n  if ((state == tabs::VerticalTabStripCollapseState::kCollapsing) ||"
+      count: 1
