@@ -1,5 +1,7 @@
 # Changing Chromium
 
+한국어판: [CUSTOMISATION.ko.md](CUSTOMISATION.ko.md)
+
 This is the order to reach for things in when the product needs behaviour Chromium does not have. It is
 Brave's order, arrived at the same way and for the same reason, and the reason is not tidiness.
 
@@ -73,7 +75,8 @@ and is then discarded by the next regeneration, which `check_repo.py` refuses.
 
 ```bash
 scripts/plaster.py generate        # regenerate every patch from its rules
-scripts/plaster.py check           # rules still match, patches not hand-edited (the CI gate)
+scripts/plaster.py check           # rules still match, patches not hand-edited (needs a checkout)
+scripts/plaster.py parsers         # both YAML parsers read every rule identically (the CI gate)
 scripts/plaster.py list            # what is rule-generated, and what each rule does
 ```
 
@@ -94,13 +97,28 @@ substitutions:
     make_virtual: { class_name: DownloadDisplayController, method_name: UpdateToolbarButtonState }
 ```
 
-Rewriters: `regex`, and the three structural ones `make_virtual`, `add_friend`, `drop_final`.
+Rewriters: `regex`, `rename`, `insert_after`, and the three structural ones `make_virtual`, `add_friend`,
+`drop_final`.
+
+`rename` carries the branding substitution: mask each protected phrase, substitute, restore. Its
+protected-phrase lists live in `presets/` and are shared by every strings file, because that list is the
+part that must not be copied — a per-file copy drifts silently, and one file keeps substituting a phrase
+the others learned to leave alone. Not lookarounds: those need one alternative per phrase and still get
+overlapping phrases wrong, because whichever alternative matches first consumes the text the longer one
+needed.
+
+`insert_after` is for the additive majority. A `regex` can express "add our block after this line", but
+only by quoting the surrounding upstream lines into the rule as both pattern and replacement — so the rule
+restates code it does not change, and becomes sensitive to indentation it never meant to assert.
+`insert_after` takes a one-line anchor, measures that line's own indentation and reapplies it.
 
 **`count` is the point.** A hand patch that applies has told you it applied — nothing more. A rule declares
 how many places it expects to change, so a rule meant for one call that now matches two, or none, stops the
-build instead of quietly changing the wrong amount of code. It has already earned this once: the first
+build instead of quietly changing the wrong amount of code. It has already earned this twice: the first
 anchor written for `chrome/utility/BUILD.gn` matched two branches, and the count said so instead of putting
-our importer in both.
+our importer in both; and five sign-in strings shipped in v0.1.4 reading "Sign in to Redrob?" because the
+rewrite that should have named Google was added after the patch was stored and never regenerated — a
+declared count of 5 cannot drift that way.
 
 Two habits that make a rule survive an uprev:
 
@@ -110,6 +128,12 @@ Two habits that make a rule survive an uprev:
 - **Use `pattern` when every token in the literal is text being replaced.** `return Foo(bar);` qualifies.
   `if (Foo() && ready) {` does not — `&& ready` and the brace can change upstream without affecting the
   rewrite, so that one needs `re_pattern`.
+
+And one trap that is not about regex at all. A YAML block scalar strips the common leading indent, so a
+multi-line `pattern` must carry the file's REAL indentation on its continuation lines, and a pattern whose
+first line is indented deeper than a later one cannot be written as a block at all — use a double-quoted
+scalar with explicit `\n`. This is checked: `plaster.py parsers` reads every rule with both YAML parsers
+and fails if they disagree, because the generated patch must not depend on which host ran the generator.
 
 ## 4. Hand-written patches
 
@@ -136,7 +160,18 @@ watching it fail:
 
 - every rewrite rule still matches, with the count it declared;
 - no rule-generated patch has been hand-edited;
-- every chromium_src override wraps the file it overrides rather than replacing it.
+- every chromium_src override wraps the file it overrides rather than replacing it;
+- every `rename` rule names a preset that exists — a deleted preset silently unprotects every phrase in it
+  across all 16 rules that share it;
+- the two YAML parsers read every rule identically, so a generated patch cannot depend on which host ran
+  the generator;
+- the package's apt URL and the workflow's publish path are the same place. If those two drift NOTHING
+  fails: the release publishes a real signed repository, the package installs a real source, and every
+  machine polls a 404 forever with no error to find.
+
+The last two are there because of defects that existed and were invisible. The parser one was invisible to
+`check` itself, which used whichever parser was installed and compared the result against a patch made by
+that same parser — a checker sharing the component it checks cannot see that component's faults.
 
 ## Where this repository stands
 
@@ -144,19 +179,31 @@ Measured on this tree, not carried forward from a summary:
 
 | | Files | Changed lines |
 |---|---|---|
-| Generated from branding rules (`derive`) | 18 | 2,688 |
-| Generated from rewrite rules (`plaster`) | 14 | 86 |
-| Hand-written: installer and packaging | 7 | 313 |
-| Hand-written: everything else | 49 | 696 |
-| **Total patches** | **88** | **3,783** |
+| Generated from rewrite rules (`plaster`) | 41 | 3,203 |
+| Hand-written: installer and packaging | 3 | 41 |
+| Hand-written: everything else | 44 | 492 |
+| **Total patches** | **88** | **3,736** |
 
-So 73% of the delta is generated rather than written, and the 2,688 in the first row is branding
-substitution that was already machine-produced before any of this. The honest reading of the second row is
-that it is a start: the 49 remaining hand patches are where the next uprev will cost time, and they are the
-queue.
+So 86% of the delta is generated rather than written. There used to be a second generator — `derive`,
+which produced the branding substitution — and it is gone: those 19 patches are rules like everything
+else, so there is one mechanism with one gate rather than two that nobody reconciled.
+
+The honest reading of the last row is that it is the queue. 44 hand patches are where the next uprev will
+cost time. They are also SMALL — a median of 6 lines across the 47 of them, and none above 39 — and that is the point at
+which converting stops paying: Brave keeps 1,186 hand patches at a median of 2 lines, because rung 4 is
+legitimate for a small stable edit, and a 15-line rule file describing a 5-line diff is a net loss. The
+ones worth taking are the ones where a count guard would catch something, not the ones that are merely
+still diffs.
 
 One measured finding worth keeping, because it is not what Brave's own numbers suggest. Brave has 2,945
 chromium_src overrides against 1,199 patches, because they REPLACE a great deal of upstream behaviour. Our
 patches mostly ADD to upstream functions, and an override cannot do that — so at this size the rung that
 pays most is 3, not 2. `vertical_tab_style_views` is the shape where both apply: 57 hand-written lines
 became a 22-line generated patch plus 40 lines of our own drawing code in a file we own.
+
+A second finding, from converting the packaging: the cost of a rule is not the regex, it is describing
+WHITESPACE. A YAML block scalar strips the common leading indent, so a pattern whose first line is
+indented deeper than a later one cannot be written at all, and a multi-line literal has to carry the
+file's real indentation on its continuation lines. That cost two silent non-matches. `insert_after` exists
+because of it: it takes a one-line anchor, measures that line's own indentation and reapplies it, which is
+what the additive majority of our edits actually need.
