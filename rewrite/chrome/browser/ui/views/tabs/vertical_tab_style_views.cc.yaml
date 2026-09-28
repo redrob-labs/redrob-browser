@@ -1,0 +1,54 @@
+substitutions:
+  - description: |
+      Hold the bottom of the tab's bounds back from the pill, so the shadow has somewhere to land. The
+      constant lives in the chromium_src override beside this rule, ABOVE its include, which is what makes
+      it visible here.
+    regex:
+      pattern: 'gfx::RectF bounds(delegate_->GetView()->GetLocalBounds());'
+      replace: |-
+        gfx::RectF bounds(delegate_->GetView()->GetLocalBounds());
+          // The pill is the TOP of the view; the rest is the shadow's.
+          bounds.Inset(gfx::InsetsF::TLBR(0, 0, kVerticalTabShadowRoom, 0));
+
+  - description: |
+      Cast the shadow BEFORE the fill, and only for the states that read as raised. Before, because
+      PaintTabBackgroundFill clips to the tab's own path and a shadow drawn inside that clip falls entirely
+      outside the path and is discarded. Anchored on the fill call rather than on the function head so the
+      two stay adjacent whatever upstream puts above them.
+    regex:
+      re_pattern: '(\n)(  if \(active_tab_fill_id\.has_value\(\))'
+      replace: |-
+        \1  // Redrob: the selected tab is a raised card, so it casts a shadow. Before the fill, because
+          // PaintTabBackgroundFill clips to the tab's own path first and a shadow drawn inside that clip is entirely
+          // outside the path and therefore entirely discarded.
+          //
+          // Only for the states that read as raised. An inactive tab is flush with the column, and giving every row a
+          // shadow would make the list look embossed rather than telling one row from the rest.
+          const TabStyle::TabSelectionState selection_state = GetSelectionState();
+          if (selection_state == TabStyle::TabSelectionState::kActive ||
+              selection_state == TabStyle::TabSelectionState::kSelected) {
+            PaintTabShadow(canvas);
+          }
+        \1\2
+
+  - description: |
+      Reuse the selection state computed for the shadow instead of asking again, now that it is in scope.
+    regex:
+      pattern: 'PaintTabBackgroundFill(canvas, GetSelectionState(),'
+      replace: 'PaintTabBackgroundFill(canvas, selection_state,'
+
+  - description: |
+      Centre the label in the PILL rather than in the view, which is taller by the shadow's room. Without
+      the extra bottom inset the favicon and title sit low in every tab, which reads as the text being off
+      rather than the box being big.
+    regex:
+      re_pattern: 'return gfx::Insets::VH\(\n      GetLayoutConstant\(LayoutConstant::kTabVerticalPadding\),\n      GetLayoutConstant\(LayoutConstant::kTabHorizontalPadding\)\);'
+      replace: |-
+        // The extra bottom inset keeps the label centred in the PILL rather than in the view, which is taller by
+          // the shadow's room. Without it the favicon and title sit low in every tab, which reads as the text being
+          // off rather than the box being big.
+          return gfx::Insets::TLBR(
+              GetLayoutConstant(LayoutConstant::kTabVerticalPadding),
+              GetLayoutConstant(LayoutConstant::kTabHorizontalPadding),
+              GetLayoutConstant(LayoutConstant::kTabVerticalPadding) + kVerticalTabShadowRoom,
+              GetLayoutConstant(LayoutConstant::kTabHorizontalPadding));

@@ -1,0 +1,55 @@
+# `Chrome` -> `Redrob`, for the strings files shared with the official build.
+#
+# The short name is far more dangerous to sweep than the long one, and this list is why. "Chromium"
+# mostly names the upstream project; "Chrome" names a dozen separate Google products, a URL scheme, a
+# user-agent token and Google's own legal text. A sweep without these phrases produces strings that are
+# not mis-branded but UNTRUE, and two of them tell the user to go and fetch software we do not publish.
+#
+# Order does not matter here: the rename masks the longest phrase first, so `Chrome Web Store` is
+# protected before the shorter `Chrome Web` can claim part of it.
+
+from: Chrome
+to: Redrob
+
+protect:
+  # The URL scheme and the official product. Rewriting either breaks a link or renames Google's browser.
+  - "chrome://"
+  - Google Chrome
+  - chrome.google.com
+
+  # The user-agent token, which is deliberately left intact -- see append_user_agent_token. Sites that
+  # sniff for it are the reason this fork exists on a Chromium base at all.
+  - "Chrome/"
+
+  # Separate Google products. None of them become ours by our renaming their name.
+  - ChromeOS
+  - Chrome OS
+  - Chrome-OS
+  - Chromebook
+  - Chromecast
+  - Chrome Web Store
+  - Chrome Web
+  - Chrome Apps
+  - Chrome App
+  - Chrome Enterprise
+  - Chrome Remote Desktop
+  - Chrome Updater
+  - Chrome Root Store
+  - Chrome Root Program
+  - Chrome Beta
+  - Chrome Dev
+  - Chrome Canary
+  - Chrome Frame
+  - Chrome Cleanup
+
+  # Google's legal text and its mobile apps. Substituting these makes a FALSE STATEMENT rather than a
+  # branded one: our terms of service did not change on a date Google chose, and there is no Redrob for
+  # iOS or Android to download. A string that sends a user to fetch a product we do not publish is worse
+  # than one that names someone else's.
+  - Chrome's Terms of Service
+  - Chrome for iOS
+  - Chrome for Android
+  - Download Chrome
+  - download Chrome
+  - Get Chrome
+  - get Chrome on

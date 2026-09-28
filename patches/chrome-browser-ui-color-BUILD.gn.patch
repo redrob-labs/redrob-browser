@@ -1,13 +1,13 @@
 diff --git a/chrome/browser/ui/color/BUILD.gn b/chrome/browser/ui/color/BUILD.gn
-index f3f7ea8c06809..deffdb997e7fa 100644
+index f3f7ea8c06809..22c5ad84b9166 100644
 --- a/chrome/browser/ui/color/BUILD.gn
 +++ b/chrome/browser/ui/color/BUILD.gn
-@@ -18,6 +18,8 @@ source_set("color_headers") {
+@@ -47,6 +47,8 @@ source_set("mixers") {
+     "tab_strip_color_mixer.h",
+   ]
  
- source_set("mixers") {
-   sources = [
-+    "redrob_color_mixer.cc",
-+    "redrob_color_mixer.h",
-     "chrome_color_mixer.cc",
-     "chrome_color_mixer.h",
-     "chrome_color_mixers.cc",
++  sources += redrob_chrome_browser_ui_color_sources
++
+   configs += [ "//build/config/compiler:wexit_time_destructors" ]
+ 
+   deps = [

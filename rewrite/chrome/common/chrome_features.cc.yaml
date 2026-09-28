@@ -1,0 +1,17 @@
+substitutions:
+  - description: |
+      Turn off the upstream assistant on every platform. Anchored on the BASE_FEATURE macro rather than
+      on the #if block inside it, so an upstream change to WHICH platforms it defaults on still matches --
+      that list changing is precisely the event this rewrite exists to be immune to.
+    regex:
+      re_pattern: 'BASE_FEATURE\(kGlic,.*?\n\);'
+      re_flags: [DOTALL]
+      replace: |-
+        // Redrob: off on every platform. Upstream enables this by default on macOS, Windows and ChromeOS, and
+        // what keeps its assistant out of a build there is a chain of conditions we do not control -- a rollout
+        // flag, an account capability, country and locale filters. This browser ships its OWN agent, so relying
+        // on someone else's rollout to keep a second, competing assistant out of it is not a decision we should
+        // leave to chance: a change on that side would surface it inside our product. Disabling the documented
+        // kill-switch is the narrowest way to do that -- it takes out the profile-picker entry point, the side
+        // panel and the settings page together, with no upstream code deleted.
+        BASE_FEATURE(kGlic, base::FEATURE_DISABLED_BY_DEFAULT);

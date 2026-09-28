@@ -1,13 +1,12 @@
 diff --git a/chrome/utility/BUILD.gn b/chrome/utility/BUILD.gn
-index 500cbc7ed8e76..b85ce67401ee7 100644
+index 500cbc7ed8e76..e86ee4c5e24d5 100644
 --- a/chrome/utility/BUILD.gn
 +++ b/chrome/utility/BUILD.gn
-@@ -106,6 +106,8 @@ static_library("utility") {
+@@ -105,6 +105,7 @@ static_library("utility") {
+       "importer/profile_import_impl.h",
      ]
      if (!is_chromeos) {
++      sources += redrob_chrome_utility_importer_sources
        sources += [
-+        "importer/chromium_importer.cc",
-+        "importer/chromium_importer.h",
          "importer/firefox_importer.cc",
          "importer/firefox_importer.h",
-       ]

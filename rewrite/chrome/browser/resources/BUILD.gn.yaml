@@ -1,0 +1,31 @@
+substitutions:
+  - description: |
+      Our WebUI bundles join the main resources group.
+    regex:
+      re_pattern: '(group\("resources"\) \{\n  public_deps = \[[\s\S]*?\n  \])'
+      replace: |-
+        \1
+
+          public_deps += redrob_chrome_browser_resources_deps
+
+  - description: |
+      And the dev_ui group, which is the one a non-official build actually packs.
+    regex:
+      re_pattern: '(group\("dev_ui_resources"\) \{\n  public_deps = \[[\s\S]*?\n  \])'
+      replace: |-
+        \1
+
+          public_deps += redrob_chrome_browser_resources_deps
+
+  - description: |
+      Fold the paks those bundles produce into dev_ui_resources.pak. A foreach rather than three literal
+      paths because root_gen_dir is per-toolchain and cannot be baked into the shared list -- the names
+      live there, the location is joined here, and adding a page touches neither this rule nor the patch.
+    regex:
+      re_pattern: '(repack\("dev_ui_paks"\) \{\n  output = "\$root_gen_dir/chrome/dev_ui_resources\.pak"\n\n  sources = \[[\s\S]*?\n  \])'
+      replace: |-
+        \1
+
+          foreach(_redrob_pak, redrob_chrome_browser_resource_pak_names) {
+            sources += [ "$root_gen_dir/chrome/$_redrob_pak" ]
+          }

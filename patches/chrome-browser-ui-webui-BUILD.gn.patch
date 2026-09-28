@@ -1,24 +1,22 @@
 diff --git a/chrome/browser/ui/webui/BUILD.gn b/chrome/browser/ui/webui/BUILD.gn
-index 9ba5323722b00..9d19312beeb31 100644
+index 9ba5323722b00..f2c505ab931f1 100644
 --- a/chrome/browser/ui/webui/BUILD.gn
 +++ b/chrome/browser/ui/webui/BUILD.gn
-@@ -99,6 +99,9 @@ source_set("configs") {
-     "//chrome/browser/ui/webui/sync_internals",
-     "//chrome/browser/ui/webui/translate_internals",
-     "//chrome/browser/ui/webui/usb_internals",
-+    "//chrome/browser/ui/webui/redrob",
-+    "//chrome/browser/ui/webui/redrob_onboarding",
-+    "//chrome/browser/ui/webui/redrob_settings",
-     "//chrome/browser/ui/webui/version",
-     "//components/compose:buildflags",
-     "//components/lens:buildflags",
-@@ -591,6 +594,9 @@ source_set("chrome_web_ui_controller_factory") {
-     "//chrome/browser/ui/webui/crashes",
-     "//chrome/browser/ui/webui/download_internals",
-     "//chrome/browser/ui/webui/flags",
-+    "//chrome/browser/ui/webui/redrob",
-+    "//chrome/browser/ui/webui/redrob_onboarding",
-+    "//chrome/browser/ui/webui/redrob_settings",
-     "//chrome/browser/ui/webui/version",
-     "//chrome/common",
-     "//chrome/common:constants",
+@@ -113,6 +113,8 @@ source_set("configs") {
+     "//ui/webui:buildflags",
+   ]
+ 
++  deps += redrob_chrome_browser_ui_webui_deps
++
+   if (is_win || is_chromeos) {
+     deps += [ "//chrome/browser/ui/webui/signin:inline_login" ]
+   }
+@@ -610,6 +612,8 @@ source_set("chrome_web_ui_controller_factory") {
+     "//ui/gfx/codec",
+   ]
+ 
++  deps += redrob_chrome_browser_ui_webui_deps
++
+   if (is_android) {
+     deps += [
+       "//chrome/browser/ui/webui/bookmarks:bookmarks_android",

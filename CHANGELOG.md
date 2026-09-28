@@ -4,6 +4,59 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
+## 0.1.5 — 2026-09-28
+
+**Five sign-in strings no longer ask the user to sign in to something that does not exist.** In v0.1.4
+`chrome://settings`, the avatar bubble and the enterprise profile prompt all read "Sign in to Redrob?".
+There is no Redrob account — the button behind those strings signs the user into a **Google** account and
+turns on Google sync, and that is what they say now. A table to rewrite them had existed since the Google
+surface audit, but the patch carrying the strings was stored before it and was never regenerated, so five
+of the seven kept the wrong name. The rules that generate them now declare how many places each rewrite
+must hit, so it cannot drift back silently.
+
+Each string was judged individually rather than swept, because the family genuinely divides: **"Sign in to
+Redrob in a new profile?" is unchanged** — that one is about a browser profile, which is ours.
+
+**Linux auto-update now has something to talk to.** The package has configured apt for itself since
+v0.1.0, but no release ever built the repository it points at, so every installed copy had a valid apt
+source aimed at nothing. Publishing now builds a signed apt repository, verifies both signatures against
+the same public key the package embeds — the check apt makes on your machine — uploads it, and reads it
+back before calling it published.
+
+It is still **off in this release**, and deliberately: it needs a signing key, and without one the release
+says so in three notices rather than publishing something shaped like a working update channel. An
+unsigned apt repository is worse than none, because it makes every future update whatever the network
+hands the user.
+
+**`chrome://version` attributes this product to us**, and `chrome://settings` no longer offers Google's AI
+features under our name — including a privacy disclosure that claimed, as Redrob, that data is sent to
+Google and may be read by human reviewers. Neither is true here: the agent talks to whichever provider you
+configured. Both were already fixed in the tree; they are named here because this is the first release
+that carries them.
+
+### Under the hood
+
+Nothing below changes the browser. It changes what a Chromium upgrade costs, which is the thing that
+decides how quickly a security release reaches you.
+
+Hand-written patch lines fell from 3,836 to **533**. The branding rename — 2,690 lines across 19 stored
+patches — is generated from rules, as is the whole packaging group. A stored patch records what a file
+looked like; a rule records what we meant, and declares how many places it applies to, so a rule that now
+matches a different number of sites **stops the build** instead of quietly changing the wrong amount of
+code. Every converted patch was verified byte-identical to the one it replaced.
+
+Two defects surfaced while doing it, both of which had been silently possible before:
+
+- The rule generator read its rules with one YAML parser when a library was installed and a built-in one
+  when it was not, **and the two disagreed** — so the patch produced depended on which machine ran the
+  generator. Its own checker could not see this, because the checker used whichever parser was installed
+  and compared the result against a patch made by that same parser. There is now a check that reads every
+  rule both ways and diffs them.
+- The apt repository's URL is stated twice, in the package and in the publishing workflow, in files that
+  never reference each other. If those drift **nothing fails**: the release publishes a real repository,
+  the package installs a real source, and every machine polls a 404 forever. A check now asserts they
+  agree.
+
 ## 0.1.4 — 2026-09-26
 
 **One unclean exit no longer makes a profile permanently unlaunchable.** This shipped broken in v0.1.3 and was

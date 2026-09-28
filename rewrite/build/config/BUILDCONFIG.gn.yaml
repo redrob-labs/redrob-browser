@@ -1,0 +1,32 @@
+substitutions:
+  - description: |
+      Turn on chromium_src overrides for every target in the build. One line, and it is the whole reason
+      redrob/chromium_src works -- the config it names adds `-iquote redrob/chromium_src`, which moves the
+      quoted include path and nothing else.
+    regex:
+      pattern: |-
+        default_compiler_configs = [
+          "//build/config/compiler/pgo:default_pgo_flags",
+      replace: |-
+        default_compiler_configs = [
+          "//redrob/build:compiler",
+          "//build/config/compiler/pgo:default_pgo_flags",
+
+  - description: |
+      Make our source and dependency lists visible to every GN file. BUILDCONFIG's scope IS the root scope
+      of every BUILD.gn, so importing here is what lets each upstream target say `+= redrob_...` with no
+      import line of its own -- one patch line per target instead of two, and none of them ever changing
+      again when we add a file. At the end of the file so nothing it reads can be undefined yet.
+    regex:
+      pattern: |-
+        set_defaults("component") {
+          configs = default_component_configs
+        }
+      replace: |-
+        set_defaults("component") {
+          configs = default_component_configs
+        }
+
+        # Redrob's own source, dependency and resource lists. Kept in a file we own so that adding a file to
+        # the product never means re-exporting an upstream patch.
+        import("//redrob/build/sources.gni")

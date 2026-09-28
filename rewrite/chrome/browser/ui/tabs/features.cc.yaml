@@ -1,0 +1,10 @@
+substitutions:
+  - description: |
+      Ship the vertical tab strip on. The product's shell IS a sidebar, so this is not a preference but
+      the thing being built; upstream keeps the flag off only while its own implementation lands.
+    regex:
+      pattern: 'BASE_FEATURE(kVerticalTabs, base::FEATURE_DISABLED_BY_DEFAULT);'
+      replace: |-
+        // Redrob: the product's shell is a vertical sidebar, so the capability ships on. Upstream keeps
+        // this off while it lands; the implementation in chrome/browser/ui/views/tabs/vertical is complete.
+        BASE_FEATURE(kVerticalTabs, base::FEATURE_ENABLED_BY_DEFAULT);

@@ -15,25 +15,33 @@ Measured on `153.0.8010.36` / Redrob `0.1.4`:
 | Where | Size | What it is |
 |---|---|---|
 | `chromium/src` | ~148 GB | Fetched at `CHROMIUM_VERSION`, never committed. Not yours. Not read. |
-| `sources/` | 87 files, **~15,900 lines** | Code we wrote outright. This is the product. |
-| `patches/` | 86 patches | One per Chromium file we modify. Named after the file. |
+| `sources/` | 88 files, **~16,000 lines** | Code we wrote outright. This is the product. |
+| `redrob/` | 3 files, 209 lines | Compiled into upstream's own translation units: the `-iquote` config, the shared GN lists, and the `chromium_src` overrides. |
+| `rewrite/` | 14 rules, 311 lines | Descriptions of changes to Chromium's code. The patches for these are generated. |
+| `patches/` | 88 patches | One per Chromium file we modify. Named after the file. 32 of them are generated. |
 | `branding/` | 41 files | Files replaced wholesale: `BRANDING`, every icon, the wordmark. |
 | `l10n/` | 4 TSVs | One row per translatable string. The `.grd`/`.xtb` are generated. |
-| `scripts/` | 1,730 lines | The entire fork workflow. `redrob.py` is 909 of it. |
+| `scripts/` | 2,230 lines | The entire fork workflow. `redrob.py` is 909 of it, `plaster.py` 408. |
 
 The 15,900 splits as C++ 10,700 · TypeScript/CSS/HTML 4,383 · Mojo IDL 487 · GN 320. Raw byte counts under
 `sources/` look far larger only because four vendored font binaries live there.
 
 **A day is enough to read all of it.** That is the design goal of the layout, not a coincidence.
 
-## 2. Four owners, and a path has exactly one
+## 2. Six owners, and a path has exactly one
 
 | Owner | Use it when | Declared in |
 |---|---|---|
 | `sources/` | The file is ours. It exists because we wrote it. | `sources/manifest` (source → destination) |
+| `redrob/` | Our code has to live inside an upstream translation unit, or a GN list of ours is shared. | the tree itself — copied wholesale to `src/redrob` |
+| `rewrite/` | Chromium's own code has to change, and the change can be described rather than diffed. | `rewrite/<upstream path>.yaml` |
 | `patches/` | The file is Chromium's and we changed some lines. | the filename itself |
 | `branding/` | The file is Chromium's and we replace all of it. | `branding/manifest` (source, target, kind) |
 | `l10n/` | It is a user-visible string. | `l10n/*.tsv` |
+
+`patches/` is now partly **output**: a patch with a `rewrite/` rule beside it is generated from that rule, and
+editing it by hand works once and is then discarded. `redrob.py check` refuses that. Which patches those are,
+and the order to reach for these owners in, is `docs/CUSTOMISATION.md`.
 
 A patch's **name is its path**: `chrome/browser/ui/x.cc` → `chrome-browser-ui-x.cc.patch`. That is Brave's
 convention, and it is why `ls patches/` is a readable inventory of what this fork changes instead of a pile of
@@ -63,14 +71,20 @@ Two details in `apply` matter when it goes wrong:
 - **`git apply --3way`.** A patch that drifted against a new Chromium reports a real conflict naming one file,
   instead of refusing the whole set. That is the difference between a rebase you can finish and one you redo.
 
+`apply` also REPLACES `src/redrob` with the `redrob/` tree — replace rather than merge, so an override deleted
+here disappears from the checkout too. A merge would leave it behind still being compiled: a file nobody can
+find from this repository, which is the worst kind of build difference to chase.
+
 Going backwards:
 
 | Command | Does |
 |---|---|
-| `redrob.py export` | Rewrites `patches/` from whatever you changed in the checkout. Patches are never hand-edited. A new file is *reported*, not patched in — new files belong in `sources/`. |
+| `redrob.py export` | Rewrites `patches/` from whatever you changed in the checkout. Hand patches are never hand-edited. A new file is *reported*, not patched in — new files belong in `sources/`. |
+| `plaster.py generate` | Rewrites the rule-generated patches from `rewrite/*.yaml`. This is the path for anything with a rule; `export` is not. |
+| `plaster.py check` | Every rule still matches, with the count it declared, and no generated patch was hand-edited. |
 | `redrob.py derive` | Regenerates the branding substitutions (the ~768-edit strings work) against a new tree, so that patch is never conflict-resolved by hand. |
 | `redrob.py strings` | Regenerates the `.grd`, the `.xtb` and the C++ header from `l10n/*.tsv`. |
-| `redrob.py check` | Repo integrity. No checkout needed. Run it before packaging. |
+| `redrob.py check` | Repo integrity, including the two above. No checkout needed for most of it. Run it before packaging. |
 
 ## 4. Module map
 
@@ -134,14 +148,16 @@ because a small number of **patches** register it. If you add a service or a Web
 
 | Patch | Registers |
 |---|---|
-| `chrome-BUILD.gn`, `chrome-browser-BUILD.gn`, `chrome-browser-ui-BUILD.gn`, … | our GN targets as deps of Chromium's |
+| `build-config-BUILDCONFIG.gn` | **the two seams everything else rests on** — `//redrob/build:compiler` (which adds `-iquote redrob/chromium_src`) and the import of `redrob/build/sources.gni`, whose lists every target below reads |
+| `build-config-siso-main.star` | the handler that compiles a `redrob/chromium_src` `.cc` in place of the upstream one |
+| `chrome-BUILD.gn`, `chrome-browser-BUILD.gn`, `chrome-browser-ui-BUILD.gn`, … | our GN targets as deps of Chromium's. Most now say `+= redrob_…` and read the actual names from `redrob/build/sources.gni`, so adding a file does not touch them |
 | `chrome-browser-prefs-browser_prefs.cc` | `redrob::prefs::RegisterProfilePrefs` — every pref, from one place |
 | `chrome-browser-profiles-chrome_browser_main_extra_parts_profiles.cc` | the five keyed-service factories (task, memory, model, routine, rpc) |
 | `tools-gritsettings-resource_ids.spec` | resource id range 5400 for our three WebUI bundles |
 | `tools-gritsettings-translation_expectations.pyl` | our locales, so grit accepts the `.xtb` |
 | `chrome-common-chrome_features.cc` | feature defaults we override — e.g. `kGlic` off on every platform |
 | `ui-webui-resources-tools-build_webui.gni` | our WebUI build path |
-| 43 more under `chrome-browser-*` | the actual behaviour changes |
+| the rest under `chrome-browser-*` | the actual behaviour changes |
 
 ## 7. Boundaries that are load-bearing
 
@@ -182,10 +198,12 @@ committed key is a published key (`docs/GOOGLE-CREDENTIALS.md`).
 ## 10. Reading order
 
 1. `scripts/redrob.py` — the whole workflow is one file. Read `cmd_apply`, `cmd_export`, `cmd_build`.
-2. `docs/AI_SURFACE.md`, then `sources/chrome/browser/ui/webui/redrob/redrob.mojom` — the product's contract.
-3. The header comment of `sources/chrome/browser/redrob/task_store.h`, then the `.cc`.
-4. `sources/chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.cc` — the thing you can see.
-5. `ls patches/`. Read a patch when a name tells you it is the one you need. Not before.
+2. `docs/CUSTOMISATION.md` — the four ways to change Chromium, in the order to reach for them. Read it before
+   you write your first patch, because which one you pick is the decision that costs or saves time later.
+3. `docs/AI_SURFACE.md`, then `sources/chrome/browser/ui/webui/redrob/redrob.mojom` — the product's contract.
+4. The header comment of `sources/chrome/browser/redrob/task_store.h`, then the `.cc`.
+5. `sources/chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.cc` — the thing you can see.
+6. `ls patches/`. Read a patch when a name tells you it is the one you need. Not before.
 
 ## 11. Where to make a change
 
@@ -197,14 +215,17 @@ committed key is a published key (`docs/GOOGLE-CREDENTIALS.md`).
 | a new call between page and browser | the `.mojom`, then `*_host_impl.cc`, then the TS caller |
 | what the agent can do | `page_tools` / `file_tools` / `agent_tabs`, the dispatch in `TaskStore`, and `PermissionMode` |
 | something remembered across launches | `redrob_prefs.cc` (already registered by the `browser_prefs.cc` patch) |
-| Chromium's own behaviour | edit `chromium/src` directly, then `redrob.py export` |
+| Chromium's own behaviour | `docs/CUSTOMISATION.md` first — an override in `redrob/chromium_src` or a rule in `rewrite/` beats editing the checkout and exporting |
+| a new file of ours in an upstream GN target | `redrob/build/sources.gni`. No patch, no export — the target already appends the list |
 | any user-visible string | `l10n/*.tsv`, then `redrob.py strings` |
 | the product name, an icon | `branding/`, then `redrob.py brand` |
 
 ## 12. What is checked, and what is not
 
-`redrob.py check` has seven gates: `sources/` orphans, the branding manifest, patch names, the version in
-**both** files that hold it, generated-string drift, checkout drift against `sources/`, and script encodings.
+`redrob.py check` has nine gates: `sources/` orphans, the branding manifest, patch names, the version in
+**both** files that hold it, generated-string drift, checkout drift against `sources/`, script encodings, every
+chromium_src override wrapping rather than replacing its upstream file, and every rewrite rule still matching
+with the count it declared. Each of the last two was verified by putting the defect back and watching it fail.
 
 CI is narrower than it looks:
 
@@ -232,3 +253,14 @@ Each of these was paid for once already.
 - **`--test-type` hides warning infobars.** A screenshot taken with it cannot prove an infobar is absent.
 - **`xdotool search --pid` with no `--name` pattern never returns.** Always give a pattern, and wrap every GUI
   command in `timeout`.
+- **An override must include the original with ANGLE brackets.** `#include "a/b.cc"` finds the override again,
+  because `-iquote` is what put it first. `#include <a/b.cc>` reaches upstream. `check` refuses the wrong one.
+- **A `.cc` override is keyed on the EXACT upstream path.** An override at `base/alias.cc` does nothing when the
+  file is `base/debug/alias.cc` — and nothing reports it, because "no override here" is the normal case. Read
+  the path off a compile command rather than guessing it.
+- **A rewrite rule's `replace` block loses the indentation of its FIRST line.** YAML takes that line's indent as
+  the block's own, so a pattern must not start with the whitespace it means to keep: anchor from the first
+  non-space character and leave the existing indentation outside the match.
+- **An anchor that looks unique often is not.** `if (!is_chromeos) {\n      sources += [` appears twice in
+  `chrome/utility/BUILD.gn`. The count check is what said so; without it our importer would have been added to
+  both branches, and the build would have been green.
