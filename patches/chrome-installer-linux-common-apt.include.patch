@@ -1,5 +1,5 @@
 diff --git a/chrome/installer/linux/common/apt.include b/chrome/installer/linux/common/apt.include
-index b3368c18c9b0d..3165cfa7f0648 100644
+index b3368c18c9b0d..b6af8c76975bd 100644
 --- a/chrome/installer/linux/common/apt.include
 +++ b/chrome/installer/linux/common/apt.include
 @@ -19,6 +19,22 @@ find_apt_sources() {
@@ -65,10 +65,3 @@ index b3368c18c9b0d..3165cfa7f0648 100644
    find_apt_sources
    LEGACY_LIST="$APT_SOURCESDIR/@@PACKAGE.list"
  
-@@ -140,4 +171,4 @@ upgrade to .*" \
-   if [ "$SHOULD_INSTALL_SOURCES" -eq 1 ]; then
-     create_sources_lists
-   fi
--}
-+}
-\ No newline at end of file

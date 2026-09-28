@@ -1,5 +1,5 @@
 diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
-index a741f89bf54c6..2bac7653ed22a 100644
+index a741f89bf54c6..4456ae779f93a 100644
 --- a/chrome/app/chromium_strings.grd
 +++ b/chrome/app/chromium_strings.grd
 @@ -278,7 +278,7 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
@@ -1088,7 +1088,7 @@ index a741f89bf54c6..2bac7653ed22a 100644
        </message>
        <message name="IDS_AI_SIGNIN_PROMO_AVATAR_PILL_TEXT" translateable="false" meaning="Text shown on the expanded avatar pill when the Signin Search AI Bubble promo is shown to the user">
 -        Sign in to Chromium?
-+        Sign in to Redrob?
++        Sign in to Google?
        </message>
  
        <if expr="toolkit_views">
@@ -1112,7 +1112,7 @@ index a741f89bf54c6..2bac7653ed22a 100644
 -        <message name="IDS_ENTERPRISE_VALUE_PROPOSITION_PROFILE_SUGGESTED_TITLE" desc="Title of the screen in the profile creation flow where the user is asked whether they want to confirm signing in to Chromium with their enterprise account.">
 -          Sign in to Chromium?
 +        <message name="IDS_ENTERPRISE_VALUE_PROPOSITION_PROFILE_SUGGESTED_TITLE" desc="Title of the screen in the profile creation flow where the user is asked whether they want to confirm signing in to Redrob with their enterprise account.">
-+          Sign in to Redrob?
++          Sign in to Google?
          </message>
        </if>
  
@@ -1235,7 +1235,7 @@ index a741f89bf54c6..2bac7653ed22a 100644
 -          desc="Text asking the user to sign into Chromium while the Chromium Signin Bubble intercept is shown.">
 -          Sign in to Chromium?
 +          desc="Text asking the user to sign into Redrob while the Redrob Signin Bubble intercept is shown.">
-+          Sign in to Redrob?
++          Sign in to Google?
          </message>
 -        <message name="IDS_SIGNIN_DICE_WEB_INTERCEPT_BUBBLE_CHROME_SIGNIN_TITLE" desc="Title of the Chromium Signin Bubble intercept that is shown when a signed out user signs in on the web with it's first account.">
 -          Make Chromium your own
@@ -1254,7 +1254,7 @@ index a741f89bf54c6..2bac7653ed22a 100644
 -          desc="Text asking the user to sign into Chromium while the Chromium Signin Bubble intercept is shown.">
 -          Sign In to Chromium?
 +          desc="Text asking the user to sign into Redrob while the Redrob Signin Bubble intercept is shown.">
-+          Sign In to Redrob?
++          Sign In to Google?
          </message>
 -        <message name="IDS_SIGNIN_DICE_WEB_INTERCEPT_BUBBLE_CHROME_SIGNIN_TITLE" desc="Title of the Chromium Signin Bubble intercept that is shown when a signed out user signs in on the web with it's first account.">
 -          Make Chromium Your Own
@@ -1393,7 +1393,7 @@ index a741f89bf54c6..2bac7653ed22a 100644
          <message name="IDS_AVATAR_BUTTON_INTERCEPT_BUBBLE_CHROME_SIGNIN_ACCESSIBILITY_LABEL"
 -          desc="Accessibility label (read by the accessibility tools) of the avatar button when the Chromium Signin bubble is shown. The text implies that the expanded bubble underneath the button is closable by clicking on the button. The actual text is 'Sign in to Chromium?' with a bubble shown under it.">
 -          Click to close the Chromium sign-in dialog
-+          desc="Accessibility label (read by the accessibility tools) of the avatar button when the Redrob Signin bubble is shown. The text implies that the expanded bubble underneath the button is closable by clicking on the button. The actual text is 'Sign in to Redrob?' with a bubble shown under it.">
++          desc="Accessibility label (read by the accessibility tools) of the avatar button when the Redrob Signin bubble is shown. The text implies that the expanded bubble underneath the button is closable by clicking on the button. The actual text is 'Sign in to Google?' with a bubble shown under it.">
 +          Click to close the Redrob sign-in dialog
          </message>
          <message name="IDS_AVATAR_BUTTON_SIGNIN_PENDING_ACCESSIBILITY_LABEL"

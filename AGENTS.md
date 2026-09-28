@@ -40,7 +40,11 @@ back-merge before the two agree again.
 ## Layout
 
 `patches/` holds surgical edits to files that stay Chromium's, one patch per Chromium file, named
-after the path it patches with `/` replaced by `-`. `sources/` holds code this fork owns outright,
+after the path it patches with `/` replaced by `-`; some of them are generated from `rewrite/`, which
+holds one YAML rule file per upstream path describing the change instead of diffing it. `redrob/` is
+copied wholesale into the checkout as `src/redrob` and holds the `-iquote` compiler config, the shared
+GN lists in `sources.gni`, and the `chromium_src` overrides that are compiled in place of an upstream
+file. `sources/` holds code this fork owns outright,
 mirrored at its destination path and copied into the checkout, with `sources/manifest` mapping source
 to destination as tab or space separated pairs. `branding/` holds files substituted wholesale, the
 `BRANDING` file and the icons, driven by `branding/manifest`. `build/args/` has one gn args file per
@@ -98,14 +102,29 @@ artefacts a local build produced and uploaded to a draft release.
 
 ## What you will get wrong on the first attempt
 
-Do not hand-edit anything in `patches/`. Edit `chromium/src` like a normal tree and run
-`./scripts/redrob.py export`, which rewrites the directory from the checkout's own diff. A patch whose
-filename no longer matches the `+++ b/` path inside it still applies, so nothing breaks at build time,
-but `check_repo.py` fails on it because `ls patches/` stops being a usable inventory.
+Before changing Chromium at all, read `docs/CUSTOMISATION.md`. There are four ways, in order of how much
+upstream text they touch, and picking the wrong one is the decision that costs time at every uprev: our own
+files and the GN lists in `redrob/build/sources.gni` first; then a `redrob/chromium_src` override, which is
+compiled in place of an upstream file and pulls it in rather than copying it; then a rule in `rewrite/`,
+which DESCRIBES the change and generates the patch; and a hand-written patch last.
+
+Do not hand-edit anything in `patches/`. A patch with a `rewrite/*.yaml` beside it is GENERATED — edit the
+rule and run `./scripts/plaster.py generate`; a hand edit works once and the next regeneration discards it,
+which `check_repo.py` refuses. For a hand patch, edit `chromium/src` like a normal tree and run
+`./scripts/redrob.py export`, which rewrites it from the checkout's own diff. A patch whose filename no
+longer matches the `+++ b/` path inside it still applies, so nothing breaks at build time, but
+`check_repo.py` fails on it because `ls patches/` stops being a usable inventory.
+
+Never use a `#define` to edit upstream code, and never redefine `final`. A `#define` rewrites every
+occurrence of that identifier in the translation unit, including ones pulled in by later includes, and
+redefining a keyword is undefined behaviour. The `make_virtual`, `add_friend` and `drop_final` rewriters in
+`rewrite/` do these jobs to one declaration and report it when the premise moves.
 
 A file you add is not a patch. New code belongs under `sources/` with a line in `sources/manifest`, and
 `check_repo.py` reports any file under `sources/` that no manifest line copies as an orphan, because an
-uncopied file is never in the build and can be edited for weeks with no effect.
+uncopied file is never in the build and can be edited for weeks with no effect. A new file that an UPSTREAM
+GN target has to know about goes in a list in `redrob/build/sources.gni` — the target already appends the
+list, so adding one touches no patch.
 
 The generated strings are checked byte for byte. `scripts/gen_strings.py` writes
 `sources/chrome/browser/redrob/resources/redrob_strings.grd`, its `translations/redrob_strings_ko.xtb`

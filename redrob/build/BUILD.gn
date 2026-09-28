@@ -1,0 +1,45 @@
+# Copyright 2026 Redrob. Portions copyright The Chromium Authors.
+# Use of this source code is governed by the licence in the repository root.
+
+import("//build/config/compiler/compiler.gni")
+
+# The one thing that makes `redrob/chromium_src` work.
+#
+# `-iquote` prepends a directory to the search path used for QUOTED includes only -- `#include "..."` --
+# and leaves ANGLE includes alone. That asymmetry is the whole mechanism, and it is why the override can
+# reach the file it is overriding without recursing into itself:
+#
+#   an upstream file's  #include "chrome/browser/foo.h"   finds  redrob/chromium_src/chrome/browser/foo.h
+#   our override's      #include <chrome/browser/foo.h>   finds  chrome/browser/foo.h
+#
+# So an override is a WRAPPER, not a copy: it pulls the original in and adds to it. Nothing upstream is
+# edited, so nothing has to be re-landed at the next Chromium uprev. A copy would drift silently instead,
+# which is the failure mode this exists to avoid -- upstream fixes a bug in the original and our copy
+# keeps the old body, with no conflict to warn anyone.
+config("chromium_src_support") {
+  iquote_flags = []
+
+  if (is_win) {
+    # clang-cl does not accept `-iquote`; it has to be handed through to the clang driver underneath.
+    iquote_flags += [ "-Xclang" ]
+  }
+
+  iquote_flags +=
+      [ "-iquote" + rebase_path("//redrob/chromium_src", root_build_dir) ]
+
+  cflags = iquote_flags
+
+  if (!disable_llvm_ml) {
+    # Only when llvm-ml is the assembler. When it is not, MASM is, and MASM neither understands the flag
+    # nor goes through the source redirection -- passing it there buys an invalid-option warning on every
+    # assembly file.
+    asmflags = iquote_flags
+  }
+}
+
+# Added to `default_compiler_configs` by patches/build-config-BUILDCONFIG.gn.patch -- one line, applying
+# to every target in the build. Kept as a separate named config from `chromium_src_support` so that a
+# future flag of ours has somewhere to go that is not the mechanism's own config.
+config("compiler") {
+  configs = [ ":chromium_src_support" ]
+}

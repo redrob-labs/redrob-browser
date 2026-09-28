@@ -1,0 +1,31 @@
+substitutions:
+  - description: |
+      Do not build a second avatar button. The sidebar owns the avatar and registers it, so a toolbar copy
+      leaves two, and the one every bubble anchors to is the invisible one. Matched from the `if` to its
+      own closing brace so an upstream change INSIDE the block does not break the rewrite -- the block
+      going away entirely should, and the count check reports that.
+    regex:
+      re_pattern: 'if \(!features::IsWebUIAvatarButtonEnabled\(\)\) \{\n[\s\S]*?\n  \}'
+      replace: |-
+        // Redrob: the SIDEBAR owns the avatar, always, and registers it through SetRedrobAvatarButton.
+          // Creating one here as well would leave two, and the one every bubble anchors to would be the
+          // invisible one, so the toolbar's own avatar is never built and `avatar_` stays null. That was already
+          // the case for every Redrob window -- it used to fall out of the toolbar being hidden -- so the null is
+          // a state the rest of this class has always had to handle. Now that there IS a top row, the rule is
+          // stated rather than inferred.
+
+  - description: |
+      Hide the app menu button rather than not building it. There is no app menu in this product, but
+      `app_menu_button()` is reached for without a null check by the menu accelerators, the avatar's IPH
+      anchoring and several browser tests -- an invisible child is skipped by the layout, so the row is
+      right and none of those callers has to be audited at every version bump.
+    regex:
+      pattern: 'app_menu_button_ = AddChildView(std::move(app_menu_button));'
+      replace: |-
+        app_menu_button_ = AddChildView(std::move(app_menu_button));
+            // Redrob: built but never shown. There is no app menu in this product -- Settings is in the sidebar,
+            // and the top row carries navigation and the address, nothing else. It is HIDDEN rather than not
+            // built because `app_menu_button()` is reached for without a null check by the menu accelerators, the
+            // avatar's IPH anchoring and several browser tests; an invisible child is skipped by the layout, so
+            // the row is right and none of those callers has to be audited on every version bump.
+            app_menu_button_->SetVisible(false);

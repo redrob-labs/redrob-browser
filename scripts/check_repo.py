@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -245,6 +246,194 @@ def check_script_encodings(problems: list[str]) -> None:
                                 f"encoding=; that is cp1252 on Windows and breaks on any non-Latin-1 byte")
 
 
+def check_rewrites(problems: list[str]) -> None:
+    """Every rule-generated patch must still be what its rules produce.
+
+    Two failures this catches, both of which are silent otherwise. One: a rule whose anchor moved at a
+    Chromium uprev, or now matches a different NUMBER of places than it declared -- that is the whole
+    reason the rules carry a count, and a count that is wrong changes the wrong amount of code without
+    anything going red. Two: somebody edited a GENERATED patch by hand, which works exactly once and is
+    then silently discarded by the next regeneration.
+
+    Needs a checkout, because a rule is only meaningful against the upstream file it rewrites. Without
+    one this is reported as skipped rather than passed -- a check that cannot run has not passed.
+    """
+    rewrites = ROOT / "rewrite"
+    if not rewrites.exists():
+        return
+    rules = sorted(rewrites.rglob("*.yaml"))
+    if not rules:
+        return
+
+    # The half that needs no checkout, so it runs in CI, where there is none. A rule is only MEANINGFUL
+    # against the upstream file it rewrites, but it can still be malformed, and a malformed rule is a
+    # patch that silently stops being regenerable.
+    sys.path.insert(0, str(ROOT / "scripts"))
+    try:
+        import plaster  # noqa: PLC0415 -- deliberately late, it is a sibling script not a package.
+    except ImportError as error:
+        problems.append(f"cannot import scripts/plaster.py to validate rewrite rules: {error}")
+        return
+    for rule in rules:
+        relative = str(rule.relative_to(rewrites))[: -len(".yaml")]
+        patch = ROOT / "patches" / plaster.patch_name(relative)
+        if not patch.exists():
+            problems.append(
+                f"rewrite/{relative}.yaml has no patch at patches/{patch.name}; "
+                f"run plaster.py generate"
+            )
+        try:
+            subs = plaster.load_rules(rule)
+        except plaster.RuleError as error:
+            problems.append(str(error))
+            continue
+        for index, sub in enumerate(subs, start=1):
+            label = f"rewrite/{relative}.yaml substitution {index}"
+            if not (sub.get("description") or "").strip():
+                problems.append(f"{label} has no description saying why the rewrite exists")
+            kinds = [key for key in sub if key != "description"]
+            if len(kinds) != 1:
+                problems.append(f"{label} must carry exactly one rewriter, has {kinds}")
+                continue
+            if kinds[0] not in plaster.REWRITERS:
+                problems.append(
+                    f"{label} uses unknown rewriter {kinds[0]!r}; have {sorted(plaster.REWRITERS)}"
+                )
+                continue
+            body = sub[kinds[0]]
+            if kinds[0] == "regex" and isinstance(body, dict) and body.get("re_pattern"):
+                try:
+                    re.compile(body["re_pattern"])
+                except re.error as error:
+                    problems.append(f"{label} re_pattern does not compile: {error}")
+            # A rename's protected-phrase list is shared, so a typo'd or deleted preset silently
+            # unprotects every phrase in it across every strings file at once -- the widest-blast-radius
+            # mistake in the rule set, and one that needs no checkout to catch.
+            if kinds[0] == "rename" and isinstance(body, dict):
+                try:
+                    plaster.load_preset(label, body.get("preset") or "")
+                except plaster.RuleError as error:
+                    problems.append(str(error))
+
+    # Do the two rule parsers agree? Needs no checkout, so this runs in CI. It is deliberately a
+    # separate process rather than an inline call: the point is to compare plaster's two reading paths,
+    # and check_repo has already imported one of them into this interpreter.
+    parsers = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "plaster.py"), "parsers"],
+        capture_output=True,
+        text=True,
+    )
+    if parsers.returncode != 0:
+        problems.append(
+            "the PyYAML and built-in rule parsers disagree, so the generated patch depends on which "
+            "host ran plaster:\n" + (parsers.stderr or parsers.stdout).strip()
+        )
+
+    # The half that needs the upstream files: does each rule still MATCH, the declared number of times, and
+    # is its patch still what the rule produces. Reported as skipped rather than passed without a checkout --
+    # a check that cannot run has not passed.
+    if not (ROOT / "chromium" / "src").exists():
+        print(f"skip: {len(rules)} rewrite rule(s) not matched against upstream -- no checkout "
+              f"(run redrob.py sync, then plaster.py check)")
+        return
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "plaster.py"), "check"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        output = result.stderr + result.stdout
+        found = False
+        for line in output.splitlines():
+            if line.startswith("FAIL"):
+                problems.append(line[len("FAIL "):].strip())
+                found = True
+        if not found:
+            problems.append(f"plaster.py check failed with no FAIL line: {result.stderr.strip()[:300]}")
+
+
+def check_update_channel(problems: list[str]) -> None:
+    """The package's repository URL and the workflow's publish path must be the same place.
+
+    Linux auto-update is two halves written in two files that never reference each other. The package
+    says where to look -- REDROB_REPO_BASE, baked into the .sources file apt reads -- and
+    sign-and-publish.yml decides where the repository is uploaded. If those drift, NOTHING FAILS: the
+    release publishes a valid signed repository, the package installs a valid apt source, and every
+    machine polls a 404 forever. The user sees a browser that simply never updates, and there is no error
+    anywhere to find, because both halves did exactly what they were told.
+
+    Checked by string rather than by running anything, because that is all the coupling is: a hostname and
+    a prefix that have to match.
+    """
+    installer = ROOT / "patches" / "chrome-installer-linux-common-installer.py.patch"
+    workflow = ROOT / ".github" / "workflows" / "sign-and-publish.yml"
+    if not installer.exists() or not workflow.exists():
+        return
+    text = installer.read_text(encoding="utf-8")
+    match = re.search(r'REDROB_REPO_BASE\s*=\s*"([^"]+)"', text)
+    if not match:
+        problems.append(
+            "cannot find REDROB_REPO_BASE in the installer patch, so the update channel's URL cannot be "
+            "checked against where sign-and-publish.yml uploads the repository"
+        )
+        return
+    # "cdn.redrob.ai/browser/apt stable main" -> host + path, dropping the suite and component.
+    base = match.group(1).split()[0]
+    flow = workflow.read_text(encoding="utf-8")
+    host = re.search(r"CDN_PUBLIC_HOST:\s*(\S+)", flow)
+    prefix = re.search(r"CDN_PREFIX:\s*(\S+)", flow)
+    if not host or not prefix:
+        problems.append("sign-and-publish.yml no longer declares CDN_PUBLIC_HOST and CDN_PREFIX")
+        return
+    expected = f"{host.group(1)}/{prefix.group(1)}/apt"
+    if base != expected:
+        problems.append(
+            f"the update channel is split: the package points apt at {base!r} but sign-and-publish.yml "
+            f"publishes the repository to {expected!r}. Nothing would fail -- every installed copy would "
+            f"poll a URL that does not exist and never update."
+        )
+    # Require an S3 DESTINATION carrying the apt path, not merely the path appearing somewhere. The first
+    # version of this check looked for the bare string and passed a workflow whose upload had been replaced
+    # with a different destination, because the path still occurred in the read-back loop below it. A gate
+    # that matches its own verification output is not checking the thing it names.
+    uploads = re.search(
+        r"s3://[^\s\"']*(?:\$\{CDN_PREFIX\}|" + re.escape(prefix.group(1)) + r")/apt/", flow
+    )
+    if not uploads:
+        problems.append(
+            f"no s3 destination in sign-and-publish.yml targets {prefix.group(1)}/apt/, so the repository "
+            f"the package points at is never published"
+        )
+
+
+def check_overlay(problems: list[str]) -> None:
+    """The chromium_src overlay has to be reachable and has to wrap rather than copy.
+
+    An override that does not include the file it overrides is not an override -- it REPLACES the upstream
+    translation unit wholesale, and then upstream's fixes to that file stop arriving with no conflict to
+    say so. That is the one mistake this mechanism makes easy, so it is the one thing checked.
+    """
+    overlay = ROOT / "redrob" / "chromium_src"
+    if not overlay.exists():
+        return
+    for path in sorted(overlay.rglob("*")):
+        if not path.is_file() or path.suffix not in (".cc", ".mm", ".h"):
+            continue
+        relative = path.relative_to(overlay).as_posix()
+        text = path.read_text(encoding="utf-8")
+        # The angle form is what reaches the original; the quoted form would find this file again.
+        if f"#include <{relative}>" not in text:
+            problems.append(
+                f"redrob/chromium_src/{relative} never includes <{relative}>, so it replaces the upstream "
+                f"file instead of wrapping it -- upstream changes to that file would stop arriving silently"
+            )
+        if f'#include "{relative}"' in text:
+            problems.append(
+                f"redrob/chromium_src/{relative} includes itself with quotes; use "
+                f"#include <{relative}> so -iquote resolves to the ORIGINAL"
+            )
+
+
 def main() -> int:
     problems: list[str] = []
     check_sources(problems)
@@ -254,12 +443,16 @@ def main() -> int:
     check_strings(problems)
     check_script_encodings(problems)
     check_sources_match_checkout(problems)
+    check_overlay(problems)
+    check_update_channel(problems)
+    check_rewrites(problems)
     if problems:
         for problem in problems:
             print(f"FAIL {problem}")
         print(f"\n{len(problems)} problem(s)")
         return 1
-    print("ok: sources, branding, patch names, versions, strings and script encodings are consistent")
+    print("ok: sources, branding, patch names, versions, strings, script encodings, the chromium_src "
+          "overlay and every rewrite rule are consistent")
     return 0
 
 

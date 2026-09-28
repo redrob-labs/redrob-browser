@@ -34,6 +34,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: PyYAML, so the rule parsers can be compared against each other
+        # The ONLY dependency this repository's tooling installs anywhere, and it is installed to make a check
+        # possible rather than to make the tooling work: plaster reads rules with PyYAML when it is importable
+        # and with a built-in subset parser when it is not, and the generated patch must not depend on which.
+        # With only one parser present there is nothing to compare, so check_repo would report a pass that
+        # means the built-in parser agrees with itself.
+        #
+        # The tooling itself still needs nothing: every script runs on a bare interpreter, which is what the
+        # build host has. This is the test environment, not a runtime requirement.
+        run: python3 -m pip install --quiet pyyaml
+
       - name: sources, branding, patch names, versions
         run: python3 scripts/check_repo.py
 

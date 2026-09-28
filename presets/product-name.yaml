@@ -1,0 +1,27 @@
+# `Chromium` -> `Redrob`, for every strings file that carries the long upstream name.
+#
+# This list is the reason the rename is not a `regex` rule. A sweep that does not know these phrases
+# does not merely leave a cosmetic blemish -- it writes false statements into the product, because in
+# each of them "Chromium" names something that is NOT us and that we do not publish.
+#
+# Shared by every rewrite/**.yaml that says `rename: {preset: product-name}`. One copy, so a phrase
+# added here protects every strings file at once. A per-file copy is how one file silently keeps
+# renaming what the others learned to leave alone.
+
+from: Chromium
+to: Redrob
+
+protect:
+  # The upstream copyright holder. Substituting it does not rebrand a string, it misattributes
+  # authorship -- and `chrome://version` renders this one, so it is the page a user opens to find out
+  # what they are running.
+  - The Chromium Authors
+
+  # The operating system is upstream's. Both spellings, because ChromeOS strings use each.
+  - Chromium OS
+  - ChromiumOS
+
+  # Upstream's project and its hosts. A link that points at our name does not resolve.
+  - Chromium Projects
+  - chromium.org
+  - chromium.googlesource.com

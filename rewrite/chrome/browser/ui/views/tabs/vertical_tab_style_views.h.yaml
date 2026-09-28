@@ -1,0 +1,13 @@
+substitutions:
+  - description: |
+      Declare PaintTabShadow on the upstream class. A member cannot be introduced from a chromium_src
+      override -- the class declaration arrives with the original header -- so this one line is a real
+      upstream edit and the body lives in the override beside it.
+    regex:
+      pattern: 'void PaintTab(gfx::Canvas* canvas) const override;'
+      replace: |-
+        void PaintTab(gfx::Canvas* canvas) const override;
+
+          // The raised-card shadow under a selected tab. Separate because it has to run before the fill clips to
+          // the tab's path.
+          void PaintTabShadow(gfx::Canvas* canvas) const;

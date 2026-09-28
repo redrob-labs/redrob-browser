@@ -429,6 +429,72 @@ jobs:
           APP_VERSION: ${{ steps.version.outputs.version }}
         run: bash .github/scripts/cdn-publish.sh cdn
 
+      - name: build and publish the apt repository
+        # THE STEP THAT MAKES LINUX AUTO-UPDATE EXIST. Without it a release ships a .deb, which installs
+        # exactly once: `apt upgrade` has nothing to talk to, so every user stays on whatever version they
+        # downloaded. The package configures apt for itself on install (see apt.include), and this is the
+        # other end of that -- the repository it points at.
+        #
+        # Gated on the signing key, and it SAYS SO rather than skipping quietly. An unsigned apt repository
+        # is worse than none: it means every future update on every machine is whatever the network hands
+        # the user, which is a remote code execution channel wearing a package manager's clothes. So the
+        # absence of the key turns this off and writes a notice a human reads in the run summary, instead
+        # of publishing something that looks like a working update channel.
+        #
+        # `continue-on-error` is deliberately NOT set. If the key exists, a repository that fails to build
+        # or fails to upload must fail the release: the alternative is a published version that some
+        # machines can see and others cannot, with the signature the difference.
+        env:
+          REDROB_SIGNING_KEY: ${{ secrets.REDROB_SIGNING_KEY }}
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${REDROB_SIGNING_KEY:-}" ]; then
+            echo "::notice::REDROB_SIGNING_KEY is not set, so no apt repository was built or published."
+            echo "::notice::The .deb on this release installs, but apt has nothing to upgrade from -- Linux auto-update stays off."
+            echo "::notice::To turn it on see docs/RELEASE.md, 'Turning the update channel on'."
+            exit 0
+          fi
+          if ! ls staging/*.deb >/dev/null 2>&1; then
+            echo "::notice::no .deb in this release, so there is nothing to put in a repository"
+            exit 0
+          fi
+
+          # build_repo.py reads out/artifacts by default; point it at what this job downloaded.
+          python3 scripts/build_repo.py --artifacts staging --out out/repo
+
+          # Verify BEFORE uploading, against the public key the repository itself carries -- which is the
+          # same key.include embeds, so this is the check apt will make on a user's machine. Verifying
+          # after upload would mean an unverifiable Release file had already been published.
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          gpg --batch --dearmor < out/repo/redrob-signing-key.asc > "$GNUPGHOME/pub.gpg"
+          for f in Release.gpg InRelease; do
+            case "$f" in
+              Release.gpg) args="out/repo/dists/stable/Release.gpg out/repo/dists/stable/Release" ;;
+              InRelease)   args="out/repo/dists/stable/InRelease" ;;
+            esac
+            # shellcheck disable=SC2086
+            gpg --batch --no-default-keyring --keyring "$GNUPGHOME/pub.gpg" --verify $args
+            echo "verified $f"
+          done
+
+          # Under a FIXED prefix, not a versioned one. An apt repository is a single moving location by
+          # design -- dists/stable/InRelease is the file apt re-fetches to discover that a new version
+          # exists -- so unlike the installers there is no per-version path and no latest/ alias to make.
+          aws s3 sync out/repo "s3://${REDROB_CDN_BUCKET}/${CDN_PREFIX}/apt/" \
+            --delete --no-progress --cache-control 'public, max-age=300'
+
+          # Read back through CloudFront, same reason the installer publish does it: a sources.list a
+          # package hands out must not reference a file that is not retrievable yet.
+          for f in dists/stable/InRelease dists/stable/Release.gpg redrob-signing-key.asc; do
+            url="https://${CDN_PUBLIC_HOST}/${CDN_PREFIX}/apt/$f"
+            code="$(curl -fsS -o /dev/null -w '%{http_code}' "$url" || echo 000)"
+            echo "$code  $url"
+            [ "$code" = "200" ] || { echo "::error::$url is not retrievable after upload"; exit 1; }
+          done
+          echo "apt repository published: https://${CDN_PUBLIC_HOST}/${CDN_PREFIX}/apt/"
+
       - name: undraft the release
         # Last. Everything before it can fail and leave a draft nobody has seen; once this runs the artefacts
         # are public, so it goes after the signatures verified and after the CDN accepted them.

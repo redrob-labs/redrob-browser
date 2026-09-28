@@ -1,0 +1,20 @@
+substitutions:
+  - description: |
+      The profile locator is shared between the browser and the utility process, so it lives in the common
+      importer target.
+    regex:
+      re_pattern: '(source_set\("importer"\) \{\n  sources = \[[\s\S]*?\n  \])'
+      replace: |-
+        \1
+
+          sources += redrob_chrome_common_importer_sources
+
+  - description: |
+      What the locator needs. Appended after upstream's deps list, whose body is wildcarded so an upstream
+      dependency change does not break this anchor.
+    regex:
+      re_pattern: '(source_set\("importer"\) \{[\s\S]*?\n  deps = \[[\s\S]*?\n  \])'
+      replace: |-
+        \1
+
+          deps += redrob_chrome_common_importer_deps

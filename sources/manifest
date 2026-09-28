@@ -123,3 +123,4 @@ sources/chrome/browser/redrob/resources/redrob_strings.grd  chrome/browser/redro
 sources/chrome/browser/redrob/resources/redrob_localized_strings.h  chrome/browser/redrob/resources/redrob_localized_strings.h
 sources/chrome/browser/redrob/resources/translations/redrob_strings_ko.xtb  chrome/browser/redrob/resources/translations/redrob_strings_ko.xtb
 sources/chrome/installer/linux/common/redrob-version.txt	chrome/installer/linux/common/redrob-version.txt
+sources/build/config/siso/redrob_siso_config.star	build/config/siso/redrob_siso_config.star

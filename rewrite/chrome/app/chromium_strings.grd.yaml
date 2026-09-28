@@ -1,0 +1,70 @@
+# The main branding strings file: 770 mentions of the upstream name in one grd.
+#
+# It was a 1,336-line hand-written patch. Nothing in it was ever reviewed line by line -- a reviewer
+# reads "Chromium became Redrob 763 times" and scrolls, which is how the two defects noted below
+# survived in it. The rules say the same thing in a page, and say the parts the diff could not: which
+# phrases are deliberately NOT renamed, and that each targeted edit is still landing.
+
+substitutions:
+  # ---- The about/version page attribution -------------------------------------------------------
+  #
+  # `chrome://version` is the page a user opens to find out what they are running, and upstream's value
+  # attributes the whole product to The Chromium Authors. Our BRANDING file declares a different
+  # copyright, so leaving these two makes the browser contradict its own licence metadata.
+  #
+  # These run BEFORE the rename, and the rename cannot do them: presets/product-name.yaml protects
+  # "The Chromium Authors" precisely so it is never swept, because everywhere ELSE in the file it is a
+  # correct statement about upstream. Only these two instances are ours to change.
+  - description: |
+      IDS_ABOUT_VERSION_COMPANY_NAME: this product is ours, so the company on the about page is ours.
+    regex:
+      re_pattern: '^(\s*)The Chromium Authors$'
+      replace: '\1Redrob'
+      re_flags: [MULTILINE]
+      count: 1
+
+  - description: |
+      IDS_ABOUT_VERSION_COPYRIGHT: our copyright, with upstream's retained as a portions notice rather
+      than dropped -- the code is still substantially theirs and the notice has to say so.
+    regex:
+      pattern: "</ph> The Chromium Authors. All rights reserved."
+      replace: "</ph> Redrob. Portions copyright The Chromium Authors. All rights reserved."
+      count: 1
+
+  # ---- Sign-in: Google's account, not ours ------------------------------------------------------
+  #
+  # These seven strings sit behind a button that signs the user into a GOOGLE account and turns on
+  # Google sync. We have no account system -- ROADMAP item 6 -- so renaming them asks the user to sign
+  # in to something that does not exist. Checked one ID at a time rather than swept, because the
+  # sign-in family DOES divide: "Sign in to Chromium in a new profile?" is about a browser profile,
+  # which is ours, and it is deliberately left to the rename below.
+  #
+  # The IDs covered here, all of them Google-account surfaces:
+  #   IDS_AI_SIGNIN_PROMO_AVATAR_PILL_TEXT
+  #   IDS_ENTERPRISE_VALUE_PROPOSITION_PROFILE_SUGGESTED_TITLE
+  #   IDS_AVATAR_BUTTON_INTERCEPT_BUBBLE_CHROME_SIGNIN_TEXT              (x2, and its a11y label)
+  #   IDS_AVATAR_BUTTON_SIGNIN_PROMO                                     (x2, then/else titlecase)
+  #
+  # The count is what a hand patch could not carry, and its absence is a defect that SHIPPED: the
+  # v0.1.4 patch rewrote only the two IDS_AVATAR_BUTTON_SIGNIN_PROMO instances and renamed the other
+  # five to "Sign in to Redrob?", because the patch was stored before this rewrite was added and never
+  # regenerated. A count that must equal 5 cannot drift that way without failing.
+  - description: |
+      The avatar and promo sign-in strings name Google's account, because that is whose account it is.
+    regex:
+      pattern: "Sign in to Chromium?"
+      replace: "Sign in to Google?"
+      count: 5
+
+  - description: |
+      The same string in the use_titlecase branch, which Windows and ChromeOS render.
+    regex:
+      pattern: "Sign In to Chromium?"
+      replace: "Sign In to Google?"
+      count: 2
+
+  # ---- The sweep -------------------------------------------------------------------------------
+  - description: |
+      Chromium -> Redrob across the file, leaving every phrase in presets/product-name.yaml alone.
+    rename:
+      preset: product-name

@@ -1,0 +1,13 @@
+substitutions:
+  - description: |
+      Add our first-run flow controller to the same branch upstream's own lives in. One line, and it never
+      changes again -- the file NAMES are in redrob/build/sources.gni, so adding another one is an edit to a
+      file we own rather than a re-export of this patch.
+    regex:
+      pattern: |-
+        if (enable_dice_support) {
+              sources += [
+      replace: |-
+        if (enable_dice_support) {
+              sources += redrob_chrome_browser_ui_dice_sources
+              sources += [

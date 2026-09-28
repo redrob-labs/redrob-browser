@@ -1,0 +1,100 @@
+# Copyright 2026 Redrob. Portions copyright The Chromium Authors.
+# Use of this source code is governed by the licence in the repository root.
+
+# Every list of ours that an upstream GN target has to be told about.
+#
+# The problem this solves is churn, not size. A patch that names our files INLINE has to be re-exported
+# every time we add one, so the number of upstream patches touched by a feature is proportional to how
+# many files it adds -- and each of those edits is a new chance for the next Chromium uprev to conflict.
+# With the names here, the patch on the upstream target is a single `+= redrob_...` line that is written
+# once and then never changes again, however many files we add.
+#
+# Imported from build/config/BUILDCONFIG.gn, whose scope is the root scope of EVERY GN file, so no
+# upstream BUILD.gn needs an import line of its own.
+#
+# Source paths are absolute (`//chrome/...`) on purpose. A relative name in a list defined here would be
+# resolved against whichever file happened to be executing, which is not this one.
+
+# chrome/browser/ui:ui -- inside the enable_dice_support branch, which is where the flow controller the
+# first-run experience replaces also lives.
+redrob_chrome_browser_ui_dice_sources = [
+  "//chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.cc",
+  "//chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.h",
+]
+
+# chrome/browser/ui/color:mixers
+redrob_chrome_browser_ui_color_sources = [
+  "//chrome/browser/ui/color/redrob_color_mixer.cc",
+  "//chrome/browser/ui/color/redrob_color_mixer.h",
+]
+
+# chrome/browser/ui/views/tabs/vertical -- headers in :vertical, implementations in :impl, per the
+# split upstream uses in that directory.
+redrob_vertical_tabs_headers = [
+  "//chrome/browser/ui/views/tabs/vertical/redrob_account_row.h",
+  "//chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.h",
+  "//chrome/browser/ui/views/tabs/vertical/redrob_sidebar_tokens.h",
+]
+
+redrob_vertical_tabs_impl_sources = [
+  "//chrome/browser/ui/views/tabs/vertical/redrob_account_row.cc",
+  "//chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.cc",
+]
+
+redrob_vertical_tabs_impl_deps = [
+  "//chrome/browser/bookmarks",
+  "//chrome/browser/redrob:sidecar",
+
+  # IDS_REDROB_* for the sidebar's own labels. The header is GENERATED, so this dep is what orders grit
+  # before the compile -- without it the failure is a missing
+  # chrome/browser/redrob/resources/grit/redrob_strings.h, and whether it appears at all depends on which
+  # target ninja happens to build first.
+  "//chrome/browser/redrob/resources:redrob_strings",
+
+  "//chrome/browser/tab_group_sync:factories",
+  "//chrome/browser/ui/navigator",
+  "//components/bookmarks/browser",
+]
+
+# chrome/utility:utility -- the Chromium-profile importer runs in the utility process.
+redrob_chrome_utility_importer_sources = [
+  "//chrome/utility/importer/chromium_importer.cc",
+  "//chrome/utility/importer/chromium_importer.h",
+]
+
+# chrome/common/importer:importer
+redrob_chrome_common_importer_sources = [
+  "//chrome/common/importer/chromium_profile_locator.cc",
+  "//chrome/common/importer/chromium_profile_locator.h",
+]
+
+redrob_chrome_common_importer_deps = [ "//chrome/common:constants" ]
+
+# chrome/browser/resources -- our three WebUI bundles.
+redrob_chrome_browser_resources_deps = [
+  "//chrome/browser/resources/redrob:resources",
+  "//chrome/browser/resources/redrob_onboarding:resources",
+  "//chrome/browser/resources/redrob_settings:resources",
+]
+
+# The pak files those bundles produce, as names under `$root_gen_dir/chrome`. Names rather than full
+# paths because root_gen_dir is per-toolchain and is not defined where this file is imported; the use
+# site joins them.
+redrob_chrome_browser_resource_pak_names = [
+  "redrob_resources.pak",
+  "redrob_onboarding_resources.pak",
+  "redrob_settings_resources.pak",
+]
+
+# chrome/browser/ui/webui -- needed by both the config list and the controller factory.
+redrob_chrome_browser_ui_webui_deps = [
+  "//chrome/browser/ui/webui/redrob",
+  "//chrome/browser/ui/webui/redrob_onboarding",
+  "//chrome/browser/ui/webui/redrob_settings",
+]
+
+# Deliberately NOT here: the four upstream files that take a single, fixed line from us -- the sidecar dep
+# in chrome/browser and chrome/browser/prefs, the macOS font bundle_data in chrome/BUILD.gn, and the
+# locale-pak prefix in chrome_repack_locales.gni. A list exists to absorb GROWTH, and those four do not
+# grow: each is one target learning about one thing of ours, once. Putting them here would add a name to
+# read without removing an edit to make.
