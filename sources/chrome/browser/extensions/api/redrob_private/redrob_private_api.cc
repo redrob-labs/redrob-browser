@@ -8,6 +8,8 @@
 
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/redrob/memory_store.h"
+#include "chrome/browser/redrob/model_store.h"
+#include "chrome/browser/redrob/routine_store.h"
 #include "chrome/common/extensions/api/redrob_private.h"
 #include "components/version_info/version_info.h"
 
@@ -47,6 +49,73 @@ RedrobPrivateForgetAllMemoryFunction::Run() {
       Profile::FromBrowserContext(browser_context()))
       ->Clear();
   return RespondNow(NoArguments());
+}
+
+namespace {
+Profile* ProfileOf(content::BrowserContext* ctx) {
+  return Profile::FromBrowserContext(ctx);
+}
+}  // namespace
+
+ExtensionFunction::ResponseAction RedrobPrivateRemoveMemoryFunction::Run() {
+  auto params = redrob_private::RemoveMemory::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const bool ok =
+      MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
+          ->Remove(params->id);
+  return RespondNow(
+      ArgumentList(redrob_private::RemoveMemory::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateSetMemoryPinnedFunction::Run() {
+  auto params = redrob_private::SetMemoryPinned::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const bool ok =
+      MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
+          ->SetPinned(params->id, params->pinned);
+  return RespondNow(
+      ArgumentList(redrob_private::SetMemoryPinned::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateRemoveRoutineFunction::Run() {
+  auto params = redrob_private::RemoveRoutine::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const bool ok =
+      RoutineStoreFactory::GetForProfile(ProfileOf(browser_context()))
+          ->Remove(params->id);
+  return RespondNow(
+      ArgumentList(redrob_private::RemoveRoutine::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetRoutineEnabledFunction::Run() {
+  auto params = redrob_private::SetRoutineEnabled::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const bool ok =
+      RoutineStoreFactory::GetForProfile(ProfileOf(browser_context()))
+          ->SetEnabled(params->id, params->enabled);
+  return RespondNow(
+      ArgumentList(redrob_private::SetRoutineEnabled::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateRemoveProviderFunction::Run() {
+  auto params = redrob_private::RemoveProvider::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const bool ok =
+      ModelStoreFactory::GetForProfile(ProfileOf(browser_context()))
+          ->Remove(params->id);
+  return RespondNow(
+      ArgumentList(redrob_private::RemoveProvider::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateSelectProviderFunction::Run() {
+  auto params = redrob_private::SelectProvider::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const bool ok =
+      ModelStoreFactory::GetForProfile(ProfileOf(browser_context()))
+          ->Select(params->id);
+  return RespondNow(
+      ArgumentList(redrob_private::SelectProvider::Results::Create(ok)));
 }
 
 }  // namespace extensions

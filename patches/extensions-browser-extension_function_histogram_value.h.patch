@@ -1,8 +1,8 @@
 diff --git a/extensions/browser/extension_function_histogram_value.h b/extensions/browser/extension_function_histogram_value.h
-index 7cf76f3b9262f..bb6ea09d8bd9a 100644
+index 7cf76f3b9262f..2090e5dd42b67 100644
 --- a/extensions/browser/extension_function_histogram_value.h
 +++ b/extensions/browser/extension_function_histogram_value.h
-@@ -2043,6 +2043,10 @@ enum HistogramValue {
+@@ -2043,6 +2043,16 @@ enum HistogramValue {
    DELETED_WEBREQUESTINTERNAL_EVENTHANDLINGDONE = 1978,
    DICTATIONPRIVATE_UPDATEAUDIOLEVEL = 1979,
    ENTERPRISEREPORTINGPRIVATE_REPORTFORCESAVETOCLOUDEVENTHANDLED = 1980,
@@ -10,6 +10,12 @@ index 7cf76f3b9262f..bb6ea09d8bd9a 100644
 +  REDROBPRIVATE_SETMEMORYENABLED = 1982,
 +  REDROBPRIVATE_SETMEMORYRETENTIONDAYS = 1983,
 +  REDROBPRIVATE_FORGETALLMEMORY = 1984,
++  REDROBPRIVATE_REMOVEMEMORY = 1985,
++  REDROBPRIVATE_SETMEMORYPINNED = 1986,
++  REDROBPRIVATE_REMOVEROUTINE = 1987,
++  REDROBPRIVATE_SETROUTINEENABLED = 1988,
++  REDROBPRIVATE_REMOVEPROVIDER = 1989,
++  REDROBPRIVATE_SELECTPROVIDER = 1990,
    // Last entry: Add new entries above, then run:
    // tools/metrics/histograms/update_extension_histograms.py
    ENUM_BOUNDARY

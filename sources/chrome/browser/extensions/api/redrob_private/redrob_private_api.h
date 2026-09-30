@@ -51,6 +51,60 @@ class RedrobPrivateForgetAllMemoryFunction : public ExtensionFunction {
   ResponseAction Run() override;
 };
 
+class RedrobPrivateRemoveMemoryFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.removeMemory",
+                             REDROBPRIVATE_REMOVEMEMORY)
+ protected:
+  ~RedrobPrivateRemoveMemoryFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetMemoryPinnedFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setMemoryPinned",
+                             REDROBPRIVATE_SETMEMORYPINNED)
+ protected:
+  ~RedrobPrivateSetMemoryPinnedFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateRemoveRoutineFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.removeRoutine",
+                             REDROBPRIVATE_REMOVEROUTINE)
+ protected:
+  ~RedrobPrivateRemoveRoutineFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetRoutineEnabledFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setRoutineEnabled",
+                             REDROBPRIVATE_SETROUTINEENABLED)
+ protected:
+  ~RedrobPrivateSetRoutineEnabledFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateRemoveProviderFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.removeProvider",
+                             REDROBPRIVATE_REMOVEPROVIDER)
+ protected:
+  ~RedrobPrivateRemoveProviderFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSelectProviderFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.selectProvider",
+                             REDROBPRIVATE_SELECTPROVIDER)
+ protected:
+  ~RedrobPrivateSelectProviderFunction() override = default;
+  ResponseAction Run() override;
+};
+
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_

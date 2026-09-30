@@ -16,6 +16,7 @@
 // migrates in later phases, each as one more function on this interface.
 namespace redrobPrivate {
   callback GetBrowserVersionCallback = void (DOMString version);
+  callback BoolCallback = void (boolean ok);
 
   interface Functions {
     // Returns the browser's full version string (the same value shown on
@@ -33,5 +34,23 @@ namespace redrobPrivate {
     // Clears all memory entries. Named for what it does, not softened: it is
     // irreversible and the UI must confirm before calling it.
     static void forgetAllMemory();
+
+    // Removes one memory entry. Resolves true if it existed and was removed.
+    static void removeMemory(DOMString id, BoolCallback callback);
+
+    // Pins or unpins a memory entry so it is kept regardless of retention.
+    static void setMemoryPinned(DOMString id, boolean pinned, BoolCallback callback);
+
+    // Removes a saved routine. Resolves true if it existed.
+    static void removeRoutine(DOMString id, BoolCallback callback);
+
+    // Enables or disables a routine without deleting it.
+    static void setRoutineEnabled(DOMString id, boolean enabled, BoolCallback callback);
+
+    // Removes a model provider. Resolves true if it existed.
+    static void removeProvider(DOMString id, BoolCallback callback);
+
+    // Makes the given provider the selected one. Resolves true on success.
+    static void selectProvider(DOMString id, BoolCallback callback);
   };
 };
