@@ -18,11 +18,105 @@ namespace redrobPrivate {
   callback GetBrowserVersionCallback = void (DOMString version);
   callback BoolCallback = void (boolean ok);
 
+  // Mirrors of the settings mojom structs, so GetSettings can return the whole
+  // AgentSettings tree over the private API. Enums are string enums (idl
+  // convention); the mojom's kFoo values become "foo".
+  enum PermissionMode { readOnly, guard, fullAccess };
+  enum Effort { quick, standard, ultrabrowse };
+  enum RoutineKind { cron, heartbeat };
+  enum EngineState { notInstalled, starting, ready, failed };
+
+  dictionary Routine {
+    DOMString id;
+    DOMString title;
+    DOMString prompt;
+    RoutineKind kind;
+    long everyMinutes;
+    PermissionMode mode;
+    Effort effort;
+    boolean enabled;
+    DOMString taskId;
+    double lastRunMs;
+    double nextRunMs;
+    DOMString lastError;
+  };
+
+  dictionary MemoryEntry {
+    DOMString id;
+    DOMString text;
+    DOMString source;
+    double createdMs;
+    boolean pinned;
+  };
+
+  dictionary MemorySettings {
+    boolean enabled;
+    long retentionDays;
+    MemoryEntry[] entries;
+  };
+
+  dictionary Provider {
+    DOMString id;
+    DOMString providerLabel;
+    DOMString model;
+    DOMString endpoint;
+    boolean hasSecret;
+    boolean isOauth;
+  };
+
+  dictionary EngineInfo {
+    EngineState state;
+    DOMString defaultModel;
+    long modelCount;
+  };
+
+  dictionary ModelSettings {
+    Provider[] providers;
+    DOMString selectedId;
+    EngineInfo engine;
+    boolean encryptionReady;
+  };
+
+  dictionary PasswordSettings {
+    boolean offerToSave;
+    boolean autoSignin;
+    DOMString choice;
+  };
+
+  dictionary ChatSummary {
+    DOMString id;
+    DOMString prompt;
+  };
+
+  dictionary RpcSettings {
+    boolean enabled;
+    DOMString endpoint;
+    DOMString handleFileName;
+  };
+
+  dictionary AgentSettings {
+    DOMString workingFolder;
+    MemorySettings memory;
+    ModelSettings model;
+    PasswordSettings passwords;
+    Routine[] routines;
+    ChatSummary[] chats;
+    RpcSettings rpc;
+  };
+
+  callback GetSettingsCallback = void (AgentSettings settings);
+
   interface Functions {
     // Returns the browser's full version string (the same value shown on
     // chrome://version). Resolves a Promise on MV3.
     // |callback|: Called with the version string.
     static void getBrowserVersion(GetBrowserVersionCallback callback);
+
+    // Returns the whole AgentSettings tree — working folder, memory, model
+    // providers + engine state, password toggles, routines, recent chats, and
+    // the loopback RPC endpoint. Assembled from the same stores the settings
+    // WebUI read.
+    static void getSettings(GetSettingsCallback callback);
 
     // Turns the agent's memory on or off. Delegates to the profile's memory
     // store, which is where the setting actually lives.
