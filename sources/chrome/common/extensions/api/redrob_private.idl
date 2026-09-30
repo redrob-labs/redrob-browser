@@ -1,0 +1,26 @@
+// Copyright 2026 Redrob. Portions copyright The Chromium Authors.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+// The <code>chrome.redrobPrivate</code> API is the single, component-gated
+// bridge by which Redrob's own bundled extensions reach browser capability
+// that a Web-facing extension API does not expose. It is restricted to
+// component extensions in _permission_features.json; an ordinary extension
+// cannot hold the permission, so this is the ONE crossing point the ownership
+// boundary (docs/OWNERSHIP.md) allows.
+//
+// getBrowserVersion is deliberately the smallest possible method: it proves an
+// extension can call into native through the fork-restricted permission, which
+// is all the foundation item F-1 has to establish. The real surfaces
+// (browser preferences, the omnibox agent) are added here as their WebUI
+// migrates in later phases, each as one more function on this interface.
+namespace redrobPrivate {
+  callback GetBrowserVersionCallback = void (DOMString version);
+
+  interface Functions {
+    // Returns the browser's full version string (the same value shown on
+    // chrome://version). Resolves a Promise on MV3.
+    // |callback|: Called with the version string.
+    static void getBrowserVersion(GetBrowserVersionCallback callback);
+  };
+};

@@ -1,0 +1,25 @@
+# Declare the redrobPrivate API feature: it depends on the redrobPrivate permission and is available only in a
+# privileged extension context. The component gate itself lives in _permission_features.json.
+#
+# Literal `pattern` rewriter (not insert_after): match the whole readingList block and re-emit it followed by
+# the redrobPrivate block, so redrobPrivate lands as its alpha-order sibling (readingList < redrobPrivate <
+# resourcesPrivate). Plain `|` with the file's real 2/4-space indentation carried literally -- NEVER `|N`,
+# which plaster's no-PyYAML fallback parser misreads. count 1 fails loudly if the readingList block changes.
+substitutions:
+  - description: Declare the redrobPrivate API feature after readingList.
+    regex:
+      pattern: |
+        "readingList": {
+            "dependencies": ["permission:readingList"],
+            "contexts": ["privileged_extension"]
+          },
+      replace: |
+        "readingList": {
+            "dependencies": ["permission:readingList"],
+            "contexts": ["privileged_extension"]
+          },
+          "redrobPrivate": {
+            "dependencies": ["permission:redrobPrivate"],
+            "contexts": ["privileged_extension"]
+          },
+      count: 1

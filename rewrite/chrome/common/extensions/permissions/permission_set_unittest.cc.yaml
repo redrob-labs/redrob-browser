@@ -1,0 +1,11 @@
+# permission_set_unittest asserts every permission either has a user-facing message rule or is explicitly
+# skipped as private. redrobPrivate has no message (it is component-only, never shown to a user), so it must be
+# in the skip set or this test fails. Anchored on the unique `// These are private.` comment that opens the
+# block.
+substitutions:
+  - description: Skip redrobPrivate in the permission-message coverage test (it is a private permission).
+    insert_after:
+      anchor: '  // These are private.'
+      count: 1
+      lines: |
+        skip.insert(APIPermissionID::kRedrobPrivate);

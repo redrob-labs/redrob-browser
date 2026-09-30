@@ -1,0 +1,17 @@
+# Map the redrobPrivate permission id to its manifest string. Literal `pattern` rewriter: match
+# brailleDisplayPrivate's whole two-line entry and re-emit it followed by our entry, so redrobPrivate lands as
+# its alpha-order sibling. Plain `|` (NOT `|2`): plaster's no-PyYAML fallback parser does not understand a
+# block-scalar indentation indicator, so `|2` reads differently on a host without PyYAML. With plain `|` the
+# block's own leading spaces are part of the content and both parsers agree.
+substitutions:
+  - description: Register the redrobPrivate permission string after brailleDisplayPrivate.
+    regex:
+      pattern: |
+        {APIPermissionID::kBrailleDisplayPrivate, "brailleDisplayPrivate",
+             APIPermissionInfo::kFlagCannotBeOptional},
+      replace: |
+        {APIPermissionID::kBrailleDisplayPrivate, "brailleDisplayPrivate",
+             APIPermissionInfo::kFlagCannotBeOptional},
+            {APIPermissionID::kRedrobPrivate, "redrobPrivate",
+             APIPermissionInfo::kFlagCannotBeOptional},
+      count: 1

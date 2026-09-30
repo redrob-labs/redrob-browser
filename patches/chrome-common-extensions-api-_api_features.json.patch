@@ -1,0 +1,15 @@
+diff --git a/chrome/common/extensions/api/_api_features.json b/chrome/common/extensions/api/_api_features.json
+index 3ddef70dcfb1a..d75453a2562c2 100644
+--- a/chrome/common/extensions/api/_api_features.json
++++ b/chrome/common/extensions/api/_api_features.json
+@@ -886,6 +886,10 @@
+     "dependencies": ["permission:readingList"],
+     "contexts": ["privileged_extension"]
+   },
++  "redrobPrivate": {
++    "dependencies": ["permission:redrobPrivate"],
++    "contexts": ["privileged_extension"]
++  },
+   "resourcesPrivate": [{
+     "dependencies": ["permission:resourcesPrivate"],
+     "contexts": ["privileged_extension"]

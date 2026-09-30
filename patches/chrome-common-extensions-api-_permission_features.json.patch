@@ -1,0 +1,18 @@
+diff --git a/chrome/common/extensions/api/_permission_features.json b/chrome/common/extensions/api/_permission_features.json
+index dda0ba31f9f20..a2eeaa8332449 100644
+--- a/chrome/common/extensions/api/_permission_features.json
++++ b/chrome/common/extensions/api/_permission_features.json
+@@ -67,6 +67,13 @@
+     // "desktop_android" is not supported.
+     "platforms": ["chromeos", "linux", "mac", "win"]
+   },
++  "redrobPrivate": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
+   "autotestPrivate": {
+     "channel": "stable",
+     "extension_types": ["extension"],

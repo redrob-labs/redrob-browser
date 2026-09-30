@@ -1,0 +1,12 @@
+diff --git a/chrome/common/extensions/api/api_sources.gni b/chrome/common/extensions/api/api_sources.gni
+index df6fb768af77e..f8eaa94cfe09f 100644
+--- a/chrome/common/extensions/api/api_sources.gni
++++ b/chrome/common/extensions/api/api_sources.gni
+@@ -89,6 +89,7 @@ if (enable_extensions) {
+     "indigo_private.webidl",
+     "language_settings_private.webidl",
+     "passwords_private.idl",
++    "redrob_private.idl",
+     "resources_private.idl",
+     "safe_browsing_private.idl",
+     "settings_private.idl",

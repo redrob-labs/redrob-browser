@@ -1,0 +1,13 @@
+# Register our private-API schema so json_schema_compiler generates its bindings.
+#
+# `chrome_extensions_api_schema_sources` in this file is what the api build target compiles; a schema not
+# listed here produces no `.h`, and the C++ that includes `redrob_private.h` then fails to compile. Added by
+# rule rather than by hand so a Chromium uprev that reshuffles the list still applies (count-enforced: the
+# anchor line is unique in the file).
+substitutions:
+  - description: Add redrob_private.idl to the extension API schema sources, in alpha order.
+    insert_after:
+      anchor: '    "passwords_private.idl",'
+      count: 1
+      lines: |
+        "redrob_private.idl",

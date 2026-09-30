@@ -1,0 +1,13 @@
+diff --git a/chrome/common/extensions/permissions/chrome_api_permissions.cc b/chrome/common/extensions/permissions/chrome_api_permissions.cc
+index 677dec7d94550..4e44b5ca83ef3 100644
+--- a/chrome/common/extensions/permissions/chrome_api_permissions.cc
++++ b/chrome/common/extensions/permissions/chrome_api_permissions.cc
+@@ -67,6 +67,8 @@ constexpr APIPermissionInfo::InitInfo permissions_to_register[] = {
+     {APIPermissionID::kBookmark, "bookmarks"},
+     {APIPermissionID::kBrailleDisplayPrivate, "brailleDisplayPrivate",
+      APIPermissionInfo::kFlagCannotBeOptional},
++    {APIPermissionID::kRedrobPrivate, "redrobPrivate",
++     APIPermissionInfo::kFlagCannotBeOptional},
+     {APIPermissionID::kBrowsingData, "browsingData",
+      APIPermissionInfo::kFlagDoesNotRequireManagedSessionFullLoginWarning},
+     {APIPermissionID::kCertificateProvider, "certificateProvider",
