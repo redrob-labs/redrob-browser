@@ -361,5 +361,23 @@ namespace redrobPrivate {
                              DOMString prompt,
                              FollowUpMode mode,
                              FollowUpCallback callback);
+
+    // Asks the user for the folder ONE TASK may write into, and records it on
+    // that task. Not the same call as chooseWorkingFolder, which sets the
+    // profile-wide default: this one never touches the pref.
+    // |callback|: the chosen folder's display name, or nothing if the user
+    // cancelled, the task is unknown, or the platform had no dialog.
+    static void chooseTaskWorkingFolder(DOMString taskId,
+                                        StringCallback callback);
+  };
+
+  interface Events {
+    // A task changed: it started, took a step, or finished. The whole task is
+    // sent rather than a diff, because a page that missed an event would
+    // otherwise be left with a record it cannot repair.
+    //
+    // redrobPrivate's other event, onImportStateChanged, is added by the
+    // onboarding branch. Both will live in this block once both have merged.
+    [supportsListeners] static void onTaskChanged(Task task);
   };
 };

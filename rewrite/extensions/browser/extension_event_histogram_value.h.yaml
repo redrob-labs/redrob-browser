@@ -1,0 +1,18 @@
+# The onTaskChanged event on redrobPrivate needs an events enum value or the generated event dispatch
+# does not compile. Appended after the current last real value (DICTATION_PRIVATE_ON_BROWSER_LOG_EVENT
+# = 578); the next ordinal is 579. The matching enums.xml entry is generated, not hand-written.
+# count=1 on the unique 578 line fails loudly on an uprev that adds its own events, which is the cue to
+# renumber.
+#
+# COLLIDES WITH THE ONBOARDING STACK ON PURPOSE. redrobPrivate's other event,
+# onImportStateChanged, is added by a branch that is NOT an ancestor of this one, anchored on the same
+# 578 line and also claiming 579. Whichever of the two merges second gets a git conflict IN THIS FILE
+# and must renumber to 580 -- which is the outcome to want: a conflict a human resolves, rather than
+# two rules silently inserting at the same anchor and leaving the enum with a duplicate value.
+substitutions:
+  - description: Add the REDROBPRIVATE_ON_TASK_CHANGED event histogram enum value.
+    insert_after:
+      anchor: '  DICTATION_PRIVATE_ON_BROWSER_LOG_EVENT = 578,'
+      count: 1
+      lines: |
+        REDROBPRIVATE_ON_TASK_CHANGED = 579,

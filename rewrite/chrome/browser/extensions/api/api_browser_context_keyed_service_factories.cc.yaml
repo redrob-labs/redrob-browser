@@ -1,0 +1,25 @@
+# The task event router is a KeyedService created WITH the browser context, so its factory must be
+# registered with the BrowserContextDependencyManager here or the dependency graph does not know it
+# exists -- and a service created with the context is exactly the case where being absent from the
+# graph shows up as a crash at startup rather than as a missing feature later.
+#
+# Two inserts, each anchored on the unique reading_list line it sorts immediately after
+# (reading_list < redrob_private < sessions).
+#
+# COLLIDES WITH THE ONBOARDING STACK. That branch registers the import-manager factory from the same
+# two anchors, in this same file. Whichever merges second gets a git conflict here and keeps both
+# registrations -- which is the outcome to want, because the alternative is one of the two services
+# silently missing from the dependency graph.
+substitutions:
+  - description: Include the redrobPrivate task-event-router factory header.
+    insert_after:
+      anchor: '#include "chrome/browser/extensions/api/reading_list/reading_list_event_router_factory.h"'
+      count: 1
+      lines: |
+        #include "chrome/browser/extensions/api/redrob_private/redrob_private_task_event_router_factory.h"
+  - description: Ensure the redrobPrivate task-event-router factory is built.
+    insert_after:
+      anchor: '  extensions::ReadingListEventRouterFactory::GetInstance();'
+      count: 1
+      lines: |
+        extensions::RedrobPrivateTaskEventRouterFactory::GetInstance();
