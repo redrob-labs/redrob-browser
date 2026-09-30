@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/files/file_path.h"
+#include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/redrob/agent_service_factories.h"
 #include "chrome/browser/redrob/memory_store.h"
@@ -26,6 +27,22 @@
 namespace extensions {
 
 namespace redrob_private = api::redrob_private;
+
+// The agent's stores and their factories all live in namespace redrob, and this
+// file lives in namespace extensions, so every use of them needs the name
+// brought in. One block here beats qualifying twenty-odd call sites, and
+// keeps the ported bodies reading the same as the mojom host they came from.
+using redrob::MemoryStore;
+using redrob::MemoryStoreFactory;
+using redrob::ModelStore;
+using redrob::ModelStoreFactory;
+using redrob::RoutineStore;
+using redrob::RoutineStoreFactory;
+using redrob::RpcServer;
+using redrob::RpcServerFactory;
+using redrob::SidecarClient;
+using redrob::TaskStore;
+using redrob::TaskStoreFactory;
 
 ExtensionFunction::ResponseAction
 RedrobPrivateGetBrowserVersionFunction::Run() {
@@ -253,6 +270,98 @@ ExtensionFunction::ResponseAction RedrobPrivateGetSettingsFunction::Run() {
 
   return RespondNow(
       ArgumentList(redrob_private::GetSettings::Results::Create(out)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateAddProviderFunction::Run() {
+  auto params = redrob_private::AddProvider::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // The secret travels one way: into the store. getSettings never reads it back.
+  const std::string id =
+      ModelStoreFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()))
+          ->Add(params->provider_label, params->model, params->endpoint,
+                params->secret);
+  // Built by hand rather than through Results::Create, which takes a plain
+  // string: an empty list calls the callback with nothing, which is what "not
+  // stored" means. An empty string would say "stored, with an empty id".
+  base::ListValue result;
+  if (!id.empty()) {
+    result.Append(id);
+  }
+  return RespondNow(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetOfferToSavePasswordsFunction::Run() {
+  auto params = redrob_private::SetOfferToSavePasswords::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  Profile::FromBrowserContext(browser_context())
+      ->GetPrefs()
+      ->SetBoolean(password_manager::prefs::kCredentialsEnableService,
+                   params->enabled);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetPasswordAutoSigninFunction::Run() {
+  auto params = redrob_private::SetPasswordAutoSignin::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  Profile::FromBrowserContext(browser_context())
+      ->GetPrefs()
+      ->SetBoolean(password_manager::prefs::kCredentialsEnableAutosignin,
+                   params->enabled);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetPasswordManagerChoiceFunction::Run() {
+  auto params =
+      redrob_private::SetPasswordManagerChoice::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // Three known values and nothing else: this arrives from a renderer and ends
+  // up rendered back.
+  const std::string& choice = params->choice;
+  if (choice != "redrob" && choice != "external" && choice != "skip") {
+    return RespondNow(NoArguments());
+  }
+  PrefService* prefs =
+      Profile::FromBrowserContext(browser_context())->GetPrefs();
+  prefs->SetString(redrob::prefs::kPasswordManagerChoice, choice);
+  // "I use another manager" means stop offering to save. It does NOT mean
+  // Chromium forgets the credentials it already has, and the page says so
+  // rather than implying a migration happened.
+  if (choice == "external") {
+    prefs->SetBoolean(password_manager::prefs::kCredentialsEnableService,
+                      false);
+  }
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateSetRpcEnabledFunction::Run() {
+  auto params = redrob_private::SetRpcEnabled::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  Profile* profile = Profile::FromBrowserContext(browser_context());
+  profile->GetPrefs()->SetBoolean(redrob::prefs::kRpcEnabled, params->enabled);
+  RpcServer* rpc = RpcServerFactory::GetForProfile(profile);
+  // Applied now rather than at the next launch. A setting whose effect you have
+  // to restart to see is a setting people toggle twice and then distrust.
+  base::ListValue result;
+  if (params->enabled && rpc->Start()) {
+    // Only an endpoint that is actually listening is reported. Off, or failed
+    // to start, sends nothing at all rather than an empty address.
+    result.Append(rpc->endpoint());
+  } else if (!params->enabled) {
+    rpc->Stop();
+  }
+  return RespondNow(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateClearWorkingFolderFunction::Run() {
+  Profile::FromBrowserContext(browser_context())
+      ->GetPrefs()
+      ->SetFilePath(redrob::prefs::kWorkingFolder, base::FilePath());
+  return RespondNow(NoArguments());
 }
 
 }  // namespace extensions
