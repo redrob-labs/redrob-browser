@@ -75,6 +75,9 @@ RedrobPrivateSetModelChoiceFunction::Run() {
   return RespondNow(NoArguments());
 }
 
+RedrobPrivateGetImportSourcesFunction::RedrobPrivateGetImportSourcesFunction() =
+    default;
+
 RedrobPrivateGetImportSourcesFunction::~RedrobPrivateGetImportSourcesFunction() =
     default;
 

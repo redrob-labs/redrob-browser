@@ -50,6 +50,8 @@ class RedrobPrivateSetModelChoiceFunction : public ExtensionFunction {
 
 class RedrobPrivateGetImportSourcesFunction : public ExtensionFunction {
  public:
+  RedrobPrivateGetImportSourcesFunction();
+
   DECLARE_EXTENSION_FUNCTION("redrobPrivate.getImportSources",
                              REDROBPRIVATE_GETIMPORTSOURCES)
 
