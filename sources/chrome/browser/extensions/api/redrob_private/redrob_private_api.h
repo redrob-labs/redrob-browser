@@ -7,9 +7,8 @@
 
 #include <memory>
 
+#include "chrome/browser/importer/importer_list.h"
 #include "extensions/browser/extension_function.h"
-
-class ImporterList;
 
 namespace extensions {
 
