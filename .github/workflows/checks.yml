@@ -59,3 +59,15 @@ jobs:
           python3 scripts/redrob.py version
           echo "REDROB_VERSION=$(cat REDROB_VERSION)"
           echo "CHROMIUM_VERSION=$(cat CHROMIUM_VERSION)"
+
+      - name: the browser's colours come from the design system
+        # Offline and instant: it reads the tree, not the registry. Catches a hex typed into the chrome, and
+        # catches a token reference that no longer resolves -- which the C++ compiler would otherwise report
+        # three hours into a Chromium build on the release runner.
+        run: python3 scripts/check_design_tokens.py
+
+      - name: the vendored design system matches its pin
+        # This one DOES reach the registry, because the question is whether the copy in the tree is still the
+        # release it claims to be. A published npm version is immutable, so a mismatch is an edited vendored
+        # file or a moved pin, never a new release.
+        run: python3 scripts/vendor_design_system.py

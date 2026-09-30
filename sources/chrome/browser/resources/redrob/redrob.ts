@@ -2,6 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// First, before anything that can paint: the vendored design system draws from a `data-theme`
+// attribute and has no `prefers-color-scheme` rule of its own, so without this the page is
+// permanently light.
+import './theme.js';
+
+import {ICON_FRAME, ICONS} from './design_icons.js';
+
 import {
   Effort,
   FollowUpMode,
@@ -61,91 +68,76 @@ function stateLabel(state: TaskState): string {
   }
 }
 
-// One drawn glyph per step kind. These were emoji, which is three problems at once: this build ships no
-// colour emoji font, so several fell back to boxes; `⑃`, `⊘`, `↺` and `⋯` are text-presentation glyphs
-// that a text font draws at whatever weight it likes, so the row read unevenly; and none of them could
-// take the product's own stroke weight. Built as elements rather than markup because this is a WebUI
-// under Trusted Types, where assigning innerHTML throws.
+// Which design-system glyph stands for each step kind. Keyed off the mojom enum, not the label: a label
+// match is a string comparison that silently stops matching when the wording changes.
 //
-// Keyed off the mojom enum, not the label: a label match is a string comparison that silently stops
-// matching when the wording changes.
-type Glyph = Array<[string, Record<string, string>]>;
+// These used to be drawn here by hand -- twelve glyphs at 16x16 with round caps at stroke 1.3 to 1.6,
+// which is not the brand's geometry. 45-icons.md specifies a 24x24 box on a 20px live area, stroke 2
+// unscaled, BUTT caps ("Never round"), miter joins at limit 3 and every diagonal at 40 degrees, and the
+// design system ships 252 glyphs drawn to exactly that. Nothing enforced it, so the hand-drawn set drifted
+// from the brand from the day it was written; `check_design_tokens.py` check 9 now fails on any glyph whose
+// geometry is not in the vendored table.
+//
+// Two of these were previously recorded as having no equivalent among the 252. Both do:
+//
+//   kSteered  -> `route`, the Evidence group's staircase. The spec's own note is "beads on a line lose to
+//                a staircase (`route` has no beads)". A steer is the run's path turning.
+//   kThinking -> `pulse`. NOT `sparkle`, which the spec reserves ("`sparkle` is for generated content
+//                only"), and not `spark` ("use sparingly"). What it replaces is a bare circle, which the
+//                spec lists by name as a way an icon fails: "a primitive rather than a thing".
+//
+// And one that reads like a judgement call is not: `pending` is the spec's own answer for a wait, in its
+// own words -- "`pending` is three dots, not a clock", distinguished from `clock` as "a time vs a wait
+// with no time". A queued message is a wait with no time.
+const STEP_ICON: Partial<Record<StepKind, string>> = {
+  [StepKind.kSearchedMemory]: 'history',
+  [StepKind.kOpenedPage]: 'browser',
+  [StepKind.kCapturedScreenshot]: 'camera',
+  [StepKind.kSavedArtifact]: 'save',
+  [StepKind.kUsedCredential]: 'key',
+  [StepKind.kSpawnedSubagents]: 'split',
+  [StepKind.kRefused]: 'blocked',
+  [StepKind.kSteered]: 'route',
+  [StepKind.kQueuedMessage]: 'pending',
+  [StepKind.kPlanned]: 'list',
+  [StepKind.kRoutine]: 'repeat',
+  [StepKind.kThinking]: 'pulse',
+};
 
-function stepGlyph(kind: StepKind): Glyph {
-  switch (kind) {
-    case StepKind.kSearchedMemory:  // a clock, for looking back
-      return [['circle', {cx: '8', cy: '8', r: '5.2'}], ['path', {d: 'M8 4.6V8l2.6 1.7'}]];
-    case StepKind.kOpenedPage:  // a window
-      return [
-        ['rect', {x: '2.4', y: '3.2', width: '11.2', height: '9.6', rx: '1.6'}],
-        ['path', {d: 'M2.4 6.2h11.2'}],
-      ];
-    case StepKind.kCapturedScreenshot:  // a camera
-      return [
-        ['rect', {x: '2.2', y: '4.8', width: '11.6', height: '8', rx: '1.6'}],
-        ['circle', {cx: '8', cy: '8.8', r: '2.2'}],
-        ['path', {d: 'M6.3 4.8l.9-1.5h1.6l.9 1.5'}],
-      ];
-    case StepKind.kSavedArtifact:  // a page with a folded corner
-      return [
-        ['path', {d: 'M4.2 2.8h4.4L12 6.2v7H4.2z'}],
-        ['path', {d: 'M8.4 2.8v3.4H12'}],
-      ];
-    case StepKind.kUsedCredential:  // a key
-      return [
-        ['circle', {cx: '5.7', cy: '6.3', r: '2.6'}],
-        ['path', {d: 'M7.7 8.3l5.1 5.1'}],
-        ['path', {d: 'M10.4 11l1.4-1.4'}],
-      ];
-    case StepKind.kSpawnedSubagents:  // one branching into two
-      return [
-        ['path', {d: 'M8 2.8v3'}],
-        ['path', {d: 'M8 5.8L4.5 9.2v3.2'}],
-        ['path', {d: 'M8 5.8l3.5 3.4v3.2'}],
-      ];
-    case StepKind.kRefused:  // a barred circle
-      return [['circle', {cx: '8', cy: '8', r: '5.4'}], ['path', {d: 'M4.6 11.4l6.8-6.8'}]];
-    case StepKind.kSteered:  // a turn taken
-      return [
-        ['path', {d: 'M12.4 8.4A4.6 4.6 0 118 3.8h3.4'}],
-        ['path', {d: 'M9.6 2l1.9 1.8-1.9 1.9'}],
-      ];
-    case StepKind.kQueuedMessage:  // waiting its turn
-      return [
-        ['circle', {cx: '4.2', cy: '8', r: '1.1', fill: 'currentcolor', stroke: 'none'}],
-        ['circle', {cx: '8', cy: '8', r: '1.1', fill: 'currentcolor', stroke: 'none'}],
-        ['circle', {cx: '11.8', cy: '8', r: '1.1', fill: 'currentcolor', stroke: 'none'}],
-      ];
-    case StepKind.kPlanned:  // a list
-      return [
-        ['path', {d: 'M3.2 4.6h9.6'}],
-        ['path', {d: 'M3.2 8h9.6'}],
-        ['path', {d: 'M3.2 11.4h6'}],
-      ];
-    case StepKind.kRoutine:  // a clock with a crown, for something that fires on its own
-      return [
-        ['circle', {cx: '8', cy: '8.9', r: '4.6'}],
-        ['path', {d: 'M8 6.6v2.3l1.7 1.1'}],
-        ['path', {d: 'M6.3 2.6h3.4'}],
-      ];
-    case StepKind.kThinking:
-    default:
-      return [['circle', {cx: '8', cy: '8', r: '2.4'}]];
+/**
+ * Builds one vendored glyph as elements.
+ *
+ * Elements rather than markup because this is a WebUI under Trusted Types, where assigning innerHTML
+ * throws. The frame comes from the vendored table too, so the ten geometry rules arrive with the artwork
+ * instead of being retyped here and drifting from it.
+ *
+ * An unknown name throws rather than returning an empty <svg>: a glyph that silently renders as nothing
+ * looks like a layout bug in a row of otherwise-fine icons, and would survive every gate.
+ */
+function icon(name: string): SVGSVGElement {
+  const geometry = ICONS[name];
+  if (geometry === undefined) {
+    throw new Error(`no vendored glyph named ${name}; add it to ICONS in vendor_design_system.py`);
   }
-}
 
-function stepIcon(kind: StepKind): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 16 16');
-  svg.setAttribute('aria-hidden', 'true');
-  for (const [tag, attrs] of stepGlyph(kind)) {
+  for (const [attribute, value] of Object.entries(ICON_FRAME)) {
+    svg.setAttribute(attribute, value);
+  }
+  for (const [tag, attributes] of geometry) {
     const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
-    for (const [name, value] of Object.entries(attrs)) {
-      node.setAttribute(name, value);
+    for (const [attribute, value] of Object.entries(attributes)) {
+      node.setAttribute(attribute, value);
     }
     svg.append(node);
   }
   return svg;
+}
+
+function stepIcon(kind: StepKind): SVGSVGElement {
+  // kThinking is the fallback as well as a kind of its own: a step kind this build does not know about is
+  // still a step that is happening, and `pulse` says that without claiming to know which kind.
+  return icon(STEP_ICON[kind] ?? 'pulse');
 }
 
 function effortLabel(effort: Effort): string {
@@ -403,17 +395,11 @@ function renderTask() {
     withdraw.type = 'button';
     withdraw.className = 'queued-withdraw';
     withdraw.setAttribute('aria-label', loadTimeData.getString('taskWithdrawQueued'));
-    // Drawn, not a text glyph: this bundle has no emoji font and a literal x renders at whatever weight
-    // the text font feels like, which is the problem the step icons already had.
-    const mark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    mark.setAttribute('viewBox', '0 0 16 16');
-    mark.setAttribute('aria-hidden', 'true');
-    for (const d of ['M5 5l6 6', 'M11 5l-6 6']) {
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      line.setAttribute('d', d);
-      mark.append(line);
-    }
-    withdraw.append(mark);
+    // The design system's own `close`, not a literal x and not a hand-drawn one. 45-icons.md keeps close
+    // at its 45 degree crossing as one of only two named exceptions to the 40 degree rule, and lists it
+    // among the shapes that may stand without a label. A text glyph was the first attempt and renders at
+    // whatever weight the text font feels like, which is the problem the step icons had.
+    withdraw.append(icon('close'));
     withdraw.addEventListener('click', async () => {
       withdraw.disabled = true;
       const {withdrawn} = await host.withdrawQueuedFollowUp(openTaskId!, index, pending);
@@ -728,6 +714,28 @@ function bindModeSelects(taskId: string|null) {
   paintModeSelects(composerMode);
 }
 
+/**
+ * Fills every `<svg data-icon="name">` in the markup from the vendored table.
+ *
+ * The markup carries a NAME, not geometry, for the same reason the step icons do: one definition of each
+ * glyph, arriving with the artwork. Static markup cannot be built with createElementNS, and this is a
+ * Trusted Types page where innerHTML throws, so the shells are empty in the HTML and are populated here.
+ *
+ * A name with no vendored glyph throws. An empty <svg> would leave a hole in a row of otherwise-fine
+ * icons, which reads as a layout bug and survives every gate.
+ */
+function fillMarkupIcons() {
+  for (const shell of document.querySelectorAll<SVGSVGElement>('svg[data-icon]')) {
+    const name = shell.dataset['icon']!;
+    const built = icon(name);
+    for (const attribute of built.getAttributeNames()) {
+      shell.setAttribute(attribute, built.getAttribute(attribute)!);
+    }
+    shell.replaceChildren(...built.childNodes);
+  }
+}
+
+fillMarkupIcons();
 bindSelectLabels();
 
 if (openTaskId) {

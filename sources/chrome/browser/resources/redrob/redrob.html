@@ -1,10 +1,21 @@
 <!doctype html>
-<html lang="$i18n{language}" dir="$i18n{textdirection}">
+<!-- data-theme is set here as well as by theme.ts, and the static value is not redundant. design_system.css
+     supersedes three roles behind `:root:not([data-theme="light"])`, which matches a document with NO
+     data-theme at all: if theme.ts ever fails to run, the page would render light everywhere except
+     --surface-sunken, --ink-muted and the six --series-* -- a half-dark page with nothing reporting it.
+     Declaring light here means that selector never matches by accident. theme.ts overwrites the attribute
+     before first paint, so a dark OS still gets a dark page with no flash. -->
+<html lang="$i18n{language}" dir="$i18n{textdirection}" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Redrob</title>
-  <link rel="stylesheet" href="tokens.css">
+  <!-- Order is load-bearing. design_tokens.css is the vendored design system and defines every token;
+       chrome_base.css follows it because it needs those tokens and because its Pretendard rule has to
+       win over the vendored static-weight rules; redrob.css consumes both. -->
+  <link rel="stylesheet" href="design_tokens.css">
+  <link rel="stylesheet" href="design_system.css">
+  <link rel="stylesheet" href="chrome_base.css">
   <link rel="stylesheet" href="redrob.css">
 </head>
 <body>
@@ -12,7 +23,16 @@
        #task. One document because a task tab and a new tab are the same WebUI host, and routing in
        the page costs nothing next to registering a second one. -->
   <main id="home" hidden>
-    <img class="mark" src="redrob-mark.svg" alt="" aria-hidden="true">
+    <!-- Two files, one shown. 10-logo.md forbids recoloring the artwork, so the dark page cannot be
+         served by tinting the light file: assets/Symbol/README.md assigns the gradient symbol to light
+         grounds and the flat-white one to redrob-black and dark surfaces, and the page swaps them on
+         data-theme. Both are in the DOM and redrob.css hides one, which is also how the design
+         system's own .rr-mark works. aria-hidden on both: the page's heading already says Redrob, so a
+         name here would be read twice. -->
+    <span class="mark">
+      <img class="mark-light" src="brand/redrob-symbol.png" alt="" aria-hidden="true">
+      <img class="mark-dark" src="brand/redrob-symbol-solid-white.png" alt="" aria-hidden="true">
+    </span>
     <!-- The card holds the input row ONLY. The controls sit BELOW it on the page, not inside a divided
          card: measured off the reference, the card is 620x44 and the control row is outside its shadow.
          Putting them in one bordered box is what made this read as a form rather than a prompt. -->
@@ -48,12 +68,10 @@
              narrow-by-default decision is unchanged; what changed is that the two modes you are NOT in
              no longer take up as much room as the one you are. -->
         <label class="ctl ctl-select">
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M8 1.8l4.6 1.7v4.1c0 3-2 5.2-4.6 6.6-2.6-1.4-4.6-3.6-4.6-6.6V3.5L8 1.8z"/>
-            <path d="M5.9 8.1l1.5 1.5 2.8-3"/>
-          </svg>
+          <svg data-icon="shieldCheck" aria-hidden="true"></svg>
           <span class="visually-hidden">$i18n{newTabPermissionMode}</span>
           <span class="ctl-value"></span>
+          <svg class="ctl-caret" data-icon="chevronDown" aria-hidden="true"></svg>
           <select id="mode" data-mode-select>
             <option value="read">$i18n{newTabPermissionRead}</option>
             <option value="guard" selected>$i18n{newTabPermissionGuard}</option>
@@ -64,6 +82,7 @@
         <label class="ctl ctl-select">
           <span class="visually-hidden">$i18n{newTabModel}</span>
           <span class="ctl-value"></span>
+          <svg class="ctl-caret" data-icon="chevronDown" aria-hidden="true"></svg>
           <select id="model">
             <option value="auto" selected>redrob/auto</option>
           </select>
@@ -71,6 +90,7 @@
         <label class="ctl ctl-select">
           <span class="visually-hidden">$i18n{newTabEffort}</span>
           <span class="ctl-value"></span>
+          <svg class="ctl-caret" data-icon="chevronDown" aria-hidden="true"></svg>
           <select id="effort">
             <option value="ultra">$i18n{newTabEffortUltra}</option>
             <option value="standard" selected>$i18n{newTabEffortStandard}</option>
@@ -119,7 +139,7 @@
            open-in-new-tab work, and it still works if the page's module fails to load. -->
       <a class="task-back" href="chrome://redrob/" aria-label="$i18n{taskBackHome}"
          title="$i18n{taskBackHome}">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 3.5L5 8l4.5 4.5"/></svg>
+        <svg data-icon="chevronLeft" aria-hidden="true"></svg>
       </a>
       <h1 id="task-title"></h1>
       <span id="task-state" class="task-state"></span>
@@ -142,11 +162,7 @@
              empty keeps its one-line note instead -- the section around it already has a heading and a
              lede, and a centred block there would repeat both. -->
         <div id="trace-empty" class="empty-block" hidden>
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <circle cx="8" cy="8" r="5.4"/>
-            <path d="M8 5.2v3.4"/>
-            <circle cx="8" cy="11" r="0.6" fill="currentcolor" stroke="none"/>
-          </svg>
+          <svg data-icon="alert" aria-hidden="true"></svg>
           <p class="empty-title" id="trace-empty-title"></p>
           <p class="empty-detail">$i18n{taskNotFoundDetail}</p>
           <a class="pill pill-solid" href="chrome://redrob/">$i18n{taskBackHomeLabel}</a>
@@ -172,12 +188,10 @@
       </div>
       <div class="composer-controls">
         <label class="ctl ctl-select">
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M8 1.8l4.6 1.7v4.1c0 3-2 5.2-4.6 6.6-2.6-1.4-4.6-3.6-4.6-6.6V3.5L8 1.8z"/>
-            <path d="M5.9 8.1l1.5 1.5 2.8-3"/>
-          </svg>
+          <svg data-icon="shieldCheck" aria-hidden="true"></svg>
           <span class="visually-hidden">$i18n{newTabPermissionMode}</span>
           <span class="ctl-value"></span>
+          <svg class="ctl-caret" data-icon="chevronDown" aria-hidden="true"></svg>
           <select data-mode-select>
             <option value="read">$i18n{newTabPermissionRead}</option>
             <option value="guard" selected>$i18n{newTabPermissionGuard}</option>

@@ -26,6 +26,9 @@ redrob_chrome_browser_ui_dice_sources = [
 redrob_chrome_browser_ui_color_sources = [
   "//chrome/browser/ui/color/redrob_color_mixer.cc",
   "//chrome/browser/ui/color/redrob_color_mixer.h",
+  # Vendored from the design system, not written here. Listed so a `gn` target that compiles the mixer also
+  # tracks the header as an input: without it a re-pin changes 89 colours and nothing rebuilds.
+  "//chrome/browser/ui/color/redrob_design_tokens.h",
 ]
 
 # chrome/browser/ui/views/tabs/vertical -- headers in :vertical, implementations in :impl, per the

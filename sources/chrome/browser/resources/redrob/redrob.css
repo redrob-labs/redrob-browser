@@ -1,31 +1,20 @@
-/* Pretendard Variable, vendored. SIL Open Font License 1.1 -- see PretendardVariable-LICENSE.txt.
-   Loaded from the resource pack rather than a CDN: the new tab page is the first thing drawn, often
-   before any network exists, and a brand that arrives a second late is a brand that flickers. */
-@font-face {
-  font-display: swap;
-  font-family: 'Pretendard Variable';
-  font-style: normal;
-  font-weight: 45 920;
-  src: url(PretendardVariable.woff2) format('woff2-variations');
-}
-
 /* Copyright 2026 Redrob. Portions copyright The Chromium Authors.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-/* Design tokens live in tokens.css, linked before this sheet. */
+/* Tokens come from design_tokens.css and chrome_base.css, linked before this sheet. */
 
 * {
   box-sizing: border-box;
 }
 
 body {
-  background: var(--surface);
-  color: var(--ink);
+  background: var(--surface-base);
+  color: var(--ink-primary);
   /* The brand's body role: 400 weight, 1.62 line height, slight negative tracking. Scaled down from the
      sheet's 17px because this is browser UI sitting next to 13px native controls, not a web page. */
-  font: 400 13px/1.62 var(--font-sans);
-  letter-spacing: -0.004em;
+  font: var(--text-body-sm);
+  letter-spacing: 0;
   margin: 0;
 }
 
@@ -63,19 +52,49 @@ body {
   padding: 0 24px;
 }
 
-/* The logo, drawn as the logo. It was previously used as a CSS mask at 18% opacity, which threw away
-   its own paint -- the mark carries a blue-to-violet gradient of its own and a mask keeps only the
-   silhouette, so the brand rendered as a grey smudge. The heavy blue drop-shadow went with it: at 44px
-   it read as a glowing badge, where the reference is a calm mark sitting well above the prompt. */
+/* The logo, drawn as the logo, on the ground the spec assigns it.
+
+   Three things were wrong here and all three were invisible in a build log. The file was a hand-drawn
+   SVG whose silhouette was #000921 with a blue-to-violet glow, where the brand symbol is a blue-to-cyan
+   gradient -- so this was not the Redrob mark, it was a near-copy of it. On the dark page that near-black
+   silhouette measured 1.00:1 against its own ground. And it was held at 50% opacity, which 10-logo.md
+   rules out along with recoloring, restretching and any added effect.
+
+   A CSS mask in a token colour would fix the contrast and break the rule: a mask keeps the silhouette
+   and throws the artwork away, which is the recolor the spec names under Incorrect usage. The spec's own
+   answer is two shipped files, one per ground, so that is what this does. Both are in the DOM; one is
+   shown. Full opacity, no filter, no mask -- scripts/check_design_tokens.py holds that line, because a
+   fade or a tint here would look like a styling tweak rather than a brand violation. */
 .mark {
-  /* An img is inline, so margin auto only centres it once it is a block. */
+  align-items: center;
+  /* A span is inline, so margin auto only centres it once it is a block. */
   display: block;
-  height: 52px;
   margin: 0 auto 30px;
-  /* Faded rather than masked: opacity keeps the mark's own gradient, where a CSS mask would keep only
-     the silhouette and paint it flat grey. */
-  opacity: 0.5;
+  /* 52px, well above the 24px screen minimum in assets/Symbol/README.md, below which the mark's own
+     doorway closes up. Height and width only: the lockup is never stretched. */
+  height: 52px;
   width: 52px;
+}
+
+.mark img {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+/* Light is the default ground, so the dark file is the one hidden by default -- a page that somehow
+   reaches CSS before theme.ts sets data-theme then shows the correct file for an unthemed page rather
+   than showing both stacked. */
+.mark .mark-dark {
+  display: none;
+}
+
+[data-theme='dark'] .mark .mark-light {
+  display: none;
+}
+
+[data-theme='dark'] .mark .mark-dark {
+  display: block;
 }
 
 .composer-wrap {
@@ -88,7 +107,7 @@ body {
    used to be 30% brand blue, which tinted the whole prompt area and is why this looked like a different
    product -- a coloured shadow is a decoration, and the reference spends none. */
 .composer {
-  background: var(--raised);
+  background: var(--surface-raised);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-md);
@@ -114,7 +133,7 @@ body {
 }
 
 .composer input::placeholder {
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
 }
 
 .composer input:focus-visible {
@@ -126,7 +145,7 @@ body {
    transparent track with a solid black active segment, which put the heaviest ink in the composer on a
    toggle rather than on what you typed. */
 .segmented {
-  background: var(--muted);
+  background: var(--surface-sunken);
   border-radius: var(--radius-md);
   display: flex;
   flex: none;
@@ -139,16 +158,16 @@ body {
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   cursor: pointer;
-  font: 500 var(--text-sm)/1 var(--font-sans);
+  font: var(--text-label);
   padding: 0 12px;
 }
 
 .seg-on {
-  background: var(--card);
-  box-shadow: var(--shadow-xs);
-  color: var(--foreground);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink-primary);
   font-weight: 600;
 }
 
@@ -172,26 +191,26 @@ body {
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   cursor: pointer;
   display: inline-flex;
-  font: 500 var(--text-sm)/1 var(--font-sans);
+  font: var(--text-label);
   gap: 5px;
   padding: 3px 2px;
 }
 
 .ctl:hover {
-  color: var(--ink);
+  color: var(--ink-primary);
 }
 
+/* SIZE AND COLOUR ONLY. fill, stroke, stroke-width, stroke-linecap and stroke-linejoin are set by the
+   vendored frame in design_icons.ts, transcribed from the design system's own svg() helper. Setting any
+   of them here would WIN -- a CSS presentation property beats an SVG presentation attribute -- and the
+   glyphs would go back to round caps at the wrong weight while still looking deliberate. Check 9 fails
+   on it. */
 .ctl svg {
-  fill: none;
   flex: none;
   height: 15px;
-  stroke: currentcolor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.4;
   width: 15px;
 }
 
@@ -199,17 +218,20 @@ body {
   cursor: default;
 }
 
-/* The chevron belongs to the control, not to the native select: a UA arrow is a different size and
-   colour on every platform, and this row is measured. */
-.ctl-select::after {
-  border-bottom: 1.4px solid currentcolor;
-  border-right: 1.4px solid currentcolor;
-  content: '';
-  height: 5px;
+/* The caret belongs to the control, not to the native select: a UA arrow is a different size and colour
+   on every platform and this row is measured. It was two CSS borders rotated 45 degrees -- which
+   45-icons.md forbids for a directional mark, allowing exactly two exceptions (`close` and `spark`) that
+   this is not. It is now the design system's own chevronDown, on the 40 degree rake like every other
+   chevron in the product. */
+/* `.ctl svg.ctl-caret`, not `.ctl-caret`. The general icon rule above is (0,1,1) and a lone class is
+   (0,1,0), so it won and the caret rendered at 15px instead of 10. Found by reading the computed style out
+   of the BUILT binary over CDP -- a specificity loss cannot show up any other way, since both rules are
+   valid CSS and the build is green either way. */
+.ctl svg.ctl-caret {
+  flex: none;
+  height: 10px;
   margin-left: 1px;
-  rotate: 45deg;
-  translate: 0 -2px;
-  width: 5px;
+  width: 10px;
 }
 
 /* A <select> is as wide as its WIDEST option, so "Guard" was laid out at the width of "Full access" and
@@ -236,7 +258,7 @@ body {
    drawn on the visible wrapper instead. `:focus-within` rather than `:focus-visible` on the select,
    because the wrapper is not the thing that takes focus. */
 .ctl-select:has(select:focus-visible) {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -251,12 +273,12 @@ body {
 .card-open:focus-visible,
 .ctl:focus-visible,
 #preview-close:focus-visible {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 .send {
-  background: var(--ink);
+  background: var(--ink-primary);
   border: 0;
   border-radius: 50%;
   cursor: pointer;
@@ -266,7 +288,7 @@ body {
 }
 
 .send::after {
-  background: var(--raised);
+  background: var(--surface-raised);
   content: '';
   height: 8px;
   inset: 50% auto auto 50%;
@@ -286,10 +308,9 @@ body {
    12px uppercase muted with wide tracking, which is the styling of a form field's label: it made the
    page's own structure quieter than the tiles underneath it. */
 h2 {
-  color: var(--foreground);
-  font-size: var(--text-lg);
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  color: var(--ink-primary);
+  font: var(--text-title-2);
+  letter-spacing: -0.018em;
   margin: 0 0 14px;
 }
 
@@ -311,7 +332,7 @@ h2 {
    rendered as a tall bordered box with its icon stacked above its label. The old rule survived that only
    because `.card-steps li` happened to reset the three properties it set at the time. */
 .cards > li {
-  background: var(--raised);
+  background: var(--surface-raised);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-sm);
@@ -336,20 +357,19 @@ h2 {
 }
 
 .card-elapsed {
-  color: var(--muted-foreground);
-  font-size: var(--text-sm);
+  color: var(--ink-secondary);
+  font: var(--text-body-sm);
 }
 
 .card-title {
-  font-size: var(--text-base);
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font: var(--text-title-4);
+  letter-spacing: -0.008em;
   margin: 3px 0 10px;
 }
 
 .card-steps {
-  color: var(--muted-foreground);
-  font-size: var(--text-sm);
+  color: var(--ink-secondary);
+  font: var(--text-body-sm);
   line-height: 1.95;
   list-style: none;
   margin: 0;
@@ -393,7 +413,7 @@ h2 {
 }
 
 #home-status {
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
 }
 
 /* ---------- task tab ---------- */
@@ -406,7 +426,7 @@ h2 {
 
 .task-head {
   align-items: baseline;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--border-subtle);
   display: flex;
   gap: 10px;
   padding: 14px 20px;
@@ -417,7 +437,7 @@ h2 {
 .task-back {
   align-self: center;
   border-radius: var(--radius-sm);
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   display: flex;
   flex: none;
   margin-inline-start: -4px;
@@ -425,22 +445,17 @@ h2 {
 }
 
 .task-back:hover {
-  background: var(--accent-subtle);
-  color: var(--accent);
+  background: var(--surface-brand-subtle);
+  color: var(--ink-brand);
 }
 
 .task-back:focus-visible {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 .task-back svg {
-  fill: none;
   height: 15px;
-  stroke: currentcolor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.6;
   width: 15px;
 }
 
@@ -451,63 +466,60 @@ h2 {
 }
 
 .task-head h1 {
-  font-size: 15px;
-  font-weight: 600;
+  font: var(--text-title-4);
   margin: 0;
 }
 
 .task-state {
-  color: var(--muted-foreground);
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  color: var(--ink-secondary);
+  font: var(--text-meta);
 }
 
 .task-effort {
-  color: var(--muted-foreground);
-  font-size: 11px;
+  color: var(--ink-secondary);
+  font: var(--text-caption);
 }
 
 .pill {
-  background: var(--raised);
-  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-full);
-  color: var(--ink);
+  color: var(--ink-primary);
   cursor: pointer;
-  font: inherit;
-  font-size: 12px;
+  font: var(--text-label);
   padding: 4px 12px;
 }
 
 .pill:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--action-primary);
+  color: var(--ink-brand);
 }
 
 .pill-quiet {
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
 }
 
 /* The one place this bundle needs a filled pill: the action on an empty surface, where there is nothing
    else on screen to compete with it. Same shape and values as the settings bundle's, so the two pages do
-   not drift -- if a third caller appears, the pill belongs in tokens.css rather than in both files. */
+   not drift -- if a third caller appears, the pill belongs in chrome_base.css rather than in both
+   files. */
 .pill-solid {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--surface);
+  background: var(--ink-primary);
+  border-color: var(--ink-primary);
+  color: var(--surface-base);
   text-decoration: none;
 }
 
 .pill-solid:hover {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-foreground);
+  background: var(--action-primary);
+  border-color: var(--action-primary);
+  color: var(--ink-on-brand);
 }
 
 .queued {
-  border-left: 2px solid var(--accent);
-  color: var(--muted-foreground);
-  font-size: 12px;
+  border-left: 2px solid var(--action-primary);
+  color: var(--ink-secondary);
+  font: var(--text-body-sm);
   list-style: none;
   margin: 0 0 8px;
   padding: 0 0 0 10px;
@@ -532,7 +544,7 @@ h2 {
   background: none;
   border: 0;
   border-radius: 6px;
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   cursor: pointer;
   display: grid;
   flex: none;
@@ -541,7 +553,7 @@ h2 {
 }
 
 .queued-withdraw:hover:not(:disabled) {
-  color: var(--ink);
+  color: var(--ink-primary);
 }
 
 .queued-withdraw:disabled {
@@ -554,16 +566,9 @@ h2 {
   width: 14px;
 }
 
-.queued-withdraw path {
-  fill: none;
-  stroke: currentcolor;
-  stroke-linecap: round;
-  stroke-width: 1.6;
-}
-
 .task-status {
-  color: var(--muted-foreground);
-  font-size: 12px;
+  color: var(--ink-secondary);
+  font: var(--text-body-sm);
   margin: 6px 0 0;
   min-height: 1em;
 }
@@ -593,25 +598,20 @@ h2 {
 }
 
 .empty-block svg {
-  color: var(--muted-foreground);
-  fill: none;
+  color: var(--ink-secondary);
   height: 22px;
   margin-bottom: 4px;
-  stroke: currentcolor;
-  stroke-linecap: round;
-  stroke-width: 1.3;
   width: 22px;
 }
 
 .empty-title {
-  font-size: var(--text-base);
-  font-weight: 600;
+  font: var(--text-title-4);
   margin: 0;
 }
 
 .empty-detail {
-  color: var(--muted-foreground);
-  font-size: var(--text-sm);
+  color: var(--ink-secondary);
+  font: var(--text-body-sm);
   margin: 0 0 6px;
 }
 
@@ -627,15 +627,15 @@ h2 {
 
 .step {
   box-shadow: var(--shadow-sm);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--control-radius);
   margin-bottom: 8px;
   padding: 9px 11px;
 }
 
 .step-head {
   align-items: center;
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   display: flex;
   gap: 7px;
 }
@@ -644,7 +644,7 @@ h2 {
    step kind came out a slightly different weight. One box, one stroke, every kind. */
 .step-icon {
   align-items: center;
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   display: flex;
   flex: none;
   height: 14px;
@@ -652,21 +652,16 @@ h2 {
 }
 
 .step-icon svg {
-  fill: none;
   height: 14px;
-  stroke: currentcolor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.4;
   width: 14px;
 }
 
 .step-label {
-  color: var(--ink);
+  color: var(--ink-primary);
 }
 
 .step-details {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--border-subtle);
   list-style: none;
   margin: 8px 0 0;
   padding: 8px 0 0;
@@ -679,16 +674,16 @@ h2 {
 }
 
 .step-source {
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
 }
 
 .step-timing {
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   margin-left: auto;
 }
 
 .step-shot {
-  border: 1px solid var(--line);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   display: block;
   margin-top: 8px;
@@ -696,15 +691,15 @@ h2 {
 }
 
 .task-error {
-  color: var(--warn);
+  color: var(--status-danger);
 }
 
 .preview {
-  border-radius: var(--radius-panel);
+  border-radius: var(--card-radius);
   box-shadow: var(--shadow-lg);
   align-self: flex-start;
-  background: var(--raised);
-  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
   flex: none;
   overflow: hidden;
   width: 340px;
@@ -712,7 +707,7 @@ h2 {
 
 .preview-head {
   align-items: center;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--border-subtle);
   display: flex;
   gap: 8px;
   padding: 7px 10px;
@@ -728,10 +723,10 @@ h2 {
 .preview-head button {
   background: transparent;
   border: 0;
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   cursor: pointer;
-  font-size: 15px;
-  line-height: 1;
+  font: var(--text-body);
+    line-height: 1;
 }
 
 .preview img {
@@ -740,7 +735,7 @@ h2 {
 }
 
 .composer-foot {
-  border-radius: var(--radius-panel);
+  border-radius: var(--card-radius);
   margin: 0 20px 16px;
   max-width: none;
 }
@@ -770,8 +765,8 @@ h2 {
 .composer-row input {
   /* 15px, measured. 17px was chosen to make this "the one field the surface is about", but the reference
      gets that emphasis from the card and the space around it, not from outsizing the text. */
-  font-size: var(--text-base);
-  letter-spacing: -0.012em;
+  font: var(--text-body);
+  letter-spacing: -0.003em;
 }
 
 
@@ -780,12 +775,9 @@ h2 {
 /* The trace's own heading stays a small label -- it sits inside a task panel and is naming a column, not
    opening a section. The home page's section headings are the heading role, set once on `h2` above. */
 .trace h2 {
-  color: var(--muted-foreground);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  color: var(--ink-secondary);
+  font: var(--text-meta);
   margin: 0 0 12px;
-  text-transform: uppercase;
 }
 
 .suggested {
@@ -803,11 +795,11 @@ h2 {
 /* Each suggestion is a plate. Same silhouette as the composer above it, which is what makes the
    surface read as one thing rather than a form with a list under it. */
 .tile {
-  background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--card-radius);
   box-shadow: var(--shadow-md);
-  color: var(--ink);
+  color: var(--ink-primary);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -823,30 +815,25 @@ h2 {
 }
 
 .tile-kind {
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  color: var(--ink-brand);
+  font: var(--text-meta);
 }
 
 .tile-title {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.012em;
+  font: var(--text-title-4);
+    letter-spacing: -0.008em;
 }
 
 .tile-detail {
-  color: var(--muted-foreground);
-  font-size: 13px;
+  color: var(--ink-secondary);
+  font: var(--text-body-sm);
 }
 
 
 /* The trace's steps become plates too, and the task title gets the heading role. */
 .task-title {
-  font-size: 21px;
-  font-weight: 600;
-  letter-spacing: -0.022em;
+  font: var(--text-title-3);
+    letter-spacing: -0.012em;
 }
 
 

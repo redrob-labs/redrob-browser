@@ -1,13 +1,37 @@
 <!doctype html>
-<html lang="$i18n{language}" dir="$i18n{textdirection}">
+<!-- Static light default, overwritten by theme.ts before first paint. See redrob/redrob.html for why the
+     attribute cannot be left off once design_system.css is linked. -->
+<html lang="$i18n{language}" dir="$i18n{textdirection}" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>$i18n{seDocumentTitle}</title>
-  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="design_tokens.css">
+  <link rel="stylesheet" href="design_system.css">
+  <link rel="stylesheet" href="chrome_base.css">
   <link rel="stylesheet" href="redrob_settings.css">
 </head>
 <body>
+  <!-- The design system's own glyphs, defined once, transcribed from the delivery (src/icons/index.tsx).
+       Geometry verbatim: 45-icons.md sets a 24x24 box with a 20px live area, a 2px unscaled stroke, BUTT
+       caps ("Never round") and MITER joins at limit 3, and ships a linter (lint/icons.py) that fails on
+       any of those. The icons this page drew by hand were 16x16 at 1.5px with round caps, which is the
+       same class of divergence as a transcribed colour: internally consistent, and disagreeing with every
+       other Redrob surface. Stroke lives on the geometry so currentColor carries through from the use
+       site -- the caret then takes --ink-secondary from .rr-select-wrap__caret. -->
+  <svg hidden aria-hidden="true">
+    <symbol id="rr-chevron-down" data-icon="chevronDown" viewBox="0 0 24 24">
+      <polyline points="7 9.9 12 14.1 17 9.9" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="3"></polyline>
+    </symbol>
+    <symbol id="rr-search" data-icon="search" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"
+         stroke-miterlimit="3">
+        <path d="M12.84 16.02 A6 6 0 1 1 16.35 11.85"></path>
+        <line x1="15.1" y1="14.36" x2="20.5" y2="18.89"></line>
+      </g>
+    </symbol>
+  </svg>
   <div class="shell">
     <nav class="nav" aria-label="$i18n{seNav}">
       <h1>$i18n{sidebarSettings}</h1>
@@ -46,52 +70,77 @@
                and the submit label say which, because an "Add routine" button that quietly overwrote an
                existing one would be the worst version of this. -->
           <h3 id="routine-form-title">$i18n{seRoutineNew}</h3>
-          <label class="field">
-            <span>$i18n{seRoutineName}</span>
-            <input id="routine-title" type="text" placeholder="$i18n{seRoutineNamePlaceholder}" maxlength="200">
+          <label class="rr-field">
+            <span class="rr-field__label">$i18n{seRoutineName}</span>
+            <input class="rr-control rr-control--md" id="routine-title" type="text" placeholder="$i18n{seRoutineNamePlaceholder}" maxlength="200">
           </label>
-          <label class="field">
-            <span>$i18n{seRoutineWhat}</span>
-            <textarea id="routine-prompt" rows="3"
+          <label class="rr-field">
+            <span class="rr-field__label">$i18n{seRoutineWhat}</span>
+            <textarea class="rr-control rr-textarea" id="routine-prompt" rows="3"
                       placeholder="$i18n{seRoutineWhatPlaceholder}"></textarea>
           </label>
           <div class="field-row">
-            <label class="field">
-              <span>$i18n{seRoutineKind}</span>
-              <select id="routine-kind">
-                <option value="cron" selected>$i18n{seRoutineKindCron}</option>
-                <option value="heartbeat">$i18n{seRoutineKindHeartbeat}</option>
-              </select>
+            <label class="rr-field">
+              <span class="rr-field__label">$i18n{seRoutineKind}</span>
+              <span class="rr-select-wrap">
+                <select class="rr-control rr-control--md rr-select" id="routine-kind">
+                  <option value="cron" selected>$i18n{seRoutineKindCron}</option>
+                  <option value="heartbeat">$i18n{seRoutineKindHeartbeat}</option>
+                </select>
+                <span class="rr-select-wrap__caret" aria-hidden="true">
+                  <svg width="100%" height="100%"><use href="#rr-chevron-down"></use></svg>
+                </span>
+              </span>
             </label>
-            <label class="field" id="routine-chat-field" hidden>
-              <span>$i18n{seRoutineWhichChat}</span>
-              <select id="routine-chat"></select>
+            <label class="rr-field" id="routine-chat-field" hidden>
+              <span class="rr-field__label">$i18n{seRoutineWhichChat}</span>
+              <span class="rr-select-wrap">
+                <select class="rr-control rr-control--md rr-select" id="routine-chat"></select>
+                <span class="rr-select-wrap__caret" aria-hidden="true">
+                  <svg width="100%" height="100%"><use href="#rr-chevron-down"></use></svg>
+                </span>
+              </span>
             </label>
-            <label class="field">
-              <span>$i18n{seRoutineEvery}</span>
-              <select id="routine-every">
-                <option value="60">$i18n{seRoutineEveryHour}</option>
-                <option value="240">$i18n{seRoutineEvery4Hours}</option>
-                <option value="720">$i18n{seRoutineEvery12Hours}</option>
-                <option value="1440" selected>$i18n{seRoutineEveryDay}</option>
-                <option value="10080">$i18n{seRoutineEveryWeek}</option>
-              </select>
+            <label class="rr-field">
+              <span class="rr-field__label">$i18n{seRoutineEvery}</span>
+              <span class="rr-select-wrap">
+                <select class="rr-control rr-control--md rr-select" id="routine-every">
+                  <option value="60">$i18n{seRoutineEveryHour}</option>
+                  <option value="240">$i18n{seRoutineEvery4Hours}</option>
+                  <option value="720">$i18n{seRoutineEvery12Hours}</option>
+                  <option value="1440" selected>$i18n{seRoutineEveryDay}</option>
+                  <option value="10080">$i18n{seRoutineEveryWeek}</option>
+                </select>
+                <span class="rr-select-wrap__caret" aria-hidden="true">
+                  <svg width="100%" height="100%"><use href="#rr-chevron-down"></use></svg>
+                </span>
+              </span>
             </label>
-            <label class="field">
-              <span>$i18n{seRoutinePermission}</span>
-              <select id="routine-mode">
-                <option value="0">$i18n{newTabPermissionRead}</option>
-                <option value="1" selected>$i18n{newTabPermissionGuard}</option>
-                <option value="2">$i18n{newTabPermissionFull}</option>
-              </select>
+            <label class="rr-field">
+              <span class="rr-field__label">$i18n{seRoutinePermission}</span>
+              <span class="rr-select-wrap">
+                <select class="rr-control rr-control--md rr-select" id="routine-mode">
+                  <option value="0">$i18n{newTabPermissionRead}</option>
+                  <option value="1" selected>$i18n{newTabPermissionGuard}</option>
+                  <option value="2">$i18n{newTabPermissionFull}</option>
+                </select>
+                <span class="rr-select-wrap__caret" aria-hidden="true">
+                  <svg width="100%" height="100%"><use href="#rr-chevron-down"></use></svg>
+                </span>
+              </span>
             </label>
-            <label class="field">
-              <span>$i18n{newTabEffort}</span>
-              <select id="routine-effort">
-                <option value="0">$i18n{newTabEffortQuick}</option>
-                <option value="1" selected>$i18n{newTabEffortStandard}</option>
-                <option value="2">$i18n{newTabEffortUltra}</option>
-              </select>
+            <label class="rr-field">
+              <span class="rr-field__label">$i18n{newTabEffort}</span>
+              <span class="rr-select-wrap">
+                <select class="rr-control rr-control--md rr-select" id="routine-effort">
+                  <option value="0">$i18n{newTabEffortQuick}</option>
+                  <option value="1" selected>$i18n{newTabEffortStandard}</option>
+                  <option value="2">$i18n{newTabEffortUltra}</option>
+                </select>
+                <span class="rr-select-wrap__caret" aria-hidden="true">
+                  <svg width="100%" height="100%"><use href="#rr-chevron-down"></use></svg>
+                </span>
+              </span>
             </label>
           </div>
           <div class="actions">
@@ -111,13 +160,18 @@
             <input id="memory-enabled" type="checkbox">
             <span>$i18n{seMemoryEnabled}</span>
           </label>
-          <label class="field">
-            <span>$i18n{seMemoryRetention}</span>
-            <select id="memory-retention">
-              <option value="30">$i18n{seMemory30Days}</option>
-              <option value="90">$i18n{seMemory90Days}</option>
-              <option value="0">$i18n{seMemoryForever}</option>
-            </select>
+          <label class="rr-field">
+            <span class="rr-field__label">$i18n{seMemoryRetention}</span>
+            <span class="rr-select-wrap">
+              <select class="rr-control rr-control--md rr-select" id="memory-retention">
+                <option value="30">$i18n{seMemory30Days}</option>
+                <option value="90">$i18n{seMemory90Days}</option>
+                <option value="0">$i18n{seMemoryForever}</option>
+              </select>
+              <span class="rr-select-wrap__caret" aria-hidden="true">
+                <svg width="100%" height="100%"><use href="#rr-chevron-down"></use></svg>
+              </span>
+            </span>
           </label>
           <div class="actions">
             <button type="button" id="memory-forget" class="pill pill-warn">$i18n{seMemoryForget}</button>
@@ -127,10 +181,7 @@
         <!-- Filters the list below rather than searching the settings page: memory is capped at 200
              entries, so this is the one list here that outgrows reading it top to bottom. -->
         <div class="list-search">
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <circle cx="7" cy="7" r="4.2"/>
-            <path d="M10.2 10.2L14 14"/>
-          </svg>
+          <svg aria-hidden="true"><use href="#rr-search"></use></svg>
           <input id="memory-search" type="search" placeholder="$i18n{seMemorySearch}"
                  aria-label="$i18n{seMemorySearch}" aria-controls="memory-list">
         </div>
@@ -146,37 +197,37 @@
         <form id="signin-form" class="plate" autocomplete="off">
           <h3>$i18n{seSigninHeading}</h3>
           <div class="field-row">
-            <label class="field">
-              <span>$i18n{seRoutineName}</span>
-              <input id="signin-label" type="text" placeholder="$i18n{seSigninNamePlaceholder}" maxlength="100">
+            <label class="rr-field">
+              <span class="rr-field__label">$i18n{seRoutineName}</span>
+              <input class="rr-control rr-control--md" id="signin-label" type="text" placeholder="$i18n{seSigninNamePlaceholder}" maxlength="100">
             </label>
-            <label class="field">
-              <span>$i18n{newTabModel}</span>
-              <input id="signin-model" type="text" placeholder="gpt-5.1" maxlength="100">
+            <label class="rr-field">
+              <span class="rr-field__label">$i18n{newTabModel}</span>
+              <input class="rr-control rr-control--md" id="signin-model" type="text" placeholder="gpt-5.1" maxlength="100">
             </label>
           </div>
-          <label class="field">
-            <span>$i18n{seSigninEndpointLabel}</span>
-            <input id="signin-endpoint" type="url" placeholder="https://api.openai.com/v1">
+          <label class="rr-field">
+            <span class="rr-field__label">$i18n{seSigninEndpointLabel}</span>
+            <input class="rr-control rr-control--md" id="signin-endpoint" type="url" placeholder="https://api.openai.com/v1">
           </label>
           <div class="field-row">
-            <label class="field">
-              <span>$i18n{seSigninAuthorizeUrl}</span>
-              <input id="signin-authorize" type="url" placeholder="https://auth.openai.com/oauth/authorize">
+            <label class="rr-field">
+              <span class="rr-field__label">$i18n{seSigninAuthorizeUrl}</span>
+              <input class="rr-control rr-control--md" id="signin-authorize" type="url" placeholder="https://auth.openai.com/oauth/authorize">
             </label>
-            <label class="field">
-              <span>$i18n{seSigninTokenUrl}</span>
-              <input id="signin-token" type="url" placeholder="https://auth.openai.com/oauth/token">
+            <label class="rr-field">
+              <span class="rr-field__label">$i18n{seSigninTokenUrl}</span>
+              <input class="rr-control rr-control--md" id="signin-token" type="url" placeholder="https://auth.openai.com/oauth/token">
             </label>
           </div>
           <div class="field-row">
-            <label class="field">
-              <span>$i18n{seSigninClientId}</span>
-              <input id="signin-client" type="text" placeholder="$i18n{seSigninClientPlaceholder}">
+            <label class="rr-field">
+              <span class="rr-field__label">$i18n{seSigninClientId}</span>
+              <input class="rr-control rr-control--md" id="signin-client" type="text" placeholder="$i18n{seSigninClientPlaceholder}">
             </label>
-            <label class="field">
-              <span>$i18n{seSigninScopes}</span>
-              <input id="signin-scopes" type="text" placeholder="openid profile offline_access">
+            <label class="rr-field">
+              <span class="rr-field__label">$i18n{seSigninScopes}</span>
+              <input class="rr-control rr-control--md" id="signin-scopes" type="text" placeholder="openid profile offline_access">
             </label>
           </div>
           <div class="actions">
@@ -190,22 +241,22 @@
         <form id="provider-form" class="plate" autocomplete="off">
           <h3>$i18n{seProviderHeading}</h3>
           <div class="field-row">
-            <label class="field">
-              <span>$i18n{seRoutineName}</span>
-              <input id="provider-label" type="text" placeholder="$i18n{seProviderNamePlaceholder}" maxlength="100">
+            <label class="rr-field">
+              <span class="rr-field__label">$i18n{seRoutineName}</span>
+              <input class="rr-control rr-control--md" id="provider-label" type="text" placeholder="$i18n{seProviderNamePlaceholder}" maxlength="100">
             </label>
-            <label class="field">
-              <span>$i18n{newTabModel}</span>
-              <input id="provider-model" type="text" placeholder="gpt-5.1" maxlength="100">
+            <label class="rr-field">
+              <span class="rr-field__label">$i18n{newTabModel}</span>
+              <input class="rr-control rr-control--md" id="provider-model" type="text" placeholder="gpt-5.1" maxlength="100">
             </label>
           </div>
-          <label class="field">
-            <span>$i18n{seProviderEndpoint}</span>
-            <input id="provider-endpoint" type="url" placeholder="https://api.openai.com/v1">
+          <label class="rr-field">
+            <span class="rr-field__label">$i18n{seProviderEndpoint}</span>
+            <input class="rr-control rr-control--md" id="provider-endpoint" type="url" placeholder="https://api.openai.com/v1">
           </label>
-          <label class="field">
-            <span>$i18n{seProviderApiKey}</span>
-            <input id="provider-secret" type="password" autocomplete="off"
+          <label class="rr-field">
+            <span class="rr-field__label">$i18n{seProviderApiKey}</span>
+            <input class="rr-control rr-control--md" id="provider-secret" type="password" autocomplete="off"
                    placeholder="$i18n{seProviderSecretPlaceholder}">
           </label>
           <div class="actions">
@@ -287,14 +338,15 @@
       </section>
 
       <!-- Appearance is a POINTER, not a second set of controls, and that is the whole decision here.
-           Every surface in this product themes itself from tokens.css, which declares `color-scheme: light
-           dark` and resolves 31 token values through light-dark() -- so the browser's own appearance mode
-           already drives our pages, and a theme picker on this page would either fight that setting or
-           write a pref nothing reads. The same goes for language: our strings come from the browser locale,
-           which cannot be changed from a page. What was actually missing was FINDABILITY -- someone looking
-           for theme or language in the product's own settings had only a generic browser-settings link at
-           the bottom of the nav -- so this section says where the setting lives and takes them straight
-           there, deep-linking the sub-pages rather than dropping them at the root. -->
+           Every surface in this product themes itself from the vendored design system, whose dark values
+           live behind `[data-theme="dark"]`; theme.ts sets that attribute from the OS setting and keeps
+           it in step with it -- so the browser's own appearance mode already drives our pages, and a
+           theme picker on this page would either fight that setting or write a pref nothing reads. The
+           same goes for language: our strings come from the browser locale, which cannot be changed from
+           a page. What was actually missing was FINDABILITY -- someone looking for theme or language in
+           the product's own settings had only a generic browser-settings link at the bottom of the nav --
+           so this section says where the setting lives and takes them straight there, deep-linking the
+           sub-pages rather than dropping them at the root. -->
       <section id="appearance" class="page">
         <h2>$i18n{seNavAppearance}</h2>
         <p class="lede">$i18n{seAppearanceLede}</p>

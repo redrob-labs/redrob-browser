@@ -1,18 +1,8 @@
-/* Pretendard Variable, vendored. SIL Open Font License 1.1 -- see the licence beside the new tab's
-   copy of this font. */
-@font-face {
-  font-display: swap;
-  font-family: 'Pretendard Variable';
-  font-style: normal;
-  font-weight: 45 920;
-  src: url(PretendardVariable.woff2) format('woff2-variations');
-}
-
 /* Copyright 2026 Redrob. Portions copyright The Chromium Authors.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-/* Design tokens live in tokens.css, linked before this sheet. */
+/* Tokens come from design_tokens.css and chrome_base.css, linked before this sheet. */
 
 * {
   box-sizing: border-box;
@@ -23,10 +13,10 @@
 }
 
 body {
-  background: var(--surface);
-  color: var(--ink);
-  font: 400 13px/1.62 var(--font-sans);
-  letter-spacing: -0.004em;
+  background: var(--surface-base);
+  color: var(--ink-primary);
+  font: var(--text-body-sm);
+  letter-spacing: 0;
   margin: 0;
 }
 
@@ -50,7 +40,7 @@ body {
    shell above no longer scrolls -- the content pane does. A stretched nav needs no sticky, no max-height
    and no top offset, and its border runs the full height at every scroll position. */
 .nav {
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -61,36 +51,33 @@ body {
 }
 
 .nav h1 {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font: var(--text-meta);
   margin: 0 0 14px 10px;
-  text-transform: uppercase;
 }
 
 .nav-link {
-  border-radius: var(--radius-control);
-  color: var(--ink);
-  font-size: 13px;
+  border-radius: var(--control-radius);
+  color: var(--ink-primary);
+  font: var(--text-body-sm);
   padding: 7px 10px;
   text-decoration: none;
 }
 
 .nav-link:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--surface-brand-subtle);
+  color: var(--ink-brand);
 }
 
 /* The section you are in. `aria-current` rather than a class so the state is one thing, announced and
    drawn from the same attribute instead of a class the screen reader cannot see. */
 .nav-link[aria-current='page'] {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--surface-brand-subtle);
+  color: var(--ink-brand);
   font-weight: 600;
 }
 
 .nav-foot {
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   margin-top: auto;
 }
 
@@ -116,29 +103,27 @@ body {
 }
 
 .page h2 {
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font: var(--text-title-3);
+    letter-spacing: -0.012em;
   margin: 0 0 6px;
 }
 
 .page h3 {
-  font-size: 13px;
-  font-weight: 600;
+  font: var(--text-label);
   margin: 0 0 10px;
 }
 
 .lede {
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   margin: 0 0 16px;
   max-width: 62ch;
 }
 
 .plate {
-  background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
-  box-shadow: 0 1px 2px light-dark(rgb(20 23 25 / 4%), rgb(0 0 0 / 25%));
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -157,9 +142,9 @@ body {
 
 .row {
   align-items: flex-start;
-  background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--card-radius);
   display: flex;
   gap: 12px;
   padding: 12px 14px;
@@ -175,20 +160,19 @@ body {
 }
 
 .row-detail {
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   overflow-wrap: anywhere;
 }
 
 /* No uppercase transform here: these rows carry endpoints, model ids and the user's own prompts, and
    HTTPS://API.OPENAI.COM/V1 is not a URL anyone typed. */
 .row-meta {
-  color: var(--muted-foreground);
-  font-size: 11px;
-  letter-spacing: 0.01em;
+  color: var(--ink-secondary);
+  font: var(--text-caption);
 }
 
 .row-warn {
-  color: var(--warn);
+  color: var(--status-danger);
 }
 
 .row-actions {
@@ -197,38 +181,14 @@ body {
   gap: 6px;
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.field > span {
-  color: var(--muted-foreground);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.field input,
-.field textarea,
-.field select {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  color: inherit;
-  font: inherit;
-  padding: 7px 10px;
-  width: 100%;
-}
-
-.field input:focus-visible,
-.field textarea:focus-visible,
-.field select:focus-visible {
-  border-color: var(--accent);
-  outline: none;
-}
+/* There is deliberately no .field block here any more. The 19 form fields on this page are the design
+   system's Field + Control + Select components (.rr-field, .rr-control, .rr-select), which this page gets
+   from the vendored design_system.css. What used to live here was a second, nearly-identical definition:
+   a 4px label gap against the system's 8px, --border-subtle against --border-strong, --control-radius
+   against --field-radius, a 7px/10px pad against a token height, and a label in --ink-secondary at
+   --text-meta against the system's --ink-primary at 600. None of it was wrong; all of it was a second
+   place a field's shape was decided, which is the drift this whole exercise removes.
+   .field-row below stays: a row of fields is this page's layout, not a component. */
 
 /* One rule for everything clickable on this page. Focus styling here covered only .field inputs, so the
    pills, the password chooser, the nav links and the row actions fell back to the UA ring drawn against
@@ -237,7 +197,7 @@ body {
 .choice:focus-visible,
 .nav-link:focus-visible,
 .toggle input:focus-visible {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -245,9 +205,9 @@ body {
    thing rather than an icon next to a box. */
 .list-search {
   align-items: center;
-  background: var(--card);
-  border: 1px solid var(--input);
-  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--control-radius);
   display: flex;
   gap: 7px;
   margin: 0 0 10px;
@@ -256,19 +216,20 @@ body {
 }
 
 .list-search:focus-within {
-  border-color: var(--accent);
-  outline: 2px solid var(--ring);
+  border-color: var(--action-primary);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
+/* Size and colour only. Stroke width, caps and joins belong to the glyph, which is the design system's own
+   (see the sprite in redrob_settings.html): 45-icons.md fixes them at 2px, butt and miter, and a local
+   override here would be a second place an icon's weight is decided. 16px is the spec's size beside
+   `label`-grade type. */
 .list-search svg {
-  fill: none;
+  color: var(--ink-secondary);
   flex: none;
-  height: 13px;
-  stroke: var(--muted-foreground);
-  stroke-linecap: round;
-  stroke-width: 1.5;
-  width: 13px;
+  height: 16px;
+  width: 16px;
 }
 
 .list-search input {
@@ -282,17 +243,17 @@ body {
 }
 
 .list-search input:disabled {
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
 }
 
 /* The confirmation. Sized to the text rather than the viewport: this asks one question, and a dialog as
    wide as the window reads as a page rather than as a stop. */
 .confirm {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--card-radius);
   box-shadow: var(--shadow-lg);
-  color: var(--ink);
+  color: var(--ink-primary);
   max-width: 380px;
   padding: 18px 20px 16px;
 }
@@ -302,14 +263,13 @@ body {
 }
 
 .confirm h2 {
-  font-size: 15px;
-  font-weight: 600;
+  font: var(--text-title-4);
   margin: 0 0 6px;
 }
 
 .confirm p {
-  color: var(--muted-foreground);
-  font-size: 13px;
+  color: var(--ink-secondary);
+  font: var(--text-body-sm);
   margin: 0 0 16px;
 }
 
@@ -323,7 +283,7 @@ body {
   gap: 12px;
 }
 
-.field-row .field {
+.field-row .rr-field {
   flex: 1;
   min-width: 140px;
 }
@@ -342,18 +302,18 @@ body {
 }
 
 .pill {
-  background: var(--raised);
-  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  color: var(--ink);
+  color: var(--ink-primary);
   cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  padding: 5px 14px;}
+  font: var(--text-label);
+  padding: 5px 14px;
+}
 
 .pill:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--action-primary);
+  color: var(--ink-brand);
 }
 
 /* The appearance section's two actions are LINKS, not buttons -- they leave for a browser settings page,
@@ -366,44 +326,44 @@ a.pill {
 }
 
 .pill-solid {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--surface);
+  background: var(--ink-primary);
+  border-color: var(--ink-primary);
+  color: var(--surface-base);
 }
 
 .pill-solid:hover {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--action-primary);
+  border-color: var(--action-primary);
   /* The accent's own paired foreground, not a literal white: in dark the accent is Blue 5, whose
      readable partner is the brand black. A hardcoded #fff was white-on-light-blue there. */
-  color: var(--accent-foreground);
+  color: var(--ink-on-brand);
 }
 
 .pill-warn:hover {
-  border-color: var(--warn);
-  color: var(--warn);
+  border-color: var(--status-danger);
+  color: var(--status-danger);
 }
 
 .pill-on {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--surface-brand-subtle);
+  border-color: var(--action-primary);
+  color: var(--ink-brand);
 }
 
 .status {
-  color: var(--muted-foreground);
-  font-size: 12px;
+  color: var(--ink-secondary);
+  font: var(--text-body-sm);
 }
 
 .note {
-  color: var(--muted-foreground);
-  font-size: 12px;
+  color: var(--ink-secondary);
+  font: var(--text-body-sm);
   margin: 4px 0 0;
   max-width: 62ch;
 }
 
 .empty {
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   margin: 0 0 16px;
 }
 
@@ -414,9 +374,9 @@ a.pill {
 }
 
 .choice {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
+  background: var(--surface-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--card-radius);
   cursor: pointer;
   display: flex;
   flex: 1;
@@ -434,8 +394,8 @@ a.pill {
    to a screen reader and had simply stopped being VISIBLE, which is the half of an accessibility fix
    that a source diff cannot show you: it took photographing the page to see three identical cards. */
 .choice[aria-checked='true'] {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--surface-brand-subtle);
+  border-color: var(--action-primary);
 }
 
 .choice-title {
@@ -443,8 +403,8 @@ a.pill {
 }
 
 .choice-detail {
-  color: var(--muted-foreground);
-  font-size: 12px;
+  color: var(--ink-secondary);
+  font: var(--text-body-sm);
 }
 
 .folder {
@@ -452,12 +412,11 @@ a.pill {
 }
 
 .mono {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
+  background: var(--surface-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--control-radius);
   display: inline-block;
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font: var(--text-code);
   margin: 0;
   padding: 6px 10px;
   overflow-wrap: anywhere;

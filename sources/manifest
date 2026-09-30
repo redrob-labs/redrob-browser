@@ -39,18 +39,51 @@ sources/chrome/browser/ui/webui/redrob/task_host_impl.cc chrome/browser/ui/webui
 sources/chrome/browser/resources/redrob/BUILD.gn    chrome/browser/resources/redrob/BUILD.gn
 sources/chrome/browser/resources/redrob/redrob.html chrome/browser/resources/redrob/redrob.html
 sources/chrome/browser/resources/redrob/redrob.css  chrome/browser/resources/redrob/redrob.css
-# tokens.css is ONE file copied into all three WebUI bundles. build_webui's static_files are
-# per-target and relative to the target's own directory, so a bundle cannot reference a file in
-# another bundle's folder -- which is why the font is already duplicated three ways. Mapping one
-# source to three destinations here means the duplication is in the copy step rather than on disk,
-# so the design tokens have exactly one place they can be edited.
-sources/chrome/browser/resources/redrob/tokens.css  chrome/browser/resources/redrob/tokens.css
-sources/chrome/browser/resources/redrob/tokens.css  chrome/browser/resources/redrob_settings/tokens.css
-sources/chrome/browser/resources/redrob/tokens.css  chrome/browser/resources/redrob_onboarding/tokens.css
+# One source file copied into all three WebUI bundles. build_webui's static_files are per-target and
+# relative to the target's own directory, so a bundle cannot reference a file in another bundle's folder
+# -- which is why the font is already duplicated three ways. Mapping one source to three destinations
+# here means the duplication is in the copy step rather than on disk, so each of these has exactly one
+# place it can be edited.
+#
+# design_tokens.css and fonts/ are the design system itself, vendored by scripts/vendor_design_system.py
+# and pinned by DESIGN_SYSTEM_PIN.json. brand/ is the logo artwork, pinned in the same file by sha256 but
+# from the design system DELIVERY rather than from npm, because @redrob-labs/ui ships no logo file. All of
+# it is copied ONCE, into redrob/: all three bundles reach them
+# through each BUILD.gn's generate_grd, whose input_files_base_dir points at that directory. The other
+# shared files below are per-bundle copies because build_webui static_files cannot cross directories. chrome_base.css carries only what a
+# Chromium WebUI needs and the design system deliberately does not provide, and defines no token at all.
+# theme.ts gives the vendored sheet the data-theme attribute it switches on.
+sources/chrome/browser/resources/redrob/design_tokens.css  chrome/browser/resources/redrob/design_tokens.css
+# The component layer. ONE copy, like the fonts: all three bundles read it out of redrob/ through
+# generate_grd's input_files_base_dir, so there is no per-bundle row here. It must be LINKED after
+# design_tokens.css -- it supersedes two of its roles. Gate check 7.
+sources/chrome/browser/resources/redrob/design_system.css  chrome/browser/resources/redrob/design_system.css
+
+# The design system's glyph geometry, DERIVED from its React icon module by the same vendor script. Code
+# rather than an asset, because the page imports it: this bundle has no React and no node_modules at build
+# time, and a Trusted Types page cannot be handed markup. Only the redrob/ bundle compiles it today; the
+# settings page carries the two glyphs it needs as a transcribed <symbol> sprite whose every coordinate
+# gate check 9 compares against this file. Sharing the compiled module across all three bundles is a build
+# change and is its own slice in docs/UX-PROGRAMME.md.
+sources/chrome/browser/resources/redrob/design_icons.ts  chrome/browser/resources/redrob/design_icons.ts
+sources/chrome/browser/resources/redrob/chrome_base.css  chrome/browser/resources/redrob/chrome_base.css
+sources/chrome/browser/resources/redrob/chrome_base.css  chrome/browser/resources/redrob_settings/chrome_base.css
+sources/chrome/browser/resources/redrob/chrome_base.css  chrome/browser/resources/redrob_onboarding/chrome_base.css
+sources/chrome/browser/resources/redrob/theme.ts  chrome/browser/resources/redrob/theme.ts
+sources/chrome/browser/resources/redrob/theme.ts  chrome/browser/resources/redrob_settings/theme.ts
+sources/chrome/browser/resources/redrob/theme.ts  chrome/browser/resources/redrob_onboarding/theme.ts
 sources/chrome/browser/resources/redrob/redrob.ts   chrome/browser/resources/redrob/redrob.ts
-sources/chrome/browser/resources/redrob/PretendardVariable.woff2  chrome/browser/resources/redrob/PretendardVariable.woff2
-sources/chrome/browser/resources/redrob/PretendardVariable-LICENSE.txt chrome/browser/resources/redrob/PretendardVariable-LICENSE.txt
-sources/chrome/browser/resources/redrob/redrob-mark.svg chrome/browser/resources/redrob/redrob-mark.svg
+sources/chrome/browser/resources/redrob/fonts/NotoSansDevanagari-Variable.woff2  chrome/browser/resources/redrob/fonts/NotoSansDevanagari-Variable.woff2
+sources/chrome/browser/resources/redrob/fonts/Pretendard-Bold.woff2  chrome/browser/resources/redrob/fonts/Pretendard-Bold.woff2
+sources/chrome/browser/resources/redrob/fonts/Pretendard-ExtraBold.woff2  chrome/browser/resources/redrob/fonts/Pretendard-ExtraBold.woff2
+sources/chrome/browser/resources/redrob/fonts/Pretendard-Light.woff2  chrome/browser/resources/redrob/fonts/Pretendard-Light.woff2
+sources/chrome/browser/resources/redrob/fonts/Pretendard-Medium.woff2  chrome/browser/resources/redrob/fonts/Pretendard-Medium.woff2
+sources/chrome/browser/resources/redrob/fonts/Pretendard-Regular.woff2  chrome/browser/resources/redrob/fonts/Pretendard-Regular.woff2
+sources/chrome/browser/resources/redrob/fonts/Pretendard-SemiBold.woff2  chrome/browser/resources/redrob/fonts/Pretendard-SemiBold.woff2
+sources/chrome/browser/resources/redrob/fonts/WantedSans-Variable.woff2  chrome/browser/resources/redrob/fonts/WantedSans-Variable.woff2
+sources/chrome/browser/resources/redrob/Pretendard-LICENSE.txt chrome/browser/resources/redrob/Pretendard-LICENSE.txt
+sources/chrome/browser/resources/redrob/brand/redrob-symbol.png  chrome/browser/resources/redrob/brand/redrob-symbol.png
+sources/chrome/browser/resources/redrob/brand/redrob-symbol-solid-white.png  chrome/browser/resources/redrob/brand/redrob-symbol-solid-white.png
 sources/chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.h  chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.h
 sources/chrome/browser/ui/views/tabs/vertical/redrob_sidebar_tokens.h  chrome/browser/ui/views/tabs/vertical/redrob_sidebar_tokens.h
 sources/chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.cc chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.cc
@@ -58,6 +91,8 @@ sources/chrome/browser/ui/views/tabs/vertical/redrob_account_row.h  chrome/brows
 sources/chrome/browser/ui/views/tabs/vertical/redrob_account_row.cc chrome/browser/ui/views/tabs/vertical/redrob_account_row.cc
 sources/chrome/browser/ui/color/redrob_color_mixer.h   chrome/browser/ui/color/redrob_color_mixer.h
 sources/chrome/browser/ui/color/redrob_color_mixer.cc  chrome/browser/ui/color/redrob_color_mixer.cc
+# Generated by the design system and vendored, not written here. See docs/DESIGN-SYSTEM.md.
+sources/chrome/browser/ui/color/redrob_design_tokens.h chrome/browser/ui/color/redrob_design_tokens.h
 sources/chrome/browser/ui/webui/redrob_onboarding/redrob_onboarding.mojom  chrome/browser/ui/webui/redrob_onboarding/redrob_onboarding.mojom
 sources/chrome/browser/ui/webui/redrob_onboarding/redrob_onboarding_ui.h  chrome/browser/ui/webui/redrob_onboarding/redrob_onboarding_ui.h
 sources/chrome/browser/ui/webui/redrob_onboarding/redrob_onboarding_ui.cc  chrome/browser/ui/webui/redrob_onboarding/redrob_onboarding_ui.cc
@@ -67,9 +102,8 @@ sources/chrome/browser/ui/webui/redrob_onboarding/BUILD.gn  chrome/browser/ui/we
 sources/chrome/browser/resources/redrob_onboarding/redrob_onboarding.html  chrome/browser/resources/redrob_onboarding/redrob_onboarding.html
 sources/chrome/browser/resources/redrob_onboarding/redrob_onboarding.css  chrome/browser/resources/redrob_onboarding/redrob_onboarding.css
 sources/chrome/browser/resources/redrob_onboarding/redrob_onboarding.ts  chrome/browser/resources/redrob_onboarding/redrob_onboarding.ts
-sources/chrome/browser/resources/redrob_onboarding/PretendardVariable.woff2  chrome/browser/resources/redrob_onboarding/PretendardVariable.woff2
-sources/chrome/browser/resources/redrob_onboarding/PretendardVariable-LICENSE.txt  chrome/browser/resources/redrob_onboarding/PretendardVariable-LICENSE.txt
-sources/chrome/browser/resources/redrob_onboarding/redrob-mark.svg  chrome/browser/resources/redrob_onboarding/redrob-mark.svg
+sources/chrome/browser/resources/redrob/Pretendard-LICENSE.txt  chrome/browser/resources/redrob_onboarding/Pretendard-LICENSE.txt
+sources/chrome/browser/resources/redrob/Pretendard-LICENSE.txt  chrome/browser/resources/redrob_settings/Pretendard-LICENSE.txt
 sources/chrome/browser/resources/redrob_onboarding/BUILD.gn  chrome/browser/resources/redrob_onboarding/BUILD.gn
 sources/chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.h  chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.h
 sources/chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.cc  chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.cc
@@ -98,7 +132,6 @@ sources/chrome/browser/resources/redrob_settings/BUILD.gn  chrome/browser/resour
 sources/chrome/browser/resources/redrob_settings/redrob_settings.html  chrome/browser/resources/redrob_settings/redrob_settings.html
 sources/chrome/browser/resources/redrob_settings/redrob_settings.css   chrome/browser/resources/redrob_settings/redrob_settings.css
 sources/chrome/browser/resources/redrob_settings/redrob_settings.ts    chrome/browser/resources/redrob_settings/redrob_settings.ts
-sources/chrome/browser/resources/redrob_settings/PretendardVariable.woff2  chrome/browser/resources/redrob_settings/PretendardVariable.woff2
 
 # The Chromium-family importer. Chromium 153 has no importer for Chrome, Edge or Brave at all -- the
 # type enum stops at Edge's legacy favourites -- so both the detection and the reading are ours.

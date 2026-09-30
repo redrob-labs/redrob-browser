@@ -1,9 +1,12 @@
 # Onboarding and the agent's tool surface
 
-The reference product is another AI browser. Two write-ups describe what it does end to end:
-`techbukket.com/blog/aside-install-guide` and `/aside-use-cases`. This file records what that
-implies for us, and the exact Chromium 153 seams each piece hangs off, so the work does not need
-re-investigating.
+This file records what our first run and our agent tool surface have to do, and the exact Chromium 153
+seams each piece hangs off, so the work does not need re-investigating.
+
+Where a competing product was looked at during research, it is described here only as what a first run
+of that CLASS of product does -- never named, never cited, never quoted. Our surfaces are specified
+from our own engine's behaviour and from the design system; the UX reference frames that informed the
+visual programme live outside this repository and are catalogued in `UX-PROGRAMME.md`.
 
 ## Where we are
 
@@ -58,9 +61,11 @@ Not built, and named rather than implied:
 
 ## 1. First run
 
-The reference's first launch is six steps before the browser: welcome, account, an explanation of what the
-agent does, a password-manager choice, connecting a model or subscription, and importing from another
-browser. We have none of it -- our first launch goes straight to a new tab.
+An agentic browser's first launch runs six steps before the browser itself: welcome, account, an
+explanation of what the agent does, a password-manager choice, connecting a model or subscription, and
+importing from another browser. We declare all six in `redrob_onboarding` and only `import` is built
+out -- our first launch otherwise goes straight to a new tab. `UX-PROGRAMME.md` slices the remaining
+five.
 
 Chromium 153 already has the surface this needs, and it is NOT a tab. `FirstRunService` decides
 whether to run it:

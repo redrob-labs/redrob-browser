@@ -1,5 +1,10 @@
 # UI/UX plan — redrob-browser follows redrob-cowork
 
+> **Superseded for the token layer, 2026-09-29.** Waves 1 and 2 below describe porting cowork's token scale
+> into a local `tokens.css`. That is not what happened: the browser now vendors `@redrob-labs/ui` directly,
+> pinned by `DESIGN_SYSTEM_PIN.json`, and `tokens.css` no longer exists. Read `docs/DESIGN-SYSTEM.md` for the
+> token layer. The rest of this document — the component and flow work — still stands.
+
 Written 2026-09-23. Standard: **redrob-cowork's UI/UX is the reference.** Where this browser and
 cowork disagree about a token, a component, a label or a flow, cowork wins unless there is a written
 reason it cannot.

@@ -1,10 +1,13 @@
 <!doctype html>
-<html dir="$i18n{textdirection}" lang="$i18n{language}">
+<!-- Static light default, overwritten by theme.ts before first paint. See redrob/redrob.html for why the
+     attribute cannot be left off once design_system.css is linked. -->
+<html dir="$i18n{textdirection}" lang="$i18n{language}" data-theme="light">
 <head>
   <meta charset="utf-8">
-  <meta name="color-scheme" content="light dark">
   <title>$i18n{obWelcomeTitle}</title>
-  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="design_tokens.css">
+  <link rel="stylesheet" href="design_system.css">
+  <link rel="stylesheet" href="chrome_base.css">
   <link rel="stylesheet" href="redrob_onboarding.css">
 </head>
 <body>
@@ -14,7 +17,13 @@
 
   <main id="stage">
     <section class="step" data-step="welcome">
-      <div class="art art-mark"><img src="redrob-mark.svg" alt=""></div>
+      <!-- Two files, one shown, for the reason in redrob.css: 10-logo.md forbids recoloring the
+           artwork, so the dark ground gets the flat-white symbol rather than a tinted copy of the
+           gradient one. -->
+      <div class="art art-mark">
+        <img class="mark-light" src="brand/redrob-symbol.png" alt="" aria-hidden="true">
+        <img class="mark-dark" src="brand/redrob-symbol-solid-white.png" alt="" aria-hidden="true">
+      </div>
       <h1>$i18n{obWelcomeTitle}</h1>
       <p>$i18n{obWelcomeBody}</p>
     </section>

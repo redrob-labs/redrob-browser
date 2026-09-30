@@ -76,7 +76,9 @@ inline constexpr int kRowLabelSizeDelta = 0;
 //
 // Which ColorId plays which part. The values are in redrob_color_mixer.cc.
 
-// The column's wash. #e9fbff, measured.
+// The column's ground. `--surface-sunken` in light, `--surface-raised` in dark, which is what the design
+// system's own `.rr-shell__side` paints. It used to be a browser-local cyan #e9fbff; see the note in
+// redrob_color_mixer.cc for why that was wrong and why it looked justified.
 inline constexpr ui::ColorId kSurface = ui::kColorFrameActive;
 
 // A row's label when it is the thing you are looking at. Measured #090b0c, which is the brand's own

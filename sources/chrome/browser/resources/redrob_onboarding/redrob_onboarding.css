@@ -1,35 +1,14 @@
-/* Pretendard Variable, vendored. SIL Open Font License 1.1 -- see PretendardVariable-LICENSE.txt.
-   Loaded from the resource pack rather than a CDN: this is the first screen of a browser that has not
-   necessarily reached a network yet. */
-@font-face {
-  font-display: swap;
-  font-family: 'Pretendard Variable';
-  font-style: normal;
-  font-weight: 45 920;
-  src: url(PretendardVariable.woff2) format('woff2-variations');
-}
-
-/* Redrob's canonical tokens, from @redrob-design/brand. The same values the new tab page uses, so the
-   first screen and the second cannot disagree about what the brand looks like. */
-/* Design tokens live in tokens.css, linked before this sheet. */
-
-/* Two names this sheet uses that are shadcn's `--primary` pair under different labels. Aliased locally
-   rather than added to the shared token file: they are this page's own vocabulary, and the token file
-   should carry the product's names, not each surface's synonyms for them. */
-:root {
-  --solid: var(--primary);
-  --on-solid: var(--primary-foreground);
-}
+/* Tokens come from design_tokens.css and chrome_base.css, linked before this sheet. */
 
 body {
-  background: var(--surface);
-  color: var(--ink);
+  background: var(--surface-base);
+  color: var(--ink-primary);
   display: flex;
   flex-direction: column;
   /* The brand's body role, scaled for a window-filling surface rather than a 240px sidebar. */
-  font: 400 15px/1.62 var(--font-sans);
+  font: var(--text-body);
   height: 100vh;
-  letter-spacing: -0.004em;
+  letter-spacing: -0.003em;
   margin: 0;
   overflow: hidden;
 }
@@ -38,7 +17,7 @@ body {
    costs nothing to ship, and it fades toward the bottom so the action bar sits on calm ground. */
 #field {
   background:
-    radial-gradient(circle at center, var(--line) 1px, transparent 1.2px) 0 0 / 22px 22px;
+    radial-gradient(circle at center, var(--border-subtle) 1px, transparent 1.2px) 0 0 / 22px 22px;
   inset: 0;
   /* Luminance mask, not a colour: #000 and transparent are the mask's opaque and clear ends, so these
      two are not themed values and must not become tokens. */
@@ -90,15 +69,13 @@ body {
 
 h1 {
   /* The brand's heading role: 600, tight tracking. */
-  font-size: 30px;
-  font-weight: 600;
-  letter-spacing: -0.022em;
-  line-height: 1.24;
+  font: var(--text-title-1);
+    letter-spacing: -0.022em;
   margin: 0 0 8px;
 }
 
 p {
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   margin: 0 0 4px;
   max-width: 44ch;
 }
@@ -116,11 +93,11 @@ p {
 }
 
 .art::before {
-  background: var(--raised);
-  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
   border-radius: 34px;
-  box-shadow: 0 22px 50px -18px color-mix(in srgb, var(--rr-blue-6) 38%, transparent),
-    0 3px 10px -4px color-mix(in srgb, var(--rr-black) 22%, transparent);
+  box-shadow: 0 22px 50px -18px color-mix(in srgb, var(--blue-6) 38%, transparent),
+    0 3px 10px -4px color-mix(in srgb, var(--redrob-black) 22%, transparent);
   content: '';
   height: 150px;
   position: absolute;
@@ -134,9 +111,25 @@ p {
   z-index: 1;
 }
 
+/* Sized by height and width only, at full opacity: 10-logo.md rules out recoloring, restretching, a fade
+   and any added effect. The rotated plate behind it is the plate's own shadow, not the mark's.
+   Two classes deep on purpose -- `.art-mark img` is one class and one element, so a single-class rule
+   here would lose to it and leave both grounds' files on screen at once. */
 .art-mark img {
   height: 84px;
   width: 84px;
+}
+
+.art-mark .mark-dark {
+  display: none;
+}
+
+[data-theme='dark'] .art-mark .mark-light {
+  display: none;
+}
+
+[data-theme='dark'] .art-mark .mark-dark {
+  display: block;
 }
 
 /* Steps without their own artwork get a tinted glyph plate rather than an empty one, so no step looks
@@ -145,7 +138,7 @@ p {
 .art-agent::after,
 .art-passwords::after,
 .art-model::after {
-  background: var(--accent);
+  background: var(--action-primary);
   content: '';
   height: 64px;
   mask: var(--glyph) center / contain no-repeat;
@@ -172,16 +165,16 @@ p {
 }
 
 .art-import .plate-source {
-  background: var(--raised);
-  border: 1px solid var(--line);
-  box-shadow: 0 16px 34px -14px color-mix(in srgb, var(--rr-black) 30%, transparent);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 16px 34px -14px color-mix(in srgb, var(--redrob-black) 30%, transparent);
   top: 14px;
   transform: rotate(-6deg);
 }
 
 .art-import .plate-target {
-  background: linear-gradient(140deg, var(--accent-soft), color-mix(in srgb, var(--accent) 30%, transparent));
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: linear-gradient(140deg, var(--surface-brand-subtle), color-mix(in srgb, var(--action-primary) 30%, transparent));
+  border: 1px solid color-mix(in srgb, var(--action-primary) 40%, transparent);
   bottom: 12px;
   transform: rotate(5deg);
 }
@@ -191,10 +184,10 @@ p {
 }
 
 input {
-  background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--control-radius);
+  color: var(--ink-primary);
   font: inherit;
   padding: 11px 13px;
 }
@@ -208,7 +201,7 @@ input {
 .primary:focus-visible,
 .quiet:focus-visible,
 .dot:focus-visible {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -221,10 +214,10 @@ input {
 }
 
 .choice {
-  background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--control-radius);
+  color: var(--ink-primary);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -235,23 +228,23 @@ input {
 }
 
 .choice span {
-  color: var(--muted-foreground);
-  font-size: 13px;
+  color: var(--ink-secondary);
+  font: var(--text-body-sm);
 }
 
 .choice[aria-checked='true'] {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--surface-brand-subtle);
+  border-color: var(--action-primary);
 }
 
 
 .status {
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   margin-top: 16px;
 }
 
 .status[data-tone='error'] {
-  color: light-dark(#a31310, #ff5452);
+  color: var(--status-danger);
 }
 
 #bar {
@@ -269,7 +262,7 @@ input {
 }
 
 .dot {
-  background: var(--line);
+  background: var(--border-subtle);
   border: 0;
   border-radius: 999px;
   height: 7px;
@@ -279,7 +272,7 @@ input {
 }
 
 .dot[aria-selected='true'] {
-  background: var(--solid);
+  background: var(--ink-primary);
   width: 20px;
 }
 
@@ -288,10 +281,10 @@ button {
 }
 
 .primary {
-  background: var(--solid);
+  background: var(--ink-primary);
   border: 0;
   border-radius: 999px;
-  color: var(--on-solid);
+  color: var(--surface-base);
   cursor: pointer;
   font-weight: 500;
   padding: 11px 22px;
@@ -306,14 +299,14 @@ button {
   background: none;
   border: 0;
   border-radius: 999px;
-  color: var(--muted-foreground);
+  color: var(--ink-secondary);
   cursor: pointer;
   padding: 11px 14px;
 }
 
 .quiet:hover {
-  background: var(--accent-soft);
-  color: var(--ink);
+  background: var(--surface-brand-subtle);
+  color: var(--ink-primary);
 }
 
 .quiet:disabled {
