@@ -107,6 +107,52 @@ redrob_private::Effort ToPrivateEffort(redrob::mojom::Effort effort) {
   }
   return redrob_private::Effort::kStandard;
 }
+
+// The other direction, for the routine a page sends back. Mirrors
+// FromWireRoutine in the settings mojom host: lastRunMs, nextRunMs and
+// lastError are reported OUT by getSettings and are the store's to set, so a
+// routine arriving from a page cannot claim them.
+redrob::mojom::PermissionMode FromPrivateMode(redrob_private::PermissionMode mode) {
+  switch (mode) {
+    case redrob_private::PermissionMode::kReadOnly:
+      return redrob::mojom::PermissionMode::kReadOnly;
+    case redrob_private::PermissionMode::kFullAccess:
+      return redrob::mojom::PermissionMode::kFullAccess;
+    case redrob_private::PermissionMode::kGuard:
+    case redrob_private::PermissionMode::kNone:
+      return redrob::mojom::PermissionMode::kGuard;
+  }
+  return redrob::mojom::PermissionMode::kGuard;
+}
+
+redrob::mojom::Effort FromPrivateEffort(redrob_private::Effort effort) {
+  switch (effort) {
+    case redrob_private::Effort::kQuick:
+      return redrob::mojom::Effort::kQuick;
+    case redrob_private::Effort::kUltrabrowse:
+      return redrob::mojom::Effort::kUltrabrowse;
+    case redrob_private::Effort::kStandard:
+    case redrob_private::Effort::kNone:
+      return redrob::mojom::Effort::kStandard;
+  }
+  return redrob::mojom::Effort::kStandard;
+}
+
+RoutineStore::Routine FromPrivateRoutine(const redrob_private::Routine& wire) {
+  RoutineStore::Routine routine;
+  routine.id = wire.id;
+  routine.title = wire.title;
+  routine.prompt = wire.prompt;
+  routine.kind = wire.kind == redrob_private::RoutineKind::kHeartbeat
+                     ? RoutineStore::Kind::kHeartbeat
+                     : RoutineStore::Kind::kCron;
+  routine.every_minutes = wire.every_minutes;
+  routine.mode = FromPrivateMode(wire.mode);
+  routine.effort = FromPrivateEffort(wire.effort);
+  routine.enabled = wire.enabled;
+  routine.task_id = wire.task_id;
+  return routine;
+}
 }  // namespace
 
 ExtensionFunction::ResponseAction RedrobPrivateRemoveMemoryFunction::Run() {
@@ -362,6 +408,47 @@ RedrobPrivateClearWorkingFolderFunction::Run() {
       ->GetPrefs()
       ->SetFilePath(redrob::prefs::kWorkingFolder, base::FilePath());
   return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateAddRoutineFunction::Run() {
+  auto params = redrob_private::AddRoutine::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const std::string id =
+      RoutineStoreFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()))
+          ->Add(FromPrivateRoutine(params->routine));
+  base::ListValue result;
+  if (!id.empty()) {
+    result.Append(id);
+  }
+  return RespondNow(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateUpdateRoutineFunction::Run() {
+  auto params = redrob_private::UpdateRoutine::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const bool existed =
+      RoutineStoreFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()))
+          ->Update(FromPrivateRoutine(params->routine));
+  return RespondNow(ArgumentList(
+      redrob_private::UpdateRoutine::Results::Create(existed)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateRunRoutineNowFunction::Run() {
+  auto params = redrob_private::RunRoutineNow::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const std::string task_id =
+      RoutineStoreFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()))
+          ->RunNow(params->id);
+  // Nothing rather than an empty id when it did not start: the caller has to be
+  // able to tell "started, here is the task" from "did not start".
+  base::ListValue result;
+  if (!task_id.empty()) {
+    result.Append(task_id);
+  }
+  return RespondNow(ArgumentList(std::move(result)));
 }
 
 }  // namespace extensions
