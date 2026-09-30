@@ -190,5 +190,29 @@ namespace redrobPrivate {
     // Runs a routine now, without waiting for its schedule.
     // |callback|: the id of the task it started, or nothing if it did not start.
     static void runRoutineNow(DOMString id, StringCallback callback);
+
+    // Asks the user for the folder agent tasks may write into, and records it.
+    // The dialog is opened by the browser and is modal to this page's window.
+    // |callback|: the chosen folder's display name, or nothing if the user
+    // cancelled, the path was not absolute, or the platform had no dialog.
+    static void chooseWorkingFolder(StringCallback callback);
+
+    // Starts an OAuth sign-in for a NEW model provider. The provider entry is
+    // written only once tokens actually arrive, so a cancelled sign-in leaves
+    // nothing behind. The authorize page is opened by the BROWSER in a new tab,
+    // not by the caller.
+    // |callback|: an error message if the sign-in could not be started, or
+    // nothing when it was started.
+    static void beginProviderSignIn(DOMString providerLabel,
+                                    DOMString model,
+                                    DOMString endpoint,
+                                    DOMString authorizeUrl,
+                                    DOMString tokenUrl,
+                                    DOMString clientId,
+                                    DOMString scopes,
+                                    StringCallback callback);
+
+    // Opens Chromium's own password manager, reusing its tab if it is open.
+    static void openPasswordManager();
   };
 };

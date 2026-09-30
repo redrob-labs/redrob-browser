@@ -11,15 +11,21 @@ source_set("redrob_private") {
   sources = [
     "redrob_private_api.cc",
     "redrob_private_api.h",
+    "redrob_private_folder_picker.cc",
+    "redrob_private_folder_picker.h",
   ]
 
   deps = [
     "//base",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/redrob:sidecar",
+    "//chrome/browser/ui/navigator",
+    "//chrome/browser/ui/select_file_policy",
     "//components/password_manager/core/common",
     "//chrome/common/extensions/api",
     "//components/version_info",
+    "//content/public/browser",
     "//extensions/browser",
+    "//ui/shell_dialogs",
   ]
 }

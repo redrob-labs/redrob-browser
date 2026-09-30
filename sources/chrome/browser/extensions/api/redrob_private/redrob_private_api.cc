@@ -7,20 +7,28 @@
 #include <string>
 
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/redrob/agent_service_factories.h"
 #include "chrome/browser/redrob/memory_store.h"
 #include "chrome/browser/redrob/model_store.h"
+#include "chrome/browser/redrob/oauth_flow.h"
 #include "chrome/browser/redrob/redrob_prefs.h"
 #include "chrome/browser/redrob/routine_store.h"
 #include "chrome/browser/redrob/rpc_server.h"
 #include "chrome/browser/redrob/sidecar_client.h"
 #include "chrome/browser/redrob/task_store.h"
 #include "chrome/browser/redrob/task_store_factory.h"
+#include "chrome/browser/ui/navigator/browser_navigator.h"
+#include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
+#include "chrome/common/webui_url_constants.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/web_contents.h"
+#include "url/gurl.h"
 #include "chrome/common/extensions/api/redrob_private.h"
 #include "components/version_info/version_info.h"
 
@@ -449,6 +457,84 @@ ExtensionFunction::ResponseAction RedrobPrivateRunRoutineNowFunction::Run() {
     result.Append(task_id);
   }
   return RespondNow(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateChooseWorkingFolderFunction::Run() {
+  content::WebContents* web_contents = GetSenderWebContents();
+  if (!web_contents) {
+    return RespondNow(ArgumentList(base::ListValue()));
+  }
+  // The picker outlives this call and answers once. Binding `this` keeps the
+  // function alive until it does, because an ExtensionFunction is ref-counted.
+  RedrobPrivateFolderPicker::Show(
+      web_contents, u"Choose the folder agent tasks may write into",
+      base::BindOnce(
+          &RedrobPrivateChooseWorkingFolderFunction::OnFolderChosen, this));
+  return RespondLater();
+}
+
+void RedrobPrivateChooseWorkingFolderFunction::OnFolderChosen(
+    const base::FilePath& path) {
+  base::ListValue result;
+  // A relative path would be recorded and then resolved against whatever the
+  // browser's working directory happens to be, so it is refused rather than
+  // stored.
+  if (!path.empty() && path.IsAbsolute()) {
+    Profile::FromBrowserContext(browser_context())
+        ->GetPrefs()
+        ->SetFilePath(redrob::prefs::kWorkingFolder, path);
+    // The page is told the display name; the full path stays in the pref.
+    result.Append(path.BaseName().AsUTF8Unsafe());
+  }
+  Respond(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateBeginProviderSignInFunction::Run() {
+  auto params = redrob_private::BeginProviderSignIn::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  redrob::OAuthFlow::Config config;
+  config.authorize_url = GURL(params->authorize_url);
+  config.token_url = GURL(params->token_url);
+  config.client_id = params->client_id;
+  config.scopes = params->scopes;
+  ModelStoreFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()))
+      ->BeginOAuth(
+          params->provider_label, params->model, params->endpoint, config,
+          base::BindOnce(
+              &RedrobPrivateBeginProviderSignInFunction::OnAuthorizeUrl, this));
+  return RespondLater();
+}
+
+void RedrobPrivateBeginProviderSignInFunction::OnAuthorizeUrl(
+    const GURL& authorize,
+    const std::string& error) {
+  base::ListValue result;
+  if (!authorize.is_valid() || !error.empty()) {
+    result.Append(error.empty() ? "The sign-in could not be started." : error);
+    Respond(ArgumentList(std::move(result)));
+    return;
+  }
+  // Opened by the browser, in a tab, because that is what this product is. A
+  // page cannot be trusted to have navigated somewhere the user can see.
+  NavigateParams params(Profile::FromBrowserContext(browser_context()),
+                        authorize, ui::PAGE_TRANSITION_AUTO_BOOKMARK);
+  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
+  Navigate(&params);
+  // Nothing appended: no error.
+  Respond(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateOpenPasswordManagerFunction::Run() {
+  NavigateParams params(Profile::FromBrowserContext(browser_context()),
+                        GURL(chrome::kChromeUIPasswordManagerURL),
+                        ui::PAGE_TRANSITION_AUTO_BOOKMARK);
+  params.disposition = WindowOpenDisposition::SINGLETON_TAB;
+  Navigate(&params);
+  return RespondNow(NoArguments());
 }
 
 }  // namespace extensions

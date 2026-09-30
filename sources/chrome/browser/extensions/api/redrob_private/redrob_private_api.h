@@ -5,7 +5,15 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_
 
+#include <string>
+
 #include "extensions/browser/extension_function.h"
+
+namespace base {
+class FilePath;
+}  // namespace base
+
+class GURL;
 
 namespace extensions {
 
@@ -194,6 +202,42 @@ class RedrobPrivateRunRoutineNowFunction : public ExtensionFunction {
                              REDROBPRIVATE_RUNROUTINENOW)
  protected:
   ~RedrobPrivateRunRoutineNowFunction() override = default;
+  ResponseAction Run() override;
+};
+
+// The three below answer AFTER Run() returns, so each holds a reference to
+// itself in the callback it hands out. That is why they declare an OnDone
+// rather than doing the work inline.
+class RedrobPrivateChooseWorkingFolderFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.chooseWorkingFolder",
+                             REDROBPRIVATE_CHOOSEWORKINGFOLDER)
+ protected:
+  ~RedrobPrivateChooseWorkingFolderFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnFolderChosen(const base::FilePath& path);
+};
+
+class RedrobPrivateBeginProviderSignInFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.beginProviderSignIn",
+                             REDROBPRIVATE_BEGINPROVIDERSIGNIN)
+ protected:
+  ~RedrobPrivateBeginProviderSignInFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnAuthorizeUrl(const GURL& authorize, const std::string& error);
+};
+
+class RedrobPrivateOpenPasswordManagerFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.openPasswordManager",
+                             REDROBPRIVATE_OPENPASSWORDMANAGER)
+ protected:
+  ~RedrobPrivateOpenPasswordManagerFunction() override = default;
   ResponseAction Run() override;
 };
 
