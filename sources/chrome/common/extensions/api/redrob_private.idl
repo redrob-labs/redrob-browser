@@ -71,6 +71,13 @@ namespace redrobPrivate {
     // arrive on onImportStateChanged. Starting a second import while one runs
     // is ignored.
     static void startImport(long sourceIndex);
+
+    // Ends the first run. When onboarding is shown inside the first-run window
+    // (which hosts this extension page), this fires the browser's own
+    // completion — mark first run finished, tear the window down, open the
+    // browser. The page cannot do any of that itself. A no-op when onboarding
+    // was opened as an ordinary tab (there is no first-run window to end).
+    static void completeOnboarding();
   };
 
   interface Events {
