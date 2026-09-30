@@ -15,7 +15,11 @@ source_set("redrob_private") {
 
   deps = [
     "//base",
+    "//chrome/browser/importer",
+    "//chrome/browser/profiles:profile",
     "//chrome/common/extensions/api",
+    "//components/prefs",
+    "//components/user_data_importer/common",
     "//components/version_info",
     "//extensions/browser",
   ]

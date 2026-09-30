@@ -5,7 +5,11 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_
 
+#include <memory>
+
 #include "extensions/browser/extension_function.h"
+
+class ImporterList;
 
 namespace extensions {
 
@@ -19,6 +23,48 @@ class RedrobPrivateGetBrowserVersionFunction : public ExtensionFunction {
 
   // ExtensionFunction:
   ResponseAction Run() override;
+};
+
+class RedrobPrivateSetPasswordChoiceFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setPasswordChoice",
+                             REDROBPRIVATE_SETPASSWORDCHOICE)
+
+ protected:
+  ~RedrobPrivateSetPasswordChoiceFunction() override = default;
+
+  // ExtensionFunction:
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetModelChoiceFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setModelChoice",
+                             REDROBPRIVATE_SETMODELCHOICE)
+
+ protected:
+  ~RedrobPrivateSetModelChoiceFunction() override = default;
+
+  // ExtensionFunction:
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateGetImportSourcesFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getImportSources",
+                             REDROBPRIVATE_GETIMPORTSOURCES)
+
+ protected:
+  ~RedrobPrivateGetImportSourcesFunction() override;
+
+  // ExtensionFunction:
+  ResponseAction Run() override;
+
+ private:
+  // Detection is asynchronous; the ImporterList must outlive Run().
+  void OnSourcesDetected();
+
+  std::unique_ptr<ImporterList> importer_list_;
 };
 
 }  // namespace extensions
