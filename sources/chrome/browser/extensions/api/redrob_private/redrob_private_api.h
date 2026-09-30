@@ -241,6 +241,31 @@ class RedrobPrivateOpenPasswordManagerFunction : public ExtensionFunction {
   ResponseAction Run() override;
 };
 
+class RedrobPrivateListModelsFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.listModels",
+                             REDROBPRIVATE_LISTMODELS)
+ protected:
+  ~RedrobPrivateListModelsFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateListTasksFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.listTasks", REDROBPRIVATE_LISTTASKS)
+ protected:
+  ~RedrobPrivateListTasksFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateGetTaskFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getTask", REDROBPRIVATE_GETTASK)
+ protected:
+  ~RedrobPrivateGetTaskFunction() override = default;
+  ResponseAction Run() override;
+};
+
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_

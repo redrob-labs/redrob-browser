@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/api/redrob_private/redrob_private_api.h"
 
 #include <string>
+#include <vector>
 
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
@@ -160,6 +161,107 @@ RoutineStore::Routine FromPrivateRoutine(const redrob_private::Routine& wire) {
   routine.enabled = wire.enabled;
   routine.task_id = wire.task_id;
   return routine;
+}
+
+// A-1: the agent's task types, outbound. The agent mojom's PermissionMode and
+// Effort are the same enums the settings surface already maps, so ToPrivateMode
+// and ToPrivateEffort above are reused rather than duplicated.
+redrob_private::TaskState ToPrivateState(redrob::mojom::TaskState state) {
+  switch (state) {
+    case redrob::mojom::TaskState::kQueued:
+      return redrob_private::TaskState::kQueued;
+    case redrob::mojom::TaskState::kRunning:
+      return redrob_private::TaskState::kRunning;
+    case redrob::mojom::TaskState::kBlockedOnPolicy:
+      return redrob_private::TaskState::kBlockedOnPolicy;
+    case redrob::mojom::TaskState::kSucceeded:
+      return redrob_private::TaskState::kSucceeded;
+    case redrob::mojom::TaskState::kFailed:
+      return redrob_private::TaskState::kFailed;
+    case redrob::mojom::TaskState::kCancelled:
+      return redrob_private::TaskState::kCancelled;
+  }
+  return redrob_private::TaskState::kFailed;
+}
+
+redrob_private::StepKind ToPrivateStepKind(redrob::mojom::StepKind kind) {
+  switch (kind) {
+    case redrob::mojom::StepKind::kThinking:
+      return redrob_private::StepKind::kThinking;
+    case redrob::mojom::StepKind::kSearchedMemory:
+      return redrob_private::StepKind::kSearchedMemory;
+    case redrob::mojom::StepKind::kOpenedPage:
+      return redrob_private::StepKind::kOpenedPage;
+    case redrob::mojom::StepKind::kCapturedScreenshot:
+      return redrob_private::StepKind::kCapturedScreenshot;
+    case redrob::mojom::StepKind::kReadPage:
+      return redrob_private::StepKind::kReadPage;
+    case redrob::mojom::StepKind::kClicked:
+      return redrob_private::StepKind::kClicked;
+    case redrob::mojom::StepKind::kTyped:
+      return redrob_private::StepKind::kTyped;
+    case redrob::mojom::StepKind::kSavedArtifact:
+      return redrob_private::StepKind::kSavedArtifact;
+    case redrob::mojom::StepKind::kRefused:
+      return redrob_private::StepKind::kRefused;
+    case redrob::mojom::StepKind::kUsedCredential:
+      return redrob_private::StepKind::kUsedCredential;
+    case redrob::mojom::StepKind::kSpawnedSubagents:
+      return redrob_private::StepKind::kSpawnedSubagents;
+    case redrob::mojom::StepKind::kSteered:
+      return redrob_private::StepKind::kSteered;
+    case redrob::mojom::StepKind::kQueuedMessage:
+      return redrob_private::StepKind::kQueuedMessage;
+    case redrob::mojom::StepKind::kPlanned:
+      return redrob_private::StepKind::kPlanned;
+    case redrob::mojom::StepKind::kRoutine:
+      return redrob_private::StepKind::kRoutine;
+  }
+  // A step kind this build does not know is still a step that happened, so it
+  // is reported as thinking rather than dropped from the record.
+  return redrob_private::StepKind::kThinking;
+}
+
+redrob_private::Task ToPrivateTask(const redrob::mojom::Task& task) {
+  redrob_private::Task out;
+  out.id = task.id;
+  out.prompt = task.prompt;
+  out.state = ToPrivateState(task.state);
+  out.narration = task.narration;
+  out.started_at_ms = static_cast<double>(task.started_at_ms);
+  out.error = task.error;
+  out.mode = ToPrivateMode(task.mode);
+  out.working_folder = task.working_folder;
+  out.effort = ToPrivateEffort(task.effort);
+  out.model = task.model;
+  out.queued = task.queued;
+  for (const auto& step : task.steps) {
+    redrob_private::Step wire;
+    wire.kind = ToPrivateStepKind(step->kind);
+    wire.step_label = step->label;
+    wire.started_at_ms = static_cast<double>(step->started_at_ms);
+    wire.preview_data_url = step->preview_data_url;
+    for (const auto& detail : step->details) {
+      redrob_private::StepDetail wire_detail;
+      wire_detail.text = detail->text;
+      wire_detail.source = detail->source;
+      wire_detail.timing = detail->timing;
+      wire.details.push_back(std::move(wire_detail));
+    }
+    out.steps.push_back(std::move(wire));
+  }
+  return out;
+}
+
+redrob_private::ModelOption ToPrivateModel(
+    const redrob::mojom::ModelOption& option) {
+  redrob_private::ModelOption out;
+  out.id = option.id;
+  out.provider_id = option.provider_id;
+  out.name = option.name;
+  out.capabilities = option.capabilities;
+  out.price_band = option.price_band;
+  return out;
 }
 }  // namespace
 
@@ -535,6 +637,48 @@ RedrobPrivateOpenPasswordManagerFunction::Run() {
   params.disposition = WindowOpenDisposition::SINGLETON_TAB;
   Navigate(&params);
   return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateListModelsFunction::Run() {
+  std::vector<redrob_private::ModelOption> out;
+  for (const auto& option :
+       TaskStoreFactory::GetForProfile(
+           Profile::FromBrowserContext(browser_context()))
+           ->ListModels()) {
+    out.push_back(ToPrivateModel(*option));
+  }
+  // An empty list is a real answer: the engine may not be serving.
+  return RespondNow(
+      ArgumentList(redrob_private::ListModels::Results::Create(out)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateListTasksFunction::Run() {
+  std::vector<redrob_private::Task> out;
+  for (const auto& task :
+       TaskStoreFactory::GetForProfile(
+           Profile::FromBrowserContext(browser_context()))
+           ->ListTasks()) {
+    out.push_back(ToPrivateTask(*task));
+  }
+  return RespondNow(
+      ArgumentList(redrob_private::ListTasks::Results::Create(out)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateGetTaskFunction::Run() {
+  auto params = redrob_private::GetTask::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const redrob::mojom::TaskPtr task =
+      TaskStoreFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()))
+          ->GetTask(params->task_id);
+  // Nothing rather than an error, and nothing rather than an empty task: a tab's
+  // URL is a string a renderer can put anything in, including the id of a task
+  // from a previous browser session.
+  base::ListValue result;
+  if (task) {
+    result.Append(ToPrivateTask(*task).ToValue());
+  }
+  return RespondNow(ArgumentList(std::move(result)));
 }
 
 }  // namespace extensions
