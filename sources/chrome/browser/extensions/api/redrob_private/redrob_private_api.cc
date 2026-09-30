@@ -7,6 +7,7 @@
 #include <string>
 
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/redrob/agent_service_factories.h"
 #include "chrome/browser/redrob/memory_store.h"
 #include "chrome/common/extensions/api/redrob_private.h"
 #include "components/version_info/version_info.h"
@@ -14,6 +15,12 @@
 namespace extensions {
 
 namespace redrob_private = api::redrob_private;
+
+// The agent's stores and their factories all live in namespace redrob, and this
+// file lives in namespace extensions, so every use of them needs the name
+// brought in. One block here beats qualifying twenty-odd call sites, and
+// keeps the ported bodies reading the same as the mojom host they came from.
+using redrob::MemoryStoreFactory;
 
 ExtensionFunction::ResponseAction
 RedrobPrivateGetBrowserVersionFunction::Run() {
