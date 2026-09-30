@@ -27,6 +27,22 @@ namespace extensions {
 
 namespace redrob_private = api::redrob_private;
 
+// The agent's stores and their factories all live in namespace redrob, and this
+// file lives in namespace extensions, so every use of them needs the name
+// brought in. One block here beats qualifying twenty-odd call sites, and
+// keeps the ported bodies reading the same as the mojom host they came from.
+using redrob::MemoryStore;
+using redrob::MemoryStoreFactory;
+using redrob::ModelStore;
+using redrob::ModelStoreFactory;
+using redrob::RoutineStore;
+using redrob::RoutineStoreFactory;
+using redrob::RpcServer;
+using redrob::RpcServerFactory;
+using redrob::SidecarClient;
+using redrob::TaskStore;
+using redrob::TaskStoreFactory;
+
 ExtensionFunction::ResponseAction
 RedrobPrivateGetBrowserVersionFunction::Run() {
   return RespondNow(ArgumentList(redrob_private::GetBrowserVersion::Results::Create(
