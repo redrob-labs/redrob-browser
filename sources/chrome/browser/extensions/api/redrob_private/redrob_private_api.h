@@ -68,6 +68,18 @@ class RedrobPrivateGetImportSourcesFunction : public ExtensionFunction {
   std::unique_ptr<ImporterList> importer_list_;
 };
 
+class RedrobPrivateStartImportFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.startImport",
+                             REDROBPRIVATE_STARTIMPORT)
+
+ protected:
+  ~RedrobPrivateStartImportFunction() override = default;
+
+  // ExtensionFunction:
+  ResponseAction Run() override;
+};
+
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_
