@@ -21,6 +21,36 @@ class RedrobPrivateGetBrowserVersionFunction : public ExtensionFunction {
   ResponseAction Run() override;
 };
 
+class RedrobPrivateSetMemoryEnabledFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setMemoryEnabled",
+                             REDROBPRIVATE_SETMEMORYENABLED)
+
+ protected:
+  ~RedrobPrivateSetMemoryEnabledFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetMemoryRetentionDaysFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setMemoryRetentionDays",
+                             REDROBPRIVATE_SETMEMORYRETENTIONDAYS)
+
+ protected:
+  ~RedrobPrivateSetMemoryRetentionDaysFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateForgetAllMemoryFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.forgetAllMemory",
+                             REDROBPRIVATE_FORGETALLMEMORY)
+
+ protected:
+  ~RedrobPrivateForgetAllMemoryFunction() override = default;
+  ResponseAction Run() override;
+};
+
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_

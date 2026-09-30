@@ -15,6 +15,8 @@ source_set("redrob_private") {
 
   deps = [
     "//base",
+    "//chrome/browser/profiles:profile",
+    "//chrome/browser/redrob:sidecar",
     "//chrome/common/extensions/api",
     "//components/version_info",
     "//extensions/browser",

@@ -22,5 +22,16 @@ namespace redrobPrivate {
     // chrome://version). Resolves a Promise on MV3.
     // |callback|: Called with the version string.
     static void getBrowserVersion(GetBrowserVersionCallback callback);
+
+    // Turns the agent's memory on or off. Delegates to the profile's memory
+    // store, which is where the setting actually lives.
+    static void setMemoryEnabled(boolean enabled);
+
+    // Sets how many days memory entries are kept before they age out.
+    static void setMemoryRetentionDays(long days);
+
+    // Clears all memory entries. Named for what it does, not softened: it is
+    // irreversible and the UI must confirm before calling it.
+    static void forgetAllMemory();
   };
 };
