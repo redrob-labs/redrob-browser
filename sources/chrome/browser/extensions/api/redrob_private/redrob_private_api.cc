@@ -13,6 +13,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.h"
 #include "chrome/browser/extensions/api/redrob_private/redrob_private_import_manager_factory.h"
+#include "chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service.h"
+#include "chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service_factory.h"
 #include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/redrob/redrob_prefs.h"
@@ -129,6 +131,17 @@ ExtensionFunction::ResponseAction RedrobPrivateStartImportFunction::Run() {
   // function returns immediately because the import outlives this call.
   RedrobPrivateImportManagerFactory::GetForBrowserContext(browser_context())
       ->StartImport(params->source_index);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateCompleteOnboardingFunction::Run() {
+  // Fires the closure the first-run window installed on the per-profile
+  // onboarding service — mark first run done, tear the window down, open the
+  // browser. A no-op when onboarding was opened as an ordinary tab (no window
+  // registered a callback).
+  RedrobPrivateOnboardingServiceFactory::GetForBrowserContext(browser_context())
+      ->Complete();
   return RespondNow(NoArguments());
 }
 

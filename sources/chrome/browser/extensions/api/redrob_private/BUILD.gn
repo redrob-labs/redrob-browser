@@ -15,6 +15,10 @@ source_set("redrob_private") {
     "redrob_private_import_manager.h",
     "redrob_private_import_manager_factory.cc",
     "redrob_private_import_manager_factory.h",
+    "redrob_private_onboarding_service.cc",
+    "redrob_private_onboarding_service.h",
+    "redrob_private_onboarding_service_factory.cc",
+    "redrob_private_onboarding_service_factory.h",
   ]
 
   # public_deps because the public header includes importer_list.h (the
