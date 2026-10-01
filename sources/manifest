@@ -163,3 +163,11 @@ sources/chrome/browser/extensions/api/redrob_private/redrob_private_api.cc	chrom
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.h	chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.h
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.cc	chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.cc
 sources/chrome/browser/extensions/api/redrob_private/BUILD.gn	chrome/browser/extensions/api/redrob_private/BUILD.gn
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.h	chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.h
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.cc	chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.cc
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_import_manager_factory.h	chrome/browser/extensions/api/redrob_private/redrob_private_import_manager_factory.h
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_import_manager_factory.cc	chrome/browser/extensions/api/redrob_private/redrob_private_import_manager_factory.cc
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service.h	chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service.h
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service.cc	chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service.cc
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service_factory.h	chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service_factory.h
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service_factory.cc	chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service_factory.cc

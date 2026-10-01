@@ -434,6 +434,57 @@ def check_overlay(problems: list[str]) -> None:
             )
 
 
+def check_ui_ownership(problems: list[str]) -> None:
+    """Once the UI migration has begun, a NEW native WebUI file in a moved surface is a regression.
+
+    Dormant until `sources/.ui-migration-began` exists: before that, the resource directories still hold the
+    WebUI we have not moved yet, and failing on them would block every other item. The sentinel is committed by
+    the first phase-3 item (O-2) and lists, one per line, the resource directories already migrated to the
+    extension (e.g. `redrob_settings`). After that point a new `.ts`/`.css`/`.html` under a listed directory
+    fails; editing an existing file does not, because a migration lands its deletions in its own later item.
+
+    See docs/OWNERSHIP.md. This is the cheap-mistake floor -- a new native UI file that compiles and looks
+    normal -- not the whole boundary, which the reviewer still enforces.
+    """
+    sentinel = ROOT / "sources" / ".ui-migration-began"
+    if not sentinel.exists():
+        return
+    migrated = [
+        line.strip()
+        for line in sentinel.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    if not migrated:
+        return
+    res_root = ROOT / "sources" / "chrome" / "browser" / "resources"
+    # "New" means not yet tracked by git: a migration edits/deletes existing tracked files in its own item, but
+    # a brand-new native UI file under a migrated surface is the regression this catches.
+    try:
+        tracked = set(
+            subprocess.run(
+                ["git", "ls-files", "sources/chrome/browser/resources"],
+                cwd=ROOT, capture_output=True, text=True, check=True,
+            ).stdout.splitlines()
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        problems.append("check_ui_ownership: could not list tracked files via git; cannot enforce the boundary")
+        return
+    for surface in migrated:
+        surface_dir = res_root / surface
+        if not surface_dir.is_dir():
+            continue
+        for path in surface_dir.rglob("*"):
+            if path.suffix not in (".ts", ".css", ".html"):
+                continue
+            rel = path.relative_to(ROOT).as_posix()
+            if rel not in tracked:
+                problems.append(
+                    f"ownership: {rel} is a new WebUI file under migrated surface '{surface}'. That surface "
+                    f"moved to the extension (see sources/.ui-migration-began); native UI for it is a "
+                    f"regression. Build it in the extension, not here (docs/OWNERSHIP.md)."
+                )
+
+
 def main() -> int:
     problems: list[str] = []
     check_sources(problems)
@@ -445,6 +496,7 @@ def main() -> int:
     check_sources_match_checkout(problems)
     check_overlay(problems)
     check_update_channel(problems)
+    check_ui_ownership(problems)
     check_rewrites(problems)
     if problems:
         for problem in problems:
