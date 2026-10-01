@@ -17,10 +17,41 @@
 namespace redrobPrivate {
   callback GetBrowserVersionCallback = void (DOMString version);
 
+  // A browser found on this machine that onboarding could import from. Mirrors
+  // the onboarding ImportSource mojom struct: each capability flag is read from
+  // the source's own bitmask, because what one browser hands over is not what
+  // another can.
+  dictionary ImportSource {
+    // What to call it in the UI, e.g. "Google Chrome".
+    DOMString name;
+    boolean hasBookmarks;
+    boolean hasHistory;
+    boolean hasPasswords;
+    boolean hasSearchEngines;
+    // Always false today: upstream defines the bit but nothing implements it.
+    boolean hasCookies;
+  };
+
+  callback GetImportSourcesCallback = void (ImportSource[] sources);
+
   interface Functions {
     // Returns the browser's full version string (the same value shown on
     // chrome://version). Resolves a Promise on MV3.
     // |callback|: Called with the version string.
     static void getBrowserVersion(GetBrowserVersionCallback callback);
+
+    // Records the first-run password-manager choice as a profile pref, so the
+    // decision survives the onboarding window being torn down. Unknown values
+    // are ignored. |choice|: one of "redrob", "external", "skip".
+    static void setPasswordChoice(DOMString choice);
+
+    // Records the first-run model choice as a profile pref. Unknown values are
+    // ignored. |choice|: one of "redrob", "chatgpt", "claude".
+    static void setModelChoice(DOMString choice);
+
+    // Lists other browsers on this machine with data that could be imported.
+    // Detection reads other browsers' profile directories, so it is async and
+    // resolves late; an empty array means none were found, not still loading.
+    static void getImportSources(GetImportSourcesCallback callback);
   };
 };
