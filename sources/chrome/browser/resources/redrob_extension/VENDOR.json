@@ -220,7 +220,7 @@
     "icon-32.png": "bb3b8e64f6cc627684e67c77eb483cd30adade7a530fdfb5b0c9b43da192498f",
     "icon-48.png": "ba43f79d268a51f0a90db25a0ae99e93b2d0347f0c8230f41d6d64a221c76cd4",
     "managed_schema.json": "97992e1d498382283699db46393fd08a84a1f1d43354366ca76f978c7a7bca8b",
-    "manifest.json": "a2cb0bf9e7bc90c2400d8139f662b4791074ac769fff5eeb2ca30e3490d2fab8",
+    "manifest.json": "82556377d0ee437ee383bb9687020768f6973436d6da9f79c6baca7f1a650124",
     "newtab.html": "16c2d5939cf4d56bb6a049caacee4a643fe166e78eae4390e650db8f81370a69",
     "offscreen.html": "fcb041a2d97f60cd957cba0c22cda2a32553e2bda7528900d32ff633232ab374",
     "offscreen.js": "a54df88f9d6e0780c1ecd5ca453b4bc9204327832383751740d2f4a9aeff5ba4",
@@ -232,5 +232,5 @@
     "sidepanel.html": "0067513da43b777fa6959ba6c071b3f31feb28842dec55ed19e2b9f3250af262",
     "sounds/notification.mp3": "991000f6da1e3a610322a24da6c867a3b0584e05581c7f501a153878630deee8"
   },
-  "total_bytes": 16460385
+  "total_bytes": 16460321
 }

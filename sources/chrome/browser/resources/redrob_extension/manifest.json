@@ -89,9 +89,6 @@
     "redrobPrivate",
     "settingsPrivate"
   ],
-  "storage": {
-    "managed_schema": "managed_schema.json"
-  },
   "version": "0.1.0",
   "web_accessible_resources": [
     {

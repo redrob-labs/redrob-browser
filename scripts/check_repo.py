@@ -654,8 +654,22 @@ def check_vendored_extension(problems: list[str]) -> None:
             f"the extension would load off the component allowlist, without redrobPrivate"
         )
     allowlist_rule = ROOT / "rewrite/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc.yaml"
-    if not allowlist_rule.is_file() or "kRedrobExtensionId" not in allowlist_rule.read_text(encoding="utf-8"):
-        problems.append("the component extension allowlist rule does not name kRedrobExtensionId")
+    if allowlist_rule.is_file():
+        allowlist_text = allowlist_rule.read_text(encoding="utf-8")
+        # TWO allowlists, and the browser needs both. ComponentLoader::Add checks the one keyed by manifest
+        # RESOURCE id, and a miss there is a NOTREACHED during profile creation -- the browser aborts before
+        # it draws a window. The extension-id list is what the rest of the browser asks. Asserting only the
+        # id entry is what shipped a build that linked cleanly and crashed on startup.
+        if "kRedrobExtensionId" not in allowlist_text:
+            problems.append("the component extension allowlist rule does not name kRedrobExtensionId")
+        if "case IDR_REDROB_EXTENSION_MANIFEST_JSON:" not in allowlist_text:
+            problems.append(
+                "the component extension allowlist rule does not add a `case "
+                "IDR_REDROB_EXTENSION_MANIFEST_JSON:` -- ComponentLoader::Add checks the RESOURCE-id "
+                "allowlist, and a miss there aborts the browser during profile creation"
+            )
+    else:
+        problems.append("the component extension allowlist rule is missing")
     loader_rule = ROOT / "rewrite/chrome/browser/extensions/component_loader.cc.yaml"
     if loader_rule.is_file():
         loader_text = loader_rule.read_text(encoding="utf-8")

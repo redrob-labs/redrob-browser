@@ -178,6 +178,20 @@ def update(source_repo: Path) -> int:
 
     manifest = json.loads((VENDOR / "manifest.json").read_text(encoding="utf-8"))
     manifest["key"] = MANIFEST_KEY
+    # `storage.managed_schema` names a file the policy code OPENS FROM DISK -- it is not read through the
+    # resource bundle. A component extension has no directory, so the key makes the browser log
+    # "File does not exist: .../resources/redrob_extension/managed_schema.json" on every single launch and
+    # still provide no managed storage. Shipping the loose file would mean a copy target plus an installer
+    # entry per platform, for a feature a component extension does not need: policy for a browser-owned
+    # extension is set by the browser's own policy, not by an extension schema. So the key is dropped from
+    # the SHIPPED copy only; the dev-loaded extension, which does have a directory, keeps it.
+    dropped_managed_schema = "managed_schema" in manifest.get("storage", {})
+    if dropped_managed_schema:
+        storage = {k: v for k, v in manifest["storage"].items() if k != "managed_schema"}
+        if storage:
+            manifest["storage"] = storage
+        else:
+            del manifest["storage"]
     # Sorted keys and a trailing newline so re-vendoring the same build is a no-op diff.
     (VENDOR / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
@@ -245,6 +259,13 @@ def check() -> int:
         for permission in ("redrobPrivate", "settingsPrivate"):
             if permission not in manifest.get("permissions", []):
                 problems.append(f"vendored manifest.json does not request {permission}")
+        # See update(): this key names a file the policy code opens from disk, which a component extension
+        # has none of. Its presence is one logged error per launch and no managed storage either way.
+        if "managed_schema" in manifest.get("storage", {}):
+            problems.append(
+                "vendored manifest.json still declares storage.managed_schema, which cannot be served "
+                "from the resource bundle -- re-vendor so it is dropped from the shipped copy"
+            )
     else:
         problems.append("vendored manifest.json missing")
 
