@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en" data-theme="redrob" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/redrob-mark.svg" />
+    <title>GIF Export - Redrob</title>
+    <!--
+      No web-font CDN. The design system's own tokens.css declares every face it
+      needs, and scripts/build.mjs copies those files next to it -- which it did not
+      do before, so the faces 404'd and this link was covering for a missing build
+      step rather than adding a font.
+    -->
+    <link rel="stylesheet" href="/assets/redrob.css" />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background: hsl(var(--background));
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      img {
+        max-width: 100%;
+        max-height: 100vh;
+        object-fit: contain;
+      }
+      .error {
+        font-family: var(--font-ui);
+        color: hsl(var(--destructive-ink));
+        padding: 24px;
+        text-align: center;
+      }
+    </style>
+    <!--
+      tokens.css ONLY, deliberately. It declares the design system's custom properties
+      and its @font-face rules -- which is how this page gets Pretendard now that the
+      CDN link is gone -- and it contains no resets. preflight.css and styles.css are
+      NOT linked here: this page predates the design system and was never laid out for
+      them, so adding resets would change it in ways this change is not about.
+    -->
+    <link rel="stylesheet" href="/assets/redrob-ui/tokens.css" />
+  </head>
+  <body>
+    <div id="content"></div>
+    <script type="module" src="gif_viewer.js"></script>
+  </body>
+</html>

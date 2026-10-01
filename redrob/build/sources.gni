@@ -73,9 +73,10 @@ redrob_chrome_common_importer_sources = [
 
 redrob_chrome_common_importer_deps = [ "//chrome/common:constants" ]
 
-# chrome/browser/resources -- our three WebUI bundles.
+# chrome/browser/resources -- our three WebUI bundles, plus the vendored extension's resource bundle.
 redrob_chrome_browser_resources_deps = [
   "//chrome/browser/resources/redrob:resources",
+  "//chrome/browser/resources/redrob_extension:resources",
   "//chrome/browser/resources/redrob_onboarding:resources",
   "//chrome/browser/resources/redrob_settings:resources",
 ]
@@ -85,6 +86,7 @@ redrob_chrome_browser_resources_deps = [
 # site joins them.
 redrob_chrome_browser_resource_pak_names = [
   "redrob_resources.pak",
+  "redrob_extension_resources.pak",
   "redrob_onboarding_resources.pak",
   "redrob_settings_resources.pak",
 ]

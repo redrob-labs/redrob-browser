@@ -12,6 +12,7 @@ Run it directly, or as `redrob.py check`. Exits non-zero with one line per probl
 from __future__ import annotations
 
 import ast
+import json
 import pathlib
 import re
 import subprocess
@@ -23,6 +24,13 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # here rather than imported from redrob.py because this file must stay runnable on a machine with nothing set
 # up, and importing the CLI drags in its whole environment contract.
 def manifest_pairs(path: pathlib.Path) -> list[tuple[str, str, int]]:
+    """Manifest rows as (source, target, line). A row ending in `/` is EXPANDED to one pair per file.
+
+    The trailing-slash form names a vendored tree whose file list belongs to its own build
+    (sources/chrome/browser/resources/redrob_extension/, the built extension). Expanding here rather than
+    special-casing each caller keeps the orphan check and the checkout-match check true of every vendored
+    file, which is the reason they exist: a file under sources/ that nothing copies is never built.
+    """
     pairs = []
     for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         stripped = line.strip()
@@ -31,7 +39,18 @@ def manifest_pairs(path: pathlib.Path) -> list[tuple[str, str, int]]:
         parts = line.split()
         if len(parts) < 2:
             continue
-        pairs.append((parts[0], parts[1], n))
+        src, dst = parts[0], parts[1]
+        if src.endswith("/"):
+            root = ROOT / src.rstrip("/")
+            prefix = dst.rstrip("/")
+            if not root.is_dir():
+                pairs.append((src, dst, n))
+                continue
+            for found in sorted(p for p in root.rglob("*") if p.is_file()):
+                relative = found.relative_to(root).as_posix()
+                pairs.append((f"{src.rstrip('/')}/{relative}", f"{prefix}/{relative}", n))
+            continue
+        pairs.append((src, dst, n))
     return pairs
 
 
@@ -591,6 +610,76 @@ def check_enum_rules(problems: list[str]) -> None:
             values[value] = name
 
 
+def check_vendored_extension(problems: list[str]) -> None:
+    """The vendored extension agrees with its pin, its grd, and the id the allowlist names.
+
+    Three ways this fails silently without a gate, all of them shipping a browser whose agent surfaces do
+    not work while the build is green. A grd out of step with the tree drops a chunk, so one page 404s a
+    module it imports. A resource-name collision makes two files one resource, so the second never ships.
+    And an extension id that is not the one the vendored manifest's key derives is not on the component
+    allowlist, which loads the extension WITHOUT redrobPrivate rather than refusing to load it -- the same
+    picture as an unpacked dev load, which is the thing this whole item exists to stop being the shipped
+    state. scripts/vendor_extension.py owns the checks; this runs it so one gate reports everything.
+    """
+    script = ROOT / "scripts" / "vendor_extension.py"
+    if not script.is_file():
+        problems.append("scripts/vendor_extension.py is missing")
+        return
+    result = subprocess.run(
+        [sys.executable, str(script)], capture_output=True, text=True, cwd=ROOT
+    )
+    if result.returncode != 0:
+        for line in (result.stderr or result.stdout).strip().splitlines():
+            problems.append(line.strip())
+        return
+
+    # The id in the allowlist rule and in the constants rule must be the id the vendored key derives.
+    # Asserted here rather than inside the vendor script because it is a fact about the REWRITE RULES.
+    pin_path = ROOT / "sources/chrome/browser/resources/redrob_extension/VENDOR.json"
+    try:
+        expected_id = json.loads(pin_path.read_text(encoding="utf-8"))["extension_id"]
+    except (OSError, ValueError, KeyError):
+        problems.append("cannot read the vendored extension's id from VENDOR.json")
+        return
+    constants_rule = ROOT / "rewrite/extensions/common/constants.h.yaml"
+    if not constants_rule.is_file():
+        problems.append("rewrite/extensions/common/constants.h.yaml does not declare kRedrobExtensionId")
+        return
+    text = constants_rule.read_text(encoding="utf-8")
+    if "kRedrobExtensionId" not in text:
+        problems.append("rewrite/extensions/common/constants.h.yaml does not declare kRedrobExtensionId")
+    elif f'"{expected_id}"' not in text:
+        problems.append(
+            f"kRedrobExtensionId is not {expected_id}, the id the vendored manifest's key derives -- "
+            f"the extension would load off the component allowlist, without redrobPrivate"
+        )
+    allowlist_rule = ROOT / "rewrite/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc.yaml"
+    if allowlist_rule.is_file():
+        allowlist_text = allowlist_rule.read_text(encoding="utf-8")
+        # TWO allowlists, and the browser needs both. ComponentLoader::Add checks the one keyed by manifest
+        # RESOURCE id, and a miss there is a NOTREACHED during profile creation -- the browser aborts before
+        # it draws a window. The extension-id list is what the rest of the browser asks. Asserting only the
+        # id entry is what shipped a build that linked cleanly and crashed on startup.
+        if "kRedrobExtensionId" not in allowlist_text:
+            problems.append("the component extension allowlist rule does not name kRedrobExtensionId")
+        if "case IDR_REDROB_EXTENSION_MANIFEST_JSON:" not in allowlist_text:
+            problems.append(
+                "the component extension allowlist rule does not add a `case "
+                "IDR_REDROB_EXTENSION_MANIFEST_JSON:` -- ComponentLoader::Add checks the RESOURCE-id "
+                "allowlist, and a miss there aborts the browser during profile creation"
+            )
+    else:
+        problems.append("the component extension allowlist rule is missing")
+    loader_rule = ROOT / "rewrite/chrome/browser/extensions/component_loader.cc.yaml"
+    if loader_rule.is_file():
+        loader_text = loader_rule.read_text(encoding="utf-8")
+        for needed in ("AddRedrobExtension();", "IDR_REDROB_EXTENSION_MANIFEST_JSON"):
+            if needed not in loader_text:
+                problems.append(f"component_loader.cc rule is missing {needed}")
+    else:
+        problems.append("rewrite/chrome/browser/extensions/component_loader.cc.yaml is missing")
+
+
 def main() -> int:
     problems: list[str] = []
     check_sources(problems)
@@ -607,6 +696,7 @@ def main() -> int:
     check_enum_rules(problems)
     check_function_enum_coverage(problems)
     check_idl_interfaces(problems)
+    check_vendored_extension(problems)
     if problems:
         for problem in problems:
             print(f"FAIL {problem}")

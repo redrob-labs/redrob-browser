@@ -1,0 +1,17 @@
+# Registering the extension and packing its files is not enough: this manager owns the map from a path
+# inside a component extension to a resource id, and a pak that is not registered here serves nothing. The
+# symptom is exact and misleading -- the extension appears in chrome://extensions-internals as COMPONENT
+# with the right id, and every page inside it is chrome-error. Found by running the build.
+substitutions:
+  - description: Include the vendored extension's generated resource map.
+    insert_after:
+      anchor: '#include "chrome/grit/contextual_tasks_extension_resources_map.h"'
+      count: 1
+      lines: |
+        #include "chrome/grit/redrob_extension_resources_map.h"
+  - description: Register its resource paths unconditionally -- it is not behind a feature flag.
+    insert_after:
+      anchor: '  AddComponentResourceEntries(kExtraComponentExtensionResources);'
+      count: 1
+      lines: |
+        AddComponentResourceEntries(kRedrobExtensionResources);

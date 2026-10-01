@@ -1,0 +1,106 @@
+{
+  "action": {
+    "default_title": "Open Redrob in Browser"
+  },
+  "background": {
+    "service_worker": "assets/service-worker.js",
+    "type": "module"
+  },
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "commands": {
+    "toggle-side-panel": {
+      "description": "Toggle Redrob side panel",
+      "suggested_key": {
+        "default": "Ctrl+E",
+        "mac": "Command+E"
+      }
+    }
+  },
+  "content_scripts": [
+    {
+      "all_frames": true,
+      "js": [
+        "assets/accessibility-tree.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "all_frames": false,
+      "js": [
+        "assets/agent-visual-indicator.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "all_frames": false,
+      "js": [
+        "assets/content-script-loader.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:;"
+  },
+  "default_locale": "en",
+  "description": "Redrob AI browser agent",
+  "host_permissions": [
+    "<all_urls>",
+    "https://console.redrob.ai/*"
+  ],
+  "icons": {
+    "128": "icon-128.png",
+    "16": "icon-16.png",
+    "32": "icon-32.png",
+    "48": "icon-48.png"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1rtRpUSRS4wTWLBK+j1CR+3vkTpcOlaerFG/4BN+Akx4uY+SX5KWddMZYBUb4XvNCbsRqQpxpu8zgW25i/y3+RljhXFnwLlpgFTuEje1Kq4C2eLBosyI91wSWtdt4jFWeFJFQSVpWzaSSChmnZopsIHOFkxttG7PNwfVVsth777yxekQsli2wiV1CKrGXipxdSE2M1PzXfDGJW1mXXpQ2RRfowCdOjWf8TTIyTqE9S+VR2qQtx0QU7B5+V46eTRKsWozQ8/pKyuc9XVrRtin0Lsk+OwwGP8l0uQLL9DHWL6QaDt39llkC5W+9ck3+qStzZb4Di9e2fl6qKGqE20Z1wIDAQAB",
+  "manifest_version": 3,
+  "minimum_chrome_version": "116",
+  "name": "Redrob in Browser",
+  "options_page": "options.html",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "activeTab",
+    "scripting",
+    "debugger",
+    "tabGroups",
+    "tabs",
+    "alarms",
+    "notifications",
+    "webNavigation",
+    "declarativeNetRequestWithHostAccess",
+    "offscreen",
+    "nativeMessaging",
+    "unlimitedStorage",
+    "downloads",
+    "redrobPrivate",
+    "settingsPrivate"
+  ],
+  "version": "0.1.0",
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "resources": [
+        "assets/accessibility-tree.js",
+        "assets/agent-visual-indicator.js",
+        "assets/content-script.js"
+      ],
+      "use_dynamic_url": false
+    }
+  ]
+}

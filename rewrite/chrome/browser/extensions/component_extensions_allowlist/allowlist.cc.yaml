@@ -1,0 +1,24 @@
+# This file holds TWO allowlists and a component extension needs both. `ComponentLoader::Add` checks the
+# one keyed by MANIFEST RESOURCE ID, and a miss there is a NOTREACHED that aborts the browser during
+# profile creation -- found by running the build, not by reading it. The one keyed by extension ID is what
+# the rest of the browser asks. Adding only the id entry builds and links cleanly and then crashes on
+# startup with "manifest resource id 58736 not in allowlist".
+substitutions:
+  - description: Allowlist the Redrob component extension by extension id.
+    insert_after:
+      anchor: '      extension_misc::kPdfExtensionId,'
+      count: 1
+      lines: |
+        extension_misc::kRedrobExtensionId,
+  - description: Make the vendored extension's resource ids visible to this file.
+    insert_after:
+      anchor: '#include "chrome/grit/contextual_tasks_extension_resources.h"'
+      count: 1
+      lines: |
+        #include "chrome/grit/redrob_extension_resources.h"
+  - description: Allowlist it by manifest resource id, which is what ComponentLoader::Add checks.
+    insert_after:
+      anchor: '    case IDR_READING_MODE_GDOCS_HELPER_MANIFEST:'
+      count: 1
+      lines: |
+        case IDR_REDROB_EXTENSION_MANIFEST_JSON:
