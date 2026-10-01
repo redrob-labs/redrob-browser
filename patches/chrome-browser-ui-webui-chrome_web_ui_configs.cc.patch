@@ -1,24 +1,22 @@
 diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-index 8e1786d0f63bf..a0542e1530432 100644
+index 8e1786d0f63bf..27b843f3af529 100644
 --- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
 +++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-@@ -59,6 +59,9 @@
+@@ -59,6 +59,8 @@
  #include "chrome/browser/ui/webui/sync_internals/sync_internals_ui.h"
  #include "chrome/browser/ui/webui/translate_internals/translate_internals_ui.h"
  #include "chrome/browser/ui/webui/usb_internals/usb_internals_ui.h"
 +#include "chrome/browser/ui/webui/redrob/redrob_ui.h"
 +#include "chrome/browser/ui/webui/redrob_onboarding/redrob_onboarding_ui.h"
-+#include "chrome/browser/ui/webui/redrob_settings/redrob_settings_ui.h"
  #include "chrome/browser/ui/webui/version/version_ui.h"
  #include "components/enterprise/buildflags/buildflags.h"
  #include "components/safe_browsing/buildflags.h"
-@@ -315,6 +318,9 @@ void RegisterChromeWebUIConfigs() {
+@@ -315,6 +317,8 @@ void RegisterChromeWebUIConfigs() {
    map.AddWebUIConfig(std::make_unique<TranslateInternalsUIConfig>());
    map.AddWebUIConfig(std::make_unique<UsbInternalsUIConfig>());
    map.AddWebUIConfig(std::make_unique<user_actions_ui::UserActionsUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<redrob::RedrobUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<redrob::RedrobOnboardingUIConfig>());
-+  map.AddWebUIConfig(std::make_unique<redrob::RedrobSettingsUIConfig>());
    map.AddWebUIConfig(std::make_unique<VersionUIConfig>());
    map.AddWebUIConfig(std::make_unique<WebRtcLogsUIConfig>());
    map.AddWebUIConfig(std::make_unique<RegionalCapabilitiesInternalsUIConfig>());

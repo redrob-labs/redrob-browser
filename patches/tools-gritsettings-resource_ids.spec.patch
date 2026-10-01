@@ -1,8 +1,8 @@
 diff --git a/tools/gritsettings/resource_ids.spec b/tools/gritsettings/resource_ids.spec
-index 322591a3aa40b..acfe801dbdab5 100644
+index 322591a3aa40b..a559f7ac31377 100644
 --- a/tools/gritsettings/resource_ids.spec
 +++ b/tools/gritsettings/resource_ids.spec
-@@ -920,6 +920,21 @@
+@@ -920,6 +920,17 @@
      "META": {"sizes": {"includes": [30]}},
      "includes": [5370],
    },
@@ -16,15 +16,11 @@ index 322591a3aa40b..acfe801dbdab5 100644
 +    "META": {"sizes": {"includes": [20]}},
 +    "includes": [5420],
 +  },
-+  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/redrob_settings/resources.grd": {
-+    "META": {"sizes": {"includes": [20]}},
-+    "includes": [5440],
-+  },
-+
++  
    # END chrome/ WebUI resources section
  
    # START chrome/ miscellaneous section.
-@@ -1794,6 +1809,26 @@
+@@ -1794,6 +1805,26 @@
      "includes": [12000],
    },
  

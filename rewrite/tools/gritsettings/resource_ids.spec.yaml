@@ -11,7 +11,7 @@ substitutions:
       chrome://redrob's resource block.
     regex:
       pattern: "  # END chrome/ WebUI resources section"
-      replace: "  # Redrob: chrome://redrob, the AI surface. Last in the WebUI section and above the 5500 the\n  # next section starts at, so this fork does not sit on an id range upstream is about to use.\n  \"<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/redrob/resources.grd\": {\n    \"META\": {\"sizes\": {\"includes\": [20]}},\n    \"includes\": [5400],\n  },\n  \"<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/redrob_onboarding/resources.grd\": {\n    \"META\": {\"sizes\": {\"includes\": [20]}},\n    \"includes\": [5420],\n  },\n  \"<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/redrob_settings/resources.grd\": {\n    \"META\": {\"sizes\": {\"includes\": [20]}},\n    \"includes\": [5440],\n  },\n\n  # END chrome/ WebUI resources section"
+      replace: "  # Redrob: chrome://redrob, the AI surface. Last in the WebUI section and above the 5500 the\n  # next section starts at, so this fork does not sit on an id range upstream is about to use.\n  \"<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/redrob/resources.grd\": {\n    \"META\": {\"sizes\": {\"includes\": [20]}},\n    \"includes\": [5400],\n  },\n  \"<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/redrob_onboarding/resources.grd\": {\n    \"META\": {\"sizes\": {\"includes\": [20]}},\n    \"includes\": [5420],\n  },\n  \n  # END chrome/ WebUI resources section"
       count: 1
   # ---- hunk 1: 0 removed, 15 added
   - description: |

@@ -67,10 +67,8 @@ sources/chrome/browser/resources/redrob/design_system.css  chrome/browser/resour
 # change and is its own slice in docs/UX-PROGRAMME.md.
 sources/chrome/browser/resources/redrob/design_icons.ts  chrome/browser/resources/redrob/design_icons.ts
 sources/chrome/browser/resources/redrob/chrome_base.css  chrome/browser/resources/redrob/chrome_base.css
-sources/chrome/browser/resources/redrob/chrome_base.css  chrome/browser/resources/redrob_settings/chrome_base.css
 sources/chrome/browser/resources/redrob/chrome_base.css  chrome/browser/resources/redrob_onboarding/chrome_base.css
 sources/chrome/browser/resources/redrob/theme.ts  chrome/browser/resources/redrob/theme.ts
-sources/chrome/browser/resources/redrob/theme.ts  chrome/browser/resources/redrob_settings/theme.ts
 sources/chrome/browser/resources/redrob/theme.ts  chrome/browser/resources/redrob_onboarding/theme.ts
 sources/chrome/browser/resources/redrob/redrob.ts   chrome/browser/resources/redrob/redrob.ts
 sources/chrome/browser/resources/redrob/fonts/NotoSansDevanagari-Variable.woff2  chrome/browser/resources/redrob/fonts/NotoSansDevanagari-Variable.woff2
@@ -103,7 +101,6 @@ sources/chrome/browser/resources/redrob_onboarding/redrob_onboarding.html  chrom
 sources/chrome/browser/resources/redrob_onboarding/redrob_onboarding.css  chrome/browser/resources/redrob_onboarding/redrob_onboarding.css
 sources/chrome/browser/resources/redrob_onboarding/redrob_onboarding.ts  chrome/browser/resources/redrob_onboarding/redrob_onboarding.ts
 sources/chrome/browser/resources/redrob/Pretendard-LICENSE.txt  chrome/browser/resources/redrob_onboarding/Pretendard-LICENSE.txt
-sources/chrome/browser/resources/redrob/Pretendard-LICENSE.txt  chrome/browser/resources/redrob_settings/Pretendard-LICENSE.txt
 sources/chrome/browser/resources/redrob_onboarding/BUILD.gn  chrome/browser/resources/redrob_onboarding/BUILD.gn
 sources/chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.h  chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.h
 sources/chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.cc  chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.cc
@@ -122,16 +119,6 @@ sources/chrome/browser/redrob/agent_service_factories.cc  chrome/browser/redrob/
 
 # chrome://redrob-settings, the product's own settings. A separate host rather than four sections
 # inside upstream's chrome://settings, which would be six files of upstream churn per release.
-sources/chrome/browser/ui/webui/redrob_settings/BUILD.gn  chrome/browser/ui/webui/redrob_settings/BUILD.gn
-sources/chrome/browser/ui/webui/redrob_settings/redrob_settings.mojom  chrome/browser/ui/webui/redrob_settings/redrob_settings.mojom
-sources/chrome/browser/ui/webui/redrob_settings/redrob_settings_ui.h   chrome/browser/ui/webui/redrob_settings/redrob_settings_ui.h
-sources/chrome/browser/ui/webui/redrob_settings/redrob_settings_ui.cc  chrome/browser/ui/webui/redrob_settings/redrob_settings_ui.cc
-sources/chrome/browser/ui/webui/redrob_settings/settings_host_impl.h   chrome/browser/ui/webui/redrob_settings/settings_host_impl.h
-sources/chrome/browser/ui/webui/redrob_settings/settings_host_impl.cc  chrome/browser/ui/webui/redrob_settings/settings_host_impl.cc
-sources/chrome/browser/resources/redrob_settings/BUILD.gn  chrome/browser/resources/redrob_settings/BUILD.gn
-sources/chrome/browser/resources/redrob_settings/redrob_settings.html  chrome/browser/resources/redrob_settings/redrob_settings.html
-sources/chrome/browser/resources/redrob_settings/redrob_settings.css   chrome/browser/resources/redrob_settings/redrob_settings.css
-sources/chrome/browser/resources/redrob_settings/redrob_settings.ts    chrome/browser/resources/redrob_settings/redrob_settings.ts
 
 # The Chromium-family importer. Chromium 153 has no importer for Chrome, Edge or Brave at all -- the
 # type enum stops at Edge's legacy favourites -- so both the detection and the reading are ours.
