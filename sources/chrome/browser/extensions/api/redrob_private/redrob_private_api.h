@@ -183,6 +183,61 @@ class RedrobPrivateSelectProviderFunction : public ExtensionFunction {
   ResponseAction Run() override;
 };
 
+class RedrobPrivateAddProviderFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.addProvider",
+                             REDROBPRIVATE_ADDPROVIDER)
+ protected:
+  ~RedrobPrivateAddProviderFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetOfferToSavePasswordsFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setOfferToSavePasswords",
+                             REDROBPRIVATE_SETOFFERTOSAVEPASSWORDS)
+ protected:
+  ~RedrobPrivateSetOfferToSavePasswordsFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetPasswordAutoSigninFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setPasswordAutoSignin",
+                             REDROBPRIVATE_SETPASSWORDAUTOSIGNIN)
+ protected:
+  ~RedrobPrivateSetPasswordAutoSigninFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetPasswordManagerChoiceFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setPasswordManagerChoice",
+                             REDROBPRIVATE_SETPASSWORDMANAGERCHOICE)
+ protected:
+  ~RedrobPrivateSetPasswordManagerChoiceFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetRpcEnabledFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setRpcEnabled",
+                             REDROBPRIVATE_SETRPCENABLED)
+ protected:
+  ~RedrobPrivateSetRpcEnabledFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateClearWorkingFolderFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.clearWorkingFolder",
+                             REDROBPRIVATE_CLEARWORKINGFOLDER)
+ protected:
+  ~RedrobPrivateClearWorkingFolderFunction() override = default;
+  ResponseAction Run() override;
+};
+
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_

@@ -17,6 +17,9 @@
 namespace redrobPrivate {
   callback GetBrowserVersionCallback = void (DOMString version);
   callback BoolCallback = void (boolean ok);
+  // Resolves with a string when there is one, and with nothing when the
+  // operation has no result to report — an absent value is not an empty one.
+  callback StringCallback = void (optional DOMString value);
 
   // A browser found on this machine that onboarding could import from. Mirrors
   // the onboarding ImportSource mojom struct: each capability flag is read from
@@ -207,5 +210,34 @@ namespace redrobPrivate {
 
     // Makes the given provider the selected one. Resolves true on success.
     static void selectProvider(DOMString id, BoolCallback callback);
+
+    // Adds a model provider. |secret| is the API key: it travels one way, into
+    // the store, and is never read back out by getSettings.
+    // |providerLabel|: the name shown for it ("label" is reserved in this idl).
+    // |callback|: the new provider's id, or nothing if it was not stored.
+    static void addProvider(DOMString providerLabel,
+                            DOMString model,
+                            DOMString endpoint,
+                            DOMString secret,
+                            StringCallback callback);
+
+    // Turns the "offer to save passwords" prompt on or off.
+    static void setOfferToSavePasswords(boolean enabled);
+
+    // Turns automatic sign-in with a saved password on or off.
+    static void setPasswordAutoSignin(boolean enabled);
+
+    // Records which password manager the user chose: "redrob", "external" or
+    // "skip". Any other value is ignored. Choosing "external" also stops
+    // offering to save — it does NOT delete credentials already stored.
+    static void setPasswordManagerChoice(DOMString choice);
+
+    // Starts or stops the local RPC server now, not at the next launch.
+    // |callback|: the endpoint it is listening on, or nothing when it is off or
+    // failed to start.
+    static void setRpcEnabled(boolean enabled, StringCallback callback);
+
+    // Forgets the agent's working folder.
+    static void clearWorkingFolder();
   };
 };
