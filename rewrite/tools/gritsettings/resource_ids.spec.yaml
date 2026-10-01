@@ -20,3 +20,15 @@ substitutions:
       pattern: "  # END \"everything else\" section."
       replace: "  # Redrob's own strings, deliberately LAST and deliberately far above everything upstream allocates.\n  #\n  # Two constraints decide this position. The id is baked into the .pak, so a range next to upstream's\n  # own means every Chromium tag that adds a grd is a chance of collision -- 13000 sits above the\n  # highest allocation in this file (12000, with 800 reserved) with room for the fork to grow. And\n  # tools/grit/grit/tool/update_resource_ids/assigner.py requires ids to be non-decreasing in file\n  # order unless a jump lands exactly on an id already seen: an entry of 13000 in the alphabetical\n  # chrome/browser/ section makes the NEXT entry a backwards jump to an unvisited id, and\n  # //tools/gritsettings:default_resource_ids fails the build with \"Cannot jump to unvisited\". So the\n  # alphabetical placement the header asks for is not available to a high range; this is.\n  \"chrome/browser/redrob/resources/redrob_strings.grd\": {\n    \"META\": {\"sizes\": {\"messages\": [500]}},\n    \"messages\": [13000],\n  },\n\n  # END \"everything else\" section."
       count: 1
+
+  # ---- hunk 2: 0 removed, 10 added
+  - description: |
+      The vendored extension's resource block. 227 includes today and one per file, so the reservation is
+      sized for growth rather than for the current build -- an extension chunk split in two is a normal
+      change and must not need an id-space edit. Placed immediately after our strings block, which
+      reserves 500 from 13000, for the same two reasons recorded there: far above anything upstream
+      allocates, and non-decreasing in file order, which the assigner requires.
+    regex:
+      pattern: "  # END \"everything else\" section."
+      replace: "  \"chrome/browser/resources/redrob_extension/resources.grd\": {\n    \"META\": {\"sizes\": {\"includes\": [400]}},\n    \"includes\": [13500],\n  },\n\n  # END \"everything else\" section."
+      count: 1
