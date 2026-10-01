@@ -18,6 +18,9 @@
 #include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/redrob/redrob_prefs.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/redrob/agent_service_factories.h"
+#include "chrome/browser/redrob/memory_store.h"
 #include "chrome/common/extensions/api/redrob_private.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_data_importer/common/importer_data_types.h"
@@ -46,6 +49,11 @@ bool IsKnownModelChoice(const std::string& choice) {
 }
 
 }  // namespace
+// The agent's stores and their factories all live in namespace redrob, and this
+// file lives in namespace extensions, so every use of them needs the name
+// brought in. One block here beats qualifying twenty-odd call sites, and
+// keeps the ported bodies reading the same as the mojom host they came from.
+using redrob::MemoryStoreFactory;
 
 ExtensionFunction::ResponseAction
 RedrobPrivateGetBrowserVersionFunction::Run() {
@@ -64,6 +72,12 @@ RedrobPrivateSetPasswordChoiceFunction::Run() {
         ->GetPrefs()
         ->SetString(redrob::prefs::kPasswordManagerChoice, params->choice);
   }
+RedrobPrivateSetMemoryEnabledFunction::Run() {
+  auto params = redrob_private::SetMemoryEnabled::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  MemoryStoreFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()))
+      ->SetEnabled(params->enabled);
   return RespondNow(NoArguments());
 }
 
@@ -131,6 +145,12 @@ ExtensionFunction::ResponseAction RedrobPrivateStartImportFunction::Run() {
   // function returns immediately because the import outlives this call.
   RedrobPrivateImportManagerFactory::GetForBrowserContext(browser_context())
       ->StartImport(params->source_index);
+RedrobPrivateSetMemoryRetentionDaysFunction::Run() {
+  auto params = redrob_private::SetMemoryRetentionDays::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  MemoryStoreFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()))
+      ->SetRetentionDays(params->days);
   return RespondNow(NoArguments());
 }
 
@@ -142,6 +162,10 @@ RedrobPrivateCompleteOnboardingFunction::Run() {
   // registered a callback).
   RedrobPrivateOnboardingServiceFactory::GetForBrowserContext(browser_context())
       ->Complete();
+RedrobPrivateForgetAllMemoryFunction::Run() {
+  MemoryStoreFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()))
+      ->Clear();
   return RespondNow(NoArguments());
 }
 
