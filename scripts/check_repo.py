@@ -485,6 +485,40 @@ def check_ui_ownership(problems: list[str]) -> None:
                 )
 
 
+def check_enum_rules(problems: list[str]) -> None:
+    """Refuse a rewrite rule that declares the same enumerator, or the same ordinal, twice.
+
+    A C++ enum rejects both, but only at compile time -- and the rule set is checked
+    far more often than the browser is built. This is not hypothetical: the
+    redrobPrivate function enum arrived on six stacked branches that all appended to
+    one anchor, and merging them re-emitted the values already on develop, so some
+    enumerators were declared six times with six different numbers. Every rule check
+    passed; the compiler was the only thing that objected, after a 40-minute build.
+    """
+    entry = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*(\d+),\s*$")
+    for rule in sorted((ROOT / "rewrite").rglob("*.yaml")):
+        names: dict[str, int] = {}
+        values: dict[int, str] = {}
+        label = rule.relative_to(ROOT)
+        for line in rule.read_text(encoding="utf-8").split("\n"):
+            match = entry.match(line)
+            if not match:
+                continue
+            name, value = match.group(1), int(match.group(2))
+            if name in names:
+                problems.append(
+                    f"{label} declares enumerator {name} twice ({names[name]} and {value}); "
+                    f"a C++ enum rejects the redefinition"
+                )
+            elif value in values:
+                problems.append(
+                    f"{label} gives {value} to both {values[value]} and {name}; "
+                    f"two enumerators cannot share an ordinal"
+                )
+            names[name] = value
+            values[value] = name
+
+
 def main() -> int:
     problems: list[str] = []
     check_sources(problems)
@@ -498,6 +532,7 @@ def main() -> int:
     check_update_channel(problems)
     check_ui_ownership(problems)
     check_rewrites(problems)
+    check_enum_rules(problems)
     if problems:
         for problem in problems:
             print(f"FAIL {problem}")
