@@ -160,6 +160,8 @@ sources/build/config/siso/redrob_siso_config.star	build/config/siso/redrob_siso_
 sources/chrome/common/extensions/api/redrob_private.idl	chrome/common/extensions/api/redrob_private.idl
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_api.h	chrome/browser/extensions/api/redrob_private/redrob_private_api.h
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_api.cc	chrome/browser/extensions/api/redrob_private/redrob_private_api.cc
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.h	chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.h
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.cc	chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.cc
 sources/chrome/browser/extensions/api/redrob_private/BUILD.gn	chrome/browser/extensions/api/redrob_private/BUILD.gn
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.h	chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.h
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.cc	chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.cc

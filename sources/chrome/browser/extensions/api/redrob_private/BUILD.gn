@@ -19,6 +19,8 @@ source_set("redrob_private") {
     "redrob_private_onboarding_service.h",
     "redrob_private_onboarding_service_factory.cc",
     "redrob_private_onboarding_service_factory.h",
+    "redrob_private_folder_picker.cc",
+    "redrob_private_folder_picker.h",
   ]
 
   # public_deps because the public header includes importer_list.h (the
@@ -30,12 +32,16 @@ source_set("redrob_private") {
     "//base",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/redrob:sidecar",
+    "//chrome/browser/ui/navigator",
+    "//chrome/browser/ui/select_file_policy",
     "//components/password_manager/core/common",
     "//chrome/common/extensions/api",
     "//components/keyed_service/core",
     "//components/prefs",
     "//components/user_data_importer/common",
     "//components/version_info",
+    "//content/public/browser",
     "//extensions/browser",
+    "//ui/shell_dialogs",
   ]
 }
