@@ -106,6 +106,10 @@ RedrobPrivateSetPasswordChoiceFunction::Run() {
         ->GetPrefs()
         ->SetString(redrob::prefs::kPasswordManagerChoice, params->choice);
   }
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
 RedrobPrivateSetMemoryEnabledFunction::Run() {
   auto params = redrob_private::SetMemoryEnabled::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params);
@@ -179,6 +183,10 @@ ExtensionFunction::ResponseAction RedrobPrivateStartImportFunction::Run() {
   // function returns immediately because the import outlives this call.
   RedrobPrivateImportManagerFactory::GetForBrowserContext(browser_context())
       ->StartImport(params->source_index);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
 RedrobPrivateSetMemoryRetentionDaysFunction::Run() {
   auto params = redrob_private::SetMemoryRetentionDays::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params);
@@ -196,6 +204,10 @@ RedrobPrivateCompleteOnboardingFunction::Run() {
   // registered a callback).
   RedrobPrivateOnboardingServiceFactory::GetForBrowserContext(browser_context())
       ->Complete();
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
 RedrobPrivateForgetAllMemoryFunction::Run() {
   MemoryStoreFactory::GetForProfile(
       Profile::FromBrowserContext(browser_context()))

@@ -485,6 +485,46 @@ def check_ui_ownership(problems: list[str]) -> None:
                 )
 
 
+def check_idl_interfaces(problems: list[str]) -> None:
+    """One `interface Functions`, one `interface Events`, and events only in Events.
+
+    The extension idl parser reads whatever structure it is given and reports nothing:
+    merging ten branches that each appended to the same anchor left this file with
+    `interface Functions` closed early and 32 FUNCTIONS declared inside a second
+    `interface Events` block. The parser returned 6 functions out of 38, the generated
+    header had no types for the rest, and the only thing that objected was the C++
+    compiler -- a build away. This check is a second.
+    """
+    for idl in sorted((ROOT / "sources/chrome/common/extensions/api").glob("*.idl")):
+        label = idl.relative_to(ROOT)
+        lines = idl.read_text(encoding="utf-8").split("\n")
+        blocks = [(n, m.group(1)) for n, line in enumerate(lines, 1)
+                  if (m := re.match(r"\s*interface (Functions|Events)\s*\{", line))]
+        for kind in ("Functions", "Events"):
+            count = sum(1 for _, name in blocks if name == kind)
+            if count > 1:
+                problems.append(
+                    f"{label} declares `interface {kind}` {count} times; the parser reads "
+                    f"only one and silently drops the rest"
+                )
+        # Which block each declaration sits in, by walking the interface boundaries.
+        current = None
+        for number, line in enumerate(lines, 1):
+            match = re.match(r"\s*interface (Functions|Events)\s*\{", line)
+            if match:
+                current = match.group(1)
+                continue
+            declaration = re.search(r"static \w+ (\w+)\(", line)
+            if not declaration or current is None:
+                continue
+            name = declaration.group(1)
+            is_event = name.startswith("on")
+            if is_event and current != "Events":
+                problems.append(f"{label}:{number} declares event {name} inside interface {current}")
+            if not is_event and current != "Functions":
+                problems.append(f"{label}:{number} declares function {name} inside interface {current}")
+
+
 def check_function_enum_coverage(problems: list[str]) -> None:
     """Every DECLARE_EXTENSION_FUNCTION's enum name must exist in the enum rule.
 
@@ -566,6 +606,7 @@ def main() -> int:
     check_rewrites(problems)
     check_enum_rules(problems)
     check_function_enum_coverage(problems)
+    check_idl_interfaces(problems)
     if problems:
         for problem in problems:
             print(f"FAIL {problem}")

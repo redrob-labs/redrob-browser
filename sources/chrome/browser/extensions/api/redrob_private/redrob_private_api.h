@@ -104,6 +104,9 @@ class RedrobPrivateCompleteOnboardingFunction : public ExtensionFunction {
   ~RedrobPrivateCompleteOnboardingFunction() override = default;
 
   // ExtensionFunction:
+  ResponseAction Run() override;
+};
+
 class RedrobPrivateGetSettingsFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("redrobPrivate.getSettings",
