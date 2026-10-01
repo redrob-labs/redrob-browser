@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en" data-theme="redrob">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/redrob-mark.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Settings</title>
+    <script src="/debug-chrome.js"></script>
+    <script type="module" crossorigin src="/assets/settings.js"></script>
+    <!-- The design system, taken from @redrob-labs/ui — tokens then preflight
+         then the component sheet, the order the library documents. -->
+    <link rel="stylesheet" href="/assets/redrob-ui/tokens.css" />
+    <link rel="stylesheet" href="/assets/redrob-ui/preflight.css" />
+    <link rel="stylesheet" href="/assets/redrob-ui/styles.css" />
+    <!-- Row layout only, in design-system tokens. After the library so it can
+         space the rows the library's controls sit in. -->
+    <link rel="stylesheet" href="/assets/settings-page.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+# A component extension that is not on this list is dropped by ComponentLoader::AddWithNameAndDescription
+# before it loads, so the allowlist entry and the loader call are one change in two files.
+substitutions:
+  - description: Allowlist the Redrob component extension.
+    insert_after:
+      anchor: '      extension_misc::kPdfExtensionId,'
+      count: 1
+      lines: |
+        extension_misc::kRedrobExtensionId,

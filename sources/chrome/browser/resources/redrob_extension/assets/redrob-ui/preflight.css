@@ -1,0 +1,73 @@
+/*
+ * Redrob design system - page preflight. OPTIONAL, and deliberately not part of `system.css`.
+ *
+ * The system styles components and nothing else. Neither `system.css` nor the delivery's own
+ * `bundle.css` declares a rule for `html` or `body` - verified, not assumed - because a library that
+ * paints the page takes a decision away from the application that embeds it. An app with its own
+ * shell, or one mounting a widget inside somebody else's page, would have to undo it.
+ *
+ * The cost of that choice is a trap: set `data-theme="dark"` and the components go dark while the page
+ * behind them stays the browser default white. It is what made the `Icons` and `Texture` specimen
+ * captures come out white in an otherwise correct dark run - those two paint no surface of their own,
+ * so what showed through was the page.
+ *
+ * So: import this when the Redrob system owns the whole page, and do not when it does not.
+ *
+ *   import '@redrob-labs/ui/preflight.css';   // after tokens.css and system.css
+ *
+ * That is every product surface we ship - the sites, the console, the chat, the Office windows - and
+ * not an embedded widget.
+ */
+
+html {
+  /* Matches the page, so an overscroll bounce and the area under a short page are not white on dark. */
+  background: var(--surface-base);
+
+  /* The form-control and scrollbar theme the browser draws itself. Without it a `<select>` popup and
+     the scrollbar stay light on a dark page, which is the one part of the UI a stylesheet cannot
+     reach. */
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-base);
+  color: var(--ink-primary);
+  font: var(--text-body);
+
+  /* Pretendard is drawn for this: it needs no synthetic smoothing, and forcing antialiasing makes its
+     lighter weights look thin on a dark page. Left to the platform on purpose. */
+  text-rendering: optimizeLegibility;
+}
+
+/* Korean and Japanese copy takes the Korean-first stack, which puts Wanted Sans ahead of Pretendard.
+   Scoped to `:lang()` rather than applied by an app-level class so a quoted passage in another
+   language inside an English page still gets the right face. */
+:lang(ko) body,
+:lang(ja) body {
+  font-family: var(--font-sans-kr);
+}
+
+/* A focus ring that survives a dark page. `:focus-visible` only, so a mouse click does not draw one -
+   the keyboard user is the one who needs to know where focus is. */
+:focus-visible {
+  outline: 2px solid var(--ink-brand);
+  outline-offset: 2px;
+}
+
+/* The system's own motion tokens respect this, but a consuming app's transitions do not know about it.
+   Stated once here so a page that opts into the preflight is honest about reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

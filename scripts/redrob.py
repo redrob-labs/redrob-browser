@@ -392,7 +392,15 @@ def read_manifest() -> list[tuple[str, str, str]]:
 
 
 def read_sources_manifest() -> list[tuple[str, str]]:
-    """sources/manifest as (source, target) rows: code we own, not a delta against Chromium."""
+    """sources/manifest as (source, target) rows: code we own, not a delta against Chromium.
+
+    A row whose SOURCE ends in `/` names a whole TREE rather than one file. That exists for a vendored
+    build artifact -- `sources/chrome/browser/resources/redrob_extension/`, the built extension -- whose
+    file list is decided by its own build and changes with every chunk hash. Listing those per file would
+    put a 227-line table in here that is wrong the first time the extension is rebuilt, and whose wrongness
+    shows up as an extension missing one chunk rather than as an error. A tree row is checked by the
+    vendoring gate instead, which compares the directory against the pin it ships with.
+    """
     path = SOURCES / "manifest"
     if not path.exists():
         return []
@@ -404,22 +412,41 @@ def read_sources_manifest() -> list[tuple[str, str]]:
         parts = line.split()
         if len(parts) != 2:
             sys.exit(f"malformed sources row (want SOURCE TARGET): {line}")
+        if parts[0].endswith("/") != parts[1].endswith("/"):
+            sys.exit(f"sources row mixes a tree and a file (both sides need the trailing /): {line}")
         rows.append((parts[0], parts[1]))
     return rows
+
+
+def expand_sources_rows() -> list[tuple[Path, str]]:
+    """Every (absolute source file, checkout-relative target) a manifest row resolves to."""
+    resolved: list[tuple[Path, str]] = []
+    for source, target in read_sources_manifest():
+        source_path = ROOT / source.rstrip("/")
+        if not source_path.exists():
+            sys.exit(f"missing source: {source}")
+        if source.endswith("/"):
+            if not source_path.is_dir():
+                sys.exit(f"sources row names a tree but {source} is not a directory")
+            prefix = target.rstrip("/")
+            for found in sorted(p for p in source_path.rglob("*") if p.is_file()):
+                relative = found.relative_to(source_path).as_posix()
+                resolved.append((found, f"{prefix}/{relative}"))
+        else:
+            resolved.append((source_path, target))
+    return resolved
 
 
 def copy_sources() -> int:
     """Put the files we own into the checkout. Directories are created as needed."""
     count = 0
-    for source, target in read_sources_manifest():
-        source_path = ROOT / source
+    for source_path, target in expand_sources_rows():
         target_path = SRC / target
-        if not source_path.exists():
-            sys.exit(f"missing source: {source}")
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source_path, target_path)
-        print(f"source   {target}")
         count += 1
+    for source, target in read_sources_manifest():
+        print(f"source   {target}")
     return count
 
 
@@ -554,7 +581,7 @@ def cmd_export(_: argparse.Namespace) -> None:
     # Only the files that could plausibly be ours. A synced checkout carries tens of thousands of
     # untracked third_party and node_modules files, and listing them buries the line that matters.
     # Files we deliberately copied in are already in this repository, so they are not news either.
-    copied_in = {target for _, target in read_sources_manifest()}
+    copied_in = {target for _, target in expand_sources_rows()}
     ours = [
         relative
         for relative in added

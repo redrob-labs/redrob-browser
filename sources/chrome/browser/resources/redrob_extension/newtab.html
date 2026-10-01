@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" data-theme="redrob">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/redrob-mark.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>New tab</title>
+    <!--
+      No web-font CDN link here, unlike the older pages (sidepanel, options,
+      pairing, gif_viewer) which fetch Pretendard from jsdelivr. A new tab opens
+      constantly, so that would be a network request per tab, it fails offline, and
+      it tells a third party how often the browser is used. The library's
+      --font-sans already lists Pretendard first and falls back through system-ui,
+      which is what the onboarding and settings pages rely on too.
+    -->
+    <script type="module" crossorigin src="/assets/newtab.js"></script>
+    <!-- The design system, taken from @redrob-labs/ui — tokens then preflight then
+         the component sheet, the order the library documents. Before our own sheet,
+         so it can still override where this surface genuinely differs. -->
+    <link rel="stylesheet" href="/assets/redrob-ui/tokens.css" />
+    <link rel="stylesheet" href="/assets/redrob-ui/preflight.css" />
+    <link rel="stylesheet" href="/assets/redrob-ui/styles.css" />
+    <link rel="stylesheet" href="/assets/redrob.css" />
+    <link rel="stylesheet" href="/assets/new-tab.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+# The id Chromium derives from the vendored manifest's `key`, which is what the component-extension
+# allowlist names. It is not a chosen string: scripts/vendor_extension.py derives it from the same key it
+# injects, and the gate refuses the two out of step -- an id that does not match loads an extension that is
+# not on the allowlist, which fails as a silently permission-less extension rather than as an error.
+substitutions:
+  - description: Declare the Redrob component extension's id.
+    insert_after:
+      anchor: '    "glbjnfimcajjenihimblfaponejbkoph";'
+      count: 1
+      lines: |
+
+        // The extension id of the Redrob component extension -- the settings, onboarding, side panel and
+        // new tab surfaces. Derived from the `key` in
+        // chrome/browser/resources/redrob_extension/manifest.json by scripts/vendor_extension.py.
+        inline constexpr char kRedrobExtensionId[] =
+            "npnpllfkpccaljklgalmdhecbnpfllom";

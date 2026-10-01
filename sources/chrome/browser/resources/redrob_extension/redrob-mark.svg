@@ -1,0 +1,19 @@
+<svg width="400" height="400" viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M259.8 320V200L399.89 250.99L400 251.03V327.21L199.99 400.01L0 327.21V251.02L0.08 250.99L140.17 200V276.45L259.8 320ZM400 148.97V72.8L199.99 0L0 72.79V148.98L0.08 149.01L140.17 199.99V123.8L259.8 80.26V199.99L399.89 149.01L400 148.96V148.97Z" fill="#2B52FF"/>
+  <mask id="mark" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="401" style="mask-type:luminance">
+    <path d="M259.8 320V200L399.89 250.99L400 251.03V327.21L199.99 400.01L0 327.21V251.02L0.08 250.99L140.17 200V276.45L259.8 320ZM400 148.97V72.8L199.99 0L0 72.79V148.98L0.08 149.01L140.17 199.99V123.8L259.8 80.26V199.99L399.89 149.01L400 148.96V148.97Z" fill="#fff"/>
+  </mask>
+  <g mask="url(#mark)">
+    <circle cx="199" cy="199" r="206" fill="url(#glow)"/>
+  </g>
+  <defs>
+    <radialGradient id="glow" cx="199" cy="199" r="206" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#44FFE3" stop-opacity="0.737"/>
+      <stop offset="0.22" stop-color="#44FFE3" stop-opacity="0.62"/>
+      <stop offset="0.44" stop-color="#44FFE3" stop-opacity="0.417"/>
+      <stop offset="0.67" stop-color="#44FFE3" stop-opacity="0.21"/>
+      <stop offset="0.89" stop-color="#44FFE3" stop-opacity="0.037"/>
+      <stop offset="1" stop-color="#44FFE3" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+</svg>
