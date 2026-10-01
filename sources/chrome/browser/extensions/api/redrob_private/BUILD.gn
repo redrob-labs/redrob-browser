@@ -11,13 +11,29 @@ source_set("redrob_private") {
   sources = [
     "redrob_private_api.cc",
     "redrob_private_api.h",
+    "redrob_private_import_manager.cc",
+    "redrob_private_import_manager.h",
+    "redrob_private_import_manager_factory.cc",
+    "redrob_private_import_manager_factory.h",
+    "redrob_private_onboarding_service.cc",
+    "redrob_private_onboarding_service.h",
+    "redrob_private_onboarding_service_factory.cc",
+    "redrob_private_onboarding_service_factory.h",
   ]
+
+  # public_deps because the public header includes importer_list.h (the
+  # unique_ptr<ImporterList> member needs the complete type wherever this
+  # function class is used, including the generated API registration).
+  public_deps = [ "//chrome/browser/importer" ]
 
   deps = [
     "//base",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/redrob:sidecar",
     "//chrome/common/extensions/api",
+    "//components/keyed_service/core",
+    "//components/prefs",
+    "//components/user_data_importer/common",
     "//components/version_info",
     "//extensions/browser",
   ]

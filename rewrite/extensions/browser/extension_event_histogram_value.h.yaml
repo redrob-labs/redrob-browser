@@ -1,0 +1,11 @@
+# The onImportStateChanged event on redrobPrivate needs an events enum value or the generated event
+# dispatch does not compile. Appended after the current last real value (DICTATION_PRIVATE_ON_BROWSER_LOG_EVENT
+# = 578); the next ordinal is 579. The matching enums.xml entry is generated, not hand-written.
+# count=1 on the unique 578 line fails loudly on an uprev that adds its own events, which is the cue to renumber.
+substitutions:
+  - description: Add the REDROBPRIVATE_ON_IMPORT_STATE_CHANGED event histogram enum value.
+    insert_after:
+      anchor: '  DICTATION_PRIVATE_ON_BROWSER_LOG_EVENT = 578,'
+      count: 1
+      lines: |
+        REDROBPRIVATE_ON_IMPORT_STATE_CHANGED = 579,
