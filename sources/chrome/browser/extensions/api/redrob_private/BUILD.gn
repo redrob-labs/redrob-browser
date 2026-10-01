@@ -30,6 +30,7 @@ source_set("redrob_private") {
     "//base",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/redrob:sidecar",
+    "//components/password_manager/core/common",
     "//chrome/common/extensions/api",
     "//components/keyed_service/core",
     "//components/prefs",

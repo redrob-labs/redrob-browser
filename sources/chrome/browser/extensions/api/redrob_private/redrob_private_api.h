@@ -89,6 +89,16 @@ class RedrobPrivateCompleteOnboardingFunction : public ExtensionFunction {
   ~RedrobPrivateCompleteOnboardingFunction() override = default;
 
   // ExtensionFunction:
+class RedrobPrivateGetSettingsFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getSettings",
+                             REDROBPRIVATE_GETSETTINGS)
+
+ protected:
+  ~RedrobPrivateGetSettingsFunction() override = default;
+  ResponseAction Run() override;
+};
+
 class RedrobPrivateSetMemoryEnabledFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("redrobPrivate.setMemoryEnabled",
