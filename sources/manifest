@@ -162,6 +162,10 @@ sources/chrome/browser/extensions/api/redrob_private/redrob_private_api.h	chrome
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_api.cc	chrome/browser/extensions/api/redrob_private/redrob_private_api.cc
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.h	chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.h
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.cc	chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.cc
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_task_event_router.h	chrome/browser/extensions/api/redrob_private/redrob_private_task_event_router.h
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_task_event_router.cc	chrome/browser/extensions/api/redrob_private/redrob_private_task_event_router.cc
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_task_event_router_factory.h	chrome/browser/extensions/api/redrob_private/redrob_private_task_event_router_factory.h
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_task_event_router_factory.cc	chrome/browser/extensions/api/redrob_private/redrob_private_task_event_router_factory.cc
 sources/chrome/browser/extensions/api/redrob_private/BUILD.gn	chrome/browser/extensions/api/redrob_private/BUILD.gn
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.h	chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.h
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.cc	chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.cc

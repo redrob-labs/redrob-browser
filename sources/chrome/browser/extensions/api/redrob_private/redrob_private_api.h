@@ -10,6 +10,8 @@
 #include "chrome/browser/importer/importer_list.h"
 #include <string>
 
+#include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
+#include "chrome/common/extensions/api/redrob_private.h"
 #include "extensions/browser/extension_function.h"
 
 namespace base {
@@ -19,6 +21,11 @@ class FilePath;
 class GURL;
 
 namespace extensions {
+
+// The one conversion from the agent's task struct to the private API's, shared
+// by getTask/listTasks and by the onTaskChanged event, so the two surfaces
+// cannot drift into two different shapes of the same task.
+api::redrob_private::Task ToPrivateTask(const redrob::mojom::Task& task);
 
 class RedrobPrivateGetBrowserVersionFunction : public ExtensionFunction {
  public:
@@ -386,6 +393,18 @@ class RedrobPrivateSendFollowUpFunction : public ExtensionFunction {
  protected:
   ~RedrobPrivateSendFollowUpFunction() override = default;
   ResponseAction Run() override;
+};
+
+class RedrobPrivateChooseTaskWorkingFolderFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.chooseTaskWorkingFolder",
+                             REDROBPRIVATE_CHOOSETASKWORKINGFOLDER)
+ protected:
+  ~RedrobPrivateChooseTaskWorkingFolderFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnFolderChosen(const std::string& task_id, const base::FilePath& path);
 };
 
 }  // namespace extensions

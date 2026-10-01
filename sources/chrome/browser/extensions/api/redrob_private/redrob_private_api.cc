@@ -338,36 +338,6 @@ redrob_private::StepKind ToPrivateStepKind(redrob::mojom::StepKind kind) {
   return redrob_private::StepKind::kThinking;
 }
 
-redrob_private::Task ToPrivateTask(const redrob::mojom::Task& task) {
-  redrob_private::Task out;
-  out.id = task.id;
-  out.prompt = task.prompt;
-  out.state = ToPrivateState(task.state);
-  out.narration = task.narration;
-  out.started_at_ms = static_cast<double>(task.started_at_ms);
-  out.error = task.error;
-  out.mode = ToPrivateMode(task.mode);
-  out.working_folder = task.working_folder;
-  out.effort = ToPrivateEffort(task.effort);
-  out.model = task.model;
-  out.queued = task.queued;
-  for (const auto& step : task.steps) {
-    redrob_private::Step wire;
-    wire.kind = ToPrivateStepKind(step->kind);
-    wire.step_label = step->label;
-    wire.started_at_ms = static_cast<double>(step->started_at_ms);
-    wire.preview_data_url = step->preview_data_url;
-    for (const auto& detail : step->details) {
-      redrob_private::StepDetail wire_detail;
-      wire_detail.text = detail->text;
-      wire_detail.source = detail->source;
-      wire_detail.timing = detail->timing;
-      wire.details.push_back(std::move(wire_detail));
-    }
-    out.steps.push_back(std::move(wire));
-  }
-  return out;
-}
 
 redrob_private::StartError ToPrivateStartError(redrob::mojom::StartError error) {
   switch (error) {
@@ -426,6 +396,40 @@ redrob_private::ModelOption ToPrivateModel(
   return out;
 }
 }  // namespace
+
+// Shared with the task event router, which turns the same struct into the
+// onTaskChanged event. Defined once, outside the anonymous namespace, so the
+// function surface and the event surface cannot drift into two conversions.
+redrob_private::Task ToPrivateTask(const redrob::mojom::Task& task) {
+  redrob_private::Task out;
+  out.id = task.id;
+  out.prompt = task.prompt;
+  out.state = ToPrivateState(task.state);
+  out.narration = task.narration;
+  out.started_at_ms = static_cast<double>(task.started_at_ms);
+  out.error = task.error;
+  out.mode = ToPrivateMode(task.mode);
+  out.working_folder = task.working_folder;
+  out.effort = ToPrivateEffort(task.effort);
+  out.model = task.model;
+  out.queued = task.queued;
+  for (const auto& step : task.steps) {
+    redrob_private::Step wire;
+    wire.kind = ToPrivateStepKind(step->kind);
+    wire.step_label = step->label;
+    wire.started_at_ms = static_cast<double>(step->started_at_ms);
+    wire.preview_data_url = step->preview_data_url;
+    for (const auto& detail : step->details) {
+      redrob_private::StepDetail wire_detail;
+      wire_detail.text = detail->text;
+      wire_detail.source = detail->source;
+      wire_detail.timing = detail->timing;
+      wire.details.push_back(std::move(wire_detail));
+    }
+    out.steps.push_back(std::move(wire));
+  }
+  return out;
+}
 
 ExtensionFunction::ResponseAction RedrobPrivateRemoveMemoryFunction::Run() {
   auto params = redrob_private::RemoveMemory::Params::Create(args());
@@ -953,6 +957,42 @@ ExtensionFunction::ResponseAction RedrobPrivateSendFollowUpFunction::Run() {
                          FromPrivateFollowUpMode(params->mode));
   return RespondNow(ArgumentList(
       redrob_private::SendFollowUp::Results::Create(ToPrivateOutcome(outcome))));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateChooseTaskWorkingFolderFunction::Run() {
+  auto params = redrob_private::ChooseTaskWorkingFolder::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  content::WebContents* web_contents = GetSenderWebContents();
+  if (!web_contents) {
+    return RespondNow(ArgumentList(base::ListValue()));
+  }
+  // The task's folder, not the profile's default: this never touches the
+  // kWorkingFolder pref that the settings page's chooseWorkingFolder writes.
+  RedrobPrivateFolderPicker::Show(
+      web_contents, u"Choose the folder this task may write into",
+      base::BindOnce(
+          &RedrobPrivateChooseTaskWorkingFolderFunction::OnFolderChosen, this,
+          params->task_id));
+  return RespondLater();
+}
+
+void RedrobPrivateChooseTaskWorkingFolderFunction::OnFolderChosen(
+    const std::string& task_id,
+    const base::FilePath& path) {
+  base::ListValue result;
+  if (!path.empty() && path.IsAbsolute()) {
+    // The store answers with the display name the page may show, or nothing when
+    // the task is unknown — which it can be by the time a dialog closes.
+    const std::optional<std::string> display =
+        TaskStoreFactory::GetForProfile(
+            Profile::FromBrowserContext(browser_context()))
+            ->SetWorkingFolder(task_id, path);
+    if (display) {
+      result.Append(*display);
+    }
+  }
+  Respond(ArgumentList(std::move(result)));
 }
 
 }  // namespace extensions

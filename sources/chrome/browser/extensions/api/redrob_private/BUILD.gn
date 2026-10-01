@@ -21,6 +21,10 @@ source_set("redrob_private") {
     "redrob_private_onboarding_service_factory.h",
     "redrob_private_folder_picker.cc",
     "redrob_private_folder_picker.h",
+    "redrob_private_task_event_router.cc",
+    "redrob_private_task_event_router.h",
+    "redrob_private_task_event_router_factory.cc",
+    "redrob_private_task_event_router_factory.h",
   ]
 
   # public_deps because the public header includes importer_list.h (the
@@ -35,6 +39,7 @@ source_set("redrob_private") {
     "//chrome/browser/search_engines",
     "//chrome/browser/ui/navigator",
     "//chrome/browser/ui/select_file_policy",
+    "//components/keyed_service/core",
     "//components/password_manager/core/common",
     "//components/search_engines",
     "//chrome/common/extensions/api",
