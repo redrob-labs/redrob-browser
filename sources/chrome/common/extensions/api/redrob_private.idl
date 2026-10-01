@@ -354,5 +354,29 @@ namespace redrobPrivate {
     // the id of a task from a previous browser session, so "no such task" is an
     // ordinary answer rather than an error.
     static void getTask(DOMString taskId, GetTaskCallback callback);
+
+    // Stops a task. Nothing to report: a task that was already finished or never
+    // existed is simply not running now, which is what the caller wanted.
+    static void cancelTask(DOMString taskId);
+
+    // Changes what a running task is allowed to do. Resolves false when the task
+    // is gone or will not accept the change.
+    static void setPermissionMode(DOMString taskId,
+                                  PermissionMode mode,
+                                  BoolCallback callback);
+
+    // Removes a queued follow-up. |expectedPrompt| is checked against what is
+    // actually at |index|, so a stale view cannot withdraw the wrong message.
+    // Resolves false when it no longer matches.
+    static void withdrawQueuedFollowUp(DOMString taskId,
+                                       long index,
+                                       DOMString expectedPrompt,
+                                       BoolCallback callback);
+
+    // Searches with the browser's default engine, replacing THIS page rather
+    // than opening a tab: the user typed into this surface and expects results
+    // where they were. Does nothing when there is no default engine — policy can
+    // remove it, and the choice screen leaves it unset until the user picks.
+    static void searchWithDefaultProvider(DOMString query);
   };
 };

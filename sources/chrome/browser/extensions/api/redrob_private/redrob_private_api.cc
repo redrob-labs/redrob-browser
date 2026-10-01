@@ -20,6 +20,7 @@
 #include "chrome/browser/redrob/redrob_prefs.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.h"
 #include "chrome/browser/profiles/profile.h"
@@ -33,12 +34,15 @@
 #include "chrome/browser/redrob/sidecar_client.h"
 #include "chrome/browser/redrob/task_store.h"
 #include "chrome/browser/redrob/task_store_factory.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/navigator/browser_navigator.h"
 #include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_service.h"
+#include "components/search_engines/template_url.h"
+#include "components/search_engines/template_url_service.h"
 #include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
 #include "chrome/common/extensions/api/redrob_private.h"
@@ -791,6 +795,86 @@ ExtensionFunction::ResponseAction RedrobPrivateGetTaskFunction::Run() {
     result.Append(ToPrivateTask(*task).ToValue());
   }
   return RespondNow(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateCancelTaskFunction::Run() {
+  auto params = redrob_private::CancelTask::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // Nothing to report: a task that was already finished, or never existed, is
+  // not running now either, which is what the caller wanted.
+  TaskStoreFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()))
+      ->CancelTask(params->task_id);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetPermissionModeFunction::Run() {
+  auto params = redrob_private::SetPermissionMode::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const bool accepted =
+      TaskStoreFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()))
+          ->SetPermissionMode(params->task_id, FromPrivateMode(params->mode));
+  return RespondNow(ArgumentList(
+      redrob_private::SetPermissionMode::Results::Create(accepted)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateWithdrawQueuedFollowUpFunction::Run() {
+  auto params = redrob_private::WithdrawQueuedFollowUp::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // A negative index cannot address a queue entry, and the store takes an
+  // unsigned one, so it is refused here rather than wrapping around to an
+  // enormous index.
+  if (params->index < 0) {
+    return RespondNow(ArgumentList(
+        redrob_private::WithdrawQueuedFollowUp::Results::Create(false)));
+  }
+  const bool withdrawn =
+      TaskStoreFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()))
+          ->WithdrawQueuedFollowUp(params->task_id,
+                                   static_cast<uint32_t>(params->index),
+                                   params->expected_prompt);
+  return RespondNow(ArgumentList(
+      redrob_private::WithdrawQueuedFollowUp::Results::Create(withdrawn)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSearchWithDefaultProviderFunction::Run() {
+  auto params = redrob_private::SearchWithDefaultProvider::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  content::WebContents* web_contents = GetSenderWebContents();
+  if (!web_contents || params->query.empty()) {
+    return RespondNow(NoArguments());
+  }
+  Profile* profile = Profile::FromBrowserContext(browser_context());
+  TemplateURLService* service =
+      profile ? TemplateURLServiceFactory::GetForProfile(profile) : nullptr;
+  const TemplateURL* provider =
+      service ? service->GetDefaultSearchProvider() : nullptr;
+  // No default provider is a real state -- enterprise policy can remove it, and
+  // the search-engine choice screen leaves it unset until the user picks. Doing
+  // nothing is right: there is no engine to ask, and substituting one would
+  // override exactly the choice this call exists to respect.
+  if (!provider) {
+    return RespondNow(NoArguments());
+  }
+  const GURL url(provider->url_ref().ReplaceSearchTerms(
+      TemplateURLRef::SearchTermsArgs(base::UTF8ToUTF16(params->query)),
+      service->search_terms_data()));
+  if (!url.is_valid()) {
+    return RespondNow(NoArguments());
+  }
+  // Replaces this page rather than opening a tab: the user typed into this
+  // surface and expects results where they were.
+  content::OpenURLParams open_params(url, content::Referrer(),
+                                     WindowOpenDisposition::CURRENT_TAB,
+                                     ui::PAGE_TRANSITION_GENERATED,
+                                     /*is_renderer_initiated=*/false);
+  web_contents->OpenURL(open_params, /*navigation_handle_callback=*/{});
+  return RespondNow(NoArguments());
 }
 
 }  // namespace extensions

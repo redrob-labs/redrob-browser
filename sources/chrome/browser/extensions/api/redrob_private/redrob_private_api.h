@@ -334,6 +334,43 @@ class RedrobPrivateGetTaskFunction : public ExtensionFunction {
   ResponseAction Run() override;
 };
 
+class RedrobPrivateCancelTaskFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.cancelTask",
+                             REDROBPRIVATE_CANCELTASK)
+ protected:
+  ~RedrobPrivateCancelTaskFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetPermissionModeFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setPermissionMode",
+                             REDROBPRIVATE_SETPERMISSIONMODE)
+ protected:
+  ~RedrobPrivateSetPermissionModeFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateWithdrawQueuedFollowUpFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.withdrawQueuedFollowUp",
+                             REDROBPRIVATE_WITHDRAWQUEUEDFOLLOWUP)
+ protected:
+  ~RedrobPrivateWithdrawQueuedFollowUpFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSearchWithDefaultProviderFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.searchWithDefaultProvider",
+                             REDROBPRIVATE_SEARCHWITHDEFAULTPROVIDER)
+ protected:
+  ~RedrobPrivateSearchWithDefaultProviderFunction() override = default;
+  ResponseAction Run() override;
+};
+
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_
