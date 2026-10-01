@@ -1,0 +1,18 @@
+# The import manager is a lazily-created KeyedService, so its factory must be registered with the
+# BrowserContextDependencyManager here or the dependency graph does not know it exists. Two inserts, each
+# anchored on the unique reading_list line it sorts immediately after (reading_list < redrob_private < sessions).
+substitutions:
+  - description: Include the redrobPrivate import-manager factory header.
+    insert_after:
+      anchor: '#include "chrome/browser/extensions/api/reading_list/reading_list_event_router_factory.h"'
+      count: 1
+      lines: |
+        #include "chrome/browser/extensions/api/redrob_private/redrob_private_import_manager_factory.h"
+        #include "chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service_factory.h"
+  - description: Ensure the redrobPrivate import-manager factory is built.
+    insert_after:
+      anchor: '  extensions::ReadingListEventRouterFactory::GetInstance();'
+      count: 1
+      lines: |
+        extensions::RedrobPrivateImportManagerFactory::GetInstance();
+        extensions::RedrobPrivateOnboardingServiceFactory::GetInstance();
