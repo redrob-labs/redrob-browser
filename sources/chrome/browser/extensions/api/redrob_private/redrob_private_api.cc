@@ -369,6 +369,52 @@ redrob_private::Task ToPrivateTask(const redrob::mojom::Task& task) {
   return out;
 }
 
+redrob_private::StartError ToPrivateStartError(redrob::mojom::StartError error) {
+  switch (error) {
+    case redrob::mojom::StartError::kEmptyPrompt:
+      return redrob_private::StartError::kEmptyPrompt;
+    case redrob::mojom::StartError::kSidecarUnavailable:
+      return redrob_private::StartError::kSidecarUnavailable;
+    case redrob::mojom::StartError::kTooManyRunningTasks:
+      return redrob_private::StartError::kTooManyRunningTasks;
+  }
+  return redrob_private::StartError::kSidecarUnavailable;
+}
+
+redrob_private::FollowUpOutcome ToPrivateOutcome(
+    redrob::mojom::FollowUpOutcome outcome) {
+  switch (outcome) {
+    case redrob::mojom::FollowUpOutcome::kStartedTurn:
+      return redrob_private::FollowUpOutcome::kStartedTurn;
+    case redrob::mojom::FollowUpOutcome::kInterrupted:
+      return redrob_private::FollowUpOutcome::kInterrupted;
+    case redrob::mojom::FollowUpOutcome::kQueued:
+      return redrob_private::FollowUpOutcome::kQueued;
+    case redrob::mojom::FollowUpOutcome::kRejected:
+      return redrob_private::FollowUpOutcome::kRejected;
+  }
+  // An outcome this build does not know is reported as rejected rather than as
+  // success: the page must not tell the user a message was delivered when the
+  // browser cannot say that it was.
+  return redrob_private::FollowUpOutcome::kRejected;
+}
+
+redrob::mojom::FollowUpMode FromPrivateFollowUpMode(
+    redrob_private::FollowUpMode mode) {
+  switch (mode) {
+    case redrob_private::FollowUpMode::kInterrupt:
+      return redrob::mojom::FollowUpMode::kInterrupt;
+    case redrob_private::FollowUpMode::kQueue:
+      return redrob::mojom::FollowUpMode::kQueue;
+    case redrob_private::FollowUpMode::kAuto:
+    case redrob_private::FollowUpMode::kNone:
+      // `auto` is the ordinary case and the safe default: the browser decides
+      // between interrupting and queueing.
+      return redrob::mojom::FollowUpMode::kAuto;
+  }
+  return redrob::mojom::FollowUpMode::kAuto;
+}
+
 redrob_private::ModelOption ToPrivateModel(
     const redrob::mojom::ModelOption& option) {
   redrob_private::ModelOption out;
@@ -875,6 +921,38 @@ RedrobPrivateSearchWithDefaultProviderFunction::Run() {
                                      /*is_renderer_initiated=*/false);
   web_contents->OpenURL(open_params, /*navigation_handle_callback=*/{});
   return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateStartTaskFunction::Run() {
+  auto params = redrob_private::StartTask::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  auto [task_id, error] =
+      TaskStoreFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()))
+          ->StartTask(params->prompt, params->context_refs,
+                      FromPrivateMode(params->mode),
+                      FromPrivateEffort(params->effort), params->model);
+  redrob_private::StartTaskResult result;
+  if (task_id) {
+    result.task_id = *task_id;
+  }
+  if (error) {
+    result.error = ToPrivateStartError(*error);
+  }
+  return RespondNow(
+      ArgumentList(redrob_private::StartTask::Results::Create(result)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateSendFollowUpFunction::Run() {
+  auto params = redrob_private::SendFollowUp::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const redrob::mojom::FollowUpOutcome outcome =
+      TaskStoreFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()))
+          ->SendFollowUp(params->task_id, params->prompt,
+                         FromPrivateFollowUpMode(params->mode));
+  return RespondNow(ArgumentList(
+      redrob_private::SendFollowUp::Results::Create(ToPrivateOutcome(outcome))));
 }
 
 }  // namespace extensions

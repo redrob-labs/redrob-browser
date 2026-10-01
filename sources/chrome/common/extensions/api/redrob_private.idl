@@ -116,6 +116,28 @@ namespace redrobPrivate {
     DOMString[] capabilities;
     DOMString priceBand;
   };
+
+  // What happened to a message typed into a running task's composer.
+  enum FollowUpOutcome { startedTurn, interrupted, queued, rejected };
+
+  // What the caller asked for. `auto` lets the browser decide between
+  // interrupting and queueing.
+  enum FollowUpMode { auto, interrupt, queue };
+
+  // Why a task could not start. Every one of these is a bound the browser
+  // enforces, not a message from the engine.
+  enum StartError { emptyPrompt, sidecarUnavailable, tooManyRunningTasks };
+
+  // Exactly one of these is set.
+  //
+  // A dictionary rather than two optional positional arguments: the mojom
+  // returns (string? task_id, StartError? error), and a callback whose FIRST
+  // argument may be absent forces every JS caller to tell "not started" from
+  // "started, id missing" by counting arguments. Naming them removes that.
+  dictionary StartTaskResult {
+    DOMString? taskId;
+    StartError? error;
+  };
   enum RoutineKind { cron, heartbeat };
   enum EngineState { notInstalled, starting, ready, failed };
 
@@ -202,6 +224,8 @@ namespace redrobPrivate {
   callback ListTasksCallback = void (Task[] tasks);
   // Resolves with a task when there is one, and with nothing when there is not.
   callback GetTaskCallback = void (optional Task task);
+  callback StartTaskCallback = void (StartTaskResult result);
+  callback FollowUpCallback = void (FollowUpOutcome outcome);
 
   interface Functions {
     // Returns the browser's full version string (the same value shown on
@@ -378,5 +402,25 @@ namespace redrobPrivate {
     // where they were. Does nothing when there is no default engine — policy can
     // remove it, and the choice screen leaves it unset until the user picks.
     static void searchWithDefaultProvider(DOMString query);
+
+    // Starts a task. Every argument came from a renderer, so the browser is
+    // where the bounds live: an empty prompt, no engine, or too many tasks
+    // already running each come back as an error rather than a half-started task.
+    // |contextRefs|: what the task may look at, by reference.
+    // |model|: the wire model id. Empty takes the default.
+    static void startTask(DOMString prompt,
+                          DOMString[] contextRefs,
+                          PermissionMode mode,
+                          Effort effort,
+                          DOMString model,
+                          StartTaskCallback callback);
+
+    // A message typed into a running task's composer. The outcome says what the
+    // browser actually did with it — started a turn, interrupted, queued, or
+    // refused — because "sent" is not one thing.
+    static void sendFollowUp(DOMString taskId,
+                             DOMString prompt,
+                             FollowUpMode mode,
+                             FollowUpCallback callback);
   };
 };
