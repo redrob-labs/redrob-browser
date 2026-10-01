@@ -54,6 +54,68 @@ namespace redrobPrivate {
   // convention); the mojom's kFoo values become "foo".
   enum PermissionMode { readOnly, guard, fullAccess };
   enum Effort { quick, standard, ultrabrowse };
+
+  // Mirrors of the agent mojom's task types (A-1), so the agent surface can move
+  // to the extension. PermissionMode and Effort above are the SAME enums the
+  // agent mojom uses, so they are not duplicated here.
+  enum TaskState { queued, running, blockedOnPolicy, succeeded, failed, cancelled };
+
+  // What the agent did, one entry per action. The list is the honest record of a
+  // run; a task that only reported a final answer could not be checked.
+  enum StepKind {
+    thinking,
+    searchedMemory,
+    openedPage,
+    capturedScreenshot,
+    readPage,
+    clicked,
+    typed,
+    savedArtifact,
+    refused,
+    usedCredential,
+    spawnedSubagents,
+    steered,
+    queuedMessage,
+    planned,
+    routine
+  };
+
+  dictionary StepDetail {
+    DOMString text;
+    DOMString? source;
+    DOMString? timing;
+  };
+
+  dictionary Step {
+    StepKind kind;
+    DOMString stepLabel;
+    double startedAtMs;
+    StepDetail[] details;
+    DOMString? previewDataUrl;
+  };
+
+  dictionary Task {
+    DOMString id;
+    DOMString prompt;
+    TaskState state;
+    Step[] steps;
+    DOMString? narration;
+    double startedAtMs;
+    DOMString? error;
+    PermissionMode mode;
+    DOMString? workingFolder;
+    Effort effort;
+    DOMString model;
+    DOMString[] queued;
+  };
+
+  dictionary ModelOption {
+    DOMString id;
+    DOMString providerId;
+    DOMString name;
+    DOMString[] capabilities;
+    DOMString priceBand;
+  };
   enum RoutineKind { cron, heartbeat };
   enum EngineState { notInstalled, starting, ready, failed };
 
@@ -136,6 +198,10 @@ namespace redrobPrivate {
   };
 
   callback GetSettingsCallback = void (AgentSettings settings);
+  callback ListModelsCallback = void (ModelOption[] options);
+  callback ListTasksCallback = void (Task[] tasks);
+  // Resolves with a task when there is one, and with nothing when there is not.
+  callback GetTaskCallback = void (optional Task task);
 
   interface Functions {
     // Returns the browser's full version string (the same value shown on
@@ -275,5 +341,18 @@ namespace redrobPrivate {
 
     // Opens Chromium's own password manager, reusing its tab if it is open.
     static void openPasswordManager();
+
+    // The models the engine can route to right now. An empty list is a real
+    // answer: the engine may not be serving.
+    static void listModels(ListModelsCallback callback);
+
+    // Every task this session knows about, newest first.
+    static void listTasks(ListTasksCallback callback);
+
+    // One task by id. |callback|: the task, or NOTHING when there is no such
+    // task — a tab's URL is a string a renderer can put anything in, including
+    // the id of a task from a previous browser session, so "no such task" is an
+    // ordinary answer rather than an error.
+    static void getTask(DOMString taskId, GetTaskCallback callback);
   };
 };
