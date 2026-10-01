@@ -34,6 +34,17 @@ namespace redrobPrivate {
 
   callback GetImportSourcesCallback = void (ImportSource[] sources);
 
+  // How an import is going. Matches the onboarding ImportState mojom enum.
+  enum ImportState {
+    // The source browser is running and holds its data open. Recoverable: the
+    // user closes it and retries, which is why it is its own state.
+    idle,
+    running,
+    succeeded,
+    sourceBusy,
+    failed
+  };
+
   interface Functions {
     // Returns the browser's full version string (the same value shown on
     // chrome://version). Resolves a Promise on MV3.
@@ -53,5 +64,18 @@ namespace redrobPrivate {
     // Detection reads other browsers' profile directories, so it is async and
     // resolves late; an empty array means none were found, not still loading.
     static void getImportSources(GetImportSourcesCallback callback);
+
+    // Starts an import from the source at |sourceIndex| in the last
+    // getImportSources() result, into this profile. An import is not
+    // instantaneous, so progress and the outcome do NOT return here; they
+    // arrive on onImportStateChanged. Starting a second import while one runs
+    // is ignored.
+    static void startImport(long sourceIndex);
+  };
+
+  interface Events {
+    // Fired as an import progresses and when it ends. |message| carries the
+    // user-facing reason on sourceBusy/failed, and is absent otherwise.
+    static void onImportStateChanged(ImportState state, optional DOMString message);
   };
 };

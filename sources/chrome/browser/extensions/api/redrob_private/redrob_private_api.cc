@@ -11,6 +11,8 @@
 #include "base/functional/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.h"
+#include "chrome/browser/extensions/api/redrob_private/redrob_private_import_manager_factory.h"
 #include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/redrob/redrob_prefs.h"
@@ -118,6 +120,16 @@ void RedrobPrivateGetImportSourcesFunction::OnSourcesDetected() {
   }
   Respond(ArgumentList(
       redrob_private::GetImportSources::Results::Create(sources)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateStartImportFunction::Run() {
+  auto params = redrob_private::StartImport::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // The manager owns the import and broadcasts onImportStateChanged; the
+  // function returns immediately because the import outlives this call.
+  RedrobPrivateImportManagerFactory::GetForBrowserContext(browser_context())
+      ->StartImport(params->source_index);
+  return RespondNow(NoArguments());
 }
 
 }  // namespace extensions
