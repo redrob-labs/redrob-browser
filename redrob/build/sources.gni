@@ -73,9 +73,11 @@ redrob_chrome_common_importer_sources = [
 
 redrob_chrome_common_importer_deps = [ "//chrome/common:constants" ]
 
-# chrome/browser/resources -- our three WebUI bundles, plus the vendored extension's resource bundle.
+# chrome/browser/resources -- the onboarding and settings WebUI bundles, plus the vendored extension's
+# resource bundle. The agent surface used to have a bundle here too (resources/redrob:resources); it is
+# gone with the C++ WebUI. The design-system files that lived beside it stay in resources/redrob/ as the
+# ONE vendored copy the onboarding and settings bundles read through their own build_design_system_grdp.
 redrob_chrome_browser_resources_deps = [
-  "//chrome/browser/resources/redrob:resources",
   "//chrome/browser/resources/redrob_extension:resources",
   "//chrome/browser/resources/redrob_onboarding:resources",
 ]
@@ -84,14 +86,15 @@ redrob_chrome_browser_resources_deps = [
 # paths because root_gen_dir is per-toolchain and is not defined where this file is imported; the use
 # site joins them.
 redrob_chrome_browser_resource_pak_names = [
-  "redrob_resources.pak",
   "redrob_extension_resources.pak",
   "redrob_onboarding_resources.pak",
 ]
 
 # chrome/browser/ui/webui -- needed by both the config list and the controller factory.
 redrob_chrome_browser_ui_webui_deps = [
-  "//chrome/browser/ui/webui/redrob",
+  # The agent WebUI is gone; only its Mojo IDL target survives, because TaskStore, RoutineStore and the
+  # redrobPrivate extension API are written in terms of the task data types it defines.
+  "//chrome/browser/ui/webui/redrob:mojo_bindings",
   "//chrome/browser/ui/webui/redrob_onboarding",
 ]
 

@@ -6,7 +6,7 @@ substitutions:
       The three headers.
     regex:
       pattern: "#include \"chrome/browser/ui/webui/segmentation_internals/segmentation_internals_ui.h\""
-      replace: "#include \"chrome/browser/ui/webui/redrob/redrob_ui.h\"\n#include \"chrome/browser/ui/webui/redrob_onboarding/redrob_onboarding_ui.h\"\n#include \"chrome/browser/ui/webui/segmentation_internals/segmentation_internals_ui.h\""
+      replace: "#include \"chrome/browser/ui/webui/redrob_onboarding/redrob_onboarding_ui.h\"\n#include \"chrome/browser/ui/webui/segmentation_internals/segmentation_internals_ui.h\""
       count: 1
   # ---- hunk 1 run 2: 0 removed, 11 added
   - description: |
@@ -16,5 +16,5 @@ substitutions:
     regex:
       # NEITHER neighbour is unique (after=34, before=448). Anchor this one by hand.
       pattern: "      OptimizationGuideInternalsUI>(map);\n\n"
-      replace: "      OptimizationGuideInternalsUI>(map);\n\n  RegisterWebUIControllerInterfaceBinder<redrob::mojom::PageHandlerFactory,\n                                        redrob::RedrobUI>(map);\n\n  RegisterWebUIControllerInterfaceBinder<\n\n      redrob::onboarding::mojom::PageHandlerFactory,\n\n      redrob::RedrobOnboardingUI>(map);\n\n"
+      replace: "      OptimizationGuideInternalsUI>(map);\n\n  RegisterWebUIControllerInterfaceBinder<\n\n      redrob::onboarding::mojom::PageHandlerFactory,\n\n      redrob::RedrobOnboardingUI>(map);\n\n"
       count: 1

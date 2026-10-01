@@ -6,12 +6,12 @@ substitutions:
       The header.
     regex:
       pattern: "#include \"chrome/browser/ui/webui/version/version_ui.h\""
-      replace: "#include \"chrome/browser/ui/webui/redrob/redrob_ui.h\"\n#include \"chrome/browser/ui/webui/redrob_onboarding/redrob_onboarding_ui.h\"\n#include \"chrome/browser/ui/webui/version/version_ui.h\""
+      replace: "#include \"chrome/browser/ui/webui/redrob_onboarding/redrob_onboarding_ui.h\"\n#include \"chrome/browser/ui/webui/version/version_ui.h\""
       count: 1
   # ---- hunk 1 run 2: 0 removed, 3 added
   - description: |
       The config registrations.
     regex:
       pattern: "  map.AddWebUIConfig(std::make_unique<VersionUIConfig>());"
-      replace: "  map.AddWebUIConfig(std::make_unique<redrob::RedrobUIConfig>());\n  map.AddWebUIConfig(std::make_unique<redrob::RedrobOnboardingUIConfig>());\n  map.AddWebUIConfig(std::make_unique<VersionUIConfig>());"
+      replace: "  map.AddWebUIConfig(std::make_unique<redrob::RedrobOnboardingUIConfig>());\n  map.AddWebUIConfig(std::make_unique<VersionUIConfig>());"
       count: 1
