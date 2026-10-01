@@ -239,5 +239,17 @@ namespace redrobPrivate {
 
     // Forgets the agent's working folder.
     static void clearWorkingFolder();
+
+    // Adds a routine. |callback|: the new routine's id, or nothing if it was
+    // not stored. lastRunMs, nextRunMs and lastError are reported by
+    // getSettings and ignored here — the store owns them.
+    static void addRoutine(Routine routine, StringCallback callback);
+
+    // Updates an existing routine in place. Resolves true if it existed.
+    static void updateRoutine(Routine routine, BoolCallback callback);
+
+    // Runs a routine now, without waiting for its schedule.
+    // |callback|: the id of the task it started, or nothing if it did not start.
+    static void runRoutineNow(DOMString id, StringCallback callback);
   };
 };

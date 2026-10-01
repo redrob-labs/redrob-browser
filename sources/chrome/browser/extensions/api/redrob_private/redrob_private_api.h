@@ -238,6 +238,33 @@ class RedrobPrivateClearWorkingFolderFunction : public ExtensionFunction {
   ResponseAction Run() override;
 };
 
+class RedrobPrivateAddRoutineFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.addRoutine",
+                             REDROBPRIVATE_ADDROUTINE)
+ protected:
+  ~RedrobPrivateAddRoutineFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateUpdateRoutineFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.updateRoutine",
+                             REDROBPRIVATE_UPDATEROUTINE)
+ protected:
+  ~RedrobPrivateUpdateRoutineFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateRunRoutineNowFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.runRoutineNow",
+                             REDROBPRIVATE_RUNROUTINENOW)
+ protected:
+  ~RedrobPrivateRunRoutineNowFunction() override = default;
+  ResponseAction Run() override;
+};
+
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_
