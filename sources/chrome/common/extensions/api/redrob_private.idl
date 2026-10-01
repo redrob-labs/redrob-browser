@@ -260,12 +260,7 @@ namespace redrobPrivate {
     // browser. The page cannot do any of that itself. A no-op when onboarding
     // was opened as an ordinary tab (there is no first-run window to end).
     static void completeOnboarding();
-  };
 
-  interface Events {
-    // Fired as an import progresses and when it ends. |message| carries the
-    // user-facing reason on sourceBusy/failed, and is absent otherwise.
-    static void onImportStateChanged(ImportState state, optional DOMString message);
     // Returns the whole AgentSettings tree — working folder, memory, model
     // providers + engine state, password toggles, routines, recent chats, and
     // the loopback RPC endpoint. Assembled from the same stores the settings
@@ -433,6 +428,10 @@ namespace redrobPrivate {
   };
 
   interface Events {
+    // Fired as an import progresses and when it ends. |message| carries the
+    // user-facing reason on sourceBusy/failed, and is absent otherwise.
+    static void onImportStateChanged(ImportState state, optional DOMString message);
+
     // A task changed: it started, took a step, or finished. The whole task is
     // sent rather than a diff, because a page that missed an event would
     // otherwise be left with a record it cannot repair.

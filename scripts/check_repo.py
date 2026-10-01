@@ -485,6 +485,112 @@ def check_ui_ownership(problems: list[str]) -> None:
                 )
 
 
+def check_idl_interfaces(problems: list[str]) -> None:
+    """One `interface Functions`, one `interface Events`, and events only in Events.
+
+    The extension idl parser reads whatever structure it is given and reports nothing:
+    merging ten branches that each appended to the same anchor left this file with
+    `interface Functions` closed early and 32 FUNCTIONS declared inside a second
+    `interface Events` block. The parser returned 6 functions out of 38, the generated
+    header had no types for the rest, and the only thing that objected was the C++
+    compiler -- a build away. This check is a second.
+    """
+    for idl in sorted((ROOT / "sources/chrome/common/extensions/api").glob("*.idl")):
+        label = idl.relative_to(ROOT)
+        lines = idl.read_text(encoding="utf-8").split("\n")
+        blocks = [(n, m.group(1)) for n, line in enumerate(lines, 1)
+                  if (m := re.match(r"\s*interface (Functions|Events)\s*\{", line))]
+        for kind in ("Functions", "Events"):
+            count = sum(1 for _, name in blocks if name == kind)
+            if count > 1:
+                problems.append(
+                    f"{label} declares `interface {kind}` {count} times; the parser reads "
+                    f"only one and silently drops the rest"
+                )
+        # Which block each declaration sits in, by walking the interface boundaries.
+        current = None
+        for number, line in enumerate(lines, 1):
+            match = re.match(r"\s*interface (Functions|Events)\s*\{", line)
+            if match:
+                current = match.group(1)
+                continue
+            declaration = re.search(r"static \w+ (\w+)\(", line)
+            if not declaration or current is None:
+                continue
+            name = declaration.group(1)
+            is_event = name.startswith("on")
+            if is_event and current != "Events":
+                problems.append(f"{label}:{number} declares event {name} inside interface {current}")
+            if not is_event and current != "Functions":
+                problems.append(f"{label}:{number} declares function {name} inside interface {current}")
+
+
+def check_function_enum_coverage(problems: list[str]) -> None:
+    """Every DECLARE_EXTENSION_FUNCTION's enum name must exist in the enum rule.
+
+    A declared name that is not in the enum does not compile -- `no member named
+    REDROBPRIVATE_STARTIMPORT in namespace extensions::functions` -- and that is
+    exactly how it shipped: the function was added on one branch and its enum value
+    was never added to the rule, which no rule check noticed because nothing compared
+    the two. The compiler found it 40 minutes into a build.
+
+    Only the mapping is checked, not the reverse: an enum value with no function yet is
+    a reserved ordinal, which is legitimate.
+    """
+    sources = ROOT / "sources/chrome/browser/extensions/api/redrob_private"
+    if not sources.is_dir():
+        return
+    declared: dict[str, str] = {}
+    for header in sorted(sources.glob("*.h")):
+        for name in re.findall(r"\b(REDROBPRIVATE_[A-Z0-9_]+)\b", header.read_text(encoding="utf-8")):
+            declared.setdefault(name, header.name)
+    rule = ROOT / "rewrite/extensions/browser/extension_function_histogram_value.h.yaml"
+    if not rule.is_file():
+        problems.append(f"{declared and 'functions are declared but'} the function enum rule is missing")
+        return
+    in_rule = set(re.findall(r"\b(REDROBPRIVATE_[A-Z0-9_]+)\s*=\s*\d+,", rule.read_text(encoding="utf-8")))
+    for name, header in sorted(declared.items()):
+        if name not in in_rule:
+            problems.append(
+                f"{header} declares {name} but {rule.relative_to(ROOT)} does not give it a value; "
+                f"the generated registration will not compile"
+            )
+
+
+def check_enum_rules(problems: list[str]) -> None:
+    """Refuse a rewrite rule that declares the same enumerator, or the same ordinal, twice.
+
+    A C++ enum rejects both, but only at compile time -- and the rule set is checked
+    far more often than the browser is built. This is not hypothetical: the
+    redrobPrivate function enum arrived on six stacked branches that all appended to
+    one anchor, and merging them re-emitted the values already on develop, so some
+    enumerators were declared six times with six different numbers. Every rule check
+    passed; the compiler was the only thing that objected, after a 40-minute build.
+    """
+    entry = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*(\d+),\s*$")
+    for rule in sorted((ROOT / "rewrite").rglob("*.yaml")):
+        names: dict[str, int] = {}
+        values: dict[int, str] = {}
+        label = rule.relative_to(ROOT)
+        for line in rule.read_text(encoding="utf-8").split("\n"):
+            match = entry.match(line)
+            if not match:
+                continue
+            name, value = match.group(1), int(match.group(2))
+            if name in names:
+                problems.append(
+                    f"{label} declares enumerator {name} twice ({names[name]} and {value}); "
+                    f"a C++ enum rejects the redefinition"
+                )
+            elif value in values:
+                problems.append(
+                    f"{label} gives {value} to both {values[value]} and {name}; "
+                    f"two enumerators cannot share an ordinal"
+                )
+            names[name] = value
+            values[value] = name
+
+
 def main() -> int:
     problems: list[str] = []
     check_sources(problems)
@@ -498,6 +604,9 @@ def main() -> int:
     check_update_channel(problems)
     check_ui_ownership(problems)
     check_rewrites(problems)
+    check_enum_rules(problems)
+    check_function_enum_coverage(problems)
+    check_idl_interfaces(problems)
     if problems:
         for problem in problems:
             print(f"FAIL {problem}")

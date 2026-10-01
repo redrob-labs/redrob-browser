@@ -135,14 +135,18 @@ void RedrobPrivateImportManager::Broadcast(const char* state,
   }
   redrob_private::ImportState parsed =
       redrob_private::ParseImportState(state);
-  std::optional<std::string> message_arg;
+  // Built by hand rather than through OnImportStateChanged::Create, which takes a
+  // plain string: the generator drops `optional` on a trailing argument, so "no
+  // message" cannot travel through it. An empty string is not the same thing -- it
+  // would tell the page there IS a reason and that the reason is blank.
+  base::ListValue args;
+  args.Append(redrob_private::ToString(parsed));
   if (!message.empty()) {
-    message_arg = message;
+    args.Append(message);
   }
   auto event = std::make_unique<Event>(
       events::REDROBPRIVATE_ON_IMPORT_STATE_CHANGED,
-      redrob_private::OnImportStateChanged::kEventName,
-      redrob_private::OnImportStateChanged::Create(parsed, message_arg),
+      redrob_private::OnImportStateChanged::kEventName, std::move(args),
       context_);
   event_router->BroadcastEvent(std::move(event));
 }
