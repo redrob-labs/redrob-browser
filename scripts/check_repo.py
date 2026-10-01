@@ -485,6 +485,38 @@ def check_ui_ownership(problems: list[str]) -> None:
                 )
 
 
+def check_function_enum_coverage(problems: list[str]) -> None:
+    """Every DECLARE_EXTENSION_FUNCTION's enum name must exist in the enum rule.
+
+    A declared name that is not in the enum does not compile -- `no member named
+    REDROBPRIVATE_STARTIMPORT in namespace extensions::functions` -- and that is
+    exactly how it shipped: the function was added on one branch and its enum value
+    was never added to the rule, which no rule check noticed because nothing compared
+    the two. The compiler found it 40 minutes into a build.
+
+    Only the mapping is checked, not the reverse: an enum value with no function yet is
+    a reserved ordinal, which is legitimate.
+    """
+    sources = ROOT / "sources/chrome/browser/extensions/api/redrob_private"
+    if not sources.is_dir():
+        return
+    declared: dict[str, str] = {}
+    for header in sorted(sources.glob("*.h")):
+        for name in re.findall(r"\b(REDROBPRIVATE_[A-Z0-9_]+)\b", header.read_text(encoding="utf-8")):
+            declared.setdefault(name, header.name)
+    rule = ROOT / "rewrite/extensions/browser/extension_function_histogram_value.h.yaml"
+    if not rule.is_file():
+        problems.append(f"{declared and 'functions are declared but'} the function enum rule is missing")
+        return
+    in_rule = set(re.findall(r"\b(REDROBPRIVATE_[A-Z0-9_]+)\s*=\s*\d+,", rule.read_text(encoding="utf-8")))
+    for name, header in sorted(declared.items()):
+        if name not in in_rule:
+            problems.append(
+                f"{header} declares {name} but {rule.relative_to(ROOT)} does not give it a value; "
+                f"the generated registration will not compile"
+            )
+
+
 def check_enum_rules(problems: list[str]) -> None:
     """Refuse a rewrite rule that declares the same enumerator, or the same ordinal, twice.
 
@@ -533,6 +565,7 @@ def main() -> int:
     check_ui_ownership(problems)
     check_rewrites(problems)
     check_enum_rules(problems)
+    check_function_enum_coverage(problems)
     if problems:
         for problem in problems:
             print(f"FAIL {problem}")
