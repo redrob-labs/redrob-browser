@@ -1,12 +1,13 @@
 diff --git a/extensions/browser/extension_event_histogram_value.h b/extensions/browser/extension_event_histogram_value.h
-index f47da4955f401..26596513fc47b 100644
+index f47da4955f401..885d1aae0119b 100644
 --- a/extensions/browser/extension_event_histogram_value.h
 +++ b/extensions/browser/extension_event_histogram_value.h
-@@ -601,6 +601,7 @@ enum HistogramValue {
+@@ -601,6 +601,8 @@ enum HistogramValue {
    DICTATION_PRIVATE_ON_END_STREAM = 576,
    DICTATION_PRIVATE_ON_CONTEXT_UPDATE = 577,
    DICTATION_PRIVATE_ON_BROWSER_LOG_EVENT = 578,
-+  REDROBPRIVATE_ON_TASK_CHANGED = 579,
++  REDROBPRIVATE_ON_IMPORT_STATE_CHANGED = 579,
++  REDROBPRIVATE_ON_TASK_CHANGED = 580,
    // Last entry: Add new entries above, then run:
    // tools/metrics/histograms/update_extension_histograms.py
    ENUM_BOUNDARY

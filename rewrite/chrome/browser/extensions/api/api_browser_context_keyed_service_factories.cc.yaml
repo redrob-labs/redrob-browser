@@ -1,25 +1,29 @@
-# The task event router is a KeyedService created WITH the browser context, so its factory must be
-# registered with the BrowserContextDependencyManager here or the dependency graph does not know it
-# exists -- and a service created with the context is exactly the case where being absent from the
-# graph shows up as a crash at startup rather than as a missing feature later.
+# redrobPrivate has three KeyedServices whose factories must be registered with the
+# BrowserContextDependencyManager here, or the dependency graph does not know they exist -- and for a
+# service created WITH the browser context that shows up as a crash at startup rather than as a
+# missing feature later.
 #
 # Two inserts, each anchored on the unique reading_list line it sorts immediately after
 # (reading_list < redrob_private < sessions).
 #
-# COLLIDES WITH THE ONBOARDING STACK. That branch registers the import-manager factory from the same
-# two anchors, in this same file. Whichever merges second gets a git conflict here and keeps both
-# registrations -- which is the outcome to want, because the alternative is one of the two services
-# silently missing from the dependency graph.
+# Two stacks registered into these same two anchors -- the onboarding stack (import manager,
+# onboarding service) and the agent stack (task event router) -- which was a deliberate collision: it
+# produced a git conflict here instead of one rule overwriting the other and leaving a service
+# silently missing from the graph. Resolved by keeping all three, in the group's alphabetical order.
 substitutions:
-  - description: Include the redrobPrivate task-event-router factory header.
+  - description: Include the redrobPrivate service factory headers.
     insert_after:
       anchor: '#include "chrome/browser/extensions/api/reading_list/reading_list_event_router_factory.h"'
       count: 1
       lines: |
+        #include "chrome/browser/extensions/api/redrob_private/redrob_private_import_manager_factory.h"
+        #include "chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service_factory.h"
         #include "chrome/browser/extensions/api/redrob_private/redrob_private_task_event_router_factory.h"
-  - description: Ensure the redrobPrivate task-event-router factory is built.
+  - description: Ensure the redrobPrivate service factories are built.
     insert_after:
       anchor: '  extensions::ReadingListEventRouterFactory::GetInstance();'
       count: 1
       lines: |
+        extensions::RedrobPrivateImportManagerFactory::GetInstance();
+        extensions::RedrobPrivateOnboardingServiceFactory::GetInstance();
         extensions::RedrobPrivateTaskEventRouterFactory::GetInstance();

@@ -1,18 +1,20 @@
-# The onTaskChanged event on redrobPrivate needs an events enum value or the generated event dispatch
-# does not compile. Appended after the current last real value (DICTATION_PRIVATE_ON_BROWSER_LOG_EVENT
-# = 578); the next ordinal is 579. The matching enums.xml entry is generated, not hand-written.
-# count=1 on the unique 578 line fails loudly on an uprev that adds its own events, which is the cue to
-# renumber.
+# redrobPrivate has two events, and both need an events enum value or the generated event dispatch
+# does not compile. They were added on two branches that were not ancestors of each other, each
+# anchored on the same last real value (DICTATION_PRIVATE_ON_BROWSER_LOG_EVENT = 578) and each
+# claiming 579. That collision was deliberate: it produced a git conflict here instead of two rules
+# silently inserting at the same anchor and leaving the enum with a duplicate value.
 #
-# COLLIDES WITH THE ONBOARDING STACK ON PURPOSE. redrobPrivate's other event,
-# onImportStateChanged, is added by a branch that is NOT an ancestor of this one, anchored on the same
-# 578 line and also claiming 579. Whichever of the two merges second gets a git conflict IN THIS FILE
-# and must renumber to 580 -- which is the outcome to want: a conflict a human resolves, rather than
-# two rules silently inserting at the same anchor and leaving the enum with a duplicate value.
+# Resolved by keeping both, as ONE rule inserting both lines: onImportStateChanged keeps 579, which it
+# already has on develop, and onTaskChanged takes 580. One rule rather than two, because two rules on
+# the same anchor would race on insertion order and the order here IS the numbering.
+#
+# count=1 on the unique 578 line fails loudly on an uprev that adds its own events, which is the cue
+# to renumber. The matching enums.xml entries are generated, not hand-written.
 substitutions:
-  - description: Add the REDROBPRIVATE_ON_TASK_CHANGED event histogram enum value.
+  - description: Add the redrobPrivate event histogram enum values.
     insert_after:
       anchor: '  DICTATION_PRIVATE_ON_BROWSER_LOG_EVENT = 578,'
       count: 1
       lines: |
-        REDROBPRIVATE_ON_TASK_CHANGED = 579,
+        REDROBPRIVATE_ON_IMPORT_STATE_CHANGED = 579,
+        REDROBPRIVATE_ON_TASK_CHANGED = 580,
