@@ -22,6 +22,8 @@
 #include "chrome/browser/ui/views/profiles/avatar_toolbar_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/webui_url_constants.h"
+#include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
@@ -111,10 +113,15 @@ void RedrobAccountRow::OpenSettings() {
   if (!browser_) {
     return;
   }
+  // Settings is rendered by the vendored extension now, not a C++ WebUI. The id is the one the
+  // component-extension allowlist names (extensions/common/constants.h); GetBaseURLFromExtensionId
+  // builds chrome-extension://<id>/, onto which the settings entry page is appended.
   // A singleton tab, which is what every other route into settings uses: pressing this twice should
   // return to the settings tab rather than accumulate copies of it.
-  NavigateParams params(browser_, GURL(chrome::kChromeUIRedrobSettingsURL),
-                        ui::PAGE_TRANSITION_AUTO_BOOKMARK);
+  const GURL settings_url =
+      extensions::Extension::GetBaseURLFromExtensionId(extension_misc::kRedrobExtensionId)
+          .Resolve("settings.html");
+  NavigateParams params(browser_, settings_url, ui::PAGE_TRANSITION_AUTO_BOOKMARK);
   params.disposition = WindowOpenDisposition::SINGLETON_TAB;
   Navigate(&params);
 }

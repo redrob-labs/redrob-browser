@@ -78,7 +78,6 @@ redrob_chrome_browser_resources_deps = [
   "//chrome/browser/resources/redrob:resources",
   "//chrome/browser/resources/redrob_extension:resources",
   "//chrome/browser/resources/redrob_onboarding:resources",
-  "//chrome/browser/resources/redrob_settings:resources",
 ]
 
 # The pak files those bundles produce, as names under `$root_gen_dir/chrome`. Names rather than full
@@ -88,14 +87,12 @@ redrob_chrome_browser_resource_pak_names = [
   "redrob_resources.pak",
   "redrob_extension_resources.pak",
   "redrob_onboarding_resources.pak",
-  "redrob_settings_resources.pak",
 ]
 
 # chrome/browser/ui/webui -- needed by both the config list and the controller factory.
 redrob_chrome_browser_ui_webui_deps = [
   "//chrome/browser/ui/webui/redrob",
   "//chrome/browser/ui/webui/redrob_onboarding",
-  "//chrome/browser/ui/webui/redrob_settings",
 ]
 
 # Deliberately NOT here: the four upstream files that take a single, fixed line from us -- the sidecar dep
