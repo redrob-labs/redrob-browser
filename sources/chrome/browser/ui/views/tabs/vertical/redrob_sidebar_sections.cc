@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "base/functional/bind.h"
+#include "base/strings/escape.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -31,6 +32,8 @@
 #include "components/saved_tab_groups/public/saved_tab_group.h"
 #include "components/saved_tab_groups/public/types.h"
 #include "components/vector_icons/vector_icons.h"
+#include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/image_model.h"
 #include "ui/base/mojom/menu_source_type.mojom-shared.h"
@@ -379,11 +382,18 @@ void RedrobSidebarSections::OpenChat(std::string task_id) {
   if (!browser_) {
     return;
   }
-  // The same URL the new tab page navigates to, so a chat opened from here and one opened from a card
+  // The composer is the vendored extension's new tab now, not a C++ WebUI. The id is the one the
+  // component-extension allowlist names (extensions/common/constants.h); GetBaseURLFromExtensionId
+  // builds chrome-extension://<id>/, onto which the new-tab page and the task it should open are
+  // appended. The same page the new tab opens, so a chat opened from here and one opened from a card
   // are the same tab rather than two views of one task.
-  NavigateParams params(browser_,
-                        GURL(std::string(chrome::kChromeUIRedrobURL) + "?task=" + task_id),
-                        ui::PAGE_TRANSITION_AUTO_BOOKMARK);
+  const GURL base =
+      extensions::Extension::GetBaseURLFromExtensionId(extension_misc::kRedrobExtensionId);
+  NavigateParams params(
+      browser_,
+      GURL(base.Resolve("newtab.html").spec() + "?task=" +
+           base::EscapeQueryParamValue(task_id, /*use_plus=*/false)),
+      ui::PAGE_TRANSITION_AUTO_BOOKMARK);
   params.disposition = WindowOpenDisposition::SINGLETON_TAB;
   Navigate(&params);
 }
@@ -559,8 +569,10 @@ void RedrobSidebarSections::StartNewTask() {
   }
   // A new tab, which in this product IS the composer -- so "new task" and "new tab" are the same action
   // and there is no second thing to keep in step. Not a singleton: two tasks at once is normal, and each
-  // wants its own tab.
-  NavigateParams params(browser_, GURL(chrome::kChromeUIRedrobURL),
+  // wants its own tab. The composer is the vendored extension's new tab page now.
+  const GURL base =
+      extensions::Extension::GetBaseURLFromExtensionId(extension_misc::kRedrobExtensionId);
+  NavigateParams params(browser_, base.Resolve("newtab.html"),
                         ui::PAGE_TRANSITION_AUTO_BOOKMARK);
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   Navigate(&params);

@@ -4,34 +4,13 @@
 
 import("//mojo/public/tools/bindings/mojom.gni")
 
+# The agent surface is the vendored extension now, not a C++ WebUI, so the chrome://redrob controller
+# (redrob_ui.*) and its per-document Mojo endpoint (task_host_impl.*) are gone. What stays is the Mojo
+# IDL: redrob.mojom defines the task data types -- Task, PermissionMode, Effort, ModelOption -- that
+# the profile's TaskStore, RoutineStore and the redrobPrivate extension API are written in terms of.
+# Those are living code; the interfaces the deleted WebUI implemented (TaskHost, PageHandlerFactory)
+# stay declared in the .mojom but are now unused, which compiles and keeps one definition of the types.
 mojom("mojo_bindings") {
   sources = [ "redrob.mojom" ]
   webui_module_path = "/"
-}
-
-source_set("redrob") {
-  sources = [
-    "redrob_ui.cc",
-    "redrob_ui.h",
-    "task_host_impl.cc",
-    "task_host_impl.h",
-  ]
-  deps = [
-    ":mojo_bindings",
-    "//base",
-    "//chrome/browser/redrob:sidecar",
-    # Redrob: the IDS_REDROB_* header behind kRedrobLocalizedStrings.
-    "//chrome/browser/redrob/resources:redrob_strings",
-    "//chrome/browser:browser_process",
-    "//chrome/browser/resources/redrob:resources",
-    # Redrob: the default search provider, so our own search field uses the engine the user chose.
-    "//chrome/browser/search_engines",
-    "//chrome/browser/ui/select_file_policy",
-    "//chrome/common",
-    "//components/search_engines",
-    "//content/public/browser",
-    "//mojo/public/cpp/bindings",
-    "//ui/shell_dialogs",
-    "//ui/webui",
-  ]
 }

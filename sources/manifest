@@ -25,20 +25,16 @@ sources/chrome/browser/redrob/redrob_fonts.cc  chrome/browser/redrob/redrob_font
 sources/chrome/browser/redrob/fonts/PretendardVariable.ttf  chrome/browser/redrob/fonts/PretendardVariable.ttf
 sources/chrome/browser/redrob/redrob_prefs.cc     chrome/browser/redrob/redrob_prefs.cc
 
-# chrome://redrob, the AI surface, and the Mojo boundary in front of it. The only Chromium files this
-# needs are the one-line registrations in patches/, which is the whole point of a WebUI.
+# The Mojo IDL for the agent's task data types. There used to be a C++ chrome://redrob WebUI in front
+# of it; that is gone (A-7), and the surface is the vendored extension's new tab now. The IDL stays
+# because TaskStore, RoutineStore and the redrobPrivate extension API are written in terms of its types.
 sources/chrome/browser/ui/webui/redrob/BUILD.gn          chrome/browser/ui/webui/redrob/BUILD.gn
 sources/chrome/browser/ui/webui/redrob/redrob.mojom      chrome/browser/ui/webui/redrob/redrob.mojom
-sources/chrome/browser/ui/webui/redrob/redrob_ui.h       chrome/browser/ui/webui/redrob/redrob_ui.h
-sources/chrome/browser/ui/webui/redrob/redrob_ui.cc      chrome/browser/ui/webui/redrob/redrob_ui.cc
-sources/chrome/browser/ui/webui/redrob/task_host_impl.h  chrome/browser/ui/webui/redrob/task_host_impl.h
-sources/chrome/browser/ui/webui/redrob/task_host_impl.cc chrome/browser/ui/webui/redrob/task_host_impl.cc
 
-# The page itself: a build_webui() target, so the TypeScript build and the generated Mojo bindings
-# come with it. This is what replaced the scaffold's string literals.
-sources/chrome/browser/resources/redrob/BUILD.gn    chrome/browser/resources/redrob/BUILD.gn
-sources/chrome/browser/resources/redrob/redrob.html chrome/browser/resources/redrob/redrob.html
-sources/chrome/browser/resources/redrob/redrob.css  chrome/browser/resources/redrob/redrob.css
+# The agent surface's own build_webui() bundle (BUILD.gn, redrob.html, redrob.css, redrob.ts) is gone
+# with the C++ WebUI (A-7). What stays in redrob/ is the design system, shared by the onboarding and
+# settings bundles -- design_icons.ts included: that bundle compiled it, but the integrity gate reads it
+# as the vendored glyph table, so it outlives the bundle.
 # One source file copied into all three WebUI bundles. build_webui's static_files are per-target and
 # relative to the target's own directory, so a bundle cannot reference a file in another bundle's folder
 # -- which is why the font is already duplicated three ways. Mapping one source to three destinations
@@ -59,18 +55,17 @@ sources/chrome/browser/resources/redrob/design_tokens.css  chrome/browser/resour
 # design_tokens.css -- it supersedes two of its roles. Gate check 7.
 sources/chrome/browser/resources/redrob/design_system.css  chrome/browser/resources/redrob/design_system.css
 
-# The design system's glyph geometry, DERIVED from its React icon module by the same vendor script. Code
-# rather than an asset, because the page imports it: this bundle has no React and no node_modules at build
-# time, and a Trusted Types page cannot be handed markup. Only the redrob/ bundle compiles it today; the
-# settings page carries the two glyphs it needs as a transcribed <symbol> sprite whose every coordinate
-# gate check 9 compares against this file. Sharing the compiled module across all three bundles is a build
-# change and is its own slice in docs/UX-PROGRAMME.md.
+# The design system's glyph geometry (design_icons.ts) was DERIVED from its React icon module and was
+# COMPILED only by the agent surface's bundle, which is gone (A-7). The file stays, because compiling it
+# was never its only job: it is the vendored table that scripts/check_design_tokens.py compares every
+# hand-transcribed <symbol> sprite against, and the onboarding page carries such a sprite. Delete it and
+# those transcriptions become unverifiable -- they would keep matching until the first re-pin moved a
+# coordinate, then disagree with every other Redrob surface with nothing able to see it.
 sources/chrome/browser/resources/redrob/design_icons.ts  chrome/browser/resources/redrob/design_icons.ts
 sources/chrome/browser/resources/redrob/chrome_base.css  chrome/browser/resources/redrob/chrome_base.css
 sources/chrome/browser/resources/redrob/chrome_base.css  chrome/browser/resources/redrob_onboarding/chrome_base.css
 sources/chrome/browser/resources/redrob/theme.ts  chrome/browser/resources/redrob/theme.ts
 sources/chrome/browser/resources/redrob/theme.ts  chrome/browser/resources/redrob_onboarding/theme.ts
-sources/chrome/browser/resources/redrob/redrob.ts   chrome/browser/resources/redrob/redrob.ts
 sources/chrome/browser/resources/redrob/fonts/NotoSansDevanagari-Variable.woff2  chrome/browser/resources/redrob/fonts/NotoSansDevanagari-Variable.woff2
 sources/chrome/browser/resources/redrob/fonts/Pretendard-Bold.woff2  chrome/browser/resources/redrob/fonts/Pretendard-Bold.woff2
 sources/chrome/browser/resources/redrob/fonts/Pretendard-ExtraBold.woff2  chrome/browser/resources/redrob/fonts/Pretendard-ExtraBold.woff2

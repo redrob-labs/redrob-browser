@@ -6,5 +6,5 @@ substitutions:
       The constants.
     regex:
       pattern: "inline constexpr char kChromeUIVersionHost[] = \"version\";"
-      replace: "inline constexpr char kChromeUIRedrobHost[] = \"redrob\";\ninline constexpr char kChromeUIRedrobURL[] = \"chrome://redrob/\";\ninline constexpr char kChromeUIRedrobOnboardingHost[] = \"redrob-onboarding\";\ninline constexpr char kChromeUIRedrobOnboardingURL[] = \"chrome://redrob-onboarding/\";\ninline constexpr char kChromeUIVersionHost[] = \"version\";"
+      replace: "inline constexpr char kChromeUIRedrobOnboardingHost[] = \"redrob-onboarding\";\ninline constexpr char kChromeUIRedrobOnboardingURL[] = \"chrome://redrob-onboarding/\";\ninline constexpr char kChromeUIVersionHost[] = \"version\";"
       count: 1

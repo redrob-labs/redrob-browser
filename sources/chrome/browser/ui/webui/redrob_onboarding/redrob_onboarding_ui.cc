@@ -19,6 +19,8 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/webui/webui_util.h"
 #include "url/gurl.h"
@@ -79,7 +81,10 @@ void RedrobOnboardingUI::OnComplete() {
   // that says it finishes something and then does nothing is the same dead control this shell is being
   // cleaned of. Leaving on the new tab is what finishing first run lands on, so the two paths agree.
   if (content::WebContents* contents = web_ui()->GetWebContents()) {
-    contents->GetController().LoadURL(GURL(chrome::kChromeUIRedrobURL),
+    const GURL newtab =
+        extensions::Extension::GetBaseURLFromExtensionId(extension_misc::kRedrobExtensionId)
+            .Resolve("newtab.html");
+    contents->GetController().LoadURL(newtab,
                                       content::Referrer(),
                                       ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
                                       /*extra_headers=*/std::string());
