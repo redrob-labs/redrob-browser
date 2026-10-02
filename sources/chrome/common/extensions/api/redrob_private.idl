@@ -219,6 +219,37 @@ namespace redrobPrivate {
     RpcSettings rpc;
   };
 
+  // Where an engine install has got to.
+  //
+  // `notInstalled` and `installed` are the two resting states; the middle four
+  // are a run in progress, and `failed` carries the reason the last run
+  // stopped. Deliberately NOT the same enum as EngineState above: that one says
+  // whether the engine is RUNNING, which is a different question with a
+  // different answer -- an engine can be installed and not running.
+  enum EngineInstallState {
+    notInstalled,
+    resolving,
+    downloading,
+    verifying,
+    extracting,
+    installed,
+    failed
+  };
+
+  dictionary EngineInstallInfo {
+    EngineInstallState state;
+    // 0..100, set only while downloading. Absent everywhere else, because a
+    // percentage that has stopped measuring anything reads as a stalled
+    // download rather than as a step that has moved on.
+    long? percent;
+    // The release being installed, or the one installed, e.g. "v0.4.1". Absent
+    // until the release has been resolved.
+    DOMString? version;
+    // The user-facing reason. Set only on failed.
+    DOMString? error;
+  };
+
+  callback GetEngineInstallStateCallback = void (EngineInstallInfo info);
   callback GetSettingsCallback = void (AgentSettings settings);
   callback ListModelsCallback = void (ModelOption[] options);
   callback ListTasksCallback = void (Task[] tasks);
@@ -425,6 +456,21 @@ namespace redrobPrivate {
     // cancelled, the task is unknown, or the platform had no dialog.
     static void chooseTaskWorkingFolder(DOMString taskId,
                                         StringCallback callback);
+
+    // Where the local engine install stands right now. One check for the binary
+    // on the path the browser already searches, plus whatever a run in flight
+    // has reached.
+    static void getEngineInstallState(GetEngineInstallStateCallback callback);
+
+    // Downloads this platform's engine release, checks it against the hash the
+    // release itself publishes, and puts the binary where the browser already
+    // looks for it.
+    //
+    // Progress arrives as onEngineInstallStateChanged rather than on a
+    // callback, because an install outlives the call that began it -- the same
+    // reason startImport() reports that way. A second call while one is already
+    // running is ignored.
+    static void installEngine();
   };
 
   interface Events {
@@ -439,5 +485,13 @@ namespace redrobPrivate {
     // redrobPrivate's other event, onImportStateChanged, is added by the
     // onboarding branch. Both will live in this block once both have merged.
     [supportsListeners] static void onTaskChanged(Task task);
+
+    // An engine install moved: it resolved a release, downloaded a slice,
+    // verified, extracted, finished, or failed. The whole state is sent rather
+    // than a delta, for the same reason onTaskChanged sends the whole task -- a
+    // page that missed one event would otherwise hold a record it cannot
+    // repair, and here that record is a progress bar that never completes.
+    [supportsListeners] static void onEngineInstallStateChanged(
+        EngineInstallInfo info);
   };
 };
