@@ -32,6 +32,14 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(kRpcEnabled, false);
   registry->RegisterStringPref(kPasswordManagerChoice, std::string());
   registry->RegisterBooleanPref(kImportCompleted, false);
+
+  // Window and tab behaviour. Every default here is what the browser does today, so registering
+  // them changes nothing observable -- see the note in the header for why that is the requirement
+  // and not merely a convenience.
+  registry->RegisterStringPref(kVerticalTabInsertionPosition, "after_current");
+  registry->RegisterBooleanPref(kHorizontalTabShrinkEnabled, true);
+  registry->RegisterBooleanPref(kWindowTranslucencyEnabled, false);
+  registry->RegisterBooleanPref(kAutomaticPictureInPictureEnabled, false);
 }
 
 }  // namespace redrob::prefs

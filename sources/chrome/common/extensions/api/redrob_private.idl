@@ -21,6 +21,13 @@ namespace redrobPrivate {
   // operation has no result to report — an absent value is not an empty one.
   callback StringCallback = void (optional DOMString value);
 
+  // The two shapes a preference getter resolves with. Separate from
+  // BoolCallback and StringCallback on purpose: those two mean "did it work"
+  // and "a result if there was one", whereas a registered preference always
+  // has a value, so an optional or an ok-flag would misdescribe it.
+  callback BooleanPrefCallback = void (boolean value);
+  callback StringPrefCallback = void (DOMString value);
+
   // A browser found on this machine that onboarding could import from. Mirrors
   // the onboarding ImportSource mojom struct: each capability flag is read from
   // the source's own bitmask, because what one browser hands over is not what
@@ -371,6 +378,47 @@ namespace redrobPrivate {
     // "skip". Any other value is ignored. Choosing "external" also stops
     // offering to save — it does NOT delete credentials already stored.
     static void setPasswordManagerChoice(DOMString choice);
+
+    // --- Window and tab preferences -------------------------------------
+    //
+    // Four behaviours, a getter and a setter each, and NOTHING on the native
+    // side reads them yet. They are the stored half of the vertical-tab,
+    // horizontal-tab, translucency and picture-in-picture items; the window
+    // and tab code that acts on them is a separate item. A page can set one
+    // today and read back what it set, and the browser will look the same —
+    // that is the intended state, not an unfinished one, and every default is
+    // current behaviour so the first reader to arrive changes nothing.
+
+    // Where a newly opened tab is inserted in the vertical tab rail:
+    // "after_current" (below the tab that opened it) or "end" (bottom of the
+    // rail).
+    static void getVerticalTabInsertionPosition(StringPrefCallback callback);
+
+    // Sets the vertical tab insertion position. Accepts "after_current" and
+    // "end"; any other value is ignored rather than stored, because this
+    // arrives from a renderer and is read back out.
+    static void setVerticalTabInsertionPosition(DOMString position);
+
+    // Whether horizontal tabs shrink as they multiply rather than holding a
+    // minimum width and letting the strip scroll.
+    static void getHorizontalTabShrinkEnabled(BooleanPrefCallback callback);
+
+    // Turns horizontal tab shrinking on or off.
+    static void setHorizontalTabShrinkEnabled(boolean enabled);
+
+    // Whether the window paints a translucent background behind its chrome.
+    static void getWindowTranslucencyEnabled(BooleanPrefCallback callback);
+
+    // Turns window background translucency on or off.
+    static void setWindowTranslucencyEnabled(boolean enabled);
+
+    // Whether a video entering the background may open picture-in-picture
+    // without the user asking.
+    static void getAutomaticPictureInPictureEnabled(
+        BooleanPrefCallback callback);
+
+    // Turns automatic picture-in-picture on or off.
+    static void setAutomaticPictureInPictureEnabled(boolean enabled);
 
     // Starts or stops the local RPC server now, not at the next launch.
     // |callback|: the endpoint it is listening on, or nothing when it is off or

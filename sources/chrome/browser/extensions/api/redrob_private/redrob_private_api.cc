@@ -685,6 +685,103 @@ RedrobPrivateSetPasswordManagerChoiceFunction::Run() {
   return RespondNow(NoArguments());
 }
 
+// --- Window and tab preferences ---------------------------------------------
+//
+// One registered pref in, one registered pref out, and no side effect beyond
+// the pref service. Nothing native reads these yet; see the block comment on
+// the same functions in redrob_private.idl for why that is the finished state
+// of this change rather than a missing half of it.
+
+ExtensionFunction::ResponseAction
+RedrobPrivateGetVerticalTabInsertionPositionFunction::Run() {
+  return RespondNow(ArgumentList(
+      redrob_private::GetVerticalTabInsertionPosition::Results::Create(
+          Profile::FromBrowserContext(browser_context())
+              ->GetPrefs()
+              ->GetString(redrob::prefs::kVerticalTabInsertionPosition))));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetVerticalTabInsertionPositionFunction::Run() {
+  auto params =
+      redrob_private::SetVerticalTabInsertionPosition::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // Two known values and nothing else, for the same reason as the password
+  // choice above: this arrives from a renderer and is read back out.
+  const std::string& position = params->position;
+  if (position != "after_current" && position != "end") {
+    return RespondNow(NoArguments());
+  }
+  Profile::FromBrowserContext(browser_context())
+      ->GetPrefs()
+      ->SetString(redrob::prefs::kVerticalTabInsertionPosition, position);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateGetHorizontalTabShrinkEnabledFunction::Run() {
+  return RespondNow(ArgumentList(
+      redrob_private::GetHorizontalTabShrinkEnabled::Results::Create(
+          Profile::FromBrowserContext(browser_context())
+              ->GetPrefs()
+              ->GetBoolean(redrob::prefs::kHorizontalTabShrinkEnabled))));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetHorizontalTabShrinkEnabledFunction::Run() {
+  auto params =
+      redrob_private::SetHorizontalTabShrinkEnabled::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  Profile::FromBrowserContext(browser_context())
+      ->GetPrefs()
+      ->SetBoolean(redrob::prefs::kHorizontalTabShrinkEnabled,
+                   params->enabled);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateGetWindowTranslucencyEnabledFunction::Run() {
+  return RespondNow(
+      ArgumentList(redrob_private::GetWindowTranslucencyEnabled::Results::Create(
+          Profile::FromBrowserContext(browser_context())
+              ->GetPrefs()
+              ->GetBoolean(redrob::prefs::kWindowTranslucencyEnabled))));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetWindowTranslucencyEnabledFunction::Run() {
+  auto params =
+      redrob_private::SetWindowTranslucencyEnabled::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  Profile::FromBrowserContext(browser_context())
+      ->GetPrefs()
+      ->SetBoolean(redrob::prefs::kWindowTranslucencyEnabled, params->enabled);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateGetAutomaticPictureInPictureEnabledFunction::Run() {
+  return RespondNow(ArgumentList(
+      redrob_private::GetAutomaticPictureInPictureEnabled::Results::Create(
+          Profile::FromBrowserContext(browser_context())
+              ->GetPrefs()
+              ->GetBoolean(
+                  redrob::prefs::kAutomaticPictureInPictureEnabled))));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetAutomaticPictureInPictureEnabledFunction::Run() {
+  auto params =
+      redrob_private::SetAutomaticPictureInPictureEnabled::Params::Create(
+          args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  Profile::FromBrowserContext(browser_context())
+      ->GetPrefs()
+      ->SetBoolean(redrob::prefs::kAutomaticPictureInPictureEnabled,
+                   params->enabled);
+  return RespondNow(NoArguments());
+}
+
 ExtensionFunction::ResponseAction RedrobPrivateSetRpcEnabledFunction::Run() {
   auto params = redrob_private::SetRpcEnabled::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params);

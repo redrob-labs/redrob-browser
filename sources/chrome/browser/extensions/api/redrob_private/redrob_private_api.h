@@ -238,6 +238,95 @@ class RedrobPrivateSetPasswordManagerChoiceFunction
   ResponseAction Run() override;
 };
 
+// Window and tab preferences. Each of these reads or writes exactly one
+// registered pref in redrob::prefs and does nothing else -- no window is
+// relaid out, no tab strip is rebuilt, because nothing on the native side
+// reads these prefs yet. See the block comment in redrob_private.idl.
+
+class RedrobPrivateGetVerticalTabInsertionPositionFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getVerticalTabInsertionPosition",
+                             REDROBPRIVATE_GETVERTICALTABINSERTIONPOSITION)
+ protected:
+  ~RedrobPrivateGetVerticalTabInsertionPositionFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetVerticalTabInsertionPositionFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setVerticalTabInsertionPosition",
+                             REDROBPRIVATE_SETVERTICALTABINSERTIONPOSITION)
+ protected:
+  ~RedrobPrivateSetVerticalTabInsertionPositionFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateGetHorizontalTabShrinkEnabledFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getHorizontalTabShrinkEnabled",
+                             REDROBPRIVATE_GETHORIZONTALTABSHRINKENABLED)
+ protected:
+  ~RedrobPrivateGetHorizontalTabShrinkEnabledFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetHorizontalTabShrinkEnabledFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setHorizontalTabShrinkEnabled",
+                             REDROBPRIVATE_SETHORIZONTALTABSHRINKENABLED)
+ protected:
+  ~RedrobPrivateSetHorizontalTabShrinkEnabledFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateGetWindowTranslucencyEnabledFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getWindowTranslucencyEnabled",
+                             REDROBPRIVATE_GETWINDOWTRANSLUCENCYENABLED)
+ protected:
+  ~RedrobPrivateGetWindowTranslucencyEnabledFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetWindowTranslucencyEnabledFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setWindowTranslucencyEnabled",
+                             REDROBPRIVATE_SETWINDOWTRANSLUCENCYENABLED)
+ protected:
+  ~RedrobPrivateSetWindowTranslucencyEnabledFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateGetAutomaticPictureInPictureEnabledFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION(
+      "redrobPrivate.getAutomaticPictureInPictureEnabled",
+      REDROBPRIVATE_GETAUTOMATICPICTUREINPICTUREENABLED)
+ protected:
+  ~RedrobPrivateGetAutomaticPictureInPictureEnabledFunction() override =
+      default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetAutomaticPictureInPictureEnabledFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION(
+      "redrobPrivate.setAutomaticPictureInPictureEnabled",
+      REDROBPRIVATE_SETAUTOMATICPICTUREINPICTUREENABLED)
+ protected:
+  ~RedrobPrivateSetAutomaticPictureInPictureEnabledFunction() override =
+      default;
+  ResponseAction Run() override;
+};
+
 class RedrobPrivateSetRpcEnabledFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("redrobPrivate.setRpcEnabled",

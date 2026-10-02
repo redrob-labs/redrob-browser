@@ -69,6 +69,36 @@ inline constexpr char kRpcEnabled[] = "redrob.rpc.enabled";
 // imported, honestly: a source that could not bring cookies says so rather than being listed.
 inline constexpr char kImportCompleted[] = "redrob.import.completed";
 
+// Browser behaviour the user chose, as opposed to agent state. These four sit in this file for the
+// same reason as everything above -- one place that can be enumerated -- but they describe windows
+// and tabs, not what the agent remembers.
+//
+// Each default below is TODAY'S BEHAVIOUR, deliberately. Nothing reads these prefs yet; the window
+// and tab code that will read them lands as its own item. A default that differed from current
+// behaviour would therefore change nothing now and silently change everything the day the first
+// reader arrives, which is the one outcome a stored-only pref must not have.
+
+// Where a newly opened tab goes in the vertical tab rail. "after_current" puts it directly below the
+// tab that opened it; "end" appends to the bottom of the rail. An unrecognised value is treated as
+// "after_current" by the setter rather than stored.
+inline constexpr char kVerticalTabInsertionPosition[] =
+    "redrob.tabs.vertical_insertion_position";
+
+// Whether horizontal tabs keep shrinking as they multiply (true) or hold a minimum width and let the
+// strip scroll (false). True matches Chromium's own strip, which shrinks to a floor.
+inline constexpr char kHorizontalTabShrinkEnabled[] =
+    "redrob.tabs.horizontal_shrink_enabled";
+
+// Whether the window paints a translucent background behind its chrome. Off by default: it costs
+// compositing work on every frame and can cost text contrast, so it is a thing a user turns on.
+inline constexpr char kWindowTranslucencyEnabled[] =
+    "redrob.window.translucency_enabled";
+
+// Whether a video entering the background may open picture-in-picture on its own. Off by default
+// because the effect is a window appearing that the user did not ask for.
+inline constexpr char kAutomaticPictureInPictureEnabled[] =
+    "redrob.picture_in_picture.automatic";
+
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
 }  // namespace redrob::prefs

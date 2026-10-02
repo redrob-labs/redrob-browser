@@ -1,8 +1,8 @@
 diff --git a/extensions/browser/extension_function_histogram_value.h b/extensions/browser/extension_function_histogram_value.h
-index 7cf76f3b9262f..8b91e82ab4df3 100644
+index 7cf76f3b9262f..cd13db2e02da5 100644
 --- a/extensions/browser/extension_function_histogram_value.h
 +++ b/extensions/browser/extension_function_histogram_value.h
-@@ -2043,6 +2043,47 @@ enum HistogramValue {
+@@ -2043,6 +2043,60 @@ enum HistogramValue {
    DELETED_WEBREQUESTINTERNAL_EVENTHANDLINGDONE = 1978,
    DICTATIONPRIVATE_UPDATEAUDIOLEVEL = 1979,
    ENTERPRISEREPORTINGPRIVATE_REPORTFORCESAVETOCLOUDEVENTHANDLED = 1980,
@@ -47,6 +47,19 @@ index 7cf76f3b9262f..8b91e82ab4df3 100644
 +  REDROBPRIVATE_GETENGINEINSTALLSTATE = 2019,
 +  REDROBPRIVATE_INSTALLENGINE = 2020,
 +  REDROBPRIVATE_GETENGINECREDENTIAL = 2021,
++  // 2022 onward are this branch's. 2021 above arrived from the engine-auth work,
++  // which this branch deliberately left a gap for rather than reusing the number:
++  // two branches declaring the same enumerator is the failure this file's header
++  // describes, and a gap in a histogram enum costs nothing while a collision costs
++  // a compile. The gap closed on merge, which is what was supposed to happen.
++  REDROBPRIVATE_GETVERTICALTABINSERTIONPOSITION = 2022,
++  REDROBPRIVATE_SETVERTICALTABINSERTIONPOSITION = 2023,
++  REDROBPRIVATE_GETHORIZONTALTABSHRINKENABLED = 2024,
++  REDROBPRIVATE_SETHORIZONTALTABSHRINKENABLED = 2025,
++  REDROBPRIVATE_GETWINDOWTRANSLUCENCYENABLED = 2026,
++  REDROBPRIVATE_SETWINDOWTRANSLUCENCYENABLED = 2027,
++  REDROBPRIVATE_GETAUTOMATICPICTUREINPICTUREENABLED = 2028,
++  REDROBPRIVATE_SETAUTOMATICPICTUREINPICTUREENABLED = 2029,
    // Last entry: Add new entries above, then run:
    // tools/metrics/histograms/update_extension_histograms.py
    ENUM_BOUNDARY
