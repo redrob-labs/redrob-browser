@@ -1,22 +1,8 @@
 diff --git a/tools/gritsettings/resource_ids.spec b/tools/gritsettings/resource_ids.spec
-index 322591a3aa40b..50def9a6fac97 100644
+index 322591a3aa40b..eb93e7291f1df 100644
 --- a/tools/gritsettings/resource_ids.spec
 +++ b/tools/gritsettings/resource_ids.spec
-@@ -920,6 +920,13 @@
-     "META": {"sizes": {"includes": [30]}},
-     "includes": [5370],
-   },
-+  # Redrob: chrome://redrob-onboarding. Last in the WebUI section and above the 5500 the next
-+  # section starts at, so this fork does not sit on an id range upstream is about to use.
-+  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/redrob_onboarding/resources.grd": {
-+    "META": {"sizes": {"includes": [20]}},
-+    "includes": [5420],
-+  },
-+
-   # END chrome/ WebUI resources section
- 
-   # START chrome/ miscellaneous section.
-@@ -1794,6 +1801,26 @@
+@@ -1794,6 +1794,26 @@
      "includes": [12000],
    },
  

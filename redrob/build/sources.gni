@@ -74,12 +74,12 @@ redrob_chrome_common_importer_sources = [
 redrob_chrome_common_importer_deps = [ "//chrome/common:constants" ]
 
 # chrome/browser/resources -- the onboarding and settings WebUI bundles, plus the vendored extension's
-# resource bundle. The agent surface used to have a bundle here too (resources/redrob:resources); it is
-# gone with the C++ WebUI. The design-system files that lived beside it stay in resources/redrob/ as the
-# ONE vendored copy the onboarding and settings bundles read through their own build_design_system_grdp.
+# resource bundle. Both C++ agent surfaces that used to have bundles here are gone -- the agent WebUI
+# with A-7 and onboarding with O-8 -- so the only bundle left is the component extension itself. The
+# design-system files that lived beside them stay in resources/redrob/ as the ONE vendored copy, now read
+# only by the settings bundle's build_design_system_grdp and by the integrity gate's glyph table.
 redrob_chrome_browser_resources_deps = [
   "//chrome/browser/resources/redrob_extension:resources",
-  "//chrome/browser/resources/redrob_onboarding:resources",
 ]
 
 # The pak files those bundles produce, as names under `$root_gen_dir/chrome`. Names rather than full
@@ -87,7 +87,6 @@ redrob_chrome_browser_resources_deps = [
 # site joins them.
 redrob_chrome_browser_resource_pak_names = [
   "redrob_extension_resources.pak",
-  "redrob_onboarding_resources.pak",
 ]
 
 # chrome/browser/ui/webui -- needed by both the config list and the controller factory.
@@ -95,7 +94,16 @@ redrob_chrome_browser_ui_webui_deps = [
   # The agent WebUI is gone; only its Mojo IDL target survives, because TaskStore, RoutineStore and the
   # redrobPrivate extension API are written in terms of the task data types it defines.
   "//chrome/browser/ui/webui/redrob:mojo_bindings",
-  "//chrome/browser/ui/webui/redrob_onboarding",
+]
+
+# chrome/browser/ui -- for our first-run flow controller, which since O-8 drives the EXTENSION's
+# onboarding page and takes its completion signal from RedrobPrivateOnboardingService instead of from a
+# WebUI controller it could cast. That is the only reason chrome/browser/ui learns about the
+# redrobPrivate API target at all, and it is one target learning about one thing of ours -- but unlike
+# the four fixed edits named below it sits in a list, because the first-run flow is where the native side
+# will keep meeting extension surfaces as the remaining C++ pages go.
+redrob_chrome_browser_ui_deps = [
+  "//chrome/browser/extensions/api/redrob_private",
 ]
 
 # Deliberately NOT here: the four upstream files that take a single, fixed line from us -- the sidecar dep

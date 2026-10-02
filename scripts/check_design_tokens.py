@@ -338,11 +338,31 @@ def custom_properties(path: pathlib.Path, global_only: bool = False) -> dict[str
     return found
 
 
-WEBUI_PAGES = (
-    ROOT / "sources/chrome/browser/resources/redrob/redrob.html",
-    ROOT / "sources/chrome/browser/resources/redrob_settings/redrob_settings.html",
-    ROOT / "sources/chrome/browser/resources/redrob_onboarding/redrob_onboarding.html",
-)
+def discover_webui_pages() -> tuple[pathlib.Path, ...]:
+    """Our own C++ WebUI pages, FOUND rather than listed.
+
+    This was a hand-written tuple of three paths, and all three surfaces have since been deleted -- the
+    agent WebUI (A-7), settings (S-7) and onboarding (O-8). A hand-kept list has two failure modes and
+    this file met both: it goes stale downward, naming files that no longer exist, and it goes stale
+    upward, so a NEW page is outside all eight checks that read this list until somebody remembers to add
+    it. The second is the dangerous one, because the newest page is exactly where an unreviewed token or a
+    recolored mark appears first.
+
+    So the set is globbed. An empty result is a real answer -- no C++ page of ours remains -- and the
+    checks below say so instead of reporting a pass they did not perform.
+    """
+    root = ROOT / "sources/chrome/browser/resources"
+    return tuple(
+        sorted(
+            page
+            for directory in root.glob("redrob*")
+            if directory.is_dir()
+            for page in directory.glob("*.html")
+        )
+    )
+
+
+WEBUI_PAGES = discover_webui_pages()
 
 
 def loaded_stylesheets(page: pathlib.Path) -> list[pathlib.Path]:
@@ -806,11 +826,22 @@ def check_brand_artwork() -> list[str]:
                     f"ground instead of recoloring or fading the one for the other ground.")
 
     # A self-check on the strip, because the failure mode of an over-eager comment scanner is a check that
-    # passes on everything: these sheets DO style the mark, so finding no mark rule at all means the
-    # parse lost them rather than that the tree is clean.
-    if not armed:
-        problems.append("check 6c found no mark rule in any sheet -- the CSS parse is not reading them, "
-                        "so this check is passing vacuously")
+    # passes on everything: a sheet that DOES style the mark and yields no mark rule means the parse lost
+    # it rather than that the tree is clean.
+    #
+    # It has to tell that apart from the other way to find nothing: having no sheet at all, which is now
+    # the real state -- all three C++ surfaces are deleted, so there is no page of ours left to style a
+    # mark. Reporting a parse bug there would fail every build for a condition that is correct, and
+    # reporting a silent pass would hide a genuine parse bug the day a page comes back. So the two are
+    # separated and the empty case says what it is.
+    sheets = our_sheets()
+    if not armed and sheets:
+        problems.append(f"check 6c read {len(sheets)} sheet(s) of ours and found no mark rule in any of "
+                        "them -- the CSS parse is not reading them, so this check is passing vacuously")
+    if not sheets:
+        print("  brand: no WebUI sheet of ours remains, so there is no mark rule to check; the pinned "
+              f"artwork itself was still verified ({checked} file(s) byte-identical)")
+        return problems
 
     print(f"  brand: {checked} pinned artwork file(s) byte-identical, grounds {sorted(grounds)}, "
           f"{armed} mark rule(s) checked, none modifies the artwork")

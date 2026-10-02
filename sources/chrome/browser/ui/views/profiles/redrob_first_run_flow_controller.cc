@@ -8,35 +8,51 @@
 #include <utility>
 
 #include "base/functional/bind.h"
+#include "chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service.h"
+#include "chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service_factory.h"
 #include "chrome/browser/ui/views/profiles/profile_management_step_controller.h"
 #include "chrome/browser/ui/views/profiles/profile_picker_web_contents_host.h"
-#include "chrome/browser/ui/webui/redrob_onboarding/redrob_onboarding_ui.h"
-#include "chrome/common/webui_url_constants.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_ui.h"
+#include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
 #include "url/gurl.h"
 
 namespace {
 
-// Shows the onboarding page and, once it is loaded, hands it the closure that ends the flow.
+// Shows the onboarding page and registers the closure that ends the flow.
 //
-// The two halves cannot be one step: the page has to exist before there is a controller to install a
-// callback on, so this waits for the load rather than assuming it.
+// O-8: the page is the EXTENSION's onboarding document now, not chrome://redrob-onboarding, and that
+// changes the shape of this class rather than just its URL.
+//
+// It used to wait for the load and then reach into the loaded page --
+// GetWebUI()->GetController()->GetAs<RedrobOnboardingUI>() -- to install the callback, because only a
+// WebUI controller could hold one. An extension page has no WebUI controller, so that cast would return
+// null and the CHECK would take the browser down on first run.
+//
+// The callback now goes to RedrobPrivateOnboardingService, which O-1 created for exactly this and which
+// had no native caller until now: it is keyed to the profile, so the closure the window installs is the
+// one redrobPrivate.completeOnboarding fires. That also means the registration no longer depends on the
+// page existing, so the two halves collapse into one step and the load wait goes away.
 class RedrobOnboardingStepController : public ProfileManagementStepController {
  public:
   RedrobOnboardingStepController(ProfilePickerWebContentsHost* host,
                                 base::RepeatingClosure complete_callback)
       : ProfileManagementStepController(host),
-        url_(chrome::kChromeUIRedrobOnboardingURL),
+        url_(extensions::Extension::GetBaseURLFromExtensionId(
+                 extension_misc::kRedrobExtensionId)
+                 .Resolve("onboarding.html")),
         complete_callback_(std::move(complete_callback)) {}
 
   ~RedrobOnboardingStepController() override = default;
 
   void Show(StepSwitchFinishedCallback step_shown_callback, bool reset_state) override {
     if (reset_state) {
+      // Registered BEFORE the navigation, not after the load. The page can call
+      // completeOnboarding as soon as its script runs, and a callback installed in a load
+      // continuation can lose that race on a fast local page.
+      RegisterCompleteCallback();
       host()->ShowScreenInPickerContents(
-          url_, base::BindOnce(&RedrobOnboardingStepController::OnLoaded,
-                               weak_factory_.GetWeakPtr(), std::move(step_shown_callback)));
+          url_, base::BindOnce(std::move(step_shown_callback.value()), true));
       return;
     }
     // Returning to a step already loaded in the picker contents. Re-navigating would restart the flow
@@ -48,16 +64,21 @@ class RedrobOnboardingStepController : public ProfileManagementStepController {
   void OnHidden() override {}
 
  private:
-  void OnLoaded(StepSwitchFinishedCallback step_shown_callback) {
-    std::move(step_shown_callback.value()).Run(/*success=*/true);
-
-    auto* onboarding_ui = host()
-                              ->GetPickerContents()
-                              ->GetWebUI()
-                              ->GetController()
-                              ->GetAs<redrob::RedrobOnboardingUI>();
-    CHECK(onboarding_ui);
-    onboarding_ui->SetCompleteCallback(complete_callback_);
+  void RegisterCompleteCallback() {
+    content::WebContents* contents = host()->GetPickerContents();
+    if (!contents) {
+      return;
+    }
+    extensions::RedrobPrivateOnboardingService* service =
+        extensions::RedrobPrivateOnboardingServiceFactory::GetForBrowserContext(
+            contents->GetBrowserContext());
+    if (!service) {
+      return;
+    }
+    // The service takes a OnceClosure and this controller holds a RepeatingClosure, because a step can
+    // be shown again. Each registration hands over its own copy, and the service replaces rather than
+    // stacks, so a re-entered flow ends exactly once.
+    service->SetCompleteCallback(base::BindOnce(complete_callback_));
   }
 
   const GURL url_;

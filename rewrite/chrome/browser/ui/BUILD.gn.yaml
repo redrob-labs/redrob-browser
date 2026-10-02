@@ -10,4 +10,5 @@ substitutions:
       replace: |-
         if (enable_dice_support) {
               sources += redrob_chrome_browser_ui_dice_sources
+              deps += redrob_chrome_browser_ui_deps
               sources += [

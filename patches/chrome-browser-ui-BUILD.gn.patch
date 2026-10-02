@@ -1,12 +1,13 @@
 diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index 2e7510e36dd0c..e9ab42bfa8a2a 100644
+index 2e7510e36dd0c..820f8b1d5908b 100644
 --- a/chrome/browser/ui/BUILD.gn
 +++ b/chrome/browser/ui/BUILD.gn
-@@ -2289,6 +2289,7 @@ static_library("ui") {
+@@ -2289,6 +2289,8 @@ static_library("ui") {
      ]
  
      if (enable_dice_support) {
 +      sources += redrob_chrome_browser_ui_dice_sources
++      deps += redrob_chrome_browser_ui_deps
        sources += [
          "views/profiles/cross_device_signin_qr_bubble_views.cc",
          "views/profiles/dice_web_signin_interception_bubble_view.cc",
