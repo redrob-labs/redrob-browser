@@ -1,13 +1,24 @@
 diff --git a/chrome/common/extensions/permissions/chrome_api_permissions.cc b/chrome/common/extensions/permissions/chrome_api_permissions.cc
-index 677dec7d94550..4e44b5ca83ef3 100644
+index 677dec7d94550..509a02b02d847 100644
 --- a/chrome/common/extensions/permissions/chrome_api_permissions.cc
 +++ b/chrome/common/extensions/permissions/chrome_api_permissions.cc
-@@ -67,6 +67,8 @@ constexpr APIPermissionInfo::InitInfo permissions_to_register[] = {
+@@ -67,6 +67,19 @@ constexpr APIPermissionInfo::InitInfo permissions_to_register[] = {
      {APIPermissionID::kBookmark, "bookmarks"},
      {APIPermissionID::kBrailleDisplayPrivate, "brailleDisplayPrivate",
       APIPermissionInfo::kFlagCannotBeOptional},
 +    {APIPermissionID::kRedrobPrivate, "redrobPrivate",
 +     APIPermissionInfo::kFlagCannotBeOptional},
++    {APIPermissionID::kRedrobPrivateTasks, "redrobPrivate.tasks"},
++    {APIPermissionID::kRedrobPrivateMemory, "redrobPrivate.memory"},
++    {APIPermissionID::kRedrobPrivateProviders, "redrobPrivate.providers"},
++    {APIPermissionID::kRedrobPrivateRoutines, "redrobPrivate.routines"},
++    {APIPermissionID::kRedrobPrivatePasswords, "redrobPrivate.passwords"},
++    {APIPermissionID::kRedrobPrivateImport, "redrobPrivate.import"},
++    {APIPermissionID::kRedrobPrivateEngine, "redrobPrivate.engine"},
++    {APIPermissionID::kRedrobPrivateWorkspace, "redrobPrivate.workspace"},
++    {APIPermissionID::kRedrobPrivateSettings, "redrobPrivate.settings"},
++    {APIPermissionID::kRedrobPrivateOnboarding, "redrobPrivate.onboarding"},
++    {APIPermissionID::kRedrobPrivateBrowser, "redrobPrivate.browser"},
      {APIPermissionID::kBrowsingData, "browsingData",
       APIPermissionInfo::kFlagDoesNotRequireManagedSessionFullLoginWarning},
      {APIPermissionID::kCertificateProvider, "certificateProvider",
