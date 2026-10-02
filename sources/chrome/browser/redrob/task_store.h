@@ -80,6 +80,17 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   // the renderer -- a fixed model id and an empty endpoint -- so it claimed a configured engine on a
   // machine that had never installed one.
   SidecarClient::Status EngineStatus() const;
+
+  // The credential and listener of the engine this profile launched, for the one
+  // caller that needs them: redrobPrivate.getEngineCredential (F-5).
+  //
+  // Two strings rather than the SidecarClient itself, deliberately. The client can
+  // start and stop processes and stream completions; handing it out so a caller
+  // can read two fields would put all of that behind an extension function. Both
+  // are empty when no engine is running, and an empty credential means the caller
+  // must refuse -- not that it may send an unauthenticated request.
+  std::string EngineCredential() const;
+  std::string EngineBaseUrl() const;
   size_t ModelOptionCount() const;
   // The wire id the built-in path routes with when nothing is chosen.
   static std::string DefaultModel();

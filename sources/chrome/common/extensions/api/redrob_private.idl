@@ -249,8 +249,26 @@ namespace redrobPrivate {
     DOMString? error;
   };
 
-  callback GetEngineInstallStateCallback = void (EngineInstallInfo info);
-  callback GetSettingsCallback = void (AgentSettings settings);
+  // What the extension needs to talk to the engine, handed over per call rather
+  // than stored.
+  //
+  // F-5. The extension used to keep the credential in chrome.storage.local and,
+  // when that copy was absent, send its requests with no Authorization header at
+  // all. An engine on loopback that requires no credential answers every process
+  // on the machine, and this engine runs shell commands and holds provider keys.
+  //
+  // `credential` is absent when this browser did not launch the engine. That is
+  // not a reason to proceed unauthenticated -- it is the signal to refuse, and
+  // the extension treats it that way.
+  dictionary EngineCredential {
+    DOMString? credential;
+    // Where the engine is actually listening, so the extension stops carrying its
+    // own guess at the port alongside its own guess at the secret.
+    DOMString? baseUrl;
+  };
+
+  callback GetEngineCredentialCallback = void (EngineCredential result);
+  callback GetEngineInstallStateCallback = void (EngineInstallInfo info);  callback GetSettingsCallback = void (AgentSettings settings);
   callback ListModelsCallback = void (ModelOption[] options);
   callback ListTasksCallback = void (Task[] tasks);
   // Resolves with a task when there is one, and with nothing when there is not.
@@ -456,6 +474,14 @@ namespace redrobPrivate {
     // cancelled, the task is unknown, or the platform had no dialog.
     static void chooseTaskWorkingFolder(DOMString taskId,
                                         StringCallback callback);
+
+    // The credential and listener for the engine THIS browser launched, fetched
+    // per use and never stored by the caller.
+    //
+    // Both fields absent means the browser has no engine running, which the
+    // extension must treat as "do not send a request", not as "send one without
+    // a credential" (F-5).
+    static void getEngineCredential(GetEngineCredentialCallback callback);
 
     // Where the local engine install stands right now. One check for the binary
     // on the path the browser already searches, plus whatever a run in flight

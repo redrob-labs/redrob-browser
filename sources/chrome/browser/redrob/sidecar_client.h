@@ -101,6 +101,19 @@ class SidecarClient {
   // The loopback base URL, e.g. http://127.0.0.1:48213. Empty until kReady.
   const std::string& base_url() const { return base_url_; }
 
+  // The credential this launch handed the engine, or empty when we did not launch one.
+  //
+  // F-5. The extension needs this because its alternative was worse: it used to keep its own copy in
+  // chrome.storage.local and, when that copy was absent, send requests with NO Authorization header at
+  // all. An engine on loopback that requires no credential answers any process on the machine, and the
+  // engine runs shell commands and holds provider keys.
+  //
+  // Read-only and deliberately not persisted anywhere: the browser mints a fresh 32 bytes per launch, so
+  // the extension can ask for the current one and never store one. Empty is the honest answer when this
+  // browser did not start the engine -- the caller must then refuse rather than fall back to sending
+  // nothing, which is the whole point of the item.
+  const std::string& engine_credential() const { return basic_credentials_; }
+
   // Receives one streamed turn, already framed and parsed but NOT interpreted. The split is the one
   // this class's comment promises: text and proposed tool calls come out here, and whether the browser
   // is willing to run any of those calls is decided by the delegate, never in here.

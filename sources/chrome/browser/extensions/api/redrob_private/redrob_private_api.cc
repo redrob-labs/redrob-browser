@@ -1010,6 +1010,29 @@ void RedrobPrivateChooseTaskWorkingFolderFunction::OnFolderChosen(
 }
 
 ExtensionFunction::ResponseAction
+RedrobPrivateGetEngineCredentialFunction::Run() {
+  // Synchronous: both values are already in memory on the client this profile owns.
+  api::redrob_private::EngineCredential out;
+  TaskStore* tasks = TaskStoreFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()));
+  if (tasks) {
+    std::string credential = tasks->EngineCredential();
+    std::string base_url = tasks->EngineBaseUrl();
+    // Each field is set only when it is real. Leaving them absent rather than
+    // sending empty strings is what lets the extension tell "no engine" from "an
+    // engine with a blank credential" -- and only the second of those would ever
+    // be a reason to send a request, which is to say never (F-5).
+    if (!credential.empty()) {
+      out.credential = std::move(credential);
+    }
+    if (!base_url.empty()) {
+      out.base_url = std::move(base_url);
+    }
+  }
+  return RespondNow(WithArguments(out.ToValue()));
+}
+
+ExtensionFunction::ResponseAction
 RedrobPrivateGetEngineInstallStateFunction::Run() {
   // Asynchronous because answering means touching the filesystem when no
   // install is in flight, and the UI thread is not where that belongs.

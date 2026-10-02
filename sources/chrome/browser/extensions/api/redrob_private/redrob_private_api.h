@@ -410,6 +410,15 @@ class RedrobPrivateChooseTaskWorkingFolderFunction : public ExtensionFunction {
   void OnFolderChosen(const std::string& task_id, const base::FilePath& path);
 };
 
+class RedrobPrivateGetEngineCredentialFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getEngineCredential",
+                             REDROBPRIVATE_GETENGINECREDENTIAL)
+ protected:
+  ~RedrobPrivateGetEngineCredentialFunction() override = default;
+  ResponseAction Run() override;
+};
+
 class RedrobPrivateGetEngineInstallStateFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("redrobPrivate.getEngineInstallState",

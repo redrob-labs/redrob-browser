@@ -1149,6 +1149,17 @@ SidecarClient::Status TaskStore::EngineStatus() const {
   return sidecar_ ? sidecar_->status() : SidecarClient::Status::kUnavailable;
 }
 
+std::string TaskStore::EngineCredential() const {
+  // Empty when there is no client, and empty is a refusal upstream, not a licence to send a request with
+  // no credential. The only reason this is reachable at all is that the extension's alternative was to
+  // keep its own copy in storage and drop the header when that copy was missing (F-5).
+  return sidecar_ ? sidecar_->engine_credential() : std::string();
+}
+
+std::string TaskStore::EngineBaseUrl() const {
+  return sidecar_ ? sidecar_->base_url() : std::string();
+}
+
 size_t TaskStore::ModelOptionCount() const {
   return model_options_.size();
 }
