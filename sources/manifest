@@ -157,6 +157,10 @@ sources/chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_s
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service.cc	chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service.cc
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service_factory.h	chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service_factory.h
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service_factory.cc	chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service_factory.cc
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer.h	chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer.h
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer.cc	chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer.cc
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer_factory.h	chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer_factory.h
+sources/chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer_factory.cc	chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer_factory.cc
 
 # The built redrob-extension, vendored whole so Chromium can load it as a COMPONENT extension -- the only
 # location that is granted redrobPrivate and settingsPrivate. A TREE row, not a file list: the extension's

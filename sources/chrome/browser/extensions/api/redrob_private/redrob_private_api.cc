@@ -11,6 +11,8 @@
 #include "base/functional/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer.h"
+#include "chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer_factory.h"
 #include "chrome/browser/extensions/api/redrob_private/redrob_private_import_manager.h"
 #include "chrome/browser/extensions/api/redrob_private/redrob_private_import_manager_factory.h"
 #include "chrome/browser/extensions/api/redrob_private/redrob_private_onboarding_service.h"
@@ -1005,6 +1007,30 @@ void RedrobPrivateChooseTaskWorkingFolderFunction::OnFolderChosen(
     }
   }
   Respond(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateGetEngineInstallStateFunction::Run() {
+  // Asynchronous because answering means touching the filesystem when no
+  // install is in flight, and the UI thread is not where that belongs.
+  RedrobPrivateEngineInstallerFactory::GetForBrowserContext(browser_context())
+      ->GetState(base::BindOnce(
+          &RedrobPrivateGetEngineInstallStateFunction::OnState, this));
+  return RespondLater();
+}
+
+void RedrobPrivateGetEngineInstallStateFunction::OnState(
+    api::redrob_private::EngineInstallInfo info) {
+  Respond(WithArguments(info.ToValue()));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateInstallEngineFunction::Run() {
+  // The installer owns the run and broadcasts onEngineInstallStateChanged; this
+  // returns immediately because the install outlives the call, exactly as
+  // startImport does.
+  RedrobPrivateEngineInstallerFactory::GetForBrowserContext(browser_context())
+      ->Install();
+  return RespondNow(NoArguments());
 }
 
 }  // namespace extensions

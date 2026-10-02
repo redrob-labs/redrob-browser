@@ -410,6 +410,27 @@ class RedrobPrivateChooseTaskWorkingFolderFunction : public ExtensionFunction {
   void OnFolderChosen(const std::string& task_id, const base::FilePath& path);
 };
 
+class RedrobPrivateGetEngineInstallStateFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getEngineInstallState",
+                             REDROBPRIVATE_GETENGINEINSTALLSTATE)
+ protected:
+  ~RedrobPrivateGetEngineInstallStateFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnState(api::redrob_private::EngineInstallInfo info);
+};
+
+class RedrobPrivateInstallEngineFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.installEngine",
+                             REDROBPRIVATE_INSTALLENGINE)
+ protected:
+  ~RedrobPrivateInstallEngineFunction() override = default;
+  ResponseAction Run() override;
+};
+
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_

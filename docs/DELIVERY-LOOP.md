@@ -66,6 +66,32 @@ One item per pass. A pass is done when its acceptance line is true and its gate 
 | G-2 | "The local service is not running" as a real UI state, not silence | X | no build |
 | G-3 | Onboarding cannot finish claiming a working agent it cannot reach | X | no build |
 
+**G-1 is decided: onboarding installs the engine.** It is not bundled with the browser.
+
+The two options were not equal in cost. Bundling means every browser release carries a ~50 MB
+engine binary per platform, the two version numbers move together whether or not either changed,
+and an engine fix cannot reach a user without a full browser release. Installing on first run keeps
+the two releasable apart, which is the same reason the surfaces are moving into the extension.
+
+What the decision costs, stated plainly rather than discovered later:
+
+- **The download is the browser's job, not the extension's.** An extension can fetch bytes; it
+  cannot write an executable into `~/.redrob/bin` or mark it executable. So this is a private API
+  (`getEngineInstallState`, `installEngine`, `onEngineInstallStateChanged`) and a browser-side
+  installer, not an extension-side one.
+- **First run needs the network.** A machine with no connection finishes onboarding with no engine.
+  That is why G-3's honest exit exists and is not optional.
+- **Integrity is a hash, not a signature.** The archive is checked against the `SHA256SUMS` the
+  release publishes, which proves the bytes arrived intact and does NOT prove we asked the right
+  host — both come from the same origin. A signature checked against a key shipped in the browser
+  is the real answer and is not written yet. Worth knowing before this is called finished.
+  (The engine's own shell installer does not check the hash at all, so this path is already
+  stricter than the documented one.)
+
+The resolution order the installer writes into is the one `SidecarClient::FindEngineBinary` already
+searches: the environment override, then `~/.redrob/bin`, then `PATH`. Installing anywhere else
+produces an engine the browser cannot find, which is the one failure a person cannot diagnose.
+
 ## Phase U — the design system's COMPONENT layer. Runs alongside phases 2–4, not after them.
 
 Every surface that moves into the extension must arrive built from `@redrob-labs/ui`, not hand-rolled in the new
