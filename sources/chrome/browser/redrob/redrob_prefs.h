@@ -40,6 +40,23 @@ inline constexpr char kModelProviders[] = "redrob.model.providers";
 // Which provider entry answers tasks. Empty means the built-in Redrob engine.
 inline constexpr char kSelectedProviderId[] = "redrob.model.selected_provider_id";
 
+// What the user chose on the onboarding subscription screen: "redrob" (the built-in plan), "chatgpt"
+// or "claude" (reuse a subscription they already pay for). A FAMILY, not a model id and not a provider
+// id -- which is why it is a separate pref from kSelectedProviderId above rather than being folded
+// into it.
+//
+// It was previously declared as a local constant in two different .cc files and registered NOWHERE, so
+// Chromium's pref system dropped every write: the user picked a plan during first run and the choice
+// went nowhere at all. Registering it here, in the one place that can answer "what does this thing
+// keep about me", is the fix.
+//
+// Recording the choice is NOT the same as honouring it. Making "claude" actually route a task needs a
+// configured provider to point kSelectedProviderId at, and which provider that is depends on what the
+// user has signed in to. That is the subscription-delegation work; this pref is its input, and
+// pretending otherwise by guessing a provider id here would route tasks somewhere the user never
+// chose.
+inline constexpr char kOnboardingModelChoice[] = "redrob.onboarding.model_choice";
+
 // What the user chose about passwords during onboarding: "redrob" (use this browser's manager),
 // "external" (they keep another one, so stop offering to save), or "skip".
 inline constexpr char kPasswordManagerChoice[] = "redrob.passwords.choice";

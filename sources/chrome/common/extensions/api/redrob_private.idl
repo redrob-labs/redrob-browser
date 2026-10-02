@@ -188,6 +188,12 @@ namespace redrobPrivate {
   dictionary ModelSettings {
     Provider[] providers;
     DOMString selectedId;
+    // What first run recorded on the subscription screen: "redrob", "chatgpt" or
+    // "claude", and empty before it was asked. A subscription FAMILY, deliberately
+    // not the same field as selectedId above, which names a configured provider
+    // entry. Reported so a surface can show the user what they chose; honouring it
+    // needs a provider to point selectedId at, which is separate work.
+    DOMString onboardingChoice;
     EngineInfo engine;
     boolean encryptionReady;
   };

@@ -58,10 +58,11 @@ namespace redrob_private = api::redrob_private;
 
 namespace {
 
-// The model choice is recorded, but nothing in the product reads it yet, so it
-// has no registered pref. Kept here, next to the write, so the reason travels
-// with the code rather than living only in the onboarding host it moved from.
-constexpr char kModelChoicePref[] = "redrob.onboarding.model_choice";
+// PA-3. The choice used to be written to a pref declared only here and registered
+// nowhere, so Chromium dropped every write and the user's first-run pick did not
+// survive the call that made it. The name now lives in redrob_prefs.h with every
+// other pref, which is also the only way a settings screen can enumerate what the
+// browser keeps.
 
 // Only the choices the flow actually offers are stored. The value arrives from
 // a renderer, and a pref that accepts arbitrary strings is a pref that will one
@@ -128,7 +129,7 @@ RedrobPrivateSetModelChoiceFunction::Run() {
   if (IsKnownModelChoice(params->choice)) {
     Profile::FromBrowserContext(browser_context())
         ->GetPrefs()
-        ->SetString(kModelChoicePref, params->choice);
+        ->SetString(redrob::prefs::kOnboardingModelChoice, params->choice);
   }
   return RespondNow(NoArguments());
 }
@@ -533,6 +534,17 @@ ExtensionFunction::ResponseAction RedrobPrivateGetSettingsFunction::Run() {
   ModelStore* model = ModelStoreFactory::GetForProfile(profile);
   out.model.selected_id = model->selected_id();
   out.model.encryption_ready = model->encryption_ready();
+  // PA-3. What first run recorded, read back from the pref it is now actually
+  // registered under. Reporting it is what makes the write mean something: before
+  // this, nothing in the product could see the choice, so a surface could not even
+  // show the user what they had picked.
+  //
+  // It stays SEPARATE from selected_id rather than being folded into it. This is a
+  // subscription family ("redrob", "chatgpt", "claude"); selected_id is a configured
+  // provider entry. Collapsing them would require guessing which provider answers for
+  // a family, and guessing wrong routes a task somewhere the user never chose.
+  out.model.onboarding_choice =
+      profile->GetPrefs()->GetString(redrob::prefs::kOnboardingModelChoice);
   TaskStore* tasks = TaskStoreFactory::GetForProfile(profile);
   out.model.engine.default_model = TaskStore::DefaultModel();
   out.model.engine.model_count =
