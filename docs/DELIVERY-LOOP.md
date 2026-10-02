@@ -57,6 +57,11 @@ One item per pass. A pass is done when its acceptance line is true and its gate 
 | F-2 | The ownership rule, written down, with a gate that fails a UI file added under `sources/` once phase 3 has begun | N | no build |
 | F-3 | Feature detection contract: the extension runs with the private APIs absent and degrades, proven by loading it in stock Chromium | X | no build |
 | F-4 | Authenticated channel between extension and engine, matching what the browser's own engine port already does | X + E | no build |
+| F-5 | **The channel cannot degrade to unauthenticated.** Today `engine-location.js` omits the Authorization header entirely when no token is stored, so a token-less engine on loopback answers anyone — any local process, not just us. A missing credential must be a refusal, not a downgrade. The credential should also stop being a long-lived secret the extension holds: the engine issues a challenge, the browser signs it with the profile's own identity through the private API, and the extension carries only a short-lived token it cannot mint | N + X + E | build |
+
+F-5 is a Phase 0 item discovered after F-4 merged, and it is the one security gap in the queue: every other item fails
+visibly, this one works perfectly while being wrong. It needs a build because signing belongs to the browser — the
+extension must not be able to produce the credential itself, or the downgrade comes back by another route.
 
 ## Phase 1 — the engine reaches the user. Every agent item below is dead until it does.
 
@@ -179,8 +184,20 @@ gap that costs nothing but care.
 | K-7 | Per-server tool inventories, so a user can see which tools are live | X + E | no build |
 | K-8 | External password managers as first-class integrations | E | no build |
 
-K-1 comes first and is not optional: their 31 skill documents are cheap BECAUSE the objects exist. Porting skill
-text without the objects ports documents that cannot run.
+K-1 comes first and is not optional: a skill document is cheap BECAUSE the objects exist. Porting skill text without
+the objects ports documents that cannot run.
+
+What K-1 and K-2 look like when they are real, from a capability audit of a shipped competing browser:
+
+- **K-1 is a REPL tool with typed globals, not a tool list.** Each skill opens by naming the global it drives --
+  `page`, `channel`, a per-integration object -- and the skill body is JavaScript against it. One audited build carried
+  13 such globals, and the busiest was the page object, named in two thirds of its skills. A skill that has to describe
+  a tool call instead of a method is the shape K-1 is meant to replace.
+- **K-2's frontmatter is two keys beside the existing ones**: an icon, and an auto-arm block carrying keyword and URL
+  glob lists (`docs.google.com/document/**`). Under half the audited skills used it, which is the point -- a skill that
+  arms on everything is a skill that is always in the prompt.
+- **Scale check.** That build shipped 32 skills; we ship one. The gap is not the prose, it is K-1 and K-2 -- without
+  them there is nothing for 32 documents to be written against.
 
 ## Phase 7 — the agent stops being a chat.
 
@@ -212,6 +229,14 @@ text without the objects ports documents that cannot run.
 P-9 and P-10 are the two items in this whole queue that can cost a user money or reputation. Neither ships
 without an explicit default-off and a confirmation path, and P-10's spend cap is not a setting to add later.
 
+**P-2 and P-4 are platform calls, not models we train or ship.** A capability audit of a shipped competing browser
+found its helper declaring OS AI APIs for exactly these: text recognition for reading a screen as text, an image
+scaler for upscaling, and foreground/object extraction for describing and editing. It carried one workload manifest
+per NPU vendor and nothing else — no weights of its own. So the cost of P-2 and P-4 is binding to an OS AI surface and
+shipping a per-NPU manifest, which is small; the real cost stays in P-1, the signed helper that is allowed to call it.
+This also means both are available only where that OS surface is, so each needs a stated answer for platforms without
+one rather than a silent absence.
+
 ## Phase 9 — the browser people expect.
 
 | id | item | owner | build |
@@ -225,6 +250,16 @@ without an explicit default-off and a confirmation path, and P-10's spend cap is
 | B-7 | Window background translucency | N | build |
 | B-8 | Automatic picture-in-picture | N | build |
 | B-9 | Multiple profiles with a switcher of ours | N + X | build |
+
+**B-3, B-5's switcher and B-6 are mostly EXTENSION work, and this table has them as native.** A capability audit of a
+shipped competing browser measured the split: the quick window, the tab switcher and the hover preview are extension
+PAGES there, and the native side contributes only a pref getter/setter pair per behaviour plus a shortcut that opens a
+page. Same for W-3's notifications. So each of these is one small `build` slice — four prefs and a window-opening
+command, done ONCE — and then three surfaces that are `no build` like every other document we own.
+
+Re-planning them is a separate pass, not a rider here, because the native slice is shared and should be cut once rather
+than three times. What is recorded now is that the `build` label on all of B-3/B-5/B-6 overstates the cost, and that
+pricing them as full native features is why they sit at the bottom of the queue.
 
 ## Phase 10 — data in, data across.
 
