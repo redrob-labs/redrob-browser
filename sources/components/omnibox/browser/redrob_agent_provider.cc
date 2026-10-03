@@ -12,7 +12,6 @@
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
-#include "components/omnibox/resources/grit/omnibox_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "third_party/metrics_proto/omnibox_focus_type.pb.h"
 #include "ui/base/l10n/l10n_util.h"
