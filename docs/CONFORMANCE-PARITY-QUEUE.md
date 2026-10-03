@@ -351,8 +351,40 @@ API. The hardware check and the "your machine cannot" answer are part of the ite
       wanting one that does not exist yet, so it needs a twelfth rather than reusing `browser`.
 - [ ] **PA-8** Local model download + run on compatible hardware, with an honest refusal on hardware
       that cannot. Covers P-2 and P-4 under the user's decision.
-      NOT STARTED. Needs the download/verify/run pipeline and a hardware probe; the probe is the half that
-      decides whether it is honest, and it is native. Sized for its own run, not a loop cycle.
+      PARTLY DONE -- the two halves that decide whether it is honest are built and tested; the surface
+      that shows a running download is not, so this item stays open deliberately.
+      MEASURED FIRST, and it shrank the item: the RUN half already exists. A local runtime is already
+      an allowed provider (`local-provider.ts`: the one trusted OpenAI-compatible package, local URL
+      only) and `local-models.ts` already lists what it serves. Nothing needed building there.
+      The probe is NOT native, which the earlier note had wrong. The engine is a process on the user's
+      own machine, so memory, cores and arch come straight from the OS; only the GPU needs a shell out,
+      and that is per-platform.
+      DONE: `local-model-fit.ts` -- measures the machine and judges a model against it. Three rules it
+      is built on. (1) An unseen GPU is reported as NOT MEASURED, never as absent: telling a user with
+      a discrete card that they have none is a false claim about their own computer. (2) It never
+      invents a model's size; the figure comes from the runtime. (3) A refusal carries the numbers --
+      "needs 12.0 GiB, 8.0 GiB free of 16.0 GiB total, short by 4.0 GiB, which this machine has if you
+      close something" -- and distinguishes that from a machine too small whatever is closed.
+      Memory is checked against AVAILABLE, not total, and `os.freemem()` understates on Linux. That
+      direction is chosen: it can refuse a model that would have squeezed in, and it will not promise
+      one that gets killed mid-generation, which loses the user's work.
+      DONE: `local-gpu-probe.ts` and `local-model-pull.ts` -- the per-platform GPU read (silent on
+      failure, by design) and the runtime's own listing/fetch shapes. We do NOT fetch weights
+      ourselves: no mirror choice, no quantisation choice, no digest we chose to trust. The runtime
+      resumes interrupted downloads and shares progress between callers already; re-implementing that
+      would mean owning model provenance, a far bigger promise than "run a model locally".
+      WHY THE SECOND SET OF ROUTES: the OpenAI-compatible `GET /models` the provider listing uses
+      reports an id and NOTHING ELSE -- no size. So it cannot answer the one question this item turns
+      on. Sizes and the fetch live on the runtime's own API.
+      Shapes taken from the runtime's published API reference, and two traps it states explicitly are
+      handled with a test each: `completed` may be ABSENT while a layer downloads, and `total` is
+      per-LAYER not per-model (a caller reading it as whole-model progress shows a bar that resets on
+      every layer). An in-band `error` frame arrives after a 200 and is terminal, not progress.
+      MEASURED: core 1034 tests 0 fail (36 new). Fit judgement is pure and needs no machine; GPU
+      parsers run against the reference's own recorded output, so they are verified without a GPU.
+      REMAINS: the surface. A progress view, the refusal shown to a person rather than returned as a
+      value, and the choice of which models to offer. No silent cloud fallback exists and none should
+      be added -- a user who asked for a local model asked for the data to stay on the machine.
 
 - [x] **PA-9** The remaining skills, against K-1's typed globals.
       DONE, and the measurement moved the item. The arming MECHANISM was the work, not the prose:
