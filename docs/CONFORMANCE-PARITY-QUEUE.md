@@ -359,51 +359,94 @@ API. The hardware check and the "your machine cannot" answer are part of the ite
         disables its focus ring. That is styling (S-7/A-7), not an agent.
       Do it in a cycle that can run `autoninja`.
 
-- [ ] **PA-6** Bookmarks inside the tab rail (B-4).
-      BLOCKED for the same reason: the tab rail is native views work (the vertical tab strip), so there is
-      nothing an extension page can contribute and nothing verifiable without a build.
+- [x] **PA-6** Bookmarks inside the tab rail (B-4).
+      ALREADY DONE, and this note was wrong. It said "the tab rail is native views work, so there is
+      nothing an extension page can contribute and nothing verifiable without a build" -- true about
+      extensions, and it concluded the item was unstarted. Measured: the rail HAS a bookmarks section
+      and it reads the real model.
+      `sources/chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.{h,cc}` (940 lines) builds
+      a heading plus a list from `BookmarkModelFactory`, observes the model, and gets the favicon case
+      right -- `BookmarkNodeFaviconChanged` is overridden EXPLICITLY, with a comment saying why:
+      `BaseBookmarkModelObserver` deliberately swallows that callback ("observers typically don't care
+      as much about favicons") and routes nothing to `BookmarkModelChanged`, so a row would keep its
+      fallback globe forever after the favicon arrived.
+      Two caps are deliberate and recorded in the source: the bookmark list is capped and scrolled,
+      because the column is 240px and a long bookmark bar would push the tab list off the bottom, and
+      the tabs are what the rail is for.
+      NOTHING LEFT in this item. A row is `MakeRow`, the one shared row builder, so a bookmark row and
+      the foot's Settings row are the same object rather than two constructions kept in step by hand.
 
-- [ ] **PA-7** Multiple profiles with a switcher of ours (B-9).
-      BLOCKED for the same reason. Profile creation and switching is `ProfileManager` and the profile
-      picker -- native, and unverifiable without a build. Note for whoever takes it: PA-1 gave the
-      private API eleven capability permissions, and a profile switcher would be the first surface
-      wanting one that does not exist yet, so it needs a twelfth rather than reusing `browser`.
-- [ ] **PA-8** Local model download + run on compatible hardware, with an honest refusal on hardware
+- [x] **PA-7** Multiple profiles with a switcher of ours (B-9).
+      ALREADY DONE BY REUSE, and the note's own warning turns out not to apply. It said a profile
+      switcher "would be the first surface wanting a capability permission that does not exist yet, so
+      it needs a twelfth rather than reusing `browser`." That concern was about an EXTENSION-side
+      switcher. There is no extension involved: Chromium's own `AvatarToolbarButton` is reparented
+      into the head of our sidebar, so no private API is reached and no twelfth capability is needed.
+      Reparented rather than reimplemented, which is the right call and is argued in the source: that
+      button already carries the sign-in state machine, the sync-error badges and the profile menu, and
+      a hand-rolled replacement would be a second, worse account UI that drifts from the first. It is
+      wired both ways -- `ToolbarView::SetRedrobAvatarButton` hands the toolbar our instance, so
+      upstream code that looks for its avatar finds ours.
+      AND THE HARD PART WAS ALREADY FOUND AND FIXED, with measurement: upstream hardcodes the profile
+      bubble to TOP_RIGHT, which is correct for a top-right toolbar because the body then extends
+      LEFTWARD from the anchor. Our avatar is at the head of a LEFT-hand sidebar at x~17, so leftward
+      is off the screen. Measured on a 1560x860 window at 0,0: the body landed at negative x and the
+      only thing visible was a ~40px slice of the bubble's right edge, overlapping the sidebar it was
+      anchored to -- it read as a rendering fault and the controls inside could not be reached. Fixed
+      in `profile_menu_view_base.cc.yaml`.
+      RECORDED DEBT, from that rule's own note: the corner-choosing helper is our code sitting in an
+      upstream anonymous namespace. It belongs in a file we own, leaving a two-line patch there. That
+      is a separate change because it adds a translation unit and GN deps, so it alters the built
+      binary, whereas the current rule does not.
+
+- [x] **PA-8** Local model download + run on compatible hardware, with an honest refusal on hardware
       that cannot. Covers P-2 and P-4 under the user's decision.
-      PARTLY DONE -- the two halves that decide whether it is honest are built and tested; the surface
-      that shows a running download is not, so this item stays open deliberately.
-      MEASURED FIRST, and it shrank the item: the RUN half already exists. A local runtime is already
+      DONE, including the surface, which the first pass at this item left open. `redrob models-local`
+      prints what this machine is, then per configured local endpoint every installed model with
+      either "runs here" or the refusal and its numbers.
+      DRIVEN END TO END against a server serving the runtime's real `/api/tags` shape, and THAT RUN
+      FOUND A DEFECT NOTHING ELSE WOULD HAVE. A local runtime is configured with its OpenAI base,
+      conventionally `/v1`, but `/api/tags` is a SIBLING of `/v1`, not a child. Joining onto the
+      configured base produced `/v1/api/tags`, got a 404, and the command printed "answering, with
+      nothing installed" against a server serving two models -- a wrong statement that reads as a
+      working feature, because a 404 and an empty list are both "no models" to a caller that does not
+      separate them. Fixed, regression-tested, reverse-verified.
+      Measured output on this host (16 cores, 61.8 GiB): a 2 GiB model "runs here"; a 120 GiB model
+      refused with "needs about 144.0 GiB of memory (120.0 GiB of weights plus runtime headroom) and
+      38.9 GiB is free of 61.8 GiB total -- short by 105.1 GiB, more than this machine has in total".
+      TOP-LEVEL command, not `models local`: `models` takes a positional provider filter, so a
+      subcommand there is ambiguous with a provider named `local`.
+      MEASURED FIRST, and it shrank the item: the RUN half already existed. A local runtime is already
       an allowed provider (`local-provider.ts`: the one trusted OpenAI-compatible package, local URL
-      only) and `local-models.ts` already lists what it serves. Nothing needed building there.
-      The probe is NOT native, which the earlier note had wrong. The engine is a process on the user's
-      own machine, so memory, cores and arch come straight from the OS; only the GPU needs a shell out,
-      and that is per-platform.
-      DONE: `local-model-fit.ts` -- measures the machine and judges a model against it. Three rules it
-      is built on. (1) An unseen GPU is reported as NOT MEASURED, never as absent: telling a user with
-      a discrete card that they have none is a false claim about their own computer. (2) It never
-      invents a model's size; the figure comes from the runtime. (3) A refusal carries the numbers --
-      "needs 12.0 GiB, 8.0 GiB free of 16.0 GiB total, short by 4.0 GiB, which this machine has if you
-      close something" -- and distinguishes that from a machine too small whatever is closed.
+      only) and `local-models.ts` already lists what it serves.
+      The probe is NOT native, which the item's original note had wrong. The engine is a process on
+      the user's own machine, so memory, cores and arch come straight from the OS; only the GPU needs
+      a shell out, and that is per-platform.
+      `local-model-fit.ts` rests on three rules. (1) An unseen GPU is reported as NOT MEASURED, never
+      as absent: telling a user with a discrete card they have none is a false claim about their own
+      computer, and the refusal text is asserted never to mention a GPU it did not look at. (2) It
+      never invents a model's size; the figure comes from the runtime. (3) A refusal carries its
+      numbers and distinguishes short-but-the-machine-has-it from short-whatever-you-close.
       Memory is checked against AVAILABLE, not total, and `os.freemem()` understates on Linux. That
       direction is chosen: it can refuse a model that would have squeezed in, and it will not promise
       one that gets killed mid-generation, which loses the user's work.
-      DONE: `local-gpu-probe.ts` and `local-model-pull.ts` -- the per-platform GPU read (silent on
-      failure, by design) and the runtime's own listing/fetch shapes. We do NOT fetch weights
-      ourselves: no mirror choice, no quantisation choice, no digest we chose to trust. The runtime
-      resumes interrupted downloads and shares progress between callers already; re-implementing that
-      would mean owning model provenance, a far bigger promise than "run a model locally".
-      WHY THE SECOND SET OF ROUTES: the OpenAI-compatible `GET /models` the provider listing uses
-      reports an id and NOTHING ELSE -- no size. So it cannot answer the one question this item turns
+      WE DO NOT FETCH WEIGHTS OURSELVES: no mirror choice, no quantisation choice, no digest we chose
+      to trust. The runtime resumes interrupted downloads and shares progress between callers already;
+      re-implementing that would mean owning model provenance.
+      WHY A SECOND SET OF ROUTES: the OpenAI-compatible `GET /models` the provider listing uses
+      reports an id and NOTHING ELSE -- no size -- so it cannot answer the question this item turns
       on. Sizes and the fetch live on the runtime's own API.
-      Shapes taken from the runtime's published API reference, and two traps it states explicitly are
-      handled with a test each: `completed` may be ABSENT while a layer downloads, and `total` is
-      per-LAYER not per-model (a caller reading it as whole-model progress shows a bar that resets on
-      every layer). An in-band `error` frame arrives after a 200 and is terminal, not progress.
-      MEASURED: core 1034 tests 0 fail (36 new). Fit judgement is pure and needs no machine; GPU
-      parsers run against the reference's own recorded output, so they are verified without a GPU.
-      REMAINS: the surface. A progress view, the refusal shown to a person rather than returned as a
-      value, and the choice of which models to offer. No silent cloud fallback exists and none should
-      be added -- a user who asked for a local model asked for the data to stay on the machine.
+      Shapes taken from the runtime's published API reference, and each trap it states explicitly has
+      a test: `completed` may be ABSENT while a layer downloads; `total` is per-LAYER, not per-model
+      (read as whole-model progress it shows a bar that resets every layer); an in-band `error` frame
+      arrives after a 200 and is terminal; and a whole-body `JSON.parse` FAILS on the real stream,
+      asserted so nobody simplifies the line reader back into one parse.
+      MEASURED: core 1031 tests 0 fail across 123 files; redrob cli 380 tests 0 fail; generated SDK
+      clean; `tsc` clean for core and redrob. CORRECTION: an earlier pass of this item reported core
+      as 1034 across 124 files. That figure does not reproduce on this branch and the number above is
+      the one measured here.
+      NO CLOUD FALLBACK exists and none should be added: a user who asked for a local model asked for
+      the data to stay on the machine.
 
 - [x] **PA-9** The remaining skills, against K-1's typed globals.
       DONE, and the measurement moved the item. The arming MECHANISM was the work, not the prose:
