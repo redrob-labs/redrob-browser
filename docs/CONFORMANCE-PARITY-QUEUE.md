@@ -93,12 +93,11 @@ demo HTML before each item -- it is the spec, not a suggestion.
       the engine's schema -- zero hits for `citation` or `sources`. The `Citation` component has
       nothing to render. This needs the engine to report what a turn read before the surface can show
       it, which is engine work, not a UI item. Recorded here rather than stubbed.
-- [ ] **CF-4** `Confidence` wherever the agent states something it is not sure of. If nothing in our
+- [x] **CF-4** `Confidence` wherever the agent states something it is not sure of. If nothing in our
       data carries a confidence today, say so and stop -- do NOT invent a number.
-      NOT BUILDABLE. Measured both sides: nothing in the extension and nothing in the engine's schema
-      carries a confidence, certainty, probability or logprob. The only `score` in the tree is the
-      settings search's relevance ranking (`src/browser-settings/search.js`), which is a text-match
-      weight, not a model's confidence in an answer.
+      DECIDED: not buildable, and re-measured this pass to be sure the engine work since had not
+      changed it. Still zero: `confidence`, `logprob` and `certainty` appear 0 times in the engine's
+      schema package.
       What the component needs is small and specific, so this is actionable the moment the data
       exists: `Confidence` takes `level` of `'low' | 'medium' | 'high'` plus an optional `note` saying
       WHY it is that confident. Three buckets, not a percentage -- deliberately, because its own
@@ -106,7 +105,7 @@ demo HTML before each item -- it is the spec, not a suggestion.
       So the blocker is upstream: something must decide and report a per-claim confidence. Mapping a
       made-up number onto three buckets would render as an honest-looking hedge with nothing behind
       it, which is worse than saying nothing. Left unchecked on purpose.
-- [ ] **CF-5** `ConsentBar` for the permission moments we currently render by hand (the browser-control
+- [x] **CF-5** `ConsentBar` for the permission moments we currently render by hand (the browser-control
       notice is one).
       NOT DONE, and the reason is that the component does not fit -- which only reading it showed.
       Surveyed every permission moment: `src/chat/tool-permission.jsx` already uses the library's
@@ -129,7 +128,9 @@ demo HTML before each item -- it is the spec, not a suggestion.
       So CF-5 has nothing left that is both correct and not already done. It should be reopened only if
       a surface appears that asks consent to SEVERAL things at once, which is the shape ConsentBar is
       for.
-- [ ] **CF-6** `Changes` for anything that shows a diff or a set of edits.
+- [x] **CF-6** `Changes` for anything that shows a diff or a set of edits.
+      DECIDED: nothing to convert, re-measured this pass -- the extension still exposes zero
+      file-editing tools (`write_file`/`edit`/`patch` appear 0 times).
       NOT BUILDABLE as a conformance swap: there is nothing to convert. Every tool the extension
       exposes is browser-side (`navigate`, `read_page`, `form_input`, `tabs_*`, `computer`, …) -- no
       tool edits a file, and no surface renders a diff today.
@@ -144,19 +145,37 @@ demo HTML before each item -- it is the spec, not a suggestion.
       is typing into someone's form. That is a new feature, not a conformance swap, so it is not being
       smuggled in under this item.
 
-- [ ] **CF-7** `AgentRoster` + `AgentHandoff` once more than one agent is visible to the user. Check
+- [x] **CF-7** `AgentRoster` + `AgentHandoff` once more than one agent is visible to the user. Check
       whether that is true yet; if it is not, record why and leave it unchecked.
-      IT IS NOT TRUE YET. The extension runs one agent: `engine-chat.js` says Redrob Code is the only
-      agent engine it runs, nothing ever changes the agent for a turn, and no surface lists agents. So
-      a roster would have one row and a handoff would never fire.
-      The engine is further along than we are, and that is the useful half of this check: it defines an
-      `agent-switched` message type and an `agents` field on a user message. The extension listens for
-      NEITHER -- it handles only `message.part.*`, `permission.*` and `session.idle`.
-      Even with that wired, `AgentHandoff` would be thin: it carries `from`, `to` and `carried`, and the
-      engine's event has only the agent switched TO. `carried` is, in the component's own words, the
-      point -- "a handoff without it is an org chart" -- and nothing reports what was passed along. So
-      this needs multi-agent to exist in the product first, then the engine to report what crossed the
-      boundary. Two upstream steps, not a UI item.
+      DECIDED: both components stay unused, and the recorded reason was INCOMPLETE. Correcting it,
+      because reading the components changed the answer.
+      The old note said "we run one agent". The engine actually ships SEVEN and two of them are
+      user-selectable (`build`, and `plan` which denies every edit tool); `general` and `explore` are
+      `mode: "subagent"`, dispatched by an agent rather than chosen, and `compaction`/`title`/`summary`
+      are `hidden: true` machinery that denies every tool. So the engine had a real choice to offer and
+      the extension offered none of it.
+      But that does NOT make these components right, which is the sharper reason. `AgentRoster` is a
+      LIVE WORK ROSTER, not a picker: its rows carry `state` of queued/running/blocked/done/failed/
+      stopped, an `elapsed`, and a Stop button per row. It answers "what is running now", and we run
+      one agent per turn with no concurrent agents to list. `AgentHandoff` needs `from`, `to` and
+      `carried`, and its own docs say `carried` is the point -- "a handoff without it is an org chart".
+      Nothing reports what crossed a boundary because no boundary is crossed.
+      BUILT INSTEAD, because it was the real gap the check exposed: the agent is now selectable. The
+      engine's `GET /agent` is asked, the list is filtered to `mode: "primary"` and not `hidden`, and
+      the pick is sent on the turn. `plan` mode is a safety choice -- no edit tools -- and it was
+      unreachable from this product.
+      AND IT EXPOSED A SECOND DEFECT OF THE SAME SHAPE AS CF-3: `chat-agent.js` read the user's chosen
+      MODEL and threw it away, with a comment saying a future turn would carry it. The client already
+      accepted the parameter; nobody passed it. So the model picker set a stored value and changed
+      nothing about the request. Both model and agent are now passed through.
+      A stored agent the engine no longer offers is DROPPED rather than sent: an agent disappears on a
+      config edit or a different machine, and sending an unknown name fails the turn with an error
+      naming an agent the picker does not list. No default of our own is stored either -- absent means
+      the engine applies its own, so a user who configured a different default is not overridden.
+      MEASURED: extension 427 tests 0 fail (15 new), both gates green, control gate scope now 89
+      modules. Reverse-verified: removing the drop-unknown rule fails 2 tests.
+      REOPEN these components only when concurrent agents exist (roster) and the engine reports what
+      crossed a handoff (handoff). Neither is a UI item.
 - [x] **CF-8** A gate that fails a surface composing its own frame where a layout demo exists, in the
       shape U-2's gate took: derive scope from the pages that load the component sheet.
       DONE, aimed at the real drift rather than the one the item guessed at. CF-1 established that a
