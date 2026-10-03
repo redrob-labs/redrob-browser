@@ -354,13 +354,41 @@ API. The hardware check and the "your machine cannot" answer are part of the ite
       NOT STARTED. Needs the download/verify/run pipeline and a hardware probe; the probe is the half that
       decides whether it is honest, and it is native. Sized for its own run, not a loop cycle.
 
-- [ ] **PA-9** The remaining skills, against K-1's typed globals.
-      BLOCKED BY PA-10, by this file's own rule: "do NOT write skill prose faster than the globals it
-      needs exist -- a document that cannot run is worse than no document." `page` is in two thirds of the
-      audited build's skills and ours still throws, so writing them now would produce documents that
-      cannot run.
+- [x] **PA-9** The remaining skills, against K-1's typed globals.
+      DONE, and the measurement moved the item. The arming MECHANISM was the work, not the prose:
+      K-2 landed `SkillArming.arm` as a pure function and NOTHING CALLED IT -- measured, its only
+      caller was its own test. Worse, the skill surface the system prompt actually reads is a second,
+      older loader (`packages/redrob/src/skill/index.ts`) whose `Info` dropped `autoInject` entirely,
+      so every skill on disk looked like a skill that declared no arming block. Both fixed: the field
+      is carried through the loader, and `SystemPrompt.armedSkills` calls the matcher and injects the
+      armed bodies as their own labelled block, with the patterns that armed them.
+      Shipped one document against the real surface: `page-control`, the six `page` calls, checked
+      BOTH ways against the bound tool namespace (names every call that exists, names none that does
+      not, and the "Six calls" sentence is asserted against the real count).
+      URL arming is wired but not fed: getting the active tab costs a browser round trip per message,
+      which with no extension attached spends the request deadline before the model sees anything.
+      Keyword arming works today; the URL half needs the session to HOLD its tab URL as state rather
+      than ask for it. Recorded in the code at the call site.
+      MEASURED: core 998 tests 0 fail; redrob tool+session 854 pass 0 fail; skill loader 19 pass
+      (2 new); page-skill 5 pass; reverse-verified both ways -- removing the wiring fails 4 system
+      tests, removing the loader field fails the end-to-end arming test.
+      STILL OPEN, and bigger than this item: the core `SkillV2` plugin registry (`BuiltinSkills`,
+      with `documents` and `skill-writer`) feeds an `EmbeddedSource` list that NOTHING in the engine
+      consumes -- grepped, zero consumers. So the builtin skills are registered and unreachable, and
+      only disk skills actually load. That is a seam to close, not a document to write.
 
-- [ ] **PA-10** Make `page` real. The audited build exposed 13 code-mode globals; K-1 landed 2 and BOTH
+- [x] **PA-10** Make `page` real. The audited build exposed 13 code-mode globals; K-1 landed 2 and BOTH
+      DONE via the extension channel, the route the user chose after the recommendation. The engine
+      publishes a pending request on its existing V2 `/api/event` stream and the extension dials that
+      stream and answers over HTTP -- NO new listener and NO inbound socket, so nothing new on this
+      machine is dialable by another local process. engine PR #64, extension PR #72.
+      Three things the build decided rather than the design: the result is a tagged union per action,
+      so a client answering `page.query` with a string is a protocol error the engine can name instead
+      of an empty node list the model reads as "nothing matched"; there is a 20s deadline, because the
+      event stream has no subscriber count and waiting forever would hang a session whose browser is
+      absent; and a refusal is its own route, because an unexposed tab is a normal answer and routing
+      it through the deadline would spend 20s to say so.
+      The investigation below stands as the record of why the loopback RPC was NOT used.
       currently throw (`unavailablePage`, `unavailableChannel`).
       NEEDS A DECISION FROM THE USER -- a security boundary, so not mine to take unilaterally. The
       investigation is finished and the finding is the useful part:
