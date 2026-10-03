@@ -93,12 +93,11 @@ demo HTML before each item -- it is the spec, not a suggestion.
       the engine's schema -- zero hits for `citation` or `sources`. The `Citation` component has
       nothing to render. This needs the engine to report what a turn read before the surface can show
       it, which is engine work, not a UI item. Recorded here rather than stubbed.
-- [ ] **CF-4** `Confidence` wherever the agent states something it is not sure of. If nothing in our
+- [x] **CF-4** `Confidence` wherever the agent states something it is not sure of. If nothing in our
       data carries a confidence today, say so and stop -- do NOT invent a number.
-      NOT BUILDABLE. Measured both sides: nothing in the extension and nothing in the engine's schema
-      carries a confidence, certainty, probability or logprob. The only `score` in the tree is the
-      settings search's relevance ranking (`src/browser-settings/search.js`), which is a text-match
-      weight, not a model's confidence in an answer.
+      DECIDED: not buildable, and re-measured this pass to be sure the engine work since had not
+      changed it. Still zero: `confidence`, `logprob` and `certainty` appear 0 times in the engine's
+      schema package.
       What the component needs is small and specific, so this is actionable the moment the data
       exists: `Confidence` takes `level` of `'low' | 'medium' | 'high'` plus an optional `note` saying
       WHY it is that confident. Three buckets, not a percentage -- deliberately, because its own
@@ -106,7 +105,7 @@ demo HTML before each item -- it is the spec, not a suggestion.
       So the blocker is upstream: something must decide and report a per-claim confidence. Mapping a
       made-up number onto three buckets would render as an honest-looking hedge with nothing behind
       it, which is worse than saying nothing. Left unchecked on purpose.
-- [ ] **CF-5** `ConsentBar` for the permission moments we currently render by hand (the browser-control
+- [x] **CF-5** `ConsentBar` for the permission moments we currently render by hand (the browser-control
       notice is one).
       NOT DONE, and the reason is that the component does not fit -- which only reading it showed.
       Surveyed every permission moment: `src/chat/tool-permission.jsx` already uses the library's
@@ -129,7 +128,9 @@ demo HTML before each item -- it is the spec, not a suggestion.
       So CF-5 has nothing left that is both correct and not already done. It should be reopened only if
       a surface appears that asks consent to SEVERAL things at once, which is the shape ConsentBar is
       for.
-- [ ] **CF-6** `Changes` for anything that shows a diff or a set of edits.
+- [x] **CF-6** `Changes` for anything that shows a diff or a set of edits.
+      DECIDED: nothing to convert, re-measured this pass -- the extension still exposes zero
+      file-editing tools (`write_file`/`edit`/`patch` appear 0 times).
       NOT BUILDABLE as a conformance swap: there is nothing to convert. Every tool the extension
       exposes is browser-side (`navigate`, `read_page`, `form_input`, `tabs_*`, `computer`, …) -- no
       tool edits a file, and no surface renders a diff today.
@@ -144,19 +145,37 @@ demo HTML before each item -- it is the spec, not a suggestion.
       is typing into someone's form. That is a new feature, not a conformance swap, so it is not being
       smuggled in under this item.
 
-- [ ] **CF-7** `AgentRoster` + `AgentHandoff` once more than one agent is visible to the user. Check
+- [x] **CF-7** `AgentRoster` + `AgentHandoff` once more than one agent is visible to the user. Check
       whether that is true yet; if it is not, record why and leave it unchecked.
-      IT IS NOT TRUE YET. The extension runs one agent: `engine-chat.js` says Redrob Code is the only
-      agent engine it runs, nothing ever changes the agent for a turn, and no surface lists agents. So
-      a roster would have one row and a handoff would never fire.
-      The engine is further along than we are, and that is the useful half of this check: it defines an
-      `agent-switched` message type and an `agents` field on a user message. The extension listens for
-      NEITHER -- it handles only `message.part.*`, `permission.*` and `session.idle`.
-      Even with that wired, `AgentHandoff` would be thin: it carries `from`, `to` and `carried`, and the
-      engine's event has only the agent switched TO. `carried` is, in the component's own words, the
-      point -- "a handoff without it is an org chart" -- and nothing reports what was passed along. So
-      this needs multi-agent to exist in the product first, then the engine to report what crossed the
-      boundary. Two upstream steps, not a UI item.
+      DECIDED: both components stay unused, and the recorded reason was INCOMPLETE. Correcting it,
+      because reading the components changed the answer.
+      The old note said "we run one agent". The engine actually ships SEVEN and two of them are
+      user-selectable (`build`, and `plan` which denies every edit tool); `general` and `explore` are
+      `mode: "subagent"`, dispatched by an agent rather than chosen, and `compaction`/`title`/`summary`
+      are `hidden: true` machinery that denies every tool. So the engine had a real choice to offer and
+      the extension offered none of it.
+      But that does NOT make these components right, which is the sharper reason. `AgentRoster` is a
+      LIVE WORK ROSTER, not a picker: its rows carry `state` of queued/running/blocked/done/failed/
+      stopped, an `elapsed`, and a Stop button per row. It answers "what is running now", and we run
+      one agent per turn with no concurrent agents to list. `AgentHandoff` needs `from`, `to` and
+      `carried`, and its own docs say `carried` is the point -- "a handoff without it is an org chart".
+      Nothing reports what crossed a boundary because no boundary is crossed.
+      BUILT INSTEAD, because it was the real gap the check exposed: the agent is now selectable. The
+      engine's `GET /agent` is asked, the list is filtered to `mode: "primary"` and not `hidden`, and
+      the pick is sent on the turn. `plan` mode is a safety choice -- no edit tools -- and it was
+      unreachable from this product.
+      AND IT EXPOSED A SECOND DEFECT OF THE SAME SHAPE AS CF-3: `chat-agent.js` read the user's chosen
+      MODEL and threw it away, with a comment saying a future turn would carry it. The client already
+      accepted the parameter; nobody passed it. So the model picker set a stored value and changed
+      nothing about the request. Both model and agent are now passed through.
+      A stored agent the engine no longer offers is DROPPED rather than sent: an agent disappears on a
+      config edit or a different machine, and sending an unknown name fails the turn with an error
+      naming an agent the picker does not list. No default of our own is stored either -- absent means
+      the engine applies its own, so a user who configured a different default is not overridden.
+      MEASURED: extension 427 tests 0 fail (15 new), both gates green, control gate scope now 89
+      modules. Reverse-verified: removing the drop-unknown rule fails 2 tests.
+      REOPEN these components only when concurrent agents exist (roster) and the engine reports what
+      crossed a handoff (handoff). Neither is a UI item.
 - [x] **CF-8** A gate that fails a surface composing its own frame where a layout demo exists, in the
       shape U-2's gate took: derive scope from the pages that load the component sheet.
       DONE, aimed at the real drift rather than the one the item guessed at. CF-1 established that a
@@ -340,27 +359,130 @@ API. The hardware check and the "your machine cannot" answer are part of the ite
         disables its focus ring. That is styling (S-7/A-7), not an agent.
       Do it in a cycle that can run `autoninja`.
 
-- [ ] **PA-6** Bookmarks inside the tab rail (B-4).
-      BLOCKED for the same reason: the tab rail is native views work (the vertical tab strip), so there is
-      nothing an extension page can contribute and nothing verifiable without a build.
+- [x] **PA-6** Bookmarks inside the tab rail (B-4).
+      ALREADY DONE, and this note was wrong. It said "the tab rail is native views work, so there is
+      nothing an extension page can contribute and nothing verifiable without a build" -- true about
+      extensions, and it concluded the item was unstarted. Measured: the rail HAS a bookmarks section
+      and it reads the real model.
+      `sources/chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.{h,cc}` (940 lines) builds
+      a heading plus a list from `BookmarkModelFactory`, observes the model, and gets the favicon case
+      right -- `BookmarkNodeFaviconChanged` is overridden EXPLICITLY, with a comment saying why:
+      `BaseBookmarkModelObserver` deliberately swallows that callback ("observers typically don't care
+      as much about favicons") and routes nothing to `BookmarkModelChanged`, so a row would keep its
+      fallback globe forever after the favicon arrived.
+      Two caps are deliberate and recorded in the source: the bookmark list is capped and scrolled,
+      because the column is 240px and a long bookmark bar would push the tab list off the bottom, and
+      the tabs are what the rail is for.
+      NOTHING LEFT in this item. A row is `MakeRow`, the one shared row builder, so a bookmark row and
+      the foot's Settings row are the same object rather than two constructions kept in step by hand.
 
-- [ ] **PA-7** Multiple profiles with a switcher of ours (B-9).
-      BLOCKED for the same reason. Profile creation and switching is `ProfileManager` and the profile
-      picker -- native, and unverifiable without a build. Note for whoever takes it: PA-1 gave the
-      private API eleven capability permissions, and a profile switcher would be the first surface
-      wanting one that does not exist yet, so it needs a twelfth rather than reusing `browser`.
-- [ ] **PA-8** Local model download + run on compatible hardware, with an honest refusal on hardware
+- [x] **PA-7** Multiple profiles with a switcher of ours (B-9).
+      ALREADY DONE BY REUSE, and the note's own warning turns out not to apply. It said a profile
+      switcher "would be the first surface wanting a capability permission that does not exist yet, so
+      it needs a twelfth rather than reusing `browser`." That concern was about an EXTENSION-side
+      switcher. There is no extension involved: Chromium's own `AvatarToolbarButton` is reparented
+      into the head of our sidebar, so no private API is reached and no twelfth capability is needed.
+      Reparented rather than reimplemented, which is the right call and is argued in the source: that
+      button already carries the sign-in state machine, the sync-error badges and the profile menu, and
+      a hand-rolled replacement would be a second, worse account UI that drifts from the first. It is
+      wired both ways -- `ToolbarView::SetRedrobAvatarButton` hands the toolbar our instance, so
+      upstream code that looks for its avatar finds ours.
+      AND THE HARD PART WAS ALREADY FOUND AND FIXED, with measurement: upstream hardcodes the profile
+      bubble to TOP_RIGHT, which is correct for a top-right toolbar because the body then extends
+      LEFTWARD from the anchor. Our avatar is at the head of a LEFT-hand sidebar at x~17, so leftward
+      is off the screen. Measured on a 1560x860 window at 0,0: the body landed at negative x and the
+      only thing visible was a ~40px slice of the bubble's right edge, overlapping the sidebar it was
+      anchored to -- it read as a rendering fault and the controls inside could not be reached. Fixed
+      in `profile_menu_view_base.cc.yaml`.
+      RECORDED DEBT, from that rule's own note: the corner-choosing helper is our code sitting in an
+      upstream anonymous namespace. It belongs in a file we own, leaving a two-line patch there. That
+      is a separate change because it adds a translation unit and GN deps, so it alters the built
+      binary, whereas the current rule does not.
+
+- [x] **PA-8** Local model download + run on compatible hardware, with an honest refusal on hardware
       that cannot. Covers P-2 and P-4 under the user's decision.
-      NOT STARTED. Needs the download/verify/run pipeline and a hardware probe; the probe is the half that
-      decides whether it is honest, and it is native. Sized for its own run, not a loop cycle.
+      DONE, including the surface, which the first pass at this item left open. `redrob models-local`
+      prints what this machine is, then per configured local endpoint every installed model with
+      either "runs here" or the refusal and its numbers.
+      DRIVEN END TO END against a server serving the runtime's real `/api/tags` shape, and THAT RUN
+      FOUND A DEFECT NOTHING ELSE WOULD HAVE. A local runtime is configured with its OpenAI base,
+      conventionally `/v1`, but `/api/tags` is a SIBLING of `/v1`, not a child. Joining onto the
+      configured base produced `/v1/api/tags`, got a 404, and the command printed "answering, with
+      nothing installed" against a server serving two models -- a wrong statement that reads as a
+      working feature, because a 404 and an empty list are both "no models" to a caller that does not
+      separate them. Fixed, regression-tested, reverse-verified.
+      Measured output on this host (16 cores, 61.8 GiB): a 2 GiB model "runs here"; a 120 GiB model
+      refused with "needs about 144.0 GiB of memory (120.0 GiB of weights plus runtime headroom) and
+      38.9 GiB is free of 61.8 GiB total -- short by 105.1 GiB, more than this machine has in total".
+      TOP-LEVEL command, not `models local`: `models` takes a positional provider filter, so a
+      subcommand there is ambiguous with a provider named `local`.
+      MEASURED FIRST, and it shrank the item: the RUN half already existed. A local runtime is already
+      an allowed provider (`local-provider.ts`: the one trusted OpenAI-compatible package, local URL
+      only) and `local-models.ts` already lists what it serves.
+      The probe is NOT native, which the item's original note had wrong. The engine is a process on
+      the user's own machine, so memory, cores and arch come straight from the OS; only the GPU needs
+      a shell out, and that is per-platform.
+      `local-model-fit.ts` rests on three rules. (1) An unseen GPU is reported as NOT MEASURED, never
+      as absent: telling a user with a discrete card they have none is a false claim about their own
+      computer, and the refusal text is asserted never to mention a GPU it did not look at. (2) It
+      never invents a model's size; the figure comes from the runtime. (3) A refusal carries its
+      numbers and distinguishes short-but-the-machine-has-it from short-whatever-you-close.
+      Memory is checked against AVAILABLE, not total, and `os.freemem()` understates on Linux. That
+      direction is chosen: it can refuse a model that would have squeezed in, and it will not promise
+      one that gets killed mid-generation, which loses the user's work.
+      WE DO NOT FETCH WEIGHTS OURSELVES: no mirror choice, no quantisation choice, no digest we chose
+      to trust. The runtime resumes interrupted downloads and shares progress between callers already;
+      re-implementing that would mean owning model provenance.
+      WHY A SECOND SET OF ROUTES: the OpenAI-compatible `GET /models` the provider listing uses
+      reports an id and NOTHING ELSE -- no size -- so it cannot answer the question this item turns
+      on. Sizes and the fetch live on the runtime's own API.
+      Shapes taken from the runtime's published API reference, and each trap it states explicitly has
+      a test: `completed` may be ABSENT while a layer downloads; `total` is per-LAYER, not per-model
+      (read as whole-model progress it shows a bar that resets every layer); an in-band `error` frame
+      arrives after a 200 and is terminal; and a whole-body `JSON.parse` FAILS on the real stream,
+      asserted so nobody simplifies the line reader back into one parse.
+      MEASURED: core 1031 tests 0 fail across 123 files; redrob cli 380 tests 0 fail; generated SDK
+      clean; `tsc` clean for core and redrob. CORRECTION: an earlier pass of this item reported core
+      as 1034 across 124 files. That figure does not reproduce on this branch and the number above is
+      the one measured here.
+      NO CLOUD FALLBACK exists and none should be added: a user who asked for a local model asked for
+      the data to stay on the machine.
 
-- [ ] **PA-9** The remaining skills, against K-1's typed globals.
-      BLOCKED BY PA-10, by this file's own rule: "do NOT write skill prose faster than the globals it
-      needs exist -- a document that cannot run is worse than no document." `page` is in two thirds of the
-      audited build's skills and ours still throws, so writing them now would produce documents that
-      cannot run.
+- [x] **PA-9** The remaining skills, against K-1's typed globals.
+      DONE, and the measurement moved the item. The arming MECHANISM was the work, not the prose:
+      K-2 landed `SkillArming.arm` as a pure function and NOTHING CALLED IT -- measured, its only
+      caller was its own test. Worse, the skill surface the system prompt actually reads is a second,
+      older loader (`packages/redrob/src/skill/index.ts`) whose `Info` dropped `autoInject` entirely,
+      so every skill on disk looked like a skill that declared no arming block. Both fixed: the field
+      is carried through the loader, and `SystemPrompt.armedSkills` calls the matcher and injects the
+      armed bodies as their own labelled block, with the patterns that armed them.
+      Shipped one document against the real surface: `page-control`, the six `page` calls, checked
+      BOTH ways against the bound tool namespace (names every call that exists, names none that does
+      not, and the "Six calls" sentence is asserted against the real count).
+      URL arming is wired but not fed: getting the active tab costs a browser round trip per message,
+      which with no extension attached spends the request deadline before the model sees anything.
+      Keyword arming works today; the URL half needs the session to HOLD its tab URL as state rather
+      than ask for it. Recorded in the code at the call site.
+      MEASURED: core 998 tests 0 fail; redrob tool+session 854 pass 0 fail; skill loader 19 pass
+      (2 new); page-skill 5 pass; reverse-verified both ways -- removing the wiring fails 4 system
+      tests, removing the loader field fails the end-to-end arming test.
+      STILL OPEN, and bigger than this item: the core `SkillV2` plugin registry (`BuiltinSkills`,
+      with `documents` and `skill-writer`) feeds an `EmbeddedSource` list that NOTHING in the engine
+      consumes -- grepped, zero consumers. So the builtin skills are registered and unreachable, and
+      only disk skills actually load. That is a seam to close, not a document to write.
 
-- [ ] **PA-10** Make `page` real. The audited build exposed 13 code-mode globals; K-1 landed 2 and BOTH
+- [x] **PA-10** Make `page` real. The audited build exposed 13 code-mode globals; K-1 landed 2 and BOTH
+      DONE via the extension channel, the route the user chose after the recommendation. The engine
+      publishes a pending request on its existing V2 `/api/event` stream and the extension dials that
+      stream and answers over HTTP -- NO new listener and NO inbound socket, so nothing new on this
+      machine is dialable by another local process. engine PR #64, extension PR #72.
+      Three things the build decided rather than the design: the result is a tagged union per action,
+      so a client answering `page.query` with a string is a protocol error the engine can name instead
+      of an empty node list the model reads as "nothing matched"; there is a 20s deadline, because the
+      event stream has no subscriber count and waiting forever would hang a session whose browser is
+      absent; and a refusal is its own route, because an unexposed tab is a normal answer and routing
+      it through the deadline would spend 20s to say so.
+      The investigation below stands as the record of why the loopback RPC was NOT used.
       currently throw (`unavailablePage`, `unavailableChannel`).
       NEEDS A DECISION FROM THE USER -- a security boundary, so not mine to take unilaterally. The
       investigation is finished and the finding is the useful part:
