@@ -1,0 +1,20 @@
+# PA-5. Compile the agent provider and its action.
+#
+# Two substitutions so each pair sorts with its neighbours: the action beside the other
+# actions, the provider beside the other providers. One block at the end would compile
+# identically and read as an afterthought in a list that is otherwise alphabetical.
+substitutions:
+  - description: Add the Redrob agent action to the omnibox browser sources.
+    insert_after:
+      anchor: '    "actions/omnibox_action.cc",'
+      count: 1
+      lines: |
+        "actions/redrob_agent_action.cc",
+            "actions/redrob_agent_action.h",
+  - description: Add the Redrob agent provider to the omnibox browser sources.
+    insert_after:
+      anchor: '    "open_tab_provider.cc",'
+      count: 1
+      lines: |
+        "redrob_agent_provider.cc",
+            "redrob_agent_provider.h",

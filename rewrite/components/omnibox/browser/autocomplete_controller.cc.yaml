@@ -1,0 +1,21 @@
+# PA-5. Build the agent provider when its bit is set.
+#
+# Two substitutions because the file needs both: the include, and the push_back. The include
+# is anchored on the provider include block rather than at the top, so it sorts with its
+# neighbours instead of ahead of base/.
+#
+# Registered LAST, after the Android-only tab-group block, which puts it outside that
+# `#if BUILDFLAG(IS_ANDROID)` -- the row is desktop-only and the guard would have swallowed
+# it. Anchored on the closing brace sequence of that block for that reason.
+substitutions:
+  - description: Include the Redrob agent provider in the autocomplete controller.
+    insert_after:
+      anchor: '#include "components/omnibox/browser/open_tab_provider.h"'
+      count: 1
+      lines: |
+        #include "components/omnibox/browser/redrob_agent_provider.h"
+  - description: Construct the Redrob agent provider when its type bit is set.
+    regex:
+      pattern: "#if BUILDFLAG(IS_ANDROID)\n  if (provider_types & AutocompleteProvider::TYPE_TAB_GROUP) {\n    providers_.push_back(\n        base::MakeRefCounted<TabGroupProvider>(provider_client_.get()));\n  }\n#endif\n"
+      replace: "#if BUILDFLAG(IS_ANDROID)\n  if (provider_types & AutocompleteProvider::TYPE_TAB_GROUP) {\n    providers_.push_back(\n        base::MakeRefCounted<TabGroupProvider>(provider_client_.get()));\n  }\n#endif\n  if (provider_types & AutocompleteProvider::TYPE_REDROB_AGENT) {\n    providers_.push_back(base::MakeRefCounted<RedrobAgentProvider>());\n  }\n"
+      count: 1

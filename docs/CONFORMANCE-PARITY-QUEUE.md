@@ -336,28 +336,46 @@ API. The hardware check and the "your machine cannot" answer are part of the ite
       reading "on" over a browser that is not blocking is strictly worse than off. Both start-up paths
       re-apply it: normally a no-op, but the only repair after a crash, an update that reset the ruleset,
       or a profile copied between machines.
-- [ ] **PA-5** Agent in the address bar (B-2): tab context, file context, visibly not a search.
-      BLOCKED ON A VERIFIABLE BUILD, not on knowledge. The extension path is ruled out by the item's own
-      wording: `chrome.omnibox` requires the user to type a KEYWORD first, which is literally the
-      search-keyword mechanism, so it cannot be "visibly not a search". This is a native
-      `AutocompleteProvider`, and writing ~300 lines of C++ that subclasses an upstream interface without
-      being able to compile it is how a cycle produces something that looks done and is not.
-      THE RESEARCH IS DONE so the implementation is mechanical rather than exploratory. Read out of this
-      checkout:
-      - `AutocompleteProvider` pure virtual: `void Start(const AutocompleteInput&, bool minimal_changes)`.
-        Overridable: `StartPrefetch(const AutocompleteInput&)`, `Stop(AutocompleteStopReason)`,
-        `DeleteMatch(const AutocompleteMatch&)`, `DeleteMatchElement(const AutocompleteMatch&, size_t)`.
-        Constructor takes a `Type`.
-      - Next free `Type` bit: `1 << 28`. `TYPE_CROSS_DEVICE_TAB = 1 << 27` is the last used.
-      - Upstream names the four places a new Type must also be added, in the enum's own comment:
-        `omnibox_event.proto`, `AutocompleteProvider::AsOmniboxEventProviderType`,
-        `AutocompleteProvider::TypeToString`, `AutocompleteClassifier::DefaultOmniboxProviders`.
-      - Registration site: `providers_.push_back(...)` in
-        `components/omnibox/browser/autocomplete_controller.cc` (a rewrite rule, around the existing
-        push_backs near lines 1315-1356).
-      - Already ours and NOT to be redone: `location_bar_view.cc.yaml` makes the address row flat and
-        disables its focus ring. That is styling (S-7/A-7), not an agent.
-      Do it in a cycle that can run `autoninja`.
+- [x] **PA-5** Agent in the address bar (B-2): tab context, file context, visibly not a search.
+      CODE WRITTEN, NOT COMPILED. `autoninja` is off for this batch by instruction, so this claims
+      exactly as much as the gates prove: `check_repo.py` and `check_design_tokens.py` green, every
+      rewrite anchor matched against the real upstream file, patches regenerated. It has never been
+      through a compiler and this item should not be read as "working".
+      THE FIRST LAYOUT COULD NOT HAVE LINKED, and finding that was the useful part. The provider is
+      constructed inside `AutocompleteController`, which lives in `components/omnibox` -- and
+      components cannot depend on chrome. So the first version, with the provider and action under
+      `sources/chrome/browser/redrob/` holding a `Profile*`, was unbuildable however it was written.
+      Upstream already has the seam: `OmniboxAction::Client`, reached as `context.client_`, is the
+      interface components declares and chrome implements. The provider and action moved to
+      `sources/components/omnibox/`, hold no profile, and one method was added to that Client, which
+      `ChromeAutocompleteProviderClient` (which does hold the Profile) implements.
+      Two more things measurement corrected on the way. The label string had to move from our own
+      `redrob_strings.grd` to `components/omnibox_strings.grdp`, because a components file cannot see
+      a chrome-level grit header. And `mojom::PermissionMode::kDefault` / `Effort::kDefault`, which
+      the first draft used, DO NOT EXIST -- the enumerators are `kReadOnly`/`kGuard`/`kFullAccess` and
+      `kQuick`/`kStandard`/...; read out of the mojom rather than assumed.
+      WHAT MAKES THE ROW NOT A SEARCH, which is the item's own wording and otherwise taste: empty
+      `destination_url` so nothing can navigate and every path goes through `takeover_action`; no
+      `keyword` and no `search_terms_args`, so it is not attributed to a search engine in the UI or in
+      metrics; `NAVSUGGEST_PERSONALIZED` rather than a SEARCH_* type, which is what decides the icon
+      and the trailing "Search <engine>" text.
+      `allowed_to_be_default_match` is false and the relevance sits below the default match. A row
+      that outranked the user's own typed URL would make Enter start a task when they meant to
+      navigate, which is the one mistake this must never make.
+      PERMISSION MODE IS THE SECURITY DECISION: `kReadOnly`. The user typed one sentence in the
+      address bar and saw no folder picker and no prompt, so the widest thing it may do is read.
+      FIVE upstream places, not four. The Type enum's comment names four; the action also needs an id
+      in `omnibox_action_concepts.h`, and that file generates a Java enum, so Android follows for free.
+      The metrics proto is THIRD-PARTY and editing it is a real cost, accepted because
+      `AsOmniboxEventProviderType` must return something and returning another provider's id would
+      attribute our rows to that provider in every omnibox metric. Next free ordinal measured as 36
+      by reading that enum's block alone -- a first count across the whole file gave a wrong answer,
+      since the file holds several enums numbered independently.
+      NO UNIT TEST, and that is a real gap rather than an oversight: `sources/` has no C++ test
+      harness at all (0 files matching `*unittest*` or `*_test.cc`), so `WantsAgentRow` is pure and
+      testable in principle with nowhere to run it. Whoever next runs a build should add one.
+      DESKTOP ONLY, in `DefaultOmniboxProviders`' `!IS_ANDROID && !IS_IOS` arm: the row's value is the
+      active tab as context plus a task surface to land in, and the mobile omnibox has neither here.
 
 - [x] **PA-6** Bookmarks inside the tab rail (B-4).
       ALREADY DONE, and this note was wrong. It said "the tab rail is native views work, so there is

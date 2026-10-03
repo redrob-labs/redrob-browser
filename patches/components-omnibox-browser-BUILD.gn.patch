@@ -1,0 +1,22 @@
+diff --git a/components/omnibox/browser/BUILD.gn b/components/omnibox/browser/BUILD.gn
+index a73b46aa23e3e..3072b4d3329f5 100644
+--- a/components/omnibox/browser/BUILD.gn
++++ b/components/omnibox/browser/BUILD.gn
+@@ -160,6 +160,8 @@ static_library("browser") {
+     "actions/cross_device_tab_action.cc",
+     "actions/cross_device_tab_action.h",
+     "actions/omnibox_action.cc",
++    "actions/redrob_agent_action.cc",
++        "actions/redrob_agent_action.h",
+     "actions/omnibox_action.h",
+     "actions/omnibox_action_client_delegator.cc",
+     "actions/omnibox_action_client_delegator.h",
+@@ -315,6 +317,8 @@ static_library("browser") {
+     "on_device_tail_tokenizer.cc",
+     "on_device_tail_tokenizer.h",
+     "open_tab_provider.cc",
++    "redrob_agent_provider.cc",
++        "redrob_agent_provider.h",
+     "open_tab_provider.h",
+     "page_classification_functions.cc",
+     "page_classification_functions.h",

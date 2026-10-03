@@ -13,6 +13,10 @@
 sources/chrome/browser/redrob/BUILD.gn            chrome/browser/redrob/BUILD.gn
 sources/chrome/browser/redrob/agent_tabs.h        chrome/browser/redrob/agent_tabs.h
 sources/chrome/browser/redrob/agent_tabs.cc       chrome/browser/redrob/agent_tabs.cc
+sources/components/omnibox/browser/redrob_agent_provider.h  components/omnibox/browser/redrob_agent_provider.h
+sources/components/omnibox/browser/redrob_agent_provider.cc  components/omnibox/browser/redrob_agent_provider.cc
+sources/components/omnibox/browser/actions/redrob_agent_action.h  components/omnibox/browser/actions/redrob_agent_action.h
+sources/components/omnibox/browser/actions/redrob_agent_action.cc  components/omnibox/browser/actions/redrob_agent_action.cc
 sources/chrome/browser/redrob/sidecar_client.h    chrome/browser/redrob/sidecar_client.h
 sources/chrome/browser/redrob/sidecar_client.cc   chrome/browser/redrob/sidecar_client.cc
 sources/chrome/browser/redrob/task_store.h        chrome/browser/redrob/task_store.h
