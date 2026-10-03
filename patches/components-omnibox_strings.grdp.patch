@@ -1,0 +1,14 @@
+diff --git a/components/omnibox_strings.grdp b/components/omnibox_strings.grdp
+index f0afe8e960eec..802ff7970bab7 100644
+--- a/components/omnibox_strings.grdp
++++ b/components/omnibox_strings.grdp
+@@ -5,6 +5,9 @@
+   <part file="omnibox_pedal_ui_strings.grdp" />
+ 
+   <!-- Omnibox popup match descriptions. -->
++  <message name="IDS_OMNIBOX_REDROB_ASK_AGENT" desc="Trailing label on the address bar row that hands what the user typed to the agent instead of searching for it.">
++    Ask the agent about this page
++  </message>
+   <message name="IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION" desc="Description for the default search match.">
+     <ph name="ENGINE">$1<ex>Google</ex></ph> Search
+   </message>

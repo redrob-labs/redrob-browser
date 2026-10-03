@@ -1,0 +1,22 @@
+# PA-5. Turn the agent provider on.
+#
+# This file is what the Type enum's comment calls `DefaultOmniboxProviders`, and it is the
+# fourth of the four places a new Type must appear. Without it the provider class exists, the
+# controller knows how to build it, and it is never built -- the bitmask never has the bit, so
+# the `if (provider_types & TYPE_REDROB_AGENT)` branch is dead. A provider that compiles and
+# never runs is the exact failure this queue keeps finding.
+#
+# DESKTOP ONLY. It goes in the `!IS_ANDROID && !IS_IOS` arm because the row's value is the
+# active tab as context plus a visible task surface to land in, and the mobile omnibox has
+# neither in this product. The mobile arms are left alone rather than given a row that starts
+# a task the user cannot watch.
+#
+# `regex` with a two-line pattern: `TYPE_CONTEXTUAL_SEARCH |` appears in the Android arm too,
+# and enabling the row there is exactly the platform this excluded on purpose. The preceding
+# `: 0) |` line is what distinguishes the desktop occurrence.
+substitutions:
+  - description: Enable the Redrob agent provider on desktop.
+    regex:
+      pattern: "           : 0) |\n      AutocompleteProvider::TYPE_CONTEXTUAL_SEARCH |\n"
+      replace: "           : 0) |\n      AutocompleteProvider::TYPE_CONTEXTUAL_SEARCH |\n      AutocompleteProvider::TYPE_REDROB_AGENT |\n"
+      count: 1

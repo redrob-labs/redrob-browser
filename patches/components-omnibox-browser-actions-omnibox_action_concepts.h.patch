@@ -1,0 +1,14 @@
+diff --git a/components/omnibox/browser/actions/omnibox_action_concepts.h b/components/omnibox/browser/actions/omnibox_action_concepts.h
+index 15ca4c04ae9e4..72698cfd6bb52 100644
+--- a/components/omnibox/browser/actions/omnibox_action_concepts.h
++++ b/components/omnibox/browser/actions/omnibox_action_concepts.h
+@@ -46,6 +46,9 @@ enum class OmniboxActionId {
+   // Action to open a tab from another device.
+   CROSS_DEVICE_TAB,
+ 
++  // Hands what was typed in the address bar to the agent instead of navigating.
++  REDROB_AGENT,
++
+   // Keep as a last item in the list, with ID one larger than the last valid
+   // Action Id.
+   LAST

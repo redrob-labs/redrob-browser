@@ -1,0 +1,20 @@
+# PA-5. The two switches the Type enum's own comment points at.
+#
+# Both are REQUIRED, not optional. Each switch ends in a `default:` that fires
+# DUMP_WILL_BE_NOTREACHED, so a Type with no case does not fall through quietly -- it logs a
+# would-be-unreachable on every omnibox keystroke that touches the provider.
+#
+# `regex` rather than `insert_after`, because the anchor has to span two lines: the file has
+# two `case TYPE_CROSS_DEVICE_TAB:` labels and only the return line after each tells them
+# apart. A single-line anchor would match both and put the wrong body in one of them.
+substitutions:
+  - description: Name the Redrob agent provider in AutocompleteProvider::TypeToString.
+    regex:
+      pattern: "    case TYPE_CROSS_DEVICE_TAB:\n      return \"CrossDeviceTab\";\n"
+      replace: "    case TYPE_CROSS_DEVICE_TAB:\n      return \"CrossDeviceTab\";\n    case TYPE_REDROB_AGENT:\n      return \"RedrobAgent\";\n"
+      count: 1
+  - description: Map the Redrob agent provider to its metrics provider type.
+    regex:
+      pattern: "    case TYPE_CROSS_DEVICE_TAB:\n      return metrics::OmniboxEventProto::CROSS_DEVICE_TAB;\n"
+      replace: "    case TYPE_CROSS_DEVICE_TAB:\n      return metrics::OmniboxEventProto::CROSS_DEVICE_TAB;\n    case TYPE_REDROB_AGENT:\n      return metrics::OmniboxEventProto::REDROB_AGENT;\n"
+      count: 1
