@@ -2,7 +2,7 @@
 // Use of this source code is governed by the licence in the repository root.
 
 // A chromium_src override: this file is compiled INSTEAD of
-// chrome/browser/ui/views/tabs/vertical_tab_style_views.cc, and pulls that file in below. Nothing
+// chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc, and pulls that file in below. Nothing
 // upstream is replaced -- the original's every line still compiles, in the same target, into the same
 // object file. What this buys is that the forty lines of drawing code below live in a file we own
 // instead of inside a patch, so an uprev cannot conflict with them.
@@ -14,7 +14,7 @@
 //
 //   BELOW the include -- PaintTabShadow's body, because it needs the class declaration, which arrives
 //   with the original. Its declaration is added to the header by a rewrite rule
-//   (rewrite/chrome/browser/ui/views/tabs/vertical_tab_style_views.h.yaml); a member cannot be
+//   (rewrite/chrome/browser/ui/views/tabs/common/vertical_tab_style_views.h.yaml); a member cannot be
 //   introduced from here.
 //
 // The three edits inside the original's own functions are rewrite rules, in the .cc.yaml beside it.
@@ -34,7 +34,7 @@ constexpr int kVerticalTabShadowRoom = 4;
 
 }  // namespace
 
-#include <chrome/browser/ui/views/tabs/vertical_tab_style_views.cc>
+#include <chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc>
 
 void VerticalTabStyleViews::PaintTabShadow(gfx::Canvas* canvas) const {
   // Measured off the reference: a 1px hairline at the pill's top edge (#e3ebec on a #f4fdfe wash) and, under
