@@ -8,12 +8,11 @@
  * See the NOTICE file for provenance.
  */
 
-
 // Matches DEV_PORTS.cdp from @browseros/shared/constants/ports
 const DEFAULT_CDP_PORT = 9010
 const REQUEST_TIMEOUT_MS = 30_000
 const EXTENSION_ID =
-  process.env.BROWSEROS_EXTENSION_ID || 'bflpfmnmnokmjhmgnolecpppdbdophmk'
+  process.env.BROWSEROS_EXTENSION_ID || 'oikpnmkappjhkifbcieakjoeiknojbgg'
 
 // ─── CDP WebSocket Client ────────────────────────────────────────────
 

@@ -182,7 +182,7 @@ describe('HTTP Server Integration Tests', () => {
             // the ones the background alarm runner makes to the already
             // guarded schedule routes. Kept so this exercises the same
             // app-origin path the extension uses.
-            Origin: 'chrome-extension://bflpfmnmnokmjhmgnolecpppdbdophmk',
+            Origin: 'chrome-extension://oikpnmkappjhkifbcieakjoeiknojbgg',
           },
           body: JSON.stringify({
             conversationId,
