@@ -1,12 +1,3 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Reduces a `run` script to its shape.
 //!
 //! # Allowlist, not blocklist
@@ -32,6 +23,15 @@
 //! When scanning fails outright, `sdk_calls_only` takes over and emits nothing but names
 //! drawn from our own SDK surface, so an unscannable script still says which API it was
 //! using and still cannot carry user text.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use ress::prelude::*;
 

@@ -1,16 +1,16 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! User-controlled audit retention policy, persisted as a small JSON file in
 //! the BrowserClaw dir and read live by the retention sweep. Mirrors the
 //! analytics-consent store: atomic write, corrupt/unreadable falls back to the
 //! default rather than failing.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};

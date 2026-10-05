@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 /**
  * @license
  * Copyright 2025 BrowserOS
@@ -7,7 +8,6 @@
  * See the NOTICE file for provenance.
  */
 
-#!/usr/bin/env bun
 
 // Matches DEV_PORTS.cdp from @browseros/shared/constants/ports
 const DEFAULT_CDP_PORT = 9010

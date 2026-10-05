@@ -1,16 +1,16 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! In-process coverage of the feedback invitation routes.
 //!
 //! These drive the real router over real app state, so the checks under test are the ones a
 //! cockpit would actually hit: consent, cohort membership and the snooze after an answer.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use axum::{
     Router,

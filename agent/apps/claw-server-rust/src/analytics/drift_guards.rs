@@ -1,12 +1,3 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Tests that keep the redaction honest as `run` changes underneath it.
 //!
 //! The scrubber and the allowlist are only safe while their assumptions match the tool
@@ -15,6 +6,15 @@
 //!
 //! They read the live `run` shim from the `browseros-mcp` crate rather than a copy, so
 //! they fail on the change itself rather than on a stale duplicate of it.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 #[cfg(test)]
 mod tests {

@@ -1,18 +1,18 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! First-launch marker: a one-shot flag persisted as a small JSON file in the
 //! BrowserClaw dir, recording that the first-launch harness auto-connect sweep
 //! has already run. Atomic write (mirrors `audit_settings`). Only a genuinely
 //! absent marker reads as not-done (a fresh install re-sweeps); a present
 //! marker, even corrupt or unreadable, reads as done so a boot never
 //! re-registers harnesses the user has since disconnected.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};

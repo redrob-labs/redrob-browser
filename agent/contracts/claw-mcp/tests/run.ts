@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 /**
  * @license
  * Copyright 2025 BrowserOS
@@ -7,7 +8,6 @@
  * See the NOTICE file for provenance.
  */
 
-#!/usr/bin/env bun
 /**
  * Entry point for the claw-mcp contract suite:
  *   bun contracts/claw-mcp/tests/run.ts [--smoke]

@@ -1,16 +1,16 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Forwards a failed `run` as a redacted report, when every gate allows it.
 //!
 //! The observer holds no policy of its own. It gathers the inputs the reporter needs and
 //! lets the reporter decide, so there is one place to read to know what can leave.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use crate::{
     api::mcp::dispatch::{ToolObserverContext, dispatch_error_text},

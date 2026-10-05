@@ -1,18 +1,18 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Unordered Chrome acquisition for accessibility snapshots.
 //!
 //! Cursor candidates and their backend-node lookups may complete in any order, but this module
 //! restores scan order before exposing results to rendering. `SnapshotBudget` is shared by every
 //! acquisition stage in one capture so concurrency is bounded without scheduling CDP work onto a
 //! separate runtime or throttling unrelated browser commands.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use super::{
     AxTreeResult, CaptureContext, DescribeNodeResult, GetFrameTreeResult, Observer,

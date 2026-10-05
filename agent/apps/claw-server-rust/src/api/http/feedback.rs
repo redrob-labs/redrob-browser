@@ -1,12 +1,3 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Whether to offer this installation a feedback call, and what came of it.
 //!
 //! # Why this is an endpoint rather than something the agent says
@@ -22,6 +13,15 @@
 //! answered as `eligible: false`. The caller is the cockpit, which has nothing to do with
 //! the distinction, and saying which check failed would describe the cohort to anyone who
 //! asks.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use super::{error, internal};
 use crate::{
