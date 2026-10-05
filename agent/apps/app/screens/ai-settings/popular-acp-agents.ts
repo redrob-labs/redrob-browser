@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Curated starting points for the "Popular agents" helper in the custom-agent
  * dialog. Each command is a starting point; users confirm the exact command and
  * login in the agent's own ACP docs. `mark` is a placeholder for a real brand

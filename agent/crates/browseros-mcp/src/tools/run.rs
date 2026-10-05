@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 use crate::framework::{
     HelperSource, InnerCallRecord, ToolCtx, ToolDef, ToolError, ToolExecResult, ToolResult,
     execute_tool, page_json, parse_args, text_result,

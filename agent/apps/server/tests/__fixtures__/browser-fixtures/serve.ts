@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { fixtureRouteList, startBrowserFixtureServer } from './app'
 
 const port = process.env.BROWSEROS_FIXTURE_PORT

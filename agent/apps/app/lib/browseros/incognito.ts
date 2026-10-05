@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Whether the assistant is running in an incognito window. Assistant history is
  * never persisted when true (#1189).
  *

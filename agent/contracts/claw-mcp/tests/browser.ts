@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Real-BrowserOS runtime for the claw-mcp contract suite, distilled
  * from `apps/server/tests/__helpers__/{browser,test-runtime}.ts` with
  * one deliberate change: there is NO default binary path. The suite is

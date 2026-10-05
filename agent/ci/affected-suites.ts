@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Computes which CI test suites are affected by a change, for the dynamic
  * matrix in `.github/workflows/test.yml`.
  *

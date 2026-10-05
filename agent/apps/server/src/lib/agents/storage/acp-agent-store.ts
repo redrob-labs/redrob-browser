@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { randomUUID } from 'node:crypto'
 import { CustomAcpAgentConfigSchema } from '@browseros/shared/schemas/agent'
 import { and, desc, eq } from 'drizzle-orm'

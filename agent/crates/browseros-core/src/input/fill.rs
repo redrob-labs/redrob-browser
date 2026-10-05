@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! Shared fill contract for MCP act and the run SDK. DOM helpers only inspect,
 //! focus, and select; the browser's native editor changes the text and emits input
 //! events. Success means the resolved field contains the expected value.

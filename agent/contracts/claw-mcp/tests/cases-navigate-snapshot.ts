@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * navigate (5), snapshot (8) and diff (3) cases — the ref-minting
  * heart of the contract. The two REGRESSION CASES from the
  * backendDOMNodeId serde break live here: refs must mint on a real

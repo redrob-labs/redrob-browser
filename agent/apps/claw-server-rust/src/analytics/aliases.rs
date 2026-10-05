@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! Links locally proven installation UUIDs to BrowserClaw's canonical analytics
 //! UUID. This is the only event allowed to request person processing; it carries
 //! no profile properties. Delivery belongs to the consent-gated client lifetime.

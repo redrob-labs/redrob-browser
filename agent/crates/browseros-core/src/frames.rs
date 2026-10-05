@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 use crate::{CoreError, FrameId, PageId, ProtocolSession, SessionId, connection::CdpConnection};
 use browseros_cdp::{CdpEvent, target};
 use serde_json::{Value, json};

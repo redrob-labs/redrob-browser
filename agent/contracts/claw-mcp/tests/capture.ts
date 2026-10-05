@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * CLAW_MCP_CAPTURE_DIR mode: alongside a suite run, dump the raw CDP
  * payloads the snapshot pipeline consumes — `Accessibility.getFullAXTree`
  * per fixture page (the exact `{"nodes":[…]}` shape of

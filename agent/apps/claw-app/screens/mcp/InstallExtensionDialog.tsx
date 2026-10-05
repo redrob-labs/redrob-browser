@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { ArrowLeft, ArrowRight, Check, Download } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button, buttonVariants } from '@/components/ui/button'

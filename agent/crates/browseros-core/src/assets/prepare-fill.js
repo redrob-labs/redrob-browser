@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 // biome-ignore-all lint: Injected function is called with the resolved DOM node as this.
 // Validate and select only. The Rust caller owns native input and final readback;
 // assigning value or dispatching synthetic events here would bypass the editor.

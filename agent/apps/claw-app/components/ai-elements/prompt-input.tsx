@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 // @ts-nocheck
 // Vercel ai-elements drop-in. Some files use @base-ui/react API shapes that differ from the currently-published version; bundled JS runs fine, only tsc strictness flags them. Same posture biome takes (third-party files are exempt from lint rules).
 "use client";

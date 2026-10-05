@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! First-launch marker: a one-shot flag persisted as a small JSON file in the
 //! BrowserClaw dir, recording that the first-launch harness auto-connect sweep
 //! has already run. Atomic write (mirrors `audit_settings`). Only a genuinely

@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! In-memory registry of pending human-help requests, one per session. A blocked agent opens a
 //! request and waits (re-calling the wait tool in bounded chunks); the cockpit surfaces it and a
 //! human hands control back, which resolves the request.

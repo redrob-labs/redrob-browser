@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! Audit storage + retention endpoints and the retention sweep. The sweep is a
 //! cross-service flow (audit db + screenshot files + recordings), so it lives
 //! in the api/http layer rather than a single-service module: it deletes aged

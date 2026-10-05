@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 // The needs-you attention tone. The mockups call for the --amber family, but
 // white text on the --amber token fails WCAG AA in dark mode (the dark token is
 // a light #e8a33d). The burnt orange #b85c10 below is the brand amber darkened

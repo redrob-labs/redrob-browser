@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { describe, expect, it } from 'bun:test'
 import { LLM_PROVIDERS } from '@browseros/shared/schemas/llm'
 import { buildAgentFilesystemToolSet } from '../../src/agent/ai-sdk-agent'

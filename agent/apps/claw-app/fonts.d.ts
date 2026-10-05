@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Ambient declarations for the bare `@fontsource-variable/*` side-effect
  * imports in the cockpit (see entrypoints/newtab/main.tsx). These packages
  * ship CSS only and carry no type declarations; their `exports["."]` maps to

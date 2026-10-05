@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Self-hosted variable + static fonts. Importing these here ships the
  * font files inside the extension bundle so the cockpit does not depend
  * on Google's CDN (chrome-extension:// + googleapis.com pairing would

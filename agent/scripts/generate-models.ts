@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 const API_URL = 'https://models.dev/api.json'
 const OUTPUT_PATH = new URL(
   '../apps/app/lib/llm-providers/models-dev-data.json',

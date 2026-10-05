@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Pure builders for the model-visible notices that describe mid-conversation
  * changes to a cached agent session's inputs (connected MCP servers, workspace,
  * chat mode). Kept side-effect free so ChatService.processMessage stays plain

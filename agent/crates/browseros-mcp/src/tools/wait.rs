@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 use crate::framework::{
     ToolCtx, ToolExecResult, ToolResult, abortable_delay, clamp_timeout, error_result, parse_args,
     pending_dialog_result, text_result,

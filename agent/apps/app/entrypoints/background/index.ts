@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { registerDiagnostics } from '@browseros/diagnostics/extension'
 import { storage } from '@wxt-dev/storage'
 import { Capabilities } from '@/lib/browseros/capabilities'

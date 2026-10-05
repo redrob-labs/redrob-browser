@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Diagnostics v1 wire contract shared by the app, Reporter and feedback service.
  * Independent releases keep a copy of this small allowlist; unknown fields are
  * discarded at each boundary so preferences or account data cannot hitch a ride.

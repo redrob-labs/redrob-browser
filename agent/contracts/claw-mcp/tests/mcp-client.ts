@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Minimal streamable-HTTP MCP client over raw fetch. The suite drives
  * the Rust server's `/mcp` with this instead of the SDK client so it
  * controls the wire exactly: no Origin/Sec-Fetch-Site headers (the

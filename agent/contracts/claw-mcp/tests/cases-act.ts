@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * act (20) — every kind and every failure path. Snapshots are taken
  * before each action to mint fresh refs; DOM state is verified through
  * evaluate (`return …`, since evaluate runs the code as a function body).

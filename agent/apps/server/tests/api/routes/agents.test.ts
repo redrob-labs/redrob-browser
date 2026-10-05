@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { describe, expect, it, mock } from 'bun:test'
 import { createAgentRoutes } from '../../../src/api/routes/agents'
 import type { AcpAgentDefinition } from '../../../src/lib/agents/agent-types'

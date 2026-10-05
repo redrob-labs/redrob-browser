@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import type { UIMessage } from 'ai'
 import type { ServerConversation } from '../conversations/conversations.hooks'
 import type { SidepanelChatTarget } from './sidepanel-chat-targets'

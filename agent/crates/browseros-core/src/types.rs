@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! `PageId` is BrowserOS's process-local handle for tools and page ownership. It remains stable
 //! when a live Chrome tab is rebound, while the tab's `TargetId` and attached `SessionId`
 //! protocol incarnations may change.

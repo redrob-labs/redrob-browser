@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { getModelsDevProvider } from './models-dev'
 import { CHATGPT_PROVIDER_DISPLAY_NAME } from './provider-display-names'
 import type { ProviderType } from './types'

@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Behavioral contract for the Rust server's `/mcp` surface. Every case drives
  * the production entrypoint over real HTTP with a real BrowserOS attached and
  * asserts observable tool behavior only.

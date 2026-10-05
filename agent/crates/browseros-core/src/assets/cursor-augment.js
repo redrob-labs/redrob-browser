@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 /* deepscan-disable UNUSED_EXPR */
 // CDP Runtime.callFunctionOn consumes the final expression as its functionDeclaration; it must remain uninvoked in this source asset.
 // biome-ignore-all lint: Injected ES5 asset mirrors the TypeScript browser-core runtime string.

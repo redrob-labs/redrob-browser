@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! Exercises the coordinator through its CDP boundary. Chrome's staged status is
 //! scripted; the actual guard and scheduling policy run in ExtensionUpdates.
 use browseros_cdp::{CdpError, CdpEvent};

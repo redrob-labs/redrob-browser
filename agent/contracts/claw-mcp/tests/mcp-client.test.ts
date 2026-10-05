@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Ungated unit tests for the raw MCP client against a scripted
  * streamable-HTTP stub: SSE parsing across chunk boundaries, session
  * header plumbing, hygiene (no Origin header), and error surfacing.

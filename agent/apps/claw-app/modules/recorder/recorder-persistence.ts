@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 /** Tracks worker persistence replies through the recorder's stop boundary. */
 export function createRecorderPersistence() {
   const pending = new Set<Promise<void>>()

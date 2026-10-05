@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { TOOL_LIMITS } from '@browseros/shared/constants/limits'
 import { z } from 'zod/v4'
 import { clampTimeout, defineTool, errorResult, textResult } from './framework'

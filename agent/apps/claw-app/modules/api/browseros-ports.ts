@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 /// <reference path="./chrome-browser-os.d.ts" />
 
 import { CLAW_API_PORT_DEFAULT } from '@browseros/shared/constants/ports'

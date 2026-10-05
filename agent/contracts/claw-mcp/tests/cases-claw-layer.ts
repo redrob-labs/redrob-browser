@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * name_session (3) + the claw-layer cross-cutting invariants: two-session
  * ownership labeling [1], browser-down guidance [2], trust-boundary
  * nonce fencing [3], auto-context embedding [4], REST audit tie-in [5],

@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * tabs (6), tab_groups (6) and windows (5) cases. Page/window handles
  * these cases open are cleaned up per case when that is part of the
  * behavior under test; group effects are observed through the tools

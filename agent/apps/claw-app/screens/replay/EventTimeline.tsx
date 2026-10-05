@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { Layers } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatTime, KIND_STYLE, VERB_META } from './replay.helpers'

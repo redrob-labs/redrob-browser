@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! Host side of code-mode helper self-healing: loads the helpers a script's
 //! owned tabs make relevant so the runtime can expose them by name, and
 //! surfaces what is available for discovery.

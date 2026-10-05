@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Boots the production Rust server against the harness browser's CDP port via
  * a temporary sidecar. The sandboxed user and BrowserClaw directories keep
  * audit state, downloads, and spill files isolated from the developer's data.

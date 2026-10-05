@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Mirror of the server-side `hexForSlug` colour mapping so the audit
  * screen's per-agent chips share colour with the homepage card border
  * and the BrowserOS tab group strip.

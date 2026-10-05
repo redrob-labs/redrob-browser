@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 pub const BROWSERCLAW_MCP_INSTRUCTIONS: &str = r#"BrowserOS neo — the browser for agents. A real browser dedicated to agent work:
 the user doesn't browse here — they set this browser up for agents and signed
 it into their accounts, so you get live logins, cookies, and a persistent

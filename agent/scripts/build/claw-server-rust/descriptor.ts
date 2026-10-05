@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import type { ResourceBuildProductDescriptor } from '@browseros/build-server-tools'
 
 // `CLAW_SENTRY_DSN` is inlined but deliberately not required: a build without it still

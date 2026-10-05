@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import type { ClientConfig } from '../_catalog/types'
 import type { AgentScope, McpServerSpec } from '../types'
 import { jsonAdd, jsonRead, jsonRemove } from './json'

@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! In-process fan-out of freshly ingested rrweb batches to live-preview
 //! subscribers, keyed by recording document id. Publishing is best-effort and
 //! never blocks ingest; a subscriber that falls behind is dropped and expected

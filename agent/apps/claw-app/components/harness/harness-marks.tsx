@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Per-harness brand marks for the new-agent wizard and any other
  * surface that renders a harness tile. Each mark wraps a brand SVG
  * installed from the `@svgl` shadcn registry (see `components.json`).

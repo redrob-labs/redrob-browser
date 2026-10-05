@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Per-agent marks for the Integrations panel. Each mark is a thin
  * wrapper around the brand SVG installed from the SVGL shadcn
  * registry (see `apps/app/components.json`). The wrappers exist

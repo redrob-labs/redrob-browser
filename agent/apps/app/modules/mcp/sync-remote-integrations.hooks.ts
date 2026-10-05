@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { useEffect, useRef, useState } from 'react'
 import { type McpServer, mcpServerStorage } from '@/lib/mcp/mcpServerStorage'
 import { useGetMCPServersList } from '@/modules/mcp/managed-mcp-servers.hooks'

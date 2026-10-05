@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! Provider-neutral estimates for semantic MCP tool traffic.
 //!
 //! Version 1 counts UTF-8 text with the shared bytes-per-token heuristic and images with bounded

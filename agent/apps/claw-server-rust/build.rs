@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 fn main() {
     println!("cargo:rerun-if-env-changed=CLAW_POSTHOG_KEY");
     let Some(key) = std::env::var_os("CLAW_POSTHOG_KEY").and_then(|value| value.into_string().ok())

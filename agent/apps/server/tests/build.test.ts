@@ -1,6 +1,15 @@
 /**
  * @license
  * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
+ * @license
+ * Copyright 2025 BrowserOS
  *
  * Build smoke test — compiles the server binary and verifies --version output.
  * Catches compile failures, broken imports, and version injection bugs.

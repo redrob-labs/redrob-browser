@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { zodResolver } from '@hookform/resolvers/zod'
 import { ChevronDown, Loader2, Sparkles, Undo2 } from 'lucide-react'
 import type { FC } from 'react'

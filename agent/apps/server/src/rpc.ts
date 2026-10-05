@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import type { createAgentRoutes } from './api/routes/agents'
 import type { createConversationRoutes } from './api/routes/conversations'
 import type { createProvidersRoutes } from './api/routes/providers'

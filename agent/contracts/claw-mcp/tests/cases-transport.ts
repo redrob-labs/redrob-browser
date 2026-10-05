@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Transport & session-plumbing cases (cross-cutting invariant [7]):
  * the `/mcp` endpoint itself — catalog exposure, browser-request
  * hygiene, session-id handling, DELETE teardown + audit tie-in.

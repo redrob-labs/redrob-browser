@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Pins the editorial MCP page shape: compressed hero + single
  * endpoint URL strip, inline Connected-agents header with an
  * `N of M connected` mono chip, hairline row list of the 7 supported

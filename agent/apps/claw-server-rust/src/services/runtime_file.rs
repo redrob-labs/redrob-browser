@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! Publishes the live claw-server URL to `<browserclaw_dir>/runtime.json` so
 //! external discovery (the Codex and Claude Desktop plugins) can read the
 //! current port without probing or scanning. Best-effort: a failed write logs

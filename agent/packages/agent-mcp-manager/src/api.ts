@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Functional public API. Each verb composes readState -> plan* ->
  * applyPlan against the same workspaceDir. Zero shared mutable state
  * between calls; the manifest is a value read at the boundary.

@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 // CDP Accessibility node shapes. Mirrors the subset of the protocol we render,
 // kept local so the renderer is a pure function over plain data (no CDP import).
 

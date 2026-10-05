@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Owns staged-update state in the extension's profile. Bundled by claw-app and
  * evaluated by the sidecar for older extensions, so both use identical guards.
  * Keep this factory self-contained: CDP supplies Chrome APIs, not module imports.

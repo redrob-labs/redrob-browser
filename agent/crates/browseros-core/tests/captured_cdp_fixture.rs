@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! Structural regression guard over REAL `Accessibility.getFullAXTree`
 //! payloads captured from a live BrowserOS by the claw-mcp contract
 //! suite's capture mode:

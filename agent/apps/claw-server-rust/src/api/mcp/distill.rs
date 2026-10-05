@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! Audit distillation: after a successful script run, turn the child primitive
 //! sequence recorded under it into a candidate helper, so a proven flow is saved
 //! for reuse with no agent writing. This is uniquely enabled by the code-mode

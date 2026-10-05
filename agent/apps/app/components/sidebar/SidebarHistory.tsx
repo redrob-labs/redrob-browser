@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { ChevronDown, History, Loader2, Search } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 import { Link } from 'react-router'

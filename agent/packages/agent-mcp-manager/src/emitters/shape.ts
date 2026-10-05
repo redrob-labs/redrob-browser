@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Data-driven entry builder. Given a McpServerSpec and the resolved
  * StdioShape / HttpShape for the target client + scope, produce the
  * concrete object we serialise into the client's config file.

@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 use crate::framework::{ToolCtx, ToolExecResult, ToolResult, error_result, parse_args};
 use browseros_core::PageId;
 use futures_util::future::BoxFuture;

@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Client-side OAuth Device Code flow.
  * Used for providers where server-side fetch is blocked by WAF (e.g. Qwen).
  * The extension makes requests using Chrome's network stack which bypasses

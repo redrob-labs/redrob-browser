@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * Replays successive live-session snapshots and threads the selected
  * browser-tab map into the next projection. This pins the cockpit's
  * cross-poll selection semantics independently of React rendering.

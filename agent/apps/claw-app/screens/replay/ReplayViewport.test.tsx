@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { parseHTML } from 'linkedom'
 import { act, StrictMode } from 'react'

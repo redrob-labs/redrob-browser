@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import { Background, ReactFlow, type ReactFlowProps } from '@xyflow/react'
 import type { ReactNode } from 'react'
 import '@xyflow/react/dist/style.css'

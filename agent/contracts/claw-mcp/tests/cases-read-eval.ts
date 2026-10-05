@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * grep (6), read (5), evaluate (5) and run (4) cases. The grep=ax
  * REGRESSION CASE (#2 in the briefing) lives here: over=ax output must
  * still carry `[ref=eN]` handles after the serde fix. Spill behavior is

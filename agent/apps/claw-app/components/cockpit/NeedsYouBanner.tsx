@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import type { HelpRequest } from '@browseros/claw-api'
 import { Hand, Square, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'

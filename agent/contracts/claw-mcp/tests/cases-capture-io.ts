@@ -1,4 +1,13 @@
 /**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+/**
  * screenshot (6), pdf (2), wait (4) and upload/download (4) cases.
  * Image formats are verified by their magic bytes and dimensions
  * parsed straight from the returned base64 — no image dependencies.

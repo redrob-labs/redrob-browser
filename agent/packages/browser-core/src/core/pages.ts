@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 import type { TabInfo as ProtocolTabInfo } from '@browseros/cdp-protocol/domains/browser'
 import type { ProtocolApi } from '@browseros/cdp-protocol/protocol-api'
 import { logger } from '../logger'

@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! Two cockpit read models: explicit `status=live` returns a complete browser-reconciled
 //! snapshot; other lists return cursor-paginated audit history, enriched from a live
 //! transport session only while one exists.

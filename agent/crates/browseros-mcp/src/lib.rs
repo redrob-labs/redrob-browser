@@ -1,3 +1,12 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
 //! BrowserOS browser tools and a thin rmcp server matching `packages/browser-mcp`.
 //!
 //! Hosts that own dispatch policy can implement `ServerHandler` directly over [`catalog`] and
