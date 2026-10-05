@@ -8,7 +8,7 @@ substitutions:
       The single range.
     regex:
       pattern: "#if BUILDFLAG(IS_WIN)"
-      replace: "// One range on every platform now: TYPE_CHROMIUM_BASED is 7 and is the maximum everywhere,\n// which also removes the Windows/non-Windows split this used to need."
+      replace: "// One range on every platform now: TYPE_CHROMIUM_BASED is 8 and is the maximum everywhere,\n// which also removes the Windows/non-Windows split this used to need."
       count: 1
   # ---- hunk 0 run 2: 6 removed, 1 added
   - description: |

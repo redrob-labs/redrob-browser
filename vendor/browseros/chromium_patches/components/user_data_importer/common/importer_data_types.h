@@ -32,7 +32,7 @@ diff --git a/components/user_data_importer/common/importer_data_types.h b/compon
    VISIT_SOURCE_FIREFOX_IMPORTED = 1,
    VISIT_SOURCE_IE_IMPORTED = 2,
    VISIT_SOURCE_SAFARI_IMPORTED = 3,
-+  VISIT_SOURCE_CHROMIUM_IMPORTED = 4,
++  VISIT_SOURCE_CHROMIUM_IMPORTED = 5,
 +  VISIT_SOURCE_CHROME_IMPORTED = 4,
  };
  

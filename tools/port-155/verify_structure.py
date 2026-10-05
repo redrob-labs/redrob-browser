@@ -51,6 +51,12 @@ NUMBERED = [
     "extensions/common/mojom/api_permission_id.mojom",
     "extensions/browser/extension_event_histogram_value.h",
     "extensions/browser/extension_function_histogram_value.h",
+    # Both forks added a "import from another Chromium browser" path independently
+    # and took the same next value in each of these. A duplicate here is a
+    # duplicate `case` at best and a wrong history source written to disk at worst.
+    "components/user_data_importer/common/importer_type.h",
+    "components/user_data_importer/common/importer_data_types.h",
+    "components/history/core/browser/history_types.h",
 ]
 
 

@@ -6,7 +6,7 @@ diff --git a/chrome/common/importer/profile_import_process_param_traits_macros.h
  #define IPC_MESSAGE_EXPORT
  
 -#if BUILDFLAG(IS_WIN)
-+// One range on every platform now: TYPE_CHROMIUM_BASED is 7 and is the maximum everywhere,
++// One range on every platform now: TYPE_CHROMIUM_BASED is 8 and is the maximum everywhere,
 +// which also removes the Windows/non-Windows split this used to need.
  IPC_ENUM_TRAITS_MIN_MAX_VALUE(user_data_importer::ImporterType,
                                user_data_importer::TYPE_UNKNOWN,
