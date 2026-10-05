@@ -37,6 +37,8 @@ jobs:
       - name: build and sign
         env:
           REDROB_AGENT_EXTENSION_KEY: ${{ secrets.REDROB_AGENT_EXTENSION_KEY }}
+          # The vite build of app + sidepanel outgrows node's default heap on a 16 GB runner.
+          NODE_OPTIONS: --max-old-space-size=8192
         run: bash scripts/redrob-extension/build.sh
 
       - name: publish to cdn.redrob.ai
