@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Copyright 2025 BrowserOS contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+# See the NOTICE file at the repository root for provenance.
 """Version file parsing and derivation for the build context.
 
 Three inputs live in the repo:

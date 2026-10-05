@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Copyright 2025 BrowserOS contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+# See the NOTICE file at the repository root for provenance.
 """Workspace helpers for extension builds: source checkout, version stamp,
 build .env, and shell command execution. Port of the actions repo's
 repo.py/manifest.py/builder.py with one behavior change — in-repo sources

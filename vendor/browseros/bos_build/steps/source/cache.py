@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Copyright 2025 BrowserOS contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+# See the NOTICE file at the repository root for provenance.
 """Chromium checkout cache in Cloudflare R2 for runners without WarpCache.
 
 Absorbs scripts/ci/r2_cache.py. WarpBuild's cache action does not

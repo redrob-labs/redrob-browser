@@ -1,3 +1,8 @@
+# Copyright 2025 BrowserOS contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+# See the NOTICE file at the repository root for provenance.
 """Strict renderer for reviewable Linux packaging policy assets.
 
 The renderer is intentionally not a general template language. Every asset has

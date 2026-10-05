@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Copyright 2025 BrowserOS contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+# See the NOTICE file at the repository root for provenance.
 """Prepare pinned Chromium source for local builds, caches and CI workspaces.
 
 This is the single reset/checkout/sync implementation. Callers own the checkout
