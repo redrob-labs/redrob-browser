@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/browseros/server/browseros_server_config.cc b/chrome/browser/browseros/server/browseros_server_config.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..c383a4374cc5a7bd4c4408c4efbdeb7d96acdc23
 --- /dev/null
 +++ b/chrome/browser/browseros/server/browseros_server_config.cc
 @@ -0,0 +1,178 @@
@@ -27,8 +26,8 @@ index 0000000000000000000000000000000000000000..c383a4374cc5a7bd4c4408c4efbdeb7d
 +    {
 +        // Empty state dir keeps the legacy .browseros/current_version layout.
 +        FILE_PATH_LITERAL(""),
-+        "https://cdn.browseros.com/appcast-server.xml",
-+        "https://cdn.browseros.com/appcast-server.alpha.xml",
++        "https://cdn.redrob.ai/browser/appcast-server.xml",
++        "https://cdn.redrob.ai/browser/appcast-server.alpha.xml",
 +        "/status",
 +    },
 +};
@@ -44,8 +43,8 @@ index 0000000000000000000000000000000000000000..c383a4374cc5a7bd4c4408c4efbdeb7d
 +    {
 +        // Isolate Claw OTA state under .browseros/BrowserClawServer/.
 +        FILE_PATH_LITERAL("BrowserClawServer"),
-+        "https://cdn.browseros.com/appcast-claw-server.xml",
-+        "https://cdn.browseros.com/appcast-claw-server.alpha.xml",
++        "https://cdn.redrob.ai/browser/appcast-claw-server.xml",
++        "https://cdn.redrob.ai/browser/appcast-claw-server.alpha.xml",
 +        // Claw does not expose the {can_update} readiness contract yet; empty
 +        // skips readiness and restarts after verification.
 +        "",

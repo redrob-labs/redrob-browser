@@ -14,9 +14,10 @@ duplicated and a revision that is not checked out can still be measured.
 | `port.py` | shared plumbing: read a file at a revision, apply one diff to one file's text in isolation, diff two texts as a patch, and fetch upstream's own patch for a path |
 | `replaster.py` | regenerate every rule in `//rewrite` against 155 and write the patches into the vendored tree. `--write` refuses unless all 107 resolve |
 | `check_at_155.py` | re-derive every patch from its rule, independently, and compare to what is on disk |
-| `verify_structure.py` | structural checks the rule engine cannot make, each measured against the untouched 155 baseline so the checker's own limits are not reported as defects |
+| `verify_structure.py` | no added line names an upstream service endpoint (CDN, PostHog, Sentry); plus structural checks the rule engine cannot make, each measured against the untouched 155 baseline so the checker's own limits are not reported as defects |
 | `reverse_verify.py` | restore each defect `verify_structure.py` claims to catch and require it to go red |
 | `applies.py` | does a whole patch set still apply at a given revision, measured per file |
+| `copy_resources.py` | the vendored `copy_resources.yaml` step for linux x64, minus the product-icon rows: `branding/manifest` owns every icon |
 
 Run them from here, in this order:
 

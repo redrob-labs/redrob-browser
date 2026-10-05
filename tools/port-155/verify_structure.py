@@ -33,7 +33,7 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from port import BASE_155, apply_to, show, upstream_patch  # noqa: E402
+from port import BASE_155, apply_to, show, start_text, upstream_patch  # noqa: E402
 from replaster import REPO, plaster, rule_targets  # noqa: E402
 
 # Constants Chromium 155 removed. Our inserted code must not name them.
@@ -61,15 +61,9 @@ NUMBERED = [
 
 
 def final_text(rel: str, yaml_path: Path, work: Path) -> tuple[str | None, str]:
-    base155 = show(BASE_155, rel)
-    if base155 is None:
-        return None, "absent at 155"
-    text = base155
-    theirs = upstream_patch(rel, work)
-    if theirs is not None:
-        text, err = apply_to(base155, theirs, work, rel)
-        if text is None:
-            return None, f"their patch does not apply: {err}"
+    _base, text, err, _overlap = start_text(rel, work)
+    if text is None:
+        return None, err
     try:
         text = plaster.apply_substitutions(rel, text, plaster.load_rules(yaml_path))
     except Exception as exc:
@@ -211,16 +205,54 @@ def check_removed_symbols(rel: str, text: str) -> list[str]:
     return [f"names {sym!r}, which 155 removed" for sym in REMOVED_AT_155 if sym in text]
 
 
+def check_accelerators(rel: str, text: str) -> list[str]:
+    """Two commands bound to one key. A DCHECK in ui::AcceleratorManager at window creation."""
+    if not rel.endswith("accelerator_table.cc"):
+        return []
+    from collections import Counter
+    rows = re.findall(r"\{\s*(ui::VKEY_[A-Z0-9_]+)\s*,\s*([^,{}]+?)\s*,\s*(IDC_[A-Z0-9_]+)\s*\}", text)
+    keys = Counter((k, re.sub(r"\s", "", m)) for k, m, _ in rows)
+    return [
+        f"accelerator {k} {m} bound {n}x: " + ", ".join(i for kk, mm, i in rows if kk == k and re.sub(r"\s", "", mm) == m)
+        for (k, m), n in keys.items() if n > 1
+    ]
+
+
 def problems_for(rel: str, text: str) -> list[str]:
     out = check_braces(rel, text) + check_parses(rel, text) + check_brackets(rel, text)
+    out += check_accelerators(rel, text)
     if rel in NUMBERED:
         out += check_enums(rel, text)
     return out
 
 
+#: Network endpoints the upstream project operates. A line our build ADDS that names one
+#: makes the browser contact (or update from, or report to) someone else's service: the
+#: 155 build first ran with these and installed that project's extensions on first launch.
+UPSTREAM_ENDPOINTS = re.compile(
+    r"cdn\.browseros\.com|us\.i\.posthog\.com|ingest\.[a-z.]*sentry\.io|phc_[A-Za-z0-9]{20,}"
+)
+
+
+def check_upstream_endpoints(patch_root: Path | None = None) -> list[tuple[str, str]]:
+    """Every added line in the vendored stack, scanned for upstream service endpoints."""
+    root = patch_root or (REPO / "vendor/browseros/chromium_patches")
+    found = []
+    for patch in sorted(root.rglob("*")):
+        if not patch.is_file() or patch.name.startswith("."):
+            continue
+        for line in patch.read_text(errors="replace").splitlines():
+            if line.startswith("+") and not line.startswith("+++"):
+                m = UPSTREAM_ENDPOINTS.search(line)
+                if m:
+                    rel = str(patch.relative_to(root))
+                    found.append((rel, f"adds upstream endpoint {m.group(0)!r}"))
+    return found
+
+
 def main() -> int:
     work = Path(tempfile.mkdtemp(prefix="verify-", dir=Path(__file__).parent))
-    regressions: list[tuple[str, str]] = []
+    regressions: list[tuple[str, str]] = check_upstream_endpoints()
     inherited = 0
     checked = 0
     hard: list[tuple[str, str]] = []
@@ -228,8 +260,12 @@ def main() -> int:
         for rel, yaml_path in rule_targets():
             base155 = show(BASE_155, rel)
             if base155 is None:
-                hard.append((rel, "absent at 155"))
-                continue
+                # A file the vendored stack creates: its baseline is their own text,
+                # before our rules ran.
+                _none, base155, err, _overlap = start_text(rel, work)
+                if base155 is None:
+                    hard.append((rel, err))
+                    continue
             text, err = final_text(rel, yaml_path, work)
             if text is None:
                 hard.append((rel, err))

@@ -1,0 +1,16 @@
+# Drop the vendored stack's Ctrl/Cmd+Shift+L shortcut for cycling the third-party LLM provider.
+#
+# Chromium 155 itself binds Ctrl/Cmd+Shift+L to IDC_TOGGLE_VERTICAL_TABS_COLLAPSE, and the vendored
+# keyboard-shortcuts feature pushes the same key for IDC_CYCLE_THIRD_PARTY_LLM_PROVIDER. Registering
+# one accelerator twice is a DCHECK in ui::AcceleratorManager, so a dev build aborts while creating
+# the first browser window. A release build has DCHECKs off and silently keeps one of the two, which
+# is how it ships upstream unnoticed.
+#
+# The vertical tab strip is this product's shell, so Chromium's binding wins. The provider cycle stays
+# reachable from its own UI; it only loses the shortcut.
+substitutions:
+  - description: Remove the duplicate Ctrl/Cmd+Shift+L push for cycling the LLM provider.
+    regex:
+      pattern: "      accelerators->push_back(\n          {ui::VKEY_L, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,\n           IDC_CYCLE_THIRD_PARTY_LLM_PROVIDER});\n"
+      replace: ""
+      count: 1

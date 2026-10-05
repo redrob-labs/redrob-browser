@@ -1,9 +1,8 @@
 diff --git a/chrome/browser/browseros/core/browseros_constants.h b/chrome/browser/browseros/core/browseros_constants.h
 new file mode 100644
-index 0000000000000..e7b9a3a608cde
 --- /dev/null
 +++ b/chrome/browser/browseros/core/browseros_constants.h
-@@ -0,0 +1,242 @@
+@@ -0,0 +1,239 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -28,11 +27,11 @@ index 0000000000000..e7b9a3a608cde
 +}
 +
 +inline constexpr char kBrowserOSConfigUrl[] =
-+    "https://cdn.browseros.com/extensions/extensions.json";
++    "https://cdn.redrob.ai/browser/extensions/extensions.json";
 +inline constexpr char kBrowserOSAlphaConfigUrl[] =
-+    "https://cdn.browseros.com/extensions/extensions.alpha.json";
++    "https://cdn.redrob.ai/browser/extensions/extensions.alpha.json";
 +
-+inline constexpr char kAgentExtensionId[] = "bflpfmnmnokmjhmgnolecpppdbdophmk";
++inline constexpr char kAgentExtensionId[] = "oikpnmkappjhkifbcieakjoeiknojbgg";
 +
 +inline constexpr char kBugReporterExtensionId[] =
 +    "adlpneommgkgeanpaekgoaolcpncohkf";
@@ -41,9 +40,9 @@ index 0000000000000..e7b9a3a608cde
 +    "pjimfkbpehlcllblajnpfamdfjhhlgkc";
 +
 +inline constexpr char kBrowserOSUpdateUrl[] =
-+    "https://cdn.browseros.com/extensions/update-manifest.xml";
++    "https://cdn.redrob.ai/browser/extensions/update-manifest.xml";
 +inline constexpr char kBrowserOSAlphaUpdateUrl[] =
-+    "https://cdn.browseros.com/extensions/update-manifest.alpha.xml";
++    "https://cdn.redrob.ai/browser/extensions/update-manifest.alpha.xml";
 +
 +inline constexpr char kBrowserOSHost[] = "browseros";
 +
@@ -237,11 +236,8 @@ index 0000000000000..e7b9a3a608cde
 +         info->is_labelled;
 +}
 +
-+// Sentry crash reporting
-+// https://9a76046fcfbcfe69a3580f4d204579f1@o4510545525932032.ingest.us.sentry.io/4510938172620800
-+inline constexpr char kSentryMinidumpUrl[] =
-+    "https://o4510545525932032.ingest.us.sentry.io/api/4510938172620800/"
-+    "minidump/?sentry_key=9a76046fcfbcfe69a3580f4d204579f1";
++// Crash uploads are off: Redrob runs no crash collector yet.
++inline constexpr char kSentryMinidumpUrl[] = "";
 +
 +}  // namespace browseros
 +

@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/win/winsparkle_glue.cc b/chrome/browser/win/winsparkle_glue.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..f86e22cf3df9d1aa48c25b7366c8b5d7162eef6b
 --- /dev/null
 +++ b/chrome/browser/win/winsparkle_glue.cc
 @@ -0,0 +1,377 @@
@@ -54,13 +53,13 @@ index 0000000000000000000000000000000000000000..f86e22cf3df9d1aa48c25b7366c8b5d7
 +// the two in lockstep.
 +#if defined(ARCH_CPU_ARM64)
 +constexpr char kAppcastURL[] =
-+    "https://cdn.browseros.com/appcast-win-arm64.xml";
++    "https://cdn.redrob.ai/browser/appcast-win-arm64.xml";
 +constexpr char kClawAppcastURL[] =
-+    "https://cdn.browseros.com/appcast-claw-win-arm64.xml";
++    "https://cdn.redrob.ai/browser/appcast-claw-win-arm64.xml";
 +#else
-+constexpr char kAppcastURL[] = "https://cdn.browseros.com/appcast-win.xml";
++constexpr char kAppcastURL[] = "https://cdn.redrob.ai/browser/appcast-win.xml";
 +constexpr char kClawAppcastURL[] =
-+    "https://cdn.browseros.com/appcast-claw-win.xml";
++    "https://cdn.redrob.ai/browser/appcast-claw-win.xml";
 +#endif
 +
 +const char* GetAppcastURL() {

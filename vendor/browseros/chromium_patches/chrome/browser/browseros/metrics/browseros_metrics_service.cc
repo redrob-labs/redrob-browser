@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/browseros/metrics/browseros_metrics_service.cc b/chrome/browser/browseros/metrics/browseros_metrics_service.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..97180c8484b889a9eb8a77b832300cb8cf8b0543
 --- /dev/null
 +++ b/chrome/browser/browseros/metrics/browseros_metrics_service.cc
 @@ -0,0 +1,274 @@
@@ -39,10 +38,10 @@ index 0000000000000000000000000000000000000000..97180c8484b889a9eb8a77b832300cb8
 +namespace {
 +
 +constexpr std::string_view kBrowserOSPostHogApiKey =
-+    "phc_PRrpVnBMVJgUumvaXzUnwKZ1dDs3L8MSICLhTdnc8jC";
++    "";
 +constexpr std::string_view kBrowserClawPostHogApiKey =
-+    "phc_mafRaZD4djbUnfNzKx9iKWyzW583UAbmZGepvxDiPcZx";
-+constexpr char kPostHogEndpoint[] = "https://us.i.posthog.com/i/v0/e/";
++    "";
++constexpr char kPostHogEndpoint[] = "";
 +constexpr size_t kMaxUploadSize = 256 * 1024;
 +constexpr size_t kMaxPendingEvents = 256;
 +
@@ -80,7 +79,7 @@ index 0000000000000000000000000000000000000000..97180c8484b889a9eb8a77b832300cb8
 +            "properties without PII."
 +          destination: OTHER
 +          destination_other:
-+            "PostHog analytics service at us.i.posthog.com"
++            "None: this build sends no analytics (empty endpoint)."
 +        }
 +        policy {
 +          cookies_allowed: NO

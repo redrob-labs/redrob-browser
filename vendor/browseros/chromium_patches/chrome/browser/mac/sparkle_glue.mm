@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/mac/sparkle_glue.mm b/chrome/browser/mac/sparkle_glue.mm
 new file mode 100644
-index 0000000000000..7a5da195279c1
 --- /dev/null
 +++ b/chrome/browser/mac/sparkle_glue.mm
 @@ -0,0 +1,673 @@
@@ -36,8 +35,8 @@ index 0000000000000..7a5da195279c1
 +  // Feed keys are owned by release/feeds/spec.py (_BROWSER_FEED_SLUGS) in
 +  // the BrowserOS repo; keep the two in lockstep.
 +  const char* base_url = browseros::IsBrowserClawProduct()
-+                             ? "https://cdn.browseros.com/appcast-claw"
-+                             : "https://cdn.browseros.com/appcast";
++                             ? "https://cdn.redrob.ai/browser/appcast-claw"
++                             : "https://cdn.redrob.ai/browser/appcast";
 +
 +  if (base::SysInfo::OperatingSystemArchitecture() == "x86_64") {
 +    return [NSString stringWithFormat:@"%s-x86_64.xml", base_url];

@@ -35,7 +35,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from port import BASE_155, THEIRS, apply_to, diff_text, show, upstream_patch  # noqa: E402
+from port import THEIRS, emit_patch, start_text  # noqa: E402
 from port import REPO  # noqa: E402
 
 REWRITES = REPO / "rewrite"
@@ -71,20 +71,13 @@ def main() -> int:
 
     try:
         for rel, yaml_path in rule_targets():
-            base155 = show(BASE_155, rel)
-            if base155 is None:
-                problems.append((rel, "gone-155", "no such path at 155; the rule needs a new home"))
+            # A rule may also target a file the vendored stack CREATES (no 155 base);
+            # then their new-file body is the text the rule runs on.
+            base155, text, err, overlap = start_text(rel, work)
+            if text is None:
+                kind = "gone-155" if not overlap and "absent" in err else "theirs-no-apply"
+                problems.append((rel, kind, err))
                 continue
-
-            overlap = False
-            text = base155
-            theirs = upstream_patch(rel, work)
-            if theirs is not None:
-                overlap = True
-                text, err = apply_to(base155, theirs, work, rel)
-                if text is None:
-                    problems.append((rel, "theirs-no-apply", err))
-                    continue
 
             try:
                 subs = plaster.load_rules(yaml_path)
@@ -100,7 +93,7 @@ def main() -> int:
                 problems.append((rel, "noop", "rules changed nothing; already true at 155"))
                 continue
 
-            out = diff_text(base155, rewritten, rel, work)
+            out = emit_patch(base155, rewritten, rel, work)
             if not out.strip():
                 problems.append((rel, "empty-diff", "rewrite produced no textual change"))
                 continue

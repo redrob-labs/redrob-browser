@@ -1,0 +1,7 @@
+# The config test pins the appcast URLs; keep it in step with browseros_server_config.cc.yaml.
+substitutions:
+  - description: Expected appcasts are Redrob's CDN.
+    regex:
+      pattern: "https://cdn.browseros.com/"
+      replace: "https://cdn.redrob.ai/browser/"
+      count: 4

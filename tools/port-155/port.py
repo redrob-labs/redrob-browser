@@ -94,6 +94,64 @@ def apply_to(text: str, patch: Path, work: Path, path: str) -> tuple[str | None,
     return f.read_text(), ""
 
 
+def new_file_body(patch: Path) -> str | None:
+    """The full text a NEW-FILE patch creates, or None if the patch is not one.
+
+    A file the vendored stack adds does not exist at 155, so there is no base to apply
+    to; its content is exactly the patch's `+` lines.
+    """
+    lines = patch.read_text(errors="replace").splitlines(keepends=True)
+    if not any(l.startswith("--- /dev/null") for l in lines[:6]):
+        return None
+    out, in_hunk, no_eol = [], False, False
+    for l in lines:
+        if l.startswith("@@"):
+            in_hunk = True
+        elif in_hunk and l.startswith("+"):
+            out.append(l[1:])
+        elif in_hunk and l.startswith("\\ No newline"):
+            no_eol = True
+    text = "".join(out)
+    if no_eol and text.endswith("\n"):
+        text = text[:-1]
+    return text
+
+
+def start_text(rel: str, work: Path) -> tuple[str | None, str | None, str, bool]:
+    """(155 base or None for a file the stack creates, text our rules run on, err, overlap)."""
+    base155 = show(BASE_155, rel)
+    theirs = upstream_patch(rel, work)
+    if base155 is None:
+        body = new_file_body(theirs) if theirs is not None else None
+        if body is None:
+            return None, None, "absent at 155 and not created by the vendored stack", False
+        return None, body, "", True
+    if theirs is None:
+        return base155, base155, "", False
+    text, err = apply_to(base155, theirs, work, rel)
+    return base155, text, err, True
+
+
+def emit_patch(base: str | None, new: str, path: str, work: Path) -> str:
+    """diff(base -> new) in the vendored layout; a new-file patch when there is no base."""
+    if base is not None:
+        return diff_text(base, new, path, work)
+    body = new.splitlines(keepends=True)
+    out = [
+        f"diff --git a/{path} b/{path}\n",
+        "new file mode 100644\n",
+        "--- /dev/null\n",
+        f"+++ b/{path}\n",
+        f"@@ -0,0 +1,{len(body)} @@\n",
+    ]
+    for line in body:
+        out.append("+" + line)
+    if body and not body[-1].endswith("\n"):
+        out[-1] += "\n"
+        out.append("\\ No newline at end of file\n")
+    return "".join(out)
+
+
 def diff_text(old: str, new: str, path: str, work: Path) -> str:
     o, n = work / "old", work / "new"
     o.write_text(old)

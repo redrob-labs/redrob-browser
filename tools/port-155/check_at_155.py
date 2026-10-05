@@ -24,7 +24,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from port import BASE_155, THEIRS, apply_to, diff_text, show, upstream_patch  # noqa: E402
+from port import THEIRS, emit_patch, start_text  # noqa: E402
 from replaster import plaster, rule_targets  # noqa: E402
 
 def main() -> int:
@@ -38,19 +38,12 @@ def main() -> int:
                 differ.append((rel, "no patch on disk for this rule"))
                 continue
 
-            base155 = show(BASE_155, rel)
-            if base155 is None:
-                differ.append((rel, "absent at 155"))
+            base155, text, err, overlap = start_text(rel, work)
+            if text is None:
+                differ.append((rel, err if not overlap else f"their original patch does not apply at 155: {err}"))
                 continue
-
-            text = base155
-            theirs = upstream_patch(rel, work)
-            if theirs is not None:
+            if overlap:
                 merged += 1
-                text, err = apply_to(base155, theirs, work, rel)
-                if text is None:
-                    differ.append((rel, f"their original patch does not apply at 155: {err}"))
-                    continue
 
             try:
                 rewritten = plaster.apply_substitutions(rel, text, plaster.load_rules(yaml_path))
@@ -58,7 +51,7 @@ def main() -> int:
                 differ.append((rel, f"rule failed: {exc}"))
                 continue
 
-            if diff_text(base155, rewritten, rel, work) == on_disk.read_text():
+            if emit_patch(base155, rewritten, rel, work) == on_disk.read_text():
                 same += 1
             else:
                 differ.append((rel, "the patch on disk is not what the rules produce at 155"))

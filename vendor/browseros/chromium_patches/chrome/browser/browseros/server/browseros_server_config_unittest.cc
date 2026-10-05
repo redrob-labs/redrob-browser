@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/browseros/server/browseros_server_config_unittest.cc b/chrome/browser/browseros/server/browseros_server_config_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..3e6c8d9cbb478e9d3dc59fa2e63ba93482b95080
 --- /dev/null
 +++ b/chrome/browser/browseros/server/browseros_server_config_unittest.cc
 @@ -0,0 +1,228 @@
@@ -116,10 +115,10 @@ index 0000000000000000000000000000000000000000..3e6c8d9cbb478e9d3dc59fa2e63ba934
 +
 +  // Empty state dir preserves the legacy .browseros/current_version layout.
 +  EXPECT_TRUE(descriptor.updater.state_dir.empty());
-+  EXPECT_EQ(std::string_view("https://cdn.browseros.com/appcast-server.xml"),
++  EXPECT_EQ(std::string_view("https://cdn.redrob.ai/browser/appcast-server.xml"),
 +            descriptor.updater.appcast_url);
 +  EXPECT_EQ(
-+      std::string_view("https://cdn.browseros.com/appcast-server.alpha.xml"),
++      std::string_view("https://cdn.redrob.ai/browser/appcast-server.alpha.xml"),
 +      descriptor.updater.alpha_appcast_url);
 +  EXPECT_EQ(std::string_view("/status"), descriptor.updater.readiness_path);
 +}
@@ -144,10 +143,10 @@ index 0000000000000000000000000000000000000000..3e6c8d9cbb478e9d3dc59fa2e63ba934
 +  EXPECT_EQ(base::FilePath::StringType(FILE_PATH_LITERAL("BrowserClawServer")),
 +            ToPathString(descriptor.updater.state_dir));
 +  EXPECT_EQ(
-+      std::string_view("https://cdn.browseros.com/appcast-claw-server.xml"),
++      std::string_view("https://cdn.redrob.ai/browser/appcast-claw-server.xml"),
 +      descriptor.updater.appcast_url);
 +  EXPECT_EQ(std::string_view(
-+                "https://cdn.browseros.com/appcast-claw-server.alpha.xml"),
++                "https://cdn.redrob.ai/browser/appcast-claw-server.alpha.xml"),
 +            descriptor.updater.alpha_appcast_url);
 +  // No readiness contract yet: empty path skips the status fetch.
 +  EXPECT_TRUE(descriptor.updater.readiness_path.empty());
