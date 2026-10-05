@@ -1,0 +1,25 @@
+diff --git a/chrome/browser/ui/layout_constants.cc b/chrome/browser/ui/layout_constants.cc
+--- a/chrome/browser/ui/layout_constants.cc
++++ b/chrome/browser/ui/layout_constants.cc
+@@ -148,13 +148,19 @@ int GetLayoutConstant(LayoutConstant constant) {
+     case LayoutConstant::kVerticalTabCornerRadius:
+       return 8;
+     case LayoutConstant::kVerticalTabHeight:
+-      return 30;
++      // Redrob: 32, measured from the reference's selected row (y 366..397 inclusive). Upstream's 30 left the
++      // tab rows a step shorter than every row in redrob_sidebar_tokens.h, so the tab list had a different
++      // rhythm from the bookmark list directly above it. Plus the 4px of shadow room that
++      // VerticalTabStyleViews holds back, so the pill itself is still 32.
++      return 36;
+     case LayoutConstant::kVerticalTabPinnedHeight:
+       return 32;
+     case LayoutConstant::kVerticalTabMinWidth:
+       return 32;
+     case LayoutConstant::kVerticalTabStripHorizontalPadding:
+-      return 12;
++      // Redrob: 7, so a tab's pill is 240 wide in the 254px column -- the reference's pill runs x 6..245.
++      // It also puts a tab's leading edge on the same line as a bookmark row's, which upstream's 12 did not.
++      return 7;
+     case LayoutConstant::kVerticalTabStripUncollapsedVerticalPadding:
+       return 12;
+     case LayoutConstant::kVerticalTabStripCollapsedVerticalPadding:

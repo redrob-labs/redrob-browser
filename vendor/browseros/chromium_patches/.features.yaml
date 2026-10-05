@@ -502,3 +502,135 @@ features:
       - extensions/browser/crx_installer.h
       - extensions/browser/external_install_info.cc
       - extensions/browser/external_install_info.h
+
+  # ── LAYER 9: REDROB ───────────────────────────────────────
+  # This fork's own differentiators, re-expressed in this layout. Every patch here
+  # is GENERATED from a rule in //rewrite/<upstream path>.yaml -- do not hand-edit a
+  # patch file, edit the rule and regenerate, or the next uprev silently drops the
+  # edit. Grouped by what the change is FOR, so a group can be dropped whole.
+
+  redrob-brand-strings:
+    description: "chore: redrob product name in upstream string tables"
+    files:
+      - chrome/app/chromium_strings.grd
+      - chrome/app/password_manager_ui_strings.grdp
+      - chrome/app/settings_chromium_strings.grdp
+      - chrome/chrome_repack_locales.gni
+      - components/autofill_payments_strings.grdp
+      - components/autofill_strings.grdp
+      - components/components_chromium_strings.grd
+      - components/embedder_support/user_agent_utils.cc
+      - components/management_strings.grdp
+      - components/new_or_sad_tab_strings.grdp
+      - components/omnibox_strings.grdp
+      - components/page_info_strings.grdp
+      - components/password_manager_strings.grdp
+      - components/privacy_sandbox_strings.grd
+      - components/reset_password_strings.grdp
+      - components/search_engine_choice_strings.grdp
+      - components/security_interstitials_strings.grdp
+      - components/ssl_errors_strings.grdp
+      - extensions/strings/extensions_chromium_strings.grdp
+      - tools/gritsettings/translation_expectations.pyl
+
+  redrob-vertical-tabs:
+    description: "feat: the vertical tab strip as this product's shell"
+    files:
+      # Chromium 155 launched vertical tabs, so the feature flag our fork used to flip
+      # is gone and only the pref default remains ours.
+      - chrome/browser/ui/color/BUILD.gn
+      - chrome/browser/ui/layout_constants.cc
+      - chrome/browser/ui/tabs/tab_strip_prefs.cc
+      - chrome/browser/ui/tabs/vertical_tab_strip_state.h
+      - chrome/browser/ui/views/frame/browser_view.cc
+      - chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+      - chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+      - chrome/browser/ui/views/tabs/common/tab_group_header_view.cc
+      - chrome/browser/ui/views/tabs/common/tab_group_header_view.h
+      - chrome/browser/ui/views/tabs/common/tab_view.cc
+      - chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
+      - chrome/browser/ui/views/tabs/common/vertical_tab_style_views.cc
+      - chrome/browser/ui/views/tabs/common/vertical_tab_style_views.h
+      - chrome/browser/ui/views/tabs/vertical/BUILD.gn
+      - chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
+      - chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
+      - chrome/browser/ui/views/toolbar/toolbar_view.cc
+      - chrome/browser/ui/views/toolbar/toolbar_view.h
+      - chrome/browser/ui/window_feature_controller/window_feature_controller.cc
+
+  redrob-omnibox-agent:
+    description: "feat: the address bar hands what was typed to the agent"
+    files:
+      - chrome/browser/autocomplete/chrome_autocomplete_provider_client.cc
+      - chrome/browser/autocomplete/chrome_autocomplete_provider_client.h
+      - chrome/browser/ui/views/location_bar/location_bar_view.cc
+      - components/omnibox/browser/BUILD.gn
+      - components/omnibox/browser/actions/omnibox_action.h
+      - components/omnibox/browser/actions/omnibox_action_concepts.h
+      - components/omnibox/browser/autocomplete_classifier.cc
+      - components/omnibox/browser/autocomplete_controller.cc
+      - components/omnibox/browser/autocomplete_provider.cc
+      - components/omnibox/browser/autocomplete_provider.h
+      - third_party/metrics_proto/omnibox_event.proto
+
+  redrob-component-extension:
+    description: "feat: load the vendored redrob extension as a component extension"
+    files:
+      # DELIBERATELY ITS OWN GROUP, and the only group whose removal is a one-line edit.
+      # A component extension is compiled into the browser binary, so it ships as part of
+      # this AGPL program rather than beside it -- which is a licence question about the
+      # extension's own source, not a build detail. The alternative is already in this
+      # tree: upstream's external-provider + OTA path loads an extension as a separate
+      # program. It is NOT a free swap, and the cost is measured, not assumed:
+      # redrobPrivate and settingsPrivate are gated on `location: component`, so an
+      # extension loaded any other way reaches none of the browser and every surface in
+      # it goes dark. Dropping this group therefore also means un-gating those APIs.
+      - chrome/browser/extensions/chrome_component_extension_resource_manager.cc
+      - chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
+      - chrome/browser/extensions/component_loader.cc
+      - chrome/browser/extensions/component_loader.h
+      - chrome/browser/resources/BUILD.gn
+      - extensions/common/constants.h
+
+  redrob-private-api:
+    description: "feat: the redrobPrivate extension API surface"
+    files:
+      # The numeric ids these lists allocate now sit in reserved high bands (permissions
+      # 1000+, events 2000+, functions 5000+) rather than at the next free value. They
+      # are IPC and metrics identities: appending at next-free collided with upstream's
+      # own new values at this uprev, and a band keeps them from moving at the next one.
+      - chrome/browser/extensions/api/BUILD.gn
+      - chrome/browser/extensions/api/api_browser_context_keyed_service_factories.cc
+      - chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc
+      - chrome/common/chrome_switches.h
+      - chrome/common/extensions/permissions/permission_set_unittest.cc
+      - chrome/common/importer/BUILD.gn
+      - components/history/core/browser/history_types.h
+      - extensions/browser/extension_event_histogram_value.h
+
+  redrob-first-run:
+    description: "feat: this product's first run and profile surfaces"
+    files:
+      - chrome/browser/ui/startup/first_run_service.cc
+      - chrome/browser/ui/views/profiles/avatar_toolbar_button_state_manager.cc
+      - chrome/browser/ui/views/profiles/profile_menu_view_base.cc
+      - chrome/browser/ui/views/profiles/profile_picker_view.cc
+      - chrome/common/chrome_features.cc
+
+  redrob-linux-packaging:
+    description: "build: redrob's linux packages and apt repository"
+    files:
+      - chrome/installer/linux/BUILD.gn
+      - chrome/installer/linux/common/apt.include
+      - chrome/installer/linux/common/chromium-browser.info
+      - chrome/installer/linux/common/installer.py
+      - chrome/installer/linux/common/key.include
+      - chrome/installer/linux/debian/additional_deps
+      - chrome/installer/linux/debian/build_repo_package.py
+
+  redrob-build:
+    description: "build: redrob's build configuration"
+    files:
+      - build/config/BUILDCONFIG.gn
+      - build/config/siso/main.star
+      - ui/webui/resources/tools/build_webui.gni

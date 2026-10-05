@@ -1,5 +1,4 @@
 diff --git a/chrome/browser/ui/tabs/vertical_tab_strip_state_controller.cc b/chrome/browser/ui/tabs/vertical_tab_strip_state_controller.cc
-index 22ece00a8c729ef5ada1d20afa2e289b8fd95d16..6b57459d409edde59b652e8af8944e3b2c9a3e05 100644
 --- a/chrome/browser/ui/tabs/vertical_tab_strip_state_controller.cc
 +++ b/chrome/browser/ui/tabs/vertical_tab_strip_state_controller.cc
 @@ -12,6 +12,7 @@
@@ -36,3 +35,24 @@ index 22ece00a8c729ef5ada1d20afa2e289b8fd95d16..6b57459d409edde59b652e8af8944e3b
    if (restored_state_collapsed.has_value()) {
      SetCollapsed(restored_state_collapsed.value());
    }
+@@ -397,11 +410,16 @@ void VerticalTabStripStateController::UpdateCollapseActionItem() {
+   const bool is_collapsed =
+       GetCollapseState() != VerticalTabStripCollapseState::kExpanded;
+ 
++  // Redrob: a sidebar-panel glyph, not a hamburger-with-a-chevron. Upstream's kMenuOpenIcon /
++  // kMenuCloseCustomIcon pair draws three lines and an arrow, which says "menu" -- and the thing this button
++  // does is show and hide a PANEL. The reference draws exactly that: a 16x12 rounded rectangle with its
++  // leading column divided off, which is what dock_to_left / dock_to_right are.
++  //
++  // The pair still flips with state and still respects RTL, because which side the panel docks to is the
++  // whole content of the icon and getting it backwards in Hebrew or Arabic would point at the wrong edge.
+   const gfx::VectorIcon& icon = (is_collapsed == base::i18n::IsRTL())
+-                                    ? features::IsRoundedIconsEnabled()
+-                                          ? views::kMenuOpenIcon
+-                                          : views::kMenuOpenOldIcon
+-                                    : views::kMenuCloseCustomIcon;
++                                    ? kDockToRightIcon
++                                    : kDockToLeftIcon;
+ 
+   const auto& text =
+       is_collapsed ? IDS_EXPAND_VERTICAL_TABS : IDS_COLLAPSE_VERTICAL_TABS;

@@ -7,7 +7,10 @@
 substitutions:
   - description: Add redrob_private.idl to the extension API schema sources, in alpha order.
     insert_after:
-      anchor: '    "passwords_private.idl",'
+      # Chromium 155 renamed this schema to `.webidl`. The anchor is the neighbour we sort after, so it
+      # moves with upstream's own rename; `redrob_private.idl` stays `.idl` because 155 still compiles
+      # 26 of those in this same list.
+      anchor: '    "passwords_private.webidl",'
       count: 1
       lines: |
         "redrob_private.idl",

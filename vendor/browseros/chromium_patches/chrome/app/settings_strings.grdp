@@ -1,7 +1,532 @@
 diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
-index caae29834c2cf5fd07bbfb05dc1f98be09e34470..c4d394aea392ef966064d703a729f1001ddfa400 100644
 --- a/chrome/app/settings_strings.grdp
 +++ b/chrome/app/settings_strings.grdp
+@@ -55,20 +55,20 @@
+       </message>
+     </if>
+     <if expr="_google_chrome">
+-      <message name="IDS_SETTINGS_ABOUT_PAGE_REPORT_AN_ISSUE" desc="Text of the button which allows the user to report an issue with Chrome.">
++      <message name="IDS_SETTINGS_ABOUT_PAGE_REPORT_AN_ISSUE" desc="Text of the button which allows the user to report an issue with Redrob.">
+         Report an issue
+       </message>
+       <message name="IDS_SETTINGS_ABOUT_PAGE_PRIVACY_POLICY" desc="Text of the button which allows the user to open the privacy policy.">
+         Privacy policy
+       </message>
+ 
+-      <message name="IDS_SETTINGS_ABOUT_PAGE_SEND_FEEDBACK" desc="Text of the button which allows the user to send feedback with Chrome.">
++      <message name="IDS_SETTINGS_ABOUT_PAGE_SEND_FEEDBACK" desc="Text of the button which allows the user to send feedback with Redrob.">
+         Send feedback
+       </message>
+     </if>
+     <if expr="is_macosx">
+-      <message name="IDS_ABOUT_CHROME_AUTOUPDATE_ALL" desc="The 'Automatically update Chrome for all users.' button in the About window.  Mac-only.">
+-        Automatically update Chrome for all users
++      <message name="IDS_ABOUT_CHROME_AUTOUPDATE_ALL" desc="The 'Automatically update Redrob for all users.' button in the About window.  Mac-only.">
++        Automatically update Redrob for all users
+       </message>
+       <message name="IDS_ABOUT_CHROME_AUTOUPDATE_ALL_IS_ON" desc="The text in About Page to indicate automatic update is turned on.  Mac-only.">
+         Automatic updates are turned on.
+@@ -95,7 +95,7 @@
+       Get image descriptions from Google
+     </message>
+     <message name="IDS_SETTINGS_ACCESSIBLE_IMAGE_LABELS_SUBTITLE" desc="Subtitle for screen reader image labels feature.">
+-      If an image doesn’t have a useful description, Chrome will try to provide one for you. To create descriptions, images are sent to Google.
++      If an image doesn’t have a useful description, Redrob will try to provide one for you. To create descriptions, images are sent to Google.
+     </message>
+     <message name="IDS_SETTINGS_MAIN_NODE_ANNOTATIONS_DOWNLOAD_COMPLETE" desc="Success message when it has downloaded main node annotation files.">
+       Main node annotation files downloaded
+@@ -247,8 +247,8 @@
+     <message name="IDS_SETTINGS_RESET_TOOLBAR_TO_DEFAULT" desc="Accessibility label of the button which resets toolbar customizations to default settings">
+       Reset toolbar to default settings
+     </message>
+-    <message name="IDS_SETTINGS_CHROME_COLORS" desc="Text of the label describing 'Chrome Colors' theme.">
+-      Chrome Colors
++    <message name="IDS_SETTINGS_CHROME_COLORS" desc="Text of the label describing 'Redrob Colors' theme.">
++      Redrob Colors
+     </message>
+     <message name="IDS_SETTINGS_COLOR_SCHEME_MODE" desc="Text of the label for selecting a color scheme mode for the browser.">
+       Mode
+@@ -331,8 +331,8 @@
+     <message name="IDS_SETTINGS_SIDE_PANEL_ALIGNMENT_CONTEXTUAL_TASKS" desc="Label for configuring Google Search AI Mode side panel alignment.">
+       Google Search AI Mode
+     </message>
+-    <message name="IDS_SETTINGS_SIDE_PANEL_ALIGNMENT_CHROME_PANELS" desc="Label for the default Chrome Panels alignment setting.">
+-      Chrome Panels
++    <message name="IDS_SETTINGS_SIDE_PANEL_ALIGNMENT_CHROME_PANELS" desc="Label for the default Redrob Panels alignment setting.">
++      Redrob Panels
+     </message>
+     <message name="IDS_SETTINGS_SIDE_PANEL_ALIGNMENT_A11Y_LABEL" is_accessibility_with_no_ui="true" desc="Accessible label for side panel alignment dropdown menus, combining the side panel item name and the side panel position category name for screen readers.">
+       <ph name="ITEM_NAME">$1<ex>Google Search AI Mode</ex></ph> <ph name="CATEGORY_NAME">$2<ex>Side panel position</ex></ph>
+@@ -362,7 +362,7 @@
+       <message name="IDS_SETTINGS_TABS_TO_LINKS_PREF" desc="The documentation string of the 'Tabs to Links' preference">
+         Pressing Tab on a webpage highlights links, as well as form fields
+       </message>
+-      <message name="IDS_SETTINGS_WARN_BEFORE_QUITTING_PREF" desc="The documentation string of the 'Warn Before Quitting' preference which is also available in the Chrome app menu.">
++      <message name="IDS_SETTINGS_WARN_BEFORE_QUITTING_PREF" desc="The documentation string of the 'Warn Before Quitting' preference which is also available in the Redrob app menu.">
+         Show warning before quitting with ⌘Q
+       </message>
+     </if>
+@@ -396,7 +396,7 @@
+       Subpage button
+     </message>
+     <if expr="not is_chromeos">
+-      <message name="IDS_SETTINGS_RESTART" desc="Text for a button that will restart Chrome.">
++      <message name="IDS_SETTINGS_RESTART" desc="Text for a button that will restart Redrob.">
+         Relaunch
+       </message>
+     </if>
+@@ -645,7 +645,7 @@
+     <message name="IDS_SETTINGS_PAYMENTS_MANAGE_WALLET_DATA" desc="Shown in the payments section of settings. Descriptive text to inform the user that data and privacy preferences, payment methods, and passes can be accessed via link. Google Wallet should not be translated because it is the product name. Has three links that open different pages on Google Wallet.">
+       Visit Google Wallet to control <ph name="BEGIN_LINK1">&lt;a href="$1" target="_blank"&gt;</ph>data and privacy preferences<ph name="END_LINK1">&lt;/a&gt;</ph> or manage <ph name="BEGIN_LINK2">&lt;a href="$2" target="_blank"&gt;</ph>payment methods<ph name="END_LINK2">&lt;/a&gt;</ph> and <ph name="BEGIN_LINK3">&lt;a href="$3" target="_blank"&gt;</ph>passes<ph name="END_LINK3">&lt;/a&gt;</ph> like loyalty cards and IDs
+     </message>
+-    <message name="IDS_SETTINGS_REMOTE_WALLET_PASSES_LINK_LABEL" desc="The title and ARIA (accessibility) label for a link in Chrome settings that opens the payment methods settings on https://wallet.google.com/wallet/passes. Note that the ARIA role and the link icon already convey that this is a link that will be opened when you click on it. Therefore, the message does not contain a verb.">
++    <message name="IDS_SETTINGS_REMOTE_WALLET_PASSES_LINK_LABEL" desc="The title and ARIA (accessibility) label for a link in Redrob settings that opens the payment methods settings on https://wallet.google.com/wallet/passes. Note that the ARIA role and the link icon already convey that this is a link that will be opened when you click on it. Therefore, the message does not contain a verb.">
+       Your Google Wallet passes
+     </message>
+     <message name="IDS_SETTINGS_PAYMENTS_SAVED_TO_THIS_DEVICE_ONLY" desc="Shown in the payments section of settings. Descriptive text to inform the user that this credit card will be saved to local device only.">
+@@ -768,7 +768,7 @@
+     <message name="IDS_SETTINGS_PASSWORDS_LEAK_DETECTION_SIGNED_OUT_ENABLED_DESC" desc="Text that describes the 'Password Leak Detection' functionality to signed-out users who have not disabled the feature. This text always follows a sentence describing the feature.">
+       When you sign in to your Google Account, this feature is turned on.
+     </message>
+-    <message name="IDS_SETTINGS_AUTOFILL_AI_WHEN_ON_SAVED_INFO" desc="Bullet 1 of 2 that appears beneath the 'When on' title. 'Autofill': the user is on the 'Autofill AI' feature page, but we want to frame this new type of autofill as just 'Autofill'. 'Can offer to save info when you submit forms': we want to convey that the user has the choice, each time a form is submitted, whether they want their info saved to Chrome for the purposes of Autofill. 'Like your driver's license or passport number': Today, supported data types for 'Autofill AI' include 1) driver's licenses, 2) passports, and 3) vehicles. Eventually we'll support more, but this example needs to mention these types of data and not others.">
++    <message name="IDS_SETTINGS_AUTOFILL_AI_WHEN_ON_SAVED_INFO" desc="Bullet 1 of 2 that appears beneath the 'When on' title. 'Autofill': the user is on the 'Autofill AI' feature page, but we want to frame this new type of autofill as just 'Autofill'. 'Can offer to save info when you submit forms': we want to convey that the user has the choice, each time a form is submitted, whether they want their info saved to Redrob for the purposes of Autofill. 'Like your driver's license or passport number': Today, supported data types for 'Autofill AI' include 1) driver's licenses, 2) passports, and 3) vehicles. Eventually we'll support more, but this example needs to mention these types of data and not others.">
+       Autofill can offer to save info when you submit forms, like your driver's license or passport number
+     </message>
+     <message name="IDS_SETTINGS_AUTOFILL_AI_ENTITY_INSTANCES_NONE" desc="Placeholder for empty entity instance list on the Autofill AI settings page.">
+@@ -869,28 +869,28 @@
+     <message name="IDS_SETTINGS_HOME_AND_WORK_ADDRESS_EDIT" desc="Label for a context menu item that provides the edit option for the selected home and work address.">
+       Edit in Google Account
+     </message>
+-    <message name="IDS_SETTINGS_HOME_AND_WORK_ADDRESS_REMOVE" desc="Label for a context menu item that removes the selected home and work address from Chrome.">
+-      Remove from Chrome
++    <message name="IDS_SETTINGS_HOME_AND_WORK_ADDRESS_REMOVE" desc="Label for a context menu item that removes the selected home and work address from Redrob.">
++      Remove from Redrob
+     </message>
+-    <message name="IDS_SETTINGS_HOME_ADDRESS_REMOVE_CONFIRMATION_DIALOG_TITLE" desc="Title for the dialog that asks for confirmation to remove the selected home address from Chrome.">
+-      Remove your home address from Chrome autofill?
++    <message name="IDS_SETTINGS_HOME_ADDRESS_REMOVE_CONFIRMATION_DIALOG_TITLE" desc="Title for the dialog that asks for confirmation to remove the selected home address from Redrob.">
++      Remove your home address from Redrob autofill?
+     </message>
+-    <message name="IDS_SETTINGS_WORK_ADDRESS_REMOVE_CONFIRMATION_DIALOG_TITLE" desc="Title for the dialog that asks for confirmation to remove the selected work address from Chrome.">
+-      Remove your work address from Chrome autofill?
++    <message name="IDS_SETTINGS_WORK_ADDRESS_REMOVE_CONFIRMATION_DIALOG_TITLE" desc="Title for the dialog that asks for confirmation to remove the selected work address from Redrob.">
++      Remove your work address from Redrob autofill?
+     </message>
+-    <message name="IDS_SETTINGS_NAME_EMAIL_ADDRESS_REMOVE_CONFIRMATION_DIALOG_TITLE" desc="Title for the dialog that asks for confirmation to remove the selected name and email address from Chrome.">
+-      Remove this info from Chrome autofill?
++    <message name="IDS_SETTINGS_NAME_EMAIL_ADDRESS_REMOVE_CONFIRMATION_DIALOG_TITLE" desc="Title for the dialog that asks for confirmation to remove the selected name and email address from Redrob.">
++      Remove this info from Redrob autofill?
+     </message>
+-    <message name="IDS_SETTINGS_HOME_ADDRESS_REMOVE_CONFIRMATION_DIALOG_NOTICE" desc="Body for the dialog that asks for confirmation to remove the selected home address from Chrome.">
++    <message name="IDS_SETTINGS_HOME_ADDRESS_REMOVE_CONFIRMATION_DIALOG_NOTICE" desc="Body for the dialog that asks for confirmation to remove the selected home address from Redrob.">
+       Your home address can help you get things done across Google services, like more relevant Search results and directions in Google Maps. You can edit or delete your address in your <ph name="BEGIN_LINK">&lt;a href="$1" target=&quot;_blank&quot;&gt;</ph>Google Account<ph name="END_LINK">&lt;/a&gt;</ph> <ph name="USERNAME">$2<ex>example@gmail.com</ex></ph>.
+     </message>
+-    <message name="IDS_SETTINGS_WORK_ADDRESS_REMOVE_CONFIRMATION_DIALOG_NOTICE" desc="Body for the dialog that asks for confirmation to remove the selected work address from Chrome.">
++    <message name="IDS_SETTINGS_WORK_ADDRESS_REMOVE_CONFIRMATION_DIALOG_NOTICE" desc="Body for the dialog that asks for confirmation to remove the selected work address from Redrob.">
+       Your work address can help you get things done across Google services, like more relevant Search results and directions in Google Maps. You can edit or delete your address in your <ph name="BEGIN_LINK">&lt;a href="$1" target=&quot;_blank&quot;&gt;</ph>Google Account<ph name="END_LINK">&lt;/a&gt;</ph> <ph name="USERNAME">$2<ex>example@gmail.com</ex></ph>.
+     </message>
+-    <message name="IDS_SETTINGS_NAME_EMAIL_ADDRESS_REMOVE_CONFIRMATION_DIALOG_NOTICE" desc="Body for the dialog that asks for confirmation to remove the selected name and email address from Chrome.">
++    <message name="IDS_SETTINGS_NAME_EMAIL_ADDRESS_REMOVE_CONFIRMATION_DIALOG_NOTICE" desc="Body for the dialog that asks for confirmation to remove the selected name and email address from Redrob.">
+       You can edit your name in your <ph name="BEGIN_LINK">&lt;a href="$1" target=&quot;_blank&quot;&gt;</ph>Google Account<ph name="END_LINK">&lt;/a&gt;</ph> <ph name="USERNAME">$2<ex>example@gmail.com</ex></ph>
+     </message>
+-    <message name="IDS_SETTINGS_HOME_AND_WORK_ADDRESS_REMOVE_CONFIRMATION_DIALOG_ACTION_OK" desc="Okay action for the dialog that asks for confirmation to remove the selected home and work address from Chrome.">
++    <message name="IDS_SETTINGS_HOME_AND_WORK_ADDRESS_REMOVE_CONFIRMATION_DIALOG_ACTION_OK" desc="Okay action for the dialog that asks for confirmation to remove the selected home and work address from Redrob.">
+       Remove
+     </message>
+     <message name="IDS_SETTINGS_HOME_AND_WORK_ADDRESS_REMOVED_MESSAGE" desc="Hidden text that is read to screen readers to confirm that a home and work address was removed.">
+@@ -905,7 +905,7 @@
+       <message name="IDS_SETTINGS_DEFAULT_BROWSER" desc="Name of the Default Browser page, which allows users to set which browser will open .html files within the OS.">
+         Default browser
+       </message>
+-      <message name="IDS_SETTINGS_DEFAULT_BROWSER_MAKE_DEFAULT_BUTTON" desc="Text of the button used to make Chrome the default browser on the user's system.">
++      <message name="IDS_SETTINGS_DEFAULT_BROWSER_MAKE_DEFAULT_BUTTON" desc="Text of the button used to make Redrob the default browser on the user's system.">
+         Make default
+       </message>
+     </if>
+@@ -1004,7 +1004,7 @@
+     <message name="IDS_SETTINGS_DELETION_CONFIRMATION_ALL_TIME_TOAST_LABEL" desc="This is the label for the confirmation toast shown on the 'Privacy and security' page after the deletion is completed in the 'Delete browsing data' dialog and the dialog was closed. This is the label shown when the user selected the data to be deleted for all time.">
+       Deleted
+     </message>
+-    <message name="IDS_SETTINGS_SEARCH_GEMINI_PASSWORDS_OTHER_DATA_SUB_LABEL" desc="Sub-label for the 'Manage Other Google Data' option in the 'Delete Browsing Data' dialog, explaining to the user that search history, Gemini history, and passwords can be deleted outside of Chrome in their respective management settings.">
++    <message name="IDS_SETTINGS_SEARCH_GEMINI_PASSWORDS_OTHER_DATA_SUB_LABEL" desc="Sub-label for the 'Manage Other Google Data' option in the 'Delete Browsing Data' dialog, explaining to the user that search history, Gemini history, and passwords can be deleted outside of Redrob in their respective management settings.">
+       Search history, Gemini history, and passwords can be deleted in their management settings
+     </message>
+ 
+@@ -1350,7 +1350,7 @@
+     <message name="IDS_SETTINGS_PRELOAD_PAGES_TITLE" desc="Title for a section in Settings that controls pages preloading and informs the user about the data shared by this feature.">
+       Preload pages
+     </message>
+-    <message name="IDS_SETTINGS_PRELOAD_PAGES_STANDARD_PRELOADING_TITLE" desc="Name of the standard preloading option for the Preload Pages settings page. This option enables preloading pages that Chrome believes the user is likely to navigate to.">
++    <message name="IDS_SETTINGS_PRELOAD_PAGES_STANDARD_PRELOADING_TITLE" desc="Name of the standard preloading option for the Preload Pages settings page. This option enables preloading pages that Redrob believes the user is likely to navigate to.">
+       Standard preloading
+     </message>
+     <message name="IDS_SETTINGS_PRELOAD_PAGES_STANDARD_PRELOADING_EXPAND_A11Y_LABEL" desc="This text is read by screenreaders and helps users find more info about the standard preloading option.">
+@@ -1362,7 +1362,7 @@
+     <message name="IDS_SETTINGS_PRELOAD_PAGES_STANDARD_PRELOADING_WHEN_ON_BULLET_ONE" desc="Bullet point in the standard preloading and when on column. Informs the user about what the standard preloading setting does.">
+       Browsing and searching is faster
+     </message>
+-    <message name="IDS_SETTINGS_PRELOAD_PAGES_EXTENDED_PRELOADING_TITLE" desc="Name of the extended preloading option for the Preload Pages settings page. This option enables more extensive preloading of pages that Chrome believes the user is likely to navigate to.">
++    <message name="IDS_SETTINGS_PRELOAD_PAGES_EXTENDED_PRELOADING_TITLE" desc="Name of the extended preloading option for the Preload Pages settings page. This option enables more extensive preloading of pages that Redrob believes the user is likely to navigate to.">
+       Extended preloading
+     </message>
+     <message name="IDS_SETTINGS_PRELOAD_PAGES_EXTENDED_PRELOADING_SUMMARY" desc="Subtitle for Preload Pages extended preloading mode. Informs the user about which preloading setting is being described on this page.">
+@@ -1446,11 +1446,11 @@
+     <message name="IDS_SETTINGS_ANTI_ABUSE_DESCRIPTION" desc="The label used for the anti-abuse site settings description.">
+       Sites you visit can verify that you're a real person and not a bot
+     </message>
+-    <message name="IDS_SETTINGS_ANTI_ABUSE_WHEN_ON_SECTION_ONE" desc="A description that informs users that Chrome saves a small amount of data when the anti-abuse features are enabled.">
+-      A site you visit can save a small amount of info with Chrome, mainly to validate you're not a bot
++    <message name="IDS_SETTINGS_ANTI_ABUSE_WHEN_ON_SECTION_ONE" desc="A description that informs users that Redrob saves a small amount of data when the anti-abuse features are enabled.">
++      A site you visit can save a small amount of info with Redrob, mainly to validate you're not a bot
+     </message>
+     <message name="IDS_SETTINGS_ANTI_ABUSE_WHEN_ON_SECTION_TWO" desc="A description that informs users how the anti-abuse features work.">
+-      As you keep browsing, sites can check with Chrome and verify with a previous site you've visited that you're likely a real person
++      As you keep browsing, sites can check with Redrob and verify with a previous site you've visited that you're likely a real person
+     </message>
+     <message name="IDS_SETTINGS_ANTI_ABUSE_WHEN_ON_SECTION_THREE" desc="A description that informs users how their browsing could be helped by the anti-abuse features.">
+       Browsing is faster because a site is less likely to ask you to verify you're a real person
+@@ -1461,10 +1461,10 @@
+ 
+ 
+     <!-- Privacy Guide -->
+-    <message name="IDS_SETTINGS_PRIVACY_GUIDE_LABEL" desc="Label of the row in the Chrome privacy and security settings page that leads to the 'Privacy Guide'. 'Privacy Guide' is a term, see go/glossarymanager/termset?gid=27517723&amp;tsid=28b420b3.">
++    <message name="IDS_SETTINGS_PRIVACY_GUIDE_LABEL" desc="Label of the row in the Redrob privacy and security settings page that leads to the 'Privacy Guide'. 'Privacy Guide' is a term, see go/glossarymanager/termset?gid=27517723&amp;tsid=28b420b3.">
+       Privacy Guide
+     </message>
+-    <message name="IDS_SETTINGS_PRIVACY_GUIDE_SUBLABEL" desc="Sublabel of the row in the Chrome privacy and security of Chrome settings that leads to the 'Privacy Guide'.">
++    <message name="IDS_SETTINGS_PRIVACY_GUIDE_SUBLABEL" desc="Sublabel of the row in the Redrob privacy and security of Redrob settings that leads to the 'Privacy Guide'.">
+       Review key privacy and security controls
+     </message>
+     <message name="IDS_SETTINGS_PRIVACY_GUIDE_PROMO_HEADER" desc="Text of a button on a card in the settings page that starts the 'Privacy Guide'. 'Privacy Guide' is a term, see go/glossarymanager/termset?gid=27517723&amp;tsid=28b420b3.">
+@@ -1476,7 +1476,7 @@
+     <message name="IDS_SETTINGS_PRIVACY_GUIDE_BACK_TO_SETTINGS_ARIA_LABEL" desc="Text read by screen readers when focusing on the back-to-settings button that is shown in the 'Privacy Guide'. If this button is activated, it will navigate to Settings. This text is only announced by screen readers and is not visible in the UI. 'Privacy Guide' is a term, see go/glossarymanager/termset?gid=27517723&amp;tsid=28b420b3.">
+       Privacy Guide back button
+     </message>
+-    <message name="IDS_SETTINGS_PRIVACY_GUIDE_BACK_TO_SETTINGS_ARIA_ROLE_DESC" desc="Description read by screen readers when focusing on back-to-settings button that is shown in the 'Privacy Guide'. It indicates to the user that activating the this button will cause 'Privacy Guide' to navigate away from 'Privacy Guide' and to Chrome Settings. This text is only announced by screen readers and is not visible in the UI. 'Privacy Guide' is a term, see go/glossarymanager/termset?gid=27517723&amp;tsid=28b420b3.">
++    <message name="IDS_SETTINGS_PRIVACY_GUIDE_BACK_TO_SETTINGS_ARIA_ROLE_DESC" desc="Description read by screen readers when focusing on back-to-settings button that is shown in the 'Privacy Guide'. It indicates to the user that activating the this button will cause 'Privacy Guide' to navigate away from 'Privacy Guide' and to Redrob Settings. This text is only announced by screen readers and is not visible in the UI. 'Privacy Guide' is a term, see go/glossarymanager/termset?gid=27517723&amp;tsid=28b420b3.">
+       Click to navigate away from Privacy Guide.
+     </message>
+     <message name="IDS_SETTINGS_PRIVACY_GUIDE_BACK_BUTTON" desc="Text of a button in the privacy guide that reverses to the previous step in the 'Privacy Guide'.">
+@@ -1503,14 +1503,14 @@
+     <message name="IDS_SETTINGS_PRIVACY_GUIDE_COMPLETION_CARD_SUB_HEADER_NO_LINKS" desc="A subheader shown at the top of the completion card in the 'Privacy Guide' that informs users that they completed the 'Privacy Guide'.">
+       You can come back anytime to take another look
+     </message>
+-    <message name="IDS_SETTINGS_PRIVACY_GUIDE_COMPLETION_CARD_LEAVE_BUTTON" desc="Text of a button in the completion card in the 'Privacy Guide' that leads the user back to Chrome settings.">
++    <message name="IDS_SETTINGS_PRIVACY_GUIDE_COMPLETION_CARD_LEAVE_BUTTON" desc="Text of a button in the completion card in the 'Privacy Guide' that leads the user back to Redrob settings.">
+       Done
+     </message>
+     <message name="IDS_SETTINGS_PRIVACY_GUIDE_COMPLETION_CARD_WAA_LABEL" desc="Text of the Web and App Activity label in the completion card of the 'Privacy Guide'.">
+       Web &#38; App Activity
+     </message>
+     <message name="IDS_SETTINGS_PRIVACY_GUIDE_COMPLETION_CARD_AI_SETTINGS_LABEL" desc="Text of the AI Innovations sublabel in the completion card of the 'Privacy Guide'.">
+-      Learn more about how AI shapes your experience and the controls provided by Chrome
++      Learn more about how AI shapes your experience and the controls provided by Redrob
+     </message>
+     <message name="IDS_SETTINGS_PRIVACY_GUIDE_MSBB_CARD_HEADER" desc="Header of the 'make searches and browsing better' card in the 'Privacy Guide'.">
+       Choose your search and browsing quality
+@@ -1571,7 +1571,7 @@
+         Sends an obfuscated portion of the URL to Google through a privacy server that hides your IP address
+       </message>
+       <message name="IDS_SETTINGS_PRIVACY_GUIDE_SAFE_BROWSING_CARD_STANDARD_PROTECTION_PRIVACY_DESCRIPTION1_PROXY" desc="A part of the privacy description of the standard protection section of the safe browsing card in the 'Privacy Guide'.">
+-        If a site tries to steal your password, or when you download a harmful file, Chrome may also send URLs, including bits of page content, to Google
++        If a site tries to steal your password, or when you download a harmful file, Redrob may also send URLs, including bits of page content, to Google
+       </message>
+     </if>
+ 
+@@ -1608,7 +1608,7 @@
+     <message name="IDS_SETTINGS_SAFETY_CHECK_UNUSED_SITE_PERMISSIONS_TOAST_LABEL" desc="'Unused Site Permissions' shows unused websites for which permissions have been revoked. This label is shown after a user has taken action to allow some permissions again.">
+       Permissions allowed again for <ph name="WEBSITE">$1<ex>www.example.com</ex></ph>
+     </message>
+-    <message name="IDS_SETTINGS_SAFETY_CHECK_UNUSED_SITE_PERMISSIONS_SETTING_LABEL" desc="By default Chrome auto-revokes (disables) permissions (e.g. Camera, Location, etc.) for websites that were not visited for a while. This label is for the toggle that allows users to switch off/on this functionality.">
++    <message name="IDS_SETTINGS_SAFETY_CHECK_UNUSED_SITE_PERMISSIONS_SETTING_LABEL" desc="By default Redrob auto-revokes (disables) permissions (e.g. Camera, Location, etc.) for websites that were not visited for a while. This label is for the toggle that allows users to switch off/on this functionality.">
+       Automatically remove permissions from unused sites
+     </message>
+     <message name="IDS_SETTINGS_SAFETY_CHECK_PASSWORDS_PRIMARY_LABEL" desc="'Passwords' is an element in safety check that allows users to check for their passwords being compromised.">
+@@ -1671,7 +1671,7 @@
+     <message name="IDS_SETTINGS_SAFEBROWSING_ENABLEPROTECTION" desc="The section title of 'Protects you and your device from dangerous sites'">
+       Safe Browsing (protects you and your device from dangerous sites)
+     </message>
+-    <message name="IDS_SETTINGS_SAFEBROWSING_ENABLEPROTECTION_DESC" desc="Checkbox label: should Chrome protect user and user's device from dangerous sites">
++    <message name="IDS_SETTINGS_SAFEBROWSING_ENABLEPROTECTION_DESC" desc="Checkbox label: should Redrob protect user and user's device from dangerous sites">
+       Sends URLs of some pages you visit to Google, when your security is at risk
+     </message>
+     <message name="IDS_SETTINGS_SAFEBROWSING_ENABLE_REPORTING_DESC" desc="Description for extended safe browsing">
+@@ -1727,10 +1727,10 @@
+     </message>
+     <if expr="_google_chrome">
+       <message name="IDS_SETTINGS_SAFEBROWSING_STANDARD_DESC_PROXY" desc="Description for safe browsing standard protection mode">
+-        Protects against sites, downloads, and extensions that are known to be dangerous. When you visit a site, Chrome sends an obfuscated portion of the URL to Google through a privacy server that hides your IP address. If a site does something suspicious, full URLs and bits of page content are also sent.
++        Protects against sites, downloads, and extensions that are known to be dangerous. When you visit a site, Redrob sends an obfuscated portion of the URL to Google through a privacy server that hides your IP address. If a site does something suspicious, full URLs and bits of page content are also sent.
+       </message>
+       <message name="IDS_SETTINGS_SAFEBROWSING_STANDARD_BULLET_TWO_PROXY" desc="Bullet point under the safe browsing standard protection mode">
+-        Sends an obfuscated portion of the URL to Google through a privacy server that hides your IP address. If a site tries to steal your password, or when you download a harmful file, Chrome may also send URLs, including bits of page content, to Google.
++        Sends an obfuscated portion of the URL to Google through a privacy server that hides your IP address. If a site tries to steal your password, or when you download a harmful file, Redrob may also send URLs, including bits of page content, to Google.
+       </message>
+     </if>
+     <message name="IDS_SETTINGS_SAFEBROWSING_STANDARD_EXPAND_ACCESSIBILITY_LABEL" desc="Label for the button that toggles showing the detailed description of safe browsing standard protection. Only visible by screen reader software.">
+@@ -2042,7 +2042,7 @@
+     <message name="IDS_SETTINGS_SITE_SETTINGS" desc="Text of the button that takes a user to the enhanced settings page thats allows users to modify site settings. Also the title of that settings page. It follows sentence case.">
+       Site settings
+     </message>
+-    <message name="IDS_SETTINGS_SITE_SETTINGS_DESCRIPTION" desc="Secondary, continued explanation of what content settings in Chrome do">
++    <message name="IDS_SETTINGS_SITE_SETTINGS_DESCRIPTION" desc="Secondary, continued explanation of what content settings in Redrob do">
+       Control what information websites can use and what content they can show you
+     </message>
+     <message name="IDS_SETTINGS_CLEAR_DATA" desc="Text for delete browsing data button in Privacy options in the tabbed UI">
+@@ -2101,10 +2101,10 @@
+     </message>
+ 
+     <!-- Reset Settings Page -->
+-    <message name="IDS_SETTINGS_RESET_PROMPT_TITLE" desc="Title for a prompt that gives an explanation of what would be resetted by 'Reset and clean up' section of Chrome Settings. " meaning="Chrome Cleanup feature. Try to use the same translation for 'Reset' in 'Reset and cleanup' string.">
++    <message name="IDS_SETTINGS_RESET_PROMPT_TITLE" desc="Title for a prompt that gives an explanation of what would be resetted by 'Reset and clean up' section of Redrob Settings. " meaning="Chrome Cleanup feature. Try to use the same translation for 'Reset' in 'Reset and cleanup' string.">
+       Reset settings?
+     </message>
+-    <message name="IDS_SETTINGS_RESET" desc="Title for an item in the 'Reset and clean up' section of Chrome Settings. If the user clicks this option, browser settings will be returned to their default values, after a confirmation by the user." meaning="Chrome Cleanup feature. Try to use the same translation for 'Reset' in 'Reset and cleanup' string.">
++    <message name="IDS_SETTINGS_RESET" desc="Title for an item in the 'Reset and clean up' section of Redrob Settings. If the user clicks this option, browser settings will be returned to their default values, after a confirmation by the user." meaning="Chrome Cleanup feature. Try to use the same translation for 'Reset' in 'Reset and cleanup' string.">
+       Reset settings
+     </message>
+     <message name="IDS_SETTINGS_RESET_SETTINGS_TRIGGER" desc="The label describing the 'reset profile setting' feature">
+@@ -2114,10 +2114,10 @@
+       Learn more about resetting settings
+     </message>
+     <message name="IDS_SETTINGS_RESET_AUTOMATED_DIALOG_V2_TITLE" desc="The title of the dialog informing the user that automated resetting of some settings occurred.">
+-      Chrome reset these settings
++      Redrob reset these settings
+     </message>
+     <message name="IDS_SETTINGS_RESET_AUTOMATED_DIALOG_V2_BODY" desc="The body of the dialog informing the user that automated resetting of some settings occurred.">
+-      These settings were changed from outside of Chrome. To protect you, Chrome reset them.
++      These settings were changed from outside of Redrob. To protect you, Redrob reset them.
+     </message>
+     <message name="IDS_SETTINGS_RESET_PINNED_TABS" desc="A string that is used to describe the pinned tabs setting.">
+       Pinned tabs
+@@ -2190,10 +2190,10 @@
+     <message name="IDS_SETTINGS_SEARCH_DEACTIVATE_SHORTCUT" desc="Text of the button that deactivates a shortcut" meaning="To turn off/disable usage of the shortcut">
+       Turn off shortcut
+     </message>
+-    <message name="IDS_SETTINGS_SEARCH_DISABLE_EXTENSION" desc="Text displayed for a button that allows the user to disable a Chrome extension">
++    <message name="IDS_SETTINGS_SEARCH_DISABLE_EXTENSION" desc="Text displayed for a button that allows the user to disable a Redrob extension">
+       Disable extension
+     </message>
+-    <message name="IDS_SETTINGS_SEARCH_MANAGE_EXTENSION" desc="Text displayed for a button that allows the user to manage a Chrome extension">
++    <message name="IDS_SETTINGS_SEARCH_MANAGE_EXTENSION" desc="Text displayed for a button that allows the user to manage a Redrob extension">
+       Manage extension
+     </message>
+     <message name="IDS_SETTINGS_SEARCH_NO_SITE_SHORTCUTS" desc="Text displayed when there are no site shortcuts present in the subsection.">
+@@ -2250,7 +2250,7 @@
+       Site search
+     </message>
+     <message name="IDS_SETTINGS_SEARCH_ENGINES_SITE_SEARCH_EXPLANATION" desc="Explanation for 'Site Search' section. Used interchangeably with IDS_SETTINGS_SEARCH_ENGINES_SITE_SEARCH_EXPLANATION_STARTER_PACK">
+-      To search a specific site or part of Chrome, type its shortcut in the address bar, followed by your preferred keyboard shortcut.
++      To search a specific site or part of Redrob, type its shortcut in the address bar, followed by your preferred keyboard shortcut.
+     </message>
+     <message name="IDS_SETTINGS_SEARCH_ENGINES_NO_SITES_ADDED" desc="Text shown when the 'Site Search' section is empty">
+       No sites added
+@@ -2265,7 +2265,7 @@
+       Extensions
+     </message>
+     <message name="IDS_SETTINGS_SEARCH_ENGINES_EXTENSION_ENGINES_EXPLANATION" desc="Explanation for a section that displays search engines added by extensions">
+-      Some extensions can add search engines to Chrome
++      Some extensions can add search engines to Redrob
+     </message>
+     <message name="IDS_SETTINGS_SEARCH_ENGINES_NAME" desc="Label for a table column that holds the name of a search engine or site search provider">
+       Name
+@@ -2291,7 +2291,7 @@
+     <message name="IDS_SETTINGS_SEARCH_ENGINES_VIEW_DETAILS" desc="Label for button that allows the user to view details of a search engine">
+       Details
+     </message>
+-    <message name="IDS_SETTINGS_SEARCH_ENGINES_MANAGE_EXTENSION" desc="Text displayed for a button that allows the user to manage a Chrome extension">
++    <message name="IDS_SETTINGS_SEARCH_ENGINES_MANAGE_EXTENSION" desc="Text displayed for a button that allows the user to manage a Redrob extension">
+       Manage
+     </message>
+     <message name="IDS_SETTINGS_SEARCH_ENGINES_KEYBOARD_SHORTCUTS_TITLE" desc="Label for scoped search mode trigger options section">
+@@ -2686,7 +2686,7 @@
+     <message name="IDS_SETTINGS_SITE_SETTINGS_JAVASCRIPT_OPTIMIZER_BLOCKED" desc="Label for the disabled option of the JavaScript optimizer content setting.">
+       Don’t allow sites to use JavaScript optimization
+     </message>
+-    <message name="IDS_SETTINGS_SITE_SETTINGS_JAVASCRIPT_OPTIMIZER_BLOCKED_UNFAMILIAR_SITES" desc="Label for option where JavaScript optimizer is disabled for sites which are unfamiliar to the user. Familiarity is determined using a heuristic based on the user's Chrome history.">
++    <message name="IDS_SETTINGS_SITE_SETTINGS_JAVASCRIPT_OPTIMIZER_BLOCKED_UNFAMILIAR_SITES" desc="Label for option where JavaScript optimizer is disabled for sites which are unfamiliar to the user. Familiarity is determined using a heuristic based on the user's Redrob history.">
+       Automatically disable JavaScript optimizers on unfamiliar sites
+     </message>
+     <message name="IDS_SETTINGS_SITE_SETTINGS_JAVASCRIPT_OPTIMIZER_BLOCKED_UNFAMILIAR_SITES_SUB_LABEL" desc="Sublabel for option where JavaScript optimizer is disabled for sites which are unfamiliar to the user.">
+@@ -2824,7 +2824,7 @@
+     <message name="IDS_SETTINGS_SITE_SETTINGS_PERMISSION_QUIET" desc="Label for the quiet version of the permission prompt.">
+       Collapse all requests in the address bar
+     </message>
+-    <message name="IDS_SETTINGS_SITE_SETTINGS_PERMISSION_CPSS" desc="Label for the CPSS version of the permission prompt. Chrome decides to show either the loud or quiet version.">
++    <message name="IDS_SETTINGS_SITE_SETTINGS_PERMISSION_CPSS" desc="Label for the CPSS version of the permission prompt. Redrob decides to show either the loud or quiet version.">
+      Collapse unwanted requests (recommended)
+     </message>
+     <message name="IDS_SETTINGS_SITE_SETTINGS_PERMISSION_LOUD" desc="Label for the loud version of the permission prompt.">
+@@ -2938,7 +2938,7 @@
+     </if>
+     <if expr="is_win and _google_chrome">
+       <message name="IDS_SETTINGS_SITE_SETTINGS_PROTECTED_CONTENT_IDENTIFIERS_ALLOWED_SUB_LABEL" desc="A subtitle for the ‘Protected Content IDs’ setting, shown if user chooses to allow Protected Content IDs. This text explains that enabling protected content IDs may result in live captioning not working.">
+-        Chrome Live Caption might not work
++        Redrob Live Caption might not work
+       </message>
+     </if>
+     <message name="IDS_SETTINGS_SITE_SETTINGS_PROTOCOL_HANDLERS_DESCRIPTION" desc="Description of the protocol handlers content setting.">
+@@ -3085,7 +3085,7 @@
+     <message name="IDS_SETTINGS_THIRD_PARTY_COOKIES_PAGE_DESCRIPTION" desc="An explanation of what third-party cookies are that appear beneath the page title: 'Third-party cookies'. * 'embed': A site you visit uses HTML to construct the page. HTML tags include references to images, like img src='filename.jpg', that are used to show an image. 'filename.jpg' can be a local file owned by the site you visit or a site can embed an external file with something like img src='www.third-party-site.com/images/filename.jpg'. This image is embedded into the site you visit and www.third-party-site.com can set a third-party cookie onto your device.">
+       A site you visit can embed content from other sites, for example, images, ads, and text. Cookies set by these other sites are called third-party cookies.
+     </message>
+-    <message name="IDS_SETTINGS_THIRD_PARTY_COOKIES_PAGE_TITLE" desc="The title of a new page. Today, Chrome has a 'Cookies and other site data' page at chrome://settings/cookies. As part of the Privacy Sandbox project (see below), Chrome is deprecating third-party cookies but maintaining first-party cookies. As a step towards the ultimate deprecation of third-party cookies, we're first separating them from other forms of 'site data', making it easier to eventually remove this page completely. Cookies are often used for honorable objectives, and the difference between first and third-party cookies is important (see any of the many resources online such as https://termly.io/resources/articles/first-party-cookies-vs-third-party-cookies/.">
++    <message name="IDS_SETTINGS_THIRD_PARTY_COOKIES_PAGE_TITLE" desc="The title of a new page. Today, Redrob has a 'Cookies and other site data' page at chrome://settings/cookies. As part of the Privacy Sandbox project (see below), Redrob is deprecating third-party cookies but maintaining first-party cookies. As a step towards the ultimate deprecation of third-party cookies, we're first separating them from other forms of 'site data', making it easier to eventually remove this page completely. Cookies are often used for honorable objectives, and the difference between first and third-party cookies is important (see any of the many resources online such as https://termly.io/resources/articles/first-party-cookies-vs-third-party-cookies/.">
+       Third-party cookies
+     </message>
+     <message name="IDS_SETTINGS_THIRD_PARTY_COOKIES_LINK_ROW_LABEL" desc="This text is the label of a page. Here, it serves as a button that opens the new page.">
+@@ -3154,8 +3154,8 @@
+     <message name="IDS_SETTINGS_SITE_SETTINGS_INSECURE_CONTENT_BLOCK" desc="Label explaining that insecure content is blocked by default in secure sites. Insecure content refers to content served over HTTP, secure sites refers to sites served over HTTPS.">
+       Insecure content is blocked by default on secure sites
+     </message>
+-    <message name="IDS_SETTINGS_SITE_SETTINGS_PDF_DOWNLOAD_PDFS" desc="Label for downloading PDF documents instead of automatically opening them in Chrome.">
+-      Download PDF files instead of automatically opening them in Chrome
++    <message name="IDS_SETTINGS_SITE_SETTINGS_PDF_DOWNLOAD_PDFS" desc="Label for downloading PDF documents instead of automatically opening them in Redrob.">
++      Download PDF files instead of automatically opening them in Redrob
+     </message>
+     <message name="IDS_SETTINGS_SITE_SETTINGS_RECENT_ACTIVITY" desc="Label for the section which contains the user's recent permissions changes">
+       Recent activity
+@@ -3260,10 +3260,10 @@
+     <message name="IDS_SETTINGS_SITE_SETTINGS_CONTENT_MORE" desc="The text on the button used to toggle the display of additional content settings.">
+       Additional content settings
+     </message>
+-    <message name="IDS_SETTINGS_SITE_SETTINGS_ALLOWLISTED" desc="A subtitle for the ‘Allowlisted’ setting, shown if a WebUI's permission is internally allowlisted by Chrome.">
++    <message name="IDS_SETTINGS_SITE_SETTINGS_ALLOWLISTED" desc="A subtitle for the ‘Allowlisted’ setting, shown if a WebUI's permission is internally allowlisted by Redrob.">
+       Allowlisted internally
+     </message>
+-    <message name="IDS_SETTINGS_SITE_SETTINGS_ADS_BLOCK_BLOCKLISTED_SINGULAR" desc="A subtitle for the ‘Ads’ setting, shown if a website is known to show ads that have a poor user experience (intrusive, misleading) and is blocked from showing ads by Chrome.">
++    <message name="IDS_SETTINGS_SITE_SETTINGS_ADS_BLOCK_BLOCKLISTED_SINGULAR" desc="A subtitle for the ‘Ads’ setting, shown if a website is known to show ads that have a poor user experience (intrusive, misleading) and is blocked from showing ads by Redrob.">
+       Site shows intrusive or misleading ads
+     </message>
+     <message name="IDS_SETTINGS_SITE_SETTINGS_ADS_BLOCK_NOT_BLOCKLISTED_SINGULAR" desc="A subtitle for the ‘Ads’ setting, shown if user chooses to Block ads. ‘Block’ refers to the blocking of ads.">
+@@ -3439,8 +3439,8 @@
+     <message name="IDS_SETTINGS_SITE_NO_SITES_ADDED" desc="Explanation for not showing a list of site exceptions">
+       No sites added
+     </message>
+-    <message name="IDS_SETTINGS_SITE_SETTINGS_BLOCK_AUTOPLAY" desc="A label for a toggle in site settings to block autoplay. If the toggle is on then Chrome will block autoplay by default and use an algorithm to determine which sites should still be able to autoplay. If the toggle is off then autoplay will be enabled for all sites.">
+-      Let Chrome choose when sites can play sound (recommended)
++    <message name="IDS_SETTINGS_SITE_SETTINGS_BLOCK_AUTOPLAY" desc="A label for a toggle in site settings to block autoplay. If the toggle is on then Redrob will block autoplay by default and use an algorithm to determine which sites should still be able to autoplay. If the toggle is off then autoplay will be enabled for all sites.">
++      Let Redrob choose when sites can play sound (recommended)
+     </message>
+     <message name="IDS_SETTINGS_SITE_SETTINGS_EMPTY_ALL_SITES_PAGE" desc="Explanation shown when there are no sites that have appeared yet on the All Sites page.">
+       Sites you visit will appear here
+@@ -3472,7 +3472,7 @@
+     <message name="IDS_SETTINGS_SITE_SETTINGS_PAGE_SITE_DATA_BLOCKED_SUB_LABEL" desc="2 of 3 possible states for the On-device site data setting. This text appears beneath the 'On-device site data' label and shows the user the state of the setting. With this status, sites have the least flexibility.">
+       Sites aren't allowed to save data on your device
+     </message>
+-    <message name="IDS_SETTINGS_SITE_SETTINGS_PAGE_SITE_DATA_DELETE_ON_EXIT_SUB_LABEL" desc="3 of 3 possible states for the On-device site data setting. This text appears beneath the 'On-device site data' label and shows the user the state of the setting. With this status, data stored on the user's device is deleted each time the user closes all Chrome windows.">
++    <message name="IDS_SETTINGS_SITE_SETTINGS_PAGE_SITE_DATA_DELETE_ON_EXIT_SUB_LABEL" desc="3 of 3 possible states for the On-device site data setting. This text appears beneath the 'On-device site data' label and shows the user the state of the setting. With this status, data stored on the user's device is deleted each time the user closes all Redrob windows.">
+       Site data is deleted from your device when you close all windows
+     </message>
+     <message name="IDS_SETTINGS_EXPIRES_AFTER_TIME_LABEL" desc="Text after a url (e.g. google.com) that explains that that a website permission is allowed or blocked until a set date in the future.">
+@@ -3483,10 +3483,10 @@
+     </message>
+ 
+     <!-- Site Settings - Site Data Page-->
+-    <message name="IDS_SETTINGS_SITE_DATA_PAGE_TITLE" desc="A page title for a new page. What is 'On-device site data'? When you interact with a site, that site can remember things about what you do. For example, you might place a pair of shoes in a shopping cart, close down your browser, and find those same shoes in your shopping cart when you visit the same site a week later. Sometimes that info is saved in the Cloud. Sometimes that info is saved on the user's device. There are several ways a site can save info to the user's device—for example, with cookies (text files saved to your device), small JavaScript databases, and even Chrome's new ad settings that are part of the Privacy Sandbox project (see details below). This page introduces the concept of on-device site data, allows the user to see which sites are using it, and allows the user to delete all saved data or just data from specific sites.">
++    <message name="IDS_SETTINGS_SITE_DATA_PAGE_TITLE" desc="A page title for a new page. What is 'On-device site data'? When you interact with a site, that site can remember things about what you do. For example, you might place a pair of shoes in a shopping cart, close down your browser, and find those same shoes in your shopping cart when you visit the same site a week later. Sometimes that info is saved in the Cloud. Sometimes that info is saved on the user's device. There are several ways a site can save info to the user's device—for example, with cookies (text files saved to your device), small JavaScript databases, and even Redrob's new ad settings that are part of the Privacy Sandbox project (see details below). This page introduces the concept of on-device site data, allows the user to see which sites are using it, and allows the user to delete all saved data or just data from specific sites.">
+       On-device site data
+     </message>
+-    <message name="IDS_SETTINGS_SITE_DATA_PAGE_DESCRIPTION" desc="A paragraph that appear beneath the page title: 'On-device site data'. It defines what on-device site data is. What is 'On-device site data'? When you interact with a site, that site can remember things about what you do. For example, you might place a pair of shoes in a shopping cart, close down your browser, and find those same shoes in your shopping cart when you visit the same site a week later. Sometimes that info is saved in the Cloud. Sometimes that info is saved on the user's device. There are several ways a site can save info to the user's device—for example, with cookies (text files saved to your device), small JavaScript databases, and even Chrome's new ad settings that are part of the Privacy Sandbox project (see details below). This page introduces the concept of on-device site data, allows the user to see which sites are using it, and allows the user to delete all saved data or just data from specific sites. **** CONTEXT PRIVACY SANDBOX **** Chrome's Privacy Sandbox initiative 1) deprecates third-party cookies in Chrome, 2) supports free and open content on the web (by finding better ways to support ads online), 3) while providing stronger privacy protections for users. You can see a high-level description of this public project at www.privacysanbox.com.">
++    <message name="IDS_SETTINGS_SITE_DATA_PAGE_DESCRIPTION" desc="A paragraph that appear beneath the page title: 'On-device site data'. It defines what on-device site data is. What is 'On-device site data'? When you interact with a site, that site can remember things about what you do. For example, you might place a pair of shoes in a shopping cart, close down your browser, and find those same shoes in your shopping cart when you visit the same site a week later. Sometimes that info is saved in the Cloud. Sometimes that info is saved on the user's device. There are several ways a site can save info to the user's device—for example, with cookies (text files saved to your device), small JavaScript databases, and even Redrob's new ad settings that are part of the Privacy Sandbox project (see details below). This page introduces the concept of on-device site data, allows the user to see which sites are using it, and allows the user to delete all saved data or just data from specific sites. **** CONTEXT PRIVACY SANDBOX **** Redrob's Privacy Sandbox initiative 1) deprecates third-party cookies in Redrob, 2) supports free and open content on the web (by finding better ways to support ads online), 3) while providing stronger privacy protections for users. You can see a high-level description of this public project at www.privacysanbox.com.">
+       A site you visit can save info about what you're doing so that it works as expected — for example, to keep you signed in to a site or to save items in your shopping cart. Often sites save this info temporarily on your device.
+     </message>
+     <message name="IDS_SETTINGS_SITE_DATA_PAGE_DEFAULT_BEHAVIOR_HEADING" desc="A label on a permissions page. For example, see the Microphone permission at chrome://settings/content/microphone.">
+@@ -3507,7 +3507,7 @@
+     <message name="IDS_SETTINGS_SITE_DATA_PAGE_BLOCK_RADIO_LABEL" desc="3 of 3 choices the user has regarding the 'default behavior' of the 'On-device site data' setting. We include 'not recommended' because the user could have a poor experience with any given site. Imagine getting prompted to sign in again every time you click a link?">
+       Don't allow sites to save data on your device (not recommended)
+     </message>
+-    <message name="IDS_SETTINGS_SITE_DATA_PAGE_BLOCK_RADIO_SUB_LABEL" desc="A description of the benefit/cost of choosing 'Sites can save content on your device. * 'don't want to leave information on your device': We think that most users should allow all on-device site data because sites might break if they don't. But there are cases for which this info could prove harmful. Imagine a case of domestic abuse and a tech-savvy partner who can go into Chrome settings and find saved information about the activity of their partner. Or a journalist working in a sensitive environment. We want to convey the value of this option without alarming users.">
++    <message name="IDS_SETTINGS_SITE_DATA_PAGE_BLOCK_RADIO_SUB_LABEL" desc="A description of the benefit/cost of choosing 'Sites can save content on your device. * 'don't want to leave information on your device': We think that most users should allow all on-device site data because sites might break if they don't. But there are cases for which this info could prove harmful. Imagine a case of domestic abuse and a tech-savvy partner who can go into Redrob settings and find saved information about the activity of their partner. Or a journalist working in a sensitive environment. We want to convey the value of this option without alarming users.">
+       Sites may not work as you would expect. Choose this option if you don't want to leave information on your device about sites you visit.
+     </message>
+     <message name="IDS_SETTINGS_SITE_DATA_PAGE_CUSTOMIZED_BEHAVIOR_HEADING" desc="A label on a permissions page. For example, see the Microphone permission at chrome://settings/content/microphone.">
+@@ -3630,7 +3630,7 @@
+       Google Profile photo
+     </message>
+ 
+-    <message name="IDS_SETTINGS_PEOPLE_VERIFY_ACCOUNT_BUTTON" desc="This button is shown in Chrome's Settings, in the 'You and Google' section. It appears when the user needs to sign back in to Chrome in order to continue saving and using data (like bookmarks, passwords, or payment methods) in their Google Account. When the user clicks this button, they will be prompted to enter their Google Account credentials.">
++    <message name="IDS_SETTINGS_PEOPLE_VERIFY_ACCOUNT_BUTTON" desc="This button is shown in Redrob's Settings, in the 'You and Google' section. It appears when the user needs to sign back in to Redrob in order to continue saving and using data (like bookmarks, passwords, or payment methods) in their Google Account. When the user clicks this button, they will be prompted to enter their Google Account credentials.">
+       Verify it's you
+     </message>
+     <message name="IDS_SETTINGS_TURN_OFF_SYNC_MANAGED_PROFILE_EXPLANATION" desc="The text to display in the 'Turn Sync off' dialog to stop syncing for managed profiles.">
+@@ -3651,7 +3651,7 @@
+     <message name="IDS_SETTINGS_SYNC_SETTINGS_SAVED_TOAST_LABEL" desc="The notification shown to user after they saved sync settings, and sync is now started.">
+       Settings saved. Sync started.
+     </message>
+-    <message name="IDS_SETTINGS_CHROME_SIGNIN_OPTION_SAVED_TOAST_LABEL" desc="The notification shown to user after they save the setting that controls whether a user gets signed in to Chrome when signing in to Google Services.">
++    <message name="IDS_SETTINGS_CHROME_SIGNIN_OPTION_SAVED_TOAST_LABEL" desc="The notification shown to user after they save the setting that controls whether a user gets signed in to Redrob when signing in to Google Services.">
+       Choice saved. Your choice will apply when you sign in to other Google services.
+     </message>
+ 
+@@ -3662,7 +3662,7 @@
+       <message name="IDS_SETTINGS_PROFILE_SHORTCUT_TOGGLE_LABEL" desc="Label of the toggle that creates or removes a desktop shortcut for the profile.">
+         Show desktop shortcut
+       </message>
+-      <message name="IDS_SETTINGS_CUSTOMIZE_PROFILE" desc="Title of the manage profile subpage. This is a subpage to customize Chrome Profile.">
++      <message name="IDS_SETTINGS_CUSTOMIZE_PROFILE" desc="Title of the manage profile subpage. This is a subpage to customize Redrob Profile.">
+         Customize profile
+       </message>
+       <message name="IDS_SETTINGS_PICK_A_THEME_COLOR" desc="Title of edit profile theme color section on the manage profile page.">
+@@ -3708,20 +3708,20 @@
+       Google services
+     </message>
+ 
+-    <message name="IDS_SETTINGS_SYNC_DISCONNECT_EXPLANATION" desc="The text to display in the Sign out of Chrome dialog to stop syncing for non-managed profiles.">
++    <message name="IDS_SETTINGS_SYNC_DISCONNECT_EXPLANATION" desc="The text to display in the Sign out of Redrob dialog to stop syncing for non-managed profiles.">
+       Changes to your bookmarks, history, passwords, and other settings will no longer be synced to your Google Account. However, your existing data will remain stored in your Google Account and can be managed on <ph name="BEGIN_LINK">&lt;a href="$1" target=&quot;_blank&quot;&gt;<ex>&lt;a href="$1" target=&quot;_blank&quot;&gt;</ex></ph>Google Dashboard<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>.
+     </message>
+-    <message name="IDS_SETTINGS_SYNC_DISCONNECT_AND_SIGN_OUT_EXPLANATION" desc="The text to display in the Sign out of Chrome dialog to stop syncing and sign-out for non-managed profiles.">
++    <message name="IDS_SETTINGS_SYNC_DISCONNECT_AND_SIGN_OUT_EXPLANATION" desc="The text to display in the Sign out of Redrob dialog to stop syncing and sign-out for non-managed profiles.">
+       This will sign you out of your Google Accounts. Your bookmarks, history, passwords, and more will no longer be synced.
+     </message>
+-    <message name="IDS_SETTINGS_SYNC_DISCONNECT_AND_SIGN_OUT_EXPLANATION_SUPERVISED_PROFILE" desc="The text to display in the Sign out of Chrome dialog to stop syncing and sign-out for supervised profiles." translateable="false">
++    <message name="IDS_SETTINGS_SYNC_DISCONNECT_AND_SIGN_OUT_EXPLANATION_SUPERVISED_PROFILE" desc="The text to display in the Sign out of Redrob dialog to stop syncing and sign-out for supervised profiles." translateable="false">
+       This will sign you out of your Google Accounts. Your parent's choices won't be able to keep you safer online. Your bookmarks, history, passwords, and more will no longer be synced.
+     </message>
+-    <message name="IDS_SETTINGS_SYNC_DISCONNECT_EXPAND_ACCESSIBILITY_LABEL" desc="Label for the button in the Sign out of Chrome dialog that toggles showing the profile stats. Only visible by screen reader software.">
++    <message name="IDS_SETTINGS_SYNC_DISCONNECT_EXPAND_ACCESSIBILITY_LABEL" desc="Label for the button in the Sign out of Redrob dialog that toggles showing the profile stats. Only visible by screen reader software.">
+       Show profile stats
+     </message>
+     <message name="IDS_SETTINGS_ENCRYPT_WITH_SYNC_PASSPHRASE_LABEL" desc="Label for the radio button which, when selected, causes synced settings to be encrypted with a user-provided password.">
+-      Encrypt synced data with your own <ph name="BEGIN_LINK">&lt;a href="$1" target=&quot;_blank&quot;&gt;<ex>&lt;a href="$1" target=&quot;_blank&quot;&gt;</ex></ph>sync passphrase<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>. Payment methods and addresses from Google Pay won’t be encrypted. Browsing history from Chrome won’t sync.
++      Encrypt synced data with your own <ph name="BEGIN_LINK">&lt;a href="$1" target=&quot;_blank&quot;&gt;<ex>&lt;a href="$1" target=&quot;_blank&quot;&gt;</ex></ph>sync passphrase<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>. Payment methods and addresses from Google Pay won’t be encrypted. Browsing history from Redrob won’t sync.
+     </message>
+     <message name="IDS_SETTINGS_PASSPHRASE_EXPLANATION_TEXT" desc="Message shown when explicit passphrase is selected.">
+       Only someone with your passphrase can read your encrypted data. The passphrase is not sent to or stored by Google. If you forget your passphrase or want to change this setting, you'll need to <ph name="BEGIN_LINK">&lt;a href="$1" target=&quot;_blank&quot;&gt;<ex>&lt;a href="$1" target=&quot;_blank&quot;&gt;</ex></ph>reset sync<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>.
+@@ -3735,25 +3735,25 @@
+     <message name="IDS_SETTINGS_PERSONALIZE_GOOGLE_SERVICES_TITLE" desc="Title of the personalize Google services section. When clicked, takes the user to the Google Activity Controls.">
+       Control how your browsing history is used to personalize Search and more
+     </message>
+-    <message name="IDS_SETTINGS_PERSONALIZE_GOOGLE_SERVICES_TITLE_V2" desc="This is the title of a setting that directs users to other settings where they can control how Chrome history can be used to personalize other Google services. This title appears in Chrome's Advanced Sync settings, before the 'To get personalization and other features' string.">
++    <message name="IDS_SETTINGS_PERSONALIZE_GOOGLE_SERVICES_TITLE_V2" desc="This is the title of a setting that directs users to other settings where they can control how Redrob history can be used to personalize other Google services. This title appears in Redrob's Advanced Sync settings, before the 'To get personalization and other features' string.">
+       Control how browsing history is used with your other data across Google services
+     </message>
+-    <message name="IDS_SETTINGS_PERSONALIZE_GOOGLE_SERVICES_WAA_TITLE" desc="This string is found on a link in Chrome's Advanced Sync settings. When the user taps it, the link takes the user to 'Web &#38; App Activity' in the Google Account's Activity Controls. This text should match the branded term 'Web &#38; App Activity' in Glossary Manager: https://localization.google.com/glossary/termset?gid=27517723&#38;tsid=77d3b75.">
++    <message name="IDS_SETTINGS_PERSONALIZE_GOOGLE_SERVICES_WAA_TITLE" desc="This string is found on a link in Redrob's Advanced Sync settings. When the user taps it, the link takes the user to 'Web &#38; App Activity' in the Google Account's Activity Controls. This text should match the branded term 'Web &#38; App Activity' in Glossary Manager: https://localization.google.com/glossary/termset?gid=27517723&#38;tsid=77d3b75.">
+       Web &#38; App Activity
+     </message>
+-    <message name="IDS_SETTINGS_PERSONALIZE_GOOGLE_SERVICES_LINKED_SERVICES_TITLE" desc="This string is found on a link in Chrome's Advanced Sync settings. When the user taps it, the link takes the user to 'Linked Google services' in the Google Account's Data &#38; privacy settings. The link is on a setting that users see in Chrome's Advanced Sync settings. This text should match the branded term 'linked Google services' in Glossary Manager: https://localization.google.com/glossary/termset?gid=27517723&#38;tsid=517bace2.">
++    <message name="IDS_SETTINGS_PERSONALIZE_GOOGLE_SERVICES_LINKED_SERVICES_TITLE" desc="This string is found on a link in Redrob's Advanced Sync settings. When the user taps it, the link takes the user to 'Linked Google services' in the Google Account's Data &#38; privacy settings. The link is on a setting that users see in Redrob's Advanced Sync settings. This text should match the branded term 'linked Google services' in Glossary Manager: https://localization.google.com/glossary/termset?gid=27517723&#38;tsid=517bace2.">
+       Linked Google services
+     </message>
+-    <message name="IDS_SETTINGS_SIGNIN_CHROME_SIGNIN_OPTION_PLACEHOLDER" desc="Placeholder for the dropdown list of options for the setting 'Sign in to Chrome when you sign in to other Google services'. This choice is not selectable and only exist and shown if the user did not do any prior choice. It will be overriden by any choice made by the user.">
++    <message name="IDS_SETTINGS_SIGNIN_CHROME_SIGNIN_OPTION_PLACEHOLDER" desc="Placeholder for the dropdown list of options for the setting 'Sign in to Redrob when you sign in to other Google services'. This choice is not selectable and only exist and shown if the user did not do any prior choice. It will be overriden by any choice made by the user.">
+       Select an option
+     </message>
+-    <message name="IDS_SETTINGS_SIGNIN_CHROME_SIGNIN_OPTION_SIGNIN" desc="One of three options for the setting is called 'Sign in to Chrome when you sign in to other Google services'. When the user chooses this option, the user will automatically sign in to Chrome after they sign in to a Google service (like Gmail) using Chrome. The verb tense should be descriptive, not imperative.">
++    <message name="IDS_SETTINGS_SIGNIN_CHROME_SIGNIN_OPTION_SIGNIN" desc="One of three options for the setting is called 'Sign in to Redrob when you sign in to other Google services'. When the user chooses this option, the user will automatically sign in to Redrob after they sign in to a Google service (like Gmail) using Redrob. The verb tense should be descriptive, not imperative.">
+       Sign in
+     </message>
+-    <message name="IDS_SETTINGS_SIGNIN_CHROME_SIGNIN_OPTION_DO_NOT_SIGNIN" desc="One of three options for the setting is called 'Sign in to Chrome when you sign in to other Google services'. When the user chooses this option, the user will NOT automatically sign in to Chrome after they sign in to a Google service (like Gmail) using Chrome. The verb tense should be descriptive, not imperative.">
++    <message name="IDS_SETTINGS_SIGNIN_CHROME_SIGNIN_OPTION_DO_NOT_SIGNIN" desc="One of three options for the setting is called 'Sign in to Redrob when you sign in to other Google services'. When the user chooses this option, the user will NOT automatically sign in to Redrob after they sign in to a Google service (like Gmail) using Redrob. The verb tense should be descriptive, not imperative.">
+       Don’t sign in
+     </message>
+-    <message name="IDS_SETTINGS_SIGNIN_CHROME_SIGNIN_OPTION_ALWAYS_ASK" desc="One of three options for the setting is called 'Sign in to Chrome when you sign in to other Google services'. When the user chooses this option, the user will be asked whether they want to sign in to Chrome after they sign in to a Google service (like Gmail) using Chrome. The verb tense should be descriptive, not imperative.">
++    <message name="IDS_SETTINGS_SIGNIN_CHROME_SIGNIN_OPTION_ALWAYS_ASK" desc="One of three options for the setting is called 'Sign in to Redrob when you sign in to other Google services'. When the user chooses this option, the user will be asked whether they want to sign in to Redrob after they sign in to a Google service (like Gmail) using Redrob. The verb tense should be descriptive, not imperative.">
+       Ask every time
+     </message>
+     <message name="IDS_SETTINGS_GOOGLE_ACCOUNT" desc="Label for the section that takes the user to the Google Account website from Related Google services.">
 @@ -3806,6 +3806,12 @@
        <message name="IDS_SETTINGS_IMPORT_AUTOFILL_FORM_DATA_CHECKBOX" desc="Checkbox for importing form data for autofill">
          Autofill form data
@@ -15,3 +540,292 @@ index caae29834c2cf5fd07bbfb05dc1f98be09e34470..c4d394aea392ef966064d703a729f100
  
        <message name="IDS_SETTINGS_IMPORT_CHOOSE_FILE" desc="Text for the Choose File on dialog">
          Choose File
+@@ -3825,16 +3831,16 @@
+     <message name="IDS_SETTINGS_HISTORY_SEARCH_SETTING_LABEL" desc="Title of the page of the settings that enables history search.">
+       History search, powered by AI
+     </message>
+-    <message name="IDS_SETTINGS_HISTORY_SEARCH_SETTING_SUBLABEL_V2" desc="This string is the subheading of a setting for ‘History search, powered by AI’. This subheading summarizes the user benefit of the History Search feature. This is an AI (artificial intelligence) feature that improves the search functionality so that users can write queries in natural language and search their Chrome browsing history. The tone should be motivating.">
++    <message name="IDS_SETTINGS_HISTORY_SEARCH_SETTING_SUBLABEL_V2" desc="This string is the subheading of a setting for ‘History search, powered by AI’. This subheading summarizes the user benefit of the History Search feature. This is an AI (artificial intelligence) feature that improves the search functionality so that users can write queries in natural language and search their Redrob browsing history. The tone should be motivating.">
+       Use everyday language to search your browsing history and find sites you visited
+     </message>
+     <message name="IDS_SETTINGS_HISTORY_SEARCH_LEARN_MORE_A11Y_LABEL" desc="Label for the 'Learn more' link in the toggle for the setting that enables history search.">
+       Learn more about history searches
+     </message>
+-    <message name="IDS_SETTINGS_HISTORY_SEARCH_WHEN_ON_PAGE_CONTENT" desc="This string is a bullet point in the ‘When on’ column, which describes the behavior of this feature. This string explains how users can write queries in natural language and search their Chrome browsing history. The tone should be motivating.">
++    <message name="IDS_SETTINGS_HISTORY_SEARCH_WHEN_ON_PAGE_CONTENT" desc="This string is a bullet point in the ‘When on’ column, which describes the behavior of this feature. This string explains how users can write queries in natural language and search their Redrob browsing history. The tone should be motivating.">
+       You can search your browsing history based on general page content, not only page title and URL, and see improved results
+     </message>
+-    <message name="IDS_SETTINGS_HISTORY_SEARCH_WHEN_ON_SEARCH_FROM" desc="This string is a bullet point in the ‘When on’ column, which describes the behavior of this feature. This string explains how users search their Chrome browsing history from the address bar (always shown on the top of Chrome). They can also search from the History page itself. The tone should be motivating.">
++    <message name="IDS_SETTINGS_HISTORY_SEARCH_WHEN_ON_SEARCH_FROM" desc="This string is a bullet point in the ‘When on’ column, which describes the behavior of this feature. This string explains how users search their Redrob browsing history from the address bar (always shown on the top of Redrob). They can also search from the History page itself. The tone should be motivating.">
+       You can search in the address bar using "@history", as well as from the History page
+     </message>
+     <message name="IDS_SETTINGS_HISTORY_SEARCH_WHEN_ON_LOG_START" desc="This string is a bullet point in the ‘When on’ column, which describes the behavior of this feature. This string explains that the AI-powered history search results will only use data about sites the user visits after they turn on this feature. Earlier history data, from when the feature setting was turned off, won’t appear in the search results. The tone should be informative.">
+@@ -3846,31 +3852,31 @@
+     <message name="IDS_SETTINGS_HISTORY_SEARCH_CONSIDER_DATA_ENCRYPTED" desc="This is a bullet point in the ‘Things to consider’ column, which describes things users should consider about a feature. This string explains that AI features will save data to the user’s device in order to provide the feature’s respective benefit. The data will be appropriately encrypted for security. The tone should be informative.">
+       As you browse sites, their page contents are encrypted and saved to your device
+     </message>
+-    <message name="IDS_SETTINGS_HISTORY_SEARCH_SUBLABEL_ON" desc="This string is the subheading of a setting for ‘History search, powered by AI’. This subheading notes that the setting is currently turned on. Then, it summarizes the user benefit of the History Search feature. This is an AI (artificial intelligence) feature that improves the search functionality so that users can write queries in natural language and search their Chrome browsing history. The tone should be motivating.">
++    <message name="IDS_SETTINGS_HISTORY_SEARCH_SUBLABEL_ON" desc="This string is the subheading of a setting for ‘History search, powered by AI’. This subheading notes that the setting is currently turned on. Then, it summarizes the user benefit of the History Search feature. This is an AI (artificial intelligence) feature that improves the search functionality so that users can write queries in natural language and search their Redrob browsing history. The tone should be motivating.">
+       Use everyday language to search your browsing history and find sites you visited. This setting is on.
+     </message>
+-    <message name="IDS_SETTINGS_HISTORY_SEARCH_SUBLABEL_OFF" desc="This string is the subheading of a setting for ‘History search, powered by AI’. This subheading notes that the setting is currently turned on. Then, it summarizes the user benefit of the History Search feature. This is an AI (artificial intelligence) feature that improves the search functionality so that users can write queries in natural language and search their Chrome browsing history. The tone should be motivating.">
++    <message name="IDS_SETTINGS_HISTORY_SEARCH_SUBLABEL_OFF" desc="This string is the subheading of a setting for ‘History search, powered by AI’. This subheading notes that the setting is currently turned on. Then, it summarizes the user benefit of the History Search feature. This is an AI (artificial intelligence) feature that improves the search functionality so that users can write queries in natural language and search their Redrob browsing history. The tone should be motivating.">
+       Use everyday language to search your browsing history and find sites you visited. This setting is off.
+     </message>
+     <message name="IDS_SETTINGS_HISTORY_SEARCH_WITH_ANSWERS_SETTING_SUBLABEL_V2" desc="Sublabel of the setting that enables history search, powered by AI, with answers enabled.">
+       Use everyday language to search your browsing history and find sites you visited. You can also ask questions and get answers based on your browsing history
+     </message>
+-    <message name="IDS_SETTINGS_HISTORY_SEARCH_WITH_ANSWERS_WHEN_ON_PAGE_CONTENT" desc="This string is a bullet point in the ‘When on’ column, which describes the behavior of this feature. This string explains how users can write queries in natural language and search their Chrome browsing history to get answers. The tone should be motivating.">
++    <message name="IDS_SETTINGS_HISTORY_SEARCH_WITH_ANSWERS_WHEN_ON_PAGE_CONTENT" desc="This string is a bullet point in the ‘When on’ column, which describes the behavior of this feature. This string explains how users can write queries in natural language and search their Redrob browsing history to get answers. The tone should be motivating.">
+       When you search your browsing history, answers and search results are based on the content of a page. This gives you improved results
+     </message>
+-    <message name="IDS_SETTINGS_HISTORY_SEARCH_WITH_ANSWERS_WHEN_ON_RECALL_INFO" desc="This string is a bullet point in the ‘When on’ column, which describes the behavior of this feature. This string explains how users can write questions (using question words like ‘what’, ‘who’, ‘where’) and get answer summaries based on their Chrome browsing history. The tone should be motivating.">
++    <message name="IDS_SETTINGS_HISTORY_SEARCH_WITH_ANSWERS_WHEN_ON_RECALL_INFO" desc="This string is a bullet point in the ‘When on’ column, which describes the behavior of this feature. This string explains how users can write questions (using question words like ‘what’, ‘who’, ‘where’) and get answer summaries based on their Redrob browsing history. The tone should be motivating.">
+       When you ask questions about your history, you can get answers about specific information from a page you visited
+     </message>
+     <message name="IDS_SETTINGS_HISTORY_SEARCH_WITH_ANSWERS_CONSIDER_DATA_ENCRYPTED" desc="This is a bullet point in the ‘Things to consider’ column, which describes things users should consider about a feature. This string explains that AI features will save data to the user’s device in order to provide the feature’s respective benefit. The data will be appropriately encrypted for security. The tone should be informative.">
+-      As you browse sites, their page contents are encrypted and saved to your device. This may affect Chrome's performance
++      As you browse sites, their page contents are encrypted and saved to your device. This may affect Redrob's performance
+     </message>
+     <message name="IDS_SETTINGS_HISTORY_SEARCH_WITH_ANSWERS_CONSIDER_OUTDATED" desc="This is a bullet point in the ‘Things to consider’ column, which describes things users should consider about a feature. This string explains that history search results and answers powered by AI may become outdated since they are dependent on the user's last visit to the page contents.">
+       AI-powered history search results and answers may become outdated if site content has changed since your last visit
+     </message>
+-    <message name="IDS_SETTINGS_HISTORY_SEARCH_WITH_ANSWERS_SUBLABEL_ON" desc="This string is the subheading of a setting for ‘History search, powered by AI’ when answers are available. This subheading notes that the setting is currently turned on. Then, it summarizes the user benefit of the History Search feature. This is an AI (artificial intelligence) feature that improves the search functionality so that users can write queries in natural language and search their Chrome browsing history. The tone should be motivating.">
++    <message name="IDS_SETTINGS_HISTORY_SEARCH_WITH_ANSWERS_SUBLABEL_ON" desc="This string is the subheading of a setting for ‘History search, powered by AI’ when answers are available. This subheading notes that the setting is currently turned on. Then, it summarizes the user benefit of the History Search feature. This is an AI (artificial intelligence) feature that improves the search functionality so that users can write queries in natural language and search their Redrob browsing history. The tone should be motivating.">
+       Use everyday language to search your browsing history and find sites you visited. You can also ask questions and get answers based on your browsing history. This setting is on.
+     </message>
+-    <message name="IDS_SETTINGS_HISTORY_SEARCH_WITH_ANSWERS_SUBLABEL_OFF" desc="This string is the subheading of a setting for ‘History search, powered by AI’ when answers are available. This subheading notes that the setting is currently turned on. Then, it summarizes the user benefit of the History Search feature. This is an AI (artificial intelligence) feature that improves the search functionality so that users can write queries in natural language and search their Chrome browsing history. The tone should be motivating.">
++    <message name="IDS_SETTINGS_HISTORY_SEARCH_WITH_ANSWERS_SUBLABEL_OFF" desc="This string is the subheading of a setting for ‘History search, powered by AI’ when answers are available. This subheading notes that the setting is currently turned on. Then, it summarizes the user benefit of the History Search feature. This is an AI (artificial intelligence) feature that improves the search functionality so that users can write queries in natural language and search their Redrob browsing history. The tone should be motivating.">
+       Use everyday language to search your browsing history and find sites you visited. You can also ask questions and get answers based on your browsing history. The setting is off.
+     </message>
+ 
+@@ -3945,7 +3951,7 @@
+       </message>
+     </if>
+     <if expr="not is_chromeos">
+-      <message name="IDS_SETTINGS_SYSTEM_HARDWARE_ACCELERATION_LABEL" desc="Label for the checkbox that forces Chrome to render via graphics acceleration (GPU) when available.">
++      <message name="IDS_SETTINGS_SYSTEM_HARDWARE_ACCELERATION_LABEL" desc="Label for the checkbox that forces Redrob to render via graphics acceleration (GPU) when available.">
+         Use graphics acceleration when available
+       </message>
+       <if expr="is_win">
+@@ -3953,28 +3959,28 @@
+           Enable Process Isolation
+         </message>
+         <message name="IDS_SETTINGS_SYSTEM_ISOLATION_STATE_SUBLABEL" desc="Sublabel for the Enable process isolation toggle.">
+-          Process Isolation prevents other applications from tampering with <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph>.
++          Process Isolation prevents other applications from tampering with <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Redrob</ex></ph>.
+         </message>
+       </if>
+-      <message name="IDS_SETTINGS_SYSTEM_FEATURE_NOTIFICATIONS_LABEL" desc="Label for the toggle that enables Chrome system notifications about features.">
+-        Show system notifications about Chrome features and tips
++      <message name="IDS_SETTINGS_SYSTEM_FEATURE_NOTIFICATIONS_LABEL" desc="Label for the toggle that enables Redrob system notifications about features.">
++        Show system notifications about Redrob features and tips
+       </message>
+       <message name="IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_LABEL" desc="Label for the control that opens the system network proxy settings. These settings apply to the entire computer.">
+         Open your computer's proxy settings
+       </message>
+-      <message name="IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_EXTENSION_LABEL" desc="Non-interactive label that describes when Chrome's proxy settings are overwritten by an extension. This is used in place of IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_LABEL above.">
+-        <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> is using proxy settings from an extension
++      <message name="IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_EXTENSION_LABEL" desc="Non-interactive label that describes when Redrob's proxy settings are overwritten by an extension. This is used in place of IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_LABEL above.">
++        <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Redrob</ex></ph> is using proxy settings from an extension
+       </message>
+-      <message name="IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_POLICY_LABEL" desc="Non-interactive label that describes when Chrome's proxy settings are overwritten by policy. This is used in place of IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_LABEL above.">
+-        <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> is using proxy settings from your administrator
++      <message name="IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_POLICY_LABEL" desc="Non-interactive label that describes when Redrob's proxy settings are overwritten by policy. This is used in place of IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_LABEL above.">
++        <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Redrob</ex></ph> is using proxy settings from your administrator
+       </message>
+-      <message name="IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_YOUR_ORGANIZATION_LABEL" desc="Non-interactive label that describes when Chrome's proxy settings are overwritten by the user's organization. This is used in place of IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_LABEL above.">
++      <message name="IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_YOUR_ORGANIZATION_LABEL" desc="Non-interactive label that describes when Redrob's proxy settings are overwritten by the user's organization. This is used in place of IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_LABEL above.">
+         Your organization
+       </message>
+-      <message name="IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_YOUR_DEVICE_LABEL" desc="Non-interactive label that describes when Chrome's proxy settings are settable by the user's device settings. This is used in place of IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_LABEL above.">
++      <message name="IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_YOUR_DEVICE_LABEL" desc="Non-interactive label that describes when Redrob's proxy settings are settable by the user's device settings. This is used in place of IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_LABEL above.">
+         Your device
+       </message>
+-      <message name="IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_MULTIPLE_SOURCES_LABEL" desc="Non-interactive label that describes when Chrome's proxy settings are overwritten by multiple sources. This is used in place of the above IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_LABEL or IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_LABEL labels in cases where both an enterprise policy or extension are applying settings at the same time.">
++      <message name="IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_MULTIPLE_SOURCES_LABEL" desc="Non-interactive label that describes when Redrob's proxy settings are overwritten by multiple sources. This is used in place of the above IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_LABEL or IDS_SETTINGS_SYSTEM_PROXY_SETTINGS_LABEL labels in cases where both an enterprise policy or extension are applying settings at the same time.">
+         Browser proxy settings are controlled by multiple sources
+       </message>
+     </if>
+@@ -3983,10 +3989,10 @@
+         On-device AI
+       </message>
+       <message name="IDS_SETTINGS_SYSTEM_FEATURE_ON_DEVICE_AI_ENABLED_SUB_LABEL" desc="This string describes what turning off the toggle implies.">
+-        To power features like scam detection, Chrome can use AI models that run directly on your device. When this is off, these features might not work. <ph name="BEGIN_LINK">&lt;a href="$1" target="_blank" aria-description="$2"&gt;</ph>Learn more about on-device AI<ph name="END_LINK">&lt;/a&gt;</ph>
++        To power features like scam detection, Redrob can use AI models that run directly on your device. When this is off, these features might not work. <ph name="BEGIN_LINK">&lt;a href="$1" target="_blank" aria-description="$2"&gt;</ph>Learn more about on-device AI<ph name="END_LINK">&lt;/a&gt;</ph>
+       </message>
+       <message name="IDS_SETTINGS_SYSTEM_ON_DEVICE_AI_LINK_SUBTITLE" desc="Subtitle for the link row that points to the on-device AI settings.">
+-        Choose whether Chrome uses AI models that run directly on your device
++        Choose whether Redrob uses AI models that run directly on your device
+       </message>
+     </if>
+ 
+@@ -4236,7 +4242,7 @@
+     <message name="IDS_SETTINGS_SAFETY_HUB" desc="Name of a page in settings that gives users an overview over their safety status and where users can take action to improve their safety.">
+       Safety Check
+     </message>
+-    <message name="IDS_SETTINGS_SAFETY_HUB_ENTRY_POINT_BUTTON_LABEL" desc="This is the label of a button that takes users to the Safety Check page in Chrome settings. This button appears in a section in privacy settings, after the 'Safety Check' and 'Chrome found some safety recommendations for your review' strings. The words 'Safety Check' should be translated to match https://localizer.google.com/glossary/termset?gid=27517723&#38;tsid=4e021eb4 or if it's not available https://localizer.google.com/messages/details/ChromeClient/7810354727545555354. The tone should be terse, because we need this button to be as short as possible. If it is impossible to say 'Go to Safety Check' in 30 characters, you may translate this as 'Review'. (CHAR LIMIT = 30)">
++    <message name="IDS_SETTINGS_SAFETY_HUB_ENTRY_POINT_BUTTON_LABEL" desc="This is the label of a button that takes users to the Safety Check page in Redrob settings. This button appears in a section in privacy settings, after the 'Safety Check' and 'Redrob found some safety recommendations for your review' strings. The words 'Safety Check' should be translated to match https://localizer.google.com/glossary/termset?gid=27517723&#38;tsid=4e021eb4 or if it's not available https://localizer.google.com/messages/details/RedrobClient/7810354727545555354. The tone should be terse, because we need this button to be as short as possible. If it is impossible to say 'Go to Safety Check' in 30 characters, you may translate this as 'Review'. (CHAR LIMIT = 30)">
+       Go to Safety Check
+     </message>
+     <message name="IDS_SETTINGS_SAFETY_HUB_PAGE_CARD_SECTION_HEADER" desc="The title of the first section in the Safety Hub page. The 'Safety at a glance' section gives an overview about the current state of passwords, browser version and safe browsing setting of the browser. ">
+@@ -4254,19 +4260,19 @@
+     <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_CHECK_SUBHEADER_SOME_TIME_AGO" desc="Subtitle of the passwords card in the Safety Hub page which explains how recently passwords were checked for issues. The passwords card contains information about password issues which are detected automatically. This text is shown below a header which explains there are no issues and indicates that passwords were checked for issues some time ago.">
+       Checked <ph name="NUM_DAYS_HOURS_MINUTES">$1<ex>2 days</ex></ph> ago
+     </message>
+-    <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_CHECK_HEADER_NO_WEAK_OR_REUSED" desc="SafetyHub has checked the user's passwords for issues and has determined the passwords are not weak or reused, which is positive. However we cannot state that there are no issues with the passwords, because one of Chrome's password checks (whether a password is known to be leaked) was not performed. The string should explicitly specify weak and reused passwords. These are Chrome Password Manager terms and should be translated the same way. This text is shown as the header of the passwords card in SafetyHub which is in a neutral state. The subheader below this explains why not all of Chrome's protections were applied here and a call to action on how to do that (e.g. 'To check for compromised passwords, sign in').">
++    <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_CHECK_HEADER_NO_WEAK_OR_REUSED" desc="SafetyHub has checked the user's passwords for issues and has determined the passwords are not weak or reused, which is positive. However we cannot state that there are no issues with the passwords, because one of Redrob's password checks (whether a password is known to be leaked) was not performed. The string should explicitly specify weak and reused passwords. These are Redrob Password Manager terms and should be translated the same way. This text is shown as the header of the passwords card in SafetyHub which is in a neutral state. The subheader below this explains why not all of Redrob's protections were applied here and a call to action on how to do that (e.g. 'To check for compromised passwords, sign in').">
+       No weak or reused passwords
+     </message>
+-    <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_CHECK_SUBHEADER_SIGN_IN" desc="This text conveys to the user that they currently do not have the full protection for their passwords and informs the user that additional protection (in form of Chrome checking whether saved passwords are compromised) is available by signing into Chrome. Compromised passwords are concepts in Chrome Password Manager, this should be translated the same way. It is shown only to signed-out users. This text appears in the subtitle of the passwords card on the Safety Hub page, below a title that lists already known password issues. The title above this may read e.g. '2 weak passwords', or 'No weak or reused passwords').">
++    <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_CHECK_SUBHEADER_SIGN_IN" desc="This text conveys to the user that they currently do not have the full protection for their passwords and informs the user that additional protection (in form of Redrob checking whether saved passwords are compromised) is available by signing into Redrob. Compromised passwords are concepts in Redrob Password Manager, this should be translated the same way. It is shown only to signed-out users. This text appears in the subtitle of the passwords card on the Safety Hub page, below a title that lists already known password issues. The title above this may read e.g. '2 weak passwords', or 'No weak or reused passwords').">
+       To check for compromised passwords, sign in to your Google Account
+     </message>
+-    <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_CHECK_SUBHEADER_GO_TO_PASSWORD_MANAGER" desc="This text conveys to the user that they currently do not have the full protection for their passwords and informs the user that additional protection (in form of Chrome checking whether saved passwords are compromised) is available by clicking on the card containing this text, which will redirect to Google Password Manager. Compromised passwords are a concept in Chrome password manager, this should be translated the same way. This text appears in the subtitle of the passwords card one the Safety Hub page, below the title 'No weak or reused passwords'.">
++    <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_CHECK_SUBHEADER_GO_TO_PASSWORD_MANAGER" desc="This text conveys to the user that they currently do not have the full protection for their passwords and informs the user that additional protection (in form of Redrob checking whether saved passwords are compromised) is available by clicking on the card containing this text, which will redirect to Google Password Manager. Compromised passwords are a concept in Redrob password manager, this should be translated the same way. This text appears in the subtitle of the passwords card one the Safety Hub page, below the title 'No weak or reused passwords'.">
+       To check for compromised passwords, go to Google Password Manager
+     </message>
+-    <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_CHECK_HEADER_NO_PASSWORDS" desc="This text is the header of the passwords card of SafetyHub when the user has no passwords saved in Chrome. Below this text there is a subheader that give the user more details: 'Chrome can check your passwords when you save them' or 'Your organization turned off saving passwords'. The card this text is part of is in a neutral state.">
++    <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_CHECK_HEADER_NO_PASSWORDS" desc="This text is the header of the passwords card of SafetyHub when the user has no passwords saved in Redrob. Below this text there is a subheader that give the user more details: 'Redrob can check your passwords when you save them' or 'Your organization turned off saving passwords'. The card this text is part of is in a neutral state.">
+       No saved passwords
+     </message>
+-    <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_CHECK_SUBHEADER_NO_PASSWORDS_POLICY" desc="Subtitle of the passwords card in SafetyHub when there are no saved passwords and saving of passwords is disabled through enterprise policy. This text is shown below the header 'No saved passwords'. It explains that the SafetyHub features for passwords are not available since the user's organization has a policy in place that prevents the user from saving passwords in Chrome.">
++    <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_CHECK_SUBHEADER_NO_PASSWORDS_POLICY" desc="Subtitle of the passwords card in SafetyHub when there are no saved passwords and saving of passwords is disabled through enterprise policy. This text is shown below the header 'No saved passwords'. It explains that the SafetyHub features for passwords are not available since the user's organization has a policy in place that prevents the user from saving passwords in Redrob.">
+       Your organization turned off saving passwords
+     </message>
+     <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_NAVIGATION_ARIA_LABEL" desc="Safety Check settings page (chrome://settings/safetyCheck) gives users an overview over their safety status. Password card in this page shows if there is any insecure password stored. This string is for the accesibility label for the card to call out where to navigation will happen (chrome://password-manager/passwords) if the card is clicked.">
+@@ -4276,7 +4282,7 @@
+       Enhanced Safe Browsing is on
+     </message>
+     <message name="IDS_SETTINGS_SAFETY_HUB_SB_ON_ENHANCED_SUBHEADER" desc="Safety Hub settings page (chrome://settings/safetyHub) gives users an overview over their safety status. Safe browsing card in this page shows the current state of Safe browsing setting (chrome://settings/security). This string is the body text of the Safe Browsing card when the current state is Enhanced protection.">
+-      You have Chrome's strongest security
++      You have Redrob's strongest security
+     </message>
+     <message name="IDS_SETTINGS_SAFETY_HUB_SB_ON_STANDARD_HEADER" desc="Safety Hub settings page (chrome://settings/safetyHub) gives users an overview over their safety status. Safe browsing card in this page shows the current state of Safe browsing setting (chrome://settings/security). This string is the headline of the Safe Browsing card when the current state is Standard protection.">
+       Safe Browsing is on
+@@ -4312,12 +4318,12 @@
+       Safe Browsing
+     </message>
+     <if expr="not is_chromeos">
+-      <message name="IDS_SETTINGS_SAFETY_HUB_VERSION_CARD_SUBHEADER_RESTART" desc="Safety Hub settings page (chrome://settings/safetyHub) gives users an overview over their safety status. The version card, which this text is a part of, informs the user whether their Chrome is up to date. This text is shown when Chrome is not up to date but there is an update available and the user needs to restart their browser to finish the update. Shown below the title 'Chrome is out of date'.">
++      <message name="IDS_SETTINGS_SAFETY_HUB_VERSION_CARD_SUBHEADER_RESTART" desc="Safety Hub settings page (chrome://settings/safetyHub) gives users an overview over their safety status. The version card, which this text is a part of, informs the user whether their Redrob is up to date. This text is shown when Redrob is not up to date but there is an update available and the user needs to restart their browser to finish the update. Shown below the title 'Redrob is out of date'.">
+         Relaunch to finish update. Your tabs will reopen.
+       </message>
+     </if>
+     <if expr="is_chromeos">
+-      <message name="IDS_SETTINGS_SAFETY_HUB_VERSION_CARD_SUBHEADER_RESTART" desc="Safety Hub settings page (chrome://settings/safetyHub) gives users an overview over their safety status. The version card, which this text is a part of, informs the user whether their Chrome is up to date. This text is shown when Chrome is not up to date but there is an update available and the user needs to restart their browser to finish the update. Shown below the title 'Chrome is out of date'.">
++      <message name="IDS_SETTINGS_SAFETY_HUB_VERSION_CARD_SUBHEADER_RESTART" desc="Safety Hub settings page (chrome://settings/safetyHub) gives users an overview over their safety status. The version card, which this text is a part of, informs the user whether their Redrob is up to date. This text is shown when Redrob is not up to date but there is an update available and the user needs to restart their browser to finish the update. Shown below the title 'Redrob is out of date'.">
+         Restart your device to finish updating
+       </message>
+     </if>
+@@ -4331,27 +4337,27 @@
+        =1 {You can stop this site from sending future notifications.}
+        other {You can stop these sites from sending future notifications.}}
+     </message>
+-    <message name="IDS_SETTINGS_SAFETY_HUB_REVOKED_PERMISSIONS_MENU_NOTIFICATION" desc="The revoked permissions module of Safety Hub revokes permissions of sites that the user hasn't visited in a while or that send abusive notifications. This label is for the notification in Chrome's three-dot menu indicating for how many sites the permission was revoked.">
++    <message name="IDS_SETTINGS_SAFETY_HUB_REVOKED_PERMISSIONS_MENU_NOTIFICATION" desc="The revoked permissions module of Safety Hub revokes permissions of sites that the user hasn't visited in a while or that send abusive notifications. This label is for the notification in Redrob's three-dot menu indicating for how many sites the permission was revoked.">
+       {NUM_SITES, plural,
+         =1 {Removed permissions for 1 site}
+         other {Removed permissions for {NUM_SITES} sites}}
+     </message>
+-    <message name="IDS_SETTINGS_SAFETY_HUB_REVIEW_NOTIFICATION_PERMISSIONS_MENU_NOTIFICATION" desc="The review notification permissions module of Safety Hub marks sites that send a lot of notifications for review by the user. This label is for the notification in Chrome's three-dot menu indicating how many sites should be reviewed.">
++    <message name="IDS_SETTINGS_SAFETY_HUB_REVIEW_NOTIFICATION_PERMISSIONS_MENU_NOTIFICATION" desc="The review notification permissions module of Safety Hub marks sites that send a lot of notifications for review by the user. This label is for the notification in Redrob's three-dot menu indicating how many sites should be reviewed.">
+       {NUM_SITES, plural,
+         =1 {Found 1 site with lots of notifications}
+         other {Found {NUM_SITES} sites with lots of notifications}}
+     </message>
+-    <message name="IDS_SETTINGS_SAFETY_HUB_COMPROMISED_PASSWORDS_MENU_NOTIFICATION" desc="The password check module of Safety Hub warns users if there is any insecure credential. This label is for the notification in Chrome's three-dot menu indicating how many passwords are compromised.">
++    <message name="IDS_SETTINGS_SAFETY_HUB_COMPROMISED_PASSWORDS_MENU_NOTIFICATION" desc="The password check module of Safety Hub warns users if there is any insecure credential. This label is for the notification in Redrob's three-dot menu indicating how many passwords are compromised.">
+       {NUM_SITES, plural,
+         =1 {Found 1 compromised password}
+         other {Found {NUM_SITES} compromised passwords}}
+     </message>
+-    <message name="IDS_SETTINGS_SAFETY_HUB_EXTENSIONS_MENU_NOTIFICATION" desc="The extension module of Safety Hub warns users if any downloaded extension is malware or policy violated. This label is for the notification in Chrome's three-dot menu indicating how many extension are marked as unsafe.">
++    <message name="IDS_SETTINGS_SAFETY_HUB_EXTENSIONS_MENU_NOTIFICATION" desc="The extension module of Safety Hub warns users if any downloaded extension is malware or policy violated. This label is for the notification in Redrob's three-dot menu indicating how many extension are marked as unsafe.">
+       {NUM_SITES, plural,
+         =1 {Turned off 1 unsafe extension}
+         other {Turned off {NUM_SITES} unsafe extensions}}
+     </message>
+-    <message name="IDS_SETTINGS_SAFETY_HUB_SAFE_BROWSING_MENU_NOTIFICATION" desc="When Safe Browsing is disabled, the proactive Safety Hub feature encourages users to turn on the feature. This label is for the notification in Chrome's three-dot menu.">
++    <message name="IDS_SETTINGS_SAFETY_HUB_SAFE_BROWSING_MENU_NOTIFICATION" desc="When Safe Browsing is disabled, the proactive Safety Hub feature encourages users to turn on the feature. This label is for the notification in Redrob's three-dot menu.">
+       Safe Browsing is off
+     </message>
+     <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORDS_MODULE_NAME" desc="The entry point shown on the screenshot leads to Safety Check settings page (chrome://settings/safetyCheck) when at least on of the Safety Check modules have recommendations. The subheader of the entry point lists the modules with recommendations. This string is the upper case version (i.e. version that comes first in the sentence) for the name of passwords module.">
+@@ -4382,14 +4388,14 @@
+       ,
+     </message>
+ 
+-      <message name="IDS_SETTINGS_AI_INNOVATIONS_PAGE_TITLE" desc="This label is on the left Navigation sidebar in Chrome’s settings. It tells the user that they can see settings related to AI (artificial intelligence) in this section. It is a noun phrase that refers to our collection of AI settings. These settings include Help me write and more. If possible, translate this so that it closely matches the Navigation tab title at the top of this marketing page: https://www.google.com/chrome/ai-innovations.">
++      <message name="IDS_SETTINGS_AI_INNOVATIONS_PAGE_TITLE" desc="This label is on the left Navigation sidebar in Redrob’s settings. It tells the user that they can see settings related to AI (artificial intelligence) in this section. It is a noun phrase that refers to our collection of AI settings. These settings include Help me write and more. If possible, translate this so that it closely matches the Navigation tab title at the top of this marketing page: https://www.google.com/chrome/ai-innovations.">
+         AI innovations
+       </message>
+-      <message name="IDS_SETTINGS_AI_PAGE_TITLE" desc="This label is on the left Navigation sidebar in Chrome’s settings. It tells the user that they can see settings related to AI (artificial intelligence) in this section. It is a noun phrase that refers to our collection of AI settings. These settings include Help me write and more.">
+-        AI in Chrome
++      <message name="IDS_SETTINGS_AI_PAGE_TITLE" desc="This label is on the left Navigation sidebar in Redrob’s settings. It tells the user that they can see settings related to AI (artificial intelligence) in this section. It is a noun phrase that refers to our collection of AI settings. These settings include Help me write and more.">
++        AI in Redrob
+       </message>
+-      <message name="IDS_SETTINGS_AI_PAGE_MAIN_SUBLABEL_3" desc="This is a bullet point on a card that sets the context for the ‘AI innovations’ section of Chrome’s settings. Here, the user can see settings related to AI (artificial intelligence) in this section; these settings include Help me write and more. This bullet point is after the ‘Reimagine Chrome, supercharged with AI’ title and ‘Things to consider’ subheading. We want users to read this card and understand the considerations that apply to all Chrome’s AI features. This bullet point specifically notes that AI features are actively developing and results may include errors. The tone should be informative.">
+-        Data sent to Google may be seen by human reviewers to improve Chrome AI’s technology
++      <message name="IDS_SETTINGS_AI_PAGE_MAIN_SUBLABEL_3" desc="This is a bullet point on a card that sets the context for the ‘AI innovations’ section of Redrob’s settings. Here, the user can see settings related to AI (artificial intelligence) in this section; these settings include Help me write and more. This bullet point is after the ‘Reimagine Redrob, supercharged with AI’ title and ‘Things to consider’ subheading. We want users to read this card and understand the considerations that apply to all Redrob’s AI features. This bullet point specifically notes that AI features are actively developing and results may include errors. The tone should be informative.">
++        Data sent to Google may be seen by human reviewers to improve Redrob AI’s technology
+       </message>
+       <message name="IDS_SETTINGS_AI_PAGE_MAIN_MANAGED_LEARN_MORE_ACCESSIBILITY_LABEL" desc="This string is found in a link that takes the user to the AI features and policies help center article when the user taps it. The tone should be informative">
+         Learn more about using generative AI at work
+@@ -4411,8 +4417,8 @@
+       <message name="IDS_SETTINGS_PASSWORD_CHANGE_LABEL" desc="Primary label for password change entry in settings. The user is in settings and this string represents the name of the feature. We were careful to choose “automated” and not “automatic” because we don’t want to give the user the impression that this will happen without their knowledge. There is an ‘automated’ process that the user initiates, but the process isn’t ‘automatic’ in the sense that it might be happening behind the scenes without the user’s knowledge.">
+         Automated Password Change
+       </message>
+-      <message name="IDS_SETTINGS_PASSWORD_CHANGE_SUBLABEL" desc="Sublabel for password change entry in settings. The description of the feature beneath the “Automated password change” feature title. This and the bullets beneath this paragraph represent the full description of the feature. * “public” does two things: 1) it provides distance between “Chrome” and “data breach”, because we don’t want users to associate the breach with Chrome (Chrome didn’t have a data leak, 2) and related, it might reassure the user to know that Chrome is using public information to establish these lists of compromised passwords. * “Google Password Manager can offer…”: The user has to agree to have this feature update their password for them each time. So Google Password Manager is ‘offering’ to do something for the user.">
+-        If Chrome finds one of your passwords in a public data breach, Google Password Manager can offer to change your password for you if you're signed in.
++      <message name="IDS_SETTINGS_PASSWORD_CHANGE_SUBLABEL" desc="Sublabel for password change entry in settings. The description of the feature beneath the “Automated password change” feature title. This and the bullets beneath this paragraph represent the full description of the feature. * “public” does two things: 1) it provides distance between “Redrob” and “data breach”, because we don’t want users to associate the breach with Redrob (Redrob didn’t have a data leak, 2) and related, it might reassure the user to know that Redrob is using public information to establish these lists of compromised passwords. * “Google Password Manager can offer…”: The user has to agree to have this feature update their password for them each time. So Google Password Manager is ‘offering’ to do something for the user.">
++        If Redrob finds one of your passwords in a public data breach, Google Password Manager can offer to change your password for you if you're signed in.
+       </message>
+       <message name="IDS_SETTINGS_PASSWORD_CHANGE_DATA_BREACH" desc="Bullet 1 of 2 that appears beneath the “When used” subtitle. This string is repetitive of the feature description, but we want to have a complete description of what happens when the feature is used. * “Google Password Manager asks…”: This part is similar to the general feature description above, but it’s written as if the feature is being used by the user, so we use “asks” and not “can offer”. * “Strong password”: As an existing autofill feature, Google Password Manager can offer to generate and save passwords for the user. These passwords are typically stronger than passwords the user might create on their own">
+         If one of your passwords is found in a data breach, Google Password Manager asks if you want it changed to a strong password
+@@ -4431,13 +4437,13 @@
+       </message>
+ 
+       <!-- Security settings toast confirmation -->
+-      <message name="IDS_SETTINGS_SAFEBROWSING_TURN_ON_ENHANCED_TOAST_BUTTON" desc="When Chrome shows a toast notification after the user turned off the Enhanced Protection setting, there's a button the user can click to turn on the Enhanced Protection setting.">
++      <message name="IDS_SETTINGS_SAFEBROWSING_TURN_ON_ENHANCED_TOAST_BUTTON" desc="When Redrob shows a toast notification after the user turned off the Enhanced Protection setting, there's a button the user can click to turn on the Enhanced Protection setting.">
+         Turn on
+       </message>
+-      <message name="IDS_SETTINGS_SAFEBROWSING_ENHANCED_ON_TOAST_MESSAGE" desc="When Chrome shows a toast notification after the user turned off the Enhanced Protection setting, this is the text on the toast letting the user know that the Enhanced Protection setting is on.">
++      <message name="IDS_SETTINGS_SAFEBROWSING_ENHANCED_ON_TOAST_MESSAGE" desc="When Redrob shows a toast notification after the user turned off the Enhanced Protection setting, this is the text on the toast letting the user know that the Enhanced Protection setting is on.">
+         Enhanced protection is on
+       </message>
+-      <message name="IDS_SETTINGS_SAFEBROWSING_ENHANCED_OFF_TOAST_MESSAGE" desc="When Chrome shows a toast notification after the user turned off the Enhanced Protection setting, this is the text on the toast letting the user know that the Enhanced Protection setting is off.">
++      <message name="IDS_SETTINGS_SAFEBROWSING_ENHANCED_OFF_TOAST_MESSAGE" desc="When Redrob shows a toast notification after the user turned off the Enhanced Protection setting, this is the text on the toast letting the user know that the Enhanced Protection setting is off.">
+         Enhanced protection is off
+       </message>
+       <message name="IDS_SYNC_ERROR_BOOKMARKS_LIMIT_EXCEEDED_DESCRIPTION" desc="Description of the sync error when the user has exceeded the bookmarks limit.">
+@@ -4447,23 +4453,23 @@
+   </if>
+ 
+   <!-- Experimental settings strings -->
+-  <message name="IDS_SETTINGS_AI_PAGE_MAIN_TITLE" desc="This string is the title of a card that sets the context for the ‘AI innovations’ section of Chrome’s settings. Here, the user can see settings related to AI (artificial intelligence) in this section; these settings include Help me write and more. This title is before the ‘Things to consider’ subheading and bullet points. We want users to read this card and understand the considerations that apply to all Chrome’s AI features. The tone should be motivating." formatter_data="android_java">
+-    Reimagine Chrome, supercharged with AI
++  <message name="IDS_SETTINGS_AI_PAGE_MAIN_TITLE" desc="This string is the title of a card that sets the context for the ‘AI innovations’ section of Redrob’s settings. Here, the user can see settings related to AI (artificial intelligence) in this section; these settings include Help me write and more. This title is before the ‘Things to consider’ subheading and bullet points. We want users to read this card and understand the considerations that apply to all Redrob’s AI features. The tone should be motivating." formatter_data="android_java">
++    Reimagine Redrob, supercharged with AI
+   </message>
+-  <message name="IDS_SETTINGS_AI_PAGE_MAIN_SUBLABEL_1" desc="This is a bullet point on a card that sets the context for the ‘AI innovations’ section of Chrome’s settings. Here, the user can see settings related to AI (artificial intelligence) in this section; these settings include Help me write and more. This bullet point is after the ‘Reimagine Chrome, supercharged with AI’ title and ‘Things to consider’ subheading. We want users to read this card and understand the considerations that apply to all Chrome’s AI features. This bullet point specifically notes that AI features are actively developing and results may include errors. The tone should be informative." formatter_data="android_java">
++  <message name="IDS_SETTINGS_AI_PAGE_MAIN_SUBLABEL_1" desc="This is a bullet point on a card that sets the context for the ‘AI innovations’ section of Redrob’s settings. Here, the user can see settings related to AI (artificial intelligence) in this section; these settings include Help me write and more. This bullet point is after the ‘Reimagine Redrob, supercharged with AI’ title and ‘Things to consider’ subheading. We want users to read this card and understand the considerations that apply to all Redrob’s AI features. This bullet point specifically notes that AI features are actively developing and results may include errors. The tone should be informative." formatter_data="android_java">
+     These features use AI, are in early development, and won’t always get it right
+   </message>
+-  <message name="IDS_SETTINGS_AI_PAGE_MAIN_SUBLABEL_2" desc="This is a bullet point on a card that sets the context for the ‘AI innovations’ section of Chrome’s settings. Here, the user can see settings related to AI (artificial intelligence) in this section; these settings include Help me write and more. This bullet point is after the ‘Reimagine Chrome, supercharged with AI’ title and ‘Things to consider’ subheading. We want users to read this card and understand the considerations that apply to all Chrome’s AI features. This bullet point specifically notes that AI features will send data to Google servers in order to provide the feature’s respective benefit. The tone should be informative." formatter_data="android_java">
++  <message name="IDS_SETTINGS_AI_PAGE_MAIN_SUBLABEL_2" desc="This is a bullet point on a card that sets the context for the ‘AI innovations’ section of Redrob’s settings. Here, the user can see settings related to AI (artificial intelligence) in this section; these settings include Help me write and more. This bullet point is after the ‘Reimagine Redrob, supercharged with AI’ title and ‘Things to consider’ subheading. We want users to read this card and understand the considerations that apply to all Redrob’s AI features. This bullet point specifically notes that AI features will send data to Google servers in order to provide the feature’s respective benefit. The tone should be informative." formatter_data="android_java">
+     When you use these features, relevant data is sent to Google in order to create AI experiences
+   </message>
+   <if expr="is_android">
+     <then>
+-      <message name="IDS_SETTINGS_AI_PAGE_MAIN_MANAGED_SUBLABEL_3" desc="This is a bullet point on a card that sets the context for the ‘AI innovations’ section of Chrome’s settings. Here, the user can see settings related to AI (artificial intelligence) in this section; these settings include Help me write and more. This bullet point is after the ‘Reimagine Chrome, supercharged with AI’ title and ‘Things to consider’ subheading. We want users to read this card and understand the considerations that apply to all Chrome’s AI features. This bullet point specifically notes that AI features are actively developing, and that humans may review feature usage and corresponding data in order to further improve the feature. The tone should be informative." formatter_data="android_java">
++      <message name="IDS_SETTINGS_AI_PAGE_MAIN_MANAGED_SUBLABEL_3" desc="This is a bullet point on a card that sets the context for the ‘AI innovations’ section of Redrob’s settings. Here, the user can see settings related to AI (artificial intelligence) in this section; these settings include Help me write and more. This bullet point is after the ‘Reimagine Redrob, supercharged with AI’ title and ‘Things to consider’ subheading. We want users to read this card and understand the considerations that apply to all Redrob’s AI features. This bullet point specifically notes that AI features are actively developing, and that humans may review feature usage and corresponding data in order to further improve the feature. The tone should be informative." formatter_data="android_java">
+         Your organization manages how data collected by these features may be used. <ph name="BEGIN_LINK">&lt;link&gt;</ph>Learn more<ph name="END_LINK">&lt;/link&gt;</ph>
+       </message>
+     </then>
+     <else>
+-      <message name="IDS_SETTINGS_AI_PAGE_MAIN_MANAGED_SUBLABEL_3" desc="This is a bullet point on a card that sets the context for the ‘AI innovations’ section of Chrome’s settings. Here, the user can see settings related to AI (artificial intelligence) in this section; these settings include Help me write and more. This bullet point is after the ‘Reimagine Chrome, supercharged with AI’ title and ‘Things to consider’ subheading. We want users to read this card and understand the considerations that apply to all Chrome’s AI features. This bullet point specifically notes that AI features are actively developing, and that humans may review feature usage and corresponding data in order to further improve the feature. The tone should be informative.">
++      <message name="IDS_SETTINGS_AI_PAGE_MAIN_MANAGED_SUBLABEL_3" desc="This is a bullet point on a card that sets the context for the ‘AI innovations’ section of Redrob’s settings. Here, the user can see settings related to AI (artificial intelligence) in this section; these settings include Help me write and more. This bullet point is after the ‘Reimagine Redrob, supercharged with AI’ title and ‘Things to consider’ subheading. We want users to read this card and understand the considerations that apply to all Redrob’s AI features. This bullet point specifically notes that AI features are actively developing, and that humans may review feature usage and corresponding data in order to further improve the feature. The tone should be informative.">
+         Your organization manages how data collected by these features may be used.
+       </message>
+     </else>

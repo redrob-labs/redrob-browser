@@ -1,5 +1,4 @@
 diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index 82f397571fefaff0096247d0e98c28c20db709bd..fc55717cabc492b8d64d6e8ee27d58ea2b3c543a 100644
 --- a/chrome/browser/ui/BUILD.gn
 +++ b/chrome/browser/ui/BUILD.gn
 @@ -9,6 +9,7 @@ import("//build/config/features.gni")
@@ -68,3 +67,12 @@ index 82f397571fefaff0096247d0e98c28c20db709bd..fc55717cabc492b8d64d6e8ee27d58ea
      # Non-android public_deps for "ui" target.
      public_deps += [
        "//chrome/browser/contextual_cueing/internals",
+@@ -2477,6 +2494,8 @@ static_library("ui") {
+     ]
+ 
+     if (enable_dice_support) {
++      sources += redrob_chrome_browser_ui_dice_sources
++      deps += redrob_chrome_browser_ui_deps
+       deps += [
+         "webui/signin/batch_upload:mojo_bindings",
+         "//chrome/browser/ui/views/profiles:cross_device_signin_qr_bubble_views",

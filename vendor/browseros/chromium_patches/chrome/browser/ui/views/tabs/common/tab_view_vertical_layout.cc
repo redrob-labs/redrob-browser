@@ -1,0 +1,20 @@
+diff --git a/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc b/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
+--- a/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
+@@ -184,7 +184,15 @@ bool TabViewVerticalLayout::IsChildVisible(const views::View* child_view,
+       return TabView().active_ && hovered_or_focused;
+     }
+ 
+-    return TabView().active_ || hovered_or_focused;
++    // Redrob: hover and focus only -- NOT active. Upstream keeps the close button permanently visible on the
++    // active tab, which in a horizontal strip is where the affordance has to live because a tab is narrow and
++    // there is nowhere else for it. In the sidebar the reference's selected row carries no X at all: the row
++    // is 240px of mostly empty space, the X is the only thing on its trailing edge, and it therefore reads as
++    // the selected row's decoration rather than as a control that appears when you reach for it.
++    //
++    // This file IS the vertical layout, so the change cannot reach the horizontal strip. Focus is kept
++    // alongside hover deliberately: without it the button becomes unreachable by keyboard.
++    return hovered_or_focused;
+   }
+ 
+   NOTREACHED() << "Unknown tab child view";

@@ -1,5 +1,4 @@
 diff --git a/chrome/common/extensions/api/api_sources.gni b/chrome/common/extensions/api/api_sources.gni
-index 194386bf5e2a788140a888a1dc9f58e4625538d2..c44cf6d6dd8b15ff324fc0b2ebc4ac74eec481bb 100644
 --- a/chrome/common/extensions/api/api_sources.gni
 +++ b/chrome/common/extensions/api/api_sources.gni
 @@ -80,6 +80,7 @@ if (enable_extensions) {
@@ -10,3 +9,11 @@ index 194386bf5e2a788140a888a1dc9f58e4625538d2..c44cf6d6dd8b15ff324fc0b2ebc4ac74
      "command_line_private.json",
      "crash_report_private.webidl",
      "dictation_private.webidl",
+@@ -90,6 +91,7 @@ if (enable_extensions) {
+     "indigo_private.webidl",
+     "language_settings_private.webidl",
+     "passwords_private.webidl",
++    "redrob_private.idl",
+     "resources_private.idl",
+     "safe_browsing_private.idl",
+     "settings_private.idl",

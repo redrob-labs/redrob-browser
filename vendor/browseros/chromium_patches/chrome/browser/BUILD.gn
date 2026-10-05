@@ -1,5 +1,4 @@
 diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
-index b58905ddb371f96377320c2948fe64bb17257663..52757c6073f53b89413387c3c105da6fa29b9aab 100644
 --- a/chrome/browser/BUILD.gn
 +++ b/chrome/browser/BUILD.gn
 @@ -13,6 +13,7 @@ import("//build/config/python.gni")
@@ -19,7 +18,15 @@ index b58905ddb371f96377320c2948fe64bb17257663..52757c6073f53b89413387c3c105da6f
      "ENABLE_UPDATER=$enable_updater",
      "ENABLE_UPDATE_NOTIFICATIONS=$enable_update_notifications",
      "USE_MINIKIN_HYPHENATION=$use_minikin_hyphenation",
-@@ -933,6 +936,12 @@ source_set("core") {
+@@ -767,6 +770,7 @@ if (is_chromeos) {
+       "//chrome/browser/policy",
+       "//chrome/browser/prefs:util",
+       "//chrome/browser/profiles:profile",
++    "//chrome/browser/redrob:sidecar",
+       "//chrome/browser/profiles:profile_io_data",
+       "//chrome/browser/sessions",
+       "//chrome/browser/sync",
+@@ -933,6 +937,12 @@ source_set("core") {
      "//chrome/browser/battery",
      "//chrome/browser/bluetooth",
      "//chrome/browser/browser_actuator/internals",
@@ -32,7 +39,7 @@ index b58905ddb371f96377320c2948fe64bb17257663..52757c6073f53b89413387c3c105da6f
      "//chrome/browser/browsing_data",
      "//chrome/browser/browsing_data:constants",
      "//chrome/browser/btm",
-@@ -1578,6 +1587,25 @@ source_set("core") {
+@@ -1578,6 +1588,25 @@ source_set("core") {
      ]
    }
  
@@ -58,7 +65,7 @@ index b58905ddb371f96377320c2948fe64bb17257663..52757c6073f53b89413387c3c105da6f
    if (!is_win && !is_android) {
      sources += [
        "certificate_viewer_stub.cc",
-@@ -2077,6 +2105,7 @@ source_set("browser") {
+@@ -2077,6 +2106,7 @@ source_set("browser") {
      "//chrome/browser/breadcrumbs",
      "//chrome/browser/browser_actuator",
      "//chrome/browser/browser_actuator/internals",

@@ -45,7 +45,21 @@ ROOT = Path(__file__).resolve().parent.parent
 CHROMIUM = ROOT / "chromium"
 SRC = CHROMIUM / "src"
 DEPOT_TOOLS = ROOT / "depot_tools"
-PATCHES = ROOT / "patches"
+PATCHES = ROOT / "vendor" / "browseros" / "chromium_patches"
+
+# Names in that tree which are not patches.
+PATCH_TREE_METADATA = {".features.yaml", ".store.yaml"}
+
+
+def patch_files() -> list[Path]:
+    """Every patch in the stack, in upstream-path order."""
+    if not PATCHES.exists():
+        return []
+    return sorted(
+        path
+        for path in PATCHES.rglob("*")
+        if path.is_file() and path.name not in PATCH_TREE_METADATA
+    )
 BRANDING = ROOT / "branding"
 SOURCES = ROOT / "sources"
 # Copied WHOLESALE into the checkout as `src/redrob`, rather than file-by-file through sources/manifest.
@@ -125,13 +139,16 @@ def run(cmd: list[str], cwd: Path, check: bool = True, allow_update: bool = Fals
 
 
 def patch_name(relative: str) -> str:
-    """`chrome/browser/ui/x.cc` -> `chrome-browser-ui-x.cc.patch`, which is Brave's convention.
+    """The patch's path inside the stack, which MIRRORS the upstream tree.
 
-    A flat directory of per-file patches, named after the file they touch. It reads as an inventory:
-    `ls patches/` is the answer to what this fork changes, and a conflict names one file rather than a
-    numbered blob touching thirty.
+    It used to be the upstream path with slashes as hyphens, in a flat `patches/`
+    directory -- Brave's convention. The stack now lives in the vendored BrowserOS
+    layout, which keys a patch by the upstream path itself, because that is what its
+    `.features.yaml` claims and what its `doctor` resolves. The inventory property is
+    unchanged and if anything better: the tree reads as the subset of Chromium this
+    fork touches, and a conflict still names one file.
     """
-    return relative.replace("/", "-") + ".patch"
+    return relative
 
 
 def ensure_pgo_profiles_checkout() -> None:
@@ -364,7 +381,7 @@ def cmd_apply(args: argparse.Namespace) -> None:
     # otherwise apply against a directory that does not exist yet.
     copied = copy_sources()
     overlaid = copy_overlay()
-    patches = sorted(PATCHES.glob("*.patch"))
+    patches = patch_files()
     if not patches:
         print(f"{copied} source file(s) copied; no patches yet, which is a valid state for the scaffold")
         return
@@ -546,16 +563,11 @@ def cmd_export(_: argparse.Namespace) -> None:
         for path in (ROOT / "rewrite").rglob("*.yaml")
     } if (ROOT / "rewrite").exists() else set()
 
-    if PATCHES.exists():
-        # Clear only the generated output. Deleting the directory takes README.md with it -- which is
-        # documentation, not output, and is exactly what happened the first time this ran.
-        #
-        # A rule-generated patch is kept: it is not this command's output, and deleting it here while also
-        # skipping it below would remove it outright. `plaster.py generate` owns those.
-        keep = {patch_name(relative) for relative in generated}
-        for stale in PATCHES.glob("*.patch"):
-            if stale.name not in keep:
-                stale.unlink()
+    # No stale sweep. The stack now lives in a tree SHARED with upstream's own patches,
+    # so deleting "whatever this command did not just write" there would remove 385
+    # patches that are not its output. It is also moot: every patch this fork owns is
+    # generated from a rule in rewrite/, so every path below is skipped and this command
+    # exports nothing. What remains useful is the untracked-file report at the end.
     PATCHES.mkdir(parents=True, exist_ok=True)
 
     exported = 0
@@ -574,7 +586,9 @@ def cmd_export(_: argparse.Namespace) -> None:
             text=True,
             check=True,
         ).stdout
-        (PATCHES / patch_name(relative)).write_text(diff, encoding="utf-8")
+        out = PATCHES / patch_name(relative)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(diff, encoding="utf-8")
         exported += 1
         print(f"exported {relative}")
 

@@ -1,0 +1,35 @@
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -594,12 +594,12 @@ void ToolbarView::Init() {
+     UpdateGlicButtonVisibility();
+   }
+ 
+-  if (!features::IsWebUIAvatarButtonEnabled()) {
+-    avatar_ = AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
+-    bool show_avatar_toolbar_button =
+-        AvatarToolbarButtonInterface::CanShowForProfile(browser_->GetProfile());
+-    avatar_->SetVisible(show_avatar_toolbar_button);
+-  }
++  // Redrob: the SIDEBAR owns the avatar, always, and registers it through SetRedrobAvatarButton.
++  // Creating one here as well would leave two, and the one every bubble anchors to would be the
++  // invisible one, so the toolbar's own avatar is never built and `avatar_` stays null. That was already
++  // the case for every Redrob window -- it used to fall out of the toolbar being hidden -- so the null is
++  // a state the rest of this class has always had to handle. Now that there IS a top row, the rule is
++  // stated rather than inferred.
+ 
+   // Only manage the overflow button when there are at least some views
+   // controls. If there aren't any, the WebUIToolbarWebView will handle all
+@@ -620,6 +620,12 @@ void ToolbarView::Init() {
+         l10n_util::GetStringUTF16(IDS_APPMENU_TOOLTIP));
+     app_menu_button->SetID(VIEW_ID_APP_MENU);
+     app_menu_button_ = AddChildView(std::move(app_menu_button));
++    // Redrob: built but never shown. There is no app menu in this product -- Settings is in the sidebar,
++    // and the top row carries navigation and the address, nothing else. It is HIDDEN rather than not
++    // built because `app_menu_button()` is reached for without a null check by the menu accelerators, the
++    // avatar's IPH anchoring and several browser tests; an invisible child is skipped by the layout, so
++    // the row is right and none of those callers has to be audited on every version bump.
++    app_menu_button_->SetVisible(false);
+   }
+ 
+   if (base::FeatureList::IsEnabled(contextual_tasks::kContextualTasks) &&

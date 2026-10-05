@@ -1,8 +1,7 @@
 diff --git a/chrome/browser/importer/importer_list.cc b/chrome/browser/importer/importer_list.cc
-index 62546b572bab8..df99dae8f9719 100644
 --- a/chrome/browser/importer/importer_list.cc
 +++ b/chrome/browser/importer/importer_list.cc
-@@ -6,10 +6,15 @@
+@@ -6,17 +6,25 @@
  
  #include <stdint.h>
  
@@ -17,16 +16,18 @@ index 62546b572bab8..df99dae8f9719 100644
 +#include "base/values.h"
  #include "build/build_config.h"
  #include "chrome/browser/shell_integration.h"
++#include "chrome/common/importer/chromium_profile_locator.h"
  #include "chrome/common/importer/firefox_importer_utils.h"
-@@ -17,6 +22,7 @@
+ #include "chrome/common/importer/importer_bridge.h"
  #include "chrome/grit/generated_resources.h"
++#include "base/strings/utf_string_conversions.h"
  #include "components/user_data_importer/common/importer_data_types.h"
  #include "ui/base/l10n/l10n_util.h"
 +#include "base/logging.h"
  
  #if BUILDFLAG(IS_MAC)
  #include "base/apple/foundation_util.h"
-@@ -29,6 +35,235 @@
+@@ -29,6 +37,235 @@
  
  namespace {
  
@@ -262,7 +263,7 @@ index 62546b572bab8..df99dae8f9719 100644
  #if BUILDFLAG(IS_WIN)
  void DetectIEProfiles(
      std::vector<user_data_importer::SourceProfile>* profiles) {
-@@ -71,6 +306,21 @@ void DetectBuiltinWindowsProfiles(
+@@ -71,6 +308,21 @@ void DetectBuiltinWindowsProfiles(
  
  #endif  // BUILDFLAG(IS_WIN)
  
@@ -284,7 +285,7 @@ index 62546b572bab8..df99dae8f9719 100644
  #if BUILDFLAG(IS_MAC)
  void DetectSafariProfiles(
      std::vector<user_data_importer::SourceProfile>* profiles) {
-@@ -88,8 +338,30 @@ void DetectSafariProfiles(
+@@ -88,8 +340,30 @@ void DetectSafariProfiles(
    safari.services_supported = items;
    profiles->push_back(safari);
  }
@@ -315,7 +316,44 @@ index 62546b572bab8..df99dae8f9719 100644
  // |locale|: The application locale used for lookups in Firefox's
  // locale-specific search engines feature (see firefox_importer.cc for
  // details).
-@@ -170,8 +442,10 @@ std::vector<user_data_importer::SourceProfile> DetectSourceProfilesWorker(
+@@ -157,6 +431,27 @@ void DetectFirefoxProfiles(
+   }
+ }
+ 
++// Every Chromium-family profile this user has. `services_supported` is the honest list and not
++// user_data_importer::ALL: ALL includes COOKIES, which upstream cannot carry and this importer
++// deliberately does not, and PASSWORDS, which means reimplementing another program's key
++// derivation -- the import step points at the CSV route for those instead.
++void DetectChromiumBasedProfiles(
++    std::vector<user_data_importer::SourceProfile>* profiles) {
++  base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
++                                                base::BlockingType::MAY_BLOCK);
++  for (const redrob::ChromiumSource& source : redrob::DetectChromiumSources()) {
++    user_data_importer::SourceProfile profile;
++    profile.importer_name = source.product_name;
++    profile.profile = source.profile_name;
++    profile.importer_type = user_data_importer::TYPE_CHROMIUM_BASED;
++    profile.source_path = source.profile_path;
++    profile.services_supported = user_data_importer::HISTORY |
++                                 user_data_importer::FAVORITES |
++                                 user_data_importer::SEARCH_ENGINES;
++    profiles->push_back(std::move(profile));
++  }
++}
++
+ std::vector<user_data_importer::SourceProfile> DetectSourceProfilesWorker(
+     const std::string& locale,
+     bool include_interactive_profiles) {
+@@ -165,13 +460,19 @@ std::vector<user_data_importer::SourceProfile> DetectSourceProfilesWorker(
+ 
+   std::vector<user_data_importer::SourceProfile> profiles;
+ 
++  // Chromium-family sources first. This fork's users are overwhelmingly arriving from one, and
++  // first-run import takes the first profile detected.
++  DetectChromiumBasedProfiles(&profiles);
++
+   // The first run import will automatically take settings from the first
+   // profile detected, which should be the user's current default.
  #if BUILDFLAG(IS_WIN)
    if (shell_integration::IsFirefoxDefaultBrowser()) {
      DetectFirefoxProfiles(locale, &profiles);
@@ -326,7 +364,7 @@ index 62546b572bab8..df99dae8f9719 100644
      DetectBuiltinWindowsProfiles(&profiles);
      DetectFirefoxProfiles(locale, &profiles);
    }
-@@ -179,11 +453,15 @@ std::vector<user_data_importer::SourceProfile> DetectSourceProfilesWorker(
+@@ -179,11 +480,15 @@ std::vector<user_data_importer::SourceProfile> DetectSourceProfilesWorker(
    if (shell_integration::IsFirefoxDefaultBrowser()) {
      DetectFirefoxProfiles(locale, &profiles);
      DetectSafariProfiles(&profiles);

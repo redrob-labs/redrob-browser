@@ -34,7 +34,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "chromium" / "src"
-PATCHES = ROOT / "patches"
+PATCHES = ROOT / "vendor" / "browseros" / "chromium_patches"
 REWRITES = ROOT / "rewrite"
 PRESETS = ROOT / "presets"
 DEPOT_TOOLS = ROOT / "depot_tools"
@@ -52,8 +52,17 @@ class RuleError(Exception):
 
 
 def patch_name(relative: str) -> str:
-    """Same naming as redrob.py, so a rule-generated patch lands on the hand patch it replaces."""
-    return relative.replace("/", "-") + ".patch"
+    """The patch's path inside the vendored patch tree, which MIRRORS the upstream tree.
+
+    It used to be the upstream path with slashes as dashes, in a flat `patches/`
+    directory. The stack now lives in the vendored BrowserOS layout, which keys a
+    patch by the upstream path itself -- one patch per file, in the file's own
+    directory -- because that is what its `.features.yaml` claims and what its
+    `doctor` resolves. Two layouts cannot both be the stack: whichever one the
+    build does not read is a copy that drifts, and the repository's own gate then
+    reports a fork that cannot be rebuilt from itself.
+    """
+    return relative
 
 
 def rewrite_files(only: str | None = None) -> list[tuple[str, Path]]:
@@ -564,9 +573,10 @@ def cmd_generate(args: argparse.Namespace) -> int:
             failures += 1
             continue
         out = PATCHES / patch_name(relative)
+        out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(diff, encoding="utf-8")
         changed = sum(1 for line in diff.splitlines() if re.match(r"^[+-][^+-]", line))
-        print(f"generated {out.name} ({changed} changed line(s)) from {yaml_path.name}")
+        print(f"generated {relative} ({changed} changed line(s)) from {yaml_path.name}")
     return 1 if failures else 0
 
 
@@ -583,17 +593,17 @@ def cmd_check(args: argparse.Namespace) -> int:
             failures += 1
             continue
         if not out.exists():
-            print(f"FAIL {out.name} is missing; run plaster.py generate", file=sys.stderr)
+            print(f"FAIL {relative} is missing from the patch tree; run plaster.py generate", file=sys.stderr)
             failures += 1
         elif out.read_text(encoding="utf-8") != diff:
             print(
-                f"FAIL {out.name} does not match its rules. It is GENERATED -- edit "
+                f"FAIL {relative} does not match its rules. It is GENERATED -- edit "
                 f"{yaml_path.relative_to(ROOT)} and regenerate, do not edit the patch.",
                 file=sys.stderr,
             )
             failures += 1
         else:
-            print(f"ok {out.name}")
+            print(f"ok {relative}")
     if not rows:
         print("no rule files to check")
     return 1 if failures else 0
@@ -678,7 +688,7 @@ def cmd_parsers(_: argparse.Namespace) -> int:
 def cmd_list(_: argparse.Namespace) -> int:
     rows = rewrite_files()
     for relative, yaml_path in rows:
-        print(f"{relative}  ->  patches/{patch_name(relative)}")
+        print(f"{relative}  ->  {PATCHES.relative_to(ROOT)}/{patch_name(relative)}")
         try:
             for index, sub in enumerate(load_rules(yaml_path), start=1):
                 kind = next((k for k in sub if k != "description"), "?")

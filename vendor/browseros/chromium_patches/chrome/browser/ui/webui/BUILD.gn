@@ -1,5 +1,4 @@
 diff --git a/chrome/browser/ui/webui/BUILD.gn b/chrome/browser/ui/webui/BUILD.gn
-index 2a4eae8943e6a1f1ad56a6f9891250ef126632cb..e33d32ea4d4b4d2525f5763da94158b07fbce2fc 100644
 --- a/chrome/browser/ui/webui/BUILD.gn
 +++ b/chrome/browser/ui/webui/BUILD.gn
 @@ -54,6 +54,7 @@ source_set("configs") {
@@ -10,3 +9,21 @@ index 2a4eae8943e6a1f1ad56a6f9891250ef126632cb..e33d32ea4d4b4d2525f5763da94158b0
      "//chrome/browser/contextual_tasks:ui",
      "//chrome/browser/glic",
      "//chrome/browser/glic:impl",
+@@ -105,6 +106,8 @@ source_set("configs") {
+     "//ui/webui:buildflags",
+   ]
+ 
++  deps += redrob_chrome_browser_ui_webui_deps
++
+   if (is_win || is_chromeos) {
+     deps += [ "//chrome/browser/ui/webui/signin:inline_login" ]
+   }
+@@ -583,6 +586,8 @@ source_set("chrome_web_ui_controller_factory") {
+     "//ui/gfx/codec",
+   ]
+ 
++  deps += redrob_chrome_browser_ui_webui_deps
++
+   if (is_android) {
+     deps += [
+       "//chrome/browser/ui/webui/bookmarks:bookmarks_android",

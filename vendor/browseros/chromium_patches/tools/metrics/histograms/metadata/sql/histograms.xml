@@ -1,5 +1,4 @@
 diff --git a/tools/metrics/histograms/metadata/sql/histograms.xml b/tools/metrics/histograms/metadata/sql/histograms.xml
-index 55f07550ca9011f1fd20339b9e7e8d1a7487c368..a26a1105f5e9e96cf907b1798db1e674a8381571 100644
 --- a/tools/metrics/histograms/metadata/sql/histograms.xml
 +++ b/tools/metrics/histograms/metadata/sql/histograms.xml
 @@ -58,6 +58,7 @@ chromium-metrics-reviews@google.com.
@@ -10,3 +9,11 @@ index 55f07550ca9011f1fd20339b9e7e8d1a7487c368..a26a1105f5e9e96cf907b1798db1e674
    <variant name="FirstPartySets" summary="FirstPartySets"/>
    <variant name="FSPContextDatabase" summary="FSPContextDatabase"/>
    <variant name="History" summary="History"/>
+@@ -88,6 +89,7 @@ chromium-metrics-reviews@google.com.
+   <variant name="Quota" summary="Quota"/>
+   <variant name="RazeNullDB" summary="RazeNullDB"/>
+   <variant name="Recovery" summary="Recovery"/>
++  <variant name="RedrobChromiumImporter" summary="RedrobChromiumImporter"/>
+   <variant name="ReplayTasks" summary="ReplayTasks"/>
+   <variant name="ReportingAndNEL" summary="ReportingAndNEL"/>
+   <variant name="ServerCertificate" summary="ServerCertificate"/>

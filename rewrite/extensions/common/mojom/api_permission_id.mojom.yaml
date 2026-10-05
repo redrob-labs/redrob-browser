@@ -12,18 +12,18 @@
 substitutions:
   - description: Add the redrobPrivate permission ids to the extension API permission id enum.
     insert_after:
-      anchor: '  kPublicSuffix = 273,'
+      anchor: '  // update_extension_permission.py).'
       count: 1
       lines: |
-        kRedrobPrivate = 274,
-        kRedrobPrivateTasks = 275,
-        kRedrobPrivateMemory = 276,
-        kRedrobPrivateProviders = 277,
-        kRedrobPrivateRoutines = 278,
-        kRedrobPrivatePasswords = 279,
-        kRedrobPrivateImport = 280,
-        kRedrobPrivateEngine = 281,
-        kRedrobPrivateWorkspace = 282,
-        kRedrobPrivateSettings = 283,
-        kRedrobPrivateOnboarding = 284,
-        kRedrobPrivateBrowser = 285,
+        kRedrobPrivate = 1000,
+        kRedrobPrivateTasks = 1001,
+        kRedrobPrivateMemory = 1002,
+        kRedrobPrivateProviders = 1003,
+        kRedrobPrivateRoutines = 1004,
+        kRedrobPrivatePasswords = 1005,
+        kRedrobPrivateImport = 1006,
+        kRedrobPrivateEngine = 1007,
+        kRedrobPrivateWorkspace = 1008,
+        kRedrobPrivateSettings = 1009,
+        kRedrobPrivateOnboarding = 1010,
+        kRedrobPrivateBrowser = 1011,

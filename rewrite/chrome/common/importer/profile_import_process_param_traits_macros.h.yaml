@@ -14,6 +14,10 @@ substitutions:
   - description: |
       The note recording why the platform split is gone.
     regex:
-      pattern: "                              user_data_importer::TYPE_EDGE)\n#else\nIPC_ENUM_TRAITS_MIN_MAX_VALUE(user_data_importer::ImporterType,\n                              user_data_importer::TYPE_UNKNOWN,\n                              user_data_importer::TYPE_BOOKMARKS_FILE)\n#endif"
+      # Stacked on another fork, both arms of this `#if` already read TYPE_CHROME -- it collapsed the
+      # per-platform maxima before we got here. Ours still has to raise the maximum, because
+      # TYPE_CHROMIUM_BASED is added above it by the importer_type.h rule, and an IPC range that stops
+      # short of a real enum value drops those messages at the deserializer.
+      re_pattern: "                              user_data_importer::TYPE_CHROME\\)\n#else\nIPC_ENUM_TRAITS_MIN_MAX_VALUE\\(user_data_importer::ImporterType,\n                              user_data_importer::TYPE_UNKNOWN,\n                              user_data_importer::TYPE_CHROME\\)\n#endif"
       replace: "                              user_data_importer::TYPE_CHROMIUM_BASED)"
       count: 1

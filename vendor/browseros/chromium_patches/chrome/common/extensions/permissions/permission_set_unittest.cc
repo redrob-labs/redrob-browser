@@ -1,0 +1,22 @@
+diff --git a/chrome/common/extensions/permissions/permission_set_unittest.cc b/chrome/common/extensions/permissions/permission_set_unittest.cc
+--- a/chrome/common/extensions/permissions/permission_set_unittest.cc
++++ b/chrome/common/extensions/permissions/permission_set_unittest.cc
+@@ -852,6 +852,18 @@ TEST(PermissionsTest, PermissionMessages) {
+   skip.insert(APIPermissionID::kIdentity);
+ 
+   // These are private.
++  skip.insert(APIPermissionID::kRedrobPrivate);
++  skip.insert(APIPermissionID::kRedrobPrivateTasks);
++  skip.insert(APIPermissionID::kRedrobPrivateMemory);
++  skip.insert(APIPermissionID::kRedrobPrivateProviders);
++  skip.insert(APIPermissionID::kRedrobPrivateRoutines);
++  skip.insert(APIPermissionID::kRedrobPrivatePasswords);
++  skip.insert(APIPermissionID::kRedrobPrivateImport);
++  skip.insert(APIPermissionID::kRedrobPrivateEngine);
++  skip.insert(APIPermissionID::kRedrobPrivateWorkspace);
++  skip.insert(APIPermissionID::kRedrobPrivateSettings);
++  skip.insert(APIPermissionID::kRedrobPrivateOnboarding);
++  skip.insert(APIPermissionID::kRedrobPrivateBrowser);
+   skip.insert(APIPermissionID::kAccessibilityPrivate);
+   skip.insert(APIPermissionID::kAccessibilityServicePrivate);
+ #if BUILDFLAG(ENABLE_PLATFORM_APPS)

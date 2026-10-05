@@ -20,6 +20,11 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
+# The patch stack. It is the VENDORED BrowserOS tree, keyed by upstream path, and it
+# is the only one -- `patches/`, the old flat directory, is gone. A second copy of the
+# stack is not a backup: the build reads one of them, and the other drifts silently.
+PATCH_TREE = ROOT / "vendor" / "browseros" / "chromium_patches"
+
 # The manifest's own format: `src<TAB>dst`, one line per destination, comments and blanks allowed. Duplicated
 # here rather than imported from redrob.py because this file must stay runnable on a machine with nothing set
 # up, and importing the CLI drags in its whole environment contract.
@@ -109,24 +114,33 @@ def check_branding(problems: list[str]) -> None:
 
 
 def check_patch_names(problems: list[str]) -> None:
-    """A patch's filename IS its path, with slashes turned into hyphens.
+    """A patch's PATH in the tree is the upstream path it edits.
 
-    That is the convention `ls patches/` relies on to answer "what does this fork change". A patch whose name no
-    longer matches the path inside it still applies, so nothing breaks -- it just stops being findable, which is
-    the whole point of the naming.
+    The stack lives in the vendored BrowserOS layout, which mirrors the Chromium
+    tree -- one patch per file, in the file's own directory. It replaced a flat
+    `patches/` directory whose filenames were the path with slashes as hyphens.
+    Either way the check is the same and it is about findability: a patch filed
+    under a path other than the one inside it still applies, it just stops
+    answering "what does this fork change about THIS file", which is the whole
+    point of keying it by path.
     """
-    patches = ROOT / "patches"
+    patches = PATCH_TREE
     if not patches.exists():
+        problems.append(f"no patch tree at {patches.relative_to(ROOT)}")
         return
-    for patch in sorted(patches.glob("*.patch")):
+    skip = {".features.yaml", ".store.yaml"}
+    for patch in sorted(p for p in patches.rglob("*") if p.is_file() and p.name not in skip):
+        relative = str(patch.relative_to(patches))
         text = patch.read_text(encoding="utf-8", errors="replace")
         match = re.search(r"^\+\+\+ b/(.+)$", text, re.MULTILINE)
         if not match:
-            problems.append(f"{patch.name} has no +++ b/ header; it is not a usable patch")
+            # A new-file patch names its target only on the `+++` line too, so a patch
+            # with no such header is not a patch at all.
+            problems.append(f"{relative} has no +++ b/ header; it is not a usable patch")
             continue
-        expected = match.group(1).strip().replace("/", "-") + ".patch"
-        if patch.name != expected:
-            problems.append(f"{patch.name} should be named {expected} (it patches {match.group(1).strip()})")
+        target = match.group(1).strip()
+        if relative != target:
+            problems.append(f"{relative} should be filed at {target} (that is what it patches)")
 
 
 def check_versions(problems: list[str]) -> None:
@@ -295,11 +309,11 @@ def check_rewrites(problems: list[str]) -> None:
         return
     for rule in rules:
         relative = str(rule.relative_to(rewrites))[: -len(".yaml")]
-        patch = ROOT / "patches" / plaster.patch_name(relative)
+        patch = PATCH_TREE / plaster.patch_name(relative)
         if not patch.exists():
             problems.append(
-                f"rewrite/{relative}.yaml has no patch at patches/{patch.name}; "
-                f"run plaster.py generate"
+                f"rewrite/{relative}.yaml has no patch at "
+                f"{PATCH_TREE.relative_to(ROOT)}/{relative}; run plaster.py generate"
             )
         try:
             subs = plaster.load_rules(rule)
@@ -384,7 +398,7 @@ def check_update_channel(problems: list[str]) -> None:
     Checked by string rather than by running anything, because that is all the coupling is: a hostname and
     a prefix that have to match.
     """
-    installer = ROOT / "patches" / "chrome-installer-linux-common-installer.py.patch"
+    installer = PATCH_TREE / "chrome/installer/linux/common/installer.py"
     workflow = ROOT / ".github" / "workflows" / "sign-and-publish.yml"
     if not installer.exists() or not workflow.exists():
         return
