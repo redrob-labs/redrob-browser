@@ -30,13 +30,17 @@ wrong amount of code.
   nobody could explain, which is how a fork ends up unable to move to the next release.
 - **Watch the file list, not the line count.** 4,000 lines across ten files is cheap; 400 lines
   across ninety files is what makes every release a project.
-- **Never anchor a numbered id on "the current last value".** Permission ids, event ids and function
-  ids are IPC and metrics identities. Appending at the next free value reads the right number only
-  for the base the rule was written against: at the 155 uprev upstream had spent those numbers, the
-  anchor line was still unique so `count` passed, and the enum ended up declaring two members with
-  one id — which decodes as the wrong call rather than failing to build. Allocate in a reserved high
-  band instead (permissions 1000+, events 2000+, functions 5000+, grit ids 13000+), far above
-  anything upstream reaches, so the ids neither collide now nor move later.
+- **Numbered ids are renumbered at every uprev, and `count` will not tell you.** Permission, event
+  and function ids are appended after the last value upstream declares. A rule's anchor names an
+  earlier line that stays unique even after upstream adds values behind it, so at the 155 uprev
+  every anchor matched and three enums declared two members with one id. Nothing failed to build:
+  the ids would have decoded as the wrong call. `tools/port-155/verify_structure.py` is what catches
+  it; run it after every uprev.
+  These three lists must stay **contiguous**. Moving them to a high band (tried: 1000+, 2000+,
+  5000+) breaks the build: permissions and events are recorded as linear UMA enumerations capped
+  at 1001 buckets (`static_assert`, "1012 < 1002"), and the event and function unittests assert
+  `ENUM_BOUNDARY` equals the `enums.xml` entry count. Grit resource ids are different and can sit
+  in a reserved band (13000+).
 
 ## Where the patches go
 

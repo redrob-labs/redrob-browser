@@ -595,10 +595,11 @@ features:
   redrob-private-api:
     description: "feat: the redrobPrivate extension API surface"
     files:
-      # The numeric ids these lists allocate now sit in reserved high bands (permissions
-      # 1000+, events 2000+, functions 5000+) rather than at the next free value. They
-      # are IPC and metrics identities: appending at next-free collided with upstream's
-      # own new values at this uprev, and a band keeps them from moving at the next one.
+      # The numeric ids these lists allocate follow upstream's last value contiguously
+      # (permissions 276+, events 581+, functions 2016+). They cannot sit in a high band:
+      # permissions and events are linear UMA enumerations capped at 1001 buckets, and the
+      # unittests require each list to be dense. Collisions at an uprev are caught by
+      # tools/port-155/verify_structure.py, not by the rules' count assertions.
       - chrome/browser/extensions/api/BUILD.gn
       - chrome/browser/extensions/api/api_browser_context_keyed_service_factories.cc
       - chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc

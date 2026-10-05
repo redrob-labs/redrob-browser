@@ -38,15 +38,15 @@ CASES = [
     (
         "duplicate enum id",
         "extensions/common/mojom/api_permission_id.mojom",
-        lambda t: t.replace("kRedrobPrivateTasks = 1001,", "kRedrobPrivateTasks = 1000,"),
-        "id 1000 claimed by 2",
+        lambda t: t.replace("kRedrobPrivateTasks = 277,", "kRedrobPrivateTasks = 276,"),
+        "id 276 claimed by 2",
     ),
     (
         "duplicate enum member name",
         "extensions/browser/extension_event_histogram_value.h",
         lambda t: t.replace(
-            "REDROBPRIVATE_ON_TASK_CHANGED = 2001,",
-            "REDROBPRIVATE_ON_IMPORT_STATE_CHANGED = 2001,",
+            "REDROBPRIVATE_ON_TASK_CHANGED = 582,",
+            "REDROBPRIVATE_ON_IMPORT_STATE_CHANGED = 582,",
         ),
         "duplicate member name",
     ),

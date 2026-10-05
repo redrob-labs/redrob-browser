@@ -17,6 +17,6 @@ substitutions:
       anchor: '  // tools/metrics/histograms/update_extension_histograms.py'
       count: 1
       lines: |
-        REDROBPRIVATE_ON_IMPORT_STATE_CHANGED = 2000,
-        REDROBPRIVATE_ON_TASK_CHANGED = 2001,
-        REDROBPRIVATE_ON_ENGINE_INSTALL_STATE_CHANGED = 2002,
+        REDROBPRIVATE_ON_IMPORT_STATE_CHANGED = 581,
+        REDROBPRIVATE_ON_TASK_CHANGED = 582,
+        REDROBPRIVATE_ON_ENGINE_INSTALL_STATE_CHANGED = 583,
