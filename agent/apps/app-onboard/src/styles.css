@@ -1,0 +1,620 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "tailwind-scrollbar-hide/v4";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Type: the design system's stacks (tokens.css). The Chromium WebUI resource
+   contract forbids shipping font files, so Pretendard and Wanted Sans are used
+   when the machine has them and the stack falls through to the platform face. */
+
+/* Colour tokens, from the Redrob design system (@redrob-labs/ui
+   dist/styles/tokens.css).
+
+   Two layers, the system's own:
+
+     1. PRIMITIVES `--rr-*`. The ramps, transcribed verbatim. Theme-independent:
+        Blue 6 is Blue 6 in light and in dark, so they are declared once on :root.
+        No component names this layer.
+
+     2. ROLES. The shadcn names every component here already reads (`--primary`,
+        `--muted-foreground`, ...), each pointed at the design system's semantic
+        token for the same job and re-pointed in `.dark`. The comment on each line
+        names that token, so a value can be checked against tokens.css by name.
+
+   Two roles the system has and shadcn does not, both used by this panel:
+   `--accent-brand` is a brand FILL (action-primary) and `--accent-brand-ink` is
+   brand TEXT (ink-brand). Dark mode is why they are two: white on Blue 6 is the
+   fill, Blue 4 on black is the text, and no single blue is both.
+
+   Same two layers, same values, as apps/app/styles/global.css, where
+   design-tokens.test.ts pins them to tokens.css. Keep the two blocks identical. */
+:root {
+  /* 1. PRIMITIVES */
+  --rr-black: #0a0b0c; /* redrob-black */
+  --rr-white: #ffffff; /* redrob-white */
+  --rr-blue-1: #eef4ff;
+  --rr-blue-2: #d9e6ff;
+  --rr-blue-3: #bad2ff;
+  --rr-blue-4: #8aafff;
+  --rr-blue-5: #507fff;
+  --rr-blue-6: #2b52ff; /* Redrob Blue */
+  --rr-blue-7: #1733d5;
+  --rr-blue-8: #09209c;
+  --rr-blue-9: #061460;
+  --rr-blue-10: #030c34;
+  --rr-gray-1: #f8f9fb;
+  --rr-gray-2: #eff1f4;
+  --rr-gray-3: #dfe2e8;
+  --rr-gray-4: #cbcfd7;
+  --rr-gray-5: #aab0bb;
+  --rr-gray-6: #7c8390;
+  --rr-gray-7: #576071;
+  --rr-gray-8: #292e37;
+  --rr-gray-9: #141719;
+  --rr-teal-3: #6ff4f0; /* accent-teal-3 */
+  --rr-teal-4: #00b5c2; /* accent-teal-4 */
+  --rr-sky-3: #2f8dff; /* accent-sky-3 */
+  --rr-sky-4: #0e51b6; /* accent-sky-4 */
+  --rr-violet-3: #8944ff; /* accent-violet-3 */
+  --rr-pink-3: #ff39ba; /* accent-pink-3 */
+  --rr-red-3: #ff4b4b; /* accent-red-3 */
+  --rr-red-4: #a31310; /* accent-red-4 */
+  --rr-orange-3: #ff9c1b; /* accent-orange-3 */
+  --rr-orange-4: #ae5100; /* accent-orange-4 */
+  --rr-lime-4: #89ad00; /* accent-lime-4 */
+  --rr-green-3: #29e474; /* accent-green-3 */
+  --rr-green-4: #00864a; /* accent-green-4 */
+
+  /* 2. ROLES, light */
+  --radius: 0.65rem;
+  --background: var(--rr-white); /* surface-base */
+  --foreground: var(--rr-black); /* ink-primary */
+  --card: var(--rr-gray-1); /* surface-raised */
+  --card-foreground: var(--rr-black);
+  --popover: var(--rr-white); /* surface-base, lifted by shadow-md */
+  --popover-foreground: var(--rr-black);
+  --primary: var(--rr-blue-6); /* action-primary */
+  --primary-foreground: var(--rr-white); /* ink-on-brand */
+  --secondary: var(--rr-gray-2); /* surface-sunken */
+  --secondary-foreground: var(--rr-black);
+  --muted: var(--rr-gray-2); /* surface-sunken */
+  --muted-foreground: var(--rr-gray-7); /* ink-secondary */
+  --ink-muted: #686e78; /* ink-muted, the system's own literal */
+  --ink-disabled: var(--rr-gray-5);
+  --accent: var(--rr-gray-2); /* hover fill on surface-base */
+  --accent-foreground: var(--rr-black);
+  --destructive: var(--rr-red-4); /* status-danger */
+  --destructive-foreground: var(--rr-white);
+  --warning: var(--rr-orange-4); /* status-warning */
+  --success: var(--rr-green-4); /* status-success */
+  --border: var(--rr-gray-3); /* border-subtle */
+  --input: var(--rr-gray-6); /* border-strong */
+  --ring: var(--rr-blue-6); /* focus-ring */
+  --chart-1: var(--rr-blue-6);
+  --chart-2: var(--rr-teal-4);
+  --chart-3: var(--rr-violet-3);
+  --chart-4: var(--rr-pink-3);
+  --chart-5: var(--rr-lime-4);
+  --sidebar: var(--rr-gray-1); /* surface-raised */
+  --sidebar-foreground: var(--rr-black);
+  --sidebar-primary: var(--rr-blue-6);
+  --sidebar-primary-foreground: var(--rr-white);
+  --sidebar-accent: var(--rr-gray-2);
+  --sidebar-accent-foreground: var(--rr-black);
+  --sidebar-border: var(--rr-gray-3);
+  --sidebar-ring: var(--rr-blue-6);
+  --accent-brand: var(--rr-blue-6); /* action-primary */
+  --accent-brand-ink: var(--rr-blue-7); /* ink-brand */
+  /* The shimmer's highlight sweep: one step lighter than the fill. */
+  --accent-brand-bright: var(--rr-blue-5);
+}
+
+.dark {
+  /* 2. ROLES, dark */
+  --background: var(--rr-black); /* surface-base */
+  --foreground: var(--rr-gray-1); /* ink-primary */
+  --card: var(--rr-gray-9); /* surface-raised */
+  --card-foreground: var(--rr-gray-1);
+  --popover: var(--rr-gray-9);
+  --popover-foreground: var(--rr-gray-1);
+  --primary: var(--rr-blue-6); /* action-primary */
+  --primary-foreground: var(--rr-white); /* ink-on-brand */
+  /* surface-sunken. Not a ramp step: the system's own value, chosen so the
+     dark elevation ladder does not reverse at its second step. */
+  --secondary: #1c1f26;
+  --secondary-foreground: var(--rr-gray-1);
+  --muted: #1c1f26;
+  --muted-foreground: var(--rr-gray-5); /* ink-secondary */
+  --ink-muted: #838a97; /* ink-muted, the system's own literal */
+  --ink-disabled: var(--rr-gray-6);
+  --accent: var(--rr-gray-8);
+  --accent-foreground: var(--rr-gray-1);
+  --destructive: var(--rr-red-3); /* status-danger */
+  --destructive-foreground: var(--rr-black);
+  --warning: var(--rr-orange-3); /* status-warning */
+  --success: var(--rr-green-3); /* status-success */
+  --border: var(--rr-gray-8); /* border-subtle */
+  --input: var(--rr-gray-6); /* border-strong */
+  --ring: var(--rr-blue-4); /* focus-ring */
+  --chart-1: var(--rr-blue-5);
+  --chart-2: var(--rr-teal-3);
+  --chart-3: var(--rr-violet-3);
+  --chart-4: var(--rr-pink-3);
+  --chart-5: var(--rr-sky-3);
+  --sidebar: var(--rr-gray-9);
+  --sidebar-foreground: var(--rr-gray-1);
+  --sidebar-primary: var(--rr-blue-6);
+  --sidebar-primary-foreground: var(--rr-white);
+  --sidebar-accent: var(--rr-gray-8);
+  --sidebar-accent-foreground: var(--rr-gray-1);
+  --sidebar-border: var(--rr-gray-8);
+  --sidebar-ring: var(--rr-blue-4);
+  --accent-brand: var(--rr-blue-6); /* action-primary */
+  --accent-brand-ink: var(--rr-blue-4); /* ink-brand */
+  --accent-brand-bright: var(--rr-blue-4);
+}
+
+@theme inline {
+  --font-sans:
+    Pretendard, "Wanted Sans", "Noto Sans Devanagari", system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  /* The design system's radius scale (tokens.css). */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-accent-brand: var(--accent-brand);
+  --color-accent-brand-ink: var(--accent-brand-ink);
+  --color-accent-brand-bright: var(--accent-brand-bright);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+
+  /* Custom keyframe animations for hero section */
+  --animate-float: float 3s ease-in-out infinite;
+  --animate-shimmer: shimmer 3s ease-in-out infinite;
+  --animate-pulse-slow: pulse-slow 4s ease-in-out infinite;
+  --animate-pulse-slow-delayed: pulse-slow 4s ease-in-out infinite 2s;
+  /* One-time glow animation for the brand word */
+  --animate-glow-once: glow-once 1.5s ease-out 1s forwards;
+  /* Added shine animation for card hover highlight effect */
+  --animate-shine: shine 0.8s ease-in-out;
+
+  /* app-onboard compatibility layer: the onboarding UI is ported from
+     claw-onboard, which uses its own token vocabulary. These map that
+     vocabulary onto the design system's roles so the shared
+     onboarding components wear the app theme without per-class edits. */
+  --color-accent: var(--accent-brand);
+  --color-accent-foreground: var(--primary-foreground);
+  --color-accent-2: var(--accent-brand-bright);
+  --color-accent-ink: var(--accent-brand-ink);
+  --color-accent-tint: oklch(from var(--accent-brand) l c h / 0.1);
+  --color-accent-tint-2: oklch(from var(--accent-brand) l c h / 0.2);
+  --color-ink: var(--foreground);
+  --color-ink-2: var(--muted-foreground);
+  --color-ink-3: var(--ink-muted);
+  --color-ink-4: var(--ink-disabled);
+  --color-bg-canvas: var(--background);
+  --color-bg-sunken: var(--muted);
+  --color-border-2: var(--border);
+  --color-border-strong: var(--input);
+  --color-card-tint: var(--muted);
+  --color-green: var(--success);
+  --color-green-tint: oklch(from var(--success) l c h / 0.14);
+  --color-amber: var(--warning);
+  --color-amber-tint: oklch(from var(--warning) l c h / 0.14);
+  --color-red: var(--destructive);
+  --color-red-tint: oklch(from var(--destructive) l c h / 0.12);
+  --font-serif: var(--font-sans);
+  --shadow-card: 0 1px 2px rgba(10, 11, 12, 0.08); /* shadow-sm */
+  --shadow-pop: 0 16px 40px rgba(10, 11, 12, 0.14); /* shadow-lg */
+  --animate-fade-up: fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-fade-in: fade-in 0.3s ease-out;
+  --animate-pulse-dot: pulse-dot 1.4s ease-in-out infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans! antialiased;
+  }
+
+  /* Styled scrollbar with stable gutter and theme-aware colors */
+  .styled-scrollbar {
+    /* Firefox support */
+    scrollbar-width: thin;
+    scrollbar-color: oklch(from var(--border) l c h / 0.4) transparent;
+  }
+
+  /* Webkit browsers (Chrome, Safari, Edge) */
+  .styled-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .styled-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .styled-scrollbar::-webkit-scrollbar-thumb {
+    background: oklch(from var(--border) l c h / 0.4);
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .styled-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: oklch(from var(--border) l c h / 0.6);
+    background-clip: padding-box;
+  }
+
+  /* Dark mode adjustments */
+  .dark .styled-scrollbar {
+    scrollbar-color: oklch(from var(--border) l c h / 0.6) transparent;
+  }
+
+  .dark .styled-scrollbar::-webkit-scrollbar-thumb {
+    background: oklch(from var(--border) l c h / 0.6);
+    background-clip: padding-box;
+  }
+
+  .dark .styled-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: oklch(from var(--border) l c h / 0.8);
+    background-clip: padding-box;
+  }
+
+  /* Custom animation keyframes for minimal, elegant hero animations */
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0px);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: -200% center;
+    }
+    100% {
+      background-position: 200% center;
+    }
+  }
+
+  @keyframes pulse-slow {
+    0%,
+    100% {
+      opacity: 0.3;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.5;
+      transform: scale(1.05);
+    }
+  }
+
+  /* Added subtle one-time glow animation that draws focus then settles */
+  @keyframes glow-once {
+    0% {
+      text-shadow: none;
+      transform: scale(1);
+    }
+    50% {
+      text-shadow:
+        0 0 20px oklch(from var(--accent-brand) l c h / 0.6),
+        0 0 40px oklch(from var(--accent-brand) l c h / 0.4),
+        0 0 60px oklch(from var(--accent-brand) l c h / 0.2);
+      transform: scale(1.02);
+    }
+    100% {
+      text-shadow: none;
+      transform: scale(1);
+    }
+  }
+
+  /* Added shine animation for card hover highlight effect */
+  @keyframes shine {
+    0% {
+      transform: translateX(-100%) translateY(-100%) rotate(30deg);
+    }
+    100% {
+      transform: translateX(100%) translateY(100%) rotate(30deg);
+    }
+  }
+
+  /* Collapsible animations for smooth expand/collapse */
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+      opacity: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height);
+      opacity: 1;
+    }
+  }
+
+  @keyframes collapsible-up {
+    from {
+      height: var(--radix-collapsible-content-height);
+      opacity: 1;
+    }
+    to {
+      height: 0;
+      opacity: 0;
+    }
+  }
+
+  .bg-grid-pattern {
+    background-image:
+      linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+    background-size: 60px 60px;
+  }
+
+  .dark .bg-grid-pattern {
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 60px 60px;
+  }
+
+  .bg-gradient-radial-focus {
+    background: radial-gradient(
+      circle at center,
+      transparent 0%,
+      transparent 30%,
+      var(--background) 70%
+    );
+  }
+
+  /* Animation utility classes */
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+
+  .animate-shimmer {
+    animation: shimmer 3s ease-in-out infinite;
+  }
+
+  .animate-pulse-slow {
+    animation: pulse-slow 4s ease-in-out infinite;
+  }
+
+  .animate-pulse-slow-delayed {
+    animation: pulse-slow 4s ease-in-out infinite 2s;
+  }
+
+  /* Added utility class for one-time glow animation */
+  .animate-glow-once {
+    animation: glow-once 1.5s ease-out forwards;
+  }
+
+  /* Added utility class for shine animation on card hover */
+  .animate-shine {
+    animation: shine 0.8s ease-in-out;
+  }
+
+  /* Collapsible animation utility classes */
+  .animate-collapsible-down {
+    animation: collapsible-down 0.2s ease-out;
+  }
+
+  .animate-collapsible-up {
+    animation: collapsible-up 0.2s ease-out;
+  }
+}
+
+/* This is a noninteractive macOS example, not an app password form. Native
+   neutral colors stay recognizable across the two product themes. */
+.keychain-preview {
+  padding: 20px 18px 18px;
+  border: 1px solid #c7c7cf;
+  border-radius: 11px;
+  background: linear-gradient(#f1f1f5, #e9e9ee);
+  box-shadow: 0 4px 12px #25242f12;
+  color: #242426;
+  font-family: "Helvetica Neue", system-ui, sans-serif;
+}
+.keychain-preview-content {
+  display: flex;
+  align-items: start;
+  gap: 16px;
+}
+.keychain-lock {
+  position: relative;
+  flex-shrink: 0;
+  width: 62px;
+  height: 62px;
+}
+.keychain-lock::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 13px;
+  width: 36px;
+  height: 40px;
+  border: 6px solid #bfc2c7;
+  border-radius: 22px 22px 0 0;
+  background: transparent;
+  box-shadow:
+    inset 1px 1px 2px #888c94,
+    0 -1px 1px #fff;
+}
+.keychain-lock span {
+  position: absolute;
+  top: 28px;
+  left: 6px;
+  width: 50px;
+  height: 34px;
+  border: 1px solid #ba871c;
+  border-radius: 4px;
+  background: linear-gradient(
+    100deg,
+    #f0b828,
+    #ffdb72 38%,
+    #eab131 75%,
+    #ce9320
+  );
+  box-shadow:
+    inset 0 1px 1px #fff3,
+    0 2px 3px #0002;
+}
+.keychain-password {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: 29px;
+  padding: 0 9px;
+  border: 2px solid #78b2f3;
+  border-radius: 6px;
+  background: white;
+  box-shadow: 0 0 0 2px #96c5f766;
+  color: #424246;
+  font-size: 14px;
+  letter-spacing: 0.05em;
+}
+.keychain-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+}
+.keychain-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 78px;
+  height: 29px;
+  padding: 0 12px;
+  border: 1px solid #d1d1d8;
+  border-radius: 5px;
+  background: linear-gradient(#fafafa, #dedee5);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.keychain-allow {
+  padding: 3px;
+  border: 2px solid var(--color-accent);
+  border-radius: 8px;
+}
+.keychain-allow .keychain-button {
+  min-width: 78px;
+}
+.keychain-help {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin-right: 8px;
+  border: 1px solid #c7c7ce;
+  border-radius: 50%;
+  background: linear-gradient(white, #e0e0e7);
+  font-size: 14px;
+  font-weight: 700;
+}
+@media (max-width: 480px) {
+  .keychain-preview {
+    padding: 16px 12px;
+  }
+  .keychain-preview-content {
+    gap: 10px;
+  }
+  .keychain-lock {
+    display: none;
+  }
+  .keychain-help {
+    display: none;
+  }
+  .keychain-preview-actions {
+    gap: 5px;
+  }
+  .keychain-button {
+    min-width: 0;
+    padding: 0 9px;
+  }
+  .keychain-allow .keychain-button {
+    min-width: 0;
+  }
+}

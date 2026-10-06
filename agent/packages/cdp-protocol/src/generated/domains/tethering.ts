@@ -1,0 +1,27 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+// ── AUTO-GENERATED from CDP protocol. DO NOT EDIT. ──
+
+// ══ Commands ══
+
+export interface BindParams {
+  port: number
+}
+
+export interface UnbindParams {
+  port: number
+}
+
+// ══ Events ══
+
+export interface AcceptedEvent {
+  port: number
+  connectionId: string
+}

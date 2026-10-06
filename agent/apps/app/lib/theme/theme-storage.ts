@@ -1,0 +1,22 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+ * See the NOTICE file for provenance.
+ */
+
+import { storage } from '@wxt-dev/storage'
+
+/**
+ * @public
+ */
+export type Theme = 'light' | 'dark' | 'system'
+
+/**
+ * @public
+ */
+export const themeStorage = storage.defineItem<Theme>('local:theme', {
+  fallback: 'system',
+})

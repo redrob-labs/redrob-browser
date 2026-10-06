@@ -1,0 +1,69 @@
+NOTICE
+======
+
+This repository is a fork of BrowserOS.
+
+Upstream project : BrowserOS
+Upstream source  : https://github.com/browseros-ai/BrowserOS
+Upstream commit  : 0152e0a829b36921787196b66a13d1025bc850be
+Imported subtree : packages/browseros-agent  (re-rooted to this repository root)
+Imported on      : 2026-10-05
+
+Copyright
+---------
+
+Copyright (c) 2026 Felafax, Inc.
+Copyright (c) 2025 BrowserOS and the upstream contributors named in this
+repository's git history.
+
+Modifications in this repository are copyright Janghoon Lee (Redrob) and
+contributors, and are released under the same licence.
+
+Licence
+-------
+
+GNU Affero General Public License, version 3 or later (AGPL-3.0-or-later).
+The full licence text is in the LICENSE file, byte-identical to upstream.
+
+Every source file in this repository carries an SPDX-License-Identifier tag.
+Upstream tagged 222 of them; the remaining 1559 were tagged during the import
+so that no file loses its licence link when read on its own.
+
+AGPL section 13 (network use)
+-----------------------------
+
+If a modified version of this software is made available to users over a
+network, its complete corresponding source code must be offered to those
+users. This obligation applies to this repository and to anything that
+includes its source. It is the reason this code lives in its own repository
+rather than inside a proprietary one.
+
+What was imported
+-----------------
+
+  apps/        app, app-onboard, claw-app, claw-onboard, claw-server-rust,
+               cli, server
+  packages/    acpx-ai-provider, agent-mcp-manager, browser-core, browser-mcp,
+               build-server-tools, cdp-protocol, claw-api, claw-api-client,
+               diagnostics, onboarding-video, shared
+  crates/      browseros-cdp, browseros-core, browseros-mcp, claw-api,
+               harness-integrations
+  contracts/, resources/, scripts/, tools/, ci/, third_party/
+  build and toolchain configuration at the repository root
+
+Git history for the imported subtree is preserved: 1435 commits, with the
+upstream authors intact.
+
+What was NOT imported
+---------------------
+
+  packages/browseros   The Chromium fork and its patch series. A separate
+                       decision; also carries LICENSE.ungoogled_chromium
+                       (BSD 3-Clause) for the patch directories.
+  .internal-docs       A private upstream submodule (git@). Not accessible.
+
+Attribution requests
+--------------------
+
+Upstream credit is carried in three places and must not be removed: this
+file, the per-file SPDX headers, and the preserved git history.
