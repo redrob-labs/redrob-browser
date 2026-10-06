@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/browseros/buildflags.gni b/chrome/browser/browseros/buildflags.gni
 new file mode 100644
-index 0000000000000..e9c2702ebc12a
 --- /dev/null
 +++ b/chrome/browser/browseros/buildflags.gni
 @@ -0,0 +1,35 @@
@@ -16,7 +15,7 @@ index 0000000000000..e9c2702ebc12a
 +
 +  # Dev/test only. Official builds should leave this false.
 +  # // TODO: nikhil - before prod claw release, set this to false
-+  browseros_allow_runtime_product_override = true
++  browseros_allow_runtime_product_override = false
 +}
 +
 +declare_args() {
@@ -37,5 +36,5 @@ index 0000000000000..e9c2702ebc12a
 +if (browseros_product_browserclaw) {
 +  browseros_product_dir_name = "BrowserClaw"
 +} else {
-+  browseros_product_dir_name = "BrowserOS"
++  browseros_product_dir_name = "Redrob"
 +}

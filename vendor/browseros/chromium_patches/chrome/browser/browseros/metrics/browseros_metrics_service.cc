@@ -65,10 +65,10 @@ new file mode 100644
 +constexpr net::NetworkTrafficAnnotationTag kBrowserOSMetricsTrafficAnnotation =
 +    net::DefineNetworkTrafficAnnotation("browseros_metrics", R"(
 +        semantics {
-+          sender: "BrowserOS Metrics"
++          sender: "Redrob Metrics"
 +          description:
 +            "Sends anonymous product usage metrics to PostHog. This helps "
-+            "improve BrowserOS and BrowserClaw by showing how features are "
++            "improve Redrob by showing how features are "
 +            "used. No personally identifiable information is collected."
 +          trigger:
 +            "Triggered when product features are used, such as extension "

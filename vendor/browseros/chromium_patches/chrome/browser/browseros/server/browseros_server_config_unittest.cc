@@ -103,7 +103,7 @@ new file mode 100644
 +  const ManagedServerDescriptor& descriptor = GetBrowserOSServerDescriptor();
 +
 +  EXPECT_EQ(Product::kBrowserOS, descriptor.product);
-+  EXPECT_EQ(std::string_view("BrowserOS server"), descriptor.log_name);
++  EXPECT_EQ(std::string_view("Redrob agent server"), descriptor.log_name);
 +  EXPECT_EQ(base::FilePath::StringType(FILE_PATH_LITERAL("BrowserOSServer")),
 +            ToPathString(descriptor.bundle_dir));
 +  EXPECT_EQ(base::FilePath::StringType(FILE_PATH_LITERAL("browseros_server")),

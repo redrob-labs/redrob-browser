@@ -7,3 +7,10 @@ substitutions:
       pattern: "https://cdn.browseros.com/"
       replace: "https://cdn.redrob.ai/browser/"
       count: 4
+  # ---- upstream-branding sweep
+  - description: |
+      Log name of the agent server.
+    regex:
+      pattern: "    \"BrowserOS server\",\n"
+      replace: "    \"Redrob agent server\",\n"
+      count: 1

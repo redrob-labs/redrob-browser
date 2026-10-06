@@ -22,3 +22,12 @@ substitutions:
       re_pattern: "// Sentry crash reporting\n// https://[^\n]*\ninline constexpr char kSentryMinidumpUrl\\[\\] =\n    \"[^\"]*\"\n    \"[^\"]*\";"
       replace: "// Crash uploads are off: Redrob runs no crash collector yet.\ninline constexpr char kSentryMinidumpUrl[] = \"\";"
       count: 1
+  # ---- upstream-branding sweep
+  - description: |
+      The virtual host the omnibox shows for the agent's pages: chrome://browseros/settings becomes
+      chrome://redrob/settings. Both directions of the rewrite (content client and omnibox client)
+      read this one constant.
+    regex:
+      pattern: "inline constexpr char kBrowserOSHost[] = \"browseros\";\n"
+      replace: "inline constexpr char kBrowserOSHost[] = \"redrob\";\n"
+      count: 1

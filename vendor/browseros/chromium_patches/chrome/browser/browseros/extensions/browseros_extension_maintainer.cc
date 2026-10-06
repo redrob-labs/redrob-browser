@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/browseros/extensions/browseros_extension_maintainer.cc b/chrome/browser/browseros/extensions/browseros_extension_maintainer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..f061377c17fccfdaf687ab5201b4c82f6dea3fcc
 --- /dev/null
 +++ b/chrome/browser/browseros/extensions/browseros_extension_maintainer.cc
 @@ -0,0 +1,292 @@
@@ -45,20 +44,20 @@ index 0000000000000000000000000000000000000000..f061377c17fccfdaf687ab5201b4c82f
 +constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
 +    net::DefineNetworkTrafficAnnotation("browseros_extension_maintenance", R"(
 +        semantics {
-+          sender: "BrowserOS Extension Maintainer"
++          sender: "Redrob Extension Maintainer"
 +          description:
-+            "Fetches JSON configuration for BrowserOS extension maintenance."
++            "Fetches JSON configuration for Redrob extension maintenance."
 +          trigger:
 +            "Background maintenance or recovery when no usable local primary "
 +            "extension exists. Never blocks external provider discovery."
 +          data: "No user data. GET request only."
 +          destination: OTHER
-+          destination_other: "BrowserOS configuration server."
++          destination_other: "Redrob configuration server."
 +        }
 +        policy {
 +          cookies_allowed: NO
 +          setting: "Controlled via command-line flags or enterprise policies."
-+          policy_exception_justification: "BrowserOS feature."
++          policy_exception_justification: "Redrob feature."
 +        })");
 +
 +}  // namespace

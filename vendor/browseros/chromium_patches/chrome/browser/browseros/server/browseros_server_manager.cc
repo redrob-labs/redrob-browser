@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/browseros/server/browseros_server_manager.cc b/chrome/browser/browseros/server/browseros_server_manager.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..88c8769d97826bd909ada9b67cbba87d09782790
 --- /dev/null
 +++ b/chrome/browser/browseros/server/browseros_server_manager.cc
 @@ -0,0 +1,1421 @@
@@ -102,7 +101,7 @@ index 0000000000000000000000000000000000000000..88c8769d97826bd909ada9b67cbba87d
 +net::NetworkTrafficAnnotationTag GetStatusTrafficAnnotation() {
 +  return net::DefineNetworkTrafficAnnotation("browseros_server_status", R"(
 +    semantics {
-+      sender: "BrowserOS Server Manager"
++      sender: "Redrob Agent Server Manager"
 +      description:
 +        "Checks whether the local server is idle before activating a prepared "
 +        "update. Deferred updates are retried without another download."

@@ -1,5 +1,4 @@
 diff --git a/chrome/install_static/chromium_install_modes.h b/chrome/install_static/chromium_install_modes.h
-index a6d969df56d13d94eaa968934f909d6fd23b5f2f..56bf2a72ca207aefee13cbdf984ee7fbe7d3afcc 100644
 --- a/chrome/install_static/chromium_install_modes.h
 +++ b/chrome/install_static/chromium_install_modes.h
 @@ -10,6 +10,7 @@
@@ -65,28 +64,28 @@ index a6d969df56d13d94eaa968934f909d6fd23b5f2f..56bf2a72ca207aefee13cbdf984ee7fb
 +        L"924012147-",
 +};
 +#else
-+inline constexpr wchar_t kProductPathName[] = L"BrowserOS";
++inline constexpr wchar_t kProductPathName[] = L"Redrob";
 +inline constexpr ProductInstallIdentity kProductInstallIdentity = {
-+    .base_app_name = L"BrowserOS",
-+    .base_app_id = L"BrowserOS",
-+    .browser_prog_id_prefix = L"BOSHTML",
-+    .browser_prog_id_description = L"BrowserOS HTML Document",
-+    .direct_launch_url_scheme = "browseros",
-+    .pdf_prog_id_prefix = L"BOSPDF",
-+    .pdf_prog_id_description = L"BrowserOS PDF Document",
-+    .active_setup_guid = L"{0EF5669B-7FD7-4138-A91F-E466631ADE97}",
-+    .toast_activator_clsid = {0xE76CCE76,
-+                              0x27A7,
-+                              0x46D3,
-+                              {0x9E, 0xED, 0xCC, 0x8C, 0x5E, 0xD7, 0xBE, 0x72}},
-+    .elevator_clsid = {0x29ED629C,
-+                       0x1F0E,
-+                       0x47D1,
-+                       {0xA6, 0x84, 0x93, 0x97, 0xAC, 0xDB, 0x71, 0xAB}},
-+    .tracing_service_clsid = {0xC39C8575,
-+                              0x9F42,
-+                              0x4599,
-+                              {0x96, 0xF1, 0x19, 0xDB, 0x7A, 0xEB, 0x51, 0xAF}},
++    .base_app_name = L"Redrob",
++    .base_app_id = L"Redrob",
++    .browser_prog_id_prefix = L"RedrobHTML",
++    .browser_prog_id_description = L"Redrob HTML Document",
++    .direct_launch_url_scheme = "redrob",
++    .pdf_prog_id_prefix = L"RedrobPDF",
++    .pdf_prog_id_description = L"Redrob PDF Document",
++    .active_setup_guid = L"{6B7F1FD9-15D5-40D2-9C26-7BF04115328C}",
++    .toast_activator_clsid = {0x770DF02E,
++                              0x602C,
++                              0x4466,
++                              {0x96, 0x57, 0xF8, 0x6C, 0x1F, 0x2B, 0xB0, 0x69}},
++    .elevator_clsid = {0x70524803,
++                       0x3E5E,
++                       0x4BC6,
++                       {0xBB, 0x16, 0xD4, 0x01, 0x42, 0xD2, 0x1A, 0x55}},
++    .tracing_service_clsid = {0x6D80524F,
++                              0x73EA,
++                              0x4A2F,
++                              {0x99, 0x17, 0xBB, 0xCD, 0x91, 0x32, 0xBF, 0xD3}},
 +    .sandbox_sid_prefix =
 +        L"S-1-15-2-3251537155-1984446955-2931258699-841473695-"
 +        L"1938553385-"

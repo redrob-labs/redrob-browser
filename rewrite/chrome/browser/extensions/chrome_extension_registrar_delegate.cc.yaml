@@ -1,0 +1,9 @@
+# Log text for the extensions the browser will not let a user disable.
+
+substitutions:
+  - description: |
+      Log message.
+    regex:
+      pattern: "\" cannot be disabled (BrowserOS extension)\""
+      replace: "\" cannot be disabled (Redrob extension)\""
+      count: 1

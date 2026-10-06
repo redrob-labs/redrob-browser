@@ -5,3 +5,10 @@ substitutions:
       pattern: "https://cdn.browseros.com/"
       replace: "https://cdn.redrob.ai/browser/"
       count: 4
+  # ---- upstream-branding sweep
+  - description: |
+      Follows the log name.
+    regex:
+      pattern: "EXPECT_EQ(std::string_view(\"BrowserOS server\"), descriptor.log_name);"
+      replace: "EXPECT_EQ(std::string_view(\"Redrob agent server\"), descriptor.log_name);"
+      count: 1

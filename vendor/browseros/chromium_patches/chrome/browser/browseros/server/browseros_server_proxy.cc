@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/browseros/server/browseros_server_proxy.cc b/chrome/browser/browseros/server/browseros_server_proxy.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..e66ec726cc6d8c796ecede86b9776402aa632f2e
 --- /dev/null
 +++ b/chrome/browser/browseros/server/browseros_server_proxy.cc
 @@ -0,0 +1,650 @@
@@ -57,19 +56,19 @@ index 0000000000000000000000000000000000000000..e66ec726cc6d8c796ecede86b9776402
 +net::NetworkTrafficAnnotationTag kBrowserOSProxyPumpTrafficAnnotation =
 +    net::DefineNetworkTrafficAnnotation("browseros_proxy_pump", R"(
 +      semantics {
-+        sender: "BrowserOS Server Proxy"
++        sender: "Redrob Agent Server Proxy"
 +        description:
-+          "Copies raw HTTP bytes between clients connected to the BrowserOS "
-+          "proxy port and the BrowserOS sidecar server on loopback."
-+        trigger: "A client connects to the BrowserOS proxy port."
-+        data: "HTTP requests and responses for BrowserOS server functionality."
++          "Copies raw HTTP bytes between clients connected to the Redrob "
++          "proxy port and the Redrob agent server on loopback."
++        trigger: "A client connects to the Redrob proxy port."
++        data: "HTTP requests and responses for Redrob agent server functionality."
 +        destination: LOCAL
 +      }
 +      policy {
 +        cookies_allowed: NO
 +        setting: "This feature cannot be disabled by settings."
 +        policy_exception_justification:
-+          "Local proxy for BrowserOS server functionality."
++          "Local proxy for Redrob agent server functionality."
 +      })");
 +
 +}  // namespace

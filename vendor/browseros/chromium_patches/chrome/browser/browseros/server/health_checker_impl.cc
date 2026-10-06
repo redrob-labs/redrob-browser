@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/browseros/server/health_checker_impl.cc b/chrome/browser/browseros/server/health_checker_impl.cc
 new file mode 100644
-index 0000000000000..cba17265c71d9
 --- /dev/null
 +++ b/chrome/browser/browseros/server/health_checker_impl.cc
 @@ -0,0 +1,93 @@
@@ -42,9 +41,9 @@ index 0000000000000..cba17265c71d9
 +  net::NetworkTrafficAnnotationTag traffic_annotation =
 +      net::DefineNetworkTrafficAnnotation("browseros_health_check", R"(
 +        semantics {
-+          sender: "BrowserOS Server Manager"
++          sender: "Redrob Agent Server Manager"
 +          description:
-+            "Checks if the BrowserOS MCP server is healthy by querying its "
++            "Checks if the Redrob MCP server is healthy by querying its "
 +            "configured health endpoint."
 +          trigger: "Periodic health check every 30 seconds while server is running."
 +          data: "No user data sent, just an HTTP GET request."
@@ -54,7 +53,7 @@ index 0000000000000..cba17265c71d9
 +          cookies_allowed: NO
 +          setting: "This feature cannot be disabled by settings."
 +          policy_exception_justification:
-+            "Internal health check for BrowserOS server functionality."
++            "Internal health check for Redrob agent server functionality."
 +        })");
 +
 +  auto resource_request = std::make_unique<network::ResourceRequest>();

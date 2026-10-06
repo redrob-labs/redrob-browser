@@ -1,0 +1,9 @@
+# Crash reports name the product that crashed.
+
+substitutions:
+  - description: |
+      The product name stamped on crash reports.
+    regex:
+      pattern: "  product_name = \"BrowserOS\";\n"
+      replace: "  product_name = \"Redrob\";\n"
+      count: 1

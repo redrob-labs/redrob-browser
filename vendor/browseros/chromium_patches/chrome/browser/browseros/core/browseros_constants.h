@@ -44,7 +44,7 @@ new file mode 100644
 +inline constexpr char kBrowserOSAlphaUpdateUrl[] =
 +    "https://cdn.redrob.ai/browser/extensions/update-manifest.alpha.xml";
 +
-+inline constexpr char kBrowserOSHost[] = "browseros";
++inline constexpr char kBrowserOSHost[] = "redrob";
 +
 +struct BrowserOSURLRoute {
 +  const char* virtual_path;

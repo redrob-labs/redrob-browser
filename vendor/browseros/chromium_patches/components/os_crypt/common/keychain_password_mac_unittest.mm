@@ -1,5 +1,4 @@
 diff --git a/components/os_crypt/common/keychain_password_mac_unittest.mm b/components/os_crypt/common/keychain_password_mac_unittest.mm
-index 8c5817204161d..64d5477a5e1dc 100644
 --- a/components/os_crypt/common/keychain_password_mac_unittest.mm
 +++ b/components/os_crypt/common/keychain_password_mac_unittest.mm
 @@ -5,6 +5,8 @@
@@ -11,7 +10,7 @@ index 8c5817204161d..64d5477a5e1dc 100644
  #include "crypto/apple/fake_keychain_v2.h"
  #include "crypto/apple/scoped_fake_keychain_v2.h"
  #include "testing/gtest/include/gtest/gtest.h"
-@@ -96,4 +98,17 @@
+@@ -96,4 +98,17 @@ TEST(KeychainPasswordTest, PasswordsDiffer) {
    EXPECT_NE(password1, password2);
  }
  
@@ -23,8 +22,8 @@ index 8c5817204161d..64d5477a5e1dc 100644
 +  EXPECT_EQ("BrowserClaw Safe Storage", KeychainPassword::GetServiceName());
 +  EXPECT_EQ("BrowserClaw", KeychainPassword::GetAccountName());
 +#else
-+  EXPECT_EQ("BrowserOS Safe Storage", KeychainPassword::GetServiceName());
-+  EXPECT_EQ("BrowserOS", KeychainPassword::GetAccountName());
++  EXPECT_EQ("Redrob Safe Storage", KeychainPassword::GetServiceName());
++  EXPECT_EQ("Redrob", KeychainPassword::GetAccountName());
 +#endif
 +}
 +

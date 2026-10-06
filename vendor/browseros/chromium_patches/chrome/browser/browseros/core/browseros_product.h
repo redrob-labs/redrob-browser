@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/browseros/core/browseros_product.h b/chrome/browser/browseros/core/browseros_product.h
 new file mode 100644
-index 0000000000000..e35cbdaf72a25
 --- /dev/null
 +++ b/chrome/browser/browseros/core/browseros_product.h
 @@ -0,0 +1,89 @@
@@ -29,7 +28,7 @@ index 0000000000000..e35cbdaf72a25
 +
 +static_assert(BUILDFLAG(BROWSEROS_PRODUCT_BROWSEROS) !=
 +                  BUILDFLAG(BROWSEROS_PRODUCT_BROWSERCLAW),
-+              "Exactly one BrowserOS product must be selected");
++              "Exactly one product must be selected");
 +
 +inline Product GetBakedProduct() {
 +#if BUILDFLAG(BROWSEROS_PRODUCT_BROWSERCLAW)

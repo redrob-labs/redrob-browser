@@ -17,7 +17,7 @@ new file mode 100644
 +
 +constexpr ManagedServerDescriptor kBrowserOSServerDescriptor = {
 +    Product::kBrowserOS,
-+    "BrowserOS server",
++    "Redrob agent server",
 +    FILE_PATH_LITERAL("BrowserOSServer"),
 +    FILE_PATH_LITERAL("browseros_server"),
 +    FILE_PATH_LITERAL("config.json"),

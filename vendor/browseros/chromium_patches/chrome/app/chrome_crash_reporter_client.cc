@@ -1,5 +1,4 @@
 diff --git a/chrome/app/chrome_crash_reporter_client.cc b/chrome/app/chrome_crash_reporter_client.cc
-index 64912e538f3b0b4acfbb21e0cd94a27b4329c7a2..fecf93d66ea720a3c4dab020e89037e1b76757fd 100644
 --- a/chrome/app/chrome_crash_reporter_client.cc
 +++ b/chrome/app/chrome_crash_reporter_client.cc
 @@ -17,6 +17,7 @@
@@ -32,7 +31,7 @@ index 64912e538f3b0b4acfbb21e0cd94a27b4329c7a2..fecf93d66ea720a3c4dab020e89037e1
 +  product_name = "BrowserOS_Mac";
  #elif BUILDFLAG(IS_WIN)
 -  product_name = "Chrome";
-+  product_name = "BrowserOS";
++  product_name = "Redrob";
  #else
    NOTREACHED();
  #endif

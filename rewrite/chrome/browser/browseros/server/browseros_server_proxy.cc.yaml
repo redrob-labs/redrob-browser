@@ -1,0 +1,39 @@
+# Network traffic annotations: the audit text that says what a request is for.
+
+substitutions:
+  - description: |
+      Annotation text for the local agent-server proxy.
+    regex:
+      pattern: "sender: \"BrowserOS Server Proxy\""
+      replace: "sender: \"Redrob Agent Server Proxy\""
+      count: 1
+  - description: |
+      (continued)
+    regex:
+      pattern: "connected to the BrowserOS \""
+      replace: "connected to the Redrob \""
+      count: 1
+  - description: |
+      (continued)
+    regex:
+      pattern: "\"proxy port and the BrowserOS sidecar server on loopback.\""
+      replace: "\"proxy port and the Redrob agent server on loopback.\""
+      count: 1
+  - description: |
+      (continued)
+    regex:
+      pattern: "\"A client connects to the BrowserOS proxy port.\""
+      replace: "\"A client connects to the Redrob proxy port.\""
+      count: 1
+  - description: |
+      (continued)
+    regex:
+      pattern: "\"HTTP requests and responses for BrowserOS server functionality.\""
+      replace: "\"HTTP requests and responses for Redrob agent server functionality.\""
+      count: 1
+  - description: |
+      (continued)
+    regex:
+      pattern: "\"Local proxy for BrowserOS server functionality.\""
+      replace: "\"Local proxy for Redrob agent server functionality.\""
+      count: 1

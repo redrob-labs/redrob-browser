@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/browseros/server/validate_resources.py b/chrome/browser/browseros/server/validate_resources.py
 new file mode 100644
-index 0000000000000..0665cc5ce0337
 --- /dev/null
 +++ b/chrome/browser/browseros/server/validate_resources.py
 @@ -0,0 +1,35 @@
@@ -23,7 +22,7 @@ index 0000000000000..0665cc5ce0337
 +  resource_path = os.path.join(resources_dir, resource)
 +
 +  if not os.path.exists(resource_path):
-+    print(f"ERROR: Required BrowserOS resource not found: {resource_path}")
++    print(f"ERROR: Required Redrob agent resource not found: {resource_path}")
 +    all_valid = False
 +    continue
 +
@@ -37,5 +36,5 @@ index 0000000000000..0665cc5ce0337
 +    print(f"  - resources/{resource}")
 +  sys.exit(1)
 +
-+print(f"BrowserOS resources validated ({len(required_resources)} resources)")
++print(f"Redrob agent resources validated ({len(required_resources)} resources)")
 +sys.exit(0)

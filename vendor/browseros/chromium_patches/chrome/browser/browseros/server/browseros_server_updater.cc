@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/browseros/server/browseros_server_updater.cc b/chrome/browser/browseros/server/browseros_server_updater.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..7c5df6afacc045b7d34559b9d47a85481bb57ed6
 --- /dev/null
 +++ b/chrome/browser/browseros/server/browseros_server_updater.cc
 @@ -0,0 +1,641 @@
@@ -45,9 +44,9 @@ index 0000000000000000000000000000000000000000..7c5df6afacc045b7d34559b9d47a8548
 +net::NetworkTrafficAnnotationTag GetAppcastTrafficAnnotation() {
 +  return net::DefineNetworkTrafficAnnotation("browseros_server_appcast", R"(
 +    semantics {
-+      sender: "BrowserOS Server Updater"
++      sender: "Redrob Agent Server Updater"
 +      description:
-+        "Checks for updates to the BrowserOS server component by fetching "
++        "Checks for updates to the Redrob agent server component by fetching "
 +        "an appcast XML feed."
 +      trigger: "Periodic check every 15 minutes while browser is running."
 +      data: "No user data sent, just an HTTP GET request."
@@ -62,16 +61,16 @@ index 0000000000000000000000000000000000000000..7c5df6afacc045b7d34559b9d47a8548
 +      cookies_allowed: NO
 +      setting: "This feature can be disabled via --disable-browseros-server or --disable-browseros-server-updater."
 +      policy_exception_justification:
-+        "Essential for keeping BrowserOS server component up to date."
++        "Essential for keeping the Redrob agent server component up to date."
 +    })");
 +}
 +
 +net::NetworkTrafficAnnotationTag GetDownloadTrafficAnnotation() {
 +  return net::DefineNetworkTrafficAnnotation("browseros_server_download", R"(
 +    semantics {
-+      sender: "BrowserOS Server Updater"
++      sender: "Redrob Agent Server Updater"
 +      description:
-+        "Downloads a new version of the BrowserOS server component."
++        "Downloads a new version of the Redrob agent server component."
 +      trigger: "When a newer version is available in the appcast feed."
 +      data: "No user data sent, just an HTTP GET request for the ZIP package."
 +      destination: OTHER
@@ -85,7 +84,7 @@ index 0000000000000000000000000000000000000000..7c5df6afacc045b7d34559b9d47a8548
 +      cookies_allowed: NO
 +      setting: "This feature can be disabled via --disable-browseros-server or --disable-browseros-server-updater."
 +      policy_exception_justification:
-+        "Essential for keeping BrowserOS server component up to date."
++        "Essential for keeping the Redrob agent server component up to date."
 +    })");
 +}
 +

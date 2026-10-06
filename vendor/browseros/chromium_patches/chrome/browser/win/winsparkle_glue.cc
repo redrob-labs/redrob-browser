@@ -72,7 +72,7 @@ new file mode 100644
 +// Per-product registry state (skipped version, last check time): BrowserOS
 +// and BrowserClaw install side by side, so sharing one path would
 +// cross-contaminate their updaters.
-+constexpr char kRegistryPath[] = "Software\\BrowserOS\\WinSparkle";
++constexpr char kRegistryPath[] = "Software\\Redrob\\WinSparkle";
 +constexpr char kClawRegistryPath[] = "Software\\BrowserClaw\\WinSparkle";
 +
 +// Version compared against the appcast's sparkle:version: the BrowserOS
@@ -308,8 +308,8 @@ new file mode 100644
 +  // comparisons use the epoch-prefixed feed version below.
 +  const std::wstring display_version =
 +      base::UTF8ToWide(version_info::GetBrowserOSVersionNumber());
-+  win_sparkle_set_app_details(L"BrowserOS",
-+                              is_claw ? L"BrowserOS neo" : L"BrowserOS",
++  win_sparkle_set_app_details(L"Redrob",
++                              is_claw ? L"BrowserOS neo" : L"Redrob",
 +                              display_version.c_str());
 +
 +  const std::wstring build_version = base::UTF8ToWide(GetUpdateFeedVersion());

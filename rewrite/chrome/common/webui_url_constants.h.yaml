@@ -1,0 +1,16 @@
+# The onboarding page's address, which the user sees in the omnibox.
+
+substitutions:
+  - description: |
+      chrome://browseros-onboarding becomes chrome://redrob-onboarding. Every caller reads these two
+      constants; nothing else in the tree spells the host.
+    regex:
+      pattern: "    \"browseros-onboarding\";\n"
+      replace: "    \"redrob-onboarding\";\n"
+      count: 1
+  - description: |
+      (continued)
+    regex:
+      pattern: "    \"chrome://browseros-onboarding/\";\n"
+      replace: "    \"chrome://redrob-onboarding/\";\n"
+      count: 1

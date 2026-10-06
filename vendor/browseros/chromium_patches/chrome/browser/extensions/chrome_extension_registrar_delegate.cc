@@ -1,5 +1,4 @@
 diff --git a/chrome/browser/extensions/chrome_extension_registrar_delegate.cc b/chrome/browser/extensions/chrome_extension_registrar_delegate.cc
-index 7ff5fb309529d5a776f0fdb29e07ef1e001f06f4..276eb347ba2d61fca627ad34b68b28a454b1f0b9 100644
 --- a/chrome/browser/extensions/chrome_extension_registrar_delegate.cc
 +++ b/chrome/browser/extensions/chrome_extension_registrar_delegate.cc
 @@ -13,6 +13,7 @@
@@ -36,7 +35,7 @@ index 7ff5fb309529d5a776f0fdb29e07ef1e001f06f4..276eb347ba2d61fca627ad34b68b28a4
 +  // - BrowserOS extensions cannot be disabled by users
 +  if (browseros::IsActiveBrowserOSExtension(extension->id())) {
 +    LOG(INFO) << "browseros: Extension " << extension->id()
-+              << " cannot be disabled (BrowserOS extension)";
++              << " cannot be disabled (Redrob extension)";
 +    return false;
 +  }
 +
