@@ -27,6 +27,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -580,18 +581,36 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+def restore_working_file(target: Path, saved: "tuple[bytes, os.stat_result] | None") -> None:
+    """Put a checkout file back exactly as `check` found it, mtime included so ninja sees no change."""
+    if saved is None:
+        return
+    data, stat = saved
+    if target.read_bytes() != data:
+        target.write_bytes(data)
+    os.utime(target, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     """Fail when a rule no longer matches, or when its patch was edited by hand instead of its rule."""
     rows = rewrite_files(args.path)
     failures = 0
     for relative, yaml_path in rows:
         out = PATCHES / patch_name(relative)
+        # generate_one writes its result into the checkout, which is what `generate` wants and `check` must
+        # not do: the working file holds this rule's patch AND every other patch on the same file, and leaving
+        # the rule-only rewrite behind silently strips the others. That is how a check run broke the 155
+        # build twice. So the working file is put back, bytes and mtime, whatever the outcome.
+        target = SRC / relative
+        saved = (target.read_bytes(), target.stat()) if target.exists() else None
         try:
             diff = generate_one(relative, yaml_path)
         except RuleError as error:
+            restore_working_file(target, saved)
             print(f"FAIL {error}", file=sys.stderr)
             failures += 1
             continue
+        restore_working_file(target, saved)
         if not out.exists():
             print(f"FAIL {relative} is missing from the patch tree; run plaster.py generate", file=sys.stderr)
             failures += 1
