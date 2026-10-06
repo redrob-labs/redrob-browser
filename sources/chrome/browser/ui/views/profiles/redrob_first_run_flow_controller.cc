@@ -4,11 +4,8 @@
 
 #include "chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.h"
 
-#include <memory>
 #include <utility>
 
-#include "base/functional/bind.h"
-#include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/ui/views/profiles/profile_picker_web_contents_host.h"
 
 RedrobFirstRunFlowController::RedrobFirstRunFlowController(
@@ -19,39 +16,26 @@ RedrobFirstRunFlowController::RedrobFirstRunFlowController(
     : FirstRunFlowController(host,
                              std::move(clear_host_callback),
                              profile,
-                             std::move(first_run_exited_callback)),
-      onboarding_profile_(profile) {}
+                             std::move(first_run_exited_callback)) {}
 
 RedrobFirstRunFlowController::~RedrobFirstRunFlowController() = default;
 
 void RedrobFirstRunFlowController::Init() {
-  // No intro screen of our own. It used to be the old component extension's onboarding page, which is gone;
-  // the agent's onboarding (chrome://redrob-onboarding) runs on first launch of the browser itself. So the
-  // flow ends straight away through upstream's own completion path, which marks first run finished and
-  // opens the browser. Posted rather than called, so Init() returns to the host before the host is torn
-  // down by the completion path.
-  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE, base::BindOnce(&RedrobFirstRunFlowController::OnOnboardingComplete,
-                                weak_factory_.GetWeakPtr()));
+  // The intro step is the agent's onboarding (chrome://redrob-onboarding), which the vendored base class
+  // registers: import, extension readiness, then straight into the browser. This class used to replace it
+  // with the old component extension's onboarding page; that extension is gone, and ending the flow
+  // without any intro step leaves the picker blank and never opens a browser window. So the base flow runs
+  // unchanged and this class only takes furniture off its screen.
+  FirstRunFlowController::Init();
 
   // Upstream puts a circled pause button in the picker's native toolbar -- EffectsControlButton, added by
   // FirstRunFlowController whenever the desktop-revamp switch is on, bound to ToggleMediaEffects. Its job
   // is to stop the Lottie animations on Chrome's sign-in promo. This flow never shows that promo, so the
   // button is a control for animations that do not exist, sitting in the corner of the first screen anyone
   // ever sees in this product.
-  //
-  // Hidden rather than patched away: the host already exposes this exact toggle, so the same reasoning
-  // that keeps the post-identity steps registered-but-unqueued applies -- leave upstream's wiring intact
-  // and take the furniture off the screen.
   host()->SetNativeToolbarEffectsControlButtonVisible(false);
 }
 
-void RedrobFirstRunFlowController::OnOnboardingComplete() {
-  // Hands back to upstream, which marks first run finished, tears this window down and opens the
-  // browser. Doing any of that here would be duplicating a sequence that already works.
-  HandleIdentityStepsCompleted(onboarding_profile_, PostHostClearedCallback(),
-                               /*is_continue_callback=*/false);
-}
 
 // Upstream's promo carousel does not run in this product.
 //
