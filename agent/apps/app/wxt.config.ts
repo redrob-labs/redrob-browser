@@ -49,8 +49,9 @@ export default defineConfig({
         extension_ids: [LEGACY_AGENT_EXTENSION_ID],
       },
     ],
-    // No new-tab override: the browser ships its own new-tab page, and an
-    // extension override would replace it on every Ctrl+T.
+    chrome_url_overrides: {
+      newtab: 'app.html',
+    },
     options_ui: {
       page: 'app.html#/settings',
       open_in_tab: true,
