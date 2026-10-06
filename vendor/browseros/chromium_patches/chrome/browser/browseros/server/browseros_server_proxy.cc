@@ -371,9 +371,9 @@ new file mode 100644
 +  listener->socket =
 +      std::make_unique<net::TCPServerSocket>(nullptr, net::NetLogSource());
 +  int result = listener->socket->ListenWithAddressAndPort(
-+      "0.0.0.0", static_cast<uint16_t>(http_port), kBackLog);
++      "127.0.0.1", static_cast<uint16_t>(http_port), kBackLog);
 +  if (result != net::OK) {
-+    LOG(ERROR) << "browseros: Proxy failed to bind 0.0.0.0:" << http_port
++    LOG(ERROR) << "browseros: Proxy failed to bind 127.0.0.1:" << http_port
 +               << " - " << net::ErrorToString(result);
 +    return false;
 +  }
@@ -390,7 +390,7 @@ new file mode 100644
 +  bound_http_port_ = local_address.port();
 +  StartAccept(http_listener_.get());
 +
-+  LOG(INFO) << "browseros: MCP proxy listening on 0.0.0.0:" << bound_http_port_;
++  LOG(INFO) << "browseros: MCP proxy listening on 127.0.0.1:" << bound_http_port_;
 +  return true;
 +}
 +
@@ -411,9 +411,9 @@ new file mode 100644
 +  listener->socket =
 +      std::make_unique<net::TCPServerSocket>(nullptr, net::NetLogSource());
 +  int result = listener->socket->ListenWithAddressAndPort(
-+      "0.0.0.0", static_cast<uint16_t>(https_port), kBackLog);
++      "127.0.0.1", static_cast<uint16_t>(https_port), kBackLog);
 +  if (result != net::OK) {
-+    LOG(ERROR) << "browseros: HTTPS proxy failed to bind 0.0.0.0:" << https_port
++    LOG(ERROR) << "browseros: HTTPS proxy failed to bind 127.0.0.1:" << https_port
 +               << " - " << net::ErrorToString(result)
 +               << ", continuing HTTP-only";
 +    tls_context_.reset();
@@ -437,7 +437,7 @@ new file mode 100644
 +  bound_https_port_ = local_address.port();
 +  StartAccept(https_listener_.get());
 +
-+  LOG(INFO) << "browseros: HTTPS MCP proxy listening on 0.0.0.0:"
++  LOG(INFO) << "browseros: HTTPS MCP proxy listening on 127.0.0.1:"
 +            << bound_https_port_;
 +  return true;
 +}

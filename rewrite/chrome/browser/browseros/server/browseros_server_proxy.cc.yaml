@@ -37,3 +37,12 @@ substitutions:
       pattern: "\"Local proxy for BrowserOS server functionality.\""
       replace: "\"Local proxy for Redrob agent server functionality.\""
       count: 1
+  - description: |
+      The MCP proxy listens on loopback only. Upstream bound 0.0.0.0, which put the agent's tool
+      surface -- tab control, page content, the user's logged-in sessions -- on every interface, so
+      any device on the same network could drive the browser. Local clients (Claude Code, Cursor)
+      reach 127.0.0.1 the same as before. Covers both listeners and their log lines.
+    regex:
+      pattern: "0.0.0.0"
+      replace: "127.0.0.1"
+      count: 6

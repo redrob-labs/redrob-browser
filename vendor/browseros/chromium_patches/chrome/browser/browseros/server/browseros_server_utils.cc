@@ -1,6 +1,5 @@
 diff --git a/chrome/browser/browseros/server/browseros_server_utils.cc b/chrome/browser/browseros/server/browseros_server_utils.cc
 new file mode 100644
-index 0000000000000..dbd7e166bb02c
 --- /dev/null
 +++ b/chrome/browser/browseros/server/browseros_server_utils.cc
 @@ -0,0 +1,518 @@
@@ -129,7 +128,7 @@ index 0000000000000..dbd7e166bb02c
 +    auto socket =
 +        std::make_unique<net::TCPServerSocket>(nullptr, net::NetLogSource());
 +    int result =
-+        socket->ListenWithAddressAndPort("0.0.0.0", port, /*backlog=*/1);
++        socket->ListenWithAddressAndPort("127.0.0.1", port, /*backlog=*/1);
 +    return result == net::OK;
 +  }
 +
