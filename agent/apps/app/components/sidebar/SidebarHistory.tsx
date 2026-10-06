@@ -64,7 +64,7 @@ export function SidebarHistory({
       onClick={() => setOpen((value) => !value)}
       className={cn(
         'flex h-9 w-full items-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 font-medium text-sm transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        open && 'bg-[var(--accent-orange)]/10',
+        open && 'bg-[var(--accent-brand)]/10',
       )}
     >
       <History className="size-4 shrink-0" />

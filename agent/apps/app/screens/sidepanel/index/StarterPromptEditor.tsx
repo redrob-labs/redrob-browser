@@ -115,8 +115,8 @@ export function StarterPromptEditor({
                   'flex min-h-11 items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2.5 text-left text-[13px] disabled:opacity-60',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   isExpanded
-                    ? 'border-[var(--accent-orange)]'
-                    : 'border-border/50 hover:border-[var(--accent-orange)]/50',
+                    ? 'border-[var(--accent-brand)]'
+                    : 'border-border/50 hover:border-[var(--accent-brand)]/50',
                 )}
               >
                 <span className="min-w-0 flex-1 break-words">
@@ -126,7 +126,7 @@ export function StarterPromptEditor({
                   aria-hidden="true"
                   className={cn(
                     'size-3.5 shrink-0 text-muted-foreground',
-                    isExpanded && 'text-[var(--accent-orange)]',
+                    isExpanded && 'text-[var(--accent-brand-ink)]',
                   )}
                 />
               </button>

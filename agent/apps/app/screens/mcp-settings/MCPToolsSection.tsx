@@ -59,7 +59,7 @@ export const MCPToolsSection: FC = () => {
               void toolsQuery.refetch()
             }}
             disabled={isLoading}
-            className="border-[var(--accent-orange)] bg-[var(--accent-orange)]/10 text-[var(--accent-orange)] hover:bg-[var(--accent-orange)]/20 hover:text-[var(--accent-orange)]"
+            className="border-[var(--accent-brand)] bg-[var(--accent-brand)]/10 text-[var(--accent-brand-ink)] hover:bg-[var(--accent-brand)]/20 hover:text-[var(--accent-brand-ink)]"
             title="Refresh tools"
           >
             {isLoading ? (
@@ -82,10 +82,10 @@ export const MCPToolsSection: FC = () => {
               {tools.map((tool) => (
                 <div
                   key={tool.name}
-                  className="rounded-lg border border-border bg-background p-4 transition-all hover:border-[var(--accent-orange)]/50 hover:shadow-sm"
+                  className="rounded-lg border border-border bg-background p-4 transition-all hover:border-[var(--accent-brand)]/50 hover:shadow-sm"
                 >
                   <div className="mb-2 flex items-start gap-2">
-                    <Wrench className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-orange)]" />
+                    <Wrench className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-brand-ink)]" />
                     <span className="min-w-0 break-words font-medium text-sm">
                       {tool.name}
                     </span>

@@ -85,8 +85,8 @@ export const NewCodingAgentDialog: FC<NewCodingAgentDialogProps> = ({
             Set up {type ? adapterLabel(type) : 'agent'}
           </DialogTitle>
           <DialogDescription>
-            BrowserOS uses your existing CLI login. This agent can run commands
-            and access files anywhere on your computer without approval.
+            Redrob uses your existing CLI login. This agent can run commands and
+            access files anywhere on your computer without approval.
           </DialogDescription>
         </DialogHeader>
 

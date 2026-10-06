@@ -40,17 +40,18 @@ export const SidebarUserFooter: FC<SidebarUserFooterProps> = ({
   //         expanded ? 'opacity-100' : 'opacity-0',
   //       )}
   //     >
-  //       Sign in to BrowserOS
+  //       Sign in to Redrob
   //     </span>
   //   </Button>
   // )
 
+  // The browser's own About page. A plain link cannot open a chrome:// URL from
+  // an extension page, so the tab is created through the API.
   const aboutLink = (
-    <a
-      href="https://docs.browseros.com/"
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex h-9 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 font-medium text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+    <button
+      type="button"
+      onClick={() => chrome.tabs.create({ url: 'chrome://settings/help' })}
+      className="flex h-9 w-full items-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 font-medium text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     >
       <Info className="size-4 shrink-0" />
       <span
@@ -59,9 +60,9 @@ export const SidebarUserFooter: FC<SidebarUserFooterProps> = ({
           expanded ? 'opacity-100' : 'opacity-0',
         )}
       >
-        About BrowserOS
+        About Redrob
       </span>
-    </a>
+    </button>
   )
 
   const shortcutsButton = (
@@ -99,7 +100,7 @@ export const SidebarUserFooter: FC<SidebarUserFooterProps> = ({
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>{aboutLink}</TooltipTrigger>
-            <TooltipContent side="right">About BrowserOS</TooltipContent>
+            <TooltipContent side="right">About Redrob</TooltipContent>
           </Tooltip>
         )}
       </div>

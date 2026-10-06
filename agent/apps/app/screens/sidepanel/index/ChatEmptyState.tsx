@@ -83,7 +83,7 @@ const ModeEmptyState: FC<ChatEmptyStateProps> = ({
       ) : (
         <>
           <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/50">
-            <Sparkles className="h-7 w-7 text-[var(--accent-orange)]" />
+            <Sparkles className="h-7 w-7 text-[var(--accent-brand-ink)]" />
           </div>
           <div>
             <h2 className="mb-1 font-semibold text-lg">
@@ -103,7 +103,7 @@ const ModeEmptyState: FC<ChatEmptyStateProps> = ({
                 type="button"
                 key={slot}
                 onClick={() => onSuggestionClick(prompts[slot].prompt)}
-                className="group flex min-h-11 items-center justify-between gap-3 rounded-lg border border-border/50 bg-card px-3 py-2.5 text-left text-[13px] transition-colors hover:border-[var(--accent-orange)]/50 hover:bg-[var(--accent-orange)]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="group flex min-h-11 items-center justify-between gap-3 rounded-lg border border-border/50 bg-card px-3 py-2.5 text-left text-[13px] transition-colors hover:border-[var(--accent-brand)]/50 hover:bg-[var(--accent-brand)]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <span className="min-w-0 flex-1 break-words">
                   {prompts[slot].display}

@@ -191,7 +191,7 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
                 <button
                   type="button"
                   onClick={() => setPopularOpen(true)}
-                  className="inline-flex items-center gap-1 font-medium text-[var(--accent-orange)] text-xs"
+                  className="inline-flex items-center gap-1 font-medium text-[var(--accent-brand-ink)] text-xs"
                 >
                   <Info className="h-3.5 w-3.5" /> Popular agents
                 </button>
@@ -224,7 +224,7 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
               variant="outline"
               onClick={() => void handleTest()}
               disabled={!command.trim() || probe.isPending}
-              className="border-[var(--accent-orange)] text-[var(--accent-orange)] hover:bg-[var(--accent-orange)]/10 hover:text-[var(--accent-orange)]"
+              className="border-[var(--accent-brand)] text-[var(--accent-brand-ink)] hover:bg-[var(--accent-brand)]/10 hover:text-[var(--accent-brand-ink)]"
             >
               {probe.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

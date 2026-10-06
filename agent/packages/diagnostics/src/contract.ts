@@ -132,8 +132,8 @@ export function productName(product: DiagnosticsSnapshot['product']): string {
   return product === 'browseros-neo'
     ? 'BrowserOS neo'
     : product === 'browseros-feedback'
-      ? 'BrowserOS (Reporter fallback)'
-      : 'BrowserOS'
+      ? 'Redrob (Reporter fallback)'
+      : 'Redrob'
 }
 
 export function formatMemory(bytes: number | null): string {
@@ -148,7 +148,7 @@ export function diagnosticSections(snapshot: DiagnosticsSnapshot) {
     {
       title: 'Versions',
       rows: [
-        ['BrowserOS', versions.browseros],
+        ['Redrob', versions.browseros],
         ['Chromium', versions.chromium],
         [
           snapshot.product === 'browseros-neo' ? 'MCP server' : 'Agent server',

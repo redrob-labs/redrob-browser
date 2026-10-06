@@ -218,7 +218,7 @@ function CalmContextControls({
           className={cn(
             'inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11.5px] transition-colors data-[state=open]:bg-accent data-[state=open]:text-foreground',
             selectedTabs.length > 0
-              ? 'bg-[var(--accent-orange)] text-white hover:bg-[var(--accent-orange)]/90'
+              ? 'bg-[var(--accent-brand)] text-white hover:bg-[var(--accent-brand)]/90'
               : 'text-muted-foreground hover:bg-accent hover:text-foreground',
           )}
         >
@@ -289,7 +289,7 @@ function CalmContextControls({
 
 function HomeShell({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-[1.55rem] border border-border/60 bg-card/95 shadow-sm transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--accent-orange)]/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklch,var(--accent-orange)_15%,transparent),0_1px_2px_rgba(15,23,42,0.04)]">
+    <div className="overflow-hidden rounded-[1.55rem] border border-border/60 bg-card/95 shadow-sm transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--accent-brand)]/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklch,var(--accent-brand)_15%,transparent),0_1px_2px_rgba(15,23,42,0.04)]">
       {children}
     </div>
   )
@@ -297,7 +297,7 @@ function HomeShell({ children }: { children: ReactNode }) {
 
 function ConversationShell({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-[1.35rem] border border-border/50 bg-background/95 shadow-[0_10px_30px_rgba(15,23,42,0.06)] backdrop-blur-md transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--accent-orange)]/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklch,var(--accent-orange)_15%,transparent),0_10px_30px_rgba(15,23,42,0.06)]">
+    <div className="overflow-hidden rounded-[1.35rem] border border-border/50 bg-background/95 shadow-[0_10px_30px_rgba(15,23,42,0.06)] backdrop-blur-md transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--accent-brand)]/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklch,var(--accent-brand)_15%,transparent),0_10px_30px_rgba(15,23,42,0.06)]">
       {children}
     </div>
   )
@@ -632,7 +632,7 @@ function BotInputIcon({ provider }: { provider?: Provider | null }) {
   const AcpMark =
     provider?.kind === 'acp' ? BRAND_MARKS[provider.brandKey ?? ''] : undefined
   return (
-    <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-[var(--accent-orange)]/10 text-[var(--accent-orange)]">
+    <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-[var(--accent-brand)]/10 text-[var(--accent-brand-ink)]">
       {AcpMark ? (
         <AcpMark className="h-5 w-5" />
       ) : provider && provider.kind === 'llm' ? (

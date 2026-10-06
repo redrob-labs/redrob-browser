@@ -34,9 +34,9 @@ export const CustomAgentTile: FC<CustomAgentTileProps> = ({ onAdd }) => {
       type="button"
       onClick={onAdd}
       aria-label="Add Custom ACP agent"
-      className="group col-span-full flex w-full items-center gap-4 rounded-lg border border-[var(--accent-orange)]/40 border-dashed bg-card p-4 text-left transition-all hover:border-[var(--accent-orange)] hover:bg-[var(--accent-orange)]/5"
+      className="group col-span-full flex w-full items-center gap-4 rounded-lg border border-[var(--accent-brand)]/40 border-dashed bg-card p-4 text-left transition-all hover:border-[var(--accent-brand)] hover:bg-[var(--accent-brand)]/5"
     >
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-orange)]/10 text-[var(--accent-orange)]">
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-brand)]/10 text-[var(--accent-brand-ink)]">
         <Plus className="size-6" />
       </span>
 
@@ -63,7 +63,7 @@ export const CustomAgentTile: FC<CustomAgentTileProps> = ({ onAdd }) => {
 
       <span
         aria-hidden
-        className="shrink-0 rounded-md border border-border bg-secondary px-3 py-1.5 font-semibold text-foreground text-xs transition-colors group-hover:border-[var(--accent-orange)] group-hover:bg-[var(--accent-orange)] group-hover:text-white"
+        className="shrink-0 rounded-md border border-border bg-secondary px-3 py-1.5 font-semibold text-foreground text-xs transition-colors group-hover:border-[var(--accent-brand)] group-hover:bg-[var(--accent-brand)] group-hover:text-white"
       >
         Add
       </span>

@@ -100,7 +100,7 @@ export function useCreateAcpAgent() {
   return useMutation({
     mutationFn: async (input: CreateAcpAgentInput) => {
       if (!baseUrl || isLoading) {
-        throw new Error('BrowserOS agent server URL is not ready')
+        throw new Error('Redrob agent server URL is not ready')
       }
       const response = await agentsClient(baseUrl).index.$post({ json: input })
       if (!response.ok) throw await agentRequestError(response)
@@ -119,7 +119,7 @@ export function useUpdateAcpAgent() {
   return useMutation({
     mutationFn: async ({ agentId, patch }: UpdateAcpAgentInput) => {
       if (!baseUrl || isLoading) {
-        throw new Error('BrowserOS agent server URL is not ready')
+        throw new Error('Redrob agent server URL is not ready')
       }
       const response = await agentsClient(baseUrl)[':agentId'].$put({
         param: { agentId },
@@ -141,7 +141,7 @@ export function useDeleteAcpAgent() {
   return useMutation({
     mutationFn: async (agentId: string) => {
       if (!baseUrl || isLoading) {
-        throw new Error('BrowserOS agent server URL is not ready')
+        throw new Error('Redrob agent server URL is not ready')
       }
       const response = await agentsClient(baseUrl)[':agentId'].$delete({
         param: { agentId },

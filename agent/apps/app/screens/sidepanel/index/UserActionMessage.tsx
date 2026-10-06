@@ -53,8 +53,8 @@ const AITabActionCard: FC<{ action: AITabAction }> = ({ action }) => {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--accent-orange)]/10">
-          <FileText className="h-4 w-4 text-[var(--accent-orange)]" />
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--accent-brand)]/10">
+          <FileText className="h-4 w-4 text-[var(--accent-brand-ink)]" />
         </div>
         <div className="flex-1">
           <div className="font-medium text-foreground text-sm">
@@ -78,16 +78,16 @@ const BrowserOSActionCard: FC<{ action: BrowserOSAction }> = ({ action }) => {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-start gap-2">
-        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--accent-orange)]/10">
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--accent-brand)]/10">
           {isAgent ? (
-            <Bot className="h-4 w-4 text-[var(--accent-orange)]" />
+            <Bot className="h-4 w-4 text-[var(--accent-brand-ink)]" />
           ) : (
-            <Sparkles className="h-4 w-4 text-[var(--accent-orange)]" />
+            <Sparkles className="h-4 w-4 text-[var(--accent-brand-ink)]" />
           )}
         </div>
         <div className="flex-1">
           <div className="mb-0.5 flex items-center gap-1.5">
-            <span className="rounded bg-[var(--accent-orange)]/10 px-1.5 py-0.5 font-medium text-[10px] text-[var(--accent-orange)] uppercase">
+            <span className="rounded bg-[var(--accent-brand)]/10 px-1.5 py-0.5 font-medium text-[10px] text-[var(--accent-brand-ink)] uppercase">
               {isAgent ? 'Agent' : 'Chat'}
             </span>
           </div>

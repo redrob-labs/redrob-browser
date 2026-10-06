@@ -29,6 +29,10 @@ function pickRandomDirection(): string {
   return R2_DIRECTIONS[Math.floor(Math.random() * R2_DIRECTIONS.length)]
 }
 
+// The survey is the upstream team's research study, answered on their
+// server. Redrob does not run it, so the popup never opens.
+const SURVEY_ENABLED = false
+
 const isEligible = (state: JtbdPopupState): boolean => {
   if (state.dontShowAgain) return false
   if (state.surveyTaken) return false
@@ -61,7 +65,7 @@ export function useJtbdPopup() {
 
   const triggerIfEligible = useCallback(async () => {
     const current = await jtbdPopupStorage.getValue()
-    if (isEligible(current)) {
+    if (SURVEY_ENABLED && isEligible(current)) {
       const newShownCount = current.shownCount + 1
       await jtbdPopupStorage.setValue({ ...current, shownCount: newShownCount })
       track(JTBD_POPUP_SHOWN_EVENT, {

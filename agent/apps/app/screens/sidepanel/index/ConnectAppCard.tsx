@@ -171,7 +171,7 @@ export const ConnectAppCard: FC<ConnectAppCardProps> = ({
     return (
       <div className="rounded-lg border border-border/50 bg-card p-4 shadow-sm">
         <div className="flex items-start gap-3">
-          <Plug className="h-5 w-5 shrink-0 text-[var(--accent-orange)]" />
+          <Plug className="h-5 w-5 shrink-0 text-[var(--accent-brand-ink)]" />
           <div>
             <p className="font-medium text-sm">
               Authorize {appName} in the opened tab
@@ -198,7 +198,7 @@ export const ConnectAppCard: FC<ConnectAppCardProps> = ({
     <>
       <div className="rounded-lg border border-border/50 bg-card p-4 shadow-sm">
         <div className="flex items-start gap-3">
-          <Plug className="h-5 w-5 shrink-0 text-[var(--accent-orange)]" />
+          <Plug className="h-5 w-5 shrink-0 text-[var(--accent-brand-ink)]" />
           <div>
             <p className="font-medium text-sm">
               Connect {appName} for better results

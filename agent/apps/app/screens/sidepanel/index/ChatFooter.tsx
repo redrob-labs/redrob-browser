@@ -151,7 +151,7 @@ export const ChatFooter: FC<ChatFooterProps> = ({
             >
               <Layers className="h-4 w-4" />
               {attachedTabs.length > 0 && (
-                <span className="font-medium text-[var(--accent-orange)] text-xs">
+                <span className="font-medium text-[var(--accent-brand-ink)] text-xs">
                   {attachedTabs.length}
                 </span>
               )}
@@ -176,7 +176,7 @@ export const ChatFooter: FC<ChatFooterProps> = ({
                 <div className="relative">
                   <Folder className="h-4 w-4" />
                   {selectedFolder && (
-                    <div className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-[var(--accent-orange)]" />
+                    <div className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-[var(--accent-brand)]" />
                   )}
                 </div>
                 <ChevronDown className="h-3 w-3" />

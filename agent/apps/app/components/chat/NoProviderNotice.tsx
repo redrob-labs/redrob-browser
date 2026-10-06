@@ -54,7 +54,7 @@ export const NoProviderNotice: FC<NoProviderNoticeProps> = ({
     className={cn(
       'flex items-start gap-3 rounded-lg border p-3',
       blocked
-        ? 'border-[var(--accent-orange)]/50 bg-[var(--accent-orange)]/10'
+        ? 'border-[var(--accent-brand)]/50 bg-[var(--accent-brand)]/10'
         : 'border-border bg-card',
       variant === 'panel' && 'mx-4',
       className,
@@ -64,7 +64,7 @@ export const NoProviderNotice: FC<NoProviderNoticeProps> = ({
       aria-hidden
       className={cn(
         'mt-0.5 size-4 shrink-0',
-        blocked ? 'text-[var(--accent-orange)]' : 'text-muted-foreground',
+        blocked ? 'text-[var(--accent-brand-ink)]' : 'text-muted-foreground',
       )}
     />
     <div className="min-w-0 flex-1 space-y-1">
@@ -76,7 +76,7 @@ export const NoProviderNotice: FC<NoProviderNoticeProps> = ({
         href={SETUP_URL}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-1 pt-0.5 font-medium text-[var(--accent-orange)] text-xs underline-offset-4 hover:underline"
+        className="inline-flex items-center gap-1 pt-0.5 font-medium text-[var(--accent-brand-ink)] text-xs underline-offset-4 hover:underline"
       >
         Connect a provider
         <ArrowRight aria-hidden className="size-3" />

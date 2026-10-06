@@ -26,7 +26,7 @@ export function groupProviderOptions(
       ? [
           {
             key: 'llm' as const,
-            label: 'BrowserOS agent + your LLM',
+            label: 'Redrob agent + your LLM',
             options: llm,
           },
         ]

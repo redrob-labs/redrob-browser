@@ -73,7 +73,7 @@ export const ChatProviderSelector: FC<
                       }}
                       className={cn(
                         'flex w-full items-center gap-3 rounded-md p-2 transition-colors',
-                        isSelected && 'bg-[var(--accent-orange)]/10',
+                        isSelected && 'bg-[var(--accent-brand)]/10',
                       )}
                     >
                       <span className="text-muted-foreground">
@@ -90,7 +90,7 @@ export const ChatProviderSelector: FC<
                         )}
                       </span>
                       {isSelected && (
-                        <Check className="h-3.5 w-3.5 text-[var(--accent-orange)]" />
+                        <Check className="h-3.5 w-3.5 text-[var(--accent-brand-ink)]" />
                       )}
                     </CommandItem>
                   )

@@ -74,8 +74,8 @@ export async function testProvider(
     return {
       success: false,
       message:
-        `Could not reach the local BrowserOS server at ${agentServerUrl}. ` +
-        `Make sure BrowserOS is running and try again. (${detail})`,
+        `Could not reach the local Redrob agent server at ${agentServerUrl}. ` +
+        `Make sure Redrob is running and try again. (${detail})`,
       responseTime,
     }
   }

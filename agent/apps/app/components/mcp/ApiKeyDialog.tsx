@@ -74,11 +74,11 @@ export const ApiKeyDialog: FC<ApiKeyDialogProps> = ({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-orange)]/10">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-brand)]/10">
               <McpServerIcon
                 serverName={serverName}
                 size={20}
-                className="text-[var(--accent-orange)]"
+                className="text-[var(--accent-brand-ink)]"
               />
             </div>
             <div>
@@ -125,7 +125,7 @@ export const ApiKeyDialog: FC<ApiKeyDialogProps> = ({
               </Button>
               <Button
                 type="submit"
-                className="bg-[var(--accent-orange)] text-white hover:bg-[var(--accent-orange-bright)]"
+                className="bg-[var(--accent-brand)] text-white hover:bg-[var(--accent-brand-bright)]"
                 disabled={isSubmitting}
               >
                 {isSubmitting ? (

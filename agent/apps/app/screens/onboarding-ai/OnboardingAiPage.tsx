@@ -55,10 +55,11 @@ export const OnboardingAiPage: FC = () => {
     <div className="min-h-[100dvh] bg-background">
       <div className="mx-auto w-full max-w-2xl px-6 py-14">
         <h1 className="mb-1.5 font-semibold text-3xl tracking-tight">
-          Set up your <span className="text-[var(--accent-orange)]">agent</span>
+          Set up your{' '}
+          <span className="text-[var(--accent-brand-ink)]">agent</span>
         </h1>
         <p className="mb-8 text-muted-foreground">
-          BrowserOS runs on the provider you bring. Connect an LLM provider or a
+          Redrob runs on the provider you bring. Connect an LLM provider or a
           coding agent harness you already use. You can change this any time in
           settings.
         </p>

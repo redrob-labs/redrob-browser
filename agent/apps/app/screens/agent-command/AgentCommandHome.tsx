@@ -10,8 +10,6 @@
 import { type FC, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { NoProviderNotice } from '@/components/chat/NoProviderNotice'
-import { BrowserClawPromoBanner } from '@/components/promo/BrowserClawPromoBanner'
-import { ProductHuntBanner } from '@/components/promo/ProductHuntBanner'
 import { Feature } from '@/lib/browseros/capabilities'
 import { createBrowserOSAction } from '@/lib/chat-actions/types'
 import { openSidePanelWithSearch } from '@/lib/messaging/sidepanel/openSidepanelWithSearch'
@@ -109,7 +107,7 @@ export const AgentCommandHome: FC = () => {
           <div className="space-y-3">
             <h1 className="font-semibold text-[clamp(2.25rem,4.5vw,3.5rem)] leading-[1.08] tracking-[-0.025em] [text-wrap:balance]">
               What should your agent{' '}
-              <span className="font-medium text-[var(--accent-orange)] italic">
+              <span className="font-medium text-[var(--accent-brand-ink)] italic">
                 work on
               </span>{' '}
               next?
@@ -155,7 +153,6 @@ export const AgentCommandHome: FC = () => {
 
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 pb-12">
           <RecentSites />
-          <ProductHuntBanner fallback={<BrowserClawPromoBanner />} />
           <ScheduleResults />
         </div>
       </div>
