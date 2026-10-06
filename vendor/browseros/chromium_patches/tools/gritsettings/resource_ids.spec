@@ -12,7 +12,7 @@ diff --git a/tools/gritsettings/resource_ids.spec b/tools/gritsettings/resource_
    # END chrome/browser section.
  
    # START chrome/ WebUI resources section
-@@ -1812,6 +1816,26 @@
+@@ -1812,6 +1816,21 @@
      "includes": [12000],
    },
  
@@ -29,11 +29,6 @@ diff --git a/tools/gritsettings/resource_ids.spec b/tools/gritsettings/resource_
 +  "chrome/browser/redrob/resources/redrob_strings.grd": {
 +    "META": {"sizes": {"messages": [500]}},
 +    "messages": [13000],
-+  },
-+
-+  "chrome/browser/resources/redrob_extension/resources.grd": {
-+    "META": {"sizes": {"includes": [400]}},
-+    "includes": [13500],
 +  },
 +
    # END "everything else" section.

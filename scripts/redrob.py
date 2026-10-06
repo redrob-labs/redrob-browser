@@ -412,11 +412,10 @@ def read_sources_manifest() -> list[tuple[str, str]]:
     """sources/manifest as (source, target) rows: code we own, not a delta against Chromium.
 
     A row whose SOURCE ends in `/` names a whole TREE rather than one file. That exists for a vendored
-    build artifact -- `sources/chrome/browser/resources/redrob_extension/`, the built extension -- whose
-    file list is decided by its own build and changes with every chunk hash. Listing those per file would
-    put a 227-line table in here that is wrong the first time the extension is rebuilt, and whose wrongness
-    shows up as an extension missing one chunk rather than as an error. A tree row is checked by the
-    vendoring gate instead, which compares the directory against the pin it ships with.
+    build artifact whose file list is decided by its own build and changes with every chunk hash (the old
+    component extension was the case it was written for). Listing those per file would
+    put a long table in here that is wrong the first time the artifact is rebuilt, and whose wrongness
+    shows up as a missing chunk rather than as an error.
     """
     path = SOURCES / "manifest"
     if not path.exists():

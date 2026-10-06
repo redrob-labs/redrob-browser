@@ -73,21 +73,17 @@ redrob_chrome_common_importer_sources = [
 
 redrob_chrome_common_importer_deps = [ "//chrome/common:constants" ]
 
-# chrome/browser/resources -- the onboarding and settings WebUI bundles, plus the vendored extension's
-# resource bundle. Both C++ agent surfaces that used to have bundles here are gone -- the agent WebUI
-# with A-7 and onboarding with O-8 -- so the only bundle left is the component extension itself. The
-# design-system files that lived beside them stay in resources/redrob/ as the ONE vendored copy, now read
-# only by the settings bundle's build_design_system_grdp and by the integrity gate's glyph table.
-redrob_chrome_browser_resources_deps = [
-  "//chrome/browser/resources/redrob_extension:resources",
-]
+# chrome/browser/resources -- resource bundles the fork adds. None today: the C++ agent surfaces that had
+# bundles here went with A-7 and O-8, and the old component extension (the last bundle) is gone too --
+# the agent extension owns the new tab, settings and onboarding and ships as its own CRX. The hook stays
+# so a future bundle is one line here rather than a new rewrite rule. The design-system files stay in
+# resources/redrob/ as the ONE vendored copy, read only by the integrity gate's glyph table.
+redrob_chrome_browser_resources_deps = []
 
 # The pak files those bundles produce, as names under `$root_gen_dir/chrome`. Names rather than full
 # paths because root_gen_dir is per-toolchain and is not defined where this file is imported; the use
 # site joins them.
-redrob_chrome_browser_resource_pak_names = [
-  "redrob_extension_resources.pak",
-]
+redrob_chrome_browser_resource_pak_names = []
 
 # chrome/browser/ui/webui -- needed by both the config list and the controller factory.
 redrob_chrome_browser_ui_webui_deps = [

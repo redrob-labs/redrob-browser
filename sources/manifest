@@ -153,10 +153,3 @@ sources/chrome/browser/extensions/api/redrob_private/redrob_private_engine_insta
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer_factory.h	chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer_factory.h
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer_factory.cc	chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer_factory.cc
 
-# The built redrob-extension, vendored whole so Chromium can load it as a COMPONENT extension -- the only
-# location that is granted redrobPrivate and settingsPrivate. A TREE row, not a file list: the extension's
-# own build decides the file names (chunk hashes change every build), so the list is checked by
-# scripts/vendor_extension.py against the pin it ships with, not transcribed here. Re-vendor with
-# `python3 scripts/vendor_extension.py --update --from <redrob-extension checkout>`; never edit a file
-# under it by hand, because the next re-vendor silently discards the edit.
-sources/chrome/browser/resources/redrob_extension/	chrome/browser/resources/redrob_extension/
