@@ -6,9 +6,6 @@
     "service_worker": "assets/service-worker.js",
     "type": "module"
   },
-  "chrome_url_overrides": {
-    "newtab": "newtab.html"
-  },
   "commands": {
     "toggle-side-panel": {
       "description": "Toggle Redrob side panel",

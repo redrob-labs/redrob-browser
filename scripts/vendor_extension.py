@@ -192,6 +192,17 @@ def update(source_repo: Path) -> int:
             manifest["storage"] = storage
         else:
             del manifest["storage"]
+    # The new tab belongs to the agent extension (Ask / Search), which declares its own
+    # `chrome_url_overrides.newtab`. Two extensions overriding the same page leave Chromium to pick one by
+    # install order, and the component extension loads first on every launch, so its older page won. The
+    # override is dropped from the SHIPPED copy only; the page file stays, so nothing that links to it 404s.
+    overrides = manifest.get("chrome_url_overrides", {})
+    if "newtab" in overrides:
+        overrides = {k: v for k, v in overrides.items() if k != "newtab"}
+        if overrides:
+            manifest["chrome_url_overrides"] = overrides
+        else:
+            del manifest["chrome_url_overrides"]
     # Sorted keys and a trailing newline so re-vendoring the same build is a no-op diff.
     (VENDOR / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
@@ -265,6 +276,12 @@ def check() -> int:
             problems.append(
                 "vendored manifest.json still declares storage.managed_schema, which cannot be served "
                 "from the resource bundle -- re-vendor so it is dropped from the shipped copy"
+            )
+        # See update(): the agent extension owns the new tab.
+        if "newtab" in manifest.get("chrome_url_overrides", {}):
+            problems.append(
+                "vendored manifest.json overrides the new tab, which belongs to the agent extension -- "
+                "re-vendor so the override is dropped from the shipped copy"
             )
     else:
         problems.append("vendored manifest.json missing")
