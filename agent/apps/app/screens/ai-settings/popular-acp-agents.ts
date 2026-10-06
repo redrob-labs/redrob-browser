@@ -24,6 +24,17 @@ export interface PopularAcpAgent {
   docsUrl: string
 }
 
+/**
+ * Redrob Code, the Redrob engine. `redrob acp` is its own ACP server over
+ * stdio (packages/redrob/src/cli/cmd/acp.ts in redrob-code), so it is added as
+ * a custom agent with this command rather than through an adapter package.
+ */
+export const REDROB_CODE_AGENT = {
+  id: 'redrob-code',
+  label: 'Redrob Code',
+  command: 'redrob acp',
+} as const
+
 export const POPULAR_ACP_AGENTS: PopularAcpAgent[] = [
   {
     id: 'opencode',

@@ -29,6 +29,10 @@ import {
   useOAuthProviderFlow,
 } from '@/modules/llm-providers/oauth-provider-flow.hooks'
 import { CustomCodingAgentDialog } from './CustomCodingAgentDialog'
+import { REDROB_CODE_AGENT } from './popular-acp-agents'
+
+type CustomAgentPreset = { name: string; command: string; icon: string }
+
 import { DeviceCodeDialog } from './DeviceCodeDialog'
 import { NewCodingAgentDialog } from './NewCodingAgentDialog'
 import { NewProviderDialog } from './NewProviderDialog'
@@ -85,6 +89,8 @@ export interface AddProviderController {
   onUseTemplate: (template: ProviderTemplate) => void
   onCreateAgent: (type: AcpAgentType) => void
   onCreateCustomAgent: () => void
+  /** Opens the custom-agent dialog seeded with Redrob Code's command. */
+  onCreateRedrobCode: () => void
   /**
    * Opens the provider form directly. No argument is the "+ Add" case; the
    * settings page passes prefill when completing a synced-but-keyless provider.
@@ -105,6 +111,7 @@ interface AddProviderDialogState {
   customAgentDialogOpen: boolean
   setCustomAgentDialogOpen: (open: boolean) => void
   editingCustomAgent: AcpAgent | null
+  customAgentPreset: CustomAgentPreset | null
   activeDeviceCode: ReturnType<typeof useOAuthProviderFlow>['pendingDeviceCode']
   clearActiveDeviceCode: () => void
   onSaveProvider: (provider: LlmProviderConfig) => Promise<void>
@@ -159,6 +166,8 @@ export function useAddProvider(input: {
   const [editingCustomAgent, setEditingCustomAgent] = useState<AcpAgent | null>(
     null,
   )
+  const [customAgentPreset, setCustomAgentPreset] =
+    useState<CustomAgentPreset | null>(null)
   const [templateValues, setTemplateValues] = useState<
     Partial<LlmProviderConfig> | undefined
   >()
@@ -226,6 +235,16 @@ export function useAddProvider(input: {
     onCreateAgent: setNewAgentType,
     onCreateCustomAgent: () => {
       setEditingCustomAgent(null)
+      setCustomAgentPreset(null)
+      setCustomAgentDialogOpen(true)
+    },
+    onCreateRedrobCode: () => {
+      setEditingCustomAgent(null)
+      setCustomAgentPreset({
+        name: REDROB_CODE_AGENT.label,
+        command: REDROB_CODE_AGENT.command,
+        icon: REDROB_CODE_AGENT.id,
+      })
       setCustomAgentDialogOpen(true)
     },
     openProviderForm: (values) => {
@@ -246,6 +265,7 @@ export function useAddProvider(input: {
       customAgentDialogOpen,
       setCustomAgentDialogOpen,
       editingCustomAgent,
+      customAgentPreset,
       activeDeviceCode,
       clearActiveDeviceCode: () => {
         chatgptPro.clearDeviceCode()
@@ -283,6 +303,7 @@ export const AddProviderDialogs: FC<{ controller: AddProviderController }> = ({
         open={d.customAgentDialogOpen}
         onOpenChange={d.setCustomAgentDialogOpen}
         agent={d.editingCustomAgent}
+        preset={d.customAgentPreset}
         onSaved={d.onAgentAdded}
       />
       <DeviceCodeDialog

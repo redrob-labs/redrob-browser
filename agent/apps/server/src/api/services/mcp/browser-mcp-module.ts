@@ -86,7 +86,7 @@ const READ_ONLY_BROWSER_TOOLS: readonly ToolDefinition[] = [
 
 export class InvalidBrowserToolLeaseError extends Error {
   constructor() {
-    super('Invalid or expired BrowserOS tool lease')
+    super('Invalid or expired Redrob tool lease')
     this.name = 'InvalidBrowserToolLeaseError'
   }
 }
@@ -145,7 +145,7 @@ export class BrowserMcpModule {
 
     const server = createBrowserMcpServer({
       name: 'browseros_mcp',
-      title: 'BrowserOS MCP server',
+      title: 'Redrob MCP server',
       version: this.deps.version,
       browserSession: this.deps.browserSession,
       defaultWindowId: lease?.browserContext?.windowId,

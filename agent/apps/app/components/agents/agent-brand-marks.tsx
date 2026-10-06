@@ -9,6 +9,7 @@
 
 import type { FC } from 'react'
 import HermesIcon from '@/assets/hermes.png'
+import RedrobMark from '@/assets/product_logo.svg'
 import { Antigravity } from '@/components/ui/svgs/antigravity'
 import { ClaudeAiIcon } from '@/components/ui/svgs/claudeAiIcon'
 import { CodexDark } from '@/components/ui/svgs/codexDark'
@@ -26,6 +27,11 @@ export interface AgentMarkProps {
  * Ids with no mark (pi, hermes) fall back to a monogram or a generic icon at the
  * call site.
  */
+
+// Redrob Code is the Redrob engine; it carries the Redrob mark, unrecoloured.
+const RedrobCodeMark: FC<AgentMarkProps> = ({ className }) => (
+  <img src={RedrobMark} alt="Redrob Code" className={className} />
+)
 
 const ClaudeMark: FC<AgentMarkProps> = ({ className }) => (
   <ClaudeAiIcon className={className} />
@@ -139,6 +145,7 @@ const PiMark: FC<AgentMarkProps> = ({ className }) => (
 export const BRAND_MARKS: Record<string, FC<AgentMarkProps>> = {
   claude: ClaudeMark,
   codex: CodexMark,
+  'redrob-code': RedrobCodeMark,
   opencode: OpencodeMark,
   openclaw: OpenClawMark,
   antigravity: AntigravityMark,

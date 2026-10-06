@@ -15,6 +15,7 @@ import { z } from 'zod/v3'
 
 const providerTypeEnum = z.enum([
   'moonshot',
+  'redrob-console',
   'anthropic',
   'openai',
   'openai-compatible',

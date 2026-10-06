@@ -41,7 +41,7 @@ export function getBrowserosDir(): string {
 
 export function logDevelopmentBrowserosDir(): void {
   if (process.env.NODE_ENV !== 'development') return
-  logger.info(`Using development BrowserOS directory: ${getBrowserosDir()}`)
+  logger.info(`Using development Redrob directory: ${getBrowserosDir()}`)
 }
 
 export function getSessionsDir(): string {
@@ -61,7 +61,7 @@ export async function getToolOutputDir(): Promise<string> {
   })
   const info = await lstat(outputDirPath)
   if (!info.isDirectory() || info.isSymbolicLink()) {
-    throw new Error('BrowserOS tool output directory must be a real directory.')
+    throw new Error('Redrob tool output directory must be a real directory.')
   }
   const outputDir = await realpath(outputDirPath)
   await chmod(outputDir, TOOL_OUTPUT_DIR_MODE)

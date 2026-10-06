@@ -19,6 +19,7 @@ export type ProviderType =
   | 'lmstudio'
   | 'bedrock'
   | 'moonshot'
+  | 'redrob-console'
   | 'chatgpt-pro'
   | 'github-copilot'
   | 'qwen-code'

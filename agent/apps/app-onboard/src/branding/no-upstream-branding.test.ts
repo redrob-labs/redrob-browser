@@ -18,7 +18,7 @@ import { join, relative } from 'node:path'
 // The onboarding app's own tree: src/ and index.html.
 const ROOT = join(import.meta.dir, '..', '..')
 const SCAN = ['src', 'index.html']
-const NAME = /BrowserOS/g
+const NAME = /BrowserOS|BrowserClaw/g
 const HOSTS =
   /browseros\.com|git\.new\/browseros|dub\.sh\/browseros|discord\.gg\/browseros|github\.com\/browseros-ai/i
 const IDENT = /[A-Za-z0-9_$]/

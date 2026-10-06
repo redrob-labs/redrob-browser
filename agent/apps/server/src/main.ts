@@ -38,7 +38,7 @@ export class Application {
   }
 
   async start(): Promise<void> {
-    logger.info(`Starting BrowserOS Server v${VERSION}`)
+    logger.info(`Starting Redrob Server v${VERSION}`)
     logger.debug('Directory config', {
       executionDir: path.resolve(this.config.executionDir),
       resourcesDir: path.resolve(this.config.resourcesDir),
@@ -170,7 +170,7 @@ export class Application {
     })
 
     const browserosId = identity.getBrowserOSId()
-    logger.info('BrowserOS ID initialized', {
+    logger.info('Redrob ID initialized', {
       browserosId: browserosId.slice(0, 12),
       durable: !!installationId,
     })

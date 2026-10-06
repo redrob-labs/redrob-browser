@@ -101,7 +101,7 @@ describe('listAgents', () => {
     ]
     const stub = createStubMcpManager()
     stub.seedServer(
-      'browseros',
+      'redrob',
       { transport: 'http', url: 'http://127.0.0.1:9100/mcp' },
       [{ agent: 'claude-code' }],
     )
@@ -150,7 +150,7 @@ describe('listAgents', () => {
     stubAgents = [agent('codex', 'Codex', true)]
     const stub = createStubMcpManager()
     stub.seedServer(
-      'browseros-stdio',
+      'redrob-stdio',
       { transport: 'stdio', command: 'npx', args: ['mcp-remote', 'x'] },
       [{ agent: 'codex' }],
     )
@@ -178,7 +178,7 @@ describe('listAgents', () => {
     stubAgents = [agent('claude-code', 'Claude Code', false)]
     const stub = createStubMcpManager()
     stub.seedServer(
-      'browseros',
+      'redrob',
       { transport: 'http', url: 'http://127.0.0.1:9100/mcp' },
       [{ agent: 'claude-code' }],
     )
@@ -204,7 +204,7 @@ describe('installInto', () => {
       agent: string
     }>
     expect(linkCalls).toHaveLength(1)
-    expect(linkCalls[0].server.name).toBe('browseros')
+    expect(linkCalls[0].server.name).toBe('redrob')
     expect(linkCalls[0].server.spec).toEqual({
       transport: 'http',
       url: 'http://127.0.0.1:9100/mcp',
@@ -226,7 +226,7 @@ describe('installInto', () => {
 
       expect(result.success).toBe(true)
       const config = JSON.parse(await readFile(claudeConfigPath, 'utf8'))
-      expect(config.mcpServers.browseros).toEqual({
+      expect(config.mcpServers.redrob).toEqual({
         url: 'http://127.0.0.1:9100/mcp',
         type: 'http',
       })
@@ -246,7 +246,7 @@ describe('installInto', () => {
       agent: string
     }>
     expect(linkCalls).toHaveLength(1)
-    expect(linkCalls[0].server.name).toBe('browseros')
+    expect(linkCalls[0].server.name).toBe('redrob')
     expect(linkCalls[0].server.spec).toEqual({
       transport: 'http',
       url: 'http://127.0.0.1:9100/mcp',
@@ -271,7 +271,7 @@ describe('installInto', () => {
       agent: string
     }>
     expect(linkCalls).toHaveLength(1)
-    expect(linkCalls[0].server.name).toBe('browseros-stdio')
+    expect(linkCalls[0].server.name).toBe('redrob-stdio')
     expect(linkCalls[0].server.spec).toEqual({
       transport: 'stdio',
       command: 'npx',
@@ -294,13 +294,13 @@ describe('installInto', () => {
       agent: string
     }>
     expect(unlinkCalls).toHaveLength(1)
-    expect(unlinkCalls[0].serverName).toBe('browseros')
+    expect(unlinkCalls[0].serverName).toBe('redrob')
     expect(unlinkCalls[0].agent).toBe('claude-desktop')
     const linkCalls = callsOf(stub, 'link') as Array<{
       server: { name: string }
     }>
     expect(linkCalls).toHaveLength(1)
-    expect(linkCalls[0].server.name).toBe('browseros-stdio')
+    expect(linkCalls[0].server.name).toBe('redrob-stdio')
   })
 
   it('rejects unsupported agent ids', async () => {
@@ -324,8 +324,8 @@ describe('uninstallFrom', () => {
     }>
     expect(disconnectCalls).toHaveLength(2)
     expect(disconnectCalls.map((c) => c.serverName).sort()).toEqual([
-      'browseros',
-      'browseros-stdio',
+      'redrob',
+      'redrob-stdio',
     ])
     for (const call of disconnectCalls) expect(call.agent).toBe('claude-code')
   })
@@ -333,7 +333,7 @@ describe('uninstallFrom', () => {
   it('tolerates a missing manifest entry (ServerNotFoundError) while sweeping', async () => {
     const stub = createStubMcpManager({
       removeThrowsByServer: new Map([
-        ['browseros-stdio', new ServerNotFoundError('browseros-stdio')],
+        ['redrob-stdio', new ServerNotFoundError('redrob-stdio')],
       ]),
     })
     setMcpManagerForTesting(stub)
@@ -346,9 +346,9 @@ describe('uninstallFrom', () => {
     const stub = createStubMcpManager({
       removeThrowsByServer: new Map([
         [
-          'browseros',
+          'redrob',
           new ForeignEntryError(
-            'browseros',
+            'redrob',
             'claude-code',
             '/tmp/fake/claude-code.json',
           ),
@@ -366,12 +366,12 @@ describe('cleanupNonCuratedLinks', () => {
   it('disconnects agents no longer in the curated surface and leaves curated ones', async () => {
     const stub = createStubMcpManager()
     stub.seedServer(
-      'browseros',
+      'redrob',
       { transport: 'http', url: 'http://127.0.0.1:9100/mcp' },
       [{ agent: 'claude-code' }, { agent: 'gemini' }],
     )
     stub.seedServer(
-      'browseros-stdio',
+      'redrob-stdio',
       { transport: 'stdio', command: 'npx', args: ['mcp-remote', 'x'] },
       [{ agent: 'claude-desktop' }],
     )
@@ -392,7 +392,7 @@ describe('cleanupNonCuratedLinks', () => {
   it('is a no-op when only curated agents are linked', async () => {
     const stub = createStubMcpManager()
     stub.seedServer(
-      'browseros',
+      'redrob',
       { transport: 'http', url: 'http://127.0.0.1:9100/mcp' },
       [{ agent: 'claude-code' }, { agent: 'cursor' }],
     )

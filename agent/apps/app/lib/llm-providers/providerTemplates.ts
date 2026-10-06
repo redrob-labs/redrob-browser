@@ -79,6 +79,19 @@ export const providerTemplates: ProviderTemplate[] = [
     supportsImages: true,
     contextWindow: 1000000,
   },
+  // Redrob's own gateway. `auto` is the console's canonical model id
+  // (autoModelId on /v1/pricing). Context window: the app's default for a
+  // routed catalogue, not the 2M the console publishes for `auto`, because a
+  // request can be routed to a model with far less.
+  {
+    id: 'redrob-console',
+    name: 'Redrob Console',
+    defaultBaseUrl: 'https://console.redrob.ai/api/backend/v1',
+    defaultModelId: 'auto',
+    supportsImages: true,
+    contextWindow: 128000,
+    apiKeyUrl: 'https://console.redrob.ai/api-keys',
+  },
   {
     id: 'moonshot',
     name: 'Moonshot AI',
@@ -145,6 +158,7 @@ export const providerTypeOptions: { value: ProviderType; label: string }[] = [
   { value: 'chatgpt-pro', label: CHATGPT_PROVIDER_DISPLAY_NAME },
   { value: 'github-copilot', label: 'GitHub Copilot' },
   { value: 'qwen-code', label: 'Qwen Code' },
+  { value: 'redrob-console', label: 'Redrob Console' },
   { value: 'moonshot', label: 'Moonshot AI' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
@@ -176,6 +190,7 @@ const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
   'github-copilot': 'https://api.githubcopilot.com',
   'qwen-code': 'https://portal.qwen.ai/v1',
   moonshot: 'https://api.moonshot.ai/v1',
+  'redrob-console': 'https://console.redrob.ai/api/backend/v1',
   anthropic: 'https://api.anthropic.com/v1',
   openai: 'https://api.openai.com/v1',
   'openai-compatible': '',

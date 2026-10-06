@@ -38,7 +38,7 @@ const ALLOWED: Record<string, string> = {
     "'/Applications/BrowserOS.app/Contents/MacOS/BrowserOS',",
 }
 
-const NAME = /BrowserOS/g
+const NAME = /BrowserOS|BrowserClaw/g
 const HOSTS =
   /browseros\.com|git\.new\/browseros|dub\.sh\/browseros|discord\.gg\/browseros|github\.com\/browseros-ai/i
 const IDENT = /[A-Za-z0-9_$]/

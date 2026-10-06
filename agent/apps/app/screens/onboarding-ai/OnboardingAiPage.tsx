@@ -67,6 +67,7 @@ export const OnboardingAiPage: FC = () => {
         <AddProviderSection
           onCreateAgent={addProvider.onCreateAgent}
           onCreateCustomAgent={addProvider.onCreateCustomAgent}
+          onCreateRedrobCode={addProvider.onCreateRedrobCode}
           onUseTemplate={addProvider.onUseTemplate}
         />
 

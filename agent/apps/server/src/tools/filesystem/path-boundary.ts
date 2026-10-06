@@ -48,7 +48,7 @@ function assertRelativeWorkspaceInput(inputPath: string): void {
 
 function assertAbsoluteBrowserosOutputInput(inputPath: string): void {
   if (!isAbsoluteInput(inputPath)) {
-    throw new Error('Path must be an absolute BrowserOS tool output path.')
+    throw new Error('Path must be an absolute Redrob tool output path.')
   }
 }
 
@@ -145,7 +145,7 @@ export async function resolveBrowserToolOutputPath(
   const candidate = resolve(inputPath)
   const canonical = await realpath(candidate)
   if (!isPathInside(outputRoot, canonical)) {
-    throw new Error('Path is outside BrowserOS tool output.')
+    throw new Error('Path is outside Redrob tool output.')
   }
   return canonical
 }

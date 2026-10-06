@@ -34,6 +34,9 @@ export interface ModelInfo {
 const CUSTOM_PROVIDER_MODELS: Partial<Record<ProviderType, ModelInfo[]>> = {
   'openai-compatible': [],
   ollama: [],
+  // The console routes hundreds of models; `auto` is its canonical id and any
+  // other id it serves can be typed in (see model-picker.helpers.ts).
+  'redrob-console': [{ modelId: 'auto', contextLength: 128000 }],
   'qwen-code': [
     { modelId: 'coder-model', contextLength: 1000000 },
     { modelId: 'qwen3-coder-plus', contextLength: 1000000 },

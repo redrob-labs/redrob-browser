@@ -50,6 +50,7 @@ const TEMPLATE_CATEGORIES: Record<string, AddProviderCategory> = {
   google: 'api-key',
   openrouter: 'api-key',
   moonshot: 'api-key',
+  'redrob-console': 'api-key',
   azure: 'api-key',
   bedrock: 'api-key',
   'openai-compatible': 'api-key',

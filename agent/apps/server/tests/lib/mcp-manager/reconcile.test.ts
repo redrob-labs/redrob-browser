@@ -105,7 +105,7 @@ describe('reconcileUrl', () => {
   it('re-links every present curated agent to the current url', async () => {
     const stub = createStubMcpManager()
     stub.seedServer(
-      'browseros',
+      'redrob',
       { transport: 'http', url: 'http://127.0.0.1:9100/mcp' },
       [{ agent: 'claude-code' }, { agent: 'cursor' }],
     )
@@ -129,7 +129,7 @@ describe('reconcileUrl', () => {
     // every present entry so the stale one is repaired.
     const stub = createStubMcpManager()
     stub.seedServer(
-      'browseros',
+      'redrob',
       { transport: 'http', url: 'http://127.0.0.1:9105/mcp' },
       [{ agent: 'claude-code' }],
     )
@@ -148,7 +148,7 @@ describe('reconcileUrl', () => {
       rescanDriftedAgents: new Set(['cursor']),
     })
     stub.seedServer(
-      'browseros',
+      'redrob',
       { transport: 'http', url: 'http://127.0.0.1:9100/mcp' },
       [{ agent: 'claude-code' }, { agent: 'cursor' }],
     )
@@ -165,7 +165,7 @@ describe('reconcileUrl', () => {
   it('does not touch non-curated agents (cleanup owns those)', async () => {
     const stub = createStubMcpManager()
     stub.seedServer(
-      'browseros',
+      'redrob',
       { transport: 'http', url: 'http://127.0.0.1:9100/mcp' },
       [{ agent: 'claude-code' }, { agent: 'gemini' }],
     )
@@ -185,8 +185,7 @@ describe('reconcileUrl', () => {
       await installInto('claude-code', 'http://127.0.0.1:9100/mcp')
 
       expect(
-        JSON.parse(await readFile(claudeConfigPath, 'utf8')).mcpServers
-          .browseros,
+        JSON.parse(await readFile(claudeConfigPath, 'utf8')).mcpServers.redrob,
       ).toEqual({
         url: 'http://127.0.0.1:9100/mcp',
         type: 'http',
@@ -202,8 +201,7 @@ describe('reconcileUrl', () => {
         affectedAgents: ['claude-code'],
       })
       expect(
-        JSON.parse(await readFile(claudeConfigPath, 'utf8')).mcpServers
-          .browseros,
+        JSON.parse(await readFile(claudeConfigPath, 'utf8')).mcpServers.redrob,
       ).toEqual({
         url: 'http://127.0.0.1:9105/mcp',
         type: 'http',
@@ -216,7 +214,7 @@ describe('reconcileUrl', () => {
       linkThrowsByAgent: new Set(['cursor']),
     })
     stub.seedServer(
-      'browseros',
+      'redrob',
       { transport: 'http', url: 'http://127.0.0.1:9100/mcp' },
       [{ agent: 'claude-code' }, { agent: 'cursor' }],
     )
@@ -235,7 +233,7 @@ describe('selfHealMcpLinks', () => {
   it('cleans up non-curated links and then repairs curated urls', async () => {
     const stub = createStubMcpManager()
     stub.seedServer(
-      'browseros',
+      'redrob',
       { transport: 'http', url: 'http://127.0.0.1:9100/mcp' },
       [{ agent: 'claude-code' }, { agent: 'gemini' }],
     )
@@ -257,7 +255,7 @@ describe('selfHealMcpLinks', () => {
   it('still cleans up when no url is provided, skipping the reconcile', async () => {
     const stub = createStubMcpManager()
     stub.seedServer(
-      'browseros',
+      'redrob',
       { transport: 'http', url: 'http://127.0.0.1:9100/mcp' },
       [{ agent: 'claude-code' }, { agent: 'gemini' }],
     )

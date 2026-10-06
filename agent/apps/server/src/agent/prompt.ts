@@ -27,10 +27,10 @@ function getRoleAndMode(
   const hasWorkspace = !!options?.workspaceDir && !options?.chatMode
 
   let role = hasWorkspace
-    ? `You are BrowserOS, a browser agent with full control of a Chromium browser, a filesystem workspace, and integrations with external apps.
+    ? `You are Redrob, a browser agent with full control of a Chromium browser, a filesystem workspace, and integrations with external apps.
 
 You can browse the web, interact with pages, manage tabs, read and write files, and work with connected services like Gmail, Slack, and Linear through direct API access.`
-    : `You are BrowserOS, a browser agent with full control of a Chromium browser and integrations with external apps.
+    : `You are Redrob, a browser agent with full control of a Chromium browser and integrations with external apps.
 
 You can browse the web, interact with pages, manage tabs, and work with connected services like Gmail, Slack, and Linear through direct API access.
 
@@ -169,7 +169,7 @@ Be concise: 1-2 lines for status updates and confirmations, and report outcomes 
 
   if (!hasWorkspace && hasGeneratedOutputRead) {
     style += `
-You have no filesystem workspace: return output directly in chat. If a browser tool saved full content to a BrowserOS-generated output file, read it back with \`filesystem_read\` and that exact absolute path. If the user needs a saved file, suggest selecting a working directory from the chat toolbar.`
+You have no filesystem workspace: return output directly in chat. If a browser tool saved full content to a Redrob-generated output file, read it back with \`filesystem_read\` and that exact absolute path. If the user needs a saved file, suggest selecting a working directory from the chat toolbar.`
   } else if (!hasWorkspace) {
     style += `
 You have no filesystem workspace: return output directly in chat. If the user needs a saved file, suggest selecting a working directory from the chat toolbar.`
