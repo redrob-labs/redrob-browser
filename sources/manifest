@@ -27,6 +27,7 @@ sources/chrome/browser/redrob/redrob_prefs.h      chrome/browser/redrob/redrob_p
 sources/chrome/browser/redrob/redrob_fonts.h  chrome/browser/redrob/redrob_fonts.h
 sources/chrome/browser/redrob/redrob_fonts.cc  chrome/browser/redrob/redrob_fonts.cc
 sources/chrome/browser/redrob/fonts/PretendardVariable.ttf  chrome/browser/redrob/fonts/PretendardVariable.ttf
+sources/chrome/browser/redrob/fonts/OFL-Pretendard.txt  chrome/browser/redrob/fonts/OFL-Pretendard.txt
 sources/chrome/browser/redrob/redrob_prefs.cc     chrome/browser/redrob/redrob_prefs.cc
 
 # The Mojo IDL for the agent's task data types. There used to be a C++ chrome://redrob WebUI in front
@@ -76,6 +77,8 @@ sources/chrome/browser/resources/redrob/fonts/Pretendard-Medium.woff2  chrome/br
 sources/chrome/browser/resources/redrob/fonts/Pretendard-Regular.woff2  chrome/browser/resources/redrob/fonts/Pretendard-Regular.woff2
 sources/chrome/browser/resources/redrob/fonts/Pretendard-SemiBold.woff2  chrome/browser/resources/redrob/fonts/Pretendard-SemiBold.woff2
 sources/chrome/browser/resources/redrob/fonts/WantedSans-Variable.woff2  chrome/browser/resources/redrob/fonts/WantedSans-Variable.woff2
+sources/chrome/browser/resources/redrob/fonts/OFL-WantedSans.txt  chrome/browser/resources/redrob/fonts/OFL-WantedSans.txt
+sources/chrome/browser/resources/redrob/fonts/OFL-NotoSansDevanagari.txt  chrome/browser/resources/redrob/fonts/OFL-NotoSansDevanagari.txt
 sources/chrome/browser/resources/redrob/Pretendard-LICENSE.txt chrome/browser/resources/redrob/Pretendard-LICENSE.txt
 sources/chrome/browser/resources/redrob/brand/redrob-symbol.png  chrome/browser/resources/redrob/brand/redrob-symbol.png
 sources/chrome/browser/resources/redrob/brand/redrob-symbol-solid-white.png  chrome/browser/resources/redrob/brand/redrob-symbol-solid-white.png

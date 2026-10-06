@@ -35,8 +35,9 @@ AGPL section 13 (network use)
 If a modified version of this software is made available to users over a
 network, its complete corresponding source code must be offered to those
 users. This obligation applies to this repository and to anything that
-includes its source. It is the reason this code lives in its own repository
-rather than inside a proprietary one.
+includes its source. Since the merge, this directory is `agent/` inside the
+browser repository, which is AGPL-3.0-or-later as a whole, so the obligation
+covers the whole browser source as well.
 
 What was imported
 -----------------

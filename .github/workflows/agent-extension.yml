@@ -2,16 +2,16 @@ name: redrob extension channel
 
 # Build the agent extension, sign it with Redrob's key and publish its update channel to
 # https://cdn.redrob.ai/browser/extensions/. The browser bundles the same CRX for first run
-# (redrob-browser tools/agent-extension); this channel is how installed browsers update.
+# (tools/agent-extension); this channel is how installed browsers update.
 
 on:
   workflow_dispatch:
   push:
-    branches: [import/browseros-agent, feat/redrob-agent-identity]
+    branches: [develop]
     paths:
-      - apps/app/**
-      - scripts/redrob-extension/**
-      - .github/workflows/redrob-extension.yml
+      - agent/apps/app/**
+      - agent/scripts/redrob-extension/**
+      - .github/workflows/agent-extension.yml
 
 permissions:
   contents: read
@@ -27,6 +27,9 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.REDROB_CDN_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: us-east-1
       CDN_PUBLIC_HOST: cdn.redrob.ai
+    defaults:
+      run:
+        working-directory: agent
     steps:
       - uses: actions/checkout@v4
 

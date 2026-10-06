@@ -68,8 +68,34 @@ Upstream has exactly two packages: `packages/browseros` (imported here) and
 system downloads one, so there was never a 100 GB directory to leave behind.
 
 - `packages/browseros-agent` -- the agent apps, server, TypeScript packages and
-  Rust crates. Imported separately into `redrob-labs/redrob-browser-agent`.
+  Rust crates. Imported separately, and later merged into this repository under
+  `agent/` with its history (see "The agent" below).
 - `.internal-docs` -- a private upstream submodule (`git@`), not accessible.
 - Two `__pycache__/*.pyc` files that upstream tracks by accident. They are
   generated CPython bytecode, regenerated on first run, and are dropped from
   this tree rather than carried. The history that created them is still present.
+
+
+The agent
+---------
+
+`agent/` is the agent extension, side panel, onboarding app, agent server and
+their TypeScript packages and Rust crates. It was developed in its own
+repository as a fork of upstream `packages/browseros-agent` and is merged here
+with its full history, moved under `agent/`. `agent/NOTICE` and `agent/LICENSE`
+are its own notices and stay with it.
+
+Licences in this repository
+---------------------------
+
+- Everything here, as a whole: GNU Affero General Public License, version 3 or
+  later. Full text in `LICENSE` (and the identical `agent/LICENSE`).
+- `vendor/browseros/series_patches/`: ungoogled-chromium patches, BSD 3-Clause,
+  `LICENSE.ungoogled_chromium`.
+- `agent/packages/acpx-ai-provider/` and `agent/packages/agent-mcp-manager/`:
+  MIT, each with its own `LICENSE`.
+- Bundled fonts (Pretendard, Wanted Sans): SIL Open Font License 1.1, licence
+  file next to each font.
+
+Modifications in this repository are copyright Janghoon Lee (Redrob) and
+contributors, and are released under the same licence as the work they modify.
