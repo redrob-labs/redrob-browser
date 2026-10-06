@@ -1,5 +1,4 @@
 diff --git a/chrome/browser/ui/browser_command_controller.cc b/chrome/browser/ui/browser_command_controller.cc
-index 3741ba7671d225e307800a48c23c4c4bd1fd121c..f1b100f99c11c3821456157bcdeec51163e388c5 100644
 --- a/chrome/browser/ui/browser_command_controller.cc
 +++ b/chrome/browser/ui/browser_command_controller.cc
 @@ -7,7 +7,9 @@
@@ -111,7 +110,7 @@ index 3741ba7671d225e307800a48c23c4c4bd1fd121c..f1b100f99c11c3821456157bcdeec511
 +              infobars::InfoBarDelegate::
 +                  BROWSEROS_AGENT_INSTALLING_INFOBAR_DELEGATE,
 +              nullptr,
-+              u"BrowserOS Agent is installing/updating. Please try again "
++              u"The Redrob agent is installing or updating. Please try again "
 +              u"shortly.",
 +              /*auto_expire=*/true,
 +              /*should_animate=*/true,

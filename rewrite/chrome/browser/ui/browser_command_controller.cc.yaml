@@ -1,0 +1,10 @@
+# The agent command (keyboard shortcut path): what it says to the user.
+
+substitutions:
+  - description: |
+      Infobar shown while the agent extension is still being installed. Same message as the
+      toolbar action's, which browser_actions.cc.yaml rewrites; the two must stay alike.
+    regex:
+      pattern: "              u\"BrowserOS Agent is installing/updating. Please try again \"\n              u\"shortly.\",\n"
+      replace: "              u\"The Redrob agent is installing or updating. Please try again \"\n              u\"shortly.\",\n"
+      count: 1

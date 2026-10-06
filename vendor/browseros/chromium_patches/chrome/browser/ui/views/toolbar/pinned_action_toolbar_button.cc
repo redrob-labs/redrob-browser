@@ -1,5 +1,4 @@
 diff --git a/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc b/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
-index 80dbf1e8b81ecba427928e58f012a67aafa988db..060bea7d1ecf655cc8a18900d6d6e916f019f4d7 100644
 --- a/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
 +++ b/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
 @@ -13,13 +13,19 @@
@@ -94,21 +93,7 @@ index 80dbf1e8b81ecba427928e58f012a67aafa988db..060bea7d1ecf655cc8a18900d6d6e916
  void PinnedActionToolbarButton::UpdateIcon() {
    const std::optional<VectorIcons>& icons = GetVectorIcons();
    // If the button is a cached permanent button the color provider will not be
-@@ -248,7 +304,12 @@ void PinnedActionToolbarButton::UpdateIcon() {
-                                     ? icons->touch_icon
-                                     : icons->icon;
- 
--  if (is_icon_visible_ && action_engaged_) {
-+  // Special case for Third Party LLM - use custom orange color
-+  if (action_id_ == kActionSidePanelShowThirdPartyLlm) {
-+    const SkColor orange = SkColorSetRGB(0xFB, 0x65, 0x18);
-+    UpdateIconsWithColors(icon, orange, orange, orange,
-+                          GetForegroundColor(ButtonState::STATE_DISABLED));
-+  } else if (is_icon_visible_ && action_engaged_) {
-     UpdateIconsWithColors(
-         icon, GetColorProvider()->GetColor(kColorToolbarActionItemEngaged),
-         GetColorProvider()->GetColor(kColorToolbarActionItemEngaged),
-@@ -341,6 +402,26 @@ void PinnedActionToolbarButtonActionViewInterface::ActionItemChangedImpl(
+@@ -341,6 +397,26 @@ void PinnedActionToolbarButtonActionViewInterface::ActionItemChangedImpl(
      }
    }
  

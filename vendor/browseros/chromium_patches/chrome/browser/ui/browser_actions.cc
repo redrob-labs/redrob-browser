@@ -1,5 +1,4 @@
 diff --git a/chrome/browser/ui/browser_actions.cc b/chrome/browser/ui/browser_actions.cc
-index 83b50c9d0440e75e275d5a09aca78a0af8dd850b..6762a8d686fbbd10aaf496480272ffc2c8b611f8 100644
 --- a/chrome/browser/ui/browser_actions.cc
 +++ b/chrome/browser/ui/browser_actions.cc
 @@ -21,6 +21,7 @@
@@ -105,7 +104,7 @@ index 83b50c9d0440e75e275d5a09aca78a0af8dd850b..6762a8d686fbbd10aaf496480272ffc2
 +                          infobars::InfoBarDelegate::
 +                              BROWSEROS_AGENT_INSTALLING_INFOBAR_DELEGATE,
 +                          nullptr,
-+                          u"BrowserOS Agent is installing/updating. Please try "
++                          u"The Redrob agent is installing or updating. Please try "
 +                          u"again shortly.",
 +                          /*auto_expire=*/true,
 +                          /*should_animate=*/true,
@@ -141,7 +140,7 @@ index 83b50c9d0440e75e275d5a09aca78a0af8dd850b..6762a8d686fbbd10aaf496480272ffc2
 +                bwi))
 +            .SetActionId(kActionBrowserOSAgent)
 +            .SetText(u"Assistant")
-+            .SetTooltipText(u"Ask BrowserOS")
++            .SetTooltipText(u"Ask Redrob")
 +            .SetImage(ui::ImageModel::FromResourceId(IDR_PRODUCT_LOGO_16))
 +            .SetProperty(
 +                actions::kActionItemPinnableKey,
