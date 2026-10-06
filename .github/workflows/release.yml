@@ -159,7 +159,10 @@ jobs:
   publish-cdn:
     name: publish to cdn.redrob.ai
     needs: build
-    if: github.repository == 'redrob-labs/redrob-browser'
+    # Pinned to the repository id, not its name. A name can move to another repository (this one was created as a
+    # second repository and renamed into place), and a fork or a later repository taking the name would then
+    # publish to the CDN with the organisation's credentials. The id belongs to this repository alone.
+    if: github.repository_id == '1407030105'
     runs-on: ubuntu-latest
     env:
       # The same variable names as every other product in this organisation. They are the convention rather than
