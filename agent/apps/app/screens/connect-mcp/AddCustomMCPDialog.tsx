@@ -152,14 +152,14 @@ export const AddCustomMCPDialog: FC<AddCustomMCPDialogProps> = ({
             />
 
             <Collapsible>
-              <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-2 rounded-md border border-[var(--accent-orange)]/30 bg-[var(--accent-orange)]/5 px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--accent-orange)]/10">
-                <Lightbulb className="h-4 w-4 shrink-0 text-[var(--accent-orange)]" />
+              <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-2 rounded-md border border-[var(--accent-brand)]/30 bg-[var(--accent-brand)]/5 px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--accent-brand)]/10">
+                <Lightbulb className="h-4 w-4 shrink-0 text-[var(--accent-brand-ink)]" />
                 <span className="flex-1 font-medium">
                   How do I find the URL?
                 </span>
                 <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-90" />
               </CollapsibleTrigger>
-              <CollapsibleContent className="mt-2 rounded-md border border-[var(--accent-orange)]/30 bg-[var(--accent-orange)]/5 px-3 py-2 text-muted-foreground text-sm">
+              <CollapsibleContent className="mt-2 rounded-md border border-[var(--accent-brand)]/30 bg-[var(--accent-brand)]/5 px-3 py-2 text-muted-foreground text-sm">
                 Many apps like Notion, Slack, or Stripe offer an MCP server you
                 can run locally. Check the app's docs for an MCP setup guide —
                 you'll get a URL (usually starting with{' '}
@@ -180,7 +180,7 @@ export const AddCustomMCPDialog: FC<AddCustomMCPDialogProps> = ({
               </Button>
               <Button
                 type="submit"
-                className="bg-[var(--accent-orange)] text-white hover:bg-[var(--accent-orange-bright)]"
+                className="bg-[var(--accent-brand)] text-white hover:bg-[var(--accent-brand-bright)]"
               >
                 Add Server
               </Button>

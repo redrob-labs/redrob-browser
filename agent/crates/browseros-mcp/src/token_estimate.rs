@@ -1,16 +1,16 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Provider-neutral estimates for semantic MCP tool traffic.
 //!
 //! Version 1 counts UTF-8 text with the shared bytes-per-token heuristic and images with bounded
 //! 32x32 patches. It deliberately excludes protocol envelopes, metadata, and opaque binary data.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rmcp::model::{ContentBlock, ResourceContents};

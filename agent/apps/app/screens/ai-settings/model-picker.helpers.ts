@@ -20,6 +20,8 @@ const USER_LOADED_MODEL_PROVIDERS: ReadonlySet<ProviderType> = new Set([
   'lmstudio',
   'ollama',
   'openai-compatible',
+  // A routing gateway: `auto` is listed, the rest of its catalogue is typed.
+  'redrob-console',
 ])
 
 export function servesUserLoadedModels(providerType: ProviderType): boolean {
@@ -116,6 +118,10 @@ export function getIncompleteCatalogHint(
 ): string | null {
   if (catalogSize === 0) return null
   const name = providerName ?? 'This provider'
+  // A gateway, not a local runtime: nothing is "loaded", the console routes.
+  if (providerType === 'redrob-console') {
+    return '`auto` lets the console pick a model. Paste the ID of any other model it serves.'
+  }
   if (servesUserLoadedModels(providerType)) {
     return `${name} lists only common models — paste the exact ID of any model you have loaded.`
   }

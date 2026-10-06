@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * @license
  * Copyright 2025 BrowserOS
@@ -7,7 +8,6 @@
  * See the NOTICE file for provenance.
  */
 
-#!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'

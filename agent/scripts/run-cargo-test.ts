@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 /**
  * @license
  * Copyright 2025 BrowserOS
@@ -7,7 +8,6 @@
  * See the NOTICE file for provenance.
  */
 
-#!/usr/bin/env bun
 /**
  * Runs `cargo` (typically `test --workspace --locked`), streams its output live,
  * and parses libtest's "test result:" summary lines into an aggregate JUnit at

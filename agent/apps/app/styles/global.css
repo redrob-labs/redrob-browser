@@ -19,119 +19,218 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Geist Sans Variable Font */
+/* Type, from the Redrob design system (@redrob-labs/ui 1.1.0 tokens.css).
+
+   Pretendard carries Latin; Wanted Sans carries Hangul, which is why it is second
+
+   in the stack. Both are the files the design system ships, under the SIL Open
+
+   Font License (public/fonts/OFL-*.txt). Code takes the system monospace stack. */
+
 @font-face {
-  font-family: "Geist";
-  src: url("../geist/Geist[wght].woff2") format("woff2-variations");
-  font-weight: 100 900;
+  font-family: "Pretendard";
+  src: url("../fonts/Pretendard-Light.woff2") format("woff2");
+  font-weight: 300;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "Geist";
-  src: url("../geist/Geist-Italic[wght].woff2") format("woff2-variations");
-  font-weight: 100 900;
-  font-style: italic;
-  font-display: swap;
-}
-
-/* Geist Mono Variable Font */
-@font-face {
-  font-family: "Geist Mono";
-  src: url("../geist-mono/GeistMono[wght].woff2") format("woff2-variations");
-  font-weight: 100 900;
+  font-family: "Pretendard";
+  src: url("../fonts/Pretendard-Regular.woff2") format("woff2");
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "Geist Mono";
-  src: url("../geist-mono/GeistMono-Italic[wght].woff2")
-    format("woff2-variations");
-  font-weight: 100 900;
-  font-style: italic;
+  font-family: "Pretendard";
+  src: url("../fonts/Pretendard-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
   font-display: swap;
 }
 
+@font-face {
+  font-family: "Pretendard";
+  src: url("../fonts/Pretendard-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Pretendard";
+  src: url("../fonts/Pretendard-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Pretendard";
+  src: url("../fonts/Pretendard-ExtraBold.woff2") format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Wanted Sans";
+  src: url("../fonts/WantedSans-Variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Colour tokens, from the Redrob design system (@redrob-labs/ui
+   dist/styles/tokens.css).
+
+   Two layers, the system's own:
+
+     1. PRIMITIVES `--rr-*`. The ramps, transcribed verbatim. Theme-independent:
+        Blue 6 is Blue 6 in light and in dark, so they are declared once on :root.
+        No component names this layer.
+
+     2. ROLES. The shadcn names every component here already reads (`--primary`,
+        `--muted-foreground`, ...), each pointed at the design system's semantic
+        token for the same job and re-pointed in `.dark`. The comment on each line
+        names that token, so a value can be checked against tokens.css by name.
+
+   Two roles the system has and shadcn does not, both used by this panel:
+   `--accent-brand` is a brand FILL (action-primary) and `--accent-brand-ink` is
+   brand TEXT (ink-brand). Dark mode is why they are two: white on Blue 6 is the
+   fill, Blue 4 on black is the text, and no single blue is both.
+
+   `styles/design-tokens.test.ts` pins every primitive to its value in
+   @redrob-labs/ui 1.1.0 and fails on any colour literal outside this layer. */
 :root {
-  --radius: 0.65rem;
-  --background: oklch(0.985 0.002 85);
-  --foreground: oklch(0.141 0.005 285.823);
-  --card: oklch(0.99 0.001 85);
-  --card-foreground: oklch(0.141 0.005 285.823);
-  --popover: oklch(0.99 0.001 85);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.646 0.222 41.116);
-  --primary-foreground: oklch(0.98 0.016 73.684);
-  --secondary: oklch(0.97 0.002 85);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.97 0.002 85);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.97 0.002 85);
-  --accent-foreground: oklch(0.21 0.006 285.885);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.75 0.183 55.934);
-  --chart-1: oklch(0.837 0.128 66.29);
-  --chart-2: oklch(0.705 0.213 47.604);
-  --chart-3: oklch(0.646 0.222 41.116);
-  --chart-4: oklch(0.553 0.195 38.402);
-  --chart-5: oklch(0.47 0.157 37.304);
-  --sidebar: oklch(0.98 0.002 85);
-  --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.646 0.222 41.116);
-  --sidebar-primary-foreground: oklch(0.98 0.016 73.684);
-  --sidebar-accent: oklch(0.92 0.004 85);
-  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.75 0.183 55.934);
-  /* Custom accent color for BrowserOS branding */
-  --accent-orange: oklch(0.6781 0.1663 43.21);
-  /* Added brighter orange variant for shimmer animation */
-  --accent-orange-bright: oklch(0.7531 0.1963 43.21);
+  /* 1. PRIMITIVES */
+  --rr-black: #0a0b0c; /* redrob-black */
+  --rr-white: #ffffff; /* redrob-white */
+  --rr-blue-1: #eef4ff;
+  --rr-blue-2: #d9e6ff;
+  --rr-blue-3: #bad2ff;
+  --rr-blue-4: #8aafff;
+  --rr-blue-5: #507fff;
+  --rr-blue-6: #2b52ff; /* Redrob Blue */
+  --rr-blue-7: #1733d5;
+  --rr-blue-8: #09209c;
+  --rr-blue-9: #061460;
+  --rr-blue-10: #030c34;
+  --rr-gray-1: #f8f9fb;
+  --rr-gray-2: #eff1f4;
+  --rr-gray-3: #dfe2e8;
+  --rr-gray-4: #cbcfd7;
+  --rr-gray-5: #aab0bb;
+  --rr-gray-6: #7c8390;
+  --rr-gray-7: #576071;
+  --rr-gray-8: #292e37;
+  --rr-gray-9: #141719;
+  --rr-teal-3: #6ff4f0; /* accent-teal-3 */
+  --rr-teal-4: #00b5c2; /* accent-teal-4 */
+  --rr-sky-3: #2f8dff; /* accent-sky-3 */
+  --rr-sky-4: #0e51b6; /* accent-sky-4 */
+  --rr-violet-3: #8944ff; /* accent-violet-3 */
+  --rr-pink-3: #ff39ba; /* accent-pink-3 */
+  --rr-red-3: #ff4b4b; /* accent-red-3 */
+  --rr-red-4: #a31310; /* accent-red-4 */
+  --rr-orange-3: #ff9c1b; /* accent-orange-3 */
+  --rr-orange-4: #ae5100; /* accent-orange-4 */
+  --rr-lime-4: #89ad00; /* accent-lime-4 */
+  --rr-green-3: #29e474; /* accent-green-3 */
+  --rr-green-4: #00864a; /* accent-green-4 */
+
+  /* 2. ROLES, light */
+  --radius: 12px; /* radius-lg, the card radius */
+  --background: var(--rr-white); /* surface-base */
+  --foreground: var(--rr-black); /* ink-primary */
+  --card: var(--rr-gray-1); /* surface-raised */
+  --card-foreground: var(--rr-black);
+  --popover: var(--rr-white); /* surface-base, lifted by shadow-md */
+  --popover-foreground: var(--rr-black);
+  --primary: var(--rr-blue-6); /* action-primary */
+  --primary-foreground: var(--rr-white); /* ink-on-brand */
+  --secondary: var(--rr-gray-2); /* surface-sunken */
+  --secondary-foreground: var(--rr-black);
+  --muted: var(--rr-gray-2); /* surface-sunken */
+  --muted-foreground: var(--rr-gray-7); /* ink-secondary */
+  --accent: var(--rr-gray-2); /* hover fill on surface-base */
+  --accent-foreground: var(--rr-black);
+  --destructive: var(--rr-red-4); /* status-danger */
+  --destructive-foreground: var(--rr-white);
+  --warning: var(--rr-orange-4); /* status-warning */
+  --success: var(--rr-green-4); /* status-success */
+  --border: var(--rr-gray-3); /* border-subtle */
+  --input: var(--rr-gray-6); /* border-strong */
+  --ring: var(--rr-blue-6); /* focus-ring */
+  --chart-1: var(--rr-blue-6);
+  --chart-2: var(--rr-teal-4);
+  --chart-3: var(--rr-violet-3);
+  --chart-4: var(--rr-pink-3);
+  --chart-5: var(--rr-lime-4);
+  --sidebar: var(--rr-gray-1); /* surface-raised */
+  --sidebar-foreground: var(--rr-black);
+  --sidebar-primary: var(--rr-blue-6);
+  --sidebar-primary-foreground: var(--rr-white);
+  --sidebar-accent: var(--rr-gray-2);
+  --sidebar-accent-foreground: var(--rr-black);
+  --sidebar-border: var(--rr-gray-3);
+  --sidebar-ring: var(--rr-blue-6);
+  --accent-brand: var(--rr-blue-6); /* action-primary */
+  --accent-brand-ink: var(--rr-blue-7); /* ink-brand */
+  /* The shimmer's highlight sweep: one step lighter than the fill. */
+  --accent-brand-bright: var(--rr-blue-5);
 }
 
 .dark {
-  --background: oklch(0.25 0.01 265);
-  --foreground: oklch(0.92 0 0);
-  --card: oklch(0.28 0.01 265);
-  --card-foreground: oklch(0.92 0 0);
-  --popover: oklch(0.28 0.01 265);
-  --popover-foreground: oklch(0.92 0 0);
-  --primary: oklch(0.705 0.213 47.604);
-  --primary-foreground: oklch(0.98 0.016 73.684);
-  --secondary: oklch(0.32 0.01 265);
-  --secondary-foreground: oklch(0.92 0 0);
-  --muted: oklch(0.32 0.01 265);
-  --muted-foreground: oklch(0.65 0 0);
-  --accent: oklch(0.32 0.01 265);
-  --accent-foreground: oklch(0.92 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.92 0 0);
-  --border: oklch(0.38 0.01 265);
-  --input: oklch(0.38 0.01 265);
-  --ring: oklch(0.408 0.123 38.172);
-  --chart-1: oklch(0.837 0.128 66.29);
-  --chart-2: oklch(0.705 0.213 47.604);
-  --chart-3: oklch(0.646 0.222 41.116);
-  --chart-4: oklch(0.553 0.195 38.402);
-  --chart-5: oklch(0.47 0.157 37.304);
-  --sidebar: oklch(0.25 0.01 265);
-  --sidebar-foreground: oklch(0.92 0 0);
-  --sidebar-primary: oklch(0.705 0.213 47.604);
-  --sidebar-primary-foreground: oklch(0.92 0 0);
-  --sidebar-accent: oklch(0.32 0.01 265);
-  --sidebar-accent-foreground: oklch(0.92 0 0);
-  --sidebar-border: oklch(0.38 0.01 265);
-  --sidebar-ring: oklch(0.408 0.123 38.172);
+  /* 2. ROLES, dark */
+  --background: var(--rr-black); /* surface-base */
+  --foreground: var(--rr-gray-1); /* ink-primary */
+  --card: var(--rr-gray-9); /* surface-raised */
+  --card-foreground: var(--rr-gray-1);
+  --popover: var(--rr-gray-9);
+  --popover-foreground: var(--rr-gray-1);
+  --primary: var(--rr-blue-6); /* action-primary */
+  --primary-foreground: var(--rr-white); /* ink-on-brand */
+  /* surface-sunken. Not a ramp step: the system's own value, chosen so the
+     dark elevation ladder does not reverse at its second step. */
+  --secondary: #1c1f26;
+  --secondary-foreground: var(--rr-gray-1);
+  --muted: #1c1f26;
+  --muted-foreground: var(--rr-gray-5); /* ink-secondary */
+  --accent: var(--rr-gray-8);
+  --accent-foreground: var(--rr-gray-1);
+  --destructive: var(--rr-red-3); /* status-danger */
+  --destructive-foreground: var(--rr-black);
+  --warning: var(--rr-orange-3); /* status-warning */
+  --success: var(--rr-green-3); /* status-success */
+  --border: var(--rr-gray-8); /* border-subtle */
+  --input: var(--rr-gray-6); /* border-strong */
+  --ring: var(--rr-blue-4); /* focus-ring */
+  --chart-1: var(--rr-blue-5);
+  --chart-2: var(--rr-teal-3);
+  --chart-3: var(--rr-violet-3);
+  --chart-4: var(--rr-pink-3);
+  --chart-5: var(--rr-sky-3);
+  --sidebar: var(--rr-gray-9);
+  --sidebar-foreground: var(--rr-gray-1);
+  --sidebar-primary: var(--rr-blue-6);
+  --sidebar-primary-foreground: var(--rr-white);
+  --sidebar-accent: var(--rr-gray-8);
+  --sidebar-accent-foreground: var(--rr-gray-1);
+  --sidebar-border: var(--rr-gray-8);
+  --sidebar-ring: var(--rr-blue-4);
+  --accent-brand: var(--rr-blue-6); /* action-primary */
+  --accent-brand-ink: var(--rr-blue-4); /* ink-brand */
+  --accent-brand-bright: var(--rr-blue-4);
 }
 
 @theme inline {
-  --font-sans: "Geist", "Geist Fallback";
-  --font-mono: "Geist Mono", "Geist Mono Fallback";
+  --font-sans:
+    Pretendard, "Wanted Sans", "Noto Sans Devanagari", system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -156,10 +255,13 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* The design system's radius scale (tokens.css). */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -168,16 +270,19 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
-  --color-accent-orange: var(--accent-orange);
-  /* Added brighter orange to theme */
-  --color-accent-orange-bright: var(--accent-orange-bright);
+  --color-accent-brand: var(--accent-brand);
+  --color-accent-brand-ink: var(--accent-brand-ink);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+  /* Brighter brand step for the shimmer sweep */
+  --color-accent-brand-bright: var(--accent-brand-bright);
 
   /* Custom keyframe animations for hero section */
   --animate-float: float 3s ease-in-out infinite;
   --animate-shimmer: shimmer 3s ease-in-out infinite;
   --animate-pulse-slow: pulse-slow 4s ease-in-out infinite;
   --animate-pulse-slow-delayed: pulse-slow 4s ease-in-out infinite 2s;
-  /* Added one-time glow animation for BrowserOS text */
+  /* One-time glow animation for the brand word */
   --animate-glow-once: glow-once 1.5s ease-out 1s forwards;
   /* Added shine animation for card hover highlight effect */
   --animate-shine: shine 0.8s ease-in-out;
@@ -275,9 +380,9 @@
     }
     50% {
       text-shadow:
-        0 0 20px rgba(214, 123, 68, 0.6),
-        0 0 40px rgba(214, 123, 68, 0.4),
-        0 0 60px rgba(214, 123, 68, 0.2);
+        0 0 20px oklch(from var(--accent-brand) l c h / 0.6),
+        0 0 40px oklch(from var(--accent-brand) l c h / 0.4),
+        0 0 60px oklch(from var(--accent-brand) l c h / 0.2);
       transform: scale(1.02);
     }
     100% {
@@ -422,13 +527,13 @@
   --baseSolidHover: var(--foreground);
   --baseText: var(--muted-foreground);
   --baseTextContrast: var(--foreground);
-  --accentBase: var(--accent-orange);
-  --accentBgSubtle: oklch(from var(--accent-orange) l c h / 0.08);
-  --accentBg: oklch(from var(--accent-orange) l c h / 0.12);
-  --accentBgActive: oklch(from var(--accent-orange) l c h / 0.18);
-  --accentLine: oklch(from var(--accent-orange) l c h / 0.3);
-  --accentSolid: var(--accent-orange);
-  --accentText: var(--accent-orange);
+  --accentBase: var(--accent-brand);
+  --accentBgSubtle: oklch(from var(--accent-brand) l c h / 0.08);
+  --accentBg: oklch(from var(--accent-brand) l c h / 0.12);
+  --accentBgActive: oklch(from var(--accent-brand) l c h / 0.18);
+  --accentLine: oklch(from var(--accent-brand) l c h / 0.3);
+  --accentSolid: var(--accent-brand);
+  --accentText: var(--accent-brand-ink);
   --font-body: var(--font-sans);
   --font-mono: var(--font-mono);
   border: none;
@@ -537,7 +642,7 @@
 /* Toolbar buttons — active / toggled on */
 .mdx-editor-themed .mdxeditor [role="toolbar"] button[data-state="on"],
 .mdx-editor-themed .mdxeditor [role="toolbar"] [role="radio"][data-state="on"] {
-  background: var(--accent-orange);
+  background: var(--accent-brand);
   color: white;
 }
 
@@ -595,8 +700,8 @@
 
 .mdx-editor-themed .mdxeditor [class*="selectItem"][data-state="checked"],
 .mdx-editor-themed .mdxeditor [class*="SelectItem"][data-state="checked"] {
-  background: oklch(from var(--accent-orange) l c h / 0.1);
-  color: var(--accent-orange);
+  background: oklch(from var(--accent-brand) l c h / 0.1);
+  color: var(--accent-brand-ink);
 }
 
 /* ── Link dialog ── */
@@ -617,9 +722,9 @@
 }
 
 .mdx-editor-themed .mdxeditor [class*="linkDialogPopover"] input:focus {
-  border-color: var(--accent-orange);
+  border-color: var(--accent-brand);
   outline: none;
-  box-shadow: 0 0 0 2px oklch(from var(--accent-orange) l c h / 0.15);
+  box-shadow: 0 0 0 2px oklch(from var(--accent-brand) l c h / 0.15);
 }
 
 .mdx-editor-themed .mdxeditor [class*="linkDialogPopover"] button {

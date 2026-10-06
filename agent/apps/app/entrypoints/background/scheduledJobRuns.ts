@@ -107,7 +107,7 @@ export const scheduledJobRuns = async () => {
   const executeScheduledJob = async (jobId: string): Promise<void> => {
     const jobs = await listScheduledJobsOrNull()
     if (jobs === null) {
-      throw new Error('Cannot reach the BrowserOS server to load the job')
+      throw new Error('Cannot reach the Redrob agent server to load the job')
     }
 
     const job = jobs.find((each) => each.id === jobId)

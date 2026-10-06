@@ -1,12 +1,3 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! At most one feedback invitation per installation, ever.
 //!
 //! The frequency rule lives in the schema rather than in code: `install_id` is the primary
@@ -17,6 +8,15 @@
 //! This is deliberately weaker machinery than [`crate::db::run_error_budget`], which caps a
 //! rolling daily count and earns its conditional claim. Here the rule is simpler, so the
 //! mechanism is too.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use crate::{db::Database, error::AppResult};
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, Value};

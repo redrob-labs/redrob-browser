@@ -1,12 +1,3 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Persistence seam for code-mode helpers: a reusable flow a script saves for a
 //! host and a later script loads by name. Each helper is a self-documenting
 //! Markdown file at `<browserclaw_dir>/helpers/<host>/<name>.md`: YAML
@@ -14,6 +5,15 @@
 //! readable body, and a fenced `js` block holding the function source. The host
 //! extracts that source for the runtime, so the engine still hot-loads a plain
 //! function expression; all Markdown handling stays here.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use serde::{Deserialize, Serialize};
 use std::{

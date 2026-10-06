@@ -19,7 +19,7 @@ import { PRODUCT_WEB_HOST } from './lib/constants/productWebHost'
 const env = process.env
 
 // See https://wxt.dev/api/config.html
-// Extension ID will be bflpfmnmnokmjhmgnolecpppdbdophmk
+// Extension ID will be oikpnmkappjhkifbcieakjoeiknojbgg (Redrob's signing key)
 export default defineConfig({
   outDir: 'dist',
   modules: ['@wxt-dev/module-react'],
@@ -30,9 +30,10 @@ export default defineConfig({
   },
   manifest: {
     name: 'Assistant',
-    key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvBDAaDRvv61NpBeLR8etBRw82lv9VJO3sz/mA26gDzWKtVuzW4DXCl8Zfj5oWmoXLTfv3aiTigUXo/LHOoGpSucEVroMmAc7cgu2KuQ1fZPpMvYa0npD/m4h89360q8Oz0oKKaZGS905IJ04M2IkF4CuU3YEHFJBWb+cUyK9H8YVugelYbPD0IVs63T1SkGbh/t/Tfb2DpkinduSO8+x26sKydm30SRt+iZ2+7Nolcdum3LExInUiX2Pgb65Jb+mVw8NqyTVJyCEp8uq0cSHomWFQirSJ80tsDhISp4btwaRKHrXqovQx9XHQv4hCd+3LuB830eUEVMUNuCO+OyPxQIDAQAB',
-    update_url: 'https://cdn.browseros.com/extensions/update-manifest.xml',
-    // update_url: 'https://cdn.browseros.com/extensions/update-manifest.alpha.xml',
+    key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkZ34Lwqovf0N+i2kqZivoxE0r5ZS5gjiUmz3c0v9+dSzMGaLw17o96HtufNe9s5ox9AKNkuGzhkBzl8rfeR2kCpxBvBnNXJdyNT8IGUZJrUnj0mQReR3V3J/9KXejLV6PeelyztL7zvO0BUZYqMDtQYYrrDW622U55Ym8FEZhhnQNAOLY8vbD13Csr2j1X0mzl+SuKPyTWb0jWGkqmGWOLO/13Gc5qRZbLqELEycDAHdqwZ5MZlMzQydNdvIgyXZmJog3npameXueiNeG46RVSh9b22eeIF7XrFnUnpfWQ+HYDb07CMKLSC2M0ccvRFcV0UWSt1P8ofOiDvWPn7ltQIDAQAB',
+    // Redrob's own CDN. The browser forces this channel for the agent id anyway
+    // (extension_management.cc), so the two must name the same manifest.
+    update_url: 'https://cdn.redrob.ai/browser/extensions/update-manifest.xml',
     // The bug reporter is the only thing that connects in. The account site
     // used to as well, to hand its sign-in result back to the extension.
     externally_connectable: {
@@ -62,7 +63,7 @@ export default defineConfig({
         48: 'icon/48.png',
         128: 'icon/128.png',
       },
-      default_title: 'Ask BrowserOS',
+      default_title: 'Ask Redrob',
     },
     permissions: [
       'system.cpu',
@@ -80,6 +81,7 @@ export default defineConfig({
       'alarms',
       'webNavigation',
       'downloads',
+      'search',
     ],
     host_permissions: ['http://127.0.0.1/*'],
   },

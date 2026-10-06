@@ -1,12 +1,3 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Membership of the top-user cohort, answered from memory.
 //!
 //! The decision this serves runs while the cockpit is painting, so nothing here may touch
@@ -16,6 +7,15 @@
 //! Every failure is silent and means "not eligible": no document, an unreachable host,
 //! malformed JSON, or a document older than [`MAX_AGE`]. A feature that quietly invites
 //! nobody is correct; one that puts an error in front of somebody is not.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use std::{
     collections::HashSet,

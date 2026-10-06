@@ -1,12 +1,3 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Identity glossary — the four scopes:
 //! - `ProfileId` — a stored agent profile configured by the user and persisted
 //!   by `crate::services::profiles`.
@@ -16,6 +7,15 @@
 //!   it `agentId` and `agent_id`; canonical API responses expose profile and
 //!   slug identity instead. Keys page ownership and audit attribution.
 //! - `DispatchId` — one tool call.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};

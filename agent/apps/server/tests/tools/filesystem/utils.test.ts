@@ -376,7 +376,7 @@ describe('filesystem path boundaries', () => {
 
   it('rejects relative BrowserOS tool output paths', async () => {
     await expect(resolveBrowserToolOutputPath('snapshot.md')).rejects.toThrow(
-      'absolute BrowserOS tool output path',
+      'absolute Redrob tool output path',
     )
   })
 
@@ -387,7 +387,7 @@ describe('filesystem path boundaries', () => {
     await writeFile(siblingPath, '{}')
 
     await expect(resolveBrowserToolOutputPath(siblingPath)).rejects.toThrow(
-      'outside BrowserOS tool output',
+      'outside Redrob tool output',
     )
   })
 
@@ -398,7 +398,7 @@ describe('filesystem path boundaries', () => {
     await writeFile(join(outsideDir, 'snapshot.md'), 'snapshot')
 
     await expect(resolveBrowserToolOutputPath(outputPath)).rejects.toThrow(
-      'BrowserOS tool output directory must be a real directory',
+      'Redrob tool output directory must be a real directory',
     )
   })
 })

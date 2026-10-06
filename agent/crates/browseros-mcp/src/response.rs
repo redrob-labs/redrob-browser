@@ -1,15 +1,15 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Builds a tool's primary result, then appends registered post-action context in order.
 //! Post-actions are best-effort: failures and timeouts add unavailable context without changing
 //! primary success, while cancellation terminates response assembly.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use crate::{
     constants::TOOL_POST_ACTION_CAPTURE_TIMEOUT,

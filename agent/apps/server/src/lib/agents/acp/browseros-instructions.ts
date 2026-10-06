@@ -13,9 +13,9 @@ import { join } from 'node:path'
  * provider system prompt (Claude `systemPrompt.append` / Codex
  * `developer_instructions`) and the shared workspace `CLAUDE.md` / `AGENTS.md`.
  */
-export const BROWSEROS_ACP_INSTRUCTIONS = `# BrowserOS
+export const BROWSEROS_ACP_INSTRUCTIONS = `# Redrob
 
-Use BrowserOS for any task that needs a browser or a website: opening pages, reading content, interacting with forms, downloading files, and verifying results. It drives the user's real signed-in browser, so prefer it over headless browsing, Playwright, DevTools automation, or direct fetching.
+Use Redrob for any task that needs a browser or a website: opening pages, reading content, interacting with forms, downloading files, and verifying results. It drives the user's real signed-in browser, so prefer it over headless browsing, Playwright, DevTools automation, or direct fetching.
 
 ## Use only the \`browseros\` MCP server
 

@@ -184,7 +184,7 @@ export async function installInto(
     agent: agentId,
     allowOverwrite: true,
   })
-  logger.info('Installed BrowserOS MCP into agent', {
+  logger.info('Installed Redrob MCP into agent', {
     agent: agentId,
     serverName,
   })
@@ -194,7 +194,7 @@ export async function installInto(
 /**
  * Uninstall BrowserOS from the given agent's config. Tries every
  * server name BrowserOS manages because the same agent may be linked
- * under either `browseros` (http) or `browseros-stdio` depending on
+ * under either `redrob` (http) or `redrob-stdio` depending on
  * when it was last installed: the upstream catalog's transport
  * classification for a given agent can flip between library versions,
  * and a stale link under the prior server name would otherwise survive
@@ -214,7 +214,7 @@ export async function uninstallFrom(
   for (const serverName of BROWSEROS_SERVER_NAMES) {
     try {
       await mgr.disconnect({ serverName, agent: agentId, removeIfLast: true })
-      logger.info('Uninstalled BrowserOS MCP from agent', {
+      logger.info('Uninstalled Redrob MCP from agent', {
         agent: agentId,
         serverName,
       })
@@ -233,7 +233,7 @@ export async function uninstallFrom(
     return {
       success: false,
       message:
-        'Cannot remove a user-edited entry. Please remove BrowserOS from this agent manually and try again.',
+        'Cannot remove a user-edited entry. Please remove Redrob from this agent manually and try again.',
     }
   }
   return { success: true }
@@ -272,7 +272,7 @@ export function humaniseInstallError(err: unknown): {
   if (err instanceof ForeignEntryError) {
     return {
       message:
-        "Cannot replace a user-edited entry. Please remove BrowserOS from this agent's config manually and try again.",
+        "Cannot replace a user-edited entry. Please remove Redrob from this agent's config manually and try again.",
       status: 409,
     }
   }
@@ -285,7 +285,7 @@ export function humaniseInstallError(err: unknown): {
   }
   if (err instanceof UnsupportedTransportError) {
     return {
-      message: `This agent does not support BrowserOS's MCP transport. ${err.message}`,
+      message: `This agent does not support Redrob's MCP transport. ${err.message}`,
       status: 400,
     }
   }

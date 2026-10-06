@@ -17,9 +17,7 @@ describe('SetupStep', () => {
       <SetupStep failed={false} onRetry={() => {}} />,
     )
     expect(html).toContain('Finishing setup')
-    expect(html).toContain(
-      'Preparing BrowserOS. This should only take a moment.',
-    )
+    expect(html).toContain('Preparing Redrob. This should only take a moment.')
     expect(html).toContain('role="status"')
     expect(html).toContain('motion-safe:animate-spin')
     expect(html).toContain('text-accent')

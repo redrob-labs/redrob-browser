@@ -29,7 +29,7 @@ export const HubProviderRow: FC<HubProviderRowProps> = ({
   const iconUrl = useMemo(() => getFaviconUrl(provider.url), [provider.url])
 
   return (
-    <div className="group flex w-full items-center gap-4 rounded-xl border border-border bg-card p-4 transition-all hover:border-[var(--accent-orange)] hover:shadow-md">
+    <div className="group flex w-full items-center gap-4 rounded-xl border border-border bg-card p-4 transition-all hover:border-[var(--accent-brand)] hover:shadow-md">
       <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
         {iconUrl ? (
           <img

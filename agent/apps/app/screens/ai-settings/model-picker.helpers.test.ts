@@ -103,6 +103,12 @@ describe('servesUserLoadedModels', () => {
 })
 
 describe('getIncompleteCatalogHint', () => {
+  it('describes the console as a router, not a local runtime', () => {
+    const hint = getIncompleteCatalogHint('redrob-console', 1, 'Redrob Console')
+    expect(hint).toContain('`auto`')
+    expect(hint).not.toContain('loaded')
+  })
+
   it('warns that a local runtime catalog is only a sample', () => {
     // Names the provider off the same template the dialog passes in, so this
     // asserts the sentence users actually read rather than echoing back a

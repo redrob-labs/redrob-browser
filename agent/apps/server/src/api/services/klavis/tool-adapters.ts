@@ -201,7 +201,7 @@ export function buildKlavisToolSet(deps: KlavisToolAdapterDeps): ToolSet {
   const toolSet: ToolSet = {
     connector_mcp_servers: {
       description:
-        'Check or list BrowserOS managed app connectors before using Strata MCP tools. Omit server_name to see available, selected, connected, and proxy status. With server_name, returns connected/auth URL status.',
+        'Check or list Redrob managed app connectors before using Strata MCP tools. Omit server_name to see available, selected, connected, and proxy status. With server_name, returns connected/auth URL status.',
       inputSchema: z.object(
         connectorInputSchema(deps.catalog) as z.ZodRawShape,
       ),
@@ -270,7 +270,7 @@ export function registerKlavisTools(
     'connector_mcp_servers',
     {
       description:
-        'Check or list BrowserOS managed app connectors before using Strata MCP tools. Omit server_name to see available, selected, connected, and proxy status. With server_name, returns connected/auth URL status.',
+        'Check or list Redrob managed app connectors before using Strata MCP tools. Omit server_name to see available, selected, connected, and proxy status. With server_name, returns connected/auth URL status.',
       inputSchema: toV2InputSchema(
         connectorInputSchema(deps.catalog) as z.ZodRawShape,
       ),

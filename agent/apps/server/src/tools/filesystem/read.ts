@@ -114,7 +114,7 @@ function formatReadResult(args: {
 }
 
 const NO_WORKSPACE_READ_ERROR =
-  'No workspace selected. filesystem_read can only read BrowserOS-generated tool output files by absolute path.'
+  'No workspace selected. filesystem_read can only read Redrob-generated tool output files by absolute path.'
 
 function assertAllowedGeneratedOutputPath(
   resolvedPath: string,
@@ -122,7 +122,7 @@ function assertAllowedGeneratedOutputPath(
 ): void {
   if (!allowedOutputPaths.has(resolvedPath)) {
     throw new Error(
-      'filesystem_read can only read BrowserOS-generated tool output files returned in this session.',
+      'filesystem_read can only read Redrob-generated tool output files returned in this session.',
     )
   }
 }
@@ -171,15 +171,15 @@ export function createReadTool(
 
   return tool({
     description: cwd
-      ? `Read a file from the filesystem. Returns text content with line numbers, or image data for image files. Text reads are limited to ${MAX_READ_LINES} lines and ${MAX_READ_CHARS} characters per call. Use offset and limit to paginate through large files.${supportsGeneratedOutputs ? ' Also accepts absolute BrowserOS-generated output file paths returned by browser tools.' : ''}`
-      : `Read BrowserOS-generated tool output files by absolute path. Returns text content with line numbers, or image data for image files. Text reads are limited to ${MAX_READ_LINES} lines and ${MAX_READ_CHARS} characters per call. Use offset and limit to paginate through large files.`,
+      ? `Read a file from the filesystem. Returns text content with line numbers, or image data for image files. Text reads are limited to ${MAX_READ_LINES} lines and ${MAX_READ_CHARS} characters per call. Use offset and limit to paginate through large files.${supportsGeneratedOutputs ? ' Also accepts absolute Redrob-generated output file paths returned by browser tools.' : ''}`
+      : `Read Redrob-generated tool output files by absolute path. Returns text content with line numbers, or image data for image files. Text reads are limited to ${MAX_READ_LINES} lines and ${MAX_READ_CHARS} characters per call. Use offset and limit to paginate through large files.`,
     inputSchema: z.object({
       path: z
         .string()
         .describe(
           cwd
-            ? `File path relative to the selected workspace${supportsGeneratedOutputs ? ', or an absolute BrowserOS-generated output path returned by a browser tool' : ''}`
-            : 'Absolute BrowserOS-generated tool output path returned by a browser tool',
+            ? `File path relative to the selected workspace${supportsGeneratedOutputs ? ', or an absolute Redrob-generated output path returned by a browser tool' : ''}`
+            : 'Absolute Redrob-generated tool output path returned by a browser tool',
         ),
       offset: z
         .number()

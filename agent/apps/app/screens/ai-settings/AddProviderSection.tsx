@@ -10,6 +10,7 @@
 import { Plus } from 'lucide-react'
 import { type FC, useId, useState } from 'react'
 import { AdapterIcon, adapterLabel } from '@/components/agents/AdapterIcon'
+import { BRAND_MARKS } from '@/components/agents/agent-brand-marks'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Feature } from '@/lib/browseros/capabilities'
@@ -27,11 +28,17 @@ import {
   groupAddProviderEntries,
 } from './add-provider.helpers'
 import { CustomAgentTile } from './CustomAgentTile'
-import { POPULAR_ACP_AGENTS } from './popular-acp-agents'
+import { POPULAR_ACP_AGENTS, REDROB_CODE_AGENT } from './popular-acp-agents'
+
+const RedrobCodeIcon: FC = () => {
+  const Mark = BRAND_MARKS[REDROB_CODE_AGENT.id]
+  return <Mark className="size-[26px]" />
+}
 
 export interface AddProviderSectionProps {
   onCreateAgent: (type: AcpAgentType) => void
   onCreateCustomAgent: () => void
+  onCreateRedrobCode: () => void
   onUseTemplate: (template: ProviderTemplate) => void
 }
 
@@ -47,6 +54,7 @@ const AGENT_TYPES = ['claude', 'codex'] as const
 export const AddProviderSection: FC<AddProviderSectionProps> = ({
   onCreateAgent,
   onCreateCustomAgent,
+  onCreateRedrobCode,
   onUseTemplate,
 }) => {
   const searchId = useId()
@@ -81,6 +89,14 @@ export const AddProviderSection: FC<AddProviderSectionProps> = ({
           icon: <AdapterIcon adapter={type} className="size-[26px]" />,
           onAdd: () => onCreateAgent(type),
         })),
+        {
+          key: `agent-${REDROB_CODE_AGENT.id}`,
+          label: REDROB_CODE_AGENT.label,
+          category: 'agent' as const,
+          keywords: ['redrob', 'redrob code'],
+          icon: <RedrobCodeIcon />,
+          onAdd: onCreateRedrobCode,
+        },
         {
           key: 'agent-custom',
           label: 'Custom ACP agent',

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * @license
  * Copyright 2025 BrowserOS
@@ -7,7 +8,6 @@
  * See the NOTICE file for provenance.
  */
 
-#!/usr/bin/env node
 
 const { execFileSync, spawnSync } = require('node:child_process')
 const path = require('node:path')

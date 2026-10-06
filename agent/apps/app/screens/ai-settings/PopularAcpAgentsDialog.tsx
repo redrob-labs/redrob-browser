@@ -87,7 +87,7 @@ export const PopularAcpAgentsDialog: FC<PopularAcpAgentsDialogProps> = ({
                   href={agent.docsUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-0.5 font-medium text-[var(--accent-orange)] text-xs"
+                  className="inline-flex items-center gap-0.5 font-medium text-[var(--accent-brand-ink)] text-xs"
                 >
                   Docs <ArrowUpRight className="h-3 w-3" />
                 </a>

@@ -1,12 +1,3 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Reading the browser's own record of a download.
 //!
 //! The browser decides where a download goes and under what name, and it is the
@@ -21,6 +12,15 @@
 //! download. The cockpit extension already holds that permission and its service
 //! worker is an attachable target, so the answer is reachable without a channel
 //! of its own or any extension code.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use crate::framework::{ToolError, ToolExecResult};
 use browseros_core::{BrowserSession, ProtocolSession, SessionId};

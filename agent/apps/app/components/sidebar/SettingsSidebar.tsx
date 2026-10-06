@@ -10,9 +10,7 @@
 import {
   Activity,
   ArrowLeft,
-  BookOpen,
   Bot,
-  Compass,
   MessageSquare,
   Palette,
   Server,
@@ -79,18 +77,16 @@ const primarySettingsSections: NavSection[] = [
     label: 'Other',
     items: [
       {
-        name: 'Customize BrowserOS',
+        name: 'Customize Redrob',
         to: '/settings/customization',
         icon: Palette,
       },
-      { name: 'BrowserOS as MCP', to: '/settings/mcp', icon: Server },
+      { name: 'Redrob as MCP', to: '/settings/mcp', icon: Server },
     ],
   },
 ]
 
 const helpItems: NavItem[] = [
-  { name: 'Docs', href: 'https://docs.browseros.com/', icon: BookOpen },
-  { name: 'Features', to: '/features', icon: Compass },
   { name: 'Diagnostics', to: '/settings/diagnostics', icon: Activity },
 ]
 

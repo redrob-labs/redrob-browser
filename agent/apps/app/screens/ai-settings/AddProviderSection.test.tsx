@@ -25,6 +25,7 @@ mock.module('@/components/agents/agent-brand-marks', () => ({
     openclaw: () => createElement('span', { 'data-mark': 'openclaw' }),
     pi: () => createElement('span', { 'data-mark': 'pi' }),
     antigravity: () => createElement('span', { 'data-mark': 'antigravity' }),
+    'redrob-code': () => createElement('span', { 'data-mark': 'redrob-code' }),
   },
   agentBrandKey: () => undefined,
 }))
@@ -45,12 +46,29 @@ function render() {
     createElement(AddProviderSection, {
       onCreateAgent: () => {},
       onCreateCustomAgent: () => {},
+      onCreateRedrobCode: () => {},
       onUseTemplate: () => {},
     }),
   )
 }
 
 describe('AddProviderSection', () => {
+  it('offers Redrob Code right after Codex in the coding agents', () => {
+    const html = render()
+    const codex = html.indexOf('>Codex<')
+    const redrobCode = html.indexOf('>Redrob Code<')
+    expect(codex).toBeGreaterThan(-1)
+    expect(redrobCode).toBeGreaterThan(codex)
+    expect(redrobCode).toBeLessThan(html.indexOf('Custom ACP agent'))
+  })
+
+  it('offers Redrob Console as an API-key provider', () => {
+    const html = render()
+    const keys = html.indexOf('Bring your own API key')
+    const console = html.indexOf('>Redrob Console<')
+    expect(console).toBeGreaterThan(keys)
+  })
+
   it('renders every category heading', () => {
     const html = render()
     for (const heading of [

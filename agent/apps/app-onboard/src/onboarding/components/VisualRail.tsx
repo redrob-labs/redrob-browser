@@ -36,9 +36,7 @@ export function VisualRail() {
           className="size-[38px] rounded-[11px]"
           src="/icon/128.png"
         />
-        <div className="font-extrabold text-[17px] tracking-tight">
-          BrowserOS
-        </div>
+        <div className="font-extrabold text-[17px] tracking-tight">Redrob</div>
       </div>
       <div className="relative">
         <div className="mb-[22px] font-semibold text-[21px] text-ink leading-snug">

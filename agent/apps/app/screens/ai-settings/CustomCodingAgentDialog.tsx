@@ -55,6 +55,8 @@ export interface CustomCodingAgentDialogProps {
   agent?: AcpAgent | null
   /** Fires with the new agent's id after a custom agent is created (not on edit). */
   onSaved?: (agentId: string) => void
+  /** Seeds a new agent's name, command and logo, e.g. for Redrob Code. */
+  preset?: { name: string; command: string; icon: string } | null
 }
 
 export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
@@ -62,6 +64,7 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
   onOpenChange,
   agent,
   onSaved,
+  preset,
 }) => {
   const createAgent = useCreateAcpAgent()
   const updateAgent = useUpdateAcpAgent()
@@ -87,21 +90,22 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
   useEffect(() => {
     if (!open) return
     const config = agent?.customConfig
-    setName(agent?.name ?? '')
-    setCommand(config?.command ?? '')
+    const seed = agent ? null : preset
+    setName(agent?.name ?? seed?.name ?? '')
+    setCommand(config?.command ?? seed?.command ?? '')
     setWorkingDirectory(agent?.workingDirectory ?? '')
     setEnvText(formatEnvLines(config?.env))
     setFullAccessModesText((config?.fullAccessModes ?? []).join(', '))
     setReasoningEffortKey(config?.reasoningEffortKey ?? '')
     setSystemPromptAppend(config?.systemPromptAppend ?? '')
-    setLogoKey(config?.icon ?? '')
+    setLogoKey(config?.icon ?? seed?.icon ?? '')
     setModelId(agent?.modelId ?? '')
     setReasoningEffort(agent?.reasoningEffort ?? '')
     setPopularOpen(false)
     createAgent.reset()
     updateAgent.reset()
     probe.reset()
-  }, [open, agent, createAgent.reset, updateAgent.reset, probe.reset])
+  }, [open, agent, preset, createAgent.reset, updateAgent.reset, probe.reset])
 
   const probeResult = probe.data
   const models = probeResult?.models ?? []
@@ -191,7 +195,7 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
                 <button
                   type="button"
                   onClick={() => setPopularOpen(true)}
-                  className="inline-flex items-center gap-1 font-medium text-[var(--accent-orange)] text-xs"
+                  className="inline-flex items-center gap-1 font-medium text-[var(--accent-brand-ink)] text-xs"
                 >
                   <Info className="h-3.5 w-3.5" /> Popular agents
                 </button>
@@ -224,7 +228,7 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
               variant="outline"
               onClick={() => void handleTest()}
               disabled={!command.trim() || probe.isPending}
-              className="border-[var(--accent-orange)] text-[var(--accent-orange)] hover:bg-[var(--accent-orange)]/10 hover:text-[var(--accent-orange)]"
+              className="border-[var(--accent-brand)] text-[var(--accent-brand-ink)] hover:bg-[var(--accent-brand)]/10 hover:text-[var(--accent-brand-ink)]"
             >
               {probe.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

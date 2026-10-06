@@ -21,6 +21,7 @@ import {
 } from '@lobehub/icons'
 import { Bot, Github } from 'lucide-react'
 import type { FC, SVGProps } from 'react'
+import RedrobMark from '@/assets/product_logo.svg'
 import type { ProviderType } from './types'
 
 interface IconProps extends SVGProps<SVGSVGElement> {
@@ -28,6 +29,17 @@ interface IconProps extends SVGProps<SVGSVGElement> {
 }
 
 type IconComponent = FC<IconProps>
+
+// The Redrob mark as is: brand marks are never recoloured.
+const RedrobConsoleIcon: IconComponent = ({ size = 20, className }) => (
+  <img
+    src={RedrobMark}
+    alt="Redrob Console"
+    width={size}
+    height={size}
+    className={className}
+  />
+)
 
 const providerIconMap: Record<ProviderType, IconComponent | null> = {
   anthropic: Anthropic,
@@ -40,6 +52,7 @@ const providerIconMap: Record<ProviderType, IconComponent | null> = {
   lmstudio: LmStudio,
   bedrock: Bedrock,
   moonshot: Kimi,
+  'redrob-console': RedrobConsoleIcon,
   'chatgpt-pro': OpenAI,
   'github-copilot': Github,
   'qwen-code': Qwen,

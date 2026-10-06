@@ -1,18 +1,18 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Classifies a `run` failure's error text against a closed set of shapes we own.
 //!
 //! The error string is whatever the script threw, verbatim, so it can hold anything the
 //! page held. Scrubbing it would be a blocklist, and a blocklist fails open on the case
 //! nobody predicted. This matches instead: a recognised shape reports its class, and
 //! anything else is reduced to its bare error type with the message discarded.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 /// Every member of the `browser` SDK. An identifier named in an engine error is only
 /// echoed back when it is one of these, because this set is ours and contains no user

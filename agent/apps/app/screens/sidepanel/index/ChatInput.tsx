@@ -288,7 +288,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
         <button
           type="submit"
           disabled={isSubmitDisabled || !input.trim()}
-          className="cursor-pointer rounded-full bg-[var(--accent-orange)] p-2 text-white shadow-sm transition-all duration-200 hover:bg-[var(--accent-orange-bright)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="cursor-pointer rounded-full bg-[var(--accent-brand)] p-2 text-white shadow-sm transition-all duration-200 hover:bg-[var(--accent-brand-bright)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Send className="h-3.5 w-3.5" />
           <span className="sr-only">Send</span>
@@ -313,7 +313,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
         {/* Reserve right padding for the overlaid send/stop button. */}
         <textarea
           ref={textareaRef}
-          className="field-sizing-content max-h-60 min-h-[42px] flex-1 resize-none overflow-hidden rounded-2xl border border-border/50 bg-muted/50 py-2.5 pr-11 pl-4 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 hover:border-border focus:border-[var(--accent-orange)]"
+          className="field-sizing-content max-h-60 min-h-[42px] flex-1 resize-none overflow-hidden rounded-2xl border border-border/50 bg-muted/50 py-2.5 pr-11 pl-4 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 hover:border-border focus:border-[var(--accent-brand)]"
           value={input}
           onChange={(e) => handleInputChange(e.target.value)}
           onKeyDown={handleKeyDown}

@@ -1,12 +1,3 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! The link supervisor has to converge on a live socket however the loss and
 //! recovery events interleave.
 //!
@@ -17,6 +8,15 @@
 //! a few instructions of the recovery and cannot be forced from outside the
 //! client. The invariant is the part worth pinning down anyway: convergence must
 //! not depend on which event happens to arrive first.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use browseros_cdp::{CdpClient, ConnectOptions, ReconnectPolicy};
 use futures_util::StreamExt;

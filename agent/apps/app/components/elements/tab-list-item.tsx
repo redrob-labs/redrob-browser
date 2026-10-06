@@ -33,7 +33,7 @@ export const TabListItem: FC<TabListItemProps> = ({
         className={cn(
           'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border transition-colors',
           isSelected
-            ? 'border-[var(--accent-orange)] bg-[var(--accent-orange)]'
+            ? 'border-[var(--accent-brand)] bg-[var(--accent-brand)]'
             : 'border-border bg-background',
         )}
       >

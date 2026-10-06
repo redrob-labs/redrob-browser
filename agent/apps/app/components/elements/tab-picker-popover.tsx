@@ -166,7 +166,7 @@ const TabPickerMentionPopover: FC<TabPickerMentionPopoverProps> = ({
               </span>
             </div>
             {selectedTabs.length > 0 && (
-              <span className="mt-1 block text-[var(--accent-orange)] text-xs">
+              <span className="mt-1 block text-[var(--accent-brand-ink)] text-xs">
                 {selectedTabs.length} tab{selectedTabs.length !== 1 ? 's' : ''}{' '}
                 selected
               </span>
@@ -274,7 +274,7 @@ const TabPickerSelectorPopover: FC<TabPickerSelectorPopoverProps> = ({
                   Tabs
                 </span>
                 {selectedTabs.length > 0 && (
-                  <span className="text-[var(--accent-orange)] text-xs">
+                  <span className="text-[var(--accent-brand-ink)] text-xs">
                     {selectedTabs.length} selected
                   </span>
                 )}

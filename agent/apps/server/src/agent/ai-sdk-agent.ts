@@ -410,7 +410,7 @@ function withoutReservedInternalToolNames(
   }
   if (skipped.length > 0) {
     logger.warn(
-      'External MCP tools skipped due to BrowserOS tool name collision',
+      'External MCP tools skipped due to Redrob tool name collision',
       {
         toolNames: skipped,
       },

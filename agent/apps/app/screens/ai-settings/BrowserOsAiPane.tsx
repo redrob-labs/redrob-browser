@@ -10,7 +10,6 @@
 import { Plus } from 'lucide-react'
 import { type FC, useState } from 'react'
 import { toast } from 'sonner'
-import { BrowserClawPromoBanner } from '@/components/promo/BrowserClawPromoBanner'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertDialog,
@@ -160,8 +159,6 @@ export const BrowserOsAiPane: FC = () => {
         </p>
       </div>
 
-      <BrowserClawPromoBanner />
-
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-semibold text-base">
@@ -179,8 +176,8 @@ export const BrowserOsAiPane: FC = () => {
         {providersUnavailable ? (
           <Alert variant="destructive">
             <AlertDescription>
-              Your providers could not be loaded because the BrowserOS server is
-              not reachable. They are still saved on this device.
+              Your providers could not be loaded because the Redrob agent server
+              is not reachable. They are still saved on this device.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -203,6 +200,7 @@ export const BrowserOsAiPane: FC = () => {
       <AddProviderSection
         onCreateAgent={addProvider.onCreateAgent}
         onCreateCustomAgent={addProvider.onCreateCustomAgent}
+        onCreateRedrobCode={addProvider.onCreateRedrobCode}
         onUseTemplate={addProvider.onUseTemplate}
       />
 

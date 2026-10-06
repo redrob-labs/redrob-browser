@@ -69,7 +69,7 @@ export const ConfiguredTargetRow: FC<ConfiguredTargetRowProps> = ({
       className={cn(
         'group flex items-center gap-3 px-4 py-3 transition-colors',
         isSelected
-          ? 'bg-[var(--accent-orange)]/5'
+          ? 'bg-[var(--accent-brand)]/5'
           : 'focus-within:bg-muted/40 hover:bg-muted/40',
       )}
     >
@@ -91,13 +91,13 @@ export const ConfiguredTargetRow: FC<ConfiguredTargetRowProps> = ({
           className={cn(
             'flex size-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors',
             isSelected
-              ? 'border-[var(--accent-orange)] bg-[var(--accent-orange)]'
-              : 'border-border group-hover:border-[var(--accent-orange)]/60',
+              ? 'border-[var(--accent-brand)] bg-[var(--accent-brand)]'
+              : 'border-border group-hover:border-[var(--accent-brand)]/60',
           )}
         >
           {isSelected ? <Check className="size-3 text-white" /> : null}
         </span>
-        <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--accent-orange)]/10 text-[var(--accent-orange)]">
+        <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--accent-brand)]/10 text-[var(--accent-brand-ink)]">
           {icon}
         </span>
         <span className="min-w-0 flex-1">
@@ -121,7 +121,7 @@ export const ConfiguredTargetRow: FC<ConfiguredTargetRowProps> = ({
         {isSelected ? (
           <Badge
             variant="secondary"
-            className="rounded bg-[var(--accent-orange)]/15 font-bold text-[10px] text-[var(--accent-orange)] uppercase tracking-wide"
+            className="rounded bg-[var(--accent-brand)]/15 font-bold text-[10px] text-[var(--accent-brand-ink)] uppercase tracking-wide"
           >
             Default
           </Badge>

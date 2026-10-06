@@ -62,7 +62,6 @@ export const providerTemplates: ProviderTemplate[] = [
     defaultModelId: 'gpt-5.5',
     supportsImages: true,
     contextWindow: 1050000,
-    setupGuideUrl: 'https://docs.browseros.com/features/chatgpt-pro-oauth',
   },
   {
     id: 'github-copilot',
@@ -71,7 +70,6 @@ export const providerTemplates: ProviderTemplate[] = [
     defaultModelId: 'gpt-5-mini',
     supportsImages: true,
     contextWindow: 128000,
-    setupGuideUrl: 'https://docs.browseros.com/features/github-copilot-oauth',
   },
   {
     id: 'qwen-code',
@@ -80,7 +78,19 @@ export const providerTemplates: ProviderTemplate[] = [
     defaultModelId: 'coder-model',
     supportsImages: true,
     contextWindow: 1000000,
-    setupGuideUrl: 'https://docs.browseros.com/features/qwen-code-oauth',
+  },
+  // Redrob's own gateway. `auto` is the console's canonical model id
+  // (autoModelId on /v1/pricing). Context window: the app's default for a
+  // routed catalogue, not the 2M the console publishes for `auto`, because a
+  // request can be routed to a model with far less.
+  {
+    id: 'redrob-console',
+    name: 'Redrob Console',
+    defaultBaseUrl: 'https://console.redrob.ai/api/backend/v1',
+    defaultModelId: 'auto',
+    supportsImages: true,
+    contextWindow: 128000,
+    apiKeyUrl: 'https://console.redrob.ai/api-keys',
   },
   {
     id: 'moonshot',
@@ -95,8 +105,6 @@ export const providerTemplates: ProviderTemplate[] = [
   enrichTemplate('openai', {
     defaultModelId: 'gpt-5',
     apiKeyUrl: 'https://platform.openai.com/api-keys',
-    setupGuideUrl:
-      'https://docs.browseros.com/features/bring-your-own-llm#openai',
   }),
   {
     id: 'openai-compatible',
@@ -109,14 +117,10 @@ export const providerTemplates: ProviderTemplate[] = [
   enrichTemplate('anthropic', {
     defaultModelId: 'claude-sonnet-4-6',
     apiKeyUrl: 'https://console.anthropic.com/settings/keys',
-    setupGuideUrl:
-      'https://docs.browseros.com/features/bring-your-own-llm#claude',
   }),
   enrichTemplate('google', {
     defaultModelId: 'gemini-2.5-flash',
     apiKeyUrl: 'https://aistudio.google.com/app/apikey',
-    setupGuideUrl:
-      'https://docs.browseros.com/features/bring-your-own-llm#gemini',
   }),
   {
     id: 'ollama',
@@ -125,20 +129,14 @@ export const providerTemplates: ProviderTemplate[] = [
     defaultModelId: 'llama3.2',
     supportsImages: false,
     contextWindow: 128000,
-    setupGuideUrl:
-      'https://docs.browseros.com/features/bring-your-own-llm#ollama',
   },
   enrichTemplate('openrouter', {
     defaultModelId: 'anthropic/claude-sonnet-4.5',
     apiKeyUrl: 'https://openrouter.ai/keys',
-    setupGuideUrl:
-      'https://docs.browseros.com/features/bring-your-own-llm#openrouter',
   }),
   enrichTemplate('lmstudio', {
     defaultModelId: 'openai/gpt-oss-20b',
     defaultBaseUrl: 'http://localhost:1234/v1',
-    setupGuideUrl:
-      'https://docs.browseros.com/features/bring-your-own-llm#lmstudio',
   }),
   enrichTemplate('azure', {
     defaultModelId: '',
@@ -160,6 +158,7 @@ export const providerTypeOptions: { value: ProviderType; label: string }[] = [
   { value: 'chatgpt-pro', label: CHATGPT_PROVIDER_DISPLAY_NAME },
   { value: 'github-copilot', label: 'GitHub Copilot' },
   { value: 'qwen-code', label: 'Qwen Code' },
+  { value: 'redrob-console', label: 'Redrob Console' },
   { value: 'moonshot', label: 'Moonshot AI' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
@@ -191,6 +190,7 @@ const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
   'github-copilot': 'https://api.githubcopilot.com',
   'qwen-code': 'https://portal.qwen.ai/v1',
   moonshot: 'https://api.moonshot.ai/v1',
+  'redrob-console': 'https://console.redrob.ai/api/backend/v1',
   anthropic: 'https://api.anthropic.com/v1',
   openai: 'https://api.openai.com/v1',
   'openai-compatible': '',

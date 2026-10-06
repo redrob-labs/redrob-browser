@@ -166,7 +166,7 @@ describe('createApiRoutes', () => {
         method: 'POST',
         headers: {
           Host: 'localhost',
-          Origin: 'chrome-extension://bflpfmnmnokmjhmgnolecpppdbdophmk',
+          Origin: 'chrome-extension://oikpnmkappjhkifbcieakjoeiknojbgg',
         },
       },
       localServer,
@@ -199,7 +199,7 @@ describe('createApiRoutes', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Origin: 'chrome-extension://bflpfmnmnokmjhmgnolecpppdbdophmk',
+          Origin: 'chrome-extension://oikpnmkappjhkifbcieakjoeiknojbgg',
         },
         body,
       },
@@ -259,7 +259,7 @@ describe('createApiRoutes', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Origin: 'chrome-extension://bflpfmnmnokmjhmgnolecpppdbdophmk',
+            Origin: 'chrome-extension://oikpnmkappjhkifbcieakjoeiknojbgg',
           },
           body,
         },

@@ -52,7 +52,7 @@ export const DeviceCodeDialog: FC<DeviceCodeDialogProps> = ({
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col items-center gap-4 py-4">
-          <div className="flex items-center gap-3 rounded-xl border-2 border-[var(--accent-orange)]/40 border-dashed bg-[var(--accent-orange)]/5 px-6 py-4">
+          <div className="flex items-center gap-3 rounded-xl border-2 border-[var(--accent-brand)]/40 border-dashed bg-[var(--accent-brand)]/5 px-6 py-4">
             <code className="font-bold font-mono text-2xl text-foreground tracking-widest">
               {deviceCode?.userCode}
             </code>
@@ -77,7 +77,7 @@ export const DeviceCodeDialog: FC<DeviceCodeDialogProps> = ({
               href={deviceCode.verificationUri}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 text-[var(--accent-orange)] text-xs transition-colors hover:underline"
+              className="flex items-center gap-1 text-[var(--accent-brand-ink)] text-xs transition-colors hover:underline"
             >
               Open verification page
               <ExternalLink className="h-3 w-3" />

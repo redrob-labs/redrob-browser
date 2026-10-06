@@ -172,6 +172,21 @@ function createMoonshotFactory(
   })
 }
 
+// Redrob Console: OpenAI-compatible, keyed by a workspace API key.
+function createRedrobConsoleFactory(
+  config: ResolvedAgentConfig,
+): (modelId: string) => unknown {
+  if (!config.baseUrl)
+    throw new Error('Redrob Console provider requires baseUrl')
+  if (!config.apiKey) throw new Error('Redrob Console provider requires apiKey')
+  return createOpenAICompatible({
+    ...(config.headers && { headers: config.headers }),
+    name: 'redrob-console',
+    baseURL: config.baseUrl,
+    apiKey: config.apiKey,
+  })
+}
+
 function createQwenCodeFactory(
   config: ResolvedAgentConfig,
 ): (modelId: string) => unknown {
@@ -220,6 +235,7 @@ const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
   [LLM_PROVIDERS.BEDROCK]: createBedrockFactory,
   [LLM_PROVIDERS.OPENAI_COMPATIBLE]: createOpenAICompatibleFactory,
   [LLM_PROVIDERS.MOONSHOT]: createMoonshotFactory,
+  [LLM_PROVIDERS.REDROB_CONSOLE]: createRedrobConsoleFactory,
   [LLM_PROVIDERS.CHATGPT_PRO]: createChatGPTProFactory,
   [LLM_PROVIDERS.GITHUB_COPILOT]: createGitHubCopilotFactory,
   [LLM_PROVIDERS.QWEN_CODE]: createQwenCodeFactory,

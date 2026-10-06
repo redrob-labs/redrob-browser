@@ -1,16 +1,16 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Live recording-preview stream (Server-Sent Events). Streams a session's
 //! currently-active rrweb document to the cockpit so the running card can render
 //! a live preview from the recording it already captures, without taking any
 //! screenshots.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use super::replay::require_known_session;
 use crate::{

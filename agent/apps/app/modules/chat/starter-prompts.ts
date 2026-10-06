@@ -53,14 +53,14 @@ const defaults: Record<ChatMode, StarterPrompt[]> = {
   ],
   agent: [
     {
-      display: 'Read about our vision and upvote',
+      display: 'Group my open tabs by topic',
       prompt:
-        'Go to https://dub.sh/browseros-launch in current tab. Find and click the upvote button',
+        'Look at every tab open in this window and group them into tab groups by topic',
     },
     {
-      display: 'Support BrowserOS on Github',
+      display: 'Find this page in other sources',
       prompt:
-        'Go to http://git.new/browseros in current tab and star the repository',
+        'Read the current tab, search for two other sources covering the same topic, and summarize where they agree and differ',
     },
     {
       display: 'Open amazon.com and order Sensodyne toothpaste',

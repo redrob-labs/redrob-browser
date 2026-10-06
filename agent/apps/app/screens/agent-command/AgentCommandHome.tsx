@@ -7,11 +7,11 @@
  * See the NOTICE file for provenance.
  */
 
+import { Search, Sparkles } from 'lucide-react'
 import { type FC, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { NoProviderNotice } from '@/components/chat/NoProviderNotice'
-import { BrowserClawPromoBanner } from '@/components/promo/BrowserClawPromoBanner'
-import { ProductHuntBanner } from '@/components/promo/ProductHuntBanner'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Feature } from '@/lib/browseros/capabilities'
 import { createBrowserOSAction } from '@/lib/chat-actions/types'
 import { openSidePanelWithSearch } from '@/lib/messaging/sidepanel/openSidepanelWithSearch'
@@ -26,10 +26,16 @@ import {
   ConversationInput,
   type ConversationInputSendInput,
 } from './ConversationInput'
+import { HomeSearchInput } from './HomeSearchInput'
 import { resolveHomeLlmRoutingMode } from './home-compose.helpers'
+
+/** Search is the default: a new tab is opened to go somewhere far more often than to start a task. */
+type HomeMode = 'search' | 'ask'
+const DEFAULT_HOME_MODE: HomeMode = 'search'
 
 export const AgentCommandHome: FC = () => {
   const navigate = useNavigate()
+  const [homeMode, setHomeMode] = useState<HomeMode>(DEFAULT_HOME_MODE)
   const showImportHint = useShowImportHint()
   const { supports, isLoading: capabilitiesLoading } = useCapabilities()
   const supportsInlineChat = supports(Feature.NEWTAB_CHAT_SUPPORT)
@@ -105,57 +111,63 @@ export const AgentCommandHome: FC = () => {
   return (
     <div className="min-h-full px-4 py-6">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-        <div className="flex flex-col items-center gap-5 pt-[max(10vh,24px)] text-center">
-          <div className="space-y-3">
-            <h1 className="font-semibold text-[clamp(2.25rem,4.5vw,3.5rem)] leading-[1.08] tracking-[-0.025em] [text-wrap:balance]">
-              What should your agent{' '}
-              <span className="font-medium text-[var(--accent-orange)] italic">
-                work on
-              </span>{' '}
-              next?
-            </h1>
-            <p className="mx-auto max-w-2xl text-muted-foreground text-sm leading-6 [text-wrap:pretty]">
-              Pick any provider or agent you have connected, then start a task,
-              all without leaving this tab.
-            </p>
-          </div>
+        <div className="flex flex-col items-center gap-5 pt-[max(18vh,24px)] text-center">
+          <Tabs
+            value={homeMode}
+            onValueChange={(value) => setHomeMode(value as HomeMode)}
+            className="w-full max-w-3xl items-center gap-4"
+          >
+            <TabsList aria-label="New tab mode">
+              <TabsTrigger value="search" className="px-4">
+                <Search aria-hidden />
+                Search
+              </TabsTrigger>
+              <TabsTrigger value="ask" className="px-4">
+                <Sparkles aria-hidden />
+                Ask
+              </TabsTrigger>
+            </TabsList>
 
-          <div className="w-full max-w-3xl space-y-3">
-            <ConversationInput
-              variant="home"
-              providers={providerOptions}
-              selectedProvider={selectedProvider}
-              onSelectProvider={selectProvider}
-              onSend={handleSend}
-              streaming={false}
-              // Stays usable with nothing connected so the task someone came to
-              // write survives the trip to provider setup. Only a genuinely
-              // pending load disables it.
-              disabled={
-                waitingForLlmCapabilities || (!selectedProvider && !noTarget)
-              }
-              attachmentsEnabled={selectedProvider?.kind === 'acp'}
-              placeholder={
-                selectedProvider
-                  ? `Ask ${selectedProvider.name} to handle a task...`
-                  : noTarget
-                    ? 'Describe a task...'
-                    : 'Loading providers...'
-              }
-            />
-            {noTarget && (
-              <NoProviderNotice
-                blocked={sendBlocked}
-                variant="inline"
-                className="text-left"
+            <TabsContent value="search" className="w-full">
+              <HomeSearchInput />
+            </TabsContent>
+
+            <TabsContent value="ask" className="w-full space-y-3">
+              <ConversationInput
+                variant="home"
+                providers={providerOptions}
+                selectedProvider={selectedProvider}
+                onSelectProvider={selectProvider}
+                onSend={handleSend}
+                streaming={false}
+                // Stays usable with nothing connected so the task someone came to
+                // write survives the trip to provider setup. Only a genuinely
+                // pending load disables it.
+                disabled={
+                  waitingForLlmCapabilities || (!selectedProvider && !noTarget)
+                }
+                attachmentsEnabled={selectedProvider?.kind === 'acp'}
+                placeholder={
+                  selectedProvider
+                    ? `Ask ${selectedProvider.name} to handle a task...`
+                    : noTarget
+                      ? 'Describe a task...'
+                      : 'Loading providers...'
+                }
               />
-            )}
-          </div>
+              {noTarget && (
+                <NoProviderNotice
+                  blocked={sendBlocked}
+                  variant="inline"
+                  className="text-left"
+                />
+              )}
+            </TabsContent>
+          </Tabs>
         </div>
 
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 pb-12">
           <RecentSites />
-          <ProductHuntBanner fallback={<BrowserClawPromoBanner />} />
           <ScheduleResults />
         </div>
       </div>

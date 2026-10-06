@@ -109,9 +109,9 @@ export function SetupAgentStep({ onSetup }: SetupAgentStepProps) {
           Set up your <Em>agent</Em>
         </DisplayHeading>
         <StepCopy>
-          BrowserOS runs on the provider you bring. Connect an LLM provider or a
-          coding agent harness you already use, and we will open BrowserOS so
-          you can finish.
+          Redrob runs on the provider you bring. Connect an LLM provider or a
+          coding agent harness you already use, and we will open Redrob so you
+          can finish.
         </StepCopy>
         <div className="mb-6 flex max-w-[480px] flex-col gap-[18px]">
           <div>

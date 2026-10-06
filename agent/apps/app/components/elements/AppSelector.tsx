@@ -260,7 +260,7 @@ export const AppSelector: FC<AppSelectorProps> = ({
                       <span className="flex-1 truncate text-sm">
                         {server.displayName}
                       </span>
-                      <KeyRound className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                      <KeyRound className="h-3.5 w-3.5 shrink-0 text-warning" />
                     </CommandItem>
                   ))}
                 </CommandGroup>

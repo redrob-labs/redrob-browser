@@ -63,18 +63,18 @@ export const AvailableManagedServers: FC<AvailableManagedServersProps> = ({
                     key={serverName}
                     variant="outline"
                     onClick={() => onAddServer(args)}
-                    className="group h-auto flex-col items-start gap-2 p-4 hover:border-[var(--accent-orange)]"
+                    className="group h-auto flex-col items-start gap-2 p-4 hover:border-[var(--accent-brand)]"
                   >
                     <div className="flex w-full items-center justify-between">
                       <div className="flex items-center gap-3">
                         <McpServerIcon
                           serverName={serverName}
                           size={20}
-                          className="text-muted-foreground transition-colors group-hover:text-[var(--accent-orange)]"
+                          className="text-muted-foreground transition-colors group-hover:text-[var(--accent-brand-ink)]"
                         />
                         <span className="font-medium">{serverName}</span>
                       </div>
-                      <Plus className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-[var(--accent-orange)]" />
+                      <Plus className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-[var(--accent-brand-ink)]" />
                     </div>
                     {description && (
                       <p className="line-clamp-1 max-w-48 text-ellipsis text-left text-muted-foreground text-xs">

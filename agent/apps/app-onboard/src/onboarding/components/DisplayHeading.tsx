@@ -26,7 +26,7 @@ export interface EmProps {
   children: ReactNode
 }
 
-/** Accent word inside a heading: app style uses the brand orange in the same
+/** Accent word inside a heading: app style uses the brand colour in the same
  * sans family (no serif italic, which is neo's signature, not the app's). */
 export function Em({ children }: EmProps) {
   return <span className="text-accent">{children}</span>

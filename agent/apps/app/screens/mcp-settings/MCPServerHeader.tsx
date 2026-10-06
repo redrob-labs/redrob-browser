@@ -7,14 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import {
-  Check,
-  Copy,
-  ExternalLink,
-  Loader2,
-  RefreshCw,
-  Server,
-} from 'lucide-react'
+import { Check, Copy, Loader2, RefreshCw, Server } from 'lucide-react'
 import { type FC, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -29,8 +22,6 @@ export interface MCPServerHeaderProps {
   error: string | null
   onServerRestart?: () => void
 }
-
-const DOCS_URL = 'https://docs.browseros.com/features/use-with-claude-code'
 
 export const MCPServerHeader: FC<MCPServerHeaderProps> = ({
   serverUrl,
@@ -80,24 +71,15 @@ export const MCPServerHeader: FC<MCPServerHeaderProps> = ({
   return (
     <div className="rounded-xl border border-border bg-card p-6 shadow-sm transition-all hover:shadow-md">
       <div className="flex items-start gap-4">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-orange)]/10">
-          <Server className="h-6 w-6 text-[var(--accent-orange)]" />
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-brand)]/10">
+          <Server className="h-6 w-6 text-[var(--accent-brand-ink)]" />
         </div>
         <div className="flex-1">
           <div className="mb-1 flex items-center justify-between">
-            <h2 className="font-semibold text-xl">BrowserOS MCP Server</h2>
-            <a
-              href={DOCS_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 text-muted-foreground text-sm transition-colors hover:text-[var(--accent-orange)]"
-            >
-              Docs
-              <ExternalLink className="h-3.5 w-3.5" />
-            </a>
+            <h2 className="font-semibold text-xl">Redrob MCP Server</h2>
           </div>
           <p className="mb-6 text-muted-foreground text-sm">
-            Connect BrowserOS to MCP clients like Claude Code, Gemini CLI and
+            Connect Redrob to MCP clients like Claude Code, Gemini CLI and
             others.
           </p>
 

@@ -1,18 +1,18 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Read-side projection for the live-session cockpit.
 //!
 //! Connected sessions drive inclusion. Durable Chrome-tab ownership is then reconciled against
 //! one current browser snapshot, with activity joined only as metadata. This
 //! keeps historical session reads on the audit path and prevents stale page or target identities
 //! from becoming public API.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use crate::{
     db::audit_log::TaskSummary,

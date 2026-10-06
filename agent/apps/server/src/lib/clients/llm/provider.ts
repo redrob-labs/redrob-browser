@@ -145,6 +145,20 @@ function createMoonshotModel(config: ResolvedLLMConfig): LanguageModel {
   })(config.model)
 }
 
+// Redrob Console: an OpenAI-compatible gateway keyed by a workspace API key.
+// Its `auto` model lets the console pick the model for each request.
+function createRedrobConsoleModel(config: ResolvedLLMConfig): LanguageModel {
+  if (!config.baseUrl)
+    throw new Error('Redrob Console provider requires baseUrl')
+  if (!config.apiKey) throw new Error('Redrob Console provider requires apiKey')
+  return createOpenAICompatible({
+    ...(config.headers && { headers: config.headers }),
+    name: 'redrob-console',
+    baseURL: config.baseUrl,
+    apiKey: config.apiKey,
+  })(config.model)
+}
+
 function createQwenCodeModel(config: ResolvedLLMConfig): LanguageModel {
   if (!config.apiKey) throw new Error('Qwen Code requires OAuth authentication')
   // Managed OAuth provider: user custom headers are deliberately not forwarded.
@@ -187,6 +201,7 @@ const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
   [LLM_PROVIDERS.BEDROCK]: createBedrockModel,
   [LLM_PROVIDERS.OPENAI_COMPATIBLE]: createOpenAICompatibleModel,
   [LLM_PROVIDERS.MOONSHOT]: createMoonshotModel,
+  [LLM_PROVIDERS.REDROB_CONSOLE]: createRedrobConsoleModel,
   [LLM_PROVIDERS.CHATGPT_PRO]: createChatGPTProModel,
   [LLM_PROVIDERS.GITHUB_COPILOT]: createGitHubCopilotModel,
   [LLM_PROVIDERS.QWEN_CODE]: createQwenCodeModel,

@@ -16,8 +16,6 @@ import { AgentCommandHome } from '@/screens/agent-command/AgentCommandHome'
 import { AISettingsPage } from '@/screens/ai-settings/AISettingsPage'
 import { ConnectMCP } from '@/screens/connect-mcp/ConnectMCP'
 import { CustomizationPage } from '@/screens/customization/CustomizationPage'
-import { FeaturesPage } from '@/screens/features/Features'
-import { SurveyPage } from '@/screens/jtbd-agent/SurveyPage'
 import { LlmHubPage } from '@/screens/llm-hub/LlmHubPage'
 import { MCPSettingsPage } from '@/screens/mcp-settings/MCPSettingsPage'
 import { NewTabChat } from '@/screens/newtab/index/NewTabChat'
@@ -25,14 +23,6 @@ import { NewTabLayout } from '@/screens/newtab/layout/NewTabLayout'
 import { Personalize } from '@/screens/newtab/personalize/Personalize'
 import { OnboardingAiPage } from '@/screens/onboarding-ai/OnboardingAiPage'
 import { ScheduledTasksPage } from '@/screens/scheduled-tasks/ScheduledTasksPage'
-
-function getSurveyParams(): { maxTurns?: number; experimentId?: string } {
-  const params = new URLSearchParams(window.location.search)
-  const maxTurnsStr = params.get('maxTurns')
-  const experimentId = params.get('experimentId') ?? 'default'
-  const maxTurns = maxTurnsStr ? Number.parseInt(maxTurnsStr, 10) : 7
-  return { maxTurns, experimentId }
-}
 
 const OptionsRedirect: FC = () => {
   const params = useParams()
@@ -45,7 +35,6 @@ const OptionsRedirect: FC = () => {
     mcp: '/settings/mcp',
     customization: '/settings/customization',
     search: '/settings/ai',
-    'jtbd-agent': '/settings/survey',
     scheduled: '/scheduled',
   }
 
@@ -54,8 +43,6 @@ const OptionsRedirect: FC = () => {
 }
 
 export const App: FC = () => {
-  const surveyParams = getSurveyParams()
-
   return (
     <HashRouter>
       <Routes>
@@ -82,12 +69,9 @@ export const App: FC = () => {
               path="search"
               element={<Navigate to="/settings/ai" replace />}
             />
-            <Route path="survey" element={<SurveyPage {...surveyParams} />} />
             <Route path="*" element={<Navigate to="/settings/ai" replace />} />
           </Route>
         </Route>
-
-        <Route path="features" element={<FeaturesPage />} />
 
         {/* First-run setup, opened by the native onboarding on completion.
             Outside every layout route on purpose: no sidebar, no chrome. */}

@@ -1,16 +1,16 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Coordinates a targeted extension reload over the existing browser connection.
 //! The extension owns persisted pending/attempt state; the server only decides
 //! when to apply it and verifies the replacement worker. No profile files or
 //! third-party extension state are read or modified by this service.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use super::{browser::BrowserService, sessions::Sessions};
 use browseros_core::{BrowserSession, SessionId};

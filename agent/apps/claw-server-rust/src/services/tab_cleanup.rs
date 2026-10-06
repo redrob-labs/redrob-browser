@@ -1,12 +1,3 @@
-/**
- * @license
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
- * See the NOTICE file for provenance.
- */
-
 //! Reliable cleanup of finished-agent browser tabs.
 //!
 //! Releasing a session's tab ownership stamps the ledger but never closes the
@@ -15,6 +6,15 @@
 //! user is currently viewing. It is idempotent and only acts on tabs the browser
 //! still reports open, so it survives crashes, disconnects, ungrouped tabs, and
 //! popup children.
+
+//
+// @license
+// Copyright 2025 BrowserOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
+// See the NOTICE file for provenance.
+//
 
 use crate::{db::SessionTabLedger, error::AppResult, services::browser::BrowserService};
 use browseros_core::PageId;
