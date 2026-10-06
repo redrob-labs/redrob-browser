@@ -28,13 +28,14 @@ substitutions:
       The vertical row's insets are ASYMMETRIC, unlike the horizontal row's -- see the constant's comment in
       the override for the measurement.
     regex:
-      pattern: 'SetInteriorMargin(gfx::Insets::VH(0, kGroupHeaderHorizontalInset));'
+      # 155 replaced the `kGroupHeaderHorizontalInset` constant with a `GetHorizontalInset()` accessor.
+      pattern: 'SetInteriorMargin(gfx::Insets::VH(0, GetHorizontalInset()));'
       replace: |-
         SetInteriorMargin(
               orientation == TabStripOrientation::kVertical
                   ? gfx::Insets::TLBR(0, kVerticalLeadingInset, 0,
-                                      kGroupHeaderHorizontalInset)
-                  : gfx::Insets::VH(0, kGroupHeaderHorizontalInset));
+                                      GetHorizontalInset())
+                  : gfx::Insets::VH(0, GetHorizontalInset()));
 
   - description: |
       Keep the mark's colour and the count in step with the rest of the row. Anchored on the chevron's own
@@ -71,9 +72,11 @@ substitutions:
       reference draws this row as a section label instead, and side by side that is the most visible
       difference in the column.
     regex:
+      # 155 replaced the `kGroupHeaderCornerRadius` constant with a `GetCornerRadius()` accessor and
+      # rewrapped the call.
       pattern: |-
         SetBackground(views::CreateRoundedRectBackground(background_color,
-                                                             kGroupHeaderCornerRadius));
+                                                             GetCornerRadius()));
       replace: |-
         //
             // Redrob: no fill in the vertical strip. The group's colour is painted as a filled rounded rect behind the
@@ -93,7 +96,7 @@ substitutions:
                   redrob::sidebar_tokens::kSurface));
             } else {
               SetBackground(views::CreateRoundedRectBackground(
-                  background_color, kGroupHeaderCornerRadius));
+                  background_color, GetCornerRadius()));
             }
 
   - description: |

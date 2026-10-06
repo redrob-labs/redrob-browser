@@ -1,0 +1,30 @@
+diff --git a/chrome/browser/ui/views/tabs/vertical/BUILD.gn b/chrome/browser/ui/views/tabs/vertical/BUILD.gn
+--- a/chrome/browser/ui/views/tabs/vertical/BUILD.gn
++++ b/chrome/browser/ui/views/tabs/vertical/BUILD.gn
+@@ -15,6 +15,8 @@ source_set("vertical") {
+     "vertical_tab_strip_top_container.h",
+   ]
+ 
++  sources += redrob_vertical_tabs_headers
++
+   public_deps = [ "//chrome/browser/ui/views/tabs/common" ]
+ 
+   deps = [
+@@ -44,6 +46,8 @@ source_set("impl") {
+     "vertical_tab_strip_top_container.cc",
+   ]
+ 
++  sources += redrob_vertical_tabs_impl_sources
++
+   deps = [
+     "//chrome/browser:primitives",
+     "//chrome/browser/glic",
+@@ -95,6 +99,8 @@ source_set("impl") {
+     "//ui/views",
+   ]
+ 
++  deps += redrob_vertical_tabs_impl_deps
++
+   public_deps = [
+     ":vertical",
+     "//chrome/browser:browser_public_dependencies",

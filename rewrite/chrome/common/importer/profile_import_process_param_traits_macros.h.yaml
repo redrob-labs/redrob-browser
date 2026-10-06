@@ -8,12 +8,16 @@ substitutions:
       The single range.
     regex:
       pattern: "#if BUILDFLAG(IS_WIN)"
-      replace: "// One range on every platform now: TYPE_CHROMIUM_BASED is 7 and is the maximum everywhere,\n// which also removes the Windows/non-Windows split this used to need."
+      replace: "// One range on every platform now: TYPE_CHROMIUM_BASED is 8 and is the maximum everywhere,\n// which also removes the Windows/non-Windows split this used to need."
       count: 1
   # ---- hunk 0 run 2: 6 removed, 1 added
   - description: |
       The note recording why the platform split is gone.
     regex:
-      pattern: "                              user_data_importer::TYPE_EDGE)\n#else\nIPC_ENUM_TRAITS_MIN_MAX_VALUE(user_data_importer::ImporterType,\n                              user_data_importer::TYPE_UNKNOWN,\n                              user_data_importer::TYPE_BOOKMARKS_FILE)\n#endif"
+      # Stacked on another fork, both arms of this `#if` already read TYPE_CHROME -- it collapsed the
+      # per-platform maxima before we got here. Ours still has to raise the maximum, because
+      # TYPE_CHROMIUM_BASED is added above it by the importer_type.h rule, and an IPC range that stops
+      # short of a real enum value drops those messages at the deserializer.
+      re_pattern: "                              user_data_importer::TYPE_CHROME\\)\n#else\nIPC_ENUM_TRAITS_MIN_MAX_VALUE\\(user_data_importer::ImporterType,\n                              user_data_importer::TYPE_UNKNOWN,\n                              user_data_importer::TYPE_CHROME\\)\n#endif"
       replace: "                              user_data_importer::TYPE_CHROMIUM_BASED)"
       count: 1

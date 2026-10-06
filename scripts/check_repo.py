@@ -20,14 +20,18 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
+# The patch stack. It is the VENDORED BrowserOS tree, keyed by upstream path, and it
+# is the only one -- `patches/`, the old flat directory, is gone. A second copy of the
+# stack is not a backup: the build reads one of them, and the other drifts silently.
+PATCH_TREE = ROOT / "vendor" / "browseros" / "chromium_patches"
+
 # The manifest's own format: `src<TAB>dst`, one line per destination, comments and blanks allowed. Duplicated
 # here rather than imported from redrob.py because this file must stay runnable on a machine with nothing set
 # up, and importing the CLI drags in its whole environment contract.
 def manifest_pairs(path: pathlib.Path) -> list[tuple[str, str, int]]:
     """Manifest rows as (source, target, line). A row ending in `/` is EXPANDED to one pair per file.
 
-    The trailing-slash form names a vendored tree whose file list belongs to its own build
-    (sources/chrome/browser/resources/redrob_extension/, the built extension). Expanding here rather than
+    The trailing-slash form names a vendored tree whose file list belongs to its own build. Expanding here rather than
     special-casing each caller keeps the orphan check and the checkout-match check true of every vendored
     file, which is the reason they exist: a file under sources/ that nothing copies is never built.
     """
@@ -109,24 +113,33 @@ def check_branding(problems: list[str]) -> None:
 
 
 def check_patch_names(problems: list[str]) -> None:
-    """A patch's filename IS its path, with slashes turned into hyphens.
+    """A patch's PATH in the tree is the upstream path it edits.
 
-    That is the convention `ls patches/` relies on to answer "what does this fork change". A patch whose name no
-    longer matches the path inside it still applies, so nothing breaks -- it just stops being findable, which is
-    the whole point of the naming.
+    The stack lives in the vendored BrowserOS layout, which mirrors the Chromium
+    tree -- one patch per file, in the file's own directory. It replaced a flat
+    `patches/` directory whose filenames were the path with slashes as hyphens.
+    Either way the check is the same and it is about findability: a patch filed
+    under a path other than the one inside it still applies, it just stops
+    answering "what does this fork change about THIS file", which is the whole
+    point of keying it by path.
     """
-    patches = ROOT / "patches"
+    patches = PATCH_TREE
     if not patches.exists():
+        problems.append(f"no patch tree at {patches.relative_to(ROOT)}")
         return
-    for patch in sorted(patches.glob("*.patch")):
+    skip = {".features.yaml", ".store.yaml"}
+    for patch in sorted(p for p in patches.rglob("*") if p.is_file() and p.name not in skip):
+        relative = str(patch.relative_to(patches))
         text = patch.read_text(encoding="utf-8", errors="replace")
         match = re.search(r"^\+\+\+ b/(.+)$", text, re.MULTILINE)
         if not match:
-            problems.append(f"{patch.name} has no +++ b/ header; it is not a usable patch")
+            # A new-file patch names its target only on the `+++` line too, so a patch
+            # with no such header is not a patch at all.
+            problems.append(f"{relative} has no +++ b/ header; it is not a usable patch")
             continue
-        expected = match.group(1).strip().replace("/", "-") + ".patch"
-        if patch.name != expected:
-            problems.append(f"{patch.name} should be named {expected} (it patches {match.group(1).strip()})")
+        target = match.group(1).strip()
+        if relative != target:
+            problems.append(f"{relative} should be filed at {target} (that is what it patches)")
 
 
 def check_versions(problems: list[str]) -> None:
@@ -295,11 +308,11 @@ def check_rewrites(problems: list[str]) -> None:
         return
     for rule in rules:
         relative = str(rule.relative_to(rewrites))[: -len(".yaml")]
-        patch = ROOT / "patches" / plaster.patch_name(relative)
+        patch = PATCH_TREE / plaster.patch_name(relative)
         if not patch.exists():
             problems.append(
-                f"rewrite/{relative}.yaml has no patch at patches/{patch.name}; "
-                f"run plaster.py generate"
+                f"rewrite/{relative}.yaml has no patch at "
+                f"{PATCH_TREE.relative_to(ROOT)}/{relative}; run plaster.py generate"
             )
         try:
             subs = plaster.load_rules(rule)
@@ -384,7 +397,7 @@ def check_update_channel(problems: list[str]) -> None:
     Checked by string rather than by running anything, because that is all the coupling is: a hostname and
     a prefix that have to match.
     """
-    installer = ROOT / "patches" / "chrome-installer-linux-common-installer.py.patch"
+    installer = PATCH_TREE / "chrome/installer/linux/common/installer.py"
     workflow = ROOT / ".github" / "workflows" / "sign-and-publish.yml"
     if not installer.exists() or not workflow.exists():
         return
@@ -610,74 +623,35 @@ def check_enum_rules(problems: list[str]) -> None:
             values[value] = name
 
 
-def check_vendored_extension(problems: list[str]) -> None:
-    """The vendored extension agrees with its pin, its grd, and the id the allowlist names.
+def check_no_component_extension(problems: list[str]) -> None:
+    """The old vendored component extension stays gone.
 
-    Three ways this fails silently without a gate, all of them shipping a browser whose agent surfaces do
-    not work while the build is green. A grd out of step with the tree drops a chunk, so one page 404s a
-    module it imports. A resource-name collision makes two files one resource, so the second never ships.
-    And an extension id that is not the one the vendored manifest's key derives is not on the component
-    allowlist, which loads the extension WITHOUT redrobPrivate rather than refusing to load it -- the same
-    picture as an unpacked dev load, which is the thing this whole item exists to stop being the shipped
-    state. scripts/vendor_extension.py owns the checks; this runs it so one gate reports everything.
+    It used to ship as a component extension with its own new tab, settings and onboarding pages. The agent
+    extension owns all three now, and while both existed Ctrl+T and the sidebar's New Tab opened the old
+    page instead of the agent's. Anything that would bring it back -- the vendored tree, its loader, its id,
+    its resource block, or a native button that links into it -- fails here rather than as a stale page on
+    screen.
     """
-    script = ROOT / "scripts" / "vendor_extension.py"
-    if not script.is_file():
-        problems.append("scripts/vendor_extension.py is missing")
-        return
-    result = subprocess.run(
-        [sys.executable, str(script)], capture_output=True, text=True, cwd=ROOT
-    )
-    if result.returncode != 0:
-        for line in (result.stderr or result.stdout).strip().splitlines():
-            problems.append(line.strip())
-        return
-
-    # The id in the allowlist rule and in the constants rule must be the id the vendored key derives.
-    # Asserted here rather than inside the vendor script because it is a fact about the REWRITE RULES.
-    pin_path = ROOT / "sources/chrome/browser/resources/redrob_extension/VENDOR.json"
-    try:
-        expected_id = json.loads(pin_path.read_text(encoding="utf-8"))["extension_id"]
-    except (OSError, ValueError, KeyError):
-        problems.append("cannot read the vendored extension's id from VENDOR.json")
-        return
-    constants_rule = ROOT / "rewrite/extensions/common/constants.h.yaml"
-    if not constants_rule.is_file():
-        problems.append("rewrite/extensions/common/constants.h.yaml does not declare kRedrobExtensionId")
-        return
-    text = constants_rule.read_text(encoding="utf-8")
-    if "kRedrobExtensionId" not in text:
-        problems.append("rewrite/extensions/common/constants.h.yaml does not declare kRedrobExtensionId")
-    elif f'"{expected_id}"' not in text:
-        problems.append(
-            f"kRedrobExtensionId is not {expected_id}, the id the vendored manifest's key derives -- "
-            f"the extension would load off the component allowlist, without redrobPrivate"
-        )
-    allowlist_rule = ROOT / "rewrite/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc.yaml"
-    if allowlist_rule.is_file():
-        allowlist_text = allowlist_rule.read_text(encoding="utf-8")
-        # TWO allowlists, and the browser needs both. ComponentLoader::Add checks the one keyed by manifest
-        # RESOURCE id, and a miss there is a NOTREACHED during profile creation -- the browser aborts before
-        # it draws a window. The extension-id list is what the rest of the browser asks. Asserting only the
-        # id entry is what shipped a build that linked cleanly and crashed on startup.
-        if "kRedrobExtensionId" not in allowlist_text:
-            problems.append("the component extension allowlist rule does not name kRedrobExtensionId")
-        if "case IDR_REDROB_EXTENSION_MANIFEST_JSON:" not in allowlist_text:
-            problems.append(
-                "the component extension allowlist rule does not add a `case "
-                "IDR_REDROB_EXTENSION_MANIFEST_JSON:` -- ComponentLoader::Add checks the RESOURCE-id "
-                "allowlist, and a miss there aborts the browser during profile creation"
-            )
-    else:
-        problems.append("the component extension allowlist rule is missing")
-    loader_rule = ROOT / "rewrite/chrome/browser/extensions/component_loader.cc.yaml"
-    if loader_rule.is_file():
-        loader_text = loader_rule.read_text(encoding="utf-8")
-        for needed in ("AddRedrobExtension();", "IDR_REDROB_EXTENSION_MANIFEST_JSON"):
-            if needed not in loader_text:
-                problems.append(f"component_loader.cc rule is missing {needed}")
-    else:
-        problems.append("rewrite/chrome/browser/extensions/component_loader.cc.yaml is missing")
+    if (ROOT / "sources/chrome/browser/resources/redrob_extension").exists():
+        problems.append("sources/chrome/browser/resources/redrob_extension is back; the agent extension owns "
+                        "those pages now")
+    markers = ("kRedrobExtensionId", "AddRedrobExtension", "IDR_REDROB_EXTENSION_", "redrob_extension")
+    roots = [ROOT / "rewrite", ROOT / "sources", ROOT / "redrob", ROOT / "vendor/browseros/chromium_patches"]
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix in (".png", ".ico", ".icns", ".woff2", ".pak"):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            for marker in markers:
+                if marker in text:
+                    problems.append(f"{path.relative_to(ROOT)} still refers to the removed component "
+                                    f"extension ({marker})")
+                    break
 
 
 def main() -> int:
@@ -696,7 +670,7 @@ def main() -> int:
     check_enum_rules(problems)
     check_function_enum_coverage(problems)
     check_idl_interfaces(problems)
-    check_vendored_extension(problems)
+    check_no_component_extension(problems)
     if problems:
         for problem in problems:
             print(f"FAIL {problem}")

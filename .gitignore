@@ -9,3 +9,6 @@
 *.log
 __pycache__/
 .env
+
+# uv builds the vendored bos_build package in place
+vendor/browseros/browseros.egg-info/

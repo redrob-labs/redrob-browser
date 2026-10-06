@@ -1,0 +1,26 @@
+diff --git a/extensions/common/mojom/api_permission_id.mojom b/extensions/common/mojom/api_permission_id.mojom
+--- a/extensions/common/mojom/api_permission_id.mojom
++++ b/extensions/common/mojom/api_permission_id.mojom
+@@ -299,9 +299,22 @@ enum APIPermissionID {
+   kBluetoothPeripheral = 272,
+   kPublicSuffix = 273,
+   kEnterpriseWebrtc = 274,
++  kBrowserOS = 275,
+ 
+   // Add new entries at the end of the enum and be sure to update the
+   // "ExtensionPermission3" enum in
+   // tools/metrics/histograms/metadata/extensions/enums.xml (by running
+   // update_extension_permission.py).
++  kRedrobPrivate = 276,
++  kRedrobPrivateTasks = 277,
++  kRedrobPrivateMemory = 278,
++  kRedrobPrivateProviders = 279,
++  kRedrobPrivateRoutines = 280,
++  kRedrobPrivatePasswords = 281,
++  kRedrobPrivateImport = 282,
++  kRedrobPrivateEngine = 283,
++  kRedrobPrivateWorkspace = 284,
++  kRedrobPrivateSettings = 285,
++  kRedrobPrivateOnboarding = 286,
++  kRedrobPrivateBrowser = 287,
+ };

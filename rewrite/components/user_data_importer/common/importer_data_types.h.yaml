@@ -6,5 +6,5 @@ substitutions:
       The bit.
     regex:
       pattern: "  VISIT_SOURCE_SAFARI_IMPORTED = 3,\n"
-      replace: "  VISIT_SOURCE_SAFARI_IMPORTED = 3,\n  VISIT_SOURCE_CHROMIUM_IMPORTED = 4,\n"
+      replace: "  VISIT_SOURCE_SAFARI_IMPORTED = 3,\n  VISIT_SOURCE_CHROMIUM_IMPORTED = 5,\n"
       count: 1

@@ -29,6 +29,7 @@
 #include "chrome/browser/redrob/redrob_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/thumbnails/thumbnail_tab_helper.h"
+#include "components/tabs/public/tab_interface.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
@@ -1501,7 +1502,11 @@ void TaskStore::AddStepDetail(const std::string& task_id,
 void TaskStore::WatchTabFrames(const std::string& task_id,
                                content::WebContents* contents,
                                size_t step_index) {
-  ThumbnailTabHelper* helper = ThumbnailTabHelper::FromWebContents(contents);
+  // Chromium 155 made ThumbnailTabHelper a per-tab feature: it is reached through
+  // the tab, not through WebContentsUserData. A WebContents that is not in a tab
+  // strip (a prerender, a devtools frame) has no TabInterface and no thumbnail.
+  tabs::TabInterface* tab = tabs::TabInterface::MaybeGetFromContents(contents);
+  ThumbnailTabHelper* helper = tab ? ThumbnailTabHelper::From(tab) : nullptr;
   if (!helper) {
     return;
   }

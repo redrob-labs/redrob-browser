@@ -1,0 +1,16 @@
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.h b/chrome/browser/ui/views/toolbar/toolbar_view.h
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.h
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.h
+@@ -202,6 +202,12 @@ class ToolbarView : public views::AccessiblePaneView,
+   // TODO(crbug.com/513238408): Remove this once toolbar layout/overflow is
+   // fixed.
+   AvatarToolbarButton* avatar_toolbar_button() { return avatar_; }
++
++  // Redrob draws the avatar in the sidebar, because this toolbar is never shown. The button lives
++  // there and is registered here so ToolbarButtonProvider keeps handing out the button the user can
++  // actually see -- one instance, correctly anchored, rather than a visible copy and a hidden original.
++  // Passing nullptr on teardown is required: this class only borrows the pointer.
++  void SetRedrobAvatarButton(AvatarToolbarButton* avatar) { avatar_ = avatar; }
+   AppMenuIconController* app_menu_icon_controller() {
+     return &app_menu_icon_controller_;
+   }

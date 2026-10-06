@@ -68,6 +68,7 @@ source_set("sidecar") {
     "//components/pref_registry",
     "//components/prefs",
     "//components/tab_groups",
+    "//components/tabs:public",
     "//content/public/browser",
     "//ui/accessibility",
     "//ui/base",

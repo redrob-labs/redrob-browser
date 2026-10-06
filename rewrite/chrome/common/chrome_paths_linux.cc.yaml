@@ -7,6 +7,9 @@ substitutions:
   - description: |
       The directory name.
     regex:
-      pattern: "  std::string data_dir_basename = \"chromium\";"
-      replace: "  // Redrob, not \"chromium\". A fork that keeps upstream's directory name shares a profile with any\n  // real Chromium install on the machine -- and our own importer, which looks for Chromium-family\n  // profiles by exactly this name, would offer to import from us.\n  std::string data_dir_basename = \"redrob\";"
+      # Anchored on the final `#else` arm, not on a value. The arms above it are the upstream vendor's
+      # own branded builds and are not ours to rename; stacked on another fork there are now four
+      # assignments in this file, so matching the assignment alone claimed all of them.
+      re_pattern: "#else\n  std::string data_dir_basename = \"[^\"]*\";"
+      replace: "#else\n  // Redrob, not \"chromium\". A fork that keeps upstream's directory name shares a profile with any\n  // real Chromium install on the machine -- and our own importer, which looks for Chromium-family\n  // profiles by exactly this name, would offer to import from us.\n  std::string data_dir_basename = \"redrob\";"
       count: 1

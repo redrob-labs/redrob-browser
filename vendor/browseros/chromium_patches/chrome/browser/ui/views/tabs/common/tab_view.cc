@@ -1,0 +1,25 @@
+diff --git a/chrome/browser/ui/views/tabs/common/tab_view.cc b/chrome/browser/ui/views/tabs/common/tab_view.cc
+--- a/chrome/browser/ui/views/tabs/common/tab_view.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_view.cc
+@@ -864,7 +864,20 @@ gfx::Size TabView::GetMinimumSize() const {
+ 
+ void TabView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+   if (orientation_ == TabStripOrientation::kVertical) {
+-    SetClipPath(GetPath());
++    // Redrob: the clip covers the whole view, not the tab's fill path.
++    //
++    // A vertical tab clips its own painting, and clipping to GetPath() -- the pill -- means the tab CANNOT
++    // paint outside the pill at all. That is what defeated three attempts at the selected tab's drop shadow:
++    // the shadow was drawn, correctly, and then discarded by this clip. Making room below the pill did not
++    // help either, because the room is outside the path as well.
++    //
++    // The clip still exists and still has the tab's corner radius, so children -- favicon, title, close
++    // button -- cannot spill past a rounded corner, which is what it was for. It is simply the view's own
++    // bounds rather than the fill's, so VerticalTabStyleViews can cast a shadow into the few pixels it holds
++    // back for one. The FILL is unaffected: PaintTabBackgroundFill clips to GetPath() itself.
++    const SkScalar radius = GetCornerRadius();
++    SetClipPath(SkPath::RRect(SkRRect::MakeRectXY(
++        gfx::RectToSkRect(GetLocalBounds()), radius, radius)));
+   }
+ }
+ 
