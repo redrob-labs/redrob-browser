@@ -62,7 +62,7 @@ describe('WelcomeStep', () => {
     )
 
     expect(html).toContain('Welcome to')
-    expect(html).toContain('BrowserOS')
+    expect(html).toContain('Redrob')
     expect(html).toContain('bring your browser over')
     expect(html).toContain('Get started')
   })

@@ -19,38 +19,67 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Geist Sans Variable Font */
+/* Type, from the Redrob design system (@redrob-labs/ui 1.1.0 tokens.css).
+
+   Pretendard carries Latin; Wanted Sans carries Hangul, which is why it is second
+
+   in the stack. Both are the files the design system ships, under the SIL Open
+
+   Font License (public/fonts/OFL-*.txt). Code takes the system monospace stack. */
+
 @font-face {
-  font-family: "Geist";
-  src: url("../geist/Geist[wght].woff2") format("woff2-variations");
-  font-weight: 100 900;
+  font-family: "Pretendard";
+  src: url("../fonts/Pretendard-Light.woff2") format("woff2");
+  font-weight: 300;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "Geist";
-  src: url("../geist/Geist-Italic[wght].woff2") format("woff2-variations");
-  font-weight: 100 900;
-  font-style: italic;
-  font-display: swap;
-}
-
-/* Geist Mono Variable Font */
-@font-face {
-  font-family: "Geist Mono";
-  src: url("../geist-mono/GeistMono[wght].woff2") format("woff2-variations");
-  font-weight: 100 900;
+  font-family: "Pretendard";
+  src: url("../fonts/Pretendard-Regular.woff2") format("woff2");
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "Geist Mono";
-  src: url("../geist-mono/GeistMono-Italic[wght].woff2")
-    format("woff2-variations");
+  font-family: "Pretendard";
+  src: url("../fonts/Pretendard-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Pretendard";
+  src: url("../fonts/Pretendard-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Pretendard";
+  src: url("../fonts/Pretendard-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Pretendard";
+  src: url("../fonts/Pretendard-ExtraBold.woff2") format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Wanted Sans";
+  src: url("../fonts/WantedSans-Variable.woff2") format("woff2-variations");
   font-weight: 100 900;
-  font-style: italic;
+  font-style: normal;
   font-display: swap;
 }
 
@@ -113,7 +142,7 @@
   --rr-green-4: #00864a; /* accent-green-4 */
 
   /* 2. ROLES, light */
-  --radius: 0.65rem;
+  --radius: 12px; /* radius-lg, the card radius */
   --background: var(--rr-white); /* surface-base */
   --foreground: var(--rr-black); /* ink-primary */
   --card: var(--rr-gray-1); /* surface-raised */
@@ -198,8 +227,10 @@
 }
 
 @theme inline {
-  --font-sans: "Geist", "Geist Fallback";
-  --font-mono: "Geist Mono", "Geist Mono Fallback";
+  --font-sans:
+    Pretendard, "Wanted Sans", "Noto Sans Devanagari", system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -224,10 +255,13 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* The design system's radius scale (tokens.css). */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);

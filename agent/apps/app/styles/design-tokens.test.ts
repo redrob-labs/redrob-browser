@@ -130,4 +130,33 @@ describe('design tokens', () => {
     walk(APP)
     expect(offenders).toEqual([])
   })
+  it('takes the type and radius scale from the design system', () => {
+    // tokens.css: --font-sans, --font-mono and --radius-xs..2xl.
+    expect(CSS).toContain(
+      '--font-sans:\n    Pretendard, "Wanted Sans", "Noto Sans Devanagari", system-ui, -apple-system,\n    "Segoe UI", sans-serif;',
+    )
+    expect(CSS).toContain(
+      '--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;',
+    )
+    const radii = Object.fromEntries(
+      [...CSS.matchAll(/^\s*--radius-(xs|sm|md|lg|xl|2xl):\s*([^;]+);/gm)].map(
+        (m) => [m[1], m[2]],
+      ),
+    )
+    expect(radii).toEqual({
+      xs: '4px',
+      sm: '6px',
+      md: '8px',
+      lg: '12px',
+      xl: '16px',
+      '2xl': '24px',
+    })
+    expect(CSS).not.toMatch(/Geist/)
+    // Every face the sheet declares is a file that ships.
+    for (const m of CSS.matchAll(/url\("\.\.\/fonts\/([^"]+)"\)/g)) {
+      expect(statSync(join(APP, 'public', 'fonts', m[1])).size).toBeGreaterThan(
+        0,
+      )
+    }
+  })
 })
