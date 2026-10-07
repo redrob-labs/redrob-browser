@@ -660,6 +660,7 @@ def cmd_build(args: argparse.Namespace) -> None:
     out.mkdir(parents=True, exist_ok=True)
     (out / "args.gn").write_text(args_gn, encoding="utf-8")
     stage_agent_server(server_target_for(args_gn, want))
+    stage_onboarding()
     run(["gn", "gen", f"out/{args.flavour}"], SRC)
     run(["autoninja", "-C", f"out/{args.flavour}", args.target], SRC)
 
@@ -728,6 +729,33 @@ def stage_agent_server(target: str) -> None:
     for path in [SERVER_RESOURCES, *SERVER_RESOURCES.rglob("*")]:
         os.utime(path)
     print(f"server   agent server {target} -> {SERVER_RESOURCES.relative_to(SRC)}")
+
+
+# The first-run onboarding page the browser serves from chrome://redrob-onboarding. Like the server it
+# is built from agent/ and copied into the checkout, and like the server it used to be staged by hand,
+# once, in the one checkout that had ever built -- so a fresh checkout failed at gn's resource list.
+ONBOARDING_RESOURCES = SRC / "chrome" / "browser" / "browseros" / "onboarding" / "resources"
+ONBOARDING_APP = AGENT / "apps" / "app-onboard"
+
+
+def stage_onboarding() -> None:
+    """Build agent/apps/app-onboard for Chromium and make it the checkout's onboarding resources."""
+    bun = shutil.which("bun")
+    if bun is None:
+        sys.exit("bun is required to build the onboarding page (agent/package.json pins its version)")
+    if not (AGENT / "node_modules").exists():
+        run([bun, "install", "--frozen-lockfile"], AGENT)
+    # build:chromium also runs verify-chromium-build.ts, which rejects remote URLs and stray assets.
+    run([bun, "run", "build:chromium"], ONBOARDING_APP)
+    built = ONBOARDING_APP / "dist" / "chromium"
+    if not (built / "index.html").is_file():
+        sys.exit(f"onboarding build produced no {(built / 'index.html').relative_to(ROOT)}")
+    if ONBOARDING_RESOURCES.name != "resources" or ONBOARDING_RESOURCES.parent.name != "onboarding":
+        sys.exit(f"refusing to replace {ONBOARDING_RESOURCES}: not the onboarding resources directory")
+    if ONBOARDING_RESOURCES.exists():
+        shutil.rmtree(ONBOARDING_RESOURCES)
+    shutil.copytree(built, ONBOARDING_RESOURCES)
+    print(f"onboard  agent onboarding -> {ONBOARDING_RESOURCES.relative_to(SRC)}")
 
 
 def cmd_server(args: argparse.Namespace) -> None:

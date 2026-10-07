@@ -156,3 +156,8 @@ sources/chrome/browser/extensions/api/redrob_private/redrob_private_engine_insta
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer_factory.h	chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer_factory.h
 sources/chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer_factory.cc	chrome/browser/extensions/api/redrob_private/redrob_private_engine_installer_factory.cc
 
+# The ported tree's version stamp. //base/version_info reads it, so a checkout without it fails at the
+# very first ninja step ("chrome/BROWSEROS_VERSION ... missing and no known rule to make it"). It used to
+# be copied by hand into the one checkout that had ever built.
+vendor/browseros/resources/BROWSEROS_VERSION	chrome/BROWSEROS_VERSION
+

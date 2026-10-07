@@ -16,3 +16,8 @@ ffmpeg_branding = "Chrome"
 # Official builds want a PGO profile for the pinned release; the checkout's hooks fetch it. If that
 # download is unavailable for a given pin, set chrome_pgo_phase = 0 rather than dropping the flavour.
 treat_warnings_as_errors = false
+
+# Package only the agent server this product launches. The ported tree defaults to packaging the
+# BrowserClaw server too, for a product branch Redrob cannot reach; that server is staged by hand and has
+# no Windows build, so packaging it made every fresh checkout depend on a file nobody produces.
+browseros_package_all_server_resources = false
