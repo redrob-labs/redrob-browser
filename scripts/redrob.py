@@ -35,11 +35,15 @@ touched. That is a hard constraint on this host, not a preference.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import platform
 import shutil
 import subprocess
 import sys
+import tarfile
+import urllib.request
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -661,6 +665,7 @@ def cmd_build(args: argparse.Namespace) -> None:
     (out / "args.gn").write_text(args_gn, encoding="utf-8")
     stage_agent_server(server_target_for(args_gn, want))
     stage_onboarding()
+    stage_update_framework(server_target_for(args_gn, want))
     run(["gn", "gen", f"out/{args.flavour}"], SRC)
     run(["autoninja", "-C", f"out/{args.flavour}", args.target], SRC)
 
@@ -756,6 +761,81 @@ def stage_onboarding() -> None:
         shutil.rmtree(ONBOARDING_RESOURCES)
     shutil.copytree(built, ONBOARDING_RESOURCES)
     print(f"onboard  agent onboarding -> {ONBOARDING_RESOURCES.relative_to(SRC)}")
+
+
+# The self-update libraries the ported tree links: Sparkle on macOS, WinSparkle on Windows. Both are
+# upstream release archives, pinned here by URL AND sha256 -- a release asset can be replaced, and these
+# are the code that later installs our updates, so a changed byte must stop the build. Their BUILD.gn
+# files come from the patch stack; only the prebuilt binaries are fetched, into the same directories.
+UPDATE_FRAMEWORKS = {
+    "mac": ("https://github.com/sparkle-project/Sparkle/releases/download/2.7.0/Sparkle-2.7.0.tar.xz",
+            "09fed60cca507d2dc542c86c22e525598af5483954a5c66366ce039647ec88e9",
+            SRC / "third_party" / "sparkle"),
+    "windows": ("https://github.com/vslavik/winsparkle/releases/download/v0.9.3/WinSparkle-0.9.3.zip",
+                "745985f41d2ab26b2d5a1cf87d76e4ed851039db19038e50610eb25ea0b73772",
+                SRC / "third_party" / "winsparkle"),
+}
+
+
+def _download_pinned(url: str, sha256: str, dest: Path) -> None:
+    with urllib.request.urlopen(url) as response, open(dest, "wb") as out:
+        shutil.copyfileobj(response, out)
+    got = hashlib.sha256(dest.read_bytes()).hexdigest()
+    if got != sha256:
+        dest.unlink()
+        sys.exit(f"{url}: sha256 {got}, expected {sha256}. Refusing an update library that changed.")
+
+
+def stage_update_framework(server_target: str) -> None:
+    """Fetch the pinned Sparkle (mac) or WinSparkle (windows) binaries into the checkout. Linux: none."""
+    os_name = "mac" if server_target.startswith("darwin") else (
+        "windows" if server_target.startswith("windows") else None)
+    if os_name is None:
+        return
+    url, sha256, target = UPDATE_FRAMEWORKS[os_name]
+    if not (target / "BUILD.gn").is_file():
+        sys.exit(f"{target.relative_to(SRC)}/BUILD.gn is missing: run apply first (it comes from the patch stack)")
+    archive = target / Path(url).name
+    _download_pinned(url, sha256, archive)
+    try:
+        if os_name == "mac":
+            framework = target / "Sparkle.framework"
+            if framework.exists():
+                shutil.rmtree(framework)
+            with tarfile.open(archive, "r:xz") as tar:
+                # Entries are "./Sparkle.framework/...", next to the CLI tools and test app we do not ship.
+                members = [m for m in tar.getmembers()
+                           if Path(m.name).parts[:1] == ("Sparkle.framework",)
+                           or Path(m.name).parts[:2] == (".", "Sparkle.framework")]
+                tar.extractall(target, members=members, filter="tar")
+            if not (framework / "Versions").is_dir():
+                sys.exit("Sparkle archive produced no Sparkle.framework/Versions")
+            # Archive mtimes are the release's; ninja would keep an older build's copy in the bundle.
+            for path in [framework, *framework.rglob("*")]:
+                os.utime(path, follow_symlinks=False)
+        else:
+            # Strip the archive's WinSparkle-<version>/ top level so the tree matches the patched BUILD.gn
+            # (include/, x64/Release/, ...). Members are checked against zip-slip before writing.
+            with zipfile.ZipFile(archive) as zf:
+                resolved = target.resolve()
+                for info in zf.infolist():
+                    parts = Path(info.filename).parts
+                    if len(parts) <= 1:
+                        continue
+                    out = target.joinpath(*parts[1:])
+                    if not out.resolve().is_relative_to(resolved):
+                        sys.exit(f"unsafe path in {archive.name}: {info.filename}")
+                    if info.is_dir():
+                        out.mkdir(parents=True, exist_ok=True)
+                        continue
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(info) as src, open(out, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+            if not (target / "x64" / "Release" / "WinSparkle.dll").is_file():
+                sys.exit("WinSparkle archive produced no x64/Release/WinSparkle.dll")
+    finally:
+        archive.unlink(missing_ok=True)
+    print(f"update   {Path(url).name} -> {target.relative_to(SRC)}")
 
 
 def cmd_server(args: argparse.Namespace) -> None:
