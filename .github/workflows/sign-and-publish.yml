@@ -121,6 +121,23 @@ jobs:
           echo "APP_PATH=$app" >> "$GITHUB_ENV"
           echo "app: $app"
 
+      - name: stamp the version Sparkle compares
+        # Sparkle offers an update when the appcast's sparkle:version is newer than the installed app's
+        # CFBundleVersion. Chromium stamps BUILD.PATCH there (8059.26), which is identical for every Redrob
+        # release cut from one Chromium, so no release on the same Chromium would ever be offered. Ours leads
+        # with REDROB_VERSION and keeps Chromium's build after it, so it rises with each release and stays
+        # unique across Chromium uprevs. Done before signing: the plist is sealed by the signature.
+        # scripts/sparkle_appcast.py reads these values back out of the signed archive.
+        run: |
+          set -euo pipefail
+          version="$(cat REDROB_VERSION)"
+          chromium="$(cat CHROMIUM_VERSION)"
+          build="${chromium#*.*.}"
+          plist="$APP_PATH/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $version.$build" "$plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$plist"
+
       - name: import the signing certificate into a throwaway keychain
         # set-key-partition-list is the step people leave out. Without it codesign prompts for keychain
         # access, and on a runner with no UI a prompt is a hang rather than an error.
@@ -190,8 +207,16 @@ jobs:
           xcrun stapler validate "$app"
           spctl --assess --type execute --verbose=2 "$app"
           mkdir -p staging
-          # ditto again on the way out, for the same reason as on the way in.
-          ditto -c -k --keepParent "$app" "staging/$(basename "$app").zip"
+          # ditto again on the way out, for the same reason as on the way in. Named by architecture and
+          # version: cdn-publish.sh derives the latest/ alias from the -<version> segment, and the appcast
+          # step picks the feed (arm64 or x86_64) from the architecture.
+          archs="$(lipo -archs "$app/Contents/MacOS/$(basename "$app" .app)")"
+          case "$archs" in
+            arm64) arch=arm64 ;;
+            x86_64) arch=x86_64 ;;
+            *) arch=universal ;;
+          esac
+          ditto -c -k --keepParent "$app" "staging/redrob-browser-macos-${arch}-$(cat REDROB_VERSION).zip"
 
       - name: clean up the keychain
         if: always()
@@ -428,6 +453,59 @@ jobs:
         env:
           APP_VERSION: ${{ steps.version.outputs.version }}
         run: bash .github/scripts/cdn-publish.sh cdn
+
+      - name: publish the Sparkle appcasts
+        # After cdn-publish.sh, so a feed never points at an archive the CDN cannot serve yet. The browser
+        # reads browser/appcast.xml on Apple silicon and browser/appcast-x86_64.xml on Intel
+        # (chrome/browser/mac/sparkle_glue.mm); a universal build feeds both. Each enclosure points at the
+        # immutable versioned key, never latest/, so an update a client already started cannot change under
+        # it. Short cache: the feed is the one file that has to move at every release.
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(cdn/redrob-browser-macos-*-"$APP_VERSION".zip)
+          if [ ${#archives[@]} -eq 0 ]; then
+            echo "::notice::no macOS archive in this release, so the appcasts are unchanged."
+            exit 0
+          fi
+          if [ -z "$SPARKLE_ED_PRIVATE_KEY" ]; then
+            echo "::error::SPARKLE_ED_PRIVATE_KEY is not set: a macOS release without a signed appcast never reaches installed browsers"
+            exit 1
+          fi
+          python3 -m pip install --quiet 'cryptography==46.0.5'
+          mkdir -p appcasts
+          for zip in "${archives[@]}"; do
+            name="$(basename "$zip")"
+            arch="${name#redrob-browser-macos-}"
+            arch="${arch%%-*}"
+            case "$arch" in
+              arm64) feeds=(appcast.xml) ;;
+              x86_64) feeds=(appcast-x86_64.xml) ;;
+              universal) feeds=(appcast.xml appcast-x86_64.xml) ;;
+              *) echo "::error::unknown macOS archive architecture in $name"; exit 1 ;;
+            esac
+            url="https://${CDN_PUBLIC_HOST}/${CDN_PREFIX}/${APP_VERSION}/${name}"
+            for feed in "${feeds[@]}"; do
+              python3 scripts/sparkle_appcast.py --archive "$zip" --url "$url" --out "appcasts/$feed"
+              aws s3 cp "appcasts/$feed" "s3://${REDROB_CDN_BUCKET}/${CDN_PREFIX}/$feed" \
+                --content-type "application/xml" --cache-control "public, max-age=300" --no-progress
+              # Read back through CloudFront until it serves THIS version: an edge may still hold the
+              # previous feed for up to its max-age.
+              served=""
+              for _ in $(seq 1 15); do
+                if curl --fail --silent "https://${CDN_PUBLIC_HOST}/${CDN_PREFIX}/$feed?v=${APP_VERSION}" \
+                    | grep -q "<sparkle:shortVersionString>${APP_VERSION}<"; then
+                  served=yes; break
+                fi
+                sleep 30
+              done
+              [ -n "$served" ] || { echo "::error::$feed is not serving $APP_VERSION after 7.5 minutes"; exit 1; }
+              echo "OK https://${CDN_PUBLIC_HOST}/${CDN_PREFIX}/$feed -> $name"
+            done
+          done
 
       - name: build and publish the apt repository
         # THE STEP THAT MAKES LINUX AUTO-UPDATE EXIST. Without it a release ships a .deb, which installs
