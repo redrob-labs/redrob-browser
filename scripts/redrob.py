@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -630,8 +631,87 @@ def cmd_build(args: argparse.Namespace) -> None:
     args_gn += google_api_args()
     out.mkdir(parents=True, exist_ok=True)
     (out / "args.gn").write_text(args_gn, encoding="utf-8")
+    stage_agent_server(server_target_for(args_gn, want))
     run(["gn", "gen", f"out/{args.flavour}"], SRC)
     run(["autoninja", "-C", f"out/{args.flavour}", args.target], SRC)
+
+
+# The agent server is a separate executable the browser bundles and launches (it serves the side panel and
+# the new tab). It is built from agent/ for ONE platform at a time, and the GN rule copies whatever sits in
+# chrome/browser/browseros/server/resources into the package without looking at its architecture. A mac
+# build once shipped the Linux x86-64 server that way: the app launched and the Assistant panel loaded
+# forever. So the server is staged per build, for the build's own target, never left over from another.
+SERVER_RESOURCES = SRC / "chrome" / "browser" / "browseros" / "server" / "resources"
+AGENT = ROOT / "agent"
+SERVER_TARGETS = {
+    ("linux", "x64"): "linux-x64",
+    ("linux", "arm64"): "linux-arm64",
+    ("mac", "arm64"): "darwin-arm64",
+    ("mac", "x64"): "darwin-x64",
+    ("win", "x64"): "windows-x64",
+}
+
+
+def _gn_value(args_gn: str, name: str) -> str | None:
+    for line in args_gn.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line.startswith(f"{name} ") or line.startswith(f"{name}="):
+            return line.split("=", 1)[1].strip().strip('"')
+    return None
+
+
+def server_target_for(args_gn: str, platform_name: str | None = None) -> str:
+    """The agent-server target id (agent/packages/build-server-tools/src/targets.ts) for a gn args file.
+
+    `platform_name` is the sys.platform the build is for (a flavour's FLAVOUR_PLATFORM); it decides the OS
+    when args.gn does not set target_os, which is the case for every native flavour.
+    """
+    host_os = {"linux": "linux", "darwin": "mac", "win32": "win"}[platform_name or sys.platform]
+    host_cpu = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x64"
+    key = (_gn_value(args_gn, "target_os") or host_os, _gn_value(args_gn, "target_cpu") or host_cpu)
+    if key not in SERVER_TARGETS:
+        sys.exit(f"no agent server target for target_os={key[0]} target_cpu={key[1]}")
+    return SERVER_TARGETS[key]
+
+
+def stage_agent_server(target: str) -> None:
+    """Build agent/'s server for `target` and make it the checkout's bundled server resources."""
+    if not AGENT.exists():
+        sys.exit("agent/ is missing: the bundled agent server is built from it")
+    bun = shutil.which("bun")
+    if bun is None:
+        sys.exit("bun is required to build the agent server (agent/package.json pins its version)")
+    if not (AGENT / "node_modules").exists():
+        run([bun, "install", "--frozen-lockfile"], AGENT)
+    # --ci inlines placeholder telemetry settings instead of requiring .env.production, so a build never
+    # depends on a developer's local secrets file. --no-upload keeps it off the release bucket.
+    run([bun, "scripts/build/server.ts", f"--target={target}", "--no-upload", "--ci"], AGENT)
+    built = AGENT / "dist" / "prod" / "server" / target / "resources"
+    binary = built / "bin" / ("browseros_server.exe" if target.startswith("windows") else "browseros_server")
+    if not binary.is_file():
+        sys.exit(f"agent server build produced no {binary.relative_to(ROOT)}")
+    if SERVER_RESOURCES.name != "resources" or SERVER_RESOURCES.parent.name != "server":
+        sys.exit(f"refusing to replace {SERVER_RESOURCES}: not the server resources directory")
+    if SERVER_RESOURCES.exists():
+        shutil.rmtree(SERVER_RESOURCES)
+    shutil.copytree(built, SERVER_RESOURCES)
+    # The archive stamps every entry 1980-01-01. Ninja compares times, so files that old never replace a
+    # previous build's copy in the bundle: stamp them now so the package always carries what was staged.
+    for path in [SERVER_RESOURCES, *SERVER_RESOURCES.rglob("*")]:
+        os.utime(path)
+    print(f"server   agent server {target} -> {SERVER_RESOURCES.relative_to(SRC)}")
+
+
+def cmd_server(args: argparse.Namespace) -> None:
+    if not SRC.exists():
+        sys.exit("no checkout: run sync first")
+    target = args.target
+    if target is None:
+        args_file = SRC / "out" / args.out / "args.gn"
+        if not args_file.exists():
+            sys.exit(f"no {args_file.relative_to(SRC)}: pass --target or --out of a generated build directory")
+        target = server_target_for(args_file.read_text(encoding="utf-8"))
+    stage_agent_server(target)
 
 
 # The three values Google's APIs authenticate a browser with. Kept OUT of build/args/*.gn on purpose: those
@@ -747,6 +827,12 @@ def main() -> None:
     build.add_argument("--force-platform", action="store_true",
                        help="build a flavour whose platform is not this host's, if you have a cross toolchain")
     build.set_defaults(func=cmd_build)
+
+    server = sub.add_parser("server", help="build agent/'s server for one target and stage it into the checkout")
+    server.add_argument("--target", choices=sorted(set(SERVER_TARGETS.values())),
+                        help="agent server target; defaults to the one --out's args.gn builds for")
+    server.add_argument("--out", default="release", help="build directory under out/ to read args.gn from")
+    server.set_defaults(func=cmd_server)
 
     run_ = sub.add_parser("run", help="launch the build with a scratch profile")
     run_.add_argument("--flavour", choices=sorted(FLAVOURS), default="dev")

@@ -92,6 +92,11 @@ jobs:
           python scripts/redrob.py apply
           python scripts/redrob.py brand
 
+      # The build stages agent/'s server for this target, which needs bun (agent/package.json pins it).
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
       - name: build
         run: python scripts/redrob.py build --flavour windows
 
