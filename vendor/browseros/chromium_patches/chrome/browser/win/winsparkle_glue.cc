@@ -44,7 +44,7 @@ new file mode 100644
 +// chrome/app/app-Info.plist); the BrowserOS release pipeline signs all
 +// platforms' artifacts with the one key.
 +constexpr char kEdDSAPublicKey[] =
-+    "LzQmcNuTsdB3/dsivo0eeN+jPfDoriRHAkkEJcfFs2A=";
++    "5lWrkUbHu7MqrCIW4bmFzx1KUoIqx8ugydJSAcAZXlQ=";
 +
 +// Windows builds are single-arch, so the arch half of the feed is chosen at
 +// compile time (macOS picks at runtime because of universal binaries); the
