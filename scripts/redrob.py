@@ -344,6 +344,10 @@ def cmd_sync(args: argparse.Namespace) -> None:
     tag = version()
     CHROMIUM.mkdir(exist_ok=True)
 
+    if args.no_history:
+        sync_shallow(tag, hooks=not args.no_hooks)
+        return
+
     if not SRC.exists():
         run(["fetch", "--nohooks", "chromium"], CHROMIUM)
 
@@ -372,6 +376,30 @@ def cmd_sync(args: argparse.Namespace) -> None:
     if not args.no_hooks:
         # Pulls the sysroot, the bundled clang and the rest of the toolchain into the checkout.
         run(["gclient", "sync", "-D", "--with_branch_heads", "--with_tags"], SRC)
+        run(["gclient", "runhooks"], SRC)
+
+
+def sync_shallow(tag: str, hooks: bool) -> None:
+    """Fetch only the pinned tag's tree, with no history: a few GB instead of ~65 GB of pack data.
+
+    For a build machine. It can build and package the pinned release and nothing else: moving to another
+    Chromium tag means a fresh shallow fetch of that tag, and `git log` / `git blame` in src/ stop at it.
+    The tag is fetched by name at depth 1 -- `git fetch --tags` here would pull every tag's history back in.
+    """
+    if not SRC.exists():
+        run(["fetch", "--nohooks", "--no-history", "chromium"], CHROMIUM)
+    ensure_pgo_profiles_checkout()
+    run(["git", "fetch", "--depth=1", "origin", f"refs/tags/{tag}:refs/tags/{tag}"], SRC)
+    branch = f"redrob-{tag}"
+    existing = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", branch], cwd=SRC, env=env(), capture_output=True
+    )
+    if existing.returncode == 0:
+        run(["git", "checkout", branch], SRC)
+    else:
+        run(["git", "checkout", "-b", branch, f"tags/{tag}"], SRC)
+    if hooks:
+        run(["gclient", "sync", "-D", "--no-history"], SRC)
         run(["gclient", "runhooks"], SRC)
 
 
@@ -809,6 +837,8 @@ def main() -> None:
 
     sync = sub.add_parser("sync", help="fetch Chromium at CHROMIUM_VERSION")
     sync.add_argument("--no-hooks", action="store_true", help="skip gclient sync/runhooks")
+    sync.add_argument("--no-history", action="store_true",
+                      help="fetch only the pinned tag, no history (a build machine: a few GB instead of ~65)")
     sync.set_defaults(func=cmd_sync)
 
     sub.add_parser("brand", help="overlay branding/ files onto the checkout").set_defaults(
