@@ -666,6 +666,7 @@ def cmd_build(args: argparse.Namespace) -> None:
     stage_agent_server(server_target_for(args_gn, want))
     stage_onboarding()
     stage_update_framework(server_target_for(args_gn, want))
+    stage_bundled_extension()
     run(["gn", "gen", f"out/{args.flavour}"], SRC)
     run(["autoninja", "-C", f"out/{args.flavour}", args.target], SRC)
 
@@ -836,6 +837,45 @@ def stage_update_framework(server_target: str) -> None:
     finally:
         archive.unlink(missing_ok=True)
     print(f"update   {Path(url).name} -> {target.relative_to(SRC)}")
+
+
+# The agent extension a first run installs before any network fetch: <id>.crx + bundled_extensions.json in
+# chrome/browser/browseros/bundled_extensions (gitignored there, named by the patched BUILD.gn). A machine
+# holding the signing key builds it with tools/agent-extension/build.sh; every other machine -- a build PC,
+# CI -- bundles the CRX the extension channel published, which is the same signed file installed browsers
+# update to. An existing CRX is left alone, so a locally built one is never overwritten.
+BUNDLED_EXTENSIONS = SRC / "chrome" / "browser" / "browseros" / "bundled_extensions"
+EXTENSION_CHANNEL = "https://cdn.redrob.ai/browser/extensions/update-manifest.xml"
+
+
+def stage_bundled_extension() -> None:
+    import json
+    import re
+    ext_id = (ROOT / "tools" / "agent-extension" / "EXTENSION_ID").read_text(encoding="utf-8").strip()
+    crx = BUNDLED_EXTENSIONS / f"{ext_id}.crx"
+    manifest = BUNDLED_EXTENSIONS / "bundled_extensions.json"
+    if crx.is_file() and manifest.is_file():
+        print(f"bundle   {crx.name} already present, kept")
+        return
+    if not (BUNDLED_EXTENSIONS / "BUILD.gn").is_file():
+        sys.exit(f"{BUNDLED_EXTENSIONS.relative_to(SRC)}/BUILD.gn is missing: run apply first")
+    with urllib.request.urlopen(EXTENSION_CHANNEL) as response:
+        xml = response.read().decode("utf-8")
+    app = re.search(rf'<app appid="{ext_id}">\s*<updatecheck codebase="([^"]+)" version="([^"]+)"', xml)
+    if not app:
+        sys.exit(f"{EXTENSION_CHANNEL} lists no {ext_id}")
+    url, version = app.groups()
+    if not url.startswith("https://cdn.redrob.ai/browser/extensions/"):
+        sys.exit(f"refusing a bundled extension from outside Redrob's CDN: {url}")
+    with urllib.request.urlopen(url) as response:
+        data = response.read()
+    # CRX3: "Cr24", format version 3. The browser verifies the signature against the id when it installs.
+    if data[:4] != b"Cr24" or int.from_bytes(data[4:8], "little") != 3:
+        sys.exit(f"{url} is not a CRX3 file")
+    crx.write_bytes(data)
+    manifest.write_text(json.dumps({ext_id: {"external_crx": crx.name, "external_version": version}},
+                                   indent=2) + "\n", encoding="utf-8")
+    print(f"bundle   {crx.name} {version} from the extension channel")
 
 
 def cmd_server(args: argparse.Namespace) -> None:
