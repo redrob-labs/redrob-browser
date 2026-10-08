@@ -183,9 +183,11 @@ jobs:
           gh release download "${{ inputs.tag }}" -p '*-packaging.zip' -D packaging
           pkgzip="$(find packaging -name '*-packaging.zip' | head -1)"
           test -n "$pkgzip" || { echo "::error::no *-packaging.zip on ${{ inputs.tag }}: upload the build's '<product> Packaging' directory (ninja target chrome/installer/mac) zipped as <name>-packaging.zip"; exit 1; }
-          ditto -x -k "$pkgzip" packaging/tree
-          driver="$(find packaging/tree -name sign_chrome.py | head -1)"
-          test -n "$driver" || { echo "::error::no sign_chrome.py inside $pkgzip"; ls -R packaging/tree | head -40; exit 1; }
+          # The driver looks for `<input>/<product> Packaging/` (entitlements, helper plists) -- model.py's
+          # packaging_dir -- so the zip is expanded BESIDE the app, into the same directory `--input` names.
+          ditto -x -k "$pkgzip" "$(dirname "$APP_PATH")"
+          driver="$(find "$(dirname "$APP_PATH")" -maxdepth 2 -name sign_chrome.py | head -1)"
+          test -n "$driver" || { echo "::error::no sign_chrome.py inside $pkgzip"; ls -R "$(dirname "$APP_PATH")" | head -40; exit 1; }
           test -f "$(dirname "$driver")/signing/build_props_config.py" || { echo "::error::packaging zip lacks signing/build_props_config.py -- it was not produced by the build"; exit 1; }
           python3 "$driver" \
             --input "$(dirname "$APP_PATH")" \
