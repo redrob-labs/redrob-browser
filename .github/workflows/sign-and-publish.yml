@@ -166,6 +166,46 @@ jobs:
           echo "SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
           echo "identity: $identity"
 
+      - name: sign the vendored binaries the Chromium driver does not know about
+        # sign_chrome.py signs Chromium's own parts and nothing else. Two vendored components ride inside
+        # the bundle and Apple's notary service rejects the whole submission when any Mach-O in it is
+        # unsigned or lacks the hardened runtime ("The binary is not signed with a valid Developer ID
+        # certificate" x11, run 37783643127): the Sparkle updater framework (Autoupdate, Updater.app, the
+        # Downloader and Installer XPC services, the framework itself) and the bundled Bun server. They are
+        # signed here first, inside-out, so the driver's outer seals then cover valid nested signatures.
+        # Options and entitlements mirror BrowserOS's own sign step (vendor/browseros/bos_build/steps/sign/
+        # macos.py and products/browseros/product.py): `runtime` everywhere, and the Bun executable gets the
+        # JIT/unsigned-memory entitlements a Bun binary needs to start under the hardened runtime.
+        run: |
+          set -euo pipefail
+          sign() { codesign --sign "$SIGNING_IDENTITY" --force --timestamp --keychain "$SIGNING_KEYCHAIN" "$@"; }
+          fw="$(find "$APP_PATH/Contents/Frameworks" -type d -name 'Sparkle.framework' | head -1)"
+          if [ -n "$fw" ]; then
+            b="$fw/Versions/B"
+            for xpc in "$b"/XPCServices/*.xpc; do sign --options runtime "$xpc"; done
+            [ -d "$b/Updater.app" ] && sign --options runtime "$b/Updater.app"
+            [ -f "$b/Autoupdate" ] && sign --options runtime "$b/Autoupdate"
+            sign --options runtime "$b"
+            codesign --verify --verbose=2 "$b"
+          else
+            echo "no Sparkle.framework in the bundle; nothing to pre-sign there"
+          fi
+          ents="vendor/browseros/resources/entitlements/browseros-executable-entitlements.plist"
+          test -f "$ents" || { echo "::error::$ents is missing"; exit 1; }
+          server="$APP_PATH/Contents/Resources/BrowserOSServer/default/resources/bin/browseros_server"
+          if [ -f "$server" ]; then
+            sign --options runtime --identifier ai.redrob.Browser.browseros_server --entitlements "$ents" "$server"
+            codesign --verify --verbose=2 "$server"
+          else
+            echo "no browseros_server in the bundle"
+          fi
+          # Anything else Apple would scan: list every Mach-O that still carries no Developer ID signature,
+          # so the next rejection names its file here instead of in a notary log.
+          find "$APP_PATH" -type f -perm +111 | while read -r f; do
+            file -b "$f" | grep -q '^Mach-O' || continue
+            codesign -dv "$f" 2>&1 | grep -q 'Authority=Developer ID Application' || echo "still unsigned (driver will sign Chromium parts): ${f#"$APP_PATH"/}"
+          done
+
       - name: sign, notarize and staple with upstream's own driver
         # sign_chrome.py, not a hand-rolled codesign: Chromium's bundle is signed inside-out -- helpers, then
         # the framework's versioned directory, then the app -- with per-part entitlements, and getting that
