@@ -1,0 +1,29 @@
+# The stable numeric ids for the redrobPrivate permissions. They must exist before chrome_api_permissions.cc can
+# map the permission strings to them. Appended after the current last value (kPublicSuffix = 273); the next
+# free ordinal is 274. A Chromium uprev that adds its own permissions will push the real next-free number up,
+# and this rule's count=1 on the unique `kPublicSuffix = 273,` line will then FAIL rather than silently
+# colliding -- which is the signal to renumber, not a bug.
+#
+# PA-1. 274 is the namespace permission, which every surface still needs to see the API at all. 275-285 are
+# PER-CAPABILITY sub-permissions, in the dotted shape upstream already uses for `glicPrivate.invoke`. Holding
+# redrobPrivate no longer means holding all 43 functions: a surface declares the capabilities it uses and the
+# function feature refuses the rest. The list in the extension's manifest then reads as an audit of what that
+# extension can actually reach, which one blanket permission could never be.
+substitutions:
+  - description: Add the redrobPrivate permission ids to the extension API permission id enum.
+    insert_after:
+      anchor: '  // update_extension_permission.py).'
+      count: 1
+      lines: |
+        kRedrobPrivate = 276,
+        kRedrobPrivateTasks = 277,
+        kRedrobPrivateMemory = 278,
+        kRedrobPrivateProviders = 279,
+        kRedrobPrivateRoutines = 280,
+        kRedrobPrivatePasswords = 281,
+        kRedrobPrivateImport = 282,
+        kRedrobPrivateEngine = 283,
+        kRedrobPrivateWorkspace = 284,
+        kRedrobPrivateSettings = 285,
+        kRedrobPrivateOnboarding = 286,
+        kRedrobPrivateBrowser = 287,

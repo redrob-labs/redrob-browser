@@ -1,0 +1,25 @@
+# Do not show upstream's session-crashed bubble.
+#
+# This is the suppression behind the v0.1.3 launch defect, and the comment it inserts is the record of why.
+# Kept as a suppression rather than a repair: repairing means changing when BrowserView registers view
+# elements, whose blast radius covers every bubble anchored that way, to restore a surface this fork never
+# integrated -- the sidebar owns tabs, and there is no session restore for this bubble to belong to.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 23 added
+  - description: |
+      The explanation, above the branch. It records the measured finding -- at this point in startup NONE of
+      BrowserView's elements exist, not even the fallback anchor -- because that is the part a future reader
+      would otherwise have to rediscover before deciding whether the suppression is still needed.
+    regex:
+      pattern: "  if (should_display_bubble) {"
+      replace: "  // Redrob: the histogram stays -- we still want to know a profile started after an unclean exit -- but\n  // the bubble itself is not shown, because in this fork it does not merely fail to appear: it takes the\n  // browser down before any window does.\n  //\n  // SessionCrashedBubbleView anchors to the app menu button. Our toolbar keeps that button built (menu\n  // accelerators reach for it without a null check) but permanently invisible, so\n  // AppMenuButton::GetAnchor() takes upstream's fallback branch -- the one upstream only reaches in\n  // content-fullscreen -- and CHECKs on an element that is not registered yet. Measured, not assumed: at\n  // this point in startup NONE of BrowserView's elements exist, not the fallback anchor and not\n  // kBrowserViewElementId, because a ViewSubregionAnchor registers when its view is drawn and the window\n  // has not been shown. The element context is correct and non-empty; the elements simply are not there.\n  //\n  // The consequence was severe out of all proportion to the feature: a profile keeps\n  // profile.exit_type=Crashed until it exits cleanly, so ONE unclean exit made every later launch die\n  // the same way, and the profile was permanently unusable.\n  //\n  // Suppressing rather than repairing is the right trade here. Repair means changing when startup\n  // registers view elements, whose blast radius covers every bubble anchored that way, to restore a\n  // surface this fork never integrated -- the sidebar owns tabs, and there is no session-restore story\n  // for this bubble to belong to. It is the same call already made for the sign-in promo's effects\n  // control and the feature-showcase carousel: upstream furniture that composes into our window without\n  // being part of the product. If a restore-after-crash affordance is wanted later, it should be built\n  // on our own surface, where it can be anchored to something that exists.\n  if (should_display_bubble) {"
+      count: 1
+  # ---- hunk 0 run 2: 3 removed, 1 added
+  - description: |
+      Keep the histogram, drop the bubble. The metric stays because we still want to know a profile started
+      after an unclean exit; only the UI goes, and it says so on VLOG rather than vanishing silently.
+    regex:
+      pattern: "    SessionCrashedBubble::ShowIfNotOffTheRecordProfile(\n        browser,\n        /*skip_tab_checking=*/false);"
+      replace: "    VLOG(1) << \"redrob: skipping the upstream session-crashed bubble\";"
+      count: 1

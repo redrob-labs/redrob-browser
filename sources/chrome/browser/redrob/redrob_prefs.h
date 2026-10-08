@@ -40,6 +40,23 @@ inline constexpr char kModelProviders[] = "redrob.model.providers";
 // Which provider entry answers tasks. Empty means the built-in Redrob engine.
 inline constexpr char kSelectedProviderId[] = "redrob.model.selected_provider_id";
 
+// What the user chose on the onboarding subscription screen: "redrob" (the built-in plan), "chatgpt"
+// or "claude" (reuse a subscription they already pay for). A FAMILY, not a model id and not a provider
+// id -- which is why it is a separate pref from kSelectedProviderId above rather than being folded
+// into it.
+//
+// It was previously declared as a local constant in two different .cc files and registered NOWHERE, so
+// Chromium's pref system dropped every write: the user picked a plan during first run and the choice
+// went nowhere at all. Registering it here, in the one place that can answer "what does this thing
+// keep about me", is the fix.
+//
+// Recording the choice is NOT the same as honouring it. Making "claude" actually route a task needs a
+// configured provider to point kSelectedProviderId at, and which provider that is depends on what the
+// user has signed in to. That is the subscription-delegation work; this pref is its input, and
+// pretending otherwise by guessing a provider id here would route tasks somewhere the user never
+// chose.
+inline constexpr char kOnboardingModelChoice[] = "redrob.onboarding.model_choice";
+
 // What the user chose about passwords during onboarding: "redrob" (use this browser's manager),
 // "external" (they keep another one, so stop offering to save), or "skip".
 inline constexpr char kPasswordManagerChoice[] = "redrob.passwords.choice";
@@ -51,6 +68,36 @@ inline constexpr char kRpcEnabled[] = "redrob.rpc.enabled";
 // Set once the import step has run, so a second first-run does not re-offer it. Records what was
 // imported, honestly: a source that could not bring cookies says so rather than being listed.
 inline constexpr char kImportCompleted[] = "redrob.import.completed";
+
+// Browser behaviour the user chose, as opposed to agent state. These four sit in this file for the
+// same reason as everything above -- one place that can be enumerated -- but they describe windows
+// and tabs, not what the agent remembers.
+//
+// Each default below is TODAY'S BEHAVIOUR, deliberately. Nothing reads these prefs yet; the window
+// and tab code that will read them lands as its own item. A default that differed from current
+// behaviour would therefore change nothing now and silently change everything the day the first
+// reader arrives, which is the one outcome a stored-only pref must not have.
+
+// Where a newly opened tab goes in the vertical tab rail. "after_current" puts it directly below the
+// tab that opened it; "end" appends to the bottom of the rail. An unrecognised value is treated as
+// "after_current" by the setter rather than stored.
+inline constexpr char kVerticalTabInsertionPosition[] =
+    "redrob.tabs.vertical_insertion_position";
+
+// Whether horizontal tabs keep shrinking as they multiply (true) or hold a minimum width and let the
+// strip scroll (false). True matches Chromium's own strip, which shrinks to a floor.
+inline constexpr char kHorizontalTabShrinkEnabled[] =
+    "redrob.tabs.horizontal_shrink_enabled";
+
+// Whether the window paints a translucent background behind its chrome. Off by default: it costs
+// compositing work on every frame and can cost text contrast, so it is a thing a user turns on.
+inline constexpr char kWindowTranslucencyEnabled[] =
+    "redrob.window.translucency_enabled";
+
+// Whether a video entering the background may open picture-in-picture on its own. Off by default
+// because the effect is a window appearing that the user did not ask for.
+inline constexpr char kAutomaticPictureInPictureEnabled[] =
+    "redrob.picture_in_picture.automatic";
 
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 

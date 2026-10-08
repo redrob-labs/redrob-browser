@@ -1,0 +1,8 @@
+# macOS browser updates must come from Redrob's CDN, never from the upstream project's appcast:
+# otherwise Sparkle would replace this browser with theirs.
+substitutions:
+  - description: Sparkle appcasts come from Redrob's CDN.
+    regex:
+      pattern: "https://cdn.browseros.com/"
+      replace: "https://cdn.redrob.ai/browser/"
+      count: 2

@@ -137,9 +137,15 @@ and fails if they disagree, because the generated patch must not depend on which
 
 ## 4. Hand-written patches
 
-Still right for some things: a change with no describable anchor, a packaging script, an upstream bug we
-are fixing rather than customising. Keep it minimal and say why in the patch. `redrob.py export` rewrites
-these from the checkout; it is not how a rule-generated patch is produced.
+**There are none in this repository right now**, and that is a fact about today rather than a rule. This
+rung is still the right answer for a change with no describable anchor, and for a small stable edit where a
+fifteen-line rule describing a five-line diff is a net loss — Brave keeps 1,186 hand patches at a median of
+2 lines for that reason. If you write one, keep it minimal and say why in the patch.
+
+`redrob.py export` rewrites hand patches from the checkout. It deliberately SKIPS every file a rule owns,
+so the two mechanisms cannot disagree about who produced a patch — which with 88 of 88 generated means
+`export` currently has nothing to do, and a patch appearing in its output is the signal that a new
+hand-written delta exists.
 
 ## Never
 
@@ -179,21 +185,28 @@ Measured on this tree, not carried forward from a summary:
 
 | | Files | Changed lines |
 |---|---|---|
-| Generated from rewrite rules (`plaster`) | 41 | 3,203 |
-| Hand-written: installer and packaging | 3 | 41 |
-| Hand-written: everything else | 44 | 492 |
+| Generated from rewrite rules (`plaster`) | 88 | 3,736 |
+| Hand-written | 0 | 0 |
 | **Total patches** | **88** | **3,736** |
 
-So 86% of the delta is generated rather than written. There used to be a second generator — `derive`,
-which produced the branding substitution — and it is gone: those 19 patches are rules like everything
-else, so there is one mechanism with one gate rather than two that nobody reconciled.
+**Every patch in this repository is generated.** 165 substitutions across 88 rule files and 2 shared
+presets, and each one declares how many places it changes. There used to be a second generator as well --
+`derive`, which produced the branding substitution -- and it is gone, so there is one mechanism with one
+gate rather than two that nobody reconciled.
 
-The honest reading of the last row is that it is the queue. 44 hand patches are where the next uprev will
-cost time. They are also SMALL — a median of 6 lines across the 47 of them, and none above 39 — and that is the point at
-which converting stops paying: Brave keeps 1,186 hand patches at a median of 2 lines, because rung 4 is
-legitimate for a small stable edit, and a 15-line rule file describing a 5-line diff is a net loss. The
-ones worth taking are the ones where a count guard would catch something, not the ones that are merely
-still diffs.
+Each conversion was verified by comparing the FILE its rule produces against the file the hand patch it
+replaced produced. Not the patch text: git chooses hunk boundaries and context for itself, so a rule that
+reproduces a file exactly can still emit a patch that differs in framing. `scripts/verify_all_rules.py`
+re-checks all 88 at once, which is the gate that matters — the tooling changed four times during the
+conversion and each change silently altered the output of every rule already written.
+
+Being at zero is not the same as every conversion having been worth it. The last thirty-odd patches were
+one to thirteen lines, mostly registrations, and for those a rule buys uniformity and a count that is
+unlikely ever to fire; Brave keeps 1,186 hand patches at a median of 2 lines for exactly that reason. What
+the conversion genuinely bought is concentrated in the large ones, and it is worth knowing where: three
+patterns turned out to match MORE THAN ONE site in their file, and one of them — two identical blocks
+building a `TabSearchBubbleHost`, one per branch — would have moved the wrong button with nothing going
+red. `count` found all three.
 
 One measured finding worth keeping, because it is not what Brave's own numbers suggest. Brave has 2,945
 chromium_src overrides against 1,199 patches, because they REPLACE a great deal of upstream behaviour. Our
@@ -201,8 +214,8 @@ patches mostly ADD to upstream functions, and an override cannot do that — so 
 pays most is 3, not 2. `vertical_tab_style_views` is the shape where both apply: 57 hand-written lines
 became a 22-line generated patch plus 40 lines of our own drawing code in a file we own.
 
-A second finding, from converting the packaging: the cost of a rule is not the regex, it is describing
-WHITESPACE. A YAML block scalar strips the common leading indent, so a pattern whose first line is
+A second finding, and the one that cost the most time: the price of a rule is not the regex, it is
+describing WHITESPACE. A YAML block scalar strips the common leading indent, so a pattern whose first line is
 indented deeper than a later one cannot be written at all, and a multi-line literal has to carry the
 file's real indentation on its continuation lines. That cost two silent non-matches. `insert_after` exists
 because of it: it takes a one-line anchor, measures that line's own indentation and reapplies it, which is

@@ -1,0 +1,12 @@
+diff --git a/components/history/core/browser/history_types.h b/components/history/core/browser/history_types.h
+--- a/components/history/core/browser/history_types.h
++++ b/components/history/core/browser/history_types.h
+@@ -56,6 +56,8 @@ enum VisitSource {
+   SOURCE_SAFARI_IMPORTED = 5,
+   SOURCE_ACTOR = 6,  // Added by the GLIC actor.
+   SOURCE_OS_MIGRATION_IMPORTED = 7,
++  // Imported from another Chromium-family browser by Redrob's importer.
++  SOURCE_CHROMIUM_IMPORTED = 8,
+ };
+ 
+ // Corresponds to the "id" column of the "visited_links" SQL table.

@@ -35,3 +35,8 @@ ffmpeg_branding = "Chrome"
 # A fork does not get to treat upstream's warnings as its own errors, and a FIRST build on a new platform will
 # have plenty of them.
 treat_warnings_as_errors = false
+
+# Package only the agent server this product launches. The ported tree defaults to packaging the
+# BrowserClaw server too, for a product branch Redrob cannot reach; that server is staged by hand and has
+# no Windows build, so packaging it made every fresh checkout depend on a file nobody produces.
+browseros_package_all_server_resources = false

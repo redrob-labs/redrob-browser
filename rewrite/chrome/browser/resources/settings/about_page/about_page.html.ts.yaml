@@ -1,0 +1,10 @@
+# Settings > About.
+
+substitutions:
+  - description: |
+      Upstream's own release number (BROWSEROS_VERSION, 0.51) under its product name. It is not
+      this product's version, which the next line already shows, so the line goes.
+    regex:
+      pattern: "      <div class=\"secondary\">BrowserOS - $i18n{aboutBrowserOSVersion}</div>\n"
+      replace: ""
+      count: 1

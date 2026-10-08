@@ -1,0 +1,197 @@
+diff --git a/chrome/common/extensions/api/_api_features.json b/chrome/common/extensions/api/_api_features.json
+--- a/chrome/common/extensions/api/_api_features.json
++++ b/chrome/common/extensions/api/_api_features.json
+@@ -212,6 +212,10 @@
+     ],
+     "contexts": ["privileged_extension"]
+   }],
++  "browserOS": {
++    "dependencies": ["permission:browserOS"],
++    "contexts": ["privileged_extension"]
++  },
+   "browsingData": {
+     "dependencies": ["permission:browsingData"],
+     "contexts": ["privileged_extension"]
+@@ -865,6 +869,182 @@
+     "dependencies": ["permission:readingList"],
+     "contexts": ["privileged_extension"]
+   },
++  "redrobPrivate": {
++    "dependencies": ["permission:redrobPrivate"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.addProvider": {
++    "dependencies": ["permission:redrobPrivate.providers"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.addRoutine": {
++    "dependencies": ["permission:redrobPrivate.routines"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.beginProviderSignIn": {
++    "dependencies": ["permission:redrobPrivate.providers"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.cancelTask": {
++    "dependencies": ["permission:redrobPrivate.tasks"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.chooseTaskWorkingFolder": {
++    "dependencies": ["permission:redrobPrivate.tasks"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.chooseWorkingFolder": {
++    "dependencies": ["permission:redrobPrivate.workspace"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.clearWorkingFolder": {
++    "dependencies": ["permission:redrobPrivate.workspace"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.completeOnboarding": {
++    "dependencies": ["permission:redrobPrivate.onboarding"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.forgetAllMemory": {
++    "dependencies": ["permission:redrobPrivate.memory"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.getBrowserVersion": {
++    "dependencies": ["permission:redrobPrivate.browser"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.getEngineInstallState": {
++    "dependencies": ["permission:redrobPrivate.engine"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.getImportSources": {
++    "dependencies": ["permission:redrobPrivate.import"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.getSettings": {
++    "dependencies": ["permission:redrobPrivate.settings"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.getTask": {
++    "dependencies": ["permission:redrobPrivate.tasks"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.installEngine": {
++    "dependencies": ["permission:redrobPrivate.engine"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.listModels": {
++    "dependencies": ["permission:redrobPrivate.providers"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.listTasks": {
++    "dependencies": ["permission:redrobPrivate.tasks"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.onEngineInstallStateChanged": {
++    "dependencies": ["permission:redrobPrivate.engine"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.onImportStateChanged": {
++    "dependencies": ["permission:redrobPrivate.import"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.onTaskChanged": {
++    "dependencies": ["permission:redrobPrivate.tasks"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.openPasswordManager": {
++    "dependencies": ["permission:redrobPrivate.passwords"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.removeMemory": {
++    "dependencies": ["permission:redrobPrivate.memory"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.removeProvider": {
++    "dependencies": ["permission:redrobPrivate.providers"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.removeRoutine": {
++    "dependencies": ["permission:redrobPrivate.routines"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.runRoutineNow": {
++    "dependencies": ["permission:redrobPrivate.routines"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.searchWithDefaultProvider": {
++    "dependencies": ["permission:redrobPrivate.browser"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.selectProvider": {
++    "dependencies": ["permission:redrobPrivate.providers"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.sendFollowUp": {
++    "dependencies": ["permission:redrobPrivate.tasks"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.setMemoryEnabled": {
++    "dependencies": ["permission:redrobPrivate.memory"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.setMemoryPinned": {
++    "dependencies": ["permission:redrobPrivate.memory"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.setMemoryRetentionDays": {
++    "dependencies": ["permission:redrobPrivate.memory"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.setModelChoice": {
++    "dependencies": ["permission:redrobPrivate.providers"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.setOfferToSavePasswords": {
++    "dependencies": ["permission:redrobPrivate.passwords"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.setPasswordAutoSignin": {
++    "dependencies": ["permission:redrobPrivate.passwords"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.setPasswordChoice": {
++    "dependencies": ["permission:redrobPrivate.passwords"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.setPasswordManagerChoice": {
++    "dependencies": ["permission:redrobPrivate.passwords"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.setPermissionMode": {
++    "dependencies": ["permission:redrobPrivate.settings"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.setRoutineEnabled": {
++    "dependencies": ["permission:redrobPrivate.routines"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.setRpcEnabled": {
++    "dependencies": ["permission:redrobPrivate.settings"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.startImport": {
++    "dependencies": ["permission:redrobPrivate.import"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.startTask": {
++    "dependencies": ["permission:redrobPrivate.tasks"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.updateRoutine": {
++    "dependencies": ["permission:redrobPrivate.routines"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.withdrawQueuedFollowUp": {
++    "dependencies": ["permission:redrobPrivate.tasks"],
++    "contexts": ["privileged_extension"]
++  },
+   "resourcesPrivate": [{
+     "dependencies": ["permission:resourcesPrivate"],
+     "contexts": ["privileged_extension"]

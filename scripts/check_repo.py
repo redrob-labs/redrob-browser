@@ -12,6 +12,7 @@ Run it directly, or as `redrob.py check`. Exits non-zero with one line per probl
 from __future__ import annotations
 
 import ast
+import json
 import pathlib
 import re
 import subprocess
@@ -19,10 +20,21 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
+# The patch stack. It is the VENDORED BrowserOS tree, keyed by upstream path, and it
+# is the only one -- `patches/`, the old flat directory, is gone. A second copy of the
+# stack is not a backup: the build reads one of them, and the other drifts silently.
+PATCH_TREE = ROOT / "vendor" / "browseros" / "chromium_patches"
+
 # The manifest's own format: `src<TAB>dst`, one line per destination, comments and blanks allowed. Duplicated
 # here rather than imported from redrob.py because this file must stay runnable on a machine with nothing set
 # up, and importing the CLI drags in its whole environment contract.
 def manifest_pairs(path: pathlib.Path) -> list[tuple[str, str, int]]:
+    """Manifest rows as (source, target, line). A row ending in `/` is EXPANDED to one pair per file.
+
+    The trailing-slash form names a vendored tree whose file list belongs to its own build. Expanding here rather than
+    special-casing each caller keeps the orphan check and the checkout-match check true of every vendored
+    file, which is the reason they exist: a file under sources/ that nothing copies is never built.
+    """
     pairs = []
     for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         stripped = line.strip()
@@ -31,7 +43,18 @@ def manifest_pairs(path: pathlib.Path) -> list[tuple[str, str, int]]:
         parts = line.split()
         if len(parts) < 2:
             continue
-        pairs.append((parts[0], parts[1], n))
+        src, dst = parts[0], parts[1]
+        if src.endswith("/"):
+            root = ROOT / src.rstrip("/")
+            prefix = dst.rstrip("/")
+            if not root.is_dir():
+                pairs.append((src, dst, n))
+                continue
+            for found in sorted(p for p in root.rglob("*") if p.is_file()):
+                relative = found.relative_to(root).as_posix()
+                pairs.append((f"{src.rstrip('/')}/{relative}", f"{prefix}/{relative}", n))
+            continue
+        pairs.append((src, dst, n))
     return pairs
 
 
@@ -90,24 +113,33 @@ def check_branding(problems: list[str]) -> None:
 
 
 def check_patch_names(problems: list[str]) -> None:
-    """A patch's filename IS its path, with slashes turned into hyphens.
+    """A patch's PATH in the tree is the upstream path it edits.
 
-    That is the convention `ls patches/` relies on to answer "what does this fork change". A patch whose name no
-    longer matches the path inside it still applies, so nothing breaks -- it just stops being findable, which is
-    the whole point of the naming.
+    The stack lives in the vendored BrowserOS layout, which mirrors the Chromium
+    tree -- one patch per file, in the file's own directory. It replaced a flat
+    `patches/` directory whose filenames were the path with slashes as hyphens.
+    Either way the check is the same and it is about findability: a patch filed
+    under a path other than the one inside it still applies, it just stops
+    answering "what does this fork change about THIS file", which is the whole
+    point of keying it by path.
     """
-    patches = ROOT / "patches"
+    patches = PATCH_TREE
     if not patches.exists():
+        problems.append(f"no patch tree at {patches.relative_to(ROOT)}")
         return
-    for patch in sorted(patches.glob("*.patch")):
+    skip = {".features.yaml", ".store.yaml"}
+    for patch in sorted(p for p in patches.rglob("*") if p.is_file() and p.name not in skip):
+        relative = str(patch.relative_to(patches))
         text = patch.read_text(encoding="utf-8", errors="replace")
         match = re.search(r"^\+\+\+ b/(.+)$", text, re.MULTILINE)
         if not match:
-            problems.append(f"{patch.name} has no +++ b/ header; it is not a usable patch")
+            # A new-file patch names its target only on the `+++` line too, so a patch
+            # with no such header is not a patch at all.
+            problems.append(f"{relative} has no +++ b/ header; it is not a usable patch")
             continue
-        expected = match.group(1).strip().replace("/", "-") + ".patch"
-        if patch.name != expected:
-            problems.append(f"{patch.name} should be named {expected} (it patches {match.group(1).strip()})")
+        target = match.group(1).strip()
+        if relative != target:
+            problems.append(f"{relative} should be filed at {target} (that is what it patches)")
 
 
 def check_versions(problems: list[str]) -> None:
@@ -276,11 +308,11 @@ def check_rewrites(problems: list[str]) -> None:
         return
     for rule in rules:
         relative = str(rule.relative_to(rewrites))[: -len(".yaml")]
-        patch = ROOT / "patches" / plaster.patch_name(relative)
+        patch = PATCH_TREE / plaster.patch_name(relative)
         if not patch.exists():
             problems.append(
-                f"rewrite/{relative}.yaml has no patch at patches/{patch.name}; "
-                f"run plaster.py generate"
+                f"rewrite/{relative}.yaml has no patch at "
+                f"{PATCH_TREE.relative_to(ROOT)}/{relative}; run plaster.py generate"
             )
         try:
             subs = plaster.load_rules(rule)
@@ -365,7 +397,7 @@ def check_update_channel(problems: list[str]) -> None:
     Checked by string rather than by running anything, because that is all the coupling is: a hostname and
     a prefix that have to match.
     """
-    installer = ROOT / "patches" / "chrome-installer-linux-common-installer.py.patch"
+    installer = PATCH_TREE / "chrome/installer/linux/common/installer.py"
     workflow = ROOT / ".github" / "workflows" / "sign-and-publish.yml"
     if not installer.exists() or not workflow.exists():
         return
@@ -434,6 +466,194 @@ def check_overlay(problems: list[str]) -> None:
             )
 
 
+def check_ui_ownership(problems: list[str]) -> None:
+    """Once the UI migration has begun, a NEW native WebUI file in a moved surface is a regression.
+
+    Dormant until `sources/.ui-migration-began` exists: before that, the resource directories still hold the
+    WebUI we have not moved yet, and failing on them would block every other item. The sentinel is committed by
+    the first phase-3 item (O-2) and lists, one per line, the resource directories already migrated to the
+    extension (e.g. `redrob_settings`). After that point a new `.ts`/`.css`/`.html` under a listed directory
+    fails; editing an existing file does not, because a migration lands its deletions in its own later item.
+
+    See docs/OWNERSHIP.md. This is the cheap-mistake floor -- a new native UI file that compiles and looks
+    normal -- not the whole boundary, which the reviewer still enforces.
+    """
+    sentinel = ROOT / "sources" / ".ui-migration-began"
+    if not sentinel.exists():
+        return
+    migrated = [
+        line.strip()
+        for line in sentinel.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    if not migrated:
+        return
+    res_root = ROOT / "sources" / "chrome" / "browser" / "resources"
+    # "New" means not yet tracked by git: a migration edits/deletes existing tracked files in its own item, but
+    # a brand-new native UI file under a migrated surface is the regression this catches.
+    try:
+        tracked = set(
+            subprocess.run(
+                ["git", "ls-files", "sources/chrome/browser/resources"],
+                cwd=ROOT, capture_output=True, text=True, check=True,
+            ).stdout.splitlines()
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        problems.append("check_ui_ownership: could not list tracked files via git; cannot enforce the boundary")
+        return
+    for surface in migrated:
+        surface_dir = res_root / surface
+        if not surface_dir.is_dir():
+            continue
+        for path in surface_dir.rglob("*"):
+            if path.suffix not in (".ts", ".css", ".html"):
+                continue
+            rel = path.relative_to(ROOT).as_posix()
+            if rel not in tracked:
+                problems.append(
+                    f"ownership: {rel} is a new WebUI file under migrated surface '{surface}'. That surface "
+                    f"moved to the extension (see sources/.ui-migration-began); native UI for it is a "
+                    f"regression. Build it in the extension, not here (docs/OWNERSHIP.md)."
+                )
+
+
+def check_idl_interfaces(problems: list[str]) -> None:
+    """One `interface Functions`, one `interface Events`, and events only in Events.
+
+    The extension idl parser reads whatever structure it is given and reports nothing:
+    merging ten branches that each appended to the same anchor left this file with
+    `interface Functions` closed early and 32 FUNCTIONS declared inside a second
+    `interface Events` block. The parser returned 6 functions out of 38, the generated
+    header had no types for the rest, and the only thing that objected was the C++
+    compiler -- a build away. This check is a second.
+    """
+    for idl in sorted((ROOT / "sources/chrome/common/extensions/api").glob("*.idl")):
+        label = idl.relative_to(ROOT)
+        lines = idl.read_text(encoding="utf-8").split("\n")
+        blocks = [(n, m.group(1)) for n, line in enumerate(lines, 1)
+                  if (m := re.match(r"\s*interface (Functions|Events)\s*\{", line))]
+        for kind in ("Functions", "Events"):
+            count = sum(1 for _, name in blocks if name == kind)
+            if count > 1:
+                problems.append(
+                    f"{label} declares `interface {kind}` {count} times; the parser reads "
+                    f"only one and silently drops the rest"
+                )
+        # Which block each declaration sits in, by walking the interface boundaries.
+        current = None
+        for number, line in enumerate(lines, 1):
+            match = re.match(r"\s*interface (Functions|Events)\s*\{", line)
+            if match:
+                current = match.group(1)
+                continue
+            declaration = re.search(r"static \w+ (\w+)\(", line)
+            if not declaration or current is None:
+                continue
+            name = declaration.group(1)
+            is_event = name.startswith("on")
+            if is_event and current != "Events":
+                problems.append(f"{label}:{number} declares event {name} inside interface {current}")
+            if not is_event and current != "Functions":
+                problems.append(f"{label}:{number} declares function {name} inside interface {current}")
+
+
+def check_function_enum_coverage(problems: list[str]) -> None:
+    """Every DECLARE_EXTENSION_FUNCTION's enum name must exist in the enum rule.
+
+    A declared name that is not in the enum does not compile -- `no member named
+    REDROBPRIVATE_STARTIMPORT in namespace extensions::functions` -- and that is
+    exactly how it shipped: the function was added on one branch and its enum value
+    was never added to the rule, which no rule check noticed because nothing compared
+    the two. The compiler found it 40 minutes into a build.
+
+    Only the mapping is checked, not the reverse: an enum value with no function yet is
+    a reserved ordinal, which is legitimate.
+    """
+    sources = ROOT / "sources/chrome/browser/extensions/api/redrob_private"
+    if not sources.is_dir():
+        return
+    declared: dict[str, str] = {}
+    for header in sorted(sources.glob("*.h")):
+        for name in re.findall(r"\b(REDROBPRIVATE_[A-Z0-9_]+)\b", header.read_text(encoding="utf-8")):
+            declared.setdefault(name, header.name)
+    rule = ROOT / "rewrite/extensions/browser/extension_function_histogram_value.h.yaml"
+    if not rule.is_file():
+        problems.append(f"{declared and 'functions are declared but'} the function enum rule is missing")
+        return
+    in_rule = set(re.findall(r"\b(REDROBPRIVATE_[A-Z0-9_]+)\s*=\s*\d+,", rule.read_text(encoding="utf-8")))
+    for name, header in sorted(declared.items()):
+        if name not in in_rule:
+            problems.append(
+                f"{header} declares {name} but {rule.relative_to(ROOT)} does not give it a value; "
+                f"the generated registration will not compile"
+            )
+
+
+def check_enum_rules(problems: list[str]) -> None:
+    """Refuse a rewrite rule that declares the same enumerator, or the same ordinal, twice.
+
+    A C++ enum rejects both, but only at compile time -- and the rule set is checked
+    far more often than the browser is built. This is not hypothetical: the
+    redrobPrivate function enum arrived on six stacked branches that all appended to
+    one anchor, and merging them re-emitted the values already on develop, so some
+    enumerators were declared six times with six different numbers. Every rule check
+    passed; the compiler was the only thing that objected, after a 40-minute build.
+    """
+    entry = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*(\d+),\s*$")
+    for rule in sorted((ROOT / "rewrite").rglob("*.yaml")):
+        names: dict[str, int] = {}
+        values: dict[int, str] = {}
+        label = rule.relative_to(ROOT)
+        for line in rule.read_text(encoding="utf-8").split("\n"):
+            match = entry.match(line)
+            if not match:
+                continue
+            name, value = match.group(1), int(match.group(2))
+            if name in names:
+                problems.append(
+                    f"{label} declares enumerator {name} twice ({names[name]} and {value}); "
+                    f"a C++ enum rejects the redefinition"
+                )
+            elif value in values:
+                problems.append(
+                    f"{label} gives {value} to both {values[value]} and {name}; "
+                    f"two enumerators cannot share an ordinal"
+                )
+            names[name] = value
+            values[value] = name
+
+
+def check_no_component_extension(problems: list[str]) -> None:
+    """The old vendored component extension stays gone.
+
+    It used to ship as a component extension with its own new tab, settings and onboarding pages. The agent
+    extension owns all three now, and while both existed Ctrl+T and the sidebar's New Tab opened the old
+    page instead of the agent's. Anything that would bring it back -- the vendored tree, its loader, its id,
+    its resource block, or a native button that links into it -- fails here rather than as a stale page on
+    screen.
+    """
+    if (ROOT / "sources/chrome/browser/resources/redrob_extension").exists():
+        problems.append("sources/chrome/browser/resources/redrob_extension is back; the agent extension owns "
+                        "those pages now")
+    markers = ("kRedrobExtensionId", "AddRedrobExtension", "IDR_REDROB_EXTENSION_", "redrob_extension")
+    roots = [ROOT / "rewrite", ROOT / "sources", ROOT / "redrob", ROOT / "vendor/browseros/chromium_patches"]
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix in (".png", ".ico", ".icns", ".woff2", ".pak"):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            for marker in markers:
+                if marker in text:
+                    problems.append(f"{path.relative_to(ROOT)} still refers to the removed component "
+                                    f"extension ({marker})")
+                    break
+
+
 def main() -> int:
     problems: list[str] = []
     check_sources(problems)
@@ -445,7 +665,12 @@ def main() -> int:
     check_sources_match_checkout(problems)
     check_overlay(problems)
     check_update_channel(problems)
+    check_ui_ownership(problems)
     check_rewrites(problems)
+    check_enum_rules(problems)
+    check_function_enum_coverage(problems)
+    check_idl_interfaces(problems)
+    check_no_component_extension(problems)
     if problems:
         for problem in problems:
             print(f"FAIL {problem}")

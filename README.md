@@ -14,6 +14,8 @@ branding/           files we replace wholesale: the BRANDING file and every icon
 sources/            code we own outright, mirrored at its destination path
 build/args/         gn args per build flavour
 scripts/redrob.py   the whole fork workflow: bootstrap, sync, brand, apply, build, run, export, derive
+agent/              the agent extension, side panel, onboarding, agent server (bun + Rust)
+vendor/browseros/   the upstream BrowserOS patch set and build system this fork imports
 ```
 
 The Chromium checkout is **fetched, never committed**. That is the lesson from the last fork: a tree with
@@ -71,3 +73,14 @@ register our code into Chromium's build, and where to make a given change. Read 
 browser UI, and a local sidecar process -- and says which of them each piece belongs in. The short
 version: the AI surfaces are web technology and should stay that way; only the tab strip and the agent
 tab plumbing need C++.
+
+`docs/DESIGN-SYSTEM.md` says where the browser's colours come from. Every other Redrob product imports
+`@redrob-labs/ui`; this one cannot -- C++ has no `var()` and `build_webui` has no resolver -- so the values
+are vendored into the tree from a pinned release and two checks keep the copy honest. Read it before
+changing a colour, because a hex typed into the chrome is a hex that disagrees with the website.
+
+## Licence
+
+AGPL-3.0-or-later as a whole (`LICENSE`), because the browser carries work derived from BrowserOS. `NOTICE`
+lists the provenance and the parts under other licences: ungoogled-chromium patches (BSD 3-Clause), two
+agent packages (MIT) and the bundled fonts (SIL OFL 1.1).

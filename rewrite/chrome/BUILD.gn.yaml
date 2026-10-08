@@ -1,0 +1,10 @@
+# Our sources in the chrome target, through the shared .gni list.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 5 added
+  - description: |
+      The dependency.
+    regex:
+      pattern: "      \":aperitif_library\","
+      replace: "      # Redrob: the UI font, which has to be INSIDE the framework. DIR_MODULE for the browser process on macOS is\n      # the versioned framework directory, so a font copied to the build root is both unreadable at runtime and\n      # unshipped. A bundle_data that no bundle depends on builds green and copies nothing, so this line is the\n      # one that makes the target real.\n      \"//chrome/browser/redrob:ui_font_bundle_data\",\n      \":aperitif_library\","
+      count: 1

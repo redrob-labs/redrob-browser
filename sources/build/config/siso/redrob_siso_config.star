@@ -35,12 +35,19 @@ def __configure(ctx, step_config, filegroups, handlers):
 
     # A build configured without any clang rule of its own still has to redirect, so name the compiler
     # commands directly. Without this the mechanism would silently do nothing on such a build -- an
-    # override would simply never be compiled, and no error would say so.
+    # override would simply never be compiled, and no error would say so. That is the normal case on
+    # Windows: clang_windows.star adds its clang-cl rules only when a reclient config exists, and GN writes
+    # the compiler there with backslashes and .exe, so the Windows prefix has to be named separately.
     if not found_clang_rule:
         step_config["rules"].extend([
             {
                 "name": "redrob_clang_redirect_cc",
                 "command_prefix": "../../third_party/llvm-build/Release+Asserts/bin/clang",
+                "handler": "redirect_cc",
+            },
+            {
+                "name": "redrob_clang_cl_redirect_cc",
+                "command_prefix": "..\\..\\third_party\\llvm-build\\Release+Asserts\\bin\\clang-cl.exe",
                 "handler": "redirect_cc",
             },
             {

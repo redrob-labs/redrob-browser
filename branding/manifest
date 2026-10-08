@@ -82,8 +82,10 @@ branding/icons/win/tiles/Logo.png      chrome/app/theme/chromium/win/tiles/Logo.
 branding/icons/win/tiles/SmallLogo.png chrome/app/theme/chromium/win/tiles/SmallLogo.png   binary
 
 # macOS. app.icns and the two catalogues below it are what a .app bundle shows in Finder and the Dock.
-# Assets.car and AppIcon.icon are deliberately absent -- see the note at the end of make-icons.sh:
-# they are actool output and cannot be produced on Linux, so a mac build has to regenerate them.
+# Assets.car is the compiled catalogue macOS 26 reads the Dock icon from (CFBundleIconName = AppIcon). It is
+# actool output and cannot be produced on Linux, so it is compiled on a Mac from branding/icons/mac/AppIcon.icon
+# plus the appiconset below -- see the note at the end of make-icons.sh -- and checked in here.
+branding/icons/mac/Assets.car                        chrome/app/theme/chromium/mac/Assets.car                                            binary
 branding/icons/mac/app.icns                          chrome/app/theme/chromium/mac/app.icns                                              binary
 branding/icons/mac/appiconset/appicon_16.png         chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_16.png     binary
 branding/icons/mac/appiconset/appicon_32.png         chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_32.png     binary

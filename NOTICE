@@ -1,0 +1,101 @@
+NOTICE
+======
+
+This repository contains work derived from BrowserOS.
+
+Upstream source   : https://github.com/browseros-ai/BrowserOS
+Upstream commit   : 0152e0a829b36921787196b66a13d1025bc850be
+Imported subtree  : packages/browseros  ->  vendor/browseros/
+Imported on       : 2026-10-05
+Upstream copyright: Copyright (c) 2026 Felafax, Inc.
+
+The imported subtree is the upstream Chromium patch set and its Python build
+system, brought in with its own git history (670 upstream commits, 9 upstream
+authors) rather than copied as loose files, so authorship stays attributable in
+`git log`.
+
+
+Licence
+-------
+
+The imported work is licensed under the GNU Affero General Public License,
+version 3 or later. `LICENSE` at this root is the upstream AGPL-3.0 text,
+byte-identical to the upstream file
+(sha256 8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef).
+
+Because that work is combined with this repository, **this repository as a whole
+is AGPL-3.0-or-later**, and so is anything added to it from here on.
+
+AGPL section 13 applies: if a modified version of this program is made available
+to users over a network, those users must be offered its complete corresponding
+source.
+
+`LICENSE.ungoogled_chromium` is the upstream BSD 3-Clause notice covering the
+ungoogled-chromium patches carried under `vendor/browseros/series_patches/`.
+
+
+Per-file headers
+----------------
+
+The imported subtree carried no SPDX headers upstream. 271 real source files
+(235 `.py`, 36 `.rs`) were tagged on import with
+`SPDX-License-Identifier: AGPL-3.0-or-later` and a pointer to this file.
+
+The 387 files under `vendor/browseros/chromium_patches/` were deliberately NOT
+tagged. They are unified diffs against a Chromium checkout -- two of them are
+even named `.py` -- and prepending a header line would stop them applying. They
+are covered by this NOTICE and by `LICENSE`.
+
+Binary assets, images, markdown and build configuration carry no header either,
+which is how upstream ships them.
+
+
+Chromium base
+-------------
+
+The imported patch set is cut against Chromium `155.0.8059.26`
+(`16c3e55476d3564bea713314b2fff638749ce3e6`), recorded upstream in
+`vendor/browseros/BASE_COMMIT`. This repository's own patch set in `patches/`
+is cut against `153.0.8010.36`; reconciling the two is tracked work, not a
+property of this import.
+
+
+What was NOT imported
+---------------------
+
+Upstream has exactly two packages: `packages/browseros` (imported here) and
+`packages/browseros-agent`. It tracks **no** Chromium checkout -- the build
+system downloads one, so there was never a 100 GB directory to leave behind.
+
+- `packages/browseros-agent` -- the agent apps, server, TypeScript packages and
+  Rust crates. Imported separately, and later merged into this repository under
+  `agent/` with its history (see "The agent" below).
+- `.internal-docs` -- a private upstream submodule (`git@`), not accessible.
+- Two `__pycache__/*.pyc` files that upstream tracks by accident. They are
+  generated CPython bytecode, regenerated on first run, and are dropped from
+  this tree rather than carried. The history that created them is still present.
+
+
+The agent
+---------
+
+`agent/` is the agent extension, side panel, onboarding app, agent server and
+their TypeScript packages and Rust crates. It was developed in its own
+repository as a fork of upstream `packages/browseros-agent` and is merged here
+with its full history, moved under `agent/`. `agent/NOTICE` and `agent/LICENSE`
+are its own notices and stay with it.
+
+Licences in this repository
+---------------------------
+
+- Everything here, as a whole: GNU Affero General Public License, version 3 or
+  later. Full text in `LICENSE` (and the identical `agent/LICENSE`).
+- `vendor/browseros/series_patches/`: ungoogled-chromium patches, BSD 3-Clause,
+  `LICENSE.ungoogled_chromium`.
+- `agent/packages/acpx-ai-provider/` and `agent/packages/agent-mcp-manager/`:
+  MIT, each with its own `LICENSE`.
+- Bundled fonts (Pretendard, Wanted Sans): SIL Open Font License 1.1, licence
+  file next to each font.
+
+Modifications in this repository are copyright Janghoon Lee (Redrob) and
+contributors, and are released under the same licence as the work they modify.

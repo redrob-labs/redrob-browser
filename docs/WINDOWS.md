@@ -100,6 +100,26 @@ A self-hosted Windows runner needs:
 Nothing here has ever run. Work through it in order and stop at the first failure — a later step cannot be
 diagnosed from a state an earlier one did not reach.
 
+The commands below are PowerShell. **Git Bash works too**, and `redrob.py` needs no change for it: `run()`
+resolves each tool with `shutil.which`, which honours `PATHEXT` and so finds depot_tools' `.bat` wrappers, and
+it joins `PATH` with `os.pathsep`, which is `;` under the Windows Python that runs the script. Four
+translations, three of which are traps rather than syntax:
+
+| PowerShell | Git Bash |
+|---|---|
+| `$env:DEPOT_TOOLS_WIN_TOOLCHAIN = "0"` | `export DEPOT_TOOLS_WIN_TOOLCHAIN=0` |
+| `python scripts\redrob.py …` | `python scripts/redrob.py …` |
+| `Test-Path <p>` | `ls -la <p>` |
+| `gh auth login` | `winpty gh auth login`, if it hangs with no prompt |
+
+- **`core.autocrlf false` matters more here**, not less. Git Bash is Git for Windows, whose default converts
+  line endings on checkout, and every patch in `patches/` was generated on Linux with LF. Step 1 sets it; skip
+  it and step 5 fails on patches that are perfectly correct.
+- **MSYS rewrites arguments that look like paths.** Prefix the launch in step 7 with `MSYS_NO_PATHCONV=1` or
+  `chrome://redrob` is mangled into a Windows path.
+- **`chrome.exe` is a native binary and does not understand `/c/...`.** Give `--user-data-dir` a
+  `C:/…` path, not `$(mktemp -d)`.
+
 ### 0. Check the machine before starting anything
 
 ```powershell
@@ -149,10 +169,16 @@ Private, so this needs credentials — `gh auth login` first, or an SSH key alre
 ```powershell
 gh repo clone redrob-labs/redrob-browser
 cd redrob-browser
-git checkout chromium
+git branch --show-current   # develop
 ```
 
-`chromium` is the default branch and an orphan branch; there is no `main` to switch from.
+There is no checkout step. `develop` is the default branch, the clone lands on it, and it is the branch you
+want: it contains `main` and runs ahead of it, because `main` only ever receives a promotion merge.
+
+This step said `git checkout chromium` until 0.1.5, and no branch by that name has ever existed — the remote
+carries `develop`, `main` and feature branches. It was the FIRST command in this document, so anyone following
+it stopped here, before reaching anything Windows-specific, on a repository that was fine. `chromium/` is a
+DIRECTORY the sync step creates two steps later, which is where the name came from.
 
 ### 4. Fetch Chromium — the long one
 

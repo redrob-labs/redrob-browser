@@ -68,3 +68,17 @@ substitutions:
       Chromium -> Redrob across the file, leaving every phrase in presets/product-name.yaml alone.
     rename:
       preset: product-name
+
+  # ---- The installed product name ----------------------------------------------------------------
+  #
+  # AFTER the sweep, which leaves IDS_PRODUCT_NAME as the bare "Redrob". That string is what Windows shows
+  # for the installed product: the Start menu and desktop shortcut, Settings > Apps, the taskbar. Redrob is
+  # the company and the product is Redrob Browser -- the BRANDING file's PRODUCT_FULLNAME, and what the mac
+  # bundle is already called -- so this one string says the full name. IDS_SHORT_PRODUCT_NAME stays
+  # "Redrob" for the in-product sentences ("Redrob is up to date").
+  - description: |
+      IDS_PRODUCT_NAME is the full product name, Redrob Browser.
+    regex:
+      re_pattern: '(<message name="IDS_PRODUCT_NAME" desc="The Chrome application name" translateable="false">\s*)Redrob(\s*</message>)'
+      replace: '\1Redrob Browser\2'
+      count: 1

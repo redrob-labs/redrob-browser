@@ -1,0 +1,36 @@
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -50,6 +50,11 @@ class FlexLayout;
+ 
+ // Container for the vertical tabstrip and the other views sharing space with
+ // it, excluding the caption buttons.
++namespace redrob {
++class RedrobAccountRow;
++class RedrobSidebarSections;
++}  // namespace redrob
++
+ class VerticalTabStripRegionView final
+     : public BaseTabStripRegionView,
+       public views::ResizeAreaDelegate,
+@@ -84,6 +89,10 @@ class VerticalTabStripRegionView final
+     return top_button_container_;
+   }
+ 
++  // Redrob's own sections at the top of the column. Exposed so BrowserView can anchor the tab search
++  // bubble to the magnifier in their header row.
++  redrob::RedrobSidebarSections* GetRedrobSections() { return redrob_sections_; }
++
+   VerticalTabStripBottomContainer* GetBottomContainer() {
+     return bottom_button_container_;
+   }
+@@ -240,6 +249,9 @@ class VerticalTabStripRegionView final
+ 
+   raw_ptr<VerticalTabStripTopContainer> top_button_container_ = nullptr;
+   raw_ptr<views::Separator> top_button_separator_ = nullptr;
++  // Redrob's workspace switcher, bookmarks and the tab-list heading. Owned as a child view.
++  raw_ptr<redrob::RedrobSidebarSections> redrob_sections_ = nullptr;
++  raw_ptr<redrob::RedrobAccountRow> redrob_account_row_ = nullptr;
+   raw_ptr<VerticalTabStripBottomContainer> bottom_button_container_ = nullptr;
+   raw_ptr<views::View> gemini_button_ = nullptr;
+   raw_ptr<views::ResizeArea> resize_area_ = nullptr;

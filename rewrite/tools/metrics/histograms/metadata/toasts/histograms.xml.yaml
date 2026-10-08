@@ -1,0 +1,9 @@
+# Metrics metadata: summaries only.
+
+substitutions:
+  - description: |
+      Toast variant summary.
+    regex:
+      pattern: "summary=\"BrowserOS extension toast\""
+      replace: "summary=\"Redrob extension toast\""
+      count: 1

@@ -1,0 +1,79 @@
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -51,6 +51,8 @@
+ #include "chrome/browser/ui/views/tabs/vertical/top_container_button.h"
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.h"
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_focus_swipe_controller.h"
++#include "chrome/browser/ui/views/tabs/vertical/redrob_account_row.h"
++#include "chrome/browser/ui/views/tabs/vertical/redrob_sidebar_sections.h"
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h"
+ #include "chrome/browser/ui/web_applications/app_browser_controller.h"
+ #include "chrome/grit/generated_resources.h"
+@@ -136,6 +138,14 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+       views::kMarginsKey, gfx::Insets::VH(0, region_horizontal_padding));
+ 
+   top_button_separator_ = AddChildView(std::make_unique<views::Separator>());
++
++  // Between the window controls and the tabs: switching workspace, reaching a bookmark and
++
++  // picking a tab all belong to the same column, in that order of scale.
++
++  redrob_sections_ = AddChildView(std::make_unique<redrob::RedrobSidebarSections>(
++
++      browser_view->browser()));
+   // The TopContainer handles the padding distance to the separator so that we
+   // can control how far it is in the various states.
+   top_button_separator_->SetProperty(
+@@ -147,6 +157,14 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+           base::BindRepeating(
+               &VerticalTabStripRegionView::RecordNewTabButtonPressed,
+               base::Unretained(this))));
++
++  // The account control, at the foot. Redrob has no toolbar for it to sit in, and signing in is
++
++  // not a browsing control, so it belongs with the things about the window rather than the tabs.
++
++  redrob_account_row_ = AddChildView(
++
++      std::make_unique<redrob::RedrobAccountRow>(browser_view->browser()));
+   bottom_button_container_->SetProperty(
+       views::kFlexBehaviorKey,
+       views::FlexSpecification(views::MinimumFlexSizeRule::kPreferred,
+@@ -740,9 +758,14 @@ void VerticalTabStripRegionView::OnTabStripViewSet() {
+               &VerticalTabStripRegionView::OnExpandOnHoverEnabledChanged,
+               base::Unretained(this)));
+ 
+-  std::optional<size_t> separator_index = GetIndexOf(top_button_separator_);
+-  CHECK(separator_index.has_value());
+-  ReorderChildView(tab_strip_view(), separator_index.value() + 1);
++  // Anchored below Redrob's sections rather than below the separator: the tab list is what the "Tabs"
++  // heading heads, so it has to follow it.
++  std::optional<size_t> anchor_index = GetIndexOf(redrob_sections_);
++  if (!anchor_index.has_value()) {
++    anchor_index = GetIndexOf(top_button_separator_);
++  }
++  CHECK(anchor_index.has_value());
++  ReorderChildView(tab_strip_view(), anchor_index.value() + 1);
+ 
+   OnCollapseStateChanged(state_controller_->GetCollapseState());
+ }
+@@ -772,6 +795,18 @@ void VerticalTabStripRegionView::OnCollapseStateChanged(
+     tab_strip_view()->SetCollapsedState(collapsed);
+   }
+ 
++  // Redrob's sections follow the same signal as the tab list: at collapsed width there is no room for
++  // their labels, so they hide rather than clip.
++  if (redrob_sections_) {
++    redrob_sections_->SetCollapsed(collapsed);
++  }
++
++  // The foot of the column follows it too. It did not before, which is why the settings gear kept the
++  // expanded row's leading padding and sat 4.7px left of the glyphs above it in the collapsed rail.
++  if (redrob_account_row_) {
++    redrob_account_row_->SetCollapsed(collapsed);
++  }
++
+   if ((state == tabs::VerticalTabStripCollapseState::kCollapsing) ||
+       (state == tabs::VerticalTabStripCollapseState::kExpanded &&
+        IsAnimatingSize())) {

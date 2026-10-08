@@ -1,0 +1,108 @@
+# The component gate. `location: component` bars non-component callers before any allowlist check, so this
+# alone stops an ordinary extension holding redrobPrivate; `component_extensions_auto_granted: false` keeps the
+# grant explicit. Literal `pattern` rewriter: match the whole autofillPrivate block and re-emit it followed by
+# redrobPrivate. Plain `|`, file indentation carried literally -- never `|N`. count 1.
+substitutions:
+  - description: Gate redrobPrivate to component extensions (the one crossing point of the ownership boundary).
+    regex:
+      pattern: |
+        "autofillPrivate": {
+            "channel": "trunk",
+            "extension_types": ["extension", "platform_app"],
+            "location": "component",
+            // "desktop_android" is not supported.
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+      replace: |
+        "autofillPrivate": {
+            "channel": "trunk",
+            "extension_types": ["extension", "platform_app"],
+            "location": "component",
+            // "desktop_android" is not supported.
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+          "redrobPrivate": {
+            "channel": "stable",
+            "component_extensions_auto_granted": false,
+            "extension_types": ["extension"],
+            "location": "component",
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+          "redrobPrivate.tasks": {
+            "channel": "stable",
+            "component_extensions_auto_granted": false,
+            "extension_types": ["extension"],
+            "location": "component",
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+          "redrobPrivate.memory": {
+            "channel": "stable",
+            "component_extensions_auto_granted": false,
+            "extension_types": ["extension"],
+            "location": "component",
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+          "redrobPrivate.providers": {
+            "channel": "stable",
+            "component_extensions_auto_granted": false,
+            "extension_types": ["extension"],
+            "location": "component",
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+          "redrobPrivate.routines": {
+            "channel": "stable",
+            "component_extensions_auto_granted": false,
+            "extension_types": ["extension"],
+            "location": "component",
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+          "redrobPrivate.passwords": {
+            "channel": "stable",
+            "component_extensions_auto_granted": false,
+            "extension_types": ["extension"],
+            "location": "component",
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+          "redrobPrivate.import": {
+            "channel": "stable",
+            "component_extensions_auto_granted": false,
+            "extension_types": ["extension"],
+            "location": "component",
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+          "redrobPrivate.engine": {
+            "channel": "stable",
+            "component_extensions_auto_granted": false,
+            "extension_types": ["extension"],
+            "location": "component",
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+          "redrobPrivate.workspace": {
+            "channel": "stable",
+            "component_extensions_auto_granted": false,
+            "extension_types": ["extension"],
+            "location": "component",
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+          "redrobPrivate.settings": {
+            "channel": "stable",
+            "component_extensions_auto_granted": false,
+            "extension_types": ["extension"],
+            "location": "component",
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+          "redrobPrivate.onboarding": {
+            "channel": "stable",
+            "component_extensions_auto_granted": false,
+            "extension_types": ["extension"],
+            "location": "component",
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+          "redrobPrivate.browser": {
+            "channel": "stable",
+            "component_extensions_auto_granted": false,
+            "extension_types": ["extension"],
+            "location": "component",
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
+      count: 1

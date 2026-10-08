@@ -35,17 +35,36 @@ touched. That is a hard constraint on this host, not a preference.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
+import platform
 import shutil
 import subprocess
 import sys
+import tarfile
+import urllib.request
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CHROMIUM = ROOT / "chromium"
 SRC = CHROMIUM / "src"
 DEPOT_TOOLS = ROOT / "depot_tools"
-PATCHES = ROOT / "patches"
+PATCHES = ROOT / "vendor" / "browseros" / "chromium_patches"
+
+# Names in that tree which are not patches.
+PATCH_TREE_METADATA = {".features.yaml", ".store.yaml"}
+
+
+def patch_files() -> list[Path]:
+    """Every patch in the stack, in upstream-path order."""
+    if not PATCHES.exists():
+        return []
+    return sorted(
+        path
+        for path in PATCHES.rglob("*")
+        if path.is_file() and path.name not in PATCH_TREE_METADATA
+    )
 BRANDING = ROOT / "branding"
 SOURCES = ROOT / "sources"
 # Copied WHOLESALE into the checkout as `src/redrob`, rather than file-by-file through sources/manifest.
@@ -125,13 +144,16 @@ def run(cmd: list[str], cwd: Path, check: bool = True, allow_update: bool = Fals
 
 
 def patch_name(relative: str) -> str:
-    """`chrome/browser/ui/x.cc` -> `chrome-browser-ui-x.cc.patch`, which is Brave's convention.
+    """The patch's path inside the stack, which MIRRORS the upstream tree.
 
-    A flat directory of per-file patches, named after the file they touch. It reads as an inventory:
-    `ls patches/` is the answer to what this fork changes, and a conflict names one file rather than a
-    numbered blob touching thirty.
+    It used to be the upstream path with slashes as hyphens, in a flat `patches/`
+    directory -- Brave's convention. The stack now lives in the vendored BrowserOS
+    layout, which keys a patch by the upstream path itself, because that is what its
+    `.features.yaml` claims and what its `doctor` resolves. The inventory property is
+    unchanged and if anything better: the tree reads as the subset of Chromium this
+    fork touches, and a conflict still names one file.
     """
-    return relative.replace("/", "-") + ".patch"
+    return relative
 
 
 def ensure_pgo_profiles_checkout() -> None:
@@ -291,6 +313,29 @@ def package_windows(args: argparse.Namespace) -> None:
         shutil.copy2(built, target)
         print(f"{target.relative_to(ROOT)}  {target.stat().st_size // (1024 * 1024)} MB")
 
+    # Optional last step: wrap mini_installer.exe in a branded setup window,
+    # redrob_setup.exe, beside the staged artifact. Off by default and leaves the
+    # mini_installer output untouched -- it only ADDS a wrapper. It needs the MSVC
+    # toolchain and a chrome.exe to render the background art, which only a
+    # Windows build host has, so it is opt-in rather than a silent requirement on
+    # every package run. See installer/windows/README.md.
+    if getattr(args, "with_setup", False):
+        wrap = ROOT / "installer" / "windows" / "build.py"
+        setup_out = ROOT / "out" / "setup"
+        setup_out.mkdir(parents=True, exist_ok=True)
+        cmd = [sys.executable, str(wrap), "--out", str(setup_out),
+               "--payload", str(built), "--version", product_version()]
+        if args.chrome:
+            cmd += ["--chrome", args.chrome]
+        run(cmd, ROOT)
+        wrapped = setup_out / "redrob_setup.exe"
+        if not wrapped.exists():
+            sys.exit("the setup wrapper produced no redrob_setup.exe")
+        branded = f"redrob-browser-x64-{product_version()}-setup-branded.exe"
+        for target in (artifacts / branded, cdn / branded):
+            shutil.copy2(wrapped, target)
+            print(f"{target.relative_to(ROOT)}  {target.stat().st_size // (1024 * 1024)} MB")
+
 
 def cmd_repo(args: argparse.Namespace) -> None:
     """Build a signed apt repository from out/artifacts. See scripts/build_repo.py for the key handling."""
@@ -326,6 +371,10 @@ def cmd_sync(args: argparse.Namespace) -> None:
     tag = version()
     CHROMIUM.mkdir(exist_ok=True)
 
+    if args.no_history:
+        sync_shallow(tag, hooks=not args.no_hooks)
+        return
+
     if not SRC.exists():
         run(["fetch", "--nohooks", "chromium"], CHROMIUM)
 
@@ -357,6 +406,30 @@ def cmd_sync(args: argparse.Namespace) -> None:
         run(["gclient", "runhooks"], SRC)
 
 
+def sync_shallow(tag: str, hooks: bool) -> None:
+    """Fetch only the pinned tag's tree, with no history: a few GB instead of ~65 GB of pack data.
+
+    For a build machine. It can build and package the pinned release and nothing else: moving to another
+    Chromium tag means a fresh shallow fetch of that tag, and `git log` / `git blame` in src/ stop at it.
+    The tag is fetched by name at depth 1 -- `git fetch --tags` here would pull every tag's history back in.
+    """
+    if not SRC.exists():
+        run(["fetch", "--nohooks", "--no-history", "chromium"], CHROMIUM)
+    ensure_pgo_profiles_checkout()
+    run(["git", "fetch", "--depth=1", "origin", f"refs/tags/{tag}:refs/tags/{tag}"], SRC)
+    branch = f"redrob-{tag}"
+    existing = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", branch], cwd=SRC, env=env(), capture_output=True
+    )
+    if existing.returncode == 0:
+        run(["git", "checkout", branch], SRC)
+    else:
+        run(["git", "checkout", "-b", branch, f"tags/{tag}"], SRC)
+    if hooks:
+        run(["gclient", "sync", "-D", "--no-history"], SRC)
+        run(["gclient", "runhooks"], SRC)
+
+
 def cmd_apply(args: argparse.Namespace) -> None:
     if not SRC.exists():
         sys.exit("no checkout: run sync first")
@@ -364,7 +437,7 @@ def cmd_apply(args: argparse.Namespace) -> None:
     # otherwise apply against a directory that does not exist yet.
     copied = copy_sources()
     overlaid = copy_overlay()
-    patches = sorted(PATCHES.glob("*.patch"))
+    patches = patch_files()
     if not patches:
         print(f"{copied} source file(s) copied; no patches yet, which is a valid state for the scaffold")
         return
@@ -392,7 +465,14 @@ def read_manifest() -> list[tuple[str, str, str]]:
 
 
 def read_sources_manifest() -> list[tuple[str, str]]:
-    """sources/manifest as (source, target) rows: code we own, not a delta against Chromium."""
+    """sources/manifest as (source, target) rows: code we own, not a delta against Chromium.
+
+    A row whose SOURCE ends in `/` names a whole TREE rather than one file. That exists for a vendored
+    build artifact whose file list is decided by its own build and changes with every chunk hash (the old
+    component extension was the case it was written for). Listing those per file would
+    put a long table in here that is wrong the first time the artifact is rebuilt, and whose wrongness
+    shows up as a missing chunk rather than as an error.
+    """
     path = SOURCES / "manifest"
     if not path.exists():
         return []
@@ -404,22 +484,41 @@ def read_sources_manifest() -> list[tuple[str, str]]:
         parts = line.split()
         if len(parts) != 2:
             sys.exit(f"malformed sources row (want SOURCE TARGET): {line}")
+        if parts[0].endswith("/") != parts[1].endswith("/"):
+            sys.exit(f"sources row mixes a tree and a file (both sides need the trailing /): {line}")
         rows.append((parts[0], parts[1]))
     return rows
+
+
+def expand_sources_rows() -> list[tuple[Path, str]]:
+    """Every (absolute source file, checkout-relative target) a manifest row resolves to."""
+    resolved: list[tuple[Path, str]] = []
+    for source, target in read_sources_manifest():
+        source_path = ROOT / source.rstrip("/")
+        if not source_path.exists():
+            sys.exit(f"missing source: {source}")
+        if source.endswith("/"):
+            if not source_path.is_dir():
+                sys.exit(f"sources row names a tree but {source} is not a directory")
+            prefix = target.rstrip("/")
+            for found in sorted(p for p in source_path.rglob("*") if p.is_file()):
+                relative = found.relative_to(source_path).as_posix()
+                resolved.append((found, f"{prefix}/{relative}"))
+        else:
+            resolved.append((source_path, target))
+    return resolved
 
 
 def copy_sources() -> int:
     """Put the files we own into the checkout. Directories are created as needed."""
     count = 0
-    for source, target in read_sources_manifest():
-        source_path = ROOT / source
+    for source_path, target in expand_sources_rows():
         target_path = SRC / target
-        if not source_path.exists():
-            sys.exit(f"missing source: {source}")
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source_path, target_path)
-        print(f"source   {target}")
         count += 1
+    for source, target in read_sources_manifest():
+        print(f"source   {target}")
     return count
 
 
@@ -519,16 +618,11 @@ def cmd_export(_: argparse.Namespace) -> None:
         for path in (ROOT / "rewrite").rglob("*.yaml")
     } if (ROOT / "rewrite").exists() else set()
 
-    if PATCHES.exists():
-        # Clear only the generated output. Deleting the directory takes README.md with it -- which is
-        # documentation, not output, and is exactly what happened the first time this ran.
-        #
-        # A rule-generated patch is kept: it is not this command's output, and deleting it here while also
-        # skipping it below would remove it outright. `plaster.py generate` owns those.
-        keep = {patch_name(relative) for relative in generated}
-        for stale in PATCHES.glob("*.patch"):
-            if stale.name not in keep:
-                stale.unlink()
+    # No stale sweep. The stack now lives in a tree SHARED with upstream's own patches,
+    # so deleting "whatever this command did not just write" there would remove 385
+    # patches that are not its output. It is also moot: every patch this fork owns is
+    # generated from a rule in rewrite/, so every path below is skipped and this command
+    # exports nothing. What remains useful is the untracked-file report at the end.
     PATCHES.mkdir(parents=True, exist_ok=True)
 
     exported = 0
@@ -547,14 +641,16 @@ def cmd_export(_: argparse.Namespace) -> None:
             text=True,
             check=True,
         ).stdout
-        (PATCHES / patch_name(relative)).write_text(diff, encoding="utf-8")
+        out = PATCHES / patch_name(relative)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(diff, encoding="utf-8")
         exported += 1
         print(f"exported {relative}")
 
     # Only the files that could plausibly be ours. A synced checkout carries tens of thousands of
     # untracked third_party and node_modules files, and listing them buries the line that matters.
     # Files we deliberately copied in are already in this repository, so they are not news either.
-    copied_in = {target for _, target in read_sources_manifest()}
+    copied_in = {target for _, target in expand_sources_rows()}
     ours = [
         relative
         for relative in added
@@ -590,8 +686,231 @@ def cmd_build(args: argparse.Namespace) -> None:
     args_gn += google_api_args()
     out.mkdir(parents=True, exist_ok=True)
     (out / "args.gn").write_text(args_gn, encoding="utf-8")
+    stage_agent_server(server_target_for(args_gn, want))
+    stage_onboarding()
+    stage_update_framework(server_target_for(args_gn, want))
+    stage_bundled_extension()
     run(["gn", "gen", f"out/{args.flavour}"], SRC)
     run(["autoninja", "-C", f"out/{args.flavour}", args.target], SRC)
+
+
+# The agent server is a separate executable the browser bundles and launches (it serves the side panel and
+# the new tab). It is built from agent/ for ONE platform at a time, and the GN rule copies whatever sits in
+# chrome/browser/browseros/server/resources into the package without looking at its architecture. A mac
+# build once shipped the Linux x86-64 server that way: the app launched and the Assistant panel loaded
+# forever. So the server is staged per build, for the build's own target, never left over from another.
+SERVER_RESOURCES = SRC / "chrome" / "browser" / "browseros" / "server" / "resources"
+AGENT = ROOT / "agent"
+SERVER_TARGETS = {
+    ("linux", "x64"): "linux-x64",
+    ("linux", "arm64"): "linux-arm64",
+    ("mac", "arm64"): "darwin-arm64",
+    ("mac", "x64"): "darwin-x64",
+    ("win", "x64"): "windows-x64",
+}
+
+
+def _gn_value(args_gn: str, name: str) -> str | None:
+    for line in args_gn.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line.startswith(f"{name} ") or line.startswith(f"{name}="):
+            return line.split("=", 1)[1].strip().strip('"')
+    return None
+
+
+def server_target_for(args_gn: str, platform_name: str | None = None) -> str:
+    """The agent-server target id (agent/packages/build-server-tools/src/targets.ts) for a gn args file.
+
+    `platform_name` is the sys.platform the build is for (a flavour's FLAVOUR_PLATFORM); it decides the OS
+    when args.gn does not set target_os, which is the case for every native flavour.
+    """
+    host_os = {"linux": "linux", "darwin": "mac", "win32": "win"}[platform_name or sys.platform]
+    host_cpu = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x64"
+    key = (_gn_value(args_gn, "target_os") or host_os, _gn_value(args_gn, "target_cpu") or host_cpu)
+    if key not in SERVER_TARGETS:
+        sys.exit(f"no agent server target for target_os={key[0]} target_cpu={key[1]}")
+    return SERVER_TARGETS[key]
+
+
+def stage_agent_server(target: str) -> None:
+    """Build agent/'s server for `target` and make it the checkout's bundled server resources."""
+    if not AGENT.exists():
+        sys.exit("agent/ is missing: the bundled agent server is built from it")
+    bun = shutil.which("bun")
+    if bun is None:
+        sys.exit("bun is required to build the agent server (agent/package.json pins its version)")
+    if not (AGENT / "node_modules").exists():
+        run([bun, "install", "--frozen-lockfile"], AGENT)
+    # --ci inlines placeholder telemetry settings instead of requiring .env.production, so a build never
+    # depends on a developer's local secrets file. --no-upload keeps it off the release bucket.
+    run([bun, "scripts/build/server.ts", f"--target={target}", "--no-upload", "--ci"], AGENT)
+    built = AGENT / "dist" / "prod" / "server" / target / "resources"
+    binary = built / "bin" / ("browseros_server.exe" if target.startswith("windows") else "browseros_server")
+    if not binary.is_file():
+        sys.exit(f"agent server build produced no {binary.relative_to(ROOT)}")
+    if SERVER_RESOURCES.name != "resources" or SERVER_RESOURCES.parent.name != "server":
+        sys.exit(f"refusing to replace {SERVER_RESOURCES}: not the server resources directory")
+    if SERVER_RESOURCES.exists():
+        shutil.rmtree(SERVER_RESOURCES)
+    shutil.copytree(built, SERVER_RESOURCES)
+    # The archive stamps every entry 1980-01-01. Ninja compares times, so files that old never replace a
+    # previous build's copy in the bundle: stamp them now so the package always carries what was staged.
+    for path in [SERVER_RESOURCES, *SERVER_RESOURCES.rglob("*")]:
+        os.utime(path)
+    print(f"server   agent server {target} -> {SERVER_RESOURCES.relative_to(SRC)}")
+
+
+# The first-run onboarding page the browser serves from chrome://redrob-onboarding. Like the server it
+# is built from agent/ and copied into the checkout, and like the server it used to be staged by hand,
+# once, in the one checkout that had ever built -- so a fresh checkout failed at gn's resource list.
+ONBOARDING_RESOURCES = SRC / "chrome" / "browser" / "browseros" / "onboarding" / "resources"
+ONBOARDING_APP = AGENT / "apps" / "app-onboard"
+
+
+def stage_onboarding() -> None:
+    """Build agent/apps/app-onboard for Chromium and make it the checkout's onboarding resources."""
+    bun = shutil.which("bun")
+    if bun is None:
+        sys.exit("bun is required to build the onboarding page (agent/package.json pins its version)")
+    if not (AGENT / "node_modules").exists():
+        run([bun, "install", "--frozen-lockfile"], AGENT)
+    # build:chromium also runs verify-chromium-build.ts, which rejects remote URLs and stray assets.
+    run([bun, "run", "build:chromium"], ONBOARDING_APP)
+    built = ONBOARDING_APP / "dist" / "chromium"
+    if not (built / "index.html").is_file():
+        sys.exit(f"onboarding build produced no {(built / 'index.html').relative_to(ROOT)}")
+    if ONBOARDING_RESOURCES.name != "resources" or ONBOARDING_RESOURCES.parent.name != "onboarding":
+        sys.exit(f"refusing to replace {ONBOARDING_RESOURCES}: not the onboarding resources directory")
+    if ONBOARDING_RESOURCES.exists():
+        shutil.rmtree(ONBOARDING_RESOURCES)
+    shutil.copytree(built, ONBOARDING_RESOURCES)
+    print(f"onboard  agent onboarding -> {ONBOARDING_RESOURCES.relative_to(SRC)}")
+
+
+# The self-update libraries the ported tree links: Sparkle on macOS, WinSparkle on Windows. Both are
+# upstream release archives, pinned here by URL AND sha256 -- a release asset can be replaced, and these
+# are the code that later installs our updates, so a changed byte must stop the build. Their BUILD.gn
+# files come from the patch stack; only the prebuilt binaries are fetched, into the same directories.
+UPDATE_FRAMEWORKS = {
+    "mac": ("https://github.com/sparkle-project/Sparkle/releases/download/2.7.0/Sparkle-2.7.0.tar.xz",
+            "09fed60cca507d2dc542c86c22e525598af5483954a5c66366ce039647ec88e9",
+            SRC / "third_party" / "sparkle"),
+    "windows": ("https://github.com/vslavik/winsparkle/releases/download/v0.9.3/WinSparkle-0.9.3.zip",
+                "745985f41d2ab26b2d5a1cf87d76e4ed851039db19038e50610eb25ea0b73772",
+                SRC / "third_party" / "winsparkle"),
+}
+
+
+def _download_pinned(url: str, sha256: str, dest: Path) -> None:
+    with urllib.request.urlopen(url) as response, open(dest, "wb") as out:
+        shutil.copyfileobj(response, out)
+    got = hashlib.sha256(dest.read_bytes()).hexdigest()
+    if got != sha256:
+        dest.unlink()
+        sys.exit(f"{url}: sha256 {got}, expected {sha256}. Refusing an update library that changed.")
+
+
+def stage_update_framework(server_target: str) -> None:
+    """Fetch the pinned Sparkle (mac) or WinSparkle (windows) binaries into the checkout. Linux: none."""
+    os_name = "mac" if server_target.startswith("darwin") else (
+        "windows" if server_target.startswith("windows") else None)
+    if os_name is None:
+        return
+    url, sha256, target = UPDATE_FRAMEWORKS[os_name]
+    if not (target / "BUILD.gn").is_file():
+        sys.exit(f"{target.relative_to(SRC)}/BUILD.gn is missing: run apply first (it comes from the patch stack)")
+    archive = target / Path(url).name
+    _download_pinned(url, sha256, archive)
+    try:
+        if os_name == "mac":
+            framework = target / "Sparkle.framework"
+            if framework.exists():
+                shutil.rmtree(framework)
+            with tarfile.open(archive, "r:xz") as tar:
+                # Entries are "./Sparkle.framework/...", next to the CLI tools and test app we do not ship.
+                members = [m for m in tar.getmembers()
+                           if Path(m.name).parts[:1] == ("Sparkle.framework",)
+                           or Path(m.name).parts[:2] == (".", "Sparkle.framework")]
+                tar.extractall(target, members=members, filter="tar")
+            if not (framework / "Versions").is_dir():
+                sys.exit("Sparkle archive produced no Sparkle.framework/Versions")
+            # Archive mtimes are the release's; ninja would keep an older build's copy in the bundle.
+            for path in [framework, *framework.rglob("*")]:
+                os.utime(path, follow_symlinks=False)
+        else:
+            # Strip the archive's WinSparkle-<version>/ top level so the tree matches the patched BUILD.gn
+            # (include/, x64/Release/, ...). Members are checked against zip-slip before writing.
+            with zipfile.ZipFile(archive) as zf:
+                resolved = target.resolve()
+                for info in zf.infolist():
+                    parts = Path(info.filename).parts
+                    if len(parts) <= 1:
+                        continue
+                    out = target.joinpath(*parts[1:])
+                    if not out.resolve().is_relative_to(resolved):
+                        sys.exit(f"unsafe path in {archive.name}: {info.filename}")
+                    if info.is_dir():
+                        out.mkdir(parents=True, exist_ok=True)
+                        continue
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(info) as src, open(out, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+            if not (target / "x64" / "Release" / "WinSparkle.dll").is_file():
+                sys.exit("WinSparkle archive produced no x64/Release/WinSparkle.dll")
+    finally:
+        archive.unlink(missing_ok=True)
+    print(f"update   {Path(url).name} -> {target.relative_to(SRC)}")
+
+
+# The agent extension a first run installs before any network fetch: <id>.crx + bundled_extensions.json in
+# chrome/browser/browseros/bundled_extensions (gitignored there, named by the patched BUILD.gn). A machine
+# holding the signing key builds it with tools/agent-extension/build.sh; every other machine -- a build PC,
+# CI -- bundles the CRX the extension channel published, which is the same signed file installed browsers
+# update to. An existing CRX is left alone, so a locally built one is never overwritten.
+BUNDLED_EXTENSIONS = SRC / "chrome" / "browser" / "browseros" / "bundled_extensions"
+EXTENSION_CHANNEL = "https://cdn.redrob.ai/browser/extensions/update-manifest.xml"
+
+
+def stage_bundled_extension() -> None:
+    import json
+    import re
+    ext_id = (ROOT / "tools" / "agent-extension" / "EXTENSION_ID").read_text(encoding="utf-8").strip()
+    crx = BUNDLED_EXTENSIONS / f"{ext_id}.crx"
+    manifest = BUNDLED_EXTENSIONS / "bundled_extensions.json"
+    if crx.is_file() and manifest.is_file():
+        print(f"bundle   {crx.name} already present, kept")
+        return
+    if not (BUNDLED_EXTENSIONS / "BUILD.gn").is_file():
+        sys.exit(f"{BUNDLED_EXTENSIONS.relative_to(SRC)}/BUILD.gn is missing: run apply first")
+    with urllib.request.urlopen(EXTENSION_CHANNEL) as response:
+        xml = response.read().decode("utf-8")
+    app = re.search(rf'<app appid="{ext_id}">\s*<updatecheck codebase="([^"]+)" version="([^"]+)"', xml)
+    if not app:
+        sys.exit(f"{EXTENSION_CHANNEL} lists no {ext_id}")
+    url, version = app.groups()
+    if not url.startswith("https://cdn.redrob.ai/browser/extensions/"):
+        sys.exit(f"refusing a bundled extension from outside Redrob's CDN: {url}")
+    with urllib.request.urlopen(url) as response:
+        data = response.read()
+    # CRX3: "Cr24", format version 3. The browser verifies the signature against the id when it installs.
+    if data[:4] != b"Cr24" or int.from_bytes(data[4:8], "little") != 3:
+        sys.exit(f"{url} is not a CRX3 file")
+    crx.write_bytes(data)
+    manifest.write_text(json.dumps({ext_id: {"external_crx": crx.name, "external_version": version}},
+                                   indent=2) + "\n", encoding="utf-8")
+    print(f"bundle   {crx.name} {version} from the extension channel")
+
+
+def cmd_server(args: argparse.Namespace) -> None:
+    if not SRC.exists():
+        sys.exit("no checkout: run sync first")
+    target = args.target
+    if target is None:
+        args_file = SRC / "out" / args.out / "args.gn"
+        if not args_file.exists():
+            sys.exit(f"no {args_file.relative_to(SRC)}: pass --target or --out of a generated build directory")
+        target = server_target_for(args_file.read_text(encoding="utf-8"))
+    stage_agent_server(target)
 
 
 # The three values Google's APIs authenticate a browser with. Kept OUT of build/args/*.gn on purpose: those
@@ -679,6 +998,12 @@ def main() -> None:
     package.add_argument("--flavour", choices=sorted(FLAVOURS), default="release")
     package.add_argument("--allow-dev", action="store_true",
                          help="package a dev build anyway, for testing the packaging path itself")
+    package.add_argument("--with-setup", action="store_true",
+                         help="Windows only: also wrap mini_installer.exe in the branded redrob_setup.exe "
+                              "window (installer/windows/). Needs MSVC + chrome.exe; leaves mini_installer "
+                              "unchanged.")
+    package.add_argument("--chrome", default=None,
+                         help="path to chrome.exe used by --with-setup to render the branded background art")
     package.set_defaults(func=cmd_package)
 
     repo = sub.add_parser("repo", help="build a signed apt repository from out/artifacts")
@@ -689,6 +1014,8 @@ def main() -> None:
 
     sync = sub.add_parser("sync", help="fetch Chromium at CHROMIUM_VERSION")
     sync.add_argument("--no-hooks", action="store_true", help="skip gclient sync/runhooks")
+    sync.add_argument("--no-history", action="store_true",
+                      help="fetch only the pinned tag, no history (a build machine: a few GB instead of ~65)")
     sync.set_defaults(func=cmd_sync)
 
     sub.add_parser("brand", help="overlay branding/ files onto the checkout").set_defaults(
@@ -707,6 +1034,12 @@ def main() -> None:
     build.add_argument("--force-platform", action="store_true",
                        help="build a flavour whose platform is not this host's, if you have a cross toolchain")
     build.set_defaults(func=cmd_build)
+
+    server = sub.add_parser("server", help="build agent/'s server for one target and stage it into the checkout")
+    server.add_argument("--target", choices=sorted(set(SERVER_TARGETS.values())),
+                        help="agent server target; defaults to the one --out's args.gn builds for")
+    server.add_argument("--out", default="release", help="build directory under out/ to read args.gn from")
+    server.set_defaults(func=cmd_server)
 
     run_ = sub.add_parser("run", help="launch the build with a scratch profile")
     run_.add_argument("--flavour", choices=sorted(FLAVOURS), default="dev")

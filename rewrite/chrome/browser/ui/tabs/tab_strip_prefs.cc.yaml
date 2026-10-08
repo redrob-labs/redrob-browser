@@ -1,0 +1,10 @@
+# Vertical tabs are the default in this product, not an opt-in.
+
+substitutions:
+  # ---- hunk 0 run 1: 1 removed, 2 added
+  - description: |
+      The default.
+    regex:
+      pattern: "  registry->RegisterBooleanPref(prefs::kVerticalTabsEnabled, false);"
+      replace: "  // Redrob: the sidebar is the shell, not an option, so a new profile starts with it.\n  registry->RegisterBooleanPref(prefs::kVerticalTabsEnabled, true);"
+      count: 1

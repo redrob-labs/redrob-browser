@@ -1,0 +1,16 @@
+# Clip a vertical tab to its VIEW bounds, not to its fill path.
+#
+# This is what defeated three attempts at the selected tab's drop shadow: the shadow was drawn correctly and
+# then discarded by this clip, because the pill path excludes everything outside it. Making room below the
+# pill did not help either -- the room is outside the path as well.
+
+substitutions:
+  # ---- hunk 0 run 1: 1 removed, 14 added
+  - description: |
+      Clip to the view's bounds with the tab's corner radius. The clip still does its original job, stopping the
+      favicon, title and close button spilling past a rounded corner; it simply uses the view's bounds instead of
+      the fill's, so a shadow can reach the few pixels around the pill.
+    regex:
+      pattern: "    SetClipPath(GetPath());"
+      replace: "    // Redrob: the clip covers the whole view, not the tab's fill path.\n    //\n    // A vertical tab clips its own painting, and clipping to GetPath() -- the pill -- means the tab CANNOT\n    // paint outside the pill at all. That is what defeated three attempts at the selected tab's drop shadow:\n    // the shadow was drawn, correctly, and then discarded by this clip. Making room below the pill did not\n    // help either, because the room is outside the path as well.\n    //\n    // The clip still exists and still has the tab's corner radius, so children -- favicon, title, close\n    // button -- cannot spill past a rounded corner, which is what it was for. It is simply the view's own\n    // bounds rather than the fill's, so VerticalTabStyleViews can cast a shadow into the few pixels it holds\n    // back for one. The FILL is unaffected: PaintTabBackgroundFill clips to GetPath() itself.\n    const SkScalar radius = GetCornerRadius();\n    SetClipPath(SkPath::RRect(SkRRect::MakeRectXY(\n        gfx::RectToSkRect(GetLocalBounds()), radius, radius)));"
+      count: 1

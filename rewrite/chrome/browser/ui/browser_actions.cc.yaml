@@ -1,0 +1,15 @@
+# The Assistant toolbar action: what it says to the user.
+
+substitutions:
+  - description: |
+      Tooltip of the Assistant button. The upstream text named the upstream product.
+    regex:
+      pattern: "            .SetTooltipText(u\"Ask BrowserOS\")\n"
+      replace: "            .SetTooltipText(u\"Ask Redrob\")\n"
+      count: 1
+  - description: |
+      Infobar shown while the agent extension is still being installed.
+    regex:
+      pattern: "u\"BrowserOS Agent is installing/updating. Please try \"\n"
+      replace: "u\"The Redrob agent is installing or updating. Please try \"\n"
+      count: 1

@@ -1,0 +1,17 @@
+# Register the colour mixer and the product typeface.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 2 added
+  - description: |
+      The two headers.
+    regex:
+      pattern: "#include \"chrome/browser/ui/javascript_dialogs/chrome_javascript_app_modal_dialog_view_factory.h\""
+      replace: "#include \"chrome/browser/redrob/redrob_fonts.h\"\n#include \"chrome/browser/ui/color/redrob_color_mixer.h\"\n#include \"chrome/browser/ui/javascript_dialogs/chrome_javascript_app_modal_dialog_view_factory.h\""
+      count: 1
+  # ---- hunk 1 run 2: 0 removed, 9 added
+  - description: |
+      The mixer goes LAST so our palette is the final word on the ids it names and silent on every id it does not. The font is registered in ToolkitInitialized because that is after the platform's font system is up and before any view -- and any cached FontList -- is built; without it the WebUI surfaces drew in Pretendard while every views surface around them drew in the platform default, which is two faces in one window.
+    regex:
+      pattern: "      base::BindRepeating(AddChromeColorMixers));\n"
+      replace: "      base::BindRepeating(AddChromeColorMixers));\n  // Last, so Redrob's palette is the final word on the ids it names and silent on every id it does not.\n  ui::ColorProviderManager::Get().AppendColorProviderInitializer(\n      base::BindRepeating(redrob::AddRedrobColorMixer));\n\n  // The product's typeface, in ToolkitInitialized because that is after the platform's font system exists\n  // (on Linux the GTK/native theme above brings fontconfig up) and before any view -- and therefore any\n  // FontList -- is built. Without it the WebUI surfaces drew in Pretendard and every views surface beside\n  // them drew in the platform default, which is two faces in one window.\n  redrob::RegisterUiFont();\n"
+      count: 1

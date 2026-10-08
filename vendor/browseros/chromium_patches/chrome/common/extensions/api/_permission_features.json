@@ -1,0 +1,105 @@
+diff --git a/chrome/common/extensions/api/_permission_features.json b/chrome/common/extensions/api/_permission_features.json
+--- a/chrome/common/extensions/api/_permission_features.json
++++ b/chrome/common/extensions/api/_permission_features.json
+@@ -67,6 +67,90 @@
+     // "desktop_android" is not supported.
+     "platforms": ["chromeos", "linux", "mac", "win"]
+   },
++  "redrobPrivate": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
++  "redrobPrivate.tasks": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
++  "redrobPrivate.memory": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
++  "redrobPrivate.providers": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
++  "redrobPrivate.routines": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
++  "redrobPrivate.passwords": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
++  "redrobPrivate.import": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
++  "redrobPrivate.engine": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
++  "redrobPrivate.workspace": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
++  "redrobPrivate.settings": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
++  "redrobPrivate.onboarding": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
++  "redrobPrivate.browser": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
+   "autotestPrivate": {
+     "channel": "stable",
+     "extension_types": ["extension"],
+@@ -93,6 +177,10 @@
+     // "desktop_android" is not supported.
+     "platforms": ["chromeos", "linux", "mac", "win"]
+   },
++  "browserOS": {
++    "channel": "stable",
++    "extension_types": ["extension", "platform_app"]
++  },
+   "browsingData": {
+     "channel": "stable",
+     "extension_types": ["extension", "legacy_packaged_app"]

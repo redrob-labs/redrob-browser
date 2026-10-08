@@ -1,0 +1,17 @@
+# The profile picker's own adjustment for this shell.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 1 added
+  - description: |
+      The change.
+    regex:
+      pattern: "#include \"chrome/browser/ui/views/profiles/profile_management_flow_controller.h\""
+      replace: "#include \"chrome/browser/ui/views/profiles/redrob_first_run_flow_controller.h\"\n#include \"chrome/browser/ui/views/profiles/profile_management_flow_controller.h\""
+      count: 1
+  # ---- hunk 1 run 2: 1 removed, 3 added
+  - description: |
+      The second half of it.
+    regex:
+      pattern: "    return std::make_unique<FirstRunFlowController>("
+      replace: "    // Redrob's onboarding instead of Chromium's intro. The subclass overrides Init() only, so the\n    // completion path below this point is upstream's.\n    return std::make_unique<RedrobFirstRunFlowController>("
+      count: 1

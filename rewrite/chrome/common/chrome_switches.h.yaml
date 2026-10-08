@@ -1,0 +1,12 @@
+# `--redrob-task="..."`, the switch that starts an agent task from a terminal.
+#
+# With a browser already running the process singleton forwards it, which is how `redrob "..."` reaches the session the user is actually in. One way only -- the singleton channel ACKs and carries no payload back, so nothing is printed; the loopback RPC is the route when an answer has to reach the terminal.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 13 added
+  - description: |
+      Declare the switch.
+    regex:
+      pattern: "}  // namespace switches"
+      replace: "\n// Starts an agent task from the command line. With a browser already running, the\n// process singleton forwards this to it, which is how `redrob \"...\"` from a terminal\n// reaches the session the user is actually in. One way only: the singleton channel\n// answers with an ACK and carries no payload back, so nothing is printed. Use the\n// loopback RPC (--redrob-rpc) when the answer has to come back to the terminal.\ninline constexpr char kRedrobTask[] = \"redrob-task\";\n\n// Binds the loopback RPC endpoint that serves the CLI, the MCP server and the REPL.\n// Off unless this switch or the matching setting is present: a local socket that can\n// drive the browser is, to any other process on the machine, the browser.\ninline constexpr char kRedrobRpc[] = \"redrob-rpc\";\n\n}  // namespace switches"
+      count: 1

@@ -1,0 +1,17 @@
+# Register our keyed-service factories with the others.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 2 added
+  - description: |
+      The header.
+    regex:
+      pattern: "#include \"chrome/browser/record_replay/task_store_factory.h\""
+      replace: "#include \"chrome/browser/redrob/agent_service_factories.h\"\n#include \"chrome/browser/redrob/task_store_factory.h\"\n#include \"chrome/browser/record_replay/task_store_factory.h\""
+      count: 1
+  # ---- hunk 1 run 2: 0 removed, 5 added
+  - description: |
+      The factory registration, in the one function that ensures a service exists before any profile is built.
+    regex:
+      pattern: "  AboutSigninInternalsFactory::GetInstance();"
+      replace: "  redrob::TaskStoreFactory::GetInstance();\n  redrob::MemoryStoreFactory::GetInstance();\n  redrob::ModelStoreFactory::GetInstance();\n  redrob::RoutineStoreFactory::GetInstance();\n  redrob::RpcServerFactory::GetInstance();\n  AboutSigninInternalsFactory::GetInstance();"
+      count: 1

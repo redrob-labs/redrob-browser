@@ -1,0 +1,22 @@
+# Ship Redrob's agent extension in the binary, and nothing else.
+#
+# The bundle is what a first run installs before any network fetch. Upstream bundles its Bug
+# Reporter and its own Agent CRX, both downloaded from its CDN at build time; we have neither and
+# want neither. Our agent CRX and bundled_extensions.json are produced by
+# tools/agent-extension/build.sh and copied in before gn gen.
+substitutions:
+  - description: Drop the upstream Bug Reporter from the bundle.
+    regex:
+      pattern: "  \"adlpneommgkgeanpaekgoaolcpncohkf.crx\",  # Bug Reporter\n"
+      replace: ""
+      count: 1
+  - description: The bundled agent is Redrob's build.
+    regex:
+      pattern: "\"bflpfmnmnokmjhmgnolecpppdbdophmk.crx\" ]  # Agent"
+      replace: "\"oikpnmkappjhkifbcieakjoeiknojbgg.crx\" ]  # Agent (Redrob build)"
+      count: 1
+  - description: No BrowserClaw bundle. That is the upstream project's second product; we ship neither its CRX nor the product.
+    regex:
+      pattern: "if (browseros_allow_runtime_product_override || browseros_product_browserclaw) {\n  _bundled_extensions_sources +=\n      [ \"pjimfkbpehlcllblajnpfamdfjhhlgkc.crx\" ]  # BrowserClaw\n}\n\n"
+      replace: ""
+      count: 1

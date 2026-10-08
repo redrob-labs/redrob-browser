@@ -1,0 +1,27 @@
+# Network traffic annotation for the extension-configuration fetch.
+
+substitutions:
+  - description: |
+      Annotation text.
+    regex:
+      pattern: "sender: \"BrowserOS Extension Maintainer\""
+      replace: "sender: \"Redrob Extension Maintainer\""
+      count: 1
+  - description: |
+      (continued)
+    regex:
+      pattern: "configuration for BrowserOS extension maintenance."
+      replace: "configuration for Redrob extension maintenance."
+      count: 1
+  - description: |
+      (continued)
+    regex:
+      pattern: "destination_other: \"BrowserOS configuration server.\""
+      replace: "destination_other: \"Redrob configuration server.\""
+      count: 1
+  - description: |
+      (continued)
+    regex:
+      pattern: "policy_exception_justification: \"BrowserOS feature.\""
+      replace: "policy_exception_justification: \"Redrob feature.\""
+      count: 1

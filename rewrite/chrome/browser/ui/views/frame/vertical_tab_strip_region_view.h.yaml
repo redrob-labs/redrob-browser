@@ -1,0 +1,24 @@
+# The declarations behind the two views this class now owns.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 5 added
+  - description: |
+      Forward-declare them rather than including their headers, so this widely-included header does not drag our targets into everything that sees it.
+    regex:
+      pattern: "class VerticalTabStripRegionView final"
+      replace: "namespace redrob {\nclass RedrobAccountRow;\nclass RedrobSidebarSections;\n}  // namespace redrob\n\nclass VerticalTabStripRegionView final"
+      count: 1
+  # ---- hunk 1 run 2: 0 removed, 4 added
+  - description: |
+      The accessor BrowserView needs to anchor the tab-search bubble to the magnifier.
+    regex:
+      pattern: "  VerticalTabStripBottomContainer* GetBottomContainer() {"
+      replace: "  // Redrob's own sections at the top of the column. Exposed so BrowserView can anchor the tab search\n  // bubble to the magnifier in their header row.\n  redrob::RedrobSidebarSections* GetRedrobSections() { return redrob_sections_; }\n\n  VerticalTabStripBottomContainer* GetBottomContainer() {"
+      count: 1
+  # ---- hunk 2 run 3: 0 removed, 3 added
+  - description: |
+      The two owned child pointers.
+    regex:
+      pattern: "  raw_ptr<VerticalTabStripBottomContainer> bottom_button_container_ = nullptr;"
+      replace: "  // Redrob's workspace switcher, bookmarks and the tab-list heading. Owned as a child view.\n  raw_ptr<redrob::RedrobSidebarSections> redrob_sections_ = nullptr;\n  raw_ptr<redrob::RedrobAccountRow> redrob_account_row_ = nullptr;\n  raw_ptr<VerticalTabStripBottomContainer> bottom_button_container_ = nullptr;"
+      count: 1

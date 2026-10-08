@@ -11,8 +11,6 @@
 #include "base/memory/raw_ptr.h"
 #include "base/scoped_observation.h"
 #include "base/uuid.h"
-#include "components/bookmarks/browser/base_bookmark_model_observer.h"
-#include "components/bookmarks/browser/bookmark_model.h"
 #include "chrome/browser/redrob/task_store.h"
 #include "components/saved_tab_groups/public/tab_group_sync_service.h"
 #include "ui/base/metadata/metadata_header_macros.h"
@@ -34,24 +32,26 @@ class MenuRunner;
 
 namespace redrob {
 
-// THE one place a sidebar row is built -- shared so the foot's Settings row is the same object as a bookmark
+// THE one place a sidebar row is built -- shared so the foot's Settings row is the same object as a chat
 // row rather than a second construction that has to be kept in step with the tokens by hand. It was declared
 // here the moment a second file needed a row, which is the point at which "one place" stops being a comment.
 std::unique_ptr<views::LabelButton> MakeRow(views::Button::PressedCallback callback,
                                             const std::u16string& text);
 
-// The part of the sidebar above the tab list: a workspace switcher, the user's bookmarks, and the
-// heading the tabs themselves sit under.
+// The part of the sidebar above the tab list: a workspace switcher, recent chats, and the heading the
+// tabs themselves sit under.
 //
 // It lives in the vertical tab strip's own column rather than in a side panel because the design puts
-// all three in one column -- switching workspace, reaching a bookmark and picking a tab are the same
-// gesture at different scales, and a separate panel would make the third one feel different from the
-// other two.
+// them in one column -- switching workspace, returning to a chat and picking a tab are the same gesture
+// at different scales, and a separate panel would make one of them feel different from the others.
+//
+// No bookmarks here. The column used to list them too, but the bookmark bar under the toolbar already
+// shows the same entries, so the sidebar drew every bookmark twice and pushed the tab list down to do it.
+
 //
 // Collapse is honoured: at collapsed width there is no room for text, so the sections hide rather than
 // clip. A row of unreadable fragments is worse than an absent row.
 class RedrobSidebarSections : public views::View,
-                              public bookmarks::BaseBookmarkModelObserver,
                               public tab_groups::TabGroupSyncService::Observer,
                               public redrob::TaskStore::Observer,
                               public ui::SimpleMenuModel::Delegate {
@@ -70,14 +70,6 @@ class RedrobSidebarSections : public views::View,
   // this, so the bubble opens under the control the user actually pressed.
   views::Button* search_button() { return search_button_; }
 
-  // bookmarks::BaseBookmarkModelObserver
-  void BookmarkModelChanged() override;
-  void BookmarkModelLoaded(bool ids_reassigned) override;
-  // Favicons need their OWN override. BaseBookmarkModelObserver deliberately swallows this callback --
-  // "observers typically don't care as much about favicons" -- and routes nothing to BookmarkModelChanged, so
-  // a row that asked for a favicon and got an empty image was never told when the real one arrived.
-  void BookmarkNodeFaviconChanged(const bookmarks::BookmarkNode* node) override;
-
   // tab_groups::TabGroupSyncService::Observer
   void OnInitialized() override;
   void OnTabGroupAdded(const tab_groups::SavedTabGroup& group,
@@ -95,10 +87,8 @@ class RedrobSidebarSections : public views::View,
   void ExecuteCommand(int command_id, int event_flags) override;
 
  private:
-  void RebuildBookmarks();
   void RebuildChats();
   void OpenChat(std::string task_id);
-  void OpenBookmark(GURL url);
   void ShowTabSearch();
   void StartNewTask();
   void UpdateWorkspaceButton();
@@ -124,8 +114,6 @@ class RedrobSidebarSections : public views::View,
   raw_ptr<views::ImageView> workspace_chevron_ = nullptr;
   raw_ptr<views::ImageButton> search_button_ = nullptr;
   raw_ptr<views::ImageButton> compose_button_ = nullptr;
-  raw_ptr<views::Label> bookmarks_heading_ = nullptr;
-  raw_ptr<views::View> bookmarks_list_ = nullptr;
   raw_ptr<views::Label> chats_heading_ = nullptr;
   raw_ptr<views::View> chats_list_ = nullptr;
   raw_ptr<views::Label> tabs_heading_ = nullptr;
@@ -136,8 +124,6 @@ class RedrobSidebarSections : public views::View,
   std::unique_ptr<ui::SimpleMenuModel> workspace_menu_model_;
   std::unique_ptr<views::MenuRunner> workspace_menu_runner_;
 
-  base::ScopedObservation<bookmarks::BookmarkModel, bookmarks::BookmarkModelObserver>
-      bookmark_observation_{this};
   base::ScopedObservation<tab_groups::TabGroupSyncService,
                           tab_groups::TabGroupSyncService::Observer>
       tab_group_observation_{this};

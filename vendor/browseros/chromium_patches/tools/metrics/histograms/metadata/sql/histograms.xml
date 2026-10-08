@@ -1,0 +1,19 @@
+diff --git a/tools/metrics/histograms/metadata/sql/histograms.xml b/tools/metrics/histograms/metadata/sql/histograms.xml
+--- a/tools/metrics/histograms/metadata/sql/histograms.xml
++++ b/tools/metrics/histograms/metadata/sql/histograms.xml
+@@ -58,6 +58,7 @@ chromium-metrics-reviews@google.com.
+   <variant name="DownloadRecord" summary="DownloadRecord"/>
+   <variant name="FileIndexService" summary="FileIndexService"/>
+   <variant name="FirefoxImporter" summary="FirefoxImporter"/>
++  <variant name="ChromeImporter" summary="ChromeImporter"/>
+   <variant name="FirstPartySets" summary="FirstPartySets"/>
+   <variant name="FSPContextDatabase" summary="FSPContextDatabase"/>
+   <variant name="History" summary="History"/>
+@@ -88,6 +89,7 @@ chromium-metrics-reviews@google.com.
+   <variant name="Quota" summary="Quota"/>
+   <variant name="RazeNullDB" summary="RazeNullDB"/>
+   <variant name="Recovery" summary="Recovery"/>
++  <variant name="RedrobChromiumImporter" summary="RedrobChromiumImporter"/>
+   <variant name="ReplayTasks" summary="ReplayTasks"/>
+   <variant name="ReportingAndNEL" summary="ReportingAndNEL"/>
+   <variant name="ServerCertificate" summary="ServerCertificate"/>

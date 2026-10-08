@@ -1,0 +1,10 @@
+# The bottom container defers to the sidebar's own foot.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 6 added
+  - description: |
+      The change, with its reason inline.
+    regex:
+      pattern: "  new_tab_button_ = AddChildView(std::move(new_tab_button));\n"
+      replace: "  new_tab_button_ = AddChildView(std::move(new_tab_button));\n  // Redrob: built and hidden. The reference draws \"+ New Tab\" as the first ROW of the Tabs section --\n  // left-aligned, labelled, in the list -- not as a centred glyph under it, so RedrobSidebarSections\n  // owns that row and this control would be a second one. Hidden rather than not built because the\n  // container registers a callback on it and IsPositionInWindowCaption walks it; an invisible child is\n  // skipped by the layout and by that walk, so nothing has to be audited on a version bump.\n  new_tab_button_->SetVisible(false);\n"
+      count: 1

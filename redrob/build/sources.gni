@@ -26,6 +26,9 @@ redrob_chrome_browser_ui_dice_sources = [
 redrob_chrome_browser_ui_color_sources = [
   "//chrome/browser/ui/color/redrob_color_mixer.cc",
   "//chrome/browser/ui/color/redrob_color_mixer.h",
+  # Vendored from the design system, not written here. Listed so a `gn` target that compiles the mixer also
+  # tracks the header as an input: without it a re-pin changes 89 colours and nothing rebuilds.
+  "//chrome/browser/ui/color/redrob_design_tokens.h",
 ]
 
 # chrome/browser/ui/views/tabs/vertical -- headers in :vertical, implementations in :impl, per the
@@ -70,27 +73,33 @@ redrob_chrome_common_importer_sources = [
 
 redrob_chrome_common_importer_deps = [ "//chrome/common:constants" ]
 
-# chrome/browser/resources -- our three WebUI bundles.
-redrob_chrome_browser_resources_deps = [
-  "//chrome/browser/resources/redrob:resources",
-  "//chrome/browser/resources/redrob_onboarding:resources",
-  "//chrome/browser/resources/redrob_settings:resources",
-]
+# chrome/browser/resources -- resource bundles the fork adds. None today: the C++ agent surfaces that had
+# bundles here went with A-7 and O-8, and the old component extension (the last bundle) is gone too --
+# the agent extension owns the new tab, settings and onboarding and ships as its own CRX. The hook stays
+# so a future bundle is one line here rather than a new rewrite rule. The design-system files stay in
+# resources/redrob/ as the ONE vendored copy, read only by the integrity gate's glyph table.
+redrob_chrome_browser_resources_deps = []
 
 # The pak files those bundles produce, as names under `$root_gen_dir/chrome`. Names rather than full
 # paths because root_gen_dir is per-toolchain and is not defined where this file is imported; the use
 # site joins them.
-redrob_chrome_browser_resource_pak_names = [
-  "redrob_resources.pak",
-  "redrob_onboarding_resources.pak",
-  "redrob_settings_resources.pak",
-]
+redrob_chrome_browser_resource_pak_names = []
 
 # chrome/browser/ui/webui -- needed by both the config list and the controller factory.
 redrob_chrome_browser_ui_webui_deps = [
-  "//chrome/browser/ui/webui/redrob",
-  "//chrome/browser/ui/webui/redrob_onboarding",
-  "//chrome/browser/ui/webui/redrob_settings",
+  # The agent WebUI is gone; only its Mojo IDL target survives, because TaskStore, RoutineStore and the
+  # redrobPrivate extension API are written in terms of the task data types it defines.
+  "//chrome/browser/ui/webui/redrob:mojo_bindings",
+]
+
+# chrome/browser/ui -- for our first-run flow controller, which since O-8 drives the EXTENSION's
+# onboarding page and takes its completion signal from RedrobPrivateOnboardingService instead of from a
+# WebUI controller it could cast. That is the only reason chrome/browser/ui learns about the
+# redrobPrivate API target at all, and it is one target learning about one thing of ours -- but unlike
+# the four fixed edits named below it sits in a list, because the first-run flow is where the native side
+# will keep meeting extension surfaces as the remaining C++ pages go.
+redrob_chrome_browser_ui_deps = [
+  "//chrome/browser/extensions/api/redrob_private",
 ]
 
 # Deliberately NOT here: the four upstream files that take a single, fixed line from us -- the sidecar dep

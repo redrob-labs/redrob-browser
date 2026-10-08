@@ -1,0 +1,22 @@
+# redrobPrivate's events each need an events enum value or the generated event dispatch does not
+# compile. The first two were added on two branches that were not ancestors of each other, each
+# anchored on the same last real value (DICTATION_PRIVATE_ON_BROWSER_LOG_EVENT = 578) and each
+# claiming 579. That collision was deliberate: it produced a git conflict here instead of two rules
+# silently inserting at the same anchor and leaving the enum with a duplicate value.
+#
+# Resolved by keeping both, as ONE rule inserting every line: onImportStateChanged keeps 579, which it
+# already has on develop, onTaskChanged takes 580, and onEngineInstallStateChanged takes 581. One rule
+# rather than three, because separate rules on the same anchor would race on insertion order and the
+# order here IS the numbering.
+#
+# count=1 on the unique 578 line fails loudly on an uprev that adds its own events, which is the cue
+# to renumber. The matching enums.xml entries are generated, not hand-written.
+substitutions:
+  - description: Add the redrobPrivate event histogram enum values.
+    insert_after:
+      anchor: '  // tools/metrics/histograms/update_extension_histograms.py'
+      count: 1
+      lines: |
+        REDROBPRIVATE_ON_IMPORT_STATE_CHANGED = 581,
+        REDROBPRIVATE_ON_TASK_CHANGED = 582,
+        REDROBPRIVATE_ON_ENGINE_INSTALL_STATE_CHANGED = 583,

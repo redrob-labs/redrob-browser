@@ -111,10 +111,13 @@ void RedrobAccountRow::OpenSettings() {
   if (!browser_) {
     return;
   }
-  // A singleton tab, which is what every other route into settings uses: pressing this twice should
-  // return to the settings tab rather than accumulate copies of it.
-  NavigateParams params(browser_, GURL(chrome::kChromeUIRedrobSettingsURL),
-                        ui::PAGE_TRANSITION_AUTO_BOOKMARK);
+  // Settings is the agent's settings page, reached through the browser's own route for it
+  // (kBrowserOSURLRoutes in chrome/browser/browseros/core/browseros_constants.h maps
+  // chrome://redrob/settings onto the agent extension). A singleton tab, which is what every other
+  // route into settings uses: pressing this twice should return to the settings tab rather than
+  // accumulate copies of it.
+  const GURL settings_url("chrome://redrob/settings");
+  NavigateParams params(browser_, settings_url, ui::PAGE_TRANSITION_AUTO_BOOKMARK);
   params.disposition = WindowOpenDisposition::SINGLETON_TAB;
   Navigate(&params);
 }

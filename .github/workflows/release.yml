@@ -83,6 +83,11 @@ jobs:
           python3 scripts/redrob.py apply
           python3 scripts/redrob.py brand
 
+      # The build stages agent/'s server for this target, which needs bun (agent/package.json pins it).
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
       - name: official build
         run: python3 scripts/redrob.py build --flavour release
 
@@ -91,12 +96,15 @@ jobs:
 
       - name: launch it once
         # A binary that links is not a binary that starts. Xvfb because the runner is headless; the flags are the
-        # ones the probe scripts use.
+        # ones the probe scripts use. It runs from the UNPACKED .deb, not out/release: the build directory has
+        # every file, so launching from there cannot tell when the package left one out.
         run: |
           set -euo pipefail
+          unpacked="$(mktemp -d)"
+          dpkg-deb -x "$(ls out/artifacts/*.deb | head -1)" "$unpacked"
           Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
           sleep 3
-          DISPLAY=:99 timeout 60 chromium/src/out/release/chrome \
+          DISPLAY=:99 timeout 60 "$unpacked"/opt/redrob/redrob-browser/redrob-browser \
             --no-sandbox --test-type --no-first-run --no-default-browser-check \
             --enable-unsafe-swiftshader --user-data-dir="$(mktemp -d)" >launch.log 2>&1 &
           sleep 30
@@ -105,7 +113,14 @@ jobs:
             tail -30 launch.log >&2
             exit 1
           fi
-          pkill -f "out/release/chrome" || true
+          # A browser that starts without its agent server is not a release: the side panel and new tab both
+          # depend on it. The .deb once shipped without BrowserOSServer/ and still passed the check above.
+          if grep -qE "Bundled server unavailable|Bundled binary also not found" launch.log; then
+            echo "the release binary started without its agent server:" >&2
+            grep -E "browseros:" launch.log | tail -10 >&2
+            exit 1
+          fi
+          pkill -f "$unpacked/opt/redrob" || true
           pkill -f "Xvfb :99" || true
 
       - uses: actions/upload-artifact@v4
@@ -159,7 +174,10 @@ jobs:
   publish-cdn:
     name: publish to cdn.redrob.ai
     needs: build
-    if: github.repository == 'redrob-labs/redrob-browser'
+    # Pinned to the repository id, not its name. A name can move to another repository (this one was created as a
+    # second repository and renamed into place), and a fork or a later repository taking the name would then
+    # publish to the CDN with the organisation's credentials. The id belongs to this repository alone.
+    if: github.repository_id == '1407030105'
     runs-on: ubuntu-latest
     env:
       # The same variable names as every other product in this organisation. They are the convention rather than

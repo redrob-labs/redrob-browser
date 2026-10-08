@@ -25,10 +25,21 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 
   registry->RegisterListPref(kModelProviders);
   registry->RegisterStringPref(kSelectedProviderId, std::string());
+  // Empty until first run asks. Unregistered before this, which meant every write was silently
+  // dropped and the user's onboarding choice never existed.
+  registry->RegisterStringPref(kOnboardingModelChoice, std::string());
 
   registry->RegisterBooleanPref(kRpcEnabled, false);
   registry->RegisterStringPref(kPasswordManagerChoice, std::string());
   registry->RegisterBooleanPref(kImportCompleted, false);
+
+  // Window and tab behaviour. Every default here is what the browser does today, so registering
+  // them changes nothing observable -- see the note in the header for why that is the requirement
+  // and not merely a convenience.
+  registry->RegisterStringPref(kVerticalTabInsertionPosition, "after_current");
+  registry->RegisterBooleanPref(kHorizontalTabShrinkEnabled, true);
+  registry->RegisterBooleanPref(kWindowTranslucencyEnabled, false);
+  registry->RegisterBooleanPref(kAutomaticPictureInPictureEnabled, false);
 }
 
 }  // namespace redrob::prefs

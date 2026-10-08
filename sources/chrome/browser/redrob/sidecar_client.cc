@@ -4,6 +4,7 @@
 
 #include "chrome/browser/redrob/sidecar_client.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "base/base64.h"
@@ -37,6 +38,16 @@
 #include "services/network/public/cpp/simple_url_loader_stream_consumer.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "url/gurl.h"
+
+#if BUILDFLAG(IS_WIN)
+#include <windows.h>
+
+#include "base/win/scoped_handle.h"
+#else
+#include <unistd.h>
+
+#include "base/files/scoped_file.h"
+#endif
 
 namespace redrob {
 namespace {
@@ -94,6 +105,89 @@ base::NativeEnvironmentString ToNative(std::string_view value) {
   return base::NativeEnvironmentString(value);
 #endif
 }
+
+// The pipe the engine prints its startup line into: the child's stdout, our non-blocking read end. POSIX
+// remaps a pipe fd onto fd 1; Windows hands the child a pipe HANDLE as its standard output and has no
+// non-blocking anonymous pipe, so "is anything there yet" is PeekNamedPipe. Both sides share one contract
+// so the read loop below has no #if: Read() returns nullopt for "nothing yet", 0 for EOF (the child is
+// gone), else the byte count.
+class StartupPipe {
+ public:
+  bool Create() {
+#if BUILDFLAG(IS_WIN)
+    HANDLE read_raw = nullptr;
+    HANDLE write_raw = nullptr;
+    // Not inheritable here: LaunchProcess makes exactly the handles in handles_to_inherit inheritable,
+    // so the read end can never leak into the child.
+    if (!::CreatePipe(&read_raw, &write_raw, nullptr, 0)) {
+      return false;
+    }
+    read_end_.Set(read_raw);
+    write_end_.Set(write_raw);
+    return true;
+#else
+    int fds[2];
+    if (!base::CreateLocalNonBlockingPipe(fds)) {
+      return false;
+    }
+    read_end_.reset(fds[0]);
+    write_end_.reset(fds[1]);
+    return true;
+#endif
+  }
+
+  void ConfigureChild(base::LaunchOptions& options) {
+#if BUILDFLAG(IS_WIN)
+    // stdout only; stdin and stderr stay null, which a non-empty handles_to_inherit permits.
+    options.stdout_handle = write_end_.get();
+    options.handles_to_inherit.push_back(write_end_.get());
+#else
+    options.fds_to_remap.emplace_back(write_end_.get(), STDOUT_FILENO);
+#endif
+  }
+
+  // After launch, so a read sees EOF once the child exits.
+  void CloseWriteEnd() {
+#if BUILDFLAG(IS_WIN)
+    write_end_.Close();
+#else
+    write_end_.reset();
+#endif
+  }
+
+  std::optional<size_t> Read(base::span<uint8_t> into) {
+#if BUILDFLAG(IS_WIN)
+    DWORD available = 0;
+    if (!::PeekNamedPipe(read_end_.get(), nullptr, 0, nullptr, &available, nullptr)) {
+      return 0;  // ERROR_BROKEN_PIPE: every writer is closed, i.e. EOF.
+    }
+    if (available == 0) {
+      return std::nullopt;
+    }
+    DWORD read = 0;
+    const DWORD want = static_cast<DWORD>(std::min<size_t>(into.size(), available));
+    if (!::ReadFile(read_end_.get(), into.data(), want, &read, nullptr)) {
+      return 0;
+    }
+    return read;
+#else
+    if (!reader_.IsValid()) {
+      reader_ = base::File(read_end_.release());
+    }
+    return reader_.ReadAtCurrentPosNoBestEffort(into);
+#endif
+  }
+
+ private:
+#if BUILDFLAG(IS_WIN)
+  base::win::ScopedHandle read_end_;
+  base::win::ScopedHandle write_end_;
+#else
+  base::ScopedFD read_end_;
+  base::ScopedFD write_end_;
+  base::File reader_;
+#endif
+};
 
 }  // namespace
 
@@ -338,7 +432,7 @@ std::optional<base::FilePath> SidecarClient::FindEngineBinary() {
   std::unique_ptr<base::Environment> env = base::Environment::Create();
   std::optional<std::string> from_env = env->GetVar(kEngineBinaryEnvVar);
   if (from_env.has_value() && !from_env->empty()) {
-    base::FilePath candidate(*from_env);
+    base::FilePath candidate = base::FilePath::FromUTF8Unsafe(*from_env);
     if (base::PathExists(candidate)) {
       return candidate;
     }
@@ -438,18 +532,16 @@ void SidecarClient::EnsureStarted(
             }
 
             base::FilePath data_dir;
-            if (!base::CreateNewTempDirectory("redrob_sidecar", &data_dir)) {
+            if (!base::CreateNewTempDirectory(FILE_PATH_LITERAL("redrob_sidecar"), &data_dir)) {
               result->failure = "could not create a private data directory";
               return result;
             }
 
-            int pipe_fds[2];
-            if (!base::CreateLocalNonBlockingPipe(pipe_fds)) {
+            StartupPipe pipe;
+            if (!pipe.Create()) {
               result->failure = "could not create a pipe for the engine's startup line";
               return result;
             }
-            base::ScopedFD read_end(pipe_fds[0]);
-            base::ScopedFD write_end(pipe_fds[1]);
 
             base::LaunchOptions options;
             base::EnvironmentMap child_env;
@@ -471,7 +563,7 @@ void SidecarClient::EnsureStarted(
             child_env[ToNative(kServerPasswordEnvVar)] = ToNative(credentials);
             options.environment = std::move(child_env);
             options.clear_environment = false;
-            options.fds_to_remap.emplace_back(write_end.get(), STDOUT_FILENO);
+            pipe.ConfigureChild(options);
 
             // Port 0 asks the OS for a free port. Binding a fixed one would race a second profile and
             // Office, and the engine tells us which port it got on the line we are about to read.
@@ -481,7 +573,7 @@ void SidecarClient::EnsureStarted(
             command.AppendArg("serve");
 
             result->process = base::LaunchProcess(command, options);
-            write_end.reset();  // So the read below sees EOF if the child dies.
+            pipe.CloseWriteEnd();  // So the read below sees EOF if the child dies.
             if (!result->process.IsValid()) {
               result->failure = "the engine did not start";
               return result;
@@ -492,10 +584,8 @@ void SidecarClient::EnsureStarted(
             const base::TimeTicks deadline = base::TimeTicks::Now() + kStartupLineTimeout;
             std::string buffer;
             uint8_t chunk[512];
-            base::File reader(read_end.release());
             while (base::TimeTicks::Now() < deadline && buffer.size() < kMaxStartupBytes) {
-              const std::optional<size_t> read =
-                  reader.ReadAtCurrentPosNoBestEffort(base::span(chunk));
+              const std::optional<size_t> read = pipe.Read(base::span(chunk));
               if (!read.has_value()) {
                 base::PlatformThread::Sleep(base::Milliseconds(20));
                 continue;  // The pipe is non-blocking; nothing available yet.

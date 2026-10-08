@@ -1,0 +1,12 @@
+# The close button appears on hover and focus, NOT on the active tab.
+#
+# Upstream keeps it permanently on the active tab because a horizontal strip has nowhere else to put it. In a 240px sidebar row the X is the only thing on the trailing edge, so a permanent one reads as the selected row's decoration rather than as a control.
+
+substitutions:
+  # ---- hunk 0 run 1: 1 removed, 9 added
+  - description: |
+      Drop active from the condition.
+    regex:
+      pattern: "    return TabView().active_ || hovered_or_focused;"
+      replace: "    // Redrob: hover and focus only -- NOT active. Upstream keeps the close button permanently visible on the\n    // active tab, which in a horizontal strip is where the affordance has to live because a tab is narrow and\n    // there is nowhere else for it. In the sidebar the reference's selected row carries no X at all: the row\n    // is 240px of mostly empty space, the X is the only thing on its trailing edge, and it therefore reads as\n    // the selected row's decoration rather than as a control that appears when you reach for it.\n    //\n    // This file IS the vertical layout, so the change cannot reach the horizontal strip. Focus is kept\n    // alongside hover deliberately: without it the button becomes unreachable by keyboard.\n    return hovered_or_focused;"
+      count: 1

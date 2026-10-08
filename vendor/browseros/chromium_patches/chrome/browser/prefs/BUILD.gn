@@ -1,0 +1,19 @@
+diff --git a/chrome/browser/prefs/BUILD.gn b/chrome/browser/prefs/BUILD.gn
+--- a/chrome/browser/prefs/BUILD.gn
++++ b/chrome/browser/prefs/BUILD.gn
+@@ -60,6 +60,7 @@ source_set("impl") {
+   deps = [
+     ":prefs",
+     ":util",
++    "//chrome/browser/browseros/core:prefs",
+     "//chrome/browser:browser_process",
+     "//chrome/browser:browser_process_impl",
+     "//chrome/browser:chrome_content_browser_client",
+@@ -104,6 +105,7 @@ source_set("impl") {
+     "//chrome/browser/profiles:profile_util",
+     "//chrome/browser/push_messaging",
+     "//chrome/browser/push_messaging:service_impl_public",
++    "//chrome/browser/redrob:sidecar",
+     "//chrome/browser/search",
+     "//chrome/browser/search/background",
+     "//chrome/browser/serial",

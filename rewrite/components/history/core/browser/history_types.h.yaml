@@ -1,0 +1,10 @@
+# The history field the importer needs to carry.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 2 added
+  - description: |
+      The field.
+    regex:
+      pattern: "  SOURCE_OS_MIGRATION_IMPORTED = 7,\n"
+      replace: "  SOURCE_OS_MIGRATION_IMPORTED = 7,\n  // Imported from another Chromium-family browser by Redrob's importer.\n  SOURCE_CHROMIUM_IMPORTED = 8,\n"
+      count: 1

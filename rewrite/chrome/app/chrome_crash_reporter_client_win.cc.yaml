@@ -1,0 +1,7 @@
+# No crash upload to the upstream project's Sentry account (Windows client keeps its own copy).
+substitutions:
+  - description: Empty crash upload URL.
+    regex:
+      re_pattern: "kSentryMinidumpUrl\\[\\] =\n    \"[^\"]*\"\n    \"[^\"]*\";"
+      replace: "kSentryMinidumpUrl[] = \"\";"
+      count: 1

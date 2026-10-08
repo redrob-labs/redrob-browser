@@ -1,0 +1,19 @@
+# The toolbar and location bar ARE supported; the tab strip answers separately.
+#
+# An earlier reading of the reference concluded this product had no toolbar, which was wrong: the row is so
+# quiet -- no fill, no border, no box around the address -- that it does not look like one, but it is there
+# and it is where you type a URL. That mistake is recorded in the comment this inserts, because it is an
+# easy one to reach twice.
+
+substitutions:
+  - description: |
+      Split the tab strip out of the shared answer and keep the toolbar and location bar supported.
+
+      Written as ONE substitution over the whole case group rather than two insertions, because every
+      individual line here repeats: `case WindowFeature::kFeatureToolbar:` appears four times in this file
+      and `kFeatureLocationBar` five, across the several functions that each answer for a window type. The
+      four-line group is what identifies this one, and the count proves it.
+    regex:
+      pattern: "    case WindowFeature::kFeatureTabStrip:\n    case WindowFeature::kFeatureToolbar:\n    case WindowFeature::kFeatureLocationBar:\n      return check_can_support || !IsFullscreen();\n"
+      replace: "    case WindowFeature::kFeatureTabStrip:\n      return check_can_support || !IsFullscreen();\n    case WindowFeature::kFeatureToolbar:\n    case WindowFeature::kFeatureLocationBar:\n      // Redrob DOES have a top row -- back, forward, reload, a magnifier and the address field, with\n      // nothing else in it. An earlier reading of the reference concluded there was no toolbar at all,\n      // which was wrong: the row is so quiet (no fill, no border, no box around the address) that it\n      // does not look like one, but it is there and it is where you type a URL.\n      //\n      // The row is the standard ToolbarView with its trailing half withdrawn rather than a new view: it\n      // is what owns back/forward/reload state, the omnibox, Ctrl+L, and the drop targets for a dragged\n      // link, and a hand-rolled row would have to re-earn all of it on every version bump. What we take\n      // out is done in ToolbarView itself -- the avatar (the sidebar owns it) and the app menu (the\n      // sidebar owns Settings).\n      return check_can_support || !IsFullscreen();\n"
+      count: 1

@@ -1,0 +1,16 @@
+# The bundled agent servers check an appcast for updates. Point those at Redrob's CDN; until we
+# publish one there the check 404s and the bundled server stays, instead of updating to a binary
+# the upstream project built.
+substitutions:
+  - description: Server appcasts come from Redrob's CDN.
+    regex:
+      pattern: "https://cdn.browseros.com/"
+      replace: "https://cdn.redrob.ai/browser/"
+      count: 4
+  # ---- upstream-branding sweep
+  - description: |
+      Log name of the agent server.
+    regex:
+      pattern: "    \"BrowserOS server\",\n"
+      replace: "    \"Redrob agent server\",\n"
+      count: 1

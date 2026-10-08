@@ -1,0 +1,19 @@
+# Two vertical-tab measurements, both taken off the reference rather than chosen.
+
+substitutions:
+  # ---- hunk 0 run 1: 1 removed, 5 added
+  - description: |
+      Row height 36: the reference's selected row measures y 366..397, so 32, plus the 4px of shadow room VerticalTabStyleViews holds back. Upstream's 30 made tab rows a step shorter than every row in redrob_sidebar_tokens.h, so the tab list kept a different rhythm from the bookmark list directly above it.
+    regex:
+      # pattern extended upward by 1 context line(s) to be unique (the removed block alone appears more than once)
+      pattern: "    case LayoutConstant::kVerticalTabHeight:\n      return 30;"
+      replace: "    case LayoutConstant::kVerticalTabHeight:\n      // Redrob: 32, measured from the reference's selected row (y 366..397 inclusive). Upstream's 30 left the\n      // tab rows a step shorter than every row in redrob_sidebar_tokens.h, so the tab list had a different\n      // rhythm from the bookmark list directly above it. Plus the 4px of shadow room that\n      // VerticalTabStyleViews holds back, so the pill itself is still 32.\n      return 36;"
+      count: 1
+  # ---- hunk 0 run 2: 1 removed, 3 added
+  - description: |
+      Horizontal inset 7, so a pill is 240 wide in the 254px column -- the reference's width -- and a tab's leading edge lands on the same line as a bookmark row's.
+    regex:
+      # pattern extended upward by 1 context line(s) to be unique (the removed block alone appears more than once)
+      pattern: "    case LayoutConstant::kVerticalTabStripHorizontalPadding:\n      return 12;"
+      replace: "    case LayoutConstant::kVerticalTabStripHorizontalPadding:\n      // Redrob: 7, so a tab's pill is 240 wide in the 254px column -- the reference's pill runs x 6..245.\n      // It also puts a tab's leading edge on the same line as a bookmark row's, which upstream's 12 did not.\n      return 7;"
+      count: 1

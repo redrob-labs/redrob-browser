@@ -1,0 +1,10 @@
+# The browser target depends on ours.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 1 added
+  - description: |
+      The dependency.
+    regex:
+      pattern: "      \"//chrome/browser/profiles:profile_io_data\","
+      replace: "    \"//chrome/browser/redrob:sidecar\",\n      \"//chrome/browser/profiles:profile_io_data\","
+      count: 1

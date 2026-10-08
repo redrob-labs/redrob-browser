@@ -1,0 +1,10 @@
+# The state this product's sidebar adds to the upstream enum.
+
+substitutions:
+  # ---- hunk 0 run 1: 1 removed, 4 added
+  - description: |
+      The addition.
+    regex:
+      pattern: "inline constexpr int kVerticalTabStripDefaultUncollapsedWidth = 240;"
+      replace: "// Redrob: 254, measured off the reference -- the column's tint ends at x=253. Every row metric in\n// redrob_sidebar_tokens.h was derived at this width, so 240 made the rows correct in proportion and\n// wrong in absolute size. The user can still drag it; this is only where it starts.\ninline constexpr int kVerticalTabStripDefaultUncollapsedWidth = 254;"
+      count: 1

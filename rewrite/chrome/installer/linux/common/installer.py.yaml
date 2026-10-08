@@ -117,3 +117,76 @@ substitutions:
                 repo_config_regex = f"deb (\\[arch=[^]]*\\b{arch}\\b[^]]*\\]"
                 repo_config_regex += f"[[:space:]]*) https?://{escaped}"
       count: 1
+
+  - description: |
+      One shared name for where the agent server lives, used by both the artifact list and the strip check
+      below, so the exemption can never name a different file from the one that is packaged.
+    regex:
+      pattern: |
+        SANDBOX = 0o4755
+      replace: |
+        SANDBOX = 0o4755
+
+
+        # Redrob: where the build puts the agent server, relative to $root_out_dir and to the install dir alike.
+        AGENT_SERVER_BINARY = "BrowserOSServer/default/resources/bin/browseros_server"
+      count: 1
+
+  - description: |
+      Package the agent server. The build copies it to $root_out_dir/BrowserOSServer and the browser launches
+      it from the install dir, but upstream's artifact list never named it, so the .deb installed and every
+      agent surface then sat on "Bundled server unavailable".
+    regex:
+      pattern: |
+        "MEIPreload/preloaded_data.pb",
+                            ArtifactType.RESOURCE,
+                            StandardPermissions.REGULAR,
+                        )
+                    )
+
+                return artifacts
+      replace: |
+        "MEIPreload/preloaded_data.pb",
+                            ArtifactType.RESOURCE,
+                            StandardPermissions.REGULAR,
+                        )
+                    )
+
+                # Redrob: the agent server the side panel talks to. The build copies it to
+                # $root_out_dir/BrowserOSServer and the browser launches it from <install_dir>/BrowserOSServer, but
+                # upstream's list never named it, so a package installed fine and then every agent surface sat on
+                # "Bundled server unavailable". Not optional: a package without it is a browser without its agent.
+                # The tree is copied as a DIRECTORY (which resets every file to 0644), then the binary again with its
+                # exec bit. strip stays False: the server is a self-contained bun executable and stripping corrupts it.
+                server_dir = "BrowserOSServer"
+                server_bin = AGENT_SERVER_BINARY
+                artifacts.append(
+                    Artifact(server_dir, server_dir, ArtifactType.DIRECTORY))
+                artifacts.append(
+                    Artifact(
+                        server_bin,
+                        server_bin,
+                        ArtifactType.RESOURCE,
+                        StandardPermissions.EXECUTABLE,
+                    )
+                )
+
+                return artifacts
+      count: 1
+
+  - description: |
+      Exempt exactly that one binary from the unstripped-ELF gate: a bun single-file executable carries its
+      program in the ELF's trailing bytes, which strip(1) cuts off. Nothing else is exempt.
+    regex:
+      pattern: |
+        if "not stripped" in output:
+                                unstripped.append(path)
+      replace: |
+        if "not stripped" in output and not str(path).endswith(
+                                AGENT_SERVER_BINARY
+                            ):
+                                # Redrob: the agent server is exempt, by its exact path only. It is a bun
+                                # single-file executable whose JS payload lives in the ELF's trailing bytes,
+                                # so strip(1) would cut the program out of it. Nothing else is exempt.
+                                unstripped.append(path)
+      count: 1

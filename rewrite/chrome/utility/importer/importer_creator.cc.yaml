@@ -1,0 +1,17 @@
+# Create the Chromium-family importer for the new type.
+
+substitutions:
+  # ---- hunk 0 run 1: 0 removed, 1 added
+  - description: |
+      The header.
+    regex:
+      pattern: "#include \"chrome/utility/importer/firefox_importer.h\""
+      replace: "#include \"chrome/utility/importer/chromium_importer.h\"\n#include \"chrome/utility/importer/firefox_importer.h\""
+      count: 1
+  # ---- hunk 1 run 2: 0 removed, 2 added
+  - description: |
+      The case in the factory.
+    regex:
+      pattern: "#if !BUILDFLAG(IS_CHROMEOS)"
+      replace: "    case user_data_importer::TYPE_CHROMIUM_BASED:\n      return new redrob::ChromiumImporter();\n#if !BUILDFLAG(IS_CHROMEOS)"
+      count: 1

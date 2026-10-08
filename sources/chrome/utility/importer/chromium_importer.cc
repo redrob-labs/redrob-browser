@@ -241,10 +241,14 @@ void ChromiumImporter::ImportHistory() {
   }
 
   // Typed and visited URLs, most recent first, hidden rows excluded. `hidden` is how Chromium marks
-  // subframe navigations and other things the user never chose to visit.
+  // subframe navigations and other things the user never chose to visit. A row with no visit time is
+  // excluded too: Chromium keeps URL rows whose visits have all expired or arrived by sync with
+  // last_visit_time 0, and history's AddPagesWithDetails requires a real time -- a debug-checked build
+  // crashed on the first such row, and a shipped one would file it as visited in 1601.
   static constexpr char kQuery[] =
       "SELECT url, title, visit_count, typed_count, last_visit_time, hidden "
-      "FROM urls WHERE hidden = 0 ORDER BY last_visit_time DESC LIMIT ?";
+      "FROM urls WHERE hidden = 0 AND last_visit_time > 0 "
+      "ORDER BY last_visit_time DESC LIMIT ?";
   sql::Statement statement(db.GetUniqueStatement(kQuery));
   statement.BindInt(0, kMaxHistoryRows);
 
@@ -262,6 +266,9 @@ void ChromiumImporter::ImportHistory() {
     row.visit_count = statement.ColumnInt(2);
     row.typed_count = statement.ColumnInt(3);
     row.last_visit = FromChromiumTime(statement.ColumnInt64(4));
+    if (row.last_visit.is_null()) {
+      continue;  // The query already excludes these; this holds if the column ever reads back <= 0.
+    }
     row.hidden = false;
     rows.push_back(std::move(row));
   }

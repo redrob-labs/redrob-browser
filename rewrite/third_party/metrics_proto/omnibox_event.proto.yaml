@@ -1,0 +1,22 @@
+# PA-5. The metrics provider id for the address bar's agent row.
+#
+# 36 is the next free ordinal in ProviderType: TAB_GROUP_PROVIDER = 35 is the current last,
+# MEASURED by reading only that enum's block rather than the whole file -- the file holds
+# several enums whose numbers run independently, and the first count taken across all of them
+# gave a wrong answer.
+#
+# A Chromium uprev that adds its own provider takes 36, and this rule's count=1 on the unique
+# `TAB_GROUP_PROVIDER = 35;` line will then FAIL rather than silently reusing the number --
+# which matters more here than elsewhere, because a reused proto ordinal mixes two providers'
+# metrics together with nothing to notice it.
+#
+# This is a THIRD-PARTY proto and editing it is a real cost, not a free line. It is accepted
+# because the alternative is worse: `AsOmniboxEventProviderType` has to return something for
+# every Type, and returning another provider's id would attribute our rows to that provider
+# in every omnibox metric.
+substitutions:
+  - description: Add the Redrob agent provider id to the omnibox metrics ProviderType enum.
+    regex:
+      pattern: "    TAB_GROUP_PROVIDER = 35;\n"
+      replace: "    TAB_GROUP_PROVIDER = 35;\n\n    // Hands what the user typed to the agent instead of searching for it.\n    REDROB_AGENT = 36;\n"
+      count: 1
