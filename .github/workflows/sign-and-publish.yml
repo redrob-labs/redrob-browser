@@ -193,9 +193,9 @@ jobs:
             --identity "$SIGNING_IDENTITY" \
             --disable-packaging \
             --notarize staple \
-            --notary-arg --key --notary-arg "$APPLE_API_KEY_PATH" \
-            --notary-arg --key-id --notary-arg "$APPLE_API_KEY" \
-            --notary-arg --issuer --notary-arg "$APPLE_API_ISSUER"
+            --notary-arg=--key --notary-arg="$APPLE_API_KEY_PATH" \
+            --notary-arg=--key-id --notary-arg="$APPLE_API_KEY" \
+            --notary-arg=--issuer --notary-arg="$APPLE_API_ISSUER"
 
       - name: verify the signature, the ticket and Gatekeeper
         # Three checks, not one. codesign says it is signed; stapler says the notarization ticket is actually
