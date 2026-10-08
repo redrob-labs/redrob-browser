@@ -53,13 +53,13 @@ function render() {
 }
 
 describe('AddProviderSection', () => {
-  it('offers Redrob Code right after Codex in the coding agents', () => {
+  it('offers Redrob Code first in the coding agents', () => {
     const html = render()
     const codex = html.indexOf('>Codex<')
     const redrobCode = html.indexOf('>Redrob Code<')
-    expect(codex).toBeGreaterThan(-1)
-    expect(redrobCode).toBeGreaterThan(codex)
-    expect(redrobCode).toBeLessThan(html.indexOf('Custom ACP agent'))
+    expect(redrobCode).toBeGreaterThan(-1)
+    expect(redrobCode).toBeLessThan(codex)
+    expect(redrobCode).toBeLessThan(html.indexOf('>Claude Code<'))
   })
 
   it('offers Redrob Console as an API-key provider', () => {

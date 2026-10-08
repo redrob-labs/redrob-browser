@@ -8,6 +8,7 @@ import { homedir } from 'node:os'
 import type { AcpAgentType } from '@browseros/shared/schemas/agent'
 import { type AgentProbeResult, probeAgent as runProbe } from 'acp-probe'
 import { resolveAcpSpawnCommand } from '../../../lib/agents/host-acp/launcher'
+import { stderrSaysCommandNotFound } from '../../../lib/agents/host-acp/redrob-engine'
 import { getBrowserosDir } from '../../../lib/browseros-dir'
 import { logger } from '../../../lib/logger'
 
@@ -94,7 +95,32 @@ export async function probeAcpAgent(
     authPolicy: 'skip',
     timeoutMs,
   })
-  return normalizeProbeResult(result)
+  const normalized = normalizeProbeResult(result)
+  // A program that is not installed reaches us as an agent that "crashed before initialize", because a shell
+  // starts, fails to find it and exits 1. Say what actually happened, and for Redrob Code where to get it.
+  if (
+    result.error?.code === 'agent_crashed' &&
+    stderrSaysCommandNotFound(result.error.stderr)
+  ) {
+    normalized.error = {
+      code: 'agent_not_found',
+      message: commandNotFoundMessage(input.command),
+    }
+  }
+  return normalized
+}
+
+export const REDROB_CODE_RELEASES_URL =
+  'https://github.com/redrob-labs/redrob-code/releases/latest'
+
+function commandNotFoundMessage(command: string | undefined): string {
+  const program = command?.trim().split(/\s+/)[0] ?? ''
+  if (program === 'redrob') {
+    return `Redrob Code is not installed on this computer. Install it from ${REDROB_CODE_RELEASES_URL}, then try again.`
+  }
+  return program
+    ? `"${program}" was not found on this computer. Install it, or use its full path in the command.`
+    : 'The agent command was not found on this computer.'
 }
 
 // Codex ACP versions encode effort as either model[effort] or model/effort.
