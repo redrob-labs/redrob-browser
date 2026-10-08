@@ -12,7 +12,6 @@
 
 #include "base/functional/bind.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/navigator/browser_navigator.h"
@@ -27,7 +26,6 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tab_search_bubble_host.h"
 #include "chrome/common/webui_url_constants.h"
-#include "components/bookmarks/browser/bookmark_node.h"
 #include "components/saved_tab_groups/public/saved_tab_group.h"
 #include "components/saved_tab_groups/public/types.h"
 #include "components/vector_icons/vector_icons.h"
@@ -62,10 +60,8 @@ namespace redrob {
 namespace {
 
 // The sidebar is 240px by default and can be dragged down to 126, so the list is capped rather than
-// scrolled: a long bookmark bar would otherwise push the tab list off the bottom, and the tabs are what
+// scrolled: a long chat history would otherwise push the tab list off the bottom, and the tabs are what
 // the column is primarily for.
-constexpr size_t kMaxBookmarkRows = 8;
-// Same reasoning as the bookmark cap: the column is 240px and the tab list must stay visible.
 constexpr size_t kMaxChatRows = 6;
 
 // Workspace menu command ids that are NOT an index into `menu_workspace_ids_`.
@@ -119,7 +115,7 @@ std::unique_ptr<views::Label> MakeEmptyNote(int message_id) {
 
 // THE one place a sidebar row is built.
 //
-// Every row -- a bookmark, a chat -- comes from here, so a row cannot disagree with the tokens by being
+// Every row -- a chat, the foot's Settings row -- comes from here, so a row cannot disagree with the tokens by being
 // constructed at a call site that forgot one of them. That is the whole point of having tokens: before this,
 // each site set its own alignment and min-height and inherited everything else from upstream's defaults,
 // which is why the measured left edge was 23px against the reference's 15 and the text was #1f1f1f against
@@ -137,7 +133,7 @@ std::unique_ptr<views::LabelButton> MakeRow(views::Button::PressedCallback callb
   row->SetTextColor(views::Button::STATE_NORMAL, sidebar_tokens::kRowForeground);
   row->SetTextColor(views::Button::STATE_HOVERED, sidebar_tokens::kRowForeground);
   row->SetImageLabelSpacing(sidebar_tokens::kFaviconLabelSpacing);
-  // A row is one line. A bookmark title or a task prompt is arbitrarily long, so the choice is between
+  // A row is one line. A task prompt is arbitrarily long, so the choice is between
   // eliding and wrapping, and wrapping would break the rhythm the tokens exist to hold. Set through the
   // button rather than its label, which is protected -- LabelButton owns that and exposes the behaviour.
   row->SetElideBehavior(gfx::ELIDE_TAIL);
@@ -256,11 +252,6 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
 
   header_ = header;
 
-  bookmarks_heading_ = AddChildView(MakeHeading(IDS_REDROB_SIDEBAR_BOOKMARKS));
-  bookmarks_list_ = AddChildView(std::make_unique<views::View>());
-  bookmarks_list_->SetLayoutManager(std::make_unique<views::BoxLayout>(
-      views::BoxLayout::Orientation::kVertical, gfx::Insets(), sidebar_tokens::kRowSpacing));
-
   chats_heading_ = AddChildView(MakeHeading(IDS_REDROB_SIDEBAR_CHATS));
   chats_list_ = AddChildView(std::make_unique<views::View>());
   chats_list_->SetLayoutManager(std::make_unique<views::BoxLayout>(
@@ -304,14 +295,6 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
     }
   }
 
-  if (browser_) {
-    bookmarks::BookmarkModel* model =
-        BookmarkModelFactory::GetForBrowserContext(browser_->GetProfile());
-    if (model) {
-      bookmark_observation_.Observe(model);
-      RebuildBookmarks();
-    }
-  }
 }
 
 RedrobSidebarSections::~RedrobSidebarSections() {
@@ -426,117 +409,9 @@ void RedrobSidebarSections::SetCollapsed(bool collapsed) {
   compose_button_->SetVisible(!collapsed);
   chats_heading_->SetVisible(!collapsed);
   chats_list_->SetVisible(!collapsed);
-  bookmarks_heading_->SetVisible(!collapsed);
-  bookmarks_list_->SetVisible(!collapsed);
   tabs_heading_->SetVisible(!collapsed);
   new_tab_row_->SetVisible(!collapsed);
   InvalidateLayout();
-}
-
-void RedrobSidebarSections::BookmarkModelChanged() {
-  RebuildBookmarks();
-}
-
-void RedrobSidebarSections::BookmarkModelLoaded(bool ids_reassigned) {
-  RebuildBookmarks();
-}
-
-void RedrobSidebarSections::BookmarkNodeFaviconChanged(
-    const bookmarks::BookmarkNode* node) {
-  // The favicon is loaded lazily and asynchronously: GetFavicon STARTS the fetch and returns an empty image,
-  // and this is the only callback that says it finished. BaseBookmarkModelObserver overrides it to do nothing
-  // on the grounds that most observers do not care about favicons -- which is true of most observers and is
-  // exactly wrong for a list whose rows are identified by their mark before their name.
-  //
-  // Verified rather than assumed: with a favicon served, fetched and written to the Favicons database, both
-  // bookmark rows still measured #7c8390 -- the muted role that tints the fallback globe -- because nothing
-  // ever asked the row to draw again.
-  //
-  // A full rebuild rather than repainting the one row. Every favicon arrives once, early, and the list is a
-  // handful of rows; a targeted update would mean holding a node-to-view map whose only job is to save a
-  // rebuild the user cannot perceive.
-  RebuildBookmarks();
-}
-
-void RedrobSidebarSections::RebuildBookmarks() {
-  bookmarks_list_->RemoveAllChildViews();
-  if (!browser_) {
-    return;
-  }
-  bookmarks::BookmarkModel* model =
-      BookmarkModelFactory::GetForBrowserContext(browser_->GetProfile());
-  if (!model || !model->loaded()) {
-    return;
-  }
-
-  size_t shown = 0;
-  auto add_children = [&](const bookmarks::BookmarkNode* parent) {
-    if (!parent) {
-      return;
-    }
-    for (const auto& child : parent->children()) {
-      if (shown >= kMaxBookmarkRows) {
-        break;
-      }
-      const bookmarks::BookmarkNode* node = child.get();
-      // Folders are listed but not opened: a folder needs a menu, and a row that silently does nothing
-      // when clicked is worse than one that is plainly not a link yet.
-      auto* row = bookmarks_list_->AddChildView(MakeRow(
-          node->is_url() ? base::BindRepeating(&RedrobSidebarSections::OpenBookmark,
-                                               base::Unretained(this), node->url())
-                         : views::Button::PressedCallback(),
-          std::u16string(node->GetTitle())));
-      row->SetEnabled(node->is_url());
-      // The favicon is what makes this list scannable -- the reference identifies a bookmark by its mark
-      // before its name. GetFavicon starts the load if it has not happened; the result arrives as a model
-      // change, which lands back here and rebuilds, so there is no separate callback to hold.
-      if (node->is_url()) {
-        const gfx::Image& favicon = model->GetFavicon(node);
-        if (!favicon.IsEmpty()) {
-          // Sized by the token rather than by whatever the site shipped: favicons arrive at 16, 32 and 48,
-          // and an unsized ImageModel makes the row as tall as the biggest one it happens to hold.
-          row->SetImageModel(
-              views::Button::STATE_NORMAL,
-              ui::ImageModel::FromImageSkia(gfx::ImageSkiaOperations::CreateResizedImage(
-                  favicon.AsImageSkia(), skia::ImageOperations::RESIZE_BEST,
-                  gfx::Size(sidebar_tokens::kFaviconSize, sidebar_tokens::kFaviconSize))));
-        } else {
-          // No favicon yet, but the row still has to hold its place: without a reserved box the label starts
-          // at the icon's position and jumps 24px sideways the moment the favicon loads.
-          row->SetImageModel(views::Button::STATE_NORMAL,
-                             ui::ImageModel::FromVectorIcon(
-                                 vector_icons::kGlobeIcon, sidebar_tokens::kMutedForeground,
-                                 sidebar_tokens::kFaviconSize));
-        }
-      }
-      ++shown;
-    }
-  };
-  // Every permanent root, not just the bookmarks bar. The empty note below tells the user to press
-  // Ctrl+D, and in this build that bubble saves into "Other bookmarks" -- so reading the bar alone made
-  // this section answer its own instruction with "nothing here". Measured: a profile whose Bookmarks file
-  // held two Ctrl+D entries drew the empty note, and the list only filled once an import created a folder
-  // inside the bar. Order is bar, other, mobile so the bar keeps the top of a capped list.
-  add_children(model->bookmark_bar_node());
-  add_children(model->other_node());
-  add_children(model->mobile_node());
-  // Nothing to show is a state this section has to draw, not one it can leave blank. Placed after the
-  // model->loaded() guard above deliberately: while the model is still loading the section is not empty,
-  // it is unknown, and telling the user to press Ctrl+D would answer a question nobody has asked yet.
-  if (shown == 0) {
-    bookmarks_list_->AddChildView(MakeEmptyNote(IDS_REDROB_SIDEBAR_BOOKMARKS_EMPTY));
-  }
-  InvalidateLayout();
-}
-
-void RedrobSidebarSections::OpenBookmark(GURL url) {
-  if (!browser_ || !url.is_valid()) {
-    return;
-  }
-  // Foreground, unlike an agent's tab: this one the user asked for by clicking it.
-  NavigateParams params(browser_, url, ui::PAGE_TRANSITION_AUTO_BOOKMARK);
-  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-  Navigate(&params);
 }
 
 void RedrobSidebarSections::ShowTabSearch() {
