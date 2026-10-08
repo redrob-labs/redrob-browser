@@ -4,6 +4,41 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
+## 0.1.6 — 2026-10-08
+
+**Redrob Code is the agent we recommend, and the browser now says so.** The onboarding "Set up your agent"
+step opens with a Redrob Code card marked Recommended, and in Settings it leads the coding agents. When the
+engine is not installed, connecting it no longer reports a crash: the launcher looks in the places our
+installers put the engine, and if it is not there the message says where to get it.
+
+**Connect with Redrob Console.** The provider form can now sign in to the console by device code: the
+browser shows the code, opens the approval page, and the workspace key the console issues lands in the form.
+The device code never leaves the agent server; the extension only holds an opaque handle.
+
+**The assistant can offer replies.** After an answer, up to three short replies in your voice appear as chips
+under its last message, in the side panel and the new-tab chat. Clicking one sends it. An external agent that
+ends its answer with an `[OPTIONS: a | b | c]` line gets the same chips instead of raw brackets.
+
+**The vertical-tabs column no longer draws your bookmarks twice.** It listed them under its own heading
+while the bookmark bar showed the same entries, pushing the tab list down by up to eight rows. The column
+keeps the workspace switcher, chats and tabs; the bar keeps bookmarks.
+
+**Windows.** A branded setup window installs the product as "Redrob Browser" — the Start menu, Settings >
+Apps and the taskbar all said the bare company name before. Setup can also install Redrob Code, off by
+default, verified against that release's checksums; a Redrob Code failure never fails the browser install.
+Uninstalling opens a matching branded window instead of Chromium's plain dialog. A reinstall opens the
+browser afterwards and exits cleanly, where before it opened nothing and died on the way out. The engine
+launches on Windows, and `chromium_src` overrides compile there too.
+
+**Importing from Chrome** skips history rows that carry no visit time instead of failing the import.
+
+### Under the hood
+
+A fresh build machine gets every checkout input it needs: the pinned Sparkle and WinSparkle binaries are
+fetched, the published agent extension is bundled when none is built, and `sync --no-history` exists for
+machines that only build. macOS updates are signed with Redrob's key and an appcast is published; Windows
+verifies WinSparkle updates against the same key. The agent extension is at 0.0.163.
+
 ## 0.1.5 — 2026-09-28
 
 **Five sign-in strings no longer ask the user to sign in to something that does not exist.** In v0.1.4
