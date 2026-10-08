@@ -1,0 +1,22 @@
+# Release signing: do not ask Gatekeeper before the notarization ticket exists.
+#
+# sign_chrome.py validates the freshly signed app with `spctl --assess` right after codesign and BEFORE
+# `--notarize`. Current macOS answers "rejected / source=Unnotarized Developer ID" for every Developer ID
+# app that has no ticket yet, so on a release runner that assessment can never pass -- the first macOS
+# signing run of v0.1.6 died exactly there, with codesign --verify already green.
+#
+# Gatekeeper is still consulted: .github/workflows/sign-and-publish.yml runs `spctl --assess` itself after
+# `--notarize staple` has attached the ticket, which is the moment the answer means something.
+substitutions:
+  - description: Skip the driver's pre-notarization Gatekeeper assessment for the Chromium-branded config.
+    insert_after:
+      anchor: '        return None'
+      count: 1
+      lines: |
+
+        @property
+        def run_spctl_assess(self):
+            # Redrob: assessed by the release workflow AFTER notarization instead; see
+            # rewrite/chrome/installer/mac/signing/chromium_config.py.yaml.
+            return False
+      indent: 4
