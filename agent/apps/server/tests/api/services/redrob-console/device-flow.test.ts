@@ -38,13 +38,51 @@ describe('RedrobConsoleDeviceFlow', () => {
     const { calls, fetchImpl } = fakeConsole([])
     const flow = new RedrobConsoleDeviceFlow({ baseUrl: BASE, fetchImpl })
     const start = await flow.start()
-    expect(calls[0]?.body).toEqual({ product: 'browser' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.body).toEqual({ product: 'redrob-browser' })
     expect(start.userCode).toBe('ABCD-EFGH')
     expect(start.verificationUri).toBe(
       'https://console.redrob.ai/device?code=ABCD-EFGH',
     )
     expect(start.intervalMs).toBe(5000)
     expect(JSON.stringify(start)).not.toContain('secret-device-code')
+  })
+
+  it('falls back to the legacy id only when an older console refuses the browser id', async () => {
+    const calls: unknown[] = []
+    const fetchImpl = async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}'))
+      calls.push(body)
+      // The shape a console without `redrob-browser` answers: ValidationPipe's 400.
+      if (body.product === 'redrob-browser') {
+        return Response.json(
+          { statusCode: 400, message: ['product must be one of the following values: ...'] },
+          { status: 400 },
+        )
+      }
+      return Response.json({
+        deviceCode: 'secret-device-code',
+        userCode: 'ABCD-EFGH',
+        verificationUri: 'https://console.redrob.ai/device',
+        expiresIn: 600,
+        interval: 5,
+      })
+    }
+    const flow = new RedrobConsoleDeviceFlow({ baseUrl: BASE, fetchImpl })
+    const start = await flow.start()
+    expect(calls).toEqual([{ product: 'redrob-browser' }, { product: 'browser' }])
+    expect(start.userCode).toBe('ABCD-EFGH')
+  })
+
+  it('does not retry under the legacy id when the console fails for another reason', async () => {
+    const calls: unknown[] = []
+    const fetchImpl = async (_url: string, init?: RequestInit) => {
+      calls.push(JSON.parse(String(init?.body ?? '{}')))
+      return Response.json({ message: 'busy' }, { status: 503 })
+    }
+    const flow = new RedrobConsoleDeviceFlow({ baseUrl: BASE, fetchImpl })
+    await expect(flow.start()).rejects.toThrow('would not start')
+    expect(calls).toHaveLength(1)
   })
 
   it('polls pending, then returns the key once and forgets the handle', async () => {

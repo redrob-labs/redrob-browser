@@ -21,10 +21,13 @@ import { randomUUID } from 'node:crypto'
 
 export const REDROB_CONSOLE_API = 'https://console.redrob.ai/api/backend/v1'
 /**
- * The console's product id for this client. `browser` is the id the console registered for the
- * Redrob browser surface; the console names the connection after it on its approval page.
+ * The console's product id for this client. `redrob-browser` is the browser's own id, shown as
+ * "Redrob Browser" on the approval page. `browser` belongs to the extension (shown as "Redrob
+ * Extension") and is used only when a console that predates `redrob-browser` refuses it with 400,
+ * so connecting keeps working while the console rolls out.
  */
-const DEVICE_PRODUCT = 'browser'
+const DEVICE_PRODUCT = 'redrob-browser'
+const LEGACY_DEVICE_PRODUCT = 'browser'
 
 const FALLBACK_EXPIRES_MS = 10 * 60_000
 const MAX_EXPIRES_MS = 30 * 60_000
@@ -96,13 +99,19 @@ export class RedrobConsoleDeviceFlow {
 
   async start(): Promise<DeviceStart> {
     this.sweep()
-    const response = await this.post('/device/authorize', {
-      product: DEVICE_PRODUCT,
-    }).catch(() => {
+    const unreachable = () => {
       throw new Error(
         'Could not reach console.redrob.ai to start the connection.',
       )
-    })
+    }
+    let response = await this.post('/device/authorize', {
+      product: DEVICE_PRODUCT,
+    }).catch(unreachable)
+    if (response.status === 400) {
+      response = await this.post('/device/authorize', {
+        product: LEGACY_DEVICE_PRODUCT,
+      }).catch(unreachable)
+    }
     if (!response.ok)
       throw new Error('console.redrob.ai would not start the connection.')
     const body = await readJson(response)

@@ -68,10 +68,35 @@ Segoe UI Variable.
 ## Demo flags
 
 - `redrob_setup.exe --demo` — runs the whole UI sequence on a timer with **no
-  payload** (Preparing → Installing → Opening → close). Safe to run anywhere.
+  payload** and no download, after you press Install on the first screen
+  (Preparing → [Installing Redrob Code] → Installing → Opening → close). Safe to
+  run anywhere.
 - `redrob_setup.exe --demo-error` — shows the error state immediately.
+- `redrob_setup.exe --demo-code-error --with-redrob-code` — the demo, ending on
+  the "Redrob Code was not installed" screen.
 - `redrob_setup.exe --demo-uninstall` — the uninstall window (confirm, removing,
   removed) on a timer after you press Uninstall. Removes nothing.
+- `--with-redrob-code` — start with the Redrob Code box ticked. Still a choice.
+
+## Redrob Code (opt-in)
+
+The first screen asks before anything is installed. "Also install Redrob Code"
+is **off** by default. When ticked, Redrob Code goes in first, so the browser
+opens already able to find it:
+
+1. Download `SHA256SUMS` and `redrob-code-x64-setup.exe` from the latest
+   [redrob-code release](https://github.com/redrob-labs/redrob-code/releases/latest).
+2. Refuse the installer unless its SHA-256 matches the line for it in `SHA256SUMS`.
+3. Run it silently for this user: `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER /TASKS=addtopath`.
+   It installs to `%LOCALAPPDATA%\Redrob\bin`, which the browser's engine lookup
+   reads directly.
+
+A Redrob Code failure never fails the browser install; the last screen says why
+and waits for Close. When Redrob Code is already installed (that folder,
+`%USERPROFILE%\.redrob\bin`, or `PATH`), the first screen says so instead.
+
+The checksum proves the file is the one the release lists. It does not prove who
+published the release; that needs Redrob Code's installer to be signed.
 
 ## Uninstall
 
@@ -87,7 +112,10 @@ The uninstall window asks first, with an "Also delete your browsing data"
 checkbox, then runs Chromium's `setup.exe --uninstall --force-uninstall`
 (plus `--delete-profile` when ticked). `--force-uninstall` skips Chromium's own
 dialog and closes running browser windows. When it is done, a hidden PowerShell
-waits for the window to exit and deletes `Redrob\Uninstall`.
+waits for the window to exit and deletes `redrob_uninstall.exe`, then the
+folder only if it is empty. The folder is shared: Redrob Code's own uninstaller
+lives in `Redrob\uninstall`, the same folder on Windows, so deleting the whole
+folder would leave Redrob Code impossible to uninstall.
 
 Limit: an install or update that bypasses this setup (running `mini_installer.exe`
 directly) rewrites `UninstallString` with Chromium's command, and the entry falls
