@@ -70,6 +70,28 @@ Segoe UI Variable.
 - `redrob_setup.exe --demo` — runs the whole UI sequence on a timer with **no
   payload** (Preparing → Installing → Opening → close). Safe to run anywhere.
 - `redrob_setup.exe --demo-error` — shows the error state immediately.
+- `redrob_setup.exe --demo-uninstall` — the uninstall window (confirm, removing,
+  removed) on a timer after you press Uninstall. Removes nothing.
+
+## Uninstall
+
+The same app, built without a payload, is the uninstaller. With `--payload`,
+`build.py` builds it first (`<out>/uninstall/redrob_uninstall.exe`) and embeds it
+in `redrob_setup.exe`. After a successful install the setup writes it to
+`%LOCALAPPDATA%\Redrob\Uninstall\` and points the Settings > Apps entry
+(`HKCU\...\Uninstall\Redrob`, `UninstallString`) at
+`redrob_uninstall.exe --uninstall`. Chromium's own command is kept in
+`RedrobChromiumUninstallString` on the same key.
+
+The uninstall window asks first, with an "Also delete your browsing data"
+checkbox, then runs Chromium's `setup.exe --uninstall --force-uninstall`
+(plus `--delete-profile` when ticked). `--force-uninstall` skips Chromium's own
+dialog and closes running browser windows. When it is done, a hidden PowerShell
+waits for the window to exit and deletes `Redrob\Uninstall`.
+
+Limit: an install or update that bypasses this setup (running `mini_installer.exe`
+directly) rewrites `UninstallString` with Chromium's command, and the entry falls
+back to Chromium's plain dialog until the next install through this setup.
 
 ## Packaging hook
 

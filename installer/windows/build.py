@@ -13,6 +13,11 @@ Usage:
 
 --payload is OPTIONAL: a demo-only build (no embedded installer) omits it and
 defines REDROB_NO_PAYLOAD. The resulting exe still runs --demo / --demo-error.
+
+With --payload the build makes two exes. First the payload-less one, written as
+<out>/uninstall/redrob_uninstall.exe: that IS the uninstaller (--uninstall). Then
+redrob_setup.exe, which embeds both the payload and that uninstaller, and installs
+the uninstaller after a successful install.
 """
 from __future__ import annotations
 
@@ -275,10 +280,29 @@ def main() -> None:
     parts = (ver.split(".") + ["0", "0", "0", "0"])[:4]
     ver_file = ",".join(parts)
 
-    # ---- compile the .rc ----
-    # Rather than pass fragile /D macros (RC's preprocessor treats backslashes in
-    # string macros as escapes, mangling Windows paths), generate a header the .rc
-    # includes. Paths use forward slashes, which RC accepts and which never escape.
+    if args.payload:
+        # The uninstaller first: the same app without a payload, embedded in the setup below.
+        uninstall_dir = out / "uninstall"
+        uninstall_dir.mkdir(exist_ok=True)
+        uninstaller = compile_app(env, uninstall_dir, "redrob_uninstall.exe", bg, lockup, font if have_font else None,
+                                  ver, ver_file, payload=None, uninstaller=None)
+        exe = compile_app(env, out, "redrob_setup.exe", bg, lockup, font if have_font else None,
+                          ver, ver_file, payload=Path(args.payload).resolve(), uninstaller=uninstaller)
+    else:
+        exe = compile_app(env, out, "redrob_setup.exe", bg, lockup, font if have_font else None,
+                          ver, ver_file, payload=None, uninstaller=None)
+    print(f"\nbuilt {exe}  {exe.stat().st_size // 1024} KB"
+          f"  (payload: {'yes' if args.payload else 'none'})")
+
+
+def compile_app(env, out: Path, exe_name: str, bg: Path, lockup: Path, font, ver: str, ver_file: str,
+                payload, uninstaller) -> Path:
+    """Compile redrob_setup.rc + redrob_setup.cpp into out/exe_name with the given embedded resources.
+
+    Rather than pass fragile /D macros (RC's preprocessor treats backslashes in string macros as escapes,
+    mangling Windows paths), generate a header the .rc includes. Paths use forward slashes, which RC accepts
+    and which never escape.
+    """
     def fwd(p) -> str:
         return str(p).replace("\\", "/")
 
@@ -294,19 +318,21 @@ def main() -> None:
     ]
     if ICON.exists():
         lines.append(f'#define REDROB_ICON_PATH "{fwd(ICON)}"')
-    if have_font:
+    if font:
         lines.append(f'#define REDROB_FONT_PATH "{fwd(font)}"')
-    if args.payload:
-        lines.append(f'#define REDROB_PAYLOAD_PATH "{fwd(Path(args.payload).resolve())}"')
+    if payload:
+        lines.append(f'#define REDROB_PAYLOAD_PATH "{fwd(payload)}"')
     else:
         lines.append("#define REDROB_NO_PAYLOAD 1")
+    if uninstaller:
+        lines.append(f'#define REDROB_UNINSTALLER_PATH "{fwd(uninstaller)}"')
     defs.write_text("\n".join(lines) + "\n", encoding="ascii")
 
     rc_cmd = ["rc.exe", "/nologo", f"/I{out}", f"/I{HERE}", f"/fo{res}", str(rc)]
     run_in_env(rc_cmd, env, str(HERE))
 
     # ---- compile + link the .cpp ----
-    exe = out / "redrob_setup.exe"
+    exe = out / exe_name
     obj = out / "redrob_setup.obj"
     cl_cmd = ["cl.exe", "/nologo", "/EHsc", "/O2", "/W3", "/MT", "/std:c++17",
               "/DUNICODE", "/D_UNICODE",
@@ -317,9 +343,8 @@ def main() -> None:
     run_in_env(cl_cmd, env, str(out))
 
     if not exe.exists():
-        sys.exit("link produced no redrob_setup.exe")
-    print(f"\nbuilt {exe}  {exe.stat().st_size // 1024} KB"
-          f"  (payload: {'yes' if args.payload else 'none'})")
+        sys.exit(f"link produced no {exe_name}")
+    return exe
 
 
 if __name__ == "__main__":

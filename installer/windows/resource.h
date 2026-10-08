@@ -6,6 +6,7 @@
 #define IDR_BACKGROUND_PNG   102  // pre-rendered brand background art (res/background.png)
 #define IDR_LOCKUP_PNG       103  // Redrob Browser product lockup, solid-mono-white (res/lockup.png)
 #define IDR_FONT_SANS        104  // Pretendard SemiBold, embedded (res/Pretendard-SemiBold.ttf)
+#define IDR_UNINSTALLER      106  // the payload-less build of this app, installed as the uninstaller
 
 // Application icon
 #define IDI_APPICON          105  // branding/icons/win/redrob.ico

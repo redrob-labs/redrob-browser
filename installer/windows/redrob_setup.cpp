@@ -27,10 +27,17 @@
 // update exits 0 and launches nothing, so after a success this app waits briefly
 // for the installer's own launch and starts the browser only if none appeared.
 //
+// Uninstall: the same binary, built without a payload, is the product's uninstaller. A successful install
+// writes it to %LOCALAPPDATA%\Redrob\Uninstall and points the Settings > Apps "Uninstall" entry at it, so
+// removal gets the same window: confirm (with "also delete browsing data"), progress, done. The removal
+// itself is still Chromium's: setup.exe --uninstall --force-uninstall [--delete-profile].
+//
 // Flags:
-//   --demo         run the whole UI sequence on a timer with NO payload.
-//   --demo-error   show the error state immediately.
-//   (no flag)      extract and run the embedded payload for real.
+//   --demo             run the whole install sequence on a timer with NO payload.
+//   --demo-error       show the error state immediately.
+//   --uninstall        remove Redrob Browser (what Settings > Apps runs).
+//   --demo-uninstall   the uninstall sequence on a timer, removing nothing.
+//   (no flag)          extract and run the embedded payload for real.
 
 #ifndef UNICODE
 #define UNICODE
@@ -64,6 +71,7 @@
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "advapi32.lib")
 
 namespace {
 
@@ -86,8 +94,15 @@ constexpr float kCaption = 44.0f;   // top drag strip height
 constexpr UINT_PTR kTickTimer = 1;
 constexpr UINT     kTickMs     = 16;   // ~60fps for the eased bar / fades
 constexpr UINT_PTR kPayloadMsgDone = (WM_APP + 1);
+constexpr UINT_PTR kUninstallMsgDone = (WM_APP + 2);
 
-enum class Stage { Preparing, Installing, Opening, Error };
+// Chromium setup.exe's uninstall results (chrome/installer/util/util_constants.h).
+constexpr DWORD kChromeNotInstalled = 15;
+constexpr DWORD kUninstallSuccessful = 19;
+constexpr DWORD kUninstallRequiresReboot = 29;
+
+enum class Stage { Preparing, Installing, Opening, Error, Confirm, Removing, Removed };
+enum class Mode { Install, Uninstall };
 
 // A tiny COM pointer so cleanup is not a maze of gotos. Move-only: a plain
 // memberwise copy would double-Release (and a function returning one by value
@@ -117,7 +132,7 @@ std::wstring g_statusOverride;
 // ---------------------------------------------------------------------------
 class SetupApp {
  public:
-  SetupApp(bool demo, bool demoError) : demo_(demo), demoError_(demoError) {}
+  SetupApp(bool demo, bool demoError, Mode mode) : demo_(demo), demoError_(demoError), mode_(mode) {}
 
   int Run(HINSTANCE hinst);
 
@@ -140,6 +155,13 @@ class SetupApp {
   DWORD RunPayload();
   void EnsureBrowserLaunched();
   bool ExtractPayload(std::wstring& outPath);
+  void InstallUninstaller();
+
+  // uninstall
+  static DWORD WINAPI UninstallThunk(LPVOID self);
+  DWORD RunUninstall();
+  void StartUninstall();
+  void ScheduleSelfCleanup();
 
   void SetStage(Stage s);
   void RequestClose(bool force);
@@ -149,6 +171,8 @@ class SetupApp {
   UINT dpi_ = 96;
   bool demo_ = false;
   bool demoError_ = false;
+  Mode mode_ = Mode::Install;
+  bool deleteData_ = false;   // the confirm screen's "also delete browsing data"
 
   // Direct2D / DirectWrite / WIC
   ComPtr<ID2D1Factory>        d2dFactory_;
@@ -176,7 +200,7 @@ class SetupApp {
   bool closing_ = false;
 
   // hit-tested button rects (device px), recomputed each paint
-  RECT rcMin_{}, rcClose_{}, rcRetry_{}, rcErrClose_{};
+  RECT rcMin_{}, rcClose_{}, rcRetry_{}, rcErrClose_{}, rcCheck_{};
   bool confirmingQuit_ = false;
 };
 
@@ -189,6 +213,9 @@ std::wstring StatusText(Stage s) {
     case Stage::Installing: return L"Installing\u2026";
     case Stage::Opening:    return L"Opening Redrob Browser\u2026";
     case Stage::Error:      return L"Something went wrong";
+    case Stage::Confirm:    return L"Uninstall Redrob Browser?";
+    case Stage::Removing:   return L"Removing Redrob Browser\u2026";
+    case Stage::Removed:    return L"Redrob Browser has been removed";
   }
   return L"";
 }
@@ -230,7 +257,8 @@ int SetupApp::Run(HINSTANCE hinst) {
 
   // Borderless (WS_POPUP). WS_THICKFRAME is kept out; a DWM shadow is attached
   // separately so a popup still casts one.
-  hwnd_ = CreateWindowExW(WS_EX_APPWINDOW, wc.lpszClassName, L"Redrob Browser Setup",
+  hwnd_ = CreateWindowExW(WS_EX_APPWINDOW, wc.lpszClassName,
+                          mode_ == Mode::Uninstall ? L"Uninstall Redrob Browser" : L"Redrob Browser Setup",
                           WS_POPUP, x, y, w, h, nullptr, nullptr, hinst, this);
   if (!hwnd_) return 2;
 
@@ -245,7 +273,9 @@ int SetupApp::Run(HINSTANCE hinst) {
   LayoutText();
 
   startTick_ = GetTickCount64();
-  if (demoError_) {
+  if (mode_ == Mode::Uninstall) {
+    SetStage(Stage::Confirm);
+  } else if (demoError_) {
     errorMessage_ = L"The installer could not be started. Please try again.";
     SetStage(Stage::Error);
   } else {
@@ -344,6 +374,24 @@ LRESULT SetupApp::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
     }
 
+    case kUninstallMsgDone: {
+      const DWORD code = (DWORD)wp;
+      if (code == kUninstallSuccessful || code == kUninstallRequiresReboot || code == kChromeNotInstalled) {
+        progressTarget_ = 1.0;
+        progress_ = 1.0;
+        SetStage(Stage::Removed);
+        if (!demo_) ScheduleSelfCleanup();
+      } else if (code == ERROR_FILE_NOT_FOUND) {
+        errorMessage_ = L"Redrob Browser's uninstaller could not be found.";
+        SetStage(Stage::Error);
+      } else {
+        errorMessage_ = L"Redrob Browser could not be removed (code " + std::to_wstring(code) +
+                        L"). Please try again.";
+        SetStage(Stage::Error);
+      }
+      return 0;
+    }
+
     case WM_GETDPISCALEDSIZE: return TRUE;
     case WM_DPICHANGED: {
       dpi_ = HIWORD(wp);
@@ -361,6 +409,17 @@ LRESULT SetupApp::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
       POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
       if (PtInRect(&rcClose_, pt)) { RequestClose(false); return 0; }
       if (PtInRect(&rcMin_, pt)) { ShowWindow(hwnd_, SW_MINIMIZE); return 0; }
+      if (stage_ == Stage::Confirm) {
+        if (PtInRect(&rcCheck_, pt)) { deleteData_ = !deleteData_; InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
+        if (PtInRect(&rcRetry_, pt)) { StartUninstall(); return 0; }       // "Uninstall"
+        if (PtInRect(&rcErrClose_, pt)) { RequestClose(true); return 0; }  // "Cancel"
+      }
+      if (stage_ == Stage::Removed && PtInRect(&rcRetry_, pt)) { RequestClose(true); return 0; }  // "Close"
+      if (stage_ == Stage::Error && mode_ == Mode::Uninstall && PtInRect(&rcRetry_, pt)) {
+        errorMessage_.clear();
+        SetStage(Stage::Confirm);  // back to the question, so a retry is still a choice
+        return 0;
+      }
       if (stage_ == Stage::Error && PtInRect(&rcRetry_, pt)) {
         // Retry: restart the sequence.
         errorMessage_.clear();
@@ -384,6 +443,12 @@ LRESULT SetupApp::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_KEYDOWN:
       if (wp == VK_ESCAPE) { RequestClose(false); return 0; }
+      if (stage_ == Stage::Confirm && wp == VK_SPACE) {
+        deleteData_ = !deleteData_;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+      }
+      if (stage_ == Stage::Confirm && wp == VK_RETURN) { StartUninstall(); return 0; }
       return 0;
 
     case WM_SYSKEYDOWN:
@@ -406,7 +471,10 @@ LRESULT SetupApp::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
 void SetupApp::RequestClose(bool force) {
   // While installing, Esc / close ask for confirmation first (do not abandon an
   // install silently). In demo and error states, close immediately.
-  bool installing = (stage_ == Stage::Installing || stage_ == Stage::Preparing) && !demo_ && !force;
+  bool installing = (stage_ == Stage::Installing || stage_ == Stage::Preparing) && !demo_ && !force &&
+                    mode_ == Mode::Install;
+  // A removal cannot be safely abandoned halfway; closing waits for it to finish.
+  if (stage_ == Stage::Removing && !force) return;
   if (installing) {
     int r = MessageBoxW(hwnd_,
         L"Redrob Browser is still installing. Stop the installation and quit?",
@@ -420,14 +488,20 @@ void SetupApp::SetStage(Stage s) {
   stage_ = s;
   g_statusOverride.clear();
   if (s == Stage::Opening) openedAt_ = GetTickCount64();
-  if (s == Stage::Error) KillTimer(hwnd_, kTickTimer);
+  if (s == Stage::Error || s == Stage::Confirm || s == Stage::Removed) KillTimer(hwnd_, kTickTimer);
   if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 void SetupApp::OnTick() {
   ULONGLONG elapsed = GetTickCount64() - startTick_;
 
-  if (demo_ && stage_ != Stage::Error) {
+  if (mode_ == Mode::Uninstall) {
+    // Removal reports no progress either: the same eased ramp, over ~12s, capped until setup.exe exits.
+    if (stage_ == Stage::Removing) {
+      double t = std::min(1.0, (GetTickCount64() - startTick_) / 12000.0);
+      progressTarget_ = 0.90 * (1 - (1 - t) * (1 - t));
+    }
+  } else if (demo_ && stage_ != Stage::Error) {
     // Scripted demo: Preparing (0-0.8s) -> Installing (0.8-5s, bar to ~0.9)
     //                -> Opening (5-6.5s, bar to 1.0) -> close.
     if (elapsed < 800) { if (stage_ != Stage::Preparing) SetStage(Stage::Preparing); progressTarget_ = 0.04; }
@@ -564,7 +638,61 @@ void SetupApp::OnPaint() {
   if (fmtStatus_) rt_->DrawTextW(status.c_str(), (UINT32)status.size(), fmtStatus_.p, statusRc,
                                  (stage_ == Stage::Error ? danger.p : ink.p));
 
-  if (stage_ != Stage::Error) {
+  ComPtr<ID2D1SolidColorBrush> black;
+  rt_->CreateSolidColorBrush(kRedrobBlack, &black);
+  // A white pill (the one prominent action, black type) and an outline pill, as the error state draws them.
+  auto pill = [&](float x, float y, float w, float h, const wchar_t* label, bool primary) {
+    D2D1_ROUNDED_RECT rr = {D2D1::RectF(x, y, x + w, y + h), h / 2, h / 2};
+    if (primary) rt_->FillRoundedRectangle(rr, white.p);
+    else rt_->DrawRoundedRectangle(rr, track.p, 1.4f);
+    if (fmtButton_) rt_->DrawTextW(label, (UINT32)wcslen(label), fmtButton_.p,
+                                   D2D1::RectF(x, y, x + w, y + h), primary ? black.p : ink.p);
+  };
+  const float pw = 120.0f, ph = 38.0f, py = H * 0.72f;
+
+  if (stage_ == Stage::Confirm) {
+    const wchar_t* body = L"Redrob Browser will close and be removed from this PC.";
+    if (fmtButton_) rt_->DrawTextW(body, (UINT32)wcslen(body), fmtButton_.p,
+                                   D2D1::RectF(60, H * 0.53f, W - 60, H * 0.59f), muted.p);
+    // "Also delete your browsing data": a 16px box and its label, centred together as one row.
+    const wchar_t* label = L"Also delete your browsing data";
+    float labelW = 200.0f;
+    ComPtr<IDWriteTextLayout> layout;
+    if (fmtButton_ && SUCCEEDED(dwFactory_->CreateTextLayout(label, (UINT32)wcslen(label), fmtButton_.p,
+                                                             W, 24.0f, &layout))) {
+      layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+      DWRITE_TEXT_METRICS tm{};
+      if (SUCCEEDED(layout->GetMetrics(&tm))) labelW = tm.widthIncludingTrailingWhitespace;
+    }
+    const float box = 16.0f, gap = 10.0f, rowY = H * 0.615f;
+    const float rowX = (W - (box + gap + labelW)) / 2.0f;
+    D2D1_ROUNDED_RECT boxRR = {D2D1::RectF(rowX, rowY, rowX + box, rowY + box), 4.0f, 4.0f};
+    if (deleteData_) {
+      rt_->FillRoundedRectangle(boxRR, blue.p);
+      rt_->DrawLine(D2D1::Point2F(rowX + 4.0f, rowY + 8.5f), D2D1::Point2F(rowX + 7.0f, rowY + 11.5f), white.p, 1.8f);
+      rt_->DrawLine(D2D1::Point2F(rowX + 7.0f, rowY + 11.5f), D2D1::Point2F(rowX + 12.5f, rowY + 5.0f), white.p, 1.8f);
+    } else {
+      rt_->DrawRoundedRectangle(boxRR, muted.p, 1.4f);
+    }
+    if (layout) rt_->DrawTextLayout(D2D1::Point2F(rowX + box + gap, rowY + box / 2 - 12.0f), layout.p, ink.p);
+    // The whole row is the hit target, not just the box.
+    rcCheck_ = ToDevice(rowX - 6.0f, rowY - 6.0f, box + gap + labelW + 12.0f, box + 12.0f);
+
+    const float ux = W / 2.0f - pw - 8.0f, cx = W / 2.0f + 8.0f;
+    rcRetry_ = ToDevice(ux, py, pw, ph);     // Uninstall
+    rcErrClose_ = ToDevice(cx, py, pw, ph);  // Cancel
+    pill(ux, py, pw, ph, L"Uninstall", true);
+    pill(cx, py, pw, ph, L"Cancel", false);
+  } else if (stage_ == Stage::Removed) {
+    const wchar_t* body = deleteData_ ? L"Your browsing data was deleted too."
+                                      : L"Your browsing data stays on this PC.";
+    if (fmtButton_) rt_->DrawTextW(body, (UINT32)wcslen(body), fmtButton_.p,
+                                   D2D1::RectF(60, H * 0.53f, W - 60, H * 0.59f), muted.p);
+    const float x = (W - pw) / 2.0f;
+    rcRetry_ = ToDevice(x, py, pw, ph);  // Close
+    rcErrClose_ = RECT{};
+    pill(x, py, pw, ph, L"Close", true);
+  } else if (stage_ != Stage::Error) {
     // ---- progress bar: thin, rounded, blue fill on a faint track -----------
     const float barW = W * 0.76f, barH = 6.0f;
     const float barX = (W - barW) / 2.0f, barY = H * 0.60f;
@@ -587,8 +715,6 @@ void SetupApp::OnPaint() {
     rcErrClose_ = ToDevice(cx, py, pw, ph);
     D2D1_ROUNDED_RECT pill = {D2D1::RectF(rx, py, rx + pw, py + ph), ph / 2, ph / 2};
     rt_->FillRoundedRectangle(pill, white.p);
-    ComPtr<ID2D1SolidColorBrush> black;
-    rt_->CreateSolidColorBrush(kRedrobBlack, &black);
     D2D1_RECT_F rtxt = D2D1::RectF(rx, py, rx + pw, py + ph);
     if (fmtButton_) rt_->DrawTextW(L"Retry", 5, fmtButton_.p, rtxt, black.p);
     // Close (outline)
@@ -692,6 +818,154 @@ void SetupApp::EnsureBrowserLaunched() {
   ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, appDir.c_str(), SW_SHOWNORMAL);
 }
 
+// %LOCALAPPDATA%, or empty.
+static std::wstring LocalAppData() {
+  wchar_t local[MAX_PATH];
+  if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, local))) return L"";
+  return local;
+}
+
+// The Settings > Apps entry Chromium's setup writes (install_static::GetUninstallRegistryPath()).
+constexpr wchar_t kArpKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Redrob";
+// Where we keep Chromium's own uninstall command once our window replaces it.
+constexpr wchar_t kSavedUninstallValue[] = L"RedrobChromiumUninstallString";
+
+static std::wstring ReadArpString(const wchar_t* value) {
+  wchar_t buf[2048];
+  DWORD size = sizeof(buf);
+  if (RegGetValueW(HKEY_CURRENT_USER, kArpKey, value, RRF_RT_REG_SZ, nullptr, buf, &size) != ERROR_SUCCESS)
+    return L"";
+  return buf;
+}
+
+static bool WriteArpString(const wchar_t* value, const std::wstring& data) {
+  return RegSetKeyValueW(HKEY_CURRENT_USER, kArpKey, value, REG_SZ, data.c_str(),
+                         (DWORD)((data.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+}
+
+// After a successful install: put the payload-less build of this app (embedded as IDR_UNINSTALLER) at
+// %LOCALAPPDATA%\Redrob\Uninstall and point Settings > Apps at it. Chromium's own command is kept beside it,
+// so the uninstaller knows which setup.exe does the removal. Best effort: if any step fails the entry keeps
+// Chromium's plain dialog, which still works.
+void SetupApp::InstallUninstaller() {
+  HRSRC res = FindResourceW(hinst_, MAKEINTRESOURCEW(IDR_UNINSTALLER), RT_RCDATA);
+  if (!res) return;
+  HGLOBAL h = LoadResource(hinst_, res);
+  void* data = LockResource(h);
+  DWORD sz = SizeofResource(hinst_, res);
+  const std::wstring local = LocalAppData();
+  if (!data || !sz || local.empty()) return;
+  if (ReadArpString(L"UninstallString").empty()) return;  // Chromium wrote no entry; nothing to redirect
+
+  const std::wstring dir = local + L"\\Redrob\\Uninstall";
+  CreateDirectoryW((local + L"\\Redrob").c_str(), nullptr);
+  CreateDirectoryW(dir.c_str(), nullptr);
+  const std::wstring exe = dir + L"\\redrob_uninstall.exe";
+  HANDLE f = CreateFileW(exe.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (f == INVALID_HANDLE_VALUE) return;
+  DWORD written = 0;
+  WriteFile(f, data, sz, &written, nullptr);
+  CloseHandle(f);
+  if (written != sz) { DeleteFileW(exe.c_str()); return; }
+
+  // Every install rewrites UninstallString with Chromium's command; save that one, never our own.
+  const std::wstring current = ReadArpString(L"UninstallString");
+  if (current.find(L"redrob_uninstall.exe") == std::wstring::npos) WriteArpString(kSavedUninstallValue, current);
+  WriteArpString(L"UninstallString", L"\"" + exe + L"\" --uninstall");
+}
+
+// Chromium's setup.exe for this install: the saved command's program, else the newest
+// Application\<version>\Installer\setup.exe.
+static std::wstring FindChromiumSetup() {
+  std::wstring saved = ReadArpString(kSavedUninstallValue);
+  if (saved.size() > 2 && saved[0] == L'"') {
+    const size_t end = saved.find(L'"', 1);
+    if (end != std::wstring::npos) {
+      std::wstring prog = saved.substr(1, end - 1);
+      if (GetFileAttributesW(prog.c_str()) != INVALID_FILE_ATTRIBUTES) return prog;
+    }
+  }
+  const std::wstring app = LocalAppData() + L"\\Redrob\\Application\\";
+  std::wstring best;
+  WIN32_FIND_DATAW fd;
+  HANDLE find = FindFirstFileW((app + L"*").c_str(), &fd);
+  if (find == INVALID_HANDLE_VALUE) return L"";
+  do {
+    if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] < L'0' || fd.cFileName[0] > L'9')
+      continue;
+    const std::wstring candidate = app + fd.cFileName + L"\\Installer\\setup.exe";
+    if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES && candidate > best) best = candidate;
+  } while (FindNextFileW(find, &fd));
+  FindClose(find);
+  return best;
+}
+
+DWORD WINAPI SetupApp::UninstallThunk(LPVOID self) {
+  return reinterpret_cast<SetupApp*>(self)->RunUninstall();
+}
+
+void SetupApp::StartUninstall() {
+  progress_ = progressTarget_ = 0.0;
+  startTick_ = GetTickCount64();
+  SetStage(Stage::Removing);
+  SetTimer(hwnd_, kTickTimer, kTickMs, nullptr);
+  if (payloadThread_) { WaitForSingleObject(payloadThread_, 5000); CloseHandle(payloadThread_); }
+  payloadThread_ = CreateThread(nullptr, 0, &SetupApp::UninstallThunk, this, 0, nullptr);
+}
+
+// The removal is Chromium's: --force-uninstall skips its own confirmation dialog (ours just asked) and
+// closes running browser windows; --delete-profile removes the user data dir.
+DWORD SetupApp::RunUninstall() {
+  if (demo_) {
+    Sleep(4500);
+    PostMessage(hwnd_, kUninstallMsgDone, (WPARAM)kUninstallSuccessful, 0);
+    return 0;
+  }
+  const std::wstring setup = FindChromiumSetup();
+  if (setup.empty()) {
+    PostMessage(hwnd_, kUninstallMsgDone, (WPARAM)ERROR_FILE_NOT_FOUND, 0);
+    return 1;
+  }
+  std::wstring cmd = L"\"" + setup + L"\" --uninstall --force-uninstall";
+  if (deleteData_) cmd += L" --delete-profile";
+  STARTUPINFOW si = {sizeof(si)};
+  si.dwFlags = STARTF_USESHOWWINDOW;
+  si.wShowWindow = SW_HIDE;
+  PROCESS_INFORMATION pi = {};
+  DWORD exitCode = ERROR_FILE_NOT_FOUND;
+  if (CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+  }
+  PostMessage(hwnd_, kUninstallMsgDone, (WPARAM)exitCode, 0);
+  return exitCode;
+}
+
+// Once removed, this exe and its directory are the last thing of ours left. A running exe cannot delete
+// itself, so a hidden PowerShell waits for this process to exit and removes the directory. Only when we run
+// from %LOCALAPPDATA%\Redrob\Uninstall: a copy started anywhere else is never deleted.
+void SetupApp::ScheduleSelfCleanup() {
+  wchar_t self[MAX_PATH];
+  if (!GetModuleFileNameW(nullptr, self, MAX_PATH)) return;
+  const std::wstring dir = LocalAppData() + L"\\Redrob\\Uninstall";
+  std::wstring me = self;
+  if (dir.size() < 4 || _wcsnicmp(me.c_str(), (dir + L"\\").c_str(), dir.size() + 1) != 0) return;
+  std::wstring cmd = L"powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \"Wait-Process -Id " +
+                     std::to_wstring(GetCurrentProcessId()) +
+                     L" -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '" + dir +
+                     L"' -Recurse -Force -ErrorAction SilentlyContinue\"";
+  STARTUPINFOW si = {sizeof(si)};
+  si.dwFlags = STARTF_USESHOWWINDOW;
+  si.wShowWindow = SW_HIDE;
+  PROCESS_INFORMATION pi = {};
+  if (CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+  }
+}
+
 DWORD SetupApp::RunPayload() {
   std::wstring exe;
   if (!ExtractPayload(exe)) {
@@ -716,7 +990,10 @@ DWORD SetupApp::RunPayload() {
     CloseHandle(pi.hProcess);
   }
   DeleteFileW(exe.c_str());  // tidy the temp payload
-  if (exitCode == 0) EnsureBrowserLaunched();
+  if (exitCode == 0) {
+    InstallUninstaller();
+    EnsureBrowserLaunched();
+  }
   PostMessage(hwnd_, kPayloadMsgDone, (WPARAM)exitCode, 0);
   return exitCode;
 }
@@ -727,14 +1004,17 @@ DWORD SetupApp::RunPayload() {
 
 int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE, PWSTR, int) {
   bool demo = false, demoError = false;
+  Mode mode = Mode::Install;
   int argc = 0;
   LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
   for (int i = 1; i < argc; ++i) {
     if (lstrcmpiW(argv[i], L"--demo") == 0) demo = true;
     else if (lstrcmpiW(argv[i], L"--demo-error") == 0) { demo = true; demoError = true; }
+    else if (lstrcmpiW(argv[i], L"--uninstall") == 0) mode = Mode::Uninstall;
+    else if (lstrcmpiW(argv[i], L"--demo-uninstall") == 0) { demo = true; mode = Mode::Uninstall; }
   }
   if (argv) LocalFree(argv);
 
-  SetupApp app(demo, demoError);
+  SetupApp app(demo, demoError, mode);
   return app.Run(hinst);
 }
