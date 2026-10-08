@@ -203,6 +203,7 @@ export const Chat = () => {
             showDontShowAgain={showDontShowAgain}
             onTakeSurvey={onTakeSurvey}
             onDismissJtbdPopup={onDismissJtbdPopup}
+            onReplySuggestionClick={handleSuggestionClick}
           />
         )}
         {agentUrlError && (

@@ -298,6 +298,27 @@ describe('nudges', () => {
   })
 })
 
+describe('reply suggestions', () => {
+  it('asks for up to three replies in the user voice as the last tool call', () => {
+    const prompt = buildRegular()
+    expect(prompt).toContain('suggest_replies')
+    expect(prompt).toContain("USER's voice")
+    expect(prompt).toContain('very last tool call')
+    expect(prompt).toContain('Never write the options as text')
+  })
+
+  it('survives dropping the nudges section (chat mode keeps the chips)', () => {
+    const prompt = buildRegular({ exclude: ['nudges'] })
+    expect(prompt).not.toContain('suggest_schedule')
+    expect(prompt).toContain('suggest_replies')
+  })
+
+  it('is removed by its own section key (scheduled tasks)', () => {
+    const prompt = buildRegular({ exclude: ['nudges', 'reply-suggestions'] })
+    expect(prompt).not.toContain('suggest_replies')
+  })
+})
+
 // ---------------------------------------------------------------------------
 // 8. STYLE
 // ---------------------------------------------------------------------------
