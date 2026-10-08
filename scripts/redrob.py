@@ -313,6 +313,29 @@ def package_windows(args: argparse.Namespace) -> None:
         shutil.copy2(built, target)
         print(f"{target.relative_to(ROOT)}  {target.stat().st_size // (1024 * 1024)} MB")
 
+    # Optional last step: wrap mini_installer.exe in a branded setup window,
+    # redrob_setup.exe, beside the staged artifact. Off by default and leaves the
+    # mini_installer output untouched -- it only ADDS a wrapper. It needs the MSVC
+    # toolchain and a chrome.exe to render the background art, which only a
+    # Windows build host has, so it is opt-in rather than a silent requirement on
+    # every package run. See installer/windows/README.md.
+    if getattr(args, "with_setup", False):
+        wrap = ROOT / "installer" / "windows" / "build.py"
+        setup_out = ROOT / "out" / "setup"
+        setup_out.mkdir(parents=True, exist_ok=True)
+        cmd = [sys.executable, str(wrap), "--out", str(setup_out),
+               "--payload", str(built), "--version", product_version()]
+        if args.chrome:
+            cmd += ["--chrome", args.chrome]
+        run(cmd, ROOT)
+        wrapped = setup_out / "redrob_setup.exe"
+        if not wrapped.exists():
+            sys.exit("the setup wrapper produced no redrob_setup.exe")
+        branded = f"redrob-browser-x64-{product_version()}-setup-branded.exe"
+        for target in (artifacts / branded, cdn / branded):
+            shutil.copy2(wrapped, target)
+            print(f"{target.relative_to(ROOT)}  {target.stat().st_size // (1024 * 1024)} MB")
+
 
 def cmd_repo(args: argparse.Namespace) -> None:
     """Build a signed apt repository from out/artifacts. See scripts/build_repo.py for the key handling."""
@@ -975,6 +998,12 @@ def main() -> None:
     package.add_argument("--flavour", choices=sorted(FLAVOURS), default="release")
     package.add_argument("--allow-dev", action="store_true",
                          help="package a dev build anyway, for testing the packaging path itself")
+    package.add_argument("--with-setup", action="store_true",
+                         help="Windows only: also wrap mini_installer.exe in the branded redrob_setup.exe "
+                              "window (installer/windows/). Needs MSVC + chrome.exe; leaves mini_installer "
+                              "unchanged.")
+    package.add_argument("--chrome", default=None,
+                         help="path to chrome.exe used by --with-setup to render the branded background art")
     package.set_defaults(func=cmd_package)
 
     repo = sub.add_parser("repo", help="build a signed apt repository from out/artifacts")
