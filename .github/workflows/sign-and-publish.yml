@@ -206,7 +206,7 @@ jobs:
             codesign -dv "$f" 2>&1 | grep -q 'Authority=Developer ID Application' || echo "still unsigned (driver will sign Chromium parts): ${f#"$APP_PATH"/}"
           done
 
-      - name: sign, notarize and staple with upstream's own driver
+      - name: sign with upstream's own driver
         # sign_chrome.py, not a hand-rolled codesign: Chromium's bundle is signed inside-out -- helpers, then
         # the framework's versioned directory, then the app -- with per-part entitlements, and getting that
         # order wrong produces a bundle codesign accepts and Gatekeeper rejects.
@@ -217,6 +217,12 @@ jobs:
         # there -- the tree holds only `build_props_config.py.in`. So the building host uploads its
         # `<product> Packaging/` directory (target `chrome/installer/mac`) as `*-packaging.zip` next to the
         # `.app.zip`, and this step uses that. Same Chromium, same branding, same GN args as the app it signs.
+        #
+        # `--notarize none`, and the next step notarizes. With `--disable-packaging` AND notarization the driver
+        # keeps the stapled app in its temporary work directory and writes NOTHING to --output (pipeline.py:
+        # dest_dir is the work dir whenever it notarizes, and only packaging copies out of it). Run 37784910398
+        # notarized and stapled successfully and then had no .app to publish. Signing-only drops the bundle
+        # straight into --output.
         run: |
           set -euo pipefail
           mkdir -p packaging signed
@@ -234,10 +240,34 @@ jobs:
             --output signed \
             --identity "$SIGNING_IDENTITY" \
             --disable-packaging \
-            --notarize staple \
-            --notary-arg=--key --notary-arg="$APPLE_API_KEY_PATH" \
-            --notary-arg=--key-id --notary-arg="$APPLE_API_KEY" \
-            --notary-arg=--issuer --notary-arg="$APPLE_API_ISSUER"
+            --notarize none
+          app="$(find signed -maxdepth 3 -type d -name '*.app' | head -1)"
+          test -n "$app" || { echo "::error::the signing driver produced no .app"; ls -R signed | head -40; exit 1; }
+          echo "SIGNED_APP=$app" >> "$GITHUB_ENV"
+
+      - name: notarize and staple
+        # The whole bundle goes to Apple as one archive, made with ditto so the framework symlinks survive.
+        # `--wait` blocks until Apple answers; a rejection prints the full log (every offending path) here, so
+        # the next fix does not start from "Invalid" alone.
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent "$SIGNED_APP" notarize.zip
+          set +e
+          xcrun notarytool submit notarize.zip \
+            --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
+            --wait --timeout 90m --output-format json > notarize.json
+          rc=$?
+          set -e
+          cat notarize.json
+          id="$(python3 -c 'import json,sys; print(json.load(open("notarize.json")).get("id",""))')"
+          status="$(python3 -c 'import json,sys; print(json.load(open("notarize.json")).get("status",""))')"
+          if [ "$rc" -ne 0 ] || [ "$status" != "Accepted" ]; then
+            echo "::error::notarization ended with status '$status' (rc=$rc)"
+            [ -n "$id" ] && xcrun notarytool log "$id" \
+              --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" || true
+            exit 1
+          fi
+          xcrun stapler staple "$SIGNED_APP"
 
       - name: verify the signature, the ticket and Gatekeeper
         # Three checks, not one. codesign says it is signed; stapler says the notarization ticket is actually
