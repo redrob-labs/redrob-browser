@@ -154,6 +154,19 @@ function getNudges(): string {
 }
 
 // -----------------------------------------------------------------------------
+// section: reply-suggestions
+// -----------------------------------------------------------------------------
+
+// Separate from `nudges` on purpose: chat mode drops the nudge cards (no browser work to schedule
+// or connect) but still wants the reply chips, and a scheduled task drops both (nobody is there
+// to click).
+function getReplySuggestions(): string {
+  return `<reply_suggestions>
+- \`suggest_replies\`: after your answer is complete, call this as the very last tool call of the turn with up to three replies the user is likely to send next, each in the USER's voice ("Open the first result", "Summarize this page too", "Yes, book it"), at most 8 words, each usable on its own. Skip it when the turn ends with a question that needs a free-form answer, when you showed another card this turn, or when nothing sensible follows. Never write the options as text in your answer; the tool renders them as buttons.
+</reply_suggestions>`
+}
+
+// -----------------------------------------------------------------------------
 // section: style
 // -----------------------------------------------------------------------------
 
@@ -235,6 +248,7 @@ const promptSections: Record<string, PromptSectionFn> = {
   'external-integrations': getExternalIntegrations,
   workspace: getWorkspace,
   nudges: getNudges,
+  'reply-suggestions': getReplySuggestions,
   style: getStyle,
   'user-context': getUserContext,
 }

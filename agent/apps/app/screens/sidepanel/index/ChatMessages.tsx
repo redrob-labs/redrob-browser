@@ -30,6 +30,7 @@ import { ChatMessageActions } from './ChatMessageActions'
 import { ConnectAppCard } from './ConnectAppCard'
 import { getMessageSegments } from './getMessageSegments'
 import { JtbdPopup } from './JtbdPopup'
+import { ReplySuggestions } from './ReplySuggestions'
 import { ScheduleSuggestionCard } from './ScheduleSuggestionCard'
 import { ToolBatch } from './ToolBatch'
 import { UserActionMessage } from './UserActionMessage'
@@ -46,6 +47,8 @@ export interface ChatMessagesProps {
   showDontShowAgain: boolean
   onTakeSurvey: (opts?: { dontShowAgain?: boolean }) => void
   onDismissJtbdPopup: (dontShowAgain: boolean) => void
+  /** Sends a suggested reply as the user's next message. Chips are hidden when absent. */
+  onReplySuggestionClick?: (reply: string) => void
 }
 
 export const ChatMessages: FC<ChatMessagesProps> = ({
@@ -60,6 +63,7 @@ export const ChatMessages: FC<ChatMessagesProps> = ({
   showDontShowAgain,
   onTakeSurvey,
   onDismissJtbdPopup,
+  onReplySuggestionClick,
 }) => {
   const isStreaming = status === 'streaming' || status === 'submitted'
 
@@ -140,6 +144,16 @@ export const ChatMessages: FC<ChatMessagesProps> = ({
                                 isLastMessage={isLastMessage}
                               />
                             )
+                          case 'reply-suggestions':
+                            return onReplySuggestionClick ? (
+                              <ReplySuggestions
+                                key={segment.key}
+                                replies={segment.replies}
+                                isLastMessage={isLastMessage}
+                                disabled={isStreaming}
+                                onSelect={onReplySuggestionClick}
+                              />
+                            ) : null
                           default:
                             return null
                         }

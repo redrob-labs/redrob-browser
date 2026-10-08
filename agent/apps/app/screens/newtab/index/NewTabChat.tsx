@@ -200,6 +200,7 @@ export const NewTabChat: FC = () => {
               showDontShowAgain={false}
               onTakeSurvey={() => {}}
               onDismissJtbdPopup={() => {}}
+              onReplySuggestionClick={handleSuggestionClick}
             />
           </>
         )}

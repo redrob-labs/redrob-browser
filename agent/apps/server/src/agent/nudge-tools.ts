@@ -7,6 +7,11 @@
  * See the NOTICE file for provenance.
  */
 
+import {
+  MAX_SUGGESTED_REPLIES,
+  normalizeSuggestedReplies,
+  REPLY_SUGGESTIONS_TYPE,
+} from '@browseros/shared/schemas/reply-suggestions'
 import { type ToolSet, tool } from 'ai'
 import { z } from 'zod'
 import { getConnectorCatalog } from '../api/services/klavis'
@@ -28,6 +33,28 @@ function sentinel(payload: Record<string, unknown>) {
 
 export function buildNudgeToolSet(): ToolSet {
   return {
+    suggest_replies: tool({
+      description:
+        'Call this as the LAST tool call of a turn, after your answer is complete, to offer the user up to three short replies they are likely to send next. Each reply is written in the USER\'s voice as something they would type ("Summarize the second article", "Yes, open it", "Show me the pricing page"), at most 8 words, and must make sense on its own. Do not call it when the turn ends with a question that needs a free-form answer, when another nudge card is shown, or when there is no sensible next step. Write no text after it.',
+      inputSchema: z.object({
+        replies: z
+          .array(z.string().min(1).max(80))
+          .min(1)
+          .max(MAX_SUGGESTED_REPLIES)
+          .describe(
+            "One to three follow-up replies in the user's voice, most likely first",
+          ),
+      }),
+      execute: async (args) =>
+        sentinel({
+          type: REPLY_SUGGESTIONS_TYPE,
+          replies: normalizeSuggestedReplies(args.replies),
+        }),
+      toModelOutput: () => ({
+        type: 'text',
+        value: 'Reply suggestions shown to the user.',
+      }),
+    }),
     suggest_schedule: tool({
       description:
         'Call this to suggest scheduling a task. Use in two cases: (1) MANDATORY after completing a task that could run on a recurring schedule (news, monitoring, reports, price tracking, data gathering). (2) Immediately when the user explicitly asks to schedule, automate, or repeat the current task - do NOT ask for clarification, infer all parameters from context. Do NOT call if the task requires real-time user interaction.',

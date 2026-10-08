@@ -288,6 +288,10 @@ export class AiSdkAgent {
         delete tools.suggest_schedule
         delete tools.suggest_app_connection
       }
+      // Reply chips need someone to click them; a scheduled run has nobody.
+      if (config.resolvedConfig.isScheduledTask) {
+        delete tools.suggest_replies
+      }
 
       // Build system prompt with optional section exclusions
       const excludeSections: string[] = []
@@ -296,6 +300,9 @@ export class AiSdkAgent {
         config.resolvedConfig.chatMode
       ) {
         excludeSections.push('nudges')
+      }
+      if (config.resolvedConfig.isScheduledTask) {
+        excludeSections.push('reply-suggestions')
       }
       const instructions = buildSystemPrompt({
         userSystemPrompt: config.resolvedConfig.userSystemPrompt,
