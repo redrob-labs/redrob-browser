@@ -21,11 +21,11 @@
 //   * Motion: every transition under a third of a second (40-surfaces-and-motion.md).
 //
 // The payload reports no progress of its own, so the bar is a time-based eased
-// ramp capped at ~90% until mini_installer.exe exits; exit 0 == success. The
-// mini_installer launches the browser itself (verified in
-// chrome/installer/setup/setup_main.cc: LaunchChromeBrowser is called on a
-// successful per-user install unless --do-not-launch-chrome/--silent), so this
-// app NEVER launches the browser -- it would be a double launch.
+// ramp capped at ~90% until mini_installer.exe exits; exit 0 == success.
+// mini_installer launches the browser only on a FIRST per-user install
+// (chrome/installer/setup/setup_main.cc: FIRST_INSTALL_SUCCESS). A repair or an
+// update exits 0 and launches nothing, so after a success this app waits briefly
+// for the installer's own launch and starts the browser only if none appeared.
 //
 // Flags:
 //   --demo         run the whole UI sequence on a timer with NO payload.
@@ -48,6 +48,7 @@
 #include <wincodec.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <tlhelp32.h>
 #include <string>
 #include <algorithm>
 #include <memory>
@@ -137,6 +138,7 @@ class SetupApp {
   // payload
   static DWORD WINAPI PayloadThunk(LPVOID self);
   DWORD RunPayload();
+  void EnsureBrowserLaunched();
   bool ExtractPayload(std::wstring& outPath);
 
   void SetStage(Stage s);
@@ -266,6 +268,15 @@ int SetupApp::Run(HINSTANCE hinst) {
     WaitForSingleObject(payloadThread_, 5000);
     CloseHandle(payloadThread_);
   }
+  // Every COM object goes BEFORE CoUninitialize. Left to the destructor, the WIC factory was released after
+  // COM was torn down, and the process died with an access violation on its way out of a successful install.
+  DiscardDeviceResources();
+  fmtStatus_.reset();
+  fmtButton_.reset();
+  fontColl_.reset();
+  wicFactory_.reset();
+  dwFactory_.reset();
+  d2dFactory_.reset();
   CoUninitialize();
   return (int)msg.wParam;
 }
@@ -435,8 +446,8 @@ void SetupApp::OnTick() {
     if (stage_ == Stage::Opening) {
       progressTarget_ = 1.0;
       // Close on a fixed delay after Opening began, regardless of the eased bar:
-      // mini_installer launches the browser itself, so once it has exited there
-      // is nothing left for this window to do but get out of the way. A fixed
+      // The browser has been launched (by mini_installer or EnsureBrowserLaunched),
+      // so there is nothing left for this window to do but get out of the way. A fixed
       // wall-clock close guarantees the window never lingers on the user's screen.
       if (GetTickCount64() - openedAt_ > 1400) { DestroyWindow(hwnd_); return; }
     }
@@ -642,6 +653,45 @@ bool SetupApp::ExtractPayload(std::wstring& outPath) {
   return true;
 }
 
+// Whether a browser process is running from the per-user install directory.
+static bool BrowserRunning(const std::wstring& appDir) {
+  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snap == INVALID_HANDLE_VALUE) return false;
+  bool found = false;
+  PROCESSENTRY32W pe = {sizeof(pe)};
+  for (BOOL ok = Process32FirstW(snap, &pe); ok && !found; ok = Process32NextW(snap, &pe)) {
+    if (lstrcmpiW(pe.szExeFile, L"chrome.exe") != 0) continue;
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
+    if (!h) continue;
+    wchar_t path[MAX_PATH];
+    DWORD len = MAX_PATH;
+    if (QueryFullProcessImageNameW(h, 0, path, &len) &&
+        _wcsnicmp(path, appDir.c_str(), appDir.size()) == 0) {
+      found = true;
+    }
+    CloseHandle(h);
+  }
+  CloseHandle(snap);
+  return found;
+}
+
+// mini_installer launches the browser only on a FIRST install (setup_main.cc: FIRST_INSTALL_SUCCESS). A
+// repair or an update over an existing install exits 0 and launches nothing, so this window would promise
+// "Opening Redrob Browser" and then open nothing. Give a first install's own launch a few seconds to appear,
+// and start the browser ourselves only if it has not -- never a second window on a first install.
+void SetupApp::EnsureBrowserLaunched() {
+  wchar_t local[MAX_PATH];
+  if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, local))) return;
+  const std::wstring appDir = std::wstring(local) + L"\\Redrob\\Application\\";
+  for (int i = 0; i < 16; ++i) {
+    if (BrowserRunning(appDir)) return;
+    Sleep(250);
+  }
+  const std::wstring exe = appDir + L"chrome.exe";
+  if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+  ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, appDir.c_str(), SW_SHOWNORMAL);
+}
+
 DWORD SetupApp::RunPayload() {
   std::wstring exe;
   if (!ExtractPayload(exe)) {
@@ -650,9 +700,8 @@ DWORD SetupApp::RunPayload() {
   }
   extractedPayload_ = exe;
 
-  // Run mini_installer hidden and wait. It writes to %LOCALAPPDATA% per-user and
-  // launches the browser itself on success; we pass no launch flag and never
-  // launch it ourselves (would double-launch).
+  // Run mini_installer hidden and wait. It installs per-user to %LOCALAPPDATA%;
+  // see EnsureBrowserLaunched for who opens the browser afterwards.
   STARTUPINFOW si = {sizeof(si)};
   si.dwFlags = STARTF_USESHOWWINDOW;
   si.wShowWindow = SW_HIDE;
@@ -667,6 +716,7 @@ DWORD SetupApp::RunPayload() {
     CloseHandle(pi.hProcess);
   }
   DeleteFileW(exe.c_str());  // tidy the temp payload
+  if (exitCode == 0) EnsureBrowserLaunched();
   PostMessage(hwnd_, kPayloadMsgDone, (WPARAM)exitCode, 0);
   return exitCode;
 }

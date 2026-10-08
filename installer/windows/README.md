@@ -38,9 +38,10 @@ state with a readable message and **Retry** / **Close**.
 
 The payload reports no progress, so the bar is a time-based eased ramp capped at
 ~90 % until `mini_installer.exe` exits (exit 0 = success). `mini_installer`
-launches the browser itself (verified in
-`chrome/installer/setup/setup_main.cc`), so this app never launches it — that
-would be a double launch.
+launches the browser only on a first install (`FIRST_INSTALL_SUCCESS` in
+`chrome/installer/setup/setup_main.cc`); a repair or update launches nothing. So
+after a success the app waits up to 4 s for the installer's own launch and opens
+the browser itself only if none appeared — never a second window.
 
 ## Build
 
