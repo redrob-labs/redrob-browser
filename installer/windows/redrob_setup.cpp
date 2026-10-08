@@ -32,12 +32,22 @@
 // removal gets the same window: confirm (with "also delete browsing data"), progress, done. The removal
 // itself is still Chromium's: setup.exe --uninstall --force-uninstall [--delete-profile].
 //
+// Redrob Code (opt-in): the first screen asks before anything is installed, with "Also install Redrob Code"
+// OFF by default. When chosen, Redrob Code goes in FIRST, so the browser opens already able to find it:
+// the latest release's redrob-code-x64-setup.exe is downloaded from GitHub, checked against that release's
+// SHA256SUMS, and run silently per-user (Inno Setup: /VERYSILENT /CURRENTUSER /TASKS=addtopath). It lands
+// in %LOCALAPPDATA%\Redrob\bin, the folder the browser's engine lookup reads directly. A Redrob Code
+// failure never fails the browser install: the browser still installs, and the last screen says why Redrob
+// Code did not. When Redrob Code is already installed the first screen says so instead of offering it.
+//
 // Flags:
-//   --demo             run the whole install sequence on a timer with NO payload.
-//   --demo-error       show the error state immediately.
-//   --uninstall        remove Redrob Browser (what Settings > Apps runs).
-//   --demo-uninstall   the uninstall sequence on a timer, removing nothing.
-//   (no flag)          extract and run the embedded payload for real.
+//   --with-redrob-code   start with "Also install Redrob Code" ticked (still shown, still a choice).
+//   --demo               run the whole install sequence on a timer with NO payload (and no download).
+//   --demo-error         show the error state immediately.
+//   --demo-code-error    --demo, ending on the "Redrob Code was not installed" screen.
+//   --uninstall          remove Redrob Browser (what Settings > Apps runs).
+//   --demo-uninstall     the uninstall sequence on a timer, removing nothing.
+//   (no flag)            extract and run the embedded payload for real.
 
 #ifndef UNICODE
 #define UNICODE
@@ -56,9 +66,14 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <tlhelp32.h>
+#include <wininet.h>
+#include <urlmon.h>
+#include <bcrypt.h>
 #include <string>
 #include <algorithm>
+#include <cctype>
 #include <memory>
+#include <vector>
 
 #include "resource.h"
 
@@ -72,6 +87,9 @@
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "urlmon.lib")
+#pragma comment(lib, "wininet.lib")
+#pragma comment(lib, "bcrypt.lib")
 
 namespace {
 
@@ -95,13 +113,24 @@ constexpr UINT_PTR kTickTimer = 1;
 constexpr UINT     kTickMs     = 16;   // ~60fps for the eased bar / fades
 constexpr UINT_PTR kPayloadMsgDone = (WM_APP + 1);
 constexpr UINT_PTR kUninstallMsgDone = (WM_APP + 2);
+constexpr UINT_PTR kStageMsg = (WM_APP + 3);  // the worker moved on: wParam is the Stage
+
+// Redrob Code's release (public repo). `latest/download/<asset>` redirects to the newest release's asset.
+constexpr wchar_t kCodeSetupUrl[] =
+    L"https://github.com/redrob-labs/redrob-code/releases/latest/download/redrob-code-x64-setup.exe";
+constexpr wchar_t kCodeSumsUrl[] =
+    L"https://github.com/redrob-labs/redrob-code/releases/latest/download/SHA256SUMS";
+constexpr char kCodeSetupAsset[] = "redrob-code-x64-setup.exe";
+// Share of the bar the Redrob Code step owns when chosen; the browser fills the rest.
+constexpr double kCodeShare = 0.35;
 
 // Chromium setup.exe's uninstall results (chrome/installer/util/util_constants.h).
 constexpr DWORD kChromeNotInstalled = 15;
 constexpr DWORD kUninstallSuccessful = 19;
 constexpr DWORD kUninstallRequiresReboot = 29;
 
-enum class Stage { Preparing, Installing, Opening, Error, Confirm, Removing, Removed };
+enum class Stage { Preparing, Installing, Opening, Error, Confirm, Removing, Removed,
+                   Welcome, InstallingCode, CodeFailed };
 enum class Mode { Install, Uninstall };
 
 // A tiny COM pointer so cleanup is not a maze of gotos. Move-only: a plain
@@ -132,7 +161,8 @@ std::wstring g_statusOverride;
 // ---------------------------------------------------------------------------
 class SetupApp {
  public:
-  SetupApp(bool demo, bool demoError, Mode mode) : demo_(demo), demoError_(demoError), mode_(mode) {}
+  SetupApp(bool demo, bool demoError, Mode mode, bool withCode, bool demoCodeError)
+      : demo_(demo), demoError_(demoError), mode_(mode), installCode_(withCode), demoCodeError_(demoCodeError) {}
 
   int Run(HINSTANCE hinst);
 
@@ -157,6 +187,10 @@ class SetupApp {
   bool ExtractPayload(std::wstring& outPath);
   void InstallUninstaller();
 
+  // install (Redrob Code, opt-in)
+  void StartInstall();
+  std::wstring InstallRedrobCode();  // empty on success, else why not (shown to the user)
+
   // uninstall
   static DWORD WINAPI UninstallThunk(LPVOID self);
   DWORD RunUninstall();
@@ -173,6 +207,11 @@ class SetupApp {
   bool demoError_ = false;
   Mode mode_ = Mode::Install;
   bool deleteData_ = false;   // the confirm screen's "also delete browsing data"
+  bool installCode_ = false;  // the welcome screen's "also install Redrob Code" -- opt-in, off by default
+  bool demoCodeError_ = false;
+  bool codePresent_ = false;  // Redrob Code is already installed: the welcome screen says so, offers nothing
+  bool codeDone_ = false;     // installed by this run; a Retry does not install it twice
+  std::wstring codeError_;    // set by the worker before it posts kPayloadMsgDone
 
   // Direct2D / DirectWrite / WIC
   ComPtr<ID2D1Factory>        d2dFactory_;
@@ -192,6 +231,7 @@ class SetupApp {
   double progressTarget_ = 0.0;
   ULONGLONG startTick_ = 0;
   ULONGLONG openedAt_ = 0;
+  ULONGLONG stageTick_ = 0;    // when the current stage began; each install step ramps from here
   bool payloadDone_ = false;
   DWORD payloadExit_ = 0;
   HANDLE payloadThread_ = nullptr;
@@ -216,11 +256,30 @@ std::wstring StatusText(Stage s) {
     case Stage::Confirm:    return L"Uninstall Redrob Browser?";
     case Stage::Removing:   return L"Removing Redrob Browser\u2026";
     case Stage::Removed:    return L"Redrob Browser has been removed";
+    case Stage::Welcome:    return L"Install Redrob Browser";
+    case Stage::InstallingCode: return L"Installing Redrob Code\u2026";
+    case Stage::CodeFailed: return L"Redrob Browser is installed";
   }
   return L"";
 }
 
 // ---------------------------------------------------------------------------
+
+// Whether Redrob Code is already on this PC: its installer's folder (%LOCALAPPDATA%\Redrob\bin), the
+// install.sh location (%USERPROFILE%\.redrob\bin), or anywhere on PATH. The same places the browser's
+// engine lookup tries, so "already installed" here means the browser will find it.
+static bool RedrobCodePresent() {
+  auto exists = [](const std::wstring& p) { return GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES; };
+  wchar_t dir[MAX_PATH];
+  if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, dir)) &&
+      exists(std::wstring(dir) + L"\\Redrob\\bin\\redrob.exe"))
+    return true;
+  if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_PROFILE, nullptr, 0, dir)) &&
+      exists(std::wstring(dir) + L"\\.redrob\\bin\\redrob.exe"))
+    return true;
+  wchar_t found[MAX_PATH];
+  return SearchPathW(nullptr, L"redrob.exe", nullptr, MAX_PATH, found, nullptr) > 0;
+}
 
 int SetupApp::Run(HINSTANCE hinst) {
   hinst_ = hinst;
@@ -279,11 +338,11 @@ int SetupApp::Run(HINSTANCE hinst) {
     errorMessage_ = L"The installer could not be started. Please try again.";
     SetStage(Stage::Error);
   } else {
-    SetStage(Stage::Preparing);
-    SetTimer(hwnd_, kTickTimer, kTickMs, nullptr);
-    if (!demo_) {
-      payloadThread_ = CreateThread(nullptr, 0, &SetupApp::PayloadThunk, this, 0, nullptr);
-    }
+    // Nothing is installed until the person presses Install: the welcome screen is where Redrob Code is
+    // offered, and an opt-in that has already started is not an opt-in.
+    if (!demo_) codePresent_ = RedrobCodePresent();
+    if (codePresent_) installCode_ = false;
+    SetStage(Stage::Welcome);
   }
 
   ShowWindow(hwnd_, SW_SHOW);
@@ -360,10 +419,19 @@ LRESULT SetupApp::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
       if (wp == kTickTimer) OnTick();
       return 0;
 
+    case kStageMsg:
+      if (stage_ != Stage::Error) SetStage((Stage)wp);
+      return 0;
+
     case kPayloadMsgDone: {
       payloadDone_ = true;
       payloadExit_ = (DWORD)wp;
-      if (payloadExit_ == 0) {
+      if (payloadExit_ == 0 && !codeError_.empty()) {
+        // The browser is installed and open; only Redrob Code is missing. Say so and wait for Close,
+        // rather than closing on a timer over a message the person has to read.
+        progressTarget_ = progress_ = 1.0;
+        SetStage(Stage::CodeFailed);
+      } else if (payloadExit_ == 0) {
         progressTarget_ = 1.0;
         SetStage(Stage::Opening);
       } else {
@@ -414,6 +482,16 @@ LRESULT SetupApp::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
         if (PtInRect(&rcRetry_, pt)) { StartUninstall(); return 0; }       // "Uninstall"
         if (PtInRect(&rcErrClose_, pt)) { RequestClose(true); return 0; }  // "Cancel"
       }
+      if (stage_ == Stage::Welcome) {
+        if (!codePresent_ && PtInRect(&rcCheck_, pt)) {
+          installCode_ = !installCode_;
+          InvalidateRect(hwnd_, nullptr, FALSE);
+          return 0;
+        }
+        if (PtInRect(&rcRetry_, pt)) { StartInstall(); return 0; }         // "Install"
+        if (PtInRect(&rcErrClose_, pt)) { RequestClose(true); return 0; }  // "Cancel"
+      }
+      if (stage_ == Stage::CodeFailed && PtInRect(&rcRetry_, pt)) { RequestClose(true); return 0; }  // "Close"
       if (stage_ == Stage::Removed && PtInRect(&rcRetry_, pt)) { RequestClose(true); return 0; }  // "Close"
       if (stage_ == Stage::Error && mode_ == Mode::Uninstall && PtInRect(&rcRetry_, pt)) {
         errorMessage_.clear();
@@ -421,15 +499,9 @@ LRESULT SetupApp::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
       }
       if (stage_ == Stage::Error && PtInRect(&rcRetry_, pt)) {
-        // Retry: restart the sequence.
+        // Retry: restart the sequence. A Redrob Code install that already succeeded is not repeated.
         errorMessage_.clear();
-        progress_ = progressTarget_ = 0.0;
-        startTick_ = GetTickCount64();
-        payloadDone_ = false;
-        SetStage(Stage::Preparing);
-        SetTimer(hwnd_, kTickTimer, kTickMs, nullptr);
-        if (!demo_) payloadThread_ = CreateThread(nullptr, 0, &SetupApp::PayloadThunk, this, 0, nullptr);
-        InvalidateRect(hwnd_, nullptr, FALSE);
+        StartInstall();
         return 0;
       }
       if (stage_ == Stage::Error && PtInRect(&rcErrClose_, pt)) { RequestClose(true); return 0; }
@@ -449,6 +521,13 @@ LRESULT SetupApp::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
       }
       if (stage_ == Stage::Confirm && wp == VK_RETURN) { StartUninstall(); return 0; }
+      if (stage_ == Stage::Welcome && wp == VK_SPACE && !codePresent_) {
+        installCode_ = !installCode_;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+      }
+      if (stage_ == Stage::Welcome && wp == VK_RETURN) { StartInstall(); return 0; }
+      if (stage_ == Stage::CodeFailed && wp == VK_RETURN) { RequestClose(true); return 0; }
       return 0;
 
     case WM_SYSKEYDOWN:
@@ -471,8 +550,8 @@ LRESULT SetupApp::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
 void SetupApp::RequestClose(bool force) {
   // While installing, Esc / close ask for confirmation first (do not abandon an
   // install silently). In demo and error states, close immediately.
-  bool installing = (stage_ == Stage::Installing || stage_ == Stage::Preparing) && !demo_ && !force &&
-                    mode_ == Mode::Install;
+  bool installing = (stage_ == Stage::Installing || stage_ == Stage::Preparing ||
+                     stage_ == Stage::InstallingCode) && !demo_ && !force && mode_ == Mode::Install;
   // A removal cannot be safely abandoned halfway; closing waits for it to finish.
   if (stage_ == Stage::Removing && !force) return;
   if (installing) {
@@ -485,12 +564,31 @@ void SetupApp::RequestClose(bool force) {
 }
 
 void SetupApp::SetStage(Stage s) {
+  if (s != stage_) stageTick_ = GetTickCount64();
   stage_ = s;
   g_statusOverride.clear();
   if (s == Stage::Opening) openedAt_ = GetTickCount64();
-  if (s == Stage::Error || s == Stage::Confirm || s == Stage::Removed) KillTimer(hwnd_, kTickTimer);
+  if (s == Stage::Error || s == Stage::Confirm || s == Stage::Removed || s == Stage::Welcome ||
+      s == Stage::CodeFailed)
+    KillTimer(hwnd_, kTickTimer);
   if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
 }
+
+// The Install button (and Retry). The worker installs Redrob Code first when it was chosen, then the browser.
+void SetupApp::StartInstall() {
+  progress_ = progressTarget_ = 0.0;
+  startTick_ = GetTickCount64();
+  payloadDone_ = false;
+  codeError_.clear();
+  SetStage(Stage::Preparing);
+  SetTimer(hwnd_, kTickTimer, kTickMs, nullptr);
+  if (!demo_) {
+    if (payloadThread_) { WaitForSingleObject(payloadThread_, 5000); CloseHandle(payloadThread_); }
+    payloadThread_ = CreateThread(nullptr, 0, &SetupApp::PayloadThunk, this, 0, nullptr);
+  }
+}
+
+static double EaseOut(double t) { return 1 - (1 - t) * (1 - t); }
 
 void SetupApp::OnTick() {
   ULONGLONG elapsed = GetTickCount64() - startTick_;
@@ -502,20 +600,37 @@ void SetupApp::OnTick() {
       progressTarget_ = 0.90 * (1 - (1 - t) * (1 - t));
     }
   } else if (demo_ && stage_ != Stage::Error) {
-    // Scripted demo: Preparing (0-0.8s) -> Installing (0.8-5s, bar to ~0.9)
-    //                -> Opening (5-6.5s, bar to 1.0) -> close.
+    // Scripted demo, same shape as a real run. With Redrob Code chosen:
+    //   Preparing (0-0.8s) -> Installing Redrob Code (0.8-4s, bar to ~kCodeShare)
+    //   -> Installing (4-8s, bar to ~0.9) -> Opening (8-9.5s) -> close, or the "Redrob Code was not
+    //   installed" screen with --demo-code-error. Without it, the Redrob Code step is skipped (as before).
+    const ULONGLONG code = installCode_ ? 3200 : 0;
     if (elapsed < 800) { if (stage_ != Stage::Preparing) SetStage(Stage::Preparing); progressTarget_ = 0.04; }
-    else if (elapsed < 5000) { if (stage_ != Stage::Installing) SetStage(Stage::Installing);
-      double t = (elapsed - 800) / 4200.0; progressTarget_ = 0.90 * (1 - (1 - t) * (1 - t)); }
-    else if (elapsed < 6500) { if (stage_ != Stage::Opening) SetStage(Stage::Opening); progressTarget_ = 1.0; }
+    else if (elapsed < 800 + code) { if (stage_ != Stage::InstallingCode) SetStage(Stage::InstallingCode);
+      progressTarget_ = kCodeShare * 0.95 * EaseOut((elapsed - 800) / (double)code); }
+    else if (elapsed < 5000 + code) { if (stage_ != Stage::Installing) SetStage(Stage::Installing);
+      const double base = installCode_ ? kCodeShare : 0.0;
+      progressTarget_ = base + (0.90 - base) * EaseOut((elapsed - 800 - code) / 4200.0); }
+    else if (demoCodeError_ && installCode_) {
+      codeError_ = L"its download did not match the release checksum";
+      progressTarget_ = progress_ = 1.0;
+      SetStage(Stage::CodeFailed);
+      return;
+    }
+    else if (elapsed < 6500 + code) { if (stage_ != Stage::Opening) SetStage(Stage::Opening); progressTarget_ = 1.0; }
     else { DestroyWindow(hwnd_); return; }
   } else if (!demo_) {
-    // Real run. Preparing until the worker reaches Installing; then a time-based
-    // eased bar capped at 0.90 until the payload exits.
-    if (stage_ == Stage::Preparing && elapsed > 600) SetStage(Stage::Installing);
+    // Real run. The worker posts each step as it starts it (kStageMsg); each step's bar is a time-based
+    // eased ramp, capped until the step's process exits. Without Redrob Code, Preparing turns into
+    // Installing after 0.6s as it always did.
+    if (stage_ == Stage::Preparing && !installCode_ && elapsed > 600) SetStage(Stage::Installing);
+    const double since = (double)(GetTickCount64() - stageTick_);
+    if (stage_ == Stage::InstallingCode) {
+      progressTarget_ = kCodeShare * 0.95 * EaseOut(std::min(1.0, since / 25000.0));  // ~35 MB download
+    }
     if (stage_ == Stage::Installing && !payloadDone_) {
-      double t = std::min(1.0, (elapsed - 600) / 30000.0);  // approach over ~30s
-      progressTarget_ = 0.90 * (1 - (1 - t) * (1 - t));
+      const double base = (installCode_ && !codePresent_) ? kCodeShare : 0.0;
+      progressTarget_ = base + (0.90 - base) * EaseOut(std::min(1.0, since / 30000.0));  // approach over ~30s
     }
     if (stage_ == Stage::Opening) {
       progressTarget_ = 1.0;
@@ -650,12 +765,8 @@ void SetupApp::OnPaint() {
   };
   const float pw = 120.0f, ph = 38.0f, py = H * 0.72f;
 
-  if (stage_ == Stage::Confirm) {
-    const wchar_t* body = L"Redrob Browser will close and be removed from this PC.";
-    if (fmtButton_) rt_->DrawTextW(body, (UINT32)wcslen(body), fmtButton_.p,
-                                   D2D1::RectF(60, H * 0.53f, W - 60, H * 0.59f), muted.p);
-    // "Also delete your browsing data": a 16px box and its label, centred together as one row.
-    const wchar_t* label = L"Also delete your browsing data";
+  // A 16px box and its label, centred together as one row. The whole row is the hit target, not just the box.
+  auto checkRow = [&](const wchar_t* label, bool checked) {
     float labelW = 200.0f;
     ComPtr<IDWriteTextLayout> layout;
     if (fmtButton_ && SUCCEEDED(dwFactory_->CreateTextLayout(label, (UINT32)wcslen(label), fmtButton_.p,
@@ -667,7 +778,7 @@ void SetupApp::OnPaint() {
     const float box = 16.0f, gap = 10.0f, rowY = H * 0.615f;
     const float rowX = (W - (box + gap + labelW)) / 2.0f;
     D2D1_ROUNDED_RECT boxRR = {D2D1::RectF(rowX, rowY, rowX + box, rowY + box), 4.0f, 4.0f};
-    if (deleteData_) {
+    if (checked) {
       rt_->FillRoundedRectangle(boxRR, blue.p);
       rt_->DrawLine(D2D1::Point2F(rowX + 4.0f, rowY + 8.5f), D2D1::Point2F(rowX + 7.0f, rowY + 11.5f), white.p, 1.8f);
       rt_->DrawLine(D2D1::Point2F(rowX + 7.0f, rowY + 11.5f), D2D1::Point2F(rowX + 12.5f, rowY + 5.0f), white.p, 1.8f);
@@ -675,14 +786,45 @@ void SetupApp::OnPaint() {
       rt_->DrawRoundedRectangle(boxRR, muted.p, 1.4f);
     }
     if (layout) rt_->DrawTextLayout(D2D1::Point2F(rowX + box + gap, rowY + box / 2 - 12.0f), layout.p, ink.p);
-    // The whole row is the hit target, not just the box.
     rcCheck_ = ToDevice(rowX - 6.0f, rowY - 6.0f, box + gap + labelW + 12.0f, box + 12.0f);
-
+  };
+  auto bodyLine = [&](const wchar_t* body) {
+    if (fmtButton_) rt_->DrawTextW(body, (UINT32)wcslen(body), fmtButton_.p,
+                                   D2D1::RectF(60, H * 0.53f, W - 60, H * 0.59f), muted.p);
+  };
+  auto twoPills = [&](const wchar_t* primary, const wchar_t* secondary) {
     const float ux = W / 2.0f - pw - 8.0f, cx = W / 2.0f + 8.0f;
-    rcRetry_ = ToDevice(ux, py, pw, ph);     // Uninstall
-    rcErrClose_ = ToDevice(cx, py, pw, ph);  // Cancel
-    pill(ux, py, pw, ph, L"Uninstall", true);
-    pill(cx, py, pw, ph, L"Cancel", false);
+    rcRetry_ = ToDevice(ux, py, pw, ph);
+    rcErrClose_ = ToDevice(cx, py, pw, ph);
+    pill(ux, py, pw, ph, primary, true);
+    pill(cx, py, pw, ph, secondary, false);
+  };
+
+  if (stage_ == Stage::Welcome) {
+    bodyLine(L"Installs for this Windows account. No administrator rights needed.");
+    if (codePresent_) {
+      // Nothing to offer: say what is there instead of a box that would do nothing.
+      const wchar_t* have = L"Redrob Code is already installed on this PC.";
+      if (fmtButton_) rt_->DrawTextW(have, (UINT32)wcslen(have), fmtButton_.p,
+                                     D2D1::RectF(60, H * 0.605f, W - 60, H * 0.665f), muted.p);
+      rcCheck_ = RECT{};
+    } else {
+      checkRow(L"Also install Redrob Code, the coding agent", installCode_);
+    }
+    twoPills(L"Install", L"Cancel");
+  } else if (stage_ == Stage::CodeFailed) {
+    const std::wstring msg = L"Redrob Code was not installed: " + codeError_ +
+                             L". Get it later from github.com/redrob-labs/redrob-code.";
+    if (fmtButton_) rt_->DrawTextW(msg.c_str(), (UINT32)msg.size(), fmtButton_.p,
+                                   D2D1::RectF(60, H * 0.53f, W - 60, H * 0.66f), muted.p);
+    const float x = (W - pw) / 2.0f;
+    rcRetry_ = ToDevice(x, py, pw, ph);  // Close
+    rcErrClose_ = RECT{};
+    pill(x, py, pw, ph, L"Close", true);
+  } else if (stage_ == Stage::Confirm) {
+    bodyLine(L"Redrob Browser will close and be removed from this PC.");
+    checkRow(L"Also delete your browsing data", deleteData_);
+    twoPills(L"Uninstall", L"Cancel");
   } else if (stage_ == Stage::Removed) {
     const wchar_t* body = deleteData_ ? L"Your browsing data was deleted too."
                                       : L"Your browsing data stays on this PC.";
@@ -943,9 +1085,12 @@ DWORD SetupApp::RunUninstall() {
   return exitCode;
 }
 
-// Once removed, this exe and its directory are the last thing of ours left. A running exe cannot delete
-// itself, so a hidden PowerShell waits for this process to exit and removes the directory. Only when we run
-// from %LOCALAPPDATA%\Redrob\Uninstall: a copy started anywhere else is never deleted.
+// Once removed, this exe is the last thing of ours left. A running exe cannot delete itself, so a hidden
+// PowerShell waits for this process to exit and removes it, then the directory only if that left it empty.
+// The folder is shared: Redrob Code's own uninstaller (Inno Setup, UninstallFilesDir
+// %LOCALAPPDATA%\Redrob\uninstall) lives in the same place on a case-insensitive file system, and removing
+// the whole folder would leave Redrob Code impossible to uninstall. Only when we run from
+// %LOCALAPPDATA%\Redrob\Uninstall: a copy started anywhere else is never deleted.
 void SetupApp::ScheduleSelfCleanup() {
   wchar_t self[MAX_PATH];
   if (!GetModuleFileNameW(nullptr, self, MAX_PATH)) return;
@@ -954,8 +1099,10 @@ void SetupApp::ScheduleSelfCleanup() {
   if (dir.size() < 4 || _wcsnicmp(me.c_str(), (dir + L"\\").c_str(), dir.size() + 1) != 0) return;
   std::wstring cmd = L"powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \"Wait-Process -Id " +
                      std::to_wstring(GetCurrentProcessId()) +
-                     L" -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '" + dir +
-                     L"' -Recurse -Force -ErrorAction SilentlyContinue\"";
+                     L" -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '" + me +
+                     L"' -Force -ErrorAction SilentlyContinue; if (-not (Get-ChildItem -LiteralPath '" + dir +
+                     L"' -Force -ErrorAction SilentlyContinue)) { Remove-Item -LiteralPath '" + dir +
+                     L"' -Force -ErrorAction SilentlyContinue }\"";
   STARTUPINFOW si = {sizeof(si)};
   si.dwFlags = STARTF_USESHOWWINDOW;
   si.wShowWindow = SW_HIDE;
@@ -966,7 +1113,122 @@ void SetupApp::ScheduleSelfCleanup() {
   }
 }
 
+// ---- Redrob Code (opt-in) --------------------------------------------------
+
+// Lower-case hex SHA-256 of a file, or empty.
+static std::string Sha256File(const std::wstring& path) {
+  std::string out;
+  HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+  if (f == INVALID_HANDLE_VALUE) return out;
+  BCRYPT_ALG_HANDLE alg = nullptr;
+  BCRYPT_HASH_HANDLE hash = nullptr;
+  if (BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0)) &&
+      BCRYPT_SUCCESS(BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0))) {
+    std::vector<unsigned char> buf(1 << 20);
+    DWORD got = 0;
+    bool ok = true;
+    while (ReadFile(f, buf.data(), (DWORD)buf.size(), &got, nullptr) && got > 0) {
+      if (!BCRYPT_SUCCESS(BCryptHashData(hash, buf.data(), got, 0))) { ok = false; break; }
+    }
+    unsigned char digest[32];
+    if (ok && BCRYPT_SUCCESS(BCryptFinishHash(hash, digest, sizeof(digest), 0))) {
+      static const char hex[] = "0123456789abcdef";
+      for (unsigned char b : digest) { out += hex[b >> 4]; out += hex[b & 15]; }
+    }
+  }
+  if (hash) BCryptDestroyHash(hash);
+  if (alg) BCryptCloseAlgorithmProvider(alg, 0);
+  CloseHandle(f);
+  return out;
+}
+
+// The hash SHA256SUMS lists for `asset` ("<64 hex>  <name>" per line, as `sha256sum` writes), or empty.
+static std::string ExpectedSha256(const std::wstring& sumsPath, const char* asset) {
+  HANDLE f = CreateFileW(sumsPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+  if (f == INVALID_HANDLE_VALUE) return "";
+  std::string text(64 * 1024, '\0');
+  DWORD got = 0;
+  ReadFile(f, &text[0], (DWORD)text.size(), &got, nullptr);
+  CloseHandle(f);
+  text.resize(got);
+  size_t start = 0;
+  while (start < text.size()) {
+    size_t end = text.find('\n', start);
+    if (end == std::string::npos) end = text.size();
+    std::string line = text.substr(start, end - start);
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    start = end + 1;
+    // Exact name after the two-space separator (or "*" for binary mode), so a longer asset name that merely
+    // ends the same way never matches.
+    if (line.size() < 66 || (line.compare(64, 2, "  ") != 0 && line.compare(64, 2, " *") != 0)) continue;
+    if (line.compare(66, std::string::npos, asset) != 0) continue;
+    std::string h = line.substr(0, 64);
+    std::transform(h.begin(), h.end(), h.begin(), [](char c) { return (char)tolower((unsigned char)c); });
+    if (h.find_first_not_of("0123456789abcdef") != std::string::npos) return "";
+    return h;
+  }
+  return "";
+}
+
+static bool Download(const wchar_t* url, const std::wstring& to) {
+  DeleteUrlCacheEntryW(url);  // `latest` moves; never install a cached older redirect
+  return SUCCEEDED(URLDownloadToFileW(nullptr, url, to.c_str(), 0, nullptr)) &&
+         GetFileAttributesW(to.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+// Download the latest Redrob Code installer, refuse it unless it matches its release's SHA256SUMS, and run it
+// silently for this user only. Inno Setup exits 0 on success.
+std::wstring SetupApp::InstallRedrobCode() {
+  wchar_t tmp[MAX_PATH];
+  GetTempPathW(MAX_PATH, tmp);
+  const std::wstring dir = std::wstring(tmp) + L"redrob-code-setup-" + std::to_wstring(GetCurrentProcessId());
+  CreateDirectoryW(dir.c_str(), nullptr);
+  const std::wstring sums = dir + L"\\SHA256SUMS";
+  const std::wstring exe = dir + L"\\redrob-code-x64-setup.exe";
+  auto cleanup = [&] {
+    DeleteFileW(sums.c_str());
+    DeleteFileW(exe.c_str());
+    RemoveDirectoryW(dir.c_str());
+  };
+
+  if (!Download(kCodeSumsUrl, sums) || !Download(kCodeSetupUrl, exe)) {
+    cleanup();
+    return L"it could not be downloaded";
+  }
+  const std::string want = ExpectedSha256(sums, kCodeSetupAsset);
+  const std::string got = Sha256File(exe);
+  if (want.empty() || got != want) {
+    cleanup();
+    return L"its download did not match the release checksum";
+  }
+
+  std::wstring cmd = L"\"" + exe + L"\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER /TASKS=addtopath";
+  STARTUPINFOW si = {sizeof(si)};
+  si.dwFlags = STARTF_USESHOWWINDOW;
+  si.wShowWindow = SW_HIDE;
+  PROCESS_INFORMATION pi = {};
+  DWORD exitCode = ERROR_FILE_NOT_FOUND;
+  if (CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, dir.c_str(), &si, &pi)) {
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+  }
+  cleanup();
+  if (exitCode != 0) return L"its installer stopped (code " + std::to_wstring(exitCode) + L")";
+  return L"";
+}
+
 DWORD SetupApp::RunPayload() {
+  // Redrob Code first, when chosen, so the browser opens already able to find it. Its failure is reported
+  // at the end and never stops the browser install.
+  if (installCode_ && !codeDone_) {
+    PostMessage(hwnd_, kStageMsg, (WPARAM)Stage::InstallingCode, 0);
+    codeError_ = InstallRedrobCode();
+    codeDone_ = codeError_.empty();
+  }
+  PostMessage(hwnd_, kStageMsg, (WPARAM)Stage::Installing, 0);
+
   std::wstring exe;
   if (!ExtractPayload(exe)) {
     PostMessage(hwnd_, kPayloadMsgDone, (WPARAM)ERROR_RESOURCE_DATA_NOT_FOUND, 0);
@@ -1003,18 +1265,20 @@ DWORD SetupApp::RunPayload() {
 // ---- entry point -----------------------------------------------------------
 
 int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE, PWSTR, int) {
-  bool demo = false, demoError = false;
+  bool demo = false, demoError = false, withCode = false, demoCodeError = false;
   Mode mode = Mode::Install;
   int argc = 0;
   LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
   for (int i = 1; i < argc; ++i) {
     if (lstrcmpiW(argv[i], L"--demo") == 0) demo = true;
     else if (lstrcmpiW(argv[i], L"--demo-error") == 0) { demo = true; demoError = true; }
+    else if (lstrcmpiW(argv[i], L"--demo-code-error") == 0) { demo = true; demoCodeError = true; }
+    else if (lstrcmpiW(argv[i], L"--with-redrob-code") == 0) withCode = true;
     else if (lstrcmpiW(argv[i], L"--uninstall") == 0) mode = Mode::Uninstall;
     else if (lstrcmpiW(argv[i], L"--demo-uninstall") == 0) { demo = true; mode = Mode::Uninstall; }
   }
   if (argv) LocalFree(argv);
 
-  SetupApp app(demo, demoError, mode);
+  SetupApp app(demo, demoError, mode, withCode, demoCodeError);
   return app.Run(hinst);
 }
