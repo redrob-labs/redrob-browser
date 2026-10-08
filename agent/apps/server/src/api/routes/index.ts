@@ -27,6 +27,7 @@ import { createMcpManagerRoutes } from './mcp-manager'
 import { createOAuthRoutes } from './oauth'
 import { createProviderRoutes } from './provider'
 import { createProvidersRoutes } from './providers'
+import { createRedrobConsoleRoutes } from './redrob-console'
 import { createRefinePromptRoutes } from './refine-prompt'
 import { createScheduledJobRunRoutes } from './scheduled-job-runs'
 import { createScheduledJobRoutes } from './scheduled-jobs'
@@ -128,6 +129,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       // credential server-side and /refine-prompt drives an outbound LLM call,
       // so they belong here too.
       .use('/providers/*', requireTrustedAppOrigin())
+      .use('/redrob-console/*', requireTrustedAppOrigin())
       .use('/test-provider/*', requireTrustedAppOrigin())
       .use('/refine-prompt/*', requireTrustedAppOrigin())
       .use('/scheduled-jobs/*', requireTrustedAppOrigin())
@@ -136,6 +138,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .route('/agents', resolvedAgentRoutes)
       .route('/conversations', createConversationRoutes())
       .route('/providers', createProvidersRoutes())
+      .route('/redrob-console', createRedrobConsoleRoutes())
       .route('/test-provider', createProviderRoutes({ browserosId }))
       .route('/refine-prompt', createRefinePromptRoutes({ browserosId }))
       .route('/scheduled-jobs', createScheduledJobRoutes())

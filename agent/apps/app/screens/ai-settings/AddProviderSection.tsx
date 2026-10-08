@@ -80,15 +80,10 @@ export const AddProviderSection: FC<AddProviderSectionProps> = ({
       onAdd: () => onUseTemplate(template),
     }))
 
+  // Redrob Code leads: it is the product's own agent, so it is the first thing offered, ahead of the
+  // third-party harnesses.
   const agentEntries: Entry[] = supportsCodingAgents
     ? [
-        ...AGENT_TYPES.map((type) => ({
-          key: `agent-${type}`,
-          label: adapterLabel(type),
-          category: 'agent' as const,
-          icon: <AdapterIcon adapter={type} className="size-[26px]" />,
-          onAdd: () => onCreateAgent(type),
-        })),
         {
           key: `agent-${REDROB_CODE_AGENT.id}`,
           label: REDROB_CODE_AGENT.label,
@@ -97,6 +92,13 @@ export const AddProviderSection: FC<AddProviderSectionProps> = ({
           icon: <RedrobCodeIcon />,
           onAdd: onCreateRedrobCode,
         },
+        ...AGENT_TYPES.map((type) => ({
+          key: `agent-${type}`,
+          label: adapterLabel(type),
+          category: 'agent' as const,
+          icon: <AdapterIcon adapter={type} className="size-[26px]" />,
+          onAdd: () => onCreateAgent(type),
+        })),
         {
           key: 'agent-custom',
           label: 'Custom ACP agent',

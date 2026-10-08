@@ -109,11 +109,34 @@ export function SetupAgentStep({ onSetup }: SetupAgentStepProps) {
           Set up your <Em>agent</Em>
         </DisplayHeading>
         <StepCopy>
-          Redrob runs on the provider you bring. Connect an LLM provider or a
-          coding agent harness you already use, and we will open Redrob so you
+          Start with Redrob Code, Redrob&rsquo;s own agent. Or connect an LLM
+          provider or a coding agent you already use. We will open Redrob so you
           can finish.
         </StepCopy>
         <div className="mb-6 flex max-w-[480px] flex-col gap-[18px]">
+          {/* Redrob Code first, and whole: the product's own agent is the default answer to this
+              step, not one chip among a dozen. The mark is the product icon the onboarding build
+              already ships under icon/. */}
+          <div className="flex items-center gap-3.5 rounded-[14px] border border-accent bg-accent-tint px-4 py-3.5">
+            <img
+              src="/icon/48.png"
+              alt=""
+              width={36}
+              height={36}
+              className="shrink-0 rounded-[9px]"
+            />
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 font-bold text-[15px] text-foreground">
+                Redrob Code
+                <span className="rounded-full bg-card px-2 py-0.5 font-bold text-[10px] text-accent uppercase tracking-[0.08em]">
+                  Recommended
+                </span>
+              </div>
+              <div className="mt-0.5 text-[13px] text-ink-3">
+                Redrob&rsquo;s own agent, made for this browser.
+              </div>
+            </div>
+          </div>
           <div>
             <div className="mb-2.5 font-bold text-[11px] text-ink-3 uppercase tracking-[0.08em]">
               Any LLM provider

@@ -381,3 +381,54 @@ describe('probeAcpAgent — normalisation', () => {
     expect(out.error?.acpErrorCode).toBe(-32603)
   })
 })
+
+describe('probeAcpAgent — a command that is not installed', () => {
+  it('reports Redrob Code as not installed, with where to get it, instead of a crash', async () => {
+    nextResult = baseProbeResult({
+      error: {
+        code: 'agent_crashed',
+        message:
+          'Agent exited (code=1, signal=null) before responding to initialize',
+        stderr:
+          "'redrob' is not recognized as an internal or external command,\r\noperable program or batch file.",
+      },
+    })
+    const out = await probeAcpAgent({
+      type: 'custom',
+      command: 'redrob acp',
+      platform: 'win32',
+    })
+    expect(out.error?.code).toBe('agent_not_found')
+    expect(out.error?.message).toContain('Redrob Code is not installed')
+    expect(out.error?.message).toContain(
+      'https://github.com/redrob-labs/redrob-code/releases/latest',
+    )
+  })
+
+  it('names any other missing program', async () => {
+    nextResult = baseProbeResult({
+      error: {
+        code: 'agent_crashed',
+        message:
+          'Agent exited (code=127, signal=null) before responding to initialize',
+        stderr: 'env: hermes: No such file or directory',
+      },
+    })
+    const out = await probeAcpAgent({ type: 'custom', command: 'hermes acp' })
+    expect(out.error?.code).toBe('agent_not_found')
+    expect(out.error?.message).toContain('"hermes" was not found')
+  })
+
+  it('leaves a real crash alone', async () => {
+    nextResult = baseProbeResult({
+      error: {
+        code: 'agent_crashed',
+        message:
+          'Agent exited (code=1, signal=null) before responding to initialize',
+        stderr: 'TypeError: cannot read properties of undefined',
+      },
+    })
+    const out = await probeAcpAgent({ type: 'custom', command: 'redrob acp' })
+    expect(out.error?.code).toBe('agent_crashed')
+  })
+})

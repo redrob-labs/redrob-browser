@@ -9,6 +9,7 @@ import { resolveBundledBun, withBundledBunAcpAdapterEnv } from './bundled-bun'
 import { withBundledNativeBinaryPath } from './bundled-native-binary'
 import { HOST_ACP_ADAPTER_CONFIG, type HostAcpAdapter } from './config'
 import { splitCommandLine } from './parse-command'
+import { resolveRedrobEngine } from './redrob-engine'
 import { mergePath, resolveLoginShellPath } from './resolve-login-path'
 
 export type AcpLauncherSource = 'bundled-bun' | 'host-npx-fallback' | 'custom'
@@ -122,6 +123,11 @@ function resolveCustomSpawnCommand(
   if (argv.length === 0) {
     throw new Error('Custom ACP agent command is empty')
   }
+  argv[0] = resolveRedrobEngine(
+    argv[0] as string,
+    platform,
+    input.env ?? process.env,
+  )
   // Run the user's command as given; the child inherits process.env, and the
   // custom env rides in as spawnEnv overrides.
   const baseArgv =

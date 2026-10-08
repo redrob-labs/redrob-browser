@@ -95,6 +95,7 @@ import {
   type ProviderFormValues,
   providerFormSchema,
 } from './provider-form-schema'
+import { RedrobConsoleConnect } from './RedrobConsoleConnect'
 
 /** Window assumed for any model the bundled catalog cannot size. */
 const DEFAULT_CONTEXT_WINDOW = 128000
@@ -868,6 +869,17 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
             </FormItem>
           )}
         />
+        {watchedType === 'redrob-console' && (
+          <RedrobConsoleConnect
+            agentServerUrl={agentServerUrl}
+            onKey={(apiKey) =>
+              form.setValue('apiKey', apiKey, {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+            }
+          />
+        )}
         <FormField
           control={form.control}
           name="apiKey"

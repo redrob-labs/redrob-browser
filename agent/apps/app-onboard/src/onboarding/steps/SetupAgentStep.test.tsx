@@ -69,6 +69,16 @@ describe('SetupAgentStep', () => {
     expect((html.match(/<svg/g) ?? []).length).toBeGreaterThan(10)
   })
 
+  it('shows Redrob Code first, before the provider and agent lists', () => {
+    const html = renderToStaticMarkup(
+      <SetupAgentStep onSetup={() => undefined} />,
+    )
+    const redrobCode = html.indexOf('Redrob Code')
+    expect(redrobCode).toBeGreaterThan(-1)
+    expect(redrobCode).toBeLessThan(html.indexOf('Any LLM provider'))
+    expect(html).toContain('Recommended')
+  })
+
   it('lists the ACP agents alongside the built-in harnesses', () => {
     const html = renderToStaticMarkup(
       <SetupAgentStep onSetup={() => undefined} />,
