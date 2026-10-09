@@ -157,7 +157,14 @@ function palette(theme: Theme): string[] {
  * in, so a fixed pause measures a different frame on a slower host -- which is exactly how the first
  * hosted run disagreed with the host that wrote the baseline by one list row.
  */
+/** How long the stub server has been idle; replaced once it is running. */
+let serverIdleFor = () => Number.POSITIVE_INFINITY
+
 async function settle(p: Page) {
+  // Data first: a screen whose second request arrives after the DOM has gone quiet (a list's labels
+  // fetched separately from the list) was captured with or without them depending on the host.
+  for (let waited = 0; serverIdleFor() < 800 && waited < 8000; waited += 100)
+    await p.waitForTimeout(100)
   await p.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
   await p.evaluate(() => document.fonts.ready.then(() => undefined))
   await p.evaluate(
@@ -204,10 +211,24 @@ async function focus(p: Page): Promise<Finding[]> {
     .locator('body')
     .click({ position: { x: 1, y: 1 } })
     .catch(() => {})
+  // A ring drawn with a transitioning box-shadow reads as whatever frame the transition is on when it is
+  // sampled, which made this count differ by host speed. With transitions off the read is the end state.
+  await p
+    .addStyleTag({
+      content:
+        '*,*::before,*::after{transition:none!important;animation-duration:0s!important}',
+    })
+    .catch(() => {})
   const misses = new Map<string, Finding>()
   const seen = new Set<string>()
   for (let i = 0; i < 25; i++) {
     await p.keyboard.press('Tab')
+    await p.evaluate(
+      () =>
+        new Promise((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(r)),
+        ),
+    )
     const r = await p.evaluate(focusedRing)
     if (!r) break
     if (seen.has(r.key)) break
@@ -341,6 +362,7 @@ async function main() {
   }
   mkdirSync(OUT, { recursive: true })
   const stub = startStubServer()
+  serverIdleFor = stub.idleFor
   const onboard = startStaticServer(ONBOARD)
   const surfaces = SURFACES.filter((s) => !only || s.id.includes(only))
   const results: Result[] = []

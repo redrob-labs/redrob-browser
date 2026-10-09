@@ -25,17 +25,21 @@ export interface StubServer {
   unknown: Map<string, number>
   /** The language the next captures are in; user-authored fixture content follows it. */
   setLocale(locale: FixtureLocale): void
+  /** Milliseconds since the last request arrived, so a capture can wait for the screen's data to land. */
+  idleFor(): number
   stop(): void
 }
 
 export function startStubServer(): StubServer {
   const unknown = new Map<string, number>()
   let json = fixturesFor('en')
+  let last = Date.now()
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
     idleTimeout: 0,
     fetch(req) {
+      last = Date.now()
       const url = new URL(req.url)
       const path = url.pathname
       if (req.method === 'OPTIONS')
@@ -74,6 +78,7 @@ export function startStubServer(): StubServer {
     setLocale: (locale) => {
       json = fixturesFor(locale)
     },
+    idleFor: () => Date.now() - last,
     stop: () => server.stop(true),
   }
 }

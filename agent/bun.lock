@@ -55,6 +55,7 @@
         "@radix-ui/react-tabs": "^1.1.21",
         "@radix-ui/react-tooltip": "^1.2.16",
         "@radix-ui/react-use-controllable-state": "^1.2.3",
+        "@redrob-labs/ui": "1.3.1",
         "@sentry/react": "^10.75.3",
         "@sentry/vite-plugin": "^4.9.1",
         "@tanstack/query-async-storage-persister": "^5.103.2",
@@ -401,9 +402,6 @@
     "packages/i18n": {
       "name": "@browseros/i18n",
       "version": "0.0.1",
-      "peerDependencies": {
-        "react": "^19.0.0",
-      },
     },
     "packages/onboarding-video": {
       "name": "@browseros/onboarding-video",
@@ -1356,6 +1354,8 @@
     "@redocly/config": ["@redocly/config@0.22.0", "", {}, "sha512-gAy93Ddo01Z3bHuVdPWfCwzgfaYgMdaZPcfL7JZ7hWJoK9V0lXDbigTWkhiPFAaLWzbOJ+kbUQG1+XwIm0KRGQ=="],
 
     "@redocly/openapi-core": ["@redocly/openapi-core@1.34.17", "", { "dependencies": { "@redocly/ajv": "8.11.2", "@redocly/config": "0.22.0", "colorette": "1.4.0", "https-proxy-agent": "7.0.6", "js-levenshtein": "1.1.6", "js-yaml": "4.2.0", "minimatch": "5.1.9", "pluralize": "8.0.0", "yaml-ast-parser": "0.0.43" } }, "sha512-wsV2keCt6B806XpSdezbWZ9aFJYf14YVh+XQf0ESt7M90yqVuxH9//PxvtC70sgj9OCkRM3nRaLfu4MsGQZRig=="],
+
+    "@redrob-labs/ui": ["@redrob-labs/ui@1.3.1", "", { "peerDependencies": { "react": "^18.2.0 || ^19.0.0", "react-dom": "^18.2.0 || ^19.0.0" } }, "sha512-fEaubVbps9rT7b9RNTikWo8GU5yaGbbzdCY4Y2wjFaZZ2V6TuzqN+/XwGjDUmpNZN54xKmegYZ8ZXFG+sTgFzA=="],
 
     "@remotion/bundler": ["@remotion/bundler@4.0.529", "", { "dependencies": { "@remotion/media-parser": "4.0.529", "@remotion/studio": "4.0.529", "@remotion/studio-shared": "4.0.529", "@remotion/timeline-utils": "4.0.529", "@rspack/core": "1.7.11", "@rspack/plugin-react-refresh": "1.6.1", "css-loader": "7.1.4", "esbuild": "0.28.1", "react-refresh": "0.18.0", "remotion": "4.0.529", "style-loader": "4.0.0", "webpack": "5.105.0" }, "peerDependencies": { "react": ">=16.8.0", "react-dom": ">=16.8.0" } }, "sha512-yrOoPWjwYz+E6B4uRub2L08VYZgo37T9fRaFqhtenrBFMVmR6JhftpXHyizOpQWRbeEuk1KLLo+M2duLhbi2qw=="],
 
