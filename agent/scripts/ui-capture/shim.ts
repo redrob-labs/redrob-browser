@@ -7,7 +7,7 @@
  *
  * Returned as a string because it is injected with addInitScript, before any of the page's own code.
  */
-export function browserShim(port: number): string {
+export function browserShim(port: number, colorScheme = 'system'): string {
   return `(() => {
   if (!globalThis.chrome || !chrome.runtime || chrome.browserOS) return;
   const prefs = {
@@ -25,5 +25,12 @@ export function browserShim(port: number): string {
     logMetric: (...args) => later(args.find((x) => typeof x === 'function')),
     choosePath: (_options, cb) => later(cb, null),
   };
+  // The browser's colour scheme, as redrobPrivate reports it: the capture's theme IS the browser's, so the
+  // pages take the same path they take in the real browser rather than their storage fallback.
+  let scheme = ${JSON.stringify(colorScheme)};
+  chrome.redrobPrivate = Object.assign(chrome.redrobPrivate || {}, {
+    getColorScheme: (cb) => later(cb, scheme),
+    setColorScheme: (next) => { scheme = next; },
+  });
 })();`
 }

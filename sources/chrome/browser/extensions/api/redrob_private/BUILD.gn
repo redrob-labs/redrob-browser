@@ -41,6 +41,8 @@ source_set("redrob_private") {
     "//chrome/browser/profiles:profile",
     "//chrome/browser/redrob:sidecar",
     "//chrome/browser/search_engines",
+    # getColorScheme / setColorScheme go through ThemeService.
+    "//chrome/browser/themes",
     "//chrome/browser/ui/navigator",
     "//chrome/browser/ui/select_file_policy",
     "//components/keyed_service/core",
