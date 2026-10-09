@@ -157,7 +157,14 @@ function palette(theme: Theme): string[] {
  * in, so a fixed pause measures a different frame on a slower host -- which is exactly how the first
  * hosted run disagreed with the host that wrote the baseline by one list row.
  */
+/** How long the stub server has been idle; replaced once it is running. */
+let serverIdleFor = () => Number.POSITIVE_INFINITY
+
 async function settle(p: Page) {
+  // Data first: a screen whose second request arrives after the DOM has gone quiet (a list's labels
+  // fetched separately from the list) was captured with or without them depending on the host.
+  for (let waited = 0; serverIdleFor() < 800 && waited < 8000; waited += 100)
+    await p.waitForTimeout(100)
   await p.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
   await p.evaluate(() => document.fonts.ready.then(() => undefined))
   await p.evaluate(
@@ -355,6 +362,7 @@ async function main() {
   }
   mkdirSync(OUT, { recursive: true })
   const stub = startStubServer()
+  serverIdleFor = stub.idleFor
   const onboard = startStaticServer(ONBOARD)
   const surfaces = SURFACES.filter((s) => !only || s.id.includes(only))
   const results: Result[] = []
