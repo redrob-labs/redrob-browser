@@ -204,10 +204,24 @@ async function focus(p: Page): Promise<Finding[]> {
     .locator('body')
     .click({ position: { x: 1, y: 1 } })
     .catch(() => {})
+  // A ring drawn with a transitioning box-shadow reads as whatever frame the transition is on when it is
+  // sampled, which made this count differ by host speed. With transitions off the read is the end state.
+  await p
+    .addStyleTag({
+      content:
+        '*,*::before,*::after{transition:none!important;animation-duration:0s!important}',
+    })
+    .catch(() => {})
   const misses = new Map<string, Finding>()
   const seen = new Set<string>()
   for (let i = 0; i < 25; i++) {
     await p.keyboard.press('Tab')
+    await p.evaluate(
+      () =>
+        new Promise((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(r)),
+        ),
+    )
     const r = await p.evaluate(focusedRing)
     if (!r) break
     if (seen.has(r.key)) break
