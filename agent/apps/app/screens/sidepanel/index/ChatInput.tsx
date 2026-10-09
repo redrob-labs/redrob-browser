@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Send, SquareStop } from 'lucide-react'
+import { Send, SquareStop } from '@browseros/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
 import {
   forwardRef,

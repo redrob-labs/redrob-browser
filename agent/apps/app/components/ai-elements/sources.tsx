@@ -9,7 +9,7 @@
 
 'use client'
 
-import { BookIcon, ChevronDownIcon } from 'lucide-react'
+import { BookIcon, ChevronDownIcon } from '@browseros/icons'
 import type { ComponentProps } from 'react'
 import {
   Collapsible,

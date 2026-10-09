@@ -7,8 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
+import { CheckIcon } from '@browseros/icons'
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox'
-import { CheckIcon } from 'lucide-react'
 import type * as React from 'react'
 
 import { cn } from '@/lib/utils'

@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ChevronDown, Folder, Layers, PlugZap } from 'lucide-react'
+import { ChevronDown, Folder, Layers, PlugZap } from '@browseros/icons'
 import type { FC, FormEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { AppSelector } from '@/components/elements/AppSelector'

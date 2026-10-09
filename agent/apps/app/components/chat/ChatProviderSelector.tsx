@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Bot, Check, Plus } from 'lucide-react'
+import { Bot, Check, Plus } from '@browseros/icons'
 import type { FC, PropsWithChildren } from 'react'
 import { useState } from 'react'
 import { BRAND_MARKS } from '@/components/agents/agent-brand-marks'

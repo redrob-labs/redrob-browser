@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Plus } from 'lucide-react'
+import { Plus } from '@browseros/icons'
 import { type FC, useId, useState } from 'react'
 import { AdapterIcon, adapterLabel } from '@/components/agents/AdapterIcon'
 import { BRAND_MARKS } from '@/components/agents/agent-brand-marks'

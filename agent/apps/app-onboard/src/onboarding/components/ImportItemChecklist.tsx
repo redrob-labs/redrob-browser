@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight } from '@browseros/icons'
 import { useId } from 'react'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { BrowserOSImportItem } from '../browseros-onboarding-api'

@@ -7,8 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
+import { XIcon } from '@browseros/icons'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { XIcon } from 'lucide-react'
 import type * as React from 'react'
 
 import { cn } from '@/lib/utils'

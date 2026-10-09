@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { MessageSquareHeart, X } from 'lucide-react'
+import { MessageSquareHeart, X } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { Message, MessageContent } from '@/components/ai-elements/message'
 import { Button } from '@/components/ui/button'

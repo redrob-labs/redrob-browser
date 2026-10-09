@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { FileText, X } from 'lucide-react'
+import { FileText, X } from '@browseros/icons'
 import type { FC } from 'react'
 import type { SelectedTextData } from '@/lib/selected-text/selectedTextStorage'
 

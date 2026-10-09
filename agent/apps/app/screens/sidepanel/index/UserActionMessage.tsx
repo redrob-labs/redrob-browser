@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Bot, FileText, Globe, Sparkles } from 'lucide-react'
+import { Bot, FileText, Globe, Sparkles } from '@browseros/icons'
 import type { FC } from 'react'
 import type {
   AITabAction,

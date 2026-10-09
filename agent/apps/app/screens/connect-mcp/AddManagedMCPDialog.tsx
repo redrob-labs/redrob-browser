@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { KeyRound, Plus, Search } from 'lucide-react'
+import { KeyRound, Plus, Search } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { McpServerIcon } from '@/components/mcp/McpServerIcon'
 import { Button } from '@/components/ui/button'

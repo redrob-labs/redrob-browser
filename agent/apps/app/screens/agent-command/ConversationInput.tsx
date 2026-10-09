@@ -18,7 +18,7 @@ import {
   Paperclip,
   Square,
   X,
-} from 'lucide-react'
+} from '@browseros/icons'
 import {
   type DragEvent,
   type FC,

@@ -174,6 +174,9 @@ export function audit(input: AuditInput): AuditResult {
           what: cls.split(/\s+/).slice(0, 2).join(' '),
           where: describe(el),
         })
+      // Only INTERFACE icons: the system's (rr-icon) and a foreign set's. A provider's logo is artwork in
+      // its owner's geometry and is not ours to redraw; check:ui-icons holds our own source to the rule.
+      const isInterfaceIcon = /\b(rr-icon|lucide|tabler-icon)/.test(cls)
       const round = Array.from(el.querySelectorAll('*')).some((p) => {
         const ps = getComputedStyle(p)
         return (
@@ -181,7 +184,7 @@ export function audit(input: AuditInput): AuditResult {
           (ps.strokeLinecap === 'round' || ps.strokeLinejoin === 'round')
         )
       })
-      if (round)
+      if (round && isInterfaceIcon)
         roundIcons.push({
           what: 'round stroke cap or join',
           where: describe(el),
