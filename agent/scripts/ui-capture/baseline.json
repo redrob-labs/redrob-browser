@@ -38,7 +38,7 @@
   "home-chat.dark.en": {
     "offPalette": 5,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 10,
     "roundIcons": 19,
     "foreignIcons": 19,
     "untranslated": 0,
@@ -47,7 +47,7 @@
   "home-chat.dark.ko": {
     "offPalette": 5,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 10,
     "roundIcons": 19,
     "foreignIcons": 19,
     "untranslated": 7,
@@ -56,7 +56,7 @@
   "home-chat.light.en": {
     "offPalette": 5,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 10,
     "roundIcons": 19,
     "foreignIcons": 19,
     "untranslated": 0,
@@ -65,7 +65,7 @@
   "home-chat.light.ko": {
     "offPalette": 5,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 10,
     "roundIcons": 19,
     "foreignIcons": 19,
     "untranslated": 7,

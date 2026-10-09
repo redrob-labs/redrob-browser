@@ -18,20 +18,16 @@ const cors = {
 export interface StubServer {
   port: number
   unknown: Map<string, number>
-  /** Milliseconds since the last request arrived, so a capture can wait for the screen's data to land. */
-  idleFor(): number
   stop(): void
 }
 
 export function startStubServer(): StubServer {
   const unknown = new Map<string, number>()
-  let last = Date.now()
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
     idleTimeout: 0,
     fetch(req) {
-      last = Date.now()
       const url = new URL(req.url)
       const path = url.pathname
       if (req.method === 'OPTIONS')
@@ -64,12 +60,7 @@ export function startStubServer(): StubServer {
       )
     },
   })
-  return {
-    port: server.port as number,
-    unknown,
-    idleFor: () => Date.now() - last,
-    stop: () => server.stop(true),
-  }
+  return { port: server.port as number, unknown, stop: () => server.stop(true) }
 }
 
 /** Serves a built static app (the onboarding page) from `root`. */

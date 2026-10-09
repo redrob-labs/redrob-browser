@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import '@mdxeditor/editor/style.css'
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
