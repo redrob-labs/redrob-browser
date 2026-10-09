@@ -76,18 +76,20 @@ const Spinner = forwardRef<HTMLSpanElement, IconProps>(function RedrobSpinner(
     .find(Boolean)
   const px =
     typeof size === 'number' ? size : fromClass ? Number(fromClass) * 4 : 16
-  return (
-    <span
-      ref={ref}
-      role={ariaLabel ? 'status' : undefined}
-      aria-label={ariaLabel}
-      aria-hidden={ariaLabel ? undefined : true}
-      className={[
-        'rr-spinner',
-        ...kept.filter((c) => !/^(size|h|w)-/.test(c)),
-      ].join(' ')}
-      style={{ fontSize: `${px}px`, ...(style as CSSProperties) }}
-    />
+  const shared = {
+    ref,
+    className: [
+      'rr-spinner',
+      ...kept.filter((c) => !/^(size|h|w)-/.test(c)),
+    ].join(' '),
+    style: { fontSize: `${px}px`, ...(style as CSSProperties) },
+  }
+  // Named, it is a live status a screen reader announces; unnamed, it is decoration beside text that
+  // already says what is loading.
+  return ariaLabel ? (
+    <span {...shared} role="status" aria-label={ariaLabel} />
+  ) : (
+    <span {...shared} aria-hidden />
   )
 })
 
