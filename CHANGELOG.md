@@ -4,6 +4,32 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
+## 0.1.7 — 2026-10-10
+
+**macOS and Windows ship from the same release as Linux.** 0.1.6 added a signed and notarized macOS app and a
+signed Windows installer after the fact; 0.1.7 is the first release cut with all three from one source.
+
+**The macOS app no longer carries a Linux program.** The bundle held a BrowserClaw server that Redrob never
+starts, and only a Linux build of it existed. It is gone, and packaging now refuses any executable in the app
+that is not a Mac binary.
+
+**The Windows installer's file properties show the year.** The copyright line read
+`Copyright @LASTCHANGE_YEAR@ Redrob`; it now reads `Copyright 2026 Redrob`.
+
+**The extension draws from Redrob UI.** Its colours, component styles and fonts come from `@redrob-labs/ui`
+1.3.1, the same release as the browser's own chrome, instead of a hand-copied table. A third-party editor
+stylesheet that repainted Redrob Blue as a different blue across the extension no longer can.
+
+**Connect apps** shows a built-in app's description even when the app synced before the catalogue loaded,
+where it used to stay blank.
+
+### Under the hood
+
+Windows builds cross-compile on the Linux build host (`--flavour win_cross`) and macOS uses its own
+`mac_cross` flavour; `docs/WINDOWS.md` and `docs/MACOS.md` describe both. The signing workflow takes the mac
+signing module from the build, signs Sparkle and the agent server first, and notarizes after the Chromium
+driver. The agent extension is at 0.0.164.
+
 ## 0.1.6 — 2026-10-08
 
 **Redrob Code is the agent we recommend, and the browser now says so.** The onboarding "Set up your agent"
