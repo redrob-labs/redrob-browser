@@ -3,11 +3,11 @@
 ## What this repository is
 
 Redrob Browser is an AI-native browser built as a patch-based fork of Chromium, pinned to the release
-named in `CHROMIUM_VERSION` (currently `153.0.8010.36`) with its own version in `REDROB_VERSION`
-(currently `0.1.3`). The Chromium checkout is fetched, never committed: `/chromium/`, `/depot_tools/`
-and `/out/` are all in `.gitignore`, so everything tracked here is the delta, and 84 files in
-`patches/` plus 87 files under `sources/` are the entire thing this repository owns. The repository is
-private on GitHub as `redrob-labs/redrob-browser`.
+named in `CHROMIUM_VERSION` (currently `155.0.8059.26`) with its own version in `REDROB_VERSION`
+(currently `0.1.6`). The Chromium checkout is fetched, never committed: `/chromium/`, `/depot_tools/`
+and `/out/` are all in `.gitignore`, so everything tracked here is the delta: the patch tree in
+`vendor/browseros/chromium_patches/`, the rules in `rewrite/`, and the files under `sources/`,
+`redrob/` and `branding/`. The repository is private on GitHub as `redrob-labs/redrob-browser`.
 
 ## Branching, and it changed recently
 
@@ -39,9 +39,11 @@ back-merge before the two agree again.
 
 ## Layout
 
-`patches/` holds surgical edits to files that stay Chromium's, one patch per Chromium file, named
-after the path it patches with `/` replaced by `-`; some of them are generated from `rewrite/`, which
-holds one YAML rule file per upstream path describing the change instead of diffing it. `redrob/` is
+`vendor/browseros/chromium_patches/` holds surgical edits to files that stay Chromium's, one patch per
+Chromium file, filed at the upstream path itself so the tree mirrors Chromium's; `.features.yaml` in it
+groups our patches into `redrob-*` features. There is no top-level `patches/` any more: commit
+`5bdae339` moved the stack into the vendored BrowserOS layout. Many patches are generated from
+`rewrite/`, which holds one YAML rule file per upstream path describing the change instead of diffing it. `redrob/` is
 copied wholesale into the checkout as `src/redrob` and holds the `-iquote` compiler config, the shared
 GN lists in `sources.gni`, and the `chromium_src` overrides that are compiled in place of an upstream
 file. `sources/` holds code this fork owns outright,
@@ -108,12 +110,13 @@ files and the GN lists in `redrob/build/sources.gni` first; then a `redrob/chrom
 compiled in place of an upstream file and pulls it in rather than copying it; then a rule in `rewrite/`,
 which DESCRIBES the change and generates the patch; and a hand-written patch last.
 
-Do not hand-edit anything in `patches/`. A patch with a `rewrite/*.yaml` beside it is GENERATED — edit the
+Do not hand-edit anything in `vendor/browseros/chromium_patches/`. A patch with a `rewrite/*.yaml` beside it is GENERATED — edit the
 rule and run `./scripts/plaster.py generate`; a hand edit works once and the next regeneration discards it,
 which `check_repo.py` refuses. For a hand patch, edit `chromium/src` like a normal tree and run
-`./scripts/redrob.py export`, which rewrites it from the checkout's own diff. A patch whose filename no
-longer matches the `+++ b/` path inside it still applies, so nothing breaks at build time, but
-`check_repo.py` fails on it because `ls patches/` stops being a usable inventory.
+`./scripts/redrob.py export`, which rewrites it from the checkout's own diff. A patch filed under a path
+other than the `+++ b/` path inside it still applies, so nothing breaks at build time, but
+`check_repo.py` fails on it because the patch tree stops answering "what does this fork change about
+this file".
 
 Never use a `#define` to edit upstream code, and never redefine `final`. A `#define` rewrites every
 occurrence of that identifier in the translation unit, including ones pulled in by later includes, and
