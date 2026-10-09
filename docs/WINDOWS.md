@@ -272,7 +272,9 @@ python depot_tools\win_toolchain\package_from_installed.py 2026 -w 10.0.28000.0 
 `...\arm64\Microsoft.VC*.CRT had 0 matches`. It writes `<hash>.zip` (1.3 GB). Copy it to the Linux host, into
 a directory OUTSIDE the repository: it is Microsoft's toolchain and is not ours to publish.
 
-**2. Point gclient at Windows and at that zip.** In `chromium/.gclient`, add `target_os = ["win"]`, and mark the
+**2. Point gclient at Windows and at that zip.** In `chromium/.gclient`, add `target_os = ["win"]` (`["win",
+"mac"]` if the same checkout also cross-builds macOS -- docs/MACOS.md; dropping `"mac"` removes clang's darwin
+runtime on the next hook run), and mark the
 `src` solution `"managed": False` -- otherwise `gclient sync` refuses with "You have uncommitted changes",
 because the applied patch stack is exactly that. Unmanaged means gclient fetches dependencies and leaves `src`
 alone. Then, in the environment:

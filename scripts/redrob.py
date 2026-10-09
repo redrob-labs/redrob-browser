@@ -87,12 +87,14 @@ FLAVOURS = {
     "mac": "build/args/mac.gn",
     "windows": "build/args/windows.gn",
     "win_cross": "build/args/win_cross.gn",
+    "mac_cross": "build/args/mac_cross.gn",
 }
 
 # Which flavours are for which host. A flavour is not a cross-compile: `mac` and `windows` name the gn
 # args a build ON that platform uses, and running them anywhere else fails inside the toolchain rather
 # than here -- so the mapping is stated once and checked, instead of being discovered from a link error.
-FLAVOUR_PLATFORM = {"dev": "linux", "release": "linux", "mac": "darwin", "windows": "win32", "win_cross": "linux"}
+FLAVOUR_PLATFORM = {"dev": "linux", "release": "linux", "mac": "darwin", "windows": "win32", "win_cross": "linux",
+                    "mac_cross": "linux"}
 
 
 def version() -> str:
@@ -219,6 +221,9 @@ def cmd_package(args: argparse.Namespace) -> None:
     if FLAVOUR_PLATFORM[args.flavour] == "win32" or _gn_value(flavour_args, "target_os") == "win":
         package_windows(args)
         return
+    if FLAVOUR_PLATFORM[args.flavour] == "darwin" or _gn_value(flavour_args, "target_os") == "mac":
+        package_mac(args)
+        return
     if args.flavour == "dev" and not args.allow_dev:
         sys.exit("refusing to package a dev build: no LTO, no PGO. Use --flavour release, "
                  "or --allow-dev if you are testing the packaging path itself")
@@ -340,6 +345,59 @@ def package_windows(args: argparse.Namespace) -> None:
         for target in (artifacts / branded, cdn / branded):
             shutil.copy2(wrapped, target)
             print(f"{target.relative_to(ROOT)}  {target.stat().st_size // (1024 * 1024)} MB")
+
+
+# First four bytes of a Mach-O image: thin 64-bit (either byte order) or universal. Anything else under a
+# bundle's bin/ directory cannot run on macOS.
+MACHO_MAGICS = {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"}
+
+
+def foreign_executables(app: Path) -> list[str]:
+    """Executables under Contents/Resources/**/bin that are not Mach-O, as bundle-relative paths.
+
+    The GN rules copy server resources into the bundle without looking at their architecture, so a Linux
+    binary staged in the wrong place ships silently: 0.1.6 carried a Linux ELF BrowserClaw server that way,
+    and Apple's notarization does not object to a file that is not Mach-O.
+    """
+    bad = []
+    for path in sorted((app / "Contents" / "Resources").glob("**/bin/*")):
+        if path.is_file() and not path.is_symlink():
+            with path.open("rb") as f:
+                if f.read(4) not in MACHO_MAGICS:
+                    bad.append(str(path.relative_to(app)))
+    return bad
+
+
+def package_mac(args: argparse.Namespace) -> None:
+    """Zip the cross-built .app and its signing kit the way sign-and-publish.yml downloads them.
+
+    Two archives, both with symlinks kept (`zip -y`), because the framework's Versions/Current links are what
+    codesign walks: `<name>.app.zip` is the app, `<name>-packaging.zip` is the `<product> Packaging` directory
+    (target chrome/installer/mac) that the workflow's signing driver and build_props_config.py come from.
+    """
+    out = SRC / "out" / args.flavour
+    app = out / "Redrob Browser.app"
+    if not (app / "Contents" / "MacOS" / "Redrob Browser").exists():
+        sys.exit(f"nothing built in out/{args.flavour}: run build first")
+    jobs = ["-j", str(args.jobs)] if getattr(args, "jobs", 0) else []
+    run(["autoninja", "-C", f"out/{args.flavour}", *jobs, "chrome/installer/mac"], SRC)
+    packaging = out / "Redrob Browser Packaging"
+    if not (packaging / "signing" / "build_props_config.py").exists():
+        sys.exit(f"chrome/installer/mac produced no signing kit in {packaging}")
+
+    bad = foreign_executables(app)
+    if bad:
+        sys.exit("refusing to package: not Mach-O, so it cannot run on macOS:\n  " + "\n  ".join(bad))
+
+    artifacts = ROOT / "out" / "artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    cpu = _gn_value((out / "args.gn").read_text(encoding="utf-8"), "target_cpu") or "arm64"
+    stem = f"redrob-browser-macos-{cpu}-{product_version()}"
+    for source, name in ((app, f"{stem}.app.zip"), (packaging, f"{stem}-packaging.zip")):
+        target = artifacts / name
+        target.unlink(missing_ok=True)
+        run(["zip", "-qry", str(target), source.name], out)
+        print(f"{target.relative_to(ROOT)}  {target.stat().st_size // (1024 * 1024)} MB")
 
 
 def cmd_repo(args: argparse.Namespace) -> None:
