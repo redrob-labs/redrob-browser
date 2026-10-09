@@ -15,7 +15,7 @@ import {
   Loader2,
   ShieldX,
   XCircle,
-} from 'lucide-react'
+} from '@browseros/icons'
 import { type FC, useEffect, useState } from 'react'
 import {
   Task,

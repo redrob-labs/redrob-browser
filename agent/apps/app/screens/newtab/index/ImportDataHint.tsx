@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Upload, X } from 'lucide-react'
+import { Upload, X } from '@browseros/icons'
 import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'

@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Copy, Loader2, RefreshCw, Server } from 'lucide-react'
+import { Check, Copy, Loader2, RefreshCw, Server } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'

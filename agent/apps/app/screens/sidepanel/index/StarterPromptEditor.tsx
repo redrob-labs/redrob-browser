@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Loader2, Pencil, X } from 'lucide-react'
+import { Loader2, Pencil, X } from '@browseros/icons'
 import { Fragment, useEffect, useId, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

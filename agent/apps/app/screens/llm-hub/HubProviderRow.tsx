@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Globe2, Trash2 } from 'lucide-react'
+import { Globe2, Trash2 } from '@browseros/icons'
 import type { FC } from 'react'
 import { useMemo } from 'react'
 import { Button } from '@/components/ui/button'

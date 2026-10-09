@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight } from '@browseros/icons'
 import { Button } from '@/components/ui/button'
 import { DisplayHeading, Em, StepCopy } from '../components/DisplayHeading'
 import { StepWrap } from '../components/StepWrap'

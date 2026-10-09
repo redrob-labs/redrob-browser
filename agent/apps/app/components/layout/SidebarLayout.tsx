@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Menu } from 'lucide-react'
+import { Menu } from '@browseros/icons'
 import type { FC } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation } from 'react-router'

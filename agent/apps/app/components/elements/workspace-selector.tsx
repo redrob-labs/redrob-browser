@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Folder, FolderOpen, Globe, X } from 'lucide-react'
+import { Check, Folder, FolderOpen, Globe, X } from '@browseros/icons'
 import type { FC, PropsWithChildren } from 'react'
 import { useState } from 'react'
 import {

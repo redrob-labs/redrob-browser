@@ -76,7 +76,8 @@
     "env:examples:check": "bun scripts/env/generate-examples.ts --check",
     "env:migrate": "bun scripts/env/migrate-local.ts",
     "generate:models": "bun scripts/generate-models.ts",
-    "ui:capture": "bun scripts/ui-capture/capture.ts"
+    "ui:capture": "bun scripts/ui-capture/capture.ts",
+    "check:ui-icons": "bun scripts/check-ui-icons.ts"
   },
   "repository": "browseros-ai/BrowserOS-server",
   "author": "BrowserOS",

@@ -7,7 +7,12 @@
  * See the NOTICE file for provenance.
  */
 
-import { CheckIcon, CopyIcon, ThumbsDownIcon, ThumbsUpIcon } from 'lucide-react'
+import {
+  CheckIcon,
+  CopyIcon,
+  ThumbsDownIcon,
+  ThumbsUpIcon,
+} from '@browseros/icons'
 import { AnimatePresence, motion } from 'motion/react'
 import { type FC, useState } from 'react'
 import { MessageAction, MessageActions } from '@/components/ai-elements/message'

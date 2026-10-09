@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Globe } from 'lucide-react'
+import { Globe } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { getFavicons } from '@/lib/getFavicons'
 import { useRecentSites } from './recent-sites.hooks'

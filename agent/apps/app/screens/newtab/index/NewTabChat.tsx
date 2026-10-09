@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Loader2 } from 'lucide-react'
+import { Loader2 } from '@browseros/icons'
 import { type FC, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router'
 import { NoProviderNotice } from '@/components/chat/NoProviderNotice'

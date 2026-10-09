@@ -9,7 +9,7 @@
 
 'use client'
 
-import { type LucideIcon, XIcon } from 'lucide-react'
+import { type LucideIcon, XIcon } from '@browseros/icons'
 import type { ComponentProps, HTMLAttributes } from 'react'
 import { Button } from '@/components/ui/button'
 import {

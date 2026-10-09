@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Loader2, Plus, Server, Trash2 } from 'lucide-react'
+import { Check, Loader2, Plus, Server, Trash2 } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiKeyDialog } from '@/components/mcp/ApiKeyDialog'

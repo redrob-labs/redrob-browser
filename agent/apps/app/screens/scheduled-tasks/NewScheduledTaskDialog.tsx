@@ -7,8 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
+import { ChevronDown, Loader2, Sparkles, Undo2 } from '@browseros/icons'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ChevronDown, Loader2, Sparkles, Undo2 } from 'lucide-react'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'

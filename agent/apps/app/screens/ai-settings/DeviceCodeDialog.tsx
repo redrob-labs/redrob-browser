@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Copy, ExternalLink } from 'lucide-react'
+import { Check, Copy, ExternalLink } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
