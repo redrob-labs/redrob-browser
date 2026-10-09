@@ -9,13 +9,13 @@
 
 'use client'
 
+import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import {
   BrainIcon,
   ChevronDownIcon,
   DotIcon,
   type LucideIcon,
-} from '@browseros/icons'
-import { useControllableState } from '@radix-ui/react-use-controllable-state'
+} from 'lucide-react'
 import type { ComponentProps, ReactNode } from 'react'
 import { createContext, memo, useContext, useMemo } from 'react'
 import { Badge } from '@/components/ui/badge'

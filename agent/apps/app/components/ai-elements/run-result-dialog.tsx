@@ -7,6 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
+import dayjs from 'dayjs'
+import duration from 'dayjs/plugin/duration'
 import {
   AlertCircle,
   Check,
@@ -16,9 +18,7 @@ import {
   RotateCcw,
   Square,
   XCircle,
-} from '@browseros/icons'
-import dayjs from 'dayjs'
-import duration from 'dayjs/plugin/duration'
+} from 'lucide-react'
 import { type FC, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {

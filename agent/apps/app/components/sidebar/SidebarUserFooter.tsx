@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Info, Keyboard } from '@browseros/icons'
+import { Info, Keyboard } from 'lucide-react'
 import type { FC } from 'react'
 import { Button } from '@/components/ui/button'
 import {

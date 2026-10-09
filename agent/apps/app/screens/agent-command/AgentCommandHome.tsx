@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Search, Sparkles } from '@browseros/icons'
+import { Search, Sparkles } from 'lucide-react'
 import { type FC, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { NoProviderNotice } from '@/components/chat/NoProviderNotice'

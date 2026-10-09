@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Copy } from '@browseros/icons'
+import '@mdxeditor/editor/style.css'
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -27,6 +27,7 @@ import {
   toolbarPlugin,
   UndoRedo,
 } from '@mdxeditor/editor'
+import { Check, Copy } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 

@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { RefreshCw } from '@browseros/icons'
+import { RefreshCw } from 'lucide-react'
 
 interface ImportingProgressCardProps {
   currentItemLabel?: string

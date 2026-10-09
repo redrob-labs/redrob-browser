@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Server } from '@browseros/icons'
+import { Server } from 'lucide-react'
 import type { FC } from 'react'
 import AirtableSvg from '@/assets/mcp-icons/airtable.svg'
 import AsanaSvg from '@/assets/mcp-icons/asana.svg'

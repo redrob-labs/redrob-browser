@@ -65,8 +65,6 @@ export function ThemeProvider({
       if (!root.classList.contains(targetTheme)) {
         root.classList.add(targetTheme)
       }
-      // The design system themes on [data-theme]; shadcn's dark: variant on .dark. Both, always together.
-      root.dataset.theme = targetTheme
     }
 
     if (theme === 'system') {

@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowDownToLine, Cpu, ShieldCheck } from '@browseros/icons'
+import { ArrowDownToLine, Cpu, ShieldCheck } from 'lucide-react'
 
 /** Persistent value rail beside the onboarding steps, in the app theme. */
 export function VisualRail() {

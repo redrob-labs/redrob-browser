@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Clock, X } from '@browseros/icons'
+import { Clock, X } from 'lucide-react'
 import { type FC, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {

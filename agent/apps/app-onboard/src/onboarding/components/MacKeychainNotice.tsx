@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Info, Lock } from '@browseros/icons'
+import { Info, Lock } from 'lucide-react'
 
 /** An inert illustration of the OS-owned prompt; credentials only go to macOS. */
 export function MacKeychainPreview() {

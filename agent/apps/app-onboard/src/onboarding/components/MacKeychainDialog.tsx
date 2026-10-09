@@ -8,7 +8,7 @@
  */
 
 import { Dialog } from '@base-ui/react/dialog'
-import { ArrowRight, Lock, X } from '@browseros/icons'
+import { ArrowRight, Lock, X } from 'lucide-react'
 import { type RefObject, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import {

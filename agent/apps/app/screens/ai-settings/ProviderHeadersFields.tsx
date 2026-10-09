@@ -7,8 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Plus, Trash2 } from '@browseros/icons'
 import { CONVERSATION_ID_PLACEHOLDER } from '@browseros/shared/schemas/llm'
+import { Plus, Trash2 } from 'lucide-react'
 import { useFieldArray, useFormContext } from 'react-hook-form'
 import { Button } from '@/components/ui/button'
 import {

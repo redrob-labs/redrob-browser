@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Plug } from '@browseros/icons'
+import { Check, Plug } from 'lucide-react'
 import { type FC, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiKeyDialog } from '@/components/mcp/ApiKeyDialog'

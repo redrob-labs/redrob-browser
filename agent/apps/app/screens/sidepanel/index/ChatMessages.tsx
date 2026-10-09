@@ -7,8 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Bot } from '@browseros/icons'
 import type { UIMessage } from 'ai'
+import { Bot } from 'lucide-react'
 import { type FC, Fragment } from 'react'
 import {
   Conversation,

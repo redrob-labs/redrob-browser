@@ -9,7 +9,7 @@
 
 'use client'
 
-import { ChevronsUpDownIcon } from '@browseros/icons'
+import { ChevronsUpDownIcon } from 'lucide-react'
 import type { ComponentProps } from 'react'
 import { createContext, useContext } from 'react'
 import { Button } from '@/components/ui/button'

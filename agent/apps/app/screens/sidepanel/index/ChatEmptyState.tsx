@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowRight, Pencil, Sparkles } from '@browseros/icons'
+import { ArrowRight, Pencil, Sparkles } from 'lucide-react'
 import { type FC, useEffect, useRef, useState } from 'react'
 import { sentry } from '@/lib/sentry/sentry'
 import { cn } from '@/lib/utils'

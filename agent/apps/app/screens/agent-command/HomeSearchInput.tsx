@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { Search } from '@browseros/icons'
+import { Search } from 'lucide-react'
 import { type FC, type FormEvent, useState } from 'react'
 import { resolveSearchInput } from '@/lib/newtab/search-input'
 

@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Monitor, Moon, Sun } from '@browseros/icons'
+import { Monitor, Moon, Sun } from 'lucide-react'
 import type { FC } from 'react'
 import type { ClassNameValue } from 'tailwind-merge'
 import { useTheme } from '@/components/theme-provider'

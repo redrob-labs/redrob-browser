@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Loader2, Pencil } from '@browseros/icons'
+import { Loader2, Pencil } from 'lucide-react'
 import { type FC, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'

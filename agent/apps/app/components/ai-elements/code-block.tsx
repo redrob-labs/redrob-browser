@@ -9,7 +9,7 @@
 
 'use client'
 
-import { CheckIcon, CopyIcon } from '@browseros/icons'
+import { CheckIcon, CopyIcon } from 'lucide-react'
 import {
   type ComponentProps,
   createContext,

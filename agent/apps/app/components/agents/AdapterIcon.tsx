@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Blocks, Bot } from '@browseros/icons'
+import { Blocks, Bot } from 'lucide-react'
 import type { FC } from 'react'
 import type { AcpAgentType } from '@/modules/agents/acp-agent-types'
 import { BRAND_MARKS } from './agent-brand-marks'

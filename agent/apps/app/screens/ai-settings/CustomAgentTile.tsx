@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Plus } from '@browseros/icons'
+import { Plus } from 'lucide-react'
 import type { FC } from 'react'
 import { BRAND_MARKS } from '@/components/agents/agent-brand-marks'
 import { POPULAR_ACP_AGENTS } from './popular-acp-agents'

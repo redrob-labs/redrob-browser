@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Globe, X } from '@browseros/icons'
+import { Globe, X } from 'lucide-react'
 import type { FC } from 'react'
 
 export interface ChatAttachedTabsProps {

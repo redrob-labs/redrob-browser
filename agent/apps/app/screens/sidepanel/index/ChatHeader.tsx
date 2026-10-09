@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Bot, ChevronDown, History, Plus, SettingsIcon } from '@browseros/icons'
+import { Bot, ChevronDown, History, Plus, SettingsIcon } from 'lucide-react'
 import type { FC } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import { BRAND_MARKS } from '@/components/agents/agent-brand-marks'
