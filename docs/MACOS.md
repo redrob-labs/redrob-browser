@@ -132,7 +132,9 @@ Mach-O: 0.1.6 shipped a Linux ELF BrowserClaw server that way, from a hand-writt
 `chromium/.gclient` must list `"mac"` in `target_os` (with `"win"` when the same checkout also cross-builds
 Windows). Without it the clang hook installs no darwin runtime, and the link fails with
 `libclang_rt.osx.a ... missing and no known rule to make it`. Re-running the hook re-downloads clang, and the
-next build of every flavour is a full one.
+next build of every flavour is a full one. A bare `tools/clang/scripts/update.py` also drops the extra LLVM
+tools, and the first dylib link then fails in `linker_driver.py` with `No such file or directory:
+.../llvm-otool`. Restore them with `tools/clang/scripts/update.py --package=objdump`.
 
 ## What does not transfer from the existing macOS CI
 
