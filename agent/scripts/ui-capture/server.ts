@@ -1,0 +1,82 @@
+/**
+ * A stub agent server: fixtures for every route a screen reads on load, nothing else.
+ *
+ * It is a stub and not the real `apps/server` because the real one needs a model credential, a CDP
+ * connection and a database before any screen has content, and a capture that depends on those is a
+ * capture of whatever state the host happened to be in. Unknown routes answer 404 and are recorded, so
+ * a screen that starts reading a new route shows up in the report instead of silently rendering empty.
+ */
+
+import { acpProbe, json, oauthStatus } from './fixtures'
+
+const cors = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers': '*',
+  'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+}
+
+export interface StubServer {
+  port: number
+  unknown: Map<string, number>
+  stop(): void
+}
+
+export function startStubServer(): StubServer {
+  const unknown = new Map<string, number>()
+  const server = Bun.serve({
+    port: 0,
+    hostname: '127.0.0.1',
+    idleTimeout: 0,
+    fetch(req) {
+      const url = new URL(req.url)
+      const path = url.pathname
+      if (req.method === 'OPTIONS')
+        return new Response(null, { status: 204, headers: cors })
+
+      if (req.method === 'GET' && path === '/chat/panels') {
+        // SSE: one empty assignment set, then held open the way the real server holds it.
+        const body = new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode('data: {"assignments":[]}\n\n'))
+          },
+        })
+        return new Response(body, {
+          headers: { ...cors, 'content-type': 'text/event-stream' },
+        })
+      }
+      if (req.method === 'GET' && path in json)
+        return Response.json(json[path], { headers: cors })
+      if (req.method === 'GET' && /^\/oauth\/[^/]+\/status$/.test(path)) {
+        return Response.json(oauthStatus(path.split('/')[2]), { headers: cors })
+      }
+      if (req.method === 'POST' && path === '/acpx/probe')
+        return Response.json(acpProbe, { headers: cors })
+
+      const key = `${req.method} ${path}`
+      unknown.set(key, (unknown.get(key) ?? 0) + 1)
+      return Response.json(
+        { error: { message: 'not in the capture fixtures' } },
+        { status: 404, headers: cors },
+      )
+    },
+  })
+  return { port: server.port as number, unknown, stop: () => server.stop(true) }
+}
+
+/** Serves a built static app (the onboarding page) from `root`. */
+export function startStaticServer(root: string): {
+  port: number
+  stop(): void
+} {
+  const server = Bun.serve({
+    port: 0,
+    hostname: '127.0.0.1',
+    async fetch(req) {
+      const path = new URL(req.url).pathname
+      const file = Bun.file(`${root}${path === '/' ? '/index.html' : path}`)
+      if (await file.exists()) return new Response(file)
+      return new Response(Bun.file(`${root}/index.html`))
+    },
+  })
+  return { port: server.port as number, stop: () => server.stop(true) }
+}
