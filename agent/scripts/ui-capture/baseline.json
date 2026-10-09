@@ -1,6 +1,6 @@
 {
   "connect-apps.dark.en": {
-    "offPalette": 4,
+    "offPalette": 5,
     "contrast": 0,
     "focusMissing": 6,
     "roundIcons": 0,
@@ -9,7 +9,7 @@
     "fonts": 0
   },
   "connect-apps.dark.ko": {
-    "offPalette": 4,
+    "offPalette": 5,
     "contrast": 0,
     "focusMissing": 6,
     "roundIcons": 0,
@@ -72,7 +72,7 @@
     "fonts": 0
   },
   "home-personalize.dark.en": {
-    "offPalette": 4,
+    "offPalette": 5,
     "contrast": 0,
     "focusMissing": 8,
     "roundIcons": 0,
@@ -81,7 +81,7 @@
     "fonts": 0
   },
   "home-personalize.dark.ko": {
-    "offPalette": 4,
+    "offPalette": 5,
     "contrast": 0,
     "focusMissing": 8,
     "roundIcons": 0,
@@ -360,7 +360,7 @@
     "fonts": 0
   },
   "settings-chat.dark.en": {
-    "offPalette": 1,
+    "offPalette": 2,
     "contrast": 0,
     "focusMissing": 6,
     "roundIcons": 0,
@@ -369,7 +369,7 @@
     "fonts": 0
   },
   "settings-chat.dark.ko": {
-    "offPalette": 1,
+    "offPalette": 2,
     "contrast": 0,
     "focusMissing": 6,
     "roundIcons": 0,
@@ -468,7 +468,7 @@
     "fonts": 0
   },
   "settings-mcp.dark.en": {
-    "offPalette": 3,
+    "offPalette": 4,
     "contrast": 0,
     "focusMissing": 6,
     "roundIcons": 0,
@@ -477,7 +477,7 @@
     "fonts": 0
   },
   "settings-mcp.dark.ko": {
-    "offPalette": 3,
+    "offPalette": 4,
     "contrast": 0,
     "focusMissing": 6,
     "roundIcons": 0,
