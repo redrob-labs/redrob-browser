@@ -1,6 +1,6 @@
 // VENDORED FROM THE REDROB DESIGN SYSTEM -- DO NOT EDIT.
-// source: @redrob-labs/ui@1.0.2  dist/icons/index.js
-// commit: f97d68788db563c1d398946f51685d550dea163a
+// source: @redrob-labs/ui@1.3.1  dist/icons/index.js
+// commit: 49f54c9b33855e4e4442aa8e10c8c400529f4303
 //
 // Regenerate with: python3 scripts/vendor_design_system.py --update
 // A value changed here is a value that disagrees with every other Redrob product.
