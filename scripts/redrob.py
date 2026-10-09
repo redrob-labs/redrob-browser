@@ -86,12 +86,13 @@ FLAVOURS = {
     "release": "build/args/release.gn",
     "mac": "build/args/mac.gn",
     "windows": "build/args/windows.gn",
+    "win_cross": "build/args/win_cross.gn",
 }
 
 # Which flavours are for which host. A flavour is not a cross-compile: `mac` and `windows` name the gn
 # args a build ON that platform uses, and running them anywhere else fails inside the toolchain rather
 # than here -- so the mapping is stated once and checked, instead of being discovered from a link error.
-FLAVOUR_PLATFORM = {"dev": "linux", "release": "linux", "mac": "darwin", "windows": "win32"}
+FLAVOUR_PLATFORM = {"dev": "linux", "release": "linux", "mac": "darwin", "windows": "win32", "win_cross": "linux"}
 
 
 def version() -> str:
@@ -212,7 +213,10 @@ def cmd_package(args: argparse.Namespace) -> None:
     """
     if not SRC.exists():
         sys.exit("no checkout: run sync first")
-    if FLAVOUR_PLATFORM[args.flavour] == "win32":
+    # Dispatch on the OS the flavour BUILDS FOR, not the host it runs on: win_cross is a Windows build made on
+    # Linux, and its installer is the same mini_installer target, built by the same cross toolchain.
+    flavour_args = (ROOT / FLAVOURS[args.flavour]).read_text(encoding="utf-8")
+    if FLAVOUR_PLATFORM[args.flavour] == "win32" or _gn_value(flavour_args, "target_os") == "win":
         package_windows(args)
         return
     if args.flavour == "dev" and not args.allow_dev:
@@ -294,7 +298,8 @@ def package_windows(args: argparse.Namespace) -> None:
     if not (out / "chrome.exe").exists():
         sys.exit(f"nothing built in out/{args.flavour}: run build first")
 
-    run(["autoninja", "-C", f"out/{args.flavour}", "chrome/installer/mini_installer"], SRC)
+    jobs = ["-j", str(args.jobs)] if getattr(args, "jobs", 0) else []
+    run(["autoninja", "-C", f"out/{args.flavour}", *jobs, "chrome/installer/mini_installer"], SRC)
 
     built = out / "mini_installer.exe"
     if not built.exists():
@@ -691,7 +696,8 @@ def cmd_build(args: argparse.Namespace) -> None:
     stage_update_framework(server_target_for(args_gn, want))
     stage_bundled_extension()
     run(["gn", "gen", f"out/{args.flavour}"], SRC)
-    run(["autoninja", "-C", f"out/{args.flavour}", args.target], SRC)
+    jobs = ["-j", str(args.jobs)] if getattr(args, "jobs", 0) else []
+    run(["autoninja", "-C", f"out/{args.flavour}", *jobs, args.target], SRC)
 
 
 # The agent server is a separate executable the browser bundles and launches (it serves the side panel and
@@ -1004,6 +1010,8 @@ def main() -> None:
                               "unchanged.")
     package.add_argument("--chrome", default=None,
                          help="path to chrome.exe used by --with-setup to render the branded background art")
+    package.add_argument("--jobs", type=int, default=0,
+                         help="cap parallel compile jobs for the installer build (0 = autoninja's default)")
     package.set_defaults(func=cmd_package)
 
     repo = sub.add_parser("repo", help="build a signed apt repository from out/artifacts")
@@ -1031,6 +1039,8 @@ def main() -> None:
     build = sub.add_parser("build", help="gn gen + ninja")
     build.add_argument("--flavour", choices=sorted(FLAVOURS), default="dev")
     build.add_argument("--target", default="chrome")
+    build.add_argument("--jobs", type=int, default=0,
+                       help="cap parallel compile jobs (0 = autoninja's default, which is every core)")
     build.add_argument("--force-platform", action="store_true",
                        help="build a flavour whose platform is not this host's, if you have a cross toolchain")
     build.set_defaults(func=cmd_build)

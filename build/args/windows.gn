@@ -40,3 +40,9 @@ treat_warnings_as_errors = false
 # BrowserClaw server too, for a product branch Redrob cannot reach; that server is staged by hand and has
 # no Windows build, so packaging it made every fresh checkout depend on a file nobody produces.
 browseros_package_all_server_resources = false
+
+# BRANDING's COPYRIGHT is "Copyright @LASTCHANGE_YEAR@ Redrob...". This flavour is not an official build, so
+# version.py would read the year from build/util/LASTCHANGE.dummy, which has no LASTCHANGE_YEAR -- and the
+# placeholder shipped verbatim in every PE version resource. Read the real LASTCHANGE (written by gclient
+# runhooks) instead. It only feeds version strings; the cost is relinking those targets when the commit moves.
+use_dummy_lastchange = false
