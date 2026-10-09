@@ -1,6 +1,6 @@
 /* VENDORED FROM THE REDROB DESIGN SYSTEM -- DO NOT EDIT. */
-/* source: @redrob-labs/ui@1.0.2  dist/styles/tokens.css */
-/* commit: f97d68788db563c1d398946f51685d550dea163a */
+/* source: @redrob-labs/ui@1.3.1  dist/styles/tokens.css */
+/* commit: 49f54c9b33855e4e4442aa8e10c8c400529f4303 */
 /* */
 /* Regenerate with: python3 scripts/vendor_design_system.py --update */
 /* A value changed here is a value that disagrees with every other Redrob product. */
@@ -107,8 +107,34 @@
   --shadow-sm: 0 1px 2px rgba(10, 11, 12, 0.08); /* Resting cards and inputs. */
   --shadow-md: 0 4px 12px rgba(10, 11, 12, 0.10); /* Menus, popovers and hovered cards. */
   --shadow-lg: 0 16px 40px rgba(10, 11, 12, 0.14); /* Modals and dialogs. */
-  /* Product colours. Seven products, each a mark (step 6), a 10-step ramp, three themed roles and
-     three `beyond` grounds -- 119 declarations, transcribed from the delivery's tokens.json.
+  /* Insight charts (MixBar, BulletBar, BarList, HeatCell, Histogram). Beyond the delivery: ported from
+     the Crew prototype's --cw-* chart variables when Crew's screens moved into Console. */
+  --chart-track: var(--gray-2); /* Empty track behind a bar; the ground a share is measured against. */
+  --chart-good: var(--blue-6); /* A change the good way, and the reader's own figure. */
+  --chart-bad: var(--accent-orange-4); /* A change the bad way. Orange, not red: something to help with, not an error. */
+  --ordinal-0: var(--gray-3); /* Ordinal ramp, step 0 (shallowest, e.g. Look up). Light to deep, so order reads without a key. */
+  --ordinal-1: var(--blue-2);
+  --ordinal-2: var(--blue-3);
+  --ordinal-3: var(--blue-5);
+  --ordinal-4: var(--blue-7);
+  --ordinal-5: var(--blue-9); /* Ordinal ramp, step 5 (deepest, e.g. Orchestrate). */
+  --ordinal-ink-0: var(--gray-9); /* Figure printed on ordinal step 0. */
+  --ordinal-ink-1: var(--blue-10);
+  --ordinal-ink-2: var(--blue-10);
+  --ordinal-ink-3: var(--redrob-white);
+  --ordinal-ink-4: var(--redrob-white);
+  --ordinal-ink-5: var(--redrob-white);
+  --heat-pos-1: #e3ecff; /* Compare grid: 3-8 points the good way. */
+  --heat-pos-2: #bad2ff; /* 8-15 points the good way. */
+  --heat-pos-3: #8aafff; /* 15 points or more the good way. */
+  --heat-neg-1: #fff1e2; /* Compare grid: 3-8 points the bad way. */
+  --heat-neg-2: #ffd5ab; /* 8-15 points the bad way. */
+  --heat-neg-3: #ffb571; /* 15 points or more the bad way. */
+  /* Product colours. Eight products, each a mark (step 6), a 10-step ramp, three themed roles and
+     three `beyond` grounds -- 136 declarations. The first seven are transcribed from the delivery's
+     tokens.json. Console is the Group's own product (the control plane every other product signs in
+     to), so it wears Redrob Blue rather than an eighth hue: its ramp IS the brand ramp, referenced
+     rather than copied so the two can never drift.
 
      They are here because system.css REFERENCES them and the delivery's own tokens.css never
      declared them: `.rr-shell[data-product="browser"] { --product-wash: var(--product-browser-wash) }`
@@ -151,6 +177,11 @@
   --product-design-6: #c162f4; --product-design-7: #8832b2; --product-design-8: #6e1a94; --product-design-9: #540075; --product-design-10: #35004b;
   --product-design-wash: var(--product-design-1); --product-design-fill: var(--product-design-2); --product-design-line: var(--product-design-3);
   --product-design-beyond-light: linear-gradient(130deg, #cd72ff 75%, #eac9ff 89%, #faf4ff 100%); --product-design-beyond-brand: linear-gradient(130deg, #dca2ff 75%, #cd72ff 89%, #c162f4 100%); --product-design-beyond-deep: linear-gradient(130deg, #c162f4 75%, #8832b2 100%);
+  --product-console: var(--blue-6);
+  --product-console-1: var(--blue-1); --product-console-2: var(--blue-2); --product-console-3: var(--blue-3); --product-console-4: var(--blue-4); --product-console-5: var(--blue-5);
+  --product-console-6: var(--blue-6); --product-console-7: var(--blue-7); --product-console-8: var(--blue-8); --product-console-9: var(--blue-9); --product-console-10: var(--blue-10);
+  --product-console-wash: var(--product-console-1); --product-console-fill: var(--product-console-2); --product-console-line: var(--product-console-3);
+  --product-console-beyond-light: linear-gradient(130deg, #507fff 75%, #bad2ff 89%, #eef4ff 100%); --product-console-beyond-brand: linear-gradient(130deg, #8aafff 75%, #507fff 89%, #2b52ff 100%); --product-console-beyond-deep: linear-gradient(130deg, #2b52ff 75%, #1733d5 100%);
 }
 [data-theme="dark"] {
   --surface-base: var(--redrob-black);
@@ -184,6 +215,28 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.7);
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.8);
+  --chart-track: var(--gray-8);
+  --chart-good: var(--blue-5);
+  --chart-bad: var(--accent-orange-3);
+  /* The ordinal ramp runs the other way on dark: deep work is the brightest, so it still reads as most. */
+  --ordinal-0: var(--gray-6);
+  --ordinal-1: var(--blue-7);
+  --ordinal-2: var(--blue-6);
+  --ordinal-3: var(--blue-5);
+  --ordinal-4: var(--blue-3);
+  --ordinal-5: var(--blue-1);
+  --ordinal-ink-0: var(--redrob-white);
+  --ordinal-ink-1: var(--redrob-white);
+  --ordinal-ink-2: var(--redrob-white);
+  --ordinal-ink-3: var(--redrob-white);
+  --ordinal-ink-4: var(--blue-10);
+  --ordinal-ink-5: var(--blue-10);
+  --heat-pos-1: #0d1c4f;
+  --heat-pos-2: #15318a;
+  --heat-pos-3: #2445c4;
+  --heat-neg-1: #3a2208;
+  --heat-neg-2: #5c3405;
+  --heat-neg-3: #8a4c00;
   /* Product roles, dark: the ramp read from the far end -- wash 10, fill 9, line 8. */
   --product-router-wash: var(--product-router-10); --product-router-fill: var(--product-router-9); --product-router-line: var(--product-router-8);
   --product-chat-wash: var(--product-chat-10); --product-chat-fill: var(--product-chat-9); --product-chat-line: var(--product-chat-8);
@@ -192,6 +245,7 @@
   --product-office-wash: var(--product-office-10); --product-office-fill: var(--product-office-9); --product-office-line: var(--product-office-8);
   --product-browser-wash: var(--product-browser-10); --product-browser-fill: var(--product-browser-9); --product-browser-line: var(--product-browser-8);
   --product-design-wash: var(--product-design-10); --product-design-fill: var(--product-design-9); --product-design-line: var(--product-design-8);
+  --product-console-wash: var(--product-console-10); --product-console-fill: var(--product-console-9); --product-console-line: var(--product-console-8);
 }
 :root {
   --space-1: 4px; /* Icon-to-label gap, hairline insets. */
