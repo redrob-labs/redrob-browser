@@ -7,8 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
+import { ChevronRight, Lightbulb } from '@browseros/icons'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ChevronRight, Lightbulb } from 'lucide-react'
 import type { FC } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod/v3'

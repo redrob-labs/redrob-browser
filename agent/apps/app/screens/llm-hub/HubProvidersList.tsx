@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Loader2, Plus } from 'lucide-react'
+import { Loader2, Plus } from '@browseros/icons'
 import type { FC } from 'react'
 import { Button } from '@/components/ui/button'
 import { HubProviderRow } from './HubProviderRow'

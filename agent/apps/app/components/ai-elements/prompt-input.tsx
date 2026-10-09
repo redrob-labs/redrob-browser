@@ -9,7 +9,6 @@
 
 'use client'
 
-import type { ChatStatus, FileUIPart } from 'ai'
 import {
   CornerDownLeftIcon,
   ImageIcon,
@@ -19,7 +18,8 @@ import {
   PlusIcon,
   SquareIcon,
   XIcon,
-} from 'lucide-react'
+} from '@browseros/icons'
+import type { ChatStatus, FileUIPart } from 'ai'
 import { nanoid } from 'nanoid'
 import {
   type ChangeEvent,

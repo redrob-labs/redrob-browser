@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Palette } from 'lucide-react'
+import { Palette } from '@browseros/icons'
 import type { FC } from 'react'
 
 export const CustomizationHeader: FC = () => {

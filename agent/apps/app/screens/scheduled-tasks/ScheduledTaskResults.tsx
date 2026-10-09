@@ -7,8 +7,6 @@
  * See the NOTICE file for provenance.
  */
 
-import dayjs from 'dayjs'
-import relativeTime from 'dayjs/plugin/relativeTime'
 import {
   Calendar,
   CheckCircle2,
@@ -17,7 +15,9 @@ import {
   RotateCcw,
   Square,
   XCircle,
-} from 'lucide-react'
+} from '@browseros/icons'
+import dayjs from 'dayjs'
+import relativeTime from 'dayjs/plugin/relativeTime'
 import type { FC } from 'react'
 import { useMemo } from 'react'
 import { Button } from '@/components/ui/button'

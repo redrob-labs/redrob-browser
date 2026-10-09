@@ -41,6 +41,9 @@ jobs:
       - name: install
         run: bun install --frozen-lockfile
 
+      - name: every icon is the design system's
+        run: bun run check:ui-icons
+
       - name: build the extension and the onboarding page
         env:
           NODE_OPTIONS: --max-old-space-size=8192

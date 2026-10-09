@@ -9,7 +9,7 @@
 
 'use client'
 
-import { ChevronDownIcon, PaperclipIcon } from 'lucide-react'
+import { ChevronDownIcon, PaperclipIcon } from '@browseros/icons'
 import type { ComponentProps } from 'react'
 import { Button } from '@/components/ui/button'
 import {

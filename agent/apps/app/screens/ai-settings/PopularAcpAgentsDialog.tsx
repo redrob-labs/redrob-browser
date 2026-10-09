@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowUpRight } from 'lucide-react'
+import { ArrowUpRight } from '@browseros/icons'
 import type { FC } from 'react'
 import { BRAND_MARKS } from '@/components/agents/agent-brand-marks'
 import { Button } from '@/components/ui/button'
