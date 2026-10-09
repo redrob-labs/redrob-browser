@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Plus } from 'lucide-react'
+import { Plus } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { toast } from 'sonner'
 import { Alert, AlertDescription } from '@/components/ui/alert'

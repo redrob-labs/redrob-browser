@@ -9,13 +9,13 @@
 
 'use client'
 
-import type { FileUIPart, UIMessage } from 'ai'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
   PaperclipIcon,
   XIcon,
-} from 'lucide-react'
+} from '@browseros/icons'
+import type { FileUIPart, UIMessage } from 'ai'
 import type { ComponentProps, HTMLAttributes, ReactElement } from 'react'
 import { createContext, memo, useContext, useEffect, useState } from 'react'
 import type { BundledTheme } from 'shiki'

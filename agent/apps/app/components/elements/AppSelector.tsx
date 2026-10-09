@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { KeyRound, Plus, Settings } from 'lucide-react'
+import { KeyRound, Plus, Settings } from '@browseros/icons'
 import type { FC, ReactNode } from 'react'
 import { useState } from 'react'
 import { toast } from 'sonner'

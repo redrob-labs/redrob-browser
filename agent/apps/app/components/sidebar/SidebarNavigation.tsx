@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { CalendarClock, Home, PlugZap, Settings } from 'lucide-react'
+import { CalendarClock, Home, PlugZap, Settings } from '@browseros/icons'
 import type { FC } from 'react'
 import { NavLink, useLocation } from 'react-router'
 import {

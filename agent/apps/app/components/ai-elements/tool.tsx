@@ -9,7 +9,6 @@
 
 'use client'
 
-import type { ToolUIPart } from 'ai'
 import {
   CheckCircleIcon,
   ChevronDownIcon,
@@ -17,7 +16,8 @@ import {
   ClockIcon,
   WrenchIcon,
   XCircleIcon,
-} from 'lucide-react'
+} from '@browseros/icons'
+import type { ToolUIPart } from 'ai'
 import type { ComponentProps, ReactNode } from 'react'
 import { isValidElement } from 'react'
 import { Badge } from '@/components/ui/badge'

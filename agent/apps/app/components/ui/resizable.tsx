@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { GripVerticalIcon } from 'lucide-react'
+import { GripVerticalIcon } from '@browseros/icons'
 import type * as React from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 

@@ -9,7 +9,7 @@
 
 'use client'
 
-import { BookmarkIcon, type LucideProps } from 'lucide-react'
+import { BookmarkIcon, type LucideProps } from '@browseros/icons'
 import type { ComponentProps, HTMLAttributes } from 'react'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'

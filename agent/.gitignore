@@ -204,3 +204,6 @@ test-results/
 .agent/
 .llm/
 .grove/
+
+# UI capture output (scripts/ui-capture)
+.ui-capture/

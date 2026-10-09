@@ -654,8 +654,73 @@ def check_no_component_extension(problems: list[str]) -> None:
                     break
 
 
+def check_flavour_args(problems: list[str]) -> None:
+    """Every build flavour packages only the agent server Redrob launches.
+
+    The ported tree defaults `browseros_package_all_server_resources` to true, which also bundles the
+    BrowserClaw server -- a product Redrob does not ship, and vendored for Linux x86-64 only. A flavour
+    without the line inherits that default: the 0.1.6 macOS app carried a Linux ELF under
+    Contents/Resources/BrowserClawServer, built from an args.gn that left it out.
+    """
+    for path in sorted((ROOT / "build" / "args").glob("*.gn")):
+        lines = [line.split("#", 1)[0].replace(" ", "") for line in path.read_text(encoding="utf-8").splitlines()]
+        if "browseros_package_all_server_resources=false" not in lines:
+            problems.append(f"{path.relative_to(ROOT)} does not set browseros_package_all_server_resources = "
+                            "false, so it would bundle the BrowserClaw server")
+
+
+def check_design_system_version(problems: list[str]) -> None:
+    """The agent's pages and the browser's chrome are built against ONE release of the design system.
+
+    The chrome copies values in through DESIGN_SYSTEM_PIN.json; the extension and the onboarding page install
+    @redrob-labs/ui from npm. Two routes to one package is two places a version is decided, and they are
+    painted in adjacent pixels -- the window's sidebar and the side panel beside it -- so a drift between
+    them is exactly the defect the pin exists to prevent, arriving by the other door.
+
+    So every agent package.json that depends on it must name the pinned version EXACTLY (a range would let
+    `bun add` move it without touching the pin), and bun.lock must resolve it to the pinned integrity: the
+    lockfile is what CI installs, and a matching version with a different hash is a different tarball.
+    """
+    pin_path = ROOT / "DESIGN_SYSTEM_PIN.json"
+    if not pin_path.exists():
+        return
+    pin = json.loads(pin_path.read_text(encoding="utf-8"))
+    name, version, integrity = pin["package"], pin["version"], pin.get("integrity", "")
+    agent = ROOT / "agent"
+    dependents = []
+    for manifest in sorted(agent.glob("apps/*/package.json")) + sorted(agent.glob("packages/*/package.json")):
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        for field in ("dependencies", "devDependencies", "peerDependencies"):
+            wanted = data.get(field, {}).get(name)
+            if wanted is None:
+                continue
+            dependents.append(manifest)
+            if wanted != version:
+                problems.append(f"{manifest.relative_to(ROOT)} asks for {name} {wanted!r} in {field}, but "
+                                f"DESIGN_SYSTEM_PIN.json pins {version}; name the pinned version exactly")
+    if not dependents:
+        return
+    lock = agent / "bun.lock"
+    if not lock.exists():
+        problems.append(f"agent/bun.lock is missing, so nothing records which {name} tarball is installed")
+        return
+    resolved = re.findall(rf'"{re.escape(name)}": \["{re.escape(name)}@([^"]+)", "[^"]*", \{{.*?\}}, "([^"]+)"\]',
+                          lock.read_text(encoding="utf-8"))
+    if not resolved:
+        problems.append(f"agent/bun.lock does not resolve {name}; run bun install in agent/")
+    for got_version, got_integrity in resolved:
+        if got_version != version:
+            problems.append(f"agent/bun.lock resolves {name} to {got_version}, but DESIGN_SYSTEM_PIN.json pins "
+                            f"{version}")
+        elif integrity and got_integrity != integrity:
+            problems.append(f"agent/bun.lock resolves {name}@{version} to a different tarball than "
+                            "DESIGN_SYSTEM_PIN.json's integrity; one of the two was not fetched from the registry")
+
+
 def main() -> int:
     problems: list[str] = []
+    check_flavour_args(problems)
+    check_design_system_version(problems)
     check_sources(problems)
     check_branding(problems)
     check_patch_names(problems)

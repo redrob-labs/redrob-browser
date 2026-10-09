@@ -9,7 +9,7 @@
 
 'use client'
 
-import { ArrowLeftIcon, ArrowRightIcon } from 'lucide-react'
+import { ArrowLeftIcon, ArrowRightIcon } from '@browseros/icons'
 import {
   type ComponentProps,
   createContext,

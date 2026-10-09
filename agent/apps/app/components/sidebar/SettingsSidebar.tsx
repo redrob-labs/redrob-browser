@@ -14,7 +14,7 @@ import {
   MessageSquare,
   Palette,
   Server,
-} from 'lucide-react'
+} from '@browseros/icons'
 import type { FC } from 'react'
 import { NavLink } from 'react-router'
 import { ThemeToggle } from '@/components/elements/theme-toggle'

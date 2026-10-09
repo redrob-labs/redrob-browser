@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ChevronDown, History, Loader2, Search } from 'lucide-react'
+import { ChevronDown, History, Loader2, Search } from '@browseros/icons'
 import { useEffect, useId, useState } from 'react'
 import { Link } from 'react-router'
 import {

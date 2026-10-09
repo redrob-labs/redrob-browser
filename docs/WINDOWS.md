@@ -253,6 +253,66 @@ publishes to the CDN, and undrafts last. The tag must match `REDROB_VERSION` or 
 `REDROB_VERSION` and `sources/chrome/installer/linux/common/redrob-version.txt` together, and add the
 `CHANGELOG.md` section, before building for a release.
 
+## Cross-building on Linux
+
+The same Windows x64 build, made on the Linux build host instead of a Windows machine. It exists because the
+Windows machine this was first built on is a 10-core laptop that holds base clock under sustained load:
+measured at about ten objects a minute, against roughly a thousand a minute for the cheap early steps on the
+32-core Linux host. Flavour: `win_cross` (`build/args/win_cross.gn`, which is `windows.gn` plus
+`target_os = "win"`). The steps below are what made it work on a sandboxed host with no root.
+
+**1. Package the MSVC toolchain, once, on a Windows machine** with the VS and SDK Chromium pins
+(`build/vs_toolchain.py`: VS 2026, SDK `10.0.28000.0` for Chromium 155):
+
+```
+python depot_tools\win_toolchain\package_from_installed.py 2026 -w 10.0.28000.0 --noarm
+```
+
+`--noarm` because an x64-only VS install has no ARM64 CRT, and the script otherwise stops on
+`...\arm64\Microsoft.VC*.CRT had 0 matches`. It writes `<hash>.zip` (1.3 GB). Copy it to the Linux host, into
+a directory OUTSIDE the repository: it is Microsoft's toolchain and is not ours to publish.
+
+**2. Point gclient at Windows and at that zip.** In `chromium/.gclient`, add `target_os = ["win"]` (`["win",
+"mac"]` if the same checkout also cross-builds macOS -- docs/MACOS.md; dropping `"mac"` removes clang's darwin
+runtime on the next hook run), and mark the
+`src` solution `"managed": False` -- otherwise `gclient sync` refuses with "You have uncommitted changes",
+because the applied patch stack is exactly that. Unmanaged means gclient fetches dependencies and leaves `src`
+alone. Then, in the environment:
+
+```
+export DEPOT_TOOLS_WIN_TOOLCHAIN=1
+export DEPOT_TOOLS_WIN_TOOLCHAIN_BASE_URL=/path/to/dir/with/the/zip/
+export GYP_MSVS_HASH_<hash pinned in vs_toolchain.py>=<hash of your zip>
+gclient sync --nohooks --no-history && gclient runhooks
+```
+
+**3. Give the toolchain a case-insensitive view.** Windows code spells one header `Windows.h`, `windows.h` or
+`SpecStrings.h`, and the SDK ships `specstrings.h`. Chromium's answer is a ciopfs FUSE mount, set up by
+`vs_toolchain.py`. Where FUSE is allowed, that is all it takes (ciopfs needs `libfuse.so.2`). Where it is not --
+`fusermount: mount failed: Operation not permitted` in a container, and ext4 without the casefold feature --
+put a no-op `ciopfs` first on `PATH` so the hook still extracts the zip into a plain directory, and add symlink
+aliases inside the extracted toolchain for every spelling the build uses: an all-lowercase alias for every
+mixed-case name; every path in `Windows Kits/10/bin/SetEnv.<arch>.json` resolved as written (it says
+`bin/HostX64`; the directory is `Hostx64`); and every `#include` and `*.lib` spelling found in the toolchain's
+headers and in every gclient dependency's tracked sources, resolved against the INCLUDE and LIB directories.
+That was 2,573 + 1 + 315 + 19 links for Chromium 155. The aliases live in the toolchain directory only, and a
+`gclient runhooks` that re-extracts the toolchain removes them, so re-create them after one.
+
+**4. Build and package** exactly as on any host, with the cross flavour:
+
+```
+python3 scripts/redrob.py build --flavour win_cross --jobs 14
+python3 scripts/redrob.py package --flavour win_cross --jobs 14
+```
+
+`package` picks the Windows path from the flavour's `target_os`, so it builds `mini_installer` and stages
+`out/artifacts/redrob-browser-x64-<version>-setup.exe` like the native build. `--jobs` caps parallel compiles;
+without it autoninja uses every core. The optional branded `--with-setup` wrapper renders its art by running
+`chrome.exe`, so it still needs a Windows host.
+
+**Not yet proven:** that the cross-built installer installs and launches. Until a cross-built `setup.exe` has
+been installed on a real Windows machine, the native build stays the release path.
+
 ## What to expect the first time
 
 The font registration is the one piece written blind. `AddFontResourceExW` takes a UTF-16 path, which

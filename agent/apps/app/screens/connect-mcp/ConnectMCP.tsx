@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Loader2, Plus, Server, Trash2 } from 'lucide-react'
+import { Check, Loader2, Plus, Server, Trash2 } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiKeyDialog } from '@/components/mcp/ApiKeyDialog'
@@ -287,7 +287,12 @@ export const ConnectMCP: FC = () => {
                     </span>
                   </div>
                   <p className="text-muted-foreground text-sm">
+                    {/* The catalogue is read here as well as at sync time: an app synced before the
+                        catalogue arrived was stored with an empty description, and kept it. */}
                     {server.managedServerDescription ||
+                      serversList?.servers.find(
+                        (s) => s.name === server.managedServerName,
+                      )?.description ||
                       server.config?.description ||
                       server.config?.url}
                   </p>

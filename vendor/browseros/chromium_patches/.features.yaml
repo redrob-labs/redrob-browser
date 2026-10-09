@@ -635,3 +635,8 @@ features:
       - build/config/BUILDCONFIG.gn
       - build/config/siso/main.star
       - ui/webui/resources/tools/build_webui.gni
+
+  redrob-mac-release-signing:
+    description: "build: sign the macOS app on a release runner (Gatekeeper asked after notarization, not before)"
+    files:
+      - chrome/installer/mac/signing/chromium_config.py

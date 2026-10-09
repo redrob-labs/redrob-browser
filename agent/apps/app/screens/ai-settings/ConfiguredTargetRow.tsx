@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Loader2, MoreHorizontal } from 'lucide-react'
+import { Check, Loader2, MoreHorizontal } from '@browseros/icons'
 import type { FC, ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

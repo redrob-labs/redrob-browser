@@ -86,12 +86,15 @@ FLAVOURS = {
     "release": "build/args/release.gn",
     "mac": "build/args/mac.gn",
     "windows": "build/args/windows.gn",
+    "win_cross": "build/args/win_cross.gn",
+    "mac_cross": "build/args/mac_cross.gn",
 }
 
 # Which flavours are for which host. A flavour is not a cross-compile: `mac` and `windows` name the gn
 # args a build ON that platform uses, and running them anywhere else fails inside the toolchain rather
 # than here -- so the mapping is stated once and checked, instead of being discovered from a link error.
-FLAVOUR_PLATFORM = {"dev": "linux", "release": "linux", "mac": "darwin", "windows": "win32"}
+FLAVOUR_PLATFORM = {"dev": "linux", "release": "linux", "mac": "darwin", "windows": "win32", "win_cross": "linux",
+                    "mac_cross": "linux"}
 
 
 def version() -> str:
@@ -212,8 +215,14 @@ def cmd_package(args: argparse.Namespace) -> None:
     """
     if not SRC.exists():
         sys.exit("no checkout: run sync first")
-    if FLAVOUR_PLATFORM[args.flavour] == "win32":
+    # Dispatch on the OS the flavour BUILDS FOR, not the host it runs on: win_cross is a Windows build made on
+    # Linux, and its installer is the same mini_installer target, built by the same cross toolchain.
+    flavour_args = (ROOT / FLAVOURS[args.flavour]).read_text(encoding="utf-8")
+    if FLAVOUR_PLATFORM[args.flavour] == "win32" or _gn_value(flavour_args, "target_os") == "win":
         package_windows(args)
+        return
+    if FLAVOUR_PLATFORM[args.flavour] == "darwin" or _gn_value(flavour_args, "target_os") == "mac":
+        package_mac(args)
         return
     if args.flavour == "dev" and not args.allow_dev:
         sys.exit("refusing to package a dev build: no LTO, no PGO. Use --flavour release, "
@@ -294,7 +303,8 @@ def package_windows(args: argparse.Namespace) -> None:
     if not (out / "chrome.exe").exists():
         sys.exit(f"nothing built in out/{args.flavour}: run build first")
 
-    run(["autoninja", "-C", f"out/{args.flavour}", "chrome/installer/mini_installer"], SRC)
+    jobs = ["-j", str(args.jobs)] if getattr(args, "jobs", 0) else []
+    run(["autoninja", "-C", f"out/{args.flavour}", *jobs, "chrome/installer/mini_installer"], SRC)
 
     built = out / "mini_installer.exe"
     if not built.exists():
@@ -335,6 +345,59 @@ def package_windows(args: argparse.Namespace) -> None:
         for target in (artifacts / branded, cdn / branded):
             shutil.copy2(wrapped, target)
             print(f"{target.relative_to(ROOT)}  {target.stat().st_size // (1024 * 1024)} MB")
+
+
+# First four bytes of a Mach-O image: thin 64-bit (either byte order) or universal. Anything else under a
+# bundle's bin/ directory cannot run on macOS.
+MACHO_MAGICS = {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"}
+
+
+def foreign_executables(app: Path) -> list[str]:
+    """Executables under Contents/Resources/**/bin that are not Mach-O, as bundle-relative paths.
+
+    The GN rules copy server resources into the bundle without looking at their architecture, so a Linux
+    binary staged in the wrong place ships silently: 0.1.6 carried a Linux ELF BrowserClaw server that way,
+    and Apple's notarization does not object to a file that is not Mach-O.
+    """
+    bad = []
+    for path in sorted((app / "Contents" / "Resources").glob("**/bin/*")):
+        if path.is_file() and not path.is_symlink():
+            with path.open("rb") as f:
+                if f.read(4) not in MACHO_MAGICS:
+                    bad.append(str(path.relative_to(app)))
+    return bad
+
+
+def package_mac(args: argparse.Namespace) -> None:
+    """Zip the cross-built .app and its signing kit the way sign-and-publish.yml downloads them.
+
+    Two archives, both with symlinks kept (`zip -y`), because the framework's Versions/Current links are what
+    codesign walks: `<name>.app.zip` is the app, `<name>-packaging.zip` is the `<product> Packaging` directory
+    (target chrome/installer/mac) that the workflow's signing driver and build_props_config.py come from.
+    """
+    out = SRC / "out" / args.flavour
+    app = out / "Redrob Browser.app"
+    if not (app / "Contents" / "MacOS" / "Redrob Browser").exists():
+        sys.exit(f"nothing built in out/{args.flavour}: run build first")
+    jobs = ["-j", str(args.jobs)] if getattr(args, "jobs", 0) else []
+    run(["autoninja", "-C", f"out/{args.flavour}", *jobs, "chrome/installer/mac"], SRC)
+    packaging = out / "Redrob Browser Packaging"
+    if not (packaging / "signing" / "build_props_config.py").exists():
+        sys.exit(f"chrome/installer/mac produced no signing kit in {packaging}")
+
+    bad = foreign_executables(app)
+    if bad:
+        sys.exit("refusing to package: not Mach-O, so it cannot run on macOS:\n  " + "\n  ".join(bad))
+
+    artifacts = ROOT / "out" / "artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    cpu = _gn_value((out / "args.gn").read_text(encoding="utf-8"), "target_cpu") or "arm64"
+    stem = f"redrob-browser-macos-{cpu}-{product_version()}"
+    for source, name in ((app, f"{stem}.app.zip"), (packaging, f"{stem}-packaging.zip")):
+        target = artifacts / name
+        target.unlink(missing_ok=True)
+        run(["zip", "-qry", str(target), source.name], out)
+        print(f"{target.relative_to(ROOT)}  {target.stat().st_size // (1024 * 1024)} MB")
 
 
 def cmd_repo(args: argparse.Namespace) -> None:
@@ -691,7 +754,8 @@ def cmd_build(args: argparse.Namespace) -> None:
     stage_update_framework(server_target_for(args_gn, want))
     stage_bundled_extension()
     run(["gn", "gen", f"out/{args.flavour}"], SRC)
-    run(["autoninja", "-C", f"out/{args.flavour}", args.target], SRC)
+    jobs = ["-j", str(args.jobs)] if getattr(args, "jobs", 0) else []
+    run(["autoninja", "-C", f"out/{args.flavour}", *jobs, args.target], SRC)
 
 
 # The agent server is a separate executable the browser bundles and launches (it serves the side panel and
@@ -1004,6 +1068,8 @@ def main() -> None:
                               "unchanged.")
     package.add_argument("--chrome", default=None,
                          help="path to chrome.exe used by --with-setup to render the branded background art")
+    package.add_argument("--jobs", type=int, default=0,
+                         help="cap parallel compile jobs for the installer build (0 = autoninja's default)")
     package.set_defaults(func=cmd_package)
 
     repo = sub.add_parser("repo", help="build a signed apt repository from out/artifacts")
@@ -1031,6 +1097,8 @@ def main() -> None:
     build = sub.add_parser("build", help="gn gen + ninja")
     build.add_argument("--flavour", choices=sorted(FLAVOURS), default="dev")
     build.add_argument("--target", default="chrome")
+    build.add_argument("--jobs", type=int, default=0,
+                       help="cap parallel compile jobs (0 = autoninja's default, which is every core)")
     build.add_argument("--force-platform", action="store_true",
                        help="build a flavour whose platform is not this host's, if you have a cross toolchain")
     build.set_defaults(func=cmd_build)
