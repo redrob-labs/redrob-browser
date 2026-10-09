@@ -7,12 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import {
-  AlertCircle,
-  ChevronDown,
-  ExternalLink,
-  Loader2,
-} from '@browseros/icons'
+import { AlertCircle, ChevronDown, ExternalLink, Loader2 } from 'lucide-react'
 import { type FC, Fragment, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {

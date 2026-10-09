@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Globe } from '@browseros/icons'
+import { Check, Globe } from 'lucide-react'
 import type { FC } from 'react'
 import { cn } from '@/lib/utils'
 

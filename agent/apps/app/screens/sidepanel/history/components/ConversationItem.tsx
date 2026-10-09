@@ -7,9 +7,9 @@
  * See the NOTICE file for provenance.
  */
 
-import { MessageSquare, Trash2 } from '@browseros/icons'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
+import { MessageSquare, Trash2 } from 'lucide-react'
 import { type FC, useState } from 'react'
 import { Link } from 'react-router'
 import {

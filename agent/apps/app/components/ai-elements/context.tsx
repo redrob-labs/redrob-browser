@@ -103,7 +103,7 @@ const ContextIcon = () => {
         stroke="currentColor"
         strokeDasharray={`${circumference} ${circumference}`}
         strokeDashoffset={dashOffset}
-        strokeLinecap="butt"
+        strokeLinecap="round"
         strokeWidth={ICON_STROKE_WIDTH}
         style={{ transformOrigin: 'center', transform: 'rotate(-90deg)' }}
       />

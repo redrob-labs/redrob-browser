@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Loader2 } from '@browseros/icons'
+import { Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { NoProviderNotice } from '@/components/chat/NoProviderNotice'
 import { createBrowserOSAction } from '@/lib/chat-actions/types'

@@ -7,14 +7,11 @@
  * See the NOTICE file for provenance.
  */
 
-import { Bot } from '@browseros/icons'
-// A provider's own mark is a logo, not an interface icon, so it comes from the brand set like the rest.
 import {
   Anthropic,
   Azure,
   Bedrock,
   Gemini,
-  Github,
   Kimi,
   LmStudio,
   Ollama,
@@ -22,6 +19,7 @@ import {
   OpenRouter,
   Qwen,
 } from '@lobehub/icons'
+import { Bot, Github } from 'lucide-react'
 import type { FC, SVGProps } from 'react'
 import RedrobMark from '@/assets/product_logo.svg'
 import type { ProviderType } from './types'

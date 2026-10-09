@@ -9,7 +9,7 @@
 
 'use client'
 
-import { ChevronDownIcon, type LucideIcon, SearchIcon } from '@browseros/icons'
+import { ChevronDownIcon, type LucideIcon, SearchIcon } from 'lucide-react'
 import type { ComponentProps } from 'react'
 import {
   Collapsible,

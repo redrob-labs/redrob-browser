@@ -7,7 +7,6 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowRight } from '@browseros/icons'
 import {
   Anthropic,
   Claude,
@@ -25,6 +24,7 @@ import {
   Perplexity,
   Qwen,
 } from '@lobehub/icons'
+import { ArrowRight } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { Button } from '@/components/ui/button'
 import {

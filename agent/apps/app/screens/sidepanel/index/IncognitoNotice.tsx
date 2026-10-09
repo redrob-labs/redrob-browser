@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { VenetianMask } from '@browseros/icons'
+import { VenetianMask } from 'lucide-react'
 
 /**
  * Shown while the assistant runs in an incognito window so the user knows the

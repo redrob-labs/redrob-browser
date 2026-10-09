@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ChevronDown, Info, Loader2, RefreshCw } from '@browseros/icons'
+import { ChevronDown, Info, Loader2, RefreshCw } from 'lucide-react'
 import { type FC, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {

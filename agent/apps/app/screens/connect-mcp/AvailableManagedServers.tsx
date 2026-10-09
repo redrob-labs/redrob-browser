@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ChevronDown, Loader2, Plus } from '@browseros/icons'
+import { ChevronDown, Loader2, Plus } from 'lucide-react'
 import { type FC, useState } from 'react'
 import { McpServerIcon } from '@/components/mcp/McpServerIcon'
 import { Button } from '@/components/ui/button'

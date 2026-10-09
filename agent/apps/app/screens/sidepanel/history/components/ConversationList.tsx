@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Loader2, MessageSquare } from '@browseros/icons'
+import { Loader2, MessageSquare } from 'lucide-react'
 import { type FC, useEffect, useRef } from 'react'
 import { Link } from 'react-router'
 import { ConversationGroup } from './ConversationGroup'

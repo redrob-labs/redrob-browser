@@ -7,6 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
+import { zodResolver } from '@hookform/resolvers/zod'
+import Fuse from 'fuse.js'
 import {
   Check,
   CheckCircle2,
@@ -14,9 +16,7 @@ import {
   ExternalLink,
   Loader2,
   XCircle,
-} from '@browseros/icons'
-import { zodResolver } from '@hookform/resolvers/zod'
-import Fuse from 'fuse.js'
+} from 'lucide-react'
 import { type FC, useEffect, useMemo, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Button } from '@/components/ui/button'

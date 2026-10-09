@@ -7,11 +7,11 @@
  * See the NOTICE file for provenance.
  */
 
-import { AlertCircle, RefreshCw } from '@browseros/icons'
 import {
   type ChatError as ChatErrorEnvelope,
   parseChatErrorEnvelope,
 } from '@browseros/shared/schemas/chat-error'
+import { AlertCircle, RefreshCw } from 'lucide-react'
 import type { FC } from 'react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'

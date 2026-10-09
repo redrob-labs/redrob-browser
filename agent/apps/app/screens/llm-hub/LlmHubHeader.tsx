@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { MessageSquare } from '@browseros/icons'
+import { MessageSquare } from 'lucide-react'
 import type { FC } from 'react'
 
 export const LlmHubHeader: FC = () => {

@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { CalendarClock, Plus } from '@browseros/icons'
+import { CalendarClock, Plus } from 'lucide-react'
 import type { FC } from 'react'
 import { Button } from '@/components/ui/button'
 

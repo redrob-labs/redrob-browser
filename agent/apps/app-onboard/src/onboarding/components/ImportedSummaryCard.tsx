@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, CreditCard, Lock } from '@browseros/icons'
+import { Check, CreditCard, Lock } from 'lucide-react'
 
 interface ImportedSummaryCardProps {
   importedItemCount: number

@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Loader2 } from '@browseros/icons'
+import { Loader2 } from 'lucide-react'
 import { type FC, useEffect, useState } from 'react'
 import { adapterLabel } from '@/components/agents/AdapterIcon'
 import { Button } from '@/components/ui/button'

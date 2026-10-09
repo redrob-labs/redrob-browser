@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { MessageSquare, MousePointer2 } from '@browseros/icons'
+import { MessageSquare, MousePointer2 } from 'lucide-react'
 import type { FC } from 'react'
 import {
   Tooltip,

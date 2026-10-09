@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { CircleAlert, LoaderCircle } from '@browseros/icons'
+import { CircleAlert, LoaderCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DisplayHeading, StepCopy } from '../components/DisplayHeading'
 

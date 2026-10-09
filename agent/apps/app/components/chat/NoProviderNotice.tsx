@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowRight, PlugZap } from '@browseros/icons'
+import { ArrowRight, PlugZap } from 'lucide-react'
 import type { FC } from 'react'
 import { cn } from '@/lib/utils'
 

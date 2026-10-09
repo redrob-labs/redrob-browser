@@ -7,6 +7,9 @@
  * See the NOTICE file for provenance.
  */
 
+import dayjs from 'dayjs'
+import duration from 'dayjs/plugin/duration'
+import relativeTime from 'dayjs/plugin/relativeTime'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -18,10 +21,7 @@ import {
   Square,
   Trash2,
   XCircle,
-} from '@browseros/icons'
-import dayjs from 'dayjs'
-import duration from 'dayjs/plugin/duration'
-import relativeTime from 'dayjs/plugin/relativeTime'
+} from 'lucide-react'
 import { type FC, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
