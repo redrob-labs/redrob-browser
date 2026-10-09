@@ -369,6 +369,7 @@ async function main() {
 
   for (const theme of ['light', 'dark'] as const) {
     for (const locale of ['en', 'ko'] as const) {
+      stub.setLocale(locale)
       const { ctx, id } = await openContext(theme, locale, stub.port)
       for (const s of surfaces) {
         const base =

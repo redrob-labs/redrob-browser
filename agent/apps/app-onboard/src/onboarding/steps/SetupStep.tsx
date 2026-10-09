@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { CircleAlert, LoaderCircle } from '@browseros/icons'
 import { Button } from '@/components/ui/button'
 import { DisplayHeading, StepCopy } from '../components/DisplayHeading'
@@ -35,17 +36,15 @@ export function SetupStep({ failed, onRetry }: SetupStepProps) {
             />
           )}
           <DisplayHeading>
-            {failed ? 'Setup didn’t finish' : 'Finishing setup'}
+            {failed ? t('onboardSetupFailed') : t('onboardFinishingSetup')}
           </DisplayHeading>
           <StepCopy>
-            {failed
-              ? 'Please try again.'
-              : 'Preparing Redrob. This should only take a moment.'}
+            {failed ? t('onboardPleaseTryAgain') : t('onboardPreparingRedrob')}
           </StepCopy>
         </div>
         {failed && (
           <Button type="button" size="lg" onClick={onRetry}>
-            Retry
+            {t('onboardRetry')}
           </Button>
         )}
       </div>

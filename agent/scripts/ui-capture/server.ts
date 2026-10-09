@@ -7,7 +7,12 @@
  * a screen that starts reading a new route shows up in the report instead of silently rendering empty.
  */
 
-import { acpProbe, json, oauthStatus } from './fixtures'
+import {
+  acpProbe,
+  type FixtureLocale,
+  fixturesFor,
+  oauthStatus,
+} from './fixtures'
 
 const cors = {
   'access-control-allow-origin': '*',
@@ -18,6 +23,8 @@ const cors = {
 export interface StubServer {
   port: number
   unknown: Map<string, number>
+  /** The language the next captures are in; user-authored fixture content follows it. */
+  setLocale(locale: FixtureLocale): void
   /** Milliseconds since the last request arrived, so a capture can wait for the screen's data to land. */
   idleFor(): number
   stop(): void
@@ -25,6 +32,7 @@ export interface StubServer {
 
 export function startStubServer(): StubServer {
   const unknown = new Map<string, number>()
+  let json = fixturesFor('en')
   let last = Date.now()
   const server = Bun.serve({
     port: 0,
@@ -67,6 +75,9 @@ export function startStubServer(): StubServer {
   return {
     port: server.port as number,
     unknown,
+    setLocale: (locale) => {
+      json = fixturesFor(locale)
+    },
     idleFor: () => Date.now() - last,
     stop: () => server.stop(true),
   }

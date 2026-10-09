@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+import { t } from '@browseros/i18n'
 import type {
   BrowserOSImportItem,
   BrowserOSImportProgress,
@@ -69,14 +70,15 @@ export const MOCK_BROWSEROS_IMPORT_SOURCES: readonly BrowserOSImportSource[] = [
 export const DEFAULT_BROWSEROS_IMPORT_SOURCE_ID =
   MOCK_BROWSEROS_IMPORT_SOURCES[0]?.id ?? ''
 
-const IMPORT_ITEM_LABELS: Record<string, string> = {
-  history: 'History',
-  bookmarks: 'Bookmarks',
-  cookies: 'Signed-in sessions (cookies)',
-  passwords: 'Saved passwords',
-  searchEngines: 'Search engines',
-  autofill: 'Autofill',
-  extensions: 'Extensions',
+// A function, not a table of strings: the labels are read at render, in the language of the page.
+const IMPORT_ITEM_LABELS: Record<string, () => string> = {
+  history: () => t('onboardItemHistory'),
+  bookmarks: () => t('onboardItemBookmarks'),
+  cookies: () => t('onboardItemCookies'),
+  passwords: () => t('onboardItemPasswords'),
+  searchEngines: () => t('onboardItemSearchEngines'),
+  autofill: () => t('onboardItemAutofill'),
+  extensions: () => t('onboardItemExtensions'),
 }
 
 function humanizeImportItem(item: string): string {
@@ -84,16 +86,16 @@ function humanizeImportItem(item: string): string {
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/[-_]+/g, ' ')
     .trim()
-  if (!label) return 'Unknown data'
+  if (!label) return t('onboardItemUnknown')
   return label.charAt(0).toUpperCase() + label.slice(1)
 }
 
 export function importItemLabel(item: string): string {
-  return IMPORT_ITEM_LABELS[item] ?? humanizeImportItem(item)
+  return IMPORT_ITEM_LABELS[item]?.() ?? humanizeImportItem(item)
 }
 
 export function importItemListLabel(items: readonly string[]): string {
-  if (items.length === 0) return 'No supported data'
+  if (items.length === 0) return t('onboardItemNone')
   return items.map(importItemLabel).join(', ')
 }
 

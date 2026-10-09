@@ -1,0 +1,9 @@
+# The agent extension's manifest: its name, toolbar title and description, which Chrome reads through
+# chrome.i18n before any page of ours runs. gen_strings.py writes ONLY this table to
+# agent/apps/app/public/_locales/*/messages.json; every page string goes through @browseros/i18n.
+#
+# key <TAB> English <TAB> Korean [<TAB> description]
+#
+# Terminology follows l10n/10-sidebar.tsv. Product names are not translated.
+manifestName	Assistant	어시스턴트	The extension's name in chrome://extensions and the side panel menu
+manifestActionTitle	Ask Redrob	Redrob에게 묻기	Tooltip on the toolbar button that opens the side panel

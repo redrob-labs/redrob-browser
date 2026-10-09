@@ -7,8 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tNodes } from '@browseros/i18n'
 import { ArrowDownToLine, Cpu, ShieldCheck } from '@browseros/icons'
-
 /** Persistent value rail beside the onboarding steps, in the app theme. */
 export function VisualRail() {
   return (
@@ -40,8 +40,12 @@ export function VisualRail() {
       </div>
       <div className="relative">
         <div className="mb-[22px] font-semibold text-[21px] text-ink leading-snug">
-          The Open Source <span className="text-accent">agentic browser</span>{' '}
-          to automate any web task
+          {tNodes(
+            'onboardRailHeadline',
+            <span key="accent" className="text-accent">
+              {t('onboardRailHeadlineAccent')}
+            </span>,
+          )}
         </div>
         <div className="flex flex-col gap-3">
           {FEATURES.map((feature) => {
@@ -63,7 +67,7 @@ export function VisualRail() {
         </div>
       </div>
       <div className="relative text-[11.5px] text-ink-3">
-        Local-first. Private.
+        {t('onboardLocalFirstPrivate')}
       </div>
     </div>
   )
@@ -72,17 +76,17 @@ export function VisualRail() {
 const FEATURES = [
   {
     icon: ArrowDownToLine,
-    title: 'Bring your browser',
-    description: 'History, bookmarks, and saved logins.',
+    title: t('onboardBringYourBrowser'),
+    description: t('onboardHistoryBookmarksAndSavedLogins'),
   },
   {
     icon: Cpu,
-    title: 'Your agent, your way',
-    description: 'Any LLM provider or coding agent.',
+    title: t('onboardYourAgentYourWay'),
+    description: t('onboardAnyLlmProviderOrCoding'),
   },
   {
     icon: ShieldCheck,
-    title: 'Runs on your machine',
-    description: 'Local-first and private.',
+    title: t('onboardRunsOnYourMachine'),
+    description: t('onboardLocalFirstAndPrivate'),
   },
 ] as const

@@ -44,6 +44,10 @@ jobs:
       - name: every icon is the design system's
         run: bun run check:ui-icons
 
+      # Seconds, and it sees strings no capture renders: the error state, the dialog nobody opened.
+      - name: no hard-coded UI strings
+        run: bun run check:ui-strings
+
       - name: build the extension and the onboarding page
         env:
           NODE_OPTIONS: --max-old-space-size=8192
