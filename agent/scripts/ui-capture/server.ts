@@ -7,7 +7,12 @@
  * a screen that starts reading a new route shows up in the report instead of silently rendering empty.
  */
 
-import { acpProbe, json, oauthStatus } from './fixtures'
+import {
+  acpProbe,
+  type FixtureLocale,
+  fixturesFor,
+  oauthStatus,
+} from './fixtures'
 
 const cors = {
   'access-control-allow-origin': '*',
@@ -18,11 +23,14 @@ const cors = {
 export interface StubServer {
   port: number
   unknown: Map<string, number>
+  /** The language the next captures are in; user-authored fixture content follows it. */
+  setLocale(locale: FixtureLocale): void
   stop(): void
 }
 
 export function startStubServer(): StubServer {
   const unknown = new Map<string, number>()
+  let json = fixturesFor('en')
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
@@ -60,7 +68,14 @@ export function startStubServer(): StubServer {
       )
     },
   })
-  return { port: server.port as number, unknown, stop: () => server.stop(true) }
+  return {
+    port: server.port as number,
+    unknown,
+    setLocale: (locale) => {
+      json = fixturesFor(locale)
+    },
+    stop: () => server.stop(true),
+  }
 }
 
 /** Serves a built static app (the onboarding page) from `root`. */

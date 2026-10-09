@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tNodes } from '@browseros/i18n'
 import {
   Anthropic,
   Claude,
@@ -106,13 +107,12 @@ export function SetupAgentStep({ onSetup }: SetupAgentStepProps) {
     <TooltipProvider>
       <StepWrap>
         <DisplayHeading>
-          Set up your <Em>agent</Em>
+          {tNodes(
+            'onboardSetUpHeading',
+            <Em key="em">{t('onboardSetUpHeadingEm')}</Em>,
+          )}
         </DisplayHeading>
-        <StepCopy>
-          Start with Redrob Code, Redrob&rsquo;s own agent. Or connect an LLM
-          provider or a coding agent you already use. We will open Redrob so you
-          can finish.
-        </StepCopy>
+        <StepCopy>{t('onboardStartWithRedrobCodeRedrob')}</StepCopy>
         <div className="mb-6 flex max-w-[480px] flex-col gap-[18px]">
           {/* Redrob Code first, and whole: the product's own agent is the default answer to this
               step, not one chip among a dozen. The mark is the product icon the onboarding build
@@ -129,17 +129,17 @@ export function SetupAgentStep({ onSetup }: SetupAgentStepProps) {
               <div className="flex flex-wrap items-center gap-2 font-bold text-[15px] text-foreground">
                 Redrob Code
                 <span className="rounded-full bg-card px-2 py-0.5 font-bold text-[10px] text-accent uppercase tracking-[0.08em]">
-                  Recommended
+                  {t('onboardRecommended')}
                 </span>
               </div>
               <div className="mt-0.5 text-[13px] text-ink-3">
-                Redrob&rsquo;s own agent, made for this browser.
+                {t('onboardRedrobSOwnAgentMade')}
               </div>
             </div>
           </div>
           <div>
             <div className="mb-2.5 font-bold text-[11px] text-ink-3 uppercase tracking-[0.08em]">
-              Any LLM provider
+              {t('onboardAnyLlmProvider')}
             </div>
             <div className="flex flex-wrap gap-2">
               {LLM_PROVIDERS.map((entry) => (
@@ -152,7 +152,7 @@ export function SetupAgentStep({ onSetup }: SetupAgentStepProps) {
           </div>
           <div>
             <div className="mb-2.5 font-bold text-[11px] text-ink-3 uppercase tracking-[0.08em]">
-              Or a coding agent harness you already use
+              {t('onboardOrACodingAgentHarness')}
             </div>
             <div className="flex flex-wrap gap-2">
               {CODING_AGENTS.map((entry) => (
@@ -160,13 +160,13 @@ export function SetupAgentStep({ onSetup }: SetupAgentStepProps) {
               ))}
             </div>
             <div className="mt-2.5 text-[13px] text-ink-3">
-              or any other ACP compatible agent
+              {t('onboardOrAnyOtherAcpCompatible')}
             </div>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Button type="button" size="lg" onClick={onSetup}>
-            Set up my agent
+            {t('onboardSetUpMyAgent')}
             <ArrowRight className="size-4" />
           </Button>
         </div>

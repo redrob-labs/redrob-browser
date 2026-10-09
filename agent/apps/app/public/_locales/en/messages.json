@@ -1,0 +1,10 @@
+{
+  "manifestName": {
+    "message": "Assistant",
+    "description": "The extension's name in chrome://extensions and the side panel menu"
+  },
+  "manifestActionTitle": {
+    "message": "Ask Redrob",
+    "description": "Tooltip on the toolbar button that opens the side panel"
+  }
+}

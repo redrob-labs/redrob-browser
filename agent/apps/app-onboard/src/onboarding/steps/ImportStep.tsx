@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tNodes } from '@browseros/i18n'
 import {
   AlertTriangle,
   ArrowRight,
@@ -61,11 +62,11 @@ function importButtonLabelFor(
   checkedItems: readonly BrowserOSImportItem[],
   browserName: string,
 ): string {
-  if (!hasSource) return 'Pick a profile'
-  if (!hasSupportedItems) return 'Nothing to copy from this profile'
-  if (checkedItems.length === 0) return 'Select what to copy'
+  if (!hasSource) return t('onboardPickAProfileAction')
+  if (!hasSupportedItems) return t('onboardNothingToCopy')
+  if (checkedItems.length === 0) return t('onboardSelectWhatToCopy')
 
-  return `Copy from ${browserName.replace(/^Google /, '')}`
+  return t('onboardCopyFrom', browserName.replace(/^Google /, ''))
 }
 
 /** Collapsing the list must not hide the profile whose data will be copied. */
@@ -177,18 +178,20 @@ export function ImportStep({
   return (
     <StepWrap className="max-w-[800px]">
       <DisplayHeading>
-        Bring <Em>everything</Em> with you
+        {tNodes(
+          'onboardBringHeading',
+          <Em key="em">{t('onboardBringHeadingEm')}</Em>,
+        )}
       </DisplayHeading>
-      <StepCopy>
-        Copy your history, bookmarks, and saved logins from your current
-        browser. Everything stays on this machine.
-      </StepCopy>
+      <StepCopy>{t('onboardCopyYourHistoryBookmarksAnd')}</StepCopy>
 
       {phase === 'picker' && (
         <>
           <div className="mb-2.5 flex items-center justify-between gap-3">
             <div className="font-bold text-[12.5px] text-ink-2">
-              {isDetecting ? 'Looking for profiles' : 'Pick a profile'}
+              {isDetecting
+                ? t('onboardLookingForProfiles')
+                : t('onboardPickAProfileAction')}
             </div>
             <Button
               type="button"
@@ -200,7 +203,7 @@ export function ImportStep({
               <RefreshCw
                 className={`size-3.5 ${isDetecting ? 'animate-spin' : ''}`}
               />
-              Refresh
+              {t('onboardRefresh')}
             </Button>
           </div>
           <FormField
@@ -211,7 +214,7 @@ export function ImportStep({
                 id={profileListId}
                 className="mb-3 flex flex-col gap-2"
                 role="radiogroup"
-                aria-label="Browser profiles"
+                aria-label={t('onboardBrowserProfiles')}
               >
                 {visibleSources.map((source) => (
                   <ImportSourceTile
@@ -234,7 +237,7 @@ export function ImportStep({
                 ))}
                 {hasNoProfiles && (
                   <div className="rounded-xl border border-border-2 bg-card p-4 text-[12.5px] text-ink-2">
-                    No profiles found.
+                    {t('onboardNoProfilesFound')}
                   </div>
                 )}
                 {/* Only ask for a pick when there is one to make. With no
@@ -260,8 +263,8 @@ export function ImportStep({
                 className={`size-3.5 ${showAllProfiles ? 'rotate-180' : ''}`}
               />
               {showAllProfiles
-                ? 'Show fewer profiles'
-                : `Show ${state.sources.length - 4} more profiles`}
+                ? t('onboardShowFewerProfiles')
+                : t('onboardShowMoreProfiles', state.sources.length - 4)}
             </Button>
           )}
           {selectedSource && hasSupportedItems && (
@@ -280,7 +283,7 @@ export function ImportStep({
             {needsPermission && (
               <p className="mb-3 flex items-center gap-2 text-ink-3 text-xs">
                 <Lock aria-hidden className="size-3.5" />
-                macOS may ask for your Mac login password.
+                {t('onboardMacosMayAskForYour')}
               </p>
             )}
             <div className="flex flex-wrap items-center gap-3">
@@ -300,11 +303,11 @@ export function ImportStep({
                 variant="ghost"
                 onClick={onContinue}
               >
-                Skip for now
+                {t('onboardSkipForNow')}
               </Button>
               {selectedSource?.profileName && (
                 <span className="text-ink-3 text-xs">
-                  From {selectedSource.profileName}’s profile
+                  {t('onboardFromSProfile', selectedSource.profileName)}
                 </span>
               )}
             </div>
@@ -329,11 +332,10 @@ export function ImportStep({
           <div className="mb-4 rounded-xl border border-amber/30 bg-amber-tint p-4">
             <div className="mb-2 flex items-center gap-2 font-bold text-[13px] text-ink">
               <AlertTriangle className="size-4 text-amber" />
-              Something went wrong.
+              {t('onboardSomethingWentWrong')}
             </div>
             <div className="text-[12.5px] text-ink-2">
-              {state.error?.message ??
-                "Redrob couldn't finish this import. Try again below, or refresh the profile list."}
+              {state.error?.message ?? t('onboardImportFailedDetail')}
             </div>
           </div>
           <div className="flex flex-wrap gap-2.5">
@@ -345,11 +347,11 @@ export function ImportStep({
               disabled={!isPickerValid}
             >
               <Download className="size-4" />
-              Try again
+              {t('onboardTryAgain')}
             </Button>
             <Button type="button" size="lg" variant="ghost" onClick={onRefresh}>
               <RefreshCw className="size-4" />
-              Refresh profiles
+              {t('onboardRefreshProfiles')}
             </Button>
             <Button
               type="button"
@@ -357,7 +359,7 @@ export function ImportStep({
               variant="ghost"
               onClick={onContinue}
             >
-              Skip for now
+              {t('onboardSkipForNow')}
             </Button>
           </div>
         </>
@@ -372,7 +374,7 @@ export function ImportStep({
           />
           <Button type="button" size="lg" onClick={onContinue}>
             <ArrowRight className="size-4" />
-            Continue
+            {t('onboardContinue')}
           </Button>
         </>
       )}

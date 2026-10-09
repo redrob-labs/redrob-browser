@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tNodes } from '@browseros/i18n'
 import { ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DisplayHeading, Em, StepCopy } from '../components/DisplayHeading'
@@ -22,19 +23,16 @@ export function WelcomeStep({ onPrimary, onSkip }: WelcomeStepProps) {
   return (
     <StepWrap>
       <DisplayHeading>
-        Welcome to <Em>Redrob</Em>
+        {tNodes('onboardWelcomeHeading', <Em key="em">Redrob</Em>)}
       </DisplayHeading>
-      <StepCopy>
-        Two quick steps to get set up: bring your browser over, then connect
-        your agent.
-      </StepCopy>
+      <StepCopy>{t('onboardTwoQuickStepsToGet')}</StepCopy>
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" size="lg" onClick={onPrimary}>
-          Get started
+          {t('onboardGetStarted')}
           <ArrowRight className="size-4" />
         </Button>
         <Button type="button" size="lg" variant="ghost" onClick={onSkip}>
-          Skip for now
+          {t('onboardSkipForNow')}
         </Button>
       </div>
     </StepWrap>

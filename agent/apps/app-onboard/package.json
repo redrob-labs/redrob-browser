@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
+    "@browseros/i18n": "workspace:*",
     "@lobehub/icons": "^2.48.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

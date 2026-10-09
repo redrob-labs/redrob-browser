@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { cn } from '@/lib/utils'
 
 interface StepDotsProps {
@@ -20,7 +21,7 @@ export function StepDots({ step, total }: StepDotsProps) {
     <div
       className="flex items-center gap-[7px]"
       role="progressbar"
-      aria-label="Onboarding progress"
+      aria-label={t('onboardOnboardingProgress')}
       aria-valuemin={1}
       aria-valuemax={total}
       aria-valuenow={step + 1}
