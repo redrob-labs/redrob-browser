@@ -20,9 +20,9 @@ tarball, verifies it against the pinned `integrity`, and writes twelve files:
 
 | vendored file | what it is for |
 | --- | --- |
-| `sources/chrome/browser/ui/color/redrob_design_tokens.h` | 223 colours per theme as `0xAARRGGBB`, for the C++ chrome (1.3.1) |
-| `sources/chrome/browser/resources/redrob/design_tokens.css` | 331 distinct custom properties (1.3.1), for WebUI pages |
-| `sources/chrome/browser/resources/redrob/design_system.css` | 166 `.rr-*` class roots (1.3.1) — and token supersessions, which is why its load order is gated |
+| `sources/chrome/browser/ui/color/redrob_design_tokens.h` | 89 colours per theme as `0xAARRGGBB`, for the C++ chrome |
+| `sources/chrome/browser/resources/redrob/design_tokens.css` | the 174 custom properties, for WebUI pages |
+| `sources/chrome/browser/resources/redrob/design_system.css` | 145 `.rr-*` component classes over 2,017 rules — and two token supersessions, which is why its load order is gated |
 | `sources/chrome/browser/resources/redrob/fonts/*.woff2` | the 8 faces `--font-sans` and `--font-mono` can select |
 | `redrob/design_tokens.json` | the same values as data, for tooling that is neither |
 
