@@ -5,104 +5,139 @@
  */
 
 /**
- * The panel's colours come from the Redrob design system and nowhere else.
+ * The panel's colours, type and radii come from @redrob-labs/ui itself and nowhere else.
  *
- * 1. Every primitive in global.css equals its value in @redrob-labs/ui 1.1.0
- *    (dist/styles/tokens.css). The table below is that file's values, copied by
- *    name; a primitive that drifts, or one added without a row here, fails.
- * 2. Outside the primitive layer the token blocks hold no colour literal: every
- *    role is a `var(--rr-*)`, except surface-sunken, which the system itself
- *    defines as a literal for dark mode.
- * 3. No upstream orange survives anywhere in the stylesheet or the components.
+ * These read the INSTALLED package, not a table of values copied from it. A copied table is how the
+ * previous version of this file pinned 1.1.0 while the browser's chrome moved on: both were internally
+ * consistent and they disagreed with each other.
+ *
+ * 1. global.css imports tokens.css, then styles.css, into the `rr` layer, and no longer carries its own
+ *    copy of either: no `--rr-*` primitive and no @font-face.
+ * 2. Every shadcn role is a single var() naming a custom property the design system declares, so a
+ *    renamed token fails here rather than rendering unstyled.
+ * 3. The installed package is the version DESIGN_SYSTEM_PIN.json names.
+ * 4. Where Tailwind's theme has to repeat a value (font stacks, radii), it repeats it exactly.
+ * 5. No upstream orange survives.
  */
 
 import { describe, expect, it } from 'bun:test'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 const APP = join(import.meta.dir, '..')
 const CSS = readFileSync(join(import.meta.dir, 'global.css'), 'utf8')
+const PKG = dirname(require.resolve('@redrob-labs/ui/package.json'))
+const TOKENS = readFileSync(join(PKG, 'dist/styles/tokens.css'), 'utf8')
+const SYSTEM = readFileSync(join(PKG, 'dist/styles/system.css'), 'utf8')
+const PIN = JSON.parse(
+  readFileSync(join(APP, '../../../DESIGN_SYSTEM_PIN.json'), 'utf8'),
+) as { version: string }
 
-// @redrob-labs/ui 1.1.0, dist/styles/tokens.css, by token name.
-const SYSTEM: Record<string, string> = {
-  'rr-black': '#0a0b0c', // redrob-black
-  'rr-white': '#ffffff', // redrob-white
-  'rr-blue-1': '#eef4ff',
-  'rr-blue-2': '#d9e6ff',
-  'rr-blue-3': '#bad2ff',
-  'rr-blue-4': '#8aafff',
-  'rr-blue-5': '#507fff',
-  'rr-blue-6': '#2b52ff',
-  'rr-blue-7': '#1733d5',
-  'rr-blue-8': '#09209c',
-  'rr-blue-9': '#061460',
-  'rr-blue-10': '#030c34',
-  'rr-gray-1': '#f8f9fb',
-  'rr-gray-2': '#eff1f4',
-  'rr-gray-3': '#dfe2e8',
-  'rr-gray-4': '#cbcfd7',
-  'rr-gray-5': '#aab0bb',
-  'rr-gray-6': '#7c8390',
-  'rr-gray-7': '#576071',
-  'rr-gray-8': '#292e37',
-  'rr-gray-9': '#141719',
-  'rr-teal-3': '#6ff4f0', // accent-teal-3
-  'rr-teal-4': '#00b5c2',
-  'rr-sky-3': '#2f8dff',
-  'rr-sky-4': '#0e51b6',
-  'rr-violet-3': '#8944ff',
-  'rr-pink-3': '#ff39ba',
-  'rr-red-3': '#ff4b4b',
-  'rr-red-4': '#a31310',
-  'rr-orange-3': '#ff9c1b',
-  'rr-orange-4': '#ae5100',
-  'rr-lime-4': '#89ad00',
-  'rr-green-3': '#29e474',
-  'rr-green-4': '#00864a',
+const stripComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, '')
+const declared = new Set(
+  [...stripComments(TOKENS + SYSTEM).matchAll(/(--[\w-]+)\s*:/g)].map(
+    (m) => m[1],
+  ),
+)
+
+function blocks(selector: string): string[] {
+  const out: string[] = []
+  const css = stripComments(CSS)
+  let at = css.indexOf(`\n${selector} {\n`)
+  while (at > -1) {
+    const end = css.indexOf('\n}\n', at)
+    out.push(css.slice(at, end))
+    at = css.indexOf(`\n${selector} {\n`, end)
+  }
+  return out
 }
 
-function block(selector: string): string {
-  const start = CSS.indexOf(`\n${selector} {\n`)
-  expect(start).toBeGreaterThan(-1)
-  const end = CSS.indexOf('\n}\n', start)
-  return CSS.slice(start, end)
-}
-
-function declarations(body: string): Array<[string, string]> {
-  return [...body.matchAll(/^\s*--([\w-]+):\s*([^;]+);/gm)].map((m) => [
+const declarations = (body: string): Array<[string, string]> =>
+  [...body.matchAll(/^\s*--([\w-]+):\s*([^;]+);/gm)].map((m) => [
     m[1],
     m[2].trim(),
   ])
-}
 
-const ROOT_DECLS = declarations(block(':root'))
-const DARK_DECLS = declarations(block('.dark'))
+const ROLES = [...blocks(':root'), ...blocks('[data-theme="dark"]')].flatMap(
+  declarations,
+)
+
+const value = (css: string, name: string) =>
+  stripComments(css)
+    .match(new RegExp(`${name}:\\s*([^;]+);`))?.[1]
+    .replace(/\s+/g, ' ')
+    .replace(/["']/g, '')
+    .trim()
 
 describe('design tokens', () => {
-  it('declares every primitive at its design-system value', () => {
-    const primitives = Object.fromEntries(
-      ROOT_DECLS.filter(([name]) => name.startsWith('rr-')),
+  it('imports the design system, tokens before system, into the rr layer', () => {
+    const tokens = CSS.indexOf(
+      '@import "@redrob-labs/ui/tokens.css" layer(rr);',
     )
-    expect(primitives).toEqual(SYSTEM)
+    const system = CSS.indexOf(
+      '@import "@redrob-labs/ui/styles.css" layer(rr);',
+    )
+    expect(tokens).toBeGreaterThan(-1)
+    expect(system).toBeGreaterThan(tokens)
+    expect(CSS).toMatch(
+      /@layer theme, base, vendor, rr, components, utilities;/,
+    )
   })
 
-  it('points every role at a primitive', () => {
-    const roles = [...ROOT_DECLS, ...DARK_DECLS].filter(
-      ([name]) => !name.startsWith('rr-') && name !== 'radius',
-    )
-    // A broken block() would hand back nothing and pass.
-    expect(roles.length).toBeGreaterThan(60)
-    const literals = roles.filter(
-      ([name, value]) =>
-        !/^var\(--rr-[\w-]+\)$/.test(value) &&
-        // surface-sunken, dark: the system's own literal (tokens.css).
-        !((name === 'secondary' || name === 'muted') && value === '#1c1f26'),
-    )
-    expect(literals).toEqual([])
+  it('takes every stylesheet through global.css, so its layer is decided there', () => {
+    // A sheet imported from a component lands unlayered and beats every layer, which is how a
+    // third-party editor once repainted the system's primitives app-wide.
+    const offenders: string[] = []
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        if (['node_modules', 'dist', '.output', '.wxt'].includes(name)) continue
+        const path = join(dir, name)
+        if (statSync(path).isDirectory()) walk(path)
+        else if (/\.(ts|tsx)$/.test(name) && !name.endsWith('.test.ts')) {
+          for (const m of readFileSync(path, 'utf8').matchAll(
+            /^import\s+['"]([^'"]+\.css)['"]/gm,
+          )) {
+            if (!m[1].endsWith('global.css')) offenders.push(`${path}: ${m[1]}`)
+          }
+        }
+      }
+    }
+    walk(APP)
+    expect(offenders).toEqual([])
+  })
+
+  it('carries no copy of the system: no primitive, no font face', () => {
+    expect(CSS).not.toMatch(/--rr-[\w-]+\s*:/)
+    expect(CSS).not.toMatch(/@font-face/)
+  })
+
+  it('points every role at a token the design system declares', () => {
+    // A broken blocks() would hand back nothing and pass.
+    expect(ROLES.length).toBeGreaterThan(40)
+    const bad = ROLES.filter(([, v]) => {
+      const m = v.match(/^var\((--[\w-]+)\)$/)
+      return !m || !declared.has(m[1])
+    })
+    expect(bad).toEqual([])
+  })
+
+  it('is the version the browser pins', () => {
+    const installed = JSON.parse(
+      readFileSync(join(PKG, 'package.json'), 'utf8'),
+    ).version
+    expect(installed).toBe(PIN.version)
+  })
+
+  it('repeats the font stacks and radii exactly where Tailwind needs its own copy', () => {
+    for (const name of ['--font-sans', '--font-mono'])
+      expect(value(CSS, name)).toBe(value(TOKENS, name))
+    for (const r of ['xs', 'sm', 'md', 'lg', 'xl', '2xl']) {
+      expect(value(CSS, `--radius-${r}`)).toBe(value(TOKENS, `--radius-${r}`))
+    }
   })
 
   it('keeps no upstream orange in the stylesheet', () => {
-    expect(CSS).not.toMatch(/accent-orange(?!-[34] \*\/)/)
+    expect(CSS).not.toMatch(/accent-orange/)
     expect(CSS).not.toMatch(
       /oklch\(0\.[0-9]+ 0\.[0-9]+ (3[0-9]|4[0-9]|5[0-9])\./,
     )
@@ -129,34 +164,5 @@ describe('design tokens', () => {
     }
     walk(APP)
     expect(offenders).toEqual([])
-  })
-  it('takes the type and radius scale from the design system', () => {
-    // tokens.css: --font-sans, --font-mono and --radius-xs..2xl.
-    expect(CSS).toContain(
-      '--font-sans:\n    Pretendard, "Wanted Sans", "Noto Sans Devanagari", system-ui, -apple-system,\n    "Segoe UI", sans-serif;',
-    )
-    expect(CSS).toContain(
-      '--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;',
-    )
-    const radii = Object.fromEntries(
-      [...CSS.matchAll(/^\s*--radius-(xs|sm|md|lg|xl|2xl):\s*([^;]+);/gm)].map(
-        (m) => [m[1], m[2]],
-      ),
-    )
-    expect(radii).toEqual({
-      xs: '4px',
-      sm: '6px',
-      md: '8px',
-      lg: '12px',
-      xl: '16px',
-      '2xl': '24px',
-    })
-    expect(CSS).not.toMatch(/Geist/)
-    // Every face the sheet declares is a file that ships.
-    for (const m of CSS.matchAll(/url\("\.\.\/fonts\/([^"]+)"\)/g)) {
-      expect(statSync(join(APP, 'public', 'fonts', m[1])).size).toBeGreaterThan(
-        0,
-      )
-    }
   })
 })
