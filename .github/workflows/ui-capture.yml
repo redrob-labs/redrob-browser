@@ -1,0 +1,66 @@
+name: ui capture
+
+# Captures every screen of the agent extension and the onboarding page in light and dark, English and
+# Korean, measures each against the design system, and holds the counts to
+# agent/scripts/ui-capture/baseline.json. See that directory and docs/UI-REDESIGN.md.
+#
+# Not a required check yet: it becomes one once it has run green on enough pull requests to trust that
+# it is deterministic on a hosted runner, not only on the host that wrote the baseline.
+
+on:
+  pull_request:
+    paths:
+      - agent/apps/app/**
+      - agent/apps/app-onboard/**
+      - agent/packages/**
+      - agent/scripts/ui-capture/**
+      - agent/package.json
+      - agent/bun.lock
+      - redrob/design_tokens.json
+      - .github/workflows/ui-capture.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    name: ui capture
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: install
+        run: bun install --frozen-lockfile
+
+      - name: build the extension and the onboarding page
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+        run: |
+          bun run build:agent
+          bun run build:app-onboard
+
+      - name: install chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: capture and compare with the baseline
+        run: bun run ui:capture
+
+      - name: upload captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-capture
+          path: agent/.ui-capture/
+          # upload-artifact skips dot-directories unless told otherwise, and uploaded nothing.
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
