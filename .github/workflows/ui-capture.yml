@@ -60,5 +60,7 @@ jobs:
         with:
           name: ui-capture
           path: agent/.ui-capture/
-          if-no-files-found: ignore
+          # upload-artifact skips dot-directories unless told otherwise, and uploaded nothing.
+          include-hidden-files: true
+          if-no-files-found: warn
           retention-days: 14

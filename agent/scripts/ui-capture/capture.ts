@@ -152,10 +152,51 @@ function palette(theme: Theme): string[] {
   return [...out]
 }
 
+/**
+ * Waits until the page has stopped changing, not for a fixed time. Lists load through SWR and animate
+ * in, so a fixed pause measures a different frame on a slower host -- which is exactly how the first
+ * hosted run disagreed with the host that wrote the baseline by one list row.
+ */
 async function settle(p: Page) {
   await p.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
   await p.evaluate(() => document.fonts.ready.then(() => undefined))
-  await p.waitForTimeout(700)
+  await p.evaluate(
+    () =>
+      new Promise<void>((done) => {
+        const quietFor = 600
+        let timer = setTimeout(finish, quietFor)
+        const observer = new MutationObserver(() => {
+          clearTimeout(timer)
+          timer = setTimeout(finish, quietFor)
+        })
+        const cap = setTimeout(finish, 8000)
+        function finish() {
+          observer.disconnect()
+          clearTimeout(cap)
+          done()
+        }
+        observer.observe(document.documentElement, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          characterData: true,
+        })
+      }),
+  )
+  // Then let any running animation land; under reduced motion that is all of them at once.
+  // Infinite ones (a spinner) never finish and are skipped.
+  await p.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) =>
+          Number.isFinite(
+            a.effect?.getComputedTiming().endTime ?? Number.POSITIVE_INFINITY,
+          ),
+        )
+        .map((a) => a.finished.catch(() => undefined)),
+    ).then(() => undefined),
+  )
 }
 
 async function focus(p: Page): Promise<Finding[]> {
