@@ -24,3 +24,8 @@ proprietary_codecs = true
 ffmpeg_branding = "Chrome"
 treat_warnings_as_errors = false
 browseros_package_all_server_resources = false
+
+# BRANDING's COPYRIGHT is "Copyright @LASTCHANGE_YEAR@ Redrob...". A non-official build reads the year from
+# build/util/LASTCHANGE.dummy, which carries no LASTCHANGE_YEAR, so the placeholder shipped verbatim in every
+# PE version resource (file Properties > Details). Read the real LASTCHANGE instead. See build/args/windows.gn.
+use_dummy_lastchange = false
