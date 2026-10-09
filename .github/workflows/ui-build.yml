@@ -1,0 +1,75 @@
+name: ui build
+
+# Builds a DEV .deb from a branch so its window chrome can be captured and measured against the design
+# system. docs/UI-REDESIGN.md, PR 0.6: the binary is built here, on the chromium-build runner, because a
+# checkout and a build do not fit a hosted runner (docs/RUNNER.md). The capture runs wherever the .deb is
+# downloaded to -- scripts/capture_native.py -- so a native UI change is judged on pixels, not on reading.
+#
+# DISPATCH ONLY, for the same reason release.yml is: a dispatch-only workflow never reports on a pull
+# request, so it can never be a required check that blocks a merge while no runner is online. A dev
+# flavour, not release: no LTO and no PGO, which is hours cheaper and paints exactly the same pixels --
+# colour mixers and views do not change with optimisation. `package --allow-dev` is the path redrob.py
+# documents for packaging a dev build on purpose.
+#
+# What it cannot do: tell you no runner exists. A run that sits in "queued" is waiting for a machine
+# carrying [self-hosted, linux, x64, chromium-build]; docs/RUNNER.md is how one is registered.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or sha to build
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  # One checkout on the runner. A second dispatch waits instead of fighting the first for 150 GB.
+  group: chromium-build-runner
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: dev build and package
+    runs-on: [self-hosted, linux, x64, chromium-build]
+    # A cold sync is 40-80 min and a cold dev build 2-4 h (docs/BUILD.md); incremental builds on a warm
+    # checkout are minutes. Six hours covers the cold case with headroom.
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: repo integrity first
+        run: python3 scripts/check_repo.py
+
+      - name: bootstrap depot_tools
+        run: python3 scripts/redrob.py bootstrap
+
+      - name: sync Chromium at the pinned tag
+        run: python3 scripts/redrob.py sync
+
+      - name: apply the patch set
+        # brand before apply: hand-written patches land on top of the branding overlay (AGENTS.md).
+        run: |
+          python3 scripts/redrob.py brand
+          python3 scripts/redrob.py apply
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: dev build
+        run: python3 scripts/redrob.py build --flavour dev
+
+      - name: package
+        run: python3 scripts/redrob.py package --flavour dev --allow-dev
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: redrob-browser-dev-deb
+          path: out/artifacts/*.deb
+          if-no-files-found: error
+          retention-days: 7
