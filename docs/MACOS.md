@@ -114,11 +114,32 @@ run answers is whether the fork can be signed and notarized at all. The DMG is t
 The signing steps are gated on a `sign` input, defaulting true, so the build can still be exercised alone when
 the interesting failure is the compile.
 
+## Cross-building on Linux (`mac_cross`)
+
+The 0.1.6 macOS release was cross-built on the Linux build host, arm64, then signed and notarized by
+`sign-and-publish.yml` on a mac runner. The flavour is `build/args/mac_cross.gn`:
+
+```
+python3 scripts/redrob.py build   --flavour mac_cross --jobs 14
+python3 scripts/redrob.py package --flavour mac_cross --jobs 14
+```
+
+`package` writes `out/artifacts/redrob-browser-macos-<cpu>-<version>.app.zip` and `...-packaging.zip`, the two
+names the workflow downloads. It refuses to package if any file under `Contents/Resources/**/bin` is not
+Mach-O: 0.1.6 shipped a Linux ELF BrowserClaw server that way, from a hand-written args.gn that lacked
+`browseros_package_all_server_resources = false`, and notarization did not object.
+
+`chromium/.gclient` must list `"mac"` in `target_os` (with `"win"` when the same checkout also cross-builds
+Windows). Without it the clang hook installs no darwin runtime, and the link fails with
+`libclang_rt.osx.a ... missing and no known rule to make it`. Re-running the hook re-downloads clang, and the
+next build of every flavour is a full one.
+
 ## What does not transfer from the existing macOS CI
 
 The browser repo already has `macos-release-build.yml`, and it runs on **ubuntu**. That is a Firefox
-cross-compile, which Firefox supports and **Chromium does not**: there is no cross-compiling a mac Chromium from
-Linux. Only `macos-universal-release-build.yml`, which runs on a real `macos-26`, describes a shape this fork can
+cross-compile. A mac Chromium CAN be cross-built from Linux (above), but only with the mac SDK on the host and
+Chromium's hermetic toolchain, which a hosted runner does not have. Only `macos-universal-release-build.yml`,
+which runs on a real `macos-26`, describes a shape this fork can
 follow — and the universal part of it is a `lipo` of two complete builds, so it doubles a wall clock that has not
 been measured once yet.
 
