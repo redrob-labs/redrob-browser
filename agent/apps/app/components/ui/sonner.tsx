@@ -28,6 +28,17 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme as ToasterProps['theme']}
       className="toaster group"
+      toastOptions={{
+        classNames: {
+          toast: 'shadow-[var(--shadow-lg)]! font-sans',
+          title: 'font-semibold! text-[14px]! leading-5!',
+          description: 'text-[13px]! leading-5! text-[var(--ink-secondary)]!',
+          success: '[&_[data-icon]]:text-[var(--status-success)]',
+          error: '[&_[data-icon]]:text-[var(--status-danger)]',
+          warning: '[&_[data-icon]]:text-[var(--status-warning)]',
+          info: '[&_[data-icon]]:text-[var(--status-info)]',
+        },
+      }}
       closeButton
       icons={{
         success: <CircleCheckIcon className="size-4" />,
@@ -38,10 +49,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }}
       style={
         {
-          '--normal-bg': 'var(--popover)',
-          '--normal-text': 'var(--popover-foreground)',
-          '--normal-border': 'var(--border)',
-          '--border-radius': 'var(--radius)',
+          // .rr-toast: raised ground, subtle border, radius-md, shadow-lg; the status icon carries the tone.
+          '--normal-bg': 'var(--surface-raised)',
+          '--normal-text': 'var(--ink-primary)',
+          '--normal-border': 'var(--border-subtle)',
+          '--border-radius': 'var(--radius-md)',
         } as React.CSSProperties
       }
       {...props}

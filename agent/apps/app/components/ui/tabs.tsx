@@ -33,12 +33,13 @@ function Tabs({
 }
 
 const tabsListVariants = cva(
-  'rounded-lg p-[3px] group-data-[orientation=horizontal]/tabs:h-9 data-[variant=line]:rounded-none group/tabs-list text-muted-foreground inline-flex w-fit items-center justify-center group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col',
+  // .rr-tabs__list: --space-1 between pills; a line list carries the subtle rule and --space-5 gaps.
+  'group/tabs-list inline-flex w-fit items-center justify-center gap-[var(--space-1)] font-sans group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col',
   {
     variants: {
       variant: {
-        default: 'bg-muted',
-        line: 'gap-1 bg-transparent',
+        default: '',
+        line: 'gap-[var(--space-5)] border-[var(--border-subtle)] border-b',
       },
     },
     defaultVariants: {
@@ -71,10 +72,11 @@ function TabsTrigger({
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
       className={cn(
-        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2 py-1 font-medium text-foreground/60 text-sm transition-all hover:text-foreground focus-visible:border-ring focus-visible:outline-1 focus-visible:outline-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 group-data-[orientation=vertical]/tabs:w-full group-data-[orientation=vertical]/tabs:justify-start group-data-[variant=default]/tabs-list:data-[state=active]:shadow-sm group-data-[variant=line]/tabs-list:data-[state=active]:shadow-none dark:text-muted-foreground dark:hover:text-foreground [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
-        'group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-[state=active]:bg-transparent dark:group-data-[variant=line]/tabs-list:data-[state=active]:border-transparent dark:group-data-[variant=line]/tabs-list:data-[state=active]:bg-transparent',
-        'data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 dark:data-[state=active]:text-foreground',
-        'after:absolute after:bg-foreground after:opacity-0 after:transition-opacity group-data-[orientation=horizontal]/tabs:after:inset-x-0 group-data-[orientation=vertical]/tabs:after:inset-y-0 group-data-[orientation=vertical]/tabs:after:-right-1 group-data-[orientation=horizontal]/tabs:after:bottom-[-5px] group-data-[orientation=horizontal]/tabs:after:h-0.5 group-data-[orientation=vertical]/tabs:after:w-0.5 group-data-[variant=line]/tabs-list:data-[state=active]:after:opacity-100',
+        // .rr-tab: 14px SemiBold in ink-secondary, the system's ring. Pill (default): 36px, radius-full,
+        // sunken on hover, brand fill when selected. Line: an underline in brand, ink-brand when selected.
+        "relative inline-flex items-center justify-center gap-[var(--space-2)] whitespace-nowrap font-semibold text-[14px] text-[var(--ink-secondary)] transition-colors duration-[var(--duration-fast)] focus-visible:outline-[length:var(--focus-ring-width)] focus-visible:outline-[var(--focus-ring)] focus-visible:outline-solid focus-visible:outline-offset-[var(--focus-ring-width)] disabled:pointer-events-none disabled:opacity-50 group-data-[orientation=vertical]/tabs:w-full group-data-[orientation=vertical]/tabs:justify-start [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        'group-data-[variant=default]/tabs-list:h-9 group-data-[variant=default]/tabs-list:rounded-full group-data-[variant=default]/tabs-list:px-[var(--space-4)] group-data-[variant=default]/tabs-list:data-[state=active]:bg-[var(--action-primary)] group-data-[variant=default]/tabs-list:data-[state=active]:text-[var(--ink-on-brand)] group-data-[variant=default]/tabs-list:hover:bg-[var(--surface-sunken)] group-data-[variant=default]/tabs-list:hover:text-[var(--ink-primary)]',
+        '-mb-px group-data-[variant=line]/tabs-list:border-transparent group-data-[variant=line]/tabs-list:border-b-2 group-data-[variant=line]/tabs-list:py-[var(--space-3)] group-data-[variant=line]/tabs-list:data-[state=active]:border-[var(--action-primary)] group-data-[variant=line]/tabs-list:data-[state=active]:text-[var(--ink-brand)] group-data-[variant=line]/tabs-list:hover:text-[var(--ink-primary)]',
         className,
       )}
       {...props}

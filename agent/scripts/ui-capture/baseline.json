@@ -108,7 +108,7 @@
     "fonts": 0
   },
   "home.dark.en": {
-    "offPalette": 7,
+    "offPalette": 6,
     "contrast": 0,
     "focusMissing": 8,
     "roundIcons": 0,
@@ -117,7 +117,7 @@
     "fonts": 0
   },
   "home.dark.ko": {
-    "offPalette": 7,
+    "offPalette": 6,
     "contrast": 0,
     "focusMissing": 8,
     "roundIcons": 0,
@@ -126,7 +126,7 @@
     "fonts": 0
   },
   "home.light.en": {
-    "offPalette": 8,
+    "offPalette": 6,
     "contrast": 0,
     "focusMissing": 8,
     "roundIcons": 0,
@@ -135,7 +135,7 @@
     "fonts": 0
   },
   "home.light.ko": {
-    "offPalette": 8,
+    "offPalette": 6,
     "contrast": 0,
     "focusMissing": 8,
     "roundIcons": 0,
@@ -288,7 +288,7 @@
     "fonts": 0
   },
   "overlay-dialog.dark.en": {
-    "offPalette": 5,
+    "offPalette": 4,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -297,7 +297,7 @@
     "fonts": 0
   },
   "overlay-dialog.dark.ko": {
-    "offPalette": 5,
+    "offPalette": 4,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -306,7 +306,7 @@
     "fonts": 0
   },
   "overlay-dialog.light.en": {
-    "offPalette": 5,
+    "offPalette": 4,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -315,7 +315,7 @@
     "fonts": 0
   },
   "overlay-dialog.light.ko": {
-    "offPalette": 5,
+    "offPalette": 4,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -396,7 +396,7 @@
     "fonts": 0
   },
   "scheduled.dark.en": {
-    "offPalette": 5,
+    "offPalette": 4,
     "contrast": 0,
     "focusMissing": 6,
     "roundIcons": 0,
@@ -405,7 +405,7 @@
     "fonts": 0
   },
   "scheduled.dark.ko": {
-    "offPalette": 5,
+    "offPalette": 4,
     "contrast": 0,
     "focusMissing": 6,
     "roundIcons": 0,
@@ -414,7 +414,7 @@
     "fonts": 0
   },
   "scheduled.light.en": {
-    "offPalette": 5,
+    "offPalette": 4,
     "contrast": 0,
     "focusMissing": 6,
     "roundIcons": 0,
@@ -423,7 +423,7 @@
     "fonts": 0
   },
   "scheduled.light.ko": {
-    "offPalette": 5,
+    "offPalette": 4,
     "contrast": 0,
     "focusMissing": 6,
     "roundIcons": 0,

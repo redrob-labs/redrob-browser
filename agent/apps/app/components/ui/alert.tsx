@@ -13,13 +13,16 @@ import type * as React from 'react'
 import { cn } from '@/lib/utils'
 
 const alertVariants = cva(
-  'relative w-full rounded-lg border px-4 py-3 text-sm grid has-[>svg]:grid-cols-[calc(var(--spacing)*4)_1fr] grid-cols-[0_1fr] has-[>svg]:gap-x-3 gap-y-0.5 items-start [&>svg]:size-4 [&>svg]:translate-y-0.5 [&>svg]:text-current',
+  // .rr-alert: --radius-md, --space-4 inset, ink-primary title, ink-secondary text.
+  'relative grid w-full grid-cols-[0_1fr] items-start gap-y-[var(--space-1)] rounded-[var(--radius-md)] border p-[var(--space-4)] text-[14px] leading-[22px] has-[>svg]:grid-cols-[20px_1fr] has-[>svg]:gap-x-[var(--space-3)] [&>svg]:size-5 [&>svg]:translate-y-px [&>svg]:text-current',
   {
     variants: {
       variant: {
-        default: 'bg-card text-card-foreground',
+        default:
+          'border-[var(--border-subtle)] bg-[var(--surface-raised)] text-[var(--ink-primary)]',
         destructive:
-          'text-destructive bg-card [&>svg]:text-current *:data-[slot=alert-description]:text-destructive/90',
+          // .rr-alert--danger, light and dark
+          'border-[var(--accent-red-2)] bg-[var(--accent-red-1)] text-[var(--ink-primary)] [&>svg]:text-[var(--status-danger)] dark:border-[var(--accent-red-4)] dark:bg-[var(--accent-red-5)] dark:text-[var(--accent-red-1)]',
       },
     },
     defaultVariants: {
@@ -54,7 +57,7 @@ function AlertTitle({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="alert-title"
       className={cn(
-        'col-start-2 line-clamp-1 min-h-4 font-medium tracking-tight',
+        'col-start-2 line-clamp-1 min-h-4 font-semibold text-[14px] leading-5',
         className,
       )}
       {...props}
@@ -73,7 +76,7 @@ function AlertDescription({
     <div
       data-slot="alert-description"
       className={cn(
-        'col-start-2 grid justify-items-start gap-1 text-muted-foreground text-sm [&_p]:leading-relaxed',
+        'col-start-2 grid justify-items-start gap-1 text-[14px] text-[var(--ink-secondary)] leading-[22px]',
         className,
       )}
       {...props}
