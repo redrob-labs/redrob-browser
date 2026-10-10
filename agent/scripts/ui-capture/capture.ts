@@ -253,7 +253,7 @@ async function openContext(theme: Theme, locale: Locale, port: number) {
       `--lang=${locale === 'ko' ? 'ko' : 'en-US'}`,
     ],
   })
-  await ctx.addInitScript(browserShim(port))
+  await ctx.addInitScript(browserShim(port, theme))
   let [sw] = ctx.serviceWorkers()
   if (!sw) sw = await ctx.waitForEvent('serviceworker')
   const id = new URL(sw.url()).host
@@ -267,7 +267,7 @@ async function openContext(theme: Theme, locale: Locale, port: number) {
           chrome: { storage: { local: { set(v: object): Promise<void> } } }
         }
       ).chrome.storage.local.set(seed),
-    { ...storageSeed, theme },
+    storageSeed,
   )
   await seeder.close()
   return { ctx, id }

@@ -80,6 +80,9 @@ export default defineConfig({
       'bookmarks',
       'history',
       'browserOS',
+      // getColorScheme / setColorScheme: one theme for the window and these pages. Component-only;
+      // stock Chromium warns about it and loads the extension anyway.
+      'redrobPrivate',
       'alarms',
       'webNavigation',
       'downloads',

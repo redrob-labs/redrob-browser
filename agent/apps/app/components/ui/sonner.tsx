@@ -14,14 +14,15 @@ import {
   OctagonXIcon,
   TriangleAlertIcon,
 } from '@browseros/icons'
-import { useTheme } from 'next-themes'
 import { Toaster as Sonner, type ToasterProps } from 'sonner'
+import { useTheme } from '@/components/theme-provider'
 
 /**
  * @public
  */
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = 'system' } = useTheme()
+  // Our provider, not next-themes': nothing mounts a next-themes provider, so that hook always said 'system'.
+  const { theme } = useTheme()
 
   return (
     <Sonner
