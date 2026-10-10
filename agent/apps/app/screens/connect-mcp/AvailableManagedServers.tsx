@@ -63,7 +63,7 @@ export const AvailableManagedServers: FC<AvailableManagedServersProps> = ({
                     key={serverName}
                     variant="outline"
                     onClick={() => onAddServer(args)}
-                    className="group h-auto flex-col items-start gap-2 p-4 hover:border-[var(--accent-brand)]"
+                    className="group h-auto flex-col items-start gap-2 p-4 font-normal leading-normal hover:border-[var(--accent-brand)]"
                   >
                     <div className="flex w-full items-center justify-between">
                       <div className="flex items-center gap-3">

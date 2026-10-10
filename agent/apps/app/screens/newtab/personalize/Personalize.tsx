@@ -106,7 +106,7 @@ export const Personalize = () => {
               <CollapsibleTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="flex h-auto w-full items-center justify-between p-4 text-left hover:bg-accent/50"
+                  className="flex h-auto w-full items-center justify-between p-4 text-left font-normal leading-normal hover:bg-accent/50"
                 >
                   <div className="flex-1">
                     <h3 className="mb-1 font-medium text-foreground text-sm">

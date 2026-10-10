@@ -100,7 +100,7 @@ export const AddManagedMCPDialog: FC<AddManagedMCPDialogProps> = ({
                   key={server.name}
                   variant="outline"
                   onClick={() => onAuthenticate(server.name)}
-                  className="group h-auto w-full items-center gap-3 border-warning/30 bg-warning/5 p-3 hover:border-warning hover:bg-warning/10"
+                  className="group h-auto w-full items-center gap-3 border-warning/30 bg-warning/5 p-3 font-normal leading-normal hover:border-warning hover:bg-warning/10"
                 >
                   <McpServerIcon
                     serverName={server.name}
@@ -135,7 +135,7 @@ export const AddManagedMCPDialog: FC<AddManagedMCPDialogProps> = ({
                     key={serverName}
                     variant="outline"
                     onClick={() => handleAddServer(args)}
-                    className="group h-auto w-full items-center gap-3 p-3 hover:border-[var(--accent-brand)] hover:bg-[var(--accent-brand)]/5"
+                    className="group h-auto w-full items-center gap-3 p-3 font-normal leading-normal hover:border-[var(--accent-brand)] hover:bg-[var(--accent-brand)]/5"
                   >
                     <McpServerIcon
                       serverName={serverName}
