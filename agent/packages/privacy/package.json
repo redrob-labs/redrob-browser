@@ -1,0 +1,29 @@
+{
+  "name": "@browseros/privacy",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test ./tests"
+  },
+  "exports": {
+    "./labels": {
+      "types": "./src/labels.ts",
+      "default": "./src/labels.ts"
+    },
+    "./compute": {
+      "types": "./src/compute.ts",
+      "default": "./src/compute.ts"
+    },
+    "./detector": {
+      "types": "./src/detector.ts",
+      "default": "./src/detector.ts"
+    },
+    "./wordpiece": {
+      "types": "./src/wordpiece.ts",
+      "default": "./src/wordpiece.ts"
+    }
+  }
+}

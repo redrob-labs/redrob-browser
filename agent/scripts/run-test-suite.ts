@@ -27,6 +27,11 @@ const testSuites = {
       argv: [bun, 'run', 'test'],
     },
     {
+      label: 'privacy tests',
+      cwd: resolve(projectRoot, 'packages/privacy'),
+      argv: [bun, 'run', 'test'],
+    },
+    {
       label: 'server tests',
       cwd: resolve(projectRoot, 'apps/server'),
       argv: [bun, 'run', 'test'],

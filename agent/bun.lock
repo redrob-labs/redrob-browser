@@ -411,6 +411,10 @@
         "@types/react-dom": "^19.3.0",
       },
     },
+    "packages/privacy": {
+      "name": "@browseros/privacy",
+      "version": "0.0.1",
+    },
     "packages/shared": {
       "name": "@browseros/shared",
       "version": "0.0.1",
@@ -655,6 +659,8 @@
     "@browseros/harness-integrations-rust": ["@browseros/harness-integrations-rust@workspace:crates/harness-integrations"],
 
     "@browseros/onboarding-video": ["@browseros/onboarding-video@workspace:packages/onboarding-video"],
+
+    "@browseros/privacy": ["@browseros/privacy@workspace:packages/privacy"],
 
     "@browseros/server": ["@browseros/server@workspace:apps/server"],
 
