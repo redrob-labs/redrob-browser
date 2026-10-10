@@ -8,5 +8,5 @@
     "declarationMap": false,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*", "tests/**/*"]
+  "include": ["src/**/*", "tests/**/*", "bench/**/*"]
 }
