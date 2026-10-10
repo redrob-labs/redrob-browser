@@ -3,6 +3,8 @@
 Status: **plan, not started.** Nothing in this document is built. Every PR below waits for the
 product owner's go-ahead.
 
+Last checked against GitHub on 10 October 2026. What changed since the first draft is in §2.1.
+
 ## 1. The brief, as decided
 
 | Question | Decision |
@@ -57,6 +59,30 @@ Everything below was read in this tree, in `redrob-cowork` and in `redrob-ui`.
 - **The extension has no i18n today.** #50 adds it from `l10n/50-extension.tsv`, so every new string
   in this plan goes there, in English and Korean.
 
+### 2.1 Latest on GitHub, and what it changes here
+
+| PR | State | What it means for this plan |
+|---|---|---|
+| browser #56, chat elements | open, stack 15 | Messages are `.rr-msg--user` / `.rr-msg--assistant`, written as `.is-user > .ui-msg` in `global.css`. The assistant's bubble is on `--surface-ai`. The composer is `.rr-composer`, and suggestions are `.rr-prompt` pills. Our `PrivateText` sits inside the user bubble, and our result cards inside the assistant bubble. The moment chips are `.rr-prompt` pills, not a new style |
+| browser #57, AppShell | open, stack 16, `ui capture` running | The app frame is `.rr-shell`, and every nav row is one `.ui-shell-link` style in `components/sidebar/SidebarNavigation.tsx` (today: Home, Connect apps, Scheduled Tasks, Settings). Playbooks, Jobs and Privacy are added as rows there. `RedrobMark` is the only brand mark. **The tip of the stack is now `feat/app-shell-v2`**, and our extension PRs start from it |
+| browser #43–#54 | open, updated | The ui-capture harness is `bun run ui:capture`: 84 captures, light/dark × en/ko, with a ratcheted `baseline.json` (offPalette, focusMissing, contrast, untranslated, fonts). There are also `check:ui-strings` and `check:ui-icons`. Each extension PR here adds its own capture scenes and may not raise any metric |
+| browser #55, this plan | open, no review yet | — |
+| redrob-ui #60, privacy defaults | open, parity red, unreleased | `PrivacyProtection`'s defaults stop saying where the check runs ("Running", "Privacy protection is off"). We **pass our own `running`, `offTitle`, `offText` and `lede`** ("Running on this computer"), so our copy is the same on 1.3.1 and on whatever release follows. The same PR gives `ScheduleRow` a layout below 480 px, which the side panel needs: take it when it ships |
+| redrob-ui #59, ModelGuide 1.4.0 | open | Cowork's "Recommended best models" link opens the Model Guide. 0.3 links to the console's guide for now; it can embed `ModelGuide` once we are on 1.4 |
+| redrob-ui #61, stable ids | open | No effect: the extension does not render on a server |
+| Cowork #180, route-labeller packaging | open | The packaged Cowork server failed to resolve an on-device ML package, because packaging only ships dependencies the desktop app declares. Our compiled server has the same kind of trap. PR 1.2 must prove the model loads **from the packaged artefact**, not from `bun run` |
+| Cowork #181, #185, #186, voice | open | Not in scope; noted for later |
+
+**The redesign has phases still to land, and they overlap with ours** (from `docs/UI-REDESIGN.md` on
+#41). Each overlap is assigned to one owner so nothing is built twice:
+
+| Redesign phase | Overlap | Who builds it |
+|---|---|---|
+| 4.2 `feat/sidepanel-chat` | `ComposerStatus`, `ComposerMode`, `ApprovalStep`, `PromptSuggestions` in the panel | **Redesign** builds the slots. Our 1.4 adds the privacy item, 2.1 the chips, 3.3 the approvals. If 4.2 has not started by the time 1.4 is ready, 1.4 adds `ComposerStatus` and 4.2 reuses it |
+| 4.4 `feat/settings-shell` | The Privacy page and the Smart Compare region setting | Built in 4.4's row pattern (title, sub, exactly one control). Until 4.4 lands, the pages follow that pattern by hand |
+| 4.5 `feat/tasks-and-connectors` | `PlaybookRow` and `ScheduleRow` | **Redesign** brings both into the app. Our 3.4 uses them and does not restyle them |
+| 4.7 `feat/agent-glow` | The Teach Mode recording frame on `glow.content` | **Redesign** owns the overlay. Our 3.1 adds a `recording` state to it |
+
 ## 3. The experience
 
 ### 3.1 Principles
@@ -106,9 +132,15 @@ Everything below was read in this tree, in `redrob-cowork` and in `redrob-ui`.
 - **Panel header:** the title, then History (⟲), **Teach** (●) and an overflow menu (⋯). The menu
   holds Playbooks, Jobs, Privacy and Settings, which open full pages in the app.
 - **Width:** the panel is designed and captured at 360 and 480 px.
-- **Full pages** live in the app (`entrypoints/app`, inside `AppShell`). The sidebar gains
-  **Playbooks**, **Jobs** and **Privacy** beside Home, Scheduled and Settings. A full page is for
-  managing things; the panel is for doing them.
+- **Full pages** live in the app (`entrypoints/app`, inside the `.rr-shell` frame from #57). The
+  sidebar gains **Playbooks**, **Jobs** and **Privacy** as `.ui-shell-link` rows beside Home,
+  Connect apps, Scheduled Tasks and Settings. A full page is for managing things; the panel is for
+  doing them.
+- **What our UI sits inside** (from #56):
+  - Moment chips are `.rr-prompt` pills in one row above the `.rr-composer`.
+  - Result cards (Smart Compare, a draft playbook, an application receipt) render inside the
+    assistant's `--surface-ai` bubble, so they read as the AI's work.
+  - `PrivateText` renders inside the user's bubble.
 - **Optional follow-up** (native, not in this plan's PRs): a chat picked from the left column's
   "Chats" list opens in the right panel instead of the new-tab page.
 
@@ -118,6 +150,10 @@ Everything below was read in this tree, in `redrob-cowork` and in `redrob-ui`.
 `PrivacyProtection`: on or off, the level, "Running on this computer", and the count kept from the
 AI this week. If the on-device check cannot run (still downloading, failed, or Off), the item says so
 in words rather than showing a grey shield.
+
+We pass `running`, `offTitle`, `offText` and `lede` ourselves, from `l10n/`, and never rely on the
+component's defaults: redrob-ui #60 makes those defaults neutral, and "on this computer" is the
+browser's claim to make.
 
 **In the user's message.** Each value that was swapped renders as `PrivateText`, a dotted underline.
 Focusing it reads "The AI saw [EMAIL_1]". The user always reads their own words.
@@ -212,8 +248,8 @@ three-line `AgentTimeline` ("Searching Coupang… Naver Shopping… Matching 9 l
 └──────────────────────────────────────────────────────┘
 ```
 
-While recording, the page gets a thin recording frame (the existing `glow.content` overlay, in the
-recording colour), and the toolbar action shows a dot. Recording covers only the tab where Teach was
+While recording, the page gets a thin recording frame, and the toolbar action shows a dot. The
+frame is a `recording` state added to the `glow.content` overlay that redesign 4.7 reworks. Recording covers only the tab where Teach was
 pressed and the tabs it opens.
 
 **Draft.** **Done** turns the recording into a draft `Playbook`:
@@ -247,7 +283,8 @@ pressed and the tabs it opens.
 A run shows `AgentTimeline`, with `ApprovalStep` at each ✋.
 
 **Playbooks page.**
-- A list of `PlaybookRow`s (name, summary, step count, number of stops).
+- A list of `PlaybookRow`s (name, summary, step count, number of stops), using the row as
+  redesign 4.5 brings it in for scheduled tasks.
 - Actions: Run, Edit, Schedule, Share, Delete. Plus Import.
 - A shared or imported playbook opens in a review screen showing its sites and its stops before it
   can be saved.
@@ -318,7 +355,7 @@ form, because placeholders are restored in tool arguments. A job application is 
 | Piece | Where |
 |---|---|
 | `packages/privacy` | A port of Cowork's `labels.ts`, `wordpiece.ts` and the detector core (decode and refine). Runtime-neutral, with the tests ported too |
-| On-device runtime | **Decided by a measured spike** (PR 1.2). Two candidates: (a) `onnxruntime-node` shipped next to the compiled server and allowed through `native-addon-guard.ts`, which today blocks hidden native addons; (b) `onnxruntime-web` on WebGPU in an extension offscreen document. Cowork measured WASM at 1–2.5 s per 1,000 characters, so the bar is ≤ 300 ms per 1,000 characters at p50 on the reference laptops |
+| On-device runtime | **Decided by a measured spike** (PR 1.2). Two candidates: (a) `onnxruntime-node` shipped next to the compiled server and allowed through `native-addon-guard.ts`, which today blocks hidden native addons; (b) `onnxruntime-web` on WebGPU in an extension offscreen document. Cowork measured WASM at 1–2.5 s per 1,000 characters, so the bar is ≤ 300 ms per 1,000 characters at p50 on the reference laptops. The measurement is taken **from the packaged server binary**: Cowork #180 is a packaged build that could not resolve its on-device ML package even though `bun run` worked |
 | Model delivery | Downloaded on first use from `cdn.redrob.ai`, pinned by SHA-256 the way `detector-source.ts` does it, with a "Getting ready" state in `PrivacyProtection`. Downloading avoids adding about 103 MB to every installer |
 | The gate | `apps/server/src/api/services/privacy/`. It runs on every path to a model: (1) user text, system text and memory before the provider call, in both `processBrowserOsMessage` and `processAcpMessage`; (2) **tool outputs** (`snapshot`, `read`, `grep`, `evaluate`, `run`, `screenshot` alt text) in `browser-tool-dispatch.ts`, since a page is the browser's biggest leak; (3) restore in tool arguments (`act` fill and type); (4) restore in the streamed answer, with a small buffer so a placeholder split across chunks is never shown half-restored. If the check fails, nothing is sent. Labels are kept per conversation, in memory |
 | Saved secrets | Native `RedrobSecretMatcher` in `sources/chrome/browser/redrob/`. It keeps salted hashes of normalised saved-password values and autofill values (from `PasswordStore` and `PersonalDataManager`), and scans text, returning spans and kinds but **never values**. The server reaches it through the existing native `rpc_server`; the panel reaches it through a new `redrobPrivate.scanForSavedSecrets` |
@@ -398,15 +435,23 @@ Cowork's #128:
 GitFlow as `AGENTS.md` states it:
 - Every branch is `<type>/<slug>`, cut from `develop`, with one PR per row below into `develop`.
 - PRs are ready for review, and no reviewers are requested automatically.
-- **Extension PRs** run `bun run check`, `bun run test` and `bun run build:agent`. They attach
-  ui-capture screenshots (360 and 480 px, light and dark, English and Korean) and bump the
+- **Extension PRs** run:
+  - `bun run check`, `bun run test` and `bun run build:agent`
+  - `bun run check:ui-strings` and `bun run check:ui-icons`
+  - `bun run ui:capture`, with new scenes for the PR's surfaces and an updated `baseline.json`, and
+    no metric allowed to rise
+
+  They attach the captures (360 and 480 px, light and dark, English and Korean) and bump the
   extension version so `agent-extension.yml` can publish.
 - **Native PRs** run `check_repo.py`, then a build-host build, then the relevant part of
   `docs/TESTING.md`. They are batched to save build hours.
 
-**Dependency on the redesign stack.** #41–#54 bring `@redrob-labs/ui`, i18n and the capture harness.
-The extension PRs here need them. The plan is to stack on the top of that stack until it merges,
-then retarget to `develop`. The native PRs (0.2, 1.5) do not depend on it and can go first.
+**Dependency on the redesign stack.** #41–#57 bring `@redrob-labs/ui` 1.3.1, i18n, the capture
+harness, the chat elements and the AppShell frame. The extension PRs here need them. "stack" in the
+table below means: branch from the stack's tip, which today is `feat/app-shell-v2` (#57), and
+retarget to `develop` as it merges. The native PRs (0.2, 1.5) and the server-only PRs (1.1–1.3) do
+not depend on it and can go first. Where a row also needs a redesign phase that is not open yet
+(4.2, 4.4, 4.5, 4.7), that is named, and §2.1 says what happens if that phase is late.
 
 | # | Branch | What | Depends on |
 |---|---|---|---|
@@ -416,16 +461,16 @@ then retarget to `develop`. The native PRs (0.2, 1.5) do not depend on it and ca
 | 1.1 | `feat/privacy-core` | `packages/privacy`, ported with its tests | — |
 | 1.2 | `chore/privacy-runtime-spike` | Measure (a) against (b); record the numbers and pick one | 1.1 |
 | 1.3 | `feat/privacy-gate` | The server gate, tool-output labelling, streaming restore, fail-closed | 1.2 |
-| 1.4 | `feat/privacy-ui` | The `ComposerStatus` chip, `PrivateText`, `ThreadNote`, the Strict confirm, the Privacy page, model download | 1.3, stack |
+| 1.4 | `feat/privacy-ui` | The `ComposerStatus` chip, `PrivateText`, `ThreadNote`, the Strict confirm, the Privacy page, model download | 1.3, stack; redesign 4.2 and 4.4 if they are open |
 | 1.5 | `feat/privacy-saved-secrets` | Native `RedrobSecretMatcher`, `redrobPrivate` and rpc, password fields always left out (native) | 1.3 |
 | 1.6 | `feat/privacy-team-policy` | Business-only signed policy and the lock UI | 1.4 |
-| 2.1 | `feat/smart-compare-detect` | Product detection, badge, chip | stack |
+| 2.1 | `feat/smart-compare-detect` | Product detection, badge, chip | stack, redesign 4.2 |
 | 2.2 | `feat/smart-compare-service` | `/compare`, store extractors, matching, cache | 2.1 |
 | 2.3 | `feat/smart-compare-card` | The result card, region override, auto setting | 2.2 |
-| 3.1 | `feat/teach-mode-recorder` | Recorder, Teach header button, recording frame | stack |
+| 3.1 | `feat/teach-mode-recorder` | Recorder, Teach header button, recording frame | stack, redesign 4.7 |
 | 3.2 | `feat/playbooks-draft` | Drafting, schema, storage, the draft editor | 3.1 |
 | 3.3 | `feat/playbooks-run` | Re-planning runner, stops and the `act` guard, chips, `/` in the composer, schedule | 3.2 |
-| 3.4 | `feat/playbooks-library` | Playbooks page, export, import and review | 3.3 |
+| 3.4 | `feat/playbooks-library` | Playbooks page, export, import and review | 3.3, redesign 4.5 |
 | 4.1 | `feat/job-apply-profile` | Jobs page shell, profile, answer bank, criteria | 1.3, stack |
 | 4.2 | `feat/job-apply-search` | Locale sites, `JobPosting` extraction, `MatchBreakdown`, shortlist | 4.1 |
 | 4.3 | `feat/job-apply-engine` | Adapters, the three modes, queue, caps, receipts | 4.2, 3.3 |
@@ -437,11 +482,15 @@ trust that makes users accept Teach Mode's recording.
 
 ## 6. Risks
 
-- **The redesign stack** (#41–#54) is unmerged. If it changes or stalls, every extension PR here
-  moves with it.
+- **The redesign stack** (#41–#57, 16 PRs, none reviewed yet) is unmerged. If it changes or stalls,
+  every extension PR here moves with it. Its later phases (4.2, 4.4, 4.5, 4.7) overlap ours; §2.1
+  says who builds each overlap, so neither side builds it twice.
 - **The runtime inside the compiled server.** Bun's `--compile` and `native-addon-guard.ts` may
-  refuse onnxruntime-node. That is what 1.2 decides, before any UI promises "Running on this
-  computer".
+  refuse onnxruntime-node, and a packaged build can miss a dependency that `bun run` finds
+  (Cowork #180). That is what 1.2 decides, measured on the packaged binary, before any UI promises
+  "Running on this computer".
+- **redrob-ui defaults moving under us.** #60 changes `PrivacyProtection`'s default copy. We pass
+  every string explicitly, so a design-system bump does not change what the browser claims.
 - **Restoring placeholders in a stream** is the subtlest code in the gate, and a half-restored label
   is visible to users. It gets its own tests.
 - **Bot defences** on Coupang and LinkedIn. Running in the user's real browser helps, but per-store
@@ -457,7 +506,9 @@ trust that makes users accept Teach Mode's recording.
 
 | Question | Default here |
 |---|---|
-| Stack on #41–#54, or wait for them to merge | Stack on top, retarget as they merge |
+| Stack on #41–#57, or wait for them to merge | Stack on `feat/app-shell-v2`, retarget as they merge |
+| Who builds the composer status line and approvals if redesign 4.2 is late | We do, in 1.4, and 4.2 reuses it |
+| Move to redrob-ui 1.4 (ModelGuide glance, `ScheduleRow` narrow layout) | When it is released and the stack moves its pin; not in our PRs |
 | Download the on-device model or bundle it in the installer | Download on first use, hash-pinned |
 | How a playbook is shared | A file in v1; a link once sync exists |
 | Hindi strings for India | English only in v1; the l10n pipeline can add a column later |
