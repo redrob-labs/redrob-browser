@@ -210,7 +210,10 @@ export function audit(input: AuditInput): AuditResult {
         !t ||
         !parent ||
         !visible(parent) ||
-        parent.closest('code, pre, kbd, [data-capture-ignore]')
+        // translate="no" is the page saying the text is data (a processor name, a size), not copy.
+        parent.closest(
+          'code, pre, kbd, [translate="no"], [data-capture-ignore]',
+        )
       )
         continue
       const words = (t.match(/[A-Za-z][A-Za-z'’-]{2,}/g) ?? []).filter(

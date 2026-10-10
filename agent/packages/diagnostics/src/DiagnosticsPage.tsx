@@ -120,7 +120,10 @@ export function DiagnosticsPage() {
               {section.rows.map(([label, value]) => (
                 <div className="diagnostics-row" key={label}>
                   <dt>{label}</dt>
-                  <dd>{value ?? 'Unavailable'}</dd>
+                  {/* A reported value is the machine's own data, not copy; only the fallback is ours. */}
+                  <dd translate={value == null ? undefined : 'no'}>
+                    {value ?? 'Unavailable'}
+                  </dd>
                 </div>
               ))}
             </dl>
