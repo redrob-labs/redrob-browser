@@ -252,7 +252,7 @@
     "fonts": 1
   },
   "onboarding-ai.dark.en": {
-    "offPalette": 17,
+    "offPalette": 16,
     "contrast": 0,
     "focusMissing": 15,
     "roundIcons": 0,
@@ -261,7 +261,7 @@
     "fonts": 0
   },
   "onboarding-ai.dark.ko": {
-    "offPalette": 17,
+    "offPalette": 16,
     "contrast": 0,
     "focusMissing": 15,
     "roundIcons": 0,
@@ -324,7 +324,7 @@
     "fonts": 0
   },
   "settings-ai.dark.en": {
-    "offPalette": 19,
+    "offPalette": 18,
     "contrast": 0,
     "focusMissing": 7,
     "roundIcons": 0,
@@ -333,7 +333,7 @@
     "fonts": 0
   },
   "settings-ai.dark.ko": {
-    "offPalette": 19,
+    "offPalette": 18,
     "contrast": 0,
     "focusMissing": 7,
     "roundIcons": 0,
@@ -504,7 +504,7 @@
     "fonts": 0
   },
   "settings-search.dark.en": {
-    "offPalette": 19,
+    "offPalette": 18,
     "contrast": 0,
     "focusMissing": 7,
     "roundIcons": 0,
@@ -513,7 +513,7 @@
     "fonts": 0
   },
   "settings-search.dark.ko": {
-    "offPalette": 19,
+    "offPalette": 18,
     "contrast": 0,
     "focusMissing": 7,
     "roundIcons": 0,
