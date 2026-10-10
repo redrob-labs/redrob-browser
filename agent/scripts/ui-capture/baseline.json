@@ -1,38 +1,38 @@
 {
   "chat-conversation.dark.en": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 3,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "chat-conversation.dark.ko": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 3,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 5,
+    "untranslated": 4,
     "fonts": 0
   },
   "chat-conversation.light.en": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 3,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "chat-conversation.light.ko": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 3,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 5,
+    "untranslated": 4,
     "fonts": 0
   },
   "connect-apps.dark.en": {
@@ -72,39 +72,39 @@
     "fonts": 0
   },
   "home-chat.dark.en": {
-    "offPalette": 5,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 2,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "home-chat.dark.ko": {
-    "offPalette": 5,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 2,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 7,
+    "untranslated": 6,
     "fonts": 0
   },
   "home-chat.light.en": {
-    "offPalette": 5,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 2,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "home-chat.light.ko": {
-    "offPalette": 5,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 2,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 7,
+    "untranslated": 6,
     "fonts": 0
   },
   "home-personalize.dark.en": {
@@ -396,7 +396,7 @@
     "fonts": 0
   },
   "overlay-tooltip.dark.en": {
-    "offPalette": 5,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -405,16 +405,16 @@
     "fonts": 0
   },
   "overlay-tooltip.dark.ko": {
-    "offPalette": 5,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 8,
+    "untranslated": 5,
     "fonts": 0
   },
   "overlay-tooltip.light.en": {
-    "offPalette": 5,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -423,12 +423,12 @@
     "fonts": 0
   },
   "overlay-tooltip.light.ko": {
-    "offPalette": 5,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 8,
+    "untranslated": 5,
     "fonts": 0
   },
   "scheduled.dark.en": {
@@ -684,72 +684,72 @@
     "fonts": 0
   },
   "sidepanel-chat.dark.en": {
-    "offPalette": 5,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 2,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "sidepanel-chat.dark.ko": {
-    "offPalette": 5,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 2,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 7,
+    "untranslated": 6,
     "fonts": 0
   },
   "sidepanel-chat.light.en": {
-    "offPalette": 5,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 2,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "sidepanel-chat.light.ko": {
-    "offPalette": 5,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 2,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 7,
+    "untranslated": 6,
     "fonts": 0
   },
   "sidepanel-history.dark.en": {
-    "offPalette": 2,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "sidepanel-history.dark.ko": {
-    "offPalette": 2,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 6,
     "fonts": 0
   },
   "sidepanel-history.light.en": {
-    "offPalette": 2,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "sidepanel-history.light.ko": {
-    "offPalette": 2,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 6,

@@ -153,13 +153,17 @@ function AlertDialogDescription({
 /**
  * @public
  */
+/** `variant` rather than a class: two buttonVariants() strings would carry two tones at once. */
 function AlertDialogAction({
   className,
+  variant,
   ...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Action>) {
+}: React.ComponentProps<typeof AlertDialogPrimitive.Action> & {
+  variant?: 'default' | 'destructive'
+}) {
   return (
     <AlertDialogPrimitive.Action
-      className={cn(buttonVariants(), className)}
+      className={cn(buttonVariants({ variant }), className)}
       {...props}
     />
   )

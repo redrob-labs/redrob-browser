@@ -1,0 +1,14 @@
+# The agent side panel (agent/apps/app/screens/sidepanel), English and Korean.
+#
+# key <TAB> English <TAB> Korean [<TAB> description]
+#
+# Terminology follows l10n/10-sidebar.tsv and 70-onboarding.tsv: agent 에이전트 / chat 채팅. Rows arrive with
+# the screen that renders them; strings the panel still hard-codes are listed by check:ui-strings once the
+# panel is enforced there.
+
+# Composer mode (the design system's ComposerMode, beside the composer)
+sidepanelModeGroup	How the AI works	AI 작동 방식	Accessible name of the radio group that holds the two modes
+sidepanelModeAgent	Agent	에이전트	Mode: the AI may act on pages
+sidepanelModeAgentHint	AI can browse, click, and navigate	AI가 웹을 탐색하고 클릭하며 이동할 수 있습니다	Tooltip of the Agent mode
+sidepanelModeChat	Chat	채팅	Mode: the AI only reads
+sidepanelModeChatHint	AI can only read, cannot click or navigate	AI는 읽기만 하며 클릭하거나 이동하지 않습니다	Tooltip of the Chat mode

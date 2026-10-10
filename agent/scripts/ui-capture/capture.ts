@@ -98,15 +98,12 @@ const SURFACES: Surface[] = [
     },
   },
   {
-    // The side panel's chat-mode toggle: always labelled by a tooltip. The app sidebar's are not --
-    // they render only while it is folded, and hover or focus unfolds it.
-    id: 'overlay-tooltip',
-    kind: 'extension',
-    path: 'sidepanel.html',
-    width: 400,
-    height: 800,
+    // A message action's tooltip (Copy), in the restored conversation. The app sidebar's tooltips render
+    // only while it is folded, and hover or focus unfolds it; the side panel's mode switch is named by
+    // title, as the system's ComposerMode is, so neither can stand in.
+    ...page('overlay-tooltip', '/home/chat?conversationId=conv-1'),
     open: {
-      hover: '[data-slot="tooltip-trigger"]:visible',
+      hover: '[data-slot="tooltip-trigger"]:has(.sr-only):visible',
       wait: '[data-slot="tooltip-content"]',
     },
   },

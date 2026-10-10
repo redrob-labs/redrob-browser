@@ -28,9 +28,7 @@ export const ConversationGroup: FC<ConversationGroupProps> = ({
 
   return (
     <div className="mb-4">
-      <h3 className="mb-2 px-3 font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-        {label}
-      </h3>
+      <h3 className="ui-shell-label mb-1 px-3">{label}</h3>
       <div className="space-y-1">
         {conversations.map((conversation) => (
           <ConversationItem

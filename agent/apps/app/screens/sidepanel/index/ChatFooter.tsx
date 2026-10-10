@@ -18,7 +18,6 @@ import {
   type SelectedTextData,
   selectedTextStorage,
 } from '@/lib/selected-text/selectedTextStorage'
-import { cn } from '@/lib/utils'
 import type { ChatMode } from '@/modules/chat/chat-types'
 import { useGetUserMCPIntegrations } from '@/modules/mcp/user-integrations.hooks'
 import { useWorkspace } from '@/modules/workspace/workspace.hooks'
@@ -116,7 +115,7 @@ export const ChatFooter: FC<ChatFooterProps> = ({
   })
 
   return (
-    <footer className="border-border/40 border-t bg-background/80 backdrop-blur-md">
+    <footer className="ui-panel-foot">
       <ChatAttachedTabs tabs={attachedTabs} onRemoveTab={onRemoveTab} />
       {visibleSelectedText && (
         <ChatSelectedText
@@ -136,7 +135,7 @@ export const ChatFooter: FC<ChatFooterProps> = ({
         <div className="flex items-center gap-2">
           <ChatModeToggle mode={mode} onModeChange={onModeChange} />
 
-          <div className="h-4 w-px bg-border/50" />
+          <div aria-hidden="true" className="ui-panel-divider" />
 
           <div className="flex items-center gap-1">
             <button
@@ -146,12 +145,13 @@ export const ChatFooter: FC<ChatFooterProps> = ({
               data-state={isTabMentionOpen ? 'open' : 'closed'}
               aria-expanded={isTabMentionOpen}
               aria-haspopup="dialog"
-              className="flex cursor-pointer items-center gap-1 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-accent"
+              className="ui-panel-tool"
               title="Attach tabs (@)"
+              aria-label="Attach tabs (@)"
             >
               <Layers className="h-4 w-4" />
               {attachedTabs.length > 0 && (
-                <span className="font-medium text-[var(--accent-brand-ink)] text-xs">
+                <span className="ui-panel-tool__count">
                   {attachedTabs.length}
                 </span>
               )}
@@ -161,12 +161,13 @@ export const ChatFooter: FC<ChatFooterProps> = ({
             <WorkspaceSelector side="top">
               <button
                 type="button"
-                className={cn(
-                  'flex cursor-pointer items-center gap-1 rounded-lg p-1.5 transition-colors hover:bg-muted/50 data-[state=open]:bg-accent',
+                className="ui-panel-tool"
+                data-selected={selectedFolder ? '' : undefined}
+                aria-label={
                   selectedFolder
-                    ? 'text-foreground'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
+                    ? selectedFolder.name
+                    : 'Select workspace folder'
+                }
                 title={
                   selectedFolder
                     ? selectedFolder.name
@@ -176,7 +177,7 @@ export const ChatFooter: FC<ChatFooterProps> = ({
                 <div className="relative">
                   <Folder className="h-4 w-4" />
                   {selectedFolder && (
-                    <div className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-[var(--accent-brand)]" />
+                    <div className="ui-panel-tool__dot absolute -top-0.5 -right-0.5" />
                   )}
                 </div>
                 <ChevronDown className="h-3 w-3" />
@@ -186,8 +187,9 @@ export const ChatFooter: FC<ChatFooterProps> = ({
             <AppSelector side="top">
               <button
                 type="button"
-                className="flex cursor-pointer items-center gap-1 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-accent"
+                className="ui-panel-tool"
                 title="Connect apps"
+                aria-label="Connect apps"
               >
                 {connectedManagedServers.length > 0 ? (
                   <>
@@ -195,7 +197,7 @@ export const ChatFooter: FC<ChatFooterProps> = ({
                       {connectedManagedServers.slice(0, 3).map((s) => (
                         <div
                           key={s.id}
-                          className="rounded-full ring-2 ring-background"
+                          className="rounded-full ring-2 ring-[var(--surface-base)]"
                         >
                           <McpServerIcon
                             serverName={s.managedServerName ?? ''}

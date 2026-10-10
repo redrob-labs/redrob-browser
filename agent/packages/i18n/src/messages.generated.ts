@@ -3,6 +3,11 @@
 const en = {
   manifestName: "Assistant",
   manifestActionTitle: "Ask Redrob",
+  sidepanelModeGroup: "How the AI works",
+  sidepanelModeAgent: "Agent",
+  sidepanelModeAgentHint: "AI can browse, click, and navigate",
+  sidepanelModeChat: "Chat",
+  sidepanelModeChatHint: "AI can only read, cannot click or navigate",
   onboardWelcomeHeading: "Welcome to $1",
   onboardTwoQuickStepsToGet: "Two quick steps to get set up: bring your browser over, then connect your agent.",
   onboardGetStarted: "Get started",
@@ -88,6 +93,11 @@ export type MessageKey = keyof typeof en
 const ko: Record<MessageKey, string> = {
   manifestName: "어시스턴트",
   manifestActionTitle: "Redrob에게 묻기",
+  sidepanelModeGroup: "AI 작동 방식",
+  sidepanelModeAgent: "에이전트",
+  sidepanelModeAgentHint: "AI가 웹을 탐색하고 클릭하며 이동할 수 있습니다",
+  sidepanelModeChat: "채팅",
+  sidepanelModeChatHint: "AI는 읽기만 하며 클릭하거나 이동하지 않습니다",
   onboardWelcomeHeading: "$1에 오신 것을 환영합니다",
   onboardTwoQuickStepsToGet: "두 단계면 준비가 끝납니다. 쓰던 브라우저를 가져오고, 에이전트를 연결하세요.",
   onboardGetStarted: "시작하기",
