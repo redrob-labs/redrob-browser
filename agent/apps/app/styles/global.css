@@ -672,3 +672,130 @@
 .dark .mdx-editor-themed .mdxeditor [class*="linkDialogPopover"] {
   filter: drop-shadow(0 4px 16px rgb(0 0 0 / 0.4));
 }
+
+/* ---- Overlays: the design system's surfaces and motion on Radix primitives ----------------------
+   Radix renders its own elements and controls open/closed state, so the system's overlay classes
+   (.rr-modal, .rr-drawer, .rr-menu__list, .rr-tooltip__bubble) cannot be put on them as-is: those
+   carry their own positioning for the system's React components. These carry the SAME values from
+   the same tokens -- one rule each, named after the rule it mirrors -- and leave position to Radix.
+
+   Motion: what arrives travels along the brand's 40 degree rake (system.css rr-arrive / rr-leave),
+   entrance curve in, exit curve out, never a zoom. Radix waits for the exit animation before it
+   unmounts, so closing is animated too. Reduced motion: none. */
+@layer components {
+  .ui-arrive[data-state="open"],
+  .ui-arrive[data-state="delayed-open"],
+  .ui-arrive[data-state="instant-open"] {
+    animation: rr-arrive var(--duration-base) var(--easing-entrance) both;
+  }
+  .ui-arrive[data-state="closed"] {
+    animation: rr-leave var(--duration-fast) var(--easing-exit) both;
+  }
+  .ui-fade[data-state="open"] {
+    animation: ui-fade-in var(--duration-base) var(--easing-standard) both;
+  }
+  .ui-fade[data-state="closed"] {
+    animation: ui-fade-in var(--duration-fast) var(--easing-exit) reverse both;
+  }
+  @keyframes ui-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ui-arrive[data-state],
+    .ui-fade[data-state] {
+      animation: none;
+    }
+  }
+
+  /* .rr-modal-scrim */
+  .ui-scrim {
+    background: var(--overlay-scrim);
+  }
+  /* .rr-modal */
+  .ui-modal {
+    background: var(--surface-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    color: var(--ink-primary);
+    font-family: var(--font-sans);
+    padding: var(--space-5);
+  }
+  /* .rr-modal__title / __body */
+  .ui-modal-title {
+    margin: 0;
+    font-size: 21px;
+    line-height: 28px;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+  }
+  .ui-modal-body {
+    font-size: 14px;
+    line-height: 22px;
+    color: var(--ink-secondary);
+  }
+  /* .rr-drawer */
+  .ui-drawer {
+    background: var(--surface-base);
+    box-shadow: var(--shadow-lg);
+    color: var(--ink-primary);
+    font-family: var(--font-sans);
+    border-color: var(--border-subtle);
+  }
+  /* .rr-menu__list -- also popovers and hover cards, which the system draws the same way */
+  .ui-pop {
+    background: var(--surface-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    color: var(--ink-primary);
+    font-family: var(--font-sans);
+  }
+  /* .rr-menu__item, keyed on Radix's highlight rather than :hover */
+  .ui-menu-item {
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--ink-primary);
+  }
+  .ui-menu-item[data-highlighted],
+  .ui-menu-item[data-state="open"] {
+    background: var(--surface-sunken);
+  }
+  .ui-menu-item[data-disabled] {
+    color: var(--ink-muted);
+  }
+  .ui-menu-item[data-variant="destructive"] {
+    color: var(--status-danger);
+  }
+  .ui-menu-item svg:not([class*="text-"]) {
+    color: var(--ink-secondary);
+  }
+  .ui-menu-item[data-variant="destructive"] svg {
+    color: inherit;
+  }
+  /* .rr-tooltip__bubble: black on light, near-white on dark */
+  .ui-tip {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--redrob-black);
+    color: var(--redrob-white);
+    box-shadow: var(--shadow-md);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    line-height: 18px;
+  }
+  [data-theme="dark"] .ui-tip {
+    background: var(--gray-1);
+    color: var(--redrob-black);
+  }
+  .ui-tip-arrow {
+    fill: var(--redrob-black);
+    background: var(--redrob-black);
+  }
+  [data-theme="dark"] .ui-tip-arrow {
+    fill: var(--gray-1);
+    background: var(--gray-1);
+  }
+}

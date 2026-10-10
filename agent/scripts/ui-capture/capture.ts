@@ -54,6 +54,11 @@ interface Surface {
   height: number
   /** Onboarding steps are reached by pressing the primary action this many times. */
   advance?: number
+  /**
+   * An overlay opened through real input before measuring: a menu, a dialog, a tooltip. A resting screen
+   * never shows one, so without these the overlays were never measured at all.
+   */
+  open?: { click?: string; hover?: string; wait: string }
 }
 
 const page = (id: string, path: string): Surface => ({
@@ -76,6 +81,33 @@ const SURFACES: Surface[] = [
   page('settings-diagnostics', '/settings/diagnostics'),
   page('settings-search', '/settings/search'),
   page('onboarding-ai', '/onboarding/ai'),
+  {
+    ...page('overlay-menu', '/settings/ai'),
+    open: {
+      click: '[aria-label="Actions for Team gateway"]',
+      wait: '[role="menu"]',
+    },
+  },
+  {
+    ...page('overlay-dialog', '/scheduled'),
+    open: {
+      click: 'button:has-text("New Task"), button:has-text("새 작업")',
+      wait: '[role="dialog"]',
+    },
+  },
+  {
+    // The side panel's chat-mode toggle: always labelled by a tooltip. The app sidebar's are not --
+    // they render only while it is folded, and hover or focus unfolds it.
+    id: 'overlay-tooltip',
+    kind: 'extension',
+    path: 'sidepanel.html',
+    width: 400,
+    height: 800,
+    open: {
+      hover: '[data-slot="tooltip-trigger"]:visible',
+      wait: '[data-slot="tooltip-content"]',
+    },
+  },
   {
     id: 'sidepanel-chat',
     kind: 'extension',
@@ -299,13 +331,26 @@ async function captureOne(
   )
   await settle(p)
   if (s.advance) await advanceOnboarding(p, s.advance)
+  if (s.open) {
+    const target = p.locator(s.open.click ?? s.open.hover ?? '').first()
+    if (s.open.click) await target.click()
+    else {
+      await target.hover()
+    }
+    await p
+      .locator(s.open.wait)
+      .first()
+      .waitFor({ state: 'visible', timeout: 5000 })
+    await settle(p)
+  }
   const name = `${s.id}.${theme}.${locale}.png`
   await p.screenshot({ path: join(OUT, name), fullPage: false })
   const found: AuditResult = await p.evaluate(audit, {
     palette: palette(theme),
     locale,
   })
-  const focusFindings = await focus(p)
+  // Tabbing would move focus out of, and close, the overlay being measured.
+  const focusFindings = s.open ? [] : await focus(p)
   await p.close()
   // Naming Pretendard is not using it: with no face loaded the stack falls through to the platform font
   // in silence. So the check is a LOADED Pretendard face, plus every face that failed to load.

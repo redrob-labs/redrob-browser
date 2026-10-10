@@ -287,6 +287,114 @@
     "untranslated": 15,
     "fonts": 0
   },
+  "overlay-dialog.dark.en": {
+    "offPalette": 5,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "overlay-dialog.dark.ko": {
+    "offPalette": 5,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 22,
+    "fonts": 0
+  },
+  "overlay-dialog.light.en": {
+    "offPalette": 5,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "overlay-dialog.light.ko": {
+    "offPalette": 5,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 22,
+    "fonts": 0
+  },
+  "overlay-menu.dark.en": {
+    "offPalette": 18,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "overlay-menu.dark.ko": {
+    "offPalette": 18,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 32,
+    "fonts": 0
+  },
+  "overlay-menu.light.en": {
+    "offPalette": 21,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "overlay-menu.light.ko": {
+    "offPalette": 21,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 32,
+    "fonts": 0
+  },
+  "overlay-tooltip.dark.en": {
+    "offPalette": 5,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "overlay-tooltip.dark.ko": {
+    "offPalette": 5,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 8,
+    "fonts": 0
+  },
+  "overlay-tooltip.light.en": {
+    "offPalette": 5,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "overlay-tooltip.light.ko": {
+    "offPalette": 5,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 8,
+    "fonts": 0
+  },
   "scheduled.dark.en": {
     "offPalette": 5,
     "contrast": 0,
