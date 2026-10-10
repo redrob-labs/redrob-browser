@@ -1,4 +1,40 @@
 {
+  "chat-conversation.dark.en": {
+    "offPalette": 4,
+    "contrast": 0,
+    "focusMissing": 8,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "chat-conversation.dark.ko": {
+    "offPalette": 4,
+    "contrast": 0,
+    "focusMissing": 8,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 5,
+    "fonts": 0
+  },
+  "chat-conversation.light.en": {
+    "offPalette": 4,
+    "contrast": 0,
+    "focusMissing": 8,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "chat-conversation.light.ko": {
+    "offPalette": 4,
+    "contrast": 0,
+    "focusMissing": 8,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 5,
+    "fonts": 0
+  },
   "connect-apps.dark.en": {
     "offPalette": 4,
     "contrast": 0,

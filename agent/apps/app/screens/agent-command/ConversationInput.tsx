@@ -96,7 +96,7 @@ function InputActionButton({
       size="icon"
       disabled={disabled}
       title={streaming && hasContent ? 'Queue message' : undefined}
-      className="h-10 w-10 flex-shrink-0 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90"
+      className="ui-composer-send size-10 flex-shrink-0"
     >
       {showSpinner ? (
         <Loader2 className="h-5 w-5 animate-spin" />
@@ -288,19 +288,11 @@ function CalmContextControls({
 }
 
 function HomeShell({ children }: { children: ReactNode }) {
-  return (
-    <div className="overflow-hidden rounded-[1.55rem] border border-border/60 bg-card/95 shadow-sm transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--accent-brand)]/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklch,var(--accent-brand)_15%,transparent),0_1px_2px_rgba(15,23,42,0.04)]">
-      {children}
-    </div>
-  )
+  return <div className="ui-composer overflow-hidden">{children}</div>
 }
 
 function ConversationShell({ children }: { children: ReactNode }) {
-  return (
-    <div className="overflow-hidden rounded-[1.35rem] border border-border/50 bg-background/95 shadow-[0_10px_30px_rgba(15,23,42,0.06)] backdrop-blur-md transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--accent-brand)]/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklch,var(--accent-brand)_15%,transparent),0_10px_30px_rgba(15,23,42,0.06)]">
-      {children}
-    </div>
-  )
+  return <div className="ui-composer overflow-hidden">{children}</div>
 }
 
 export const ConversationInput: FC<ConversationInputProps> = ({

@@ -71,6 +71,8 @@ const page = (id: string, path: string): Surface => ({
 const SURFACES: Surface[] = [
   page('home', '/home'),
   page('home-chat', '/home/chat'),
+  // A conversation with both voices in it, restored from the fixtures, so message bubbles are measured.
+  page('chat-conversation', '/home/chat?conversationId=conv-1'),
   page('home-personalize', '/home/personalize'),
   page('scheduled', '/scheduled'),
   page('connect-apps', '/connect-apps'),

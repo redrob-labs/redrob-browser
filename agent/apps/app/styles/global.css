@@ -803,3 +803,95 @@
     background: var(--gray-1);
   }
 }
+
+/* ---- Chat: the design system's message, prompt and composer anatomy ---------------------------
+   Same values as system.css's .rr-msg, .rr-prompt and .rr-composer, on the app's own elements. */
+@layer components {
+  /* .rr-msg--user .rr-msg__bubble */
+  .is-user > .ui-msg {
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg);
+    background: var(--surface-sunken);
+    color: var(--ink-primary);
+  }
+  /* .rr-msg--assistant .rr-msg__bubble: machine output on --surface-ai, so it is never mistaken for a
+     person's, with the quiet wash (deep on dark). */
+  .is-assistant > .ui-msg {
+    padding: var(--space-4);
+    border: 1px solid var(--border-ai);
+    border-radius: var(--radius-lg);
+    background-color: var(--surface-ai);
+    background-image: var(--wash-quiet);
+    color: var(--ink-primary);
+  }
+  [data-theme="dark"] .is-assistant > .ui-msg {
+    background-image: var(--wash-deep);
+  }
+  /* .rr-msg__body type */
+  .ui-msg {
+    font-size: 15px;
+    line-height: 24px;
+  }
+  /* .rr-prompt, over the Button it is built on (components beats the rr layer) */
+  .ui-prompt {
+    gap: var(--space-2);
+    height: auto;
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-full);
+    background: var(--surface-raised);
+    color: var(--ink-primary);
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 20px;
+  }
+  .ui-prompt:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    background: var(--surface-brand-subtle);
+  }
+  /* .rr-composer */
+  .ui-composer {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-2xl);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-sm);
+    transition: border-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-composer:focus-within {
+    border-color: var(--border-strong);
+  }
+  /* .rr-composer__input */
+  .ui-composer-input {
+    color: var(--ink-primary);
+    font-size: 15px;
+    line-height: 24px;
+  }
+  .ui-composer-input::placeholder {
+    color: var(--ink-muted);
+  }
+  /* .rr-composer__send and --stop */
+  .ui-composer-send {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-full);
+    background: var(--action-primary);
+    color: var(--ink-on-brand);
+  }
+  .ui-composer-send:hover:not(:disabled) {
+    background: var(--action-primary-hover);
+  }
+  .ui-composer-send:disabled {
+    background: var(--surface-sunken);
+    color: var(--ink-muted);
+    opacity: 1;
+  }
+  .ui-composer-send:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+  .ui-composer-stop {
+    background: var(--ink-primary);
+    color: var(--surface-base);
+  }
+}

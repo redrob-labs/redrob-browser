@@ -65,9 +65,9 @@ export const MessageContent = ({
 }: MessageContentProps) => (
   <div
     className={cn(
-      'is-user:dark flex w-fit flex-col gap-2 overflow-hidden text-sm',
-      'group-[.is-user]:ml-auto group-[.is-user]:rounded-lg group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground',
-      'group-[.is-assistant]:text-foreground',
+      'is-user:dark flex w-fit flex-col gap-2 overflow-hidden',
+      // The system's message bubbles (global.css .ui-msg): the person's on sunken, the agent's on --surface-ai.
+      'ui-msg group-[.is-user]:ml-auto group-[.is-assistant]:w-full',
       className,
     )}
     {...props}
