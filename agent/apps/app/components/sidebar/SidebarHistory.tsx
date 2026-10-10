@@ -62,10 +62,8 @@ export function SidebarHistory({
       aria-expanded={visible}
       aria-controls={contentId}
       onClick={() => setOpen((value) => !value)}
-      className={cn(
-        'flex h-9 w-full items-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 font-medium text-sm transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        open && 'bg-[var(--accent-brand)]/10',
-      )}
+      // An open disclosure is not a selection, so it takes no `active` ground; the chevron says it.
+      className="ui-shell-link flex h-9 w-full items-center gap-2 overflow-hidden whitespace-nowrap px-3"
     >
       <History className="size-4 shrink-0" />
       <span
@@ -151,9 +149,7 @@ export function SidebarHistory({
             )}
             {groups.map((group) => (
               <section key={group.label} aria-label={group.label}>
-                <h3 className="px-2 pt-2 pb-1 font-medium text-muted-foreground text-xs">
-                  {group.label}
-                </h3>
+                <h3 className="ui-shell-label px-2 pt-2 pb-1">{group.label}</h3>
                 <ul className="space-y-1">
                   {group.conversations.map((conversation) => {
                     const title = conversationTitle(
@@ -169,8 +165,8 @@ export function SidebarHistory({
                           }
                           title={title}
                           className={cn(
-                            'flex h-10 min-w-0 flex-col justify-center rounded-md px-2 hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                            activeId === conversation.id && 'bg-sidebar-accent',
+                            'ui-shell-link flex h-10 min-w-0 flex-col justify-center px-2',
+                            activeId === conversation.id && 'active',
                           )}
                         >
                           <span className="truncate text-[13px] leading-[19px]">
@@ -195,7 +191,7 @@ export function SidebarHistory({
               <button
                 type="button"
                 onClick={() => setLimit((value) => value + HISTORY_PAGE_SIZE)}
-                className="w-full rounded-md px-2 py-2 text-left text-muted-foreground text-xs hover:bg-sidebar-accent"
+                className="ui-shell-link w-full px-2 py-2 text-left text-xs"
               >
                 Show older
               </button>

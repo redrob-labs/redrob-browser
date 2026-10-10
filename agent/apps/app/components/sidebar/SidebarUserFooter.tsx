@@ -51,7 +51,7 @@ export const SidebarUserFooter: FC<SidebarUserFooterProps> = ({
     <button
       type="button"
       onClick={() => chrome.tabs.create({ url: 'chrome://settings/help' })}
-      className="flex h-9 w-full items-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 font-medium text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      className="ui-shell-link flex h-9 w-full items-center gap-2 overflow-hidden whitespace-nowrap px-3"
     >
       <Info className="size-4 shrink-0" />
       <span
@@ -69,7 +69,7 @@ export const SidebarUserFooter: FC<SidebarUserFooterProps> = ({
     <Button
       variant="ghost"
       onClick={onOpenShortcuts}
-      className="flex h-9 w-full items-center justify-start gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 font-medium text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      className="ui-shell-link flex h-9 w-full items-center justify-start gap-2 overflow-hidden whitespace-nowrap px-3"
     >
       <Keyboard className="size-4 shrink-0" />
       <span

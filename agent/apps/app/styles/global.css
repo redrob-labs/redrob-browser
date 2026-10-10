@@ -895,3 +895,94 @@
     color: var(--surface-base);
   }
 }
+
+/* ---- The product frame: the design system's AppShell (.rr-shell) on the app's own sidebars ------
+   Same values as system.css's .rr-shell__side, __nav and the product wash, from the same tokens. */
+@layer components {
+  /* .rr-shell__side: sunken in light, raised in dark -- elevation runs upward there. */
+  .ui-shell-side {
+    background-color: var(--surface-sunken);
+    border-right: 1px solid var(--border-subtle);
+    color: var(--ink-primary);
+    font-family: var(--font-sans);
+    /* .rr-shell[data-product="browser"]: Browser's own wash enters from the top edge and is gone by
+       132px, so selection, text and controls stay Redrob Blue and ink. Only the frame reads a
+       --product-* token, as the system requires. */
+    background-image: linear-gradient(
+      180deg,
+      var(--product-browser-wash) 0,
+      transparent 132px
+    );
+  }
+  [data-theme="dark"] .ui-shell-side {
+    background-color: var(--surface-raised);
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--product-browser-wash) 55%, transparent) 0,
+      transparent 132px
+    );
+  }
+  .ui-shell-side > :first-child {
+    border-color: var(--border-subtle);
+  }
+  /* .rr-shell__nav a */
+  .ui-shell-link {
+    border-radius: var(--radius-sm);
+    color: var(--ink-secondary);
+    font-size: 13px;
+    font-weight: 400;
+    transition:
+      background-color var(--duration-fast) var(--easing-standard),
+      color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-shell-link:hover {
+    background: var(--surface-base);
+    color: var(--ink-primary);
+  }
+  [data-theme="dark"] .ui-shell-link:hover {
+    background: var(--surface-sunken);
+  }
+  /* The ground and the weight carry the selection; no bar down the edge. */
+  .ui-shell-link[aria-current="page"],
+  .ui-shell-link.active {
+    background: var(--surface-base);
+    color: var(--ink-primary);
+    font-weight: 600;
+  }
+  [data-theme="dark"] .ui-shell-link[aria-current="page"],
+  [data-theme="dark"] .ui-shell-link.active {
+    background: var(--surface-sunken);
+  }
+  .ui-shell-link svg {
+    color: var(--ink-muted);
+  }
+  .ui-shell-link[aria-current="page"] svg,
+  .ui-shell-link.active svg {
+    color: var(--ink-brand);
+  }
+  .ui-shell-link:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: -2px;
+  }
+  /* The meta line above a group: 12px Medium in ink-secondary, sentence case -- never uppercase,
+     never tracked (--text-meta). */
+  .ui-shell-label {
+    color: var(--ink-secondary);
+    font: var(--text-meta);
+    letter-spacing: 0;
+    text-transform: none;
+  }
+}
+
+/* .rr-mark: one artwork file per ground, swapped on the theme. Never a filter, a mask or an opacity. */
+@layer components {
+  .ui-mark__dark {
+    display: none;
+  }
+  [data-theme="dark"] .ui-mark__light {
+    display: none;
+  }
+  [data-theme="dark"] .ui-mark__dark {
+    display: block;
+  }
+}

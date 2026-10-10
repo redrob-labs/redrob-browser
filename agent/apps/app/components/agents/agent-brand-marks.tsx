@@ -9,7 +9,7 @@
 
 import type { FC } from 'react'
 import HermesIcon from '@/assets/hermes.png'
-import RedrobMark from '@/assets/product_logo.svg'
+import { RedrobMark } from '@/components/brand/RedrobMark'
 import { Antigravity } from '@/components/ui/svgs/antigravity'
 import { ClaudeAiIcon } from '@/components/ui/svgs/claudeAiIcon'
 import { CodexDark } from '@/components/ui/svgs/codexDark'
@@ -30,7 +30,7 @@ export interface AgentMarkProps {
 
 // Redrob Code is the Redrob engine; it carries the Redrob mark, unrecoloured.
 const RedrobCodeMark: FC<AgentMarkProps> = ({ className }) => (
-  <img src={RedrobMark} alt="Redrob Code" className={className} />
+  <RedrobMark alt="Redrob Code" className={className} />
 )
 
 const ClaudeMark: FC<AgentMarkProps> = ({ className }) => (

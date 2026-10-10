@@ -2,7 +2,7 @@
   "chat-conversation.dark.en": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 8,
+    "focusMissing": 3,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -11,7 +11,7 @@
   "chat-conversation.dark.ko": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 8,
+    "focusMissing": 3,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 5,
@@ -20,7 +20,7 @@
   "chat-conversation.light.en": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 8,
+    "focusMissing": 3,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -29,7 +29,7 @@
   "chat-conversation.light.ko": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 8,
+    "focusMissing": 3,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 5,
@@ -38,7 +38,7 @@
   "connect-apps.dark.en": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -47,7 +47,7 @@
   "connect-apps.dark.ko": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 13,
@@ -56,7 +56,7 @@
   "connect-apps.light.en": {
     "offPalette": 4,
     "contrast": 1,
-    "focusMissing": 6,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -65,7 +65,7 @@
   "connect-apps.light.ko": {
     "offPalette": 4,
     "contrast": 1,
-    "focusMissing": 6,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 13,
@@ -74,7 +74,7 @@
   "home-chat.dark.en": {
     "offPalette": 5,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 2,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -83,7 +83,7 @@
   "home-chat.dark.ko": {
     "offPalette": 5,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 2,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 7,
@@ -92,7 +92,7 @@
   "home-chat.light.en": {
     "offPalette": 5,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 2,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -101,7 +101,7 @@
   "home-chat.light.ko": {
     "offPalette": 5,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 2,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 7,
@@ -110,7 +110,7 @@
   "home-personalize.dark.en": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 8,
+    "focusMissing": 3,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -119,7 +119,7 @@
   "home-personalize.dark.ko": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 8,
+    "focusMissing": 3,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 15,
@@ -128,7 +128,7 @@
   "home-personalize.light.en": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 8,
+    "focusMissing": 3,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -137,7 +137,7 @@
   "home-personalize.light.ko": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 8,
+    "focusMissing": 3,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 15,
@@ -146,7 +146,7 @@
   "home.dark.en": {
     "offPalette": 6,
     "contrast": 0,
-    "focusMissing": 8,
+    "focusMissing": 3,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -155,7 +155,7 @@
   "home.dark.ko": {
     "offPalette": 6,
     "contrast": 0,
-    "focusMissing": 8,
+    "focusMissing": 3,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 10,
@@ -164,7 +164,7 @@
   "home.light.en": {
     "offPalette": 6,
     "contrast": 0,
-    "focusMissing": 8,
+    "focusMissing": 3,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -173,7 +173,7 @@
   "home.light.ko": {
     "offPalette": 6,
     "contrast": 0,
-    "focusMissing": 8,
+    "focusMissing": 3,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 10,
@@ -434,7 +434,7 @@
   "scheduled.dark.en": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -443,7 +443,7 @@
   "scheduled.dark.ko": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 7,
@@ -452,7 +452,7 @@
   "scheduled.light.en": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -461,7 +461,7 @@
   "scheduled.light.ko": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 7,
@@ -470,7 +470,7 @@
   "settings-ai.dark.en": {
     "offPalette": 18,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -479,7 +479,7 @@
   "settings-ai.dark.ko": {
     "offPalette": 18,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 29,
@@ -488,7 +488,7 @@
   "settings-ai.light.en": {
     "offPalette": 21,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -497,7 +497,7 @@
   "settings-ai.light.ko": {
     "offPalette": 21,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 29,
@@ -506,7 +506,7 @@
   "settings-chat.dark.en": {
     "offPalette": 1,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -515,7 +515,7 @@
   "settings-chat.dark.ko": {
     "offPalette": 1,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 14,
@@ -524,7 +524,7 @@
   "settings-chat.light.en": {
     "offPalette": 1,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -533,7 +533,7 @@
   "settings-chat.light.ko": {
     "offPalette": 1,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 14,
@@ -542,7 +542,7 @@
   "settings-customization.dark.en": {
     "offPalette": 1,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -551,7 +551,7 @@
   "settings-customization.dark.ko": {
     "offPalette": 1,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 18,
@@ -560,7 +560,7 @@
   "settings-customization.light.en": {
     "offPalette": 1,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -569,7 +569,7 @@
   "settings-customization.light.ko": {
     "offPalette": 1,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 18,
@@ -578,7 +578,7 @@
   "settings-diagnostics.dark.en": {
     "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -587,7 +587,7 @@
   "settings-diagnostics.dark.ko": {
     "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 32,
@@ -596,7 +596,7 @@
   "settings-diagnostics.light.en": {
     "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -605,7 +605,7 @@
   "settings-diagnostics.light.ko": {
     "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 32,
@@ -614,7 +614,7 @@
   "settings-mcp.dark.en": {
     "offPalette": 3,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -623,7 +623,7 @@
   "settings-mcp.dark.ko": {
     "offPalette": 3,
     "contrast": 0,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 23,
@@ -632,7 +632,7 @@
   "settings-mcp.light.en": {
     "offPalette": 3,
     "contrast": 1,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -641,7 +641,7 @@
   "settings-mcp.light.ko": {
     "offPalette": 3,
     "contrast": 1,
-    "focusMissing": 6,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 23,
@@ -650,7 +650,7 @@
   "settings-search.dark.en": {
     "offPalette": 18,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -659,7 +659,7 @@
   "settings-search.dark.ko": {
     "offPalette": 18,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 29,
@@ -668,7 +668,7 @@
   "settings-search.light.en": {
     "offPalette": 21,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -677,7 +677,7 @@
   "settings-search.light.ko": {
     "offPalette": 21,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 1,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 29,
