@@ -48,7 +48,7 @@ export class SmartCompare {
   compare(
     identity: ProductIdentity,
     region: Region,
-    options: { fresh?: boolean } = {},
+    options: { fresh?: boolean; groupTitle?: string } = {},
   ): Promise<Comparison> {
     const key = this.key(identity, region)
     const cached = this.cache.get(key)
@@ -62,9 +62,14 @@ export class SmartCompare {
     }
     const inFlight = this.running.get(key)
     if (inFlight) return inFlight
-    const run = compareProduct(identity, region, this.fetcher(), {
-      now: this.now,
-    })
+    const run = compareProduct(
+      identity,
+      region,
+      this.fetcher(options.groupTitle),
+      {
+        now: this.now,
+      },
+    )
       .then((result) => {
         this.cache.set(key, result)
         while (this.cache.size > CACHE_LIMIT) {
@@ -80,12 +85,12 @@ export class SmartCompare {
   }
 
   /** Opens a search page in a background tab in the Smart Compare group, reads it, closes it. */
-  private fetcher(): PageFetcher {
+  private fetcher(groupTitle = GROUP_TITLE): PageFetcher {
     return async (url, { timeoutMs }) => {
       const pages = this.session.pages
       const pageId = await pages.newPage(url, { background: true })
       try {
-        await this.group(pageId)
+        await this.group(pageId, groupTitle)
         const deadline = this.now() + timeoutMs
         // Search pages render their results after load; wait for load, then a moment for scripts.
         while (true) {
@@ -117,7 +122,7 @@ export class SmartCompare {
     }
   }
 
-  private async group(pageId: number): Promise<void> {
+  private async group(pageId: number, title: string): Promise<void> {
     const tabId = this.session.pages.getTabId(pageId)
     if (tabId === undefined) return
     try {
@@ -133,7 +138,7 @@ export class SmartCompare {
       try {
         const { group } = (await this.session.cdp('Browser.createTabGroup', {
           tabIds: [tabId],
-          title: GROUP_TITLE,
+          title,
         })) as { group: TabGroup }
         this.groupId = group.groupId
         await this.session.cdp('Browser.updateTabGroup', {
