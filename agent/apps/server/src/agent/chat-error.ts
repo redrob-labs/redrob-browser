@@ -278,10 +278,31 @@ function fromMessage(message: string, ctx: ChatErrorContext): ChatError | null {
 }
 
 /** Maps any thrown value onto the envelope the client renders. */
+/** Privacy Protection refused to send: said in its own words, not as a provider failure. */
+function isPrivacyGateError(error: unknown): boolean {
+  for (let current = error, depth = 0; current && depth < 5; depth += 1) {
+    if (current instanceof Error && current.name === 'PrivacyGateError') {
+      return true
+    }
+    current = current instanceof Error ? current.cause : undefined
+  }
+  return false
+}
+
 export function toChatError(
   error: unknown,
   ctx: ChatErrorContext = {},
 ): ChatError {
+  if (isPrivacyGateError(error)) {
+    return {
+      code: 'unknown',
+      title: 'Privacy Protection stopped this message',
+      message:
+        'Privacy Protection could not check this message on this computer, so nothing was sent. Try again, or change the level in Settings, Privacy.',
+      retryable: true,
+      provider: ctx.provider,
+    }
+  }
   // The SDK wraps exhausted retries; the last failure is the informative one.
   if (RetryError.isInstance(error)) {
     return toChatError(error.lastError ?? error.errors.at(-1), ctx)

@@ -9,10 +9,14 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { AcpAgentRuntime } from '../../lib/agents/acp/acp-agent-runtime'
 import type { OAuthTokenManager } from '../../lib/clients/oauth/token-manager'
+import { DetectorSource } from '../../lib/privacy/detector-source'
+import { PrivacyGate } from '../../lib/privacy/gate'
+import { PrivacySettingsStore } from '../../lib/privacy/settings'
 import { requireTrustedOrigin } from '../middleware/require-trusted-origin'
 import { ConversationRuns } from '../services/conversation-runs'
 import type { KlavisService } from '../services/klavis'
 import { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
+import { setNeverReadSitesSource } from '../services/mcp/guards/never-read-sites'
 import type { Env, HttpServerConfig } from '../types'
 import { defaultCorsConfig } from '../utils/cors'
 import { requireTrustedAppOrigin } from '../utils/request-auth'
@@ -25,6 +29,7 @@ import { createKlavisRoutes } from './klavis'
 import { createMcpRoutes } from './mcp'
 import { createMcpManagerRoutes } from './mcp-manager'
 import { createOAuthRoutes } from './oauth'
+import { createPrivacyRoutes } from './privacy'
 import { createProviderRoutes } from './provider'
 import { createProvidersRoutes } from './providers'
 import { createRedrobConsoleRoutes } from './redrob-console'
@@ -50,6 +55,13 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
   const { activity } = config
   const acpRuntime = new AcpAgentRuntime({ serverPort: port, resourcesDir })
   const conversationRuns = new ConversationRuns({ activity })
+  const privacyGate =
+    config.privacyGate ??
+    new PrivacyGate(
+      new PrivacySettingsStore(),
+      new DetectorSource({ resourcesDir }),
+    )
+  setNeverReadSitesSource(() => privacyGate.settings.get().neverReadSites)
   // One deep module owns every browser-tool lease and execution effect;
   // both /chat and /mcp must share it for loopback calls to recover context.
   const browserMcp = new BrowserMcpModule({
@@ -112,6 +124,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
           activity,
           acpRuntime,
           conversationRuns,
+          privacyGate,
         }),
       )
       // Protected routes. The extension-origin auth middleware is applied per
@@ -134,13 +147,19 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .use('/refine-prompt/*', requireTrustedAppOrigin())
       .use('/scheduled-jobs/*', requireTrustedAppOrigin())
       .use('/scheduled-job-runs/*', requireTrustedAppOrigin())
+      // The names a person asked to keep private are in these settings.
+      .use('/privacy/*', requireTrustedAppOrigin())
       .route('/acpx/probe', createAcpxProbeRoutes({ resourcesDir }))
       .route('/agents', resolvedAgentRoutes)
       .route('/conversations', createConversationRoutes())
       .route('/providers', createProvidersRoutes())
       .route('/redrob-console', createRedrobConsoleRoutes())
       .route('/test-provider', createProviderRoutes({ browserosId }))
-      .route('/refine-prompt', createRefinePromptRoutes({ browserosId }))
+      .route(
+        '/refine-prompt',
+        createRefinePromptRoutes({ browserosId, privacyGate }),
+      )
+      .route('/privacy', createPrivacyRoutes({ gate: privacyGate }))
       .route('/scheduled-jobs', createScheduledJobRoutes())
       .route('/scheduled-job-runs', createScheduledJobRunRoutes())
   )

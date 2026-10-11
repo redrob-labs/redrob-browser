@@ -17,6 +17,7 @@ import type { AcpAgentRuntime } from '../../lib/agents/acp/acp-agent-runtime'
 import { SERVER_CREDENTIALED_PROVIDERS } from '../../lib/clients/llm/config'
 import { logger } from '../../lib/logger'
 import { metrics } from '../../lib/metrics'
+import type { PrivacyGate } from '../../lib/privacy/gate'
 import { dbProviderStore } from '../../lib/providers/provider-store'
 import { Sentry } from '../../lib/sentry'
 import {
@@ -55,6 +56,7 @@ interface ChatRouteDeps {
   conversationRuns?: ConversationRuns
   /** Injectable so the hydration path is testable without a database. */
   providerStore?: ChatProviderLookup
+  privacyGate?: PrivacyGate
 }
 
 /**
@@ -88,6 +90,7 @@ export function createChatRoutes(deps: ChatRouteDeps): Hono<Env> {
     activity: deps.activity,
     acpRuntime: deps.acpRuntime,
     conversationRuns: deps.conversationRuns,
+    privacyGate: deps.privacyGate,
   })
 
   const app = new Hono<Env>()
