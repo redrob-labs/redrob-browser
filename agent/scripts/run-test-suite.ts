@@ -22,6 +22,11 @@ const bun = process.execPath
 const testSuites = {
   all: [
     {
+      label: 'hiring tests',
+      cwd: resolve(projectRoot, 'packages/hiring'),
+      argv: [bun, 'run', 'test'],
+    },
+    {
       label: 'diagnostics tests',
       cwd: resolve(projectRoot, 'packages/diagnostics'),
       argv: [bun, 'run', 'test'],

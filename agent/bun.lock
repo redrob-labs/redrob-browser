@@ -394,6 +394,13 @@
         "react": "^19.2.8",
       },
     },
+    "packages/hiring": {
+      "name": "@browseros/hiring",
+      "version": "0.0.1",
+      "dependencies": {
+        "linkedom": "^0.18.13",
+      },
+    },
     "packages/onboarding-video": {
       "name": "@browseros/onboarding-video",
       "version": "0.2.0",
@@ -653,6 +660,8 @@
     "@browseros/diagnostics": ["@browseros/diagnostics@workspace:packages/diagnostics"],
 
     "@browseros/harness-integrations-rust": ["@browseros/harness-integrations-rust@workspace:crates/harness-integrations"],
+
+    "@browseros/hiring": ["@browseros/hiring@workspace:packages/hiring"],
 
     "@browseros/onboarding-video": ["@browseros/onboarding-video@workspace:packages/onboarding-video"],
 

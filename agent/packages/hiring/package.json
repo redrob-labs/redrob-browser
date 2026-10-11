@@ -1,0 +1,47 @@
+{
+  "name": "@browseros/hiring",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test ./tests"
+  },
+  "exports": {
+    "./candidate": {
+      "types": "./src/candidate.ts",
+      "default": "./src/candidate.ts"
+    },
+    "./sites": {
+      "types": "./src/sites.ts",
+      "default": "./src/sites.ts"
+    },
+    "./criteria": {
+      "types": "./src/criteria.ts",
+      "default": "./src/criteria.ts"
+    },
+    "./evaluate": {
+      "types": "./src/evaluate.ts",
+      "default": "./src/evaluate.ts"
+    },
+    "./people": {
+      "types": "./src/people.ts",
+      "default": "./src/people.ts"
+    },
+    "./limits": {
+      "types": "./src/limits.ts",
+      "default": "./src/limits.ts"
+    },
+    "./extract": {
+      "types": "./src/extract.ts",
+      "default": "./src/extract.ts"
+    },
+    "./screening": {
+      "types": "./src/screening.ts",
+      "default": "./src/screening.ts"
+    }
+  },
+  "dependencies": {
+    "linkedom": "^0.18.13"
+  }
+}
