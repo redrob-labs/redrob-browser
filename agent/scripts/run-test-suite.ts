@@ -27,6 +27,11 @@ const testSuites = {
       argv: [bun, 'run', 'test'],
     },
     {
+      label: 'shopping tests',
+      cwd: resolve(projectRoot, 'packages/shopping'),
+      argv: [bun, 'run', 'test'],
+    },
+    {
       label: 'server tests',
       cwd: resolve(projectRoot, 'apps/server'),
       argv: [bun, 'run', 'test'],

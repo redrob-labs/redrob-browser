@@ -13,6 +13,7 @@ import { requireTrustedOrigin } from '../middleware/require-trusted-origin'
 import { ConversationRuns } from '../services/conversation-runs'
 import type { KlavisService } from '../services/klavis'
 import { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
+import { SmartCompare } from '../services/smart-compare'
 import type { Env, HttpServerConfig } from '../types'
 import { defaultCorsConfig } from '../utils/cors'
 import { requireTrustedAppOrigin } from '../utils/request-auth'
@@ -32,6 +33,7 @@ import { createRefinePromptRoutes } from './refine-prompt'
 import { createScheduledJobRunRoutes } from './scheduled-job-runs'
 import { createScheduledJobRoutes } from './scheduled-jobs'
 import { createShutdownRoute } from './shutdown'
+import { createSmartCompareRoutes } from './smart-compare'
 import { createStatusRoute } from './status'
 
 interface CreateApiRoutesDeps {
@@ -50,6 +52,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
   const { activity } = config
   const acpRuntime = new AcpAgentRuntime({ serverPort: port, resourcesDir })
   const conversationRuns = new ConversationRuns({ activity })
+  const smartCompare = new SmartCompare(browserSession)
   // One deep module owns every browser-tool lease and execution effect;
   // both /chat and /mcp must share it for loopback calls to recover context.
   const browserMcp = new BrowserMcpModule({
@@ -134,6 +137,8 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .use('/refine-prompt/*', requireTrustedAppOrigin())
       .use('/scheduled-jobs/*', requireTrustedAppOrigin())
       .use('/scheduled-job-runs/*', requireTrustedAppOrigin())
+      // Opens tabs in the person's browser: only the extension may ask.
+      .use('/compare/*', requireTrustedAppOrigin())
       .route('/acpx/probe', createAcpxProbeRoutes({ resourcesDir }))
       .route('/agents', resolvedAgentRoutes)
       .route('/conversations', createConversationRoutes())
@@ -141,6 +146,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .route('/redrob-console', createRedrobConsoleRoutes())
       .route('/test-provider', createProviderRoutes({ browserosId }))
       .route('/refine-prompt', createRefinePromptRoutes({ browserosId }))
+      .route('/compare', createSmartCompareRoutes({ compare: smartCompare }))
       .route('/scheduled-jobs', createScheduledJobRoutes())
       .route('/scheduled-job-runs', createScheduledJobRunRoutes())
   )
