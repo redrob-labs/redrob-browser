@@ -6,5 +6,9 @@
   "manifestActionTitle": {
     "message": "Redrob에게 묻기",
     "description": "Tooltip on the toolbar button that opens the side panel"
+  },
+  "glowStopAgent": {
+    "message": "에이전트 중지",
+    "description": "Name of the round stop button shown on a page while the agent works on it"
   }
 }
