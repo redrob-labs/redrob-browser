@@ -27,7 +27,7 @@ export const RedrobModelGroup: FC<{
   const { data: providers = [] } = useProvidersQuery()
   const queryClient = useQueryClient()
   const config = providers.find((p) => p.id === providerId)
-  if (!config || config.type !== 'redrob-console') return null
+  if (config?.type !== 'redrob-console') return null
 
   const choose = async (modelId: string) => {
     onDone()
