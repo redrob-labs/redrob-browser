@@ -38,7 +38,7 @@ export function ManualSetupCard({ endpointUrl }: ManualSetupCardProps) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="group block w-full rounded-9 border border-cyanotype-border bg-card p-4 text-left transition-colors hover:border-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        className="group block w-full rounded-9 border border-cyanotype-border bg-card p-4 text-left transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong"
       >
         <div className="flex items-start gap-3">
           <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-card-tint text-cyanotype-muted">

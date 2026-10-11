@@ -165,7 +165,7 @@ function TimelineRow({
       className={cn(
         'rounded-lg border border-transparent px-2 py-1.5',
         isNotable && 'border-primary/30 bg-primary/5',
-        isError && 'border-red-500/30 bg-red-500/5',
+        isError && 'border-red bg-red-tint',
       )}
     >
       <button

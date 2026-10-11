@@ -57,10 +57,10 @@ export function NeedsYouBanner({
     <section
       data-needs-you-banner
       aria-live="polite"
-      className="rounded-2xl border border-amber/40 bg-amber-tint px-5 py-4"
+      className="rounded-2xl border border-amber bg-amber-tint px-5 py-4"
     >
       <div className="flex items-start gap-4">
-        <span className="mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-[#b85c10] text-white">
+        <span className="mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent-orange-4)] text-white">
           <TriangleAlert className="size-4.5" />
         </span>
         <div className="min-w-0 flex-1">
@@ -71,7 +71,7 @@ export function NeedsYouBanner({
                 : `${pending.length} agents need you right now`}
             </h2>
             {pending.length > 1 && (
-              <span className="inline-flex shrink-0 items-center rounded-full bg-[#b85c10] px-2 py-0.5 font-mono text-[10px] text-white uppercase tracking-[0.1em]">
+              <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--accent-orange-4)] px-2 py-0.5 font-mono text-[10px] text-white uppercase tracking-[0.1em]">
                 {pending.length} need you
               </span>
             )}
@@ -93,7 +93,7 @@ export function NeedsYouBanner({
       </div>
 
       {rest.length > 0 && (
-        <ul className="mt-3 flex flex-col gap-2 border-amber/30 border-t pt-3">
+        <ul className="mt-3 flex flex-col gap-2 border-amber border-t pt-3">
           {rest.map(({ session, help }) => (
             <li
               key={session.sessionId}

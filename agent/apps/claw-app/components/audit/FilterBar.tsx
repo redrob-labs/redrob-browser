@@ -231,7 +231,7 @@ function StatusPill({ status }: { status: TaskStatus }) {
     )
   }
   if (status === 'failed') {
-    return <span className="text-red-500">Failed</span>
+    return <span className="text-red">Failed</span>
   }
   if (status === 'cancelled') return <span>Stopped</span>
   return <span>Done</span>

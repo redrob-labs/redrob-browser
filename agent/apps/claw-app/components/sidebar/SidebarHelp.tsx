@@ -81,10 +81,8 @@ export function SidebarHelp({ expanded = false }: SidebarHelpProps) {
                   : undefined
               }
               className={cn(
-                item.internal &&
-                  location.pathname === item.url &&
-                  'bg-sidebar-accent text-sidebar-accent-foreground',
-                'flex h-9 w-full items-center gap-3 overflow-hidden whitespace-nowrap rounded-md px-2.5 font-medium text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                item.internal && location.pathname === item.url && 'active',
+                'ui-shell-link flex h-9 w-full items-center gap-3 overflow-hidden whitespace-nowrap px-2.5',
               )}
             >
               <Icon className="size-5 shrink-0" />

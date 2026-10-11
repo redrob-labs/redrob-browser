@@ -139,10 +139,10 @@ export function AgentRunningCard({
             <span className="truncate text-white">{session.label}</span>
           </span>
           {showingLive ? (
-            <span className="inline-flex shrink-0 items-center gap-1.5 text-[#8fb4ff]">
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-[var(--blue-4)]">
               <span
                 aria-hidden
-                className="inline-block size-1.5 animate-[pulse-dot_1.4s_ease-in-out_infinite] rounded-full bg-[#8fb4ff] shadow-[0_0_8px_hsl(221_100%_78%/0.6)]"
+                className="inline-block size-1.5 animate-[pulse-dot_1.4s_ease-in-out_infinite] rounded-full bg-[var(--blue-4)] shadow-[0_0_8px_hsl(221_100%_78%/0.6)]"
               />
               LIVE
             </span>
@@ -154,7 +154,7 @@ export function AgentRunningCard({
                   type="button"
                   data-follow-live={session.sessionId}
                   onClick={onFollowLive}
-                  className="text-[#8fb4ff] uppercase tracking-[0.08em] transition hover:text-white"
+                  className="text-[var(--blue-4)] uppercase tracking-[0.08em] transition hover:text-white"
                 >
                   Follow live
                 </button>
@@ -252,7 +252,7 @@ function AgentNeedsYouCard({
     <div
       data-session-card={session.sessionId}
       data-needs-you={session.sessionId}
-      className="group relative flex h-[300px] flex-col overflow-hidden rounded-2xl border-2 border-[#b85c10] bg-bg-sunken shadow-[0_0_0_1px_rgba(184,92,16,0.25)]"
+      className="group relative flex h-[300px] flex-col overflow-hidden rounded-2xl border-2 border-[var(--accent-orange-4)] bg-bg-sunken shadow-[0_0_0_1px_rgba(184,92,16,0.25)]"
     >
       <div className="relative flex-1 overflow-hidden">
         <MiniScreencast
@@ -263,7 +263,7 @@ function AgentNeedsYouCard({
           className="h-full w-full"
         />
         <div className="absolute top-3 left-3">
-          <span className="inline-flex items-center rounded-md bg-[#b85c10] px-2 py-1 font-mono text-[10px] text-white uppercase tracking-[0.1em] shadow-sm">
+          <span className="inline-flex items-center rounded-md bg-[var(--accent-orange-4)] px-2 py-1 font-mono text-[10px] text-white uppercase tracking-[0.1em] shadow-sm">
             Paused here
           </span>
         </div>
@@ -308,7 +308,7 @@ function AgentNeedsYouCard({
             data-take-over={session.sessionId}
             onClick={onTakeOver}
             disabled={isFocusPending}
-            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-white px-2 py-1.5 font-mono text-[#b85c10] text-[10.5px] uppercase tracking-[0.08em] transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-white px-2 py-1.5 font-mono text-[10.5px] text-[var(--accent-orange-4)] uppercase tracking-[0.08em] transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isFocusPending ? (
               <RefreshCw className="size-3 animate-spin" />

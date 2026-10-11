@@ -53,8 +53,8 @@ export function SidebarNavigation({ expanded = true }: SidebarNavigationProps) {
             <NavLink
               to={item.to}
               className={cn(
-                'flex h-9 items-center gap-3 overflow-hidden whitespace-nowrap rounded-md px-2.5 font-medium text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                isActive && 'bg-sidebar-accent text-sidebar-accent-foreground',
+                'ui-shell-link flex h-9 items-center gap-3 overflow-hidden whitespace-nowrap px-2.5',
+                isActive && 'active',
               )}
             >
               <Icon className="size-5 shrink-0" />

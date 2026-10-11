@@ -42,8 +42,8 @@ export function TaskCard({ task, now }: TaskCardProps) {
         // which causes the subpixel red-line rendering on the hero
         // screenshot to shift slightly during the hover window and
         // reads as "the image is animating".
-        'group block rounded-2xl border border-border-2 bg-card p-4 transition-[border-color,box-shadow] duration-150 hover:border-accent/40 hover:shadow-sm',
-        task.status === 'live' && 'border-accent/30',
+        'group block rounded-2xl border border-border-2 bg-card p-4 transition-[border-color,box-shadow] duration-150 hover:border-border-strong hover:shadow-sm',
+        task.status === 'live' && 'border-border-strong',
       )}
       data-testid={`task-card-${task.sessionId}`}
     >
@@ -97,7 +97,7 @@ export function TaskCard({ task, now }: TaskCardProps) {
             {task.errorCount > 0 && (
               <>
                 <span className="text-ink-3">•</span>
-                <span className="text-red-600 dark:text-red-400">
+                <span className="text-red">
                   {task.errorCount} error{task.errorCount === 1 ? '' : 's'}
                 </span>
               </>

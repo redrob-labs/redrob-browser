@@ -80,7 +80,7 @@ export function TaskHeader({ detail }: TaskHeaderProps) {
               <span className="font-semibold text-ink">{task.slug}</span>
               <StatusBadge status={task.status} />
               {task.errorCount > 0 && (
-                <span className="text-[12.5px] text-red-600 dark:text-red-400">
+                <span className="text-[12.5px] text-red">
                   {task.errorCount} error{task.errorCount === 1 ? '' : 's'}
                 </span>
               )}

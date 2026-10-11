@@ -199,7 +199,7 @@ export function Replay() {
           {view.incompleteUntilMs !== null && (
             <div
               role="status"
-              className="rounded-lg border border-amber/30 bg-amber-tint px-3 py-2 font-medium text-ink-2 text-xs"
+              className="rounded-lg border border-amber bg-amber-tint px-3 py-2 font-medium text-ink-2 text-xs"
             >
               Recording incomplete — playback starts at{' '}
               {formatIncompleteOffset(view.incompleteUntilMs)}
@@ -208,7 +208,7 @@ export function Replay() {
           {view.incompleteUntilMs === null && view.knownIncomplete && (
             <div
               role="status"
-              className="rounded-lg border border-amber/30 bg-amber-tint px-3 py-2 font-medium text-ink-2 text-xs"
+              className="rounded-lg border border-amber bg-amber-tint px-3 py-2 font-medium text-ink-2 text-xs"
             >
               Recording incomplete — this replay contains a known gap
             </div>

@@ -425,3 +425,62 @@ body {
   --red-tint: var(--accent-red-5);
   --cyanotype-live-text: var(--status-success);
 }
+
+/* The rail is the system's AppShell sidebar (.rr-shell__side): sunken in light, raised in dark, Browser's
+   wash entering from the top edge. Rows are .rr-shell__nav links: ground and weight carry the selection. */
+@layer components {
+  .ui-shell-side {
+    background-color: var(--surface-sunken);
+    background-image: linear-gradient(
+      180deg,
+      var(--product-browser-wash) 0,
+      transparent 132px
+    );
+    border-right: 1px solid var(--border-subtle);
+    color: var(--ink-primary);
+  }
+  [data-theme="dark"] .ui-shell-side {
+    background-color: var(--surface-raised);
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--product-browser-wash) 55%, transparent) 0,
+      transparent 132px
+    );
+  }
+  .ui-shell-link {
+    border-radius: var(--radius-sm);
+    color: var(--ink-secondary);
+    font-size: 13px;
+    font-weight: 400;
+    transition:
+      background-color var(--duration-fast) var(--easing-standard),
+      color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-shell-link:hover,
+  .ui-shell-link[aria-expanded="true"] {
+    background: var(--surface-base);
+    color: var(--ink-primary);
+  }
+  .ui-shell-link[aria-current="page"],
+  .ui-shell-link.active {
+    background: var(--surface-base);
+    color: var(--ink-primary);
+    font-weight: 600;
+  }
+  [data-theme="dark"] .ui-shell-link:hover,
+  [data-theme="dark"] .ui-shell-link[aria-current="page"],
+  [data-theme="dark"] .ui-shell-link.active {
+    background: var(--surface-sunken);
+  }
+  .ui-shell-link svg {
+    color: var(--ink-muted);
+  }
+  .ui-shell-link[aria-current="page"] svg,
+  .ui-shell-link.active svg {
+    color: var(--ink-brand);
+  }
+  .ui-shell-link:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: -2px;
+  }
+}

@@ -74,7 +74,7 @@ export function SidebarPrivacy({ expanded = false }: SidebarPrivacyProps) {
   const trigger = (
     <button
       type="button"
-      className="flex h-9 w-full items-center gap-3 overflow-hidden whitespace-nowrap rounded-md px-2.5 font-medium text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      className="ui-shell-link flex h-9 w-full items-center gap-3 overflow-hidden whitespace-nowrap px-2.5"
     >
       <ShieldCheck className="size-5 shrink-0" />
       <span

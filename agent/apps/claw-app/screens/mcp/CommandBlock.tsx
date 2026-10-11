@@ -77,7 +77,7 @@ export function CommandBlock({
         onClick={copy}
         disabled={isPending}
         aria-label={copied ? 'Command copied' : 'Copy command'}
-        className="inline-flex shrink-0 items-center gap-1.5 self-center rounded-lg border border-border-2 bg-card px-2 py-1 text-[11.5px] text-ink-3 transition-colors hover:border-accent/40 hover:text-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40"
+        className="inline-flex shrink-0 items-center gap-1.5 self-center rounded-lg border border-border-2 bg-card px-2 py-1 text-[11.5px] text-ink-3 transition-colors hover:border-border-strong hover:text-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40"
       >
         {copied ? (
           <>

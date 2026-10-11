@@ -32,7 +32,7 @@ export function ClaudeDesktopCard() {
       <button
         type="button"
         onClick={() => setGuideOpen(true)}
-        className="group block w-full rounded-9 border border-cyanotype-border bg-card p-4 text-left transition-colors hover:border-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        className="group block w-full rounded-9 border border-cyanotype-border bg-card p-4 text-left transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong"
       >
         <div className="flex items-start gap-3">
           <ClaudeMark className="size-7 shrink-0" />

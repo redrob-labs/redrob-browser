@@ -75,7 +75,7 @@ export function ConnectionRow({
         <RowAction state={state} isPending={isPending} />
       </div>
       {errorMessage && (
-        <div className="px-10 pb-2 font-mono text-[11.5px] text-red-600">
+        <div className="px-10 pb-2 font-mono text-[11.5px] text-red">
           {errorMessage}
         </div>
       )}

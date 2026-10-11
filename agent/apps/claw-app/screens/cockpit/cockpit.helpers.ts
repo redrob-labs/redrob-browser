@@ -17,15 +17,15 @@ import type {
 
 // Missing parent colors fall back to a stable slug hash so card identity does
 // not flicker between live-session polls.
+// The design system's data-series palette (--series-1..6, light values), written out because a session's
+// colour also travels to the server and the tab-group strip as a hex.
 const PALETTE = [
-  '#16A34A',
-  '#2F6FE0',
-  '#7A5AF8',
-  '#10A37F',
-  '#EA580C',
-  '#0EA5E9',
-  '#F59E0B',
-  '#DB2777',
+  '#2B52FF',
+  '#AE5100',
+  '#8944FF',
+  '#00864A',
+  '#A31310',
+  '#D2A100',
 ]
 
 const TRAIL_DISPLAY_CAP = 4
