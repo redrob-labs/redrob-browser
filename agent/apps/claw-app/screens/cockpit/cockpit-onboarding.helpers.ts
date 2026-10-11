@@ -60,7 +60,7 @@ export const MANAGE_COPY = {
 export const STARTER_PROMPT_LABEL = 'Paste this prompt into your agent.'
 
 export const STARTER_PROMPT =
-  'Using BrowserOS neo, search for the current monthly prices of streaming services such as Netflix, Disney plus, Hulu, Max and Apple TV'
+  'Using Redrob, search for the current monthly prices of streaming services such as Netflix, Disney plus, Hulu, Max and Apple TV'
 
 export const CONNECTED_COPY = {
   suffix: 'connected',
@@ -73,5 +73,5 @@ export const FOOTER_COPY = {
   // instead of BrowserOS's general index. Mintlify canonicalises
   // the URL without a trailing slash, so we use the no-slash form
   // to avoid triggering a redirect on every click.
-  docsHref: 'https://docs.browseros.com/browserclaw',
+  docsHref: 'https://docs.redrob.ai/guide',
 } as const

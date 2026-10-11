@@ -40,7 +40,7 @@ export function SetupStep({ failed, onRetry }: SetupStepProps) {
           <StepCopy>
             {failed
               ? 'Please try again.'
-              : 'Preparing BrowserOS neo. This should only take a moment.'}
+              : 'Preparing Redrob. This should only take a moment.'}
           </StepCopy>
         </div>
         {failed && (

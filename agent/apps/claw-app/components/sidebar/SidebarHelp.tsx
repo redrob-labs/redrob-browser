@@ -31,7 +31,7 @@ interface HelpItem {
 export const helpItems: HelpItem[] = [
   {
     name: 'Docs',
-    url: 'https://docs.browseros.com/browserclaw',
+    url: 'https://docs.redrob.ai/guide',
     icon: BookOpen,
   },
   {

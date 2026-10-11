@@ -144,7 +144,7 @@ function CreateForm({ onClose }: { onClose: () => void }) {
         <DialogHeader>
           <DialogTitle>New skill</DialogTitle>
           <DialogDescription>
-            A skill BrowserOS neo links into your agents and you re-run by name.
+            A skill Redrob links into your agents and you re-run by name.
           </DialogDescription>
         </DialogHeader>
         <FormField

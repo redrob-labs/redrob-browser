@@ -52,7 +52,7 @@ describe('cockpit onboarding copy', () => {
 
   it('starter prompt is the streaming-price research task', () => {
     expect(STARTER_PROMPT).toBe(
-      'Using BrowserOS neo, search for the current monthly prices of streaming services such as Netflix, Disney plus, Hulu, Max and Apple TV',
+      'Using Redrob, search for the current monthly prices of streaming services such as Netflix, Disney plus, Hulu, Max and Apple TV',
     )
   })
 
@@ -72,7 +72,7 @@ describe('cockpit onboarding copy', () => {
     // Should NOT bare-root; readers arriving from the cockpit expect
     // BrowserClaw-specific docs (install / MCP / first-run), not the
     // BrowserOS index. Guard against accidental drift.
-    expect(FOOTER_COPY.docsHref).toBe('https://docs.browseros.com/browserclaw')
+    expect(FOOTER_COPY.docsHref).toBe('https://docs.redrob.ai/guide')
     expect(FOOTER_COPY.docs).toBe('Read the docs')
   })
 })

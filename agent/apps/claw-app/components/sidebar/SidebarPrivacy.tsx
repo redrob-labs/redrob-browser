@@ -102,13 +102,13 @@ export function SidebarPrivacy({ expanded = false }: SidebarPrivacyProps) {
         <DialogHeader>
           <DialogTitle>Privacy & analytics</DialogTitle>
           <DialogDescription>
-            BrowserOS neo collects anonymous, aggregate usage (which agents
-            connect and which screens you open) to improve the product. It never
-            collects the pages you browse, your prompts, tool inputs or outputs,
-            or any page content. One in five analytics sessions may also record
-            interactions with the BrowserOS neo cockpit. All inputs are masked,
-            and task, audit, and replay content is blocked from those
-            recordings. No account or personal data is used.
+            Redrob collects anonymous, aggregate usage (which agents connect and
+            which screens you open) to improve the product. It never collects
+            the pages you browse, your prompts, tool inputs or outputs, or any
+            page content. One in five analytics sessions may also record
+            interactions with the Redrob cockpit. All inputs are masked, and
+            task, audit, and replay content is blocked from those recordings. No
+            account or personal data is used.
           </DialogDescription>
         </DialogHeader>
         <label

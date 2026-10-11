@@ -25,7 +25,7 @@ const HOME_TASK_LIMIT = 12
 // The header collapses the body, and the choice is remembered per machine so a
 // section collapsed once stays collapsed on every new tab after it. Default is
 // expanded, so a first run still shows that activity exists. Same localStorage
-// shape as ProductHuntBanner, try/catch included: a tab without storage access
+// shape as the other dismissible cockpit cards, try/catch included: a tab without storage access
 // must fall back to the default rather than throw.
 const COLLAPSED_KEY = 'cockpitRecentActivityCollapsed'
 const BODY_ID = 'recent-activity-body'

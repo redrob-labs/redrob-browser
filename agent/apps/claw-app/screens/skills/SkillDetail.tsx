@@ -57,8 +57,7 @@ export function SkillDetail() {
 
       {isError ? (
         <Notice>
-          Could not load this skill. Check that BrowserOS neo is running and try
-          again.
+          Could not load this skill. Check that Redrob is running and try again.
         </Notice>
       ) : isLoading || !detail ? (
         <DetailSkeleton />

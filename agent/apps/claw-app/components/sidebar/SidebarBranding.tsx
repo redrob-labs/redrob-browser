@@ -42,9 +42,9 @@ export function SidebarBranding({ expanded = false }: SidebarBrandingProps) {
   return (
     <div className="flex h-14 shrink-0 items-center gap-3 px-3">
       <img
-        src="/icons/browserclaw.svg"
-        alt="BrowserOS neo"
-        className="size-8 shrink-0 rounded-md shadow-card"
+        src="/icons/redrob-symbol.png"
+        alt="Redrob"
+        className="size-8 shrink-0"
       />
       <span
         className={cn(
@@ -52,7 +52,7 @@ export function SidebarBranding({ expanded = false }: SidebarBrandingProps) {
           expanded ? 'opacity-100' : 'opacity-0',
         )}
       >
-        BrowserOS neo
+        Redrob
       </span>
     </div>
   )
