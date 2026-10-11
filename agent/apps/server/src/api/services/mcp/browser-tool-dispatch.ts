@@ -24,8 +24,10 @@ import { logger } from '../../../lib/logger'
 import type { ActiveConversationRun } from '../conversation-runs'
 import type { ConversationTabGroups } from './conversation-tab-groups'
 import { applyConversationTabs } from './effects/conversation-tabs'
+import { applyJobReceipts } from './effects/job-receipts'
 import { applyTabGroups } from './effects/tab-groups'
 import { guardConversationRunning } from './guards/conversation-running'
+import { guardJobApply } from './guards/job-apply'
 import { guardNeverReadSites } from './guards/never-read-sites'
 import { guardPlaybookStops } from './guards/playbook-stops'
 import { guardReadOnly } from './guards/read-only'
@@ -53,6 +55,9 @@ export interface BrowserToolCall {
   source: string
   trace: BrowserToolPageTrace
   tabGroups: Pick<ConversationTabGroups, 'addCreatedPages'>
+  /** During a job application: what this call fills and presses, read before it runs. */
+  jobFields?: Array<{ field: string; value: string }>
+  jobPressed?: string
 }
 
 export interface BrowserToolEffectContext {
@@ -96,11 +101,13 @@ const GUARDS: readonly NamedToolGuard[] = [
   { name: 'read-only', run: guardReadOnly },
   { name: 'never-read-sites', run: guardNeverReadSites },
   { name: 'playbook-stops', run: guardPlaybookStops },
+  { name: 'job-apply', run: guardJobApply },
 ]
 
 const EFFECTS: readonly NamedToolEffect[] = [
   { name: 'conversation-tabs', run: applyConversationTabs },
   { name: 'tab-groups', run: applyTabGroups },
+  { name: 'job-receipts', run: applyJobReceipts },
 ]
 
 const OBSERVERS: readonly NamedToolObserver[] = [

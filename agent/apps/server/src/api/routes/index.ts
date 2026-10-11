@@ -9,6 +9,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { AcpAgentRuntime } from '../../lib/agents/acp/acp-agent-runtime'
 import type { OAuthTokenManager } from '../../lib/clients/oauth/token-manager'
+import { JobStore } from '../../lib/jobs/store'
 import { PlaybookStore } from '../../lib/playbooks/store'
 import { DetectorSource } from '../../lib/privacy/detector-source'
 import { PrivacyGate } from '../../lib/privacy/gate'
@@ -17,6 +18,8 @@ import { requireTrustedOrigin } from '../middleware/require-trusted-origin'
 import { ConversationRuns } from '../services/conversation-runs'
 import type { KlavisService } from '../services/klavis'
 import { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
+import { setJobReceiptStore } from '../services/mcp/effects/job-receipts'
+import { setApplicationRunSource } from '../services/mcp/guards/job-apply'
 import { setNeverReadSitesSource } from '../services/mcp/guards/never-read-sites'
 import { setPlaybookRunSource } from '../services/mcp/guards/playbook-stops'
 import { SmartCompare } from '../services/smart-compare'
@@ -28,6 +31,7 @@ import { createAgentRoutes } from './agents'
 import { createChatRoutes } from './chat'
 import { createConversationRoutes } from './conversations'
 import { createHealthRoute } from './health'
+import { createJobRoutes } from './jobs'
 import { createKlavisRoutes } from './klavis'
 import { createMcpRoutes } from './mcp'
 import { createMcpManagerRoutes } from './mcp-manager'
@@ -70,6 +74,9 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
   const smartCompare = new SmartCompare(browserSession)
   const playbooks = new PlaybookStore()
   setPlaybookRunSource((id) => playbooks.activeRun(id))
+  const jobs = new JobStore()
+  setApplicationRunSource((id) => jobs.activeRun(id))
+  setJobReceiptStore(jobs)
   // One deep module owns every browser-tool lease and execution effect;
   // both /chat and /mcp must share it for loopback calls to recover context.
   const browserMcp = new BrowserMcpModule({
@@ -160,6 +167,8 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       // Opens tabs in the person's browser: only the extension may ask.
       .use('/compare/*', requireTrustedAppOrigin())
       .use('/playbooks/*', requireTrustedAppOrigin())
+      // The résumé and every answer a person gave about themselves.
+      .use('/jobs/*', requireTrustedAppOrigin())
       .route('/acpx/probe', createAcpxProbeRoutes({ resourcesDir }))
       .route('/agents', resolvedAgentRoutes)
       .route('/conversations', createConversationRoutes())
@@ -173,6 +182,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .route('/privacy', createPrivacyRoutes({ gate: privacyGate }))
       .route('/compare', createSmartCompareRoutes({ compare: smartCompare }))
       .route('/playbooks', createPlaybookRoutes({ store: playbooks }))
+      .route('/jobs', createJobRoutes({ store: jobs }))
       .route('/scheduled-jobs', createScheduledJobRoutes())
       .route('/scheduled-job-runs', createScheduledJobRunRoutes())
   )
