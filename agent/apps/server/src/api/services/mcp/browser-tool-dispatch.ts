@@ -27,6 +27,7 @@ import { applyConversationTabs } from './effects/conversation-tabs'
 import { applyTabGroups } from './effects/tab-groups'
 import { guardConversationRunning } from './guards/conversation-running'
 import { guardNeverReadSites } from './guards/never-read-sites'
+import { guardPlaybookStops } from './guards/playbook-stops'
 import { guardReadOnly } from './guards/read-only'
 import { observeToolTelemetry } from './observers/tool-telemetry'
 
@@ -94,6 +95,7 @@ const GUARDS: readonly NamedToolGuard[] = [
   { name: 'conversation-running', run: guardConversationRunning },
   { name: 'read-only', run: guardReadOnly },
   { name: 'never-read-sites', run: guardNeverReadSites },
+  { name: 'playbook-stops', run: guardPlaybookStops },
 ]
 
 const EFFECTS: readonly NamedToolEffect[] = [

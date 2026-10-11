@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { CalendarClock, Home, PlugZap, Settings } from '@browseros/icons'
+import { t } from '@browseros/i18n'
+import { Book, CalendarClock, Home, PlugZap, Settings } from '@browseros/icons'
 import type { FC } from 'react'
 import { NavLink, useLocation } from 'react-router'
 import {
@@ -38,6 +39,7 @@ const primaryNavItems: NavItem[] = [
     icon: PlugZap,
   },
   { name: 'Scheduled Tasks', to: '/scheduled', icon: CalendarClock },
+  { name: t('playbooksNav'), to: '/playbooks', icon: Book },
   {
     name: 'Settings',
     to: '/settings/ai',

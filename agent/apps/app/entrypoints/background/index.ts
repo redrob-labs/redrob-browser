@@ -30,6 +30,10 @@ import {
 } from '@/lib/messaging/runtime/runtimeMessages'
 import { onServerMessage } from '@/lib/messaging/server/serverMessages'
 import { onOpenSidePanelWithSearch } from '@/lib/messaging/sidepanel/openSidepanelWithSearch'
+import {
+  startTeachBadge,
+  startTeachTabFollowing,
+} from '@/lib/playbooks/teachTabs'
 import { searchActionsStorage } from '@/lib/search-actions/searchActionsStorage'
 import { selectedTextStorage } from '@/lib/selected-text/selectedTextStorage'
 import { startSmartCompareBadge } from '@/lib/smart-compare/badge'
@@ -58,6 +62,8 @@ export default defineBackground(() => {
   const conversationPanelBroker = createConversationPanelBroker()
   void conversationPanelBroker.start()
   startSmartCompareBadge()
+  startTeachTabFollowing()
+  startTeachBadge()
 
   // Registration never opens a panel. Per-tab URLs let panels opened by the
   // native Alt+A shortcut identify their owner without following tab switches.

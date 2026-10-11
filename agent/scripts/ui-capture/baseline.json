@@ -431,6 +431,42 @@
     "untranslated": 5,
     "fonts": 0
   },
+  "playbooks.dark.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "playbooks.dark.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "playbooks.light.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "playbooks.light.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
   "scheduled.dark.en": {
     "offPalette": 4,
     "contrast": 0,
@@ -897,6 +933,42 @@
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 6,
+    "fonts": 0
+  },
+  "sidepanel-teach.dark.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "sidepanel-teach.dark.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 3,
+    "fonts": 0
+  },
+  "sidepanel-teach.light.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "sidepanel-teach.light.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 3,
     "fonts": 0
   }
 }

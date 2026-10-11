@@ -121,6 +121,8 @@ export function fixturesFor(locale: FixtureLocale): Record<string, unknown> {
 
   // Path → JSON body. `apps/app` destructures one wrapper key per route; none returns a bare array.
   return {
+    // modules/playbooks/playbooks.hooks.ts
+    '/playbooks': { playbooks: [playbookFixture(locale)] },
     // modules/privacy/privacy.hooks.ts: High, the model ready, two sites listed.
     '/privacy': {
       level: 'high',
@@ -406,5 +408,55 @@ export function comparisonFor(region: string) {
     lowest: { store: 'coupang', listing: best },
     saving: 40000,
     checkedAt: NOW,
+  }
+}
+
+/** A taught playbook, in the capture's language. */
+export function playbookFixture(locale: FixtureLocale) {
+  const ko = locale === 'ko'
+  return {
+    version: 1,
+    id: 'pb-1',
+    name: ko ? '주간 장보기' : 'Weekly groceries',
+    purpose: ko
+      ? '아마존 프레시에서 자주 사는 식료품 다시 주문'
+      : 'Reorder my usual groceries on Amazon Fresh',
+    sites: ['amazon.com'],
+    inputs: [
+      {
+        id: 'grocery_list',
+        label: ko ? '장보기 목록' : 'Grocery list',
+        example: 'oat milk',
+      },
+    ],
+    steps: [
+      {
+        intent: ko ? '아마존 프레시 열기' : 'Open Amazon Fresh',
+        hint: { url: 'https://www.amazon.com/fresh' },
+        stop: false,
+      },
+      {
+        intent: ko
+          ? '{grocery_list}의 품목을 찾아 장바구니에 담기'
+          : 'Find and add each item on {grocery_list}',
+        stop: false,
+      },
+      {
+        intent: ko ? '배송 시간 고르기' : 'Pick the delivery slot',
+        stop: false,
+      },
+      {
+        intent: ko ? '“주문하기” 누르기' : 'Press “Place your order”',
+        hint: { target: 'Place your order' },
+        stop: true,
+        reason: ko
+          ? '확정하는 단계라 직접 확인합니다.'
+          : 'This step is final, so you confirm it.',
+      },
+    ],
+    createdAt: NOW - 86_400_000 * 9,
+    updatedAt: NOW - 86_400_000 * 2,
+    runs: 4,
+    lastRunAt: NOW - 86_400_000 * 2,
   }
 }

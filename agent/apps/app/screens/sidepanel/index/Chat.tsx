@@ -11,6 +11,7 @@ import { t } from '@browseros/i18n'
 import { Loader2 } from '@browseros/icons'
 import { useEffect, useRef, useState } from 'react'
 import { NoProviderNotice } from '@/components/chat/NoProviderNotice'
+import { PlaybookPanels } from '@/components/playbooks/TeachPanel'
 import {
   PrivacyConfirmDialog,
   type PrivacyConfirmRequest,
@@ -30,6 +31,7 @@ import { track } from '@/lib/metrics/track'
 import { useChatSessionContext } from '@/modules/chat/chat-session-context'
 import type { ChatMode } from '@/modules/chat/chat-types'
 import { useJtbdPopup } from '@/modules/jtbd-popup/jtbd-popup.hooks'
+import { usePlaybookPanel } from '@/modules/playbooks/panel.hooks'
 import { usePrivacyStatus } from '@/modules/privacy/privacy.hooks'
 import {
   privateCount,
@@ -74,6 +76,7 @@ export const Chat = () => {
     hasAnyTarget,
     isSettled,
     sendBlocked,
+    conversationId,
   } = useChatSessionContext()
 
   const {
@@ -86,6 +89,11 @@ export const Chat = () => {
   } = useJtbdPopup()
 
   const { data: privacy } = usePrivacyStatus()
+  const playbookPanel = usePlaybookPanel({
+    conversationId,
+    send: (message: string) => sendNow(message),
+  })
+  const { runChips } = playbookPanel
   const { product } = useActiveProduct()
   const [region, setRegion] = useCompareRegion()
   const compare = useCompare()
@@ -233,7 +241,8 @@ export const Chat = () => {
           <div className="flex flex-1 items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
-        ) : messages.length === 0 && comparison ? null : messages.length ===
+        ) : messages.length === 0 &&
+          (comparison || playbookPanel.showing) ? null : messages.length ===
           0 ? (
           <ChatEmptyState
             mode={mode}
@@ -257,6 +266,7 @@ export const Chat = () => {
             onReplySuggestionClick={handleSuggestionClick}
           />
         )}
+        <PlaybookPanels panel={playbookPanel} />
         {comparison ? (
           <SmartCompareCard
             result={comparison}
@@ -303,14 +313,29 @@ export const Chat = () => {
         onRemoveTab={removeTab}
         externalAgentName={externalAgentName}
         moments={
-          product && !comparison ? (
-            <SmartCompareChip
-              region={region}
-              busy={compare.isPending}
-              onCompare={() => runCompare()}
-            />
+          (product && !comparison) || runChips.length ? (
+            <>
+              {product && !comparison ? (
+                <SmartCompareChip
+                  region={region}
+                  busy={compare.isPending}
+                  onCompare={() => runCompare()}
+                />
+              ) : null}
+              {runChips.map((playbook) => (
+                <button
+                  key={playbook.id}
+                  type="button"
+                  className="rr-prompt"
+                  onClick={() => playbookPanel.setRunning(playbook)}
+                >
+                  {t('playbookRunNamed', playbook.name)}
+                </button>
+              ))}
+            </>
           ) : null
         }
+        onTeach={playbookPanel.onTeach}
       />
       <PrivacyConfirmDialog
         request={confirm}

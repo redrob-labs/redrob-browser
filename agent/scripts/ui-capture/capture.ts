@@ -80,6 +80,7 @@ const SURFACES: Surface[] = [
   page('chat-conversation', '/home/chat?conversationId=conv-1'),
   page('home-personalize', '/home/personalize'),
   page('scheduled', '/scheduled'),
+  page('playbooks', '/playbooks'),
   page('connect-apps', '/connect-apps'),
   page('settings-ai', '/settings/ai'),
   page('settings-chat', '/settings/chat'),
@@ -155,6 +156,46 @@ const SURFACES: Surface[] = [
       click: 'button[aria-haspopup="dialog"]:has-text("Redrob")',
       wait: '[cmdk-group-heading]',
     },
+  },
+  {
+    // Teach Mode while recording: what has been understood so far.
+    id: 'sidepanel-teach',
+    kind: 'extension',
+    path: 'sidepanel.html',
+    width: 400,
+    height: 800,
+    storage: () => ({
+      'teach.session': { tabIds: [0], startedAt: NOW, paused: false },
+      'teach.events': [
+        {
+          kind: 'navigate',
+          url: 'https://www.amazon.com/fresh',
+          title: 'Amazon Fresh',
+          at: NOW,
+        },
+        {
+          kind: 'input',
+          url: 'https://www.amazon.com/fresh',
+          field: 'Search Amazon',
+          value: 'oat milk',
+          valueClass: 'text',
+          at: NOW,
+        },
+        {
+          kind: 'submit',
+          url: 'https://www.amazon.com/fresh',
+          name: '',
+          at: NOW,
+        },
+        {
+          kind: 'click',
+          url: 'https://www.amazon.com/s',
+          role: 'button',
+          name: 'Add to cart',
+          at: NOW,
+        },
+      ],
+    }),
   },
   {
     id: 'sidepanel-history',

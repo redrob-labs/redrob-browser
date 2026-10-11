@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { ChevronDown, Folder, Layers, PlugZap } from '@browseros/icons'
 import type { FC, FormEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
@@ -43,6 +44,8 @@ export interface ChatFooterProps {
   externalAgentName?: string
   /** Shown above the composer while the tab is a product page (Smart Compare's chip). */
   moments?: React.ReactNode
+  /** Starts Teach Mode; absent while teaching. */
+  onTeach?: () => void
 }
 
 export const ChatFooter: FC<ChatFooterProps> = ({
@@ -59,6 +62,7 @@ export const ChatFooter: FC<ChatFooterProps> = ({
   onRemoveTab,
   externalAgentName,
   moments,
+  onTeach,
 }) => {
   const { selectedFolder } = useWorkspace()
   const { servers: mcpServers } = useMcpServers()
@@ -124,6 +128,21 @@ export const ChatFooter: FC<ChatFooterProps> = ({
   return (
     <footer className="ui-panel-foot">
       {moments ? <div className="rr-prompts px-3 pt-2">{moments}</div> : null}
+      {onTeach ? (
+        <div className="flex justify-end px-3 pt-2">
+          <button
+            type="button"
+            className="rr-btn rr-btn--ghost rr-btn--sm"
+            onClick={onTeach}
+          >
+            <span
+              aria-hidden="true"
+              className="mr-1.5 inline-block size-2 rounded-full bg-[var(--status-danger)]"
+            />
+            {t('teachButton')}
+          </button>
+        </div>
+      ) : null}
       <div className="px-3 pt-2">
         <PrivacyStatusLine
           externalAgentName={externalAgentName}

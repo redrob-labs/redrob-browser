@@ -22,6 +22,7 @@ import { NewTabChat } from '@/screens/newtab/index/NewTabChat'
 import { NewTabLayout } from '@/screens/newtab/layout/NewTabLayout'
 import { Personalize } from '@/screens/newtab/personalize/Personalize'
 import { OnboardingAiPage } from '@/screens/onboarding-ai/OnboardingAiPage'
+import { PlaybooksPage } from '@/screens/playbooks/PlaybooksPage'
 import { PrivacySettingsPage } from '@/screens/privacy-settings/PrivacySettingsPage'
 import { ScheduledTasksPage } from '@/screens/scheduled-tasks/ScheduledTasksPage'
 
@@ -56,6 +57,7 @@ export const App: FC = () => {
 
           <Route path="connect-apps" element={<ConnectMCP />} />
           <Route path="scheduled" element={<ScheduledTasksPage />} />
+          <Route path="playbooks" element={<PlaybooksPage />} />
         </Route>
 
         <Route element={<SettingsSidebarLayout />}>

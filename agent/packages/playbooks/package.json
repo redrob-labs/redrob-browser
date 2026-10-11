@@ -1,0 +1,23 @@
+{
+  "name": "@browseros/playbooks",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test ./tests"
+  },
+  "exports": {
+    "./playbook": {
+      "types": "./src/playbook.ts",
+      "default": "./src/playbook.ts"
+    },
+    "./teach": {
+      "types": "./src/teach.ts",
+      "default": "./src/teach.ts"
+    }
+  },
+  "dependencies": {
+    "@browseros/privacy": "workspace:*"
+  }
+}

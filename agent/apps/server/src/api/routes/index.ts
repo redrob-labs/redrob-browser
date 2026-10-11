@@ -9,6 +9,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { AcpAgentRuntime } from '../../lib/agents/acp/acp-agent-runtime'
 import type { OAuthTokenManager } from '../../lib/clients/oauth/token-manager'
+import { PlaybookStore } from '../../lib/playbooks/store'
 import { DetectorSource } from '../../lib/privacy/detector-source'
 import { PrivacyGate } from '../../lib/privacy/gate'
 import { PrivacySettingsStore } from '../../lib/privacy/settings'
@@ -17,6 +18,7 @@ import { ConversationRuns } from '../services/conversation-runs'
 import type { KlavisService } from '../services/klavis'
 import { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
 import { setNeverReadSitesSource } from '../services/mcp/guards/never-read-sites'
+import { setPlaybookRunSource } from '../services/mcp/guards/playbook-stops'
 import { SmartCompare } from '../services/smart-compare'
 import type { Env, HttpServerConfig } from '../types'
 import { defaultCorsConfig } from '../utils/cors'
@@ -30,6 +32,7 @@ import { createKlavisRoutes } from './klavis'
 import { createMcpRoutes } from './mcp'
 import { createMcpManagerRoutes } from './mcp-manager'
 import { createOAuthRoutes } from './oauth'
+import { createPlaybookRoutes } from './playbooks'
 import { createPrivacyRoutes } from './privacy'
 import { createProviderRoutes } from './provider'
 import { createProvidersRoutes } from './providers'
@@ -65,6 +68,8 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
     )
   setNeverReadSitesSource(() => privacyGate.settings.get().neverReadSites)
   const smartCompare = new SmartCompare(browserSession)
+  const playbooks = new PlaybookStore()
+  setPlaybookRunSource((id) => playbooks.activeRun(id))
   // One deep module owns every browser-tool lease and execution effect;
   // both /chat and /mcp must share it for loopback calls to recover context.
   const browserMcp = new BrowserMcpModule({
@@ -154,6 +159,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .use('/privacy/*', requireTrustedAppOrigin())
       // Opens tabs in the person's browser: only the extension may ask.
       .use('/compare/*', requireTrustedAppOrigin())
+      .use('/playbooks/*', requireTrustedAppOrigin())
       .route('/acpx/probe', createAcpxProbeRoutes({ resourcesDir }))
       .route('/agents', resolvedAgentRoutes)
       .route('/conversations', createConversationRoutes())
@@ -166,6 +172,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       )
       .route('/privacy', createPrivacyRoutes({ gate: privacyGate }))
       .route('/compare', createSmartCompareRoutes({ compare: smartCompare }))
+      .route('/playbooks', createPlaybookRoutes({ store: playbooks }))
       .route('/scheduled-jobs', createScheduledJobRoutes())
       .route('/scheduled-job-runs', createScheduledJobRunRoutes())
   )

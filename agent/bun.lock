@@ -33,6 +33,7 @@
         "@browseros/diagnostics": "workspace:*",
         "@browseros/i18n": "workspace:*",
         "@browseros/icons": "workspace:*",
+        "@browseros/playbooks": "workspace:*",
         "@browseros/privacy": "workspace:*",
         "@browseros/server": "workspace:*",
         "@browseros/shared": "workspace:*",
@@ -268,6 +269,7 @@
         "@browseros/browser-core": "workspace:*",
         "@browseros/browser-mcp": "workspace:*",
         "@browseros/cdp-protocol": "workspace:*",
+        "@browseros/playbooks": "workspace:*",
         "@browseros/privacy": "workspace:*",
         "@browseros/shared": "workspace:*",
         "@browseros/shopping": "workspace:*",
@@ -435,6 +437,13 @@
         "@remotion/renderer": "^4.0.400",
         "@types/react": "^19.3.0",
         "@types/react-dom": "^19.3.0",
+      },
+    },
+    "packages/playbooks": {
+      "name": "@browseros/playbooks",
+      "version": "0.0.1",
+      "dependencies": {
+        "@browseros/privacy": "workspace:*",
       },
     },
     "packages/privacy": {
@@ -700,6 +709,8 @@
     "@browseros/icons": ["@browseros/icons@workspace:packages/icons"],
 
     "@browseros/onboarding-video": ["@browseros/onboarding-video@workspace:packages/onboarding-video"],
+
+    "@browseros/playbooks": ["@browseros/playbooks@workspace:packages/playbooks"],
 
     "@browseros/privacy": ["@browseros/privacy@workspace:packages/privacy"],
 
