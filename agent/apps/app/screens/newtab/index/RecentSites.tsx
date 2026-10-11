@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Globe } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { getFavicons } from '@/lib/getFavicons'
@@ -44,7 +45,7 @@ export const RecentSites: FC = () => {
 
   return (
     <div className="space-y-4">
-      <h2 className="ui-meta-label text-center">Recent sites</h2>
+      <h2 className="ui-meta-label text-center">{t('shRecentSites')}</h2>
       <div className="flex flex-wrap items-center justify-center gap-6">
         {recentSites.map((site) => {
           const icon = site.host ? getFavicons(site.host) : undefined

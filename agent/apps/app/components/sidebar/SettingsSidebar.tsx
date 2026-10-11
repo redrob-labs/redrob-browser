@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import {
   Activity,
   ArrowLeft,
@@ -62,7 +63,7 @@ const sectionLabelClassName = 'ui-shell-label mb-2 px-3'
 
 const primarySettingsSections: NavSection[] = [
   {
-    label: 'Provider Settings',
+    label: t('shProviderSettings'),
     items: [
       { name: 'AI & Agents', to: '/settings/ai', icon: Bot },
       {
@@ -73,7 +74,7 @@ const primarySettingsSections: NavSection[] = [
     ],
   },
   {
-    label: 'Other',
+    label: t('shOther'),
     items: [
       {
         name: 'Customize Redrob',
@@ -151,7 +152,7 @@ export const SettingsSidebar: FC = () => {
           className="ui-shell-link flex h-9 items-center gap-2 overflow-hidden whitespace-nowrap px-3"
         >
           <ArrowLeft className="size-4 shrink-0" />
-          <span className="truncate">Back</span>
+          <span className="truncate">{t('shBack')}</span>
         </NavLink>
         <ThemeToggle
           className="mr-1 h-8 w-8 shrink-0"
@@ -160,10 +161,10 @@ export const SettingsSidebar: FC = () => {
       </div>
 
       <div className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden p-2">
-        <div className="ui-shell-label mb-2 px-3">Settings</div>
+        <div className="ui-shell-label mb-2 px-3">{t('shSettings')}</div>
         <div>{filteredSections.map(renderSection)}</div>
         <div className="mt-auto pt-4">
-          <div className={sectionLabelClassName}>Help</div>
+          <div className={sectionLabelClassName}>{t('shHelp')}</div>
           <nav className="space-y-1">
             {filteredHelpItems.map(renderNavItem)}
           </nav>

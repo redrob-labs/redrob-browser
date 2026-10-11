@@ -1048,6 +1048,7 @@ export const useChatSession = (options?: ChatSessionOptions) => {
     void selectChatTarget(target).catch((error) => {
       sentry.captureException(error, {
         extra: {
+          // i18n-ignore: telemetry, not copy
           message: 'Failed to persist sidepanel chat target selection',
           targetId: target.id,
           targetKind: target.kind,

@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { formatRelative, t } from '@browseros/i18n'
 import {
   Calendar,
   CheckCircle2,
@@ -62,7 +63,8 @@ const getStatusIcon = (status: JobRunWithDetails['status']) => {
   }
 }
 
-const formatTimestamp = (dateString: string) => dayjs(dateString).fromNow()
+const formatTimestamp = (dateString: string) =>
+  formatRelative(new Date(dateString))
 
 export const ScheduleResults: FC = () => {
   const navigate = useNavigate()
@@ -123,11 +125,11 @@ export const ScheduleResults: FC = () => {
           <div className="flex items-center gap-3">
             <Calendar className="h-4 w-4 text-[var(--ink-muted)]" />
             <span className="font-medium text-foreground text-sm">
-              Scheduled Task Outputs
+              {t('shScheduledTaskOutputs')}
             </span>
             {runningCount > 0 && (
               <Badge variant="secondary" className="text-xs">
-                {runningCount} running
+                {t('shRunningN', runningCount)}
               </Badge>
             )}
           </div>
@@ -172,7 +174,7 @@ export const ScheduleResults: FC = () => {
                     handleCancelRun(run.id)
                   }}
                   className="ui-status--danger shrink-0"
-                  aria-label="Cancel run"
+                  aria-label={t('shCancelRun')}
                 >
                   <Square className="h-3.5 w-3.5" />
                 </Button>
@@ -186,7 +188,7 @@ export const ScheduleResults: FC = () => {
                     handleRetryRun(run.jobId)
                   }}
                   className="shrink-0"
-                  aria-label="Retry run"
+                  aria-label={t('shRetryRun')}
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                 </Button>
@@ -195,7 +197,7 @@ export const ScheduleResults: FC = () => {
           </Button>
         ))}
         <Button variant="ghost" onClick={handleViewMore} className="w-full">
-          View more
+          {t('shViewMore')}
         </Button>
       </CollapsibleContent>
 

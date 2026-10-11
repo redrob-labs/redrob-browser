@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+import { t } from '@browseros/i18n'
 import { Search } from '@browseros/icons'
 import { type FC, type FormEvent, useState } from 'react'
 import { resolveSearchInput } from '@/lib/newtab/search-input'
@@ -37,7 +38,7 @@ export const HomeSearchInput: FC = () => {
 
   return (
     <form
-      aria-label="Search"
+      aria-label={t('shSearch')}
       onSubmit={handleSubmit}
       className="ui-composer flex items-center gap-3 overflow-hidden px-5 py-4"
     >
@@ -48,8 +49,8 @@ export const HomeSearchInput: FC = () => {
         type="text"
         value={value}
         onChange={(event) => setValue(event.target.value)}
-        placeholder="Search the web or type a URL"
-        aria-label="Search the web or type a URL"
+        placeholder={t('shSearchTheWebOrType')}
+        aria-label={t('shSearchTheWebOrType')}
         autoComplete="off"
         spellCheck={false}
         className="ui-composer-input min-w-0 flex-1 bg-transparent outline-none"

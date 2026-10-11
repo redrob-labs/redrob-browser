@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { getModelsDevProvider } from './models-dev'
 import { CHATGPT_PROVIDER_DISPLAY_NAME } from './provider-display-names'
 import type { ProviderType } from './types'
@@ -162,7 +163,7 @@ export const providerTypeOptions: { value: ProviderType; label: string }[] = [
   { value: 'moonshot', label: 'Moonshot AI' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
-  { value: 'openai-compatible', label: 'OpenAI Compatible' },
+  { value: 'openai-compatible', label: t('shOpenaiCompatible') },
   { value: 'google', label: 'Gemini' },
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'azure', label: 'Azure' },

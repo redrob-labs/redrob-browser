@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tNodes } from '@browseros/i18n'
 import type { FC } from 'react'
 import { useNavigate } from 'react-router'
 import { useLlmProviders } from '@/modules/llm-providers/llm-providers.hooks'
@@ -55,13 +56,15 @@ export const OnboardingAiPage: FC = () => {
     <div className="min-h-[100dvh] bg-background">
       <div className="mx-auto w-full max-w-2xl px-6 py-14">
         <h1 className="mb-1.5 font-semibold text-3xl tracking-tight">
-          Set up your{' '}
-          <span className="text-[var(--accent-brand-ink)]">agent</span>
+          {tNodes(
+            'shSetUpYourAgent',
+            <span key="em" className="text-[var(--accent-brand-ink)]">
+              {t('shAgent')}
+            </span>,
+          )}
         </h1>
         <p className="mb-8 text-muted-foreground">
-          Redrob runs on the provider you bring. Connect an LLM provider or a
-          coding agent harness you already use. You can change this any time in
-          settings.
+          {t('shRedrobRunsOnTheProvider')}
         </p>
 
         <AddProviderSection

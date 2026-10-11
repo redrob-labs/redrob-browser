@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import {
   Dialog,
   DialogContent,
@@ -34,10 +35,10 @@ export const ShortcutsDialog = ({
       <DialogContent className="styled-scrollbar max-h-[80vh] max-w-xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-semibold text-2xl">
-            Keyboard Shortcuts
+            {t('shKeyboardShortcuts')}
           </DialogTitle>
           <DialogDescription>
-            Use these shortcuts to navigate Redrob faster
+            {t('shUseTheseShortcutsToNavigate')}
           </DialogDescription>
         </DialogHeader>
 
@@ -68,7 +69,7 @@ export const ShortcutsDialog = ({
         </div>
 
         <div className="mt-8 border-border/50 border-t pt-4 text-center text-muted-foreground text-xs">
-          More shortcuts coming soon
+          {t('shMoreShortcutsComingSoon')}
         </div>
       </DialogContent>
     </Dialog>

@@ -33,6 +33,7 @@ export function useStarterPrompts(mode: ChatMode) {
       },
       (error) => {
         sentry.captureException(error, {
+          // i18n-ignore: telemetry, not copy
           extra: { message: 'Failed to load starter prompts', mode },
         })
         setLoading(false)

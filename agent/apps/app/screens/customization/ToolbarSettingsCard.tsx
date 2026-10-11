@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { type FC, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import {
@@ -94,17 +95,17 @@ export const ToolbarSettingsCard: FC = () => {
       setter(value)
       return true
     } catch {
-      toast.error('Failed to update setting')
+      toast.error(t('shFailedToUpdateSetting'))
       return false
     }
   }
 
   return (
-    <SettingsGroup title="Toolbar">
+    <SettingsGroup title={t('shToolbar')}>
       <SettingsRow
         htmlFor="show-llm-chat"
-        label="Show Chat Button"
-        description="Display the Chat button in the browser toolbar"
+        label={t('shShowChatButton')}
+        description={t('shDisplayTheChatButtonIn')}
       >
         <Switch
           id="show-llm-chat"
@@ -117,8 +118,8 @@ export const ToolbarSettingsCard: FC = () => {
       </SettingsRow>
       <SettingsRow
         htmlFor="show-toolbar-labels"
-        label="Show Button Labels"
-        description="Display text labels next to toolbar button icons"
+        label={t('shShowButtonLabels')}
+        description={t('shDisplayTextLabelsNextTo')}
       >
         <Switch
           id="show-toolbar-labels"
@@ -136,8 +137,8 @@ export const ToolbarSettingsCard: FC = () => {
       {supportsVerticalTabs && (
         <SettingsRow
           htmlFor="vertical-tabs-enabled"
-          label="Use Vertical Tabs"
-          description="Turn off to switch back to the horizontal tab strip"
+          label={t('shUseVerticalTabs')}
+          description={t('shTurnOffToSwitchBack')}
         >
           <Switch
             id="vertical-tabs-enabled"

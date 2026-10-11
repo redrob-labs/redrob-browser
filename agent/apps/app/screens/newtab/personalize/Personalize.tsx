@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Check, ChevronDown, Copy } from '@browseros/icons'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -25,18 +26,18 @@ import { templates } from './templates'
 const sections = [
   {
     key: 'aboutYou' as const,
-    title: 'Add more info about you',
-    description: 'Help Redrob understand who you are',
+    title: t('shAddMoreInfoAboutYou'),
+    description: t('shHelpRedrobUnderstandWhoYou'),
   },
   {
     key: 'expectations' as const,
-    title: 'What you expect from the browser',
-    description: 'Share your preferences and needs',
+    title: t('shWhatYouExpectFromThe'),
+    description: t('shShareYourPreferencesAndNeeds'),
   },
   {
     key: 'commonActions' as const,
-    title: 'Your commonly performed actions',
-    description: 'Describe your daily workflows',
+    title: t('shYourCommonlyPerformedActions'),
+    description: t('shDescribeYourDailyWorkflows'),
   },
 ]
 
@@ -69,18 +70,17 @@ export const Personalize = () => {
           mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0',
         )}
       >
-        <Label htmlFor="personalization">Your Information</Label>
+        <Label htmlFor="personalization">{t('shYourInformation')}</Label>
         <MarkdownEditor
           id="personalization"
           value={personalization}
           autoFocus
           onChange={setPersonalization}
-          placeholder="Tell Redrob about yourself..."
+          placeholder={t('shTellRedrobAboutYourself')}
           className="styled-scrollbar h-96 overflow-y-auto"
         />
         <p className="text-muted-foreground text-xs">
-          Your information is saved locally and never leaves your device.
-          Markdown formatting is supported.
+          {t('shYourInformationIsSavedLocally')}
         </p>
       </div>
 
@@ -90,7 +90,7 @@ export const Personalize = () => {
           mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0',
         )}
       >
-        <h2 className="ui-meta-label">Need help getting started?</h2>
+        <h2 className="ui-meta-label">{t('shNeedHelpGettingStarted')}</h2>
         <div className="space-y-2">
           {sections.map((section) => (
             <Collapsible
@@ -124,7 +124,7 @@ export const Personalize = () => {
                 <div className="space-y-3 px-4 pb-4">
                   <div>
                     <p className="mb-2 font-medium text-muted-foreground text-xs">
-                      Template (click to copy):
+                      {t('shTemplateClickToCopy')}
                     </p>
                     <div className="relative">
                       <pre className="ui-sample styled-scrollbar overflow-x-auto whitespace-pre-wrap break-words p-4 text-xs">
@@ -135,7 +135,7 @@ export const Personalize = () => {
                         size="icon-sm"
                         onClick={() => copyTemplate(section.key)}
                         className="absolute top-3 right-3"
-                        title="Copy template"
+                        title={t('shCopyTemplate')}
                       >
                         {copiedSection === section.key ? (
                           <Check className="ui-status--success h-4 w-4" />
@@ -148,7 +148,7 @@ export const Personalize = () => {
 
                   <div>
                     <p className="mb-2 font-medium text-muted-foreground text-xs">
-                      Example:
+                      {t('shExample')}
                     </p>
                     <pre className="ui-sample ui-sample--quiet styled-scrollbar overflow-x-auto whitespace-pre-wrap break-words p-4 text-xs">
                       {templates[section.key].example}
@@ -156,9 +156,7 @@ export const Personalize = () => {
                   </div>
 
                   <p className="text-muted-foreground text-xs">
-                    Click the copy button to add this template to your
-                    clipboard, then paste it into the text area above and
-                    customize it.
+                    {t('shClickTheCopyButtonTo')}
                   </p>
                 </div>
               </CollapsibleContent>

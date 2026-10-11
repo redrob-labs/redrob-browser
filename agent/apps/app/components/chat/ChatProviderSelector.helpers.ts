@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import type { Provider } from './chatComponentTypes'
 
 export interface ProviderOptionGroup {
@@ -26,13 +27,13 @@ export function groupProviderOptions(
       ? [
           {
             key: 'llm' as const,
-            label: 'Redrob agent + your LLM',
+            label: t('shRedrobAgentYourLlm'),
             options: llm,
           },
         ]
       : []),
     ...(acp.length
-      ? [{ key: 'acp' as const, label: '3p agents', options: acp }]
+      ? [{ key: 'acp' as const, label: t('sh3pAgents'), options: acp }]
       : []),
   ]
 }

@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Upload, X } from '@browseros/icons'
 import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
@@ -57,7 +58,9 @@ export const ImportDataHint = () => {
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2">
                   <Upload className="size-5 text-muted-foreground" />
-                  <CardTitle className="text-base">Import your data</CardTitle>
+                  <CardTitle className="text-base">
+                    {t('shImportYourData')}
+                  </CardTitle>
                 </div>
                 <Button
                   variant="ghost"
@@ -69,7 +72,7 @@ export const ImportDataHint = () => {
                 </Button>
               </div>
               <CardDescription>
-                Bring bookmarks, history, and passwords from Chrome.
+                {t('shBringBookmarksHistoryAndPasswords')}
               </CardDescription>
               <label
                 htmlFor="import-dont-ask-again"
@@ -82,11 +85,11 @@ export const ImportDataHint = () => {
                     setDontAskAgain(checked === true)
                   }
                 />
-                Don't show this again
+                {t('shDonTShowThisAgain')}
               </label>
               <Button className="w-full" onClick={handleImport}>
                 <Upload className="size-4" />
-                Open Import Settings
+                {t('shOpenImportSettings')}
               </Button>
             </CardHeader>
           </Card>

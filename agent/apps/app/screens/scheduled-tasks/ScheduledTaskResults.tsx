@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { formatRelative } from '@browseros/i18n'
 import {
   Calendar,
   CheckCircle2,
@@ -53,7 +54,8 @@ const getStatusIcon = (status: JobRunWithDetails['status']) => {
   }
 }
 
-const formatTimestamp = (dateString: string) => dayjs(dateString).fromNow()
+const formatTimestamp = (dateString: string) =>
+  formatRelative(new Date(dateString))
 
 export const ScheduledTaskResults: FC<ScheduledTaskResultsProps> = ({
   onViewRun,

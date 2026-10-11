@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { formatRelative } from '@browseros/i18n'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -66,7 +67,8 @@ function formatSchedule(job: ScheduledJob): string {
   return 'Not scheduled'
 }
 
-const formatRelativeTime = (dateStr: string) => dayjs(dateStr).fromNow()
+const formatRelativeTime = (dateStr: string) =>
+  formatRelative(new Date(dateStr))
 
 function formatDuration(startedAt: string, completedAt?: string): string {
   if (!completedAt) return 'Running...'

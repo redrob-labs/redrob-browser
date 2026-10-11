@@ -58,7 +58,8 @@ const OpencodeMark: FC<AgentMarkProps> = ({ className }) => (
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
     role="img"
-    aria-label="opencode"
+    // i18n-ignore: a name, never translated
+    aria-label={'opencode'}
   >
     <path
       fillRule="evenodd"
@@ -129,7 +130,8 @@ const PiMark: FC<AgentMarkProps> = ({ className }) => (
     className={className}
     xmlns="http://www.w3.org/2000/svg"
     role="img"
-    aria-label="pi"
+    // i18n-ignore: a name, never translated
+    aria-label={'pi'}
   >
     <rect width="800" height="800" rx="120" fill="#09090b" />
     <path

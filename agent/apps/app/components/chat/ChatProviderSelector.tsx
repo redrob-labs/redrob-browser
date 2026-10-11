@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Bot, Check, Plus } from '@browseros/icons'
 import type { FC, PropsWithChildren } from 'react'
 import { useState } from 'react'
@@ -53,11 +54,11 @@ export const ChatProviderSelector: FC<
       <PopoverContent side="bottom" align="start" className="w-64 p-0">
         <Command>
           <CommandInput
-            placeholder="Search providers or agents..."
+            placeholder={t('shSearchProvidersOrAgents')}
             className="h-9"
           />
           <CommandList>
-            <CommandEmpty>No provider found</CommandEmpty>
+            <CommandEmpty>{t('shNoProviderFound')}</CommandEmpty>
             {groups.map((group) => (
               <CommandGroup key={group.key} heading={group.label}>
                 {group.options.map((provider) => {
@@ -107,7 +108,7 @@ export const ChatProviderSelector: FC<
                 }}
               >
                 <Plus className="h-4 w-4" />
-                Add Provider
+                {t('shAddProvider')}
               </button>
             </div>
           </CommandList>
