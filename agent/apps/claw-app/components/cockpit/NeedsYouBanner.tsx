@@ -8,7 +8,7 @@
  */
 
 import type { HelpRequest } from '@browseros/claw-api'
-import { Hand, Square, TriangleAlert } from 'lucide-react'
+import { Hand, Square, TriangleAlert } from '@browseros/icons'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { LiveSessionCardRecord } from '@/screens/cockpit/cockpit.helpers'

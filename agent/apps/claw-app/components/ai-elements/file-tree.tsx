@@ -20,7 +20,7 @@ import {
   FileIcon,
   FolderIcon,
   FolderOpenIcon,
-} from "lucide-react";
+} from "@browseros/icons";
 import type { HTMLAttributes, ReactNode } from "react";
 import {
   createContext,

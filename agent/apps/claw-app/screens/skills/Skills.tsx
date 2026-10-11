@@ -5,7 +5,7 @@
  */
 
 import type { Skill } from '@browseros/claw-api'
-import { Plus } from 'lucide-react'
+import { Plus } from '@browseros/icons'
 import type { ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { DeleteSkillDialog } from '@/components/skills/DeleteSkillDialog'

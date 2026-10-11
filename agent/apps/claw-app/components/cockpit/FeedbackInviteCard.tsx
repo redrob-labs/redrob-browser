@@ -8,8 +8,8 @@
  * books or declines; the card asks, shows, and reports back what happened.
  */
 
+import { CalendarCheck, X } from '@browseros/icons'
 import { useQueryClient } from '@tanstack/react-query'
-import { CalendarCheck, X } from 'lucide-react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'

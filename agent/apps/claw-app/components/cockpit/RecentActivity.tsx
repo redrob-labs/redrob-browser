@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ChevronDown, History } from 'lucide-react'
+import { ChevronDown, History } from '@browseros/icons'
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router'
 import { Skeleton } from '@/components/ui/skeleton'

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { ArrowLeft, History } from 'lucide-react'
+import { ArrowLeft, History } from '@browseros/icons'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router'
 import { StatusBadge } from '@/components/cockpit/StatusBadge'

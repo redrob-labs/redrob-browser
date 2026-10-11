@@ -7,12 +7,12 @@
  * See the NOTICE file for provenance.
  */
 
+import { ArrowRight } from '@browseros/icons'
 import {
   flexRender,
   getCoreRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import { ArrowRight } from 'lucide-react'
 import { Fragment, type ReactNode, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { AuditEmpty } from '@/components/audit/AuditEmpty'

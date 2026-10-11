@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Copy, Sparkles } from 'lucide-react'
+import { Check, Copy, Sparkles } from '@browseros/icons'
 import { useState } from 'react'
 
 interface StarterPromptTileProps {

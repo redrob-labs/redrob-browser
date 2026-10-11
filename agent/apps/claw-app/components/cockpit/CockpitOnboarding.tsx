@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { Check } from 'lucide-react'
+import { Check } from '@browseros/icons'
 import { useState } from 'react'
 import { NavLink } from 'react-router'
 import { cn } from '@/lib/utils'

@@ -13,7 +13,7 @@ import {
   ExternalLink,
   PlayCircle,
   Settings2,
-} from 'lucide-react'
+} from '@browseros/icons'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'

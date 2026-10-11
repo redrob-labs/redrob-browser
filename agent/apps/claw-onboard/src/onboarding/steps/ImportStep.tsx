@@ -14,7 +14,7 @@ import {
   Download,
   Lock,
   RefreshCw,
-} from 'lucide-react'
+} from '@browseros/icons'
 import { useId, useRef, useState } from 'react'
 import type { UseFormReturn } from 'react-hook-form'
 import { Button } from '@/components/ui/button'

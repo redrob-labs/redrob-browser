@@ -15,7 +15,7 @@ import {
   ExternalLink,
   History,
   Lock,
-} from 'lucide-react'
+} from '@browseros/icons'
 import type { ComponentType, SVGProps } from 'react'
 import { Link } from 'react-router'
 import { cn } from '@/lib/utils'

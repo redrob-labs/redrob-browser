@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { PlugZap } from 'lucide-react'
+import { PlugZap } from '@browseros/icons'
 import { Button } from '@/components/ui/button'
 import { DisplayHeading, Em, StepCopy } from '../components/DisplayHeading'
 import { StarterPromptTile } from '../components/StarterPromptTile'

@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Globe } from 'lucide-react'
+import { Globe } from '@browseros/icons'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { cn } from '@/lib/utils'
 import { sessionPreviewUrl, useApiBaseUrl } from '@/modules/api/audit.hooks'

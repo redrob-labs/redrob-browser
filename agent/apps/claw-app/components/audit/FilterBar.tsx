@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, ChevronDown, Search, X } from 'lucide-react'
+import { Check, ChevronDown, Search, X } from '@browseros/icons'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {

@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowUpRight } from 'lucide-react'
+import { ArrowUpRight } from '@browseros/icons'
 import { NavLink, useLocation } from 'react-router'
 import { cn } from '@/lib/utils'
 import {

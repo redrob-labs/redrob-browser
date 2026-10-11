@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowUpRight, Check } from 'lucide-react'
+import { ArrowUpRight, Check } from '@browseros/icons'
 import { useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import {

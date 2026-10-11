@@ -5,7 +5,7 @@
  */
 
 import type { Skill, SkillRun, SkillTokenSavings } from '@browseros/claw-api'
-import { ArrowLeft, Check } from 'lucide-react'
+import { ArrowLeft, Check } from '@browseros/icons'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { DeleteSkillDialog } from '@/components/skills/DeleteSkillDialog'

@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Bot } from 'lucide-react'
+import { Bot } from '@browseros/icons'
 import type { FC } from 'react'
 import type { Harness } from './harness.types'
 import {

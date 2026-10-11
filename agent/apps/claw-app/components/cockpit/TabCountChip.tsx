@@ -8,7 +8,7 @@
  */
 
 import type { SessionBrowserTab } from '@browseros/claw-api'
-import { Layers } from 'lucide-react'
+import { Layers } from '@browseros/icons'
 import { useState } from 'react'
 import {
   Popover,

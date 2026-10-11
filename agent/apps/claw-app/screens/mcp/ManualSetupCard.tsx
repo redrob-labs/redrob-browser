@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowRight, Terminal } from 'lucide-react'
+import { ArrowRight, Terminal } from '@browseros/icons'
 import { useState } from 'react'
 import { MANUAL_SETUP_CARD_LINE } from './install-guide.data'
 import { ManualSetupDialog } from './ManualSetupDialog'

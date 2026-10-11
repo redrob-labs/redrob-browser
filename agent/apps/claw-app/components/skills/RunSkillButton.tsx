@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { Copy } from 'lucide-react'
+import { Copy } from '@browseros/icons'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { skillCommand } from '@/screens/skills/skills.helpers'

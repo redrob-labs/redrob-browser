@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight } from '@browseros/icons'
 import { NavLink } from 'react-router'
 import { AgentDot } from '@/components/audit/AgentDot'
 import { StatusBadge } from '@/components/audit/StatusBadge'

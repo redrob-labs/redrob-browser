@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Activity, BookOpen, RotateCcw } from 'lucide-react'
+import { Activity, BookOpen, RotateCcw } from '@browseros/icons'
 import type { ComponentType, SVGProps } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import {

@@ -7,7 +7,11 @@
  * See the NOTICE file for provenance.
  */
 
-import { IconChevronLeft, IconChevronRight, IconX } from '@tabler/icons-react'
+import {
+  ChevronLeft as IconChevronLeft,
+  ChevronRight as IconChevronRight,
+  X as IconX,
+} from '@browseros/icons'
 import { type KeyboardEventHandler, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {

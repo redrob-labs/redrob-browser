@@ -8,7 +8,7 @@
  */
 
 import type { HelpRequest } from '@browseros/claw-api'
-import { ExternalLink, Hand, RefreshCw, Square } from 'lucide-react'
+import { ExternalLink, Hand, RefreshCw, Square } from '@browseros/icons'
 import { cn } from '@/lib/utils'
 import type { LiveSessionCardRecord } from '@/screens/cockpit/cockpit.helpers'
 import { formatToolTrail, siteOf } from '@/screens/cockpit/cockpit.helpers'

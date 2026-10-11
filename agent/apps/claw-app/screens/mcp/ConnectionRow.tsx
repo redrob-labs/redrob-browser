@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Loader2 } from 'lucide-react'
+import { Loader2 } from '@browseros/icons'
 import { HarnessIcon } from '@/components/harness/HarnessIcon'
 import { cn } from '@/lib/utils'
 import type { ConnectionState } from '@/modules/api/connections.hooks'

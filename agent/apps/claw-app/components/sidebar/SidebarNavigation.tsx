@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { LayoutDashboard, PlugZap, Repeat, ScrollText } from 'lucide-react'
+import { LayoutDashboard, PlugZap, Repeat, ScrollText } from '@browseros/icons'
 import type { ComponentType, SVGProps } from 'react'
 import { NavLink, useLocation } from 'react-router'
 import {

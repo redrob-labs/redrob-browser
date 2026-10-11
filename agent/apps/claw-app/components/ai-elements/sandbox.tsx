@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import type { ToolUIPart } from "ai";
-import { ChevronDownIcon, Code } from "lucide-react";
+import { ChevronDownIcon, Code } from "@browseros/icons";
 import type { ComponentProps } from "react";
 
 import { getStatusBadge } from "./tool";

@@ -20,7 +20,12 @@
 import { readFileSync } from 'node:fs'
 import { Glob } from 'bun'
 
-const ENFORCED = ['apps/app', 'apps/app-onboard/src']
+const ENFORCED = [
+  'apps/app',
+  'apps/app-onboard/src',
+  'apps/claw-app',
+  'apps/claw-onboard/src',
+]
 const FOREIGN =
   /from\s+['"](lucide-react|@tabler\/icons-react|react-icons(\/[^'"]*)?|@heroicons\/[^'"]+)['"]/
 const ROUND =

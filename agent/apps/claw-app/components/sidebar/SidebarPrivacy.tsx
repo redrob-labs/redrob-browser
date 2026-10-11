@@ -9,8 +9,8 @@
  * cockpit and the local server's telemetry.
  */
 
+import { ShieldCheck } from '@browseros/icons'
 import { useQueryClient } from '@tanstack/react-query'
-import { ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import {
   Dialog,

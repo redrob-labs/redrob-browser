@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Monitor, Moon, Sun } from 'lucide-react'
+import { Monitor, Moon, Sun } from '@browseros/icons'
 import { type ComponentType, type SVGProps, useRef } from 'react'
 import { useTheme } from '@/components/theme-provider'
 import {

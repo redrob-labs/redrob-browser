@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { CheckCircle2, Circle, User } from 'lucide-react'
+import { CheckCircle2, Circle, User } from '@browseros/icons'
 import { cn } from '@/lib/utils'
 import type { BrowserOSImportSource } from '../browseros-onboarding-api'
 

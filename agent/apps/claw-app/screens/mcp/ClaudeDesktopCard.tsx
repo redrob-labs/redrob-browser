@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight } from '@browseros/icons'
 import { useState } from 'react'
 import { InstallExtensionDialog } from './InstallExtensionDialog'
 import { COWORK_REQUIREMENT_LINE } from './install-guide.data'

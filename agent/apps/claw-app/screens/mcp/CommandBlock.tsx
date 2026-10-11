@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Copy } from 'lucide-react'
+import { Check, Copy } from '@browseros/icons'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 

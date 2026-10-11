@@ -42,7 +42,7 @@ import {
   TransgenderIcon,
   VenusAndMarsIcon,
   VenusIcon,
-} from "lucide-react";
+} from "@browseros/icons";
 import type { ComponentProps, ReactNode } from "react";
 import { createContext, useCallback, useContext, useMemo } from "react";
 

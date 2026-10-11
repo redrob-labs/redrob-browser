@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Layers } from 'lucide-react'
+import { Layers } from '@browseros/icons'
 import { cn } from '@/lib/utils'
 import { formatTime, KIND_STYLE, VERB_META } from './replay.helpers'
 import type { ReplayAction } from './session-replay'

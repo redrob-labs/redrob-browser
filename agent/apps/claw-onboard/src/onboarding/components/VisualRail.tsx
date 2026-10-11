@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Lock, ShieldCheck, Zap } from 'lucide-react'
+import { Lock, ShieldCheck, Zap } from '@browseros/icons'
 
 /** Renders the persistent BrowserOS neo visual rail beside the onboarding steps. */
 export function VisualRail() {

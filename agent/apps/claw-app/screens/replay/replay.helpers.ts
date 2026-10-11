@@ -16,7 +16,7 @@ import {
   Paperclip,
   Send,
   Type,
-} from 'lucide-react'
+} from '@browseros/icons'
 import type { ReplayKind, ReplayVerb } from '@/modules/api/replay.hooks'
 
 export interface VerbMeta {

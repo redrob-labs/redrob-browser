@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Pause, Play, RotateCcw } from 'lucide-react'
+import { Pause, Play, RotateCcw } from '@browseros/icons'
 import type { ChangeEvent } from 'react'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { cn } from '@/lib/utils'
