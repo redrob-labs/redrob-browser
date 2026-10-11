@@ -31,7 +31,7 @@ import {
 import { getBrowserosDir } from '../browseros-dir'
 
 const RUN_TTL_MS = 60 * 60_000
-export const RESUME_TYPES: Record<string, string> = {
+const RESUME_TYPES: Record<string, string> = {
   '.pdf': 'application/pdf',
   '.doc': 'application/msword',
   '.docx':

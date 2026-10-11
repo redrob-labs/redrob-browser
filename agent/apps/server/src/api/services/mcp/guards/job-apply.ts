@@ -42,7 +42,7 @@ function label(call: BrowserToolCall, ref: string): string {
 }
 
 /** What an `act` call fills, by field label. */
-export function filledFields(
+function filledFields(
   call: BrowserToolCall,
 ): Array<{ field: string; value: string }> {
   if (call.tool.name !== 'act' || typeof call.args.page !== 'number') return []
@@ -60,7 +60,7 @@ export function filledFields(
 }
 
 /** The name of the control an `act` call presses, or undefined when it presses nothing. */
-export function pressedTarget(call: BrowserToolCall): string | undefined {
+function pressedTarget(call: BrowserToolCall): string | undefined {
   if (call.tool.name !== 'act' || typeof call.args.page !== 'number') return
   const kind = call.args.kind
   const pressing =

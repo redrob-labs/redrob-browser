@@ -22,6 +22,7 @@
     "@browseros/diagnostics": "workspace:*",
     "@browseros/i18n": "workspace:*",
     "@browseros/icons": "workspace:*",
+    "@browseros/jobs": "workspace:*",
     "@browseros/playbooks": "workspace:*",
     "@browseros/privacy": "workspace:*",
     "@browseros/server": "workspace:*",

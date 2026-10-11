@@ -16,6 +16,7 @@ import { AgentCommandHome } from '@/screens/agent-command/AgentCommandHome'
 import { AISettingsPage } from '@/screens/ai-settings/AISettingsPage'
 import { ConnectMCP } from '@/screens/connect-mcp/ConnectMCP'
 import { CustomizationPage } from '@/screens/customization/CustomizationPage'
+import { JobsPage } from '@/screens/jobs/JobsPage'
 import { LlmHubPage } from '@/screens/llm-hub/LlmHubPage'
 import { MCPSettingsPage } from '@/screens/mcp-settings/MCPSettingsPage'
 import { NewTabChat } from '@/screens/newtab/index/NewTabChat'
@@ -58,6 +59,7 @@ export const App: FC = () => {
           <Route path="connect-apps" element={<ConnectMCP />} />
           <Route path="scheduled" element={<ScheduledTasksPage />} />
           <Route path="playbooks" element={<PlaybooksPage />} />
+          <Route path="jobs" element={<JobsPage />} />
         </Route>
 
         <Route element={<SettingsSidebarLayout />}>

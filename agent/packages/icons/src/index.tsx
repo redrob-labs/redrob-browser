@@ -154,6 +154,7 @@ const MAP = {
   ThumbsDown: 'flag',
   // Objects
   Book: 'book',
+  Briefcase: 'briefcase',
   Bookmark: 'bookmark',
   Calendar: 'calendar',
   CalendarClock: 'calendarClock',
@@ -319,6 +320,8 @@ export const {
   BookIcon,
   Bookmark,
   BookmarkIcon,
+  Briefcase,
+  BriefcaseIcon,
   Calendar,
   CalendarIcon,
   CalendarClock,
