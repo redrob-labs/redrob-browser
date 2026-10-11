@@ -82,6 +82,7 @@ const SURFACES: Surface[] = [
   page('settings-customization', '/settings/customization'),
   page('settings-diagnostics', '/settings/diagnostics'),
   page('settings-search', '/settings/search'),
+  page('settings-privacy', '/settings/privacy'),
   page('onboarding-ai', '/onboarding/ai'),
   {
     ...page('overlay-menu', '/settings/ai'),
@@ -113,6 +114,15 @@ const SURFACES: Surface[] = [
     path: 'sidepanel.html',
     width: 400,
     height: 800,
+  },
+  {
+    // The status line's Privacy panel, open above the composer.
+    id: 'sidepanel-privacy',
+    kind: 'extension',
+    path: 'sidepanel.html',
+    width: 400,
+    height: 800,
+    open: { click: '.rr-cstatus__item', wait: '.rr-cstatus__panel' },
   },
   {
     id: 'sidepanel-history',

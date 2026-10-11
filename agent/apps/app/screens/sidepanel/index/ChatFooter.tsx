@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AppSelector } from '@/components/elements/AppSelector'
 import { WorkspaceSelector } from '@/components/elements/workspace-selector'
 import { McpServerIcon } from '@/components/mcp/McpServerIcon'
+import { PrivacyStatusLine } from '@/components/privacy/PrivacyStatusLine'
 import { useMcpServers } from '@/lib/mcp/mcpServerStorage'
 import {
   type SelectedTextData,
@@ -38,6 +39,8 @@ export interface ChatFooterProps {
   attachedTabs: chrome.tabs.Tab[]
   onToggleTab: (tab: chrome.tabs.Tab) => void
   onRemoveTab: (tabId?: number) => void
+  /** Set when the chosen agent is an external one, which Privacy Protection does not cover. */
+  externalAgentName?: string
 }
 
 export const ChatFooter: FC<ChatFooterProps> = ({
@@ -52,6 +55,7 @@ export const ChatFooter: FC<ChatFooterProps> = ({
   attachedTabs,
   onToggleTab,
   onRemoveTab,
+  externalAgentName,
 }) => {
   const { selectedFolder } = useWorkspace()
   const { servers: mcpServers } = useMcpServers()
@@ -116,6 +120,14 @@ export const ChatFooter: FC<ChatFooterProps> = ({
 
   return (
     <footer className="ui-panel-foot">
+      <div className="px-3 pt-2">
+        <PrivacyStatusLine
+          externalAgentName={externalAgentName}
+          onOpenSettings={() =>
+            window.open('/app.html#/settings/privacy', '_blank')
+          }
+        />
+      </div>
       <ChatAttachedTabs tabs={attachedTabs} onRemoveTab={onRemoveTab} />
       {visibleSelectedText && (
         <ChatSelectedText

@@ -22,6 +22,7 @@ export type FixtureLocale = 'en' | 'ko'
  */
 const USER: Record<FixtureLocale, Record<string, string>> = {
   en: {
+    privacyName: 'Jiwon Kim',
     job1: 'Morning digest',
     job1q: 'Summarise the newest posts on the sites I bookmarked under Reading',
     job2: 'Price watch',
@@ -41,6 +42,7 @@ const USER: Record<FixtureLocale, Record<string, string>> = {
     conv3: 'Fix the failing test in utils.ts',
   },
   ko: {
+    privacyName: '김지원',
     job1: '아침 요약',
     job1q: '읽을거리 북마크에 있는 사이트의 새 글을 요약해 줘',
     job2: '가격 확인',
@@ -119,6 +121,15 @@ export function fixturesFor(locale: FixtureLocale): Record<string, unknown> {
 
   // Path → JSON body. `apps/app` destructures one wrapper key per route; none returns a bare array.
   return {
+    // modules/privacy/privacy.hooks.ts: High, the model ready, two sites listed.
+    '/privacy': {
+      level: 'high',
+      names: [[u.privacyName]],
+      neverReadSites: ['mybank.com', 'gov.kr'],
+      keptThisWeek: 12,
+      detector: { state: 'ready', model: '1T/veil-pii-ko-lite@dd26d2b1' },
+      coverage: { redrobAgent: true, externalAgents: false },
+    },
     // modules/llm-providers/llm-providers.api.ts
     '/providers': { providers: [redrob, second] },
     '/providers/default': { provider: redrob },

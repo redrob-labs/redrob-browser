@@ -25,7 +25,10 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from '@/components/ai-elements/reasoning'
+import { PrivateMessageText } from '@/components/privacy/PrivateMessageText'
 import type { ChatAction } from '@/lib/chat-actions/types'
+import type { PrivacyStatus } from '@/modules/privacy/privacy.types'
+import { splitPrivate } from '@/modules/privacy/private-spans'
 import { ChatMessageActions } from './ChatMessageActions'
 import { ConnectAppCard } from './ConnectAppCard'
 import { getMessageSegments } from './getMessageSegments'
@@ -36,6 +39,8 @@ import { ToolBatch } from './ToolBatch'
 import { UserActionMessage } from './UserActionMessage'
 
 export interface ChatMessagesProps {
+  /** Privacy Protection's settings while it covers this chat; marks the person's own details. */
+  privacy?: PrivacyStatus
   messages: UIMessage[]
   status: 'streaming' | 'submitted' | 'ready' | 'error'
   getActionForMessage?: (message: UIMessage) => ChatAction | undefined
@@ -64,6 +69,7 @@ export const ChatMessages: FC<ChatMessagesProps> = ({
   onTakeSurvey,
   onDismissJtbdPopup,
   onReplySuggestionClick,
+  privacy,
 }) => {
   const isStreaming = status === 'streaming' || status === 'submitted'
 
@@ -100,12 +106,32 @@ export const ChatMessages: FC<ChatMessagesProps> = ({
                     ) : (
                       segments.map((segment) => {
                         switch (segment.type) {
-                          case 'text':
+                          case 'text': {
+                            // A person's own words, with what the AI saw as placeholders marked.
+                            const pieces =
+                              privacy && message.role === 'user'
+                                ? splitPrivate(
+                                    segment.text,
+                                    privacy.level,
+                                    privacy.names,
+                                  )
+                                : null
+                            if (
+                              pieces?.some((piece) => piece.kind === 'private')
+                            ) {
+                              return (
+                                <PrivateMessageText
+                                  key={segment.key}
+                                  pieces={pieces}
+                                />
+                              )
+                            }
                             return (
                               <MessageResponse key={segment.key}>
                                 {segment.text}
                               </MessageResponse>
                             )
+                          }
                           case 'reasoning':
                             return (
                               <Reasoning

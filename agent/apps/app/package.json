@@ -21,6 +21,7 @@
     "@ai-sdk/react": "^4.0.117",
     "@browseros/diagnostics": "workspace:*",
     "@browseros/icons": "workspace:*",
+    "@browseros/privacy": "workspace:*",
     "@browseros/i18n": "workspace:*",
     "@browseros/server": "workspace:*",
     "@browseros/shared": "workspace:*",

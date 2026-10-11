@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import {
   Activity,
   ArrowLeft,
@@ -14,6 +15,7 @@ import {
   MessageSquare,
   Palette,
   Server,
+  ShieldCheck,
 } from '@browseros/icons'
 import type { FC } from 'react'
 import { NavLink } from 'react-router'
@@ -81,6 +83,7 @@ const primarySettingsSections: NavSection[] = [
         icon: Palette,
       },
       { name: 'Redrob as MCP', to: '/settings/mcp', icon: Server },
+      { name: t('privacyNavItem'), to: '/settings/privacy', icon: ShieldCheck },
     ],
   },
 ]

@@ -647,6 +647,42 @@
     "untranslated": 23,
     "fonts": 0
   },
+  "settings-privacy.dark.en": {
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "settings-privacy.dark.ko": {
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 9,
+    "fonts": 0
+  },
+  "settings-privacy.light.en": {
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "settings-privacy.light.ko": {
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 9,
+    "fonts": 0
+  },
   "settings-search.dark.en": {
     "offPalette": 18,
     "contrast": 0,
@@ -748,6 +784,42 @@
   },
   "sidepanel-history.light.ko": {
     "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 6,
+    "fonts": 0
+  },
+  "sidepanel-privacy.dark.en": {
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "sidepanel-privacy.dark.ko": {
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 6,
+    "fonts": 0
+  },
+  "sidepanel-privacy.light.en": {
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "sidepanel-privacy.light.ko": {
+    "offPalette": 1,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,

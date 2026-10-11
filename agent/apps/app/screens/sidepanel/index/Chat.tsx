@@ -10,6 +10,10 @@
 import { Loader2 } from '@browseros/icons'
 import { useEffect, useRef, useState } from 'react'
 import { NoProviderNotice } from '@/components/chat/NoProviderNotice'
+import {
+  PrivacyConfirmDialog,
+  type PrivacyConfirmRequest,
+} from '@/components/privacy/PrivacyConfirmDialog'
 import { createBrowserOSAction } from '@/lib/chat-actions/types'
 import {
   SIDEPANEL_AI_TRIGGERED_EVENT,
@@ -23,6 +27,12 @@ import { track } from '@/lib/metrics/track'
 import { useChatSessionContext } from '@/modules/chat/chat-session-context'
 import type { ChatMode } from '@/modules/chat/chat-types'
 import { useJtbdPopup } from '@/modules/jtbd-popup/jtbd-popup.hooks'
+import { usePrivacyStatus } from '@/modules/privacy/privacy.hooks'
+import {
+  privateCount,
+  privateKinds,
+  splitPrivate,
+} from '@/modules/privacy/private-spans'
 import { buildChatErrorProps } from './Chat.helpers'
 import { ChatEmptyState } from './ChatEmptyState'
 import { ChatError } from './ChatError'
@@ -67,6 +77,15 @@ export const Chat = () => {
     onDismiss: onDismissJtbdPopup,
   } = useJtbdPopup()
 
+  const { data: privacy } = usePrivacyStatus()
+  const externalAgentName =
+    selectedProvider?.kind === 'acp' ? selectedProvider.name : undefined
+  const privacyApplies = Boolean(
+    privacy && privacy.level !== 'off' && !externalAgentName,
+  )
+  const [confirm, setConfirm] = useState<
+    (PrivacyConfirmRequest & { text: string }) | null
+  >(null)
   const [input, setInput] = useState('')
   const [attachedTabs, setAttachedTabs] = useState<chrome.tabs.Tab[]>([])
   const [mounted, setMounted] = useState(false)
@@ -130,10 +149,22 @@ export const Chat = () => {
     setAttachedTabs((prev) => prev.filter((t) => t.id !== tabId))
   }
 
+  /** At Strict, a message holding private details is confirmed first; Edit keeps the draft. */
   const executeMessage = (customMessageText?: string) => {
     const messageText = customMessageText ? customMessageText : input.trim()
     if (!messageText) return
+    if (privacy?.level === 'strict' && privacyApplies) {
+      const pieces = splitPrivate(messageText, privacy.level, privacy.names)
+      const count = privateCount(pieces)
+      if (count > 0) {
+        setConfirm({ count, kinds: privateKinds(pieces), text: messageText })
+        return
+      }
+    }
+    sendNow(messageText)
+  }
 
+  const sendNow = (messageText: string) => {
     recordMessageSent()
 
     const sent = attachedTabs.length
@@ -192,6 +223,7 @@ export const Chat = () => {
           />
         ) : (
           <ChatMessages
+            privacy={privacyApplies ? privacy : undefined}
             messages={messages}
             status={status}
             getActionForMessage={getActionForMessage}
@@ -232,6 +264,16 @@ export const Chat = () => {
         attachedTabs={attachedTabs}
         onToggleTab={toggleTabSelection}
         onRemoveTab={removeTab}
+        externalAgentName={externalAgentName}
+      />
+      <PrivacyConfirmDialog
+        request={confirm}
+        onEdit={() => setConfirm(null)}
+        onSend={() => {
+          const text = confirm?.text
+          setConfirm(null)
+          if (text) sendNow(text)
+        }}
       />
     </>
   )
