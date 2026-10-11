@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Loader2 } from '@browseros/icons'
 import { useEffect, useRef, useState } from 'react'
 import { NoProviderNotice } from '@/components/chat/NoProviderNotice'
@@ -14,6 +15,8 @@ import {
   PrivacyConfirmDialog,
   type PrivacyConfirmRequest,
 } from '@/components/privacy/PrivacyConfirmDialog'
+import { SmartCompareCard } from '@/components/smart-compare/SmartCompareCard'
+import { SmartCompareChip } from '@/components/smart-compare/SmartCompareChip'
 import { createBrowserOSAction } from '@/lib/chat-actions/types'
 import {
   SIDEPANEL_AI_TRIGGERED_EVENT,
@@ -33,6 +36,11 @@ import {
   privateKinds,
   splitPrivate,
 } from '@/modules/privacy/private-spans'
+import {
+  useActiveProduct,
+  useCompare,
+  useCompareRegion,
+} from '@/modules/smart-compare/smart-compare.hooks'
 import { buildChatErrorProps } from './Chat.helpers'
 import { ChatEmptyState } from './ChatEmptyState'
 import { ChatError } from './ChatError'
@@ -78,6 +86,16 @@ export const Chat = () => {
   } = useJtbdPopup()
 
   const { data: privacy } = usePrivacyStatus()
+  const { product } = useActiveProduct()
+  const [region, setRegion] = useCompareRegion()
+  const compare = useCompare()
+  // A result belongs to the product it was asked for; another tab's product hides it.
+  const comparison =
+    compare.data && product && compare.data.product.url === product.url
+      ? compare.data
+      : null
+  const runCompare = (fresh = false, nextRegion = region) =>
+    product && compare.mutate({ product, region: nextRegion, fresh })
   const externalAgentName =
     selectedProvider?.kind === 'acp' ? selectedProvider.name : undefined
   const privacyApplies = Boolean(
@@ -215,7 +233,8 @@ export const Chat = () => {
           <div className="flex flex-1 items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
-        ) : messages.length === 0 ? (
+        ) : messages.length === 0 && comparison ? null : messages.length ===
+          0 ? (
           <ChatEmptyState
             mode={mode}
             mounted={mounted}
@@ -238,6 +257,24 @@ export const Chat = () => {
             onReplySuggestionClick={handleSuggestionClick}
           />
         )}
+        {comparison ? (
+          <SmartCompareCard
+            result={comparison}
+            region={region}
+            refreshing={compare.isPending}
+            onRefresh={() => runCompare(true)}
+            onRegionChange={(next) => {
+              setRegion(next)
+              runCompare(false, next)
+            }}
+          />
+        ) : null}
+        {compare.isError ? (
+          <ChatError
+            error={new Error(t('compareFailed'))}
+            providerType={selectedProvider?.type}
+          />
+        ) : null}
         {agentUrlError && (
           <ChatError
             error={agentUrlError}
@@ -265,6 +302,15 @@ export const Chat = () => {
         onToggleTab={toggleTabSelection}
         onRemoveTab={removeTab}
         externalAgentName={externalAgentName}
+        moments={
+          product && !comparison ? (
+            <SmartCompareChip
+              region={region}
+              busy={compare.isPending}
+              onCompare={() => runCompare()}
+            />
+          ) : null
+        }
       />
       <PrivacyConfirmDialog
         request={confirm}

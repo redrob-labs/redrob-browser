@@ -755,6 +755,42 @@
     "untranslated": 6,
     "fonts": 0
   },
+  "sidepanel-compare.dark.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "sidepanel-compare.dark.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 1,
+    "fonts": 0
+  },
+  "sidepanel-compare.light.en": {
+    "offPalette": 0,
+    "contrast": 1,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "sidepanel-compare.light.ko": {
+    "offPalette": 0,
+    "contrast": 1,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 1,
+    "fonts": 0
+  },
   "sidepanel-history.dark.en": {
     "offPalette": 0,
     "contrast": 0,

@@ -32,6 +32,7 @@ import { onServerMessage } from '@/lib/messaging/server/serverMessages'
 import { onOpenSidePanelWithSearch } from '@/lib/messaging/sidepanel/openSidepanelWithSearch'
 import { searchActionsStorage } from '@/lib/search-actions/searchActionsStorage'
 import { selectedTextStorage } from '@/lib/selected-text/selectedTextStorage'
+import { startSmartCompareBadge } from '@/lib/smart-compare/badge'
 import { stopAgentStorage } from '@/lib/stop-agent/stop-agent-storage'
 import { scheduledJobRuns } from './scheduledJobRuns'
 
@@ -56,6 +57,7 @@ export default defineBackground(() => {
   // panel-routing effects; individual React panels can come and go freely.
   const conversationPanelBroker = createConversationPanelBroker()
   void conversationPanelBroker.start()
+  startSmartCompareBadge()
 
   // Registration never opens a panel. Per-tab URLs let panels opened by the
   // native Alt+A shortcut identify their owner without following tab switches.

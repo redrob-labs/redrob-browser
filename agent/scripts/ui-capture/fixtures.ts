@@ -358,3 +358,53 @@ export const storageSeed: Record<string, unknown> = {
     '0.1.6',
   ],
 }
+
+/** The product Smart Compare's scene compares, and what the stub server answers for it. */
+export const compareProduct = {
+  title: 'Sony WH-1000XM5 Wireless Noise Cancelling Headphones, Black',
+  models: ['wh1000xm5'],
+  price: { amount: 429000, currency: 'KRW' },
+  url: 'https://shop.example/p/wh1000xm5',
+  source: 'json-ld',
+}
+
+export function comparisonFor(region: string) {
+  const listing = (title: string, amount: number, match = 'same') => ({
+    title,
+    url: `https://www.coupang.com/vp/products/${amount}`,
+    productId: String(amount),
+    price: { amount, currency: 'KRW' },
+    match,
+    confidence: 3,
+    reason: 'model',
+  })
+  const best = listing('소니 WH-1000XM5 무선 노이즈캔슬링 헤드폰 블랙', 389000)
+  return {
+    region,
+    query: 'Sony WH-1000XM5',
+    product: compareProduct,
+    stores: [
+      {
+        store: 'coupang',
+        name: 'Coupang',
+        searchUrl: 'https://www.coupang.com/np/search?q=Sony+WH-1000XM5',
+        outcome: {
+          status: 'ok',
+          best,
+          variants: [listing('소니 WH-1000XM5 실버', 379000, 'variant')],
+          checked: 14,
+        },
+      },
+      {
+        store: 'naver',
+        name: 'Naver Shopping',
+        searchUrl:
+          'https://search.shopping.naver.com/search/all?query=Sony+WH-1000XM5',
+        outcome: { status: 'sign-in' },
+      },
+    ],
+    lowest: { store: 'coupang', listing: best },
+    saving: 40000,
+    checkedAt: NOW,
+  }
+}

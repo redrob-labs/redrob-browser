@@ -21,7 +21,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { type BrowserContext, chromium, type Page } from 'playwright'
 import { type AuditResult, audit, type Finding, focusedRing } from './audit'
-import { NOW, storageSeed } from './fixtures'
+import { compareProduct, NOW, storageSeed } from './fixtures'
 import { startStaticServer, startStubServer } from './server'
 import { browserShim } from './shim'
 
@@ -59,6 +59,11 @@ interface Surface {
    * never shows one, so without these the overlays were never measured at all.
    */
   open?: { click?: string; hover?: string; wait: string }
+  /**
+   * chrome.storage.local entries for this scene only, written after the page loads (keyed by the
+   * page's own tab id where a value needs it) and removed after the capture.
+   */
+  storage?: (tabId: number) => Record<string, unknown>
 }
 
 const page = (id: string, path: string): Surface => ({
@@ -123,6 +128,21 @@ const SURFACES: Surface[] = [
     width: 400,
     height: 800,
     open: { click: '.rr-cstatus__item', wait: '.rr-cstatus__panel' },
+  },
+  {
+    // A product page in the active tab: the "Compare prices" chip, pressed, and the result card.
+    id: 'sidepanel-compare',
+    kind: 'extension',
+    path: 'sidepanel.html',
+    width: 400,
+    height: 800,
+    storage: (tabId) => ({
+      'smartCompare.productByTab': { [String(tabId)]: compareProduct },
+    }),
+    open: {
+      click: 'button.rr-prompt[aria-busy]',
+      wait: 'section.rr-card[aria-label]',
+    },
   },
   {
     id: 'sidepanel-history',
@@ -339,6 +359,21 @@ async function captureOne(
     s.kind === 'extension' ? `${base}/${s.path}` : `${base}${s.path}`,
   )
   await settle(p)
+  const seeded = s.storage
+    ? await p.evaluate(
+        async (entries) => {
+          const c = (globalThis as unknown as { chrome: typeof chrome }).chrome
+          const tab = await c.tabs.getCurrent()
+          const values = JSON.parse(
+            entries.replaceAll('__TAB__', String(tab?.id ?? 0)),
+          )
+          await c.storage.local.set(values)
+          return Object.keys(values)
+        },
+        JSON.stringify(s.storage(-1)).replaceAll('"-1"', '"__TAB__"'),
+      )
+    : []
+  if (seeded.length) await settle(p)
   if (s.advance) await advanceOnboarding(p, s.advance)
   if (s.open) {
     const target = p.locator(s.open.click ?? s.open.hover ?? '').first()
@@ -360,6 +395,15 @@ async function captureOne(
   })
   // Tabbing would move focus out of, and close, the overlay being measured.
   const focusFindings = s.open ? [] : await focus(p)
+  if (seeded.length) {
+    await p.evaluate(
+      (keys) =>
+        (
+          globalThis as unknown as { chrome: typeof chrome }
+        ).chrome.storage.local.remove(keys),
+      seeded,
+    )
+  }
   await p.close()
   // Naming Pretendard is not using it: with no face loaded the stack falls through to the platform font
   // in silence. So the check is a LOADED Pretendard face, plus every face that failed to load.

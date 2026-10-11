@@ -24,6 +24,7 @@
     "@browseros/privacy": "workspace:*",
     "@browseros/i18n": "workspace:*",
     "@browseros/server": "workspace:*",
+    "@browseros/shopping": "workspace:*",
     "@browseros/shared": "workspace:*",
     "@hookform/resolvers": "^5.9.1",
     "@lobehub/icons": "^2.48.0",

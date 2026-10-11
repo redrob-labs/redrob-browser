@@ -9,6 +9,7 @@
 
 import {
   acpProbe,
+  comparisonFor,
   type FixtureLocale,
   fixturesFor,
   oauthStatus,
@@ -61,6 +62,8 @@ export function startStubServer(): StubServer {
       if (req.method === 'GET' && /^\/oauth\/[^/]+\/status$/.test(path)) {
         return Response.json(oauthStatus(path.split('/')[2]), { headers: cors })
       }
+      if (req.method === 'POST' && path === '/compare')
+        return Response.json(comparisonFor('KR'), { headers: cors })
       if (req.method === 'POST' && path === '/acpx/probe')
         return Response.json(acpProbe, { headers: cors })
 

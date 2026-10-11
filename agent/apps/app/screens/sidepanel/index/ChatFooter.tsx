@@ -41,6 +41,8 @@ export interface ChatFooterProps {
   onRemoveTab: (tabId?: number) => void
   /** Set when the chosen agent is an external one, which Privacy Protection does not cover. */
   externalAgentName?: string
+  /** Shown above the composer while the tab is a product page (Smart Compare's chip). */
+  moments?: React.ReactNode
 }
 
 export const ChatFooter: FC<ChatFooterProps> = ({
@@ -56,6 +58,7 @@ export const ChatFooter: FC<ChatFooterProps> = ({
   onToggleTab,
   onRemoveTab,
   externalAgentName,
+  moments,
 }) => {
   const { selectedFolder } = useWorkspace()
   const { servers: mcpServers } = useMcpServers()
@@ -120,6 +123,7 @@ export const ChatFooter: FC<ChatFooterProps> = ({
 
   return (
     <footer className="ui-panel-foot">
+      {moments ? <div className="rr-prompts px-3 pt-2">{moments}</div> : null}
       <div className="px-3 pt-2">
         <PrivacyStatusLine
           externalAgentName={externalAgentName}

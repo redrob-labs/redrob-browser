@@ -1,0 +1,34 @@
+# Smart Compare (agent/apps/app/components/smart-compare), English and Korean.
+#
+# key <TAB> English <TAB> Korean [<TAB> description]
+#
+# Store names are names and stay as written (Amazon, Flipkart, Coupang 쿠팡 is written in Korean in the
+# Korean column only where the store writes itself that way: 쿠팡, 네이버쇼핑).
+
+compareChip	Compare prices	가격 비교	Chip above the composer on a product page
+compareChipHint	Search $1 for this product	$1에서 이 상품 검색	Title of the chip; $1 is a list of stores
+compareTitle	Smart Compare	스마트 비교	The card's title
+compareRegionKR	Korea	한국	Region name
+compareRegionIN	India	인도	Region name
+compareRegionUS	United States	미국	Region name
+compareRegionLabel	Search in	검색 지역	Label of the region menu
+compareSearching	Searching $1…	$1에서 찾는 중…	While a store is being searched; $1 is the store
+compareLowest	Lowest $1 at $2	최저가 $1 · $2	$1 is a price, $2 a store
+compareLess	$1 less than this page	이 페이지보다 $1 저렴	$1 is an amount
+compareMore	This page is already the lowest	이 페이지가 이미 최저가입니다
+compareNoneFound	No listing of this exact product was found.	이 상품과 같은 상품을 찾지 못했습니다.
+compareThisPage	This page	이 페이지
+compareOpen	Open	열기	Opens a listing
+compareOpenStore	Search on $1	$1에서 직접 검색	Link to the store's own search when it could not be checked
+compareVariant	Similar, not the same: $1	비슷하지만 다른 상품: $1	A variant listing; $1 is its title
+compareSure	Same product: model number matches	같은 상품: 모델 번호 일치	Confidence line
+compareLikely	Probably the same product: the titles match	같은 상품일 가능성 높음: 이름 일치	Confidence line
+compareStoreBlocked	$1 did not let Redrob search. Not checked.	$1에서 검색을 허용하지 않아 확인하지 못했습니다.	$1 is a store
+compareStoreSignIn	$1 asked you to sign in. Not checked.	$1에서 로그인을 요청해 확인하지 못했습니다.	$1 is a store
+compareStoreTimeout	$1 took too long. Not checked.	$1의 응답이 너무 늦어 확인하지 못했습니다.	$1 is a store
+compareStoreFailed	$1 could not be read. Not checked.	$1을(를) 읽지 못해 확인하지 못했습니다.	$1 is a store
+compareStoreNone	$1: no listing of this exact product.	$1: 같은 상품이 없습니다.	$1 is a store
+compareChecked	Checked $1 of $2 stores · $3	스토어 $2곳 중 $1곳 확인 · $3	$1, $2 counts, $3 a relative time
+compareRefresh	Check again	다시 확인
+compareFailed	Smart Compare could not run. Is Redrob still starting?	스마트 비교를 실행하지 못했습니다. Redrob이 아직 시작 중인가요?
+compareTabsNote	Searched in your browser, in tabs grouped as “$1”, then closed.	브라우저에서 ‘$1’ 탭 그룹으로 검색한 뒤 닫았습니다.	$1 is the tab group's name (compareTitle)
