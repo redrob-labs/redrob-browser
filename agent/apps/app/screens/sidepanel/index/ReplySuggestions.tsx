@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+import { t } from '@browseros/i18n'
 import type { FC } from 'react'
 import { Suggestion, Suggestions } from '@/components/ai-elements/suggestion'
 
@@ -29,7 +30,7 @@ export const ReplySuggestions: FC<ReplySuggestionsProps> = ({
   return (
     <Suggestions
       className="pt-1"
-      aria-label="Suggested replies"
+      aria-label={t('spSuggestedReplies')}
       data-testid="reply-suggestions"
     >
       {replies.map((reply) => (

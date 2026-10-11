@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Check, Plug } from '@browseros/icons'
 import { type FC, useEffect, useState } from 'react'
 import { toast } from 'sonner'
@@ -75,7 +76,7 @@ export const ConnectAppCard: FC<ConnectAppCardProps> = ({
       })
 
       if (!response.oauthUrl && !response.apiKeyUrl) {
-        toast.error(`Failed to connect ${appName}`)
+        toast.error(t('spConnectFailed', appName))
         setConnecting(false)
         return
       }
@@ -97,7 +98,7 @@ export const ConnectAppCard: FC<ConnectAppCardProps> = ({
         setPhase('oauth-pending')
       }
     } catch (e) {
-      toast.error(`Failed to connect ${appName}`)
+      toast.error(t('spConnectFailed', appName))
       sentry.captureException(e)
       setConnecting(false)
     }
@@ -119,16 +120,20 @@ export const ConnectAppCard: FC<ConnectAppCardProps> = ({
         managedServerDescription: '',
       })
       track(MANAGED_MCP_ADDED_EVENT, { server_name: appName })
-      toast.success(`${apiKeyServer.name} connected successfully`)
+      toast.success(t('spConnectedOk', apiKeyServer.name))
       setApiKeyServer(null)
-      setResolvedText(`Connected ${appName}`)
+      setResolvedText(t('spConnectedApp', appName))
       setPhase('resolved')
       sendMessage({
         text: `I've connected ${appName}, continue with the task`,
       })
     } catch (e) {
       toast.error(
-        `Failed to connect ${apiKeyServer.name}: ${e instanceof Error ? e.message : 'Unknown error'}`,
+        t(
+          'spConnectFailedWhy',
+          apiKeyServer.name,
+          e instanceof Error ? e.message : t('spErrUnexpected'),
+        ),
       )
       sentry.captureException(e)
     }
@@ -136,7 +141,7 @@ export const ConnectAppCard: FC<ConnectAppCardProps> = ({
 
   const handleOAuthComplete = () => {
     track(BREADCRUMB_CONNECT_COMPLETED_EVENT, { app_name: appName })
-    setResolvedText(`Connected ${appName}`)
+    setResolvedText(t('spConnectedApp', appName))
     setPhase('resolved')
     sendMessage({
       text: `I've connected ${appName}, continue with the task`,
@@ -149,7 +154,7 @@ export const ConnectAppCard: FC<ConnectAppCardProps> = ({
     if (!current.includes(appName)) {
       await declinedAppsStorage.setValue([...current, appName])
     }
-    setResolvedText(`Continuing without ${appName}`)
+    setResolvedText(t('spContinuingWithout', appName))
     setPhase('resolved')
     sendMessage({
       text: `Continue without connecting ${appName}, do it manually with browser automation`,
@@ -174,20 +179,20 @@ export const ConnectAppCard: FC<ConnectAppCardProps> = ({
           <Plug className="h-5 w-5 shrink-0 text-[var(--accent-brand-ink)]" />
           <div>
             <p className="font-medium text-sm">
-              Authorize {appName} in the opened tab
+              {t('spAuthorizeApp', appName)}
             </p>
             <p className="mt-1 text-muted-foreground text-xs">
-              Complete the sign-in flow, then click the button below.
+              {t('spAuthorizeHelp')}
             </p>
           </div>
         </div>
 
         <div className="mt-3 flex gap-2">
           <Button size="sm" onClick={handleOAuthComplete}>
-            I've authorized {appName}, continue
+            {t('spAuthorizedContinue', appName)}
           </Button>
           <Button size="sm" variant="ghost" onClick={handleManual}>
-            Skip, do it manually
+            {t('spSkipManual')}
           </Button>
         </div>
       </div>
@@ -201,7 +206,7 @@ export const ConnectAppCard: FC<ConnectAppCardProps> = ({
           <Plug className="h-5 w-5 shrink-0 text-[var(--accent-brand-ink)]" />
           <div>
             <p className="font-medium text-sm">
-              Connect {appName} for better results
+              {t('spConnectForResults', appName)}
             </p>
             {reason && (
               <p className="mt-1 text-muted-foreground text-xs">{reason}</p>
@@ -211,10 +216,10 @@ export const ConnectAppCard: FC<ConnectAppCardProps> = ({
 
         <div className="mt-3 flex gap-2">
           <Button size="sm" onClick={handleConnect} disabled={connecting}>
-            {connecting ? 'Connecting...' : `Connect ${appName}`}
+            {connecting ? t('spConnecting') : t('spConnectApp', appName)}
           </Button>
           <Button size="sm" variant="ghost" onClick={handleManual}>
-            Do it manually
+            {t('spDoManually')}
           </Button>
         </div>
       </div>

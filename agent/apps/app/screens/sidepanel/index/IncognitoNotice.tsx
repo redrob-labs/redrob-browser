@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { VenetianMask } from '@browseros/icons'
 
 /**
@@ -17,7 +18,7 @@ export const IncognitoNotice = () => {
   return (
     <div className="mx-4 mb-2 flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-muted-foreground text-xs">
       <VenetianMask className="h-4 w-4 shrink-0" />
-      <span>Incognito mode: this chat is not saved to history.</span>
+      <span>{t('spIncognito')}</span>
     </div>
   )
 }

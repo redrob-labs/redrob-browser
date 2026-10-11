@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs'
 import { Glob } from 'bun'
 import { parseSync } from 'oxc-parser'
 
-const ENFORCED = ['apps/app-onboard/src']
+const ENFORCED = ['apps/app-onboard/src', 'apps/app/screens/sidepanel']
 
 const ATTRS = new Set([
   'placeholder',

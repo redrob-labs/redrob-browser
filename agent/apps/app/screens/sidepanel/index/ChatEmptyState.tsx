@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { ArrowRight, Pencil, Sparkles } from '@browseros/icons'
 import { type FC, useEffect, useRef, useState } from 'react'
 import { sentry } from '@/lib/sentry/sentry'
@@ -59,6 +60,7 @@ const ModeEmptyState: FC<ChatEmptyStateProps> = ({
       finishEditing()
     } catch (error) {
       sentry.captureException(error, {
+        // i18n-ignore: telemetry, not copy
         extra: { message: 'Failed to save starter prompts', mode },
       })
       throw error
@@ -90,13 +92,11 @@ const ModeEmptyState: FC<ChatEmptyStateProps> = ({
             <div className="flex flex-col gap-1">
               <h2 className="rr-empty__title">
                 {mode === 'chat'
-                  ? 'Chat with this page'
-                  : 'Agent at your service'}
+                  ? t('spEmptyChatTitle')
+                  : t('spEmptyAgentTitle')}
               </h2>
               <p className="rr-empty__desc">
-                {mode === 'chat'
-                  ? 'Ask questions about the current page or any topic'
-                  : 'Let AI automate tasks and browse for you'}
+                {mode === 'chat' ? t('spEmptyChatDesc') : t('spEmptyAgentDesc')}
               </p>
             </div>
             <div className="group/prompts rr-prompts ui-panel-prompts mt-3 w-full">
@@ -125,13 +125,13 @@ const ModeEmptyState: FC<ChatEmptyStateProps> = ({
                 className="rr-btn rr-btn--sm rr-btn--ghost gap-1.5 opacity-0 transition-opacity disabled:cursor-wait group-focus-within/prompts:opacity-100 group-hover/prompts:opacity-100 [@media(hover:none)]:opacity-100"
               >
                 <Pencil aria-hidden="true" className="size-3" />
-                Customize prompts
+                {t('spCustomizePrompts')}
               </button>
               {loadError && (
                 <p role="alert" className="text-[var(--status-danger)] text-xs">
-                  Could not load saved prompts.{' '}
+                  {t('spPromptsLoadFailed')}{' '}
                   <button type="button" onClick={retry} className="underline">
-                    Retry
+                    {t('spRetry')}
                   </button>
                 </p>
               )}

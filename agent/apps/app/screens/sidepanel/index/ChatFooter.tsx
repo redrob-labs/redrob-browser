@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { ChevronDown, Folder, Layers, PlugZap } from '@browseros/icons'
 import type { FC, FormEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
@@ -146,8 +147,8 @@ export const ChatFooter: FC<ChatFooterProps> = ({
               aria-expanded={isTabMentionOpen}
               aria-haspopup="dialog"
               className="ui-panel-tool"
-              title="Attach tabs (@)"
-              aria-label="Attach tabs (@)"
+              title={t('spAttachTabs')}
+              aria-label={t('spAttachTabs')}
             >
               <Layers className="h-4 w-4" />
               {attachedTabs.length > 0 && (
@@ -164,14 +165,10 @@ export const ChatFooter: FC<ChatFooterProps> = ({
                 className="ui-panel-tool"
                 data-selected={selectedFolder ? '' : undefined}
                 aria-label={
-                  selectedFolder
-                    ? selectedFolder.name
-                    : 'Select workspace folder'
+                  selectedFolder ? selectedFolder.name : t('spSelectFolder')
                 }
                 title={
-                  selectedFolder
-                    ? selectedFolder.name
-                    : 'Select workspace folder'
+                  selectedFolder ? selectedFolder.name : t('spSelectFolder')
                 }
               >
                 <div className="relative">
@@ -188,8 +185,8 @@ export const ChatFooter: FC<ChatFooterProps> = ({
               <button
                 type="button"
                 className="ui-panel-tool"
-                title="Connect apps"
-                aria-label="Connect apps"
+                title={t('spConnectApps')}
+                aria-label={t('spConnectApps')}
               >
                 {connectedManagedServers.length > 0 ? (
                   <>

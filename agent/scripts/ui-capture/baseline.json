@@ -14,7 +14,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 4,
+    "untranslated": 0,
     "fonts": 0
   },
   "chat-conversation.light.en": {
@@ -32,7 +32,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 4,
+    "untranslated": 0,
     "fonts": 0
   },
   "connect-apps.dark.en": {
@@ -86,7 +86,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 6,
+    "untranslated": 1,
     "fonts": 0
   },
   "home-chat.light.en": {
@@ -104,7 +104,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 6,
+    "untranslated": 1,
     "fonts": 0
   },
   "home-personalize.dark.en": {
@@ -410,7 +410,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 5,
+    "untranslated": 0,
     "fonts": 0
   },
   "overlay-tooltip.light.en": {
@@ -428,7 +428,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 5,
+    "untranslated": 0,
     "fonts": 0
   },
   "scheduled.dark.en": {
@@ -698,7 +698,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 6,
+    "untranslated": 1,
     "fonts": 0
   },
   "sidepanel-chat.light.en": {
@@ -716,7 +716,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 6,
+    "untranslated": 1,
     "fonts": 0
   },
   "sidepanel-history.dark.en": {
@@ -734,7 +734,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 6,
+    "untranslated": 1,
     "fonts": 0
   },
   "sidepanel-history.light.en": {
@@ -752,7 +752,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 6,
+    "untranslated": 1,
     "fonts": 0
   }
 }

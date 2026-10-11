@@ -7,9 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
+import { formatRelative, t } from '@browseros/i18n'
 import { MessageSquare, Trash2 } from '@browseros/icons'
-import dayjs from 'dayjs'
-import relativeTime from 'dayjs/plugin/relativeTime'
 import { type FC, useState } from 'react'
 import { Link } from 'react-router'
 import {
@@ -24,8 +23,6 @@ import {
 } from '@/components/ui/alert-dialog'
 import type { HistoryConversation } from './types'
 
-dayjs.extend(relativeTime)
-
 export interface ConversationItemProps {
   conversation: HistoryConversation
   onDelete?: (id: string) => void
@@ -39,7 +36,7 @@ export const ConversationItem: FC<ConversationItemProps> = ({
 }) => {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const label = conversation.lastUserMessage
-  const relativeTimeAgo = dayjs(conversation.lastMessagedAt).fromNow()
+  const relativeTimeAgo = formatRelative(conversation.lastMessagedAt)
 
   const handleDeleteClick = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -76,8 +73,8 @@ export const ConversationItem: FC<ConversationItemProps> = ({
             type="button"
             onClick={handleDeleteClick}
             className="ui-panel-row__action rr-iconbtn rr-iconbtn--sm mt-1.5 mr-1.5 shrink-0"
-            title="Delete conversation"
-            aria-label="Delete conversation"
+            title={t('spDeleteConversation')}
+            aria-label={t('spDeleteConversation')}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -87,19 +84,18 @@ export const ConversationItem: FC<ConversationItemProps> = ({
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete conversation?</AlertDialogTitle>
+            <AlertDialogTitle>{t('spDeleteConversationQ')}</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete your
-              conversation and all its messages.
+              {t('spDeleteConversationDesc')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('spCancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmDelete}
               variant="destructive"
             >
-              Delete
+              {t('spDelete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

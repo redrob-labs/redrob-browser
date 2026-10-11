@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { type MessageKey, t } from '@browseros/i18n'
 import { AlertCircle, RefreshCw } from '@browseros/icons'
 import {
   type ChatError as ChatErrorEnvelope,
@@ -36,26 +37,29 @@ interface ChatErrorView {
  * message, used as-is for codes shipped after this build.
  */
 const CODE_COPY: Partial<
-  Record<ChatErrorEnvelope['code'], { title: string; linkLabel: string }>
+  Record<
+    ChatErrorEnvelope['code'],
+    { title: MessageKey; linkLabel: MessageKey }
+  >
 > = {
-  rate_limited: { title: 'Rate limited', linkLabel: 'Learn more' },
+  rate_limited: { title: 'spErrRateLimited', linkLabel: 'spLearnMore' },
   auth_failed: {
-    title: 'Authentication failed',
-    linkLabel: 'Open AI settings',
+    title: 'spErrAuth',
+    linkLabel: 'spOpenAiSettings',
   },
   provider_config: {
-    title: 'Provider not configured',
-    linkLabel: 'Open AI settings',
+    title: 'spErrProviderConfig',
+    linkLabel: 'spOpenAiSettings',
   },
   connection_failed: {
-    title: 'Connection failed',
-    linkLabel: 'View troubleshooting guide',
+    title: 'spErrConnection',
+    linkLabel: 'spTroubleshooting',
   },
-  context_length: { title: 'Conversation too long', linkLabel: 'Learn more' },
-  content_filter: { title: 'Content was rejected', linkLabel: 'Learn more' },
+  context_length: { title: 'spErrContextLength', linkLabel: 'spLearnMore' },
+  content_filter: { title: 'spErrContentFilter', linkLabel: 'spLearnMore' },
   provider_unavailable: {
-    title: 'Provider unavailable',
-    linkLabel: 'Learn more',
+    title: 'spErrUnavailable',
+    linkLabel: 'spLearnMore',
   },
 }
 
@@ -70,10 +74,10 @@ function fromEnvelope(envelope: ChatErrorEnvelope): ChatErrorView {
       : undefined)
 
   return {
-    title: known?.title ?? envelope.title,
+    title: known ? t(known.title) : envelope.title,
     text: envelope.message,
     url,
-    linkLabel: known?.linkLabel,
+    linkLabel: known ? t(known.linkLabel) : undefined,
     details: envelope.details,
     canRetry: envelope.retryable,
   }
@@ -88,8 +92,8 @@ function fromMessage(message: string): ChatErrorView {
   // fetch failure is always a local connection issue.
   if (message.includes('Failed to fetch') || message.includes('fetch failed')) {
     return {
-      title: 'Connection failed',
-      text: 'Unable to connect to the Redrob agent. Restart Redrob and try again.',
+      title: t('spErrConnection'),
+      text: t('spErrAgentUnreachable'),
       canRetry: true,
     }
   }
@@ -108,8 +112,8 @@ function fromMessage(message: string): ChatErrorView {
   }
 
   return {
-    title: 'Something went wrong',
-    text: text || 'An unexpected error occurred',
+    title: t('spErrGeneric'),
+    text: text || t('spErrUnexpected'),
     url,
     canRetry: true,
   }
@@ -171,14 +175,14 @@ export const ChatError: FC<ChatErrorProps> = ({ error, onRetry }) => {
         <div className="w-full">
           <div className="mb-1 flex items-center justify-between px-0.5">
             <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
-              Full error
+              {t('spFullError')}
             </span>
             <button
               type="button"
               onClick={copyDetails}
               className="text-[10px] text-muted-foreground underline hover:text-foreground"
             >
-              {copiedDetails ? 'Copied' : 'Copy'}
+              {copiedDetails ? t('spCopied') : t('spCopy')}
             </button>
           </div>
           <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted p-2 text-left text-[10px] text-muted-foreground">
@@ -194,7 +198,7 @@ export const ChatError: FC<ChatErrorProps> = ({ error, onRetry }) => {
           className="mt-1 gap-2"
         >
           <RefreshCw className="h-3.5 w-3.5" />
-          Try again
+          {t('spTryAgain')}
         </Button>
       )}
     </div>

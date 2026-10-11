@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { MessageSquareHeart, X } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { Message, MessageContent } from '@/components/ai-elements/message'
@@ -41,9 +42,9 @@ export const JtbdPopup: FC<JtbdPopupProps> = ({
           <div className="flex items-start gap-3 pr-6">
             <MessageSquareHeart className="h-5 w-5 shrink-0 text-primary" />
             <div>
-              <p className="font-medium text-sm">Help us improve Redrob!</p>
+              <p className="font-medium text-sm">{t('spSurveyTitle')}</p>
               <p className="mt-1 text-muted-foreground text-xs">
-                Take a quick 3-minute survey.
+                {t('spSurveyDesc')}
               </p>
             </div>
           </div>
@@ -60,20 +61,20 @@ export const JtbdPopup: FC<JtbdPopupProps> = ({
                   setDontShowAgain(checked === true)
                 }
               />
-              Don't show this again
+              {t('spDontShowAgain')}
             </label>
           )}
 
           <div className="mt-3 flex gap-2">
             <Button size="sm" onClick={() => onTakeSurvey({ dontShowAgain })}>
-              Take Survey
+              {t('spTakeSurvey')}
             </Button>
             <Button
               size="sm"
               variant="ghost"
               onClick={() => onDismiss(dontShowAgain)}
             >
-              Maybe Later
+              {t('spMaybeLater')}
             </Button>
           </div>
         </div>

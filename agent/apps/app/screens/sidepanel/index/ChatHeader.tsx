@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Bot, ChevronDown, History, Plus, SettingsIcon } from '@browseros/icons'
 import type { FC } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
@@ -65,7 +66,7 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
           <button
             type="button"
             className="group rr-btn rr-btn--sm rr-btn--secondary gap-1.5 px-2"
-            title="Change AI Provider"
+            title={t('spChangeProvider')}
           >
             <HeaderProviderIcon provider={selectedProvider} />
             <span
@@ -74,7 +75,7 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
                 !selectedProvider && 'text-muted-foreground',
               )}
             >
-              {selectedProvider?.name ?? 'No provider'}
+              {selectedProvider?.name ?? t('spNoProvider')}
             </span>
             <ChevronDown className="h-4 w-4 shrink-0 text-[var(--ink-muted)] transition-transform group-data-[state=open]:rotate-180" />
           </button>
@@ -87,8 +88,8 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
             type="button"
             onClick={onNewConversation}
             className="rr-iconbtn rr-iconbtn--sm"
-            title="New conversation"
-            aria-label="New conversation"
+            title={t('spNewConversation')}
+            aria-label={t('spNewConversation')}
           >
             <Plus className="h-4 w-4" />
           </button>
@@ -100,8 +101,8 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
               type="button"
               onClick={handleNewConversationFromHistory}
               className="rr-iconbtn rr-iconbtn--sm"
-              title="New conversation"
-              aria-label="New conversation"
+              title={t('spNewConversation')}
+              aria-label={t('spNewConversation')}
             >
               <Plus className="h-4 w-4" />
             </button>
@@ -109,8 +110,8 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
             <Link
               to="/history"
               className="rr-iconbtn rr-iconbtn--sm"
-              title="Chat history"
-              aria-label="Chat history"
+              title={t('spChatHistory')}
+              aria-label={t('spChatHistory')}
             >
               <History className="h-4 w-4" />
             </Link>
@@ -121,8 +122,8 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
           target="_blank"
           rel="noopener noreferrer"
           className="rr-iconbtn rr-iconbtn--sm"
-          title="Settings"
-          aria-label="Settings"
+          title={t('spSettings')}
+          aria-label={t('spSettings')}
         >
           <SettingsIcon className="h-4 w-4" />
         </a>

@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { type MessageKey, t } from '@browseros/i18n'
 import { z } from 'zod'
 import type { ChatMode } from './chat-types'
 
@@ -21,12 +22,12 @@ export const starterPromptsSchema = z
       display: z
         .string()
         .trim()
-        .min(1, 'Enter a button label.')
+        .min(1, t('spEnterLabel'))
         .max(STARTER_PROMPT_LABEL_LIMIT),
       prompt: z
         .string()
         .trim()
-        .min(1, 'Enter a prompt.')
+        .min(1, t('spEnterPrompt'))
         .max(STARTER_PROMPT_TEXT_LIMIT),
     }),
   )
@@ -35,43 +36,25 @@ export const starterPromptsSchema = z
 /** A compact button label and the complete instruction sent when it is run. */
 export type StarterPrompt = z.infer<typeof starterPromptsSchema>[number]
 
-const defaults: Record<ChatMode, StarterPrompt[]> = {
+/** Message keys, read through t() each time, so the defaults follow the page's language. */
+const defaults: Record<ChatMode, [MessageKey, MessageKey][]> = {
   chat: [
-    {
-      display: 'Summarize this page',
-      prompt: 'Read the current tab and summarize it in bullet points',
-    },
-    {
-      display: 'What topics does this page talk about?',
-      prompt:
-        'Read the current tab and briefly describe what it is about in 1-2 lines',
-    },
-    {
-      display: 'Extract comments from this page',
-      prompt: 'Read the current tab and extract comments as bullet points',
-    },
+    ['spStarterChat1', 'spStarterChat1Prompt'],
+    ['spStarterChat2', 'spStarterChat2Prompt'],
+    ['spStarterChat3', 'spStarterChat3Prompt'],
   ],
   agent: [
-    {
-      display: 'Group my open tabs by topic',
-      prompt:
-        'Look at every tab open in this window and group them into tab groups by topic',
-    },
-    {
-      display: 'Find this page in other sources',
-      prompt:
-        'Read the current tab, search for two other sources covering the same topic, and summarize where they agree and differ',
-    },
-    {
-      display: 'Open amazon.com and order Sensodyne toothpaste',
-      prompt:
-        'Open amazon.com in current tab and add sensodyne toothpaste to cart',
-    },
+    ['spStarterAgent1', 'spStarterAgent1Prompt'],
+    ['spStarterAgent2', 'spStarterAgent2Prompt'],
+    ['spStarterAgent3', 'spStarterAgent3Prompt'],
   ],
 }
 
 export function getDefaultStarterPrompts(mode: ChatMode): StarterPrompt[] {
-  return defaults[mode].map((prompt) => ({ ...prompt }))
+  return defaults[mode].map(([display, prompt]) => ({
+    display: t(display),
+    prompt: t(prompt),
+  }))
 }
 
 /** Storage is an untrusted boundary: invalid preferences never break new chat. */

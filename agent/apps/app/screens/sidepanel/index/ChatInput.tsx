@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Send, SquareStop } from '@browseros/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
 import {
@@ -279,7 +280,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             className="ui-composer-send ui-composer-stop size-8 cursor-pointer"
           >
             <SquareStop className="h-3.5 w-3.5" />
-            <span className="sr-only">Stop</span>
+            <span className="sr-only">{t('spStop')}</span>
           </button>
         )
       }
@@ -291,7 +292,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
           className="ui-composer-send size-8 cursor-pointer disabled:cursor-not-allowed"
         >
           <Send className="h-3.5 w-3.5" />
-          <span className="sr-only">Send</span>
+          <span className="sr-only">{t('spSend')}</span>
         </button>
       )
     }
@@ -318,7 +319,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
           onChange={(e) => handleInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={
-            mode === 'chat' ? 'Ask about this page...' : 'What should I do?'
+            mode === 'chat' ? t('spPlaceholderChat') : t('spPlaceholderAgent')
           }
           rows={1}
         />

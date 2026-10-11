@@ -53,6 +53,7 @@ export const ChatModeToggle: FC<ChatModeToggleProps> = ({
     aria-label={t('sidepanelModeGroup')}
   >
     {MODES.map(({ value, label, hint, icon: Icon }) => (
+      // biome-ignore lint/a11y/useSemanticElements: the system's ComposerMode is a radiogroup of buttons
       <button
         key={value}
         type="button"
