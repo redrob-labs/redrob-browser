@@ -1,0 +1,35 @@
+{
+  "name": "@browseros/shopping",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test ./tests"
+  },
+  "exports": {
+    "./product": {
+      "types": "./src/product.ts",
+      "default": "./src/product.ts"
+    },
+    "./price": {
+      "types": "./src/price.ts",
+      "default": "./src/price.ts"
+    },
+    "./stores": {
+      "types": "./src/stores.ts",
+      "default": "./src/stores.ts"
+    },
+    "./listings": {
+      "types": "./src/listings.ts",
+      "default": "./src/listings.ts"
+    },
+    "./compare": {
+      "types": "./src/compare.ts",
+      "default": "./src/compare.ts"
+    }
+  },
+  "dependencies": {
+    "linkedom": "^0.18.13"
+  }
+}

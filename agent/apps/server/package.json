@@ -77,6 +77,7 @@
     "@browseros/cdp-protocol": "workspace:*",
     "@browseros/privacy": "workspace:*",
     "@browseros/shared": "workspace:*",
+    "@browseros/shopping": "workspace:*",
     "@hono/zod-validator": "^0.9.1",
     "@modelcontextprotocol/client": "^2.1.0",
     "@modelcontextprotocol/hono": "^2.0.1",

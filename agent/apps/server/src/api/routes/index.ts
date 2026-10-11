@@ -17,6 +17,7 @@ import { ConversationRuns } from '../services/conversation-runs'
 import type { KlavisService } from '../services/klavis'
 import { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
 import { setNeverReadSitesSource } from '../services/mcp/guards/never-read-sites'
+import { SmartCompare } from '../services/smart-compare'
 import type { Env, HttpServerConfig } from '../types'
 import { defaultCorsConfig } from '../utils/cors'
 import { requireTrustedAppOrigin } from '../utils/request-auth'
@@ -37,6 +38,7 @@ import { createRefinePromptRoutes } from './refine-prompt'
 import { createScheduledJobRunRoutes } from './scheduled-job-runs'
 import { createScheduledJobRoutes } from './scheduled-jobs'
 import { createShutdownRoute } from './shutdown'
+import { createSmartCompareRoutes } from './smart-compare'
 import { createStatusRoute } from './status'
 
 interface CreateApiRoutesDeps {
@@ -62,6 +64,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       new DetectorSource({ resourcesDir }),
     )
   setNeverReadSitesSource(() => privacyGate.settings.get().neverReadSites)
+  const smartCompare = new SmartCompare(browserSession)
   // One deep module owns every browser-tool lease and execution effect;
   // both /chat and /mcp must share it for loopback calls to recover context.
   const browserMcp = new BrowserMcpModule({
@@ -149,6 +152,8 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .use('/scheduled-job-runs/*', requireTrustedAppOrigin())
       // The names a person asked to keep private are in these settings.
       .use('/privacy/*', requireTrustedAppOrigin())
+      // Opens tabs in the person's browser: only the extension may ask.
+      .use('/compare/*', requireTrustedAppOrigin())
       .route('/acpx/probe', createAcpxProbeRoutes({ resourcesDir }))
       .route('/agents', resolvedAgentRoutes)
       .route('/conversations', createConversationRoutes())
@@ -160,6 +165,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
         createRefinePromptRoutes({ browserosId, privacyGate }),
       )
       .route('/privacy', createPrivacyRoutes({ gate: privacyGate }))
+      .route('/compare', createSmartCompareRoutes({ compare: smartCompare }))
       .route('/scheduled-jobs', createScheduledJobRoutes())
       .route('/scheduled-job-runs', createScheduledJobRunRoutes())
   )
