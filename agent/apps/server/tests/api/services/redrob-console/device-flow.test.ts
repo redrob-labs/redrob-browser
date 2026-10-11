@@ -56,10 +56,7 @@ describe('RedrobConsoleDeviceFlow', () => {
       // The shape a console without `redrob-browser` answers: ValidationPipe's 400.
       if (body.product === 'redrob-browser') {
         return Response.json(
-          {
-            statusCode: 400,
-            message: ['product must be one of the following values: ...'],
-          },
+          { statusCode: 400, message: ['product must be one of the following values: ...'] },
           { status: 400 },
         )
       }
@@ -73,10 +70,7 @@ describe('RedrobConsoleDeviceFlow', () => {
     }
     const flow = new RedrobConsoleDeviceFlow({ baseUrl: BASE, fetchImpl })
     const start = await flow.start()
-    expect(calls).toEqual([
-      { product: 'redrob-browser' },
-      { product: 'browser' },
-    ])
+    expect(calls).toEqual([{ product: 'redrob-browser' }, { product: 'browser' }])
     expect(start.userCode).toBe('ABCD-EFGH')
   })
 
