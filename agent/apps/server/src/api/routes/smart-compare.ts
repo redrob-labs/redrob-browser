@@ -26,6 +26,8 @@ export const CompareRequestSchema = z.object({
   }),
   region: z.enum(['KR', 'IN', 'US']),
   fresh: z.boolean().optional(),
+  /** The tab group's name, in the person's language. */
+  groupTitle: z.string().min(1).max(40).optional(),
 })
 
 export function createSmartCompareRoutes(deps: { compare: SmartCompare }) {
@@ -33,8 +35,10 @@ export function createSmartCompareRoutes(deps: { compare: SmartCompare }) {
     '/',
     zValidator('json', CompareRequestSchema),
     async (c) => {
-      const { product, region, fresh } = c.req.valid('json')
-      return c.json(await deps.compare.compare(product, region, { fresh }))
+      const { product, region, fresh, groupTitle } = c.req.valid('json')
+      return c.json(
+        await deps.compare.compare(product, region, { fresh, groupTitle }),
+      )
     },
   )
 }
