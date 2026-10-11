@@ -36,7 +36,10 @@ const Receipt: FC<{ application: Application; baseUrl?: string }> = ({
         {t('jobsReceiptFields')}
       </div>
       {receipt.fields.length ? (
-        <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-x-3 gap-y-1">
+        <dl
+          translate="no"
+          className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-x-3 gap-y-1"
+        >
           {receipt.fields.map((f) => (
             <div key={f.field} className="contents">
               <dt className="truncate text-[var(--text-secondary)]">
@@ -86,7 +89,7 @@ export const ApplicationsTab: FC<{
   return (
     <div className="space-y-4">
       {queued.length ? (
-        <div className="rr-card flex items-center justify-between gap-3 p-3">
+        <div className="rr-card flex-row items-center justify-between gap-3 p-3">
           <p className="text-[13px] text-[var(--text-secondary)]">
             {t('jobsApproveHint')}
           </p>
@@ -104,7 +107,9 @@ export const ApplicationsTab: FC<{
               setSelected(new Set())
             }}
           >
-            {t('jobsApprove', selected.size)}
+            {selected.size
+              ? t('jobsApprove', selected.size)
+              : t('jobsApproveNone')}
           </button>
         </div>
       ) : null}
@@ -132,14 +137,19 @@ export const ApplicationsTab: FC<{
                 ) : null}
                 <span className="min-w-0 flex-1 space-y-1">
                   <span className="flex flex-wrap items-center gap-2">
-                    <b className="font-semibold text-[15px]">{posting.title}</b>
+                    <b className="font-semibold text-[15px]" translate="no">
+                      {posting.title}
+                    </b>
                     <span
                       className={`rr-badge rr-badge--sm ${STATUS_TONE[status]}`}
                     >
                       {t(STATUS_LABEL[status])}
                     </span>
                   </span>
-                  <span className="block text-[13px] text-[var(--text-secondary)]">
+                  <span
+                    className="block text-[13px] text-[var(--text-secondary)]"
+                    translate="no"
+                  >
                     {[posting.company, posting.location]
                       .filter(Boolean)
                       .join(' · ')}

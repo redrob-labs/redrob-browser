@@ -91,7 +91,11 @@ function TabsContent({
   return (
     <TabsPrimitive.Content
       data-slot="tabs-content"
-      className={cn('flex-1 outline-none', className)}
+      className={cn(
+        // A tab panel takes focus from the keyboard; it shows the system's ring when it does.
+        'flex-1 outline-none focus-visible:outline-[length:var(--focus-ring-width)] focus-visible:outline-[var(--focus-ring)] focus-visible:outline-solid focus-visible:outline-offset-[var(--focus-ring-width)]',
+        className,
+      )}
       {...props}
     />
   )

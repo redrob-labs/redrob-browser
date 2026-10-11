@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { t } from '@browseros/i18n'
+import { t, tCount } from '@browseros/i18n'
 import type { JobMatch as Match } from '@browseros/jobs/match'
 import type { JobPosting } from '@browseros/jobs/posting'
 import type { ApplyMode, JobProfile } from '@browseros/jobs/profile'
@@ -63,7 +63,9 @@ export const JobPostingCard: FC<{
       {needsSetup ? (
         <div className="space-y-1 rounded-[var(--radius-md)] bg-[var(--surface-sunken)] p-3 text-[12px] text-[var(--text-secondary)]">
           {!profile.resume ? <p>{t('jobsNoResume')}</p> : null}
-          {unanswered > 0 ? <p>{t('jobsUnanswered', unanswered)}</p> : null}
+          {unanswered > 0 ? (
+            <p>{tCount('jobsUnanswered', unanswered)}</p>
+          ) : null}
           <button
             type="button"
             className="rr-btn rr-btn--ghost rr-btn--sm -ml-2"
@@ -100,9 +102,12 @@ export const JobPostingCard: FC<{
           {mode === 'review' ? t('jobsApplyReview') : t('jobsApplySend')}
         </button>
       </footer>
-      <p className="text-[11px] text-[var(--text-tertiary)]">
-        {t('jobsSiteTerms')}
-      </p>
+      {/* Sites' terms are about unattended applying; in review mode the person sends it. */}
+      {mode !== 'review' ? (
+        <p className="text-[11px] text-[var(--text-tertiary)]">
+          {t('jobsSiteTerms')}
+        </p>
+      ) : null}
     </section>
   )
 }

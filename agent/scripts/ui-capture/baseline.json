@@ -146,7 +146,7 @@
   "home.dark.en": {
     "offPalette": 6,
     "contrast": 0,
-    "focusMissing": 3,
+    "focusMissing": 2,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -155,7 +155,7 @@
   "home.dark.ko": {
     "offPalette": 6,
     "contrast": 0,
-    "focusMissing": 3,
+    "focusMissing": 2,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 10,
@@ -164,7 +164,7 @@
   "home.light.en": {
     "offPalette": 6,
     "contrast": 0,
-    "focusMissing": 3,
+    "focusMissing": 2,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -173,10 +173,82 @@
   "home.light.ko": {
     "offPalette": 6,
     "contrast": 0,
-    "focusMissing": 3,
+    "focusMissing": 2,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 10,
+    "fonts": 0
+  },
+  "jobs-profile.dark.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "jobs-profile.dark.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "jobs-profile.light.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "jobs-profile.light.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "jobs.dark.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "jobs.dark.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "jobs.light.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "jobs.light.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
     "fonts": 0
   },
   "onboard-agent.dark.en": {
@@ -470,7 +542,7 @@
   "scheduled.dark.en": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 1,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -479,7 +551,7 @@
   "scheduled.dark.ko": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 1,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 7,
@@ -488,7 +560,7 @@
   "scheduled.light.en": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 1,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -497,7 +569,7 @@
   "scheduled.light.ko": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 1,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 7,
@@ -861,6 +933,42 @@
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 6,
+    "fonts": 0
+  },
+  "sidepanel-jobs.dark.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "sidepanel-jobs.dark.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 1,
+    "fonts": 0
+  },
+  "sidepanel-jobs.light.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "sidepanel-jobs.light.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 1,
     "fonts": 0
   },
   "sidepanel-models.dark.en": {

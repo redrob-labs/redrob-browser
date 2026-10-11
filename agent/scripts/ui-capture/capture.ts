@@ -21,7 +21,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { type BrowserContext, chromium, type Page } from 'playwright'
 import { type AuditResult, audit, type Finding, focusedRing } from './audit'
-import { compareProduct, NOW, storageSeed } from './fixtures'
+import { compareProduct, jobPosting, NOW, storageSeed } from './fixtures'
 import { startStaticServer, startStubServer } from './server'
 import { browserShim } from './shim'
 
@@ -81,6 +81,15 @@ const SURFACES: Surface[] = [
   page('home-personalize', '/home/personalize'),
   page('scheduled', '/scheduled'),
   page('playbooks', '/playbooks'),
+  // With applications in the tracker the page opens on them; the profile is one tab over.
+  page('jobs', '/jobs'),
+  {
+    ...page('jobs-profile', '/jobs'),
+    open: {
+      click: '[role="tab"]:has-text("Profile"), [role="tab"]:has-text("프로필")',
+      wait: '#jobs-keywords',
+    },
+  },
   page('connect-apps', '/connect-apps'),
   page('settings-ai', '/settings/ai'),
   page('settings-chat', '/settings/chat'),
@@ -142,6 +151,21 @@ const SURFACES: Surface[] = [
     }),
     open: {
       click: 'button.rr-prompt[aria-busy]',
+      wait: 'section.rr-card[aria-label]',
+    },
+  },
+  {
+    // A job posting in the active tab: "Apply with Redrob", pressed, and the posting card.
+    id: 'sidepanel-jobs',
+    kind: 'extension',
+    path: 'sidepanel.html',
+    width: 400,
+    height: 800,
+    storage: (tabId) => ({
+      'jobs.postingByTab': { [String(tabId)]: jobPosting },
+    }),
+    open: {
+      click: 'button.rr-prompt[title]',
       wait: 'section.rr-card[aria-label]',
     },
   },

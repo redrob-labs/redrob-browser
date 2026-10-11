@@ -73,13 +73,16 @@ export const ProfileTab: FC<{ profile: JobProfile }> = ({ profile }) => {
     >
       <section className="space-y-3">
         <h2 className="font-semibold text-[15px]">{t('jobsResume')}</h2>
-        <div className="rr-card flex items-center justify-between gap-3 p-4">
+        <div className="rr-card flex-row items-center justify-between gap-3 p-4">
           <span className="flex min-w-0 items-center gap-3">
             <FileText className="size-5 shrink-0 text-[var(--text-secondary)]" />
             <span className="min-w-0">
               {profile.resume ? (
                 <>
-                  <span className="block truncate font-medium text-[14px]">
+                  <span
+                    className="block truncate font-medium text-[14px]"
+                    translate="no"
+                  >
                     {profile.resume.name}
                   </span>
                   <span className="block text-[12px] text-[var(--text-tertiary)]">

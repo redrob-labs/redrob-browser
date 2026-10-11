@@ -123,6 +123,9 @@ export function fixturesFor(locale: FixtureLocale): Record<string, unknown> {
   return {
     // modules/playbooks/playbooks.hooks.ts
     '/playbooks': { playbooks: [playbookFixture(locale)] },
+    // modules/jobs/jobs.hooks.ts
+    '/jobs/profile': { profile: jobProfileFixture(locale) },
+    '/jobs/applications': { applications: jobApplicationsFixture(locale) },
     // modules/privacy/privacy.hooks.ts: High, the model ready, two sites listed.
     '/privacy': {
       level: 'high',
@@ -459,4 +462,117 @@ export function playbookFixture(locale: FixtureLocale) {
     runs: 4,
     lastRunAt: NOW - 86_400_000 * 2,
   }
+}
+
+/** The job posting Job Apply's side-panel scene shows: an employer's text, so the same in both languages. */
+export const jobPosting = {
+  title: 'Senior Product Designer',
+  company: 'Northwind Labs',
+  location: 'Seoul (hybrid)',
+  description:
+    'Design end-to-end flows for our hiring platform. You will prototype in Figma and work with engineers every day. Hybrid: three days a week in our Seoul office. 5+ years of product design experience.',
+  url: 'https://boards.greenhouse.io/northwind/jobs/4012',
+  system: 'greenhouse',
+  source: 'json-ld',
+}
+
+/**
+ * The job seeker's profile, in the capture's language. Must-haves include one the posting is silent on
+ * (visa sponsorship), so the scene shows a condition left out of the count rather than held against it.
+ * modules/jobs/jobs.hooks.ts reads `{ profile }`.
+ */
+export function jobProfileFixture(locale: FixtureLocale) {
+  const ko = locale === 'ko'
+  const answer = (id: string, question: string, value: string) => ({
+    id,
+    question,
+    aliases: [],
+    answer: value,
+  })
+  return {
+    version: 1,
+    resume: { name: 'Jiwon-Kim-CV.pdf', size: 184_320, addedAt: h(72) },
+    answers: [
+      answer('phone', 'Phone number', '+82 10-0000-0000'),
+      answer('email', 'Email', 'jiwon@example.com'),
+      answer('notice', 'Notice period', ko ? '1개월' : '1 month'),
+      answer('salary', 'Expected salary', ''),
+      answer('gender', 'Gender (voluntary)', ''),
+    ],
+    criteria: [
+      {
+        id: 'figma',
+        text: ko ? '피그마 사용' : 'Works in Figma',
+        kind: 'must',
+        keywords: ['figma'],
+      },
+      {
+        id: 'seoul',
+        text: ko ? '서울 근무' : 'Based in Seoul',
+        kind: 'must',
+        keywords: ['seoul', '서울'],
+      },
+      {
+        id: 'visa',
+        text: ko ? '비자 지원' : 'Visa sponsorship',
+        kind: 'nice',
+        keywords: ['visa', 'sponsorship'],
+      },
+    ],
+    mode: 'review',
+    dailyCap: 10,
+    keywords: ko ? '프로덕트 디자이너' : 'product designer',
+  }
+}
+
+/** The tracker: one of each state a person acts on. modules/jobs/jobs.hooks.ts reads `{ applications }`. */
+export function jobApplicationsFixture(locale: FixtureLocale) {
+  const ko = locale === 'ko'
+  const posting = (title: string, company: string, location: string) => ({
+    ...jobPosting,
+    title,
+    company,
+    location,
+    url: `https://jobs.example/${company.toLowerCase().replace(/\W+/g, '-')}`,
+  })
+  return [
+    {
+      id: 'app-1',
+      posting: posting('Product Designer', 'Contoso', 'Remote'),
+      status: 'needs-you',
+      note: ko
+        ? '“희망 연봉” 질문에 답이 없어 멈췄습니다.'
+        : 'Stopped at “Expected salary”: it has no answer yet.',
+      createdAt: h(5),
+      updatedAt: h(2),
+    },
+    {
+      id: 'app-2',
+      posting: jobPosting,
+      status: 'ready',
+      createdAt: h(6),
+      updatedAt: h(3),
+    },
+    {
+      id: 'app-3',
+      posting: posting('UX Designer', 'Fabrikam', 'Seoul'),
+      status: 'queued',
+      createdAt: h(20),
+      updatedAt: h(20),
+    },
+    {
+      id: 'app-4',
+      posting: posting('Design Lead', 'Tailspin', 'Bengaluru'),
+      status: 'sent',
+      receipt: {
+        fields: [
+          { field: 'Email', value: 'jiwon@example.com' },
+          { field: ko ? '입사 가능일' : 'Notice period', value: ko ? '1개월' : '1 month' },
+        ],
+        sentAt: h(30),
+      },
+      createdAt: h(31),
+      updatedAt: h(30),
+    },
+  ]
 }

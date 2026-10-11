@@ -48,7 +48,7 @@ const FindTab: FC<{ keywords: string }> = ({ keywords }) => {
           <li key={site.id}>
             <button
               type="button"
-              className="rr-card flex w-full items-center gap-3 p-4 text-left"
+              className="rr-card w-full flex-row items-center gap-3 p-4 text-left"
               disabled={!keywords.trim()}
               onClick={() =>
                 void chrome.tabs.create({ url: site.search(keywords.trim()) })

@@ -48,13 +48,13 @@ export const STATUS_LABEL: Record<ApplicationStatus, MessageKey> = {
 
 /** Badge tone per status: the design system's .rr-badge modifiers. */
 export const STATUS_TONE: Record<ApplicationStatus, string> = {
-  queued: 'rr-badge--neutral',
-  filling: 'rr-badge--info',
-  'needs-you': 'rr-badge--warning',
-  ready: 'rr-badge--info',
-  sent: 'rr-badge--success',
-  failed: 'rr-badge--danger',
-  skipped: 'rr-badge--neutral',
+  queued: 'rr-badge--subtle rr-badge--neutral',
+  filling: 'rr-badge--subtle rr-badge--brand',
+  'needs-you': 'rr-badge--subtle rr-badge--warning',
+  ready: 'rr-badge--subtle rr-badge--brand',
+  sent: 'rr-badge--subtle rr-badge--success',
+  failed: 'rr-badge--subtle rr-badge--danger',
+  skipped: 'rr-badge--subtle rr-badge--neutral',
 }
 
 /** What needs the person first, then what is in progress, then the record. */

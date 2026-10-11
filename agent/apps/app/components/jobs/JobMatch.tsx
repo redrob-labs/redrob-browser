@@ -23,8 +23,14 @@ export const JobMatch: FC<{ match: Match; name: string; sub?: string }> = ({
   <div className="rr-match">
     <div className="rr-match__head">
       <span className="rr-match__body">
-        <span className="rr-match__name">{name}</span>
-        {sub ? <span className="rr-match__sub">{sub}</span> : null}
+        <span className="rr-match__name" translate="no">
+          {name}
+        </span>
+        {sub ? (
+          <span className="rr-match__sub" translate="no">
+            {sub}
+          </span>
+        ) : null}
       </span>
       {match.items.length ? (
         <span className="rr-match__verdict">
@@ -55,13 +61,15 @@ export const JobMatch: FC<{ match: Match; name: string; sub?: string }> = ({
               <span className="rr-match__label">
                 {item.criterion.text}
                 {item.criterion.kind === 'must' ? (
-                  <span className="rr-badge rr-badge--sm rr-badge--neutral ml-2">
+                  <span className="rr-badge rr-badge--sm rr-badge--subtle rr-badge--neutral ml-2">
                     {t('jobsMust')}
                   </span>
                 ) : null}
               </span>
               {item.evidence ? (
-                <span className="rr-match__evidence">“{item.evidence}”</span>
+                <span className="rr-match__evidence" translate="no">
+                  “{item.evidence}”
+                </span>
               ) : (
                 <span className="rr-match__evidence rr-match__evidence--none">
                   {t('jobsNoEvidence')}
