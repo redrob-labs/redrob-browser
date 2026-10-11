@@ -33,6 +33,7 @@ import {
   groupProviderOptions,
 } from './ChatProviderSelector.helpers'
 import type { Provider } from './chatComponentTypes'
+import { RedrobModelGroup } from './RedrobModelGroup'
 
 export interface ChatProviderSelectorProps {
   providers: Provider[]
@@ -58,6 +59,13 @@ export const ChatProviderSelector: FC<
           />
           <CommandList>
             <CommandEmpty>No provider found</CommandEmpty>
+            {selectedProvider?.kind === 'llm' &&
+            selectedProvider.type === 'redrob-console' ? (
+              <RedrobModelGroup
+                providerId={selectedProvider.id}
+                onDone={() => setOpen(false)}
+              />
+            ) : null}
             {groups.map((group) => (
               <CommandGroup key={group.key} heading={group.label}>
                 {group.options.map((provider) => {

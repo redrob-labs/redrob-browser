@@ -1,0 +1,17 @@
+# The model menu for a Redrob Console provider (agent/apps/app/modules/models), English and Korean.
+#
+# key <TAB> English <TAB> Korean [<TAB> description]
+#
+# Notes follow Redrob Cowork's model_select copy. Lab and model names are names and are not translated.
+
+modelGroup	Model	모델	Heading of the model list in the agent menu
+modelAuto	Redrob Auto	Redrob 자동	The routed model; a product name with a translated word
+modelNoteAuto	Picks the best model for each message	메시지마다 가장 알맞은 모델을 고릅니다
+modelNoteAnthropic	Careful writing and long, hard tasks	신중한 글쓰기와 길고 어려운 작업
+modelNoteOpenai	Strong all-round reasoning	뛰어난 종합 추론
+modelNoteGoogle	Fast and inexpensive	빠르고 저렴함
+modelNoteMeta	Open model, quick answers	오픈 모델, 빠른 답변
+modelNoteXai	Current events and plain answers	최신 소식과 솔직한 답변
+modelCurrent	In use	사용 중	Badge on the model in use when it is not a recommended one
+modelAll	All models in Settings	설정에서 모든 모델 보기	Link to the full list
+modelSaveFailed	Couldn't switch the model. Try again.	모델을 바꾸지 못했습니다. 다시 시도하세요.

@@ -145,6 +145,18 @@ const SURFACES: Surface[] = [
     },
   },
   {
+    // The agent menu with Redrob Console selected: Redrob Auto, then one model per lab.
+    id: 'sidepanel-models',
+    kind: 'extension',
+    path: 'sidepanel.html',
+    width: 400,
+    height: 800,
+    open: {
+      click: 'button[aria-haspopup="dialog"]:has-text("Redrob")',
+      wait: '[cmdk-group-heading]',
+    },
+  },
+  {
     id: 'sidepanel-history',
     kind: 'extension',
     path: 'sidepanel.html#/history',
