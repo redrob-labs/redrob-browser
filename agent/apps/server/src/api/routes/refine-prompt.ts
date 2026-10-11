@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { refinePrompt } from '../../lib/clients/llm/refine-prompt'
 import type { ProviderRow } from '../../lib/db/schema'
 import { logger } from '../../lib/logger'
+import type { PrivacyGate } from '../../lib/privacy/gate'
 import {
   dbProviderStore,
   type ProviderStore,
@@ -44,6 +45,7 @@ interface RefinePromptRouteDeps {
   browserosId?: string
   /** Injectable so the resolution is testable without a database. */
   providerStore?: RefineProviderLookup
+  privacyGate?: PrivacyGate
 }
 
 const NO_LLM_MESSAGE =
@@ -127,11 +129,39 @@ export function createRefinePromptRoutes(deps: RefinePromptRouteDeps = {}) {
         taskName: name,
       })
 
+      // The draft a person is refining goes to the model like any message, so it is labelled
+      // the same way, and the refined prompt they read comes back with the real values.
+      const gate = deps.privacyGate
+      const gateKey = `refine:${crypto.randomUUID()}`
+      let labelled: { prompt: string; name: string }
+      try {
+        const texts = gate
+          ? (await gate.label(gateKey, [prompt, name])).texts
+          : [prompt, name]
+        labelled = { prompt: texts[0] ?? prompt, name: texts[1] ?? name }
+      } catch (error) {
+        gate?.forget(gateKey)
+        logger.warn('Refine prompt stopped by Privacy Protection', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return c.json(
+          {
+            success: false,
+            message:
+              'Privacy Protection could not check this prompt, so nothing was sent.',
+          },
+          400,
+        )
+      }
       const result = await refinePrompt(
         { ...llmConfig, provider: llmConfig.provider, model: llmConfig.model },
-        { prompt, name },
+        labelled,
         deps.browserosId,
       )
+      if (gate && result.success && result.refined) {
+        result.refined = gate.restore(gateKey, result.refined)
+      }
+      gate?.forget(gateKey)
 
       logger.info('Refine prompt result', {
         provider: llmConfig.provider,

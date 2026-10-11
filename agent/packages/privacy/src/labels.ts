@@ -39,6 +39,7 @@ export type LabelCategory =
   | 'ORG'
   | 'TITLE'
   | 'AMOUNT'
+  | 'SECRET'
 
 export type PrivacyRules = {
   level: PrivacyLevel
@@ -65,7 +66,9 @@ export function emptyLabelMap(dateShiftDays = 0): LabelMap {
   return { byLabel: {}, byValue: {}, dateShiftDays }
 }
 
-const STANDARD: LabelCategory[] = ['EMAIL', 'RRN', 'CARD', 'PHONE']
+// SECRET is the browser's addition to Cowork's set: API keys, tokens and private keys are never what a
+// person means to send, so they are kept from the model from the first level up.
+const STANDARD: LabelCategory[] = ['SECRET', 'EMAIL', 'RRN', 'CARD', 'PHONE']
 const HIGH: LabelCategory[] = [
   ...STANDARD,
   'ACCOUNT',
@@ -138,6 +141,23 @@ type Rule = {
 
 /** In order: the more specific shapes go first, so a phone pattern never takes an ID number. */
 const RULES: Rule[] = [
+  // Secrets first, so no other shape takes part of a key. Patterns follow the server's chat-error
+  // scrubber (apps/server/src/agent/chat-error.ts).
+  {
+    category: 'SECRET',
+    pattern:
+      /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+  },
+  {
+    category: 'SECRET',
+    pattern:
+      /\b(?:sk|pk|rk)[-_][A-Za-z0-9_-]{12,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{22,}|\bglpat-[A-Za-z0-9_-]{20}|\bAIza[0-9A-Za-z_-]{35}|\bya29\.[0-9A-Za-z_-]{20,}|\bxox[baprs]-[A-Za-z0-9-]{10,}|\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/g,
+  },
+  {
+    category: 'SECRET',
+    pattern: /\bBearer\s+([A-Za-z0-9._~+/-]{12,}=*)/gi,
+    group: 1,
+  },
   {
     category: 'EMAIL',
     pattern: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
@@ -461,7 +481,7 @@ export function labelText(
 }
 
 const CATEGORY_ALTERNATION =
-  'EMAIL|RRN|BRN|CARD|PHONE|ACCOUNT|ADDRESS|PERSON|ORG|TITLE|AMOUNT|NAME'
+  'EMAIL|RRN|BRN|CARD|PHONE|ACCOUNT|ADDRESS|PERSON|ORG|TITLE|AMOUNT|SECRET|NAME'
 /**
  * `[PERSON_1]`, `[PERSON 1]`, `［PERSON_1］`, and a bare `PERSON_1` as a whole word. A bracketed
  * label's approximation, `(≈₩12,000,000)`, goes with it: the exact value replaces both.

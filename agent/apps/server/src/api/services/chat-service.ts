@@ -41,6 +41,7 @@ import {
   type SaveConversationInput,
 } from '../../lib/conversations/conversation-store'
 import { logger } from '../../lib/logger'
+import type { PrivacyGate } from '../../lib/privacy/gate'
 import type { KlavisService } from '../services/klavis'
 import type {
   BrowserMcpModule,
@@ -82,6 +83,8 @@ export interface ChatServiceDeps {
   acpRuntime?: Pick<AcpAgentRuntime, 'stream' | 'close'>
   conversationStore?: Pick<ConversationStore, 'get' | 'save'>
   conversationRuns?: ConversationRuns
+  /** Privacy Protection for the Redrob agent. External (ACP) agents make their own model calls. */
+  privacyGate?: PrivacyGate
 }
 
 export class ChatService {
@@ -839,6 +842,7 @@ export class ChatService {
         browserosId: this.deps.browserosId,
         aiSdkDevtoolsEnabled: this.deps.aiSdkDevtoolsEnabled,
         outputFileAccess,
+        privacyGate: this.deps.privacyGate,
       })
       return { agent, browserToolLease }
     } catch (error) {
