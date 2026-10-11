@@ -1,0 +1,43 @@
+{
+  "name": "@browseros/jobs",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test ./tests"
+  },
+  "exports": {
+    "./posting": {
+      "types": "./src/posting.ts",
+      "default": "./src/posting.ts"
+    },
+    "./profile": {
+      "types": "./src/profile.ts",
+      "default": "./src/profile.ts"
+    },
+    "./answers": {
+      "types": "./src/answers.ts",
+      "default": "./src/answers.ts"
+    },
+    "./match": {
+      "types": "./src/match.ts",
+      "default": "./src/match.ts"
+    },
+    "./applications": {
+      "types": "./src/applications.ts",
+      "default": "./src/applications.ts"
+    },
+    "./prompt": {
+      "types": "./src/prompt.ts",
+      "default": "./src/prompt.ts"
+    },
+    "./sites": {
+      "types": "./src/sites.ts",
+      "default": "./src/sites.ts"
+    }
+  },
+  "devDependencies": {
+    "linkedom": "^0.18.13"
+  }
+}

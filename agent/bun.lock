@@ -422,6 +422,13 @@
         "react": "^19.0.0",
       },
     },
+    "packages/jobs": {
+      "name": "@browseros/jobs",
+      "version": "0.0.1",
+      "devDependencies": {
+        "linkedom": "^0.18.13",
+      },
+    },
     "packages/onboarding-video": {
       "name": "@browseros/onboarding-video",
       "version": "0.2.0",
@@ -707,6 +714,8 @@
     "@browseros/i18n": ["@browseros/i18n@workspace:packages/i18n"],
 
     "@browseros/icons": ["@browseros/icons@workspace:packages/icons"],
+
+    "@browseros/jobs": ["@browseros/jobs@workspace:packages/jobs"],
 
     "@browseros/onboarding-video": ["@browseros/onboarding-video@workspace:packages/onboarding-video"],
 
