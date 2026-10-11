@@ -26,6 +26,8 @@ export interface StubServer {
   unknown: Map<string, number>
   /** The language the next captures are in; user-authored fixture content follows it. */
   setLocale(locale: FixtureLocale): void
+  /** Route bodies for one scene only, laid over the locale's fixtures; null clears them. */
+  override(routes: Record<string, unknown> | null): void
   /** Milliseconds since the last request arrived, so a capture can wait for the screen's data to land. */
   idleFor(): number
   stop(): void
@@ -34,6 +36,7 @@ export interface StubServer {
 export function startStubServer(): StubServer {
   const unknown = new Map<string, number>()
   let json = fixturesFor('en')
+  let base = json
   let last = Date.now()
   const server = Bun.serve({
     port: 0,
@@ -79,7 +82,11 @@ export function startStubServer(): StubServer {
     port: server.port as number,
     unknown,
     setLocale: (locale) => {
-      json = fixturesFor(locale)
+      base = fixturesFor(locale)
+      json = base
+    },
+    override: (routes) => {
+      json = routes ? { ...base, ...routes } : base
     },
     idleFor: () => Date.now() - last,
     stop: () => server.stop(true),

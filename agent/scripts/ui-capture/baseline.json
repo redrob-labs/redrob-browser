@@ -755,6 +755,42 @@
     "untranslated": 23,
     "fonts": 0
   },
+  "settings-privacy-team.dark.en": {
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "settings-privacy-team.dark.ko": {
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 9,
+    "fonts": 0
+  },
+  "settings-privacy-team.light.en": {
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "settings-privacy-team.light.ko": {
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 9,
+    "fonts": 0
+  },
   "settings-privacy.dark.en": {
     "offPalette": 1,
     "contrast": 0,

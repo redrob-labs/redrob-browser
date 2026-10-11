@@ -10,8 +10,8 @@
  * pattern redesign 4.4 adopts for all of Settings, so this page needs no rework when it lands.
  */
 
-import { t, tNodes } from '@browseros/i18n'
-import { ShieldCheck, ShieldX, Trash2 } from '@browseros/icons'
+import { t, tCount, tNodes } from '@browseros/i18n'
+import { Lock, ShieldCheck, ShieldX, Trash2 } from '@browseros/icons'
 import { ProtectionStatus } from '@redrob-labs/ui'
 import { type FC, type FormEvent, useState } from 'react'
 import { toast } from 'sonner'
@@ -23,6 +23,7 @@ import {
   useUpdatePrivacy,
 } from '@/modules/privacy/privacy.hooks'
 import {
+  levelLocked,
   PRIVACY_LEVELS,
   type PrivacyLevel,
   type PrivacyStatus,
@@ -31,6 +32,7 @@ import {
   LEVEL_DETAIL,
   LEVEL_NAME,
   modelNote,
+  teamRefusal,
 } from '@/modules/privacy/privacy-copy'
 
 /** `김지원 | Jiwon Kim` per line, to the server's groups of forms. */
@@ -122,6 +124,9 @@ export const PrivacySettingsView: FC<{ status: PrivacyStatus }> = ({
 
   const on = status.level !== 'off'
   const note = modelNote(status.level, status.detector)
+  const locked = levelLocked(status)
+  const team = status.team?.state === 'active' ? status.team : null
+  const refused = teamRefusal(status.team?.refused)
 
   return (
     <div className="fade-in slide-in-from-bottom-5 animate-in space-y-6 duration-500">
@@ -136,6 +141,17 @@ export const PrivacySettingsView: FC<{ status: PrivacyStatus }> = ({
         }
         live={on ? t('privacyRunning') : undefined}
       >
+        {team?.setBy ? (
+          <span className="mb-1 flex items-center gap-1.5 font-medium">
+            <Lock className="size-[14px]" aria-hidden />
+            {tNodes(
+              'privacyTeamSetBy',
+              <span key="n" translate="no">
+                {team.setBy}
+              </span>,
+            )}
+          </span>
+        ) : null}
         {on
           ? t('privacyKeptWeek', status.keptThisWeek)
           : t('privacyLevelOffDetail')}
@@ -154,6 +170,10 @@ export const PrivacySettingsView: FC<{ status: PrivacyStatus }> = ({
           </span>
         ) : null}
       </ProtectionStatus>
+
+      {refused ? (
+        <ProtectionStatus tone="warn" title={refused} icon={<ShieldX />} />
+      ) : null}
 
       <Section title={t('privacyPageSendTitle')}>
         <Row
@@ -176,6 +196,12 @@ export const PrivacySettingsView: FC<{ status: PrivacyStatus }> = ({
       </Section>
 
       <Section title={t('privacyPageLevelsTitle')}>
+        {locked ? (
+          <p className="flex items-center gap-1.5 text-[13px] text-[var(--text-secondary)]">
+            <Lock className="size-[14px] shrink-0" aria-hidden />
+            {t('privacyTeamLocked')}
+          </p>
+        ) : null}
         <div className="space-y-3">
           {PRIVACY_LEVELS.map((level: PrivacyLevel) => {
             const current = level === status.level
@@ -187,9 +213,11 @@ export const PrivacySettingsView: FC<{ status: PrivacyStatus }> = ({
                 control={
                   current ? (
                     <span className="rr-badge rr-badge--subtle rr-badge--success rr-badge--sm">
-                      {t('privacyPageYourLevel')}
+                      {locked
+                        ? t('privacyTeamLockedLevel')
+                        : t('privacyPageYourLevel')}
                     </span>
-                  ) : (
+                  ) : locked ? null : (
                     <button
                       type="button"
                       aria-label={`${t('privacyPageUseLevel')}: ${t(LEVEL_NAME[level])}`}
@@ -262,6 +290,11 @@ export const PrivacySettingsView: FC<{ status: PrivacyStatus }> = ({
             <Code key="n">김지원 | Jiwon Kim</Code>,
           )}
         </p>
+        {team?.names ? (
+          <p className="text-[13px] text-[var(--text-secondary)]">
+            {tCount('privacyTeamNames', team.names)}
+          </p>
+        ) : null}
         <Textarea
           translate="no"
           value={names}
@@ -285,6 +318,14 @@ export const PrivacySettingsView: FC<{ status: PrivacyStatus }> = ({
         <Row
           title={t('privacyPageWhereAgentTitle')}
           text={t('privacyPageWhereAgentText')}
+        />
+        <Row
+          title={t('privacyPageWhereSavedTitle')}
+          text={
+            status.savedSecrets === 'unavailable'
+              ? `${t('privacyPageWhereSavedText')} ${t('privacyPageWhereSavedUnavailable')}`
+              : t('privacyPageWhereSavedText')
+          }
         />
         <Row
           title={t('privacyPageWhereMissTitle')}

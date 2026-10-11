@@ -113,7 +113,11 @@ export function privacyItem(
         ]}
         onLabel={t('privacyOnTitle')}
         running={t('privacyRunning')}
-        summary={t('privacyKeptWeek', status.keptThisWeek)}
+        summary={
+          status.team?.state === 'active' && status.team.setBy
+            ? `${t('privacyKeptWeek', status.keptThisWeek)} · ${t('privacyTeamSetBy', status.team.setBy)}`
+            : t('privacyKeptWeek', status.keptThisWeek)
+        }
         lede={t('privacyLede')}
         showLevels={false}
         last={note ?? undefined}

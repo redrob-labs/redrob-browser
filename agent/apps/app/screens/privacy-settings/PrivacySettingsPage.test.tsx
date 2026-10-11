@@ -32,6 +32,11 @@ const status: PrivacyStatus = {
   coverage: { redrobAgent: true, externalAgents: false },
 }
 
+const render = (overrides: Partial<PrivacyStatus>) =>
+  renderToStaticMarkup(
+    createElement(PrivacySettingsView, { status: { ...status, ...overrides } }),
+  )
+
 describe('Settings, Privacy', () => {
   it('shows the level, the sites, the names and what it cannot cover', () => {
     const html = renderToStaticMarkup(
@@ -66,5 +71,41 @@ describe('Settings, Privacy', () => {
     )
     expect(html).toContain('could not be set up')
     expect(html).toContain('Try again')
+  })
+
+  it('shows who set a locked level, offers no other level, and counts the team’s names', () => {
+    const html = render({
+      level: 'high',
+      team: {
+        state: 'active',
+        accountId: 'acc_team',
+        version: 3,
+        setBy: 'Park Hyunjin',
+        level: 'high',
+        locked: true,
+        names: 2,
+      },
+      savedSecrets: 'on',
+    })
+    expect(html).toContain('Set by your team · <span translate="no">Park Hyunjin</span>')
+    expect(html).toContain('Only a new policy from your team changes it.')
+    expect(html).not.toContain('Use this level')
+    expect(html).toContain('Your team also keeps 2 names private.')
+    expect(html).toContain('Passwords and details you saved')
+  })
+
+  it('says when the device’s policy was refused, and leaves the levels to the person', () => {
+    const html = render({
+      team: {
+        state: 'refused',
+        refused: 'team_policy_unknown_key',
+        locked: false,
+        names: 0,
+      },
+      savedSecrets: 'unavailable',
+    })
+    expect(html).toContain('signed with a key this browser doesn&#x27;t trust')
+    expect(html).toContain('Use this level')
+    expect(html).toContain('only the checks above applied')
   })
 })

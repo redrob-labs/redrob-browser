@@ -21,7 +21,13 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { type BrowserContext, chromium, type Page } from 'playwright'
 import { type AuditResult, audit, type Finding, focusedRing } from './audit'
-import { compareProduct, jobPosting, NOW, storageSeed } from './fixtures'
+import {
+  compareProduct,
+  fixturesFor,
+  jobPosting,
+  NOW,
+  storageSeed,
+} from './fixtures'
 import { startStaticServer, startStubServer } from './server'
 import { browserShim } from './shim'
 
@@ -64,6 +70,8 @@ interface Surface {
    * page's own tab id where a value needs it) and removed after the capture.
    */
   storage?: (tabId: number) => Record<string, unknown>
+  /** Stub-server route bodies for this scene only, given the locale's fixtures. */
+  fixtures?: (base: Record<string, unknown>) => Record<string, unknown>
 }
 
 const page = (id: string, path: string): Surface => ({
@@ -86,7 +94,8 @@ const SURFACES: Surface[] = [
   {
     ...page('jobs-profile', '/jobs'),
     open: {
-      click: '[role="tab"]:has-text("Profile"), [role="tab"]:has-text("프로필")',
+      click:
+        '[role="tab"]:has-text("Profile"), [role="tab"]:has-text("프로필")',
       wait: '#jobs-keywords',
     },
   },
@@ -98,6 +107,25 @@ const SURFACES: Surface[] = [
   page('settings-diagnostics', '/settings/diagnostics'),
   page('settings-search', '/settings/search'),
   page('settings-privacy', '/settings/privacy'),
+  {
+    // A business device: the team's signed policy locks the level and adds names.
+    ...page('settings-privacy-team', '/settings/privacy'),
+    fixtures: (base) => ({
+      '/privacy': {
+        ...(base['/privacy'] as object),
+        team: {
+          state: 'active',
+          accountId: 'acc_northwind',
+          version: 3,
+          setBy: 'Park Hyunjin',
+          level: 'high',
+          locked: true,
+          names: 4,
+        },
+        savedSecrets: 'on',
+      },
+    }),
+  },
   page('onboarding-ai', '/onboarding/ai'),
   {
     ...page('overlay-menu', '/settings/ai'),
@@ -436,6 +464,19 @@ async function captureOne(
     s.kind === 'extension' ? `${base}/${s.path}` : `${base}${s.path}`,
   )
   await settle(p)
+  if (s.fixtures) {
+    // The app persists its query cache in IndexedDB (idb-keyval's keyval-store), so this scene would
+    // otherwise show the previous scene's answers until they go stale. Drop it and load again.
+    await p.evaluate(
+      () =>
+        new Promise<void>((done) => {
+          const request = indexedDB.deleteDatabase('keyval-store')
+          request.onsuccess = request.onerror = request.onblocked = () => done()
+        }),
+    )
+    await p.reload()
+    await settle(p)
+  }
   const seeded = s.storage
     ? await p.evaluate(
         async (entries) => {
@@ -551,6 +592,7 @@ async function main() {
           s.kind === 'extension'
             ? `chrome-extension://${id}`
             : `http://127.0.0.1:${onboard.port}`
+        stub.override(s.fixtures ? s.fixtures(fixturesFor(locale)) : null)
         try {
           const r = await captureOne(ctx, s, base, theme, locale)
           results.push(r)

@@ -567,7 +567,10 @@ export function jobApplicationsFixture(locale: FixtureLocale) {
       receipt: {
         fields: [
           { field: 'Email', value: 'jiwon@example.com' },
-          { field: ko ? '입사 가능일' : 'Notice period', value: ko ? '1개월' : '1 month' },
+          {
+            field: ko ? '입사 가능일' : 'Notice period',
+            value: ko ? '1개월' : '1 month',
+          },
         ],
         sentAt: h(30),
       },

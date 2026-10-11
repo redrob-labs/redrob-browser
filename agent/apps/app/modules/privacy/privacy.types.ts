@@ -24,6 +24,18 @@ export type PrivacyDetectorStatus =
   | { state: 'absent'; reason: string }
   | { state: 'failed'; reason: string }
 
+/** A business workspace's signed policy on this device. Absent everywhere else. */
+export interface PrivacyTeamStatus {
+  state: 'active' | 'refused'
+  refused?: string
+  accountId?: string
+  version?: number
+  setBy?: string
+  level?: PrivacyLevel
+  locked: boolean
+  names: number
+}
+
 export interface PrivacyStatus {
   level: PrivacyLevel
   names: string[][]
@@ -31,6 +43,15 @@ export interface PrivacyStatus {
   keptThisWeek: number
   detector: PrivacyDetectorStatus
   coverage: { redrobAgent: boolean; externalAgents: boolean }
+  /** Absent from a server older than team policy: read as no team. */
+  team?: PrivacyTeamStatus | null
+  /** Absent from a server older than the saved-secret scan. */
+  savedSecrets?: 'on' | 'unavailable' | 'unknown'
+}
+
+/** Whether the level is the team's to set. */
+export function levelLocked(status: PrivacyStatus): boolean {
+  return status.team?.state === 'active' && status.team.locked
 }
 
 export interface PrivacyUpdate {

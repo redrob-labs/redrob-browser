@@ -75,3 +75,11 @@ export function modelNote(
       return null
   }
 }
+
+/** Why the device's team policy was not applied, in words; null when it was. */
+export function teamRefusal(code: string | undefined): string | null {
+  if (!code) return null
+  if (code === 'team_policy_unknown_key') return t('privacyTeamRefusedKey')
+  if (code === 'team_policy_stale') return t('privacyTeamRefusedStale')
+  return t('privacyTeamRefusedInvalid')
+}
