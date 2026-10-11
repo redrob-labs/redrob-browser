@@ -34,9 +34,9 @@ export const CustomAgentTile: FC<CustomAgentTileProps> = ({ onAdd }) => {
       type="button"
       onClick={onAdd}
       aria-label="Add Custom ACP agent"
-      className="group col-span-full flex w-full items-center gap-4 rounded-lg border border-[var(--accent-brand)]/40 border-dashed bg-card p-4 text-left transition-all hover:border-[var(--accent-brand)] hover:bg-[var(--accent-brand)]/5"
+      className="ui-pick ui-pick--dashed group col-span-full flex w-full items-center gap-4 p-4 text-left"
     >
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-brand)]/10 text-[var(--accent-brand-ink)]">
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-brand-subtle)] text-[var(--ink-brand)]">
         <Plus className="size-6" />
       </span>
 

@@ -141,9 +141,7 @@ export const AddProviderSection: FC<AddProviderSectionProps> = ({
       ) : (
         groups.map((group) => (
           <div key={group.category} className="space-y-2">
-            <h4 className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-              {group.label}
-            </h4>
+            <h4 className="ui-meta-label">{group.label}</h4>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {group.entries.map((entry) =>
                 entry.featured ? (

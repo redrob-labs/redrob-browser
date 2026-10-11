@@ -52,7 +52,7 @@ export function VisualRail() {
             const Icon = feature.icon
             return (
               <div key={feature.title} className="flex items-start gap-[11px]">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-card/70 text-accent-ink">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-card text-accent-ink">
                   <Icon className="size-[15px]" />
                 </span>
                 <div>

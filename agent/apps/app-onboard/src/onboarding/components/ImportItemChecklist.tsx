@@ -65,7 +65,7 @@ export function ImportItemChecklist({
           <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[12px] text-ink-3 transition-colors hover:text-ink-2">
             <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
             {t('onboardAlsoCopyMyBrowsingSetup')}
-            <span className="text-ink-4">
+            <span className="text-ink-3">
               ({optionalItems.map(importItemLabel).join(', ')})
             </span>
           </summary>

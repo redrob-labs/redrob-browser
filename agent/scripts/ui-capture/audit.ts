@@ -340,8 +340,14 @@ export function focusedRing(): {
   finding: Finding
   ring: boolean
 } | null {
-  const el = document.activeElement as HTMLElement | null
-  if (!el || el === document.body) return null
+  const active = document.activeElement as HTMLElement | null
+  if (!active || active === document.body) return null
+  // A visually hidden control (an sr-only radio inside a tile) draws its focus on the label around it.
+  const box = active.getBoundingClientRect()
+  const el =
+    box.width <= 1 && box.height <= 1
+      ? ((active.closest('label') as HTMLElement | null) ?? active)
+      : active
   const s = getComputedStyle(el)
   const outline = s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) >= 2
   const shadow = s.boxShadow !== 'none' && s.boxShadow !== ''

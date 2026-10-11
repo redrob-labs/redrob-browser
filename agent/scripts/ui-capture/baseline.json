@@ -180,8 +180,8 @@
     "fonts": 0
   },
   "onboard-agent.dark.en": {
-    "offPalette": 4,
-    "contrast": 1,
+    "offPalette": 1,
+    "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
@@ -189,8 +189,8 @@
     "fonts": 1
   },
   "onboard-agent.dark.ko": {
-    "offPalette": 4,
-    "contrast": 1,
+    "offPalette": 1,
+    "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
@@ -198,8 +198,8 @@
     "fonts": 1
   },
   "onboard-agent.light.en": {
-    "offPalette": 3,
-    "contrast": 1,
+    "offPalette": 0,
+    "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
@@ -207,8 +207,8 @@
     "fonts": 1
   },
   "onboard-agent.light.ko": {
-    "offPalette": 3,
-    "contrast": 1,
+    "offPalette": 0,
+    "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
@@ -216,43 +216,43 @@
     "fonts": 1
   },
   "onboard-import.dark.en": {
-    "offPalette": 5,
-    "contrast": 2,
-    "focusMissing": 1,
+    "offPalette": 2,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 1
   },
   "onboard-import.dark.ko": {
-    "offPalette": 5,
-    "contrast": 2,
-    "focusMissing": 1,
+    "offPalette": 2,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 4,
     "fonts": 1
   },
   "onboard-import.light.en": {
-    "offPalette": 3,
-    "contrast": 2,
-    "focusMissing": 1,
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 1
   },
   "onboard-import.light.ko": {
-    "offPalette": 3,
-    "contrast": 2,
-    "focusMissing": 1,
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 4,
     "fonts": 1
   },
   "onboard-welcome.dark.en": {
-    "offPalette": 2,
+    "offPalette": 1,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -261,7 +261,7 @@
     "fonts": 1
   },
   "onboard-welcome.dark.ko": {
-    "offPalette": 2,
+    "offPalette": 1,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -270,7 +270,7 @@
     "fonts": 1
   },
   "onboard-welcome.light.en": {
-    "offPalette": 1,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -279,7 +279,7 @@
     "fonts": 1
   },
   "onboard-welcome.light.ko": {
-    "offPalette": 1,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -288,36 +288,36 @@
     "fonts": 1
   },
   "onboarding-ai.dark.en": {
-    "offPalette": 16,
+    "offPalette": 12,
     "contrast": 0,
-    "focusMissing": 15,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "onboarding-ai.dark.ko": {
-    "offPalette": 16,
+    "offPalette": 12,
     "contrast": 0,
-    "focusMissing": 15,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 15,
     "fonts": 0
   },
   "onboarding-ai.light.en": {
-    "offPalette": 19,
+    "offPalette": 15,
     "contrast": 0,
-    "focusMissing": 15,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "onboarding-ai.light.ko": {
-    "offPalette": 19,
+    "offPalette": 15,
     "contrast": 0,
-    "focusMissing": 15,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 15,
@@ -360,7 +360,7 @@
     "fonts": 0
   },
   "overlay-menu.dark.en": {
-    "offPalette": 18,
+    "offPalette": 15,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -369,7 +369,7 @@
     "fonts": 0
   },
   "overlay-menu.dark.ko": {
-    "offPalette": 18,
+    "offPalette": 15,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -378,7 +378,7 @@
     "fonts": 0
   },
   "overlay-menu.light.en": {
-    "offPalette": 21,
+    "offPalette": 18,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -387,7 +387,7 @@
     "fonts": 0
   },
   "overlay-menu.light.ko": {
-    "offPalette": 21,
+    "offPalette": 18,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -468,7 +468,7 @@
     "fonts": 0
   },
   "settings-ai.dark.en": {
-    "offPalette": 18,
+    "offPalette": 15,
     "contrast": 0,
     "focusMissing": 1,
     "roundIcons": 0,
@@ -477,7 +477,7 @@
     "fonts": 0
   },
   "settings-ai.dark.ko": {
-    "offPalette": 18,
+    "offPalette": 15,
     "contrast": 0,
     "focusMissing": 1,
     "roundIcons": 0,
@@ -486,7 +486,7 @@
     "fonts": 0
   },
   "settings-ai.light.en": {
-    "offPalette": 21,
+    "offPalette": 18,
     "contrast": 0,
     "focusMissing": 1,
     "roundIcons": 0,
@@ -495,7 +495,7 @@
     "fonts": 0
   },
   "settings-ai.light.ko": {
-    "offPalette": 21,
+    "offPalette": 18,
     "contrast": 0,
     "focusMissing": 1,
     "roundIcons": 0,
@@ -648,7 +648,7 @@
     "fonts": 0
   },
   "settings-search.dark.en": {
-    "offPalette": 18,
+    "offPalette": 15,
     "contrast": 0,
     "focusMissing": 1,
     "roundIcons": 0,
@@ -657,7 +657,7 @@
     "fonts": 0
   },
   "settings-search.dark.ko": {
-    "offPalette": 18,
+    "offPalette": 15,
     "contrast": 0,
     "focusMissing": 1,
     "roundIcons": 0,
@@ -666,7 +666,7 @@
     "fonts": 0
   },
   "settings-search.light.en": {
-    "offPalette": 21,
+    "offPalette": 18,
     "contrast": 0,
     "focusMissing": 1,
     "roundIcons": 0,
@@ -675,7 +675,7 @@
     "fonts": 0
   },
   "settings-search.light.ko": {
-    "offPalette": 21,
+    "offPalette": 18,
     "contrast": 0,
     "focusMissing": 1,
     "roundIcons": 0,

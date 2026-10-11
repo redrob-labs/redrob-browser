@@ -1080,6 +1080,40 @@
   .ui-sample--quiet {
     color: var(--ink-secondary);
   }
+  /* A picker tile (Add a provider): .rr-card--interactive. Hover is the border and the Add chip turning
+     brand; nothing lifts, and focus is the system ring. */
+  .ui-pick {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    color: var(--ink-primary);
+    transition: border-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-pick--dashed {
+    border-style: dashed;
+    border-color: var(--border-strong);
+  }
+  .ui-pick:hover {
+    border-color: var(--border-strong);
+  }
+  .ui-pick:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+  }
+  .ui-pick__add {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+    color: var(--ink-primary);
+    font-weight: 600;
+    transition: background-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-pick:hover .ui-pick__add,
+  .ui-pick:focus-visible .ui-pick__add {
+    border-color: transparent;
+    background: var(--action-primary);
+    color: var(--ink-on-brand);
+  }
   /* A row's delete action: quiet until hovered, then the danger ink. */
   .ui-row-delete {
     color: var(--ink-muted);

@@ -60,7 +60,7 @@ export function MacKeychainPermissionNote() {
 /** Native progress does not expose whether a Keychain prompt is currently open. */
 export function MacKeychainReminder() {
   return (
-    <div className="mt-4 flex items-start gap-3 rounded-xl border border-accent/20 bg-accent-tint p-4 text-[13px] text-ink-2 leading-relaxed">
+    <div className="mt-4 flex items-start gap-3 rounded-xl border border-accent-tint-2 bg-accent-tint p-4 text-[13px] text-ink-2 leading-relaxed">
       <Lock aria-hidden className="mt-0.5 size-4 shrink-0 text-accent" />
       <p>
         {tNodes(
