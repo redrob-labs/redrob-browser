@@ -213,7 +213,9 @@ export function audit(input: AuditInput): AuditResult {
         // translate="no" is the page saying the text is data (a processor name, a size), not copy.
         parent.closest(
           'code, pre, kbd, [translate="no"], [data-capture-ignore]',
-        )
+        ) ||
+        // Text the page marks as another language (a language named in itself) is not untranslated.
+        parent.closest('[lang]:not([lang="ko"]):not(html)')
       )
         continue
       const words = (t.match(/[A-Za-z][A-Za-z'’-]{2,}/g) ?? []).filter(

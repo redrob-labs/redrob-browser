@@ -964,6 +964,61 @@
   }
 }
 
+/* Settings: the page shell's title and lede, then groups of rows inside one card each. */
+@layer components {
+  .ui-settings-head {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .ui-settings-head__title {
+    margin: 0;
+    color: var(--ink-primary);
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 32px;
+    letter-spacing: -0.012em;
+  }
+  .ui-settings-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .ui-settings-group > .ui-meta-label {
+    padding: 0 var(--space-1);
+  }
+  .ui-settings-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-4) var(--space-5);
+  }
+  .ui-settings-row + .ui-settings-row {
+    border-top: 1px solid var(--border-subtle);
+  }
+  .ui-settings-row__label {
+    display: block;
+    color: var(--ink-primary);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 22px;
+  }
+  .ui-settings-row__desc {
+    margin: 2px 0 0;
+    color: var(--ink-secondary);
+    font-size: 13px;
+    line-height: 20px;
+  }
+  /* A button that continues a sentence: the ghost button's colour and focus, at the text's own size. */
+  .ui-inline-btn {
+    height: auto;
+    padding: 0 var(--space-1);
+    color: var(--ink-brand);
+    font-size: inherit;
+    vertical-align: baseline;
+  }
+}
+
 /* The new tab page. */
 @layer components {
   /* A Radix tab panel is focusable (it takes the focus that leaves its tab list), so it shows the ring. */

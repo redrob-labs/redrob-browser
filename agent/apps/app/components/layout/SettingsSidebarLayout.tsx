@@ -38,6 +38,7 @@ export const SettingsSidebarLayout: FC = () => {
               variant="ghost"
               size="icon"
               className="-ml-1 size-7"
+              aria-label="Open settings menu"
               onClick={() => setMobileOpen(true)}
             >
               <Menu className="size-4" />
