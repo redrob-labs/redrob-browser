@@ -3,6 +3,7 @@
 const en = {
   manifestName: "Assistant",
   manifestActionTitle: "Ask Redrob",
+  glowStopAgent: "Stop the agent",
   sidepanelModeGroup: "How the AI works",
   sidepanelModeAgent: "Agent",
   sidepanelModeAgentHint: "AI can browse, click, and navigate",
@@ -105,6 +106,7 @@ export type MessageKey = keyof typeof en
 const ko: Record<MessageKey, string> = {
   manifestName: "어시스턴트",
   manifestActionTitle: "Redrob에게 묻기",
+  glowStopAgent: "에이전트 중지",
   sidepanelModeGroup: "AI 작동 방식",
   sidepanelModeAgent: "에이전트",
   sidepanelModeAgentHint: "AI가 웹을 탐색하고 클릭하며 이동할 수 있습니다",
