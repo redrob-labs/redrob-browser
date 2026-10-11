@@ -19,12 +19,15 @@ import {
   type SavedSecretKind,
 } from '@browseros/privacy/labels'
 import { logger } from '../logger'
-
-/** The agent extension: the one that holds the redrobPrivate.privacy permission. */
-export const AGENT_EXTENSION_ID = 'oikpnmkappjhkifbcieakjoeiknojbgg'
+import {
+  AGENT_EXTENSION_ID,
+  type Cdp,
+  ExtensionWorker,
+  withTimeout,
+} from './extension-worker'
 
 /** The browser refuses longer texts; a value across a cut is caught by the overlap. */
-export const CHUNK = 60_000
+const CHUNK = 60_000
 const OVERLAP = 256
 const TIMEOUT_MS = 2_000
 /**
@@ -51,27 +54,6 @@ export interface SavedSecretScanner {
 /** No browser to ask: what tests and a server without a CDP connection use. */
 export const NO_SAVED_SECRETS: SavedSecretScanner = {
   scan: async () => ({ state: 'unavailable' }),
-}
-
-type Cdp = (
-  method: string,
-  params?: Record<string, unknown>,
-  sessionId?: string,
-) => Promise<unknown>
-
-interface TargetInfo {
-  targetId: string
-  type: string
-  url: string
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error('saved-secret scan timed out')), ms),
-    ),
-  ])
 }
 
 /** Cuts a long text into overlapping pieces the browser accepts, with each piece's offset. */
@@ -121,58 +103,18 @@ export function detectedFrom(
 }
 
 export class ExtensionSavedSecrets implements SavedSecretScanner {
-  private sessionId: string | null = null
+  private readonly worker: ExtensionWorker
   private readonly cache = new Map<
     string,
     { at: number; spans: SavedSecretSpan[] }
   >()
 
   constructor(
-    private readonly cdp: Cdp,
-    private readonly extensionId = AGENT_EXTENSION_ID,
+    cdp: Cdp,
+    extensionId = AGENT_EXTENSION_ID,
     private readonly now: () => number = Date.now,
-  ) {}
-
-  private async attach(): Promise<string | null> {
-    if (this.sessionId) return this.sessionId
-    const { targetInfos } = (await this.cdp('Target.getTargets')) as {
-      targetInfos: TargetInfo[]
-    }
-    const origin = `chrome-extension://${this.extensionId}/`
-    // The worker first; an open extension page (the side panel) has the same API.
-    const target =
-      targetInfos.find(
-        (t) => t.type === 'service_worker' && t.url.startsWith(origin),
-      ) ??
-      targetInfos.find((t) => t.type === 'page' && t.url.startsWith(origin))
-    if (!target) return null
-    const { sessionId } = (await this.cdp('Target.attachToTarget', {
-      targetId: target.targetId,
-      flatten: true,
-    })) as { sessionId: string }
-    this.sessionId = sessionId
-    return sessionId
-  }
-
-  private async scanPiece(
-    sessionId: string,
-    text: string,
-  ): Promise<{ ready: boolean; spans: SavedSecretSpan[] } | null> {
-    const response = (await this.cdp(
-      'Runtime.evaluate',
-      {
-        // The text goes in as a JSON literal, so nothing in it can be read as code.
-        expression: `(() => { const api = globalThis.chrome?.redrobPrivate; return api?.scanForSavedSecrets ? api.scanForSavedSecrets(${JSON.stringify(text)}) : null })()`,
-        awaitPromise: true,
-        returnByValue: true,
-      },
-      sessionId,
-    )) as {
-      result?: { value?: { ready: boolean; spans: SavedSecretSpan[] } | null }
-      exceptionDetails?: unknown
-    }
-    if (response.exceptionDetails) return null
-    return response.result?.value ?? null
+  ) {
+    this.worker = new ExtensionWorker(cdp, extensionId)
   }
 
   async scan(text: string): Promise<SavedSecretScan> {
@@ -194,8 +136,6 @@ export class ExtensionSavedSecrets implements SavedSecretScanner {
       }
       return scan
     } catch (error) {
-      // A detached worker (it sleeps after 30 s idle) answers with an error: attach again next time.
-      this.sessionId = null
       logger.debug('saved-secret scan unavailable', {
         error: error instanceof Error ? error.message : String(error),
       })
@@ -204,11 +144,15 @@ export class ExtensionSavedSecrets implements SavedSecretScanner {
   }
 
   private async scanAll(text: string): Promise<SavedSecretScan> {
-    const sessionId = await this.attach()
-    if (!sessionId) return { state: 'unavailable' }
     const spans: SavedSecretSpan[] = []
     for (const piece of chunks(text)) {
-      const result = await this.scanPiece(sessionId, piece.text)
+      // The text goes in as a JSON literal, so nothing in it can be read as code.
+      const result = await this.worker.evaluate<{
+        ready: boolean
+        spans: SavedSecretSpan[]
+      }>(
+        `(() => { const api = globalThis.chrome?.redrobPrivate; return api?.scanForSavedSecrets ? api.scanForSavedSecrets(${JSON.stringify(piece.text)}) : null })()`,
+      )
       if (!result?.ready) return { state: 'unavailable' }
       for (const span of result.spans) {
         spans.push({

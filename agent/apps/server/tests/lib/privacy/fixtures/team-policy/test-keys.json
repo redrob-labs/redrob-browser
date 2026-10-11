@@ -1,0 +1,29 @@
+{
+  "//": "TEST KEYS ONLY. Anyone can sign with these, which is why packaged builds never trust them (see ../keys.ts). The console DevSigner and the contract vectors use them.",
+  "keys": [
+    {
+      "kid": "test-2026-10-active",
+      "jwk": {
+        "key_ops": ["sign"],
+        "ext": true,
+        "kty": "EC",
+        "x": "sJ_MU3gdtP-MyQNDq5olOvKQu7x9DnnACnr2EaYHxP0",
+        "y": "IzLhCEa0vmJE4srb1YYNYEBR_DfkbNOu8UFAzPdSDNE",
+        "crv": "P-256",
+        "d": "26qau05VsitaDtltnr7P6RckXSLMoi8yTQlh2eDE7Ls"
+      }
+    },
+    {
+      "kid": "test-2026-10-standby",
+      "jwk": {
+        "key_ops": ["sign"],
+        "ext": true,
+        "kty": "EC",
+        "x": "PCFJ6QeewCQ63huKOmCMOvX-rFrJYEhD83a85-VumAI",
+        "y": "AZnvYBiBi5-ihCjtQQTmUhN5m5npm2W0ayI181X-tUc",
+        "crv": "P-256",
+        "d": "z4e5ZFcSfUofxGBrkJfsFkM9YSx-Jr8Hsq4_tCYUzyk"
+      }
+    }
+  ]
+}

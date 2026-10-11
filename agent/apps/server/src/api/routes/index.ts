@@ -10,9 +10,14 @@ import { cors } from 'hono/cors'
 import { AcpAgentRuntime } from '../../lib/agents/acp/acp-agent-runtime'
 import type { OAuthTokenManager } from '../../lib/clients/oauth/token-manager'
 import { DetectorSource } from '../../lib/privacy/detector-source'
+import { type Cdp, ExtensionWorker } from '../../lib/privacy/extension-worker'
 import { PrivacyGate } from '../../lib/privacy/gate'
 import { ExtensionSavedSecrets } from '../../lib/privacy/saved-secrets'
 import { PrivacySettingsStore } from '../../lib/privacy/settings'
+import {
+  managedStorageReader,
+  TeamPolicySource,
+} from '../../lib/privacy/team-policy/source'
 import { requireTrustedOrigin } from '../middleware/require-trusted-origin'
 import { ConversationRuns } from '../services/conversation-runs'
 import type { KlavisService } from '../services/klavis'
@@ -56,15 +61,21 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
   const { activity } = config
   const acpRuntime = new AcpAgentRuntime({ serverPort: port, resourcesDir })
   const conversationRuns = new ConversationRuns({ activity })
+  const cdp: Cdp = (method, params, sessionId) =>
+    browserSession.cdp(method, params, sessionId)
+  const teamPolicy = config.privacyGate
+    ? null
+    : new TeamPolicySource(managedStorageReader(new ExtensionWorker(cdp)))
+  void teamPolicy?.start()
   const privacyGate =
     config.privacyGate ??
     new PrivacyGate(
       new PrivacySettingsStore(),
       new DetectorSource({ resourcesDir }),
       // The browser's saved passwords and autofill details, found by the browser itself.
-      new ExtensionSavedSecrets((method, params, sessionId) =>
-        browserSession.cdp(method, params, sessionId),
-      ),
+      new ExtensionSavedSecrets(cdp),
+      // A business workspace's signed policy, deployed as a Chromium managed policy.
+      teamPolicy,
     )
   setNeverReadSitesSource(() => privacyGate.settings.get().neverReadSites)
   // One deep module owns every browser-tool lease and execution effect;

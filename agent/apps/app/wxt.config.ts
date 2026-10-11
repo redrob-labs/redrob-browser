@@ -88,6 +88,9 @@ export default defineConfig({
       'search',
     ],
     host_permissions: ['http://127.0.0.1/*'],
+    // The team policy arrives as a Chromium managed policy for this extension
+    // (3rdparty.extensions.<id>.teamPolicy). See apps/server/src/lib/privacy/team-policy/source.ts.
+    storage: { managed_schema: 'managed_schema.json' },
   },
   vite: () => ({
     build: {
