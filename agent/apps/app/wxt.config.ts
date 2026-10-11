@@ -80,15 +80,21 @@ export default defineConfig({
       'bookmarks',
       'history',
       'browserOS',
-      // getColorScheme / setColorScheme: one theme for the window and these pages. Component-only;
-      // stock Chromium warns about it and loads the extension anyway.
+      // Component-only; stock Chromium warns about them and loads the extension anyway.
+      // getColorScheme / setColorScheme: one theme for the window and these pages.
+      // redrobPrivate.privacy: the saved-secret scan Privacy Protection asks the browser for
+      // (positions only, never values).
       'redrobPrivate',
+      'redrobPrivate.privacy',
       'alarms',
       'webNavigation',
       'downloads',
       'search',
     ],
     host_permissions: ['http://127.0.0.1/*'],
+    // The team policy arrives as a Chromium managed policy for this extension
+    // (3rdparty.extensions.<id>.teamPolicy). See apps/server/src/lib/privacy/team-policy/source.ts.
+    storage: { managed_schema: 'managed_schema.json' },
   },
   vite: () => ({
     build: {

@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "teamPolicy": {
+      "title": "Redrob team policy",
+      "description": "The signed team policy (compact JWS, typ redrob-team-policy+jws) your Redrob console workspace issued. Redrob applies it only if its signature checks against a key built into the browser.",
+      "type": "string"
+    }
+  }
+}

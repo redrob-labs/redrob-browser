@@ -1,7 +1,7 @@
 diff --git a/extensions/common/mojom/api_permission_id.mojom b/extensions/common/mojom/api_permission_id.mojom
 --- a/extensions/common/mojom/api_permission_id.mojom
 +++ b/extensions/common/mojom/api_permission_id.mojom
-@@ -299,9 +299,22 @@ enum APIPermissionID {
+@@ -299,9 +299,23 @@ enum APIPermissionID {
    kBluetoothPeripheral = 272,
    kPublicSuffix = 273,
    kEnterpriseWebrtc = 274,
@@ -23,4 +23,5 @@ diff --git a/extensions/common/mojom/api_permission_id.mojom b/extensions/common
 +  kRedrobPrivateSettings = 285,
 +  kRedrobPrivateOnboarding = 286,
 +  kRedrobPrivateBrowser = 287,
++  kRedrobPrivatePrivacy = 288,
  };

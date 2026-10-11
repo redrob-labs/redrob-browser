@@ -122,6 +122,10 @@ substitutions:
             "dependencies": ["permission:redrobPrivate.routines"],
             "contexts": ["privileged_extension"]
           },
+          "redrobPrivate.scanForSavedSecrets": {
+            "dependencies": ["permission:redrobPrivate.privacy"],
+            "contexts": ["privileged_extension"]
+          },
           "redrobPrivate.searchWithDefaultProvider": {
             "dependencies": ["permission:redrobPrivate.browser"],
             "contexts": ["privileged_extension"]

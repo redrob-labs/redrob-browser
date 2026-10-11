@@ -249,6 +249,27 @@ namespace redrobPrivate {
     failed
   };
 
+  // What kind of saved value a span is. Privacy Protection labels each as
+  // its own category: a saved password as SECRET, a saved card as CARD.
+  enum SavedSecretKind { password, email, phone, name, address, card };
+
+  // Where a value the person saved in this browser occurs in the scanned
+  // text: UTF-16 offsets, end exclusive. Never the value itself.
+  dictionary SavedSecretSpan {
+    long start;
+    long end;
+    SavedSecretKind kind;
+  };
+
+  dictionary SavedSecretScan {
+    // False until the browser has finished reading its stores; spans is
+    // then empty and the caller should not conclude nothing matched.
+    boolean ready;
+    SavedSecretSpan[] spans;
+  };
+
+  callback ScanForSavedSecretsCallback = void (SavedSecretScan result);
+
   dictionary EngineInstallInfo {
     EngineInstallState state;
     // 0..100, set only while downloading. Absent everywhere else, because a
@@ -566,6 +587,14 @@ namespace redrobPrivate {
     // reason startImport() reports that way. A second call while one is already
     // running is ignored.
     static void installEngine();
+
+    // Finds the person's saved passwords and autofill details (name, email,
+    // phone, street address, local card numbers) in |text|. The browser keeps
+    // only keyed digests of them, in memory, and answers with positions and
+    // kinds -- never a value -- so Privacy Protection can label them before
+    // any of the text reaches a model.
+    static void scanForSavedSecrets(DOMString text,
+                                    ScanForSavedSecretsCallback callback);
   };
 
   interface Events {

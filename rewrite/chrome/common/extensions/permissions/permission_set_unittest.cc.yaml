@@ -20,3 +20,4 @@ substitutions:
         skip.insert(APIPermissionID::kRedrobPrivateSettings);
         skip.insert(APIPermissionID::kRedrobPrivateOnboarding);
         skip.insert(APIPermissionID::kRedrobPrivateBrowser);
+        skip.insert(APIPermissionID::kRedrobPrivatePrivacy);

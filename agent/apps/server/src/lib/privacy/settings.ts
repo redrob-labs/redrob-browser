@@ -29,6 +29,8 @@ const SettingsSchema = z.object({
   kept: z
     .object({ week: z.string(), count: z.number().int().nonnegative() })
     .default({ week: '', count: 0 }),
+  /** The unlocked team policy whose level was last applied, by payload hash: applied once each. */
+  teamApplied: z.string().default(''),
 })
 
 export type PrivacySettings = z.infer<typeof SettingsSchema>
@@ -120,6 +122,16 @@ export class PrivacySettingsStore {
     }
     await this.write(next)
     return next
+  }
+
+  /** An unlocked team policy sets the level once; the person can change it afterwards. */
+  async applyTeamLevel(
+    payloadSha256: string,
+    level: PrivacyLevel,
+  ): Promise<void> {
+    const current = this.get()
+    if (current.teamApplied === payloadSha256) return
+    await this.write({ ...current, level, teamApplied: payloadSha256 })
   }
 
   /** Private details kept from the AI this week. */

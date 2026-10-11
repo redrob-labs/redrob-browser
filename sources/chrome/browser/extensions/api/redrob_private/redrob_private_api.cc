@@ -50,6 +50,9 @@
 #include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
 #include "chrome/common/extensions/api/redrob_private.h"
+#include "chrome/browser/extensions/api/redrob_private/redrob_private_saved_secrets.h"
+#include "chrome/browser/extensions/api/redrob_private/redrob_private_saved_secrets_factory.h"
+#include "base/strings/utf_string_conversions.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_data_importer/common/importer_data_types.h"
 #include "components/version_info/version_info.h"
@@ -1215,6 +1218,55 @@ ExtensionFunction::ResponseAction RedrobPrivateInstallEngineFunction::Run() {
   RedrobPrivateEngineInstallerFactory::GetForBrowserContext(browser_context())
       ->Install();
   return RespondNow(NoArguments());
+}
+
+// A chat message or a page can be long; past this the scan would hold the UI thread. The caller
+// scans in pieces of this size, which is also the gate's chunk size.
+constexpr size_t kMaxSavedSecretScanLength = 64 * 1024;
+
+ExtensionFunction::ResponseAction
+RedrobPrivateScanForSavedSecretsFunction::Run() {
+  auto params = redrob_private::ScanForSavedSecrets::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const std::u16string text = base::UTF8ToUTF16(params->text);
+  if (text.size() > kMaxSavedSecretScanLength) {
+    return RespondNow(Error("text is longer than 65536 UTF-16 units"));
+  }
+  RedrobPrivateSavedSecrets* secrets =
+      RedrobPrivateSavedSecretsFactory::GetForBrowserContext(browser_context());
+  redrob_private::SavedSecretScan result;
+  result.ready = secrets && secrets->ready();
+  if (secrets) {
+    for (const auto& span : secrets->Scan(text)) {
+      redrob_private::SavedSecretSpan out;
+      out.start = static_cast<int>(span.start);
+      out.end = static_cast<int>(span.end);
+      using Kind = redrob::SecretMatcher::Kind;
+      switch (span.kind) {
+        case Kind::kPassword:
+          out.kind = redrob_private::SavedSecretKind::kPassword;
+          break;
+        case Kind::kEmail:
+          out.kind = redrob_private::SavedSecretKind::kEmail;
+          break;
+        case Kind::kPhone:
+          out.kind = redrob_private::SavedSecretKind::kPhone;
+          break;
+        case Kind::kName:
+          out.kind = redrob_private::SavedSecretKind::kName;
+          break;
+        case Kind::kAddress:
+          out.kind = redrob_private::SavedSecretKind::kAddress;
+          break;
+        case Kind::kCard:
+          out.kind = redrob_private::SavedSecretKind::kCard;
+          break;
+      }
+      result.spans.push_back(std::move(out));
+    }
+  }
+  return RespondNow(ArgumentList(
+      redrob_private::ScanForSavedSecrets::Results::Create(result)));
 }
 
 }  // namespace extensions

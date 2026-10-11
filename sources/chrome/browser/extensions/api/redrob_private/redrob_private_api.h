@@ -549,6 +549,17 @@ class RedrobPrivateInstallEngineFunction : public ExtensionFunction {
   ResponseAction Run() override;
 };
 
+// Privacy Protection's saved-secret scan. Answers positions and kinds only.
+class RedrobPrivateScanForSavedSecretsFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.scanForSavedSecrets",
+                             REDROBPRIVATE_SCANFORSAVEDSECRETS)
+
+ protected:
+  ~RedrobPrivateScanForSavedSecretsFunction() override = default;
+  ResponseAction Run() override;
+};
+
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_

@@ -1,7 +1,7 @@
 diff --git a/chrome/common/extensions/permissions/chrome_api_permissions.cc b/chrome/common/extensions/permissions/chrome_api_permissions.cc
 --- a/chrome/common/extensions/permissions/chrome_api_permissions.cc
 +++ b/chrome/common/extensions/permissions/chrome_api_permissions.cc
-@@ -67,6 +67,20 @@ constexpr APIPermissionInfo::InitInfo permissions_to_register[] = {
+@@ -67,6 +67,21 @@ constexpr APIPermissionInfo::InitInfo permissions_to_register[] = {
      {APIPermissionID::kBookmark, "bookmarks"},
      {APIPermissionID::kBrailleDisplayPrivate, "brailleDisplayPrivate",
       APIPermissionInfo::kFlagCannotBeOptional},
@@ -18,6 +18,7 @@ diff --git a/chrome/common/extensions/permissions/chrome_api_permissions.cc b/ch
 +    {APIPermissionID::kRedrobPrivateSettings, "redrobPrivate.settings"},
 +    {APIPermissionID::kRedrobPrivateOnboarding, "redrobPrivate.onboarding"},
 +    {APIPermissionID::kRedrobPrivateBrowser, "redrobPrivate.browser"},
++    {APIPermissionID::kRedrobPrivatePrivacy, "redrobPrivate.privacy"},
 +    {APIPermissionID::kBrowserOS, "browserOS"},
      {APIPermissionID::kBrowsingData, "browsingData",
       APIPermissionInfo::kFlagDoesNotRequireManagedSessionFullLoginWarning},

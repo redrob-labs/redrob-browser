@@ -27,3 +27,4 @@ substitutions:
         kRedrobPrivateSettings = 285,
         kRedrobPrivateOnboarding = 286,
         kRedrobPrivateBrowser = 287,
+        kRedrobPrivatePrivacy = 288,

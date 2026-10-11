@@ -349,6 +349,31 @@ export const MODEL_CATEGORIES: Record<PrivacyLevel, readonly LabelCategory[]> =
 /** An entity the detection model found, by value: it is labelled wherever that value appears. */
 export type DetectedValue = { category: LabelCategory; value: string }
 
+/**
+ * Narrows one labelling pass. The browser's saved passwords and cards are labelled even with
+ * Privacy Protection off ("never sent to AI, at any level"): that pass labels only those categories,
+ * from the browser's finds alone, and runs none of the patterns the person turned off.
+ */
+export type LabelOptions = {
+  categories?: readonly LabelCategory[]
+  patterns?: boolean
+}
+
+/** What the browser's saved-secret scan found, as values the labeller matches. */
+export const SAVED_SECRET_CATEGORY = {
+  password: 'SECRET',
+  card: 'CARD',
+  email: 'EMAIL',
+  phone: 'PHONE',
+  name: 'PERSON',
+  address: 'ADDRESS',
+} as const satisfies Record<string, LabelCategory>
+
+export type SavedSecretKind = keyof typeof SAVED_SECRET_CATEGORY
+
+/** Labelled at every level, Off included. */
+export const ALWAYS_LABELLED: readonly LabelCategory[] = ['SECRET', 'CARD']
+
 const ENTITY_CATEGORIES = new Set<LabelCategory>(['PERSON', 'ORG', 'ADDRESS'])
 
 /**
@@ -366,8 +391,9 @@ export function labelText(
   rules: PrivacyRules,
   map: LabelMap,
   detected: readonly DetectedValue[] = [],
+  options: LabelOptions = {},
 ): LabelResult {
-  const allowed = new Set(LEVEL_CATEGORIES[rules.level])
+  const allowed = new Set(options.categories ?? LEVEL_CATEGORIES[rules.level])
   if (!allowed.size || !text) return { text, found: [] }
   const ctx: Ctx = { map, groups: new Map(), found: [] }
 
@@ -431,7 +457,7 @@ export function labelText(
   }
 
   let next = text
-  for (const rule of RULES) {
+  for (const rule of options.patterns === false ? [] : RULES) {
     if (!allowed.has(rule.category)) continue
     // A whole address the model found goes before the address patterns, which only know the
     // street part: otherwise the pattern takes `테헤란로 152` and leaves `, 12층` behind. Addresses

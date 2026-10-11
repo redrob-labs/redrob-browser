@@ -12,7 +12,7 @@ diff --git a/chrome/common/extensions/api/_api_features.json b/chrome/common/ext
    "browsingData": {
      "dependencies": ["permission:browsingData"],
      "contexts": ["privileged_extension"]
-@@ -865,6 +869,182 @@
+@@ -865,6 +869,186 @@
      "dependencies": ["permission:readingList"],
      "contexts": ["privileged_extension"]
    },
@@ -118,6 +118,10 @@ diff --git a/chrome/common/extensions/api/_api_features.json b/chrome/common/ext
 +  },
 +  "redrobPrivate.runRoutineNow": {
 +    "dependencies": ["permission:redrobPrivate.routines"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.scanForSavedSecrets": {
++    "dependencies": ["permission:redrobPrivate.privacy"],
 +    "contexts": ["privileged_extension"]
 +  },
 +  "redrobPrivate.searchWithDefaultProvider": {

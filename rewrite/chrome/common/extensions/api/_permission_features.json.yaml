@@ -63,6 +63,13 @@ substitutions:
             "location": "component",
             "platforms": ["chromeos", "linux", "mac", "win"]
           },
+          "redrobPrivate.privacy": {
+            "channel": "stable",
+            "component_extensions_auto_granted": false,
+            "extension_types": ["extension"],
+            "location": "component",
+            "platforms": ["chromeos", "linux", "mac", "win"]
+          },
           "redrobPrivate.import": {
             "channel": "stable",
             "component_extensions_auto_granted": false,
