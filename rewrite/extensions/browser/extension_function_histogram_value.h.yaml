@@ -71,3 +71,6 @@ substitutions:
         REDROBPRIVATE_SETWINDOWTRANSLUCENCYENABLED = 2062,
         REDROBPRIVATE_GETAUTOMATICPICTUREINPICTUREENABLED = 2063,
         REDROBPRIVATE_SETAUTOMATICPICTUREINPICTUREENABLED = 2064,
+        // 2065 and 2066 are the colour-scheme pair on the redesign stack; left free here so the
+        // two branches meet without declaring one number twice.
+        REDROBPRIVATE_SCANFORSAVEDSECRETS = 2067,

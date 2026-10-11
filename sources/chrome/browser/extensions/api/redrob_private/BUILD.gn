@@ -29,6 +29,10 @@ source_set("redrob_private") {
     "redrob_private_task_event_router.h",
     "redrob_private_task_event_router_factory.cc",
     "redrob_private_task_event_router_factory.h",
+    "redrob_private_saved_secrets.cc",
+    "redrob_private_saved_secrets.h",
+    "redrob_private_saved_secrets_factory.cc",
+    "redrob_private_saved_secrets_factory.h",
   ]
 
   # public_deps because the public header includes importer_list.h (the
@@ -45,6 +49,11 @@ source_set("redrob_private") {
     "//chrome/browser/ui/select_file_policy",
     "//components/keyed_service/core",
     "//components/password_manager/core/common",
+    # Saved secrets: the stores the matcher is built from. Read into digests only.
+    "//chrome/browser/password_manager:factories",
+    "//components/autofill/core/browser",
+    "//components/password_manager/core/browser",
+    "//components/password_manager/core/browser/password_store:password_store_interface",
     "//components/search_engines",
     # The engine installer downloads an archive and unpacks it in the sandboxed
     # unzip service rather than in this process, which is why the unzip service

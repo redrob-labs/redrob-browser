@@ -26,6 +26,8 @@ source_set("sidecar") {
     "routine_store.h",
     "rpc_server.cc",
     "rpc_server.h",
+    "secret_matcher.cc",
+    "secret_matcher.h",
     "sidecar_client.cc",
     "sidecar_client.h",
     "task_store.cc",
@@ -53,6 +55,8 @@ source_set("sidecar") {
 
   deps += [
     "//base",
+    # secret_matcher.cc folds case the way the person's locale does.
+    "//base:i18n",
     # model_store.cc and routine_store.cc report failures to the settings page, so they read the
     # product's own strings rather than carrying English literals. The grit header is generated, so the
     # dependency is what makes it exist at all.
@@ -106,4 +110,15 @@ if (is_mac) {
     sources = [ "fonts/PretendardVariable.ttf" ]
     outputs = [ "{{bundle_resources_dir}}/fonts/{{source_file_part}}" ]
   }
+}
+
+# The matcher's unit test. Pure logic, no profile. unit_tests depends on this target
+# (vendor/browseros/chromium_patches/chrome/test/BUILD.gn).
+source_set("unit_tests") {
+  testonly = true
+  sources = [ "secret_matcher_unittest.cc" ]
+  deps = [
+    ":sidecar",
+    "//testing/gtest",
+  ]
 }

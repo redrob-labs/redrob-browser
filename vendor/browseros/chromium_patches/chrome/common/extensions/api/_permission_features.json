@@ -1,7 +1,7 @@
 diff --git a/chrome/common/extensions/api/_permission_features.json b/chrome/common/extensions/api/_permission_features.json
 --- a/chrome/common/extensions/api/_permission_features.json
 +++ b/chrome/common/extensions/api/_permission_features.json
-@@ -67,6 +67,90 @@
+@@ -67,6 +67,97 @@
      // "desktop_android" is not supported.
      "platforms": ["chromeos", "linux", "mac", "win"]
    },
@@ -41,6 +41,13 @@ diff --git a/chrome/common/extensions/api/_permission_features.json b/chrome/com
 +    "platforms": ["chromeos", "linux", "mac", "win"]
 +  },
 +  "redrobPrivate.passwords": {
++    "channel": "stable",
++    "component_extensions_auto_granted": false,
++    "extension_types": ["extension"],
++    "location": "component",
++    "platforms": ["chromeos", "linux", "mac", "win"]
++  },
++  "redrobPrivate.privacy": {
 +    "channel": "stable",
 +    "component_extensions_auto_granted": false,
 +    "extension_types": ["extension"],
@@ -92,7 +99,7 @@ diff --git a/chrome/common/extensions/api/_permission_features.json b/chrome/com
    "autotestPrivate": {
      "channel": "stable",
      "extension_types": ["extension"],
-@@ -93,6 +177,10 @@
+@@ -93,6 +184,10 @@
      // "desktop_android" is not supported.
      "platforms": ["chromeos", "linux", "mac", "win"]
    },

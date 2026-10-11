@@ -11,6 +11,7 @@ import { AcpAgentRuntime } from '../../lib/agents/acp/acp-agent-runtime'
 import type { OAuthTokenManager } from '../../lib/clients/oauth/token-manager'
 import { DetectorSource } from '../../lib/privacy/detector-source'
 import { PrivacyGate } from '../../lib/privacy/gate'
+import { ExtensionSavedSecrets } from '../../lib/privacy/saved-secrets'
 import { PrivacySettingsStore } from '../../lib/privacy/settings'
 import { requireTrustedOrigin } from '../middleware/require-trusted-origin'
 import { ConversationRuns } from '../services/conversation-runs'
@@ -60,6 +61,10 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
     new PrivacyGate(
       new PrivacySettingsStore(),
       new DetectorSource({ resourcesDir }),
+      // The browser's saved passwords and autofill details, found by the browser itself.
+      new ExtensionSavedSecrets((method, params, sessionId) =>
+        browserSession.cdp(method, params, sessionId),
+      ),
     )
   setNeverReadSitesSource(() => privacyGate.settings.get().neverReadSites)
   // One deep module owns every browser-tool lease and execution effect;

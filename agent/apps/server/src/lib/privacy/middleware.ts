@@ -56,7 +56,7 @@ export function privacyMiddleware(
   return {
     specificationVersion: 'v4',
     transformParams: async ({ params }) => {
-      if (gate.level() === 'off') return params
+      // Off still runs: saved passwords and cards are labelled at every level (gate.labelSavedOnly).
       const prompt = await labelPrompt(gate, conversationId, params.prompt)
       const instruction = gate.instruction(conversationId)
       return {

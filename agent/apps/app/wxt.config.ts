@@ -78,6 +78,10 @@ export default defineConfig({
       'bookmarks',
       'history',
       'browserOS',
+      // Component-only. redrobPrivate.privacy: the saved-secret scan Privacy Protection asks the
+      // browser for (positions only, never values). Stock Chromium warns and loads the extension anyway.
+      'redrobPrivate',
+      'redrobPrivate.privacy',
       'alarms',
       'webNavigation',
       'downloads',

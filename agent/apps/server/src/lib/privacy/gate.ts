@@ -12,6 +12,7 @@
  */
 
 import {
+  ALWAYS_LABELLED,
   emptyLabelMap,
   type LabelCategory,
   type LabelMap,
@@ -23,6 +24,11 @@ import {
   restoreText,
 } from '@browseros/privacy/labels'
 import { DetectorSource, type DetectorStatus } from './detector-source'
+import {
+  detectedFrom,
+  NO_SAVED_SECRETS,
+  type SavedSecretScanner,
+} from './saved-secrets'
 import { type PrivacySettings, PrivacySettingsStore } from './settings'
 
 const MAX_CONVERSATIONS = 500
@@ -58,16 +64,20 @@ export interface PrivacyGateStatus {
   neverReadSites: string[]
   keptThisWeek: number
   detector: DetectorStatus
+  /** Whether the browser answered the last saved-secret scan. "unknown" until one has run. */
+  savedSecrets: 'on' | 'unavailable' | 'unknown'
   /** Which agents the gate sits in front of. External agents make their own model calls. */
   coverage: { redrobAgent: true; externalAgents: false }
 }
 
 export class PrivacyGate {
   private readonly maps = new Map<string, LabelMap>()
+  private savedSecretsState: PrivacyGateStatus['savedSecrets'] = 'unknown'
 
   constructor(
     readonly settings: PrivacySettingsStore = new PrivacySettingsStore(),
     readonly detectors: DetectorSource = new DetectorSource(),
+    readonly savedSecrets: SavedSecretScanner = NO_SAVED_SECRETS,
   ) {
     if (this.needsModel(this.settings.get().level)) {
       void this.detectors.ensureDownloaded()
@@ -95,6 +105,7 @@ export class PrivacyGate {
       neverReadSites: settings.neverReadSites,
       keptThisWeek: this.settings.keptThisWeek(),
       detector: this.detectors.status(),
+      savedSecrets: this.savedSecretsState,
       coverage: { redrobAgent: true, externalAgents: false },
     }
   }
@@ -135,9 +146,8 @@ export class PrivacyGate {
   async label(conversationId: string, texts: string[]): Promise<LabelOutcome> {
     try {
       const rules = this.rules()
-      if (rules.level === 'off') {
-        return { texts, found: [], newDetails: 0, detection: 'patterns' }
-      }
+      if (rules.level === 'off')
+        return await this.labelSavedOnly(conversationId, texts)
       const map = this.map(conversationId)
       const before = Object.keys(map.byLabel).length
       const modelCategories = new Set(MODEL_CATEGORIES[rules.level])
@@ -151,7 +161,9 @@ export class PrivacyGate {
                 .filter((entity) => modelCategories.has(entity.category))
                 .map(({ category, value }) => ({ category, value }))
             : []
-        const result = labelText(text, rules, map, detected)
+        const saved = await this.scanSaved(text)
+        // Saved values first: the browser knows them exactly, the model only guesses.
+        const result = labelText(text, rules, map, [...saved, ...detected])
         found.push(...result.found)
         out.push(result.text)
       }
@@ -167,6 +179,55 @@ export class PrivacyGate {
       throw error instanceof PrivacyGateError
         ? error
         : new PrivacyGateError(error)
+    }
+  }
+
+  private async scanSaved(text: string) {
+    if (!text.trim()) return []
+    const scan = await this.savedSecrets.scan(text)
+    this.savedSecretsState = scan.state === 'ready' ? 'on' : 'unavailable'
+    return scan.state === 'ready' ? detectedFrom(text, scan.spans) : []
+  }
+
+  /**
+   * With Privacy Protection off, saved passwords and saved cards are still labelled: they are
+   * "never sent to AI, at any level". Only the browser's finds of those two, no patterns, no names.
+   */
+  private async labelSavedOnly(
+    conversationId: string,
+    texts: string[],
+  ): Promise<LabelOutcome> {
+    const always = new Set(ALWAYS_LABELLED)
+    const out: string[] = []
+    const found: LabelCategory[] = []
+    let map: LabelMap | null = null
+    let before = 0
+    for (const text of texts) {
+      const saved = (await this.scanSaved(text)).filter((d) =>
+        always.has(d.category),
+      )
+      if (!saved.length) {
+        out.push(text)
+        continue
+      }
+      if (!map) {
+        map = this.map(conversationId)
+        before = Object.keys(map.byLabel).length
+      }
+      const result = labelText(text, { level: 'off', names: [] }, map, saved, {
+        categories: ALWAYS_LABELLED,
+        patterns: false,
+      })
+      found.push(...result.found)
+      out.push(result.text)
+    }
+    const newDetails = map ? Object.keys(map.byLabel).length - before : 0
+    if (newDetails > 0) await this.settings.addKept(newDetails)
+    return {
+      texts: out,
+      found: [...new Set(found)],
+      newDetails,
+      detection: 'patterns',
     }
   }
 

@@ -25,4 +25,5 @@ substitutions:
             {APIPermissionID::kRedrobPrivateSettings, "redrobPrivate.settings"},
             {APIPermissionID::kRedrobPrivateOnboarding, "redrobPrivate.onboarding"},
             {APIPermissionID::kRedrobPrivateBrowser, "redrobPrivate.browser"},
+            {APIPermissionID::kRedrobPrivatePrivacy, "redrobPrivate.privacy"},
       count: 1

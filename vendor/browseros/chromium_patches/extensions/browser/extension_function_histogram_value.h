@@ -1,7 +1,7 @@
 diff --git a/extensions/browser/extension_function_histogram_value.h b/extensions/browser/extension_function_histogram_value.h
 --- a/extensions/browser/extension_function_histogram_value.h
 +++ b/extensions/browser/extension_function_histogram_value.h
-@@ -2051,8 +2051,91 @@ enum HistogramValue {
+@@ -2051,8 +2051,94 @@ enum HistogramValue {
    ENTERPRISE_WEBRTC_STARTCAPTURE = 1986,
    ENTERPRISE_WEBRTC_GETCAPTURESTATUS = 1987,
    ENTERPRISE_WEBRTC_STOPCAPTURE = 1988,
@@ -90,6 +90,9 @@ diff --git a/extensions/browser/extension_function_histogram_value.h b/extension
 +  REDROBPRIVATE_SETWINDOWTRANSLUCENCYENABLED = 2062,
 +  REDROBPRIVATE_GETAUTOMATICPICTUREINPICTUREENABLED = 2063,
 +  REDROBPRIVATE_SETAUTOMATICPICTUREINPICTUREENABLED = 2064,
++  // 2065 and 2066 are the colour-scheme pair on the redesign stack; left free here so the
++  // two branches meet without declaring one number twice.
++  REDROBPRIVATE_SCANFORSAVEDSECRETS = 2067,
    ENUM_BOUNDARY
  };
  // LINT.ThenChange(/tools/metrics/histograms/metadata/extensions/enums.xml:ExtensionFunctions)
