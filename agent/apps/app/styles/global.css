@@ -356,27 +356,16 @@
     }
   }
 
+  /* The new tab's grid, drawn in the system's subtle border and faded by a mask. It used to be faded by an
+     opaque radial ground laid OVER the page, which washed out whatever sat near the edge -- the brand mark
+     on Personalize included, which must never carry an opacity. */
   .bg-grid-pattern {
     background-image:
-      linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+      linear-gradient(to right, var(--border-subtle) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--border-subtle) 1px, transparent 1px);
     background-size: 60px 60px;
-  }
-
-  .dark .bg-grid-pattern {
-    background-image:
-      linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-    background-size: 60px 60px;
-  }
-
-  .bg-gradient-radial-focus {
-    background: radial-gradient(
-      circle at center,
-      transparent 0%,
-      transparent 30%,
-      var(--background) 70%
-    );
+    opacity: 0.45;
+    mask-image: radial-gradient(circle at center, #000 30%, transparent 70%);
   }
 
   /* Animation utility classes */
@@ -966,11 +955,84 @@
   }
   /* The meta line above a group: 12px Medium in ink-secondary, sentence case -- never uppercase,
      never tracked (--text-meta). */
-  .ui-shell-label {
+  .ui-shell-label,
+  .ui-meta-label {
     color: var(--ink-secondary);
     font: var(--text-meta);
     letter-spacing: 0;
     text-transform: none;
+  }
+}
+
+/* The new tab page. */
+@layer components {
+  /* A Radix tab panel is focusable (it takes the focus that leaves its tab list), so it shows the ring. */
+  [data-slot="tabs-content"]:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+    border-radius: var(--radius-lg);
+  }
+  /* A recent site: .rr-card--interactive at tile size. The ground and the border answer hover; nothing
+     scales, because a growing tile shifts its neighbours' labels under the pointer. */
+  .ui-tile {
+    border-radius: var(--radius-lg);
+    color: var(--ink-secondary);
+  }
+  .ui-tile__face {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-sm);
+    transition: border-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-tile:hover .ui-tile__face {
+    border-color: var(--border-strong);
+  }
+  .ui-tile:hover {
+    color: var(--ink-primary);
+  }
+  .ui-tile:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+  }
+  /* A card that is also a button (the run rows, the Personalize sections): .rr-card's ground and border,
+     over the Button it is built on. */
+  .ui-card-btn {
+    height: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    color: var(--ink-primary);
+    font-weight: 400;
+    line-height: normal;
+  }
+  .ui-card-btn:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    background: var(--surface-raised);
+  }
+  .ui-card {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+  }
+  /* A template or example block inside a card. */
+  .ui-sample {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+    color: var(--ink-primary);
+  }
+  .ui-sample--quiet {
+    color: var(--ink-secondary);
+  }
+  .ui-status--success {
+    color: var(--status-success);
+  }
+  .ui-status--danger {
+    color: var(--status-danger);
+  }
+  .ui-status--running {
+    color: var(--ink-brand);
   }
 }
 

@@ -343,6 +343,11 @@ export function focusedRing(): {
   const s = getComputedStyle(el)
   const outline = s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) >= 2
   const shadow = s.boxShadow !== 'none' && s.boxShadow !== ''
+  // The system's Composer shows focus on its frame (.rr-composer:focus-within takes --border-strong), not
+  // on the text field inside it, so a field in a composer counts the frame's indicator as its own.
+  const composer =
+    (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') &&
+    el.closest('.ui-composer, .rr-composer') !== null
   const label = (el.getAttribute('aria-label') ?? el.innerText ?? '')
     .trim()
     .replace(/\s+/g, ' ')
@@ -353,6 +358,6 @@ export function focusedRing(): {
       what: `${el.tagName.toLowerCase()} "${label}"`,
       where: String(el.className ?? '').slice(0, 80),
     },
-    ring: outline || shadow,
+    ring: outline || shadow || composer,
   }
 }

@@ -90,9 +90,7 @@ export const Personalize = () => {
           mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0',
         )}
       >
-        <h2 className="font-semibold text-muted-foreground text-sm uppercase tracking-wide">
-          Need help getting started?
-        </h2>
+        <h2 className="ui-meta-label">Need help getting started?</h2>
         <div className="space-y-2">
           {sections.map((section) => (
             <Collapsible
@@ -101,12 +99,12 @@ export const Personalize = () => {
               onOpenChange={(open) =>
                 setExpandedSection(open ? section.key : null)
               }
-              className="w-full rounded-xl border border-border/50 bg-card hover:border-border"
+              className="ui-card w-full"
             >
               <CollapsibleTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="flex h-auto w-full items-center justify-between p-4 text-left font-normal leading-normal hover:bg-accent/50"
+                  className="ui-card-btn flex w-full items-center justify-between border-transparent! p-4 text-left"
                 >
                   <div className="flex-1">
                     <h3 className="mb-1 font-medium text-foreground text-sm">
@@ -129,7 +127,7 @@ export const Personalize = () => {
                       Template (click to copy):
                     </p>
                     <div className="relative">
-                      <pre className="styled-scrollbar overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-accent/50 p-4 text-foreground text-xs">
+                      <pre className="ui-sample styled-scrollbar overflow-x-auto whitespace-pre-wrap break-words p-4 text-xs">
                         {templates[section.key].template}
                       </pre>
                       <Button
@@ -140,7 +138,7 @@ export const Personalize = () => {
                         title="Copy template"
                       >
                         {copiedSection === section.key ? (
-                          <Check className="h-4 w-4 text-green-500" />
+                          <Check className="ui-status--success h-4 w-4" />
                         ) : (
                           <Copy className="h-4 w-4 text-muted-foreground" />
                         )}
@@ -152,7 +150,7 @@ export const Personalize = () => {
                     <p className="mb-2 font-medium text-muted-foreground text-xs">
                       Example:
                     </p>
-                    <pre className="styled-scrollbar overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-border/30 bg-muted/30 p-4 text-muted-foreground text-xs">
+                    <pre className="ui-sample ui-sample--quiet styled-scrollbar overflow-x-auto whitespace-pre-wrap break-words p-4 text-xs">
                       {templates[section.key].example}
                     </pre>
                   </div>

@@ -54,11 +54,11 @@ const SCHEDULE_RESULTS_COLLAPSED_KEY = 'schedule-results-collapsed'
 const getStatusIcon = (status: JobRunWithDetails['status']) => {
   switch (status) {
     case 'completed':
-      return <CheckCircle2 className="h-4 w-4 text-green-500" />
+      return <CheckCircle2 className="ui-status--success h-4 w-4" />
     case 'running':
-      return <Loader2 className="h-4 w-4 animate-spin text-accent-brand-ink" />
+      return <Loader2 className="ui-status--running h-4 w-4 animate-spin" />
     case 'failed':
-      return <XCircle className="h-4 w-4 text-destructive" />
+      return <XCircle className="ui-status--danger h-4 w-4" />
   }
 }
 
@@ -118,10 +118,10 @@ export const ScheduleResults: FC = () => {
       <CollapsibleTrigger asChild>
         <Button
           variant="ghost"
-          className="group flex h-auto w-full items-center justify-between rounded-xl border border-border/50 bg-card/50 p-3 font-normal leading-normal transition-all hover:border-border hover:bg-card"
+          className="ui-card-btn group flex w-full items-center justify-between p-3"
         >
           <div className="flex items-center gap-3">
-            <Calendar className="h-4 w-4 text-muted-foreground" />
+            <Calendar className="h-4 w-4 text-[var(--ink-muted)]" />
             <span className="font-medium text-foreground text-sm">
               Scheduled Task Outputs
             </span>
@@ -143,7 +143,7 @@ export const ScheduleResults: FC = () => {
             key={run.id}
             variant="ghost"
             onClick={() => viewRun(run)}
-            className="h-auto w-full justify-start rounded-xl border border-border/50 bg-card p-4 text-left font-normal leading-normal transition-all hover:border-border"
+            className="ui-card-btn w-full justify-start p-4 text-left"
           >
             <div className="flex w-full items-start gap-3">
               {getStatusIcon(run.status)}
@@ -171,7 +171,7 @@ export const ScheduleResults: FC = () => {
                     e.stopPropagation()
                     handleCancelRun(run.id)
                   }}
-                  className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  className="ui-status--danger shrink-0"
                   aria-label="Cancel run"
                 >
                   <Square className="h-3.5 w-3.5" />
@@ -185,7 +185,7 @@ export const ScheduleResults: FC = () => {
                     e.stopPropagation()
                     handleRetryRun(run.jobId)
                   }}
-                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                  className="shrink-0"
                   aria-label="Retry run"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />

@@ -108,7 +108,7 @@
     "fonts": 0
   },
   "home-personalize.dark.en": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 3,
     "roundIcons": 0,
@@ -117,7 +117,7 @@
     "fonts": 0
   },
   "home-personalize.dark.ko": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 3,
     "roundIcons": 0,
@@ -126,7 +126,7 @@
     "fonts": 0
   },
   "home-personalize.light.en": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 3,
     "roundIcons": 0,
@@ -135,7 +135,7 @@
     "fonts": 0
   },
   "home-personalize.light.ko": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 3,
     "roundIcons": 0,
@@ -144,36 +144,36 @@
     "fonts": 0
   },
   "home.dark.en": {
-    "offPalette": 6,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 3,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "home.dark.ko": {
-    "offPalette": 6,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 3,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 10,
     "fonts": 0
   },
   "home.light.en": {
-    "offPalette": 6,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 3,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "home.light.ko": {
-    "offPalette": 6,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 3,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 10,
@@ -434,7 +434,7 @@
   "scheduled.dark.en": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 1,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -443,7 +443,7 @@
   "scheduled.dark.ko": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 1,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 7,
@@ -452,7 +452,7 @@
   "scheduled.light.en": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 1,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -461,7 +461,7 @@
   "scheduled.light.ko": {
     "offPalette": 4,
     "contrast": 0,
-    "focusMissing": 1,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 7,
