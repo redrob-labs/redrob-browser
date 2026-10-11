@@ -7,11 +7,12 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Loader2, Plus, Server, Trash2 } from '@browseros/icons'
+import { Check, Loader2, Plus, Trash2 } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiKeyDialog } from '@/components/mcp/ApiKeyDialog'
 import { McpServerIcon } from '@/components/mcp/McpServerIcon'
+import { SettingsHeader } from '@/components/settings/SettingsLayout'
 import { Button } from '@/components/ui/button'
 import {
   CUSTOM_MCP_ADDED_EVENT,
@@ -221,72 +222,54 @@ export const ConnectMCP: FC = () => {
 
   return (
     <div className="fade-in slide-in-from-bottom-5 animate-in space-y-6 duration-500">
-      {/* Header */}
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm transition-all hover:shadow-md">
-        <div className="flex items-start gap-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-brand)]/10">
-            <Server className="h-6 w-6 text-[var(--accent-brand-ink)]" />
-          </div>
-          <div className="flex-1">
-            <h2 className="mb-1 font-semibold text-xl">Connected Apps</h2>
-            <p className="mb-6 text-muted-foreground text-sm">
-              Connect the Redrob assistant to apps to send email, schedule
-              calendar events, write docs, and more
-            </p>
-
-            <div className="flex flex-wrap gap-3">
-              <Button
-                variant="outline"
-                onClick={() => setAddingManagedMcp(true)}
-                className="border-[var(--accent-brand)] bg-[var(--accent-brand)]/10 text-[var(--accent-brand-ink)] hover:bg-[var(--accent-brand)]/20"
-              >
-                <Plus className="h-4 w-4" />
-                <span>Add built-in app</span>
-              </Button>
-
-              <Button
-                variant="outline"
-                onClick={() => setAddingCustomMcp(true)}
-              >
-                <Plus className="h-4 w-4" />
-                <span>Add custom app</span>
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <SettingsHeader
+        title="Connected Apps"
+        lede="Connect the Redrob assistant to apps to send email, schedule calendar events, write docs, and more"
+        actions={
+          <>
+            <Button onClick={() => setAddingManagedMcp(true)}>
+              <Plus className="h-4 w-4" />
+              <span>Add built-in app</span>
+            </Button>
+            <Button variant="outline" onClick={() => setAddingCustomMcp(true)}>
+              <Plus className="h-4 w-4" />
+              <span>Add custom app</span>
+            </Button>
+          </>
+        }
+      />
 
       {/* Created Servers */}
       {createdServers.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-6 shadow-sm transition-all hover:shadow-md">
-          <h3 className="mb-4 font-semibold text-lg">Your Connected Apps</h3>
-          <div className="space-y-3">
+        <section aria-labelledby="connected-apps" className="ui-settings-group">
+          <h2 id="connected-apps" className="ui-meta-label">
+            Your Connected Apps
+          </h2>
+          <div className="ui-card ui-settings-rows">
             {createdServers.map((server) => (
-              <div
-                key={server.id}
-                className="flex items-center gap-4 rounded-lg border border-border bg-background p-4 transition-all hover:border-[var(--accent-brand)]/50 hover:shadow-sm"
-              >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-brand)]/10">
+              <div key={server.id} className="ui-settings-row">
+                <div className="ui-sample flex h-10 w-10 shrink-0 items-center justify-center">
                   <McpServerIcon
                     serverName={server.managedServerName ?? ''}
                     size={20}
-                    className="text-[var(--accent-brand-ink)]"
                   />
                 </div>
                 <div className="flex-1">
                   <div className="mb-1 flex items-center gap-2">
-                    <span className="font-semibold">{server.displayName}</span>
+                    <span className="ui-settings-row__label">
+                      {server.displayName}
+                    </span>
                     <span
-                      className={`rounded px-2 py-0.5 font-medium text-xs ${
+                      className={`rr-badge rr-badge--sm rr-badge--subtle ${
                         server.type === 'managed'
-                          ? 'bg-[var(--accent-brand)]/10 text-[var(--accent-brand-ink)]'
-                          : 'bg-muted text-muted-foreground'
+                          ? 'rr-badge--brand'
+                          : 'rr-badge--neutral'
                       }`}
                     >
                       {server.type === 'managed' ? 'Built-in' : 'Custom'}
                     </span>
                   </div>
-                  <p className="text-muted-foreground text-sm">
+                  <p className="ui-settings-row__desc">
                     {/* The catalogue is read here as well as at sync time: an app synced before the
                         catalogue arrived was stored with an empty description, and kept it. */}
                     {server.managedServerDescription ||
@@ -303,7 +286,7 @@ export const ConnectMCP: FC = () => {
                   ) : userMCPIntegrations?.integrations?.find(
                       (i) => i.name === server.managedServerName,
                     )?.is_authenticated ? (
-                    <span className="flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-1 font-medium text-green-600 text-xs">
+                    <span className="rr-badge rr-badge--md rr-badge--subtle rr-badge--success gap-1">
                       <Check className="h-3 w-3" />
                       Authenticated
                     </span>
@@ -333,7 +316,7 @@ export const ConnectMCP: FC = () => {
                       removeServer(server.id)
                     }
                   }}
-                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  className="ui-row-delete"
                   title="Remove server"
                 >
                   {deletingServerId === server.id ? (
@@ -345,7 +328,7 @@ export const ConnectMCP: FC = () => {
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
       <AvailableManagedServers

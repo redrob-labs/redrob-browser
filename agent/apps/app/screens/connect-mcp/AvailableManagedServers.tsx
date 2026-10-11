@@ -32,10 +32,10 @@ export const AvailableManagedServers: FC<AvailableManagedServersProps> = ({
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm transition-all hover:shadow-md">
-        <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between hover:opacity-50">
+      <div className="ui-card p-5">
+        <CollapsibleTrigger className="ui-disclosure flex w-full cursor-pointer items-center justify-between">
           <div className="flex flex-col items-start">
-            <h3 className="font-semibold text-lg">Built-in Apps</h3>
+            <h2 className="ui-settings-row__label">Built-in Apps</h2>
             <p className="text-muted-foreground text-sm">
               {isLoading
                 ? 'Loading...'
@@ -63,18 +63,18 @@ export const AvailableManagedServers: FC<AvailableManagedServersProps> = ({
                     key={serverName}
                     variant="outline"
                     onClick={() => onAddServer(args)}
-                    className="group h-auto flex-col items-start gap-2 p-4 font-normal leading-normal hover:border-[var(--accent-brand)]"
+                    className="ui-card-btn group flex-col items-start gap-2 p-4"
                   >
                     <div className="flex w-full items-center justify-between">
                       <div className="flex items-center gap-3">
                         <McpServerIcon
                           serverName={serverName}
                           size={20}
-                          className="text-muted-foreground transition-colors group-hover:text-[var(--accent-brand-ink)]"
+                          className="text-[var(--ink-secondary)]"
                         />
                         <span className="font-medium">{serverName}</span>
                       </div>
-                      <Plus className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-[var(--accent-brand-ink)]" />
+                      <Plus className="h-4 w-4 text-[var(--ink-muted)] group-hover:text-[var(--ink-brand)]" />
                     </div>
                     {description && (
                       <p className="line-clamp-1 max-w-48 text-ellipsis text-left text-muted-foreground text-xs">

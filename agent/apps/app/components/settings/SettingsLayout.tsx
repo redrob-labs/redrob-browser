@@ -12,13 +12,20 @@ import { useId } from 'react'
  * ground (not a card around the heading), then groups. A group is a meta label over one card whose rows
  * are separated by rules -- the label names the group, so the rows never repeat it.
  */
-export const SettingsHeader: FC<{ title: ReactNode; lede?: ReactNode }> = ({
-  title,
-  lede,
-}) => (
+export const SettingsHeader: FC<{
+  title: ReactNode
+  lede?: ReactNode
+  /** The page's own actions, at the end of the title row (New task, Add app). */
+  actions?: ReactNode
+}> = ({ title, lede, actions }) => (
   <header className="ui-settings-head">
-    <h1 className="ui-settings-head__title">{title}</h1>
-    {lede && <p className="rr-panellede">{lede}</p>}
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex min-w-0 flex-col gap-2">
+        <h1 className="ui-settings-head__title">{title}</h1>
+        {lede && <p className="rr-panellede">{lede}</p>}
+      </div>
+      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+    </div>
   </header>
 )
 

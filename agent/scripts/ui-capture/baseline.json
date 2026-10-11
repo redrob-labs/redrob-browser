@@ -36,36 +36,36 @@
     "fonts": 0
   },
   "connect-apps.dark.en": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 1,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "connect-apps.dark.ko": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 1,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 13,
     "fonts": 0
   },
   "connect-apps.light.en": {
-    "offPalette": 4,
-    "contrast": 1,
-    "focusMissing": 1,
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "connect-apps.light.ko": {
-    "offPalette": 4,
-    "contrast": 1,
-    "focusMissing": 1,
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 13,
@@ -324,7 +324,7 @@
     "fonts": 0
   },
   "overlay-dialog.dark.en": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -333,7 +333,7 @@
     "fonts": 0
   },
   "overlay-dialog.dark.ko": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -342,7 +342,7 @@
     "fonts": 0
   },
   "overlay-dialog.light.en": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -351,7 +351,7 @@
     "fonts": 0
   },
   "overlay-dialog.light.ko": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -432,7 +432,7 @@
     "fonts": 0
   },
   "scheduled.dark.en": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -441,7 +441,7 @@
     "fonts": 0
   },
   "scheduled.dark.ko": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -450,7 +450,7 @@
     "fonts": 0
   },
   "scheduled.light.en": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -459,7 +459,7 @@
     "fonts": 0
   },
   "scheduled.light.ko": {
-    "offPalette": 4,
+    "offPalette": 0,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,

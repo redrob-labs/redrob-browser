@@ -114,7 +114,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
   )
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4 shadow-sm transition-all hover:border-[var(--accent-brand)]/50 hover:shadow-sm">
+    <div className="ui-card p-4">
       <div className="flex items-start gap-4">
         <Switch
           checked={job.enabled}
@@ -126,7 +126,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
           <div className="mb-1 flex items-center gap-2">
             <span className="truncate font-semibold">{job.name}</span>
             {!job.enabled && (
-              <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
+              <span className="rr-badge rr-badge--sm rr-badge--subtle rr-badge--neutral">
                 Disabled
               </span>
             )}
@@ -148,7 +148,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
             {providerMissing && (
               <>
                 <span>•</span>
-                <span className="flex items-center gap-1 text-[var(--accent-brand-ink)]">
+                <span className="flex items-center gap-1 text-[var(--status-warning)]">
                   <AlertTriangle aria-hidden className="size-3" />
                   Provider unavailable
                 </span>
@@ -176,7 +176,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
             variant="ghost"
             size="icon-sm"
             onClick={onDelete}
-            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            className="ui-row-delete"
             aria-label={`Delete ${job.name}`}
           >
             <Trash2 className="h-4 w-4" />
@@ -186,7 +186,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
 
       {runs.length > 0 && (
         <Collapsible open={isOpen} onOpenChange={setIsOpen} className="mt-4">
-          <CollapsibleTrigger className="flex w-full items-center gap-2 text-muted-foreground text-sm hover:text-foreground">
+          <CollapsibleTrigger className="ui-disclosure flex w-full items-center gap-2 text-sm">
             <ChevronDown
               className={`h-4 w-4 transition-transform duration-200 ${
                 isOpen ? 'rotate-180' : ''
@@ -199,14 +199,14 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
               {runs.map((run) => (
                 <div
                   key={run.id}
-                  className="flex items-center gap-3 rounded-lg border border-border bg-background p-3"
+                  className="ui-sample flex items-center gap-3 p-3"
                 >
                   {run.status === 'completed' ? (
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+                    <CheckCircle2 className="ui-status--success h-4 w-4 shrink-0" />
                   ) : run.status === 'failed' ? (
-                    <XCircle className="h-4 w-4 shrink-0 text-destructive" />
+                    <XCircle className="ui-status--danger h-4 w-4 shrink-0" />
                   ) : (
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-accent-brand-ink" />
+                    <Loader2 className="ui-status--running h-4 w-4 shrink-0 animate-spin" />
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -218,7 +218,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
                       </span>
                     </div>
                     {run.status === 'failed' && run.result && (
-                      <p className="mt-1 line-clamp-1 text-destructive text-xs">
+                      <p className="ui-status--danger mt-1 line-clamp-1 text-xs">
                         {run.result}
                       </p>
                     )}
@@ -232,7 +232,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
                           e.stopPropagation()
                           onCancelRun(run.id)
                         }}
-                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        className="ui-status--danger"
                         aria-label="Cancel run"
                       >
                         <Square className="h-3.5 w-3.5" />
@@ -246,7 +246,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
                           e.stopPropagation()
                           onRetryRun(run.jobId)
                         }}
-                        className="text-muted-foreground hover:text-foreground"
+                        className=""
                         aria-label="Retry run"
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
@@ -256,7 +256,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
                       variant="ghost"
                       size="sm"
                       onClick={() => onViewRun(run)}
-                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                      className="shrink-0"
                     >
                       View
                     </Button>

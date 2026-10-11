@@ -1080,6 +1080,25 @@
   .ui-sample--quiet {
     color: var(--ink-secondary);
   }
+  /* A row's delete action: quiet until hovered, then the danger ink. */
+  .ui-row-delete {
+    color: var(--ink-muted);
+  }
+  .ui-row-delete:hover:not(:disabled) {
+    color: var(--status-danger);
+  }
+  /* A disclosure trigger that is a heading or a count, not a button: ink changes, the focus ring shows. */
+  .ui-disclosure {
+    border-radius: var(--radius-sm);
+    color: var(--ink-secondary);
+  }
+  .ui-disclosure:hover {
+    color: var(--ink-primary);
+  }
+  .ui-disclosure:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+  }
   .ui-status--success {
     color: var(--status-success);
   }
