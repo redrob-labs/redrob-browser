@@ -121,7 +121,11 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
         <Switch
           checked={job.enabled}
           onCheckedChange={onToggle}
-          aria-label={`${job.enabled ? 'Disable' : 'Enable'} ${job.name}`}
+          aria-label={
+            job.enabled
+              ? t('stDisableName', job.name)
+              : t('stEnableName', job.name)
+          }
         />
 
         <div className="min-w-0 flex-1">

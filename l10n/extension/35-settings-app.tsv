@@ -336,3 +336,11 @@ stConnectAppsLede	Connect the Redrob assistant to apps to send email, schedule c
 stScheduledLede	Automate recurring browser tasks	반복되는 브라우저 작업을 자동화하세요
 stKindAgent	Agent	에이전트	Row tag: a coding agent
 stKindModel	Model	모델	Row tag: a model provider
+stTesting	Testing…	테스트하는 중…
+stUpdate	Update	변경
+stSave	Save	저장
+stCreate	Create	만들기
+stDisableName	Disable $1	$1 사용 중지
+stEnableName	Enable $1	$1 사용
+stImage	Image	이미지
+stAttachment	Attachment	첨부 파일

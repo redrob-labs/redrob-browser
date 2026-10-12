@@ -495,7 +495,9 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
               >
                 {t('stCancel')}
               </Button>
-              <Button type="submit">{isEditing ? 'Update' : 'Create'}</Button>
+              <Button type="submit">
+                {isEditing ? t('stUpdate') : t('stCreate')}
+              </Button>
             </DialogFooter>
           </form>
         </Form>

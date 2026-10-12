@@ -167,6 +167,25 @@ function sentences(node: any): { start: number; text: string }[] {
   return []
 }
 
+/**
+ * A choice between two capitalised words (`{editing ? 'Update' : 'Create'}`): single words slip past
+ * SENTENCE, but when BOTH branches are a capitalised word it is a label, not an id or a class name.
+ */
+const WORD = /^[A-Z][a-z]+(\.\.\.|…)?$/
+// biome-ignore lint/suspicious/noExplicitAny: an ESTree walk
+function wordChoice(node: any): { start: number; text: string }[] {
+  if (node?.type !== 'ConditionalExpression') return []
+  const pick = [node.consequent, node.alternate]
+  return pick.every(
+    (b) =>
+      b?.type === 'Literal' &&
+      typeof b.value === 'string' &&
+      WORD.test(b.value),
+  )
+    ? pick.map((b) => ({ start: b.start, text: b.value }))
+    : []
+}
+
 function check(file: string): Finding[] {
   const src = readFileSync(file, 'utf8')
   const lines = src.split('\n')
@@ -228,6 +247,14 @@ function check(file: string): Finding[] {
     // A sentence handed to the UI some other way: returned by a label helper, or chosen inside a JSX
     // expression (`{busy ? 'Looking for profiles' : 'Pick a profile'}`). Only SENTENCE-shaped strings --
     // a capitalised word followed by more words -- so class names, ids and keys never match.
+    if (n.type === 'JSXExpressionContainer' && !skipped)
+      for (const w of wordChoice(n.expression)) report(w.start, w.text)
+    if (
+      n.type === 'Property' &&
+      !n.computed &&
+      PROPS.has(n.key?.name ?? n.key?.value)
+    )
+      for (const w of wordChoice(n.value)) report(w.start, w.text)
     if (
       n.type === 'ReturnStatement' ||
       (n.type === 'JSXExpressionContainer' && !skipped)

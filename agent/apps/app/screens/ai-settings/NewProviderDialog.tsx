@@ -1276,10 +1276,10 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                 disabled={!canTest || isTesting}
               >
                 {isTesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {isTesting ? 'Testing...' : 'Test'}
+                {isTesting ? t('stTesting') : t('stTest')}
               </Button>
               <Button type="submit" disabled={isTesting || contextExceedsMax}>
-                {initialValues?.id ? 'Update' : 'Save'}
+                {initialValues?.id ? t('stUpdate') : t('stSave')}
               </Button>
             </DialogFooter>
           </form>

@@ -58,7 +58,7 @@ export function buildProviderActions(input: {
 
   actions.push(
     {
-      label: isTesting ? 'Testing...' : 'Test connection',
+      label: isTesting ? t('stTesting') : t('stTestConnection'),
       onSelect: () => input.onTestProvider(provider),
       disabled: isTesting,
     },

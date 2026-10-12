@@ -156,7 +156,9 @@ export const AddHubProviderDialog: FC<AddHubProviderDialogProps> = ({
               >
                 {t('stCancel')}
               </Button>
-              <Button type="submit">{isEditing ? 'Update' : 'Add'}</Button>
+              <Button type="submit">
+                {isEditing ? t('stUpdate') : t('stAdd')}
+              </Button>
             </DialogFooter>
           </form>
         </Form>

@@ -338,7 +338,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 1,
+    "untranslated": 0,
     "fonts": 0
   },
   "overlay-dialog.light.en": {
@@ -356,7 +356,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 1,
+    "untranslated": 0,
     "fonts": 0
   },
   "overlay-menu.dark.en": {
@@ -374,7 +374,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 8,
+    "untranslated": 7,
     "fonts": 0
   },
   "overlay-menu.light.en": {
@@ -392,7 +392,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 8,
+    "untranslated": 7,
     "fonts": 0
   },
   "overlay-tooltip.dark.en": {
