@@ -1043,6 +1043,42 @@
     "untranslated": 1,
     "fonts": 0
   },
+  "sidepanel-hiring-list.dark.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "sidepanel-hiring-list.dark.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 6,
+    "fonts": 0
+  },
+  "sidepanel-hiring-list.light.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "sidepanel-hiring-list.light.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 6,
+    "fonts": 0
+  },
   "sidepanel-hiring.dark.en": {
     "offPalette": 0,
     "contrast": 0,

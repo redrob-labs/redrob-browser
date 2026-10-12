@@ -37,7 +37,9 @@ export function draftPrompt(input: {
     input.evidence.length ? 'What they wrote that fits the role:' : '',
     ...input.evidence.slice(0, 5).map((e) => `- ${e}`),
     input.tone ? `The recruiter's own tone, as an example: ${input.tone}` : '',
-    input.previous ? `The message they have not answered:\n${input.previous}` : '',
+    input.previous
+      ? `The message they have not answered:\n${input.previous}`
+      : '',
   ]
     .filter(Boolean)
     .join('\n')
@@ -75,12 +77,24 @@ export function sameMessage(approved: string, typed: string): boolean {
 }
 
 const ZONES: Array<[RegExp, string]> = [
-  [/seoul|busan|incheon|daegu|daejeon|gwangju|pangyo|korea|서울|부산|인천|대구|대전|광주|판교|한국/i, 'Asia/Seoul'],
-  [/bengaluru|bangalore|mumbai|delhi|gurgaon|gurugram|noida|pune|hyderabad|chennai|kolkata|india/i, 'Asia/Kolkata'],
+  [
+    /seoul|busan|incheon|daegu|daejeon|gwangju|pangyo|korea|서울|부산|인천|대구|대전|광주|판교|한국/i,
+    'Asia/Seoul',
+  ],
+  [
+    /bengaluru|bangalore|mumbai|delhi|gurgaon|gurugram|noida|pune|hyderabad|chennai|kolkata|india/i,
+    'Asia/Kolkata',
+  ],
   [/tokyo|osaka|japan|도쿄/i, 'Asia/Tokyo'],
   [/singapore/i, 'Asia/Singapore'],
-  [/seattle|san francisco|los angeles|portland|bay area|california|washington state|oregon/i, 'America/Los_Angeles'],
-  [/new york|boston|atlanta|miami|toronto|washington,? d\.?c/i, 'America/New_York'],
+  [
+    /seattle|san francisco|los angeles|portland|bay area|california|washington state|oregon/i,
+    'America/Los_Angeles',
+  ],
+  [
+    /new york|boston|atlanta|miami|toronto|washington,? d\.?c/i,
+    'America/New_York',
+  ],
   [/chicago|austin|dallas|houston|texas/i, 'America/Chicago'],
   [/denver|colorado/i, 'America/Denver'],
   [/london|united kingdom|\buk\b/i, 'Europe/London'],

@@ -173,6 +173,28 @@ export function createHiringRoutes(deps: {
         })),
     )
     .post(
+      '/roles/:id/list',
+      zValidator(
+        'json',
+        z.object({
+          url: z.string().url().max(2_000),
+          html: z.string().max(5_000_000),
+          groupTitle: z.string().min(1).max(120),
+        }),
+      ),
+      (c) =>
+        guard(c, async () => {
+          const { url, html, groupTitle } = c.req.valid('json')
+          return {
+            results: await sourcing.fromListPage(
+              c.req.param('id'),
+              { url, html },
+              groupTitle,
+            ),
+          }
+        }),
+    )
+    .post(
       '/roles/:id/source',
       zValidator(
         'json',

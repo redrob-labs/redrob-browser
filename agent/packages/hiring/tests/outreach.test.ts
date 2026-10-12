@@ -52,12 +52,16 @@ describe('outreach', () => {
   })
 
   it('compares an approved message to what is typed, ignoring spacing only', () => {
-    expect(sameMessage('Hi Jiwon,\n\nWe are hiring.', 'Hi Jiwon, We are hiring.')).toBe(true)
+    expect(
+      sameMessage('Hi Jiwon,\n\nWe are hiring.', 'Hi Jiwon, We are hiring.'),
+    ).toBe(true)
     expect(sameMessage('Hi Jiwon', 'Hi Jiwon, click this link')).toBe(false)
   })
 
   it('places quiet hours in the recipient’s zone, else the role’s', () => {
-    expect(timeZoneFor(['Seoul, South Korea', 'London'], 'UTC')).toBe('Asia/Seoul')
+    expect(timeZoneFor(['Seoul, South Korea', 'London'], 'UTC')).toBe(
+      'Asia/Seoul',
+    )
     expect(timeZoneFor([undefined, 'Bengaluru'], 'UTC')).toBe('Asia/Kolkata')
     expect(timeZoneFor(['Mars'], 'Asia/Seoul')).toBe('Asia/Seoul')
   })

@@ -137,6 +137,79 @@ export function useHiringPanel(options: {
     ? people.find((p) => p.id === checked.personId)
     : undefined
   const [busy, setBusy] = useState(false)
+  const [reviewed, setReviewed] = useState<{
+    role: Role
+    url: string
+    personIds: string[]
+    notChecked: number
+    problem?: string
+  } | null>(null)
+  const { data: reviewedPeople = [] } = usePeople(reviewed?.role.id)
+
+  /** The list the recruiter has open: each profile it links to, read one at a time, then checked. */
+  const review = async (role: Role) => {
+    if (tabId === undefined || !page) return
+    setBusy(true)
+    try {
+      const read = (await chrome.tabs.sendMessage(tabId, {
+        type: READ_MESSAGE,
+      })) as { url: string; html: string } | undefined
+      if (!read?.html) throw new Error('no page')
+      toast(t('hiringReviewing', page.count ?? 0))
+      const results = await actions.reviewList.mutateAsync({
+        roleId: role.id,
+        ...read,
+        groupTitle: t('hiringGroupTitle', role.title),
+      })
+      const ok = results.filter((r) => r.status === 'ok' && r.personId)
+      const failed = results.filter((r) => r.status !== 'ok')
+      await actions.screenRole.mutateAsync(role.id)
+      setReviewed({
+        role,
+        url: page.url,
+        personIds: ok.map((r) => r.personId as string),
+        notChecked: failed.length,
+        problem: failed.some((r) => r.status === 'limit')
+          ? t('hiringReviewLimit')
+          : failed[0]
+            ? sourceProblem(failed[0].status)
+            : undefined,
+      })
+    } catch {
+      toast.error(t('hiringCheckFailed', sourceProblem('failed')))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const reviewedList =
+    reviewed && page && reviewed.url === page.url
+      ? {
+          role: reviewed.role,
+          people: reviewedPeople.filter((p) =>
+            reviewed.personIds.includes(p.id),
+          ),
+          notChecked: reviewed.notChecked,
+          problem: reviewed.problem,
+        }
+      : null
+
+  /** The recruiter's own click: shortlist everyone on the list who meets every must have with evidence. */
+  const saveAllMeeting = async () => {
+    if (!reviewedList) return
+    const meeting = reviewedList.people.filter(
+      (p) => p.evaluation?.meetsEveryMust && p.stage === 'found',
+    )
+    for (const p of meeting) {
+      await actions.setStage.mutateAsync({
+        roleId: reviewedList.role.id,
+        personId: p.id,
+        stage: 'shortlisted',
+      })
+    }
+    toast.success(t('hiringSavedAll', meeting.length))
+    setReviewed(null)
+  }
 
   // The card belongs to the page it was asked for.
   const showing = checked && page && checked.url === page.url ? checked : null
@@ -194,7 +267,13 @@ export function useHiringPanel(options: {
 
   return {
     page,
-    chips: page && !showing ? roles.slice(0, 2) : [],
+    chips: page?.kind !== 'list' && page && !showing ? roles.slice(0, 2) : [],
+    listChips: page?.kind === 'list' && !reviewedList ? roles.slice(0, 2) : [],
+    listCount: page?.count ?? 0,
+    review,
+    reviewedList,
+    saveAllMeeting,
+    closeList: () => setReviewed(null),
     noRole: Boolean(page && roles.length === 0),
     busy,
     check,
@@ -203,7 +282,8 @@ export function useHiringPanel(options: {
     setAside: (reason: SetAsideReason) => decide('set-aside', reason),
     close: () => setChecked(null),
     sendNext: sending.sendNext,
-    hasChips: Boolean(page && !showing) || Boolean(sending.sendNext),
+    hasChips:
+      Boolean(page && !showing && !reviewedList) || Boolean(sending.sendNext),
   }
 }
 

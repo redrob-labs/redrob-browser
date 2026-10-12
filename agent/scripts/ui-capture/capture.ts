@@ -215,6 +215,25 @@ const SURFACES: Surface[] = [
     },
   },
   {
+    // A LinkedIn search in the active tab: "Review these 12 people for <role>".
+    id: 'sidepanel-hiring-list',
+    kind: 'extension',
+    path: 'sidepanel.html',
+    width: 400,
+    height: 800,
+    storage: (tabId) => ({
+      'hiring.pageByTab': {
+        [String(tabId)]: {
+          url: 'https://www.linkedin.com/search/results/people/?keywords=go',
+          site: 'linkedin',
+          siteName: 'LinkedIn',
+          kind: 'list',
+          count: 12,
+        },
+      },
+    }),
+  },
+  {
     // A LinkedIn profile in the active tab: one "Check against <role>" chip per role.
     id: 'sidepanel-hiring',
     kind: 'extension',

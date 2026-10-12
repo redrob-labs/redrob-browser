@@ -222,6 +222,23 @@ export function useHiringActions() {
         ).results,
       onSuccess: refresh,
     }),
+    reviewList: useMutation<
+      Array<{ url: string; status: SourceStatus; personId?: string }>,
+      Error,
+      { roleId: string; url: string; html: string; groupTitle: string }
+    >({
+      mutationFn: async ({ roleId, ...body }) =>
+        (
+          await ok<{
+            results: Array<{
+              url: string
+              status: SourceStatus
+              personId?: string
+            }>
+          }>(await fetch(`${baseUrl}/hiring/roles/${roleId}/list`, json(body)))
+        ).results,
+      onSuccess: refresh,
+    }),
     screen: useMutation<
       ScreenOutcome,
       Error,

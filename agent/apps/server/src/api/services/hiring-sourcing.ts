@@ -18,7 +18,7 @@
 import { activeCriteria } from '@browseros/hiring/criteria'
 import { evaluate } from '@browseros/hiring/evaluate'
 import type { ExtractOutcome } from '@browseros/hiring/extract'
-import { extractPage } from '@browseros/hiring/extract'
+import { extractListUrls, extractPage } from '@browseros/hiring/extract'
 import { recognisePage } from '@browseros/hiring/sites'
 import type { HiringStore } from '../../lib/hiring/store'
 import {
@@ -48,6 +48,13 @@ export interface SourceResult {
   isNew?: boolean
   /** Asked not to be contacted: kept on the list, never written to. */
   suppressed?: boolean
+}
+
+function statusOf(error: unknown): SourceStatus {
+  if (error instanceof NeverReadSiteError) return 'never-read'
+  if (error instanceof ReadBudgetError) return 'limit'
+  if (error instanceof PageTimeoutError) return 'timeout'
+  return 'failed'
 }
 
 export class HiringSourcing {
@@ -101,6 +108,19 @@ export class HiringSourcing {
     return this.keep(roleId, page.url, extractPage(page.html, page.url))
   }
 
+  /**
+   * The list the recruiter has open: the people it links to, each then read in the background, one at
+   * a time, in the role's tab group. Only the people on the open page; no further pages are fetched.
+   */
+  async fromListPage(
+    roleId: string,
+    page: { url: string; html: string },
+    groupTitle: string,
+  ): Promise<SourceResult[]> {
+    const urls = extractListUrls(page.html, page.url, 50)
+    return urls.length ? this.fromUrls(roleId, urls, groupTitle) : []
+  }
+
   /** Profiles from a list, read in the background, one at a time per site. */
   async fromUrls(
     roleId: string,
@@ -143,14 +163,7 @@ export class HiringSourcing {
           )),
         )
       } catch (error) {
-        const status: SourceStatus =
-          error instanceof NeverReadSiteError
-            ? 'never-read'
-            : error instanceof ReadBudgetError
-              ? 'limit'
-              : error instanceof PageTimeoutError
-                ? 'timeout'
-                : 'failed'
+        const status = statusOf(error)
         out.push({ url, status })
         // A site at its limit stays there for the day: the rest of its list is not tried.
         if (status === 'limit') limited.add(page.site.id)

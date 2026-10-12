@@ -259,7 +259,8 @@ export const Chat = () => {
           (comparison ||
             playbookPanel.showing ||
             jobs.open ||
-            hiring.card) ? null : messages.length === 0 ? (
+            hiring.card ||
+            hiring.reviewedList) ? null : messages.length === 0 ? (
           <ChatEmptyState
             mode={mode}
             mounted={mounted}

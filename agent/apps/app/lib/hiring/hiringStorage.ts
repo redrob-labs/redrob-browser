@@ -13,6 +13,10 @@ export interface HiringPage {
   url: string
   site: string
   siteName: string
+  /** A single person, or a list of them. */
+  kind: 'person' | 'list'
+  /** On a list: how many people it shows. */
+  count?: number
 }
 
 export const hiringPageByTabStorage = storage.defineItem<

@@ -352,3 +352,40 @@ function normalise(u: string): string {
     .replace(/\/+$/, '')
     .toLowerCase()
 }
+
+/**
+ * The people a list page links to (a Recruiter search, a project, a Greenhouse or Saramin applicant
+ * list): every link on the page that is a profile or applicant page Talent Scout recognises, in page
+ * order, once each. Only what the recruiter can see on the open page; nothing beyond it is fetched.
+ */
+export function extractListUrls(
+  html: string,
+  pageUrl: string,
+  limit = 100,
+): string[] {
+  const doc = parseDocument(html)
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const a of doc.querySelectorAll('a[href]')) {
+    let href: string
+    try {
+      href = new URL(a.getAttribute('href') ?? '', pageUrl).toString()
+    } catch {
+      continue
+    }
+    // Tracking parameters and fragments make the same person look like two.
+    const clean = href.replace(/[?#].*$/, '').replace(/\/+$/, '')
+    const page = recognisePage(clean)
+    if (!page || (page.kind !== 'profile' && page.kind !== 'applicant'))
+      continue
+    if (
+      clean === pageUrl.replace(/[?#].*$/, '').replace(/\/+$/, '') ||
+      seen.has(clean)
+    )
+      continue
+    seen.add(clean)
+    out.push(clean)
+    if (out.length >= limit) break
+  }
+  return out
+}

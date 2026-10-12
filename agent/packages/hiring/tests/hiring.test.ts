@@ -328,7 +328,10 @@ describe('evaluating a person against a role', () => {
     })
     expect(deviceCheckFor('Built payment systems')).toBeUndefined()
     expect(deviceCheckFor('Led or mentored engineers')).toBeUndefined()
-    expect(deviceCheckFor('C++/Rust')).toEqual({ type: 'skills', any: ['C++', 'Rust'] })
+    expect(deviceCheckFor('C++/Rust')).toEqual({
+      type: 'skills',
+      any: ['C++', 'Rust'],
+    })
   })
 
   it('counts experience from dated roles, overlaps once', () => {
@@ -634,5 +637,36 @@ describe('when a message may go', () => {
     ['네 좋습니다', false],
   ])('opt-out: %s', (reply, out) => {
     expect(isOptOut(reply)).toBe(out)
+  })
+})
+
+describe('reading a list of people', () => {
+  it('collects the profiles a list links to, once each, without tracking parameters', async () => {
+    const { extractListUrls } = await import('../src/extract')
+    const html = `
+      <a href="/in/jiwon-kim?trk=search">Jiwon</a>
+      <a href="https://www.linkedin.com/in/jiwon-kim/">Jiwon again</a>
+      <a href="https://www.linkedin.com/in/arjun-m#about">Arjun</a>
+      <a href="https://www.linkedin.com/company/acme">a company</a>
+      <a href="https://github.com/sam-example/repo">a repo</a>
+      <a href="https://github.com/sam-example">Sam</a>`
+    expect(
+      extractListUrls(
+        html,
+        'https://www.linkedin.com/search/results/people/?keywords=go',
+      ),
+    ).toEqual([
+      'https://www.linkedin.com/in/jiwon-kim',
+      'https://www.linkedin.com/in/arjun-m',
+      'https://github.com/sam-example',
+    ])
+    const greenhouse =
+      '<a href="/people/4471?application_id=9">A</a><a href="/people/4472">B</a>'
+    expect(
+      extractListUrls(greenhouse, 'https://acme.greenhouse.io/people?job_id=1'),
+    ).toEqual([
+      'https://acme.greenhouse.io/people/4471',
+      'https://acme.greenhouse.io/people/4472',
+    ])
   })
 })

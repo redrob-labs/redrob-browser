@@ -186,3 +186,12 @@ hiringExportCsv	Export for an audit (CSV)	감사용으로 내보내기 (CSV)
 hiringModeTeamOff	Your team turned Automatic off for Talent Scout.	팀에서 인재 스카우트의 자동 모드를 껐어요.
 hiringNoticeAudit	Read the independent audit of this tool	이 도구에 대한 독립 감사 보기
 hiringStatusRegion	your team doesn't use Talent Scout in this site's region	팀에서 이 사이트의 지역에서는 인재 스카우트를 쓰지 않아요
+hiringReviewList	Review these $1 people for “$2”	‘$2’ 기준으로 이 $1명 검토하기	Chip on a list page
+hiringReviewing	Reading $1 profiles in the background, one at a time…	백그라운드에서 프로필 $1개를 하나씩 읽고 있어요…
+hiringReviewDone	Checked $1 people: $2 meet every must have.	$1명을 확인했어요: $2명이 필수 조건을 모두 충족해요.
+hiringReviewNotChecked	$1 not checked: $2	$1명은 확인하지 못했어요: $2
+hiringReviewLimit	the site's daily reading limit was reached	사이트의 하루 읽기 한도에 도달했어요
+hiringSaveAllMust	Save all $1 who meet every must have	필수 조건을 모두 충족한 $1명 관심 후보에 담기
+hiringSavedAll	Saved $1 to the shortlist	$1명을 관심 후보에 담았어요
+hiringGroupTitle	Talent Scout · $1	인재 스카우트 · $1	Tab group name
+hiringReviewTitle	$1 people from this list	이 목록의 $1명

@@ -361,3 +361,32 @@ describe('Talent Scout: the record for an audit', () => {
     expect(csv).not.toContain('Jiwon')
   })
 })
+
+describe('Talent Scout: reviewing the list that is open', () => {
+  it('reads each profile the list links to, in the role’s group, and none it does not', async () => {
+    const asked: Array<{ url: string; group: string }> = []
+    const reader = {
+      read: async (url: string, o: { group: string }) => {
+        asked.push({ url, group: o.group })
+        return { url, html: fixture('github-profile') }
+      },
+    } as unknown as BackgroundReader
+    const { app, store } = setup(reader)
+    const { role } = store.createRole({ title: 'r', criteria: [] })
+    const res = await app.request(
+      `/hiring/roles/${role.id}/list`,
+      json({
+        url: 'https://www.linkedin.com/search/results/people/?keywords=go',
+        html: '<a href="https://github.com/sam-example">Sam</a><a href="https://example.com/x">x</a>',
+        groupTitle: 'Talent Scout · r',
+      }),
+    )
+    const { results } = (await res.json()) as {
+      results: Array<{ status: string }>
+    }
+    expect(results.map((r) => r.status)).toEqual(['ok'])
+    expect(asked).toEqual([
+      { url: 'https://github.com/sam-example', group: 'Talent Scout · r' },
+    ])
+  })
+})
