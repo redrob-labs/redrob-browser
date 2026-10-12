@@ -327,6 +327,8 @@ describe('evaluating a person against a role', () => {
       any: ['Seoul'],
     })
     expect(deviceCheckFor('Built payment systems')).toBeUndefined()
+    expect(deviceCheckFor('Led or mentored engineers')).toBeUndefined()
+    expect(deviceCheckFor('C++/Rust')).toEqual({ type: 'skills', any: ['C++', 'Rust'] })
   })
 
   it('counts experience from dated roles, overlaps once', () => {

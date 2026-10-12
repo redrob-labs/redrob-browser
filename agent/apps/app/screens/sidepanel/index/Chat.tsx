@@ -11,6 +11,7 @@ import { t } from '@browseros/i18n'
 import { Loader2 } from '@browseros/icons'
 import { useEffect, useRef, useState } from 'react'
 import { NoProviderNotice } from '@/components/chat/NoProviderNotice'
+import { HiringChips, HiringPanels } from '@/components/hiring/HiringPanels'
 import { JobChips, JobPanels } from '@/components/jobs/JobPanels'
 import { PlaybookPanels } from '@/components/playbooks/TeachPanel'
 import {
@@ -31,6 +32,7 @@ import {
 import { track } from '@/lib/metrics/track'
 import { useChatSessionContext } from '@/modules/chat/chat-session-context'
 import type { ChatMode } from '@/modules/chat/chat-types'
+import { useHiringPanel } from '@/modules/hiring/panel.hooks'
 import { useJobPanel } from '@/modules/jobs/panel.hooks'
 import { useJtbdPopup } from '@/modules/jtbd-popup/jtbd-popup.hooks'
 import { usePlaybookPanel } from '@/modules/playbooks/panel.hooks'
@@ -96,6 +98,7 @@ export const Chat = () => {
     send: (message: string) => sendNow(message),
   })
   const { runChips } = playbookPanel
+  const hiring = useHiringPanel()
   const jobs = useJobPanel({
     conversationId,
     status,
@@ -251,7 +254,8 @@ export const Chat = () => {
         ) : messages.length === 0 &&
           (comparison ||
             playbookPanel.showing ||
-            jobs.open) ? null : messages.length === 0 ? (
+            jobs.open ||
+            hiring.card) ? null : messages.length === 0 ? (
           <ChatEmptyState
             mode={mode}
             mounted={mounted}
@@ -276,6 +280,7 @@ export const Chat = () => {
         )}
         <PlaybookPanels panel={playbookPanel} />
         <JobPanels panel={jobs} />
+        <HiringPanels panel={hiring} />
         {comparison ? (
           <SmartCompareCard
             result={comparison}
@@ -322,9 +327,13 @@ export const Chat = () => {
         onRemoveTab={removeTab}
         externalAgentName={externalAgentName}
         moments={
-          (product && !comparison) || runChips.length || jobs.hasChips ? (
+          (product && !comparison) ||
+          runChips.length ||
+          jobs.hasChips ||
+          hiring.hasChips ? (
             <>
               <JobChips panel={jobs} />
+              <HiringChips panel={hiring} />
               {product && !comparison ? (
                 <SmartCompareChip
                   region={region}

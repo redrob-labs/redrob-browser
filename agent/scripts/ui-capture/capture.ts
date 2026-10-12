@@ -91,6 +91,15 @@ const SURFACES: Surface[] = [
   page('playbooks', '/playbooks'),
   // With applications in the tracker the page opens on them; the profile is one tab over.
   page('jobs', '/jobs'),
+  // Talent Scout: the role with its criteria, then the People pipeline with one person open.
+  page('hiring', '/hiring'),
+  {
+    ...page('hiring-people', '/hiring'),
+    open: {
+      click: '[role="tab"]:has-text("People"), [role="tab"]:has-text("후보자")',
+      wait: '[role="tabpanel"] ul li',
+    },
+  },
   {
     ...page('jobs-profile', '/jobs'),
     open: {
@@ -196,6 +205,23 @@ const SURFACES: Surface[] = [
       click: 'button.rr-prompt[title]',
       wait: 'section.rr-card[aria-label]',
     },
+  },
+  {
+    // A LinkedIn profile in the active tab: one "Check against <role>" chip per role.
+    id: 'sidepanel-hiring',
+    kind: 'extension',
+    path: 'sidepanel.html',
+    width: 400,
+    height: 800,
+    storage: (tabId) => ({
+      'hiring.pageByTab': {
+        [String(tabId)]: {
+          url: 'https://www.linkedin.com/in/example-1',
+          site: 'linkedin',
+          siteName: 'LinkedIn',
+        },
+      },
+    }),
   },
   {
     // The agent menu with Redrob Console selected: Redrob Auto, then one model per lab.
@@ -520,6 +546,16 @@ async function captureOne(
           globalThis as unknown as { chrome: typeof chrome }
         ).chrome.storage.local.remove(keys),
       seeded,
+    )
+  }
+  if (s.fixtures) {
+    // And drop it again, so the next scene does not start from this scene's answers.
+    await p.evaluate(
+      () =>
+        new Promise<void>((done) => {
+          const request = indexedDB.deleteDatabase('keyval-store')
+          request.onsuccess = request.onerror = request.onblocked = () => done()
+        }),
     )
   }
   await p.close()

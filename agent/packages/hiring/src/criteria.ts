@@ -174,10 +174,10 @@ export function deviceCheckFor(text: string): DeviceCheck | undefined {
   const worked = /^(?:has )?worked at (?:one of:?\s*)?(.+)$/i.exec(text.trim())
   if (worked)
     return { type: 'worked-at', any: splitAlternatives(worked[1] ?? '') }
-  const skills =
-    /^([A-Za-z0-9+#.\- ]{1,30})(?:\s+(?:or|\/)\s+[A-Za-z0-9+#.\- ]{1,30})+$/.exec(
-      text.trim(),
-    )
+  // "Go or Kotlin", "C++/Rust": names of tools, one word each. "Led or mentored engineers" is not.
+  const skills = /^[A-Za-z0-9+#.-]{1,20}(?:\s*(?:\bor\b|\/|,)\s*[A-Za-z0-9+#.-]{1,20})+$/.exec(
+    text.trim(),
+  )
   if (skills) return { type: 'skills', any: splitAlternatives(text) }
   return undefined
 }

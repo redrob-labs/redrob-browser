@@ -71,6 +71,78 @@
     "untranslated": 13,
     "fonts": 0
   },
+  "hiring-people.dark.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "hiring-people.dark.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "hiring-people.light.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "hiring-people.light.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "hiring.dark.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "hiring.dark.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "hiring.light.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "hiring.light.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
   "home-chat.dark.en": {
     "offPalette": 0,
     "contrast": 0,
@@ -933,6 +1005,42 @@
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 1,
+    "fonts": 0
+  },
+  "sidepanel-hiring.dark.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "sidepanel-hiring.dark.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 6,
+    "fonts": 0
+  },
+  "sidepanel-hiring.light.en": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 0,
+    "fonts": 0
+  },
+  "sidepanel-hiring.light.ko": {
+    "offPalette": 0,
+    "contrast": 0,
+    "focusMissing": 0,
+    "roundIcons": 0,
+    "foreignIcons": 0,
+    "untranslated": 6,
     "fonts": 0
   },
   "sidepanel-history.dark.en": {

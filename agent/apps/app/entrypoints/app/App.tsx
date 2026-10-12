@@ -16,6 +16,7 @@ import { AgentCommandHome } from '@/screens/agent-command/AgentCommandHome'
 import { AISettingsPage } from '@/screens/ai-settings/AISettingsPage'
 import { ConnectMCP } from '@/screens/connect-mcp/ConnectMCP'
 import { CustomizationPage } from '@/screens/customization/CustomizationPage'
+import { HiringPage } from '@/screens/hiring/HiringPage'
 import { JobsPage } from '@/screens/jobs/JobsPage'
 import { LlmHubPage } from '@/screens/llm-hub/LlmHubPage'
 import { MCPSettingsPage } from '@/screens/mcp-settings/MCPSettingsPage'
@@ -60,6 +61,7 @@ export const App: FC = () => {
           <Route path="scheduled" element={<ScheduledTasksPage />} />
           <Route path="playbooks" element={<PlaybooksPage />} />
           <Route path="jobs" element={<JobsPage />} />
+          <Route path="hiring" element={<HiringPage />} />
         </Route>
 
         <Route element={<SettingsSidebarLayout />}>

@@ -15,6 +15,7 @@ import {
   Home,
   PlugZap,
   Settings,
+  Users,
 } from '@browseros/icons'
 import type { FC } from 'react'
 import { NavLink, useLocation } from 'react-router'
@@ -48,6 +49,7 @@ const primaryNavItems: NavItem[] = [
   { name: 'Scheduled Tasks', to: '/scheduled', icon: CalendarClock },
   { name: t('playbooksNav'), to: '/playbooks', icon: Book },
   { name: t('jobsNav'), to: '/jobs', icon: Briefcase },
+  { name: t('hiringNav'), to: '/hiring', icon: Users },
   {
     name: 'Settings',
     to: '/settings/ai',

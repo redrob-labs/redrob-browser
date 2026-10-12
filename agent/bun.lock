@@ -31,6 +31,7 @@
       "dependencies": {
         "@ai-sdk/react": "^4.0.117",
         "@browseros/diagnostics": "workspace:*",
+        "@browseros/hiring": "workspace:*",
         "@browseros/i18n": "workspace:*",
         "@browseros/icons": "workspace:*",
         "@browseros/jobs": "workspace:*",

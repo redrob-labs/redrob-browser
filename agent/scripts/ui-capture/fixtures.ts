@@ -123,6 +123,7 @@ export function fixturesFor(locale: FixtureLocale): Record<string, unknown> {
   return {
     // modules/playbooks/playbooks.hooks.ts
     '/playbooks': { playbooks: [playbookFixture(locale)] },
+    ...hiringFixtures(locale),
     // modules/jobs/jobs.hooks.ts
     '/jobs/profile': { profile: jobProfileFixture(locale) },
     '/jobs/applications': { applications: jobApplicationsFixture(locale) },
@@ -578,4 +579,187 @@ export function jobApplicationsFixture(locale: FixtureLocale) {
       updatedAt: h(30),
     },
   ]
+}
+
+/**
+ * Talent Scout: one role with criteria (one an unconfirmed assumption), and people at different stages.
+ * Names are placeholders, in the capture's language. modules/hiring/hiring.hooks.ts reads these.
+ */
+export function hiringFixtures(locale: FixtureLocale) {
+  const ko = locale === 'ko'
+  const criteria = {
+    version: 2,
+    items: [
+      {
+        id: 'c1',
+        text: ko ? '경력 5년 이상' : '5+ years',
+        kind: 'must',
+        check: { type: 'years', min: 5 },
+      },
+      {
+        id: 'c2',
+        text: 'Go or Kotlin',
+        kind: 'must',
+        check: { type: 'skills', any: ['Go', 'Kotlin'] },
+      },
+      {
+        id: 'c3',
+        text: ko ? '결제 시스템 개발 경험' : 'Built payment systems',
+        kind: 'nice',
+      },
+      {
+        id: 'c4',
+        text: ko ? '팀 리드 경험' : 'Led or mentored engineers',
+        kind: 'nice',
+        inferred: true,
+      },
+    ],
+  }
+  const role = {
+    id: 'role-1',
+    title: ko ? '백엔드 엔지니어' : 'Backend Engineer',
+    location: ko ? '서울' : 'Seoul',
+    description: null,
+    criteria,
+    mode: 'review',
+    sites: ['linkedin', 'github'],
+    createdAt: h(200),
+    updatedAt: h(20),
+  }
+  const record = (
+    name: string,
+    url: string,
+    site: string,
+    headline: string,
+  ) => ({
+    url,
+    site,
+    name,
+    headline,
+    positions: [],
+    education: [],
+    skills: [],
+    languages: [],
+    links: [],
+    contact: [],
+  })
+  const evaluation = (
+    states: string[],
+    evidence: Array<string | undefined>,
+  ) => {
+    const results = states.map((state, i) => ({
+      criterionId: `c${i + 1}`,
+      state,
+      by: i < 2 ? 'device' : 'model',
+      ...(evidence[i] ? { evidence: evidence[i] } : {}),
+    }))
+    const judged = results.filter((r) => r.state !== 'unknown').length
+    const met = results.filter((r) => r.state === 'met').length
+    return {
+      criteriaVersion: 2,
+      results,
+      met,
+      judged,
+      meetsEveryMust: states[0] === 'met' && states[1] === 'met',
+      suggestsSetAside: states.slice(0, 2).includes('missing'),
+    }
+  }
+  const people = [
+    {
+      id: 'p1',
+      record: record(
+        ko ? '김지원' : 'Jiwon Kim',
+        'https://www.linkedin.com/in/example-1',
+        'linkedin',
+        ko
+          ? '시니어 엔지니어, 결제 백엔드'
+          : 'Senior Engineer, payments backend',
+      ),
+      sites: ['linkedin', 'github'],
+      readByModel: false,
+      stage: 'shortlisted',
+      foundAt: h(30),
+      evaluation: evaluation(
+        ['met', 'met', 'met'],
+        [
+          ko
+            ? '7년, 2019–현재 시니어 엔지니어'
+            : '7 years in dated roles: 2019–now Senior Engineer',
+          'Skills: Go',
+          ko
+            ? '결제 시스템을 Go로 개발합니다'
+            : 'I build payment systems in Go',
+        ],
+      ),
+    },
+    {
+      id: 'p2',
+      record: record(
+        'Arjun Mehta',
+        'https://github.com/example-2',
+        'github',
+        '@example-2',
+      ),
+      sites: ['github'],
+      readByModel: false,
+      stage: 'found',
+      foundAt: h(6),
+      evaluation: evaluation(
+        ['unknown', 'met', 'unknown'],
+        [undefined, 'Skills: Kotlin', undefined],
+      ),
+    },
+  ]
+  const events = [
+    {
+      id: 'e1',
+      roleId: 'role-1',
+      personId: null,
+      kind: 'role-created',
+      actor: 'recruiter',
+      detail: {},
+      at: h(200),
+    },
+    {
+      id: 'e2',
+      roleId: 'role-1',
+      personId: null,
+      kind: 'criteria-changed',
+      actor: 'recruiter',
+      detail: { version: 2 },
+      at: h(150),
+    },
+    {
+      id: 'e3',
+      roleId: 'role-1',
+      personId: 'p1',
+      kind: 'found',
+      actor: 'recruiter',
+      detail: { site: 'linkedin' },
+      at: h(30),
+    },
+    {
+      id: 'e4',
+      roleId: 'role-1',
+      personId: 'p1',
+      kind: 'evaluated',
+      actor: 'recruiter',
+      detail: { met: 3, judged: 3 },
+      at: h(29),
+    },
+    {
+      id: 'e5',
+      roleId: 'role-1',
+      personId: 'p1',
+      kind: 'stage',
+      actor: 'recruiter',
+      detail: { to: 'shortlisted' },
+      at: h(28),
+    },
+  ]
+  return {
+    '/hiring/roles': { roles: [role] },
+    '/hiring/roles/role-1/people': { people },
+    '/hiring/record': { events },
+  }
 }
