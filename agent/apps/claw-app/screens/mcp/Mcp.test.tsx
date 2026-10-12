@@ -192,17 +192,13 @@ describe('Mcp (editorial)', () => {
     expect(html).not.toContain('OpenClaw')
   })
 
-  it('renders the Claude Desktop callout as an in-app guide trigger, not a repo link', () => {
+  it('withholds the Claude Desktop card while the only extension is the upstream one', () => {
     const html = renderApp()
-    expect(html).toContain('Claude Desktop')
-    expect(html).toContain('Give Claude Desktop a real browser.')
-    expect(html).toContain('Show me how')
-    expect(html).toContain(coworkRequirementLine())
-    // The walkthrough replaced the link-out; nothing here should leave the app.
+    expect(html).not.toContain('Give Claude Desktop a real browser.')
+    expect(html).not.toContain(coworkRequirementLine())
     expect(html).not.toContain(
       'https://github.com/browseros-ai/browserclaw-claude-desktop#install-the-extension',
     )
-    expect(html).not.toContain('Also works with Cowork.')
   })
 
   it('keeps the install walkthrough closed until the callout is activated', () => {
