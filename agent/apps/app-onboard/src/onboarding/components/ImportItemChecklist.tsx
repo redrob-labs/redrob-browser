@@ -53,7 +53,7 @@ export function ImportItemChecklist({
         <div className="font-bold text-[12.5px] text-ink-2">
           {t('onboardWhatToCopy')}
         </div>
-        <div className="font-mono text-[11.5px] text-ink-3">
+        <div className="text-[11.5px] text-ink-3 tabular-nums">
           {t('onboardCategoriesSelected', checkedItems.length)}
         </div>
       </div>

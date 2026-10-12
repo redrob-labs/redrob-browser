@@ -48,7 +48,7 @@ export function ImportingProgressCard({
           style={{ width: `${percent}%` }}
         />
       </div>
-      <div className="font-mono text-[12.5px] text-ink-2">
+      <div className="text-[12.5px] text-ink-2 tabular-nums">
         {t('onboardItems', progress, total)}
       </div>
     </div>
