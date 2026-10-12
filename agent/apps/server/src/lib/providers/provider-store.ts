@@ -8,6 +8,7 @@ import { and, eq, ne, sql } from 'drizzle-orm'
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 import { getDb } from '../db'
 import { type NewProviderRow, type ProviderRow, providers } from '../db/schema'
+import { readSharedAccount, wantsLauncherKey } from '../redrob-shared-account'
 
 /**
  * Every column except the four that hold secrets, plus flags saying whether
@@ -51,10 +52,32 @@ const publicColumns = {
   hasSessionToken: isSet(providers.sessionToken),
 }
 
-export type PublicProviderRow = {
+type ProjectedRow = {
   [K in keyof typeof publicColumns]: K extends `has${string}`
     ? boolean
     : ProviderRow[Extract<K, keyof ProviderRow>]
+}
+
+export type PublicProviderRow = ProjectedRow & {
+  /**
+   * Whether a request through this provider would use Redrob Launcher's shared
+   * sign-in: a Redrob Console row with no key of its own while the launcher is
+   * signed in. Read from the shared file at the time of the read, so the UI
+   * follows a sign-in or sign-out in the launcher.
+   */
+  viaLauncher: boolean
+}
+
+function withLauncherFlag(rows: ProjectedRow[]): PublicProviderRow[] {
+  // One read of the shared file per listing, and none when no row could use it.
+  let signedIn: boolean | undefined
+  return rows.map((row) => {
+    if (!wantsLauncherKey(row.type, row.hasApiKey ? 'set' : '')) {
+      return { ...row, viaLauncher: false }
+    }
+    signedIn ??= readSharedAccount() !== null
+    return { ...row, viaLauncher: signedIn }
+  })
 }
 
 /**
@@ -95,15 +118,19 @@ export interface ProviderStore {
 }
 
 async function list(): Promise<PublicProviderRow[]> {
-  return getDb().select(publicColumns).from(providers).all()
+  return withLauncherFlag(
+    await getDb().select(publicColumns).from(providers).all(),
+  )
 }
 
 async function listLlm(): Promise<PublicProviderRow[]> {
-  return getDb()
-    .select(publicColumns)
-    .from(providers)
-    .where(eq(providers.kind, 'llm'))
-    .all()
+  return withLauncherFlag(
+    await getDb()
+      .select(publicColumns)
+      .from(providers)
+      .where(eq(providers.kind, 'llm'))
+      .all(),
+  )
 }
 
 async function get(id: string): Promise<PublicProviderRow | null> {
@@ -112,7 +139,7 @@ async function get(id: string): Promise<PublicProviderRow | null> {
     .from(providers)
     .where(eq(providers.id, id))
     .limit(1)
-  return row ?? null
+  return row ? withLauncherFlag([row])[0] : null
 }
 
 async function getWithCredentials(id: string): Promise<ProviderRow | null> {
@@ -190,7 +217,7 @@ async function getDefault(): Promise<PublicProviderRow | null> {
     .from(providers)
     .where(eq(providers.isDefault, true))
     .limit(1)
-  return row ?? null
+  return row ? withLauncherFlag([row])[0] : null
 }
 
 async function getDefaultWithCredentials(): Promise<ProviderRow | null> {

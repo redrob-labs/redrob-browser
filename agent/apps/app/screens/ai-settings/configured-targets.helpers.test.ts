@@ -107,6 +107,19 @@ describe('providerDescription', () => {
       } as LlmProviderConfig),
     ).toBe('gpt-5.5')
   })
+
+  it("says the key is Redrob Launcher's when the row has none of its own", () => {
+    expect(
+      helpers.providerDescription({
+        ...provider,
+        type: 'redrob-console',
+        modelId: 'auto',
+        baseUrl: 'https://console.redrob.ai/api/backend/v1',
+        hasApiKey: false,
+        viaLauncher: true,
+      }),
+    ).toBe('Signed in with Redrob Launcher · auto')
+  })
 })
 
 describe('buildProviderActions', () => {

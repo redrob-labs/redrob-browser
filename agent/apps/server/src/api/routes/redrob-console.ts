@@ -7,17 +7,23 @@
 import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { launcherSignIn } from '../../lib/redrob-shared-account'
 import { RedrobConsoleDeviceFlow } from '../services/redrob-console/device-flow'
 import type { Env } from '../types'
 
 const handleSchema = z.object({ handle: z.string().uuid() }).strict()
 
-/** `POST /start` begins a console device connection; `POST /poll` and `POST /cancel` take its handle. */
+/**
+ * `POST /start` begins a console device connection; `POST /poll` and `POST /cancel` take its handle.
+ * `GET /launcher` says whether Redrob Launcher's shared sign-in is available, and for which account --
+ * never the key itself.
+ */
 export function createRedrobConsoleRoutes(
   options: { flow?: RedrobConsoleDeviceFlow } = {},
 ) {
   const flow = options.flow ?? new RedrobConsoleDeviceFlow()
   return new Hono<Env>()
+    .get('/launcher', (c) => c.json(launcherSignIn(), 200))
     .post('/device/start', async (c) => {
       try {
         return c.json(await flow.start(), 200)

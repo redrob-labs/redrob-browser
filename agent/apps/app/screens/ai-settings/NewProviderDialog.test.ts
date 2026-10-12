@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from 'bun:test'
 import { providerTypeOptions } from '../../lib/llm-providers/providerTemplates'
+import { isProviderTestable } from './NewProviderDialog'
 import {
   normalizeProviderFormValues,
   providerFormSchema,
@@ -141,5 +142,36 @@ describe('provider setup boundary', () => {
       originalType: 'bedrock' as const,
     })
     expect(result.success).toBe(true)
+  })
+})
+
+describe('isProviderTestable with Redrob Launcher signed in', () => {
+  const redrob = {
+    type: 'redrob-console' as const,
+    modelId: 'auto',
+    baseUrl: 'https://console.redrob.ai/api/backend/v1',
+    apiKey: '',
+  }
+
+  it('needs a key when the launcher is not signed in', () => {
+    expect(isProviderTestable(redrob)).toBe(false)
+    expect(isProviderTestable({ ...redrob, launcherSignedIn: false })).toBe(
+      false,
+    )
+  })
+
+  it('runs on the launcher sign-in when the provider has no key of its own', () => {
+    expect(isProviderTestable({ ...redrob, launcherSignedIn: true })).toBe(true)
+  })
+
+  it('does not lend the launcher sign-in to any other provider type', () => {
+    expect(
+      isProviderTestable({
+        ...redrob,
+        type: 'openai',
+        baseUrl: 'https://api.openai.com/v1',
+        launcherSignedIn: true,
+      }),
+    ).toBe(false)
   })
 })

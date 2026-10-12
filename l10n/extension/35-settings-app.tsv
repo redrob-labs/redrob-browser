@@ -282,6 +282,8 @@ stToolsAvailable	$1 tools available	사용 가능한 도구 $1개
 stApproveWithCode	Approve this connection on the console with code $1.	콘솔에서 코드 $1(으)로 이 연결을 승인하세요.	$1 is a short code
 stWaitingApproval	Waiting for approval…	승인을 기다리는 중…
 stConnectConsole	Connect with Redrob Console	Redrob Console로 연결
+stSignedInWithLauncher	Signed in with Redrob Launcher	Redrob Launcher로 로그인됨	Shown instead of the connect/disconnect controls when the key in use is Redrob Launcher's shared sign-in
+stLeaveBlankForLauncher	Leave blank to use Redrob Launcher's sign-in	비워 두면 Redrob Launcher의 로그인을 사용합니다	API key field placeholder while the launcher's shared sign-in is available
 stContextMax	Context window cannot exceed $1.	컨텍스트 창은 $1을(를) 넘을 수 없습니다.	$1 is a size such as 128K
 stCustomValueAdded	Custom value added.	사용자 지정 값을 추가했습니다.
 stTemperatureRange	Temperature ($1–$2)	Temperature ($1–$2)	Parameter name kept in English; $1/$2 are its bounds
