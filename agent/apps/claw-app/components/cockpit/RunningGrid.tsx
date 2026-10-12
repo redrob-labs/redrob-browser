@@ -81,7 +81,7 @@ export function RunningGrid({
     <section className="ph-no-capture space-y-4">
       <header className="flex items-baseline gap-3">
         <h2 className="font-semibold text-ink text-lg">{t('clRunningNow')}</h2>
-        <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-accent uppercase tracking-[0.08em]">
+        <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-accent-ink uppercase tracking-[0.08em]">
           <span
             aria-hidden
             className="inline-block size-1.5 animate-[pulse-dot_1.4s_ease-in-out_infinite] rounded-full bg-accent shadow-[0_0_8px_hsl(221_90%_55%/0.5)]"

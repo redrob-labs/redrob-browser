@@ -57,7 +57,7 @@ export function ConnectionRow({
       }
       className={cn(
         'group block w-full border-cyanotype-border border-t text-left transition-colors',
-        'hover:bg-card-tint focus-visible:bg-card-tint focus-visible:outline-none',
+        'hover:bg-card-tint focus-visible:bg-card-tint focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2',
         'disabled:cursor-not-allowed disabled:opacity-70',
       )}
     >
@@ -113,7 +113,7 @@ function RowAction({
   return (
     <span
       className={cn(
-        'inline-flex shrink-0 items-center gap-1.5 text-[12px] text-cyanotype-blue',
+        'inline-flex shrink-0 items-center gap-1.5 text-[12px] text-accent-ink',
         'transition-colors group-hover:text-cyanotype-blue-hover',
       )}
     >

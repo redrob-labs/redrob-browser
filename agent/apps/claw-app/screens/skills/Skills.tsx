@@ -134,7 +134,7 @@ function SkillRow({ skill, onOpen }: { skill: Skill; onOpen: () => void }) {
     >
       <TableCell className={cn(CELL_PADDING, 'align-middle')}>
         <div className="flex flex-col gap-0.5">
-          <span className="font-medium font-mono text-[13px] text-primary">
+          <span className="font-medium font-mono text-[13px] text-accent-ink">
             {skillCommand(skill.name)}
           </span>
           <span className="truncate text-[13px] text-ledger-ink-2">

@@ -8,10 +8,13 @@
  */
 
 /* The design system first, in its own layer, so Tailwind's utilities still win and a component's
-   classes still read. tokens.css declares the faces it names and Vite bundles them. */
+   classes still read. tokens.css declares the faces it names and Vite bundles them. preflight.css is
+   the system's document rules, among them the keyboard focus ring every control gets unless its own
+   classes draw one. */
 @layer theme, base, rr, components, utilities;
 @import "@redrob-labs/ui/tokens.css" layer(rr);
 @import "@redrob-labs/ui/styles.css" layer(rr);
+@import "@redrob-labs/ui/preflight.css" layer(rr);
 @import "tailwindcss";
 /*
  ---break---

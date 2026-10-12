@@ -72,72 +72,72 @@
     "fonts": 0
   },
   "claw-cockpit.dark.en": {
-    "offPalette": 12,
-    "contrast": 11,
-    "focusMissing": 3,
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "claw-cockpit.dark.ko": {
-    "offPalette": 12,
-    "contrast": 11,
-    "focusMissing": 3,
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "claw-cockpit.light.en": {
-    "offPalette": 12,
-    "contrast": 9,
-    "focusMissing": 3,
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "claw-cockpit.light.ko": {
-    "offPalette": 12,
-    "contrast": 9,
-    "focusMissing": 3,
+    "offPalette": 1,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "claw-mcp.dark.en": {
-    "offPalette": 5,
-    "contrast": 4,
-    "focusMissing": 5,
+    "offPalette": 4,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "claw-mcp.dark.ko": {
-    "offPalette": 5,
-    "contrast": 4,
-    "focusMissing": 5,
+    "offPalette": 4,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "claw-mcp.light.en": {
-    "offPalette": 6,
+    "offPalette": 5,
     "contrast": 0,
-    "focusMissing": 5,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
     "fonts": 0
   },
   "claw-mcp.light.ko": {
-    "offPalette": 6,
+    "offPalette": 5,
     "contrast": 0,
-    "focusMissing": 5,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -146,7 +146,7 @@
   "claw-skill.dark.en": {
     "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 1,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -155,7 +155,7 @@
   "claw-skill.dark.ko": {
     "offPalette": 0,
     "contrast": 0,
-    "focusMissing": 1,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -163,8 +163,8 @@
   },
   "claw-skill.light.en": {
     "offPalette": 0,
-    "contrast": 1,
-    "focusMissing": 1,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -172,8 +172,8 @@
   },
   "claw-skill.light.ko": {
     "offPalette": 0,
-    "contrast": 1,
-    "focusMissing": 1,
+    "contrast": 0,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -181,7 +181,7 @@
   },
   "claw-skills.dark.en": {
     "offPalette": 0,
-    "contrast": 2,
+    "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
@@ -190,7 +190,7 @@
   },
   "claw-skills.dark.ko": {
     "offPalette": 0,
-    "contrast": 2,
+    "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
@@ -218,7 +218,7 @@
   "claw-task.dark.en": {
     "offPalette": 1,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -227,7 +227,7 @@
   "claw-task.dark.ko": {
     "offPalette": 1,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -236,7 +236,7 @@
   "claw-task.light.en": {
     "offPalette": 1,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,
@@ -245,7 +245,7 @@
   "claw-task.light.ko": {
     "offPalette": 1,
     "contrast": 0,
-    "focusMissing": 7,
+    "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
     "untranslated": 0,

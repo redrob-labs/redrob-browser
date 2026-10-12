@@ -36,7 +36,7 @@ export function EndpointStrip({ label, value }: EndpointStripProps) {
         {hasValue ? (
           <>
             <code
-              className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-white/90"
+              className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-white"
               title={value}
             >
               {value}
@@ -45,7 +45,7 @@ export function EndpointStrip({ label, value }: EndpointStripProps) {
               type="button"
               onClick={copy}
               aria-label={t('clCopyName', label)}
-              className="shrink-0 rounded px-1.5 py-0.5 text-[12px] text-white/90 transition-colors hover:bg-white/10 hover:text-white"
+              className="shrink-0 rounded px-1.5 py-0.5 text-[12px] text-white transition-colors hover:bg-white/10 hover:text-white"
             >
               {copied ? t('clCopiedCheck') : t('clCopy')}
             </button>

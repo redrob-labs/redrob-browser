@@ -158,7 +158,7 @@ function FeaturedRequest({
 
   return (
     <>
-      <p className="mt-1 font-mono text-[11px] text-ink-3 uppercase tracking-[0.06em]">
+      <p className="mt-1 font-mono text-[11px] text-ink-2 uppercase tracking-[0.06em]">
         {context}
       </p>
       <p className="mt-1 font-medium text-[14px] text-ink">{help.reason}</p>
@@ -168,7 +168,7 @@ function FeaturedRequest({
         </p>
       )}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <span className="mr-auto inline-flex items-center gap-1.5 font-mono text-[11px] text-ink-3 uppercase tracking-[0.08em]">
+        <span className="mr-auto inline-flex items-center gap-1.5 font-mono text-[11px] text-ink-2 uppercase tracking-[0.08em]">
           {t('clWaiting')}
           <span className="tabular-nums">
             {waitLabel(help.requestedAt, now)}

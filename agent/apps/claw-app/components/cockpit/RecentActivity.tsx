@@ -84,7 +84,7 @@ export function RecentActivity() {
       <div className="pt-0.5">
         <NavLink
           to="/audit"
-          className="group inline-flex items-center gap-2.5 font-medium text-[12px] text-cyanotype-blue leading-4 transition-colors hover:text-cyanotype-blue-hover"
+          className="group inline-flex items-center gap-2.5 font-medium text-[12px] text-accent-ink leading-4 transition-colors hover:text-ink"
         >
           <span>{t('clViewAllActivity')}</span>
           <span

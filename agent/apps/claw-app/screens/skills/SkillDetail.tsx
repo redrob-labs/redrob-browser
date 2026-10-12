@@ -311,8 +311,8 @@ function RunHistory({ runs }: { runs: SkillRun[] }) {
                   </TableCell>
                   <TableCell className={cn(CELL_PADDING, 'text-[13px]')}>
                     {run.clean ? (
-                      <span className="inline-flex items-center gap-1 text-green">
-                        <Check className="size-3.5" />
+                      <span className="inline-flex items-center gap-1 text-ink-2">
+                        <Check className="size-3.5 text-green" />
                         {t('clClean')}
                       </span>
                     ) : (

@@ -49,7 +49,7 @@ export function ClaudeDesktopCard() {
           </div>
         </div>
         <div className="mt-3 flex justify-end">
-          <span className="inline-flex items-center gap-1 text-[12px] text-cyanotype-blue transition-colors group-hover:text-cyanotype-blue-hover">
+          <span className="inline-flex items-center gap-1 text-[12px] text-accent-ink transition-colors group-hover:text-ink">
             {t('clShowMeHow')}
             <ArrowRight
               aria-hidden
