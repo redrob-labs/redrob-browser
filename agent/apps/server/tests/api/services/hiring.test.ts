@@ -327,3 +327,37 @@ describe('Talent Scout: reading a list in the background', () => {
     expect(asked[0]?.minMs).toBe(4_000)
   })
 })
+
+describe('Talent Scout: the record for an audit', () => {
+  it('exports every step with who did it, keyed by the ATS id, and no names or message text', async () => {
+    const { app, store } = setup()
+    const { role } = store.createRole({
+      title: 'r',
+      criteria: [{ text: '5+ years', kind: 'must' }],
+    })
+    const { personId } = await store.upsertPerson(
+      role.id,
+      person({
+        atsId: '4471',
+        site: 'greenhouse',
+        url: 'https://acme.greenhouse.io/people/4471',
+      }),
+    )
+    store.setStage(role.id, personId, 'set-aside', 'recruiter', 'not-looking')
+    store.event(
+      'contacted',
+      'redrob:automatic',
+      { text: 'Hi Jiwon Kim, …', channel: 'linkedin' },
+      { roleId: role.id, personId },
+    )
+    const res = await app.request(`/hiring/record/export?roleId=${role.id}`)
+    expect(res.headers.get('content-type')).toContain('text/csv')
+    const csv = await res.text()
+    expect(csv.split('\n')[0]).toBe(
+      'at,role_id,person_ref,step,by,criteria_version,criteria_states,reason,site',
+    )
+    expect(csv).toContain(',greenhouse:4471,set-aside,recruiter,,,not-looking,')
+    expect(csv).toContain(',contacted,redrob:automatic,')
+    expect(csv).not.toContain('Jiwon')
+  })
+})

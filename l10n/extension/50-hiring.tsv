@@ -165,3 +165,21 @@ hiringWhyChannel	this site carries no messages	이 사이트로는 메시지를 
 hiringWhyNotApproved	it isn't approved	승인되지 않았어요
 hiringWhySetAside	they're set aside	보류한 사람이에요
 hiringWhyNeedsYou	the last try didn't send; check the site	지난번에 보내지 못했어요. 사이트를 확인하세요
+hiringNoticeShow	Show what Redrob holds	레드롭이 가진 정보 보기
+hiringNoticeTitle	How Talent Scout reviewed your profile	인재 스카우트가 프로필을 검토한 방법
+hiringNoticeDecision	Your profile for $1 was checked against the criteria below. Nothing here was decided automatically: $2 reviewed it.	$1 포지션 기준으로 프로필을 아래 조건에 맞춰 확인했어요. 자동으로 결정된 것은 없고, $2님이 검토했어요.
+hiringNoticeUsed	What it looked at	확인한 것
+hiringNoticeNotUsed	What it never looks at	절대 보지 않는 것
+hiringNoticeNotUsedList	Your photo · your age or graduation year · gender · name · nationality · family or marital status · religion · disability · ethnicity · school names · where you live	사진 · 나이나 졸업 연도 · 성별 · 이름 · 국적 · 가족이나 결혼 여부 · 종교 · 장애 · 인종 · 학교 이름 · 사는 곳
+hiringNoticeHuman	A person, not the tool, decides at every step: who to contact, who to set aside, and who to interview.	연락할 사람, 보류할 사람, 면접할 사람은 도구가 아니라 사람이 단계마다 결정해요.
+hiringNoticeReviewer	the recruiter	채용 담당자
+hiringNoticeRights	What you can ask for	요청할 수 있는 것
+hiringNoticeRightSee	To see what is held about you	나에 대해 가진 정보 열람
+hiringNoticeRightCorrect	To correct it	정보 정정
+hiringNoticeRightDelete	To have it deleted	정보 삭제
+hiringNoticeRightStop	Never to be contacted again	다시는 연락받지 않기
+hiringNoticeRightHuman	An explanation from a person, and a decision made by one	사람의 설명과 사람이 내린 결정
+hiringNoticeCopy	Copy notice	고지문 복사
+hiringNoticeCopied	Copied. Send it in your reply.	복사했어요. 답장에 붙여 보내세요.
+hiringNoticeCriterion	$1: $2	$1: $2
+hiringExportCsv	Export for an audit (CSV)	감사용으로 내보내기 (CSV)

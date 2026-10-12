@@ -592,6 +592,51 @@ export class HiringStore {
     return stale.length
   }
 
+  /**
+   * The record for an employer's bias audit (Recruit plan §3.4, §4b): one row per step, keyed by the
+   * ATS's candidate id where there is one so an auditor can join it with the ATS's voluntary
+   * demographic data. No names, no message text, nothing Redrob holds about who someone is.
+   */
+  auditRows(roleId?: string): Array<Record<string, string>> {
+    const people = new Map(
+      this.db
+        .select({ id: hiringPeople.id, record: hiringPeople.record })
+        .from(hiringPeople)
+        .all()
+        .map((p) => [p.id, p.record]),
+    )
+    return this.record(roleId).map((event) => {
+      const d = (event.detail ?? {}) as Record<string, unknown>
+      const record = event.personId ? people.get(event.personId) : undefined
+      const states =
+        d.states && typeof d.states === 'object'
+          ? (d.states as Record<string, string>)
+          : undefined
+      return {
+        at: new Date(event.at).toISOString(),
+        role_id: event.roleId ?? '',
+        person_ref: record?.atsId
+          ? `${record.site}:${record.atsId}`
+          : (event.personId ?? ''),
+        step: event.kind,
+        by: event.actor,
+        criteria_version: String(d.criteriaVersion ?? d.version ?? ''),
+        criteria_states: states
+          ? Object.entries(states)
+              .map(([k, v]) => `${k}=${v}`)
+              .join(';')
+          : '',
+        reason: typeof d.reason === 'string' ? d.reason : '',
+        site:
+          typeof d.site === 'string'
+            ? d.site
+            : typeof d.channel === 'string'
+              ? d.channel
+              : '',
+      }
+    })
+  }
+
   record(roleId?: string): HiringEventRow[] {
     const query = this.db.select().from(hiringEvents)
     return (roleId ? query.where(eq(hiringEvents.roleId, roleId)) : query)

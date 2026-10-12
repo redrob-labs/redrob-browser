@@ -303,6 +303,31 @@ export function createHiringRoutes(deps: {
           ),
         ),
     )
+    .get('/record/export', (c) => {
+      const rows = store.auditRows(c.req.query('roleId') || undefined)
+      if (c.req.query('format') === 'json') return c.json({ rows })
+      const columns = [
+        'at',
+        'role_id',
+        'person_ref',
+        'step',
+        'by',
+        'criteria_version',
+        'criteria_states',
+        'reason',
+        'site',
+      ]
+      const cell = (v: string) =>
+        /[",\n]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v
+      const csv = [
+        columns.join(','),
+        ...rows.map((r) => columns.map((k) => cell(r[k] ?? '')).join(',')),
+      ].join('\n')
+      return c.body(`${csv}\n`, 200, {
+        'content-type': 'text/csv; charset=utf-8',
+        'content-disposition': 'attachment; filename="hiring-record.csv"',
+      })
+    })
     .get('/record', (c) =>
       c.json({ events: store.record(c.req.query('roleId') || undefined) }),
     )

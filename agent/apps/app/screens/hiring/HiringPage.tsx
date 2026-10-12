@@ -14,6 +14,7 @@ import { formatRelative, t, tNodes } from '@browseros/i18n'
 import { Trash2 } from '@browseros/icons'
 import { type FC, useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { CandidateNotice } from '@/components/hiring/CandidateNotice'
 import { CriteriaEditor } from '@/components/hiring/CriteriaEditor'
 import {
   RecordReply,
@@ -24,6 +25,7 @@ import { PersonCard } from '@/components/hiring/PersonCard'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { useAgentServerUrl } from '@/modules/browseros/agent-server-url.hooks'
 import {
   type CriterionDraft,
   type Refused,
@@ -213,6 +215,7 @@ const People: FC<{ role: Role }> = ({ role }) => {
   const { data: people = [] } = usePeople(role.id)
   const actions = useHiringActions()
   const [open, setOpen] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   if (!people.length) {
     return (
       <div className="rr-empty rr-empty--compact">
@@ -329,6 +332,16 @@ const People: FC<{ role: Role }> = ({ role }) => {
                     }
                   />
                   <span className="flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      className="rr-btn rr-btn--ghost rr-btn--sm"
+                      aria-expanded={notice === person.id}
+                      onClick={() =>
+                        setNotice(notice === person.id ? null : person.id)
+                      }
+                    >
+                      {t('hiringNoticeShow')}
+                    </button>
                     {person.stage === 'shortlisted' ? (
                       <WriteMessage role={role} person={person} />
                     ) : null}
@@ -383,6 +396,9 @@ const People: FC<{ role: Role }> = ({ role }) => {
                       {t('hiringDeletePerson')}
                     </button>
                   </span>
+                  {notice === person.id ? (
+                    <CandidateNotice role={role} person={person} />
+                  ) : null}
                 </div>
               ) : null}
             </li>
@@ -395,14 +411,15 @@ const People: FC<{ role: Role }> = ({ role }) => {
 
 const Record: FC<{ roleId?: string }> = ({ roleId }) => {
   const { data: events = [] } = useRecord(roleId)
-  const exportRecord = () => {
-    // Keyed by the record's own ids: what an auditor joins with the ATS's data. No names, no values.
-    const blob = new Blob([JSON.stringify(events, null, 2)], {
-      type: 'application/json',
-    })
+  const { baseUrl } = useAgentServerUrl()
+  // The server's audit export: no names, no message text, keyed for joining with the ATS's data.
+  const exportRecord = async () => {
+    const response = await fetch(
+      `${baseUrl}/hiring/record/export${roleId ? `?roleId=${roleId}` : ''}`,
+    )
     const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = 'hiring-record.json'
+    a.href = URL.createObjectURL(await response.blob())
+    a.download = 'hiring-record.csv'
     a.click()
     URL.revokeObjectURL(a.href)
   }
@@ -415,10 +432,10 @@ const Record: FC<{ roleId?: string }> = ({ roleId }) => {
         <button
           type="button"
           className="rr-btn rr-btn--secondary rr-btn--sm shrink-0"
-          onClick={exportRecord}
+          onClick={() => void exportRecord()}
           disabled={!events.length}
         >
-          {t('hiringExport')}
+          {t('hiringExportCsv')}
         </button>
       </div>
       {events.length ? (
