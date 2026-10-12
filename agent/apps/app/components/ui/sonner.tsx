@@ -31,7 +31,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
       toastOptions={{
         classNames: {
           toast: 'shadow-[var(--shadow-lg)]! font-sans',
+          // i18n-ignore: class names, not copy
           title: 'font-semibold! text-[14px]! leading-5!',
+          // i18n-ignore: class names, not copy
           description: 'text-[13px]! leading-5! text-[var(--ink-secondary)]!',
           success: '[&_[data-icon]]:text-[var(--status-success)]',
           error: '[&_[data-icon]]:text-[var(--status-danger)]',

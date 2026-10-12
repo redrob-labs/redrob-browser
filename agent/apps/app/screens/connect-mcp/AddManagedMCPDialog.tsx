@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { KeyRound, Plus, Search } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { McpServerIcon } from '@/components/mcp/McpServerIcon'
@@ -73,16 +74,14 @@ export const AddManagedMCPDialog: FC<AddManagedMCPDialogProps> = ({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add built-in app</DialogTitle>
-          <DialogDescription>
-            Select a built-in app to connect
-          </DialogDescription>
+          <DialogTitle>{t('stAddBuiltInApp')}</DialogTitle>
+          <DialogDescription>{t('stSelectABuiltInApp')}</DialogDescription>
         </DialogHeader>
 
         <div className="relative">
           <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search apps..."
+            placeholder={t('stSearchApps')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
@@ -93,7 +92,7 @@ export const AddManagedMCPDialog: FC<AddManagedMCPDialogProps> = ({
           {filteredUnauthenticated.length > 0 && (
             <div className="space-y-2">
               <p className="px-1 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-                Needs authentication
+                {t('stNeedsAuthentication')}
               </p>
               {filteredUnauthenticated.map((server) => (
                 <Button
@@ -125,7 +124,7 @@ export const AddManagedMCPDialog: FC<AddManagedMCPDialogProps> = ({
             <div className="space-y-2">
               {filteredUnauthenticated.length > 0 && (
                 <p className="px-1 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-                  Available
+                  {t('stAvailable')}
                 </p>
               )}
               {filteredAvailable?.map((args) => {
@@ -159,7 +158,7 @@ export const AddManagedMCPDialog: FC<AddManagedMCPDialogProps> = ({
 
           {!hasResults && (
             <p className="py-6 text-center text-muted-foreground text-sm">
-              No apps found
+              {t('stNoAppsFound')}
             </p>
           )}
         </div>

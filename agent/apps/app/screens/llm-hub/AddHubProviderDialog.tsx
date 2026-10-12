@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { zodResolver } from '@hookform/resolvers/zod'
 import type { FC } from 'react'
 import { useEffect } from 'react'
@@ -52,7 +53,7 @@ const formSchema = z.object({
           return false
         }
       },
-      { message: 'Please enter a valid URL' },
+      { message: t('stPleaseEnterAValidUrl') },
     ),
 })
 
@@ -110,12 +111,10 @@ export const AddHubProviderDialog: FC<AddHubProviderDialogProps> = ({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {isEditing ? 'Edit Provider' : 'Add Custom Provider'}
+            {isEditing ? t('stEditProvider') : t('stAddCustomProvider')}
           </DialogTitle>
           <DialogDescription>
-            {isEditing
-              ? 'Update your custom AI chat provider.'
-              : 'Add a new AI chat provider for quick access.'}
+            {isEditing ? t('stUpdateYourCustomAiChat') : t('stAddANewAiChat')}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -125,9 +124,9 @@ export const AddHubProviderDialog: FC<AddHubProviderDialogProps> = ({
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Provider Name</FormLabel>
+                  <FormLabel>{t('stProviderName')}</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., DeepSeek" {...field} />
+                    <Input placeholder={t('stEGDeepseek')} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -141,11 +140,9 @@ export const AddHubProviderDialog: FC<AddHubProviderDialogProps> = ({
                 <FormItem>
                   <FormLabel>URL</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., chat.deepseek.com" {...field} />
+                    <Input placeholder={t('stEGChatDeepseekCom')} {...field} />
                   </FormControl>
-                  <FormDescription>
-                    The web address of the AI chat service
-                  </FormDescription>
+                  <FormDescription>{t('stTheWebAddressOfThe')}</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -157,7 +154,7 @@ export const AddHubProviderDialog: FC<AddHubProviderDialogProps> = ({
                 variant="outline"
                 onClick={() => onOpenChange(false)}
               >
-                Cancel
+                {t('stCancel')}
               </Button>
               <Button type="submit">{isEditing ? 'Update' : 'Add'}</Button>
             </DialogFooter>

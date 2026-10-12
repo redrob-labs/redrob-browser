@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import type { FC, SVGProps } from 'react'
 import {
   AntigravityMark,
@@ -84,7 +85,7 @@ const AGENT_PRESENTATION: Record<string, AgentPresentation> = {
 }
 
 const FALLBACK_PRESENTATION: AgentPresentation = {
-  label: 'Unknown agent',
+  label: t('stUnknownAgent'),
   installUrl: '',
   mark: GenericAgentMark,
 }

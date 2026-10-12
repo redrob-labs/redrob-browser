@@ -65,9 +65,9 @@ const primarySettingsSections: NavSection[] = [
   {
     label: t('shProviderSettings'),
     items: [
-      { name: 'AI & Agents', to: '/settings/ai', icon: Bot },
+      { name: t('stAiAmpAgents'), to: '/settings/ai', icon: Bot },
       {
-        name: 'Chat & Council Provider',
+        name: t('stNavChatCouncil'),
         to: '/settings/chat',
         icon: MessageSquare,
       },
@@ -77,17 +77,17 @@ const primarySettingsSections: NavSection[] = [
     label: t('shOther'),
     items: [
       {
-        name: 'Customize Redrob',
+        name: t('customizeTitle'),
         to: '/settings/customization',
         icon: Palette,
       },
-      { name: 'Redrob as MCP', to: '/settings/mcp', icon: Server },
+      { name: t('stNavRedrobMcp'), to: '/settings/mcp', icon: Server },
     ],
   },
 ]
 
 const helpItems: NavItem[] = [
-  { name: 'Diagnostics', to: '/settings/diagnostics', icon: Activity },
+  { name: t('stNavDiagnostics'), to: '/settings/diagnostics', icon: Activity },
 ]
 
 export const SettingsSidebar: FC = () => {

@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { formatRelative } from '@browseros/i18n'
+import { formatRelative, t } from '@browseros/i18n'
 import {
   Calendar,
   CheckCircle2,
@@ -92,7 +92,7 @@ export const ScheduledTaskResults: FC<ScheduledTaskResultsProps> = ({
         <span className="rr-empty__icon" aria-hidden="true">
           <Calendar />
         </span>
-        <p className="rr-empty__desc">No task runs yet</p>
+        <p className="rr-empty__desc">{t('stNoTaskRunsYet')}</p>
       </div>
     )
   }
@@ -133,7 +133,7 @@ export const ScheduledTaskResults: FC<ScheduledTaskResultsProps> = ({
                   onCancelRun(run.id)
                 }}
                 className="ui-status--danger shrink-0"
-                aria-label="Cancel run"
+                aria-label={t('stCancelRun')}
               >
                 <Square className="h-3.5 w-3.5" />
               </Button>
@@ -147,7 +147,7 @@ export const ScheduledTaskResults: FC<ScheduledTaskResultsProps> = ({
                   onRetryRun(run.jobId)
                 }}
                 className="shrink-0"
-                aria-label="Retry run"
+                aria-label={t('stRetryRun')}
               >
                 <RotateCcw className="h-3.5 w-3.5" />
               </Button>

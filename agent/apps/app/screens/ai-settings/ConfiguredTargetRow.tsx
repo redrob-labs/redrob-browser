@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Check, Loader2, MoreHorizontal } from '@browseros/icons'
 import type { FC, ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
@@ -113,7 +114,7 @@ export const ConfiguredTargetRow: FC<ConfiguredTargetRowProps> = ({
           variant="secondary"
           className="rounded font-semibold text-[10px] uppercase tracking-wide"
         >
-          {kind}
+          {kind === 'agent' ? t('stKindAgent') : t('stKindModel')}
         </Badge>
       </span>
 
@@ -123,7 +124,7 @@ export const ConfiguredTargetRow: FC<ConfiguredTargetRowProps> = ({
             variant="secondary"
             className="rounded bg-[var(--accent-brand)]/15 font-bold text-[10px] text-[var(--accent-brand-ink)] uppercase tracking-wide"
           >
-            Default
+            {t('stDefault')}
           </Badge>
         ) : (
           <Button
@@ -132,7 +133,7 @@ export const ConfiguredTargetRow: FC<ConfiguredTargetRowProps> = ({
             className="hidden opacity-0 transition-opacity focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 sm:inline-flex"
             onClick={() => actions[0]?.onSelect()}
           >
-            Set as default
+            {t('stSetAsDefault')}
           </Button>
         )}
       </span>
@@ -144,7 +145,7 @@ export const ConfiguredTargetRow: FC<ConfiguredTargetRowProps> = ({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={`Actions for ${name}`}
+                aria-label={t('stActionsFor', name)}
                 className="text-muted-foreground"
               >
                 {busy ? (

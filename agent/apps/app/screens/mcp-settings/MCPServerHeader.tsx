@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Check, Copy, Loader2, RefreshCw, Server } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { toast } from 'sonner'
@@ -54,10 +55,10 @@ export const MCPServerHeader: FC<MCPServerHeaderProps> = ({
       const healthy = await waitForServerHealth()
       if (healthy) {
         track(MCP_SERVER_RESTARTED_EVENT)
-        toast.success('Server restarted successfully')
+        toast.success(t('stServerRestartedSuccessfully'))
         onServerRestart?.()
       } else {
-        toast.error('Server did not respond. Try restarting the browser.')
+        toast.error(t('stServerDidNotRespondTry'))
       }
     } catch (err) {
       toast.error(
@@ -76,21 +77,22 @@ export const MCPServerHeader: FC<MCPServerHeaderProps> = ({
         </div>
         <div className="flex-1">
           <div className="mb-1 flex items-center justify-between">
-            <h2 className="font-semibold text-xl">Redrob MCP Server</h2>
+            <h2 className="font-semibold text-xl">{t('stRedrobMcpServer')}</h2>
           </div>
           <p className="mb-6 text-muted-foreground text-sm">
-            Connect Redrob to MCP clients like Claude Code, Gemini CLI and
-            others.
+            {t('stConnectRedrobToMcpClients')}
           </p>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <span className="whitespace-nowrap font-medium text-sm">
-              Server URL:
+              {t('stServerUrl2')}
             </span>
             <div className="flex flex-1 items-center gap-2">
               <div className="flex-1 rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm sm:max-w-md">
                 {isLoading ? (
-                  <span className="text-muted-foreground">Loading...</span>
+                  <span className="text-muted-foreground">
+                    {t('stLoading')}
+                  </span>
                 ) : error ? (
                   <span className="text-destructive">{error}</span>
                 ) : (
@@ -103,7 +105,7 @@ export const MCPServerHeader: FC<MCPServerHeaderProps> = ({
                 onClick={handleCopy}
                 disabled={!serverUrl || isLoading}
                 className="shrink-0"
-                title="Copy URL"
+                title={t('stCopyUrl')}
               >
                 {isCopied ? (
                   <Check className="h-4 w-4 text-green-600" />
@@ -117,7 +119,7 @@ export const MCPServerHeader: FC<MCPServerHeaderProps> = ({
                 onClick={handleRestart}
                 disabled={isLoading || isRestarting}
                 className="shrink-0"
-                title="Restart server"
+                title={t('stRestartServer')}
               >
                 {isRestarting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />

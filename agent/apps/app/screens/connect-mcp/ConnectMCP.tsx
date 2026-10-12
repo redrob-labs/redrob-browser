@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Check, Loader2, Plus, Trash2 } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { toast } from 'sonner'
@@ -223,17 +224,17 @@ export const ConnectMCP: FC = () => {
   return (
     <div className="fade-in slide-in-from-bottom-5 animate-in space-y-6 duration-500">
       <SettingsHeader
-        title="Connected Apps"
-        lede="Connect the Redrob assistant to apps to send email, schedule calendar events, write docs, and more"
+        title={t('stConnectedApps')}
+        lede={t('stConnectAppsLede')}
         actions={
           <>
             <Button onClick={() => setAddingManagedMcp(true)}>
               <Plus className="h-4 w-4" />
-              <span>Add built-in app</span>
+              <span>{t('stAddBuiltInApp')}</span>
             </Button>
             <Button variant="outline" onClick={() => setAddingCustomMcp(true)}>
               <Plus className="h-4 w-4" />
-              <span>Add custom app</span>
+              <span>{t('stAddCustomApp2')}</span>
             </Button>
           </>
         }
@@ -243,7 +244,7 @@ export const ConnectMCP: FC = () => {
       {createdServers.length > 0 && (
         <section aria-labelledby="connected-apps" className="ui-settings-group">
           <h2 id="connected-apps" className="ui-meta-label">
-            Your Connected Apps
+            {t('stYourConnectedApps')}
           </h2>
           <div className="ui-card ui-settings-rows">
             {createdServers.map((server) => (
@@ -266,7 +267,9 @@ export const ConnectMCP: FC = () => {
                           : 'rr-badge--neutral'
                       }`}
                     >
-                      {server.type === 'managed' ? 'Built-in' : 'Custom'}
+                      {server.type === 'managed'
+                        ? t('stBuiltIn')
+                        : t('stCustom')}
                     </span>
                   </div>
                   <p className="ui-settings-row__desc">
@@ -288,7 +291,7 @@ export const ConnectMCP: FC = () => {
                     )?.is_authenticated ? (
                     <span className="rr-badge rr-badge--md rr-badge--subtle rr-badge--success gap-1">
                       <Check className="h-3 w-3" />
-                      Authenticated
+                      {t('stAuthenticated')}
                     </span>
                   ) : (
                     <Button
@@ -299,7 +302,7 @@ export const ConnectMCP: FC = () => {
                         openAuthUrlForMCP(server.managedServerName)
                       }
                     >
-                      Authenticate
+                      {t('stAuthenticate')}
                     </Button>
                   ))}
                 <Button
@@ -317,7 +320,7 @@ export const ConnectMCP: FC = () => {
                     }
                   }}
                   className="ui-row-delete"
-                  title="Remove server"
+                  title={t('stRemoveServer')}
                 >
                   {deletingServerId === server.id ? (
                     <Loader2 className="h-4 w-4 animate-spin" />

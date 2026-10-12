@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { XIcon } from '@browseros/icons'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import type * as React from 'react'
@@ -94,7 +95,7 @@ function DialogContent({
             className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0"
           >
             <XIcon />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t('stClose')}</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Content>

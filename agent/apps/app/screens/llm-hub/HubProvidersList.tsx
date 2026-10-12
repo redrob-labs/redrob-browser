@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Loader2, Plus } from '@browseros/icons'
 import type { FC } from 'react'
 import { Button } from '@/components/ui/button'
@@ -33,7 +34,7 @@ export const HubProvidersList: FC<HubProvidersListProps> = ({
       <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
         <div className="flex items-center justify-center gap-3 py-8 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin" />
-          <span>Loading providers...</span>
+          <span>{t('stLoadingProviders')}</span>
         </div>
       </div>
     )
@@ -43,7 +44,7 @@ export const HubProvidersList: FC<HubProvidersListProps> = ({
     return (
       <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="font-medium">Configured AI Providers</h3>
+          <h3 className="font-medium">{t('stConfiguredAiProviders')}</h3>
           <Button
             variant="outline"
             size="sm"
@@ -51,12 +52,12 @@ export const HubProvidersList: FC<HubProvidersListProps> = ({
             className="border-[var(--accent-brand)] bg-[var(--accent-brand)]/10 text-[var(--accent-brand-ink)] hover:bg-[var(--accent-brand)]/20 hover:text-[var(--accent-brand-ink)]"
           >
             <Plus className="mr-1.5 h-4 w-4" />
-            Add provider
+            {t('stAddProvider')}
           </Button>
         </div>
         <div className="rounded-lg border border-border border-dashed py-8 text-center">
           <p className="text-muted-foreground text-sm">
-            No providers configured yet.
+            {t('stNoProvidersConfiguredYet')}
           </p>
         </div>
       </div>
@@ -66,7 +67,7 @@ export const HubProvidersList: FC<HubProvidersListProps> = ({
   return (
     <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="font-medium">Configured AI Providers</h3>
+        <h3 className="font-medium">{t('stConfiguredAiProviders')}</h3>
         <Button
           variant="outline"
           size="sm"
@@ -74,7 +75,7 @@ export const HubProvidersList: FC<HubProvidersListProps> = ({
           className="border-[var(--accent-brand)] bg-[var(--accent-brand)]/10 text-[var(--accent-brand-ink)] hover:bg-[var(--accent-brand)]/20 hover:text-[var(--accent-brand-ink)]"
         >
           <Plus className="mr-1.5 h-4 w-4" />
-          Add provider
+          {t('stAddProvider')}
         </Button>
       </div>
       <div className="space-y-3">

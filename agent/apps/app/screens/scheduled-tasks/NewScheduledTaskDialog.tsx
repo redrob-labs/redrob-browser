@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { ChevronDown, Loader2, Sparkles, Undo2 } from '@browseros/icons'
 import { zodResolver } from '@hookform/resolvers/zod'
 import type { FC } from 'react'
@@ -73,7 +74,7 @@ const formSchema = z
     if (data.scheduleType === 'daily' && !data.scheduleTime) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Time is required for daily schedule',
+        message: t('stTimeIsRequiredForDaily'),
         path: ['scheduleTime'],
       })
     }
@@ -83,7 +84,7 @@ const formSchema = z
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Interval must be at least 1',
+        message: t('stIntervalMustBeAtLeast'),
         path: ['scheduleInterval'],
       })
     }
@@ -229,7 +230,7 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
       track(SCHEDULED_TASK_PROMPT_REFINED_EVENT)
     } catch {
       if (requestId !== refineRequestIdRef.current) return
-      toast.error('Failed to rewrite prompt. Please try again.')
+      toast.error(t('stFailedToRewritePromptPlease'))
       originalPromptRef.current = null
     } finally {
       if (requestId === refineRequestIdRef.current) {
@@ -272,12 +273,12 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {isEditing ? 'Edit Scheduled Task' : 'Create Scheduled Task'}
+            {isEditing ? t('stEditScheduledTask') : t('stCreateScheduledTask')}
           </DialogTitle>
           <DialogDescription>
             {isEditing
-              ? 'Update your scheduled task configuration.'
-              : 'Create a new task that runs automatically on a schedule.'}
+              ? t('stUpdateYourScheduledTaskConfiguration')
+              : t('stCreateANewTaskThat')}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -287,9 +288,9 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Name</FormLabel>
+                  <FormLabel>{t('stName')}</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., Morning Briefing" {...field} />
+                    <Input placeholder={t('stEGMorningBriefing')} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -302,7 +303,7 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
               render={({ field }) => (
                 <FormItem>
                   <div className="flex items-center justify-between">
-                    <FormLabel>Prompt</FormLabel>
+                    <FormLabel>{t('stPrompt')}</FormLabel>
                     <Button
                       type="button"
                       variant="ghost"
@@ -316,12 +317,12 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
                       ) : (
                         <Sparkles className="h-3 w-3" />
                       )}
-                      {isRefining ? 'Rewriting...' : 'Rewrite with AI'}
+                      {isRefining ? 'Rewriting...' : t('stRewriteWithAi')}
                     </Button>
                   </div>
                   <FormControl>
                     <Textarea
-                      placeholder="What should the agent do? e.g., Check my email and summarize important messages"
+                      placeholder={t('stTaskPromptPlaceholder')}
                       className="min-h-[100px] resize-none"
                       {...field}
                       onChange={(e) => {
@@ -342,11 +343,11 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
                       onClick={handleUndoRefine}
                     >
                       <Undo2 className="h-3 w-3" />
-                      Undo rewrite
+                      {t('stUndoRewrite')}
                     </button>
                   ) : (
                     <FormDescription>
-                      The instruction that will be sent to the agent
+                      {t('stTheInstructionThatWillBe')}
                     </FormDescription>
                   )}
                   <FormMessage />
@@ -356,7 +357,7 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
 
             {providers.length > 0 && resolvedProvider && (
               <FormItem>
-                <FormLabel>AI Provider</FormLabel>
+                <FormLabel>{t('stAiProvider')}</FormLabel>
                 <ChatProviderSelector
                   providers={providerOptions}
                   selectedProvider={resolvedProvider}
@@ -381,9 +382,7 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
                     <ChevronDown className="h-4 w-4 opacity-50" />
                   </Button>
                 </ChatProviderSelector>
-                <FormDescription>
-                  The AI provider used to run this task
-                </FormDescription>
+                <FormDescription>{t('stTheAiProviderUsedTo')}</FormDescription>
               </FormItem>
             )}
 
@@ -393,7 +392,7 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
                 name="scheduleType"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Schedule</FormLabel>
+                    <FormLabel>{t('stSchedule')}</FormLabel>
                     <Select
                       onValueChange={field.onChange}
                       defaultValue={field.value}
@@ -401,13 +400,21 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
                     >
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select schedule type" />
+                          <SelectValue
+                            placeholder={t('stSelectScheduleType')}
+                          />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="daily">Daily at time</SelectItem>
-                        <SelectItem value="hourly">Every N hours</SelectItem>
-                        <SelectItem value="minutes">Every N minutes</SelectItem>
+                        <SelectItem value="daily">
+                          {t('stDailyAtTime')}
+                        </SelectItem>
+                        <SelectItem value="hourly">
+                          {t('stEveryNHours')}
+                        </SelectItem>
+                        <SelectItem value="minutes">
+                          {t('stEveryNMinutes')}
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -421,7 +428,7 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
                   name="scheduleTime"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Time</FormLabel>
+                      <FormLabel>{t('stTime')}</FormLabel>
                       <FormControl>
                         <Input type="time" {...field} />
                       </FormControl>
@@ -436,8 +443,9 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>
-                        Interval (
-                        {scheduleType === 'hourly' ? 'hours' : 'minutes'})
+                        {scheduleType === 'hourly'
+                          ? t('stIntervalHours')
+                          : t('stIntervalMinutes')}
                       </FormLabel>
                       <FormControl>
                         <Input
@@ -473,7 +481,7 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
                     />
                   </FormControl>
                   <FormLabel className="font-normal">
-                    Enable this task
+                    {t('stEnableThisTask')}
                   </FormLabel>
                 </FormItem>
               )}
@@ -485,7 +493,7 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
                 variant="outline"
                 onClick={() => onOpenChange(false)}
               >
-                Cancel
+                {t('stCancel')}
               </Button>
               <Button type="submit">{isEditing ? 'Update' : 'Create'}</Button>
             </DialogFooter>

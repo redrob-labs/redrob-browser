@@ -86,7 +86,9 @@ const SURFACES: Surface[] = [
   {
     ...page('overlay-menu', '/settings/ai'),
     open: {
-      click: '[aria-label="Actions for Team gateway"]',
+      // The row's actions button, by its name in either language (stActionsFor).
+      click:
+        '[aria-label="Actions for Team gateway"], [aria-label="Team gateway 작업"]',
       wait: '[role="menu"]',
     },
   },

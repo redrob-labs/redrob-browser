@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tNodes } from '@browseros/i18n'
 import {
   Check,
   CheckCircle2,
@@ -153,8 +154,10 @@ function formatContextWindow(tokens: number): string {
 }
 
 function setupGuideLabel(type: ProviderType, providerName?: string): string {
-  if (type === 'moonshot') return 'How to get a Kimi API key'
-  return providerName ? `${providerName} setup guide` : 'Provider setup guide'
+  if (type === 'moonshot') return t('stHowToGetAKimi')
+  return providerName
+    ? `${providerName} setup guide`
+    : t('stProviderSetupGuide')
 }
 
 function isProviderTypeOptionSupported(
@@ -351,7 +354,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
       onClick={resetContextWindow}
       className="cursor-pointer text-primary hover:underline"
     >
-      Reset
+      {t('stReset')}
     </button>
   )
 
@@ -525,7 +528,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
     if (!agentServerUrl) {
       setTestResult({
         success: false,
-        message: 'Server URL not available',
+        message: t('stServerUrlNotAvailable'),
       })
       return
     }
@@ -602,14 +605,14 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
 
   const renderReasoningControls = () => (
     <div className="space-y-4 border-border border-t pt-4">
-      <h4 className="font-medium text-sm">Reasoning</h4>
+      <h4 className="font-medium text-sm">{t('stReasoning')}</h4>
       <div className="grid gap-4 sm:grid-cols-2">
         <FormField
           control={form.control}
           name="reasoningEffort"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Reasoning Effort</FormLabel>
+              <FormLabel>{t('stReasoningEffort2')}</FormLabel>
               <Select
                 onValueChange={field.onChange}
                 value={
@@ -631,9 +634,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                   ))}
                 </SelectContent>
               </Select>
-              <FormDescription>
-                How much the model thinks before responding
-              </FormDescription>
+              <FormDescription>{t('stHowMuchTheModelThinks')}</FormDescription>
               <FormMessage />
             </FormItem>
           )}
@@ -644,7 +645,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
             name="reasoningSummary"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Reasoning Summary</FormLabel>
+                <FormLabel>{t('stReasoningSummary')}</FormLabel>
                 <Select
                   onValueChange={field.onChange}
                   value={field.value || 'auto'}
@@ -655,13 +656,13 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    <SelectItem value="auto">Auto</SelectItem>
-                    <SelectItem value="concise">Concise</SelectItem>
-                    <SelectItem value="detailed">Detailed</SelectItem>
+                    <SelectItem value="auto">{t('stAuto')}</SelectItem>
+                    <SelectItem value="concise">{t('stConcise')}</SelectItem>
+                    <SelectItem value="detailed">{t('stDetailed')}</SelectItem>
                   </SelectContent>
                 </Select>
                 <FormDescription>
-                  Detail level of visible thinking steps
+                  {t('stDetailLevelOfVisibleThinking')}
                 </FormDescription>
                 <FormMessage />
               </FormItem>
@@ -680,7 +681,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
       const name = watchedType === 'github-copilot' ? 'GitHub' : 'Qwen Code'
       return (
         <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-green-700 text-sm dark:border-green-800 dark:bg-green-950 dark:text-green-300">
-          Credentials are managed via {name} OAuth. No API key needed.
+          {t('stOauthManagedBy', name)}
         </div>
       )
     }
@@ -688,7 +689,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
     if (watchedType === 'chatgpt-pro') {
       return (
         <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-green-700 text-sm dark:border-green-800 dark:bg-green-950 dark:text-green-300">
-          Credentials are managed via OAuth. No API key needed.
+          {t('stCredentialsAreManagedViaOauth')}
         </div>
       )
     }
@@ -702,11 +703,14 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
               name="resourceName"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Resource Name *</FormLabel>
+                  <FormLabel>{t('stResourceName')}</FormLabel>
                   <FormControl>
+                    {/* i18n-ignore: a sample resource id */}
                     <Input placeholder="your-resource-name" {...field} />
                   </FormControl>
-                  <FormDescription>Azure OpenAI resource name</FormDescription>
+                  <FormDescription>
+                    {t('stAzureOpenaiResourceName')}
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -716,12 +720,12 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
               name="baseUrl"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Base URL Override</FormLabel>
+                  <FormLabel>{t('stBaseUrlOverride')}</FormLabel>
                   <FormControl>
-                    <Input placeholder="Optional custom URL" {...field} />
+                    <Input placeholder={t('stOptionalCustomUrl')} {...field} />
                   </FormControl>
                   <FormDescription>
-                    Overrides resource name if set
+                    {t('stOverridesResourceNameIfSet')}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -733,14 +737,17 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
             name="apiKey"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>API Key{savedApiKey ? '' : ' *'}</FormLabel>
+                <FormLabel>
+                  {t('stApiKey')}
+                  {savedApiKey ? '' : ' *'}
+                </FormLabel>
                 <FormControl>
                   <Input
                     type="password"
                     placeholder={
                       savedApiKey
                         ? KEEP_SAVED_PLACEHOLDER
-                        : 'Enter your Azure API key'
+                        : t('stEnterYourAzureApiKey')
                     }
                     {...field}
                   />
@@ -763,7 +770,8 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>
-                    Access Key ID{savedAccessKeyId ? '' : ' *'}
+                    {t('stAccessKeyId')}
+                    {savedAccessKeyId ? '' : ' *'}
                   </FormLabel>
                   <FormControl>
                     <Input
@@ -783,7 +791,8 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>
-                    Secret Access Key{savedSecretAccessKey ? '' : ' *'}
+                    {t('stSecretAccessKey')}
+                    {savedSecretAccessKey ? '' : ' *'}
                   </FormLabel>
                   <FormControl>
                     <Input
@@ -791,7 +800,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                       placeholder={
                         savedSecretAccessKey
                           ? KEEP_SAVED_PLACEHOLDER
-                          : 'Enter your secret access key'
+                          : t('stEnterYourSecretAccessKey')
                       }
                       {...field}
                     />
@@ -807,8 +816,9 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
               name="region"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Region *</FormLabel>
+                  <FormLabel>{t('stRegion')}</FormLabel>
                   <FormControl>
+                    {/* i18n-ignore: a sample region id */}
                     <Input placeholder="us-east-1" {...field} />
                   </FormControl>
                   <FormMessage />
@@ -820,16 +830,16 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
               name="sessionToken"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Session Token</FormLabel>
+                  <FormLabel>{t('stSessionToken')}</FormLabel>
                   <FormControl>
                     <Input
                       type="password"
-                      placeholder="Optional (for STS credentials)"
+                      placeholder={t('stOptionalForStsCredentials')}
                       {...field}
                     />
                   </FormControl>
                   <FormDescription>
-                    Required for temporary credentials
+                    {t('stRequiredForTemporaryCredentials')}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -847,22 +857,23 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
           name="baseUrl"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Base URL *</FormLabel>
+              <FormLabel>{t('stBaseUrl')}</FormLabel>
               <FormControl>
+                {/* i18n-ignore: a sample URL */}
                 <Input placeholder="https://api.openai.com/v1" {...field} />
               </FormControl>
               {watchedType === 'openai' && (
                 <FormDescription>
-                  If your custom endpoint doesn't work with OpenAI, try the
-                  OpenAI Compatible provider template instead.
+                  {t('stIfYourCustomEndpointDoesn')}
                 </FormDescription>
               )}
               {watchedType === 'openai-compatible' && (
                 <FormDescription>
-                  <code>/chat/completions</code> is appended automatically, so
-                  enter only the base URL (e.g.{' '}
-                  <code>https://opencode.ai/zen/go/v1</code>), not the full
-                  endpoint.
+                  {tNodes(
+                    'stBaseUrlOnly',
+                    <code key="a">/chat/completions</code>,
+                    <code key="b">https://opencode.ai/zen/go/v1</code>,
+                  )}
                 </FormDescription>
               )}
               <FormMessage />
@@ -890,7 +901,8 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
             return (
               <FormItem>
                 <FormLabel>
-                  API Key{isApiKeyOptional || savedApiKey ? '' : ' *'}
+                  {t('stApiKey')}
+                  {isApiKeyOptional || savedApiKey ? '' : ' *'}
                 </FormLabel>
                 <FormControl>
                   <Input
@@ -899,14 +911,14 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                       savedApiKey
                         ? KEEP_SAVED_PLACEHOLDER
                         : isApiKeyOptional
-                          ? 'Enter your API key (optional)'
-                          : 'Enter your API key'
+                          ? t('stEnterYourApiKeyOptional')
+                          : t('stEnterYourApiKey')
                     }
                     {...field}
                   />
                 </FormControl>
                 <FormDescription>
-                  Your API key is encrypted and stored locally.{' '}
+                  {t('stKeyEncrypted')}{' '}
                   {setupGuideUrl && (
                     <a
                       href={setupGuideUrl}
@@ -932,12 +944,14 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
-            {initialValues?.id ? 'Edit Provider' : 'Configure New Provider'}
+            {initialValues?.id
+              ? t('stEditProvider')
+              : t('stConfigureNewProvider')}
           </DialogTitle>
           <DialogDescription>
             {initialValues?.id
-              ? 'Update your LLM provider configuration.'
-              : 'Add a new LLM provider configuration with API key and model settings.'}
+              ? t('stUpdateYourLlmProviderConfiguration')
+              : t('stAddANewLlmProvider')}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -948,14 +962,16 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                 name="type"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Provider Type *</FormLabel>
+                    <FormLabel>{t('stProviderType')}</FormLabel>
                     <Select
                       onValueChange={(v) => handleTypeChange(v as ProviderType)}
                       value={field.value}
                     >
                       <FormControl>
                         <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select provider type" />
+                          <SelectValue
+                            placeholder={t('stSelectProviderType')}
+                          />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
@@ -975,9 +991,9 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                 name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Provider Name *</FormLabel>
+                    <FormLabel>{t('stProviderName2')}</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g., Work OpenAI" {...field} />
+                      <Input placeholder={t('stEGWorkOpenai')} {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -992,16 +1008,16 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
               name="modelId"
               render={({ field }) => (
                 <FormItem className="flex flex-col">
-                  <FormLabel>Model *</FormLabel>
+                  <FormLabel>{t('stModel2')}</FormLabel>
                   {modelInfoList.length === 0 ? (
                     <FormControl>
                       <Input
                         placeholder={
                           watchedType === 'azure'
-                            ? 'Enter your deployment name'
+                            ? t('stEnterYourDeploymentName')
                             : watchedType === 'bedrock'
                               ? 'e.g., anthropic.claude-3-5-sonnet-20241022-v2:0'
-                              : 'Enter model ID'
+                              : t('stEnterModelId')
                         }
                         {...field}
                       />
@@ -1030,7 +1046,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                           )}
                         >
                           <span className="truncate">
-                            {field.value || 'Select or paste a model ID'}
+                            {field.value || t('stSelectOrPasteAModel')}
                           </span>
                           <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </button>
@@ -1041,7 +1057,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                       >
                         <Command shouldFilter={false}>
                           <CommandInput
-                            placeholder="Search or paste a model ID..."
+                            placeholder={t('stSearchOrPasteAModel')}
                             value={modelSearch}
                             onValueChange={(v) => {
                               setModelSearch(v)
@@ -1059,10 +1075,10 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                                   onSelect={() => commitModelId(customModelId)}
                                 >
                                   <span className="flex-1 truncate">
-                                    Use &quot;{customModelId}&quot;
+                                    {t('stUseQuoted', customModelId)}
                                   </span>
                                   <span className="ml-2 shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground uppercase tracking-wide">
-                                    Custom
+                                    {t('stCustom')}
                                   </span>
                                   {field.value === customModelId && (
                                     <Check className="ml-2 h-4 w-4 shrink-0" />
@@ -1105,8 +1121,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                                 keystroke, so the free-form row above is what
                                 Enter commits until the user arrows away. */}
                           <p className="border-border border-t px-3 py-2 text-[11px] text-muted-foreground">
-                            Model not listed? Type or paste its exact ID, then
-                            press Enter.
+                            {t('stModelNotListedTypeOr')}
                           </p>
                         </Command>
                       </PopoverContent>
@@ -1123,7 +1138,9 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
             {showReasoning && renderReasoningControls()}
 
             <div className="space-y-4 border-border border-t pt-4">
-              <h4 className="font-medium text-sm">Model Configuration</h4>
+              <h4 className="font-medium text-sm">
+                {t('stModelConfiguration')}
+              </h4>
               <FormField
                 control={form.control}
                 name="supportsImages"
@@ -1136,7 +1153,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                       />
                     </FormControl>
                     <FormLabel className="font-normal">
-                      Supports Images
+                      {t('stSupportsImages')}
                     </FormLabel>
                   </FormItem>
                 )}
@@ -1147,7 +1164,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                   name="contextWindow"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Context Window Size</FormLabel>
+                      <FormLabel>{t('stContextWindowSize')}</FormLabel>
                       <FormControl>
                         <Input
                           type="number"
@@ -1160,19 +1177,21 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                       </FormControl>
                       {contextExceedsMax && (
                         <p className="text-destructive text-sm">
-                          Context window cannot exceed{' '}
-                          {formatContextWindow(modelDefaultContext ?? 0)}.{' '}
+                          {t(
+                            'stContextMax',
+                            formatContextWindow(modelDefaultContext ?? 0),
+                          )}{' '}
                           {resetContextLink}
                         </p>
                       )}
                       {!contextExceedsMax && contextIsCustom && (
                         <FormDescription>
-                          Custom value added. {resetContextLink}
+                          {t('stCustomValueAdded')} {resetContextLink}
                         </FormDescription>
                       )}
                       {!contextExceedsMax && !contextIsCustom && (
                         <FormDescription>
-                          Auto-filled based on model
+                          {t('stAutoFilledBasedOnModel')}
                         </FormDescription>
                       )}
                       <FormMessage />
@@ -1185,8 +1204,11 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>
-                        Temperature ({temperatureRange.min}-
-                        {temperatureRange.max})
+                        {t(
+                          'stTemperatureRange',
+                          temperatureRange.min,
+                          temperatureRange.max,
+                        )}
                       </FormLabel>
                       <FormControl>
                         <Input
@@ -1203,8 +1225,8 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                       </FormControl>
                       <FormDescription>
                         {temperatureDisabled
-                          ? 'This model does not support temperature'
-                          : 'Controls response randomness'}
+                          ? t('stThisModelDoesNotSupport')
+                          : t('stControlsResponseRandomness')}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -1233,7 +1255,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                 <span className="flex-1">{testResult.message}</span>
                 {testResult.responseTime && (
                   <span className="text-xs opacity-70">
-                    {testResult.responseTime}ms
+                    {t('stMs', testResult.responseTime)}
                   </span>
                 )}
               </div>
@@ -1245,7 +1267,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                 variant="outline"
                 onClick={() => onOpenChange(false)}
               >
-                Cancel
+                {t('stCancel')}
               </Button>
               <Button
                 type="button"

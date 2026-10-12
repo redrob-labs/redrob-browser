@@ -22,7 +22,26 @@ import { readFileSync } from 'node:fs'
 import { Glob } from 'bun'
 import { parseSync } from 'oxc-parser'
 
-const ENFORCED = ['apps/app-onboard/src', 'apps/app/screens/sidepanel']
+const ENFORCED = ['apps/app-onboard/src', 'apps/app']
+
+/**
+ * Vendored ai-elements and shadcn files that nothing in apps/app imports, so no person ever reads their
+ * text. They are listed rather than translated; the check below fails the moment one of them is imported,
+ * so a file cannot start rendering while still skipped.
+ */
+const NOT_RENDERED = [
+  'components/ai-elements/artifact.tsx',
+  'components/ai-elements/chain-of-thought.tsx',
+  'components/ai-elements/context.tsx',
+  'components/ai-elements/inline-citation.tsx',
+  'components/ai-elements/open-in-chat.tsx',
+  'components/ai-elements/plan.tsx',
+  'components/ai-elements/prompt-input.tsx',
+  'components/ai-elements/sources.tsx',
+  'components/ai-elements/tool.tsx',
+  'components/ai-elements/web-preview.tsx',
+  'components/ui/sidebar.tsx',
+]
 
 const ATTRS = new Set([
   'placeholder',
@@ -40,6 +59,7 @@ const ATTRS = new Set([
   'cancelText',
   'helperText',
   'buttonText',
+  'lede',
 ])
 const PROPS = new Set([
   'label',
@@ -74,6 +94,20 @@ const NAMES = new Set([
   'Ollama',
   'OpenRouter',
   'Moonshot Kimi',
+  'Moonshot AI',
+  'Azure',
+  'LM Studio',
+  'AWS Bedrock',
+  'opencode',
+  'OpenCode',
+  'pi',
+  'Claude Desktop',
+  'Cursor',
+  'VS Code',
+  'Antigravity',
+  'Zed',
+  // A language named in itself (LangSwitch): never translated into the current one.
+  'English',
   'Qwen',
   'Qwen Code',
   'Cohere',
@@ -219,9 +253,24 @@ function check(file: string): Finding[] {
 
 const findings: Finding[] = []
 let files = 0
+for (const rel of NOT_RENDERED) {
+  const stem = rel.replace(/\.tsx?$/, '')
+  for await (const other of new Glob('**/*.{ts,tsx}').scan('apps/app')) {
+    if (/node_modules|\/dist\/|\.wxt\/|\.output\//.test(other) || other === rel)
+      continue
+    if (readFileSync(`apps/app/${other}`, 'utf8').includes(`/${stem}'`))
+      findings.push({
+        file: `apps/app/${other}`,
+        line: 1,
+        text: `imports ${rel}, listed as not rendered: translate it and drop it from NOT_RENDERED`,
+      })
+  }
+}
 for (const root of ENFORCED) {
   for await (const rel of new Glob('**/*.{ts,tsx}').scan(root)) {
     if (/\.test\.|\.stories\.|messages\.generated/.test(rel)) continue
+    if (/node_modules|\/dist\/|\.wxt\/|\.output\//.test(rel)) continue
+    if (root === 'apps/app' && NOT_RENDERED.includes(rel)) continue
     files++
     findings.push(...check(`${root}/${rel}`))
   }

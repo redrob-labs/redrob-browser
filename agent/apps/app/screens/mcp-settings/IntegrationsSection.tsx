@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tNodes } from '@browseros/i18n'
 import {
   AlertCircle,
   ChevronDown,
@@ -83,23 +84,23 @@ export const IntegrationsSection: FC<IntegrationsSectionProps> = ({
       <div className="flex items-end justify-between gap-4">
         <div className="space-y-1">
           <h2 className="font-semibold text-lg leading-tight">
-            Connected agents
+            {t('stConnectedAgents')}
           </h2>
           <p className="text-muted-foreground text-sm">
-            Add Redrob as an MCP server in your AI agents — no copy-paste
-            required.
+            {t('stAddRedrobAsAnMcp')}
           </p>
         </div>
         {detectedCount > 0 && (
           <div className="shrink-0 rounded-full border border-border bg-card px-2.5 py-1 text-muted-foreground text-xs tabular-nums">
-            <span className="font-semibold text-foreground">
-              {connectedCount}
-            </span>{' '}
-            of{' '}
-            <span className="font-semibold text-foreground">
-              {detectedCount}
-            </span>{' '}
-            connected
+            {tNodes(
+              'stNofMConnected',
+              <span key="a" className="font-semibold text-foreground">
+                {connectedCount}
+              </span>,
+              <span key="b" className="font-semibold text-foreground">
+                {detectedCount}
+              </span>,
+            )}
           </div>
         )}
       </div>
@@ -119,7 +120,7 @@ export const IntegrationsSection: FC<IntegrationsSectionProps> = ({
 
       {agentsQuery.data && agents.length === 0 && (
         <div className="rounded-lg border border-border border-dashed bg-card px-4 py-6 text-center text-muted-foreground text-sm">
-          No supported agents found on this system.
+          {t('stNoSupportedAgentsFoundOn')}
         </div>
       )}
 
@@ -154,7 +155,7 @@ export const IntegrationsSection: FC<IntegrationsSectionProps> = ({
             className="-ml-2 text-muted-foreground hover:text-foreground"
           >
             <ChevronDown className="mr-1 h-3.5 w-3.5 transition-transform data-[state=open]:rotate-180" />
-            Show manual setup
+            {t('stShowManualSetup')}
           </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="pt-3">
@@ -208,11 +209,13 @@ const AgentRow: FC<AgentRowProps> = ({
                 className="h-1.5 w-1.5 rounded-full bg-emerald-500"
                 aria-hidden
               />
-              Connected
+              {t('stConnected')}
             </span>
           )}
           {!agent.installed && (
-            <span className="text-muted-foreground text-xs">Not installed</span>
+            <span className="text-muted-foreground text-xs">
+              {t('stNotInstalled')}
+            </span>
           )}
         </div>
         {error && (
@@ -236,7 +239,7 @@ const AgentRow: FC<AgentRowProps> = ({
               target="_blank"
               rel="noopener noreferrer"
             >
-              Get {presentation.label}
+              {t('stGetName', presentation.label)}
               <ExternalLink className="ml-1 h-3 w-3" />
             </a>
           </Button>
@@ -246,14 +249,10 @@ const AgentRow: FC<AgentRowProps> = ({
             size="sm"
             disabled={busy || !canConnect}
             onClick={() => onInstall(agent.id)}
-            title={
-              !canConnect
-                ? 'Waiting for the MCP server URL to load…'
-                : undefined
-            }
+            title={!canConnect ? t('stWaitingForTheMcpServer') : undefined}
           >
             {busy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-            Connect
+            {t('stConnect')}
           </Button>
         )}
         {agent.installed && agent.linked && (
@@ -265,7 +264,7 @@ const AgentRow: FC<AgentRowProps> = ({
             className="text-muted-foreground hover:text-destructive"
           >
             {busy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-            Disconnect
+            {t('stDisconnect')}
           </Button>
         )}
       </div>
@@ -298,10 +297,12 @@ const ErrorPanel: FC<{ message: string; onRetry: () => void }> = ({
   <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
     <div className="space-y-1.5 text-sm">
-      <div className="font-medium text-destructive">Could not load agents</div>
+      <div className="font-medium text-destructive">
+        {t('stCouldNotLoadAgents')}
+      </div>
       <div className="text-muted-foreground">{message}</div>
       <Button size="sm" variant="outline" className="mt-1" onClick={onRetry}>
-        Retry
+        {t('stRetry')}
       </Button>
     </div>
   </div>

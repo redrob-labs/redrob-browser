@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import type { FC, ReactNode } from 'react'
 
 export interface AddProviderTileProps {
@@ -29,7 +30,7 @@ export const AddProviderTile: FC<AddProviderTileProps> = ({
   <button
     type="button"
     onClick={onAdd}
-    aria-label={`Add ${label}`}
+    aria-label={t('stAddName', label)}
     className="ui-pick group flex w-full items-center gap-3 p-3 text-left"
   >
     <span className="flex size-7 shrink-0 items-center justify-center text-[var(--ink-brand)]">
@@ -39,7 +40,7 @@ export const AddProviderTile: FC<AddProviderTileProps> = ({
       {label}
     </span>
     <span aria-hidden className="ui-pick__add shrink-0 px-2.5 py-1 text-xs">
-      Add
+      {t('stAdd')}
     </span>
   </button>
 )

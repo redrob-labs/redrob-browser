@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { MessageSquare } from '@browseros/icons'
 import type { FC } from 'react'
 
@@ -18,9 +19,9 @@ export const LlmHubHeader: FC = () => {
           <MessageSquare className="h-6 w-6 text-[var(--accent-brand-ink)]" />
         </div>
         <div>
-          <h2 className="mb-1 font-semibold text-xl">LLM Chat & Hub</h2>
+          <h2 className="mb-1 font-semibold text-xl">{t('stLlmChatHub')}</h2>
           <p className="text-muted-foreground text-sm">
-            Curate and configure your favourite LLM chat providers
+            {t('stCurateAndConfigureYourFavourite')}
           </p>
         </div>
       </div>

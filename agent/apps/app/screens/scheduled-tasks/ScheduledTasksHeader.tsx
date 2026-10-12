@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Plus } from '@browseros/icons'
 import type { FC } from 'react'
 import { SettingsHeader } from '@/components/settings/SettingsLayout'
@@ -21,12 +22,12 @@ export const ScheduledTasksHeader: FC<ScheduledTasksHeaderProps> = ({
 }) => {
   return (
     <SettingsHeader
-      title="Scheduled Tasks"
-      lede="Automate recurring browser tasks"
+      title={t('stScheduledTasks')}
+      lede={t('stScheduledLede')}
       actions={
         <Button onClick={onAddClick}>
           <Plus className="h-4 w-4" />
-          New Task
+          {t('stNewTask')}
         </Button>
       }
     />

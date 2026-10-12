@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tNodes } from '@browseros/i18n'
 import { Plus, Trash2 } from '@browseros/icons'
 import { CONVERSATION_ID_PLACEHOLDER } from '@browseros/shared/schemas/llm'
 import { useFieldArray, useFormContext } from 'react-hook-form'
@@ -30,11 +31,12 @@ export function ProviderHeadersFields() {
 
   return (
     <fieldset className="space-y-3">
-      <legend className="font-medium text-sm">Custom headers</legend>
+      <legend className="font-medium text-sm">{t('stCustomHeaders')}</legend>
       <p className="text-muted-foreground text-xs">
-        Sent with every request to this provider. Use{' '}
-        <code>{CONVERSATION_ID_PLACEHOLDER}</code> for a stable ID within each
-        conversation. Connection tests use a separate session ID.
+        {tNodes(
+          'stHeadersHelp',
+          <code key="a">{CONVERSATION_ID_PLACEHOLDER}</code>,
+        )}
       </p>
       {fields.map((header, index) => (
         <div key={header.id} className="space-y-2">
@@ -44,8 +46,9 @@ export function ProviderHeadersFields() {
               name={`headers.${index}.name`}
               render={({ field }) => (
                 <FormItem className="min-w-0 flex-1">
-                  <FormLabel>Header name</FormLabel>
+                  <FormLabel>{t('stHeaderName')}</FormLabel>
                   <FormControl>
+                    {/* i18n-ignore: a sample header name */}
                     <Input placeholder="X-Custom-Header" {...field} />
                   </FormControl>
                   <FormMessage />
@@ -57,8 +60,9 @@ export function ProviderHeadersFields() {
               name={`headers.${index}.value`}
               render={({ field }) => (
                 <FormItem className="min-w-0 flex-1">
-                  <FormLabel>Header value</FormLabel>
+                  <FormLabel>{t('stHeaderValue')}</FormLabel>
                   <FormControl>
+                    {/* i18n-ignore: a sample value */}
                     <Input autoComplete="off" placeholder="value" {...field} />
                   </FormControl>
                   <FormMessage />
@@ -70,7 +74,7 @@ export function ProviderHeadersFields() {
               variant="ghost"
               size="icon"
               className="mt-6"
-              aria-label={`Remove header ${index + 1}`}
+              aria-label={t('stRemoveHeaderN', index + 1)}
               onClick={() => remove(index)}
             >
               <Trash2 className="size-4" />
@@ -89,7 +93,7 @@ export function ProviderHeadersFields() {
               )
             }
           >
-            Use conversation ID
+            {t('stUseConversationId')}
           </Button>
         </div>
       ))}
@@ -100,7 +104,7 @@ export function ProviderHeadersFields() {
         onClick={() => append({ name: '', value: '' })}
       >
         <Plus className="mr-2 size-4" />
-        Add header
+        {t('stAddHeader')}
       </Button>
     </fieldset>
   )

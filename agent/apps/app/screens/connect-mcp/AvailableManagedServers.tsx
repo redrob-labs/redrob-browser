@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { ChevronDown, Loader2, Plus } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { McpServerIcon } from '@/components/mcp/McpServerIcon'
@@ -35,11 +36,11 @@ export const AvailableManagedServers: FC<AvailableManagedServersProps> = ({
       <div className="ui-card p-5">
         <CollapsibleTrigger className="ui-disclosure flex w-full cursor-pointer items-center justify-between">
           <div className="flex flex-col items-start">
-            <h2 className="ui-settings-row__label">Built-in Apps</h2>
+            <h2 className="ui-settings-row__label">{t('stBuiltInApps')}</h2>
             <p className="text-muted-foreground text-sm">
               {isLoading
-                ? 'Loading...'
-                : `${availableServers?.length} apps available`}
+                ? t('stLoading')
+                : t('stAppsAvailable', availableServers?.length ?? 0)}
             </p>
           </div>
           <ChevronDown

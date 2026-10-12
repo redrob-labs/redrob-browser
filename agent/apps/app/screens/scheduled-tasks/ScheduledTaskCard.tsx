@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { formatRelative } from '@browseros/i18n'
+import { formatRelative, t } from '@browseros/i18n'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -52,19 +52,19 @@ export interface ScheduledTaskCardProps {
 
 function formatSchedule(job: ScheduledJob): string {
   if (job.scheduleType === 'daily' && job.scheduleTime) {
-    return `Daily at ${job.scheduleTime}`
+    return t('stDailyAt', job.scheduleTime)
   }
   if (job.scheduleType === 'hourly' && job.scheduleInterval) {
     return job.scheduleInterval === 1
-      ? 'Every hour'
-      : `Every ${job.scheduleInterval} hours`
+      ? t('stEveryHour')
+      : t('stEveryNHoursN', job.scheduleInterval)
   }
   if (job.scheduleType === 'minutes' && job.scheduleInterval) {
     return job.scheduleInterval === 1
-      ? 'Every minute'
-      : `Every ${job.scheduleInterval} minutes`
+      ? t('stEveryMinute')
+      : t('stEveryNMinutesN', job.scheduleInterval)
   }
-  return 'Not scheduled'
+  return t('stNotScheduled')
 }
 
 const formatRelativeTime = (dateStr: string) =>
@@ -129,7 +129,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
             <span className="truncate font-semibold">{job.name}</span>
             {!job.enabled && (
               <span className="rr-badge rr-badge--sm rr-badge--subtle rr-badge--neutral">
-                Disabled
+                {t('stDisabled')}
               </span>
             )}
           </div>
@@ -152,14 +152,14 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
                 <span>•</span>
                 <span className="flex items-center gap-1 text-[var(--status-warning)]">
                   <AlertTriangle aria-hidden className="size-3" />
-                  Provider unavailable
+                  {t('stProviderUnavailable')}
                 </span>
               </>
             )}
             {job.lastRunAt && (
               <>
                 <span>•</span>
-                <span>Last run: {formatRelativeTime(job.lastRunAt)}</span>
+                <span>{t('stLastRun', formatRelativeTime(job.lastRunAt))}</span>
               </>
             )}
           </div>
@@ -168,18 +168,18 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" size="sm" onClick={onRun}>
             <Play className="mr-1.5 h-3 w-3" />
-            Test
+            {t('stTest')}
           </Button>
           <Button variant="outline" size="sm" onClick={onEdit}>
             <Pencil className="mr-1.5 h-3 w-3" />
-            Edit
+            {t('stEdit')}
           </Button>
           <Button
             variant="ghost"
             size="icon-sm"
             onClick={onDelete}
             className="ui-row-delete"
-            aria-label={`Delete ${job.name}`}
+            aria-label={t('stDeleteName', job.name)}
           >
             <Trash2 className="h-4 w-4" />
           </Button>
@@ -194,7 +194,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
                 isOpen ? 'rotate-180' : ''
               }`}
             />
-            <span>Run History ({runs.length})</span>
+            <span>{t('stRunHistoryN', runs.length)}</span>
           </CollapsibleTrigger>
           <CollapsibleContent className="pt-3">
             <div className="space-y-2">
@@ -235,7 +235,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
                           onCancelRun(run.id)
                         }}
                         className="ui-status--danger"
-                        aria-label="Cancel run"
+                        aria-label={t('stCancelRun')}
                       >
                         <Square className="h-3.5 w-3.5" />
                       </Button>
@@ -249,7 +249,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
                           onRetryRun(run.jobId)
                         }}
                         className=""
-                        aria-label="Retry run"
+                        aria-label={t('stRetryRun')}
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                       </Button>
@@ -260,7 +260,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
                       onClick={() => onViewRun(run)}
                       className="shrink-0"
                     >
-                      View
+                      {t('stView')}
                     </Button>
                   </div>
                 </div>

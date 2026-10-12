@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { type FC, useState } from 'react'
 import {
   AlertDialog,
@@ -86,15 +87,15 @@ export const LlmHubPage: FC = () => {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove Provider</AlertDialogTitle>
+            <AlertDialogTitle>{t('stRemoveProvider')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Remove {providerToDelete?.name} from your LLM chat providers?
+              {t('stRemoveFromHub', providerToDelete?.name ?? '')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('stCancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDelete}>
-              Remove
+              {t('stRemove')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
