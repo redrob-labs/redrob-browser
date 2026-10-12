@@ -112,6 +112,11 @@
   font-family: var(--font-mono, monospace);
   overflow-wrap: anywhere;
 }
+/* The "unavailable" fallback is our copy, not machine data, so it takes the page's face: the platform
+   monospace stack has no Hangul and drew it as empty boxes. */
+.diagnostics-row dd:not([translate="no"]) {
+  font-family: inherit;
+}
 .browseros-diagnostics .diagnostics-note {
   font-size: 12px;
 }
