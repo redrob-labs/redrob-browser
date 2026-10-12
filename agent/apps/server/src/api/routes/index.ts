@@ -9,8 +9,13 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { AcpAgentRuntime } from '../../lib/agents/acp/acp-agent-runtime'
 import type { OAuthTokenManager } from '../../lib/clients/oauth/token-manager'
+import { getDb } from '../../lib/db'
+import { HiringStore } from '../../lib/hiring/store'
+import { logger } from '../../lib/logger'
 import { requireTrustedOrigin } from '../middleware/require-trusted-origin'
+import { BackgroundReader } from '../services/background-reader'
 import { ConversationRuns } from '../services/conversation-runs'
+import { HiringSourcing } from '../services/hiring-sourcing'
 import type { KlavisService } from '../services/klavis'
 import { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
 import { SmartCompare } from '../services/smart-compare'
@@ -22,6 +27,7 @@ import { createAgentRoutes } from './agents'
 import { createChatRoutes } from './chat'
 import { createConversationRoutes } from './conversations'
 import { createHealthRoute } from './health'
+import { createHiringRoutes } from './hiring'
 import { createKlavisRoutes } from './klavis'
 import { createMcpRoutes } from './mcp'
 import { createMcpManagerRoutes } from './mcp-manager'
@@ -52,7 +58,22 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
   const { activity } = config
   const acpRuntime = new AcpAgentRuntime({ serverPort: port, resourcesDir })
   const conversationRuns = new ConversationRuns({ activity })
-  const smartCompare = new SmartCompare(browserSession)
+  const reader = new BackgroundReader(browserSession)
+  const smartCompare = new SmartCompare(reader)
+  const hiringStore = new HiringStore(() => getDb())
+  const hiringSourcing = new HiringSourcing(hiringStore, reader)
+  // People with no activity for 180 days are deleted (Recruit plan §4.6): soon after start, then daily.
+  const purge = () => {
+    try {
+      hiringStore.purgeInactive()
+    } catch (error) {
+      logger.warn('Talent Scout retention could not run', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+  setTimeout(purge, 60_000).unref?.()
+  setInterval(purge, 86_400_000).unref?.()
   // One deep module owns every browser-tool lease and execution effect;
   // both /chat and /mcp must share it for loopback calls to recover context.
   const browserMcp = new BrowserMcpModule({
@@ -139,6 +160,8 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .use('/scheduled-job-runs/*', requireTrustedAppOrigin())
       // Opens tabs in the person's browser: only the extension may ask.
       .use('/compare/*', requireTrustedAppOrigin())
+      // Other people's details: only the extension may ask.
+      .use('/hiring/*', requireTrustedAppOrigin())
       .route('/acpx/probe', createAcpxProbeRoutes({ resourcesDir }))
       .route('/agents', resolvedAgentRoutes)
       .route('/conversations', createConversationRoutes())
@@ -147,6 +170,10 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .route('/test-provider', createProviderRoutes({ browserosId }))
       .route('/refine-prompt', createRefinePromptRoutes({ browserosId }))
       .route('/compare', createSmartCompareRoutes({ compare: smartCompare }))
+      .route(
+        '/hiring',
+        createHiringRoutes({ store: hiringStore, sourcing: hiringSourcing }),
+      )
       .route('/scheduled-jobs', createScheduledJobRoutes())
       .route('/scheduled-job-runs', createScheduledJobRunRoutes())
   )

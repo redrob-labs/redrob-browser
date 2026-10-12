@@ -262,6 +262,7 @@
         "@browseros/browser-core": "workspace:*",
         "@browseros/browser-mcp": "workspace:*",
         "@browseros/cdp-protocol": "workspace:*",
+        "@browseros/hiring": "workspace:*",
         "@browseros/shared": "workspace:*",
         "@browseros/shopping": "workspace:*",
         "@hono/zod-validator": "^0.9.1",

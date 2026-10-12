@@ -262,6 +262,11 @@ const currentMigrationHistory = [
     hash: 'bc71831be007936b7d04aa24c4496a06517e204a78d35af93935f3fc97eb49f9',
     createdAt: 1790235209541,
   },
+  {
+    tag: '0015_add_hiring',
+    hash: '0e954d6083a6e77c34ed201c3f5a786037191734c433260963067877ac9db291',
+    createdAt: 1791766560705,
+  },
 ]
 
 // TODO(nikhil): Remove this fallback once Windows/Linux packaging always includes Drizzle migrations.
@@ -380,6 +385,70 @@ const currentSchemaStatements = [
   `
     CREATE INDEX IF NOT EXISTS conversations_last_messaged_at_idx
     ON conversations (last_messaged_at)
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS hiring_events (
+	id text PRIMARY KEY NOT NULL,
+	role_id text,
+	person_id text,
+	kind text NOT NULL,
+	actor text NOT NULL,
+	detail text,
+	at integer NOT NULL
+);
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS hiring_events_role_at_idx ON hiring_events (role_id,at);
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS hiring_people (
+	id text PRIMARY KEY NOT NULL,
+	record text NOT NULL,
+	keys text NOT NULL,
+	sites text NOT NULL,
+	read_by_model integer DEFAULT false NOT NULL,
+	last_activity_at integer NOT NULL,
+	created_at integer NOT NULL
+);
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS hiring_people_last_activity_idx ON hiring_people (last_activity_at);
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS hiring_role_people (
+	role_id text NOT NULL,
+	person_id text NOT NULL,
+	stage text DEFAULT 'found' NOT NULL,
+	reason text,
+	evaluation text,
+	found_at integer NOT NULL,
+	updated_at integer NOT NULL,
+	PRIMARY KEY(role_id, person_id),
+	FOREIGN KEY (role_id) REFERENCES hiring_roles(id) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (person_id) REFERENCES hiring_people(id) ON UPDATE no action ON DELETE cascade
+);
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS hiring_role_people_stage_idx ON hiring_role_people (role_id,stage);
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS hiring_roles (
+	id text PRIMARY KEY NOT NULL,
+	title text NOT NULL,
+	location text,
+	description text,
+	criteria text NOT NULL,
+	mode text DEFAULT 'review' NOT NULL,
+	sites text NOT NULL,
+	created_at integer NOT NULL,
+	updated_at integer NOT NULL
+);
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS hiring_suppressions (
+	hash text PRIMARY KEY NOT NULL,
+	at integer NOT NULL
+);
   `,
   `
     CREATE TABLE IF NOT EXISTS __drizzle_migrations (
