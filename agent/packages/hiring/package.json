@@ -39,6 +39,10 @@
     "./screening": {
       "types": "./src/screening.ts",
       "default": "./src/screening.ts"
+    },
+    "./outreach": {
+      "types": "./src/outreach.ts",
+      "default": "./src/outreach.ts"
     }
   },
   "dependencies": {

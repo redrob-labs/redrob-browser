@@ -24,6 +24,15 @@ export const HiringPanels: FC<{ panel: HiringPanel }> = ({ panel }) =>
 /** "Check against <role>" on a profile; with no role yet, the way to set one up. */
 export const HiringChips: FC<{ panel: HiringPanel }> = ({ panel }) => (
   <>
+    {panel.sendNext ? (
+      <button type="button" className="rr-prompt" onClick={panel.sendNext.run}>
+        {t(
+          'hiringPanelSendNext',
+          panel.sendNext.position,
+          panel.sendNext.total,
+        )}
+      </button>
+    ) : null}
     {panel.chips.map((role) => (
       <button
         key={role.id}

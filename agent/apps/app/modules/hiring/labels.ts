@@ -124,3 +124,23 @@ export function eventText(event: HiringEvent): string {
       return t('hiringEventOther')
   }
 }
+
+const SEND_REFUSAL: Record<string, MessageKey> = {
+  'opted-out': 'hiringWhyOptedOut',
+  'contacted-recently': 'hiringWhyRecent',
+  'daily-cap': 'hiringWhyCap',
+  'domain-hourly': 'hiringWhyDomain',
+  'quiet-hours': 'hiringWhyQuiet',
+  'follow-up-too-soon': 'hiringWhyTooSoon',
+  'follow-up-limit': 'hiringWhyLimit',
+  replied: 'hiringWhyReplied',
+  'no-channel': 'hiringWhyChannel',
+  'not-approved': 'hiringWhyNotApproved',
+  'set-aside': 'hiringWhySetAside',
+  'needs-you': 'hiringWhyNeedsYou',
+}
+
+/** Why a message can't go now, in words. */
+export function sendRefusalText(code: string): string {
+  return t(SEND_REFUSAL[code] ?? 'hiringWhyNeedsYou')
+}

@@ -15,6 +15,11 @@ import { Trash2 } from '@browseros/icons'
 import { type FC, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { CriteriaEditor } from '@/components/hiring/CriteriaEditor'
+import {
+  RecordReply,
+  RoleMode,
+  WriteMessage,
+} from '@/components/hiring/Outreach'
 import { PersonCard } from '@/components/hiring/PersonCard'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -35,6 +40,7 @@ import {
   STAGES,
   screenProblem,
 } from '@/modules/hiring/labels'
+import { MessagesTab } from './MessagesTab'
 
 const showRefused = (refused: Refused[]) => {
   for (const r of refused) toast.error(refusalText(r.text, r.reason))
@@ -178,6 +184,7 @@ const RoleCard: FC<{ role: Role }> = ({ role }) => {
         </button>
       </header>
       <CriteriaEditor items={items} onChange={setItems} />
+      <RoleMode role={role} />
       <footer className="flex justify-end">
         <button
           type="button"
@@ -322,6 +329,19 @@ const People: FC<{ role: Role }> = ({ role }) => {
                     }
                   />
                   <span className="flex flex-wrap justify-end gap-2">
+                    {person.stage === 'shortlisted' ? (
+                      <WriteMessage role={role} person={person} />
+                    ) : null}
+                    {person.stage === 'contacted' ? (
+                      <>
+                        <WriteMessage
+                          role={role}
+                          person={person}
+                          sequence={1}
+                        />
+                        <RecordReply role={role} person={person} />
+                      </>
+                    ) : null}
                     <button
                       type="button"
                       className="rr-btn rr-btn--ghost rr-btn--sm"
@@ -446,6 +466,7 @@ export const HiringPage: FC = () => {
           <TabsList variant="line" aria-label={t('hiringTitle')}>
             <TabsTrigger value="roles">{t('hiringTabRoles')}</TabsTrigger>
             <TabsTrigger value="people">{t('hiringTabPeople')}</TabsTrigger>
+            <TabsTrigger value="messages">{t('hiringTabMessages')}</TabsTrigger>
             <TabsTrigger value="record">{t('hiringTabRecord')}</TabsTrigger>
           </TabsList>
           {tab !== 'roles' && roles.length ? (
@@ -486,6 +507,9 @@ export const HiringPage: FC = () => {
               {t('hiringRolesEmpty')}
             </p>
           )}
+        </TabsContent>
+        <TabsContent value="messages">
+          {role ? <MessagesTab role={role} /> : null}
         </TabsContent>
         <TabsContent value="record">
           <Record roleId={role?.id} />

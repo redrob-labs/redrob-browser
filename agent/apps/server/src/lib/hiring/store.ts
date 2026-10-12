@@ -111,7 +111,7 @@ export class HiringStore {
     } = {},
   ) {}
 
-  private get db(): BrowserOsDatabase {
+  get db(): BrowserOsDatabase {
     return typeof this.source === 'function' ? this.source() : this.source
   }
 
@@ -133,7 +133,8 @@ export class HiringStore {
     return this.saltValue
   }
 
-  private event(
+  /** Appends one step to the hiring record. */
+  event(
     kind: string,
     actor: Actor,
     detail: Record<string, unknown> = {},

@@ -30,11 +30,13 @@ import {
 import { requireTrustedOrigin } from '../middleware/require-trusted-origin'
 import { BackgroundReader } from '../services/background-reader'
 import { ConversationRuns } from '../services/conversation-runs'
+import { HiringOutreach } from '../services/hiring-outreach'
 import { HiringScreening } from '../services/hiring-screening'
 import { HiringSourcing } from '../services/hiring-sourcing'
 import type { KlavisService } from '../services/klavis'
 import { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
 import { setJobReceiptStore } from '../services/mcp/effects/job-receipts'
+import { setOutreachSource } from '../services/mcp/guards/hiring-send'
 import { setApplicationRunSource } from '../services/mcp/guards/job-apply'
 import { setNeverReadSitesSource } from '../services/mcp/guards/never-read-sites'
 import { setPlaybookRunSource } from '../services/mcp/guards/playbook-stops'
@@ -106,6 +108,12 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
   const smartCompare = new SmartCompare(reader)
   const hiringStore = new HiringStore(() => getDb())
   const hiringSourcing = new HiringSourcing(hiringStore, reader)
+  const hiringOutreach = new HiringOutreach(
+    hiringStore,
+    privacyGate,
+    providerCompleter(browserosId),
+  )
+  setOutreachSource(hiringOutreach)
   const hiringScreening = new HiringScreening(
     hiringStore,
     privacyGate,
@@ -242,6 +250,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
           store: hiringStore,
           sourcing: hiringSourcing,
           screening: hiringScreening,
+          outreach: hiringOutreach,
         }),
       )
       .route('/scheduled-jobs', createScheduledJobRoutes())

@@ -122,3 +122,51 @@ export type HiringRoleRow = InferSelectModel<typeof hiringRoles>
 export type HiringPersonRow = InferSelectModel<typeof hiringPeople>
 export type HiringRolePersonRow = InferSelectModel<typeof hiringRolePeople>
 export type HiringEventRow = InferSelectModel<typeof hiringEvents>
+
+export const HIRING_MESSAGE_STATUSES = [
+  /** Written, waiting for the recruiter. */
+  'draft',
+  /** Approved: by the recruiter, or by Redrob in Automatic for someone who meets every must have. */
+  'approved',
+  /** In a side-panel run now. */
+  'sending',
+  'sent',
+  /** The recruiter chose not to send it. */
+  'not-sent',
+  /** Stopped by a reply or an opt-out. */
+  'stopped',
+] as const
+
+/** Messages to send and sent (Recruit plan §3.2 "Messages", §4.3). The exact text is the receipt. */
+export const hiringMessages = sqliteTable(
+  'hiring_messages',
+  {
+    id: text('id').primaryKey(),
+    roleId: text('role_id')
+      .notNull()
+      .references(() => hiringRoles.id, { onDelete: 'cascade' }),
+    personId: text('person_id')
+      .notNull()
+      .references(() => hiringPeople.id, { onDelete: 'cascade' }),
+    /** The site's id, whose own channel carries it. */
+    channel: text('channel').notNull(),
+    /** 0 for the first message, then 1 and 2 for follow-ups. */
+    sequence: integer('sequence').notNull().default(0),
+    body: text('body').notNull(),
+    status: text('status', { enum: HIRING_MESSAGE_STATUSES })
+      .notNull()
+      .default('draft'),
+    approvedBy: text('approved_by'),
+    /** Why it could not go, in a code the panel words: a limit, quiet hours, a stop. */
+    note: text('note'),
+    sentAt: integer('sent_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [
+    index('hiring_messages_status_idx').on(table.status),
+    index('hiring_messages_person_idx').on(table.personId),
+  ],
+)
+
+export type HiringMessageRow = InferSelectModel<typeof hiringMessages>

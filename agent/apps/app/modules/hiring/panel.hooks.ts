@@ -8,21 +8,24 @@
  */
 
 import { t } from '@browseros/i18n'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   type HiringPage,
   hiringPageByTabStorage,
 } from '@/lib/hiring/hiringStorage'
 import {
+  OutreachRefused,
   type PersonOnRole,
   type Role,
   type SetAsideReason,
   useHiringActions,
+  useMessages,
+  useOutreachActions,
   usePeople,
   useRoles,
 } from './hiring.hooks'
-import { screenProblem, sourceProblem } from './labels'
+import { screenProblem, sendRefusalText, sourceProblem } from './labels'
 
 const READ_MESSAGE = 'redrob:hiring:read-page'
 
@@ -48,7 +51,79 @@ function useActiveHiringPage(): { page: HiringPage | null; tabId?: number } {
   }
 }
 
-export function useHiringPanel() {
+type ChatStatus = 'submitted' | 'streaming' | 'ready' | 'error'
+
+/**
+ * Approved messages are sent here, one per run, in the recruiter's own browser where they can watch:
+ * the chip starts the next one, the server's send guard holds the agent to its text, and when the run
+ * ends the message is either sent (and recorded) or back in Messages with "Needs you".
+ */
+function useSending(options: {
+  conversationId: string
+  status: ChatStatus
+  send: (message: string) => void
+}) {
+  const { data } = useMessages(undefined)
+  const outreach = useOutreachActions()
+  const running = useRef(false)
+  const previous = useRef(options.status)
+  const approved = (data?.messages ?? []).filter((m) => m.status === 'approved')
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only reacts to the chat finishing
+  useEffect(() => {
+    const was = previous.current
+    previous.current = options.status
+    const finished =
+      (was === 'streaming' || was === 'submitted') &&
+      (options.status === 'ready' || options.status === 'error')
+    if (!finished || !running.current) return
+    running.current = false
+    outreach.end.mutate(options.conversationId, {
+      onSuccess: ({ message }) =>
+        message?.status === 'sent'
+          ? toast.success(t('hiringPanelSent'))
+          : toast(t('hiringPanelNotSent')),
+    })
+  }, [options.status])
+
+  const next = approved[0]
+  return {
+    sendNext: next
+      ? {
+          position: 1,
+          total: approved.length,
+          run: () =>
+            outreach.start.mutate(
+              { id: next.id, conversationId: options.conversationId },
+              {
+                onSuccess: ({ instruction }) => {
+                  running.current = true
+                  options.send(instruction)
+                },
+                onError: (error) =>
+                  toast.error(
+                    t(
+                      'hiringRefusedSend',
+                      sendRefusalText(
+                        error instanceof OutreachRefused
+                          ? error.code
+                          : 'needs-you',
+                      ),
+                    ),
+                  ),
+              },
+            ),
+        }
+      : null,
+  }
+}
+
+export function useHiringPanel(options: {
+  conversationId: string
+  status: ChatStatus
+  send: (message: string) => void
+}) {
+  const sending = useSending(options)
   const { page, tabId } = useActiveHiringPage()
   const { data: roles = [] } = useRoles()
   const actions = useHiringActions()
@@ -127,7 +202,8 @@ export function useHiringPanel() {
     shortlist: () => decide('shortlisted'),
     setAside: (reason: SetAsideReason) => decide('set-aside', reason),
     close: () => setChecked(null),
-    hasChips: Boolean(page && !showing),
+    sendNext: sending.sendNext,
+    hasChips: Boolean(page && !showing) || Boolean(sending.sendNext),
   }
 }
 

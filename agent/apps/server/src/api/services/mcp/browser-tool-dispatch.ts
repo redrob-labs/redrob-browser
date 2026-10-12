@@ -27,6 +27,11 @@ import { applyConversationTabs } from './effects/conversation-tabs'
 import { applyJobReceipts } from './effects/job-receipts'
 import { applyTabGroups } from './effects/tab-groups'
 import { guardConversationRunning } from './guards/conversation-running'
+import {
+  applyHiringSend,
+  guardHiringSend,
+  recordHiringPress,
+} from './guards/hiring-send'
 import { guardJobApply } from './guards/job-apply'
 import { guardNeverReadSites } from './guards/never-read-sites'
 import { guardPlaybookStops } from './guards/playbook-stops'
@@ -58,6 +63,8 @@ export interface BrowserToolCall {
   /** During a job application: what this call fills and presses, read before it runs. */
   jobFields?: Array<{ field: string; value: string }>
   jobPressed?: string
+  /** During a Talent Scout send: the control this call presses, read before it runs. */
+  hiringPressed?: string
 }
 
 export interface BrowserToolEffectContext {
@@ -102,12 +109,15 @@ const GUARDS: readonly NamedToolGuard[] = [
   { name: 'never-read-sites', run: guardNeverReadSites },
   { name: 'playbook-stops', run: guardPlaybookStops },
   { name: 'job-apply', run: guardJobApply },
+  { name: 'hiring-send', run: guardHiringSend },
+  { name: 'hiring-press', run: recordHiringPress },
 ]
 
 const EFFECTS: readonly NamedToolEffect[] = [
   { name: 'conversation-tabs', run: applyConversationTabs },
   { name: 'tab-groups', run: applyTabGroups },
   { name: 'job-receipts', run: applyJobReceipts },
+  { name: 'hiring-send', run: applyHiringSend },
 ]
 
 const OBSERVERS: readonly NamedToolObserver[] = [

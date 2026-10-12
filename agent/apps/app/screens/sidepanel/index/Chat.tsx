@@ -98,7 +98,11 @@ export const Chat = () => {
     send: (message: string) => sendNow(message),
   })
   const { runChips } = playbookPanel
-  const hiring = useHiringPanel()
+  const hiring = useHiringPanel({
+    conversationId,
+    status,
+    send: (message: string) => sendNow(message),
+  })
   const jobs = useJobPanel({
     conversationId,
     status,

@@ -757,7 +757,52 @@ export function hiringFixtures(locale: FixtureLocale) {
       at: h(28),
     },
   ]
+  const message = (
+    id: string,
+    personId: string,
+    status: string,
+    body: string,
+    extra = {},
+  ) => ({
+    id,
+    roleId: 'role-1',
+    personId,
+    channel: personId === 'p1' ? 'linkedin' : 'github',
+    sequence: 0,
+    body,
+    status,
+    approvedBy: status === 'approved' ? 'recruiter' : null,
+    note: null,
+    sentAt: null,
+    createdAt: h(3),
+    updatedAt: h(3),
+    ...extra,
+  })
+  const notice = ko
+    ? '연락드린 경위: LinkedIn 프로필을 보고 연락드렸어요. "수신거부"라고 답하시면 다시 연락하지 않을게요.'
+    : 'How I found you: your LinkedIn profile. Reply "no thanks" and I won\'t write again.'
+  const messages = [
+    message(
+      'm1',
+      'p1',
+      'draft',
+      `${ko ? '김지원님, 안녕하세요. Go로 결제 시스템을 만드신 경험이 눈에 띄었어요. 서울에서 백엔드 엔지니어를 찾고 있는데 이야기 나눠 보실래요?' : 'Hi Jiwon, your work building payment systems in Go stood out. We are hiring a Backend Engineer in Seoul. Would you be open to a short chat?'}\n\n${notice}`,
+    ),
+    message(
+      'm2',
+      'p1',
+      'sent',
+      ko ? '지난주에 보낸 메시지예요.' : 'An earlier message, sent last week.',
+      {
+        sentAt: h(170),
+      },
+    ),
+  ]
   return {
+    '/hiring/messages': {
+      messages,
+      today: [{ channel: 'linkedin', sent: 6, cap: 25 }],
+    },
     '/hiring/roles': { roles: [role] },
     '/hiring/roles/role-1/people': { people },
     '/hiring/record': { events },

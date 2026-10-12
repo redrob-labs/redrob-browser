@@ -16,6 +16,10 @@ import {
   type HiringStore,
   SET_ASIDE_REASONS,
 } from '../../lib/hiring/store'
+import {
+  type HiringOutreach,
+  OutreachRefusedError,
+} from '../services/hiring-outreach'
 import type { HiringScreening } from '../services/hiring-screening'
 import type { HiringSourcing } from '../services/hiring-sourcing'
 
@@ -50,8 +54,9 @@ export function createHiringRoutes(deps: {
   store: HiringStore
   sourcing: HiringSourcing
   screening: HiringScreening
+  outreach: HiringOutreach
 }) {
-  const { store, sourcing, screening } = deps
+  const { store, sourcing, screening, outreach } = deps
   const guard = async <T>(
     c: { json: (b: unknown, s?: number) => Response },
     run: () => Promise<T> | T,
@@ -61,6 +66,21 @@ export function createHiringRoutes(deps: {
     } catch (error) {
       const f = failure(error)
       return c.json(f.body, f.status)
+    }
+  }
+  /** Like guard, and a limit or a stop on outreach is a 409 with its code. */
+  const sent = async <T>(
+    c: { json: (b: unknown, s?: number) => Response },
+    run: () => Promise<T> | T,
+  ) => {
+    try {
+      // guard answers HiringInputError and rethrows the rest, an OutreachRefusedError included.
+      return await guard(c, run)
+    } catch (error) {
+      if (error instanceof OutreachRefusedError) {
+        return c.json({ error: { message: error.code, code: error.code } }, 409)
+      }
+      throw error
     }
   }
   return new Hono()
@@ -197,6 +217,91 @@ export function createHiringRoutes(deps: {
         await store.suppress(c.req.param('personId'))
         return { ok: true }
       }),
+    )
+    .get('/messages', (c) =>
+      c.json({
+        messages: outreach.list(c.req.query('roleId') || undefined),
+        today: outreach.today(),
+      }),
+    )
+    .post(
+      '/roles/:id/people/:personId/messages',
+      zValidator(
+        'json',
+        z.object({
+          notice: z.string().min(1).max(500),
+          language: z.string().min(2).max(20),
+          tone: z.string().max(2_000).optional(),
+          body: z.string().max(8_000).optional(),
+          sequence: z.number().int().min(0).max(2).optional(),
+        }),
+      ),
+      (c) =>
+        sent(c, () =>
+          outreach.draft(
+            c.req.param('id'),
+            c.req.param('personId'),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .patch(
+      '/messages/:id',
+      zValidator(
+        'json',
+        z.object({
+          body: z.string().min(1).max(8_000).optional(),
+          status: z.enum(['approved', 'not-sent']).optional(),
+        }),
+      ),
+      (c) =>
+        sent(c, () => {
+          const { body, status } = c.req.valid('json')
+          const id = c.req.param('id')
+          if (body) outreach.edit(id, body)
+          if (status === 'approved') outreach.approve([id])
+          if (status === 'not-sent') outreach.dontSend(id)
+          return { message: outreach.get(id) }
+        }),
+    )
+    .post(
+      '/messages/approve',
+      zValidator(
+        'json',
+        z.object({ ids: z.array(z.string().min(1)).min(1).max(100) }),
+      ),
+      (c) =>
+        sent(c, () => ({
+          messages: outreach.approve(c.req.valid('json').ids),
+        })),
+    )
+    .post(
+      '/messages/:id/start',
+      zValidator('json', z.object({ conversationId: z.string().min(1) })),
+      (c) =>
+        sent(c, () =>
+          outreach.start(c.req.param('id'), c.req.valid('json').conversationId),
+        ),
+    )
+    .post(
+      '/messages/end',
+      zValidator('json', z.object({ conversationId: z.string().min(1) })),
+      (c) =>
+        sent(c, () => ({
+          message: outreach.end(c.req.valid('json').conversationId),
+        })),
+    )
+    .post(
+      '/roles/:id/people/:personId/reply',
+      zValidator('json', z.object({ text: z.string().min(1).max(20_000) })),
+      (c) =>
+        sent(c, () =>
+          outreach.reply(
+            c.req.param('id'),
+            c.req.param('personId'),
+            c.req.valid('json').text,
+          ),
+        ),
     )
     .get('/record', (c) =>
       c.json({ events: store.record(c.req.query('roleId') || undefined) }),

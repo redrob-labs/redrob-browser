@@ -276,3 +276,155 @@ export function useHiringActions() {
     }),
   }
 }
+
+export interface HiringMessage {
+  id: string
+  roleId: string
+  personId: string
+  channel: string
+  sequence: number
+  body: string
+  status: 'draft' | 'approved' | 'sending' | 'sent' | 'not-sent' | 'stopped'
+  approvedBy: string | null
+  note: string | null
+  sentAt: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+export function useMessages(roleId: string | undefined) {
+  const { baseUrl } = useAgentServerUrl()
+  return useQuery<{
+    messages: HiringMessage[]
+    today: Array<{ channel: string; sent: number; cap: number }>
+  }>({
+    queryKey: [...HIRING_KEY, 'messages', roleId ?? 'all', baseUrl],
+    enabled: Boolean(baseUrl),
+    refetchInterval: 5_000,
+    queryFn: async () =>
+      ok(
+        await fetch(
+          `${baseUrl}/hiring/messages${roleId ? `?roleId=${roleId}` : ''}`,
+        ),
+      ),
+  })
+}
+
+export class OutreachRefused extends Error {
+  constructor(readonly code: string) {
+    super(code)
+  }
+}
+
+async function okOrRefused<T>(response: Response): Promise<T> {
+  if (response.status === 409) {
+    const body = (await response.json().catch(() => ({}))) as {
+      error?: { code?: string }
+    }
+    throw new OutreachRefused(body.error?.code ?? 'refused')
+  }
+  return ok<T>(response)
+}
+
+export function useOutreachActions() {
+  const { baseUrl } = useAgentServerUrl()
+  const queryClient = useQueryClient()
+  const refresh = () => queryClient.invalidateQueries({ queryKey: HIRING_KEY })
+  return {
+    draft: useMutation<
+      | { status: 'drafted'; message: HiringMessage }
+      | {
+          status: 'needs-you'
+          reason: 'privacy' | 'no-model' | 'model-failed'
+        },
+      Error,
+      {
+        roleId: string
+        personId: string
+        notice: string
+        language: string
+        body?: string
+        sequence?: number
+      }
+    >({
+      mutationFn: async ({ roleId, personId, ...body }) =>
+        okOrRefused(
+          await fetch(
+            `${baseUrl}/hiring/roles/${roleId}/people/${personId}/messages`,
+            json(body),
+          ),
+        ),
+      onSuccess: refresh,
+    }),
+    update: useMutation<
+      unknown,
+      Error,
+      { id: string; body?: string; status?: 'approved' | 'not-sent' }
+    >({
+      mutationFn: async ({ id, ...body }) =>
+        okOrRefused(
+          await fetch(`${baseUrl}/hiring/messages/${id}`, json(body, 'PATCH')),
+        ),
+      onSuccess: refresh,
+    }),
+    approve: useMutation<unknown, Error, string[]>({
+      mutationFn: async (ids) =>
+        okOrRefused(
+          await fetch(`${baseUrl}/hiring/messages/approve`, json({ ids })),
+        ),
+      onSuccess: refresh,
+    }),
+    start: useMutation<
+      { instruction: string },
+      Error,
+      { id: string; conversationId: string }
+    >({
+      mutationFn: async ({ id, conversationId }) =>
+        okOrRefused(
+          await fetch(
+            `${baseUrl}/hiring/messages/${id}/start`,
+            json({ conversationId }),
+          ),
+        ),
+      onSuccess: refresh,
+    }),
+    end: useMutation<{ message: HiringMessage | null }, Error, string>({
+      mutationFn: async (conversationId) =>
+        ok(
+          await fetch(
+            `${baseUrl}/hiring/messages/end`,
+            json({ conversationId }),
+          ),
+        ),
+      onSuccess: refresh,
+    }),
+    reply: useMutation<
+      { optedOut: boolean },
+      Error,
+      { roleId: string; personId: string; text: string }
+    >({
+      mutationFn: async ({ roleId, personId, text }) =>
+        ok(
+          await fetch(
+            `${baseUrl}/hiring/roles/${roleId}/people/${personId}/reply`,
+            json({ text }),
+          ),
+        ),
+      onSuccess: refresh,
+    }),
+    setMode: useMutation<
+      unknown,
+      Error,
+      { roleId: string; mode: Role['mode'] }
+    >({
+      mutationFn: async ({ roleId, mode }) =>
+        ok(
+          await fetch(
+            `${baseUrl}/hiring/roles/${roleId}`,
+            json({ mode }, 'PATCH'),
+          ),
+        ),
+      onSuccess: refresh,
+    }),
+  }
+}

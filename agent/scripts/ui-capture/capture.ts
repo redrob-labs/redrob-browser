@@ -94,6 +94,14 @@ const SURFACES: Surface[] = [
   // Talent Scout: the role with its criteria, then the People pipeline with one person open.
   page('hiring', '/hiring'),
   {
+    ...page('hiring-messages', '/hiring'),
+    open: {
+      click:
+        '[role="tab"]:has-text("Messages"), [role="tab"]:has-text("메시지")',
+      wait: '[role="tabpanel"] ul li',
+    },
+  },
+  {
     ...page('hiring-people', '/hiring'),
     open: {
       click: '[role="tab"]:has-text("People"), [role="tab"]:has-text("후보자")',
