@@ -101,6 +101,19 @@ export interface PrivacyGateStatus {
   coverage: { redrobAgent: true; externalAgents: false }
 }
 
+const ORDER: readonly PrivacyLevel[] = ['off', 'standard', 'high', 'strict']
+
+/**
+ * The rules at `minLevel` or above. Other people's details (Talent Scout's candidates) are labelled at
+ * High at least, whatever the person's own level: it is their data, not the person's (Recruit plan §4.7).
+ */
+function atLeast(rules: PrivacyRules, minLevel?: PrivacyLevel): PrivacyRules {
+  if (!minLevel || ORDER.indexOf(rules.level) >= ORDER.indexOf(minLevel)) {
+    return rules
+  }
+  return { ...rules, level: minLevel }
+}
+
 export class PrivacyGate {
   private readonly maps = new Map<string, LabelMap>()
   private savedSecretsState: PrivacyGateStatus['savedSecrets'] = 'unknown'
@@ -225,9 +238,13 @@ export class PrivacyGate {
   }
 
   /** Labels texts for one conversation. Throws PrivacyGateError when it cannot: callers send nothing. */
-  async label(conversationId: string, texts: string[]): Promise<LabelOutcome> {
+  async label(
+    conversationId: string,
+    texts: string[],
+    options: { minLevel?: PrivacyLevel } = {},
+  ): Promise<LabelOutcome> {
     try {
-      const rules = this.rules()
+      const rules = atLeast(this.rules(), options.minLevel)
       if (rules.level === 'off')
         return await this.labelSavedOnly(conversationId, texts)
       const map = this.map(conversationId)

@@ -79,6 +79,7 @@
     "@browseros/playbooks": "workspace:*",
     "@browseros/privacy": "workspace:*",
     "@browseros/shared": "workspace:*",
+    "@browseros/hiring": "workspace:*",
     "@browseros/shopping": "workspace:*",
     "@hono/zod-validator": "^0.9.1",
     "@modelcontextprotocol/client": "^2.1.0",

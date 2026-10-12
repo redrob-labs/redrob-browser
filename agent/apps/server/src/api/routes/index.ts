@@ -9,19 +9,29 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { AcpAgentRuntime } from '../../lib/agents/acp/acp-agent-runtime'
 import type { OAuthTokenManager } from '../../lib/clients/oauth/token-manager'
+import { getDb } from '../../lib/db'
+import { providerCompleter } from '../../lib/hiring/model'
+import { HiringStore } from '../../lib/hiring/store'
 import { JobStore } from '../../lib/jobs/store'
+import { logger } from '../../lib/logger'
 import { PlaybookStore } from '../../lib/playbooks/store'
 import { DetectorSource } from '../../lib/privacy/detector-source'
 import { type Cdp, ExtensionWorker } from '../../lib/privacy/extension-worker'
 import { PrivacyGate } from '../../lib/privacy/gate'
 import { ExtensionSavedSecrets } from '../../lib/privacy/saved-secrets'
-import { PrivacySettingsStore } from '../../lib/privacy/settings'
+import {
+  isNeverReadSite,
+  PrivacySettingsStore,
+} from '../../lib/privacy/settings'
 import {
   managedStorageReader,
   TeamPolicySource,
 } from '../../lib/privacy/team-policy/source'
 import { requireTrustedOrigin } from '../middleware/require-trusted-origin'
+import { BackgroundReader } from '../services/background-reader'
 import { ConversationRuns } from '../services/conversation-runs'
+import { HiringScreening } from '../services/hiring-screening'
+import { HiringSourcing } from '../services/hiring-sourcing'
 import type { KlavisService } from '../services/klavis'
 import { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
 import { setJobReceiptStore } from '../services/mcp/effects/job-receipts'
@@ -37,6 +47,7 @@ import { createAgentRoutes } from './agents'
 import { createChatRoutes } from './chat'
 import { createConversationRoutes } from './conversations'
 import { createHealthRoute } from './health'
+import { createHiringRoutes } from './hiring'
 import { createJobRoutes } from './jobs'
 import { createKlavisRoutes } from './klavis'
 import { createMcpRoutes } from './mcp'
@@ -87,7 +98,31 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       teamPolicy,
     )
   setNeverReadSitesSource(() => privacyGate.settings.get().neverReadSites)
-  const smartCompare = new SmartCompare(browserSession)
+  // Background reads (Smart Compare, Talent Scout) never open a site the person listed.
+  const reader = new BackgroundReader(browserSession, {
+    neverRead: (url) =>
+      isNeverReadSite(url, privacyGate.settings.get().neverReadSites),
+  })
+  const smartCompare = new SmartCompare(reader)
+  const hiringStore = new HiringStore(() => getDb())
+  const hiringSourcing = new HiringSourcing(hiringStore, reader)
+  const hiringScreening = new HiringScreening(
+    hiringStore,
+    privacyGate,
+    providerCompleter(browserosId),
+  )
+  // People with no activity for 180 days are deleted (Recruit plan §4.6): soon after start, then daily.
+  const purge = () => {
+    try {
+      hiringStore.purgeInactive()
+    } catch (error) {
+      logger.warn('Talent Scout retention could not run', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+  setTimeout(purge, 60_000).unref?.()
+  setInterval(purge, 86_400_000).unref?.()
   const playbooks = new PlaybookStore()
   setPlaybookRunSource((id) => playbooks.activeRun(id))
   const jobs = new JobStore()
@@ -185,6 +220,8 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .use('/playbooks/*', requireTrustedAppOrigin())
       // The résumé and every answer a person gave about themselves.
       .use('/jobs/*', requireTrustedAppOrigin())
+      // Other people's details: only the extension may ask.
+      .use('/hiring/*', requireTrustedAppOrigin())
       .route('/acpx/probe', createAcpxProbeRoutes({ resourcesDir }))
       .route('/agents', resolvedAgentRoutes)
       .route('/conversations', createConversationRoutes())
@@ -199,6 +236,14 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .route('/compare', createSmartCompareRoutes({ compare: smartCompare }))
       .route('/playbooks', createPlaybookRoutes({ store: playbooks }))
       .route('/jobs', createJobRoutes({ store: jobs }))
+      .route(
+        '/hiring',
+        createHiringRoutes({
+          store: hiringStore,
+          sourcing: hiringSourcing,
+          screening: hiringScreening,
+        }),
+      )
       .route('/scheduled-jobs', createScheduledJobRoutes())
       .route('/scheduled-job-runs', createScheduledJobRunRoutes())
   )

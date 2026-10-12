@@ -270,6 +270,7 @@
         "@browseros/browser-core": "workspace:*",
         "@browseros/browser-mcp": "workspace:*",
         "@browseros/cdp-protocol": "workspace:*",
+        "@browseros/hiring": "workspace:*",
         "@browseros/jobs": "workspace:*",
         "@browseros/playbooks": "workspace:*",
         "@browseros/privacy": "workspace:*",
@@ -405,6 +406,13 @@
       },
       "peerDependencies": {
         "react": "^19.2.8",
+      },
+    },
+    "packages/hiring": {
+      "name": "@browseros/hiring",
+      "version": "0.0.1",
+      "dependencies": {
+        "linkedom": "^0.18.13",
       },
     },
     "packages/i18n": {
@@ -712,6 +720,8 @@
     "@browseros/diagnostics": ["@browseros/diagnostics@workspace:packages/diagnostics"],
 
     "@browseros/harness-integrations-rust": ["@browseros/harness-integrations-rust@workspace:crates/harness-integrations"],
+
+    "@browseros/hiring": ["@browseros/hiring@workspace:packages/hiring"],
 
     "@browseros/i18n": ["@browseros/i18n@workspace:packages/i18n"],
 
