@@ -12,7 +12,7 @@
 import logoLight from './redrob-logo-primary.png'
 import logoDark from './redrob-logo-primary-white.png'
 import { showRedrobSplash } from './redrob-splash.js'
-import './redrob-splash.css'
+// redrob-splash.css is imported by styles/global.css, in the components layer, like every other sheet.
 
 const SEEN_KEY = 'redrob-splash:browser'
 

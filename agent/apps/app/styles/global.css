@@ -23,6 +23,8 @@
 @import "@xyflow/react/dist/style.css" layer(vendor);
 @import "@redrob-labs/ui/tokens.css" layer(rr);
 @import "@redrob-labs/ui/styles.css" layer(rr);
+/* The launch splash: its own sheet, so it can paint before the app, but layered here like every other. */
+@import "../lib/splash/redrob-splash.css" layer(components);
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "tailwind-scrollbar-hide/v4";
