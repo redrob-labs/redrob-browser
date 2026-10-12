@@ -422,6 +422,77 @@ describe('Talent Scout email', () => {
     ).toBeUndefined()
   })
 
+  it('a reply answers on the same mailbox inside the 90-day window, keeps quiet hours, and is never the model', async () => {
+    const { outreach, role, personId, advance } = await setup({
+      model: () => 'model text',
+    })
+    await expect(
+      outreach.draft(role.id, personId, {
+        notice: NOTICE,
+        language: 'en',
+        body: 'Times',
+        reply: true,
+      }),
+    ).rejects.toMatchObject({ code: 'not-approved' })
+    const d = await outreach.draft(role.id, personId, {
+      notice: NOTICE,
+      language: 'en',
+      body: 'Hi Jiwon, a role.',
+      email: { connector: 'Gmail', recipient: 'jiwon@example.com' },
+    })
+    if (d.status !== 'drafted') throw new Error()
+    outreach.approve([d.message.id])
+    await outreach.start(d.message.id, 'c1')
+    const first = sendArgs('jiwon@example.com', d.message.body)
+    afterConnectorCall('c1', 'execute_action', first)
+    await outreach.reply(role.id, personId, 'Sounds good, when?')
+    advance(2 * 3_600_000)
+
+    // The app writes the times; without its text there is nothing to send.
+    await expect(
+      outreach.draft(role.id, personId, {
+        notice: NOTICE,
+        language: 'en',
+        reply: true,
+      }),
+    ).rejects.toMatchObject({ code: 'not-approved' })
+    const r = await outreach.draft(role.id, personId, {
+      notice: NOTICE,
+      language: 'en',
+      body: 'Here are three times.',
+      reply: true,
+      // A caller cannot redirect a reply to another address.
+      email: { connector: 'Outlook Mail', recipient: 'other@example.com' },
+    })
+    if (r.status !== 'drafted') throw new Error()
+    expect([
+      r.message.sequence,
+      r.message.channel,
+      r.message.recipient,
+      r.message.connector,
+      r.message.body,
+    ]).toEqual([
+      -1,
+      'email',
+      'jiwon@example.com',
+      'Gmail',
+      'Here are three times.',
+    ])
+    outreach.approve([r.message.id])
+    advance(9 * 3_600_000) // 22:00 in Seoul
+    await expect(outreach.start(r.message.id, 'c2')).rejects.toMatchObject({
+      code: 'quiet-hours',
+    })
+    advance(11 * 3_600_000) // 09:00 next day, well inside 90 days
+    await outreach.start(r.message.id, 'c2')
+    afterConnectorCall(
+      'c2',
+      'execute_action',
+      sendArgs('jiwon@example.com', r.message.body),
+    )
+    expect(outreach.get(r.message.id)?.status).toBe('sent')
+  })
+
   it('one email an hour to a domain', async () => {
     const { outreach, store, role, personId } = await setup()
     const other = await store.upsertPerson(role.id, {

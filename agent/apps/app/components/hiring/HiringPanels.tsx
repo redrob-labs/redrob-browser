@@ -37,6 +37,16 @@ export const HiringChips: FC<{ panel: HiringPanel }> = ({ panel }) => (
         )}
       </button>
     ) : null}
+    {panel.findTimes ? (
+      <button type="button" className="rr-prompt" onClick={panel.findTimes.run}>
+        {t('hiringPanelFindTimes', panel.findTimes.name)}
+      </button>
+    ) : null}
+    {panel.book ? (
+      <button type="button" className="rr-prompt" onClick={panel.book.run}>
+        {t('hiringPanelBook', panel.book.name)}
+      </button>
+    ) : null}
     {panel.listChips.map((role) => (
       <button
         key={role.id}

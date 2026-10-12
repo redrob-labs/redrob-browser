@@ -120,6 +120,10 @@ export function eventText(event: HiringEvent): string {
       return t('hiringEventDeleted')
     case 'retention':
       return t('hiringEventRetention', Number(d.deleted ?? 0))
+    case 'times-found':
+      return t('hiringEventTimesFound')
+    case 'interview-booked':
+      return t('hiringEventBooked')
     case 'mode-changed':
       return t('hiringEventMode')
     default:

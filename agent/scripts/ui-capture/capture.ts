@@ -91,13 +91,21 @@ const SURFACES: Surface[] = [
   page('playbooks', '/playbooks'),
   // With applications in the tracker the page opens on them; the profile is one tab over.
   page('jobs', '/jobs'),
-  // Talent Scout: the role with its criteria, then the People pipeline with one person open.
+  // Talent Scout: the role with its criteria, Messages, Interviews, then People with one person open.
   page('hiring', '/hiring'),
   {
     ...page('hiring-messages', '/hiring'),
     open: {
       click:
         '[role="tab"]:has-text("Messages"), [role="tab"]:has-text("메시지")',
+      wait: '[role="tabpanel"] ul li',
+    },
+  },
+  {
+    ...page('hiring-interviews', '/hiring'),
+    open: {
+      click:
+        '[role="tab"]:has-text("Interviews"), [role="tab"]:has-text("면접")',
       wait: '[role="tabpanel"] ul li',
     },
   },

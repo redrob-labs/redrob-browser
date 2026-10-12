@@ -798,7 +798,28 @@ export function hiringFixtures(locale: FixtureLocale) {
       },
     ),
   ]
+  // Times found in the recruiter's calendar, waiting to be offered: 10:00 Seoul on three business days.
+  const slot = (day: number, hour: number) => ({
+    start: Date.UTC(2026, 9, day, hour - 9),
+    end: Date.UTC(2026, 9, day, hour - 9, 30),
+  })
+  const interviews = [
+    {
+      id: 'i1',
+      roleId: 'role-1',
+      personId: 'p1',
+      connector: 'Google Calendar',
+      lengthMinutes: 30,
+      status: 'offered',
+      slots: [slot(14, 10), slot(15, 11), slot(16, 14)],
+      chosen: null,
+      createdAt: h(1),
+      updatedAt: h(1),
+    },
+  ]
   return {
+    '/hiring/interviews': { interviews },
+    '/hiring/roles/role-1/interviews': { interviews },
     '/hiring/messages': {
       messages,
       today: [{ channel: 'linkedin', sent: 6, cap: 25 }],

@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * The outreach controls on a person and on a role: write a message (Redrob drafts it, or the recruiter
- * writes it when no AI can), record a reply, and choose how much Redrob does on the role.
+ * writes it when no AI can), record a reply, offer interview times, and choose how much Redrob does
+ * on the role.
  */
 
 import { automaticAllowed } from '@browseros/hiring/outreach'
@@ -13,10 +14,12 @@ import { getLocale, t } from '@browseros/i18n'
 import { type FC, useState } from 'react'
 import { toast } from 'sonner'
 import { Textarea } from '@/components/ui/textarea'
+import { timesRequestStorage } from '@/lib/hiring/hiringStorage'
 import {
   type PersonOnRole,
   type Role,
   useHiringPolicy,
+  useInterviews,
   useOutreachActions,
 } from '@/modules/hiring/hiring.hooks'
 import { screenProblem } from '@/modules/hiring/labels'
@@ -282,5 +285,74 @@ export const RoleMode: FC<{ role: Role }> = ({ role }) => {
           : `${t(current.hint)} ${teamOff ? t('hiringModeTeamOff') : t('hiringModeAutomaticBlocked')}`}
       </p>
     </div>
+  )
+}
+
+type Calendar = 'Google Calendar' | 'Outlook Calendar'
+
+/**
+ * "Offer interview times": the side panel reads the chosen calendar (read only) and finds free slots;
+ * the times then wait on Interviews for the recruiter to add to Messages.
+ */
+export const OfferTimes: FC<{ role: Role; person: PersonOnRole }> = ({
+  role,
+  person,
+}) => {
+  const { data: integrations } = useGetUserMCPIntegrations()
+  const { data: interviews = [] } = useInterviews(role.id)
+  const calendars = (['Google Calendar', 'Outlook Calendar'] as const).filter(
+    (name) =>
+      integrations?.integrations.some(
+        (i) => i.name === name && i.is_authenticated,
+      ),
+  )
+  const [picked, setPicked] = useState<Calendar | undefined>()
+  const calendar = picked && calendars.includes(picked) ? picked : calendars[0]
+  const open = interviews.some(
+    (i) =>
+      i.personId === person.id &&
+      !['booked', 'cancelled', 'needs-you'].includes(i.status),
+  )
+  if (open) return null
+  if (!calendar) {
+    return (
+      <span className="text-[12px] text-[var(--text-tertiary)]">
+        {t('hiringConnectCalendar')}
+      </span>
+    )
+  }
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      {calendars.length > 1 ? (
+        <select
+          className="rr-select rr-select--sm"
+          aria-label={t('hiringOfferFrom', calendar)}
+          value={calendar}
+          onChange={(e) => setPicked(e.target.value as Calendar)}
+        >
+          {calendars.map((c) => (
+            <option key={c} value={c}>
+              {t('hiringOfferFrom', c)}
+            </option>
+          ))}
+        </select>
+      ) : null}
+      <button
+        type="button"
+        className="rr-btn rr-btn--secondary rr-btn--sm"
+        onClick={() =>
+          void timesRequestStorage
+            .setValue({
+              roleId: role.id,
+              personId: person.id,
+              name: person.record.name,
+              connector: calendar,
+            })
+            .then(() => toast(t('hiringOfferQueued')))
+        }
+      >
+        {t('hiringOfferTimes')}
+      </button>
+    </span>
   )
 }

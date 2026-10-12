@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Hiring: Talent Scout's page (Recruit plan §3.2). Roles with their criteria; People, the pipeline per
- * role in stage order; and the Record, every step with who did it. Messages and Interviews join the
- * tabs when outreach and scheduling land.
+ * role in stage order; Messages, the outreach queue; Interviews, times from the recruiter's calendar;
+ * and the Record, every step with who did it.
  */
 
 import { activeCriteria } from '@browseros/hiring/criteria'
@@ -17,6 +17,7 @@ import { toast } from 'sonner'
 import { CandidateNotice } from '@/components/hiring/CandidateNotice'
 import { CriteriaEditor } from '@/components/hiring/CriteriaEditor'
 import {
+  OfferTimes,
   RecordReply,
   RoleMode,
   WriteMessage,
@@ -43,6 +44,7 @@ import {
   STAGES,
   screenProblem,
 } from '@/modules/hiring/labels'
+import { InterviewsTab } from './InterviewsTab'
 import { MessagesTab } from './MessagesTab'
 
 const showRefused = (refused: Refused[]) => {
@@ -355,7 +357,11 @@ const People: FC<{ role: Role }> = ({ role }) => {
                           sequence={1}
                         />
                         <RecordReply role={role} person={person} />
+                        <OfferTimes role={role} person={person} />
                       </>
+                    ) : null}
+                    {person.stage === 'replied' ? (
+                      <OfferTimes role={role} person={person} />
                     ) : null}
                     <button
                       type="button"
@@ -490,6 +496,9 @@ export const HiringPage: FC = () => {
             <TabsTrigger value="roles">{t('hiringTabRoles')}</TabsTrigger>
             <TabsTrigger value="people">{t('hiringTabPeople')}</TabsTrigger>
             <TabsTrigger value="messages">{t('hiringTabMessages')}</TabsTrigger>
+            <TabsTrigger value="interviews">
+              {t('hiringTabInterviews')}
+            </TabsTrigger>
             <TabsTrigger value="record">{t('hiringTabRecord')}</TabsTrigger>
           </TabsList>
           {tab !== 'roles' && roles.length ? (
@@ -533,6 +542,9 @@ export const HiringPage: FC = () => {
         </TabsContent>
         <TabsContent value="messages">
           {role ? <MessagesTab role={role} /> : null}
+        </TabsContent>
+        <TabsContent value="interviews">
+          {role ? <InterviewsTab role={role} /> : null}
         </TabsContent>
         <TabsContent value="record">
           <Record roleId={role?.id} />

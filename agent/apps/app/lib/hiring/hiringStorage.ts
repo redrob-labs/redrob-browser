@@ -22,3 +22,18 @@ export interface HiringPage {
 export const hiringPageByTabStorage = storage.defineItem<
   Record<string, HiringPage>
 >('local:hiring.pageByTab', { fallback: {} })
+
+/** "Offer interview times" asked on the Hiring page, waiting for the side panel to read the calendar. */
+export interface TimesRequest {
+  roleId: string
+  personId: string
+  name: string
+  connector: 'Google Calendar' | 'Outlook Calendar'
+}
+
+export const timesRequestStorage = storage.defineItem<TimesRequest | null>(
+  'local:hiring.timesRequest',
+  {
+    fallback: null,
+  },
+)

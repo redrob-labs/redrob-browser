@@ -269,6 +269,13 @@ export function createHiringRoutes(deps: {
           tone: z.string().max(2_000).optional(),
           body: z.string().max(8_000).optional(),
           sequence: z.number().int().min(0).max(2).optional(),
+          reply: z.boolean().optional(),
+          email: z
+            .object({
+              connector: z.enum(['Gmail', 'Outlook Mail']),
+              recipient: z.string().email().max(320),
+            })
+            .optional(),
         }),
       ),
       (c) =>

@@ -24,6 +24,7 @@ import {
   DEFAULT_LIMITS,
   isOptOut,
   type OutreachLimits,
+  REPLY_SEQUENCE,
   type SendRefusal,
   type SentMessage,
 } from '@browseros/hiring/limits'
@@ -208,6 +209,67 @@ export class HiringOutreach {
     return 'email'
   }
 
+  /** The model's draft, labelled through the privacy gate at high; the name and evidence only. */
+  private async modelDraft(
+    roleId: string,
+    personId: string,
+    role: ReturnType<HiringOutreach['person']>['role'],
+    person: ReturnType<HiringOutreach['person']>['person'],
+    input: {
+      tone?: string
+      language: string
+      previous?: string
+      followUp: boolean
+    },
+  ): Promise<string | DraftOutcome> {
+    if (!this.complete) return { status: 'needs-you', reason: 'no-model' }
+    const evidence = (person.evaluation?.results ?? [])
+      .filter((r) => r.state === 'met' && r.by === 'model' && r.evidence)
+      .map((r) => r.evidence as string)
+    const key = `hiring:draft:${roleId}:${personId}:${this.now()}`
+    try {
+      let labelled: string
+      try {
+        labelled =
+          (
+            await this.gate.label(
+              key,
+              [
+                draftPrompt({
+                  role,
+                  name: person.record.name,
+                  evidence,
+                  tone: input.tone,
+                  language: input.language,
+                  previous: input.previous,
+                }),
+              ],
+              { minLevel: 'high' },
+            )
+          ).texts[0] ?? ''
+      } catch {
+        return { status: 'needs-you', reason: 'privacy' }
+      }
+      let body: string
+      try {
+        body = this.gate
+          .restore(
+            key,
+            await this.complete(
+              input.followUp ? FOLLOW_UP_SYSTEM : DRAFT_SYSTEM,
+              labelled,
+            ),
+          )
+          .trim()
+      } catch {
+        return { status: 'needs-you', reason: 'model-failed' }
+      }
+      return body || { status: 'needs-you', reason: 'model-failed' }
+    } finally {
+      this.gate.forget(key)
+    }
+  }
+
   /** A first message (sequence 0) or a follow-up, written by the model or by the recruiter (`body`). */
   async draft(
     roleId: string,
@@ -218,6 +280,8 @@ export class HiringOutreach {
       tone?: string
       body?: string
       sequence?: number
+      /** Answering them on the channel of the last message (interview times). */
+      reply?: boolean
       /** Send by email from this mailbox, to an address the person published or applied with. */
       email?: { connector: EmailConnector; recipient: string }
     },
@@ -225,62 +289,48 @@ export class HiringOutreach {
     const { role, person } = this.person(roleId, personId)
     if (person.stage === 'set-aside')
       throw new OutreachRefusedError('set-aside')
-    const email = input.email
+    const lastSent = this.list(roleId)
+      .filter((m) => m.personId === personId && m.status === 'sent')
+      .at(-1)
+    if (input.reply && !lastSent) throw new OutreachRefusedError('not-approved')
+    // A reply goes back the way the conversation went: the same mailbox and address, or the site.
+    const email =
+      input.reply &&
+      lastSent?.channel === 'email' &&
+      lastSent.recipient &&
+      lastSent.connector
+        ? {
+            connector: lastSent.connector as EmailConnector,
+            recipient: lastSent.recipient,
+          }
+        : input.reply
+          ? undefined
+          : input.email
     const channel = this.channelFor(person.record, email)
     const sentBefore = this.list(roleId).filter(
       (m) => m.personId === personId && m.status === 'sent',
     )
     // A follow-up is numbered by what was really sent, not by what the caller says.
-    const sequence = input.sequence ? Math.max(1, sentBefore.length) : 0
+    const sequence = input.reply
+      ? REPLY_SEQUENCE
+      : input.sequence
+        ? Math.max(1, sentBefore.length)
+        : 0
     const previous = sequence ? sentBefore.at(-1)?.body : undefined
 
+    // A reply is the app's own localized text (interview times), never the model's.
+    if (sequence === REPLY_SEQUENCE && !input.body?.trim())
+      throw new OutreachRefusedError('not-approved')
     let body = input.body?.trim()
     if (!body) {
-      if (!this.complete) return { status: 'needs-you', reason: 'no-model' }
-      const evidence = (person.evaluation?.results ?? [])
-        .filter((r) => r.state === 'met' && r.by === 'model' && r.evidence)
-        .map((r) => r.evidence as string)
-      const key = `hiring:draft:${roleId}:${personId}:${this.now()}`
-      try {
-        let labelled: string
-        try {
-          labelled =
-            (
-              await this.gate.label(
-                key,
-                [
-                  draftPrompt({
-                    role,
-                    name: person.record.name,
-                    evidence,
-                    tone: input.tone,
-                    language: input.language,
-                    previous,
-                  }),
-                ],
-                { minLevel: 'high' },
-              )
-            ).texts[0] ?? ''
-        } catch {
-          return { status: 'needs-you', reason: 'privacy' }
-        }
-        try {
-          body = this.gate
-            .restore(
-              key,
-              await this.complete(
-                sequence ? FOLLOW_UP_SYSTEM : DRAFT_SYSTEM,
-                labelled,
-              ),
-            )
-            .trim()
-        } catch {
-          return { status: 'needs-you', reason: 'model-failed' }
-        }
-      } finally {
-        this.gate.forget(key)
-      }
-      if (!body) return { status: 'needs-you', reason: 'model-failed' }
+      const drafted = await this.modelDraft(roleId, personId, role, person, {
+        tone: input.tone,
+        language: input.language,
+        previous,
+        followUp: sequence !== 0,
+      })
+      if (typeof drafted !== 'string') return drafted
+      body = drafted
     }
     if (sequence === 0) body = withNotice(body, input.notice)
 

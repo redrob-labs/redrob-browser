@@ -204,3 +204,30 @@ hiringEmailLabel	Email	이메일
 hiringNoticeEmail	How I found you: the address you $1. Reply "no thanks" and I won't write again.	연락드린 경위: $1 주소로 연락드렸어요. "수신거부"라고 답하시면 다시 연락하지 않을게요.	$1 is how they gave it
 hiringNoticeEmailGave	published on your $1 profile	$1 프로필에 공개하신
 hiringNoticeEmailApplied	gave in your application	지원서에 적어 주신
+hiringTabInterviews	Interviews	면접
+hiringInterviewsEmpty	No interviews yet. On People, choose Offer interview times for someone who replied.	아직 면접이 없어요. 후보자 탭에서 답장한 사람에게 면접 가능 시간 보내기를 누르세요.
+hiringOfferTimes	Offer interview times	면접 가능 시간 보내기
+hiringOfferFrom	From $1	$1에서
+hiringConnectCalendar	Connect Google Calendar or Outlook Calendar in Connect apps to offer times.	시간을 제안하려면 앱 연결에서 Google 캘린더나 Outlook 캘린더를 연결하세요.
+hiringOfferQueued	Open the side panel to read your calendar.	캘린더를 읽으려면 사이드 패널을 여세요.
+hiringPanelFindTimes	Find interview times for $1	$1님 면접 가능 시간 찾기	Side-panel chip
+hiringPanelBook	Book $1's interview	$1님 면접 예약하기	Side-panel chip
+hiringPanelTimesFound	Found $1 times. They're in Hiring, Interviews, ready to send.	가능한 시간 $1개를 찾았어요. 채용 > 면접에서 보낼 수 있어요.
+hiringPanelTimesNone	Couldn't read your calendar, so no times were found. Choose times yourself in Hiring.	캘린더를 읽지 못해 시간을 찾지 못했어요. 채용에서 직접 시간을 고르세요.
+hiringPanelBooked	Booked. The invitation goes from your calendar.	예약했어요. 초대장은 내 캘린더에서 보내져요.
+hiringPanelNotBooked	It wasn't booked. The chosen time is still waiting in Hiring.	예약하지 못했어요. 고른 시간은 채용에서 기다리고 있어요.
+hiringInterviewReading	Reading your calendar	캘린더 읽는 중
+hiringInterviewOffered	Times to offer	보낼 시간
+hiringInterviewChosen	Chosen: $1	선택한 시간: $1
+hiringInterviewBooking	Booking	예약 중
+hiringInterviewBooked	Booked	예약됨
+hiringInterviewNeedsYou	Your calendar couldn't be read. Offer times yourself.	캘린더를 읽지 못했어요. 시간을 직접 제안하세요.
+hiringTimesMessage	Would one of these times work for a $1-minute call?	다음 중 $1분 통화가 가능한 시간이 있을까요?
+hiringTimesMessageEnd	Reply with the number that suits you, or suggest another time.	편한 번호로 답해 주시거나 다른 시간을 알려 주세요.
+hiringAddTimes	Add these times to Messages	이 시간을 메시지에 추가
+hiringTheyPicked	They picked	선택한 시간
+hiringPickFromReply	Or paste their reply	또는 답장을 붙여 넣기
+hiringPickUnclear	Their reply doesn't name one time clearly. Pick it yourself.	답장에 시간이 분명하지 않아요. 직접 고르세요.
+hiringCancelInterview	Cancel	취소
+hiringEventTimesFound	Found interview times	면접 가능 시간을 찾았어요
+hiringEventBooked	Booked an interview	면접을 예약했어요

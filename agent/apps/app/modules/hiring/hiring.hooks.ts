@@ -365,6 +365,8 @@ export function useOutreachActions() {
         language: string
         body?: string
         sequence?: number
+        /** Answering them on the channel of the last message (interview times). */
+        reply?: boolean
         email?: { connector: 'Gmail' | 'Outlook Mail'; recipient: string }
       }
     >({
@@ -472,4 +474,108 @@ export function useHiringPolicy() {
         .policy
     },
   })
+}
+
+export interface HiringInterview {
+  id: string
+  roleId: string
+  personId: string
+  connector: string
+  lengthMinutes: number
+  status:
+    | 'reading'
+    | 'offered'
+    | 'chosen'
+    | 'booking'
+    | 'booked'
+    | 'cancelled'
+    | 'needs-you'
+  slots: Array<{ start: number; end: number }>
+  chosen: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+export function useInterviews(roleId?: string) {
+  const { baseUrl } = useAgentServerUrl()
+  return useQuery<HiringInterview[]>({
+    queryKey: [...HIRING_KEY, 'interviews', roleId ?? 'open', baseUrl],
+    enabled: Boolean(baseUrl),
+    refetchInterval: 5_000,
+    queryFn: async () => {
+      const response = await fetch(
+        `${baseUrl}/hiring/${roleId ? `roles/${roleId}/interviews` : 'interviews'}`,
+      )
+      if (!response.ok) return []
+      return ((await response.json()) as { interviews: HiringInterview[] })
+        .interviews
+    },
+  })
+}
+
+export function useInterviewActions() {
+  const { baseUrl } = useAgentServerUrl()
+  const queryClient = useQueryClient()
+  const refresh = () => queryClient.invalidateQueries({ queryKey: HIRING_KEY })
+  return {
+    startRead: useMutation<
+      { instruction: string },
+      Error,
+      {
+        roleId: string
+        personId: string
+        connector: 'Google Calendar' | 'Outlook Calendar'
+        conversationId: string
+      }
+    >({
+      mutationFn: async ({ roleId, personId, ...body }) =>
+        ok(
+          await fetch(
+            `${baseUrl}/hiring/roles/${roleId}/people/${personId}/interviews`,
+            json(body),
+          ),
+        ),
+      onSuccess: refresh,
+    }),
+    end: useMutation<{ interview: HiringInterview | null }, Error, string>({
+      mutationFn: async (conversationId) =>
+        ok(
+          await fetch(
+            `${baseUrl}/hiring/interviews/end`,
+            json({ conversationId }),
+          ),
+        ),
+      onSuccess: refresh,
+    }),
+    choose: useMutation<
+      { interview: HiringInterview | null },
+      Error,
+      { id: string; index?: number; reply?: string; timeZone: string }
+    >({
+      mutationFn: async ({ id, ...body }) =>
+        ok(
+          await fetch(`${baseUrl}/hiring/interviews/${id}/choice`, json(body)),
+        ),
+      onSuccess: refresh,
+    }),
+    startBook: useMutation<
+      { instruction: string },
+      Error,
+      { id: string; conversationId: string }
+    >({
+      mutationFn: async ({ id, conversationId }) =>
+        ok(
+          await fetch(
+            `${baseUrl}/hiring/interviews/${id}/book`,
+            json({ conversationId }),
+          ),
+        ),
+      onSuccess: refresh,
+    }),
+    cancel: useMutation<unknown, Error, string>({
+      mutationFn: async (id) =>
+        ok(await fetch(`${baseUrl}/hiring/interviews/${id}/cancel`, json({}))),
+      onSuccess: refresh,
+    }),
+  }
 }

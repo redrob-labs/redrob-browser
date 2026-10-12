@@ -53,6 +53,12 @@ export const DEFAULT_LIMITS: OutreachLimits = {
   recontactDays: 90,
 }
 
+/**
+ * A message answering someone who wrote back (interview times): not a follow-up, so neither the
+ * 90-day window nor the follow-up rules apply. Opt-outs, quiet hours and caps still do.
+ */
+export const REPLY_SEQUENCE = -1
+
 export interface SentMessage {
   personId: string
   /** The site id, or `email`. */
@@ -122,7 +128,9 @@ export function canSend(
   if (state.optedOut) return 'opted-out'
   if (!state.channelOpen) return 'no-channel'
   const toPerson = history.filter((m) => m.personId === send.personId)
-  if (send.sequence === 0) {
+  if (send.sequence === REPLY_SEQUENCE) {
+    // Answering them: they wrote back, so the window and follow-up rules do not apply.
+  } else if (send.sequence === 0) {
     const last = toPerson.at(-1)
     if (last && now - last.sentAt < limits.recontactDays * 86_400_000) {
       return 'contacted-recently'

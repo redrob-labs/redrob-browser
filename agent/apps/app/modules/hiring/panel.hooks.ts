@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Talent Scout in the side panel: on a profile, one chip per role (two at most); pressing one reads
- * the open page, adds the person, checks them against the role, and shows the card.
+ * the open page, adds the person, checks them against the role, and shows the card. Approved messages
+ * are sent from here, and interview times are found in, and booked on, the recruiter's calendar.
  */
 
 import { t } from '@browseros/i18n'
@@ -13,6 +14,8 @@ import { toast } from 'sonner'
 import {
   type HiringPage,
   hiringPageByTabStorage,
+  type TimesRequest,
+  timesRequestStorage,
 } from '@/lib/hiring/hiringStorage'
 import {
   OutreachRefused,
@@ -20,6 +23,8 @@ import {
   type Role,
   type SetAsideReason,
   useHiringActions,
+  useInterviewActions,
+  useInterviews,
   useMessages,
   useOutreachActions,
   usePeople,
@@ -118,12 +123,116 @@ function useSending(options: {
   }
 }
 
+/**
+ * Interviews, run here like sending: "Find interview times" reads the calendar the recruiter chose on
+ * the Hiring page (read only; the server's guard refuses any change), and "Book" creates the one event
+ * at the time the candidate picked. Each run is ended on the server when the chat finishes.
+ */
+function useScheduling(options: {
+  conversationId: string
+  status: ChatStatus
+  send: (message: string) => void
+}) {
+  const scheduling = useInterviewActions()
+  const { data: interviews = [] } = useInterviews()
+  const [request, setRequest] = useState<TimesRequest | null>(null)
+  const running = useRef<'read' | 'book' | null>(null)
+  const previous = useRef(options.status)
+  const chosen = interviews.find((i) => i.status === 'chosen')
+  const { data: people = [] } = usePeople(chosen?.roleId)
+  const chosenName = people.find((p) => p.id === chosen?.personId)?.record.name
+
+  useEffect(() => {
+    void timesRequestStorage.getValue().then(setRequest)
+    return timesRequestStorage.watch((next) => setRequest(next ?? null))
+  }, [])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only reacts to the chat finishing
+  useEffect(() => {
+    const was = previous.current
+    previous.current = options.status
+    const finished =
+      (was === 'streaming' || was === 'submitted') &&
+      (options.status === 'ready' || options.status === 'error')
+    const kind = running.current
+    if (!finished || !kind) return
+    running.current = null
+    scheduling.end.mutate(options.conversationId, {
+      onSuccess: ({ interview }) => {
+        if (kind === 'read') {
+          if (interview?.status === 'offered' && interview.slots.length) {
+            toast.success(t('hiringPanelTimesFound', interview.slots.length))
+          } else toast(t('hiringPanelTimesNone'))
+        } else if (interview?.status === 'booked') {
+          toast.success(t('hiringPanelBooked'))
+        } else toast(t('hiringPanelNotBooked'))
+      },
+    })
+  }, [options.status])
+
+  const failed = (error: Error) =>
+    toast.error(
+      t(
+        'hiringRefusedSend',
+        sendRefusalText(
+          error instanceof OutreachRefused ? error.code : 'needs-you',
+        ),
+      ),
+    )
+
+  return {
+    findTimes: request
+      ? {
+          name: request.name,
+          run: () =>
+            scheduling.startRead.mutate(
+              {
+                roleId: request.roleId,
+                personId: request.personId,
+                connector: request.connector,
+                conversationId: options.conversationId,
+              },
+              {
+                onSuccess: ({ instruction }) => {
+                  running.current = 'read'
+                  void timesRequestStorage.setValue(null)
+                  options.send(instruction)
+                },
+                onError: (error) => {
+                  void timesRequestStorage.setValue(null)
+                  failed(error)
+                },
+              },
+            ),
+        }
+      : null,
+    book:
+      chosen && chosenName
+        ? {
+            name: chosenName,
+            run: () =>
+              scheduling.startBook.mutate(
+                { id: chosen.id, conversationId: options.conversationId },
+                {
+                  onSuccess: ({ instruction }) => {
+                    running.current = 'book'
+                    options.send(instruction)
+                  },
+                  onError: failed,
+                },
+              ),
+          }
+        : null,
+  }
+}
+
 export function useHiringPanel(options: {
   conversationId: string
   status: ChatStatus
   send: (message: string) => void
 }) {
   const sending = useSending(options)
+  const scheduling = useScheduling(options)
   const { page, tabId } = useActiveHiringPage()
   const { data: roles = [] } = useRoles()
   const actions = useHiringActions()
@@ -282,8 +391,11 @@ export function useHiringPanel(options: {
     setAside: (reason: SetAsideReason) => decide('set-aside', reason),
     close: () => setChecked(null),
     sendNext: sending.sendNext,
+    findTimes: scheduling.findTimes,
+    book: scheduling.book,
     hasChips:
-      Boolean(page && !showing && !reviewedList) || Boolean(sending.sendNext),
+      Boolean(page && !showing && !reviewedList) ||
+      Boolean(sending.sendNext || scheduling.findTimes || scheduling.book),
   }
 }
 
