@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { ChevronDown, Info, Loader2, RefreshCw } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { ChevronDown, Info, Loader2, RefreshCw } from '@browseros/icons'
 import { type FC, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -170,34 +171,33 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {isEdit ? 'Edit custom agent' : 'Add a custom ACP agent'}
+              {isEdit ? t('stEditCustomAgent') : t('stAddACustomAcpAgent')}
             </DialogTitle>
             <DialogDescription>
-              Connect any agent that speaks ACP over stdio. It can run commands
-              and access files anywhere on your computer without approval.
+              {t('stConnectAnyAgentThatSpeaks')}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label htmlFor="custom-agent-name">Name</Label>
+              <Label htmlFor="custom-agent-name">{t('stName')}</Label>
               <Input
                 id="custom-agent-name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="My Agent"
+                placeholder={t('stMyAgent')}
               />
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="custom-agent-command">Command</Label>
+                <Label htmlFor="custom-agent-command">{t('stCommand')}</Label>
                 <button
                   type="button"
                   onClick={() => setPopularOpen(true)}
                   className="inline-flex items-center gap-1 font-medium text-[var(--accent-brand-ink)] text-xs"
                 >
-                  <Info className="h-3.5 w-3.5" /> Popular agents
+                  <Info className="h-3.5 w-3.5" /> {t('stPopularAgents')}
                 </button>
               </div>
               <Input
@@ -205,22 +205,24 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
                 className="font-mono text-sm"
                 value={command}
                 onChange={(event) => setCommand(event.target.value)}
+                // i18n-ignore: a sample command
                 placeholder="npx -y @scope/my-agent-acp --stdio"
               />
               <p className="text-muted-foreground text-xs">
-                The full launch command, args included. The agent must speak ACP
-                over stdio.
+                {t('stTheFullLaunchCommandArgs')}
               </p>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="custom-agent-cwd">Working directory</Label>
+              <Label htmlFor="custom-agent-cwd">
+                {t('stWorkingDirectory')}
+              </Label>
               <Input
                 id="custom-agent-cwd"
                 className="font-mono text-sm"
                 value={workingDirectory}
                 onChange={(event) => setWorkingDirectory(event.target.value)}
-                placeholder="Defaults to your home directory"
+                placeholder={t('stDefaultsToYourHomeDirectory')}
               />
             </div>
 
@@ -235,13 +237,13 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
               ) : (
                 <RefreshCw className="h-4 w-4" />
               )}
-              Test connection
+              {t('stTestConnection')}
             </Button>
 
             {probeResult && !probeResult.error ? (
               <div className="space-y-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
                 <p className="font-medium text-emerald-600 text-sm dark:text-emerald-400">
-                  Connected
+                  {t('stConnected')}
                   {probeResult.agentInfo?.name
                     ? ` · ${probeResult.agentInfo.name}`
                     : ''}
@@ -250,7 +252,7 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
                     : ''}
                 </p>
                 <div className="space-y-2">
-                  <Label>Model</Label>
+                  <Label>{t('stModel')}</Label>
                   <Select
                     value={modelId || AGENT_DEFAULT}
                     onValueChange={(value) =>
@@ -262,7 +264,7 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={AGENT_DEFAULT}>
-                        Agent default
+                        {t('stAgentDefault')}
                       </SelectItem>
                       {models.map((model) => (
                         <SelectItem key={model.id} value={model.id}>
@@ -274,7 +276,7 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
                 </div>
                 {reasoningValues.length > 0 ? (
                   <div className="space-y-2">
-                    <Label>Reasoning effort</Label>
+                    <Label>{t('stReasoningEffort')}</Label>
                     <Select
                       value={reasoningEffort || AGENT_DEFAULT}
                       onValueChange={(value) =>
@@ -286,7 +288,7 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={AGENT_DEFAULT}>
-                          Agent default
+                          {t('stAgentDefault')}
                         </SelectItem>
                         {reasoningValues.map((effort) => (
                           <SelectItem key={effort} value={effort}>
@@ -306,12 +308,12 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
 
             <Collapsible>
               <CollapsibleTrigger className="flex items-center gap-1 font-medium text-muted-foreground text-sm">
-                <ChevronDown className="h-4 w-4" /> Advanced
+                <ChevronDown className="h-4 w-4" /> {t('stAdvanced')}
               </CollapsibleTrigger>
               <CollapsibleContent className="space-y-4 pt-3">
                 <div className="space-y-2">
                   <Label htmlFor="custom-agent-env">
-                    Environment variables
+                    {t('stEnvironmentVariables')}
                   </Label>
                   <Textarea
                     id="custom-agent-env"
@@ -319,16 +321,16 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
                     rows={3}
                     value={envText}
                     onChange={(event) => setEnvText(event.target.value)}
+                    // i18n-ignore: a sample of env syntax
                     placeholder={'KEY=value\nANOTHER=value'}
                   />
                   <p className="text-destructive text-xs">
-                    Stored locally in plaintext. Prefer your agent&rsquo;s own
-                    login for secrets.
+                    {t('stStoredLocallyInPlaintextPrefer')}
                   </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="custom-agent-modes">
-                    Full-access mode ids
+                    {t('stFullAccessModeIds')}
                   </Label>
                   <Input
                     id="custom-agent-modes"
@@ -337,16 +339,16 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
                     onChange={(event) =>
                       setFullAccessModesText(event.target.value)
                     }
+                    // i18n-ignore: a sample mode id
                     placeholder="bypassPermissions"
                   />
                   <p className="text-muted-foreground text-xs">
-                    Comma-separated. Leave empty to use the agent&rsquo;s
-                    default permission mode.
+                    {t('stCommaSeparatedLeaveEmptyTo')}
                   </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="custom-agent-reasoning-key">
-                    Reasoning effort key
+                    {t('stReasoningEffortKey')}
                   </Label>
                   <Input
                     id="custom-agent-reasoning-key"
@@ -355,12 +357,13 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
                     onChange={(event) =>
                       setReasoningEffortKey(event.target.value)
                     }
+                    // i18n-ignore: a sample key
                     placeholder="effort"
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="custom-agent-prompt">
-                    System prompt (append)
+                    {t('stSystemPromptAppend')}
                   </Label>
                   <Textarea
                     id="custom-agent-prompt"
@@ -369,7 +372,7 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
                     onChange={(event) =>
                       setSystemPromptAppend(event.target.value)
                     }
-                    placeholder="Optional extra instructions"
+                    placeholder={t('stOptionalExtraInstructions')}
                   />
                 </div>
               </CollapsibleContent>
@@ -382,14 +385,14 @@ export const CustomCodingAgentDialog: FC<CustomCodingAgentDialogProps> = ({
 
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t('stCancel')}
             </Button>
             <Button
               onClick={() => void handleSubmit()}
               disabled={!name.trim() || !command.trim() || pending}
             >
               {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {isEdit ? 'Save agent' : 'Create agent'}
+              {isEdit ? t('stSaveAgent') : t('stCreateAgent')}
             </Button>
           </DialogFooter>
         </DialogContent>

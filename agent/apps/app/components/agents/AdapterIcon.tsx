@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Blocks, Bot } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Blocks, Bot } from '@browseros/icons'
 import type { FC } from 'react'
 import type { AcpAgentType } from '@/modules/agents/acp-agent-types'
 import { BRAND_MARKS } from './agent-brand-marks'
@@ -21,9 +22,9 @@ export const AdapterIcon: FC<AdapterIconProps> = ({ adapter, className }) => {
   const Mark = BRAND_MARKS[adapter]
   if (Mark) return <Mark className={className} />
   if (adapter === 'custom') {
-    return <Blocks className={className} aria-label="Custom agent" />
+    return <Blocks className={className} aria-label={t('shCustomAgent')} />
   }
-  return <Bot className={className} aria-label="Agent" />
+  return <Bot className={className} aria-label={t('shAgent2')} />
 }
 
 export function adapterLabel(adapter: AcpAgentType | 'unknown'): string {
@@ -33,7 +34,7 @@ export function adapterLabel(adapter: AcpAgentType | 'unknown'): string {
     case 'codex':
       return 'Codex'
     case 'custom':
-      return 'Custom agent'
+      return t('shCustomAgent')
     default:
       return 'Agent'
   }

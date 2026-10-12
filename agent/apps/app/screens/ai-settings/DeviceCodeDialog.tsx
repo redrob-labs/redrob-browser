@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Copy, ExternalLink } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Check, Copy, ExternalLink } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -45,10 +46,11 @@ export const DeviceCodeDialog: FC<DeviceCodeDialogProps> = ({
     <Dialog open={!!deviceCode} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Connect to {deviceCode?.providerName}</DialogTitle>
+          <DialogTitle>
+            {t('stConnectTo', deviceCode?.providerName ?? '')}
+          </DialogTitle>
           <DialogDescription>
-            Paste this code on the {deviceCode?.providerName} page that just
-            opened in your browser.
+            {t('stPasteCodeOn', deviceCode?.providerName ?? '')}
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col items-center gap-4 py-4">
@@ -70,7 +72,7 @@ export const DeviceCodeDialog: FC<DeviceCodeDialogProps> = ({
             </Button>
           </div>
           <p className="text-center text-muted-foreground text-xs">
-            This dialog will close automatically once authentication completes.
+            {t('stThisDialogWillCloseAutomatically')}
           </p>
           {deviceCode?.verificationUri && (
             <a
@@ -79,7 +81,7 @@ export const DeviceCodeDialog: FC<DeviceCodeDialogProps> = ({
               rel="noopener noreferrer"
               className="flex items-center gap-1 text-[var(--accent-brand-ink)] text-xs transition-colors hover:underline"
             >
-              Open verification page
+              {t('stOpenVerificationPage')}
               <ExternalLink className="h-3 w-3" />
             </a>
           )}

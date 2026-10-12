@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { Lock } from 'lucide-react'
+import { Lock } from '@browseros/icons'
 import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import type { ReplayEvent, ReplayFrame } from '@/modules/api/replay.hooks'

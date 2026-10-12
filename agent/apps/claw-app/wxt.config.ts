@@ -21,11 +21,12 @@ export default defineConfig({
   outDir: 'dist',
   modules: ['@wxt-dev/module-react'],
   manifest: {
-    name: 'BrowserOS neo',
+    name: 'Redrob',
     externally_connectable: { ids: [REPORTER_EXTENSION_ID] },
-    description: 'BrowserOS neo — the browser for AI agents.',
+    // i18n-ignore: a manifest field, read by Chrome before any page; claw-app has no _locales of its own yet
+    description: 'Redrob — the browser for AI agents.',
     key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyXbY2XVCs1/yJqGd53ei1rHdoUGIvZ8uq+x9YKmUc+jnb6NogIrq0USPeRNb6uzszio45GR8BW0O0pgbFKmhlhrCwgs9gEW8mufksE29E1g8Q2ug1sowzj38X6jmitO4I9cBbQMx7+gJZJS8pS5DZ+V7Bl8Uka2LWHMTP/Pf10YjbeNNCA0wj6kQkkTb8lg80r5Vm+gFqyo2xDFaxj8lN2kE73yFBjCt6B4ycntXvnnUTPX4IJqH+eQuwsFWPuqdYEwdvaaIOQ+lCxcYyZusX58zhxr0pkMxQjnEoJqAk6Av5O/JiNIOZYzbwUjm6aA+p9j9/6xzvmG+Lvp74Dk9pwIDAQAB',
-    update_url: 'https://cdn.browseros.com/extensions/update-manifest.xml',
+    // No update_url: the upstream CDN's manifest would replace this build with the upstream extension.
     // Keep shared permissions in sync with apps/app/wxt.config.ts; additions
     // re-prompt or disable existing installs on update.
     permissions: [
@@ -55,7 +56,7 @@ export default defineConfig({
         48: 'icon/48.png',
         128: 'icon/128.png',
       },
-      default_title: 'BrowserOS neo',
+      default_title: 'Redrob',
     },
   },
   vite: () => ({

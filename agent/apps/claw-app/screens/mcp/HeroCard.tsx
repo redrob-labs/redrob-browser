@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { EndpointStrip } from './EndpointStrip'
 
 interface HeroCardProps {
@@ -22,10 +23,10 @@ export function HeroCard({ url }: HeroCardProps) {
           MCP
         </h1>
         <p className="text-[15px] text-cyanotype-muted leading-snug">
-          One endpoint, every harness.
+          {t('clOneEndpointEveryHarness')}
         </p>
       </div>
-      <EndpointStrip label="Endpoint URL" value={url} />
+      <EndpointStrip label={t('clEndpointUrl')} value={url} />
     </header>
   )
 }

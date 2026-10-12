@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Clock, X } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Clock, X } from '@browseros/icons'
 import { type FC, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -84,19 +85,19 @@ export const ScheduleSuggestionCard: FC<ScheduleSuggestionCardProps> = ({
       <div className="flex items-start gap-3 pr-6">
         <Clock className="h-5 w-5 shrink-0 text-[var(--accent-brand-ink)]" />
         <div>
-          <p className="font-medium text-sm">Run this automatically?</p>
+          <p className="font-medium text-sm">{t('spScheduleTitle')}</p>
           <p className="mt-1 text-muted-foreground text-xs">
-            &ldquo;{suggestedName}&rdquo; &mdash; I can run this {scheduleLabel}
+            {t('spScheduleDesc', suggestedName, scheduleLabel)}
           </p>
         </div>
       </div>
 
       <div className="mt-3 flex gap-2">
         <Button size="sm" onClick={handleSchedule}>
-          Schedule this task
+          {t('spScheduleTask')}
         </Button>
         <Button size="sm" variant="ghost" onClick={handleDismiss}>
-          Maybe later
+          {t('spMaybeLater')}
         </Button>
       </div>
     </div>

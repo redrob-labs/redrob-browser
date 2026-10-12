@@ -9,6 +9,7 @@
  * the current policy after a confirmation gate.
  */
 
+import { t } from '@browseros/i18n'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -96,7 +97,7 @@ export function ManageAuditFilesDialog() {
         `Removed ${result.sessionsDeleted} session${
           result.sessionsDeleted === 1 ? '' : 's'
         } and reclaimed ${formatBytes(result.bytesReclaimed)}.`,
-      error: 'Could not clean up audit files.',
+      error: t('clCouldNotClean'),
     })
   }
 
@@ -108,15 +109,15 @@ export function ManageAuditFilesDialog() {
       <DialogTrigger
         render={
           <Button variant="outline" size="sm" className="rounded-9 px-2.5">
-            Manage audit files
+            {t('clManageAuditFiles')}
           </Button>
         }
       />
       <DialogContent className="ph-no-capture max-w-md">
         <DialogHeader>
-          <DialogTitle>Manage audit files</DialogTitle>
+          <DialogTitle>{t('clManageAuditFiles')}</DialogTitle>
           <DialogDescription>
-            Storage used by sessions, screenshots, and replays.
+            {t('clStorageUsedBySessionsScreenshots')}
           </DialogDescription>
         </DialogHeader>
 
@@ -125,17 +126,20 @@ export function ManageAuditFilesDialog() {
             <div className="h-16 animate-pulse rounded bg-muted" />
           ) : storage.isError ? (
             <p className="text-destructive text-sm">
-              Could not load audit storage usage.
+              {t('clCouldNotLoadAuditStorage')}
             </p>
           ) : (
             <>
-              <UsageRow label="Recordings" bytes={usage?.recordingBytes ?? 0} />
               <UsageRow
-                label="Screenshots"
+                label={t('clRecordings')}
+                bytes={usage?.recordingBytes ?? 0}
+              />
+              <UsageRow
+                label={t('clScreenshots')}
                 bytes={usage?.screenshotBytes ?? 0}
               />
               <div className="mt-1 flex items-center justify-between border-border-2 border-t pt-2 font-semibold">
-                <span>Total</span>
+                <span>{t('clTotal')}</span>
                 <span>{formatBytes(usage?.totalBytes ?? 0)}</span>
               </div>
             </>
@@ -144,7 +148,7 @@ export function ManageAuditFilesDialog() {
 
         <div className="flex flex-col gap-2">
           <label className="font-medium text-sm" htmlFor="audit-retention">
-            Automatically delete audit log older than
+            {t('clAutomaticallyDeleteAuditLogOlder')}
           </label>
           <Select
             value={choice}
@@ -156,17 +160,17 @@ export function ManageAuditFilesDialog() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="ph-no-capture">
-              <SelectItem value="7" label="7 days">
-                7 days
+              <SelectItem value="7" label={t('cl7Days')}>
+                {t('cl7Days')}
               </SelectItem>
-              <SelectItem value="30" label="30 days">
-                30 days
+              <SelectItem value="30" label={t('cl30Days')}>
+                {t('cl30Days')}
               </SelectItem>
-              <SelectItem value="custom" label="Custom">
-                Custom
+              <SelectItem value="custom" label={t('clCustom')}>
+                {t('clCustom')}
               </SelectItem>
-              <SelectItem value="never" label="Never">
-                Never
+              <SelectItem value="never" label={t('clNever')}>
+                {t('clNever')}
               </SelectItem>
             </SelectContent>
           </Select>
@@ -174,7 +178,7 @@ export function ManageAuditFilesDialog() {
             <input
               type="number"
               min={1}
-              aria-label="Custom retention days"
+              aria-label={t('clCustomRetentionDays')}
               className="w-full rounded-md border border-border-2 bg-transparent px-3 py-2 text-sm"
               value={days}
               onChange={(event) =>
@@ -185,7 +189,7 @@ export function ManageAuditFilesDialog() {
           )}
           {setRetention.isError && (
             <p className="text-destructive text-sm">
-              Could not save the retention policy.
+              {t('clCouldNotSaveTheRetention')}
             </p>
           )}
         </div>
@@ -198,21 +202,21 @@ export function ManageAuditFilesDialog() {
                 size="sm"
                 disabled={runCleanup.isPending}
               >
-                {runCleanup.isPending ? 'Cleaning up…' : 'Clean up now'}
+                {runCleanup.isPending ? t('clCleaningUp') : t('clCleanUpNow')}
               </Button>
             }
           />
           <AlertDialogContent className="ph-no-capture">
             <AlertDialogHeader>
-              <AlertDialogTitle>Clean up audit data now?</AlertDialogTitle>
+              <AlertDialogTitle>{t('clCleanUpAuditDataNow')}</AlertDialogTitle>
               <AlertDialogDescription>
                 {cleanupConfirmText(retention)}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{t('clCancel')}</AlertDialogCancel>
               <AlertDialogAction onClick={onCleanup}>
-                Delete and reclaim
+                {t('clDeleteAndReclaim')}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

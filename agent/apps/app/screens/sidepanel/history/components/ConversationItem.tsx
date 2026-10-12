@@ -7,9 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import dayjs from 'dayjs'
-import relativeTime from 'dayjs/plugin/relativeTime'
-import { MessageSquare, Trash2 } from 'lucide-react'
+import { formatRelative, t } from '@browseros/i18n'
+import { MessageSquare, Trash2 } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { Link } from 'react-router'
 import {
@@ -24,8 +23,6 @@ import {
 } from '@/components/ui/alert-dialog'
 import type { HistoryConversation } from './types'
 
-dayjs.extend(relativeTime)
-
 export interface ConversationItemProps {
   conversation: HistoryConversation
   onDelete?: (id: string) => void
@@ -39,7 +36,7 @@ export const ConversationItem: FC<ConversationItemProps> = ({
 }) => {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const label = conversation.lastUserMessage
-  const relativeTimeAgo = dayjs(conversation.lastMessagedAt).fromNow()
+  const relativeTimeAgo = formatRelative(conversation.lastMessagedAt)
 
   const handleDeleteClick = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -54,51 +51,51 @@ export const ConversationItem: FC<ConversationItemProps> = ({
 
   return (
     <>
-      <Link
-        to={`/?conversationId=${conversation.id}`}
-        className={`group flex w-full items-start gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted/50 ${
-          isActive ? 'bg-muted/70' : ''
-        }`}
+      {/* The row is a ground; the link and the delete button are siblings inside it, because an
+          interactive element nested in an <a> is invalid and leaves the button without a focus target. */}
+      <div
+        className="ui-panel-row group flex w-full items-start gap-1"
+        aria-current={isActive ? 'page' : undefined}
       >
-        <div
-          className={`mt-0.5 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`}
+        <Link
+          to={`/?conversationId=${conversation.id}`}
+          aria-current={isActive ? 'page' : undefined}
+          className="ui-panel-row__link flex min-w-0 flex-1 items-start gap-3 px-3 py-2.5"
         >
-          <MessageSquare className="h-4 w-4" />
-        </div>
-        <div className="min-w-0 flex-1 overflow-hidden">
-          <p className="truncate font-medium text-foreground text-sm">
-            {label}
-          </p>
-          <p className="text-muted-foreground text-xs">{relativeTimeAgo}</p>
-        </div>
+          <MessageSquare className="ui-panel-row__icon mt-0.5 h-4 w-4 shrink-0" />
+          <div className="min-w-0 flex-1 overflow-hidden">
+            <p className="ui-panel-row__title truncate">{label}</p>
+            <p className="ui-panel-row__meta">{relativeTimeAgo}</p>
+          </div>
+        </Link>
         {onDelete && (
           <button
             type="button"
             onClick={handleDeleteClick}
-            className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-            title="Delete conversation"
+            className="ui-panel-row__action rr-iconbtn rr-iconbtn--sm mt-1.5 mr-1.5 shrink-0"
+            title={t('spDeleteConversation')}
+            aria-label={t('spDeleteConversation')}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         )}
-      </Link>
+      </div>
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete conversation?</AlertDialogTitle>
+            <AlertDialogTitle>{t('spDeleteConversationQ')}</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete your
-              conversation and all its messages.
+              {t('spDeleteConversationDesc')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('spCancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
-              Delete
+              {t('spDelete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -1,0 +1,28 @@
+# The claw onboarding page (agent/apps/claw-onboard), English and Korean. Strings it shares with the browser's
+# own first run reuse that table's keys (70-onboarding.tsv); only its own copy is here.
+#
+# key <TAB> English <TAB> Korean [<TAB> description]
+
+clawLogins	logins.	로그인 정보
+clawSet	set!	준비 완료!
+clawAgents	agents.	에이전트
+clawNotYours	Not yours.	내 브라우저는 따로.
+clawSignedInAsYou	Signed in as you.	내 계정으로 로그인됩니다.
+clawUsesTheSessionsYouAlready	Uses the sessions you already have.	이미 로그인한 세션을 그대로 씁니다.
+clawWatchEveryStep	Watch every step.	모든 단계를 지켜보세요.
+clawSeeEveryAgentInReal	See every agent in real time.	모든 에이전트를 실시간으로 확인하세요.
+clawEverythingStaysLocal	Everything stays local.	모든 것이 이 기기에 남습니다.
+clawAllDataIsStoredOn	All data is stored on this machine. Open source and privacy-first.	모든 데이터는 이 컴퓨터에 저장됩니다. 오픈 소스이며 개인 정보를 우선합니다.
+clawBringYourSignedInSessions	Bring your signed-in sessions and saved data from Chrome. Everything is copied locally to this machine.	Chrome에서 로그인된 세션과 저장된 데이터를 가져오세요. 모든 것은 이 컴퓨터에 복사됩니다.
+clawWeConnectedThisBrowserTo	We connected this browser to the agents already installed on your machine. Try it out — copy one of these into your agent:	이 컴퓨터에 설치된 에이전트에 이 브라우저를 연결했습니다. 아래 중 하나를 에이전트에 복사해 써 보세요:
+clawAgentDoesnRsquoTSee	Agent doesn’t see this browser yet? Restart it once, so it picks up the connection.	에이전트가 아직 이 브라우저를 못 찾나요? 한 번 다시 시작하면 연결을 인식합니다.
+clawOpenTheMcpPage	Open the MCP page	MCP 페이지 열기
+clawNotAChromeReplacementThis	Not a Chrome replacement. This browser is for your agents, where Claude, Codex, and Cursor work.	Chrome을 대신하는 브라우저가 아닙니다. Claude, Codex, Cursor가 일하는 에이전트 전용 브라우저입니다.
+clawSetItUp	Set it up	설정하기
+clawAlreadySetUpReconnect	Already set up? Reconnect.	이미 설정했나요? 다시 연결하기
+clawSignedBuildForMacV1	Signed build for Mac. v1.0.	서명된 Mac 빌드. v1.0.
+clawNeedLogins	Your agents need your $1	에이전트에게는 $1가 필요합니다	Heading; $1 is the emphasised word (clawLogins)
+clawAllSet	All $1	$1	Heading; $1 is the emphasised clawSet, which carries the whole sentence in Korean
+clawSecondBrowser	Your second browser. For your $1	두 번째 브라우저, $1 전용	Heading; $1 is the emphasised clawAgents
+clawRailQuote	“Your agents’ browser. $1”	“에이전트의 브라우저. $1”	Rail quote; $1 is the emphasised clawNotYours
+clawData	data	데이터	Fallback item name in "Importing $1..."

@@ -7,8 +7,9 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tNodes } from '@browseros/i18n'
+import { ChevronRight, Lightbulb } from '@browseros/icons'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ChevronRight, Lightbulb } from 'lucide-react'
 import type { FC } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod/v3'
@@ -91,9 +92,9 @@ export const AddCustomMCPDialog: FC<AddCustomMCPDialogProps> = ({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Custom App</DialogTitle>
+          <DialogTitle>{t('stAddCustomApp')}</DialogTitle>
           <DialogDescription>
-            Configure your custom app connection
+            {t('stConfigureYourCustomAppConnection')}
           </DialogDescription>
         </DialogHeader>
 
@@ -104,9 +105,9 @@ export const AddCustomMCPDialog: FC<AddCustomMCPDialogProps> = ({
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Server Name</FormLabel>
+                  <FormLabel>{t('stServerName')}</FormLabel>
                   <FormControl>
-                    <Input placeholder="My Custom App" {...field} />
+                    <Input placeholder={t('stMyCustomApp')} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -118,11 +119,12 @@ export const AddCustomMCPDialog: FC<AddCustomMCPDialogProps> = ({
               name="url"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>MCP Server URL</FormLabel>
-                  <FormDescription>(only supports HTTP)</FormDescription>
+                  <FormLabel>{t('stMcpServerUrl')}</FormLabel>
+                  <FormDescription>{t('stOnlySupportsHttp')}</FormDescription>
                   <FormControl>
                     <Input
                       type="url"
+                      // i18n-ignore: a sample URL
                       placeholder="http://mcp.example.com"
                       {...field}
                     />
@@ -137,10 +139,10 @@ export const AddCustomMCPDialog: FC<AddCustomMCPDialogProps> = ({
               name="description"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Description (Optional)</FormLabel>
+                  <FormLabel>{t('stDescriptionOptional')}</FormLabel>
                   <FormControl>
                     <Textarea
-                      placeholder="Describe what this server does..."
+                      placeholder={t('stDescribeWhatThisServerDoes')}
                       rows={3}
                       className="resize-none"
                       {...field}
@@ -155,18 +157,20 @@ export const AddCustomMCPDialog: FC<AddCustomMCPDialogProps> = ({
               <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-2 rounded-md border border-[var(--accent-brand)]/30 bg-[var(--accent-brand)]/5 px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--accent-brand)]/10">
                 <Lightbulb className="h-4 w-4 shrink-0 text-[var(--accent-brand-ink)]" />
                 <span className="flex-1 font-medium">
-                  How do I find the URL?
+                  {t('stHowDoIFindThe')}
                 </span>
                 <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-90" />
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-2 rounded-md border border-[var(--accent-brand)]/30 bg-[var(--accent-brand)]/5 px-3 py-2 text-muted-foreground text-sm">
-                Many apps like Notion, Slack, or Stripe offer an MCP server you
-                can run locally. Check the app's docs for an MCP setup guide —
-                you'll get a URL (usually starting with{' '}
-                <code className="inline rounded bg-muted px-1 text-xs">
-                  http://
-                </code>
-                ) to paste here.
+                {tNodes(
+                  'stFindMcpUrl',
+                  <code
+                    key="a"
+                    className="inline rounded bg-muted px-1 text-xs"
+                  >
+                    http://
+                  </code>,
+                )}
               </CollapsibleContent>
             </Collapsible>
 
@@ -176,13 +180,13 @@ export const AddCustomMCPDialog: FC<AddCustomMCPDialogProps> = ({
                 variant="outline"
                 onClick={() => handleOpenChange(false)}
               >
-                Cancel
+                {t('stCancel')}
               </Button>
               <Button
                 type="submit"
                 className="bg-[var(--accent-brand)] text-white hover:bg-[var(--accent-brand-bright)]"
               >
-                Add Server
+                {t('stAddServer')}
               </Button>
             </DialogFooter>
           </form>

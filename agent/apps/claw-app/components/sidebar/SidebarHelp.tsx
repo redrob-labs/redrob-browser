@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Activity, BookOpen, RotateCcw } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Activity, BookOpen, RotateCcw } from '@browseros/icons'
 import type { ComponentType, SVGProps } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import {
@@ -31,7 +32,7 @@ interface HelpItem {
 export const helpItems: HelpItem[] = [
   {
     name: 'Docs',
-    url: 'https://docs.browseros.com/browserclaw',
+    url: 'https://docs.redrob.ai/guide',
     icon: BookOpen,
   },
   {
@@ -63,7 +64,7 @@ export function SidebarHelp({ expanded = false }: SidebarHelpProps) {
           expanded ? 'opacity-100' : 'opacity-0',
         )}
       >
-        Help
+        {t('clHelp')}
       </div>
       <div className="space-y-1">
         {helpItems.map((item) => {
@@ -81,10 +82,8 @@ export function SidebarHelp({ expanded = false }: SidebarHelpProps) {
                   : undefined
               }
               className={cn(
-                item.internal &&
-                  location.pathname === item.url &&
-                  'bg-sidebar-accent text-sidebar-accent-foreground',
-                'flex h-9 w-full items-center gap-3 overflow-hidden whitespace-nowrap rounded-md px-2.5 font-medium text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                item.internal && location.pathname === item.url && 'active',
+                'ui-shell-link flex h-9 w-full items-center gap-3 overflow-hidden whitespace-nowrap px-2.5',
               )}
             >
               <Icon className="size-5 shrink-0" />

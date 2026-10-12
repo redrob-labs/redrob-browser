@@ -7,7 +7,13 @@
  * See the NOTICE file for provenance.
  */
 
-import { CheckIcon, CopyIcon, ThumbsDownIcon, ThumbsUpIcon } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import {
+  CheckIcon,
+  CopyIcon,
+  ThumbsDownIcon,
+  ThumbsUpIcon,
+} from '@browseros/icons'
 import { AnimatePresence, motion } from 'motion/react'
 import { type FC, useState } from 'react'
 import { MessageAction, MessageActions } from '@/components/ai-elements/message'
@@ -72,8 +78,8 @@ export const ChatMessageActions: FC<ChatMessageActionsProps> = ({
           navigator.clipboard.writeText(messageText)
           track(SIDEPANEL_MESSAGE_COPIED_EVENT)
         }}
-        label="Copy"
-        tooltip="Copy to clipboard"
+        label={t('spCopy')}
+        tooltip={t('spCopyToClipboard')}
       >
         <CopyIcon className="size-3" />
       </MessageAction>
@@ -88,7 +94,7 @@ export const ChatMessageActions: FC<ChatMessageActionsProps> = ({
             className="flex items-center gap-1 text-muted-foreground text-xs"
           >
             <CheckIcon className="size-3" />
-            <span>Feedback submitted</span>
+            <span>{t('spFeedbackSent')}</span>
           </motion.div>
         ) : (
           <motion.div
@@ -100,9 +106,9 @@ export const ChatMessageActions: FC<ChatMessageActionsProps> = ({
             className="flex items-center gap-1"
           >
             <MessageAction
-              label="Like"
+              label={t('spLike')}
               onClick={handleLike}
-              tooltip="Like this response"
+              tooltip={t('spLikeResponse')}
             >
               <ThumbsUpIcon
                 className="size-4"
@@ -110,9 +116,9 @@ export const ChatMessageActions: FC<ChatMessageActionsProps> = ({
               />
             </MessageAction>
             <MessageAction
-              label="Dislike"
+              label={t('spDislike')}
               onClick={handleDislikeClick}
-              tooltip="Dislike this response"
+              tooltip={t('spDislikeResponse')}
             >
               <ThumbsDownIcon
                 className="size-4"
@@ -126,13 +132,11 @@ export const ChatMessageActions: FC<ChatMessageActionsProps> = ({
       <Dialog open={dislikeDialogOpen} onOpenChange={setDislikeDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>What went wrong?</DialogTitle>
-            <DialogDescription>
-              Help us improve by sharing what was wrong with this response.
-            </DialogDescription>
+            <DialogTitle>{t('spWhatWentWrong')}</DialogTitle>
+            <DialogDescription>{t('spWhatWentWrongDesc')}</DialogDescription>
           </DialogHeader>
           <Input
-            placeholder="Add a comment (optional)"
+            placeholder={t('spCommentOptional')}
             value={dislikeComment}
             onChange={(e) => setDislikeComment(e.target.value)}
             onKeyDown={(e) => {
@@ -143,9 +147,9 @@ export const ChatMessageActions: FC<ChatMessageActionsProps> = ({
           />
           <DialogFooter>
             <Button variant="outline" onClick={handleDislikeCancel}>
-              Cancel
+              {t('spCancel')}
             </Button>
-            <Button onClick={handleDislikeSubmit}>Submit</Button>
+            <Button onClick={handleDislikeSubmit}>{t('spSubmit')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

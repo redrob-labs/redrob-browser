@@ -13,7 +13,7 @@ import {
   ChevronDownIcon,
   ExternalLinkIcon,
   MessageCircleIcon,
-} from 'lucide-react'
+} from '@browseros/icons'
 import { type ComponentProps, createContext, useContext } from 'react'
 import { Button } from '@/components/ui/button'
 import {

@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import {
   HEADER_NAME_PATTERN,
   HEADER_VALUE_PATTERN,
@@ -60,7 +61,7 @@ export const providerFormSchema = z
           if (names.has(normalized)) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message: 'Duplicate header name',
+              message: t('stDuplicateHeaderName'),
               path: [index, 'name'],
             })
           }
@@ -102,14 +103,14 @@ export const providerFormSchema = z
       if (!data.resourceName && !data.baseUrl) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Either Resource Name or Base URL is required',
+          message: t('stEitherResourceNameOrBase'),
           path: ['resourceName'],
         })
       }
       if (!data.apiKey && !hasStoredApiKey) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'API Key is required for Azure',
+          message: t('stApiKeyIsRequiredFor'),
           path: ['apiKey'],
         })
       }
@@ -117,21 +118,21 @@ export const providerFormSchema = z
       if (!data.accessKeyId && !hasStoredAccessKeyId) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Access Key ID is required',
+          message: t('stAccessKeyIdIsRequired'),
           path: ['accessKeyId'],
         })
       }
       if (!data.secretAccessKey && !hasStoredSecretAccessKey) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Secret Access Key is required',
+          message: t('stSecretAccessKeyIsRequired'),
           path: ['secretAccessKey'],
         })
       }
       if (!data.region) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Region is required',
+          message: t('stRegionIsRequired'),
           path: ['region'],
         })
       }
@@ -140,13 +141,13 @@ export const providerFormSchema = z
     } else if (!data.baseUrl) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Base URL is required',
+        message: t('stBaseUrlIsRequired'),
         path: ['baseUrl'],
       })
     } else if (!/^https?:\/\/.+/.test(data.baseUrl)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Must be a valid URL',
+        message: t('stMustBeAValidUrl'),
         path: ['baseUrl'],
       })
     }

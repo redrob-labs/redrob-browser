@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { CheckCircle2, Circle, User } from 'lucide-react'
+import { CheckCircle2, Circle, User } from '@browseros/icons'
 import { cn } from '@/lib/utils'
 import type { BrowserOSImportSource } from '../browseros-onboarding-api'
 
@@ -26,7 +26,7 @@ export function ImportSourceTile({
   return (
     <label
       className={cn(
-        'flex w-full cursor-pointer items-center gap-3 rounded-xl border px-4 py-2.5 text-left transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent has-[:focus-visible]:ring-offset-2',
+        'flex w-full cursor-pointer items-center gap-3 rounded-xl border px-4 py-2.5 text-left transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-solid has-[:focus-visible]:outline-ring has-[:focus-visible]:outline-offset-2',
         selected
           ? 'border-accent bg-accent-tint'
           : 'border-border-2 bg-card hover:border-border-strong',
@@ -51,7 +51,7 @@ export function ImportSourceTile({
         <div className="font-bold text-[13.5px] text-ink">
           {source.profileName || source.displayName}
         </div>
-        <div className="truncate text-[11.5px] text-ink-3">
+        <div className="truncate text-[11.5px] text-ink-2">
           {source.browserName}
         </div>
       </div>

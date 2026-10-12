@@ -7,8 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
+import { CheckIcon } from '@browseros/icons'
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox'
-import { CheckIcon } from 'lucide-react'
 import type * as React from 'react'
 
 import { cn } from '@/lib/utils'
@@ -24,7 +24,9 @@ function Checkbox({
     <CheckboxPrimitive.Root
       data-slot="checkbox"
       className={cn(
-        'peer size-4 shrink-0 rounded-[4px] border border-input shadow-xs outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:bg-input/30 dark:data-[state=checked]:bg-primary dark:aria-invalid:ring-destructive/40',
+        // .rr-choice__box's metrics on Radix's button: 18px, radius-xs, strong border on the base ground,
+        // brand fill when checked, the system's 2px ring at a 2px offset, sunken when disabled.
+        'peer inline-flex size-[18px] shrink-0 items-center justify-center rounded-[var(--radius-xs)] border border-[var(--border-strong)] bg-[var(--surface-base)] text-[var(--ink-on-brand)] outline-none transition-colors duration-[var(--duration-fast)] focus-visible:outline-[length:var(--focus-ring-width)] focus-visible:outline-[var(--focus-ring)] focus-visible:outline-solid focus-visible:outline-offset-[var(--focus-ring-width)] disabled:cursor-not-allowed disabled:border-[var(--border-subtle)] disabled:bg-[var(--surface-sunken)] aria-invalid:border-[var(--status-danger)] data-[state=checked]:border-[var(--action-primary)] data-[state=checked]:bg-[var(--action-primary)]',
         className,
       )}
       {...props}
@@ -33,7 +35,7 @@ function Checkbox({
         data-slot="checkbox-indicator"
         className="grid place-content-center text-current transition-none"
       >
-        <CheckIcon className="size-3.5" />
+        <CheckIcon className="size-3" />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   )

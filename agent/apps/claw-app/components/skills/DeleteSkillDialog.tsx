@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+import { t } from '@browseros/i18n'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 import { toast } from 'sonner'
@@ -44,7 +45,7 @@ export function DeleteSkillDialog({
       {
         loading: `Deleting ${name}…`,
         success: `Deleted ${name}`,
-        error: 'Could not delete the skill',
+        error: t('clCouldNotDeleteSkill'),
       },
     )
   }
@@ -55,23 +56,22 @@ export function DeleteSkillDialog({
         render={
           trigger ?? (
             <Button variant="outline" size="sm" className="rounded-9 text-red">
-              Delete
+              {t('clDelete')}
             </Button>
           )
         }
       />
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete this skill?</AlertDialogTitle>
+          <AlertDialogTitle>{t('clDeleteThisSkill')}</AlertDialogTitle>
           <AlertDialogDescription>
-            This removes {name} and unlinks its skill from your coding agents.
-            Its run history is discarded.
+            {t('clDeleteSkillDesc', name)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t('clCancel')}</AlertDialogCancel>
           <AlertDialogAction onClick={onConfirm}>
-            Delete skill
+            {t('clDeleteSkill')}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -8,7 +8,8 @@
  */
 
 import type { HelpRequest } from '@browseros/claw-api'
-import { ExternalLink, Hand, RefreshCw, Square } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { ExternalLink, Hand, RefreshCw, Square } from '@browseros/icons'
 import { cn } from '@/lib/utils'
 import type { LiveSessionCardRecord } from '@/screens/cockpit/cockpit.helpers'
 import { formatToolTrail, siteOf } from '@/screens/cockpit/cockpit.helpers'
@@ -74,7 +75,7 @@ export function AgentRunningCard({
     shownTab != null && shownTab.browserTabId === liveBrowserTabId
   const showingLive = active && isLiveTab
   const trail = formatToolTrail(session.recentTools)
-  const site = shownTab ? siteOf(shownTab.url) : 'No browser activity'
+  const site = shownTab ? siteOf(shownTab.url) : t('clNoBrowserActivity')
   const help = session.helpRequest
   const needsHelp = help != null
 
@@ -129,62 +130,68 @@ export function AgentRunningCard({
         )}
         data-caption-tone="blue"
       >
-        <div className="flex items-center gap-3 font-mono text-[10.5px] text-white/80 uppercase tracking-[0.08em]">
+        <div className="flex items-center gap-3 font-mono text-[10.5px] text-[var(--blue-1)] uppercase tracking-[0.08em]">
           <span className="inline-flex min-w-0 items-center gap-1.5">
             <span
               aria-hidden
               className="inline-block size-2 shrink-0 rounded-full"
               style={{ background: session.color }}
             />
-            <span className="truncate text-white">{session.label}</span>
+            <span className="truncate text-white" translate="no">
+              {session.label}
+            </span>
           </span>
           {showingLive ? (
-            <span className="inline-flex shrink-0 items-center gap-1.5 text-[#8fb4ff]">
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-white">
               <span
                 aria-hidden
-                className="inline-block size-1.5 animate-[pulse-dot_1.4s_ease-in-out_infinite] rounded-full bg-[#8fb4ff] shadow-[0_0_8px_hsl(221_100%_78%/0.6)]"
+                className="inline-block size-1.5 animate-[pulse-dot_1.4s_ease-in-out_infinite] rounded-full bg-white"
               />
-              LIVE
+              {t('clLive2')}
             </span>
           ) : active && pinned && !isLiveTab ? (
-            <span className="inline-flex shrink-0 items-center gap-2 text-white/45">
-              Last frame
+            <span className="inline-flex shrink-0 items-center gap-2 text-[var(--blue-1)]">
+              {t('clLastFrame')}
               {onFollowLive && (
                 <button
                   type="button"
                   data-follow-live={session.sessionId}
                   onClick={onFollowLive}
-                  className="text-[#8fb4ff] uppercase tracking-[0.08em] transition hover:text-white"
+                  className="text-white uppercase tracking-[0.08em] underline-offset-2 transition hover:underline"
                 >
-                  Follow live
+                  {t('clFollowLive')}
                 </button>
               )}
             </span>
           ) : (
-            <span className="shrink-0 text-white/45">Idle</span>
+            <span className="shrink-0 text-[var(--blue-1)]">{t('clIdle')}</span>
           )}
         </div>
         <h3 className="truncate font-semibold text-[14px] text-white leading-tight">
           {shownTab?.title || session.name || site}
         </h3>
-        <p className="truncate font-mono text-[11px] text-white/60">
-          {trail || (shownTab ? site : 'Waiting for browser activity')}
+        {/* The tool trail and the site are data; the waiting line is copy. */}
+        <p
+          className="truncate font-mono text-[11px] text-[var(--blue-1)]"
+          translate={trail || shownTab ? 'no' : undefined}
+        >
+          {trail || (shownTab ? site : t('clWaitingBrowserActivity'))}
         </p>
-        <div className="mt-1 flex items-center gap-2 border-white/10 border-t pt-2">
+        <div className="mt-1 flex items-center gap-2 border-[var(--blue-5)] border-t pt-2">
           {shownTab && onWatch && (
             <button
               type="button"
               data-watch-browser-tab={shownTab.browserTabId}
               onClick={onWatch}
               disabled={isFocusPending}
-              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-white/10 px-2 py-1.5 font-mono text-[10.5px] text-white/90 uppercase tracking-[0.08em] transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-[var(--blue-7)] px-2 py-1.5 font-mono text-[10.5px] text-white uppercase tracking-[0.08em] transition hover:bg-[var(--blue-8)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isFocusPending ? (
                 <RefreshCw className="size-3 animate-spin" />
               ) : (
                 <ExternalLink className="size-3" />
               )}
-              Watch
+              {t('clWatch')}
             </button>
           )}
           <button
@@ -192,18 +199,21 @@ export function AgentRunningCard({
             data-stop-session={session.sessionId}
             onClick={onStop}
             disabled={isCancelPending}
-            aria-label={isCancelPending ? 'Cancelling session' : 'Stop session'}
+            aria-label={
+              isCancelPending ? t('clCancellingSession') : t('clStopSession')
+            }
             // min-w reserves enough width for the longer pending label so
             // swapping states does not push the adjacent Watch button around.
-            className="inline-flex min-w-[92px] flex-1 items-center justify-center gap-1.5 rounded-md bg-white/10 px-2 py-1.5 font-mono text-[10.5px] text-white/90 uppercase tracking-[0.08em] transition hover:bg-red-500/30 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex min-w-[92px] flex-1 items-center justify-center gap-1.5 rounded-md bg-[var(--blue-7)] px-2 py-1.5 font-mono text-[10.5px] text-white uppercase tracking-[0.08em] transition hover:bg-[var(--accent-red-4)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isCancelPending ? (
               <>
-                <RefreshCw className="size-3 animate-spin" /> Cancelling
+                <RefreshCw className="size-3 animate-spin" />{' '}
+                {t('clCancelling')}
               </>
             ) : (
               <>
-                <Square className="size-3" /> Stop
+                <Square className="size-3" /> {t('clStop')}
               </>
             )}
           </button>
@@ -252,7 +262,7 @@ function AgentNeedsYouCard({
     <div
       data-session-card={session.sessionId}
       data-needs-you={session.sessionId}
-      className="group relative flex h-[300px] flex-col overflow-hidden rounded-2xl border-2 border-[#b85c10] bg-bg-sunken shadow-[0_0_0_1px_rgba(184,92,16,0.25)]"
+      className="group relative flex h-[300px] flex-col overflow-hidden rounded-2xl border-2 border-[var(--accent-orange-4)] bg-bg-sunken"
     >
       <div className="relative flex-1 overflow-hidden">
         <MiniScreencast
@@ -263,8 +273,8 @@ function AgentNeedsYouCard({
           className="h-full w-full"
         />
         <div className="absolute top-3 left-3">
-          <span className="inline-flex items-center rounded-md bg-[#b85c10] px-2 py-1 font-mono text-[10px] text-white uppercase tracking-[0.1em] shadow-sm">
-            Paused here
+          <span className="inline-flex items-center rounded-md bg-[var(--accent-orange-4)] px-2 py-1 font-mono text-[10px] text-white uppercase tracking-[0.1em] shadow-sm">
+            {t('clPausedHere')}
           </span>
         </div>
         {shownTab && onSelectTab && (
@@ -282,56 +292,61 @@ function AgentNeedsYouCard({
         className={cn('flex flex-col gap-1.5 px-4 py-3', needsYouTone.surface)}
         data-caption-tone="needs-you"
       >
-        <div className="flex items-center gap-3 font-mono text-[10.5px] text-white/85 uppercase tracking-[0.08em]">
+        <div className="flex items-center gap-3 font-mono text-[10.5px] text-[var(--accent-orange-1)] uppercase tracking-[0.08em]">
           <span className="inline-flex min-w-0 items-center gap-1.5">
             <span
               aria-hidden
               className="inline-block size-2 shrink-0 rounded-full"
               style={{ background: session.color }}
             />
-            <span className="truncate text-white">{session.label}</span>
+            <span className="truncate text-white" translate="no">
+              {session.label}
+            </span>
           </span>
           <span className="inline-flex shrink-0 items-center gap-1.5 text-white">
-            Needs you
+            {t('clNeedsYou')}
             <span className="tabular-nums">{waiting}</span>
           </span>
         </div>
         <h3 className="truncate font-semibold text-[14px] text-white leading-tight">
           {help.reason}
         </h3>
-        <p className="truncate font-mono text-[11px] text-white/70">
+        <p className="truncate font-mono text-[11px] text-[var(--accent-orange-1)]">
           {help.details || context}
         </p>
-        <div className="mt-1 flex items-center gap-2 border-white/15 border-t pt-2">
+        <div className="mt-1 flex items-center gap-2 border-[var(--accent-orange-2)] border-t pt-2">
           <button
             type="button"
             data-take-over={session.sessionId}
             onClick={onTakeOver}
             disabled={isFocusPending}
-            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-white px-2 py-1.5 font-mono text-[#b85c10] text-[10.5px] uppercase tracking-[0.08em] transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-white px-2 py-1.5 font-mono text-[10.5px] text-[var(--accent-orange-4)] uppercase tracking-[0.08em] transition hover:bg-[var(--accent-orange-1)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isFocusPending ? (
               <RefreshCw className="size-3 animate-spin" />
             ) : (
               <Hand className="size-3" />
             )}
-            Take over
+            {t('clTakeOver')}
           </button>
           <button
             type="button"
             data-stop-session={session.sessionId}
             onClick={onStop}
             disabled={isCancelPending}
-            aria-label={isCancelPending ? 'Cancelling session' : 'Stop session'}
-            className="inline-flex min-w-[92px] flex-1 items-center justify-center gap-1.5 rounded-md bg-white/15 px-2 py-1.5 font-mono text-[10.5px] text-white uppercase tracking-[0.08em] transition hover:bg-red-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+            aria-label={
+              isCancelPending ? t('clCancellingSession') : t('clStopSession')
+            }
+            className="inline-flex min-w-[92px] flex-1 items-center justify-center gap-1.5 rounded-md bg-[var(--accent-orange-5)] px-2 py-1.5 font-mono text-[10.5px] text-white uppercase tracking-[0.08em] transition hover:bg-[var(--accent-red-5)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isCancelPending ? (
               <>
-                <RefreshCw className="size-3 animate-spin" /> Cancelling
+                <RefreshCw className="size-3 animate-spin" />{' '}
+                {t('clCancelling')}
               </>
             ) : (
               <>
-                <Square className="size-3" /> Stop
+                <Square className="size-3" /> {t('clStop')}
               </>
             )}
           </button>

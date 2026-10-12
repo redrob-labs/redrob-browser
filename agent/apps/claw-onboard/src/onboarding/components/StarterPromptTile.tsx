@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Copy, Sparkles } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Check, Copy, Sparkles } from '@browseros/icons'
 import { useState } from 'react'
 
 interface StarterPromptTileProps {
@@ -37,7 +38,7 @@ export function StarterPromptTile({ prompt }: StarterPromptTileProps) {
         className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-bg-sunken px-2.5 py-1 font-semibold text-[12px] text-ink-2 transition hover:bg-card-tint hover:text-ink"
       >
         {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-        {copied ? 'Copied' : 'Copy'}
+        {copied ? t('stCopied') : t('stCopy')}
       </button>
     </div>
   )

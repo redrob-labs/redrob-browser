@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Search, Sparkles } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Search, Sparkles } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { NoProviderNotice } from '@/components/chat/NoProviderNotice'
@@ -117,14 +118,14 @@ export const AgentCommandHome: FC = () => {
             onValueChange={(value) => setHomeMode(value as HomeMode)}
             className="w-full max-w-3xl items-center gap-4"
           >
-            <TabsList aria-label="New tab mode">
+            <TabsList aria-label={t('shNewTabMode')}>
               <TabsTrigger value="search" className="px-4">
                 <Search aria-hidden />
-                Search
+                {t('shSearch')}
               </TabsTrigger>
               <TabsTrigger value="ask" className="px-4">
                 <Sparkles aria-hidden />
-                Ask
+                {t('shAsk')}
               </TabsTrigger>
             </TabsList>
 
@@ -149,10 +150,10 @@ export const AgentCommandHome: FC = () => {
                 attachmentsEnabled={selectedProvider?.kind === 'acp'}
                 placeholder={
                   selectedProvider
-                    ? `Ask ${selectedProvider.name} to handle a task...`
+                    ? t('shAskProviderTask', selectedProvider.name)
                     : noTarget
-                      ? 'Describe a task...'
-                      : 'Loading providers...'
+                      ? t('shDescribeATask')
+                      : t('shLoadingProviders')
                 }
               />
               {noTarget && (

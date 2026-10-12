@@ -8,7 +8,8 @@
  */
 
 import type { HelpRequest } from '@browseros/claw-api'
-import { Hand, Square, TriangleAlert } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Hand, Square, TriangleAlert } from '@browseros/icons'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { LiveSessionCardRecord } from '@/screens/cockpit/cockpit.helpers'
@@ -57,22 +58,22 @@ export function NeedsYouBanner({
     <section
       data-needs-you-banner
       aria-live="polite"
-      className="rounded-2xl border border-amber/40 bg-amber-tint px-5 py-4"
+      className="rounded-2xl border border-amber bg-amber-tint px-5 py-4"
     >
       <div className="flex items-start gap-4">
-        <span className="mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-[#b85c10] text-white">
+        <span className="mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent-orange-4)] text-white">
           <TriangleAlert className="size-4.5" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
             <h2 className="font-semibold text-[15px] text-ink leading-tight">
               {pending.length === 1
-                ? 'One agent needs you right now'
-                : `${pending.length} agents need you right now`}
+                ? t('clOneAgentNeedsYouRight')
+                : t('clAgentsNeedYouNow', pending.length)}
             </h2>
             {pending.length > 1 && (
-              <span className="inline-flex shrink-0 items-center rounded-full bg-[#b85c10] px-2 py-0.5 font-mono text-[10px] text-white uppercase tracking-[0.1em]">
-                {pending.length} need you
+              <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--accent-orange-4)] px-2 py-0.5 font-mono text-[10px] text-white uppercase tracking-[0.1em]">
+                {t('clNeedYouN', pending.length)}
               </span>
             )}
           </div>
@@ -93,7 +94,7 @@ export function NeedsYouBanner({
       </div>
 
       {rest.length > 0 && (
-        <ul className="mt-3 flex flex-col gap-2 border-amber/30 border-t pt-3">
+        <ul className="mt-3 flex flex-col gap-2 border-amber border-t pt-3">
           {rest.map(({ session, help }) => (
             <li
               key={session.sessionId}
@@ -105,7 +106,9 @@ export function NeedsYouBanner({
                 style={{ background: session.color }}
               />
               <span className="min-w-0 flex-1 truncate text-ink">
-                <span className="font-medium">{session.label}</span>
+                <span className="font-medium" translate="no">
+                  {session.label}
+                </span>
                 <span className="text-ink-3"> · {help.reason}</span>
               </span>
               <span className="shrink-0 font-mono text-[11px] text-ink-3 tabular-nums">
@@ -119,7 +122,7 @@ export function NeedsYouBanner({
                 disabled={pendingTakeOverSessionId === session.sessionId}
                 className={cn('shrink-0', needsYouTone.action)}
               >
-                Take over
+                {t('clTakeOver')}
               </Button>
             </li>
           ))}
@@ -155,7 +158,7 @@ function FeaturedRequest({
 
   return (
     <>
-      <p className="mt-1 font-mono text-[11px] text-ink-3 uppercase tracking-[0.06em]">
+      <p className="mt-1 font-mono text-[11px] text-ink-2 uppercase tracking-[0.06em]">
         {context}
       </p>
       <p className="mt-1 font-medium text-[14px] text-ink">{help.reason}</p>
@@ -165,8 +168,8 @@ function FeaturedRequest({
         </p>
       )}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <span className="mr-auto inline-flex items-center gap-1.5 font-mono text-[11px] text-ink-3 uppercase tracking-[0.08em]">
-          Waiting
+        <span className="mr-auto inline-flex items-center gap-1.5 font-mono text-[11px] text-ink-2 uppercase tracking-[0.08em]">
+          {t('clWaiting')}
           <span className="tabular-nums">
             {waitLabel(help.requestedAt, now)}
           </span>
@@ -180,7 +183,7 @@ function FeaturedRequest({
           className={needsYouTone.action}
         >
           <Hand className="size-3.5" />
-          Take over
+          {t('clTakeOver')}
         </Button>
         <Button
           type="button"
@@ -189,10 +192,10 @@ function FeaturedRequest({
           data-stop-session={session.sessionId}
           onClick={() => onStop(session.sessionId)}
           disabled={isStopPending}
-          aria-label="Stop session"
+          aria-label={t('clStopSession')}
         >
           <Square className="size-3.5" />
-          Stop
+          {t('clStop')}
         </Button>
       </div>
     </>

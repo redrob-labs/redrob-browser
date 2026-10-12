@@ -15,11 +15,19 @@ import { Toaster } from '@/components/ui/sonner'
 import { AnalyticsProvider } from '@/lib/analytics/AnalyticsProvider.tsx'
 import { QueryProvider } from '@/lib/query/QueryProvider'
 import { sentryRootErrorHandler } from '@/lib/sentry/sentryRootErrorHandler.ts'
+import {
+  applyTheme,
+  mirroredTheme,
+  resolveTheme,
+} from '@/lib/theme/browser-color-scheme'
 import { App } from './App'
 
 const $root = document.getElementById('root')
 
 if ($root) {
+  // Before the first render: a module script runs before first paint, so a dark page is never white.
+  applyTheme(resolveTheme(mirroredTheme()))
+
   ReactDOM.createRoot($root, sentryRootErrorHandler).render(
     <React.StrictMode>
       <QueryProvider>

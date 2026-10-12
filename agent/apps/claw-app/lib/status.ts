@@ -7,6 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
+
 /** Shared status labels and colors for cockpit and audit surfaces. */
 
 export type RunStatus =
@@ -30,61 +32,61 @@ export interface StatusMeta {
 
 export const STATUS_META: Record<RunStatus, StatusMeta> = {
   running: {
-    label: 'Running',
+    label: t('clRunning'),
     textClass: 'text-green',
     bgClass: 'bg-green-tint',
     pulse: true,
   },
   live: {
-    label: 'Live',
+    label: t('clLive'),
     textClass: 'text-green',
     bgClass: 'bg-green-tint',
     pulse: true,
   },
   'needs-ok': {
-    label: 'Needs OK',
+    label: t('clNeedsOk'),
     textClass: 'text-amber',
     bgClass: 'bg-amber-tint',
     pulse: false,
   },
   'needs-human': {
-    label: 'Your turn',
+    label: t('clYourTurn'),
     textClass: 'text-amber',
     bgClass: 'bg-amber-tint',
     pulse: false,
   },
   blocked: {
-    label: 'Blocked',
+    label: t('clBlocked'),
     textClass: 'text-red',
     bgClass: 'bg-red-tint',
     pulse: false,
   },
   stopped: {
-    label: 'Stopped',
+    label: t('clStopped'),
     textClass: 'text-ink-3',
     bgClass: 'bg-bg-sunken',
     pulse: false,
   },
   done: {
-    label: 'Completed',
+    label: t('clCompleted'),
     textClass: 'text-green',
     bgClass: 'bg-green-tint',
     pulse: false,
   },
   asleep: {
-    label: 'Asleep',
+    label: t('clAsleep'),
     textClass: 'text-ink-3',
     bgClass: 'bg-bg-sunken',
     pulse: false,
   },
   idle: {
-    label: 'Idle',
+    label: t('clIdle'),
     textClass: 'text-ink-3',
     bgClass: 'bg-bg-sunken',
     pulse: false,
   },
   stuck: {
-    label: 'Stuck',
+    label: t('clStuck'),
     textClass: 'text-amber',
     bgClass: 'bg-amber-tint',
     pulse: false,

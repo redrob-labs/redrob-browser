@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Loader2 } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Loader2 } from '@browseros/icons'
 import { type FC, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router'
 import { NoProviderNotice } from '@/components/chat/NoProviderNotice'
@@ -213,14 +214,14 @@ export const NewTabChat: FC = () => {
                 onClick={retryRestoreConversation}
                 className="underline underline-offset-2"
               >
-                Try again
+                {t('shTryAgain')}
               </button>
               <button
                 type="button"
                 onClick={handleNewConversation}
                 className="underline underline-offset-2"
               >
-                New conversation
+                {t('shNewConversation')}
               </button>
             </div>
           </div>

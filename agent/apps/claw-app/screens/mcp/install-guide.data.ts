@@ -7,6 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
+
 /**
  * The Claude Desktop install walkthrough, as data. The step rail, the
  * counter, the Back/Next bounds, and the tests all derive from this one
@@ -24,8 +26,12 @@ export const MCPB_FILENAME = EXTENSION_DOWNLOAD_URL.slice(
   EXTENSION_DOWNLOAD_URL.lastIndexOf('/') + 1,
 )
 
-export const COWORK_REQUIREMENT_LINE =
-  'To use BrowserOS neo with Claude Cowork, you need to install this extension.'
+/** The upstream extension's own name: the file the user installs is called this, so it is not ours to rename. */
+export const UPSTREAM_EXTENSION_NAME = 'BrowserOS neo'
+
+/** Read when rendered, so it follows the page language. */
+export const coworkRequirementLine = (): string =>
+  t('clCoworkRequirement', UPSTREAM_EXTENSION_NAME)
 
 /**
  * Screenshots live in the `browserclaw` R2 bucket rather than the extension
@@ -53,7 +59,7 @@ export interface InstallStep {
 export const INSTALL_STEPS: readonly InstallStep[] = [
   {
     id: 'open-settings',
-    title: 'Open Settings',
+    title: t('clOpenSettings'),
     body: 'In Claude Desktop, click your account at the bottom-left of the sidebar, then choose Settings.',
     image: {
       src: `${IMAGE_BASE}/step-settings.webp`,
@@ -62,7 +68,7 @@ export const INSTALL_STEPS: readonly InstallStep[] = [
   },
   {
     id: 'open-extensions',
-    title: 'Extensions',
+    title: t('clExtensions'),
     body: 'In the Settings sidebar, scroll to Desktop app and click Extensions. Then click Advanced settings on the right.',
     image: {
       src: `${IMAGE_BASE}/step-extensions.webp`,
@@ -71,13 +77,13 @@ export const INSTALL_STEPS: readonly InstallStep[] = [
   },
   {
     id: 'download',
-    title: 'Download',
+    title: t('clDownload'),
     kind: 'download',
     body: `Download the BrowserOS neo extension. It saves to your Downloads folder as ${MCPB_FILENAME}.`,
   },
   {
     id: 'install-extension',
-    title: 'Install Extension',
+    title: t('clInstallExtension'),
     body: 'On the Advanced settings page, scroll down to Extension Developer and click Install Extension.',
     image: {
       src: `${IMAGE_BASE}/step-install-extension.webp`,
@@ -86,7 +92,7 @@ export const INSTALL_STEPS: readonly InstallStep[] = [
   },
   {
     id: 'choose-file',
-    title: 'Pick the file',
+    title: t('clPickTheFile'),
     body: `In the file picker, select the ${MCPB_FILENAME} you just downloaded.`,
     image: {
       src: `${IMAGE_BASE}/step-choose-file.webp`,
@@ -95,7 +101,7 @@ export const INSTALL_STEPS: readonly InstallStep[] = [
   },
   {
     id: 'confirm-install',
-    title: 'Click Install',
+    title: t('clClickInstall'),
     body: 'Claude shows the BrowserOS neo extension details. Click Install to finish — Claude can now drive BrowserOS neo.',
     image: {
       src: `${IMAGE_BASE}/step-confirm-install.webp`,
@@ -132,8 +138,7 @@ export const MCP_SERVER_NAME = 'browseros-neo'
 
 export const MANUAL_SETUP_DOCS_URL = 'https://docs.browseros.com/neo/mcp/manual'
 
-export const MANUAL_SETUP_CARD_LINE =
-  'Connect it by hand: add the endpoint, then install the skill.'
+export const MANUAL_SETUP_CARD_LINE = t('clManualCardLine')
 
 export interface ManualSetupStep {
   id: string
@@ -149,15 +154,15 @@ export interface ManualSetupStep {
 export const MANUAL_SETUP_STEPS: readonly ManualSetupStep[] = [
   {
     id: 'add-mcp',
-    title: 'Add the MCP server',
-    body: `Point your agent at the endpoint URL from this page and add it as a streamable HTTP MCP server named ${MCP_SERVER_NAME}. Where that setting lives depends on the agent, so check its own MCP documentation.`,
-    note: 'Read the URL from the top of this page rather than assuming a port. It is a loopback address and the port is not the same across builds.',
+    title: t('clAddTheMcpServer'),
+    body: t('clManualAddMcpBody', MCP_SERVER_NAME),
+    note: t('clManualAddMcpNote'),
   },
   {
     id: 'install-skill',
-    title: 'Install the skill',
-    body: 'The MCP server gives your agent the tools. The skill tells it how to use them: to work in its own tabs instead of yours, to name its session so you can find it in the cockpit, and to reach for this browser rather than its own fetcher.',
+    title: t('clInstallTheSkill'),
+    body: t('clManualSkillBody'),
     command: SKILL_INSTALL_COMMAND,
-    note: 'Run this in your project, or add -g to install it for every project.',
+    note: t('clManualSkillNote'),
   },
 ]

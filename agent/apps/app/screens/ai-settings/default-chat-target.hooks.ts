@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import type { LlmProviderConfig } from '@/lib/llm-providers/types'
 import { sentry } from '@/lib/sentry/sentry'
 import type { ChatTargetRef } from '@/modules/chat/sidepanel-chat-targets'
@@ -43,7 +44,7 @@ export function useDefaultChatTarget({
     setDefaultProvider(next.id).catch((error) => {
       sentry.captureException(error, {
         extra: {
-          message: 'Failed to change default chat target',
+          message: t('stFailedToChangeDefaultChat'),
           targetId: next.id,
           targetKind: next.kind,
         },

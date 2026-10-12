@@ -9,7 +9,7 @@
 
 import type { FC } from 'react'
 import HermesIcon from '@/assets/hermes.png'
-import RedrobMark from '@/assets/product_logo.svg'
+import { RedrobMark } from '@/components/brand/RedrobMark'
 import { Antigravity } from '@/components/ui/svgs/antigravity'
 import { ClaudeAiIcon } from '@/components/ui/svgs/claudeAiIcon'
 import { CodexDark } from '@/components/ui/svgs/codexDark'
@@ -30,7 +30,7 @@ export interface AgentMarkProps {
 
 // Redrob Code is the Redrob engine; it carries the Redrob mark, unrecoloured.
 const RedrobCodeMark: FC<AgentMarkProps> = ({ className }) => (
-  <img src={RedrobMark} alt="Redrob Code" className={className} />
+  <RedrobMark alt="Redrob Code" className={className} />
 )
 
 const ClaudeMark: FC<AgentMarkProps> = ({ className }) => (
@@ -58,7 +58,8 @@ const OpencodeMark: FC<AgentMarkProps> = ({ className }) => (
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
     role="img"
-    aria-label="opencode"
+    // i18n-ignore: a name, never translated
+    aria-label={'opencode'}
   >
     <path
       fillRule="evenodd"
@@ -129,7 +130,8 @@ const PiMark: FC<AgentMarkProps> = ({ className }) => (
     className={className}
     xmlns="http://www.w3.org/2000/svg"
     role="img"
-    aria-label="pi"
+    // i18n-ignore: a name, never translated
+    aria-label={'pi'}
   >
     <rect width="800" height="800" rx="120" fill="#09090b" />
     <path

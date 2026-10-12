@@ -7,9 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import dayjs from 'dayjs'
-import duration from 'dayjs/plugin/duration'
-import relativeTime from 'dayjs/plugin/relativeTime'
+import { formatRelative, t } from '@browseros/i18n'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -21,7 +19,10 @@ import {
   Square,
   Trash2,
   XCircle,
-} from 'lucide-react'
+} from '@browseros/icons'
+import dayjs from 'dayjs'
+import duration from 'dayjs/plugin/duration'
+import relativeTime from 'dayjs/plugin/relativeTime'
 import { type FC, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -51,22 +52,23 @@ export interface ScheduledTaskCardProps {
 
 function formatSchedule(job: ScheduledJob): string {
   if (job.scheduleType === 'daily' && job.scheduleTime) {
-    return `Daily at ${job.scheduleTime}`
+    return t('stDailyAt', job.scheduleTime)
   }
   if (job.scheduleType === 'hourly' && job.scheduleInterval) {
     return job.scheduleInterval === 1
-      ? 'Every hour'
-      : `Every ${job.scheduleInterval} hours`
+      ? t('stEveryHour')
+      : t('stEveryNHoursN', job.scheduleInterval)
   }
   if (job.scheduleType === 'minutes' && job.scheduleInterval) {
     return job.scheduleInterval === 1
-      ? 'Every minute'
-      : `Every ${job.scheduleInterval} minutes`
+      ? t('stEveryMinute')
+      : t('stEveryNMinutesN', job.scheduleInterval)
   }
-  return 'Not scheduled'
+  return t('stNotScheduled')
 }
 
-const formatRelativeTime = (dateStr: string) => dayjs(dateStr).fromNow()
+const formatRelativeTime = (dateStr: string) =>
+  formatRelative(new Date(dateStr))
 
 function formatDuration(startedAt: string, completedAt?: string): string {
   if (!completedAt) return 'Running...'
@@ -114,20 +116,24 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
   )
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4 shadow-sm transition-all hover:border-[var(--accent-brand)]/50 hover:shadow-sm">
+    <div className="ui-card p-4">
       <div className="flex items-start gap-4">
         <Switch
           checked={job.enabled}
           onCheckedChange={onToggle}
-          aria-label={`${job.enabled ? 'Disable' : 'Enable'} ${job.name}`}
+          aria-label={
+            job.enabled
+              ? t('stDisableName', job.name)
+              : t('stEnableName', job.name)
+          }
         />
 
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex items-center gap-2">
             <span className="truncate font-semibold">{job.name}</span>
             {!job.enabled && (
-              <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
-                Disabled
+              <span className="rr-badge rr-badge--sm rr-badge--subtle rr-badge--neutral">
+                {t('stDisabled')}
               </span>
             )}
           </div>
@@ -148,16 +154,16 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
             {providerMissing && (
               <>
                 <span>•</span>
-                <span className="flex items-center gap-1 text-[var(--accent-brand-ink)]">
+                <span className="flex items-center gap-1 text-[var(--status-warning)]">
                   <AlertTriangle aria-hidden className="size-3" />
-                  Provider unavailable
+                  {t('stProviderUnavailable')}
                 </span>
               </>
             )}
             {job.lastRunAt && (
               <>
                 <span>•</span>
-                <span>Last run: {formatRelativeTime(job.lastRunAt)}</span>
+                <span>{t('stLastRun', formatRelativeTime(job.lastRunAt))}</span>
               </>
             )}
           </div>
@@ -166,18 +172,18 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" size="sm" onClick={onRun}>
             <Play className="mr-1.5 h-3 w-3" />
-            Test
+            {t('stTest')}
           </Button>
           <Button variant="outline" size="sm" onClick={onEdit}>
             <Pencil className="mr-1.5 h-3 w-3" />
-            Edit
+            {t('stEdit')}
           </Button>
           <Button
             variant="ghost"
             size="icon-sm"
             onClick={onDelete}
-            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-            aria-label={`Delete ${job.name}`}
+            className="ui-row-delete"
+            aria-label={t('stDeleteName', job.name)}
           >
             <Trash2 className="h-4 w-4" />
           </Button>
@@ -186,27 +192,27 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
 
       {runs.length > 0 && (
         <Collapsible open={isOpen} onOpenChange={setIsOpen} className="mt-4">
-          <CollapsibleTrigger className="flex w-full items-center gap-2 text-muted-foreground text-sm hover:text-foreground">
+          <CollapsibleTrigger className="ui-disclosure flex w-full items-center gap-2 text-sm">
             <ChevronDown
               className={`h-4 w-4 transition-transform duration-200 ${
                 isOpen ? 'rotate-180' : ''
               }`}
             />
-            <span>Run History ({runs.length})</span>
+            <span>{t('stRunHistoryN', runs.length)}</span>
           </CollapsibleTrigger>
           <CollapsibleContent className="pt-3">
             <div className="space-y-2">
               {runs.map((run) => (
                 <div
                   key={run.id}
-                  className="flex items-center gap-3 rounded-lg border border-border bg-background p-3"
+                  className="ui-sample flex items-center gap-3 p-3"
                 >
                   {run.status === 'completed' ? (
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+                    <CheckCircle2 className="ui-status--success h-4 w-4 shrink-0" />
                   ) : run.status === 'failed' ? (
-                    <XCircle className="h-4 w-4 shrink-0 text-destructive" />
+                    <XCircle className="ui-status--danger h-4 w-4 shrink-0" />
                   ) : (
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-accent-brand-ink" />
+                    <Loader2 className="ui-status--running h-4 w-4 shrink-0 animate-spin" />
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -218,7 +224,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
                       </span>
                     </div>
                     {run.status === 'failed' && run.result && (
-                      <p className="mt-1 line-clamp-1 text-destructive text-xs">
+                      <p className="ui-status--danger mt-1 line-clamp-1 text-xs">
                         {run.result}
                       </p>
                     )}
@@ -232,8 +238,8 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
                           e.stopPropagation()
                           onCancelRun(run.id)
                         }}
-                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        aria-label="Cancel run"
+                        className="ui-status--danger"
+                        aria-label={t('stCancelRun')}
                       >
                         <Square className="h-3.5 w-3.5" />
                       </Button>
@@ -246,8 +252,8 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
                           e.stopPropagation()
                           onRetryRun(run.jobId)
                         }}
-                        className="text-muted-foreground hover:text-foreground"
-                        aria-label="Retry run"
+                        className=""
+                        aria-label={t('stRetryRun')}
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                       </Button>
@@ -256,9 +262,9 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
                       variant="ghost"
                       size="sm"
                       onClick={() => onViewRun(run)}
-                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                      className="shrink-0"
                     >
-                      View
+                      {t('stView')}
                     </Button>
                   </div>
                 </div>

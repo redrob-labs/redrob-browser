@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Globe2, Trash2 } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Globe2, Trash2 } from '@browseros/icons'
 import type { FC } from 'react'
 import { useMemo } from 'react'
 import { Button } from '@/components/ui/button'
@@ -34,7 +35,7 @@ export const HubProviderRow: FC<HubProviderRowProps> = ({
         {iconUrl ? (
           <img
             src={iconUrl}
-            alt={`${provider.name} icon`}
+            alt={t('stProviderIcon', provider.name)}
             className="h-full w-full object-cover"
           />
         ) : (
@@ -53,7 +54,7 @@ export const HubProviderRow: FC<HubProviderRowProps> = ({
 
       <div className="flex shrink-0 items-center gap-2">
         <Button variant="outline" size="sm" onClick={onEdit}>
-          Edit
+          {t('stEdit')}
         </Button>
         <Button
           variant="ghost"
@@ -61,7 +62,7 @@ export const HubProviderRow: FC<HubProviderRowProps> = ({
           disabled={!canDelete}
           className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-30"
           onClick={onDelete}
-          aria-label={`Remove ${provider.name}`}
+          aria-label={t('stRemoveName', provider.name)}
         >
           <Trash2 className="h-4 w-4" />
         </Button>

@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import type { FC } from 'react'
 import { ScheduledTaskCard } from './ScheduledTaskCard'
 import type { ScheduledJob, ScheduledJobRun } from './types'
@@ -34,11 +35,9 @@ export const ScheduledTasksList: FC<ScheduledTasksListProps> = ({
 }) => {
   if (jobs.length === 0) {
     return (
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
-        <div className="rounded-lg border border-border border-dashed py-8 text-center">
-          <p className="text-muted-foreground text-sm">
-            No scheduled tasks yet. Create one to automate recurring tasks.
-          </p>
+      <div className="ui-card rr-empty rr-empty--compact">
+        <div>
+          <p className="rr-empty__desc">{t('stNoScheduledTasksYetCreate')}</p>
         </div>
       </div>
     )

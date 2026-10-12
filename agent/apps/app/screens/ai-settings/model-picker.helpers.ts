@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import type { ProviderType } from '../../lib/llm-providers/types'
 import type { ModelInfo } from './models'
 
@@ -126,7 +127,7 @@ export function getIncompleteCatalogHint(
     return `${name} lists only common models — paste the exact ID of any model you have loaded.`
   }
   if (hasInferredCatalog(providerType)) {
-    return `This list is a snapshot, not ${name}'s own. Paste the exact ID of any model your plan offers.`
+    return t('stSnapshotHint', name)
   }
   return null
 }

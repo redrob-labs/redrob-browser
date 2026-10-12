@@ -88,8 +88,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const root = document.documentElement
 
     const apply = () => {
+      const next = resolveTheme(theme, browserScheme)
       root.classList.remove('light', 'dark')
-      root.classList.add(resolveTheme(theme, browserScheme))
+      root.classList.add(next)
+      // The design system's tokens switch on [data-theme]; shadcn's on .dark. Both, always together.
+      root.dataset.theme = next
     }
     apply()
 

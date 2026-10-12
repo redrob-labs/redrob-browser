@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Send, SquareStop } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Send, SquareStop } from '@browseros/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
 import {
   forwardRef,
@@ -276,10 +277,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
           <button
             type="button"
             onClick={onStop}
-            className="cursor-pointer rounded-full bg-red-600 p-2 text-white shadow-sm transition-all duration-200 hover:bg-red-900"
+            className="ui-composer-send ui-composer-stop size-8 cursor-pointer"
           >
             <SquareStop className="h-3.5 w-3.5" />
-            <span className="sr-only">Stop</span>
+            <span className="sr-only">{t('spStop')}</span>
           </button>
         )
       }
@@ -288,10 +289,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
         <button
           type="submit"
           disabled={isSubmitDisabled || !input.trim()}
-          className="cursor-pointer rounded-full bg-[var(--accent-brand)] p-2 text-white shadow-sm transition-all duration-200 hover:bg-[var(--accent-brand-bright)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="ui-composer-send size-8 cursor-pointer disabled:cursor-not-allowed"
         >
           <Send className="h-3.5 w-3.5" />
-          <span className="sr-only">Send</span>
+          <span className="sr-only">{t('spSend')}</span>
         </button>
       )
     }
@@ -313,12 +314,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
         {/* Reserve right padding for the overlaid send/stop button. */}
         <textarea
           ref={textareaRef}
-          className="field-sizing-content max-h-60 min-h-[42px] flex-1 resize-none overflow-hidden rounded-2xl border border-border/50 bg-muted/50 py-2.5 pr-11 pl-4 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 hover:border-border focus:border-[var(--accent-brand)]"
+          className="ui-composer ui-composer-input field-sizing-content max-h-60 min-h-[48px] flex-1 resize-none overflow-hidden py-3 pr-12 pl-4 outline-none"
           value={input}
           onChange={(e) => handleInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={
-            mode === 'chat' ? 'Ask about this page...' : 'What should I do?'
+            mode === 'chat' ? t('spPlaceholderChat') : t('spPlaceholderAgent')
           }
           rows={1}
         />

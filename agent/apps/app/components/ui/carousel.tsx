@@ -9,10 +9,11 @@
 
 'use client'
 
+import { t } from '@browseros/i18n'
+import { ArrowLeft, ArrowRight } from '@browseros/icons'
 import useEmblaCarousel, {
   type UseEmblaCarouselType,
 } from 'embla-carousel-react'
-import { ArrowLeft, ArrowRight } from 'lucide-react'
 import * as React from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -221,7 +222,7 @@ function CarouselPrevious({
       {...props}
     >
       <ArrowLeft />
-      <span className="sr-only">Previous slide</span>
+      <span className="sr-only">{t('stPreviousSlide')}</span>
     </Button>
   )
 }
@@ -254,7 +255,7 @@ function CarouselNext({
       {...props}
     >
       <ArrowRight />
-      <span className="sr-only">Next slide</span>
+      <span className="sr-only">{t('stNextSlide')}</span>
     </Button>
   )
 }

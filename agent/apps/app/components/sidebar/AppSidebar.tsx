@@ -27,7 +27,7 @@ export const AppSidebar: FC<AppSidebarProps> = ({
   return (
     <div
       className={cn(
-        'flex h-full flex-col border-r bg-sidebar text-sidebar-foreground transition-all duration-200 ease-in-out',
+        'ui-shell-side flex h-full flex-col transition-[width] duration-[var(--duration-base)] ease-[var(--easing-standard)]',
         expanded ? 'w-64' : 'w-14',
       )}
     >

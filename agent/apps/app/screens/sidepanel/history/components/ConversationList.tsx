@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Loader2, MessageSquare } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Loader2, MessageSquare } from '@browseros/icons'
 import { type FC, useEffect, useRef } from 'react'
 import { Link } from 'react-router'
 import { ConversationGroup } from './ConversationGroup'
@@ -76,7 +77,7 @@ export const ConversationList: FC<ConversationListProps> = ({
       {isRefreshing && (
         <div className="flex items-center justify-center gap-2 pb-3 text-muted-foreground text-xs">
           <Loader2 className="h-3 w-3 animate-spin" />
-          <span>Fetching latest conversations</span>
+          <span>{t('spFetching')}</span>
         </div>
       )}
       {!hasConversations ? (
@@ -84,31 +85,31 @@ export const ConversationList: FC<ConversationListProps> = ({
           <MessageSquare className="mb-3 h-10 w-10 text-muted-foreground/50" />
           <p className="text-muted-foreground text-sm">{emptyMessage}</p>
           <Link to="/" className="mt-2 text-primary text-sm hover:underline">
-            Start a new chat
+            {t('spStartChat')}
           </Link>
         </div>
       ) : (
         <>
           <ConversationGroup
-            label={TIME_GROUP_LABELS.today}
+            label={t(TIME_GROUP_LABELS.today)}
             conversations={groupedConversations.today}
             onDelete={onDelete}
             activeConversationId={activeConversationId}
           />
           <ConversationGroup
-            label={TIME_GROUP_LABELS.thisWeek}
+            label={t(TIME_GROUP_LABELS.thisWeek)}
             conversations={groupedConversations.thisWeek}
             onDelete={onDelete}
             activeConversationId={activeConversationId}
           />
           <ConversationGroup
-            label={TIME_GROUP_LABELS.thisMonth}
+            label={t(TIME_GROUP_LABELS.thisMonth)}
             conversations={groupedConversations.thisMonth}
             onDelete={onDelete}
             activeConversationId={activeConversationId}
           />
           <ConversationGroup
-            label={TIME_GROUP_LABELS.older}
+            label={t(TIME_GROUP_LABELS.older)}
             conversations={groupedConversations.older}
             onDelete={onDelete}
             activeConversationId={activeConversationId}

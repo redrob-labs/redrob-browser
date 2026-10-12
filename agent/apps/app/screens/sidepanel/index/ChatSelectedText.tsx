@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { FileText, X } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { FileText, X } from '@browseros/icons'
 import type { FC } from 'react'
 import type { SelectedTextData } from '@/lib/selected-text/selectedTextStorage'
 
@@ -37,14 +38,14 @@ export const ChatSelectedText: FC<ChatSelectedTextProps> = ({
               {selectedText.pageTitle}
             </div>
             <div className="line-clamp-3 text-foreground text-xs leading-relaxed">
-              &ldquo;{truncated}&rdquo;
+              {t('spQuoted', truncated)}
             </div>
           </div>
           <button
             type="button"
             onClick={onDismiss}
             className="flex-shrink-0 rounded p-0.5 transition-colors hover:bg-background"
-            title="Remove selected text"
+            title={t('spRemoveSelection')}
           >
             <X className="h-3 w-3 text-muted-foreground" />
           </button>

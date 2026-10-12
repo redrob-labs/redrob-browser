@@ -16,7 +16,7 @@ export const activityCardCaptionTones = {
   },
   blue: {
     surface: 'bg-cyanotype-blue text-white',
-    subdued: 'text-white/70',
+    subdued: 'text-[var(--blue-1)]',
   },
 } as const satisfies Record<
   ActivityCardCaptionTone,

@@ -9,8 +9,9 @@
 
 'use client'
 
+import { t } from '@browseros/i18n'
+import { BrainIcon, ChevronDownIcon } from '@browseros/icons'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import { BrainIcon, ChevronDownIcon } from 'lucide-react'
 import type { ComponentProps } from 'react'
 import { createContext, memo, useContext, useEffect, useState } from 'react'
 import { Streamdown } from 'streamdown'
@@ -125,12 +126,12 @@ export type ReasoningTriggerProps = ComponentProps<typeof CollapsibleTrigger>
 
 const getThinkingMessage = (isStreaming: boolean, duration?: number) => {
   if (isStreaming || duration === 0) {
-    return <Shimmer duration={1}>Thinking...</Shimmer>
+    return <Shimmer duration={1}>{t('stThinking')}</Shimmer>
   }
   if (duration === undefined) {
-    return <p>Thought for a few seconds</p>
+    return <p>{t('stThoughtForAFewSeconds')}</p>
   }
-  return <p>Thought for {duration} seconds</p>
+  return <p>{t('stThoughtForN', duration)}</p>
 }
 
 /** @public */

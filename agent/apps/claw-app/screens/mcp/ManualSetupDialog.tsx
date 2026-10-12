@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowUpRight, Check } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { ArrowUpRight, Check } from '@browseros/icons'
 import { useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -53,12 +54,10 @@ export function ManualSetupDialog({
       <DialogContent className="max-h-[92vh] w-[min(38rem,94vw)] max-w-[94vw] overflow-y-auto p-0 sm:max-w-[min(38rem,94vw)]">
         <div className="border-border-2 border-b px-6 pt-5 pb-4">
           <DialogTitle className="pr-10 font-semibold text-[17px] text-ink leading-snug">
-            Connect any other agent
+            {t('clConnectAnyOtherAgent')}
           </DialogTitle>
           <DialogDescription className="mt-1.5 text-[13.5px] text-ink-2 leading-relaxed">
-            Connecting a listed agent does two things, so doing it by hand means
-            doing both. The MCP server lets your agent reach the browser. The
-            skill teaches it how to use it.
+            {t('clConnectingAListedAgentDoes')}
           </DialogDescription>
         </div>
 
@@ -106,12 +105,12 @@ export function ManualSetupDialog({
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-[12.5px] text-accent underline-offset-4 transition-colors hover:underline"
           >
-            Full setup guide
+            {t('clFullSetupGuide')}
             <ArrowUpRight aria-hidden className="size-3.5" />
           </a>
           <Button size="sm" onClick={() => onOpenChange(false)}>
             <Check aria-hidden />
-            Done
+            {t('clDone')}
           </Button>
         </div>
       </DialogContent>

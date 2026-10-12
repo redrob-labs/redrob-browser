@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Loader2, Pencil, X } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Loader2, Pencil, X } from '@browseros/icons'
 import { Fragment, useEffect, useId, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -83,7 +84,7 @@ export function StarterPromptEditor({
 
   return (
     <form
-      aria-label="Customize prompts"
+      aria-label={t('spCustomizePrompts')}
       className="w-full max-w-[352px] text-left"
       noValidate
       onSubmit={(event) => {
@@ -107,7 +108,11 @@ export function StarterPromptEditor({
             <Fragment key={slot}>
               <button
                 type="button"
-                aria-label={`Edit prompt ${slot + 1}: ${prompt.display || 'Untitled'}`}
+                aria-label={t(
+                  'spEditPromptN',
+                  slot + 1,
+                  prompt.display || t('spUntitled'),
+                )}
                 aria-expanded={isExpanded}
                 aria-controls={isExpanded ? regionId : undefined}
                 onClick={() => setExpanded(slot)}
@@ -120,7 +125,7 @@ export function StarterPromptEditor({
                 )}
               >
                 <span className="min-w-0 flex-1 break-words">
-                  {prompt.display || `Prompt ${slot + 1}`}
+                  {prompt.display || t('spPromptN', slot + 1)}
                 </span>
                 <Pencil
                   aria-hidden="true"
@@ -136,10 +141,12 @@ export function StarterPromptEditor({
                   className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4"
                 >
                   <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-sm">Edit prompt</h3>
+                    <h3 className="font-semibold text-sm">
+                      {t('spEditPrompt')}
+                    </h3>
                     <button
                       type="button"
-                      aria-label="Cancel prompt customization"
+                      aria-label={t('spCancelCustomize')}
                       onClick={onCancel}
                       className="rounded p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
@@ -148,7 +155,7 @@ export function StarterPromptEditor({
                   </div>
                   <div className="flex flex-col gap-2">
                     <Label htmlFor={`${id}-label`} className="text-xs">
-                      Button label
+                      {t('spButtonLabel')}
                     </Label>
                     <Input
                       ref={labelRef}
@@ -163,7 +170,7 @@ export function StarterPromptEditor({
                   </div>
                   <div className="flex flex-col gap-2">
                     <Label htmlFor={`${id}-prompt`} className="text-xs">
-                      Prompt
+                      {t('spPrompt')}
                     </Label>
                     <Textarea
                       id={`${id}-prompt`}
@@ -180,7 +187,7 @@ export function StarterPromptEditor({
                     id={`${id}-help`}
                     className="text-muted-foreground text-xs"
                   >
-                    The full prompt runs when you click the shortcut.
+                    {t('spPromptHelp')}
                   </p>
                 </div>
               )}
@@ -194,13 +201,13 @@ export function StarterPromptEditor({
         )}
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="outline" size="sm" onClick={onCancel}>
-            Cancel
+            {t('spCancel')}
           </Button>
           <Button type="submit" size="sm">
             {isSaving && (
               <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
             )}
-            {isSaving ? 'Saving…' : 'Save prompts'}
+            {isSaving ? t('spSaving') : t('spSavePrompts')}
           </Button>
         </div>
       </fieldset>

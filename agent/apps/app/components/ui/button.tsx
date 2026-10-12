@@ -13,29 +13,37 @@ import type * as React from 'react'
 
 import { cn } from '@/lib/utils'
 
-const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive cursor-pointer",
+/**
+ * The design system's Button and IconButton (`.rr-btn`, `.rr-iconbtn` in @redrob-labs/ui's styles.css),
+ * under shadcn's variant and size names so no call site changes. Option A: the look is the system's own
+ * CSS; only the behaviour (Slot, Radix) stays local.
+ *
+ *   default -> primary      outline, secondary -> secondary (base ground, strong border)
+ *   ghost   -> ghost (brand ink, brand-subtle hover)          destructive -> danger
+ *   sm 32 / default 40 / lg 48: the system's control heights. shadcn's default was 36; the system has
+ *   no 36, and a control between two steps is the drift this rework removes.
+ * An icon size renders `.rr-iconbtn` at the same three heights. Focus is the system's 2px ring at a 2px
+ * offset, from the class -- not shadcn's 3px translucent glow.
+ */
+const localVariants = cva(
+  "[&_svg:not([class*='size-'])]:size-4 shrink-0 cursor-pointer whitespace-nowrap aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 disabled:pointer-events-none",
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
-        destructive:
-          'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60',
-        outline:
-          'border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50',
-        secondary:
-          'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-        ghost:
-          'hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50',
-        link: 'text-primary underline-offset-4 hover:underline',
+        default: '',
+        destructive: '',
+        outline: '',
+        secondary: '',
+        ghost: '',
+        link: 'h-auto! border-0! bg-transparent! p-0! text-[var(--ink-brand)] underline-offset-4 hover:underline',
       },
       size: {
-        default: 'h-9 px-4 py-2 has-[>svg]:px-3',
-        sm: 'h-8 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5',
-        lg: 'h-10 rounded-md px-6 has-[>svg]:px-4',
-        icon: 'size-9',
-        'icon-sm': 'size-8',
-        'icon-lg': 'size-10',
+        default: '',
+        sm: '',
+        lg: '',
+        icon: '',
+        'icon-sm': '',
+        'icon-lg': '',
       },
     },
     defaultVariants: {
@@ -45,9 +53,59 @@ const buttonVariants = cva(
   },
 )
 
+type Variant =
+  | 'default'
+  | 'destructive'
+  | 'outline'
+  | 'secondary'
+  | 'ghost'
+  | 'link'
+type Size = string
+
+/** The system's own classes for a variant and size; the cva above only adds what the system leaves out. */
+function rrClasses(
+  variant: Variant | null | undefined,
+  size: Size | null | undefined,
+): string {
+  const v = variant ?? 'default'
+  const s = size ?? 'default'
+  if (v === 'link') return ''
+  const icon = s.startsWith('icon')
+  const step = s.endsWith('lg')
+    ? 'lg'
+    : s.endsWith('sm') || s.endsWith('xs')
+      ? 'sm'
+      : 'md'
+  if (icon) {
+    const tone =
+      v === 'default'
+        ? ' rr-iconbtn--primary'
+        : v === 'outline' || v === 'secondary'
+          ? ' rr-iconbtn--secondary'
+          : ''
+    return `rr-iconbtn rr-iconbtn--${step}${tone}${v === 'destructive' ? ' text-[var(--status-danger)]' : ''}`
+  }
+  const tone = {
+    default: 'primary',
+    destructive: 'danger',
+    outline: 'secondary',
+    secondary: 'secondary',
+    ghost: 'ghost',
+  }[v]
+  return `rr-btn rr-btn--${step} rr-btn--${tone}`
+}
+
 /**
  * @public
  */
+/** The system's classes plus the local additions. Exported so a caller styling a link as a button
+ * (alert-dialog's actions) gets the system's button too. */
+function buttonVariants(
+  options: Parameters<typeof localVariants>[0] = {},
+): string {
+  return cn(rrClasses(options?.variant, options?.size), localVariants(options))
+}
+
 function Button({
   className,
   variant = 'default',
@@ -55,7 +113,7 @@ function Button({
   asChild = false,
   ...props
 }: React.ComponentProps<'button'> &
-  VariantProps<typeof buttonVariants> & {
+  VariantProps<typeof localVariants> & {
     asChild?: boolean
   }) {
   const Comp = asChild ? Slot : 'button'
@@ -65,7 +123,7 @@ function Button({
       data-slot="button"
       data-variant={variant}
       data-size={size}
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={buttonVariants({ variant, size, className })}
       {...props}
     />
   )

@@ -5,7 +5,8 @@
  */
 
 import type { Skill, SkillRun, SkillTokenSavings } from '@browseros/claw-api'
-import { ArrowLeft, Check } from 'lucide-react'
+import { t, tNodes } from '@browseros/i18n'
+import { ArrowLeft, Check } from '@browseros/icons'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { DeleteSkillDialog } from '@/components/skills/DeleteSkillDialog'
@@ -52,14 +53,11 @@ export function SkillDetail() {
         className="inline-flex w-fit items-center gap-1.5 font-medium text-[13px] text-ink-2 transition-colors hover:text-ink"
       >
         <ArrowLeft className="size-3.5" />
-        Skills
+        {t('clSkills')}
       </button>
 
       {isError ? (
-        <Notice>
-          Could not load this skill. Check that BrowserOS neo is running and try
-          again.
-        </Notice>
+        <Notice>{t('clCouldNotLoadThisSkill')}</Notice>
       ) : isLoading || !detail ? (
         <DetailSkeleton />
       ) : (
@@ -97,7 +95,9 @@ function DetailBody({
           </h1>
           <p className="max-w-2xl text-ink-2 text-sm">{skill.description}</p>
           {skill.site && (
-            <p className="text-ink-3 text-xs">operates on {skill.site}</p>
+            <p className="text-ink-3 text-xs">
+              {t('clOperatesOn', skill.site)}
+            </p>
           )}
         </div>
         <div className="flex items-center gap-1.5">
@@ -110,7 +110,7 @@ function DetailBody({
             body={body}
             trigger={
               <Button variant="outline" size="sm" className="rounded-9">
-                Edit
+                {t('clEdit')}
               </Button>
             }
           />
@@ -124,7 +124,10 @@ function DetailBody({
       </div>
 
       <section className="flex flex-col gap-2">
-        <h2 className="font-semibold text-ink text-sm">SKILL.md</h2>
+        {/* i18n-ignore: a file name */}
+        <h2 className="font-semibold text-ink text-sm" translate="no">
+          SKILL.md
+        </h2>
         <pre className="overflow-x-auto rounded-9 border border-ledger-border bg-card p-4 font-mono text-[12px] text-ledger-ink leading-relaxed">
           {body}
         </pre>
@@ -155,25 +158,27 @@ function TokensSavedCard({
 }) {
   if (tokenSavings.measuredRunCount === 0) {
     return (
-      <StatCard title="Tokens saved">
-        <p className="text-ink-3 text-sm">No measured runs yet.</p>
+      <StatCard title={t('clTokensSaved')}>
+        <p className="text-ink-3 text-sm">{t('clNoMeasuredRunsYet')}</p>
       </StatCard>
     )
   }
   const saved = Math.max(0, tokenSavings.saved)
   return (
-    <StatCard title="Tokens saved">
+    <StatCard title={t('clTokensSaved')}>
       <div className="flex items-baseline gap-1">
         <span className="font-extrabold text-3xl text-ink tabular-nums">
           {formatTokens(saved)}
         </span>
-        <span className="text-ink-2 text-sm">tokens</span>
+        <span className="text-ink-2 text-sm">{t('clTokens')}</span>
       </div>
       <p className="text-ink-2 text-sm">
-        <span className="tabular-nums">
-          {formatTokens(tokenSavings.otherBrowsers)}
-        </span>{' '}
-        tokens in other browsers
+        {tNodes(
+          'clTokensOtherBrowsers',
+          <span key="a" className="tabular-nums">
+            {formatTokens(tokenSavings.otherBrowsers)}
+          </span>,
+        )}
       </p>
     </StatCard>
   )
@@ -182,9 +187,9 @@ function TokensSavedCard({
 /** The coding agents the skill is currently linked into. */
 function LinkedIntoCard({ skill }: { skill: Skill }) {
   return (
-    <StatCard title="Linked into">
+    <StatCard title={t('clLinkedInto')}>
       {skill.linkedAgents.length === 0 ? (
-        <p className="text-ink-3 text-sm">Not linked into any agent.</p>
+        <p className="text-ink-3 text-sm">{t('clNotLinkedIntoAnyAgent')}</p>
       ) : (
         <div className="flex flex-wrap gap-1.5">
           {skill.linkedAgents.map((agent) => (
@@ -206,10 +211,10 @@ const CELL_PADDING = 'px-2 py-2.5 first:pl-4 last:pr-4'
 function RunHistory({ runs }: { runs: SkillRun[] }) {
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="font-semibold text-ink text-sm">Run history</h2>
+      <h2 className="font-semibold text-ink text-sm">{t('clRunHistory')}</h2>
       {runs.length === 0 ? (
         <div className="rounded-9 border border-ledger-border bg-card px-6 py-8 text-center text-ink-2 text-sm">
-          This skill has not run yet.
+          {t('clThisSkillHasNotRun')}
         </div>
       ) : (
         <div className="overflow-clip rounded-9 border border-ledger-border bg-card">
@@ -222,7 +227,7 @@ function RunHistory({ runs }: { runs: SkillRun[] }) {
                     'h-auto w-16 font-medium text-[12px] text-ledger-head-ink',
                   )}
                 >
-                  Run
+                  {t('clRun')}
                 </TableHead>
                 <TableHead
                   className={cn(
@@ -230,7 +235,7 @@ function RunHistory({ runs }: { runs: SkillRun[] }) {
                     'h-auto font-medium text-[12px] text-ledger-head-ink',
                   )}
                 >
-                  Agent
+                  {t('clAgent')}
                 </TableHead>
                 <TableHead
                   className={cn(
@@ -238,7 +243,7 @@ function RunHistory({ runs }: { runs: SkillRun[] }) {
                     'h-auto w-24 text-right font-medium text-[12px] text-ledger-head-ink',
                   )}
                 >
-                  Tokens
+                  {t('clTokens2')}
                 </TableHead>
                 <TableHead
                   className={cn(
@@ -246,7 +251,7 @@ function RunHistory({ runs }: { runs: SkillRun[] }) {
                     'h-auto w-20 text-right font-medium text-[12px] text-ledger-head-ink',
                   )}
                 >
-                  Tools
+                  {t('clTools')}
                 </TableHead>
                 <TableHead
                   className={cn(
@@ -254,7 +259,7 @@ function RunHistory({ runs }: { runs: SkillRun[] }) {
                     'h-auto w-40 font-medium text-[12px] text-ledger-head-ink',
                   )}
                 >
-                  Result
+                  {t('clResult2')}
                 </TableHead>
                 <TableHead
                   className={cn(
@@ -262,7 +267,7 @@ function RunHistory({ runs }: { runs: SkillRun[] }) {
                     'h-auto w-24 text-right font-medium text-[12px] text-ledger-head-ink',
                   )}
                 >
-                  When
+                  {t('clWhen')}
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -278,6 +283,7 @@ function RunHistory({ runs }: { runs: SkillRun[] }) {
                     #{run.runNumber}
                   </TableCell>
                   <TableCell
+                    translate="no"
                     className={cn(
                       CELL_PADDING,
                       'truncate text-[13px] text-ledger-ink-2',
@@ -292,7 +298,7 @@ function RunHistory({ runs }: { runs: SkillRun[] }) {
                     )}
                   >
                     {run.tokens === undefined
-                      ? 'not run'
+                      ? t('clNotRun')
                       : formatTokens(run.tokens)}
                   </TableCell>
                   <TableCell
@@ -305,13 +311,16 @@ function RunHistory({ runs }: { runs: SkillRun[] }) {
                   </TableCell>
                   <TableCell className={cn(CELL_PADDING, 'text-[13px]')}>
                     {run.clean ? (
-                      <span className="inline-flex items-center gap-1 text-green">
-                        <Check className="size-3.5" />
-                        clean
+                      <span className="inline-flex items-center gap-1 text-ink-2">
+                        <Check className="size-3.5 text-green" />
+                        {t('clClean')}
                       </span>
                     ) : (
-                      <span className="truncate text-red">
-                        {run.erroredTool ?? 'error'}
+                      <span
+                        className="truncate text-red"
+                        translate={run.erroredTool ? 'no' : undefined}
+                      >
+                        {run.erroredTool ?? t('clErrorLower')}
                       </span>
                     )}
                   </TableCell>

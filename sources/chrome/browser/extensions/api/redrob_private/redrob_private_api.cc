@@ -37,6 +37,8 @@
 #include "chrome/browser/redrob/task_store.h"
 #include "chrome/browser/redrob/task_store_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/navigator/browser_navigator.h"
 #include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
@@ -756,6 +758,56 @@ RedrobPrivateSetWindowTranslucencyEnabledFunction::Run() {
   Profile::FromBrowserContext(browser_context())
       ->GetPrefs()
       ->SetBoolean(redrob::prefs::kWindowTranslucencyEnabled, params->enabled);
+  return RespondNow(NoArguments());
+}
+
+namespace {
+
+// The renderer-facing names for ThemeService::BrowserColorScheme. Strings rather than the stored integers,
+// because the integers are a pref encoding the page has no business depending on.
+constexpr char kColorSchemeSystem[] = "system";
+constexpr char kColorSchemeLight[] = "light";
+constexpr char kColorSchemeDark[] = "dark";
+
+}  // namespace
+
+ExtensionFunction::ResponseAction RedrobPrivateGetColorSchemeFunction::Run() {
+  ThemeService* theme = ThemeServiceFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()));
+  const char* name = kColorSchemeSystem;
+  switch (theme->GetBrowserColorScheme()) {
+    case ThemeService::BrowserColorScheme::kLight:
+      name = kColorSchemeLight;
+      break;
+    case ThemeService::BrowserColorScheme::kDark:
+      name = kColorSchemeDark;
+      break;
+    case ThemeService::BrowserColorScheme::kSystem:
+      break;
+  }
+  return RespondNow(
+      ArgumentList(redrob_private::GetColorScheme::Results::Create(name)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateSetColorSchemeFunction::Run() {
+  auto params = redrob_private::SetColorScheme::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  ThemeService::BrowserColorScheme scheme;
+  if (params->scheme == kColorSchemeSystem) {
+    scheme = ThemeService::BrowserColorScheme::kSystem;
+  } else if (params->scheme == kColorSchemeLight) {
+    scheme = ThemeService::BrowserColorScheme::kLight;
+  } else if (params->scheme == kColorSchemeDark) {
+    scheme = ThemeService::BrowserColorScheme::kDark;
+  } else {
+    // Ignored rather than stored: this arrives from a renderer.
+    return RespondNow(NoArguments());
+  }
+  // Through ThemeService, not prefs->SetInteger: its setter is what notifies the frame and the colour
+  // pipeline, so the window re-themes exactly as it does from chrome://settings/appearance.
+  ThemeServiceFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()))
+      ->SetBrowserColorScheme(scheme);
   return RespondNow(NoArguments());
 }
 

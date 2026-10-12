@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowUpRight } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { ArrowUpRight } from '@browseros/icons'
 import type { FC } from 'react'
 import { BRAND_MARKS } from '@/components/agents/agent-brand-marks'
 import { Button } from '@/components/ui/button'
@@ -38,11 +39,8 @@ export const PopularAcpAgentsDialog: FC<PopularAcpAgentsDialogProps> = ({
   <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="max-h-[80vh] overflow-y-auto">
       <DialogHeader>
-        <DialogTitle>Popular ACP agents</DialogTitle>
-        <DialogDescription>
-          Pick a starting point. Check each agent&rsquo;s docs for install and
-          login.
-        </DialogDescription>
+        <DialogTitle>{t('stPopularAcpAgents')}</DialogTitle>
+        <DialogDescription>{t('stPickAStartingPointCheck')}</DialogDescription>
       </DialogHeader>
 
       <div className="space-y-2 py-2">
@@ -80,7 +78,7 @@ export const PopularAcpAgentsDialog: FC<PopularAcpAgentsDialogProps> = ({
                       onSelect(agent.suggestedCommand as string, agent.id)
                     }
                   >
-                    Use
+                    {t('stUse')}
                   </Button>
                 ) : null}
                 <a
@@ -89,7 +87,7 @@ export const PopularAcpAgentsDialog: FC<PopularAcpAgentsDialogProps> = ({
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-0.5 font-medium text-[var(--accent-brand-ink)] text-xs"
                 >
-                  Docs <ArrowUpRight className="h-3 w-3" />
+                  {t('stDocs')} <ArrowUpRight className="h-3 w-3" />
                 </a>
               </div>
             </div>
@@ -98,8 +96,7 @@ export const PopularAcpAgentsDialog: FC<PopularAcpAgentsDialogProps> = ({
       </div>
 
       <p className="text-muted-foreground text-xs">
-        Commands are starting points; confirm the exact command and login in
-        each agent&rsquo;s ACP docs.
+        {t('stCommandsAreStartingPointsConfirm')}
       </p>
     </DialogContent>
   </Dialog>

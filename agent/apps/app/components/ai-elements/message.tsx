@@ -9,13 +9,14 @@
 
 'use client'
 
-import type { FileUIPart, UIMessage } from 'ai'
+import { t } from '@browseros/i18n'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
   PaperclipIcon,
   XIcon,
-} from 'lucide-react'
+} from '@browseros/icons'
+import type { FileUIPart, UIMessage } from 'ai'
 import type { ComponentProps, HTMLAttributes, ReactElement } from 'react'
 import { createContext, memo, useContext, useEffect, useState } from 'react'
 import type { BundledTheme } from 'shiki'
@@ -65,9 +66,9 @@ export const MessageContent = ({
 }: MessageContentProps) => (
   <div
     className={cn(
-      'is-user:dark flex w-fit flex-col gap-2 overflow-hidden text-sm',
-      'group-[.is-user]:ml-auto group-[.is-user]:rounded-lg group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground',
-      'group-[.is-assistant]:text-foreground',
+      'is-user:dark flex w-fit flex-col gap-2 overflow-hidden',
+      // The system's message bubbles (global.css .ui-msg): the person's on sunken, the agent's on --surface-ai.
+      'ui-msg group-[.is-user]:ml-auto group-[.is-assistant]:w-full',
       className,
     )}
     {...props}
@@ -283,7 +284,7 @@ export const MessageBranchPrevious = ({
 
   return (
     <Button
-      aria-label="Previous branch"
+      aria-label={t('stPreviousBranch')}
       disabled={totalBranches <= 1}
       onClick={goToPrevious}
       size="icon-sm"
@@ -310,7 +311,7 @@ export const MessageBranchNext = ({
 
   return (
     <Button
-      aria-label="Next branch"
+      aria-label={t('stNextBranch')}
       disabled={totalBranches <= 1}
       onClick={goToNext}
       size="icon-sm"
@@ -342,7 +343,7 @@ export const MessageBranchPage = ({
       )}
       {...props}
     >
-      {currentBranch + 1} of {totalBranches}
+      {t('stNofM', currentBranch + 1, totalBranches)}
     </ButtonGroupText>
   )
 }
@@ -387,7 +388,8 @@ export function MessageAttachment({
   const mediaType =
     data.mediaType?.startsWith('image/') && data.url ? 'image' : 'file'
   const isImage = mediaType === 'image'
-  const attachmentLabel = filename || (isImage ? 'Image' : 'Attachment')
+  const attachmentLabel =
+    filename || (isImage ? t('stImage') : t('stAttachment'))
 
   return (
     <div
@@ -408,7 +410,7 @@ export function MessageAttachment({
           />
           {onRemove && (
             <Button
-              aria-label="Remove attachment"
+              aria-label={t('stRemoveAttachment')}
               className="absolute top-2 right-2 size-6 rounded-full bg-background/80 p-0 opacity-0 backdrop-blur-sm transition-opacity hover:bg-background group-hover:opacity-100 [&>svg]:size-3"
               onClick={(e) => {
                 e.stopPropagation()
@@ -418,7 +420,7 @@ export function MessageAttachment({
               variant="ghost"
             >
               <XIcon />
-              <span className="sr-only">Remove</span>
+              <span className="sr-only">{t('stRemove')}</span>
             </Button>
           )}
         </>
@@ -436,7 +438,7 @@ export function MessageAttachment({
           </Tooltip>
           {onRemove && (
             <Button
-              aria-label="Remove attachment"
+              aria-label={t('stRemoveAttachment')}
               className="size-6 shrink-0 rounded-full p-0 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100 [&>svg]:size-3"
               onClick={(e) => {
                 e.stopPropagation()
@@ -446,7 +448,7 @@ export function MessageAttachment({
               variant="ghost"
             >
               <XIcon />
-              <span className="sr-only">Remove</span>
+              <span className="sr-only">{t('stRemove')}</span>
             </Button>
           )}
         </>

@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { ChevronDown, History } from 'lucide-react'
+import { t, tCount } from '@browseros/i18n'
+import { ChevronDown, History } from '@browseros/icons'
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -25,7 +26,7 @@ const HOME_TASK_LIMIT = 12
 // The header collapses the body, and the choice is remembered per machine so a
 // section collapsed once stays collapsed on every new tab after it. Default is
 // expanded, so a first run still shows that activity exists. Same localStorage
-// shape as ProductHuntBanner, try/catch included: a tab without storage access
+// shape as the other dismissible cockpit cards, try/catch included: a tab without storage access
 // must fall back to the default rather than throw.
 const COLLAPSED_KEY = 'cockpitRecentActivityCollapsed'
 const BODY_ID = 'recent-activity-body'
@@ -83,9 +84,9 @@ export function RecentActivity() {
       <div className="pt-0.5">
         <NavLink
           to="/audit"
-          className="group inline-flex items-center gap-2.5 font-medium text-[12px] text-cyanotype-blue leading-4 transition-colors hover:text-cyanotype-blue-hover"
+          className="group inline-flex items-center gap-2.5 font-medium text-[12px] text-accent-ink leading-4 transition-colors hover:text-ink"
         >
-          <span>View all activity</span>
+          <span>{t('clViewAllActivity')}</span>
           <span
             aria-hidden
             className="h-px w-[22px] bg-current transition-[width] group-hover:w-8"
@@ -123,12 +124,12 @@ function SectionHeader({
           className="group flex w-full cursor-pointer items-center gap-3.5 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyanotype-blue/40"
         >
           <span className="shrink-0 font-medium text-[15px] text-cyanotype-ink leading-[18px]">
-            Recent activity
+            {t('clRecentActivity')}
           </span>
           <span aria-hidden className="h-px flex-1 bg-cyanotype-border" />
           <span className="flex shrink-0 items-center gap-2">
             <span className="text-[11px] text-cyanotype-muted tabular-nums leading-[14px]">
-              {sessionCount} {sessionCount === 1 ? 'session' : 'sessions'}
+              {tCount('clSessions', sessionCount)}
             </span>
             <ChevronDown
               aria-hidden
@@ -158,8 +159,8 @@ function ActivityBody({
   if (tasks.length === 0) {
     return (
       <EmptyState
-        title="No recent activity"
-        hint="Tool calls from connected agents will appear here."
+        title={t('clNoRecentActivity')}
+        hint={t('clToolCallsAppearHere')}
         icon={<History className="size-5" />}
       />
     )
@@ -197,7 +198,10 @@ function ActivityList({ tasks, now }: { tasks: TaskSummary[]; now: number }) {
               data-testid={`activity-row-${task.sessionId}`}
               className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-cyanotype-well/60"
             >
-              <span className="w-28 shrink-0 truncate font-medium text-[12px] text-cyanotype-ink leading-4">
+              <span
+                className="w-28 shrink-0 truncate font-medium text-[12px] text-cyanotype-ink leading-4"
+                translate="no"
+              >
                 {task.label}
               </span>
               <span className="min-w-0 flex-1 truncate text-[12px] text-cyanotype-soft leading-4">
@@ -205,12 +209,12 @@ function ActivityList({ tasks, now }: { tasks: TaskSummary[]; now: number }) {
               </span>
               {isLive && (
                 <span className="shrink-0 rounded-full bg-cyanotype-live px-2 py-0.5 font-semibold text-[10px] text-cyanotype-live-ink">
-                  LIVE
+                  {t('clLive2')}
                 </span>
               )}
               {isStopped && (
                 <span className="shrink-0 font-medium text-[10px] text-cyanotype-muted">
-                  STOPPED
+                  {t('clStopped2')}
                 </span>
               )}
               <span className="shrink-0 text-[11px] text-cyanotype-muted tabular-nums leading-4">

@@ -7,8 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import dayjs from 'dayjs'
-import duration from 'dayjs/plugin/duration'
+import { t } from '@browseros/i18n'
 import {
   AlertCircle,
   Check,
@@ -18,7 +17,9 @@ import {
   RotateCcw,
   Square,
   XCircle,
-} from 'lucide-react'
+} from '@browseros/icons'
+import dayjs from 'dayjs'
+import duration from 'dayjs/plugin/duration'
 import { type FC, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -46,13 +47,13 @@ const formatDateTime = (dateStr: string) =>
   dayjs(dateStr).format('MMM D, YYYY, h:mm A')
 
 function formatDuration(startedAt: string, completedAt?: string): string {
-  if (!completedAt) return 'Still running'
+  if (!completedAt) return t('stStillRunning')
   const diff = dayjs(completedAt).diff(dayjs(startedAt))
   const d = dayjs.duration(diff)
   const mins = Math.floor(d.asMinutes())
   const secs = d.seconds()
-  if (mins === 0) return `${secs} seconds`
-  return `${mins}m ${secs}s`
+  if (mins === 0) return t('stDurationSeconds', secs)
+  return t('stDurationMinSec', mins, secs)
 }
 
 export const RunResultDialog: FC<RunResultDialogProps> = ({
@@ -85,7 +86,7 @@ export const RunResultDialog: FC<RunResultDialogProps> = ({
             ) : (
               <Loader2 className="h-5 w-5 animate-spin text-accent-brand-ink" />
             )}
-            {jobName || 'Run Result'}
+            {jobName || t('stRunResult')}
           </DialogTitle>
           <div className="text-muted-foreground text-sm">
             {formatDateTime(run.startedAt)} •{' '}
@@ -98,7 +99,7 @@ export const RunResultDialog: FC<RunResultDialogProps> = ({
             <div className="flex flex-col gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <AlertCircle className="h-5 w-5" />
-                <span className="font-medium text-sm">Task failed</span>
+                <span className="font-medium text-sm">{t('stTaskFailed')}</span>
               </div>
               <p className="text-destructive text-sm">{run.result}</p>
             </div>
@@ -108,7 +109,7 @@ export const RunResultDialog: FC<RunResultDialogProps> = ({
             </div>
           ) : (
             <div className="rounded-lg border border-border bg-muted/50 p-4 text-muted-foreground text-sm">
-              No result available
+              {t('stNoResultAvailable')}
             </div>
           )}
         </ScrollArea>
@@ -117,7 +118,7 @@ export const RunResultDialog: FC<RunResultDialogProps> = ({
           {run.status === 'running' && onCancelRun && (
             <Button variant="destructive" onClick={() => onCancelRun(run.id)}>
               <Square className="h-4 w-4" />
-              Cancel
+              {t('stCancel')}
             </Button>
           )}
           {run.status === 'failed' && onRetryRun && (
@@ -129,7 +130,7 @@ export const RunResultDialog: FC<RunResultDialogProps> = ({
               }}
             >
               <RotateCcw className="h-4 w-4" />
-              Retry
+              {t('stRetry')}
             </Button>
           )}
           {run.result && (
@@ -141,17 +142,17 @@ export const RunResultDialog: FC<RunResultDialogProps> = ({
               {copied ? (
                 <>
                   <Check className="h-4 w-4" />
-                  Copied
+                  {t('stCopied')}
                 </>
               ) : (
                 <>
                   <Copy className="h-4 w-4" />
-                  Copy
+                  {t('stCopy')}
                 </>
               )}
             </Button>
           )}
-          <Button onClick={() => onOpenChange(false)}>Close</Button>
+          <Button onClick={() => onOpenChange(false)}>{t('stClose')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

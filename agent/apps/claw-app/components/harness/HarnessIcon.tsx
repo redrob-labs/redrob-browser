@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Bot } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Bot } from '@browseros/icons'
 import type { FC } from 'react'
 import type { Harness } from './harness.types'
 import {
@@ -51,7 +52,7 @@ export const HarnessIcon: FC<HarnessIconProps> = ({ harness, className }) => {
       // Harness is added to the union without a case above.
       const _exhaustive: never = harness
       void _exhaustive
-      return <Bot className={className} aria-label="Harness" />
+      return <Bot className={className} aria-label={t('clHarness')} />
     }
   }
 }

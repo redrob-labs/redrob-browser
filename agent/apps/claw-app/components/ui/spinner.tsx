@@ -8,12 +8,17 @@
  */
 
 import { cn } from "@/lib/utils"
-import { IconLoader } from "@tabler/icons-react"
+import { Loader2 as IconLoader } from "@browseros/icons"
 
-function Spinner({ className, ...props }: React.ComponentProps<"svg">) {
-  return (
-    <IconLoader role="status" aria-label="Loading" className={cn("size-4 animate-spin", className)} {...props} />
-  )
+/** The system's spinner (.rr-spinner), named so a screen reader announces it as a live status. */
+function Spinner({
+  className,
+  "aria-label": label = "Loading",
+}: {
+  className?: string
+  "aria-label"?: string
+}) {
+  return <IconLoader aria-label={label} className={cn("size-4", className)} />
 }
 
 export { Spinner }

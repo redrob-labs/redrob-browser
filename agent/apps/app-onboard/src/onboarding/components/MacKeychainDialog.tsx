@@ -8,7 +8,8 @@
  */
 
 import { Dialog } from '@base-ui/react/dialog'
-import { ArrowRight, Lock, X } from 'lucide-react'
+import { t, tNodes } from '@browseros/i18n'
+import { ArrowRight, Lock, X } from '@browseros/icons'
 import { type RefObject, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -49,7 +50,7 @@ export function MacKeychainDialog({
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label="Back to import options"
+                  aria-label={t('onboardBackToImportOptions')}
                 />
               }
             >
@@ -62,13 +63,17 @@ export function MacKeychainDialog({
               tabIndex={-1}
               className="mb-3 font-semibold text-[26px] leading-[34px] tracking-tight outline-none"
             >
-              Import your Chrome logins
+              {t('onboardImportYourChromeLogins')}
             </Dialog.Title>
             <Dialog.Description className="text-[15px] text-ink-2 leading-[23px]">
-              Redrob needs your permission to import your logins from Chrome.
+              {t('onboardRedrobNeedsYourPermissionTo')}
               <br />
-              When macOS asks, enter your Mac login password and click{' '}
-              <strong className="font-semibold text-ink">Allow</strong>.
+              {tNodes(
+                'onboardWhenMacosAsksClick',
+                <strong key="allow" className="font-semibold text-ink">
+                  {t('onboardAllow')}
+                </strong>,
+              )}
             </Dialog.Description>
           </div>
           <MacKeychainPreview />
@@ -83,7 +88,7 @@ export function MacKeychainDialog({
                 />
               }
             >
-              Back
+              {t('onboardBack')}
             </Dialog.Close>
             <Button
               type="button"
@@ -91,7 +96,8 @@ export function MacKeychainDialog({
               className="h-[46px] rounded-lg px-5"
               onClick={onContinue}
             >
-              Continue <ArrowRight aria-hidden className="size-4" />
+              {t('onboardContinue')}{' '}
+              <ArrowRight aria-hidden className="size-4" />
             </Button>
           </div>
         </Dialog.Popup>

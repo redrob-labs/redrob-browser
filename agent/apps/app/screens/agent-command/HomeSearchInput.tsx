@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { Search } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Search } from '@browseros/icons'
 import { type FC, type FormEvent, useState } from 'react'
 import { resolveSearchInput } from '@/lib/newtab/search-input'
 
@@ -37,22 +38,22 @@ export const HomeSearchInput: FC = () => {
 
   return (
     <form
-      aria-label="Search"
+      aria-label={t('shSearch')}
       onSubmit={handleSubmit}
-      className="flex items-center gap-3 overflow-hidden rounded-[1.55rem] border border-border/60 bg-card/95 px-5 py-4 shadow-sm transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--accent-brand)]/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklch,var(--accent-brand)_15%,transparent),0_1px_2px_rgba(15,23,42,0.04)]"
+      className="ui-composer flex items-center gap-3 overflow-hidden px-5 py-4"
     >
-      <Search aria-hidden className="size-5 shrink-0 text-muted-foreground" />
+      <Search aria-hidden className="size-5 shrink-0 text-[var(--ink-muted)]" />
       <input
         // biome-ignore lint/a11y/noAutofocus: the new tab exists to be typed into
         autoFocus
         type="text"
         value={value}
         onChange={(event) => setValue(event.target.value)}
-        placeholder="Search the web or type a URL"
-        aria-label="Search the web or type a URL"
+        placeholder={t('shSearchTheWebOrType')}
+        aria-label={t('shSearchTheWebOrType')}
         autoComplete="off"
         spellCheck={false}
-        className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground"
+        className="ui-composer-input min-w-0 flex-1 bg-transparent outline-none"
       />
     </form>
   )

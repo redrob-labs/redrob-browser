@@ -7,15 +7,9 @@
  * See the NOTICE file for provenance.
  */
 
-import { MessageSquare, MousePointer2 } from 'lucide-react'
+import { type MessageKey, t } from '@browseros/i18n'
+import { MessageSquare, MousePointer2 } from '@browseros/icons'
 import type { FC } from 'react'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
-import { cn } from '@/lib/utils'
 import type { ChatMode } from '@/modules/chat/chat-types'
 
 export interface ChatModeToggleProps {
@@ -23,45 +17,56 @@ export interface ChatModeToggleProps {
   onModeChange: (mode: ChatMode) => void
 }
 
+const MODES: {
+  value: ChatMode
+  label: MessageKey
+  hint: MessageKey
+  icon: typeof MousePointer2
+}[] = [
+  {
+    value: 'agent',
+    label: 'sidepanelModeAgent',
+    hint: 'sidepanelModeAgentHint',
+    icon: MousePointer2,
+  },
+  {
+    value: 'chat',
+    label: 'sidepanelModeChat',
+    hint: 'sidepanelModeChatHint',
+    icon: MessageSquare,
+  },
+]
+
+/**
+ * The design system's ComposerMode (`.rr-cmode`): both modes visible as a radio group beside the
+ * composer, so the current one is read from the selection rather than from a pill that says "ON".
+ * Each option's label is its accessible name and its hint its title, which still holds in the 400px
+ * panel, where the system shows the icons only.
+ */
 export const ChatModeToggle: FC<ChatModeToggleProps> = ({
   mode,
   onModeChange,
-}) => {
-  const isAgentMode = mode === 'agent'
-
-  return (
-    <TooltipProvider delayDuration={0}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={() => onModeChange(isAgentMode ? 'chat' : 'agent')}
-            className={cn(
-              'flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 font-medium text-xs transition-all',
-              isAgentMode
-                ? 'border-border/50 bg-muted text-muted-foreground hover:text-foreground'
-                : 'border-[var(--accent-brand)]/30 bg-[var(--accent-brand)]/10 text-[var(--accent-brand-ink)]',
-            )}
-          >
-            {isAgentMode ? (
-              <>
-                <MousePointer2 className="h-3 w-3" />
-                <span>Agent Mode ON</span>
-              </>
-            ) : (
-              <>
-                <MessageSquare className="h-3 w-3" />
-                <span>Chat Mode ON</span>
-              </>
-            )}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-[220px]">
-          {isAgentMode
-            ? 'AI can browse, click, and navigate'
-            : 'AI can only read, cannot click or navigate'}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  )
-}
+}) => (
+  <div
+    className="rr-cmode"
+    role="radiogroup"
+    aria-label={t('sidepanelModeGroup')}
+  >
+    {MODES.map(({ value, label, hint, icon: Icon }) => (
+      // biome-ignore lint/a11y/useSemanticElements: the system's ComposerMode is a radiogroup of buttons
+      <button
+        key={value}
+        type="button"
+        role="radio"
+        aria-checked={mode === value}
+        aria-label={t(label)}
+        title={t(hint)}
+        className="rr-cmode__o"
+        onClick={() => mode !== value && onModeChange(value)}
+      >
+        <Icon aria-hidden="true" className="size-[13px]" />
+        <span className="rr-cmode__l">{t(label)}</span>
+      </button>
+    ))}
+  </div>
+)

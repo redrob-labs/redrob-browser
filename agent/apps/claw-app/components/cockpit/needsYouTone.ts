@@ -7,15 +7,13 @@
  * See the NOTICE file for provenance.
  */
 
-// The needs-you attention tone. The mockups call for the --amber family, but
-// white text on the --amber token fails WCAG AA in dark mode (the dark token is
-// a light #e8a33d). The burnt orange #b85c10 below is the brand amber darkened
-// to a fixed value that clears AA with white text in both themes, so the
-// attention state reads the same regardless of the viewer's theme.
+// The needs-you attention tone: the system's Orange 4 (status-warning in light), fixed in both themes
+// because white on the dark theme's Orange 3 fails AA. White on Orange 4 is 5.3:1; Orange 5 when pressed.
 //
 // surface: filled caption plate on the running card.
 // action:  the primary action on a pale surface (banner, in-control bar).
 export const needsYouTone = {
-  surface: 'bg-[#b85c10] text-white',
-  action: 'bg-[#b85c10] text-white hover:bg-[#a4520e]',
+  surface: 'bg-[var(--accent-orange-4)] text-white',
+  action:
+    'bg-[var(--accent-orange-4)] text-white hover:bg-[var(--accent-orange-5)]',
 } as const

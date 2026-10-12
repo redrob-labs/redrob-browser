@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Folder, FolderOpen, Globe, X } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Check, Folder, FolderOpen, Globe, X } from '@browseros/icons'
 import type { FC, PropsWithChildren } from 'react'
 import { useState } from 'react'
 import {
@@ -103,14 +104,14 @@ export const WorkspaceSelector: FC<
         align="start"
         className="w-72 p-0"
         role="dialog"
-        aria-label="Select workspace folder"
+        aria-label={t('stSelectWorkspaceFolder')}
       >
         <Command
           className="[&_svg:not([class*='text-'])]:text-muted-foreground"
           shouldFilter={false}
         >
           <CommandInput
-            placeholder="Search folders..."
+            placeholder={t('stSearchFolders')}
             className="h-9"
             value={filterText}
             onValueChange={setFilterText}
@@ -124,9 +125,9 @@ export const WorkspaceSelector: FC<
               >
                 <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
-                  <span className="block text-sm">No workspace</span>
+                  <span className="block text-sm">{t('stNoWorkspace')}</span>
                   <span className="block text-muted-foreground text-xs">
-                    AI works with tabs only
+                    {t('stAiWorksWithTabsOnly')}
                   </span>
                 </div>
                 {!selectedFolder && (
@@ -138,7 +139,7 @@ export const WorkspaceSelector: FC<
             {filteredFolders.length > 0 && (
               <CommandGroup>
                 <div className="my-2 px-2 font-semibold text-muted-foreground text-xs uppercase tracking-wide">
-                  Recent
+                  {t('stRecent')}
                 </div>
                 {filteredFolders.map((folder) => (
                   <CommandItem
@@ -167,7 +168,7 @@ export const WorkspaceSelector: FC<
                           'rounded p-0.5 transition-opacity hover:bg-muted-foreground/20',
                           'opacity-0 group-hover:opacity-100',
                         )}
-                        aria-label={`Remove ${folder.name} from recents`}
+                        aria-label={t('stRemoveFromRecents', folder.name)}
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -177,7 +178,7 @@ export const WorkspaceSelector: FC<
               </CommandGroup>
             )}
 
-            <CommandEmpty>No folders found</CommandEmpty>
+            <CommandEmpty>{t('stNoFoldersFound')}</CommandEmpty>
           </CommandList>
 
           <div className="border-border/50 border-t">
@@ -187,7 +188,7 @@ export const WorkspaceSelector: FC<
               className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted"
             >
               <FolderOpen className="h-4 w-4 text-muted-foreground" />
-              <span>Choose a different folder</span>
+              <span>{t('stChooseADifferentFolder')}</span>
             </button>
           </div>
         </Command>

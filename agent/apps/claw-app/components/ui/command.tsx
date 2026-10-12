@@ -22,7 +22,7 @@ import {
   InputGroup,
   InputGroupAddon,
 } from "@/components/ui/input-group"
-import { IconSearch, IconCheck } from "@tabler/icons-react"
+import { Search as IconSearch, Check as IconCheck } from "@browseros/icons"
 
 function Command({
   className,

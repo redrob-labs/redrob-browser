@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tCount } from '@browseros/i18n'
 import { activityCardCaptionTones } from '@/components/cockpit/activityCardTone'
 import { cn } from '@/lib/utils'
 import {
@@ -66,7 +67,9 @@ export function AuditHoverPreview({ task }: AuditHoverPreviewProps) {
           data-caption-tone="blue"
         >
           <div className="flex items-center gap-2 font-mono text-[10px] text-white/75 uppercase tracking-[0.08em]">
-            <span className="truncate text-white/95">{task.slug}</span>
+            <span className="truncate text-white/95" translate="no">
+              {task.slug}
+            </span>
             {task.status === 'live' && <LiveChip />}
           </div>
           <p className="truncate font-semibold text-[13px] text-white leading-tight">
@@ -74,7 +77,8 @@ export function AuditHoverPreview({ task }: AuditHoverPreviewProps) {
           </p>
           <p className="font-mono text-[10.5px] text-white/65 tabular-nums">
             {formatDuration(task.durationMs)}{' '}
-            <span className="text-white/40">·</span> {task.dispatchCount} tools{' '}
+            <span className="text-white/40">·</span>{' '}
+            {tCount('clTools', task.dispatchCount)}{' '}
             <span className="text-white/40">·</span>{' '}
             {formatRelative(task.startedAt, Date.now())}
           </p>
@@ -108,7 +112,7 @@ function NoShotComposition({ task }: { task: TaskSummary }) {
 function LiveChip() {
   return (
     <span className="inline-flex shrink-0 items-center rounded-full bg-cyanotype-live px-2.5 py-[3px] font-sans font-semibold text-[11px] text-cyanotype-live-ink normal-case leading-[14px] tracking-normal">
-      Live
+      {t('clLive')}
     </span>
   )
 }

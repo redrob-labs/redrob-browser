@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowRight, PlugZap } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { ArrowRight, PlugZap } from '@browseros/icons'
 import type { FC } from 'react'
 import { cn } from '@/lib/utils'
 
@@ -26,15 +27,11 @@ export interface NoProviderNoticeProps {
 }
 
 function headline(blocked: boolean): string {
-  return blocked
-    ? 'Nothing to send this to yet'
-    : 'Connect a provider to start chatting'
+  return blocked ? t('shNothingToSendThisTo') : t('shConnectAProviderToStart')
 }
 
 function body(blocked: boolean): string {
-  return blocked
-    ? 'Connect an LLM provider or a coding agent, then send again. Your message is still here.'
-    : 'Connect an LLM provider or a coding agent you already use.'
+  return blocked ? t('shConnectThenSendAgain') : t('shConnectAnLlmProviderOr')
 }
 
 /**
@@ -78,7 +75,7 @@ export const NoProviderNotice: FC<NoProviderNoticeProps> = ({
         rel="noopener noreferrer"
         className="inline-flex items-center gap-1 pt-0.5 font-medium text-[var(--accent-brand-ink)] text-xs underline-offset-4 hover:underline"
       >
-        Connect a provider
+        {t('shConnectAProvider')}
         <ArrowRight aria-hidden className="size-3" />
       </a>
     </div>

@@ -124,7 +124,7 @@ afterEach(() => {
 
 const { Mcp } = await import('./Mcp')
 const { HeroCard } = await import('./HeroCard')
-const { COWORK_REQUIREMENT_LINE, EXTENSION_DOWNLOAD_URL } = await import(
+const { coworkRequirementLine, EXTENSION_DOWNLOAD_URL } = await import(
   './install-guide.data'
 )
 
@@ -197,7 +197,7 @@ describe('Mcp (editorial)', () => {
     expect(html).toContain('Claude Desktop')
     expect(html).toContain('Give Claude Desktop a real browser.')
     expect(html).toContain('Show me how')
-    expect(html).toContain(COWORK_REQUIREMENT_LINE)
+    expect(html).toContain(coworkRequirementLine())
     // The walkthrough replaced the link-out; nothing here should leave the app.
     expect(html).not.toContain(
       'https://github.com/browseros-ai/browserclaw-claude-desktop#install-the-extension',

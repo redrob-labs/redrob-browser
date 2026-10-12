@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import {
   Activity,
   ArrowLeft,
@@ -14,7 +15,7 @@ import {
   MessageSquare,
   Palette,
   Server,
-} from 'lucide-react'
+} from '@browseros/icons'
 import type { FC } from 'react'
 import { NavLink } from 'react-router'
 import { ThemeToggle } from '@/components/elements/theme-toggle'
@@ -51,43 +52,42 @@ function isExternalNavItem(item: NavItem): item is ExternalNavItem {
 
 const getNavLinkClassName = (isActive: boolean) =>
   cn(
-    'flex h-9 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 font-medium text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-    isActive && 'bg-sidebar-accent text-sidebar-accent-foreground',
+    'ui-shell-link flex h-9 items-center gap-2 overflow-hidden whitespace-nowrap px-3',
+    isActive && 'active',
   )
 
 const getSectionClassName = (index: number) =>
-  cn(index > 0 && 'mt-3 border-t pt-3')
+  cn(index > 0 && 'mt-3 border-[var(--border-subtle)] border-t pt-3')
 
-const sectionLabelClassName =
-  'mb-2 px-3 font-semibold text-[10px] text-muted-foreground uppercase tracking-[0.18em]'
+const sectionLabelClassName = 'ui-shell-label mb-2 px-3'
 
 const primarySettingsSections: NavSection[] = [
   {
-    label: 'Provider Settings',
+    label: t('shProviderSettings'),
     items: [
-      { name: 'AI & Agents', to: '/settings/ai', icon: Bot },
+      { name: t('stAiAmpAgents'), to: '/settings/ai', icon: Bot },
       {
-        name: 'Chat & Council Provider',
+        name: t('stNavChatCouncil'),
         to: '/settings/chat',
         icon: MessageSquare,
       },
     ],
   },
   {
-    label: 'Other',
+    label: t('shOther'),
     items: [
       {
-        name: 'Customize Redrob',
+        name: t('customizeTitle'),
         to: '/settings/customization',
         icon: Palette,
       },
-      { name: 'Redrob as MCP', to: '/settings/mcp', icon: Server },
+      { name: t('stNavRedrobMcp'), to: '/settings/mcp', icon: Server },
     ],
   },
 ]
 
 const helpItems: NavItem[] = [
-  { name: 'Diagnostics', to: '/settings/diagnostics', icon: Activity },
+  { name: t('stNavDiagnostics'), to: '/settings/diagnostics', icon: Activity },
 ]
 
 export const SettingsSidebar: FC = () => {
@@ -145,14 +145,14 @@ export const SettingsSidebar: FC = () => {
   )
 
   return (
-    <div className="flex h-full w-64 flex-col border-r bg-sidebar text-sidebar-foreground">
+    <div className="ui-shell-side flex h-full w-64 flex-col">
       <div className="flex h-14 items-center justify-between border-b px-2">
         <NavLink
           to="/home"
-          className="flex h-9 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 font-medium text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          className="ui-shell-link flex h-9 items-center gap-2 overflow-hidden whitespace-nowrap px-3"
         >
           <ArrowLeft className="size-4 shrink-0" />
-          <span className="truncate">Back</span>
+          <span className="truncate">{t('shBack')}</span>
         </NavLink>
         <ThemeToggle
           className="mr-1 h-8 w-8 shrink-0"
@@ -161,12 +161,10 @@ export const SettingsSidebar: FC = () => {
       </div>
 
       <div className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden p-2">
-        <div className="mb-2 px-3 font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-          Settings
-        </div>
+        <div className="ui-shell-label mb-2 px-3">{t('shSettings')}</div>
         <div>{filteredSections.map(renderSection)}</div>
         <div className="mt-auto pt-4">
-          <div className={sectionLabelClassName}>Help</div>
+          <div className={sectionLabelClassName}>{t('shHelp')}</div>
           <nav className="space-y-1">
             {filteredHelpItems.map(renderNavItem)}
           </nav>

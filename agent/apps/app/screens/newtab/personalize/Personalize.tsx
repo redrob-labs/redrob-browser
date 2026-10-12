@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, ChevronDown, Copy } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Check, ChevronDown, Copy } from '@browseros/icons'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -25,18 +26,18 @@ import { templates } from './templates'
 const sections = [
   {
     key: 'aboutYou' as const,
-    title: 'Add more info about you',
-    description: 'Help Redrob understand who you are',
+    title: t('shAddMoreInfoAboutYou'),
+    description: t('shHelpRedrobUnderstandWhoYou'),
   },
   {
     key: 'expectations' as const,
-    title: 'What you expect from the browser',
-    description: 'Share your preferences and needs',
+    title: t('shWhatYouExpectFromThe'),
+    description: t('shShareYourPreferencesAndNeeds'),
   },
   {
     key: 'commonActions' as const,
-    title: 'Your commonly performed actions',
-    description: 'Describe your daily workflows',
+    title: t('shYourCommonlyPerformedActions'),
+    description: t('shDescribeYourDailyWorkflows'),
   },
 ]
 
@@ -69,18 +70,17 @@ export const Personalize = () => {
           mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0',
         )}
       >
-        <Label htmlFor="personalization">Your Information</Label>
+        <Label htmlFor="personalization">{t('shYourInformation')}</Label>
         <MarkdownEditor
           id="personalization"
           value={personalization}
           autoFocus
           onChange={setPersonalization}
-          placeholder="Tell Redrob about yourself..."
+          placeholder={t('shTellRedrobAboutYourself')}
           className="styled-scrollbar h-96 overflow-y-auto"
         />
         <p className="text-muted-foreground text-xs">
-          Your information is saved locally and never leaves your device.
-          Markdown formatting is supported.
+          {t('shYourInformationIsSavedLocally')}
         </p>
       </div>
 
@@ -90,9 +90,7 @@ export const Personalize = () => {
           mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0',
         )}
       >
-        <h2 className="font-semibold text-muted-foreground text-sm uppercase tracking-wide">
-          Need help getting started?
-        </h2>
+        <h2 className="ui-meta-label">{t('shNeedHelpGettingStarted')}</h2>
         <div className="space-y-2">
           {sections.map((section) => (
             <Collapsible
@@ -101,12 +99,12 @@ export const Personalize = () => {
               onOpenChange={(open) =>
                 setExpandedSection(open ? section.key : null)
               }
-              className="w-full rounded-xl border border-border/50 bg-card hover:border-border"
+              className="ui-card w-full"
             >
               <CollapsibleTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="flex h-auto w-full items-center justify-between p-4 text-left hover:bg-accent/50"
+                  className="ui-card-btn flex w-full items-center justify-between border-transparent! p-4 text-left"
                 >
                   <div className="flex-1">
                     <h3 className="mb-1 font-medium text-foreground text-sm">
@@ -126,10 +124,10 @@ export const Personalize = () => {
                 <div className="space-y-3 px-4 pb-4">
                   <div>
                     <p className="mb-2 font-medium text-muted-foreground text-xs">
-                      Template (click to copy):
+                      {t('shTemplateClickToCopy')}
                     </p>
                     <div className="relative">
-                      <pre className="styled-scrollbar overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-accent/50 p-4 text-foreground text-xs">
+                      <pre className="ui-sample styled-scrollbar overflow-x-auto whitespace-pre-wrap break-words p-4 text-xs">
                         {templates[section.key].template}
                       </pre>
                       <Button
@@ -137,10 +135,10 @@ export const Personalize = () => {
                         size="icon-sm"
                         onClick={() => copyTemplate(section.key)}
                         className="absolute top-3 right-3"
-                        title="Copy template"
+                        title={t('shCopyTemplate')}
                       >
                         {copiedSection === section.key ? (
-                          <Check className="h-4 w-4 text-green-500" />
+                          <Check className="ui-status--success h-4 w-4" />
                         ) : (
                           <Copy className="h-4 w-4 text-muted-foreground" />
                         )}
@@ -150,17 +148,15 @@ export const Personalize = () => {
 
                   <div>
                     <p className="mb-2 font-medium text-muted-foreground text-xs">
-                      Example:
+                      {t('shExample')}
                     </p>
-                    <pre className="styled-scrollbar overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-border/30 bg-muted/30 p-4 text-muted-foreground text-xs">
+                    <pre className="ui-sample ui-sample--quiet styled-scrollbar overflow-x-auto whitespace-pre-wrap break-words p-4 text-xs">
                       {templates[section.key].example}
                     </pre>
                   </div>
 
                   <p className="text-muted-foreground text-xs">
-                    Click the copy button to add this template to your
-                    clipboard, then paste it into the text area above and
-                    customize it.
+                    {t('shClickTheCopyButtonTo')}
                   </p>
                 </div>
               </CollapsibleContent>

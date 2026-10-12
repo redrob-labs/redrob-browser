@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { ChevronDown, History, Loader2, Search } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { ChevronDown, History, Loader2, Search } from '@browseros/icons'
 import { useEffect, useId, useState } from 'react'
 import { Link } from 'react-router'
 import {
@@ -58,14 +59,12 @@ export function SidebarHistory({
   const trigger = (
     <button
       type="button"
-      aria-label="History"
+      aria-label={t('shHistory')}
       aria-expanded={visible}
       aria-controls={contentId}
       onClick={() => setOpen((value) => !value)}
-      className={cn(
-        'flex h-9 w-full items-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 font-medium text-sm transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        open && 'bg-[var(--accent-brand)]/10',
-      )}
+      // An open disclosure is not a selection, so it takes no `active` ground; the chevron says it.
+      className="ui-shell-link flex h-9 w-full items-center gap-2 overflow-hidden whitespace-nowrap px-3"
     >
       <History className="size-4 shrink-0" />
       <span
@@ -74,7 +73,7 @@ export function SidebarHistory({
           !expanded && 'opacity-0',
         )}
       >
-        History
+        {t('shHistory')}
       </span>
       {expanded && (
         <ChevronDown
@@ -93,7 +92,9 @@ export function SidebarHistory({
       {/* Content is absent while expanded; close from the trigger rather than the content's hover region. */}
       <Tooltip disableHoverableContent>
         <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-        {!expanded && <TooltipContent side="right">History</TooltipContent>}
+        {!expanded && (
+          <TooltipContent side="right">{t('shHistory')}</TooltipContent>
+        )}
       </Tooltip>
       <div id={contentId} hidden={!visible}>
         <div className="mx-3 my-3 space-y-2">
@@ -101,8 +102,8 @@ export function SidebarHistory({
             <Search className="size-3.5 shrink-0 text-muted-foreground" />
             <input
               type="search"
-              aria-label="Search conversations"
-              placeholder="Search conversations"
+              aria-label={t('shSearchConversations')}
+              placeholder={t('shSearchConversations')}
               value={search}
               onChange={(event) => {
                 setSearch(event.target.value)
@@ -113,7 +114,7 @@ export function SidebarHistory({
           </label>
           <section
             className="styled-scrollbar max-h-[min(28rem,50dvh)] space-y-2 overflow-y-auto"
-            aria-label="Recent conversations"
+            aria-label={t('shRecentConversations')}
           >
             {isPending && !isError && (
               <p
@@ -121,7 +122,7 @@ export function SidebarHistory({
                 className="flex items-center gap-2 px-2 py-3 text-muted-foreground text-xs"
               >
                 <Loader2 className="size-3.5 animate-spin" />
-                Loading conversations…
+                {t('shLoadingConversations')}
               </p>
             )}
             {isError && (
@@ -129,13 +130,13 @@ export function SidebarHistory({
                 role="alert"
                 className="px-2 py-2 text-muted-foreground text-xs"
               >
-                <p>Couldn’t load history.</p>
+                <p>{t('shCouldnTLoadHistory')}</p>
                 <button
                   type="button"
                   onClick={() => void refetch()}
                   className="mt-1 underline underline-offset-2"
                 >
-                  Try again
+                  {t('shTryAgain')}
                 </button>
               </div>
             )}
@@ -145,15 +146,13 @@ export function SidebarHistory({
                 className="px-2 py-3 text-muted-foreground text-xs"
               >
                 {search.trim()
-                  ? 'No conversations found.'
-                  : 'Your conversations will appear here.'}
+                  ? t('shNoConversationsFound')
+                  : t('shYourConversationsWillAppearHere')}
               </p>
             )}
             {groups.map((group) => (
               <section key={group.label} aria-label={group.label}>
-                <h3 className="px-2 pt-2 pb-1 font-medium text-muted-foreground text-xs">
-                  {group.label}
-                </h3>
+                <h3 className="ui-shell-label px-2 pt-2 pb-1">{group.label}</h3>
                 <ul className="space-y-1">
                   {group.conversations.map((conversation) => {
                     const title = conversationTitle(
@@ -169,8 +168,8 @@ export function SidebarHistory({
                           }
                           title={title}
                           className={cn(
-                            'flex h-10 min-w-0 flex-col justify-center rounded-md px-2 hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                            activeId === conversation.id && 'bg-sidebar-accent',
+                            'ui-shell-link flex h-10 min-w-0 flex-col justify-center px-2',
+                            activeId === conversation.id && 'active',
                           )}
                         >
                           <span className="truncate text-[13px] leading-[19px]">
@@ -195,9 +194,9 @@ export function SidebarHistory({
               <button
                 type="button"
                 onClick={() => setLimit((value) => value + HISTORY_PAGE_SIZE)}
-                className="w-full rounded-md px-2 py-2 text-left text-muted-foreground text-xs hover:bg-sidebar-accent"
+                className="ui-shell-link w-full px-2 py-2 text-left text-xs"
               >
-                Show older
+                {t('shShowOlder')}
               </button>
             )}
           </section>

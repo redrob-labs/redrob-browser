@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Menu } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Menu } from '@browseros/icons'
 import type { FC } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation } from 'react-router'
@@ -79,7 +80,7 @@ const SidebarLayoutContent: FC = () => {
               size="icon"
               className="-ml-1 size-7"
               onClick={() => setMobileOpen(true)}
-              aria-label="Open navigation"
+              aria-label={t('shOpenNavigation')}
             >
               <Menu className="size-4" />
             </Button>

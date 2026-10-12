@@ -7,12 +7,13 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import type { ServerConversationSummary } from './conversations.hooks'
 
 export const HISTORY_PAGE_SIZE = 6
 
 export function conversationTitle(lastUserMessage: string): string {
-  return lastUserMessage.trim() || 'Untitled conversation'
+  return lastUserMessage.trim() || t('shUntitledConversation')
 }
 
 /** Group by local calendar days, not elapsed hours (which breaks at midnight/DST). */
@@ -31,7 +32,7 @@ export function historyTimestamp(timestamp: number, now: Date): string {
       0,
       Math.floor((now.getTime() - timestamp) / 60_000),
     )
-    if (minutes < 1) return 'Just now'
+    if (minutes < 1) return t('shJustNow')
     if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
     const hours = Math.floor(minutes / 60)
     return `${hours} hour${hours === 1 ? '' : 's'} ago`

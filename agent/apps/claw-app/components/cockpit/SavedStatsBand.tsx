@@ -8,6 +8,7 @@
  */
 
 import type { CockpitStats, CockpitStatsWindow } from '@browseros/claw-api'
+import { t, tNodes } from '@browseros/i18n'
 import { useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
@@ -54,11 +55,11 @@ export function SavedStatsBand({ stats }: SavedStatsBandProps) {
         data-saved-stats-header
       >
         <h2 className="font-semibold text-[18px] text-cyanotype-ink leading-7">
-          Since you started
+          {t('clSinceYouStarted')}
         </h2>
         <TabsList
           activateOnFocus
-          aria-label="Saved stats window"
+          aria-label={t('clSavedStatsWindow')}
           className="ml-auto h-9 rounded-[9px] bg-cyanotype-well p-1"
         >
           {WINDOWS.map(({ key, tabLabel }) => (
@@ -114,7 +115,7 @@ function SavedStatsPanel({
       <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
         <div className="min-w-0">
           <div className="text-[11px] text-cyanotype-muted leading-4">
-            Tokens saved · {windowDefinition.valueLabel}
+            {t('clTokensSavedWindow', windowDefinition.valueLabel)}
           </div>
           <div className="mt-1.5 flex items-baseline gap-2">
             <span
@@ -133,14 +134,16 @@ function SavedStatsPanel({
               >
                 {Math.round(savingsRatio * 100)}%
               </span>
-              <span className="text-[12px] text-green leading-4">fewer</span>
+              <span className="text-[12px] text-green leading-4">
+                {t('clFewer')}
+              </span>
             </span>
           </div>
         </div>
 
         <div className="min-w-0">
           <div className="text-[11px] text-cyanotype-muted leading-4">
-            Human time saved
+            {t('clHumanTimeSaved')}
           </div>
           <div
             className="mt-1.5 font-extrabold text-[26px] text-cyanotype-ink tabular-nums leading-none tracking-[-0.02em]"
@@ -152,7 +155,7 @@ function SavedStatsPanel({
 
         <div className="min-w-0">
           <div className="text-[11px] text-cyanotype-muted leading-4">
-            Sessions · tool calls
+            {t('clSessionsToolCalls')}
           </div>
           <div
             className="mt-1.5 min-w-0 max-w-full break-all font-extrabold text-[26px] text-cyanotype-ink tabular-nums leading-none tracking-[-0.02em]"
@@ -173,16 +176,28 @@ function SavedStatsPanel({
       <div>
         <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] leading-4">
           <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-medium text-cyanotype-soft">
-            used{' '}
-            <span className="tabular-nums" data-stat="browserclaw-tokens">
-              {formatCompact(windowStats.browserClawTokenEstimate)}
-            </span>
+            {tNodes(
+              'clUsedN',
+              <span
+                key="a"
+                className="tabular-nums"
+                data-stat="browserclaw-tokens"
+              >
+                {formatCompact(windowStats.browserClawTokenEstimate)}
+              </span>,
+            )}
           </span>
           <span className="text-cyanotype-muted">
-            a screenshot-first agent would spend{' '}
-            <span className="tabular-nums" data-stat="comparison-tokens">
-              {formatCompact(windowStats.screenshotFirstTokenEstimate)}
-            </span>
+            {tNodes(
+              'clScreenshotAgentSpend',
+              <span
+                key="a"
+                className="tabular-nums"
+                data-stat="comparison-tokens"
+              >
+                {formatCompact(windowStats.screenshotFirstTokenEstimate)}
+              </span>,
+            )}
           </span>
         </div>
         <div

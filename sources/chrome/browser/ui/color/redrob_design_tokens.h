@@ -1,6 +1,6 @@
 // VENDORED FROM THE REDROB DESIGN SYSTEM -- DO NOT EDIT.
-// source: @redrob-labs/ui@1.0.2  dist/native/redrob_tokens.h
-// commit: f97d68788db563c1d398946f51685d550dea163a
+// source: @redrob-labs/ui@1.3.1  dist/native/redrob_tokens.h
+// commit: 49f54c9b33855e4e4442aa8e10c8c400529f4303
 //
 // Regenerate with: python3 scripts/vendor_design_system.py --update
 // A value changed here is a value that disagrees with every other Redrob product.
@@ -15,7 +15,7 @@
 // 0xAARRGGBB, which is what SkColor and SK_ColorSetARGB expect. Alpha is real: two tokens in the set
 // are translucent, and treating them as opaque paints a block where the design has a veil.
 //
-// 188 colours, both themes. Pick the namespace by the active theme, not by build flag -
+// 223 colours, both themes. Pick the namespace by the active theme, not by build flag -
 // the browser can be dark while the OS is light.
 
 #ifndef REDROB_TOKENS_H_
@@ -86,6 +86,9 @@ namespace light {
   constexpr uint32_t kBorderAi = 0xFFBAD2FF;            // --border-ai
   constexpr uint32_t kBorderStrong = 0xFF7C8390;        // --border-strong (same in both themes)
   constexpr uint32_t kBorderSubtle = 0xFFDFE2E8;        // --border-subtle
+  constexpr uint32_t kChartBad = 0xFFAE5100;            // --chart-bad
+  constexpr uint32_t kChartGood = 0xFF2B52FF;           // --chart-good
+  constexpr uint32_t kChartTrack = 0xFFEFF1F4;          // --chart-track
   constexpr uint32_t kFocusRing = 0xFF2B52FF;           // --focus-ring
   constexpr uint32_t kGray1 = 0xFFF8F9FB;               // --gray-1 (same in both themes)
   constexpr uint32_t kGray2 = 0xFFEFF1F4;               // --gray-2 (same in both themes)
@@ -96,11 +99,29 @@ namespace light {
   constexpr uint32_t kGray7 = 0xFF576071;               // --gray-7 (same in both themes)
   constexpr uint32_t kGray8 = 0xFF292E37;               // --gray-8 (same in both themes)
   constexpr uint32_t kGray9 = 0xFF141719;               // --gray-9 (same in both themes)
+  constexpr uint32_t kHeatNeg1 = 0xFFFFF1E2;            // --heat-neg-1
+  constexpr uint32_t kHeatNeg2 = 0xFFFFD5AB;            // --heat-neg-2
+  constexpr uint32_t kHeatNeg3 = 0xFFFFB571;            // --heat-neg-3
+  constexpr uint32_t kHeatPos1 = 0xFFE3ECFF;            // --heat-pos-1
+  constexpr uint32_t kHeatPos2 = 0xFFBAD2FF;            // --heat-pos-2
+  constexpr uint32_t kHeatPos3 = 0xFF8AAFFF;            // --heat-pos-3
   constexpr uint32_t kInkBrand = 0xFF1733D5;            // --ink-brand
   constexpr uint32_t kInkMuted = 0xFF686E78;            // --ink-muted
   constexpr uint32_t kInkOnBrand = 0xFFFFFFFF;          // --ink-on-brand (same in both themes)
   constexpr uint32_t kInkPrimary = 0xFF0A0B0C;          // --ink-primary
   constexpr uint32_t kInkSecondary = 0xFF576071;        // --ink-secondary
+  constexpr uint32_t kOrdinal0 = 0xFFDFE2E8;            // --ordinal-0
+  constexpr uint32_t kOrdinal1 = 0xFFD9E6FF;            // --ordinal-1
+  constexpr uint32_t kOrdinal2 = 0xFFBAD2FF;            // --ordinal-2
+  constexpr uint32_t kOrdinal3 = 0xFF507FFF;            // --ordinal-3 (same in both themes)
+  constexpr uint32_t kOrdinal4 = 0xFF1733D5;            // --ordinal-4
+  constexpr uint32_t kOrdinal5 = 0xFF061460;            // --ordinal-5
+  constexpr uint32_t kOrdinalInk0 = 0xFF141719;         // --ordinal-ink-0
+  constexpr uint32_t kOrdinalInk1 = 0xFF030C34;         // --ordinal-ink-1
+  constexpr uint32_t kOrdinalInk2 = 0xFF030C34;         // --ordinal-ink-2
+  constexpr uint32_t kOrdinalInk3 = 0xFFFFFFFF;         // --ordinal-ink-3 (same in both themes)
+  constexpr uint32_t kOrdinalInk4 = 0xFFFFFFFF;         // --ordinal-ink-4
+  constexpr uint32_t kOrdinalInk5 = 0xFFFFFFFF;         // --ordinal-ink-5
   constexpr uint32_t kOverlayScrim = 0x8C0A0B0C;        // --overlay-scrim
   constexpr uint32_t kProductBrowser = 0xFFF14AA8;      // --product-browser (same in both themes)
   constexpr uint32_t kProductBrowser1 = 0xFFFFF3F8;     // --product-browser-1 (same in both themes)
@@ -144,6 +165,20 @@ namespace light {
   constexpr uint32_t kProductCodeFill = 0xFFCCF9D6;     // --product-code-fill
   constexpr uint32_t kProductCodeLine = 0xFF97EFAF;     // --product-code-line
   constexpr uint32_t kProductCodeWash = 0xFFE9FDED;     // --product-code-wash
+  constexpr uint32_t kProductConsole = 0xFF2B52FF;      // --product-console (same in both themes)
+  constexpr uint32_t kProductConsole1 = 0xFFEEF4FF;     // --product-console-1 (same in both themes)
+  constexpr uint32_t kProductConsole10 = 0xFF030C34;    // --product-console-10 (same in both themes)
+  constexpr uint32_t kProductConsole2 = 0xFFD9E6FF;     // --product-console-2 (same in both themes)
+  constexpr uint32_t kProductConsole3 = 0xFFBAD2FF;     // --product-console-3 (same in both themes)
+  constexpr uint32_t kProductConsole4 = 0xFF8AAFFF;     // --product-console-4 (same in both themes)
+  constexpr uint32_t kProductConsole5 = 0xFF507FFF;     // --product-console-5 (same in both themes)
+  constexpr uint32_t kProductConsole6 = 0xFF2B52FF;     // --product-console-6 (same in both themes)
+  constexpr uint32_t kProductConsole7 = 0xFF1733D5;     // --product-console-7 (same in both themes)
+  constexpr uint32_t kProductConsole8 = 0xFF09209C;     // --product-console-8 (same in both themes)
+  constexpr uint32_t kProductConsole9 = 0xFF061460;     // --product-console-9 (same in both themes)
+  constexpr uint32_t kProductConsoleFill = 0xFFD9E6FF;  // --product-console-fill
+  constexpr uint32_t kProductConsoleLine = 0xFFBAD2FF;  // --product-console-line
+  constexpr uint32_t kProductConsoleWash = 0xFFEEF4FF;  // --product-console-wash
   constexpr uint32_t kProductDesign = 0xFFC162F4;       // --product-design (same in both themes)
   constexpr uint32_t kProductDesign1 = 0xFFFAF4FF;      // --product-design-1 (same in both themes)
   constexpr uint32_t kProductDesign10 = 0xFF35004B;     // --product-design-10 (same in both themes)
@@ -277,6 +312,9 @@ namespace dark {
   constexpr uint32_t kBorderAi = 0xFF09209C;            // --border-ai
   constexpr uint32_t kBorderStrong = 0xFF7C8390;        // --border-strong (same in both themes)
   constexpr uint32_t kBorderSubtle = 0xFF292E37;        // --border-subtle
+  constexpr uint32_t kChartBad = 0xFFFF9C1B;            // --chart-bad
+  constexpr uint32_t kChartGood = 0xFF507FFF;           // --chart-good
+  constexpr uint32_t kChartTrack = 0xFF292E37;          // --chart-track
   constexpr uint32_t kFocusRing = 0xFF8AAFFF;           // --focus-ring
   constexpr uint32_t kGray1 = 0xFFF8F9FB;               // --gray-1 (same in both themes)
   constexpr uint32_t kGray2 = 0xFFEFF1F4;               // --gray-2 (same in both themes)
@@ -287,11 +325,29 @@ namespace dark {
   constexpr uint32_t kGray7 = 0xFF576071;               // --gray-7 (same in both themes)
   constexpr uint32_t kGray8 = 0xFF292E37;               // --gray-8 (same in both themes)
   constexpr uint32_t kGray9 = 0xFF141719;               // --gray-9 (same in both themes)
+  constexpr uint32_t kHeatNeg1 = 0xFF3A2208;            // --heat-neg-1
+  constexpr uint32_t kHeatNeg2 = 0xFF5C3405;            // --heat-neg-2
+  constexpr uint32_t kHeatNeg3 = 0xFF8A4C00;            // --heat-neg-3
+  constexpr uint32_t kHeatPos1 = 0xFF0D1C4F;            // --heat-pos-1
+  constexpr uint32_t kHeatPos2 = 0xFF15318A;            // --heat-pos-2
+  constexpr uint32_t kHeatPos3 = 0xFF2445C4;            // --heat-pos-3
   constexpr uint32_t kInkBrand = 0xFF8AAFFF;            // --ink-brand
   constexpr uint32_t kInkMuted = 0xFF838A97;            // --ink-muted
   constexpr uint32_t kInkOnBrand = 0xFFFFFFFF;          // --ink-on-brand (same in both themes)
   constexpr uint32_t kInkPrimary = 0xFFF8F9FB;          // --ink-primary
   constexpr uint32_t kInkSecondary = 0xFFAAB0BB;        // --ink-secondary
+  constexpr uint32_t kOrdinal0 = 0xFF7C8390;            // --ordinal-0
+  constexpr uint32_t kOrdinal1 = 0xFF1733D5;            // --ordinal-1
+  constexpr uint32_t kOrdinal2 = 0xFF2B52FF;            // --ordinal-2
+  constexpr uint32_t kOrdinal3 = 0xFF507FFF;            // --ordinal-3 (same in both themes)
+  constexpr uint32_t kOrdinal4 = 0xFFBAD2FF;            // --ordinal-4
+  constexpr uint32_t kOrdinal5 = 0xFFEEF4FF;            // --ordinal-5
+  constexpr uint32_t kOrdinalInk0 = 0xFFFFFFFF;         // --ordinal-ink-0
+  constexpr uint32_t kOrdinalInk1 = 0xFFFFFFFF;         // --ordinal-ink-1
+  constexpr uint32_t kOrdinalInk2 = 0xFFFFFFFF;         // --ordinal-ink-2
+  constexpr uint32_t kOrdinalInk3 = 0xFFFFFFFF;         // --ordinal-ink-3 (same in both themes)
+  constexpr uint32_t kOrdinalInk4 = 0xFF030C34;         // --ordinal-ink-4
+  constexpr uint32_t kOrdinalInk5 = 0xFF030C34;         // --ordinal-ink-5
   constexpr uint32_t kOverlayScrim = 0xA8000000;        // --overlay-scrim
   constexpr uint32_t kProductBrowser = 0xFFF14AA8;      // --product-browser (same in both themes)
   constexpr uint32_t kProductBrowser1 = 0xFFFFF3F8;     // --product-browser-1 (same in both themes)
@@ -335,6 +391,20 @@ namespace dark {
   constexpr uint32_t kProductCodeFill = 0xFF00441F;     // --product-code-fill
   constexpr uint32_t kProductCodeLine = 0xFF005D2C;     // --product-code-line
   constexpr uint32_t kProductCodeWash = 0xFF002A10;     // --product-code-wash
+  constexpr uint32_t kProductConsole = 0xFF2B52FF;      // --product-console (same in both themes)
+  constexpr uint32_t kProductConsole1 = 0xFFEEF4FF;     // --product-console-1 (same in both themes)
+  constexpr uint32_t kProductConsole10 = 0xFF030C34;    // --product-console-10 (same in both themes)
+  constexpr uint32_t kProductConsole2 = 0xFFD9E6FF;     // --product-console-2 (same in both themes)
+  constexpr uint32_t kProductConsole3 = 0xFFBAD2FF;     // --product-console-3 (same in both themes)
+  constexpr uint32_t kProductConsole4 = 0xFF8AAFFF;     // --product-console-4 (same in both themes)
+  constexpr uint32_t kProductConsole5 = 0xFF507FFF;     // --product-console-5 (same in both themes)
+  constexpr uint32_t kProductConsole6 = 0xFF2B52FF;     // --product-console-6 (same in both themes)
+  constexpr uint32_t kProductConsole7 = 0xFF1733D5;     // --product-console-7 (same in both themes)
+  constexpr uint32_t kProductConsole8 = 0xFF09209C;     // --product-console-8 (same in both themes)
+  constexpr uint32_t kProductConsole9 = 0xFF061460;     // --product-console-9 (same in both themes)
+  constexpr uint32_t kProductConsoleFill = 0xFF061460;  // --product-console-fill
+  constexpr uint32_t kProductConsoleLine = 0xFF09209C;  // --product-console-line
+  constexpr uint32_t kProductConsoleWash = 0xFF030C34;  // --product-console-wash
   constexpr uint32_t kProductDesign = 0xFFC162F4;       // --product-design (same in both themes)
   constexpr uint32_t kProductDesign1 = 0xFFFAF4FF;      // --product-design-1 (same in both themes)
   constexpr uint32_t kProductDesign10 = 0xFF35004B;     // --product-design-10 (same in both themes)

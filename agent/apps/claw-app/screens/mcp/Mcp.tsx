@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import {
@@ -66,7 +67,7 @@ export function Mcp() {
     } catch (err) {
       setErrors((prev) => ({
         ...prev,
-        [harness]: err instanceof Error ? err.message : 'Failed to connect.',
+        [harness]: err instanceof Error ? err.message : t('clFailedConnect'),
       }))
     }
   }
@@ -81,7 +82,7 @@ export function Mcp() {
     } catch (err) {
       setErrors((prev) => ({
         ...prev,
-        [harness]: err instanceof Error ? err.message : 'Failed to disconnect.',
+        [harness]: err instanceof Error ? err.message : t('clFailedDisconnect'),
       }))
     }
   }
@@ -99,11 +100,11 @@ export function Mcp() {
       <section className="space-y-2">
         <header className="flex items-baseline justify-between gap-3">
           <h2 className="font-semibold text-cyanotype-ink text-lg">
-            Connected agents
+            {t('clConnectedAgents')}
           </h2>
           {!isLoading && !connections.isError && (
             <span className="text-[12px] text-cyanotype-muted tabular-nums">
-              {connectedCount} of {totalCount} connected
+              {t('clNofMConnected', connectedCount, totalCount)}
             </span>
           )}
         </header>
@@ -111,10 +112,9 @@ export function Mcp() {
           <SkeletonList />
         ) : connections.isError ? (
           <EditorialEmpty
-            leading="could not"
-            accent="reach"
-            trailing="the cockpit."
-            hint="Check that the local claw-server is running."
+            line="clCouldNotReachLine"
+            accent={t('clReach')}
+            hint={t('clCheckClawServer')}
           />
         ) : (
           <div>

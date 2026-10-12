@@ -8,7 +8,7 @@
  */
 
 import type { FC } from 'react'
-import ProductLogo from '@/assets/product_logo.svg'
+import { RedrobMark } from '@/components/brand/RedrobMark'
 import { ThemeToggle } from '@/components/elements/theme-toggle'
 import { cn } from '@/lib/utils'
 import { useWorkspace } from '@/modules/workspace/workspace.hooks'
@@ -32,7 +32,7 @@ export const SidebarBranding: FC<SidebarBrandingProps> = ({
   return (
     <div className="flex h-14 items-center justify-between border-b px-2">
       <div className="flex items-center gap-2 p-1.5">
-        <img src={ProductLogo} alt="Redrob" className="size-8 shrink-0" />
+        <RedrobMark className="size-8" />
         <span
           className={cn(
             'min-w-0 truncate font-semibold leading-none transition-opacity duration-200',

@@ -7,14 +7,14 @@
  * See the NOTICE file for provenance.
  */
 
-import { Info, Lock } from 'lucide-react'
-
+import { t, tNodes } from '@browseros/i18n'
+import { Info, Lock } from '@browseros/icons'
 /** An inert illustration of the OS-owned prompt; credentials only go to macOS. */
 export function MacKeychainPreview() {
   return (
     <figure className="m-0 min-w-0">
       <figcaption className="mb-3 text-ink-2 text-xs">
-        Example macOS dialog
+        {t('onboardExampleMacosDialog')}
       </figcaption>
       <div className="keychain-preview" aria-hidden="true">
         <div className="keychain-preview-content">
@@ -23,25 +23,24 @@ export function MacKeychainPreview() {
           </div>
           <div className="min-w-0 flex-1">
             <p className="m-0 font-bold text-[13px] leading-[17px]">
-              Redrob Browser Helper wants to use your confidential information
-              stored in &ldquo;Chrome Safe Storage&rdquo; in your keychain.
+              {t('onboardRedrobBrowserHelperWantsTo')}
             </p>
             <p className="my-3 text-xs leading-[17px]">
-              To allow this, enter the &ldquo;login&rdquo; keychain password.
+              {t('onboardToAllowThisEnterThe')}
             </p>
             <div className="flex items-center gap-2 text-xs">
-              <span>Password:</span>
+              <span>{t('onboardPassword')}</span>
               <span className="keychain-password">••••••••</span>
             </div>
           </div>
         </div>
         <div className="keychain-preview-actions">
           <span className="keychain-help">?</span>
-          <span className="keychain-button">Always Allow</span>
+          <span className="keychain-button">{t('onboardAlwaysAllow')}</span>
           <span className="flex-1" />
-          <span className="keychain-button">Deny</span>
+          <span className="keychain-button">{t('onboardDeny')}</span>
           <span className="keychain-allow">
-            <span className="keychain-button">Allow</span>
+            <span className="keychain-button">{t('onboardAllow')}</span>
           </span>
         </div>
       </div>
@@ -53,7 +52,7 @@ export function MacKeychainPermissionNote() {
   return (
     <p className="m-0 flex items-start gap-2 text-[13px] text-ink-2 leading-[19px]">
       <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
-      Allow gives access for this import.
+      {t('onboardAllowGivesAccessForThis')}
     </p>
   )
 }
@@ -61,11 +60,15 @@ export function MacKeychainPermissionNote() {
 /** Native progress does not expose whether a Keychain prompt is currently open. */
 export function MacKeychainReminder() {
   return (
-    <div className="mt-4 flex items-start gap-3 rounded-xl border border-accent/20 bg-accent-tint p-4 text-[13px] text-ink-2 leading-relaxed">
+    <div className="mt-4 flex items-start gap-3 rounded-xl border border-accent-tint-2 bg-accent-tint p-4 text-[13px] text-ink-2 leading-relaxed">
       <Lock aria-hidden className="mt-0.5 size-4 shrink-0 text-accent" />
       <p>
-        If macOS asks, enter your Mac login password and click{' '}
-        <strong className="font-semibold text-ink">Allow</strong>.
+        {tNodes(
+          'onboardIfMacosAsksClick',
+          <strong key="allow" className="font-semibold text-ink">
+            {t('onboardAllow')}
+          </strong>,
+        )}
       </p>
     </div>
   )

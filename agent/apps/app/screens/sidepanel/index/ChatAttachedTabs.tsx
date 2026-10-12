@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Globe, X } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Globe, X } from '@browseros/icons'
 import type { FC } from 'react'
 
 export interface ChatAttachedTabsProps {
@@ -43,7 +44,7 @@ export const ChatAttachedTabs: FC<ChatAttachedTabsProps> = ({
               type="button"
               onClick={() => onRemoveTab(tab.id)}
               className="flex-shrink-0 rounded p-0.5 transition-colors hover:bg-background"
-              title="Remove tab"
+              title={t('spRemoveTab')}
             >
               <X className="h-3 w-3 text-muted-foreground" />
             </button>

@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { Check, ExternalLink, Link2, Loader2 } from 'lucide-react'
+import { t, tNodes } from '@browseros/i18n'
+import { Check, ExternalLink, Link2, Loader2 } from '@browseros/icons'
 import { type FC, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 
@@ -107,7 +108,7 @@ export const RedrobConsoleConnect: FC<RedrobConsoleConnectProps> = ({
     if (!agentServerUrl) {
       setState({
         kind: 'error',
-        message: 'The Redrob agent server is not running.',
+        message: t('stTheRedrobAgentServerIs'),
       })
       return
     }
@@ -142,7 +143,7 @@ export const RedrobConsoleConnect: FC<RedrobConsoleConnectProps> = ({
     return (
       <p className="flex items-center gap-1.5 text-sm">
         <Check className="size-4 text-primary" />
-        Connected to Redrob Console. The key is filled in below.
+        {t('stConnectedToRedrobConsoleThe')}
       </p>
     )
   }
@@ -152,15 +153,16 @@ export const RedrobConsoleConnect: FC<RedrobConsoleConnectProps> = ({
       {state.kind === 'waiting' ? (
         <div className="space-y-1.5 text-sm">
           <p>
-            Approve this connection on the console with code{' '}
-            <span className="font-mono font-semibold tracking-wider">
-              {state.userCode}
-            </span>
-            .
+            {tNodes(
+              'stApproveWithCode',
+              <span key="a" className="font-mono font-semibold tracking-wider">
+                {state.userCode}
+              </span>,
+            )}
           </p>
           <p className="flex items-center gap-1.5 text-muted-foreground">
             <Loader2 className="size-3.5 animate-spin" />
-            Waiting for approval…{' '}
+            {t('stWaitingApproval')}{' '}
             <a
               href={state.verificationUri}
               target="_blank"
@@ -168,7 +170,7 @@ export const RedrobConsoleConnect: FC<RedrobConsoleConnectProps> = ({
               className="inline-flex items-center gap-1 text-primary hover:underline"
             >
               <ExternalLink className="size-3" />
-              Open the console again
+              {t('stOpenTheConsoleAgain')}
             </a>
           </p>
         </div>
@@ -185,10 +187,10 @@ export const RedrobConsoleConnect: FC<RedrobConsoleConnectProps> = ({
             ) : (
               <Link2 className="size-4" />
             )}
-            Connect with Redrob Console
+            {t('stConnectConsole')}
           </Button>
           <p className="text-muted-foreground text-xs">
-            Sign in on the console and approve this browser. No key to copy.
+            {t('stSignInOnTheConsole')}
           </p>
           {state.kind === 'error' && (
             <p className="text-destructive text-xs">{state.message}</p>

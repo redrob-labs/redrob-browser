@@ -7,13 +7,15 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
+
 /**
  * @public
  */
 export const SHORTCUTS_LIST = [
   {
     key: 'A',
-    description: 'Toggle Agent',
+    description: t('shToggleAgent'),
     modifier: {
       windows: 'Alt',
       mac: '⌥',
@@ -22,7 +24,7 @@ export const SHORTCUTS_LIST = [
   },
   {
     key: 'K',
-    description: 'Toggle LLM Chat',
+    description: t('shToggleLlmChat'),
     modifier: {
       windows: 'Ctrl+Shift',
       mac: '⌘+Shift',
@@ -31,7 +33,7 @@ export const SHORTCUTS_LIST = [
   },
   {
     key: 'L',
-    description: 'Switch providers in LLM Chat',
+    description: t('shSwitchProvidersInLlmChat'),
     modifier: {
       windows: 'Ctrl+Shift',
       mac: '⌘+Shift',

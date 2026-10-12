@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { ChevronDown, Loader2, RefreshCw, Wrench } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { ChevronDown, Loader2, RefreshCw, Wrench } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -39,10 +40,10 @@ export const MCPToolsSection: FC = () => {
         <div className="flex items-start justify-between gap-3">
           <CollapsibleTrigger className="flex flex-1 items-center justify-between text-left">
             <div>
-              <h3 className="font-semibold text-lg">Available Tools</h3>
+              <h3 className="font-semibold text-lg">{t('stAvailableTools')}</h3>
               {tools.length > 0 && (
                 <p className="text-muted-foreground text-sm">
-                  {tools.length} tools available
+                  {t('stToolsAvailable', tools.length)}
                 </p>
               )}
             </div>
@@ -60,7 +61,7 @@ export const MCPToolsSection: FC = () => {
             }}
             disabled={isLoading}
             className="border-[var(--accent-brand)] bg-[var(--accent-brand)]/10 text-[var(--accent-brand-ink)] hover:bg-[var(--accent-brand)]/20 hover:text-[var(--accent-brand-ink)]"
-            title="Refresh tools"
+            title={t('stRefreshTools')}
           >
             {isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />

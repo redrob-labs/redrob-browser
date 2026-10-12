@@ -7,6 +7,22 @@
  * See the NOTICE file for provenance.
  */
 
+/* Layer order. The design system's two sheets sit in `rr`, after Tailwind's preflight (`base`) and
+   before Tailwind's components and utilities: a utility class on an element still wins over an
+   `.rr-*` rule, and the system's document-level rules (::selection, autofill, caret and accent colour,
+   Korean word breaking) win over preflight. tokens.css must come BEFORE system.css -- system.css
+   corrects roles the token sheet declares first, and in the other order the superseded values paint.
+
+   `vendor` holds third-party sheets, BELOW the system. @mdxeditor/editor's stylesheet declares Radix
+   colour scales on :root under the system's own primitive names (--blue-6, --red-3, --slate-*); imported
+   unlayered from a component, as it used to be, it beat the system and painted Redrob Blue as Radix sky
+   across the whole app. Every stylesheet comes in through this file so its layer is decided here. */
+@layer theme, base, vendor, rr, components, utilities;
+
+@import "@mdxeditor/editor/style.css" layer(vendor);
+@import "@xyflow/react/dist/style.css" layer(vendor);
+@import "@redrob-labs/ui/tokens.css" layer(rr);
+@import "@redrob-labs/ui/styles.css" layer(rr);
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "tailwind-scrollbar-hide/v4";
@@ -19,217 +35,130 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Type, from the Redrob design system (@redrob-labs/ui 1.1.0 tokens.css).
+/* Colour and type come from @redrob-labs/ui itself (the imports above), at the version
+   DESIGN_SYSTEM_PIN.json names, so this extension and the browser's own chrome paint the same values.
+   Its fonts arrive with it: tokens.css declares the faces and Vite bundles the files it names.
 
-   Pretendard carries Latin; Wanted Sans carries Hangul, which is why it is second
+   What is left here is the MAPPING: the shadcn role names every component in this app reads, each
+   pointed at the design system's SEMANTIC token for the same job. No primitive, no hex. The system
+   switches theme on `[data-theme]`, which ThemeProvider sets together with `.dark`, so each role is
+   declared once and follows the theme by itself. The few roles whose job differs between the themes
+   are re-pointed under [data-theme="dark"], each with the rule it follows.
 
-   in the stack. Both are the files the design system ships, under the SIL Open
-
-   Font License (public/fonts/OFL-*.txt). Code takes the system monospace stack. */
-
-@font-face {
-  font-family: "Pretendard";
-  src: url("../fonts/Pretendard-Light.woff2") format("woff2");
-  font-weight: 300;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Pretendard";
-  src: url("../fonts/Pretendard-Regular.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Pretendard";
-  src: url("../fonts/Pretendard-Medium.woff2") format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Pretendard";
-  src: url("../fonts/Pretendard-SemiBold.woff2") format("woff2");
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Pretendard";
-  src: url("../fonts/Pretendard-Bold.woff2") format("woff2");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Pretendard";
-  src: url("../fonts/Pretendard-ExtraBold.woff2") format("woff2");
-  font-weight: 800;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Wanted Sans";
-  src: url("../fonts/WantedSans-Variable.woff2") format("woff2-variations");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-
-/* Colour tokens, from the Redrob design system (@redrob-labs/ui
-   dist/styles/tokens.css).
-
-   Two layers, the system's own:
-
-     1. PRIMITIVES `--rr-*`. The ramps, transcribed verbatim. Theme-independent:
-        Blue 6 is Blue 6 in light and in dark, so they are declared once on :root.
-        No component names this layer.
-
-     2. ROLES. The shadcn names every component here already reads (`--primary`,
-        `--muted-foreground`, ...), each pointed at the design system's semantic
-        token for the same job and re-pointed in `.dark`. The comment on each line
-        names that token, so a value can be checked against tokens.css by name.
-
-   Two roles the system has and shadcn does not, both used by this panel:
-   `--accent-brand` is a brand FILL (action-primary) and `--accent-brand-ink` is
-   brand TEXT (ink-brand). Dark mode is why they are two: white on Blue 6 is the
-   fill, Blue 4 on black is the text, and no single blue is both.
-
-   `styles/design-tokens.test.ts` pins every primitive to its value in
-   @redrob-labs/ui 1.1.0 and fails on any colour literal outside this layer. */
+   styles/design-tokens.test.ts holds this: every value below must be a var() naming a token the
+   design system declares. */
 :root {
-  /* 1. PRIMITIVES */
-  --rr-black: #0a0b0c; /* redrob-black */
-  --rr-white: #ffffff; /* redrob-white */
-  --rr-blue-1: #eef4ff;
-  --rr-blue-2: #d9e6ff;
-  --rr-blue-3: #bad2ff;
-  --rr-blue-4: #8aafff;
-  --rr-blue-5: #507fff;
-  --rr-blue-6: #2b52ff; /* Redrob Blue */
-  --rr-blue-7: #1733d5;
-  --rr-blue-8: #09209c;
-  --rr-blue-9: #061460;
-  --rr-blue-10: #030c34;
-  --rr-gray-1: #f8f9fb;
-  --rr-gray-2: #eff1f4;
-  --rr-gray-3: #dfe2e8;
-  --rr-gray-4: #cbcfd7;
-  --rr-gray-5: #aab0bb;
-  --rr-gray-6: #7c8390;
-  --rr-gray-7: #576071;
-  --rr-gray-8: #292e37;
-  --rr-gray-9: #141719;
-  --rr-teal-3: #6ff4f0; /* accent-teal-3 */
-  --rr-teal-4: #00b5c2; /* accent-teal-4 */
-  --rr-sky-3: #2f8dff; /* accent-sky-3 */
-  --rr-sky-4: #0e51b6; /* accent-sky-4 */
-  --rr-violet-3: #8944ff; /* accent-violet-3 */
-  --rr-pink-3: #ff39ba; /* accent-pink-3 */
-  --rr-red-3: #ff4b4b; /* accent-red-3 */
-  --rr-red-4: #a31310; /* accent-red-4 */
-  --rr-orange-3: #ff9c1b; /* accent-orange-3 */
-  --rr-orange-4: #ae5100; /* accent-orange-4 */
-  --rr-lime-4: #89ad00; /* accent-lime-4 */
-  --rr-green-3: #29e474; /* accent-green-3 */
-  --rr-green-4: #00864a; /* accent-green-4 */
-
-  /* 2. ROLES, light */
-  --radius: 12px; /* radius-lg, the card radius */
-  --background: var(--rr-white); /* surface-base */
-  --foreground: var(--rr-black); /* ink-primary */
-  --card: var(--rr-gray-1); /* surface-raised */
-  --card-foreground: var(--rr-black);
-  --popover: var(--rr-white); /* surface-base, lifted by shadow-md */
-  --popover-foreground: var(--rr-black);
-  --primary: var(--rr-blue-6); /* action-primary */
-  --primary-foreground: var(--rr-white); /* ink-on-brand */
-  --secondary: var(--rr-gray-2); /* surface-sunken */
-  --secondary-foreground: var(--rr-black);
-  --muted: var(--rr-gray-2); /* surface-sunken */
-  --muted-foreground: var(--rr-gray-7); /* ink-secondary */
-  --accent: var(--rr-gray-2); /* hover fill on surface-base */
-  --accent-foreground: var(--rr-black);
-  --destructive: var(--rr-red-4); /* status-danger */
-  --destructive-foreground: var(--rr-white);
-  --warning: var(--rr-orange-4); /* status-warning */
-  --success: var(--rr-green-4); /* status-success */
-  --border: var(--rr-gray-3); /* border-subtle */
-  --input: var(--rr-gray-6); /* border-strong */
-  --ring: var(--rr-blue-6); /* focus-ring */
-  --chart-1: var(--rr-blue-6);
-  --chart-2: var(--rr-teal-4);
-  --chart-3: var(--rr-violet-3);
-  --chart-4: var(--rr-pink-3);
-  --chart-5: var(--rr-lime-4);
-  --sidebar: var(--rr-gray-1); /* surface-raised */
-  --sidebar-foreground: var(--rr-black);
-  --sidebar-primary: var(--rr-blue-6);
-  --sidebar-primary-foreground: var(--rr-white);
-  --sidebar-accent: var(--rr-gray-2);
-  --sidebar-accent-foreground: var(--rr-black);
-  --sidebar-border: var(--rr-gray-3);
-  --sidebar-ring: var(--rr-blue-6);
-  --accent-brand: var(--rr-blue-6); /* action-primary */
-  --accent-brand-ink: var(--rr-blue-7); /* ink-brand */
+  --radius: var(--radius-lg);
+  --background: var(--surface-base);
+  --foreground: var(--ink-primary);
+  --card: var(--surface-raised);
+  --card-foreground: var(--ink-primary);
+  /* Menus and popovers: the system's menu list is surface-base lifted by shadow-md (.rr-menu__list). */
+  --popover: var(--surface-base);
+  --popover-foreground: var(--ink-primary);
+  --primary: var(--action-primary);
+  --primary-foreground: var(--ink-on-brand);
+  --secondary: var(--surface-sunken);
+  --secondary-foreground: var(--ink-primary);
+  --muted: var(--surface-sunken);
+  --muted-foreground: var(--ink-secondary);
+  /* The hover fill of a row or a ghost control on surface-base. */
+  --accent: var(--surface-sunken);
+  --accent-foreground: var(--ink-primary);
+  --destructive: var(--status-danger);
+  /* Text on a danger fill: .rr-btn--danger sets white in both themes. */
+  --destructive-foreground: var(--redrob-white);
+  --warning: var(--status-warning);
+  --success: var(--status-success);
+  --info: var(--status-info);
+  --border: var(--border-subtle);
+  --input: var(--border-strong);
+  --ring: var(--focus-ring);
+  /* The system's data-series palette (system.css), already themed. */
+  --chart-1: var(--series-1);
+  --chart-2: var(--series-2);
+  --chart-3: var(--series-3);
+  --chart-4: var(--series-4);
+  --chart-5: var(--series-5);
+  /* The app's side rail is AppShell's sidebar: sunken in light, raised in dark, where elevation runs
+     upward (.rr-shell__side). Its hover and selection ground is the page itself (.rr-shell__nav a). */
+  --sidebar: var(--surface-sunken);
+  --sidebar-foreground: var(--ink-primary);
+  --sidebar-primary: var(--action-primary);
+  --sidebar-primary-foreground: var(--ink-on-brand);
+  --sidebar-accent: var(--surface-base);
+  --sidebar-accent-foreground: var(--ink-primary);
+  --sidebar-border: var(--border-subtle);
+  --sidebar-ring: var(--focus-ring);
+  /* Brand FILL and brand TEXT are two tokens because no single blue is both in dark. */
+  --accent-brand: var(--action-primary);
+  --accent-brand-ink: var(--ink-brand);
   /* The shimmer's highlight sweep: one step lighter than the fill. */
-  --accent-brand-bright: var(--rr-blue-5);
+  --accent-brand-bright: var(--blue-5);
+  /* Machine output, so it is never mistaken for a person's. */
+  --ai: var(--surface-ai);
+  --ai-border: var(--border-ai);
 }
 
-.dark {
-  /* 2. ROLES, dark */
-  --background: var(--rr-black); /* surface-base */
-  --foreground: var(--rr-gray-1); /* ink-primary */
-  --card: var(--rr-gray-9); /* surface-raised */
-  --card-foreground: var(--rr-gray-1);
-  --popover: var(--rr-gray-9);
-  --popover-foreground: var(--rr-gray-1);
-  --primary: var(--rr-blue-6); /* action-primary */
-  --primary-foreground: var(--rr-white); /* ink-on-brand */
-  /* surface-sunken. Not a ramp step: the system's own value, chosen so the
-     dark elevation ladder does not reverse at its second step. */
-  --secondary: #1c1f26;
-  --secondary-foreground: var(--rr-gray-1);
-  --muted: #1c1f26;
-  --muted-foreground: var(--rr-gray-5); /* ink-secondary */
-  --accent: var(--rr-gray-8);
-  --accent-foreground: var(--rr-gray-1);
-  --destructive: var(--rr-red-3); /* status-danger */
-  --destructive-foreground: var(--rr-black);
-  --warning: var(--rr-orange-3); /* status-warning */
-  --success: var(--rr-green-3); /* status-success */
-  --border: var(--rr-gray-8); /* border-subtle */
-  --input: var(--rr-gray-6); /* border-strong */
-  --ring: var(--rr-blue-4); /* focus-ring */
-  --chart-1: var(--rr-blue-5);
-  --chart-2: var(--rr-teal-3);
-  --chart-3: var(--rr-violet-3);
-  --chart-4: var(--rr-pink-3);
-  --chart-5: var(--rr-sky-3);
-  --sidebar: var(--rr-gray-9);
-  --sidebar-foreground: var(--rr-gray-1);
-  --sidebar-primary: var(--rr-blue-6);
-  --sidebar-primary-foreground: var(--rr-white);
-  --sidebar-accent: var(--rr-gray-8);
-  --sidebar-accent-foreground: var(--rr-gray-1);
-  --sidebar-border: var(--rr-gray-8);
-  --sidebar-ring: var(--rr-blue-4);
-  --accent-brand: var(--rr-blue-6); /* action-primary */
-  --accent-brand-ink: var(--rr-blue-4); /* ink-brand */
-  --accent-brand-bright: var(--rr-blue-4);
+/* So the scrollbar, the <select> popup and the caret follow the theme, as chrome_base.css does for the
+   browser's own pages. */
+:root {
+  color-scheme: light;
+}
+
+/* Rendered markdown (chat answers, the editor). Tailwind Typography paints its own grey ramp unless
+   told otherwise, and the system's tokens already follow the theme, so the inverted set is the same
+   set and `dark:prose-invert` changes nothing it should not. */
+.prose {
+  --tw-prose-body: var(--ink-primary);
+  --tw-prose-headings: var(--ink-primary);
+  --tw-prose-lead: var(--ink-secondary);
+  --tw-prose-links: var(--ink-brand);
+  --tw-prose-bold: var(--ink-primary);
+  --tw-prose-counters: var(--ink-secondary);
+  --tw-prose-bullets: var(--ink-muted);
+  --tw-prose-hr: var(--border-subtle);
+  --tw-prose-quotes: var(--ink-primary);
+  --tw-prose-quote-borders: var(--border-strong);
+  --tw-prose-captions: var(--ink-secondary);
+  --tw-prose-kbd: var(--ink-primary);
+  --tw-prose-code: var(--ink-primary);
+  --tw-prose-pre-code: var(--ink-primary);
+  --tw-prose-pre-bg: var(--surface-sunken);
+  --tw-prose-th-borders: var(--border-strong);
+  --tw-prose-td-borders: var(--border-subtle);
+  --tw-prose-invert-body: var(--ink-primary);
+  --tw-prose-invert-headings: var(--ink-primary);
+  --tw-prose-invert-lead: var(--ink-secondary);
+  --tw-prose-invert-links: var(--ink-brand);
+  --tw-prose-invert-bold: var(--ink-primary);
+  --tw-prose-invert-counters: var(--ink-secondary);
+  --tw-prose-invert-bullets: var(--ink-muted);
+  --tw-prose-invert-hr: var(--border-subtle);
+  --tw-prose-invert-quotes: var(--ink-primary);
+  --tw-prose-invert-quote-borders: var(--border-strong);
+  --tw-prose-invert-captions: var(--ink-secondary);
+  --tw-prose-invert-kbd: var(--ink-primary);
+  --tw-prose-invert-code: var(--ink-primary);
+  --tw-prose-invert-pre-code: var(--ink-primary);
+  --tw-prose-invert-pre-bg: var(--surface-sunken);
+  --tw-prose-invert-th-borders: var(--border-strong);
+  --tw-prose-invert-td-borders: var(--border-subtle);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --sidebar: var(--surface-raised);
+  --sidebar-accent: var(--surface-sunken);
+  --accent-brand-bright: var(--blue-4);
 }
 
 @theme inline {
+  /* Not var(--font-sans): Tailwind's own --font-sans is this same name, and a self-reference is a
+     cycle. The stack is the system's, verbatim; design-tokens.test.ts holds the two equal. */
   --font-sans:
     Pretendard, "Wanted Sans", "Noto Sans Devanagari", system-ui, -apple-system,
-    "Segoe UI", sans-serif;
+    Segoe UI, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -274,6 +203,9 @@
   --color-accent-brand-ink: var(--accent-brand-ink);
   --color-warning: var(--warning);
   --color-success: var(--success);
+  --color-info: var(--info);
+  --color-ai: var(--ai);
+  --color-ai-border: var(--ai-border);
   /* Brighter brand step for the shimmer sweep */
   --color-accent-brand-bright: var(--accent-brand-bright);
 
@@ -424,27 +356,16 @@
     }
   }
 
+  /* The new tab's grid, drawn in the system's subtle border and faded by a mask. It used to be faded by an
+     opaque radial ground laid OVER the page, which washed out whatever sat near the edge -- the brand mark
+     on Personalize included, which must never carry an opacity. */
   .bg-grid-pattern {
     background-image:
-      linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+      linear-gradient(to right, var(--border-subtle) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--border-subtle) 1px, transparent 1px);
     background-size: 60px 60px;
-  }
-
-  .dark .bg-grid-pattern {
-    background-image:
-      linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-    background-size: 60px 60px;
-  }
-
-  .bg-gradient-radial-focus {
-    background: radial-gradient(
-      circle at center,
-      transparent 0%,
-      transparent 30%,
-      var(--background) 70%
-    );
+    opacity: 0.45;
+    mask-image: radial-gradient(circle at center, #000 30%, transparent 70%);
   }
 
   /* Animation utility classes */
@@ -739,4 +660,626 @@
 
 .dark .mdx-editor-themed .mdxeditor [class*="linkDialogPopover"] {
   filter: drop-shadow(0 4px 16px rgb(0 0 0 / 0.4));
+}
+
+/* ---- Overlays: the design system's surfaces and motion on Radix primitives ----------------------
+   Radix renders its own elements and controls open/closed state, so the system's overlay classes
+   (.rr-modal, .rr-drawer, .rr-menu__list, .rr-tooltip__bubble) cannot be put on them as-is: those
+   carry their own positioning for the system's React components. These carry the SAME values from
+   the same tokens -- one rule each, named after the rule it mirrors -- and leave position to Radix.
+
+   Motion: what arrives travels along the brand's 40 degree rake (system.css rr-arrive / rr-leave),
+   entrance curve in, exit curve out, never a zoom. Radix waits for the exit animation before it
+   unmounts, so closing is animated too. Reduced motion: none. */
+@layer components {
+  .ui-arrive[data-state="open"],
+  .ui-arrive[data-state="delayed-open"],
+  .ui-arrive[data-state="instant-open"] {
+    animation: rr-arrive var(--duration-base) var(--easing-entrance) both;
+  }
+  .ui-arrive[data-state="closed"] {
+    animation: rr-leave var(--duration-fast) var(--easing-exit) both;
+  }
+  .ui-fade[data-state="open"] {
+    animation: ui-fade-in var(--duration-base) var(--easing-standard) both;
+  }
+  .ui-fade[data-state="closed"] {
+    animation: ui-fade-in var(--duration-fast) var(--easing-exit) reverse both;
+  }
+  @keyframes ui-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ui-arrive[data-state],
+    .ui-fade[data-state] {
+      animation: none;
+    }
+  }
+
+  /* .rr-modal-scrim */
+  .ui-scrim {
+    background: var(--overlay-scrim);
+  }
+  /* .rr-modal */
+  .ui-modal {
+    background: var(--surface-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    color: var(--ink-primary);
+    font-family: var(--font-sans);
+    padding: var(--space-5);
+  }
+  /* .rr-modal__title / __body */
+  .ui-modal-title {
+    margin: 0;
+    font-size: 21px;
+    line-height: 28px;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+  }
+  .ui-modal-body {
+    font-size: 14px;
+    line-height: 22px;
+    color: var(--ink-secondary);
+  }
+  /* .rr-drawer */
+  .ui-drawer {
+    background: var(--surface-base);
+    box-shadow: var(--shadow-lg);
+    color: var(--ink-primary);
+    font-family: var(--font-sans);
+    border-color: var(--border-subtle);
+  }
+  /* .rr-menu__list -- also popovers and hover cards, which the system draws the same way */
+  .ui-pop {
+    background: var(--surface-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    color: var(--ink-primary);
+    font-family: var(--font-sans);
+  }
+  /* .rr-menu__item, keyed on Radix's highlight rather than :hover */
+  .ui-menu-item {
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--ink-primary);
+  }
+  .ui-menu-item[data-highlighted],
+  .ui-menu-item[data-state="open"] {
+    background: var(--surface-sunken);
+  }
+  .ui-menu-item[data-disabled] {
+    color: var(--ink-muted);
+  }
+  .ui-menu-item[data-variant="destructive"] {
+    color: var(--status-danger);
+  }
+  .ui-menu-item svg:not([class*="text-"]) {
+    color: var(--ink-secondary);
+  }
+  .ui-menu-item[data-variant="destructive"] svg {
+    color: inherit;
+  }
+  /* .rr-tooltip__bubble: black on light, near-white on dark */
+  .ui-tip {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--redrob-black);
+    color: var(--redrob-white);
+    box-shadow: var(--shadow-md);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    line-height: 18px;
+  }
+  [data-theme="dark"] .ui-tip {
+    background: var(--gray-1);
+    color: var(--redrob-black);
+  }
+  .ui-tip-arrow {
+    fill: var(--redrob-black);
+    background: var(--redrob-black);
+  }
+  [data-theme="dark"] .ui-tip-arrow {
+    fill: var(--gray-1);
+    background: var(--gray-1);
+  }
+}
+
+/* ---- Chat: the design system's message, prompt and composer anatomy ---------------------------
+   Same values as system.css's .rr-msg, .rr-prompt and .rr-composer, on the app's own elements. */
+@layer components {
+  /* .rr-msg--user .rr-msg__bubble */
+  .is-user > .ui-msg {
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg);
+    background: var(--surface-sunken);
+    color: var(--ink-primary);
+  }
+  /* .rr-msg--assistant .rr-msg__bubble: machine output on --surface-ai, so it is never mistaken for a
+     person's, with the quiet wash (deep on dark). */
+  .is-assistant > .ui-msg {
+    padding: var(--space-4);
+    border: 1px solid var(--border-ai);
+    border-radius: var(--radius-lg);
+    background-color: var(--surface-ai);
+    background-image: var(--wash-quiet);
+    color: var(--ink-primary);
+  }
+  [data-theme="dark"] .is-assistant > .ui-msg {
+    background-image: var(--wash-deep);
+  }
+  /* .rr-msg__body type */
+  .ui-msg {
+    font-size: 15px;
+    line-height: 24px;
+  }
+  /* .rr-prompt, over the Button it is built on (components beats the rr layer) */
+  .ui-prompt {
+    gap: var(--space-2);
+    height: auto;
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-full);
+    background: var(--surface-raised);
+    color: var(--ink-primary);
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 20px;
+  }
+  .ui-prompt:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    background: var(--surface-brand-subtle);
+  }
+  /* .rr-composer */
+  .ui-composer {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-2xl);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-sm);
+    transition: border-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-composer:focus-within {
+    border-color: var(--border-strong);
+  }
+  /* .rr-composer__input */
+  .ui-composer-input {
+    color: var(--ink-primary);
+    font-size: 15px;
+    line-height: 24px;
+  }
+  .ui-composer-input::placeholder {
+    color: var(--ink-muted);
+  }
+  /* .rr-composer__send and --stop */
+  .ui-composer-send {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-full);
+    background: var(--action-primary);
+    color: var(--ink-on-brand);
+  }
+  .ui-composer-send:hover:not(:disabled) {
+    background: var(--action-primary-hover);
+  }
+  .ui-composer-send:disabled {
+    background: var(--surface-sunken);
+    color: var(--ink-muted);
+    opacity: 1;
+  }
+  .ui-composer-send:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+  .ui-composer-stop {
+    background: var(--ink-primary);
+    color: var(--surface-base);
+  }
+}
+
+/* ---- The product frame: the design system's AppShell (.rr-shell) on the app's own sidebars ------
+   Same values as system.css's .rr-shell__side, __nav and the product wash, from the same tokens. */
+@layer components {
+  /* .rr-shell__side: sunken in light, raised in dark -- elevation runs upward there. */
+  .ui-shell-side {
+    background-color: var(--surface-sunken);
+    border-right: 1px solid var(--border-subtle);
+    color: var(--ink-primary);
+    font-family: var(--font-sans);
+    /* .rr-shell[data-product="browser"]: Browser's own wash enters from the top edge and is gone by
+       132px, so selection, text and controls stay Redrob Blue and ink. Only the frame reads a
+       --product-* token, as the system requires. */
+    background-image: linear-gradient(
+      180deg,
+      var(--product-browser-wash) 0,
+      transparent 132px
+    );
+  }
+  [data-theme="dark"] .ui-shell-side {
+    background-color: var(--surface-raised);
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--product-browser-wash) 55%, transparent) 0,
+      transparent 132px
+    );
+  }
+  .ui-shell-side > :first-child {
+    border-color: var(--border-subtle);
+  }
+  /* .rr-shell__nav a */
+  .ui-shell-link {
+    border-radius: var(--radius-sm);
+    color: var(--ink-secondary);
+    font-size: 13px;
+    font-weight: 400;
+    transition:
+      background-color var(--duration-fast) var(--easing-standard),
+      color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-shell-link:hover {
+    background: var(--surface-base);
+    color: var(--ink-primary);
+  }
+  [data-theme="dark"] .ui-shell-link:hover {
+    background: var(--surface-sunken);
+  }
+  /* The ground and the weight carry the selection; no bar down the edge. */
+  .ui-shell-link[aria-current="page"],
+  .ui-shell-link.active {
+    background: var(--surface-base);
+    color: var(--ink-primary);
+    font-weight: 600;
+  }
+  [data-theme="dark"] .ui-shell-link[aria-current="page"],
+  [data-theme="dark"] .ui-shell-link.active {
+    background: var(--surface-sunken);
+  }
+  .ui-shell-link svg {
+    color: var(--ink-muted);
+  }
+  .ui-shell-link[aria-current="page"] svg,
+  .ui-shell-link.active svg {
+    color: var(--ink-brand);
+  }
+  .ui-shell-link:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: -2px;
+  }
+  /* The meta line above a group: 12px Medium in ink-secondary, sentence case -- never uppercase,
+     never tracked (--text-meta). */
+  .ui-shell-label,
+  .ui-meta-label {
+    color: var(--ink-secondary);
+    font: var(--text-meta);
+    letter-spacing: 0;
+    text-transform: none;
+  }
+}
+
+/* Settings: the page shell's title and lede, then groups of rows inside one card each. */
+@layer components {
+  .ui-settings-head {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .ui-settings-head__title {
+    margin: 0;
+    color: var(--ink-primary);
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 32px;
+    letter-spacing: -0.012em;
+  }
+  .ui-settings-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .ui-settings-group > .ui-meta-label {
+    padding: 0 var(--space-1);
+  }
+  .ui-settings-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-4) var(--space-5);
+  }
+  .ui-settings-row + .ui-settings-row {
+    border-top: 1px solid var(--border-subtle);
+  }
+  .ui-settings-row__label {
+    display: block;
+    color: var(--ink-primary);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 22px;
+  }
+  .ui-settings-row__desc {
+    margin: 2px 0 0;
+    color: var(--ink-secondary);
+    font-size: 13px;
+    line-height: 20px;
+  }
+  /* A button that continues a sentence: the ghost button's colour and focus, at the text's own size. */
+  .ui-inline-btn {
+    height: auto;
+    padding: 0 var(--space-1);
+    color: var(--ink-brand);
+    font-size: inherit;
+    vertical-align: baseline;
+  }
+}
+
+/* The new tab page. */
+@layer components {
+  /* A Radix tab panel is focusable (it takes the focus that leaves its tab list), so it shows the ring. */
+  [data-slot="tabs-content"]:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+    border-radius: var(--radius-lg);
+  }
+  /* A recent site: .rr-card--interactive at tile size. The ground and the border answer hover; nothing
+     scales, because a growing tile shifts its neighbours' labels under the pointer. */
+  .ui-tile {
+    border-radius: var(--radius-lg);
+    color: var(--ink-secondary);
+  }
+  .ui-tile__face {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-sm);
+    transition: border-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-tile:hover .ui-tile__face {
+    border-color: var(--border-strong);
+  }
+  .ui-tile:hover {
+    color: var(--ink-primary);
+  }
+  .ui-tile:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+  }
+  /* A card that is also a button (the run rows, the Personalize sections): .rr-card's ground and border,
+     over the Button it is built on. */
+  .ui-card-btn {
+    height: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    color: var(--ink-primary);
+    font-weight: 400;
+    line-height: normal;
+  }
+  .ui-card-btn:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    background: var(--surface-raised);
+  }
+  .ui-card {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+  }
+  /* A template or example block inside a card. */
+  .ui-sample {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+    color: var(--ink-primary);
+  }
+  .ui-sample--quiet {
+    color: var(--ink-secondary);
+  }
+  /* A picker tile (Add a provider): .rr-card--interactive. Hover is the border and the Add chip turning
+     brand; nothing lifts, and focus is the system ring. */
+  .ui-pick {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    color: var(--ink-primary);
+    transition: border-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-pick--dashed {
+    border-style: dashed;
+    border-color: var(--border-strong);
+  }
+  .ui-pick:hover {
+    border-color: var(--border-strong);
+  }
+  .ui-pick:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+  }
+  .ui-pick__add {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+    color: var(--ink-primary);
+    font-weight: 600;
+    transition: background-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-pick:hover .ui-pick__add,
+  .ui-pick:focus-visible .ui-pick__add {
+    border-color: transparent;
+    background: var(--action-primary);
+    color: var(--ink-on-brand);
+  }
+  /* A row's delete action: quiet until hovered, then the danger ink. */
+  .ui-row-delete {
+    color: var(--ink-muted);
+  }
+  .ui-row-delete:hover:not(:disabled) {
+    color: var(--status-danger);
+  }
+  /* A disclosure trigger that is a heading or a count, not a button: ink changes, the focus ring shows. */
+  .ui-disclosure {
+    border-radius: var(--radius-sm);
+    color: var(--ink-secondary);
+  }
+  .ui-disclosure:hover {
+    color: var(--ink-primary);
+  }
+  .ui-disclosure:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+  }
+  .ui-status--success {
+    color: var(--status-success);
+  }
+  .ui-status--danger {
+    color: var(--status-danger);
+  }
+  .ui-status--running {
+    color: var(--ink-brand);
+  }
+}
+
+/* The side panel: a column on the base ground. Header and footer are opaque rules, not frosted glass
+   (a translucent ground is a colour the palette does not have). */
+@layer components {
+  .ui-panel-head,
+  .ui-panel-foot {
+    background: var(--surface-base);
+    border-color: var(--border-subtle);
+    color: var(--ink-primary);
+  }
+  .ui-panel-head {
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .ui-panel-foot {
+    border-top: 1px solid var(--border-subtle);
+  }
+  .ui-panel-divider {
+    width: 1px;
+    height: 16px;
+    background: var(--border-subtle);
+  }
+  /* A toolbar control with a caret or a count beside its glyph: .rr-iconbtn's ground, at its own width. */
+  .ui-panel-tool {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    height: var(--control-height-sm);
+    padding: 0 var(--space-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--ink-secondary);
+    cursor: pointer;
+    transition:
+      background-color var(--duration-fast) var(--easing-standard),
+      color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-panel-tool:hover,
+  .ui-panel-tool[data-state="open"],
+  .rr-iconbtn[data-state="open"],
+  .ui-panel-head .rr-btn--secondary[data-state="open"] {
+    background: var(--surface-sunken);
+    color: var(--ink-primary);
+  }
+  .ui-panel-tool:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+  }
+  .ui-panel-tool[data-selected] {
+    color: var(--ink-primary);
+  }
+  .ui-panel-tool__count {
+    color: var(--ink-brand);
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .ui-panel-tool__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-full);
+    background: var(--surface-brand);
+  }
+  /* A list row on the base ground: the sunken ground and the weight carry hover and selection. */
+  .ui-panel-row {
+    border-radius: var(--radius-md);
+    color: var(--ink-primary);
+    transition: background-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-panel-row:hover,
+  .ui-panel-row:focus-within {
+    background: var(--surface-sunken);
+  }
+  .ui-panel-row[aria-current="page"] {
+    background: var(--surface-sunken);
+  }
+  .ui-panel-row[aria-current="page"] .ui-panel-row__title {
+    font-weight: 600;
+  }
+  .ui-panel-row__link:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: -2px;
+    border-radius: var(--radius-md);
+  }
+  .ui-panel-row__icon {
+    color: var(--ink-muted);
+  }
+  .ui-panel-row[aria-current="page"] .ui-panel-row__icon {
+    color: var(--ink-brand);
+  }
+  .ui-panel-row__title {
+    color: var(--ink-primary);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+  }
+  .ui-panel-row__meta {
+    color: var(--ink-muted);
+    font-size: 12px;
+    line-height: 18px;
+  }
+  /* Delete appears with the row, on hover or keyboard focus; it is never the only way to reach it. */
+  .ui-panel-row .ui-panel-row__action {
+    opacity: 0;
+  }
+  .ui-panel-row:hover .ui-panel-row__action,
+  .ui-panel-row:focus-within .ui-panel-row__action {
+    opacity: 1;
+  }
+  .ui-panel-row__action:hover:not(:disabled) {
+    color: var(--status-danger);
+  }
+  @media (hover: none) {
+    .ui-panel-row .ui-panel-row__action {
+      opacity: 1;
+    }
+  }
+  /* .rr-prompts, stacked: in a 400px column a wrapped row of chips reads as one ragged line. */
+  .ui-panel-prompts {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .ui-panel-prompts .rr-prompt {
+    max-width: 100%;
+    text-align: left;
+  }
+}
+
+/* .rr-mark: one artwork file per ground, swapped on the theme. Never a filter, a mask or an opacity. */
+@layer components {
+  .ui-mark__dark {
+    display: none;
+  }
+  [data-theme="dark"] .ui-mark__light {
+    display: none;
+  }
+  [data-theme="dark"] .ui-mark__dark {
+    display: block;
+  }
 }

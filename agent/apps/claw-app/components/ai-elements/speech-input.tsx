@@ -12,7 +12,7 @@
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { MicIcon, SquareIcon } from "lucide-react";
+import { MicIcon, SquareIcon } from "@browseros/icons";
 import type { ComponentProps } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 

@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import '@mdxeditor/editor/style.css'
+import { t } from '@browseros/i18n'
+import { Check, Copy } from '@browseros/icons'
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -27,7 +28,6 @@ import {
   toolbarPlugin,
   UndoRedo,
 } from '@mdxeditor/editor'
-import { Check, Copy } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 
@@ -98,10 +98,10 @@ function CopyMarkdownButton({
       type="button"
       onClick={handleCopy}
       className="mdx-copy-button"
-      title="Copy raw markdown"
+      title={t('stCopyRawMarkdown')}
     >
       {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-      <span>{copied ? 'Copied' : 'Copy markdown'}</span>
+      <span>{copied ? t('stCopied') : t('stCopyMarkdown')}</span>
     </button>
   )
 }

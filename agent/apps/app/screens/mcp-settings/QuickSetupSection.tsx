@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, Copy } from 'lucide-react'
+import { t, tNodes } from '@browseros/i18n'
+import { Check, Copy } from '@browseros/icons'
 import { type FC, type ReactNode, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -32,16 +33,25 @@ const clients: ClientConfig[] = [
     kind: 'config',
     action: (
       <>
-        Add the block below to your agent's MCP config (commonly{' '}
-        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
-          mcp.json
-        </code>{' '}
-        or{' '}
-        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
-          settings.json
-        </code>
-        ). If the schema differs, the only values that matter are{' '}
-        <strong>type</strong> and <strong>url</strong>.
+        {tNodes(
+          'stQuickSetupGeneric',
+          <code
+            key="a"
+            className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]"
+          >
+            mcp.json
+          </code>,
+          <code
+            key="b"
+            className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]"
+          >
+            settings.json
+          </code>,
+          // i18n-ignore: the config keys themselves
+          <strong key="c">type</strong>,
+          // i18n-ignore: the config keys themselves
+          <strong key="d">url</strong>,
+        )}
       </>
     ),
     getSnippet: (url) =>
@@ -69,11 +79,15 @@ const clients: ClientConfig[] = [
     kind: 'config',
     action: (
       <>
-        Add this block to{' '}
-        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
-          claude_desktop_config.json
-        </code>
-        .
+        {tNodes(
+          'stAddBlockTo',
+          <code
+            key="a"
+            className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]"
+          >
+            claude_desktop_config.json
+          </code>,
+        )}
       </>
     ),
     getSnippet: (url) =>
@@ -117,7 +131,7 @@ const CopyButton: FC<{ text: string; label?: string }> = ({ text, label }) => {
       variant="ghost"
       size="icon-sm"
       onClick={handleCopy}
-      aria-label={copied ? 'Copied' : (label ?? 'Copy')}
+      aria-label={copied ? t('stCopied') : (label ?? t('stCopy'))}
       className="shrink-0 text-muted-foreground hover:text-foreground"
     >
       {copied ? (
@@ -137,17 +151,18 @@ export const QuickSetupSection: FC<QuickSetupSectionProps> = ({
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="font-semibold text-sm">Manual setup</h3>
+        <h3 className="font-semibold text-sm">{t('stManualSetup')}</h3>
         <p className="text-muted-foreground text-xs">
-          Use the snippet for your agent, or use the Server URL with clients
-          that support URL-based MCP config.
+          {t('stUseTheSnippetForYour')}
         </p>
       </div>
 
       <div className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
-        <span className="text-muted-foreground text-xs">Server URL</span>
+        <span className="text-muted-foreground text-xs">
+          {t('stServerUrl')}
+        </span>
         <code className="flex-1 truncate font-mono text-xs">{serverUrl}</code>
-        <CopyButton text={serverUrl} label="Copy server URL" />
+        <CopyButton text={serverUrl} label={t('stCopyServerUrl')} />
       </div>
 
       <Tabs defaultValue="generic">
@@ -181,7 +196,7 @@ export const QuickSetupSection: FC<QuickSetupSectionProps> = ({
                 </pre>
                 <CopyButton
                   text={snippet}
-                  label={`Copy ${client.name} setup`}
+                  label={t('stCopySetup', client.name)}
                 />
               </div>
             </TabsContent>

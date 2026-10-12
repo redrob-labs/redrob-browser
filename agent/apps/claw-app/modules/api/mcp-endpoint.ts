@@ -23,6 +23,7 @@ function mcpBaseUrlFallback(): string {
 }
 
 export function buildMcpCliCommand(slug: string): string {
+  // i18n-ignore: a shell command
   return `mcp add ${slug}`
 }
 

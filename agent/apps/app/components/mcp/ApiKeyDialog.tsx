@@ -7,8 +7,9 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
+import { Loader2 } from '@browseros/icons'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Loader2 } from 'lucide-react'
 import { type FC, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod/v3'
@@ -82,9 +83,9 @@ export const ApiKeyDialog: FC<ApiKeyDialogProps> = ({
               />
             </div>
             <div>
-              <DialogTitle>Connect {serverName}</DialogTitle>
+              <DialogTitle>{t('shConnectName', serverName)}</DialogTitle>
               <DialogDescription>
-                Enter your {serverName} API key to connect
+                {t('shEnterApiKey', serverName)}
               </DialogDescription>
             </div>
           </div>
@@ -100,11 +101,11 @@ export const ApiKeyDialog: FC<ApiKeyDialogProps> = ({
               name="apiKey"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>API Key</FormLabel>
+                  <FormLabel>{t('shApiKey')}</FormLabel>
                   <FormControl>
                     <Input
                       type="password"
-                      placeholder="Paste your API key here"
+                      placeholder={t('shPasteYourApiKeyHere')}
                       autoComplete="off"
                       {...field}
                     />
@@ -121,7 +122,7 @@ export const ApiKeyDialog: FC<ApiKeyDialogProps> = ({
                 onClick={() => onOpenChange(false)}
                 disabled={isSubmitting}
               >
-                Cancel
+                {t('shCancel')}
               </Button>
               <Button
                 type="submit"
@@ -131,10 +132,10 @@ export const ApiKeyDialog: FC<ApiKeyDialogProps> = ({
                 {isSubmitting ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Connecting...
+                    {t('shConnecting')}
                   </>
                 ) : (
-                  'Connect'
+                  t('stConnect')
                 )}
               </Button>
             </DialogFooter>

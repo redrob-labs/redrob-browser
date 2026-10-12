@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { KeyRound, Plus, Search } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { KeyRound, Plus, Search } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { McpServerIcon } from '@/components/mcp/McpServerIcon'
 import { Button } from '@/components/ui/button'
@@ -73,16 +74,14 @@ export const AddManagedMCPDialog: FC<AddManagedMCPDialogProps> = ({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add built-in app</DialogTitle>
-          <DialogDescription>
-            Select a built-in app to connect
-          </DialogDescription>
+          <DialogTitle>{t('stAddBuiltInApp')}</DialogTitle>
+          <DialogDescription>{t('stSelectABuiltInApp')}</DialogDescription>
         </DialogHeader>
 
         <div className="relative">
           <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search apps..."
+            placeholder={t('stSearchApps')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
@@ -93,14 +92,14 @@ export const AddManagedMCPDialog: FC<AddManagedMCPDialogProps> = ({
           {filteredUnauthenticated.length > 0 && (
             <div className="space-y-2">
               <p className="px-1 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-                Needs authentication
+                {t('stNeedsAuthentication')}
               </p>
               {filteredUnauthenticated.map((server) => (
                 <Button
                   key={server.name}
                   variant="outline"
                   onClick={() => onAuthenticate(server.name)}
-                  className="group h-auto w-full items-center gap-3 border-warning/30 bg-warning/5 p-3 hover:border-warning hover:bg-warning/10"
+                  className="group h-auto w-full items-center gap-3 border-warning/30 bg-warning/5 p-3 font-normal leading-normal hover:border-warning hover:bg-warning/10"
                 >
                   <McpServerIcon
                     serverName={server.name}
@@ -125,7 +124,7 @@ export const AddManagedMCPDialog: FC<AddManagedMCPDialogProps> = ({
             <div className="space-y-2">
               {filteredUnauthenticated.length > 0 && (
                 <p className="px-1 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-                  Available
+                  {t('stAvailable')}
                 </p>
               )}
               {filteredAvailable?.map((args) => {
@@ -135,7 +134,7 @@ export const AddManagedMCPDialog: FC<AddManagedMCPDialogProps> = ({
                     key={serverName}
                     variant="outline"
                     onClick={() => handleAddServer(args)}
-                    className="group h-auto w-full items-center gap-3 p-3 hover:border-[var(--accent-brand)] hover:bg-[var(--accent-brand)]/5"
+                    className="group h-auto w-full items-center gap-3 p-3 font-normal leading-normal hover:border-[var(--accent-brand)] hover:bg-[var(--accent-brand)]/5"
                   >
                     <McpServerIcon
                       serverName={serverName}
@@ -159,7 +158,7 @@ export const AddManagedMCPDialog: FC<AddManagedMCPDialogProps> = ({
 
           {!hasResults && (
             <p className="py-6 text-center text-muted-foreground text-sm">
-              No apps found
+              {t('stNoAppsFound')}
             </p>
           )}
         </div>

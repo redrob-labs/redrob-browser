@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
@@ -131,8 +132,8 @@ export function useOAuthProviderFlow(
 
   async function startOAuthFlow(agentServerUrl: string | undefined) {
     if (!agentServerUrl) {
-      toast.error('Server not available', {
-        description: 'Cannot start OAuth flow without server connection.',
+      toast.error(t('shServerNotAvailable'), {
+        description: t('shCannotStartOauthFlowWithout'),
       })
       return
     }
@@ -211,7 +212,7 @@ export function useOAuthProviderFlow(
     startPolling()
     track(config.startedEvent)
     toast.info(`Authenticating with ${config.displayName}`, {
-      description: 'Complete the login in the opened tab.',
+      description: t('shCompleteTheLoginInThe'),
     })
   }
 
