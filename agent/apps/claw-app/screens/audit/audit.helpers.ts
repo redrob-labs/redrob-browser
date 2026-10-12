@@ -72,15 +72,15 @@ export function siteOf(url: string | null): string {
 
 export function formatDuration(ms: number): string {
   const v = ms < 0 ? 0 : ms
-  if (v < 1000) return `${v}ms`
+  if (v < 1000) return t('clDurationMs', v)
   const seconds = Math.floor(v / 1000)
-  if (seconds < 60) return `${seconds}s`
+  if (seconds < 60) return t('clDurationSeconds', seconds)
   const mins = Math.floor(seconds / 60)
   const remSec = seconds % 60
-  if (mins < 60) return `${mins}m ${remSec}s`
+  if (mins < 60) return t('clDurationMinutes', mins, remSec)
   const hours = Math.floor(mins / 60)
   const remMin = mins % 60
-  return `${hours}h ${remMin}m`
+  return t('clDurationHours', hours, remMin)
 }
 
 const TOKEN_COMPACT_FORMAT = new Intl.NumberFormat('en-US', {
