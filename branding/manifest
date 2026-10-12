@@ -80,6 +80,10 @@ branding/icons/win/redrob_doc.ico      chrome/app/theme/chromium/win/chromium_do
 branding/icons/win/redrob_pdf.ico      chrome/app/theme/chromium/win/chromium_pdf.ico      binary
 branding/icons/win/tiles/Logo.png      chrome/app/theme/chromium/win/tiles/Logo.png        binary
 branding/icons/win/tiles/SmallLogo.png chrome/app/theme/chromium/win/tiles/SmallLogo.png   binary
+# The installer's own icon. Upstream ships a generic boxed-CD picture here, so setup.exe showed no
+# product mark in Explorer or Downloads. Both installer executables carry the app icon instead.
+branding/icons/win/redrob.ico          chrome/installer/mini_installer/mini_installer.ico  binary
+branding/icons/win/redrob.ico          chrome/installer/setup/setup.ico                    binary
 
 # macOS. app.icns and the two catalogues below it are what a .app bundle shows in Finder and the Dock.
 # Assets.car is the compiled catalogue macOS 26 reads the Dock icon from (CFBundleIconName = AppIcon). It is
