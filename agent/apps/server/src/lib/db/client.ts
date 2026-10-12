@@ -272,6 +272,11 @@ const currentMigrationHistory = [
     hash: '81ffce013838ed5be45bbe734c04752434e49010f2959984a0240cebf17b81b6',
     createdAt: 1791769742000,
   },
+  {
+    tag: '0017_add_hiring_interviews',
+    hash: '6d98f54013632950b3f515a37e4a4f8460418f91f1718d73b99c206fd91ddbfe',
+    createdAt: 1791774310335,
+  },
 ]
 
 // TODO(nikhil): Remove this fallback once Windows/Linux packaging always includes Drizzle migrations.
@@ -480,6 +485,25 @@ const currentSchemaStatements = [
   `,
   `
     CREATE INDEX IF NOT EXISTS hiring_messages_person_idx ON hiring_messages (person_id);
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS hiring_interviews (
+	id text PRIMARY KEY NOT NULL,
+	role_id text NOT NULL,
+	person_id text NOT NULL,
+	connector text NOT NULL,
+	length_minutes integer NOT NULL,
+	status text NOT NULL,
+	slots text NOT NULL,
+	chosen integer,
+	created_at integer NOT NULL,
+	updated_at integer NOT NULL,
+	FOREIGN KEY (role_id) REFERENCES hiring_roles(id) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (person_id) REFERENCES hiring_people(id) ON UPDATE no action ON DELETE cascade
+);
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS hiring_interviews_role_idx ON hiring_interviews (role_id);
   `,
   `
     CREATE TABLE IF NOT EXISTS __drizzle_migrations (

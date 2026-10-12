@@ -43,6 +43,10 @@
     "./outreach": {
       "types": "./src/outreach.ts",
       "default": "./src/outreach.ts"
+    },
+    "./schedule": {
+      "types": "./src/schedule.ts",
+      "default": "./src/schedule.ts"
     }
   },
   "dependencies": {

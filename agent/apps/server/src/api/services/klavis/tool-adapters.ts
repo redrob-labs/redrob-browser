@@ -49,7 +49,11 @@ export interface KlavisMcpRegistrationOptions {
     args: Record<string, unknown>,
   ) => string | undefined
   /** Told of every connector call that returned without an error. */
-  afterToolCall?: (toolName: string, args: Record<string, unknown>) => void
+  afterToolCall?: (
+    toolName: string,
+    args: Record<string, unknown>,
+    result: unknown,
+  ) => void
 }
 
 type ConnectorToolPayload =
@@ -417,7 +421,8 @@ export function registerKlavisTools(
             })
           }
 
-          if (!result?.isError) options.afterToolCall?.(strataTool.name, args)
+          if (!result?.isError)
+            options.afterToolCall?.(strataTool.name, args, result)
           return result
         } catch (error) {
           const errorText =

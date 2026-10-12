@@ -189,8 +189,8 @@ export class BrowserMcpModule {
         // A Talent Scout email run holds connector calls to the one approved email.
         authorizeToolCall: (toolName, args) =>
           authorizeConnectorCall(lease?.conversationId, toolName, args),
-        afterToolCall: (toolName, args) =>
-          afterConnectorCall(lease?.conversationId, toolName, args),
+        afterToolCall: (toolName, args, result) =>
+          afterConnectorCall(lease?.conversationId, toolName, args, result),
       },
     )
     return server

@@ -24,6 +24,10 @@ import {
   type HiringOutreach,
   OutreachRefusedError,
 } from '../services/hiring-outreach'
+import {
+  CALENDAR_CONNECTORS,
+  type HiringScheduling,
+} from '../services/hiring-scheduling'
 import type { HiringScreening } from '../services/hiring-screening'
 import type { HiringSourcing } from '../services/hiring-sourcing'
 
@@ -59,6 +63,7 @@ export function createHiringRoutes(deps: {
   sourcing: HiringSourcing
   screening: HiringScreening
   outreach: HiringOutreach
+  scheduling?: HiringScheduling
   policy?: HiringPolicySource
 }) {
   const { store, sourcing, screening, outreach } = deps
@@ -332,6 +337,89 @@ export function createHiringRoutes(deps: {
             c.req.valid('json').text,
           ),
         ),
+    )
+    .get('/interviews', (c) =>
+      c.json({ interviews: deps.scheduling?.open() ?? [] }),
+    )
+    .get('/roles/:id/interviews', (c) =>
+      c.json({ interviews: deps.scheduling?.list(c.req.param('id')) ?? [] }),
+    )
+    .post(
+      '/roles/:id/people/:personId/interviews',
+      zValidator(
+        'json',
+        z.object({
+          connector: z.enum(CALENDAR_CONNECTORS),
+          conversationId: z.string().min(1),
+          lengthMinutes: z.number().int().min(15).max(120).optional(),
+        }),
+      ),
+      (c) =>
+        guard(c, () => {
+          if (!deps.scheduling)
+            throw new HiringInputError(
+              'no-calendar',
+              'scheduling is not available',
+            )
+          return deps.scheduling.startRead(
+            c.req.param('id'),
+            c.req.param('personId'),
+            c.req.valid('json'),
+          )
+        }),
+    )
+    .post(
+      '/interviews/end',
+      zValidator('json', z.object({ conversationId: z.string().min(1) })),
+      (c) =>
+        guard(c, () => ({
+          interview:
+            deps.scheduling?.end(c.req.valid('json').conversationId) ?? null,
+        })),
+    )
+    .post(
+      '/interviews/:id/choice',
+      zValidator(
+        'json',
+        z.object({
+          index: z.number().int().min(0).max(5).optional(),
+          reply: z.string().max(20_000).optional(),
+          timeZone: z.string().min(1).max(60),
+        }),
+      ),
+      (c) =>
+        guard(c, () => {
+          const { index, reply, timeZone } = c.req.valid('json')
+          return {
+            interview:
+              deps.scheduling?.choose(
+                c.req.param('id'),
+                { index, reply },
+                timeZone,
+              ) ?? null,
+          }
+        }),
+    )
+    .post(
+      '/interviews/:id/book',
+      zValidator('json', z.object({ conversationId: z.string().min(1) })),
+      (c) =>
+        guard(c, () => {
+          if (!deps.scheduling)
+            throw new HiringInputError(
+              'no-calendar',
+              'scheduling is not available',
+            )
+          return deps.scheduling.startBook(
+            c.req.param('id'),
+            c.req.valid('json').conversationId,
+          )
+        }),
+    )
+    .post('/interviews/:id/cancel', (c) =>
+      guard(c, () => ({
+        interview: deps.scheduling?.cancel(c.req.param('id')),
+      })),
     )
     .get('/record/export', (c) => {
       const rows = store.auditRows(c.req.query('roleId') || undefined)

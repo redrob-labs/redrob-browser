@@ -120,6 +120,13 @@
       "when": 1791769742000,
       "tag": "0016_add_hiring_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1791774310335,
+      "tag": "0017_add_hiring_interviews",
+      "breakpoints": true
     }
   ]
 }

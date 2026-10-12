@@ -22,6 +22,7 @@ import {
 } from '@browseros/hiring/outreach'
 import { isConsequential } from '@browseros/playbooks/playbook'
 import type { ActiveOutreachRun, HiringOutreach } from '../../hiring-outreach'
+import type { HiringScheduling } from '../../hiring-scheduling'
 import type {
   BrowserToolCall,
   BrowserToolEffect,
@@ -29,6 +30,18 @@ import type {
 } from '../browser-tool-dispatch'
 
 let outreach: Pick<HiringOutreach, 'activeRun' | 'markSent'> | null = null
+
+let scheduling: Pick<
+  HiringScheduling,
+  'activeRun' | 'authorize' | 'after'
+> | null = null
+
+/** Called once by the server. */
+export function setSchedulingSource(
+  next: Pick<HiringScheduling, 'activeRun' | 'authorize' | 'after'> | null,
+): void {
+  scheduling = next
+}
 
 /** Called once by the server. */
 export function setOutreachSource(
@@ -73,11 +86,21 @@ function typedTexts(call: BrowserToolCall): string[] {
   return []
 }
 
-export const guardHiringSend: BrowserToolGuard = (call) =>
-  guardHiringSendCall(
+export const guardHiringSend: BrowserToolGuard = (call) => {
+  // A calendar run reads or books through the connector; the browser is not part of it.
+  if (
+    scheduling?.activeRun(call.lease?.conversationId) &&
+    call.tool.name !== 'tabs'
+  ) {
+    return errorResult(
+      `${call.tool.name}: this is a calendar task, done with the calendar connector, not the browser.`,
+    )
+  }
+  return guardHiringSendCall(
     call,
     outreach?.activeRun(call.lease?.conversationId) ?? null,
   )
+}
 
 export function guardHiringSendCall(
   call: BrowserToolCall,
@@ -152,6 +175,8 @@ export function authorizeConnectorCall(
   toolName: string,
   args: Record<string, unknown>,
 ): string | undefined {
+  const calendar = scheduling?.activeRun(conversationId)
+  if (calendar) return scheduling?.authorize(calendar, toolName, args)
   const run = outreach?.activeRun(conversationId)
   if (!run) return undefined
   if (!run.email) {
@@ -169,7 +194,13 @@ export function afterConnectorCall(
   conversationId: string | undefined,
   toolName: string,
   args: Record<string, unknown>,
+  result?: unknown,
 ): void {
+  const calendar = scheduling?.activeRun(conversationId)
+  if (calendar && conversationId) {
+    scheduling?.after(conversationId, calendar, toolName, args, result)
+    return
+  }
   const run = outreach?.activeRun(conversationId)
   if (!run?.email || run.sent || !conversationId) return
   const verdict = emailCallVerdict(toolName, args, run.email)

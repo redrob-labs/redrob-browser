@@ -31,12 +31,16 @@ import { requireTrustedOrigin } from '../middleware/require-trusted-origin'
 import { BackgroundReader } from '../services/background-reader'
 import { ConversationRuns } from '../services/conversation-runs'
 import { HiringOutreach } from '../services/hiring-outreach'
+import { HiringScheduling } from '../services/hiring-scheduling'
 import { HiringScreening } from '../services/hiring-screening'
 import { HiringSourcing } from '../services/hiring-sourcing'
 import type { KlavisService } from '../services/klavis'
 import { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
 import { setJobReceiptStore } from '../services/mcp/effects/job-receipts'
-import { setOutreachSource } from '../services/mcp/guards/hiring-send'
+import {
+  setOutreachSource,
+  setSchedulingSource,
+} from '../services/mcp/guards/hiring-send'
 import { setApplicationRunSource } from '../services/mcp/guards/job-apply'
 import { setNeverReadSitesSource } from '../services/mcp/guards/never-read-sites'
 import { setPlaybookRunSource } from '../services/mcp/guards/playbook-stops'
@@ -124,6 +128,8 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
     { policy: hiringPolicy },
   )
   setOutreachSource(hiringOutreach)
+  const hiringScheduling = new HiringScheduling(hiringStore)
+  setSchedulingSource(hiringScheduling)
   const hiringScreening = new HiringScreening(
     hiringStore,
     privacyGate,
@@ -261,6 +267,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
           sourcing: hiringSourcing,
           screening: hiringScreening,
           outreach: hiringOutreach,
+          scheduling: hiringScheduling,
           policy: hiringPolicy,
         }),
       )

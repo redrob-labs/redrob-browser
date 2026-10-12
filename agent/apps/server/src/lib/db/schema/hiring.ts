@@ -174,3 +174,44 @@ export const hiringMessages = sqliteTable(
 )
 
 export type HiringMessageRow = InferSelectModel<typeof hiringMessages>
+
+export const HIRING_INTERVIEW_STATUSES = [
+  /** Reading the recruiter's calendar in a side-panel run. */
+  'reading',
+  /** Times found, waiting for the recruiter to send them. */
+  'offered',
+  /** The candidate picked one; waiting for the recruiter to book it. */
+  'chosen',
+  'booking',
+  'booked',
+  'cancelled',
+  /** The calendar could not be read: the recruiter picks times. */
+  'needs-you',
+] as const
+
+/** Interviews being arranged (Recruit plan §4.5). Never recorded or analysed: a time, nothing more. */
+export const hiringInterviews = sqliteTable(
+  'hiring_interviews',
+  {
+    id: text('id').primaryKey(),
+    roleId: text('role_id')
+      .notNull()
+      .references(() => hiringRoles.id, { onDelete: 'cascade' }),
+    personId: text('person_id')
+      .notNull()
+      .references(() => hiringPeople.id, { onDelete: 'cascade' }),
+    /** Google Calendar or Outlook Calendar. */
+    connector: text('connector').notNull(),
+    lengthMinutes: integer('length_minutes').notNull(),
+    status: text('status', { enum: HIRING_INTERVIEW_STATUSES }).notNull(),
+    slots: text('slots', { mode: 'json' })
+      .$type<Array<{ start: number; end: number }>>()
+      .notNull(),
+    chosen: integer('chosen'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [index('hiring_interviews_role_idx').on(table.roleId)],
+)
+
+export type HiringInterviewRow = InferSelectModel<typeof hiringInterviews>
