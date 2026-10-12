@@ -1,0 +1,35 @@
+# The diagnostics page (packages/diagnostics), English and Korean. The page receives these through its tr prop;
+# the text its Copy button produces stays English, because it goes to support.
+#
+# key <TAB> English <TAB> Korean
+
+dgDiagnostics	Diagnostics	진단
+dgUnavailableAll	Diagnostics unavailable	진단 정보를 가져올 수 없음
+dgHelp	Help	도움말
+dgLede	Version and system details to help us troubleshoot.	문제 해결에 필요한 버전과 시스템 정보입니다.
+dgRefreshing	Refreshing…	새로 고치는 중…
+dgRefresh	Refresh	새로 고침
+dgCopied	Copied	복사됨
+dgCopy	Copy diagnostics	진단 정보 복사
+dgCached	Cached sample	저장된 정보
+dgCollected	Collected	수집됨
+dgCollecting	Collecting diagnostics…	진단 정보를 수집하는 중…
+dgNoSample	No sample available	수집된 정보가 없습니다
+dgPrevious	Showing the previous sample.	이전에 수집한 정보를 표시합니다.
+dgVersions	Versions	버전
+dgSystem	System	시스템
+dgMemory	Memory	메모리
+dgAtTime	At time of collection	수집 시점 기준
+dgAgentServer	Agent server	에이전트 서버
+dgMcpServer	MCP server	MCP 서버
+dgAppExtension	App extension	앱 확장 프로그램
+dgReporter	Bug Reporter extension	버그 신고 확장 프로그램
+dgOs	Operating system	운영체제
+dgArch	Architecture	아키텍처
+dgCpu	Processor	프로세서
+dgCores	Logical cores	논리 코어
+dgTotalMem	Total system memory	전체 시스템 메모리
+dgFreeMem	Available system memory	사용 가능한 시스템 메모리
+dgUnavailable	Unavailable	알 수 없음
+dgNote	Copy includes these details and the collection time. No browsing history or account information.	복사한 내용에는 위 정보와 수집 시각만 들어 있습니다. 방문 기록이나 계정 정보는 포함되지 않습니다.
+dgClipboard	Clipboard unavailable. Select and copy these details:	클립보드를 쓸 수 없습니다. 아래 내용을 선택해 복사하세요:

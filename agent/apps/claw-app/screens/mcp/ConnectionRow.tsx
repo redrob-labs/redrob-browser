@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Loader2 } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Loader2 } from '@browseros/icons'
 import { HarnessIcon } from '@/components/harness/HarnessIcon'
 import { cn } from '@/lib/utils'
 import type { ConnectionState } from '@/modules/api/connections.hooks'
@@ -51,12 +52,12 @@ export function ConnectionRow({
       disabled={isPending}
       aria-label={
         state.installed
-          ? `Disconnect ${state.harness}`
-          : `Connect ${state.harness}`
+          ? t('clDisconnectName', state.harness)
+          : t('clConnectName', state.harness)
       }
       className={cn(
         'group block w-full border-cyanotype-border border-t text-left transition-colors',
-        'hover:bg-card-tint focus-visible:bg-card-tint focus-visible:outline-none',
+        'hover:bg-card-tint focus-visible:bg-card-tint focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2',
         'disabled:cursor-not-allowed disabled:opacity-70',
       )}
     >
@@ -75,7 +76,7 @@ export function ConnectionRow({
         <RowAction state={state} isPending={isPending} />
       </div>
       {errorMessage && (
-        <div className="px-10 pb-2 font-mono text-[11.5px] text-red-600">
+        <div className="px-10 pb-2 font-mono text-[11.5px] text-red">
           {errorMessage}
         </div>
       )}
@@ -97,13 +98,13 @@ function RowAction({
     return (
       <div className="flex shrink-0 items-center gap-3">
         <span className="font-semibold text-[12px] text-cyanotype-live-text">
-          Connected
+          {t('clConnected')}
         </span>
         <span aria-hidden className="text-[16px] text-cyanotype-border">
           ·
         </span>
         <span className="inline-flex items-center gap-1 text-[12px] text-cyanotype-muted transition-colors group-hover:text-cyanotype-ink">
-          Disconnect
+          {t('clDisconnect')}
           <ActionArrow />
         </span>
       </div>
@@ -112,11 +113,11 @@ function RowAction({
   return (
     <span
       className={cn(
-        'inline-flex shrink-0 items-center gap-1.5 text-[12px] text-cyanotype-blue',
+        'inline-flex shrink-0 items-center gap-1.5 text-[12px] text-accent-ink',
         'transition-colors group-hover:text-cyanotype-blue-hover',
       )}
     >
-      Connect
+      {t('clConnect')}
       <ActionArrow />
     </span>
   )

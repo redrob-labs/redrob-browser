@@ -1,7 +1,7 @@
 name: ui capture
 
-# Captures every screen of the agent extension and the onboarding page in light and dark, English and
-# Korean, measures each against the design system, and holds the counts to
+# Captures every screen of the agent extension, the onboarding page and the claw cockpit in light and
+# dark, English and Korean, measures each against the design system, and holds the counts to
 # agent/scripts/ui-capture/baseline.json. See that directory and docs/UI-REDESIGN.md.
 #
 # Not a required check yet: it becomes one once it has run green on enough pull requests to trust that
@@ -12,6 +12,7 @@ on:
     paths:
       - agent/apps/app/**
       - agent/apps/app-onboard/**
+      - agent/apps/claw-app/**
       - agent/packages/**
       - agent/scripts/ui-capture/**
       - agent/package.json
@@ -44,12 +45,17 @@ jobs:
       - name: every icon is the design system's
         run: bun run check:ui-icons
 
-      - name: build the extension and the onboarding page
+      # Seconds, and it sees strings no capture renders: the error state, the dialog nobody opened.
+      - name: no hard-coded UI strings
+        run: bun run check:ui-strings
+
+      - name: build the extension, the onboarding page and the claw cockpit
         env:
           NODE_OPTIONS: --max-old-space-size=8192
         run: |
           bun run build:agent
           bun run build:app-onboard
+          (cd apps/claw-app && bun run build)
 
       - name: install chromium
         run: bunx playwright install --with-deps chromium

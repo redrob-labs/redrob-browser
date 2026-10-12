@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Bot, FileText, Globe, Sparkles } from '@browseros/icons'
 import type { FC } from 'react'
 import type {
@@ -88,7 +89,7 @@ const BrowserOSActionCard: FC<{ action: BrowserOSAction }> = ({ action }) => {
         <div className="flex-1">
           <div className="mb-0.5 flex items-center gap-1.5">
             <span className="rounded bg-[var(--accent-brand)]/10 px-1.5 py-0.5 font-medium text-[10px] text-[var(--accent-brand-ink)] uppercase">
-              {isAgent ? 'Agent' : 'Chat'}
+              {isAgent ? t('sidepanelModeAgent') : t('sidepanelModeChat')}
             </span>
           </div>
           <div className="text-foreground text-sm">{action.message}</div>

@@ -27,7 +27,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { ChevronsUpDownIcon } from "lucide-react";
+import { ChevronsUpDownIcon } from "@browseros/icons";
 import type { ComponentProps } from "react";
 import { createContext, useContext, useMemo } from "react";
 

@@ -65,16 +65,14 @@ export const SidebarNavigation: FC<SidebarNavigationProps> = ({
         <nav className="space-y-1">
           {primaryNavItems.map((item) => {
             const Icon = item.icon
-            const isActive = isNavItemActive(item, location.pathname)
+            const _isActive = isNavItemActive(item, location.pathname)
 
             const navItem = (
               <NavLink
                 to={item.to}
                 onClick={onNavigate}
                 className={cn(
-                  'flex h-9 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 font-medium text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                  isActive &&
-                    'bg-sidebar-accent text-sidebar-accent-foreground',
+                  'ui-shell-link flex h-9 items-center gap-2 overflow-hidden whitespace-nowrap px-3',
                 )}
               >
                 <Icon className="size-4 shrink-0" />

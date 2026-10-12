@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowRight, Terminal } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { ArrowRight, Terminal } from '@browseros/icons'
 import { useState } from 'react'
 import { MANUAL_SETUP_CARD_LINE } from './install-guide.data'
 import { ManualSetupDialog } from './ManualSetupDialog'
@@ -31,14 +32,16 @@ export function ManualSetupCard({ endpointUrl }: ManualSetupCardProps) {
     <section className="space-y-2">
       <header className="flex items-baseline justify-between gap-3">
         <h2 className="font-semibold text-cyanotype-ink text-lg">
-          Any other agent
+          {t('clAnyOtherAgent')}
         </h2>
-        <span className="text-[12px] text-cyanotype-muted">Manual</span>
+        <span className="text-[12px] text-cyanotype-muted">
+          {t('clManual')}
+        </span>
       </header>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="group block w-full rounded-9 border border-cyanotype-border bg-card p-4 text-left transition-colors hover:border-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        className="group block w-full rounded-9 border border-cyanotype-border bg-card p-4 text-left transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong"
       >
         <div className="flex items-start gap-3">
           <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-card-tint text-cyanotype-muted">
@@ -46,7 +49,7 @@ export function ManualSetupCard({ endpointUrl }: ManualSetupCardProps) {
           </span>
           <div className="min-w-0 flex-1 space-y-1">
             <p className="font-semibold text-[15px] text-cyanotype-ink leading-snug">
-              Not on the list above?
+              {t('clNotOnTheListAbove')}
             </p>
             <p className="text-[13px] text-cyanotype-muted leading-snug">
               {MANUAL_SETUP_CARD_LINE}
@@ -54,8 +57,8 @@ export function ManualSetupCard({ endpointUrl }: ManualSetupCardProps) {
           </div>
         </div>
         <div className="mt-3 flex justify-end">
-          <span className="inline-flex items-center gap-1 text-[12px] text-cyanotype-blue transition-colors group-hover:text-cyanotype-blue-hover">
-            Show me how
+          <span className="inline-flex items-center gap-1 text-[12px] text-accent-ink transition-colors group-hover:text-ink">
+            {t('clShowMeHow')}
             <ArrowRight
               aria-hidden
               className="size-3.5 transition-transform group-hover:translate-x-0.5"

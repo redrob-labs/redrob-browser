@@ -39,7 +39,7 @@ const globalDescriptors = new Map(
 
 const { InstallExtensionDialog } = await import('./InstallExtensionDialog')
 const {
-  COWORK_REQUIREMENT_LINE,
+  coworkRequirementLine,
   EXTENSION_DOWNLOAD_URL,
   EXTENSION_RELEASES_URL,
   INSTALL_STEPS,
@@ -129,7 +129,7 @@ describe('InstallExtensionDialog', () => {
     const first = INSTALL_STEPS[0]
     expect(paneText()).toContain(first.title)
     expect(paneText()).toContain(first.body)
-    expect(paneText()).toContain(COWORK_REQUIREMENT_LINE)
+    expect(paneText()).toContain(coworkRequirementLine())
     expect(paneText()).toContain(`step 1 of ${INSTALL_STEPS.length}`)
     expect(container.querySelector('img')?.getAttribute('src')).toBe(
       first.image?.src,

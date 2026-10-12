@@ -99,6 +99,7 @@ export function useExecutionHistoryTracker(options?: { enabled?: boolean }) {
         } catch (error) {
           sentry.captureException(error, {
             extra: {
+              // i18n-ignore: telemetry, not copy
               message: 'Failed to persist execution history task',
               conversationId: task.conversationId,
               taskId: task.id,

@@ -22,7 +22,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   CopyIcon,
-} from "lucide-react";
+} from "@browseros/icons";
 import type { ComponentProps } from "react";
 import {
   createContext,

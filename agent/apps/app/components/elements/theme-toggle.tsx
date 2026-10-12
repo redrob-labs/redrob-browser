@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Monitor, Moon, Sun } from '@browseros/icons'
 import type { FC } from 'react'
 import type { ClassNameValue } from 'tailwind-merge'
@@ -23,9 +24,9 @@ import type { Theme } from '@/lib/theme/theme-storage'
 import { cn } from '@/lib/utils'
 
 const themes: { value: Theme; icon: typeof Monitor; label: string }[] = [
-  { value: 'system', icon: Monitor, label: 'System' },
-  { value: 'light', icon: Sun, label: 'Light' },
-  { value: 'dark', icon: Moon, label: 'Dark' },
+  { value: 'system', icon: Monitor, label: t('stSystem') },
+  { value: 'light', icon: Sun, label: t('stLight') },
+  { value: 'dark', icon: Moon, label: t('stDark') },
 ]
 
 export interface ThemeToggleProps {
@@ -53,11 +54,13 @@ export const ThemeToggle: FC<ThemeToggleProps> = ({
         <Button
           variant="ghost"
           size={hideLabel ? 'icon' : 'default'}
-          aria-label={`Current theme: ${currentTheme?.label}`}
+          aria-label={t('stCurrentTheme', currentTheme?.label ?? '')}
           className={cn(className)}
         >
           <CurrentIcon className={cn('h-5 w-5', iconClassName)} />
-          {!hideLabel && <span>{currentTheme?.label || 'Theme'}</span>}
+          {!hideLabel && (
+            <span>{currentTheme?.label || t('appearanceTheme')}</span>
+          )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

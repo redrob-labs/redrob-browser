@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import type { ProviderTemplate } from '@/lib/llm-providers/providerTemplates'
 
 /**
@@ -25,10 +26,10 @@ export const ADD_PROVIDER_CATEGORY_ORDER: readonly AddProviderCategory[] = [
 
 export const ADD_PROVIDER_CATEGORY_LABELS: Record<AddProviderCategory, string> =
   {
-    agent: 'Coding agents',
-    subscription: 'Sign in with a subscription',
-    'api-key': 'Bring your own API key',
-    local: 'Runs on this machine',
+    agent: t('stCatAgents'),
+    subscription: t('stCatSubscription'),
+    'api-key': t('stCatApiKey'),
+    local: t('stCatLocal'),
   }
 
 /**

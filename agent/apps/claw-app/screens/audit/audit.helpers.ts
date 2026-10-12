@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import type { TaskStatus, TaskSummary } from '@/modules/api/audit.hooks'
 
 /**
@@ -53,11 +54,11 @@ const ONE_DAY = 86_400_000
 
 export function formatRelative(createdAt: number, now: number): string {
   const delta = now - createdAt
-  if (delta < NINE_SECONDS) return 'just now'
-  if (delta < ONE_MINUTE) return `${Math.floor(delta / 1000)}s ago`
-  if (delta < ONE_HOUR) return `${Math.floor(delta / ONE_MINUTE)}m ago`
-  if (delta < ONE_DAY) return `${Math.floor(delta / ONE_HOUR)}h ago`
-  return `${Math.floor(delta / ONE_DAY)}d ago`
+  if (delta < NINE_SECONDS) return t('clJustNow')
+  if (delta < ONE_MINUTE) return t('clSecondsAgo', Math.floor(delta / 1000))
+  if (delta < ONE_HOUR) return t('clMinutesAgo', Math.floor(delta / ONE_MINUTE))
+  if (delta < ONE_DAY) return t('clHoursAgo', Math.floor(delta / ONE_HOUR))
+  return t('clDaysAgo', Math.floor(delta / ONE_DAY))
 }
 
 export function siteOf(url: string | null): string {
@@ -71,15 +72,15 @@ export function siteOf(url: string | null): string {
 
 export function formatDuration(ms: number): string {
   const v = ms < 0 ? 0 : ms
-  if (v < 1000) return `${v}ms`
+  if (v < 1000) return t('clDurationMs', v)
   const seconds = Math.floor(v / 1000)
-  if (seconds < 60) return `${seconds}s`
+  if (seconds < 60) return t('clDurationSeconds', seconds)
   const mins = Math.floor(seconds / 60)
   const remSec = seconds % 60
-  if (mins < 60) return `${mins}m ${remSec}s`
+  if (mins < 60) return t('clDurationMinutes', mins, remSec)
   const hours = Math.floor(mins / 60)
   const remMin = mins % 60
-  return `${hours}h ${remMin}m`
+  return t('clDurationHours', hours, remMin)
 }
 
 const TOKEN_COMPACT_FORMAT = new Intl.NumberFormat('en-US', {

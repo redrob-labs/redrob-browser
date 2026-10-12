@@ -7,13 +7,13 @@
  * See the NOTICE file for provenance.
  */
 
+import { type MessageKey, tNodes } from '@browseros/i18n'
+
 interface EditorialEmptyProps {
-  /** Text before the italic accent word. */
-  leading: string
+  /** The whole line, with the accent word as $1, so a translation can put it where its grammar needs. */
+  line: MessageKey
   /** The italic Newsreader accent word (the app's signature move). */
   accent: string
-  /** Text after the italic accent word. */
-  trailing: string
   /** Mono ink-3 hint line under the accent line. */
   hint: string
 }
@@ -26,19 +26,19 @@ interface EditorialEmptyProps {
  * lives at the call site.
  */
 export function EditorialEmpty({
-  leading,
+  line,
   accent,
-  trailing,
   hint,
 }: EditorialEmptyProps) {
   return (
     <div className="py-20 text-center">
       <p className="font-extrabold text-2xl leading-tight tracking-tight md:text-3xl">
-        {leading}{' '}
-        <span className="font-medium font-serif text-accent italic">
-          {accent}
-        </span>{' '}
-        {trailing}
+        {tNodes(
+          line,
+          <span key="a" className="font-medium font-serif text-accent italic">
+            {accent}
+          </span>,
+        )}
       </p>
       <p className="mt-3 font-mono text-[12px] text-ink-3">{hint}</p>
     </div>

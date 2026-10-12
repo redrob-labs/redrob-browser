@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Pause, Play, RotateCcw } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Pause, Play, RotateCcw } from '@browseros/icons'
 import type { ChangeEvent } from 'react'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { cn } from '@/lib/utils'
@@ -51,7 +52,7 @@ export function PlaybackTransport({
           type="button"
           onClick={togglePlay}
           aria-label={
-            finished ? 'Restart playback' : isPlaying ? 'Pause' : 'Play'
+            finished ? t('clRestartPlayback') : isPlaying ? 'Pause' : 'Play'
           }
           className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-accent text-white shadow"
         >
@@ -83,7 +84,7 @@ export function PlaybackTransport({
                 type="button"
                 key={frame.dispatchId ?? `bookmark-${action.sourceIndex}`}
                 title={frame.caption}
-                aria-label={`Jump to ${frame.caption}`}
+                aria-label={t('clJumpTo', frame.caption)}
                 onClick={() => onSeek(action.startAt)}
                 style={{ left: `${pct}%` }}
                 className={cn(
@@ -100,8 +101,12 @@ export function PlaybackTransport({
           />
           <input
             type="range"
-            aria-label="Playback position"
-            aria-valuetext={`${formatTime(time)} of ${formatTime(totalSeconds)}`}
+            aria-label={t('clPlaybackPosition')}
+            aria-valuetext={t(
+              'clTimeOfTotal',
+              formatTime(time),
+              formatTime(totalSeconds),
+            )}
             min={0}
             max={totalSeconds}
             step={SCRUBBER_STEP}

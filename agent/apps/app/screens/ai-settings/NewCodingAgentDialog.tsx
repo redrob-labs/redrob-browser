@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Loader2 } from '@browseros/icons'
 import { type FC, useEffect, useState } from 'react'
 import { adapterLabel } from '@/components/agents/AdapterIcon'
@@ -82,17 +83,16 @@ export const NewCodingAgentDialog: FC<NewCodingAgentDialogProps> = ({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            Set up {type ? adapterLabel(type) : 'agent'}
+            {t('stSetUpName', type ? adapterLabel(type) : t('stAgentWord'))}
           </DialogTitle>
           <DialogDescription>
-            Redrob uses your existing CLI login. This agent can run commands and
-            access files anywhere on your computer without approval.
+            {t('stRedrobUsesYourExistingCli')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label htmlFor="coding-agent-name">Name</Label>
+            <Label htmlFor="coding-agent-name">{t('stName')}</Label>
             <Input
               id="coding-agent-name"
               value={name}
@@ -102,7 +102,7 @@ export const NewCodingAgentDialog: FC<NewCodingAgentDialogProps> = ({
           </div>
 
           <div className="space-y-2">
-            <Label>Model</Label>
+            <Label>{t('stModel')}</Label>
             <Select
               value={modelId || AGENT_DEFAULT}
               onValueChange={(value) =>
@@ -113,7 +113,9 @@ export const NewCodingAgentDialog: FC<NewCodingAgentDialogProps> = ({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={AGENT_DEFAULT}>Agent default</SelectItem>
+                <SelectItem value={AGENT_DEFAULT}>
+                  {t('stAgentDefault')}
+                </SelectItem>
                 {(probe.data?.models ?? []).map((model) => (
                   <SelectItem key={model.id} value={model.id}>
                     {model.name ?? model.id}
@@ -125,7 +127,7 @@ export const NewCodingAgentDialog: FC<NewCodingAgentDialogProps> = ({
 
           {(probe.data?.reasoning?.values.length ?? 0) > 0 ? (
             <div className="space-y-2">
-              <Label>Reasoning effort</Label>
+              <Label>{t('stReasoningEffort')}</Label>
               <Select
                 value={reasoningEffort || AGENT_DEFAULT}
                 onValueChange={(value) =>
@@ -136,7 +138,9 @@ export const NewCodingAgentDialog: FC<NewCodingAgentDialogProps> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={AGENT_DEFAULT}>Agent default</SelectItem>
+                  <SelectItem value={AGENT_DEFAULT}>
+                    {t('stAgentDefault')}
+                  </SelectItem>
                   {(probe.data?.reasoning?.values ?? []).map((effort) => (
                     <SelectItem key={effort} value={effort}>
                       {effort}
@@ -149,8 +153,8 @@ export const NewCodingAgentDialog: FC<NewCodingAgentDialogProps> = ({
 
           {probe.isLoading ? (
             <p className="flex items-center gap-2 text-muted-foreground text-sm">
-              <Loader2 className="h-4 w-4 animate-spin" /> Inspecting installed
-              agent…
+              <Loader2 className="h-4 w-4 animate-spin" />{' '}
+              {t('stInspectingInstalledAgent')}
             </p>
           ) : null}
           {probeError ? (
@@ -165,7 +169,7 @@ export const NewCodingAgentDialog: FC<NewCodingAgentDialogProps> = ({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('stCancel')}
           </Button>
           <Button
             onClick={() => void handleCreate()}
@@ -174,7 +178,7 @@ export const NewCodingAgentDialog: FC<NewCodingAgentDialogProps> = ({
             {createAgent.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : null}
-            Create agent
+            {t('stCreateAgent')}
           </Button>
         </DialogFooter>
       </DialogContent>

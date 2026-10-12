@@ -23,7 +23,7 @@ import {
   Qwen,
 } from '@lobehub/icons'
 import type { FC, SVGProps } from 'react'
-import RedrobMark from '@/assets/product_logo.svg'
+import { RedrobMark } from '@/components/brand/RedrobMark'
 import type { ProviderType } from './types'
 
 interface IconProps extends SVGProps<SVGSVGElement> {
@@ -34,13 +34,7 @@ type IconComponent = FC<IconProps>
 
 // The Redrob mark as is: brand marks are never recoloured.
 const RedrobConsoleIcon: IconComponent = ({ size = 20, className }) => (
-  <img
-    src={RedrobMark}
-    alt="Redrob Console"
-    width={size}
-    height={size}
-    className={className}
-  />
+  <RedrobMark alt="Redrob Console" size={size} className={className} />
 )
 
 const providerIconMap: Record<ProviderType, IconComponent | null> = {

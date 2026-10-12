@@ -92,6 +92,9 @@
   --muted-foreground: var(--rr-gray-7); /* ink-secondary */
   --ink-muted: #686e78; /* ink-muted, the system's own literal */
   --ink-disabled: var(--rr-gray-5);
+  --brand-subtle: var(--rr-blue-1); /* surface-brand-subtle */
+  --brand-subtle-2: var(--rr-blue-2); /* blue-2: selected, a step stronger */
+  --primary-hover: var(--rr-blue-7); /* action-primary-hover */
   --accent: var(--rr-gray-2); /* hover fill on surface-base */
   --accent-foreground: var(--rr-black);
   --destructive: var(--rr-red-4); /* status-danger */
@@ -138,6 +141,9 @@
   --muted-foreground: var(--rr-gray-5); /* ink-secondary */
   --ink-muted: #838a97; /* ink-muted, the system's own literal */
   --ink-disabled: var(--rr-gray-6);
+  --brand-subtle: var(--rr-blue-10); /* surface-brand-subtle */
+  --brand-subtle-2: var(--rr-blue-9);
+  --primary-hover: var(--rr-blue-5); /* action-primary-hover */
   --accent: var(--rr-gray-8);
   --accent-foreground: var(--rr-gray-1);
   --destructive: var(--rr-red-3); /* status-danger */
@@ -233,8 +239,10 @@
   --color-accent-foreground: var(--primary-foreground);
   --color-accent-2: var(--accent-brand-bright);
   --color-accent-ink: var(--accent-brand-ink);
-  --color-accent-tint: oklch(from var(--accent-brand) l c h / 0.1);
-  --color-accent-tint-2: oklch(from var(--accent-brand) l c h / 0.2);
+  /* Brand tints are the system's own steps, not the fill at an alpha (which is a colour it does not have). */
+  --color-accent-tint: var(--brand-subtle);
+  --color-accent-tint-2: var(--brand-subtle-2);
+  --color-primary-hover: var(--primary-hover);
   --color-ink: var(--foreground);
   --color-ink-2: var(--muted-foreground);
   --color-ink-3: var(--ink-muted);

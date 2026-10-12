@@ -1,0 +1,139 @@
+# The agent side panel (agent/apps/app/screens/sidepanel), English and Korean.
+#
+# key <TAB> English <TAB> Korean [<TAB> description]
+#
+# Terminology follows l10n/10-sidebar.tsv and 70-onboarding.tsv: agent 에이전트 / chat 채팅. Rows arrive with
+# the screen that renders them; strings the panel still hard-codes are listed by check:ui-strings once the
+# panel is enforced there.
+
+# Composer mode (the design system's ComposerMode, beside the composer)
+sidepanelModeGroup	How the AI works	AI 작동 방식	Accessible name of the radio group that holds the two modes
+sidepanelModeAgent	Agent	에이전트	Mode: the AI may act on pages
+sidepanelModeAgentHint	AI can browse, click, and navigate	AI가 웹을 탐색하고 클릭하며 이동할 수 있습니다	Tooltip of the Agent mode
+sidepanelModeChat	Chat	채팅	Mode: the AI only reads
+sidepanelModeChatHint	AI can only read, cannot click or navigate	AI는 읽기만 하며 클릭하거나 이동하지 않습니다	Tooltip of the Chat mode
+
+# Header and footer
+spChangeProvider	Change AI provider	AI 제공자 변경	Tooltip on the provider picker
+spNoProvider	No provider	제공자 없음	Shown in the picker when none is configured
+spNewConversation	New conversation	새 대화	Header button; also the title of a conversation with no user message yet
+spChatHistory	Chat history	대화 기록	Header button
+spSettings	Settings	설정	Header button
+spAttachTabs	Attach tabs (@)	탭 첨부 (@)	Footer tool; @ is the keyboard shortcut, keep it
+spSelectFolder	Select workspace folder	작업 폴더 선택	Footer tool with no folder chosen
+spConnectApps	Connect apps	앱 연결	Footer tool
+spStop	Stop	중지	Composer: stop the running answer
+spSend	Send	보내기	Composer send button
+spPlaceholderChat	Ask about this page…	이 페이지에 대해 물어보세요…	Composer placeholder in Chat mode
+spPlaceholderAgent	What should I do?	무엇을 할까요?	Composer placeholder in Agent mode
+spRemoveTab	Remove tab	탭 제거	Attached tab chip
+spRemoveSelection	Remove selected text	선택한 텍스트 제거	Selected-text chip
+spQuoted	“$1”	“$1”	Quotation marks around quoted page text; Korean uses the same marks
+spIncognito	Incognito mode: this chat is not saved to history.	시크릿 모드: 이 대화는 기록에 저장되지 않습니다.
+spSuggestedReplies	Suggested replies	추천 답장	Accessible name of the reply chips
+
+# Empty state and starter prompts
+spEmptyChatTitle	Chat with this page	이 페이지와 대화하기	Empty state title in Chat mode
+spEmptyAgentTitle	Agent at your service	에이전트가 도와드릴게요	Empty state title in Agent mode
+spEmptyChatDesc	Ask questions about the current page or any topic	지금 보고 있는 페이지나 어떤 주제든 물어보세요
+spEmptyAgentDesc	Let AI automate tasks and browse for you	AI가 작업을 자동화하고 대신 탐색합니다
+spCustomizePrompts	Customize prompts	프롬프트 맞춤 설정
+spPromptsLoadFailed	Could not load saved prompts.	저장된 프롬프트를 불러오지 못했습니다.
+spRetry	Retry	다시 시도
+spEditPromptN	Edit prompt $1: $2	프롬프트 $1 편집: $2	Accessible name; $1 is the slot number, $2 the prompt's label
+spUntitled	Untitled	제목 없음
+spPromptN	Prompt $1	프롬프트 $1	A prompt slot with no label; $1 is its number
+spEditPrompt	Edit prompt	프롬프트 편집
+spCancelCustomize	Cancel prompt customization	프롬프트 맞춤 설정 취소
+spButtonLabel	Button label	버튼 이름
+spPrompt	Prompt	프롬프트
+spPromptHelp	The full prompt runs when you click the shortcut.	바로가기를 누르면 전체 프롬프트가 실행됩니다.
+spCancel	Cancel	취소
+spSaving	Saving…	저장 중…
+spSavePrompts	Save prompts	프롬프트 저장
+
+# Message actions and feedback
+spCopy	Copy	복사
+spCopied	Copied	복사됨
+spCopyToClipboard	Copy to clipboard	클립보드에 복사
+spFeedbackSent	Feedback submitted	의견을 보냈습니다
+spLike	Like	좋아요
+spLikeResponse	Like this response	이 답변이 좋아요
+spDislike	Dislike	별로예요
+spDislikeResponse	Dislike this response	이 답변이 별로예요
+spWhatWentWrong	What went wrong?	무엇이 문제였나요?
+spWhatWentWrongDesc	Help us improve by sharing what was wrong with this response.	이 답변의 문제를 알려 주시면 개선에 도움이 됩니다.
+spCommentOptional	Add a comment (optional)	의견 추가 (선택)
+spSubmit	Submit	보내기
+
+# Errors
+spErrRateLimited	Rate limited	요청 한도 초과
+spErrAuth	Authentication failed	인증 실패
+spErrProviderConfig	Provider not configured	제공자가 설정되지 않음
+spErrConnection	Connection failed	연결 실패
+spErrContextLength	Conversation too long	대화가 너무 깁니다
+spErrContentFilter	Content was rejected	콘텐츠가 거부되었습니다
+spErrUnavailable	Provider unavailable	제공자를 사용할 수 없음
+spErrGeneric	Something went wrong	문제가 발생했습니다
+spErrAgentUnreachable	Unable to connect to the Redrob agent. Restart Redrob and try again.	Redrob 에이전트에 연결할 수 없습니다. Redrob을 다시 시작한 뒤 다시 시도하세요.
+spErrUnexpected	An unexpected error occurred	예기치 않은 오류가 발생했습니다
+spLearnMore	Learn more	자세히 알아보기
+spOpenAiSettings	Open AI settings	AI 설정 열기
+spTroubleshooting	View troubleshooting guide	문제 해결 가이드 보기
+spFullError	Full error	전체 오류
+spTryAgain	Try again	다시 시도
+
+# Connect an app, mid-task
+spAuthorizeApp	Authorize $1 in the opened tab	열린 탭에서 $1 권한을 허용하세요	$1 is the app's name
+spAuthorizeHelp	Complete the sign-in flow, then click the button below.	로그인을 마친 뒤 아래 버튼을 누르세요.
+spAuthorizedContinue	I've authorized $1, continue	$1 권한을 허용했어요, 계속하기
+spSkipManual	Skip, do it manually	건너뛰고 직접 하기
+spConnectForResults	Connect $1 for better results	더 나은 결과를 위해 $1을(를) 연결하세요
+spConnecting	Connecting…	연결 중…
+spConnectApp	Connect $1	$1 연결
+spDoManually	Do it manually	직접 하기
+spConnectedApp	Connected $1	$1 연결됨
+spContinuingWithout	Continuing without $1	$1 없이 계속합니다
+spConnectFailed	Failed to connect $1	$1 연결 실패
+spConnectFailedWhy	Failed to connect $1: $2	$1 연결 실패: $2	$2 is the error message
+spConnectedOk	$1 connected successfully	$1 연결 완료
+
+# Survey and schedule suggestions
+spSurveyTitle	Help us improve Redrob!	Redrob 개선에 도움을 주세요!
+spSurveyDesc	Take a quick 3-minute survey.	3분이면 끝나는 설문에 참여해 주세요.
+spDontShowAgain	Don't show this again	다시 표시하지 않기
+spTakeSurvey	Take survey	설문 참여
+spMaybeLater	Maybe later	나중에
+spScheduleTitle	Run this automatically?	자동으로 실행할까요?
+spScheduleDesc	“$1” — I can run this $2	“$1” — $2 자동으로 실행할 수 있어요	$1 is the task name, $2 a schedule phrase such as "every day at 9:00"
+spScheduleTask	Schedule this task	이 작업 예약
+
+# History
+spNoConversations	No conversations on this device yet	이 기기에는 아직 대화가 없습니다
+spFetching	Fetching latest conversations	최신 대화를 불러오는 중
+spStartChat	Start a new chat	새 대화 시작
+spDeleteConversation	Delete conversation	대화 삭제
+spDeleteConversationQ	Delete conversation?	대화를 삭제할까요?
+spDeleteConversationDesc	This action cannot be undone. This will permanently delete your conversation and all its messages.	이 작업은 되돌릴 수 없습니다. 대화와 모든 메시지가 영구적으로 삭제됩니다.
+spDelete	Delete	삭제
+spGroupToday	Today	오늘
+spGroupThisWeek	This week	이번 주
+spGroupThisMonth	This month	이번 달
+spGroupOlder	Older	이전
+
+# Default starter prompts (modules/chat/starter-prompts.ts). Read at render time, never stored, so a person
+# who has not customised them sees them in their language; the prompt text is what is sent to the agent.
+spStarterChat1	Summarize this page	이 페이지 요약하기
+spStarterChat1Prompt	Read the current tab and summarize it in bullet points	현재 탭을 읽고 핵심을 글머리 기호로 요약해 줘
+spStarterChat2	What topics does this page talk about?	이 페이지는 어떤 주제를 다루나요?
+spStarterChat2Prompt	Read the current tab and briefly describe what it is about in 1-2 lines	현재 탭을 읽고 무엇에 관한 내용인지 한두 줄로 간단히 설명해 줘
+spStarterChat3	Extract comments from this page	이 페이지의 댓글 추출하기
+spStarterChat3Prompt	Read the current tab and extract comments as bullet points	현재 탭을 읽고 댓글을 글머리 기호로 정리해 줘
+spStarterAgent1	Group my open tabs by topic	열린 탭을 주제별로 묶기
+spStarterAgent1Prompt	Look at every tab open in this window and group them into tab groups by topic	이 창에 열린 모든 탭을 살펴보고 주제별로 탭 그룹을 만들어 줘
+spStarterAgent2	Find this page in other sources	다른 출처에서 같은 내용 찾기
+spStarterAgent2Prompt	Read the current tab, search for two other sources covering the same topic, and summarize where they agree and differ	현재 탭을 읽고 같은 주제를 다루는 다른 출처 두 곳을 찾아, 서로 일치하는 점과 다른 점을 요약해 줘
+spStarterAgent3	Open amazon.com and order Sensodyne toothpaste	amazon.com에서 센소다인 치약 주문하기
+spStarterAgent3Prompt	Open amazon.com in current tab and add sensodyne toothpaste to cart	현재 탭에서 amazon.com을 열고 센소다인 치약을 장바구니에 담아 줘
+spEnterLabel	Enter a button label.	버튼 이름을 입력하세요.
+spEnterPrompt	Enter a prompt.	프롬프트를 입력하세요.

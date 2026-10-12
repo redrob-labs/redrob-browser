@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Info, Keyboard } from '@browseros/icons'
 import type { FC } from 'react'
 import { Button } from '@/components/ui/button'
@@ -51,7 +52,7 @@ export const SidebarUserFooter: FC<SidebarUserFooterProps> = ({
     <button
       type="button"
       onClick={() => chrome.tabs.create({ url: 'chrome://settings/help' })}
-      className="flex h-9 w-full items-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 font-medium text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      className="ui-shell-link flex h-9 w-full items-center gap-2 overflow-hidden whitespace-nowrap px-3"
     >
       <Info className="size-4 shrink-0" />
       <span
@@ -60,7 +61,7 @@ export const SidebarUserFooter: FC<SidebarUserFooterProps> = ({
           expanded ? 'opacity-100' : 'opacity-0',
         )}
       >
-        About Redrob
+        {t('shAboutRedrob')}
       </span>
     </button>
   )
@@ -69,7 +70,7 @@ export const SidebarUserFooter: FC<SidebarUserFooterProps> = ({
     <Button
       variant="ghost"
       onClick={onOpenShortcuts}
-      className="flex h-9 w-full items-center justify-start gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 font-medium text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      className="ui-shell-link flex h-9 w-full items-center justify-start gap-2 overflow-hidden whitespace-nowrap px-3"
     >
       <Keyboard className="size-4 shrink-0" />
       <span
@@ -78,7 +79,7 @@ export const SidebarUserFooter: FC<SidebarUserFooterProps> = ({
           expanded ? 'opacity-100' : 'opacity-0',
         )}
       >
-        Shortcuts
+        {t('shShortcuts')}
       </span>
     </Button>
   )
@@ -91,7 +92,7 @@ export const SidebarUserFooter: FC<SidebarUserFooterProps> = ({
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>{shortcutsButton}</TooltipTrigger>
-            <TooltipContent side="right">Shortcuts</TooltipContent>
+            <TooltipContent side="right">{t('shShortcuts')}</TooltipContent>
           </Tooltip>
         )}
 
@@ -100,7 +101,7 @@ export const SidebarUserFooter: FC<SidebarUserFooterProps> = ({
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>{aboutLink}</TooltipTrigger>
-            <TooltipContent side="right">About Redrob</TooltipContent>
+            <TooltipContent side="right">{t('shAboutRedrob')}</TooltipContent>
           </Tooltip>
         )}
       </div>

@@ -14,7 +14,16 @@ import { requestDiagnostics } from './extension'
 import './styles.css'
 
 /** The same snapshot powers the visible rows and clipboard across both products. */
-export function DiagnosticsPage() {
+/**
+ * `tr` translates the page's own English copy, key for key; the host app passes its localisation.
+ * The copied text (formatDiagnostics) stays English on purpose: it goes to support, who read one language.
+ * Machine values -- versions, processor names, sizes -- are never passed through it.
+ */
+export function DiagnosticsPage({
+  tr = (english: string) => english,
+}: {
+  tr?: (english: string) => string
+} = {}) {
   const [result, setResult] = useState<DiagnosticsResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -29,12 +38,14 @@ export function DiagnosticsPage() {
       setResult(await requestDiagnostics())
     } catch (failure) {
       setError(
-        failure instanceof Error ? failure.message : 'Diagnostics unavailable',
+        failure instanceof Error
+          ? failure.message
+          : tr('Diagnostics unavailable'),
       )
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [tr])
   useEffect(() => {
     void refresh()
   }, [refresh])
@@ -66,12 +77,12 @@ export function DiagnosticsPage() {
       aria-labelledby="diagnostics-title"
     >
       <p className="diagnostics-breadcrumb">
-        Help <span>/</span> Diagnostics
+        {tr('Help')} <span>/</span> {tr('Diagnostics')}
       </p>
       <div className="diagnostics-header">
         <div>
-          <h1 id="diagnostics-title">Diagnostics</h1>
-          <p>Version and system details to help us troubleshoot.</p>
+          <h1 id="diagnostics-title">{tr('Diagnostics')}</h1>
+          <p>{tr('Version and system details to help us troubleshoot.')}</p>
         </div>
         <div className="diagnostics-actions">
           <button
@@ -80,7 +91,7 @@ export function DiagnosticsPage() {
             disabled={loading}
           >
             <span aria-hidden="true">↻</span>{' '}
-            {loading ? 'Refreshing…' : 'Refresh'}
+            {loading ? tr('Refreshing…') : tr('Refresh')}
           </button>
           <button
             type="button"
@@ -88,21 +99,21 @@ export function DiagnosticsPage() {
             onClick={copy}
             disabled={!result || loading}
           >
-            {copied ? 'Copied' : 'Copy diagnostics'}
+            {copied ? tr('Copied') : tr('Copy diagnostics')}
           </button>
         </div>
       </div>
       <p className="diagnostics-timestamp" role="status">
         {result
-          ? `${result.cached ? 'Cached sample' : 'Collected'} · ${new Date(result.snapshot.collectedAt).toLocaleString()}`
+          ? `${result.cached ? tr('Cached sample') : tr('Collected')} · ${new Date(result.snapshot.collectedAt).toLocaleString()}`
           : loading
-            ? 'Collecting diagnostics…'
-            : 'No sample available'}
+            ? tr('Collecting diagnostics…')
+            : tr('No sample available')}
       </p>
       {error && (
         <p role="alert">
           {error}
-          {result ? ' Showing the previous sample.' : ''}
+          {result ? ` ${tr('Showing the previous sample.')}` : ''}
         </p>
       )}
       {result &&
@@ -110,17 +121,30 @@ export function DiagnosticsPage() {
           <section
             className="diagnostics-section"
             key={section.title}
-            aria-label={section.title}
+            aria-label={tr(section.title)}
           >
             <div className="diagnostics-section-heading">
-              <h2>{section.title}</h2>
-              {section.title === 'Memory' && <span>At time of collection</span>}
+              <h2>{tr(section.title)}</h2>
+              {section.title === 'Memory' && (
+                <span>{tr('At time of collection')}</span>
+              )}
             </div>
             <dl>
               {section.rows.map(([label, value]) => (
                 <div className="diagnostics-row" key={label}>
-                  <dt>{label}</dt>
-                  <dd>{value ?? 'Unavailable'}</dd>
+                  <dt>{label == null ? null : tr(label)}</dt>
+                  {/* A reported value is the machine's own data, not copy; only the fallback is ours. */}
+                  <dd
+                    translate={
+                      value == null || value === 'Unavailable'
+                        ? undefined
+                        : 'no'
+                    }
+                  >
+                    {value == null || value === 'Unavailable'
+                      ? tr('Unavailable')
+                      : value}
+                  </dd>
                 </div>
               ))}
             </dl>
@@ -128,13 +152,14 @@ export function DiagnosticsPage() {
         ))}
       {result && (
         <p className="diagnostics-note">
-          Copy includes these details and the collection time. No browsing
-          history or account information.
+          {tr(
+            'Copy includes these details and the collection time. No browsing history or account information.',
+          )}
         </p>
       )}
       {copyFallback && result && (
         <label className="diagnostics-fallback">
-          Clipboard unavailable. Select and copy these details:
+          {tr('Clipboard unavailable. Select and copy these details:')}
           <textarea
             readOnly
             value={formatDiagnostics(result.snapshot)}

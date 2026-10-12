@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import type { DynamicToolUIPart, ToolUIPart, UIMessage } from 'ai'
 import type {
   ExecutionStepApproval,
@@ -54,32 +55,32 @@ function isExecutionToolPart(
 
 function getPreviewText(part: ToolLikePart): string {
   if (part.state === 'approval-requested') {
-    return 'Waiting for approval'
+    return t('shWaitingForApproval')
   }
 
   if (part.state === 'approval-responded') {
     return part.approval?.approved === false
-      ? 'Approval rejected'
-      : 'Approval granted'
+      ? t('shApprovalRejected')
+      : t('shApprovalGranted')
   }
 
   if (part.state === 'output-denied') {
-    return 'Action denied'
+    return t('shActionDenied')
   }
 
   if (part.state === 'output-error') {
-    return 'Action failed'
+    return t('shActionFailed')
   }
 
   if (part.state === 'output-available') {
-    return 'Completed successfully'
+    return t('shCompletedSuccessfully')
   }
 
   if (part.state === 'input-available') {
-    return 'Action running'
+    return t('shActionRunning')
   }
 
-  return 'Preparing action'
+  return t('shPreparingAction')
 }
 
 function getApproval(part: ToolLikePart): ExecutionStepApproval | undefined {

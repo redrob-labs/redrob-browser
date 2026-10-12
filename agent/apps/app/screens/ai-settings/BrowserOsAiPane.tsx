@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Plus } from '@browseros/icons'
 import { type FC, useState } from 'react'
 import { toast } from 'sonner'
@@ -101,10 +102,10 @@ export const BrowserOsAiPane: FC = () => {
 
   const handleTestProvider = async (provider: LlmProviderConfig) => {
     if (!agentServerUrl) {
-      toast.error('Test Failed', {
+      toast.error(t('stTestFailed'), {
         description: (
           <span className="text-red-600 text-sm dark:text-red-400">
-            Server URL not available
+            {t('stServerUrlNotAvailable')}
           </span>
         ),
         duration: 3000,
@@ -118,7 +119,7 @@ export const BrowserOsAiPane: FC = () => {
       const result = await testProvider(provider, agentServerUrl)
 
       if (result.success) {
-        toast.success('Test Successful', {
+        toast.success(t('stTestSuccessful'), {
           description: (
             <span className="text-green-600 text-sm dark:text-green-400">
               {result.message}
@@ -127,7 +128,7 @@ export const BrowserOsAiPane: FC = () => {
           duration: 3000,
         })
       } else {
-        toast.error('Test Failed', {
+        toast.error(t('stTestFailed'), {
           description: (
             <span className="text-red-600 text-sm dark:text-red-400">
               {result.message}
@@ -137,10 +138,10 @@ export const BrowserOsAiPane: FC = () => {
         })
       }
     } catch (error) {
-      toast.error('Test Failed', {
+      toast.error(t('stTestFailed'), {
         description: (
           <span className="text-red-600 text-sm dark:text-red-400">
-            {error instanceof Error ? error.message : 'Unknown error'}
+            {error instanceof Error ? error.message : t('stUnknownError')}
           </span>
         ),
         duration: 3000,
@@ -153,31 +154,30 @@ export const BrowserOsAiPane: FC = () => {
   return (
     <div className="fade-in slide-in-from-bottom-5 animate-in space-y-6 duration-500">
       <div>
-        <h2 className="font-semibold text-xl">AI &amp; Agents</h2>
+        <h2 className="font-semibold text-xl">{t('stAiAmpAgents')}</h2>
         <p className="text-muted-foreground text-sm">
-          Pick what runs your chats, and connect anything else you use.
+          {t('stPickWhatRunsYourChats')}
         </p>
       </div>
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-semibold text-base">
-            Your providers{' '}
+            {t('stYourProviders')}{' '}
             <span className="font-normal text-muted-foreground">
               ({providers.length + coding.agents.length})
             </span>
           </h3>
           <Button onClick={() => addProvider.openProviderForm()}>
             <Plus className="size-4" />
-            Add
+            {t('stAdd')}
           </Button>
         </div>
 
         {providersUnavailable ? (
           <Alert variant="destructive">
             <AlertDescription>
-              Your providers could not be loaded because the Redrob agent server
-              is not reachable. They are still saved on this device.
+              {t('stYourProvidersCouldNotBe')}
             </AlertDescription>
           </Alert>
         ) : null}
@@ -219,16 +219,15 @@ export const BrowserOsAiPane: FC = () => {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Provider</AlertDialogTitle>
+            <AlertDialogTitle>{t('stDeleteProvider')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{providerToDelete?.name}"? This
-              action cannot be undone.
+              {t('stConfirmDeleteProvider', providerToDelete?.name ?? '')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('stCancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDeleteProvider}>
-              Delete
+              {t('stDelete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

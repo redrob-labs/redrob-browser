@@ -27,7 +27,7 @@ export function AppSidebar({ expanded = false }: AppSidebarProps) {
   return (
     <div
       className={cn(
-        'flex h-full flex-col border-border border-r bg-sidebar text-sidebar-foreground transition-all duration-200 ease-in-out',
+        'ui-shell-side flex h-full flex-col transition-all duration-200 ease-in-out',
         expanded ? 'w-64' : 'w-14',
       )}
     >

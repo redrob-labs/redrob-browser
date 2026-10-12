@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+import { t } from '@browseros/i18n'
 import type {
   BrowserOSImportItem,
   BrowserOSImportProgress,
@@ -84,7 +85,7 @@ function humanizeImportItem(item: string): string {
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/[-_]+/g, ' ')
     .trim()
-  if (!label) return 'Unknown data'
+  if (!label) return t('onboardItemUnknown')
   return label.charAt(0).toUpperCase() + label.slice(1)
 }
 
@@ -93,7 +94,7 @@ export function importItemLabel(item: string): string {
 }
 
 export function importItemListLabel(items: readonly string[]): string {
-  if (items.length === 0) return 'No supported data'
+  if (items.length === 0) return t('onboardItemNone')
   return items.map(importItemLabel).join(', ')
 }
 

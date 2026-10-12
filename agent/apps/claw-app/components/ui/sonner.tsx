@@ -9,7 +9,7 @@
 
 import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
-import { IconCircleCheck, IconInfoCircle, IconAlertTriangle, IconAlertOctagon, IconLoader } from "@tabler/icons-react"
+import { CheckCircle2 as IconCircleCheck, Info as IconInfoCircle, AlertTriangle as IconAlertTriangle, CircleAlert as IconAlertOctagon, Loader2 as IconLoader } from "@browseros/icons"
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme()

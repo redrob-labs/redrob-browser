@@ -8,6 +8,7 @@
  */
 
 import type { AuditRetention } from '@browseros/claw-api'
+import { t } from '@browseros/i18n'
 
 /** Human-readable size in MB (below 1 GB) or GB. */
 export function formatBytes(bytes: number): string {
@@ -56,8 +57,8 @@ export function retentionRequest(
 /** Confirmation copy for the "Clean up now" gate. */
 export function cleanupConfirmText(retention: AuditRetention): string {
   if (retention.mode === 'keepForever') {
-    return 'Retention is set to Never, so this only removes orphaned audit files and reclaims disk space. Continue?'
+    return t('clCleanKeepForever')
   }
   const days = retention.days ?? 7
-  return `This permanently deletes all audit data, screenshots, and replays older than ${days} days, then reclaims the disk space. Continue?`
+  return t('clCleanOlderThan', days)
 }

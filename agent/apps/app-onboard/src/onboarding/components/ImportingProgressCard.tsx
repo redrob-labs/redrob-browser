@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { RefreshCw } from '@browseros/icons'
 
 interface ImportingProgressCardProps {
@@ -33,7 +34,7 @@ export function ImportingProgressCard({
       <div className="mb-3.5 flex items-center gap-2.5">
         <RefreshCw className="size-[18px] animate-spin text-accent" />
         <span className="font-bold text-[14px]">
-          Importing {currentItemLabel ?? 'data'}...
+          {t('onboardImporting', currentItemLabel ?? 'data')}
         </span>
       </div>
       {sourceLabel && (
@@ -47,8 +48,8 @@ export function ImportingProgressCard({
           style={{ width: `${percent}%` }}
         />
       </div>
-      <div className="font-mono text-[12.5px] text-ink-2">
-        {progress} / {total} items
+      <div className="text-[12.5px] text-ink-2 tabular-nums">
+        {t('onboardItems', progress, total)}
       </div>
     </div>
   )

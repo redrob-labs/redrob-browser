@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { type MessageKey, t } from '@browseros/i18n'
 import type { UIMessage } from 'ai'
 import dayjs from 'dayjs'
 import type {
@@ -15,11 +16,12 @@ import type {
   TimeGroup,
 } from './types'
 
-export const TIME_GROUP_LABELS: Record<TimeGroup, string> = {
-  today: 'Today',
-  thisWeek: 'This Week',
-  thisMonth: 'This Month',
-  older: 'Older',
+/** Message keys; read through t() where shown, so the label follows the page's language. */
+export const TIME_GROUP_LABELS: Record<TimeGroup, MessageKey> = {
+  today: 'spGroupToday',
+  thisWeek: 'spGroupThisWeek',
+  thisMonth: 'spGroupThisMonth',
+  older: 'spGroupOlder',
 }
 
 const getTimeGroup = (timestamp: number): TimeGroup => {
@@ -36,12 +38,12 @@ export const extractLastUserMessage = (messages: UIMessage[]): string => {
   const userMessages = messages.filter((m) => m.role === 'user')
   const lastUserMessage = userMessages[userMessages.length - 1]
 
-  if (!lastUserMessage) return 'New conversation'
+  if (!lastUserMessage) return t('spNewConversation')
 
   const textParts = lastUserMessage.parts.filter((p) => p.type === 'text')
   const text = textParts.map((p) => (p as { text: string }).text).join(' ')
 
-  return text || 'New conversation'
+  return text || t('spNewConversation')
 }
 
 export const groupConversations = (

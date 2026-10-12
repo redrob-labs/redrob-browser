@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { ChevronRight } from '@browseros/icons'
 import { useId } from 'react'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -49,9 +50,11 @@ export function ImportItemChecklist({
   return (
     <div className="mb-5 border-border-2 border-t pt-5">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="font-bold text-[12.5px] text-ink-2">What to copy</div>
-        <div className="font-mono text-[11.5px] text-ink-3">
-          {checkedItems.length} categories selected
+        <div className="font-bold text-[12.5px] text-ink-2">
+          {t('onboardWhatToCopy')}
+        </div>
+        <div className="text-[11.5px] text-ink-3 tabular-nums">
+          {t('onboardCategoriesSelected', checkedItems.length)}
         </div>
       </div>
       <div className="grid grid-cols-1 gap-x-4 gap-y-2.5 min-[420px]:grid-cols-2">
@@ -61,9 +64,9 @@ export function ImportItemChecklist({
         <details className="group mt-3 border-border-2 border-t pt-3">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[12px] text-ink-3 transition-colors hover:text-ink-2">
             <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
-            Also copy my browsing setup
-            <span className="text-ink-4">
-              ({optionalItems.map(importItemLabel).join(', ').toLowerCase()})
+            {t('onboardAlsoCopyMyBrowsingSetup')}
+            <span className="text-ink-3">
+              ({optionalItems.map(importItemLabel).join(', ')})
             </span>
           </summary>
           <div className="mt-2.5 grid grid-cols-1 gap-x-4 gap-y-2.5 min-[420px]:grid-cols-2">

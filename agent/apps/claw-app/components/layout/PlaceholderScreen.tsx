@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import type { ComponentType, ReactNode, SVGProps } from 'react'
 
 interface PlaceholderScreenProps {
@@ -36,7 +37,7 @@ export function PlaceholderScreen({
         {description}
       </p>
       <span className="mt-4 inline-flex items-center gap-2 rounded-full bg-bg-sunken px-3 py-1 text-ink-3 text-xs">
-        Coming soon
+        {t('clComingSoon')}
       </span>
     </div>
   )

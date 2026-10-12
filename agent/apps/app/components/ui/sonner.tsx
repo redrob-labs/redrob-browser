@@ -14,19 +14,33 @@ import {
   OctagonXIcon,
   TriangleAlertIcon,
 } from '@browseros/icons'
-import { useTheme } from 'next-themes'
 import { Toaster as Sonner, type ToasterProps } from 'sonner'
+import { useTheme } from '@/components/theme-provider'
 
 /**
  * @public
  */
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = 'system' } = useTheme()
+  // Our provider, not next-themes': nothing mounts a next-themes provider, so that hook always said 'system'.
+  const { theme } = useTheme()
 
   return (
     <Sonner
       theme={theme as ToasterProps['theme']}
       className="toaster group"
+      toastOptions={{
+        classNames: {
+          toast: 'shadow-[var(--shadow-lg)]! font-sans',
+          // i18n-ignore: class names, not copy
+          title: 'font-semibold! text-[14px]! leading-5!',
+          // i18n-ignore: class names, not copy
+          description: 'text-[13px]! leading-5! text-[var(--ink-secondary)]!',
+          success: '[&_[data-icon]]:text-[var(--status-success)]',
+          error: '[&_[data-icon]]:text-[var(--status-danger)]',
+          warning: '[&_[data-icon]]:text-[var(--status-warning)]',
+          info: '[&_[data-icon]]:text-[var(--status-info)]',
+        },
+      }}
       closeButton
       icons={{
         success: <CircleCheckIcon className="size-4" />,
@@ -37,10 +51,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }}
       style={
         {
-          '--normal-bg': 'var(--popover)',
-          '--normal-text': 'var(--popover-foreground)',
-          '--normal-border': 'var(--border)',
-          '--border-radius': 'var(--radius)',
+          // .rr-toast: raised ground, subtle border, radius-md, shadow-lg; the status icon carries the tone.
+          '--normal-bg': 'var(--surface-raised)',
+          '--normal-text': 'var(--ink-primary)',
+          '--normal-border': 'var(--border-subtle)',
+          '--border-radius': 'var(--radius-md)',
         } as React.CSSProperties
       }
       {...props}

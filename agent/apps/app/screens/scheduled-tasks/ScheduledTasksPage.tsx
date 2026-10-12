@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { type FC, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { RunResultDialog } from '@/components/ai-elements/run-result-dialog'
@@ -186,8 +187,8 @@ export const ScheduledTasksPage: FC = () => {
 
       <Tabs value={activeTab} onValueChange={setSelectedTab}>
         <TabsList>
-          <TabsTrigger value="results">Results</TabsTrigger>
-          <TabsTrigger value="tasks">Scheduled Tasks</TabsTrigger>
+          <TabsTrigger value="results">{t('stResults')}</TabsTrigger>
+          <TabsTrigger value="tasks">{t('stScheduledTasks')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="results">
@@ -243,16 +244,15 @@ export const ScheduledTasksPage: FC = () => {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Scheduled Task</AlertDialogTitle>
+            <AlertDialogTitle>{t('stDeleteScheduledTask')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Delete "{jobToDelete?.name}"? This will also remove all run
-              history for this task.
+              {t('stConfirmDeleteTask', jobToDelete?.name ?? '')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('stCancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDelete}>
-              Delete
+              {t('stDelete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

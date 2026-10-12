@@ -1,13 +1,15 @@
 #!/usr/bin/env bun
 /**
- * Captures every screen of the extension and the onboarding page, in both themes and both languages,
+ * Captures every screen of the extension, the onboarding page and the claw cockpit, in both themes and
+ * both languages,
  * measures each against the design system, and holds the result to a committed baseline.
  *
  *   bun run ui:capture                    capture, compare with baseline.json, exit 1 on any change
  *   bun run ui:capture --update-baseline  capture and rewrite baseline.json
  *   bun run ui:capture --only settings    only the surfaces whose id contains "settings"
  *
- * Needs the built apps (`bun run build:agent`, `bun run build:app-onboard`) and Playwright's Chromium
+ * Needs the built apps (`bun run build:agent`, `bun run build:app-onboard`, and `bun run build` in
+ * apps/claw-app) and Playwright's Chromium
  * (`bunx playwright install chromium`). Writes screenshots and report.{json,md} to `.ui-capture/`.
  *
  * WHY A RATCHET. Today's screens are off the design system, so a gate that demanded zero findings would
@@ -28,6 +30,7 @@ import { browserShim } from './shim'
 const AGENT = resolve(import.meta.dir, '..', '..')
 const EXTENSION = join(AGENT, 'apps/app/dist/chrome-mv3')
 const ONBOARD = join(AGENT, 'apps/app-onboard/dist')
+const CLAW = join(AGENT, 'apps/claw-app/dist/chrome-mv3')
 const TOKENS = resolve(AGENT, '..', 'redrob/design_tokens.json')
 const BASELINE = join(import.meta.dir, 'baseline.json')
 const OUT = join(AGENT, '.ui-capture')
@@ -48,12 +51,17 @@ const METRICS = [
 
 interface Surface {
   id: string
-  kind: 'extension' | 'onboarding'
+  kind: 'extension' | 'onboarding' | 'claw'
   path: string
   width: number
   height: number
   /** Onboarding steps are reached by pressing the primary action this many times. */
   advance?: number
+  /**
+   * An overlay opened through real input before measuring: a menu, a dialog, a tooltip. A resting screen
+   * never shows one, so without these the overlays were never measured at all.
+   */
+  open?: { click?: string; hover?: string; wait: string }
 }
 
 const page = (id: string, path: string): Surface => ({
@@ -63,9 +71,22 @@ const page = (id: string, path: string): Surface => ({
   width: 1280,
   height: 800,
 })
+/**
+ * A claw cockpit screen. Its own extension in its own context, reading the same stub server through the
+ * same port pref, so the screens are populated: running and finished sessions, skills, connections.
+ */
+const claw = (id: string, path: string): Surface => ({
+  id,
+  kind: 'claw',
+  path: `newtab.html#${path}`,
+  width: 1280,
+  height: 800,
+})
 const SURFACES: Surface[] = [
   page('home', '/home'),
   page('home-chat', '/home/chat'),
+  // A conversation with both voices in it, restored from the fixtures, so message bubbles are measured.
+  page('chat-conversation', '/home/chat?conversationId=conv-1'),
   page('home-personalize', '/home/personalize'),
   page('scheduled', '/scheduled'),
   page('connect-apps', '/connect-apps'),
@@ -76,6 +97,32 @@ const SURFACES: Surface[] = [
   page('settings-diagnostics', '/settings/diagnostics'),
   page('settings-search', '/settings/search'),
   page('onboarding-ai', '/onboarding/ai'),
+  {
+    ...page('overlay-menu', '/settings/ai'),
+    open: {
+      // The row's actions button, by its name in either language (stActionsFor).
+      click:
+        '[aria-label="Actions for Team gateway"], [aria-label="Team gateway 작업"]',
+      wait: '[role="menu"]',
+    },
+  },
+  {
+    ...page('overlay-dialog', '/scheduled'),
+    open: {
+      click: 'button:has-text("New Task"), button:has-text("새 작업")',
+      wait: '[role="dialog"]',
+    },
+  },
+  {
+    // A message action's tooltip (Copy), in the restored conversation. The app sidebar's tooltips render
+    // only while it is folded, and hover or focus unfolds it; the side panel's mode switch is named by
+    // title, as the system's ComposerMode is, so neither can stand in.
+    ...page('overlay-tooltip', '/home/chat?conversationId=conv-1'),
+    open: {
+      hover: '[data-slot="tooltip-trigger"]:has(.sr-only):visible',
+      wait: '[data-slot="tooltip-content"]',
+    },
+  },
   {
     id: 'sidepanel-chat',
     kind: 'extension',
@@ -114,6 +161,12 @@ const SURFACES: Surface[] = [
     height: 800,
     advance: 2,
   },
+  claw('claw-cockpit', '/'),
+  claw('claw-audit', '/audit'),
+  claw('claw-task', '/audit/done-1'),
+  claw('claw-skills', '/skills'),
+  claw('claw-skill', '/skills/inbox-sweep'),
+  claw('claw-mcp', '/mcp'),
 ]
 
 const args = process.argv.slice(2)
@@ -238,8 +291,13 @@ async function focus(p: Page): Promise<Finding[]> {
   return [...misses.values()]
 }
 
-async function openContext(theme: Theme, locale: Locale, port: number) {
-  const dir = join(OUT, `.profile-${theme}-${locale}`)
+async function openContext(
+  theme: Theme,
+  locale: Locale,
+  port: number,
+  ext = EXTENSION,
+) {
+  const dir = join(OUT, `.profile-${profileName(ext)}-${theme}-${locale}`)
   rmSync(dir, { recursive: true, force: true })
   const ctx = await chromium.launchPersistentContext(dir, {
     headless: true,
@@ -248,15 +306,16 @@ async function openContext(theme: Theme, locale: Locale, port: number) {
     colorScheme: theme,
     reducedMotion: 'reduce',
     args: [
-      `--disable-extensions-except=${EXTENSION}`,
-      `--load-extension=${EXTENSION}`,
+      `--disable-extensions-except=${ext}`,
+      `--load-extension=${ext}`,
       `--lang=${locale === 'ko' ? 'ko' : 'en-US'}`,
     ],
   })
-  await ctx.addInitScript(browserShim(port))
+  await ctx.addInitScript(browserShim(port, theme))
   let [sw] = ctx.serviceWorkers()
   if (!sw) sw = await ctx.waitForEvent('serviceworker')
   const id = new URL(sw.url()).host
+  if (ext !== EXTENSION) return { ctx, id, dir }
   // Seeded from an extension page: Playwright's service-worker evaluate does not see `chrome.storage`.
   const seeder = await ctx.newPage()
   await seeder.goto(`chrome-extension://${id}/manifest.json`)
@@ -267,11 +326,13 @@ async function openContext(theme: Theme, locale: Locale, port: number) {
           chrome: { storage: { local: { set(v: object): Promise<void> } } }
         }
       ).chrome.storage.local.set(seed),
-    { ...storageSeed, theme },
+    storageSeed,
   )
   await seeder.close()
-  return { ctx, id }
+  return { ctx, id, dir }
 }
+
+const profileName = (ext: string) => (ext === CLAW ? 'claw' : 'app')
 
 async function advanceOnboarding(p: Page, times: number) {
   for (let i = 0; i < times; i++) {
@@ -295,24 +356,42 @@ async function captureOne(
   const errors: string[] = []
   p.on('pageerror', (e) => errors.push(e.message.slice(0, 200)))
   await p.goto(
-    s.kind === 'extension' ? `${base}/${s.path}` : `${base}${s.path}`,
+    s.kind === 'onboarding' ? `${base}${s.path}` : `${base}/${s.path}`,
   )
   await settle(p)
   if (s.advance) await advanceOnboarding(p, s.advance)
+  if (s.open) {
+    const target = p.locator(s.open.click ?? s.open.hover ?? '').first()
+    if (s.open.click) await target.click()
+    else {
+      await target.hover()
+    }
+    await p
+      .locator(s.open.wait)
+      .first()
+      .waitFor({ state: 'visible', timeout: 5000 })
+    await settle(p)
+  }
   const name = `${s.id}.${theme}.${locale}.png`
   await p.screenshot({ path: join(OUT, name), fullPage: false })
   const found: AuditResult = await p.evaluate(audit, {
     palette: palette(theme),
     locale,
   })
-  const focusFindings = await focus(p)
+  // Tabbing would move focus out of, and close, the overlay being measured.
+  const focusFindings = s.open ? [] : await focus(p)
   await p.close()
   // Naming Pretendard is not using it: with no face loaded the stack falls through to the platform font
   // in silence. So the check is a LOADED Pretendard face, plus every face that failed to load.
   const pretendardLoaded =
     /^pretendard$/i.test(found.fonts.family) &&
     found.fonts.loaded.some((f) => /^Pretendard /.test(f))
-  const fontFail = found.fonts.failed.length + (pretendardLoaded ? 0 : 1)
+  // Plus every place Hangul is set in a stack without Pretendard: with no Hangul in that face the text
+  // draws as empty boxes, which the loaded faces above never show.
+  const fontFail =
+    found.fonts.failed.length +
+    (pretendardLoaded ? 0 : 1) +
+    found.hangulFace.length
   const metrics: Metrics = {
     offPalette: found.offPalette.length,
     contrast: found.contrast.length,
@@ -339,6 +418,7 @@ async function captureOne(
           what: `body family ${found.fonts.family}; failed: ${found.fonts.failed.join(', ') || 'none'}`,
           where: found.fonts.loaded.join(', '),
         },
+        ...found.hangulFace,
       ],
     },
   }
@@ -346,14 +426,49 @@ async function captureOne(
 
 type Result = Awaited<ReturnType<typeof captureOne>>
 
+/** Every surface of one extension, in one theme and language, from a fresh profile. */
+async function captureContext(
+  ext: string,
+  surfaces: Surface[],
+  theme: Theme,
+  locale: Locale,
+  stubPort: number,
+  onboardPort: number,
+): Promise<Result[]> {
+  const out: Result[] = []
+  const { ctx, id, dir } = await openContext(theme, locale, stubPort, ext)
+  for (const s of surfaces) {
+    const base =
+      s.kind === 'onboarding'
+        ? `http://127.0.0.1:${onboardPort}`
+        : `chrome-extension://${id}`
+    try {
+      const r = await captureOne(ctx, s, base, theme, locale)
+      out.push(r)
+      console.log(
+        `${r.id.padEnd(40)} ${METRICS.map((m) => `${m}=${r.metrics[m]}`).join(' ')}`,
+      )
+    } catch (e) {
+      console.error(
+        `${s.id}.${theme}.${locale}: capture failed: ${(e as Error).message.split('\n')[0]}`,
+      )
+      process.exitCode = 1
+    }
+  }
+  await ctx.close()
+  rmSync(dir, { recursive: true, force: true })
+  return out
+}
+
 async function main() {
   for (const [dir, cmd] of [
     [EXTENSION, 'bun run build:agent'],
     [ONBOARD, 'bun run build:app-onboard'],
+    [CLAW, 'cd apps/claw-app && bun run build'],
   ] as const) {
     if (
       !(await Bun.file(
-        join(dir, dir === EXTENSION ? 'manifest.json' : 'index.html'),
+        join(dir, dir === ONBOARD ? 'index.html' : 'manifest.json'),
       ).exists())
     ) {
       console.error(`missing ${dir}: run \`${cmd}\` first`)
@@ -369,30 +484,23 @@ async function main() {
 
   for (const theme of ['light', 'dark'] as const) {
     for (const locale of ['en', 'ko'] as const) {
-      const { ctx, id } = await openContext(theme, locale, stub.port)
-      for (const s of surfaces) {
-        const base =
-          s.kind === 'extension'
-            ? `chrome-extension://${id}`
-            : `http://127.0.0.1:${onboard.port}`
-        try {
-          const r = await captureOne(ctx, s, base, theme, locale)
-          results.push(r)
-          console.log(
-            `${r.id.padEnd(40)} ${METRICS.map((m) => `${m}=${r.metrics[m]}`).join(' ')}`,
-          )
-        } catch (e) {
-          console.error(
-            `${s.id}.${theme}.${locale}: capture failed: ${(e as Error).message.split('\n')[0]}`,
-          )
-          process.exitCode = 1
-        }
+      stub.setLocale(locale)
+      for (const ext of [EXTENSION, CLAW]) {
+        const mine = surfaces.filter(
+          (s) => (s.kind === 'claw') === (ext === CLAW),
+        )
+        if (!mine.length) continue
+        results.push(
+          ...(await captureContext(
+            ext,
+            mine,
+            theme,
+            locale,
+            stub.port,
+            onboard.port,
+          )),
+        )
       }
-      await ctx.close()
-      rmSync(join(OUT, `.profile-${theme}-${locale}`), {
-        recursive: true,
-        force: true,
-      })
     }
   }
   stub.stop()

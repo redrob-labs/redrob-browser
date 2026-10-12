@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+import { t } from '@browseros/i18n'
 import type { FieldErrors, Resolver, ResolverResult } from 'react-hook-form'
 import type { BrowserOSImportItem } from './browseros-onboarding-api'
 import {
@@ -60,7 +61,9 @@ function validateFormValues(
   return {
     success: false,
     error: {
-      issues: [{ message: 'Pick a profile.', path: ['selectedSourceId'] }],
+      issues: [
+        { message: t('onboardPickAProfile'), path: ['selectedSourceId'] },
+      ],
     },
   }
 }

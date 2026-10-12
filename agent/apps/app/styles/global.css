@@ -23,6 +23,8 @@
 @import "@xyflow/react/dist/style.css" layer(vendor);
 @import "@redrob-labs/ui/tokens.css" layer(rr);
 @import "@redrob-labs/ui/styles.css" layer(rr);
+/* The launch splash: its own sheet, so it can paint before the app, but layered here like every other. */
+@import "../lib/splash/redrob-splash.css" layer(components);
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "tailwind-scrollbar-hide/v4";
@@ -356,27 +358,16 @@
     }
   }
 
+  /* The new tab's grid, drawn in the system's subtle border and faded by a mask. It used to be faded by an
+     opaque radial ground laid OVER the page, which washed out whatever sat near the edge -- the brand mark
+     on Personalize included, which must never carry an opacity. */
   .bg-grid-pattern {
     background-image:
-      linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+      linear-gradient(to right, var(--border-subtle) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--border-subtle) 1px, transparent 1px);
     background-size: 60px 60px;
-  }
-
-  .dark .bg-grid-pattern {
-    background-image:
-      linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-    background-size: 60px 60px;
-  }
-
-  .bg-gradient-radial-focus {
-    background: radial-gradient(
-      circle at center,
-      transparent 0%,
-      transparent 30%,
-      var(--background) 70%
-    );
+    opacity: 0.45;
+    mask-image: radial-gradient(circle at center, #000 30%, transparent 70%);
   }
 
   /* Animation utility classes */
@@ -671,4 +662,626 @@
 
 .dark .mdx-editor-themed .mdxeditor [class*="linkDialogPopover"] {
   filter: drop-shadow(0 4px 16px rgb(0 0 0 / 0.4));
+}
+
+/* ---- Overlays: the design system's surfaces and motion on Radix primitives ----------------------
+   Radix renders its own elements and controls open/closed state, so the system's overlay classes
+   (.rr-modal, .rr-drawer, .rr-menu__list, .rr-tooltip__bubble) cannot be put on them as-is: those
+   carry their own positioning for the system's React components. These carry the SAME values from
+   the same tokens -- one rule each, named after the rule it mirrors -- and leave position to Radix.
+
+   Motion: what arrives travels along the brand's 40 degree rake (system.css rr-arrive / rr-leave),
+   entrance curve in, exit curve out, never a zoom. Radix waits for the exit animation before it
+   unmounts, so closing is animated too. Reduced motion: none. */
+@layer components {
+  .ui-arrive[data-state="open"],
+  .ui-arrive[data-state="delayed-open"],
+  .ui-arrive[data-state="instant-open"] {
+    animation: rr-arrive var(--duration-base) var(--easing-entrance) both;
+  }
+  .ui-arrive[data-state="closed"] {
+    animation: rr-leave var(--duration-fast) var(--easing-exit) both;
+  }
+  .ui-fade[data-state="open"] {
+    animation: ui-fade-in var(--duration-base) var(--easing-standard) both;
+  }
+  .ui-fade[data-state="closed"] {
+    animation: ui-fade-in var(--duration-fast) var(--easing-exit) reverse both;
+  }
+  @keyframes ui-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ui-arrive[data-state],
+    .ui-fade[data-state] {
+      animation: none;
+    }
+  }
+
+  /* .rr-modal-scrim */
+  .ui-scrim {
+    background: var(--overlay-scrim);
+  }
+  /* .rr-modal */
+  .ui-modal {
+    background: var(--surface-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    color: var(--ink-primary);
+    font-family: var(--font-sans);
+    padding: var(--space-5);
+  }
+  /* .rr-modal__title / __body */
+  .ui-modal-title {
+    margin: 0;
+    font-size: 21px;
+    line-height: 28px;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+  }
+  .ui-modal-body {
+    font-size: 14px;
+    line-height: 22px;
+    color: var(--ink-secondary);
+  }
+  /* .rr-drawer */
+  .ui-drawer {
+    background: var(--surface-base);
+    box-shadow: var(--shadow-lg);
+    color: var(--ink-primary);
+    font-family: var(--font-sans);
+    border-color: var(--border-subtle);
+  }
+  /* .rr-menu__list -- also popovers and hover cards, which the system draws the same way */
+  .ui-pop {
+    background: var(--surface-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    color: var(--ink-primary);
+    font-family: var(--font-sans);
+  }
+  /* .rr-menu__item, keyed on Radix's highlight rather than :hover */
+  .ui-menu-item {
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--ink-primary);
+  }
+  .ui-menu-item[data-highlighted],
+  .ui-menu-item[data-state="open"] {
+    background: var(--surface-sunken);
+  }
+  .ui-menu-item[data-disabled] {
+    color: var(--ink-muted);
+  }
+  .ui-menu-item[data-variant="destructive"] {
+    color: var(--status-danger);
+  }
+  .ui-menu-item svg:not([class*="text-"]) {
+    color: var(--ink-secondary);
+  }
+  .ui-menu-item[data-variant="destructive"] svg {
+    color: inherit;
+  }
+  /* .rr-tooltip__bubble: black on light, near-white on dark */
+  .ui-tip {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--redrob-black);
+    color: var(--redrob-white);
+    box-shadow: var(--shadow-md);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    line-height: 18px;
+  }
+  [data-theme="dark"] .ui-tip {
+    background: var(--gray-1);
+    color: var(--redrob-black);
+  }
+  .ui-tip-arrow {
+    fill: var(--redrob-black);
+    background: var(--redrob-black);
+  }
+  [data-theme="dark"] .ui-tip-arrow {
+    fill: var(--gray-1);
+    background: var(--gray-1);
+  }
+}
+
+/* ---- Chat: the design system's message, prompt and composer anatomy ---------------------------
+   Same values as system.css's .rr-msg, .rr-prompt and .rr-composer, on the app's own elements. */
+@layer components {
+  /* .rr-msg--user .rr-msg__bubble */
+  .is-user > .ui-msg {
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg);
+    background: var(--surface-sunken);
+    color: var(--ink-primary);
+  }
+  /* .rr-msg--assistant .rr-msg__bubble: machine output on --surface-ai, so it is never mistaken for a
+     person's, with the quiet wash (deep on dark). */
+  .is-assistant > .ui-msg {
+    padding: var(--space-4);
+    border: 1px solid var(--border-ai);
+    border-radius: var(--radius-lg);
+    background-color: var(--surface-ai);
+    background-image: var(--wash-quiet);
+    color: var(--ink-primary);
+  }
+  [data-theme="dark"] .is-assistant > .ui-msg {
+    background-image: var(--wash-deep);
+  }
+  /* .rr-msg__body type */
+  .ui-msg {
+    font-size: 15px;
+    line-height: 24px;
+  }
+  /* .rr-prompt, over the Button it is built on (components beats the rr layer) */
+  .ui-prompt {
+    gap: var(--space-2);
+    height: auto;
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-full);
+    background: var(--surface-raised);
+    color: var(--ink-primary);
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 20px;
+  }
+  .ui-prompt:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    background: var(--surface-brand-subtle);
+  }
+  /* .rr-composer */
+  .ui-composer {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-2xl);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-sm);
+    transition: border-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-composer:focus-within {
+    border-color: var(--border-strong);
+  }
+  /* .rr-composer__input */
+  .ui-composer-input {
+    color: var(--ink-primary);
+    font-size: 15px;
+    line-height: 24px;
+  }
+  .ui-composer-input::placeholder {
+    color: var(--ink-muted);
+  }
+  /* .rr-composer__send and --stop */
+  .ui-composer-send {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-full);
+    background: var(--action-primary);
+    color: var(--ink-on-brand);
+  }
+  .ui-composer-send:hover:not(:disabled) {
+    background: var(--action-primary-hover);
+  }
+  .ui-composer-send:disabled {
+    background: var(--surface-sunken);
+    color: var(--ink-muted);
+    opacity: 1;
+  }
+  .ui-composer-send:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+  .ui-composer-stop {
+    background: var(--ink-primary);
+    color: var(--surface-base);
+  }
+}
+
+/* ---- The product frame: the design system's AppShell (.rr-shell) on the app's own sidebars ------
+   Same values as system.css's .rr-shell__side, __nav and the product wash, from the same tokens. */
+@layer components {
+  /* .rr-shell__side: sunken in light, raised in dark -- elevation runs upward there. */
+  .ui-shell-side {
+    background-color: var(--surface-sunken);
+    border-right: 1px solid var(--border-subtle);
+    color: var(--ink-primary);
+    font-family: var(--font-sans);
+    /* .rr-shell[data-product="browser"]: Browser's own wash enters from the top edge and is gone by
+       132px, so selection, text and controls stay Redrob Blue and ink. Only the frame reads a
+       --product-* token, as the system requires. */
+    background-image: linear-gradient(
+      180deg,
+      var(--product-browser-wash) 0,
+      transparent 132px
+    );
+  }
+  [data-theme="dark"] .ui-shell-side {
+    background-color: var(--surface-raised);
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--product-browser-wash) 55%, transparent) 0,
+      transparent 132px
+    );
+  }
+  .ui-shell-side > :first-child {
+    border-color: var(--border-subtle);
+  }
+  /* .rr-shell__nav a */
+  .ui-shell-link {
+    border-radius: var(--radius-sm);
+    color: var(--ink-secondary);
+    font-size: 13px;
+    font-weight: 400;
+    transition:
+      background-color var(--duration-fast) var(--easing-standard),
+      color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-shell-link:hover {
+    background: var(--surface-base);
+    color: var(--ink-primary);
+  }
+  [data-theme="dark"] .ui-shell-link:hover {
+    background: var(--surface-sunken);
+  }
+  /* The ground and the weight carry the selection; no bar down the edge. */
+  .ui-shell-link[aria-current="page"],
+  .ui-shell-link.active {
+    background: var(--surface-base);
+    color: var(--ink-primary);
+    font-weight: 600;
+  }
+  [data-theme="dark"] .ui-shell-link[aria-current="page"],
+  [data-theme="dark"] .ui-shell-link.active {
+    background: var(--surface-sunken);
+  }
+  .ui-shell-link svg {
+    color: var(--ink-muted);
+  }
+  .ui-shell-link[aria-current="page"] svg,
+  .ui-shell-link.active svg {
+    color: var(--ink-brand);
+  }
+  .ui-shell-link:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: -2px;
+  }
+  /* The meta line above a group: 12px Medium in ink-secondary, sentence case -- never uppercase,
+     never tracked (--text-meta). */
+  .ui-shell-label,
+  .ui-meta-label {
+    color: var(--ink-secondary);
+    font: var(--text-meta);
+    letter-spacing: 0;
+    text-transform: none;
+  }
+}
+
+/* Settings: the page shell's title and lede, then groups of rows inside one card each. */
+@layer components {
+  .ui-settings-head {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .ui-settings-head__title {
+    margin: 0;
+    color: var(--ink-primary);
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 32px;
+    letter-spacing: -0.012em;
+  }
+  .ui-settings-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .ui-settings-group > .ui-meta-label {
+    padding: 0 var(--space-1);
+  }
+  .ui-settings-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-4) var(--space-5);
+  }
+  .ui-settings-row + .ui-settings-row {
+    border-top: 1px solid var(--border-subtle);
+  }
+  .ui-settings-row__label {
+    display: block;
+    color: var(--ink-primary);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 22px;
+  }
+  .ui-settings-row__desc {
+    margin: 2px 0 0;
+    color: var(--ink-secondary);
+    font-size: 13px;
+    line-height: 20px;
+  }
+  /* A button that continues a sentence: the ghost button's colour and focus, at the text's own size. */
+  .ui-inline-btn {
+    height: auto;
+    padding: 0 var(--space-1);
+    color: var(--ink-brand);
+    font-size: inherit;
+    vertical-align: baseline;
+  }
+}
+
+/* The new tab page. */
+@layer components {
+  /* A Radix tab panel is focusable (it takes the focus that leaves its tab list), so it shows the ring. */
+  [data-slot="tabs-content"]:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+    border-radius: var(--radius-lg);
+  }
+  /* A recent site: .rr-card--interactive at tile size. The ground and the border answer hover; nothing
+     scales, because a growing tile shifts its neighbours' labels under the pointer. */
+  .ui-tile {
+    border-radius: var(--radius-lg);
+    color: var(--ink-secondary);
+  }
+  .ui-tile__face {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-sm);
+    transition: border-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-tile:hover .ui-tile__face {
+    border-color: var(--border-strong);
+  }
+  .ui-tile:hover {
+    color: var(--ink-primary);
+  }
+  .ui-tile:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+  }
+  /* A card that is also a button (the run rows, the Personalize sections): .rr-card's ground and border,
+     over the Button it is built on. */
+  .ui-card-btn {
+    height: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    color: var(--ink-primary);
+    font-weight: 400;
+    line-height: normal;
+  }
+  .ui-card-btn:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    background: var(--surface-raised);
+  }
+  .ui-card {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+  }
+  /* A template or example block inside a card. */
+  .ui-sample {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+    color: var(--ink-primary);
+  }
+  .ui-sample--quiet {
+    color: var(--ink-secondary);
+  }
+  /* A picker tile (Add a provider): .rr-card--interactive. Hover is the border and the Add chip turning
+     brand; nothing lifts, and focus is the system ring. */
+  .ui-pick {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    color: var(--ink-primary);
+    transition: border-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-pick--dashed {
+    border-style: dashed;
+    border-color: var(--border-strong);
+  }
+  .ui-pick:hover {
+    border-color: var(--border-strong);
+  }
+  .ui-pick:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+  }
+  .ui-pick__add {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+    color: var(--ink-primary);
+    font-weight: 600;
+    transition: background-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-pick:hover .ui-pick__add,
+  .ui-pick:focus-visible .ui-pick__add {
+    border-color: transparent;
+    background: var(--action-primary);
+    color: var(--ink-on-brand);
+  }
+  /* A row's delete action: quiet until hovered, then the danger ink. */
+  .ui-row-delete {
+    color: var(--ink-muted);
+  }
+  .ui-row-delete:hover:not(:disabled) {
+    color: var(--status-danger);
+  }
+  /* A disclosure trigger that is a heading or a count, not a button: ink changes, the focus ring shows. */
+  .ui-disclosure {
+    border-radius: var(--radius-sm);
+    color: var(--ink-secondary);
+  }
+  .ui-disclosure:hover {
+    color: var(--ink-primary);
+  }
+  .ui-disclosure:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+  }
+  .ui-status--success {
+    color: var(--status-success);
+  }
+  .ui-status--danger {
+    color: var(--status-danger);
+  }
+  .ui-status--running {
+    color: var(--ink-brand);
+  }
+}
+
+/* The side panel: a column on the base ground. Header and footer are opaque rules, not frosted glass
+   (a translucent ground is a colour the palette does not have). */
+@layer components {
+  .ui-panel-head,
+  .ui-panel-foot {
+    background: var(--surface-base);
+    border-color: var(--border-subtle);
+    color: var(--ink-primary);
+  }
+  .ui-panel-head {
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .ui-panel-foot {
+    border-top: 1px solid var(--border-subtle);
+  }
+  .ui-panel-divider {
+    width: 1px;
+    height: 16px;
+    background: var(--border-subtle);
+  }
+  /* A toolbar control with a caret or a count beside its glyph: .rr-iconbtn's ground, at its own width. */
+  .ui-panel-tool {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    height: var(--control-height-sm);
+    padding: 0 var(--space-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--ink-secondary);
+    cursor: pointer;
+    transition:
+      background-color var(--duration-fast) var(--easing-standard),
+      color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-panel-tool:hover,
+  .ui-panel-tool[data-state="open"],
+  .rr-iconbtn[data-state="open"],
+  .ui-panel-head .rr-btn--secondary[data-state="open"] {
+    background: var(--surface-sunken);
+    color: var(--ink-primary);
+  }
+  .ui-panel-tool:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+  }
+  .ui-panel-tool[data-selected] {
+    color: var(--ink-primary);
+  }
+  .ui-panel-tool__count {
+    color: var(--ink-brand);
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .ui-panel-tool__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-full);
+    background: var(--surface-brand);
+  }
+  /* A list row on the base ground: the sunken ground and the weight carry hover and selection. */
+  .ui-panel-row {
+    border-radius: var(--radius-md);
+    color: var(--ink-primary);
+    transition: background-color var(--duration-fast) var(--easing-standard);
+  }
+  .ui-panel-row:hover,
+  .ui-panel-row:focus-within {
+    background: var(--surface-sunken);
+  }
+  .ui-panel-row[aria-current="page"] {
+    background: var(--surface-sunken);
+  }
+  .ui-panel-row[aria-current="page"] .ui-panel-row__title {
+    font-weight: 600;
+  }
+  .ui-panel-row__link:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: -2px;
+    border-radius: var(--radius-md);
+  }
+  .ui-panel-row__icon {
+    color: var(--ink-muted);
+  }
+  .ui-panel-row[aria-current="page"] .ui-panel-row__icon {
+    color: var(--ink-brand);
+  }
+  .ui-panel-row__title {
+    color: var(--ink-primary);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+  }
+  .ui-panel-row__meta {
+    color: var(--ink-muted);
+    font-size: 12px;
+    line-height: 18px;
+  }
+  /* Delete appears with the row, on hover or keyboard focus; it is never the only way to reach it. */
+  .ui-panel-row .ui-panel-row__action {
+    opacity: 0;
+  }
+  .ui-panel-row:hover .ui-panel-row__action,
+  .ui-panel-row:focus-within .ui-panel-row__action {
+    opacity: 1;
+  }
+  .ui-panel-row__action:hover:not(:disabled) {
+    color: var(--status-danger);
+  }
+  @media (hover: none) {
+    .ui-panel-row .ui-panel-row__action {
+      opacity: 1;
+    }
+  }
+  /* .rr-prompts, stacked: in a 400px column a wrapped row of chips reads as one ragged line. */
+  .ui-panel-prompts {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .ui-panel-prompts .rr-prompt {
+    max-width: 100%;
+    text-align: left;
+  }
+}
+
+/* .rr-mark: one artwork file per ground, swapped on the theme. Never a filter, a mask or an opacity. */
+@layer components {
+  .ui-mark__dark {
+    display: none;
+  }
+  [data-theme="dark"] .ui-mark__light {
+    display: none;
+  }
+  [data-theme="dark"] .ui-mark__dark {
+    display: block;
+  }
 }

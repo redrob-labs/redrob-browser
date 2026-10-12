@@ -8,8 +8,9 @@
  * books or declines; the card asks, shows, and reports back what happened.
  */
 
+import { t } from '@browseros/i18n'
+import { CalendarCheck, X } from '@browseros/icons'
 import { useQueryClient } from '@tanstack/react-query'
-import { CalendarCheck, X } from 'lucide-react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -169,9 +170,7 @@ export function FeedbackInviteCard() {
           appeared.current = false
         },
         onError: () => {
-          toast.error(
-            'Could not save your response. The invitation may appear again.',
-          )
+          toast.error(t('clCouldNotSaveYourResponse'))
         },
       },
     )
@@ -198,7 +197,7 @@ export function FeedbackInviteCardView({
 }) {
   return (
     <section
-      aria-label="Feedback call invitation"
+      aria-label={t('clFeedbackCallInvitation')}
       className="flex items-start gap-3 rounded-[9px] border border-cyanotype-border bg-accent-tint/50 px-4 py-3.5"
     >
       <span className="flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-accent-tint-2 text-cyanotype-blue">
@@ -206,10 +205,10 @@ export function FeedbackInviteCardView({
       </span>
       <div className="min-w-0 flex-1">
         <p className="font-semibold text-[13px] text-cyanotype-ink leading-5">
-          You're one of our most active users
+          {t('clYouReOneOfOur')}
         </p>
         <p className="text-[13px] text-cyanotype-soft leading-5">
-          We'd like to hear what you use neo for and what we should fix.
+          {t('clWeDLikeToHear')}
         </p>
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
           <Button
@@ -217,7 +216,7 @@ export function FeedbackInviteCardView({
             onClick={onBook}
             className="h-7 bg-cyanotype-blue px-3 text-[13px] text-on-cyanotype hover:bg-cyanotype-blue-hover"
           >
-            Book a 15 minute chat
+            {t('clBookA15MinuteChat')}
           </Button>
           <Button
             size="sm"
@@ -225,14 +224,14 @@ export function FeedbackInviteCardView({
             onClick={onDecline}
             className="h-7 px-2 text-[13px] text-cyanotype-soft"
           >
-            No thanks
+            {t('clNoThanks')}
           </Button>
         </div>
       </div>
       <button
         type="button"
         onClick={onDecline}
-        aria-label="Dismiss"
+        aria-label={t('clDismiss')}
         className="shrink-0 rounded-sm p-1 text-cyanotype-soft opacity-60 transition-opacity hover:opacity-100"
       >
         <X className="size-3.5" />

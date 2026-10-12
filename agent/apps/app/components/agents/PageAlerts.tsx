@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { AlertCircle } from '@browseros/icons'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -21,12 +22,12 @@ export function InlineErrorAlert({
   return (
     <Alert variant="destructive">
       <AlertCircle className="size-4" />
-      <AlertTitle>Agent action failed</AlertTitle>
+      <AlertTitle>{t('shAgentActionFailed')}</AlertTitle>
       <AlertDescription>
         <p>{message}</p>
         <div className="mt-2">
           <Button variant="outline" size="sm" onClick={onDismiss}>
-            Dismiss
+            {t('shDismiss')}
           </Button>
         </div>
       </AlertDescription>

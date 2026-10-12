@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tCount } from '@browseros/i18n'
 import type * as React from 'react'
 import type { FC, PropsWithChildren } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -150,7 +151,7 @@ const TabPickerMentionPopover: FC<TabPickerMentionPopoverProps> = ({
         onOpenAutoFocus={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
         role="dialog"
-        aria-label="Select tabs to attach"
+        aria-label={t('stSelectTabsToAttach')}
       >
         <Command
           className="[&_svg:not([class*='text-'])]:text-muted-foreground"
@@ -159,16 +160,17 @@ const TabPickerMentionPopover: FC<TabPickerMentionPopoverProps> = ({
           <div className="border-border/50 border-b px-3 py-2">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
-                Attach Tabs
+                {t('stAttachTabs')}
               </span>
               <span className="text-muted-foreground text-xs">
-                {filterText ? `Filtering: "${filterText}"` : 'Type to filter'}
+                {filterText
+                  ? `Filtering: "${filterText}"`
+                  : t('stTypeToFilter')}
               </span>
             </div>
             {selectedTabs.length > 0 && (
               <span className="mt-1 block text-[var(--accent-brand-ink)] text-xs">
-                {selectedTabs.length} tab{selectedTabs.length !== 1 ? 's' : ''}{' '}
-                selected
+                {tCount('stTabsSelected', selectedTabs.length)}
               </span>
             )}
           </div>
@@ -176,25 +178,25 @@ const TabPickerMentionPopover: FC<TabPickerMentionPopoverProps> = ({
             ref={listRef}
             className="max-h-64 overflow-auto"
             role="listbox"
-            aria-label="Available tabs"
+            aria-label={t('stAvailableTabs')}
             aria-multiselectable="true"
           >
             <CommandEmpty className="py-6 text-center">
               {isLoading ? (
                 <div className="text-muted-foreground text-sm">
-                  Loading tabs…
+                  {t('stLoadingTabs')}
                 </div>
               ) : (
                 <>
                   <div className="text-muted-foreground text-sm">
                     {allTabs.length === 0
-                      ? 'No active tabs'
-                      : `No tabs matching "${filterText}"`}
+                      ? t('stNoActiveTabs')
+                      : t('stNoTabsMatching', filterText)}
                   </div>
                   <div className="mt-1 text-muted-foreground/70 text-xs">
                     {allTabs.length === 0
-                      ? 'Open some web pages to attach them'
-                      : 'Try a different search term'}
+                      ? t('stOpenSomeWebPagesTo')
+                      : t('stTryADifferentSearchTerm')}
                   </div>
                 </>
               )}
@@ -250,14 +252,14 @@ const TabPickerSelectorPopover: FC<TabPickerSelectorPopoverProps> = ({
         align="start"
         className="w-72 p-0"
         role="dialog"
-        aria-label="Select tabs"
+        aria-label={t('stSelectTabs')}
       >
         <Command
           className="[&_svg:not([class*='text-'])]:text-muted-foreground"
           shouldFilter={false}
         >
           <CommandInput
-            placeholder="Search tabs..."
+            placeholder={t('stSearchTabs')}
             className="h-9"
             value={filterText}
             onValueChange={setFilterText}
@@ -265,17 +267,17 @@ const TabPickerSelectorPopover: FC<TabPickerSelectorPopoverProps> = ({
           <CommandList
             className="max-h-64 overflow-auto"
             role="listbox"
-            aria-label="Available tabs"
+            aria-label={t('stAvailableTabs')}
             aria-multiselectable="true"
           >
             <div className="border-border/50 border-b px-3 py-2">
               <div className="flex items-center justify-between">
                 <span className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
-                  Tabs
+                  {t('stTabs')}
                 </span>
                 {selectedTabs.length > 0 && (
                   <span className="text-[var(--accent-brand-ink)] text-xs">
-                    {selectedTabs.length} selected
+                    {t('stNSelected', selectedTabs.length)}
                   </span>
                 )}
               </div>
@@ -284,19 +286,19 @@ const TabPickerSelectorPopover: FC<TabPickerSelectorPopoverProps> = ({
             <CommandEmpty className="py-6 text-center">
               {isLoading ? (
                 <div className="text-muted-foreground text-sm">
-                  Loading tabs…
+                  {t('stLoadingTabs')}
                 </div>
               ) : (
                 <>
                   <div className="text-muted-foreground text-sm">
                     {allTabs.length === 0
-                      ? 'No active tabs'
-                      : `No tabs matching "${filterText}"`}
+                      ? t('stNoActiveTabs')
+                      : t('stNoTabsMatching', filterText)}
                   </div>
                   <div className="mt-1 text-muted-foreground/70 text-xs">
                     {allTabs.length === 0
-                      ? 'Open some web pages to attach them'
-                      : 'Try a different search term'}
+                      ? t('stOpenSomeWebPagesTo')
+                      : t('stTryADifferentSearchTerm')}
                   </div>
                 </>
               )}

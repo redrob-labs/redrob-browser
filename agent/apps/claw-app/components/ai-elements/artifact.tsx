@@ -17,8 +17,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import type { LucideIcon } from "lucide-react";
-import { XIcon } from "lucide-react";
+import type { LucideIcon } from "@browseros/icons";
+import { XIcon } from "@browseros/icons";
 import type { ComponentProps, HTMLAttributes } from "react";
 
 export type ArtifactProps = HTMLAttributes<HTMLDivElement>;

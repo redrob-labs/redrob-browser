@@ -8,7 +8,8 @@
  */
 
 import type { SessionBrowserTab } from '@browseros/claw-api'
-import { Layers } from 'lucide-react'
+import { t, tCount } from '@browseros/i18n'
+import { Layers } from '@browseros/icons'
 import { useState } from 'react'
 import {
   Popover,
@@ -45,7 +46,7 @@ export function TabCountChip({
         className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border-2 bg-card px-1.5 py-[1.5px] font-bold text-[10px] text-ink-2 uppercase tracking-wider transition hover:border-border-strong"
       >
         <Layers className="size-2.5" />
-        {browserTabs.length} tabs
+        {tCount('clTabs', browserTabs.length)}
       </PopoverTrigger>
       <PopoverContent className="ph-no-capture w-72 p-1.5" align="end">
         <ul className="flex flex-col gap-0.5">
@@ -88,7 +89,7 @@ export function TabCountChip({
                   </div>
                   {isLive && (
                     <span className="mt-0.5 shrink-0 font-mono text-[9px] text-accent uppercase tracking-[0.08em]">
-                      on screen
+                      {t('clOnScreen')}
                     </span>
                   )}
                 </button>

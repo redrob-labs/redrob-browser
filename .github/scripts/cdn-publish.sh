@@ -55,6 +55,27 @@ content_type() {
   esac
 }
 
+# Only the replace path needs this. The distribution is found by its public alias
+# unless CDN_DISTRIBUTION_ID names it, and a failure here fails the publish: an
+# overwritten object the edge keeps serving stale is a replace that did not happen.
+invalidate() {
+  local dist="${CDN_DISTRIBUTION_ID:-}"
+  if [ -z "$dist" ]; then
+    dist="$(aws cloudfront list-distributions \
+      --query "DistributionList.Items[?Aliases.Items && contains(Aliases.Items, '${host}')].Id | [0]" \
+      --output text)"
+  fi
+  if [ -z "$dist" ] || [ "$dist" = "None" ]; then
+    echo "no CloudFront distribution carries the alias ${host}; set CDN_DISTRIBUTION_ID" >&2
+    exit 1
+  fi
+  local id
+  id="$(aws cloudfront create-invalidation --distribution-id "$dist" --paths "$@" \
+    --query Invalidation.Id --output text)"
+  echo "invalidation $id on $dist: $*"
+  aws cloudfront wait invalidation-completed --distribution-id "$dist" --id "$id"
+}
+
 put() {
   aws s3 cp "$1" "s3://${REDROB_CDN_BUCKET}/${prefix}/$2" \
     --content-type "$(content_type "$2")" \
@@ -93,6 +114,31 @@ for file in "$staging"/*; do
     published_sum="$(sha256sum "$published" | awk '{print $1}')"
     if [ "$published_sum" = "$local_sum" ]; then
       echo "Already published, unchanged: https://${host}/${prefix}/${version}/${name}"
+    elif [ "${REPLACE_PUBLISHED:-false}" = "true" ]; then
+      # BROWSER-ONLY DIVERGENCE from redrob-design. A human chose, by dispatching with
+      # replace_published, to change what this version's file is (0.1.7 shipped with
+      # upstream's installer icon). The object is overwritten, CloudFront is told to
+      # drop its copy, and the read-back below must see the new bytes from the edge.
+      # Readers who already downloaded the old file keep it; that is the cost the
+      # dispatcher accepted.
+      echo "::warning::${prefix}/${version}/${name} is being REPLACED (published=$published_sum new=$local_sum)"
+      put "$file" "$version/$name" "public, max-age=31536000, immutable"
+      put "$file.sha256" "$version/$name.sha256" "public, max-age=31536000, immutable"
+      replaced=true
+      invalidate "/${prefix}/${version}/${name}" "/${prefix}/${version}/${name}.sha256"
+      remote="$RUNNER_TEMP/verify-$name"
+      remote_sum=""
+      for _ in $(seq 1 30); do
+        curl --fail --location --silent -o "$remote" "https://${host}/${prefix}/${version}/${name}" || true
+        remote_sum="$(sha256sum "$remote" 2>/dev/null | awk '{print $1}')"
+        [ "$remote_sum" = "$local_sum" ] && break
+        sleep 20
+      done
+      if [ "$remote_sum" != "$local_sum" ]; then
+        echo "CloudFront still serves $remote_sum for $name after 10 minutes, expected $local_sum" >&2
+        exit 1
+      fi
+      echo "OK replaced https://${host}/${prefix}/${version}/${name} ($remote_sum)"
     else
       echo "::notice::${prefix}/${version}/${name} is already published (published=$published_sum built=$local_sum). Keeping the published bytes; the alias will mirror them."
       file="$published"
@@ -126,5 +172,11 @@ for file in "$staging"/*; do
   printf '%s  %s\n' "$local_sum" "$stable" >"$staging/$stable.sha256"
   put "$file" "latest/$stable" "public, max-age=300"
   put "$staging/$stable.sha256" "latest/$stable.sha256" "public, max-age=300"
+  if [ "${replaced:-false}" = "true" ]; then
+    # After the alias write, not before: invalidating first would let an edge
+    # re-cache the old alias in the gap.
+    invalidate "/${prefix}/latest/${stable}" "/${prefix}/latest/${stable}.sha256"
+    replaced=false
+  fi
   echo "OK https://${host}/${prefix}/latest/${stable}"
 done

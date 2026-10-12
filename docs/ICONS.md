@@ -1,6 +1,6 @@
 # Icons in the extension and the onboarding page
 
-Every interface icon in `agent/apps/app` and `agent/apps/app-onboard` is a glyph from `@redrob-labs/ui`, drawn
+Every interface icon in `agent/apps/app`, `agent/apps/app-onboard`, `agent/apps/claw-app` and `agent/apps/claw-onboard` is a glyph from `@redrob-labs/ui`, drawn
 through `agent/packages/icons` (`@browseros/icons`).
 
 That package keeps lucide-react's component **names** and draws the system's **glyphs**, so the migration was one
@@ -65,6 +65,29 @@ The mapping is code: `MAP` in `agent/packages/icons/src/index.tsx`. The reasons 
 | Wrench | `tool` | |
 | Sparkles | `sparkle` | "For generated content only": every site marks AI output or an AI action |
 | Loader2, LoaderCircle | `.rr-spinner` | The system's loading mark is two raked ticks passing light, not a glyph that rotates. `animate-spin` is dropped |
+| BookOpen | `bookOpen` | Docs |
+| CalendarCheck | `calendarCheck` | Direct equivalent |
+| Eye | `eye` | Direct equivalent |
+| Pause | `pause` | Direct equivalent |
+| PlayCircle | `play` | The system draws one play glyph; the circle was the frame, not the meaning |
+| Repeat | `repeat` | Direct equivalent |
+| Terminal | `terminal` | Direct equivalent |
+| ChevronsDownUp | `collapse` | Collapse all |
+| LayoutDashboard | `grid` | The cockpit: a grid of live sessions |
+| ScrollText | `log` | The audit trail |
+| Settings2 | `sliders` | Adjustable settings |
+| Compass | `globe` | A replay step that navigated |
+| MousePointer | `target` | A replay step that clicked a target |
+| Type | `edit` | A replay step that typed |
+| Hand | `pending` | A session waiting on a person |
+| Zap | `spark` | Speed |
+| CircleDot | `dot` | A pending test |
+| Code | `code` | Direct equivalent |
+| EyeOff | `eyeOff` | Direct equivalent |
+| File | `file` | Direct equivalent |
+| GitCommit | `branch` | A commit, drawn as the branch it lands on |
+| Minus | `minus` | Direct equivalent |
+| Package | `package` | Direct equivalent |
 
 ## Substitutions awaiting a decision
 

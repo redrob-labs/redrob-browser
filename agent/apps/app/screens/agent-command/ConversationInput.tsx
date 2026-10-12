@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import {
   ArrowRight,
   Bot,
@@ -95,8 +96,8 @@ function InputActionButton({
       onClick={onClick}
       size="icon"
       disabled={disabled}
-      title={streaming && hasContent ? 'Queue message' : undefined}
-      className="h-10 w-10 flex-shrink-0 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90"
+      title={streaming && hasContent ? t('shQueueMessage') : undefined}
+      className="ui-composer-send size-10 flex-shrink-0"
     >
       {showSpinner ? (
         <Loader2 className="h-5 w-5 animate-spin" />
@@ -114,8 +115,8 @@ function StopButton({ onStop }: { onStop: () => void }) {
       size="icon"
       variant="ghost"
       onClick={onStop}
-      title="Stop current turn — queued messages will start next."
-      aria-label="Stop current turn"
+      title={t('shStopCurrentTurnQueuedMessages')}
+      aria-label={t('shStopCurrentTurn')}
       className="h-8 w-8 flex-shrink-0 rounded-lg bg-destructive/10 text-destructive transition-colors hover:bg-destructive/15 hover:text-destructive"
     >
       <Square className="h-3.5 w-3.5 fill-current" />
@@ -202,9 +203,9 @@ function CalmContextControls({
           className="inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
         >
           <Folder className="size-3" />
-          <span>Workspace</span>
+          <span>{t('shWorkspace')}</span>
           <span className="font-mono text-[10.5px] text-muted-foreground/70">
-            {selectedFolder?.name ?? 'none'}
+            {selectedFolder?.name ?? t('stNoFolder')}
           </span>
         </button>
       </WorkspaceSelector>
@@ -223,7 +224,7 @@ function CalmContextControls({
           )}
         >
           <Layers className="size-3" />
-          <span>Tabs</span>
+          <span>{t('shTabs')}</span>
           <span
             className={cn(
               'font-mono text-[10.5px]',
@@ -240,11 +241,11 @@ function CalmContextControls({
         type="button"
         onClick={onAttachClick}
         disabled={attachDisabled || !attachmentsEnabled}
-        title="Attach files"
+        title={t('shAttachFiles')}
         className="inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Paperclip className="size-3" />
-        <span>Attach</span>
+        <span>{t('shAttach')}</span>
       </button>
       <AppSelector side="bottom">
         <button
@@ -265,7 +266,7 @@ function CalmContextControls({
           ) : (
             <FileText className="size-3" />
           )}
-          <span>Apps</span>
+          <span>{t('shApps')}</span>
           <ChevronDown className="size-3" />
         </button>
       </AppSelector>
@@ -273,7 +274,7 @@ function CalmContextControls({
         <kbd className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-border bg-accent/30 px-1 font-mono text-[10px] text-muted-foreground">
           ↵
         </kbd>
-        <span>to run</span>
+        <span>{t('shToRun')}</span>
         <span className="text-muted-foreground/40">·</span>
         <kbd className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-border bg-accent/30 px-1 font-mono text-[10px] text-muted-foreground">
           ⇧
@@ -281,26 +282,18 @@ function CalmContextControls({
         <kbd className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-border bg-accent/30 px-1 font-mono text-[10px] text-muted-foreground">
           ↵
         </kbd>
-        <span>new line</span>
+        <span>{t('shNewLine')}</span>
       </div>
     </div>
   )
 }
 
 function HomeShell({ children }: { children: ReactNode }) {
-  return (
-    <div className="overflow-hidden rounded-[1.55rem] border border-border/60 bg-card/95 shadow-sm transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--accent-brand)]/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklch,var(--accent-brand)_15%,transparent),0_1px_2px_rgba(15,23,42,0.04)]">
-      {children}
-    </div>
-  )
+  return <div className="ui-composer overflow-hidden">{children}</div>
 }
 
 function ConversationShell({ children }: { children: ReactNode }) {
-  return (
-    <div className="overflow-hidden rounded-[1.35rem] border border-border/50 bg-background/95 shadow-[0_10px_30px_rgba(15,23,42,0.06)] backdrop-blur-md transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--accent-brand)]/40 focus-within:shadow-[0_0_0_4px_color-mix(in_oklch,var(--accent-brand)_15%,transparent),0_10px_30px_rgba(15,23,42,0.06)]">
-      {children}
-    </div>
-  )
+  return <div className="ui-composer overflow-hidden">{children}</div>
 }
 
 export const ConversationInput: FC<ConversationInputProps> = ({
@@ -465,7 +458,7 @@ export const ConversationInput: FC<ConversationInputProps> = ({
         // Drag/drop on a region isn't a click affordance — wrap the
         // composer in a labeled <section> so the a11y rule is satisfied
         // without misrepresenting the surface as interactive.
-        aria-label="Message composer"
+        aria-label={t('shMessageComposer')}
         className={cn('relative', isDragOver && 'ring-2 ring-primary/60')}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -508,7 +501,8 @@ export const ConversationInput: FC<ConversationInputProps> = ({
               onPaste={handlePaste}
               rows={1}
               placeholder={
-                placeholder ?? `Message ${selectedProvider?.name ?? 'agent'}...`
+                placeholder ??
+                t('shMessageProvider', selectedProvider?.name ?? t('shAgent'))
               }
               disabled={disabled}
               className={cn(
@@ -549,7 +543,7 @@ export const ConversationInput: FC<ConversationInputProps> = ({
         />
         {isDragOver ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[inherit] bg-background/80 font-medium text-foreground text-sm backdrop-blur-sm">
-            Drop files to attach
+            {t('shDropFilesToAttach')}
           </div>
         ) : null}
       </section>
@@ -605,7 +599,7 @@ function AttachmentChip({
           type="button"
           onClick={onRemove}
           className="absolute top-1 right-1 inline-flex size-5 items-center justify-center rounded-full bg-background/80 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-          aria-label={`Remove ${attachment.name}`}
+          aria-label={t('shRemoveName', attachment.name)}
         >
           <X className="size-3" />
         </button>
@@ -620,7 +614,7 @@ function AttachmentChip({
         type="button"
         onClick={onRemove}
         className="ml-1 inline-flex size-4 items-center justify-center text-muted-foreground hover:text-foreground"
-        aria-label={`Remove ${attachment.name}`}
+        aria-label={t('shRemoveName', attachment.name)}
       >
         <X className="size-3" />
       </button>

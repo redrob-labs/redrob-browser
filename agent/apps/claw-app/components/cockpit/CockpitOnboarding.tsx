@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { Check } from 'lucide-react'
+import { tNodes } from '@browseros/i18n'
+import { Check } from '@browseros/icons'
 import { useState } from 'react'
 import { NavLink } from 'react-router'
 import { cn } from '@/lib/utils'
@@ -74,10 +75,12 @@ function OnboardingHero() {
         {HERO_COPY.eyebrow}
       </span>
       <h1 className="font-extrabold text-3xl leading-[1.15] tracking-tight md:text-4xl">
-        {HERO_COPY.h1Prefix}{' '}
-        <span className="font-medium font-serif text-accent italic">
-          {HERO_COPY.h1Accent}
-        </span>
+        {tNodes(
+          'clYouWatchLine',
+          <span key="a" className="font-medium font-serif text-accent italic">
+            {HERO_COPY.h1Accent}
+          </span>,
+        )}
       </h1>
       <p className="max-w-xl text-ink-3 text-sm">{HERO_COPY.subhead}</p>
     </header>

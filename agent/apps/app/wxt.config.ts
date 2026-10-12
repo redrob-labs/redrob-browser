@@ -29,7 +29,9 @@ export default defineConfig({
     'build:done': (wxt, output) => archiveSourceMaps(wxt.config, output),
   },
   manifest: {
-    name: 'Assistant',
+    // From l10n/extension/00-manifest.tsv via _locales, so chrome://extensions shows the browser's language.
+    name: '__MSG_manifestName__',
+    default_locale: 'en',
     key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkZ34Lwqovf0N+i2kqZivoxE0r5ZS5gjiUmz3c0v9+dSzMGaLw17o96HtufNe9s5ox9AKNkuGzhkBzl8rfeR2kCpxBvBnNXJdyNT8IGUZJrUnj0mQReR3V3J/9KXejLV6PeelyztL7zvO0BUZYqMDtQYYrrDW622U55Ym8FEZhhnQNAOLY8vbD13Csr2j1X0mzl+SuKPyTWb0jWGkqmGWOLO/13Gc5qRZbLqELEycDAHdqwZ5MZlMzQydNdvIgyXZmJog3npameXueiNeG46RVSh9b22eeIF7XrFnUnpfWQ+HYDb07CMKLSC2M0ccvRFcV0UWSt1P8ofOiDvWPn7ltQIDAQAB',
     // Redrob's own CDN. The browser forces this channel for the agent id anyway
     // (extension_management.cc), so the two must name the same manifest.
@@ -63,7 +65,7 @@ export default defineConfig({
         48: 'icon/48.png',
         128: 'icon/128.png',
       },
-      default_title: 'Ask Redrob',
+      default_title: '__MSG_manifestActionTitle__',
     },
     permissions: [
       'system.cpu',
@@ -78,6 +80,9 @@ export default defineConfig({
       'bookmarks',
       'history',
       'browserOS',
+      // getColorScheme / setColorScheme: one theme for the window and these pages. Component-only;
+      // stock Chromium warns about it and loads the extension anyway.
+      'redrobPrivate',
       'alarms',
       'webNavigation',
       'downloads',

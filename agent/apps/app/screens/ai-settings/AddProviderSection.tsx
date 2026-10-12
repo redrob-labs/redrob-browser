@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Plus } from '@browseros/icons'
 import { type FC, useId, useState } from 'react'
 import { AdapterIcon, adapterLabel } from '@/components/agents/AdapterIcon'
@@ -101,7 +102,7 @@ export const AddProviderSection: FC<AddProviderSectionProps> = ({
         })),
         {
           key: 'agent-custom',
-          label: 'Custom ACP agent',
+          label: t('stCustomAcpAgent'),
           category: 'agent' as const,
           keywords: POPULAR_ACP_AGENTS.flatMap((agent) => [
             agent.id,
@@ -121,29 +122,27 @@ export const AddProviderSection: FC<AddProviderSectionProps> = ({
 
   return (
     <section className="space-y-4">
-      <h3 className="font-semibold text-base">Add a provider</h3>
+      <h3 className="font-semibold text-base">{t('stAddAProvider')}</h3>
 
       <div className="space-y-1.5">
-        <Label htmlFor={searchId}>Search providers and agents</Label>
+        <Label htmlFor={searchId}>{t('stSearchProvidersAndAgents')}</Label>
         <Input
           id={searchId}
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Try claude, ollama, or openai"
+          placeholder={t('stTryClaudeOllamaOrOpenai')}
         />
       </div>
 
       {groups.length === 0 ? (
         <p className="text-muted-foreground text-sm">
-          No provider matches that search.
+          {t('stNoProviderMatchesThatSearch')}
         </p>
       ) : (
         groups.map((group) => (
           <div key={group.category} className="space-y-2">
-            <h4 className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-              {group.label}
-            </h4>
+            <h4 className="ui-meta-label">{group.label}</h4>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {group.entries.map((entry) =>
                 entry.featured ? (

@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { Check, CreditCard, Lock } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { Check, CreditCard, Lock } from '@browseros/icons'
 
 interface ImportedSummaryCardProps {
   importedItemCount: number
@@ -28,7 +29,7 @@ export function ImportedSummaryCard({
           <Check className="size-4" />
         </span>
         <span className="font-bold text-[14px]">
-          Copied {importedItemCount} items from {sourceName}.
+          {t('onboardCopiedItemsFrom', importedItemCount, sourceName)}
         </span>
       </div>
       <SummaryRow

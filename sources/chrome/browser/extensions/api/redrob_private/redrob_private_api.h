@@ -327,6 +327,26 @@ class RedrobPrivateSetAutomaticPictureInPictureEnabledFunction
   ResponseAction Run() override;
 };
 
+class RedrobPrivateGetColorSchemeFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getColorScheme",
+                             REDROBPRIVATE_GETCOLORSCHEME)
+
+ protected:
+  ~RedrobPrivateGetColorSchemeFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetColorSchemeFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setColorScheme",
+                             REDROBPRIVATE_SETCOLORSCHEME)
+
+ protected:
+  ~RedrobPrivateSetColorSchemeFunction() override = default;
+  ResponseAction Run() override;
+};
+
 class RedrobPrivateSetRpcEnabledFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("redrobPrivate.setRpcEnabled",

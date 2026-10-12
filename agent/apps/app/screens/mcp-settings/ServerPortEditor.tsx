@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Loader2, Pencil } from '@browseros/icons'
 import { type FC, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -94,7 +95,7 @@ export const ServerPortEditor: FC<ServerPortEditorProps> = ({
       if (healthy) {
         track(MCP_PROXY_PORT_CHANGED_EVENT, { port: result.port })
         setCurrentPort(result.port)
-        toast.success('Server port updated', {
+        toast.success(t('stServerPortUpdated'), {
           description: `MCP clients now connect on port ${result.port}.`,
         })
         onPortChanged?.()
@@ -119,7 +120,7 @@ export const ServerPortEditor: FC<ServerPortEditorProps> = ({
           variant="outline"
           size="icon"
           className="shrink-0"
-          title="Edit server port"
+          title={t('stEditServerPort')}
         >
           <Pencil className="h-4 w-4" />
         </Button>
@@ -127,16 +128,14 @@ export const ServerPortEditor: FC<ServerPortEditorProps> = ({
       <PopoverContent align="end" className="w-80">
         <div className="space-y-3">
           <div className="space-y-1">
-            <h4 className="font-medium text-sm">Server port</h4>
+            <h4 className="font-medium text-sm">{t('stServerPort')}</h4>
             <p className="text-muted-foreground text-xs leading-relaxed">
-              The port external MCP clients (Claude Code, Gemini CLI, and
-              others) use to connect. Saving restarts the server, so any active
-              connections will briefly drop.
+              {t('stThePortExternalMcpClients')}
             </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="proxy-port" className="sr-only">
-              Server port
+              {t('stServerPort')}
             </Label>
             <Input
               id="proxy-port"
@@ -168,16 +167,16 @@ export const ServerPortEditor: FC<ServerPortEditorProps> = ({
               onClick={() => setOpen(false)}
               disabled={isSaving}
             >
-              Cancel
+              {t('stCancel')}
             </Button>
             <Button size="sm" onClick={handleSave} disabled={!canSave}>
               {isSaving ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Restarting…
+                  {t('stRestarting')}
                 </>
               ) : (
-                'Save'
+                t('stSave')
               )}
             </Button>
           </div>

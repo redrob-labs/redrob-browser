@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { Activity } from 'lucide-react'
+import { Activity } from '@browseros/icons'
 import type { ReactNode } from 'react'
 
 interface EmptyStateProps {

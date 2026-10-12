@@ -39,7 +39,7 @@ describe('OnboardingV2 shell', () => {
 
   it('renders the visual rail with the v2 quote and three feature blocks', () => {
     const html = renderApp()
-    expect(html).toContain('BrowserOS neo')
+    expect(html).toContain('Redrob')
     expect(html).toContain('Not yours.')
     expect(html).toContain('Signed in as you.')
     expect(html).toContain('Watch every step.')
@@ -50,7 +50,7 @@ describe('OnboardingV2 shell', () => {
     const html = renderApp()
     expect(html).toContain('<main')
     expect(html).not.toContain('role="dialog"')
-    expect(html).not.toContain('Welcome to BrowserOS neo')
+    expect(html).not.toContain('Welcome to Redrob')
     expect(html).not.toContain('#FF5F57')
   })
 

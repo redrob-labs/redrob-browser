@@ -1,0 +1,97 @@
+# First run (agent/apps/app-onboard), served at chrome://redrob-onboarding.
+#
+# key <TAB> English <TAB> Korean [<TAB> description]
+#
+# Terminology follows l10n/10-sidebar.tsv: agent 에이전트 / bookmark 북마크 / model 모델. Product names are not
+# translated. Headings that emphasise one word carry it as $1, with the word itself in its own row, so a
+# translation can put the emphasis where its own word order needs it.
+
+# Welcome
+onboardWelcomeHeading	Welcome to $1	$1에 오신 것을 환영합니다	Step 1 heading; $1 is the emphasised product name, Redrob
+onboardTwoQuickStepsToGet	Two quick steps to get set up: bring your browser over, then connect your agent.	두 단계면 준비가 끝납니다. 쓰던 브라우저를 가져오고, 에이전트를 연결하세요.
+onboardGetStarted	Get started	시작하기	Primary action on the welcome step
+onboardSkipForNow	Skip for now	나중에 하기
+onboardOnboardingProgress	Onboarding progress	시작하기 진행 상황	Accessible name of the step dots
+
+# The rail beside every step
+onboardRailHeadline	The Open Source $1 to automate any web task	모든 웹 작업을 자동화하는 오픈 소스 $1	$1 is the emphasised phrase in onboardRailHeadlineAccent
+onboardRailHeadlineAccent	agentic browser	에이전트 브라우저
+onboardLocalFirstPrivate	Local-first. Private.	로컬 우선. 비공개.
+onboardBringYourBrowser	Bring your browser	쓰던 브라우저 가져오기
+onboardHistoryBookmarksAndSavedLogins	History, bookmarks, and saved logins.	방문 기록, 북마크, 저장된 로그인 정보.
+onboardYourAgentYourWay	Your agent, your way	원하는 방식의 에이전트
+onboardAnyLlmProviderOrCoding	Any LLM provider or coding agent.	어떤 LLM 제공자나 코딩 에이전트든.
+onboardRunsOnYourMachine	Runs on your machine	내 컴퓨터에서 실행
+onboardLocalFirstAndPrivate	Local-first and private.	로컬 우선, 비공개.
+
+# Import
+onboardBringHeading	Bring $1 with you	$1 그대로 가져오세요	Step 2 heading; $1 is onboardBringHeadingEm, emphasised
+onboardBringHeadingEm	everything	모든 것을
+onboardCopyYourHistoryBookmarksAnd	Copy your history, bookmarks, and saved logins from your current browser. Everything stays on this machine.	지금 쓰는 브라우저에서 방문 기록, 북마크, 저장된 로그인 정보를 복사합니다. 모든 데이터는 이 컴퓨터에만 남습니다.
+onboardBrowserProfiles	Browser profiles	브라우저 프로필
+onboardPickAProfile	Pick a profile.	프로필을 고르세요.
+onboardNoProfilesFound	No profiles found.	프로필을 찾지 못했습니다.
+onboardRefresh	Refresh	새로고침
+onboardLookingForProfiles	Looking for profiles	프로필을 찾는 중	Label above the profile list while browsers are being detected
+onboardPickAProfileAction	Pick a profile	프로필 선택	Label above the profile list, and the import button before a profile is chosen
+onboardShowFewerProfiles	Show fewer profiles	프로필 간단히 보기
+onboardShowMoreProfiles	Show $1 more profiles	프로필 $1개 더 보기	$1 is a count, always 1 or more
+onboardNothingToCopy	Nothing to copy from this profile	이 프로필에는 복사할 항목이 없습니다	Import button label, disabled
+onboardSelectWhatToCopy	Select what to copy	복사할 항목을 선택하세요	Import button label, disabled
+onboardCopyFrom	Copy from $1	$1에서 복사	Import button; $1 is the source browser, e.g. Chrome
+onboardImportFailedDetail	Redrob couldn't finish this import. Try again below, or refresh the profile list.	가져오기를 마치지 못했습니다. 아래에서 다시 시도하거나 프로필 목록을 새로고침하세요.	Shown when the browser reports a failure with no message of its own
+onboardRefreshProfiles	Refresh profiles	프로필 새로고침
+onboardFromSProfile	From $1’s profile	$1 프로필에서	$1 is the person's name on the source profile
+onboardWhatToCopy	What to copy	복사할 항목
+onboardCategoriesSelected	$1 categories selected	$1개 항목 선택됨
+onboardAlsoCopyMyBrowsingSetup	Also copy my browsing setup	브라우징 설정도 복사	Followed by the optional items in parentheses
+onboardItemHistory	History	방문 기록
+onboardItemBookmarks	Bookmarks	북마크
+onboardItemCookies	Signed-in sessions (cookies)	로그인 세션(쿠키)
+onboardItemPasswords	Saved passwords	저장된 비밀번호
+onboardItemSearchEngines	Search engines	검색 엔진
+onboardItemAutofill	Autofill	자동 완성
+onboardItemExtensions	Extensions	확장 프로그램
+onboardItemUnknown	Unknown data	알 수 없는 데이터
+onboardItemNone	No supported data	지원되는 데이터 없음
+onboardImporting	Importing $1...	$1 가져오는 중...	$1 is the item being imported, e.g. Bookmarks
+onboardItems	$1 / $2 items	$1 / $2개 항목
+onboardCopiedItemsFrom	Copied $1 items from $2.	$2에서 $1개 항목을 복사했습니다.	$1 a count, $2 the source browser
+onboardSomethingWentWrong	Something went wrong.	문제가 발생했습니다.
+onboardTryAgain	Try again	다시 시도
+onboardRetry	Retry	다시 시도
+onboardContinue	Continue	계속
+onboardBack	Back	뒤로
+
+# The macOS keychain prompt, explained before it appears
+onboardMacosMayAskForYour	macOS may ask for your Mac login password.	macOS가 Mac 로그인 암호를 물어볼 수 있습니다.
+onboardImportYourChromeLogins	Import your Chrome logins	Chrome 로그인 정보 가져오기
+onboardRedrobNeedsYourPermissionTo	Redrob needs your permission to import your logins from Chrome.	Chrome에서 로그인 정보를 가져오려면 사용자의 허락이 필요합니다.
+onboardWhenMacosAsksClick	When macOS asks, enter your Mac login password and click $1.	macOS가 물어보면 Mac 로그인 암호를 입력하고 $1을 누르세요.	$1 is the bold button name onboardAllow, as macOS labels it
+onboardIfMacosAsksClick	If macOS asks, enter your Mac login password and click $1.	macOS가 물어보면 Mac 로그인 암호를 입력하고 $1을 누르세요.	$1 is the bold button name onboardAllow
+onboardBackToImportOptions	Back to import options	가져오기 옵션으로 돌아가기
+onboardExampleMacosDialog	Example macOS dialog	macOS 대화상자 예시	Accessible name of the illustrated keychain prompt
+onboardRedrobBrowserHelperWantsTo	Redrob Browser Helper wants to use your confidential information stored in “Chrome Safe Storage” in your keychain.	Redrob Browser Helper가 키체인의 “Chrome Safe Storage”에 저장된 기밀 정보를 사용하려고 합니다.	Mirrors the macOS prompt text
+onboardToAllowThisEnterThe	To allow this, enter the “login” keychain password.	허용하려면 “login” 키체인 암호를 입력하십시오.	Mirrors the macOS prompt text
+onboardPassword	Password:	암호:	Field label in the illustrated macOS prompt
+onboardAlwaysAllow	Always Allow	항상 허용	Button in the illustrated macOS prompt; macOS's own Korean label
+onboardDeny	Deny	거부	Button in the illustrated macOS prompt; macOS's own Korean label
+onboardAllow	Allow	허용	Button in the illustrated macOS prompt; macOS's own Korean label
+onboardAllowGivesAccessForThis	Allow gives access for this import.	허용을 누르면 이번 가져오기에만 접근을 허락합니다.
+
+# Set up your agent
+onboardSetUpHeading	Set up your $1	$1 설정하기	Step 3 heading; $1 is onboardSetUpHeadingEm, emphasised
+onboardSetUpHeadingEm	agent	에이전트
+onboardStartWithRedrobCodeRedrob	Start with Redrob Code, Redrob’s own agent. Or connect an LLM provider or a coding agent you already use. We will open Redrob so you can finish.	Redrob의 자체 에이전트인 Redrob Code로 시작하세요. 이미 쓰는 LLM 제공자나 코딩 에이전트를 연결해도 됩니다. 마무리할 수 있도록 Redrob을 열어 드립니다.
+onboardRecommended	Recommended	추천	Badge beside Redrob Code
+onboardRedrobSOwnAgentMade	Redrob’s own agent, made for this browser.	이 브라우저를 위해 만든 Redrob의 자체 에이전트.
+onboardAnyLlmProvider	Any LLM provider	모든 LLM 제공자	Label above the provider chips
+onboardOrACodingAgentHarness	Or a coding agent harness you already use	또는 이미 쓰는 코딩 에이전트 하네스	Label above the coding agent chips
+onboardOrAnyOtherAcpCompatible	or any other ACP compatible agent	또는 ACP를 지원하는 다른 에이전트
+onboardSetUpMyAgent	Set up my agent	에이전트 설정하기	Primary action on the last step
+
+# Handing off to the extension
+onboardFinishingSetup	Finishing setup	설정을 마무리하는 중	Heading while the browser prepares the agent
+onboardPreparingRedrob	Preparing Redrob. This should only take a moment.	Redrob을 준비하고 있습니다. 잠시만 기다려 주세요.
+onboardSetupFailed	Setup didn’t finish	설정을 마치지 못했습니다
+onboardPleaseTryAgain	Please try again.	다시 시도해 주세요.

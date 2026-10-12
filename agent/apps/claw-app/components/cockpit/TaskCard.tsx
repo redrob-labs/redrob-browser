@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-import { ChevronRight } from 'lucide-react'
+import { t, tCount } from '@browseros/i18n'
+import { ChevronRight } from '@browseros/icons'
 import { NavLink } from 'react-router'
 import { AgentDot } from '@/components/audit/AgentDot'
 import { StatusBadge } from '@/components/audit/StatusBadge'
@@ -42,14 +43,16 @@ export function TaskCard({ task, now }: TaskCardProps) {
         // which causes the subpixel red-line rendering on the hero
         // screenshot to shift slightly during the hover window and
         // reads as "the image is animating".
-        'group block rounded-2xl border border-border-2 bg-card p-4 transition-[border-color,box-shadow] duration-150 hover:border-accent/40 hover:shadow-sm',
-        task.status === 'live' && 'border-accent/30',
+        'group block rounded-2xl border border-border-2 bg-card p-4 transition-[border-color,box-shadow] duration-150 hover:border-border-strong hover:shadow-sm',
+        task.status === 'live' && 'border-border-strong',
       )}
       data-testid={`task-card-${task.sessionId}`}
     >
       <header className="flex items-center gap-2">
         <AgentDot slug={task.slug} />
-        <span className="font-semibold text-ink">{task.label}</span>
+        <span className="font-semibold text-ink" translate="no">
+          {task.label}
+        </span>
         <StatusBadge status={task.status} />
         <div className="flex-1" />
         <span className="text-[12px] text-ink-3">
@@ -71,7 +74,7 @@ export function TaskCard({ task, now }: TaskCardProps) {
                     screenshotId,
                     screenshotBaseUrl,
                   )}
-                  alt={`Hero from ${task.label}`}
+                  alt={t('clHeroFrom', task.label)}
                   className="h-full w-full object-cover"
                   loading="lazy"
                   decoding="async"
@@ -83,7 +86,7 @@ export function TaskCard({ task, now }: TaskCardProps) {
           </div>
         ) : (
           <div className="flex w-32 shrink-0 items-center justify-center rounded-md border border-border-2 border-dashed bg-bg-sunken text-[10.5px] text-ink-3 uppercase">
-            <span className="px-2 text-center">no screenshot</span>
+            <span className="px-2 text-center">{t('clNoScreenshot')}</span>
           </div>
         )}
         <div className="min-w-0 flex-1 space-y-1.5">
@@ -91,19 +94,20 @@ export function TaskCard({ task, now }: TaskCardProps) {
           <div className="flex items-center gap-3 text-[12.5px] text-ink-3">
             <span className="font-mono">{formatDuration(task.durationMs)}</span>
             <span className="text-ink-3">•</span>
-            <span>
-              {task.dispatchCount} tool{task.dispatchCount === 1 ? '' : 's'}
-            </span>
+            <span>{tCount('clTools', task.dispatchCount)}</span>
             {task.errorCount > 0 && (
               <>
                 <span className="text-ink-3">•</span>
-                <span className="text-red-600 dark:text-red-400">
-                  {task.errorCount} error{task.errorCount === 1 ? '' : 's'}
+                <span className="text-red">
+                  {tCount('clErrors', task.errorCount)}
                 </span>
               </>
             )}
           </div>
-          <p className="truncate font-mono text-[11.5px] text-ink-3">
+          <p
+            className="truncate font-mono text-[11.5px] text-ink-3"
+            translate="no"
+          >
             {abbreviateSequence(task.toolSequence)}
           </p>
         </div>

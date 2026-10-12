@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Menu } from '@browseros/icons'
 import type { FC } from 'react'
 import { useEffect, useState } from 'react'
@@ -38,11 +39,12 @@ export const SettingsSidebarLayout: FC = () => {
               variant="ghost"
               size="icon"
               className="-ml-1 size-7"
+              aria-label={t('shOpenSettingsMenu')}
               onClick={() => setMobileOpen(true)}
             >
               <Menu className="size-4" />
             </Button>
-            <span className="font-semibold">Settings</span>
+            <span className="font-semibold">{t('shSettings')}</span>
           </header>
           <main className="flex-1 overflow-y-auto">
             <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">

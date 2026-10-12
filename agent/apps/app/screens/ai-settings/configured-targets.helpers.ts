@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { adapterLabel } from '@/components/agents/AdapterIcon'
 import type { LlmProviderConfig } from '@/lib/llm-providers/types'
 import type { AcpAgent } from '@/modules/agents/acp-agent-types'
@@ -28,7 +29,7 @@ export function agentDescription(agent: AcpAgent): string {
 
   return [
     primaryLabel,
-    agent.modelId ?? 'Agent default model',
+    agent.modelId ?? t('stAgentDefaultModel'),
     agent.reasoningEffort,
   ]
     .filter((part): part is string => Boolean(part))
@@ -50,20 +51,20 @@ export function buildProviderActions(input: {
   const { provider, isTesting } = input
   const actions: TargetRowAction[] = [
     {
-      label: 'Set as default',
+      label: t('stSetAsDefault'),
       onSelect: () => input.onSelectProvider(provider.id),
     },
   ]
 
   actions.push(
     {
-      label: isTesting ? 'Testing...' : 'Test connection',
+      label: isTesting ? t('stTesting') : t('stTestConnection'),
       onSelect: () => input.onTestProvider(provider),
       disabled: isTesting,
     },
-    { label: 'Edit', onSelect: () => input.onEditProvider(provider) },
+    { label: t('stEdit'), onSelect: () => input.onEditProvider(provider) },
     {
-      label: 'Delete',
+      label: t('stDelete'),
       onSelect: () => input.onDeleteProvider(provider),
       destructive: true,
     },
@@ -81,16 +82,19 @@ export function buildAgentActions(input: {
 }): TargetRowAction[] {
   const { agent, isDeleting } = input
   const actions: TargetRowAction[] = [
-    { label: 'Set as default', onSelect: () => input.onSelectAgent(agent.id) },
+    {
+      label: t('stSetAsDefault'),
+      onSelect: () => input.onSelectAgent(agent.id),
+    },
   ]
 
   if (agent.type === 'custom' && input.onEditAgent) {
     const onEditAgent = input.onEditAgent
-    actions.push({ label: 'Edit', onSelect: () => onEditAgent(agent) })
+    actions.push({ label: t('stEdit'), onSelect: () => onEditAgent(agent) })
   }
 
   actions.push({
-    label: 'Delete',
+    label: t('stDelete'),
     onSelect: () => void input.onDeleteAgent(agent),
     destructive: true,
     disabled: isDeleting,

@@ -7,9 +7,13 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { type FC, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Label } from '@/components/ui/label'
+import {
+  SettingsGroup,
+  SettingsRow,
+} from '@/components/settings/SettingsLayout'
 import { Switch } from '@/components/ui/switch'
 import { getBrowserOSAdapter } from '@/lib/browseros/adapter'
 import { Capabilities, Feature } from '@/lib/browseros/capabilities'
@@ -91,93 +95,65 @@ export const ToolbarSettingsCard: FC = () => {
       setter(value)
       return true
     } catch {
-      toast.error('Failed to update setting')
+      toast.error(t('shFailedToUpdateSetting'))
       return false
     }
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-6 shadow-sm transition-all hover:shadow-md">
-      <h3 className="mb-4 font-semibold text-lg">Toolbar Settings</h3>
-
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="space-y-0.5">
-            <Label htmlFor="show-llm-chat" className="font-medium text-sm">
-              Show Chat Button
-            </Label>
-            <p className="text-muted-foreground text-xs">
-              Display the Chat button in the browser toolbar
-            </p>
-          </div>
+    <SettingsGroup title={t('shToolbar')}>
+      <SettingsRow
+        htmlFor="show-llm-chat"
+        label={t('shShowChatButton')}
+        description={t('shDisplayTheChatButtonIn')}
+      >
+        <Switch
+          id="show-llm-chat"
+          checked={showLlmChat}
+          onCheckedChange={(checked) =>
+            handleToggle(BROWSEROS_PREFS.SHOW_LLM_CHAT, checked, setShowLlmChat)
+          }
+          disabled={isLoading}
+        />
+      </SettingsRow>
+      <SettingsRow
+        htmlFor="show-toolbar-labels"
+        label={t('shShowButtonLabels')}
+        description={t('shDisplayTextLabelsNextTo')}
+      >
+        <Switch
+          id="show-toolbar-labels"
+          checked={showToolbarLabels}
+          onCheckedChange={(checked) =>
+            handleToggle(
+              BROWSEROS_PREFS.SHOW_TOOLBAR_LABELS,
+              checked,
+              setShowToolbarLabels,
+            )
+          }
+          disabled={isLoading}
+        />
+      </SettingsRow>
+      {supportsVerticalTabs && (
+        <SettingsRow
+          htmlFor="vertical-tabs-enabled"
+          label={t('shUseVerticalTabs')}
+          description={t('shTurnOffToSwitchBack')}
+        >
           <Switch
-            id="show-llm-chat"
-            checked={showLlmChat}
+            id="vertical-tabs-enabled"
+            checked={verticalTabsEnabled}
             onCheckedChange={(checked) =>
               handleToggle(
-                BROWSEROS_PREFS.SHOW_LLM_CHAT,
+                BROWSEROS_PREFS.VERTICAL_TABS_ENABLED,
                 checked,
-                setShowLlmChat,
+                setVerticalTabsEnabled,
               )
             }
             disabled={isLoading}
           />
-        </div>
-
-        <div className="flex items-center justify-between border-border border-t pt-4">
-          <div className="space-y-0.5">
-            <Label
-              htmlFor="show-toolbar-labels"
-              className="font-medium text-sm"
-            >
-              Show Button Labels
-            </Label>
-            <p className="text-muted-foreground text-xs">
-              Display text labels next to toolbar button icons
-            </p>
-          </div>
-          <Switch
-            id="show-toolbar-labels"
-            checked={showToolbarLabels}
-            onCheckedChange={(checked) =>
-              handleToggle(
-                BROWSEROS_PREFS.SHOW_TOOLBAR_LABELS,
-                checked,
-                setShowToolbarLabels,
-              )
-            }
-            disabled={isLoading}
-          />
-        </div>
-
-        {supportsVerticalTabs && (
-          <div className="flex items-center justify-between border-border border-t pt-4">
-            <div className="space-y-0.5">
-              <Label
-                htmlFor="vertical-tabs-enabled"
-                className="font-medium text-sm"
-              >
-                Use Vertical Tabs
-              </Label>
-              <p className="text-muted-foreground text-xs">
-                Turn off to switch back to the horizontal tab strip
-              </p>
-            </div>
-            <Switch
-              id="vertical-tabs-enabled"
-              checked={verticalTabsEnabled}
-              onCheckedChange={(checked) =>
-                handleToggle(
-                  BROWSEROS_PREFS.VERTICAL_TABS_ENABLED,
-                  checked,
-                  setVerticalTabsEnabled,
-                )
-              }
-              disabled={isLoading}
-            />
-          </div>
-        )}
-      </div>
-    </div>
+        </SettingsRow>
+      )}
+    </SettingsGroup>
   )
 }

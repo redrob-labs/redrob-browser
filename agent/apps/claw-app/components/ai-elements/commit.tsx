@@ -24,7 +24,7 @@ import {
   GitCommitIcon,
   MinusIcon,
   PlusIcon,
-} from "lucide-react";
+} from "@browseros/icons";
 import type { ComponentProps, HTMLAttributes } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 

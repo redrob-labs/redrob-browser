@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Bot, ChevronDown, History, Plus, SettingsIcon } from '@browseros/icons'
 import type { FC } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
@@ -51,7 +52,7 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
   return (
     <header
       className={cn(
-        'flex items-center justify-between border-border/40 border-b bg-background/80 px-3 py-2.5 backdrop-blur-md',
+        'ui-panel-head flex items-center justify-between px-3 py-2.5',
         className,
       )}
     >
@@ -64,19 +65,19 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
         >
           <button
             type="button"
-            className="group relative inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-border px-2 py-1.5 text-foreground transition-colors hover:border-[var(--accent-brand)]/40 hover:bg-muted/50 data-[state=open]:border-[var(--accent-brand)]/50 data-[state=open]:bg-accent"
-            title="Change AI Provider"
+            className="group rr-btn rr-btn--sm rr-btn--secondary gap-1.5 px-2"
+            title={t('spChangeProvider')}
           >
             <HeaderProviderIcon provider={selectedProvider} />
             <span
               className={cn(
-                'font-semibold text-base',
+                'font-semibold text-[15px]',
                 !selectedProvider && 'text-muted-foreground',
               )}
             >
-              {selectedProvider?.name ?? 'No provider'}
+              {selectedProvider?.name ?? t('spNoProvider')}
             </span>
-            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+            <ChevronDown className="h-4 w-4 shrink-0 text-[var(--ink-muted)] transition-transform group-data-[state=open]:rotate-180" />
           </button>
         </ChatProviderSelector>
       </div>
@@ -86,8 +87,9 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
           <button
             type="button"
             onClick={onNewConversation}
-            className="cursor-pointer rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-            title="New conversation"
+            className="rr-iconbtn rr-iconbtn--sm"
+            title={t('spNewConversation')}
+            aria-label={t('spNewConversation')}
           >
             <Plus className="h-4 w-4" />
           </button>
@@ -98,16 +100,18 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
             <button
               type="button"
               onClick={handleNewConversationFromHistory}
-              className="cursor-pointer rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-              title="New conversation"
+              className="rr-iconbtn rr-iconbtn--sm"
+              title={t('spNewConversation')}
+              aria-label={t('spNewConversation')}
             >
               <Plus className="h-4 w-4" />
             </button>
           ) : (
             <Link
               to="/history"
-              className="cursor-pointer rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-              title="Chat history"
+              className="rr-iconbtn rr-iconbtn--sm"
+              title={t('spChatHistory')}
+              aria-label={t('spChatHistory')}
             >
               <History className="h-4 w-4" />
             </Link>
@@ -117,16 +121,14 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
           href="/app.html#/settings"
           target="_blank"
           rel="noopener noreferrer"
-          className="cursor-pointer rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-          title="Settings"
+          className="rr-iconbtn rr-iconbtn--sm"
+          title={t('spSettings')}
+          aria-label={t('spSettings')}
         >
           <SettingsIcon className="h-4 w-4" />
         </a>
 
-        <ThemeToggle
-          className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-          iconClassName="h-4 w-4"
-        />
+        <ThemeToggle className="size-8" iconClassName="h-4 w-4" />
       </div>
     </header>
   )

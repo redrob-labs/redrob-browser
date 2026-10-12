@@ -18,96 +18,125 @@ const GLOW_OVERLAY_ID = 'browseros-glow-overlay'
 const GLOW_STYLES_ID = 'browseros-glow-styles'
 const GLOW_STOP_BTN_ID = 'browseros-glow-stop-btn'
 
-const GLOW_THICKNESS = 1.0
-const GLOW_OPACITY = 0.6
+/**
+ * The design system's values, written out: this stylesheet lands on arbitrary pages, where none of
+ * tokens.css exists and a page's own `--blue-6` could mean anything.
+ */
+const RR = {
+  blue6: '#2b52ff', // action-primary, focus-ring
+  teal3: '#6ff4f0', // the brand gradient's far stop
+  red4: '#a31310', // status-danger
+  red5: '#560100', // its pressed step
+  white: '#ffffff',
+  tickAngle: '40deg', // the rake of the mark
+  gradientAngle: '130deg', // --gradient-brand
+  entrance: 'cubic-bezier(0.05, 0.7, 0.1, 1)', // --easing-entrance
+  standard: 'cubic-bezier(0.2, 0, 0, 1)', // --easing-standard
+  shadowMd: '0 4px 12px rgba(10, 11, 12, 0.10)',
+} as const
 
 let activeConversationId: string | null = null
 
+/**
+ * The agent is working: the page is framed, not tinted.
+ *
+ * - The frame is the brand gradient (--gradient-brand, Blue 6 to Teal 3 at 130 degrees), 3px, drawn on
+ *   the border box only, so nothing on the page changes colour under it.
+ * - A soft inner Blue 6 edge breathes behind it once every 3.2s, and a light passes along the frame on
+ *   the 40 degree rake: the arrival at 1400ms, then one pass every 4.2s, the cadence of the system's
+ *   MarkReveal hand-off -- slow enough never to nag, present enough to read as still working.
+ * - Reduced motion: the frame and the edge are simply there. No breath and no pass.
+ * - The stop button is the system's round danger IconButton at lg (48px): Red 4, Red 5 when pressed, a
+ *   name for a screen reader, and the focus ring.
+ */
 function injectStyles(): void {
   if (document.getElementById(GLOW_STYLES_ID)) {
     return
   }
 
-  const t = GLOW_THICKNESS
-
   const style = document.createElement('style')
   style.id = GLOW_STYLES_ID
   style.textContent = `
-    @keyframes browseros-glow-pulse {
-      0% {
-        box-shadow:
-          inset 0 0 ${58 * t}px ${26 * t}px transparent,
-          inset 0 0 ${50 * t}px ${22 * t}px rgba(43, 82, 255, 0.06),
-          inset 0 0 ${42 * t}px ${18 * t}px rgba(43, 82, 255, 0.12),
-          inset 0 0 ${34 * t}px ${14 * t}px rgba(43, 82, 255, 0.18);
-      }
-      50% {
-        box-shadow:
-          inset 0 0 ${72 * t}px ${35 * t}px transparent,
-          inset 0 0 ${64 * t}px ${32 * t}px rgba(43, 82, 255, 0.10),
-          inset 0 0 ${54 * t}px ${26 * t}px rgba(43, 82, 255, 0.18),
-          inset 0 0 ${46 * t}px ${22 * t}px rgba(43, 82, 255, 0.24);
-      }
-      100% {
-        box-shadow:
-          inset 0 0 ${58 * t}px ${26 * t}px transparent,
-          inset 0 0 ${50 * t}px ${22 * t}px rgba(43, 82, 255, 0.06),
-          inset 0 0 ${42 * t}px ${18 * t}px rgba(43, 82, 255, 0.12),
-          inset 0 0 ${34 * t}px ${14 * t}px rgba(43, 82, 255, 0.18);
-      }
+    @keyframes browseros-glow-breathe {
+      0%, 100% { box-shadow: inset 0 0 40px 10px rgba(43, 82, 255, 0.14); }
+      50%      { box-shadow: inset 0 0 56px 16px rgba(43, 82, 255, 0.22); }
     }
-
-    @keyframes browseros-glow-fade-in {
+    @keyframes browseros-glow-arrive {
       from { opacity: 0; }
-      to { opacity: ${GLOW_OPACITY}; }
+      to   { opacity: 1; }
     }
-
-    @keyframes browseros-glow-btn-fade-in {
-      from { opacity: 0; }
-      to { opacity: 1; }
+    @keyframes browseros-glow-pass {
+      0%   { background-position: 0 0, 124% 124%; }
+      33%  { background-position: 0 0, -30% -30%; }
+      100% { background-position: 0 0, -30% -30%; }
     }
 
     #${GLOW_OVERLAY_ID} {
       position: fixed !important;
-      top: 0 !important;
-      left: 0 !important;
-      width: 100% !important;
-      height: 100% !important;
+      inset: 0 !important;
       pointer-events: none !important;
       z-index: 2147483647 !important;
       opacity: 0;
-      will-change: opacity;
       animation:
-        browseros-glow-pulse 3s ease-in-out infinite,
-        browseros-glow-fade-in 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards !important;
+        browseros-glow-arrive 1400ms ${RR.entrance} forwards,
+        browseros-glow-breathe 3200ms ${RR.standard} infinite !important;
+    }
+    #${GLOW_OVERLAY_ID}::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      padding: 3px;
+      background:
+        linear-gradient(${RR.gradientAngle}, ${RR.blue6} 0%, ${RR.teal3} 100%),
+        linear-gradient(${RR.gradientAngle}, transparent 40%, rgba(255, 255, 255, 0.9) 50%, transparent 60%);
+      background-size: 100% 100%, 300% 300%;
+      background-blend-mode: normal, screen;
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+      animation: browseros-glow-pass 4200ms ${RR.entrance} 1400ms infinite;
     }
 
     #${GLOW_STOP_BTN_ID} {
+      all: initial;
       position: fixed !important;
       bottom: 24px !important;
       left: 50% !important;
       transform: translateX(-50%) !important;
       width: 48px !important;
       height: 48px !important;
-      border-radius: 50% !important;
-      background: rgba(163, 19, 16, 0.95) !important;
-      color: white !important;
-      border: none !important;
+      border-radius: 9999px !important;
+      background: ${RR.red4} !important;
+      color: ${RR.white} !important;
+      border: 0 !important;
       pointer-events: auto !important;
       cursor: pointer !important;
       z-index: 2147483647 !important;
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
-      line-height: 1 !important;
-      padding: 0 !important;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+      box-shadow: ${RR.shadowMd} !important;
       opacity: 0;
-      animation: browseros-glow-btn-fade-in 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards !important;
+      animation: browseros-glow-arrive 220ms ${RR.entrance} forwards !important;
+      transition: background-color 80ms ${RR.standard};
+    }
+    #${GLOW_STOP_BTN_ID}:hover,
+    #${GLOW_STOP_BTN_ID}:active {
+      background: ${RR.red5} !important;
+    }
+    #${GLOW_STOP_BTN_ID}:focus-visible {
+      outline: 2px solid ${RR.blue6} !important;
+      outline-offset: 2px !important;
     }
 
-    #${GLOW_STOP_BTN_ID}:hover {
-      background: rgba(86, 1, 0, 1) !important;
+    @media (prefers-reduced-motion: reduce) {
+      #${GLOW_OVERLAY_ID} {
+        opacity: 1;
+        animation: none !important;
+        box-shadow: inset 0 0 48px 12px rgba(43, 82, 255, 0.18);
+      }
+      #${GLOW_OVERLAY_ID}::before { animation: none; }
+      #${GLOW_STOP_BTN_ID} { opacity: 1; animation: none !important; }
     }
   `
   const appendStyle = () => document.head.appendChild(style)
@@ -128,8 +157,13 @@ function startGlow(): void {
 
   const button = document.createElement('button')
   button.id = GLOW_STOP_BTN_ID
+  button.type = 'button'
+  // The page's language is not ours, so the name is the browser UI's: chrome.i18n follows it.
+  const label = browser.i18n.getMessage('glowStopAgent') || 'Stop the agent'
+  button.setAttribute('aria-label', label)
+  button.title = label
   button.innerHTML =
-    '<svg width="16" height="16" viewBox="0 0 16 16" fill="white" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="14" height="14" rx="2"/></svg>'
+    '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="12" height="12" rx="2"/></svg>'
   button.addEventListener('click', () => {
     if (activeConversationId) {
       void sendRuntimeMessage(RuntimeMessageType.stopAgent, {

@@ -12,6 +12,8 @@
  * discriminant and the copy constants; it never re-derives state.
  */
 
+import { t } from '@browseros/i18n'
+
 export type OnboardingState = 'first-run' | 'waiting' | 'ready'
 
 export interface OnboardingSignals {
@@ -36,42 +38,41 @@ export function getOnboardingState({
 }
 
 export const HERO_COPY = {
-  eyebrow: 'WELCOME',
-  h1Prefix: 'You watch. Your agent',
-  h1Accent: 'works.',
-  subhead:
-    'Your agents are wired in. Watch a quick demo, then hand your first task to any of them.',
+  eyebrow: t('clWelcome'),
+  h1Prefix: t('clYouWatchPrefix'),
+  h1Accent: t('clWorks'),
+  subhead: t('clOnboardSubhead'),
 } as const
 
 export const PANEL_COPY = {
-  heading: 'Hand off your first task',
+  heading: t('clHandOffYourFirstTask'),
   // Three status messages share one fixed-height slot so copying never
   // reflows the panel. Keep each to at most two lines at panel width.
-  tieBack: 'Then come back here to watch it run.',
-  waiting: 'Waiting for your first run. Come back the moment you press enter.',
-  copied: 'Copied. Paste it into your agent, then watch it here.',
+  tieBack: t('clTieBack'),
+  waiting: t('clWaitingFirstRun'),
+  copied: t('clCopiedPasteIt'),
 } as const
 
 export const MANAGE_COPY = {
-  label: 'Manage agents',
+  label: t('clManageAgents'),
   href: '/mcp',
 } as const
 
-export const STARTER_PROMPT_LABEL = 'Paste this prompt into your agent.'
+export const STARTER_PROMPT_LABEL = t('clPasteThisPrompt')
 
-export const STARTER_PROMPT =
-  'Using BrowserOS neo, search for the current monthly prices of streaming services such as Netflix, Disney plus, Hulu, Max and Apple TV'
+/** The task a person pastes into their agent, so it is in their language too. */
+export const STARTER_PROMPT = t('clStarterPrompt')
 
 export const CONNECTED_COPY = {
-  suffix: 'connected',
+  suffix: t('clConnectedSuffix'),
 } as const
 
 export const FOOTER_COPY = {
-  docs: 'Read the docs',
+  docs: t('clReadDocs'),
   // Deep-link to the BrowserClaw section instead of the docs root
   // so a first-run reader lands on install / first-run / MCP setup
   // instead of BrowserOS's general index. Mintlify canonicalises
   // the URL without a trailing slash, so we use the no-slash form
   // to avoid triggering a redirect on every click.
-  docsHref: 'https://docs.browseros.com/browserclaw',
+  docsHref: 'https://docs.redrob.ai/guide',
 } as const

@@ -7,7 +7,12 @@
  * See the NOTICE file for provenance.
  */
 
-import { IconChevronLeft, IconChevronRight, IconX } from '@tabler/icons-react'
+import { t } from '@browseros/i18n'
+import {
+  ChevronLeft as IconChevronLeft,
+  ChevronRight as IconChevronRight,
+  X as IconX,
+} from '@browseros/icons'
 import { type KeyboardEventHandler, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -151,7 +156,9 @@ export function ScreenshotLightbox({
         className="ph-no-capture flex max-h-[92vh] w-[92vw] max-w-[94vw] flex-col gap-2 bg-transparent p-0 shadow-none ring-0 sm:max-w-[94vw]"
         onKeyDown={handleKeyDown}
       >
-        <DialogTitle className="sr-only">Screenshot preview</DialogTitle>
+        <DialogTitle className="sr-only">
+          {t('clScreenshotPreview')}
+        </DialogTitle>
         {open && (
           <>
             <div className="flex items-center gap-3 rounded-lg bg-popover/95 px-3 py-2 ring-1 ring-foreground/10 supports-backdrop-filter:backdrop-blur">
@@ -163,7 +170,7 @@ export function ScreenshotLightbox({
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Previous screenshot"
+                  aria-label={t('clPreviousScreenshot')}
                   disabled={!canPrev}
                   className="text-ink-2 hover:bg-card-tint hover:text-ink"
                   onClick={() => api?.scrollPrev()}
@@ -177,7 +184,7 @@ export function ScreenshotLightbox({
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Next screenshot"
+                  aria-label={t('clNextScreenshot')}
                   disabled={!canNext}
                   className="text-ink-2 hover:bg-card-tint hover:text-ink"
                   onClick={() => api?.scrollNext()}
@@ -191,7 +198,7 @@ export function ScreenshotLightbox({
                   }
                 >
                   <IconX aria-hidden />
-                  <span className="sr-only">Close</span>
+                  <span className="sr-only">{t('clClose')}</span>
                 </DialogClose>
               </div>
             </div>
@@ -218,8 +225,8 @@ export function ScreenshotLightbox({
                           )}
                           alt={
                             itemHost
-                              ? `Screenshot of ${itemHost}`
-                              : 'Screenshot'
+                              ? t('clScreenshotOf', itemHost)
+                              : t('clScreenshotCap')
                           }
                           loading={
                             Math.abs(index - current) <= 1 ? 'eager' : 'lazy'

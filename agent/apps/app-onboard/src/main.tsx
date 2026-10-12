@@ -7,11 +7,14 @@
  * See the NOTICE file for provenance.
  */
 
+import { applyDocumentLocale } from '@browseros/i18n'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
 import { App } from './App'
 import './styles.css'
+
+applyDocumentLocale()
 
 const root = document.getElementById('root')
 if (!root) throw new Error('Root element not found')

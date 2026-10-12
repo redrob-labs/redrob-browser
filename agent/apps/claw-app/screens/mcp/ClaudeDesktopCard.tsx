@@ -7,10 +7,11 @@
  * See the NOTICE file for provenance.
  */
 
-import { ArrowRight } from 'lucide-react'
+import { t } from '@browseros/i18n'
+import { ArrowRight } from '@browseros/icons'
 import { useState } from 'react'
 import { InstallExtensionDialog } from './InstallExtensionDialog'
-import { COWORK_REQUIREMENT_LINE } from './install-guide.data'
+import { coworkRequirementLine } from './install-guide.data'
 
 /**
  * Advertises the BrowserOS neo extension for Claude Desktop. Unlike the
@@ -27,27 +28,29 @@ export function ClaudeDesktopCard() {
         <h2 className="font-semibold text-cyanotype-ink text-lg">
           Claude Desktop
         </h2>
-        <span className="text-[12px] text-cyanotype-muted">Extension</span>
+        <span className="text-[12px] text-cyanotype-muted">
+          {t('clExtension')}
+        </span>
       </header>
       <button
         type="button"
         onClick={() => setGuideOpen(true)}
-        className="group block w-full rounded-9 border border-cyanotype-border bg-card p-4 text-left transition-colors hover:border-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        className="group block w-full rounded-9 border border-cyanotype-border bg-card p-4 text-left transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong"
       >
         <div className="flex items-start gap-3">
           <ClaudeMark className="size-7 shrink-0" />
           <div className="min-w-0 flex-1 space-y-1">
             <p className="font-semibold text-[15px] text-cyanotype-ink leading-snug">
-              Give Claude Desktop a real browser.
+              {t('clGiveClaudeDesktopAReal')}
             </p>
             <p className="text-[13px] text-cyanotype-muted leading-snug">
-              {COWORK_REQUIREMENT_LINE}
+              {coworkRequirementLine()}
             </p>
           </div>
         </div>
         <div className="mt-3 flex justify-end">
-          <span className="inline-flex items-center gap-1 text-[12px] text-cyanotype-blue transition-colors group-hover:text-cyanotype-blue-hover">
-            Show me how
+          <span className="inline-flex items-center gap-1 text-[12px] text-accent-ink transition-colors group-hover:text-ink">
+            {t('clShowMeHow')}
             <ArrowRight
               aria-hidden
               className="size-3.5 transition-transform group-hover:translate-x-0.5"

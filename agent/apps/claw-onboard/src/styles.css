@@ -74,14 +74,19 @@
   --color-red-tint: var(--red-tint);
   --color-blue: var(--blue);
 
+  /* The system's stacks. Served from chrome://, so no font files ship (the WebUI resource contract):
+     Pretendard and Wanted Sans are used where installed, then the platform face. */
   --font-sans:
-    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-serif: Georgia, "Times New Roman", serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --shadow-card:
-    0 1px 2px hsl(221 60% 20% / 0.05), 0 1px 3px hsl(221 60% 20% / 0.04);
-  --shadow-pop:
-    0 8px 30px hsl(221 60% 20% / 0.14), 0 2px 8px hsl(221 60% 20% / 0.08);
+    Pretendard, "Wanted Sans", "Noto Sans Devanagari", system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --font-serif: Newsreader, "Nanum Myeongjo", Georgia, "Times New Roman", serif;
+  /* Hangul has no monospace face here: Pretendard and Wanted Sans take those glyphs, before the
+     generic family, so Korean in a mono line never draws as empty boxes. */
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Consolas, Pretendard, "Wanted Sans",
+    monospace;
+  --shadow-card: 0 1px 2px rgba(10, 11, 12, 0.08);
+  --shadow-pop: 0 4px 12px rgba(10, 11, 12, 0.1);
   --animate-pulse-dot: pulse-dot 1.4s ease-in-out infinite;
   --animate-fade-up: fade-up 0.4s cubic-bezier(0.2, 0.7, 0.3, 1) both;
   --animate-fade-in: fade-in 0.35s ease both;
@@ -135,21 +140,8 @@ body,
 body {
   color: var(--color-foreground);
   font-family: var(--font-sans);
-  /* background-attachment: fixed anchors the gradient to the viewport so it
-     stays put behind scrolled content instead of revealing bare canvas. */
-  background:
-    radial-gradient(
-      1200px 700px at 18% -8%,
-      hsl(221 100% 96%) 0%,
-      hsl(221 100% 96% / 0) 60%
-    ),
-    radial-gradient(
-      1000px 800px at 100% 110%,
-      hsl(210 100% 97%) 0%,
-      hsl(210 100% 97% / 0) 55%
-    ),
-    linear-gradient(155deg, hsl(220 60% 97%) 0%, hsl(210 50% 98%) 100%);
-  background-attachment: fixed;
+  /* The system's base ground; the old navy-tinted radial wash has no colour in the palette. */
+  background: var(--background);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -159,19 +151,7 @@ body {
    any downstream tool or embedding scope that opts into `.dark` still gets a
    coherent palette, mirroring claw-app. */
 .dark body {
-  background:
-    radial-gradient(
-      1200px 700px at 18% -8%,
-      hsl(222 45% 12%) 0%,
-      hsl(222 45% 12% / 0) 60%
-    ),
-    radial-gradient(
-      1000px 800px at 100% 110%,
-      hsl(215 40% 12%) 0%,
-      hsl(215 40% 12% / 0) 55%
-    ),
-    linear-gradient(155deg, hsl(222 40% 7%) 0%, hsl(220 35% 9%) 100%);
-  background-attachment: fixed;
+  background: var(--background);
 }
 
 ::selection {
@@ -189,97 +169,185 @@ body {
     scroll-behavior: auto;
   }
 }
+/* Colour tokens, from the Redrob design system (@redrob-labs/ui
+   dist/styles/tokens.css).
 
+   Two layers, the system's own:
+
+     1. PRIMITIVES `--rr-*`. The ramps, transcribed verbatim. Theme-independent:
+        Blue 6 is Blue 6 in light and in dark, so they are declared once on :root.
+        No component names this layer.
+
+     2. ROLES. The shadcn names every component here already reads (`--primary`,
+        `--muted-foreground`, ...), each pointed at the design system's semantic
+        token for the same job and re-pointed in `.dark`. The comment on each line
+        names that token, so a value can be checked against tokens.css by name.
+
+   Two roles the system has and shadcn does not, both used by this panel:
+   `--accent-brand` is a brand FILL (action-primary) and `--accent-brand-ink` is
+   brand TEXT (ink-brand). Dark mode is why they are two: white on Blue 6 is the
+   fill, Blue 4 on black is the text, and no single blue is both.
+
+   Same two layers, same values, as apps/app/styles/global.css, where
+   design-tokens.test.ts pins them to tokens.css. Keep the two blocks identical. */
 :root {
-  color-scheme: light;
-  --background: #ffffff;
-  --foreground: #25242f;
-  --card: #ffffff;
-  --card-foreground: #25242f;
-  --popover: #ffffff;
-  --popover-foreground: #25242f;
-  --primary: #0254ec;
-  --primary-foreground: #ffffff;
-  --secondary: #eaf1ff;
-  --secondary-foreground: #01123f;
-  --muted: #f1f5fb;
-  --muted-foreground: #717783;
-  --accent: #0254ec;
-  --accent-foreground: #ffffff;
-  --destructive: #ef4444;
-  --destructive-foreground: #ffffff;
-  --border: #dde5f0;
-  --input: #dde5f0;
-  --ring: #0254ec;
+  /* 1. PRIMITIVES */
+  --rr-black: #0a0b0c; /* redrob-black */
+  --rr-white: #ffffff; /* redrob-white */
+  --rr-blue-1: #eef4ff;
+  --rr-blue-2: #d9e6ff;
+  --rr-blue-3: #bad2ff;
+  --rr-blue-4: #8aafff;
+  --rr-blue-5: #507fff;
+  --rr-blue-6: #2b52ff; /* Redrob Blue */
+  --rr-blue-7: #1733d5;
+  --rr-blue-8: #09209c;
+  --rr-blue-9: #061460;
+  --rr-blue-10: #030c34;
+  --rr-gray-1: #f8f9fb;
+  --rr-gray-2: #eff1f4;
+  --rr-gray-3: #dfe2e8;
+  --rr-gray-4: #cbcfd7;
+  --rr-gray-5: #aab0bb;
+  --rr-gray-6: #7c8390;
+  --rr-gray-7: #576071;
+  --rr-gray-8: #292e37;
+  --rr-gray-9: #141719;
+  --rr-teal-3: #6ff4f0; /* accent-teal-3 */
+  --rr-teal-4: #00b5c2; /* accent-teal-4 */
+  --rr-sky-3: #2f8dff; /* accent-sky-3 */
+  --rr-sky-4: #0e51b6; /* accent-sky-4 */
+  --rr-violet-3: #8944ff; /* accent-violet-3 */
+  --rr-pink-3: #ff39ba; /* accent-pink-3 */
+  --rr-red-3: #ff4b4b; /* accent-red-3 */
+  --rr-red-4: #a31310; /* accent-red-4 */
+  --rr-orange-3: #ff9c1b; /* accent-orange-3 */
+  --rr-orange-4: #ae5100; /* accent-orange-4 */
+  --rr-lime-4: #89ad00; /* accent-lime-4 */
+  --rr-green-3: #29e474; /* accent-green-3 */
+  --rr-green-4: #00864a; /* accent-green-4 */
 
-  --bg-canvas: #f9fbff;
-  --bg-sunken: #eef3fb;
-  --card-tint: #fbfcff;
-  --border-2: #e3e9f4;
-  --border-strong: #c7d3e8;
-  --ink: #25242f;
-  --ink-2: #4a4f5c;
-  --ink-3: #717783;
-  --ink-4: #9aa1ae;
-  --accent-2: #2f6fed;
-  --accent-ink: #0143c4;
-  --accent-tint: #e4edff;
-  --accent-tint-2: #d3e2ff;
-  --green: #16a34a;
-  --green-tint: #e6f6ec;
-  --amber: hsl(35 85% 42%);
-  --amber-tint: hsl(42 90% 94%);
-  --red: #dc2626;
-  --red-tint: hsl(0 75% 96%);
-  --blue: #0e7490;
+  /* 2. ROLES, light */
+  --radius: 0.65rem;
+  --background: var(--rr-white); /* surface-base */
+  --foreground: var(--rr-black); /* ink-primary */
+  --card: var(--rr-gray-1); /* surface-raised */
+  --card-foreground: var(--rr-black);
+  --popover: var(--rr-white); /* surface-base, lifted by shadow-md */
+  --popover-foreground: var(--rr-black);
+  --primary: var(--rr-blue-6); /* action-primary */
+  --primary-foreground: var(--rr-white); /* ink-on-brand */
+  --secondary: var(--rr-gray-2); /* surface-sunken */
+  --secondary-foreground: var(--rr-black);
+  --muted: var(--rr-gray-2); /* surface-sunken */
+  --muted-foreground: var(--rr-gray-7); /* ink-secondary */
+  --ink-muted: #686e78; /* ink-muted, the system's own literal */
+  --ink-disabled: var(--rr-gray-5);
+  --brand-subtle: var(--rr-blue-1); /* surface-brand-subtle */
+  --brand-subtle-2: var(--rr-blue-2); /* blue-2: selected, a step stronger */
+  --primary-hover: var(--rr-blue-7); /* action-primary-hover */
+  --accent: var(--rr-gray-2); /* hover fill on surface-base */
+  --accent-foreground: var(--rr-black);
+  --destructive: var(--rr-red-4); /* status-danger */
+  --destructive-foreground: var(--rr-white);
+  --warning: var(--rr-orange-4); /* status-warning */
+  --success: var(--rr-green-4); /* status-success */
+  --border: var(--rr-gray-3); /* border-subtle */
+  --input: var(--rr-gray-6); /* border-strong */
+  --ring: var(--rr-blue-6); /* focus-ring */
+  --chart-1: var(--rr-blue-6);
+  --chart-2: var(--rr-teal-4);
+  --chart-3: var(--rr-violet-3);
+  --chart-4: var(--rr-pink-3);
+  --chart-5: var(--rr-lime-4);
+  --sidebar: var(--rr-gray-1); /* surface-raised */
+  --sidebar-foreground: var(--rr-black);
+  --sidebar-primary: var(--rr-blue-6);
+  --sidebar-primary-foreground: var(--rr-white);
+  --sidebar-accent: var(--rr-gray-2);
+  --sidebar-accent-foreground: var(--rr-black);
+  --sidebar-border: var(--rr-gray-3);
+  --sidebar-ring: var(--rr-blue-6);
+  --accent-brand: var(--rr-blue-6); /* action-primary */
+  --accent-brand-ink: var(--rr-blue-7); /* ink-brand */
+  /* The shimmer's highlight sweep: one step lighter than the fill. */
+  --accent-brand-bright: var(--rr-blue-5);
+  --success-subtle: #d6ffe1; /* accent-green-1 */
+  --warning-subtle: #ffedda; /* accent-orange-1 */
+  --destructive-subtle: #ffe1e1; /* accent-red-1 */
+
+  /* The claw onboarding page's own role names, each on a role above. */
+  --ink: var(--foreground);
+  --ink-2: var(--muted-foreground);
+  --ink-3: var(--ink-muted);
+  --ink-4: var(--ink-muted);
+  --accent-2: var(--accent-brand-bright);
+  --accent-ink: var(--accent-brand-ink);
+  --accent-tint: var(--brand-subtle);
+  --accent-tint-2: var(--brand-subtle-2);
+  --bg-canvas: var(--background);
+  --bg-sunken: var(--muted);
+  --card-tint: var(--muted);
+  --border-2: var(--border);
+  --border-strong: var(--input);
+  --green: var(--success);
+  --green-tint: var(--success-subtle);
+  --amber: var(--warning);
+  --amber-tint: var(--warning-subtle);
+  --red: var(--destructive);
+  --red-tint: var(--destructive-subtle);
+  --blue: var(--accent-brand-ink);
 }
 
-/* Dark theme values, not applied at runtime. The onboarding flow is light-only
-   (OS-theme mirroring was removed); the block is kept as the canonical palette
-   reference for any downstream tool or embedding scope that opts in via `.dark`,
-   mirroring claw-app. The ink scale inverts and tints go from pale to deep. */
 .dark {
-  color-scheme: dark;
-  --background: #0b0f17;
-  --foreground: #e8ecf4;
-  --card: #131926;
-  --card-foreground: #e8ecf4;
-  --popover: #131926;
-  --popover-foreground: #e8ecf4;
-  --primary: #2f6fed;
-  --primary-foreground: #ffffff;
-  --secondary: #212a3d;
-  --secondary-foreground: #d5dded;
-  --muted: #171e2b;
-  --muted-foreground: #98a3b6;
-  --accent: #4d8bff;
-  --accent-foreground: #0b0f17;
-  --destructive: #ef4444;
-  --destructive-foreground: #ffffff;
-  --border: #2a3446;
-  --input: #313c52;
-  --ring: #4d8bff;
-
-  --bg-canvas: #090d14;
-  --bg-sunken: #070b11;
-  --card-tint: #151d2e;
-  --border-2: #253046;
-  --border-strong: #34405c;
-  --ink: #eef2f9;
-  --ink-2: #c4cddf;
-  --ink-3: #94a0b5;
-  --ink-4: #67748c;
-  --accent-2: #6195ff;
-  --accent-ink: #8fb4ff;
-  --accent-tint: #1a2540;
-  --accent-tint-2: #223055;
-  --green: #34c26b;
-  --green-tint: #10281a;
-  --amber: hsl(38 85% 58%);
-  --amber-tint: hsl(38 45% 15%);
-  --red: #f36a5f;
-  --red-tint: #2b1414;
-  --blue: #56b8d8;
+  /* 2. ROLES, dark */
+  --background: var(--rr-black); /* surface-base */
+  --foreground: var(--rr-gray-1); /* ink-primary */
+  --card: var(--rr-gray-9); /* surface-raised */
+  --card-foreground: var(--rr-gray-1);
+  --popover: var(--rr-gray-9);
+  --popover-foreground: var(--rr-gray-1);
+  --primary: var(--rr-blue-6); /* action-primary */
+  --primary-foreground: var(--rr-white); /* ink-on-brand */
+  /* surface-sunken. Not a ramp step: the system's own value, chosen so the
+     dark elevation ladder does not reverse at its second step. */
+  --secondary: #1c1f26;
+  --secondary-foreground: var(--rr-gray-1);
+  --muted: #1c1f26;
+  --muted-foreground: var(--rr-gray-5); /* ink-secondary */
+  --ink-muted: #838a97; /* ink-muted, the system's own literal */
+  --ink-disabled: var(--rr-gray-6);
+  --brand-subtle: var(--rr-blue-10); /* surface-brand-subtle */
+  --brand-subtle-2: var(--rr-blue-9);
+  --primary-hover: var(--rr-blue-5); /* action-primary-hover */
+  --accent: var(--rr-gray-8);
+  --accent-foreground: var(--rr-gray-1);
+  --destructive: var(--rr-red-3); /* status-danger */
+  --destructive-foreground: var(--rr-black);
+  --warning: var(--rr-orange-3); /* status-warning */
+  --success: var(--rr-green-3); /* status-success */
+  --border: var(--rr-gray-8); /* border-subtle */
+  --input: var(--rr-gray-6); /* border-strong */
+  --ring: var(--rr-blue-4); /* focus-ring */
+  --chart-1: var(--rr-blue-5);
+  --chart-2: var(--rr-teal-3);
+  --chart-3: var(--rr-violet-3);
+  --chart-4: var(--rr-pink-3);
+  --chart-5: var(--rr-sky-3);
+  --sidebar: var(--rr-gray-9);
+  --sidebar-foreground: var(--rr-gray-1);
+  --sidebar-primary: var(--rr-blue-6);
+  --sidebar-primary-foreground: var(--rr-white);
+  --sidebar-accent: var(--rr-gray-8);
+  --sidebar-accent-foreground: var(--rr-gray-1);
+  --sidebar-border: var(--rr-gray-8);
+  --sidebar-ring: var(--rr-blue-4);
+  --accent-brand: var(--rr-blue-6); /* action-primary */
+  --accent-brand-ink: var(--rr-blue-4); /* ink-brand */
+  --accent-brand-bright: var(--rr-blue-4);
+  --success-subtle: #004829; /* accent-green-5 */
+  --warning-subtle: #5c2d00; /* accent-orange-5 */
+  --destructive-subtle: #560100; /* accent-red-5 */
 }
 
 /* This is a noninteractive macOS example, not an app password form. Native

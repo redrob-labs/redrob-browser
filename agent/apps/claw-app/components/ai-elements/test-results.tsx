@@ -22,7 +22,7 @@ import {
   CircleDotIcon,
   CircleIcon,
   XCircleIcon,
-} from "lucide-react";
+} from "@browseros/icons";
 import type { ComponentProps, HTMLAttributes } from "react";
 import { createContext, useContext, useMemo } from "react";
 

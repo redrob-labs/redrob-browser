@@ -14,18 +14,19 @@ import type {
   SessionSummary,
   ToolEvent,
 } from '@browseros/claw-api'
+import { t } from '@browseros/i18n'
 
 // Missing parent colors fall back to a stable slug hash so card identity does
 // not flicker between live-session polls.
+// The design system's data-series palette (--series-1..6, light values), written out because a session's
+// colour also travels to the server and the tab-group strip as a hex.
 const PALETTE = [
-  '#16A34A',
-  '#2F6FE0',
-  '#7A5AF8',
-  '#10A37F',
-  '#EA580C',
-  '#0EA5E9',
-  '#F59E0B',
-  '#DB2777',
+  '#2B52FF',
+  '#AE5100',
+  '#8944FF',
+  '#00864A',
+  '#A31310',
+  '#D2A100',
 ]
 
 const TRAIL_DISPLAY_CAP = 4
@@ -50,13 +51,13 @@ export function siteOf(url: string): string {
 export function formatRelative(ms: number, now: number): string {
   const delta = Math.max(0, now - ms)
   const seconds = Math.floor(delta / 1000)
-  if (seconds < 60) return `${seconds}s ago`
+  if (seconds < 60) return t('clSecondsAgo', seconds)
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 60) return t('clMinutesAgo', minutes)
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
+  if (hours < 24) return t('clHoursAgo', hours)
   const days = Math.floor(hours / 24)
-  return `${days}d ago`
+  return t('clDaysAgo', days)
 }
 
 /** Returns the most recent N tool names joined for compact card trail rows. */

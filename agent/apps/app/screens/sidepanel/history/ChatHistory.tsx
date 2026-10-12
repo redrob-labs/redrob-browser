@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { type FC, useMemo } from 'react'
 import { useChatSessionContext } from '@/modules/chat/chat-session-context'
 import {
@@ -50,7 +51,7 @@ export const ChatHistory: FC = () => {
         groupedConversations={groupedConversations}
         activeConversationId={activeConversationId}
         onDelete={(id) => deleteConversation.mutate(id)}
-        emptyMessage="No conversations on this device yet"
+        emptyMessage={t('spNoConversations')}
       />
     </main>
   )

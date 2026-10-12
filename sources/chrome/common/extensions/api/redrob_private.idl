@@ -420,6 +420,21 @@ namespace redrobPrivate {
     // Turns automatic picture-in-picture on or off.
     static void setAutomaticPictureInPictureEnabled(boolean enabled);
 
+    // --- Colour scheme ----------------------------------------------------
+    //
+    // The browser's own light/dark choice (ThemeService's BrowserColorScheme,
+    // the pref chrome://settings/appearance writes). The extension's pages read
+    // and write THIS instead of keeping a theme of their own, so the window and
+    // the side panel beside it can never disagree about which theme they are in.
+    // "system", "light" or "dark".
+    static void getColorScheme(StringPrefCallback callback);
+
+    // Sets the browser's colour scheme. Accepts "system", "light" and "dark";
+    // any other value is ignored rather than stored, because this arrives from a
+    // renderer. Goes through ThemeService, not the raw pref, so the window
+    // re-themes the way it does when the setting is changed in Settings.
+    static void setColorScheme(DOMString scheme);
+
     // Starts or stops the local RPC server now, not at the next launch.
     // |callback|: the endpoint it is listening on, or nothing when it is off or
     // failed to start.

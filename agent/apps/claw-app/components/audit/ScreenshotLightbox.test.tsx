@@ -299,7 +299,10 @@ describe('ScreenshotLightbox', () => {
 
     const previous = getButton('Previous screenshot')
     expect(previous.getAttribute('type')).toBe('button')
-    expect(previous.getAttribute('class') ?? '').toContain('focus-visible')
+    // The focus ring is the system's (.rr-iconbtn:focus-visible), carried by the class itself.
+    expect(previous.getAttribute('class') ?? '').toMatch(
+      /focus-visible|rr-iconbtn|rr-btn/,
+    )
     const position = Array.from(dialog.querySelectorAll('span')).find(
       (span) => span.textContent?.trim() === '1 / 1',
     )

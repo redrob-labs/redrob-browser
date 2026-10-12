@@ -5,6 +5,7 @@
  */
 
 import type { RecordingMetadata } from '@browseros/claw-api'
+import { t } from '@browseros/i18n'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import type { RunStatus } from '@/lib/status'
@@ -360,9 +361,9 @@ function buildCaption(
   isError: boolean,
   cancelled: boolean,
 ): string {
-  if (cancelled) return `${row.toolName}: cancelled by operator`
-  if (isError) return `${row.toolName}: errored`
-  if (verb === 'navigate' && row.url) return `Navigate to ${row.url}`
+  if (cancelled) return t('clToolCancelled', row.toolName)
+  if (isError) return t('clToolErrored', row.toolName)
+  if (verb === 'navigate' && row.url) return t('clNavigateTo', row.url)
   if (row.title) return `${row.toolName}: ${row.title}`
   return row.toolName
 }

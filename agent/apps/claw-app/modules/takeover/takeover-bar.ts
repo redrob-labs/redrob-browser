@@ -36,7 +36,7 @@ export const TAKEOVER_BAR_CSS = `
   border-radius: 12px; box-shadow: 0 10px 30px rgba(2,22,51,0.30); overflow: hidden; max-width: 760px; margin: 0 auto; }
 .nt-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: #eaf1ff; border-bottom: 1px solid rgba(2,84,236,0.18); }
 .nt-dog { width: 22px; height: 22px; flex: 0 0 auto; display: block; }
-.nt-dog svg { width: 22px; height: 22px; border-radius: 6px; display: block; }
+.nt-dog img { width: 22px; height: 22px; display: block; }
 .nt-brand { font-weight: 800; font-size: 12.5px; letter-spacing: -0.01em; color: #0254ec; }
 .nt-spacer { flex: 1 1 auto; }
 .nt-pill { display: inline-flex; align-items: center; gap: 6px; background: #b85c10; color: #fff; white-space: nowrap;
@@ -63,7 +63,7 @@ export const TAKEOVER_BAR_CSS = `
   border-radius: 999px; padding: 7px 13px 7px 7px; box-shadow: 0 8px 22px rgba(2,22,51,0.4); font: inherit;
   font-size: 13px; font-weight: 600; cursor: pointer; float: right; }
 .nt-chip { width: 24px; height: 24px; border-radius: 7px; background: #fff; display: flex; align-items: center; justify-content: center; }
-.nt-chip svg { width: 18px; height: 18px; border-radius: 4px; display: block; }
+.nt-chip img { width: 18px; height: 18px; display: block; }
 .nt-dot { width: 7px; height: 7px; border-radius: 50%; background: #f6b53d; box-shadow: 0 0 0 2px rgba(246,181,61,0.3); }
 .nt-pill-btn .nt-timer { font-variant-numeric: tabular-nums; opacity: 0.92; }
 .nt-chev { opacity: 0.9; }
@@ -98,7 +98,7 @@ export function createTakeoverBar(
   const dog = el('span', 'nt-dog')
   dog.innerHTML = NEO_MARK_SVG
   const brand = el('span', 'nt-brand')
-  brand.textContent = 'BrowserOS neo'
+  brand.textContent = 'Redrob'
   const spacer = el('span', 'nt-spacer')
   const pill = el('span', 'nt-pill')
   pill.append('Awaiting user input ')
@@ -134,7 +134,7 @@ export function createTakeoverBar(
   // Minimized pill.
   const pillBtn = el('button', 'nt-pill-btn')
   pillBtn.type = 'button'
-  pillBtn.setAttribute('aria-label', 'Expand BrowserOS neo takeover controls')
+  pillBtn.setAttribute('aria-label', 'Expand Redrob takeover controls')
   const chip = el('span', 'nt-chip')
   chip.innerHTML = NEO_MARK_SVG
   const pillAgent = el('span')
