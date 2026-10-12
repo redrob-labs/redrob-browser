@@ -7,7 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
-import { t } from '@browseros/i18n'
+import { t, tCount } from '@browseros/i18n'
 import {
   AlertTriangle,
   Check,
@@ -136,7 +136,7 @@ export function ActivityRow({ row }: ActivityRowProps) {
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate font-bold text-[12.5px]">
+          <span className="truncate font-bold text-[12.5px]" translate="no">
             {row.agentLabel}
           </span>
           <span
@@ -164,7 +164,7 @@ export function ActivityRow({ row }: ActivityRowProps) {
             <>
               {' . '}
               <span className="font-mono text-[11.5px] text-ink-3">
-                {row.toolCount} {row.toolCount === 1 ? 'action' : 'actions'}
+                {tCount('clToolActions', row.toolCount)}
               </span>
             </>
           )}

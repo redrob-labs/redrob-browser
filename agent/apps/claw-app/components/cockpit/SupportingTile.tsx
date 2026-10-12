@@ -110,7 +110,9 @@ function Caption({
       data-caption-tone={tone}
     >
       <div className="flex items-center gap-2 font-medium text-[11.5px] leading-[14px]">
-        <span className="truncate">{task.label}</span>
+        <span className="truncate" translate="no">
+          {task.label}
+        </span>
         {isLive && (
           <span className="rounded-full bg-cyanotype-live px-2 py-0.5 font-semibold text-[10px] text-cyanotype-live-ink">
             {t('clLive2')}
@@ -135,7 +137,11 @@ function NoShotComposition({ task }: { task: TaskSummary }) {
   const verbs = task.toolSequence.slice(0, 4)
   return (
     <div className="absolute inset-0 bg-cyanotype-well">
-      <div className="pointer-events-none absolute inset-0 flex flex-col justify-center gap-0.5 pl-4 text-[14px] text-cyanotype-ink/18 leading-tight tracking-tight">
+      <div
+        aria-hidden
+        translate="no"
+        className="pointer-events-none absolute inset-0 flex flex-col justify-center gap-0.5 pl-4 text-[14px] text-cyanotype-ink/18 leading-tight tracking-tight"
+      >
         {verbs.map((verb, idx) => (
           <span
             // biome-ignore lint/suspicious/noArrayIndexKey: tool sequence is stable-ordered per session, not a reorderable list

@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import type { ComponentProps, ReactNode } from 'react'
 import {
   Command,
@@ -217,7 +218,7 @@ export const ModelSelectorLogo = ({
 }: ModelSelectorLogoProps) => (
   <img
     {...props}
-    alt={`${provider} logo`}
+    alt={t('stProviderLogo', provider)}
     className={cn('size-3 dark:invert', className)}
     height={12}
     src={`https://models.dev/logos/${provider}.svg`}

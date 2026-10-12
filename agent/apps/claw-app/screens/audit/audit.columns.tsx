@@ -35,11 +35,14 @@ import {
 export const TASK_COLUMNS: ColumnDef<TaskSummary>[] = [
   {
     id: 'agent',
-    header: 'Agent',
+    header: () => t('clAgent'),
     accessorKey: 'slug',
     cell: ({ row }) => (
       <div className="flex items-center gap-2">
-        <span className="min-w-0 truncate text-[12px] text-ledger-link">
+        <span
+          className="min-w-0 truncate text-[12px] text-ledger-link"
+          translate="no"
+        >
           {row.original.slug}
         </span>
         {row.original.status === 'live' && <LiveInlineChip />}
@@ -51,14 +54,14 @@ export const TASK_COLUMNS: ColumnDef<TaskSummary>[] = [
   },
   {
     id: 'title',
-    header: 'Target',
+    header: () => t('clTarget'),
     accessorKey: 'title',
-    // system-ui rather than the app's Schibsted Grotesk sans: the target is
-    // the one cell a reader scans rather than skims, and the design calls
-    // for the platform UI face at reading size here.
+    // The system's sans, as every other cell: upstream set this one in
+    // system-ui, which on a host without a Hangul system face drew Korean
+    // task names as empty boxes.
     cell: ({ row }) => (
       <div className="min-w-0">
-        <span className="block truncate font-[system-ui,sans-serif] text-[13px] text-ledger-ink">
+        <span className="block truncate text-[13px] text-ledger-ink">
           {row.original.name}
         </span>
         {row.original.taskSummary && (
@@ -72,14 +75,17 @@ export const TASK_COLUMNS: ColumnDef<TaskSummary>[] = [
   },
   {
     id: 'sequence',
-    header: 'Tool chain',
+    header: () => t('clToolChain'),
     accessorFn: (t) => t.toolSequence.join('/'),
     // Four links, not the shared default of five: five overflows the 240px
     // track for almost every real chain, and a CSS clip mid-word reads as a
     // rendering bug next to the explicit trailing ellipsis. The wider
     // cockpit tiles keep the default.
     cell: ({ row }) => (
-      <span className="block truncate text-[12px] text-ledger-ink-3">
+      <span
+        className="block truncate text-[12px] text-ledger-ink-3"
+        translate="no"
+      >
         {abbreviateSequence(row.original.toolSequence, 4)}
       </span>
     ),
@@ -87,14 +93,14 @@ export const TASK_COLUMNS: ColumnDef<TaskSummary>[] = [
   },
   {
     id: 'tokens',
-    header: 'Tokens',
+    header: () => t('clTokens2'),
     accessorFn: (t) => t.tokenUsage?.totalTokenEstimate,
     cell: ({ row }) => <TokensCell task={row.original} />,
     enableSorting: false,
   },
   {
     id: 'duration',
-    header: 'Duration',
+    header: () => t('clDuration'),
     accessorFn: (t) => t.durationMs,
     cell: ({ getValue }) => (
       <span className="text-[12px] text-ledger-ink-2 tabular-nums">
@@ -105,7 +111,7 @@ export const TASK_COLUMNS: ColumnDef<TaskSummary>[] = [
   },
   {
     id: 'when',
-    header: 'When',
+    header: () => t('clWhen'),
     accessorKey: 'startedAt',
     cell: ({ getValue }) => (
       <span className="text-[12px] text-ledger-ink-3 tabular-nums">
@@ -164,7 +170,7 @@ function TokensCell({ task }: { task: TaskSummary }) {
   return (
     <span
       className="text-[12px] text-ledger-ink-2 tabular-nums"
-      title={`${formatTokensFull(usage.totalTokenEstimate)} tokens`}
+      title={t('clNTokens', formatTokensFull(usage.totalTokenEstimate))}
     >
       {formatTokensCompact(usage.totalTokenEstimate)}
     </span>

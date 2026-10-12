@@ -198,7 +198,10 @@ function ActivityList({ tasks, now }: { tasks: TaskSummary[]; now: number }) {
               data-testid={`activity-row-${task.sessionId}`}
               className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-cyanotype-well/60"
             >
-              <span className="w-28 shrink-0 truncate font-medium text-[12px] text-cyanotype-ink leading-4">
+              <span
+                className="w-28 shrink-0 truncate font-medium text-[12px] text-cyanotype-ink leading-4"
+                translate="no"
+              >
                 {task.label}
               </span>
               <span className="min-w-0 flex-1 truncate text-[12px] text-cyanotype-soft leading-4">

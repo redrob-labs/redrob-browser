@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { cn } from '@/lib/utils'
 import type { TaskStatus } from '@/modules/api/audit.hooks'
 
@@ -23,17 +24,17 @@ const STYLES: Record<TaskStatus, string> = {
   cancelled: 'rr-badge--subtle rr-badge--neutral',
 }
 
-const LABELS: Record<TaskStatus, string> = {
-  live: 'Live',
-  done: 'Done',
-  failed: 'Failed',
-  cancelled: 'Stopped',
+const LABELS: Record<TaskStatus, () => string> = {
+  live: () => t('clLive'),
+  done: () => t('clDone'),
+  failed: () => t('clFailed'),
+  cancelled: () => t('clStopped'),
 }
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {
   return (
     <span className={cn('rr-badge rr-badge--sm', STYLES[status], className)}>
-      {LABELS[status]}
+      {LABELS[status]()}
     </span>
   )
 }

@@ -102,7 +102,11 @@ export function PlaybackTransport({
           <input
             type="range"
             aria-label={t('clPlaybackPosition')}
-            aria-valuetext={`${formatTime(time)} of ${formatTime(totalSeconds)}`}
+            aria-valuetext={t(
+              'clTimeOfTotal',
+              formatTime(time),
+              formatTime(totalSeconds),
+            )}
             min={0}
             max={totalSeconds}
             step={SCRUBBER_STEP}

@@ -26,8 +26,12 @@ export const MCPB_FILENAME = EXTENSION_DOWNLOAD_URL.slice(
   EXTENSION_DOWNLOAD_URL.lastIndexOf('/') + 1,
 )
 
-export const COWORK_REQUIREMENT_LINE =
-  'To use BrowserOS neo with Claude Cowork, you need to install this extension.'
+/** The upstream extension's own name: the file the user installs is called this, so it is not ours to rename. */
+export const UPSTREAM_EXTENSION_NAME = 'BrowserOS neo'
+
+/** Read when rendered, so it follows the page language. */
+export const coworkRequirementLine = (): string =>
+  t('clCoworkRequirement', UPSTREAM_EXTENSION_NAME)
 
 /**
  * Screenshots live in the `browserclaw` R2 bucket rather than the extension

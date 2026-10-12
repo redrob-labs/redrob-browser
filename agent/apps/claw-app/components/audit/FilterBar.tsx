@@ -87,10 +87,10 @@ export function FilterBar({
           {selectedAgent ? (
             <>
               <AgentDot slug={selectedAgent.slug} />
-              {selectedAgent.slug}
+              <span translate="no">{selectedAgent.slug}</span>
             </>
           ) : (
-            'Agent'
+            t('clAgent')
           )}
           <ChevronDown className="size-3 text-ink-3" />
         </DropdownMenuTrigger>
@@ -108,7 +108,9 @@ export function FilterBar({
               onClick={() => onAgentChange(opt.slug)}
             >
               <AgentDot slug={opt.slug} className="mr-1.5" />
-              <span className="flex-1">{opt.slug}</span>
+              <span className="flex-1" translate="no">
+                {opt.slug}
+              </span>
               <span className="ml-2 text-[11.5px] text-ink-3">{opt.count}</span>
               {selectedAgentSlug === opt.slug && (
                 <Check className="ml-2 size-3.5" />
@@ -128,7 +130,11 @@ export function FilterBar({
             />
           }
         >
-          {selectedStatus ? <StatusPill status={selectedStatus} /> : 'Status'}
+          {selectedStatus ? (
+            <StatusPill status={selectedStatus} />
+          ) : (
+            t('clStatus')
+          )}
           <ChevronDown className="size-3 text-ink-3" />
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -165,7 +171,7 @@ export function FilterBar({
               />
             }
           >
-            {selectedSite ?? 'Site'}
+            {selectedSite ?? t('clSite')}
             <ChevronDown className="size-3 text-ink-3" />
           </DropdownMenuTrigger>
           <DropdownMenuContent

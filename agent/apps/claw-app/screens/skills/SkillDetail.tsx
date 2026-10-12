@@ -125,7 +125,9 @@ function DetailBody({
 
       <section className="flex flex-col gap-2">
         {/* i18n-ignore: a file name */}
-        <h2 className="font-semibold text-ink text-sm">SKILL.md</h2>
+        <h2 className="font-semibold text-ink text-sm" translate="no">
+          SKILL.md
+        </h2>
         <pre className="overflow-x-auto rounded-9 border border-ledger-border bg-card p-4 font-mono text-[12px] text-ledger-ink leading-relaxed">
           {body}
         </pre>
@@ -281,6 +283,7 @@ function RunHistory({ runs }: { runs: SkillRun[] }) {
                     #{run.runNumber}
                   </TableCell>
                   <TableCell
+                    translate="no"
                     className={cn(
                       CELL_PADDING,
                       'truncate text-[13px] text-ledger-ink-2',
@@ -295,7 +298,7 @@ function RunHistory({ runs }: { runs: SkillRun[] }) {
                     )}
                   >
                     {run.tokens === undefined
-                      ? 'not run'
+                      ? t('clNotRun')
                       : formatTokens(run.tokens)}
                   </TableCell>
                   <TableCell
@@ -313,8 +316,11 @@ function RunHistory({ runs }: { runs: SkillRun[] }) {
                         {t('clClean')}
                       </span>
                     ) : (
-                      <span className="truncate text-red">
-                        {run.erroredTool ?? 'error'}
+                      <span
+                        className="truncate text-red"
+                        translate={run.erroredTool ? 'no' : undefined}
+                      >
+                        {run.erroredTool ?? t('clErrorLower')}
                       </span>
                     )}
                   </TableCell>

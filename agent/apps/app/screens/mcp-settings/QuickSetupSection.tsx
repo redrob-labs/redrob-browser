@@ -131,7 +131,7 @@ const CopyButton: FC<{ text: string; label?: string }> = ({ text, label }) => {
       variant="ghost"
       size="icon-sm"
       onClick={handleCopy}
-      aria-label={copied ? 'Copied' : (label ?? 'Copy')}
+      aria-label={copied ? t('stCopied') : (label ?? t('stCopy'))}
       className="shrink-0 text-muted-foreground hover:text-foreground"
     >
       {copied ? (

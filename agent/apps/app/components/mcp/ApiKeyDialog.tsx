@@ -135,7 +135,7 @@ export const ApiKeyDialog: FC<ApiKeyDialogProps> = ({
                     {t('shConnecting')}
                   </>
                 ) : (
-                  'Connect'
+                  t('stConnect')
                 )}
               </Button>
             </DialogFooter>

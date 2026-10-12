@@ -176,7 +176,7 @@ export const ServerPortEditor: FC<ServerPortEditorProps> = ({
                   {t('stRestarting')}
                 </>
               ) : (
-                'Save'
+                t('stSave')
               )}
             </Button>
           </div>

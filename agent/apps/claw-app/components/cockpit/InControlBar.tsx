@@ -43,8 +43,9 @@ export function InControlBar({
       <div className="mx-auto flex max-w-[1040px] flex-col gap-2">
         <div className="flex flex-col gap-0.5">
           <p className="font-semibold text-[14px] text-ink">
-            {t('clInControlOf', session.label)}
-            {site ? ` on ${site}` : ''}.
+            {site
+              ? t('clInControlOfOn', session.label, site)
+              : t('clInControlOf', session.label)}
           </p>
           {help?.resumeHint && (
             <p className="text-[13px] text-ink-2">

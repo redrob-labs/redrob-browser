@@ -11,7 +11,7 @@ import { t } from '@browseros/i18n'
 import { ArrowRight } from '@browseros/icons'
 import { useState } from 'react'
 import { InstallExtensionDialog } from './InstallExtensionDialog'
-import { COWORK_REQUIREMENT_LINE } from './install-guide.data'
+import { coworkRequirementLine } from './install-guide.data'
 
 /**
  * Advertises the BrowserOS neo extension for Claude Desktop. Unlike the
@@ -44,7 +44,7 @@ export function ClaudeDesktopCard() {
               {t('clGiveClaudeDesktopAReal')}
             </p>
             <p className="text-[13px] text-cyanotype-muted leading-snug">
-              {COWORK_REQUIREMENT_LINE}
+              {coworkRequirementLine()}
             </p>
           </div>
         </div>

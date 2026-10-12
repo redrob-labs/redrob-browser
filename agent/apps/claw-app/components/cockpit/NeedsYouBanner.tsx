@@ -106,7 +106,9 @@ export function NeedsYouBanner({
                 style={{ background: session.color }}
               />
               <span className="min-w-0 flex-1 truncate text-ink">
-                <span className="font-medium">{session.label}</span>
+                <span className="font-medium" translate="no">
+                  {session.label}
+                </span>
                 <span className="text-ink-3"> · {help.reason}</span>
               </span>
               <span className="shrink-0 font-mono text-[11px] text-ink-3 tabular-nums">

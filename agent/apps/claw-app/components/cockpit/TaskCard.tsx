@@ -50,7 +50,9 @@ export function TaskCard({ task, now }: TaskCardProps) {
     >
       <header className="flex items-center gap-2">
         <AgentDot slug={task.slug} />
-        <span className="font-semibold text-ink">{task.label}</span>
+        <span className="font-semibold text-ink" translate="no">
+          {task.label}
+        </span>
         <StatusBadge status={task.status} />
         <div className="flex-1" />
         <span className="text-[12px] text-ink-3">
@@ -102,7 +104,10 @@ export function TaskCard({ task, now }: TaskCardProps) {
               </>
             )}
           </div>
-          <p className="truncate font-mono text-[11.5px] text-ink-3">
+          <p
+            className="truncate font-mono text-[11.5px] text-ink-3"
+            translate="no"
+          >
             {abbreviateSequence(task.toolSequence)}
           </p>
         </div>

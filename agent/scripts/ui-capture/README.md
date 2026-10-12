@@ -27,7 +27,7 @@ All measurements read computed style in the rendered page.
 | `roundIcons` | SVG icons drawn with round caps or joins. The design system's icons never use them |
 | `foreignIcons` | Icons from lucide or tabler, not from the design system |
 | `untranslated` | In Korean captures: visible English text that is not a name, code or URL |
-| `fonts` | No loaded Pretendard face, plus every font face that failed to load |
+| `fonts` | No loaded Pretendard face, plus every font face that failed to load, plus every element that sets Hangul in a stack without Pretendard (it draws as boxes where the face has no Hangul) |
 
 ## Why the baseline is a ratchet
 

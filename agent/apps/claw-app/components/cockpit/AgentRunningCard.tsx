@@ -137,7 +137,9 @@ export function AgentRunningCard({
               className="inline-block size-2 shrink-0 rounded-full"
               style={{ background: session.color }}
             />
-            <span className="truncate text-white">{session.label}</span>
+            <span className="truncate text-white" translate="no">
+              {session.label}
+            </span>
           </span>
           {showingLive ? (
             <span className="inline-flex shrink-0 items-center gap-1.5 text-[var(--blue-4)]">
@@ -168,8 +170,12 @@ export function AgentRunningCard({
         <h3 className="truncate font-semibold text-[14px] text-white leading-tight">
           {shownTab?.title || session.name || site}
         </h3>
-        <p className="truncate font-mono text-[11px] text-white/60">
-          {trail || (shownTab ? site : 'Waiting for browser activity')}
+        {/* The tool trail and the site are data; the waiting line is copy. */}
+        <p
+          className="truncate font-mono text-[11px] text-white/60"
+          translate={trail || shownTab ? 'no' : undefined}
+        >
+          {trail || (shownTab ? site : t('clWaitingBrowserActivity'))}
         </p>
         <div className="mt-1 flex items-center gap-2 border-white/10 border-t pt-2">
           {shownTab && onWatch && (
@@ -293,7 +299,9 @@ function AgentNeedsYouCard({
               className="inline-block size-2 shrink-0 rounded-full"
               style={{ background: session.color }}
             />
-            <span className="truncate text-white">{session.label}</span>
+            <span className="truncate text-white" translate="no">
+              {session.label}
+            </span>
           </span>
           <span className="inline-flex shrink-0 items-center gap-1.5 text-white">
             {t('clNeedsYou')}

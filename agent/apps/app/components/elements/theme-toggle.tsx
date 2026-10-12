@@ -58,7 +58,9 @@ export const ThemeToggle: FC<ThemeToggleProps> = ({
           className={cn(className)}
         >
           <CurrentIcon className={cn('h-5 w-5', iconClassName)} />
-          {!hideLabel && <span>{currentTheme?.label || 'Theme'}</span>}
+          {!hideLabel && (
+            <span>{currentTheme?.label || t('appearanceTheme')}</span>
+          )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

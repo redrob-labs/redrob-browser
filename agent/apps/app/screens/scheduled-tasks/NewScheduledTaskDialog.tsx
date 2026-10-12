@@ -317,7 +317,7 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
                       ) : (
                         <Sparkles className="h-3 w-3" />
                       )}
-                      {isRefining ? 'Rewriting...' : t('stRewriteWithAi')}
+                      {isRefining ? t('stRewriting') : t('stRewriteWithAi')}
                     </Button>
                   </div>
                   <FormControl>

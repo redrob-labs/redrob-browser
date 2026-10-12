@@ -14,6 +14,7 @@ import type {
   SessionSummary,
   ToolEvent,
 } from '@browseros/claw-api'
+import { t } from '@browseros/i18n'
 
 // Missing parent colors fall back to a stable slug hash so card identity does
 // not flicker between live-session polls.
@@ -50,13 +51,13 @@ export function siteOf(url: string): string {
 export function formatRelative(ms: number, now: number): string {
   const delta = Math.max(0, now - ms)
   const seconds = Math.floor(delta / 1000)
-  if (seconds < 60) return `${seconds}s ago`
+  if (seconds < 60) return t('clSecondsAgo', seconds)
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 60) return t('clMinutesAgo', minutes)
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
+  if (hours < 24) return t('clHoursAgo', hours)
   const days = Math.floor(hours / 24)
-  return `${days}d ago`
+  return t('clDaysAgo', days)
 }
 
 /** Returns the most recent N tool names joined for compact card trail rows. */

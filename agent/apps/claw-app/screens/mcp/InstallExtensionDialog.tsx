@@ -20,7 +20,7 @@ import {
 import { cn } from '@/lib/utils'
 import { AnalyticsEvent, track } from '@/modules/analytics/events'
 import {
-  COWORK_REQUIREMENT_LINE,
+  coworkRequirementLine,
   EXTENSION_DOWNLOAD_URL,
   EXTENSION_RELEASES_URL,
   INSTALL_STEPS,
@@ -69,7 +69,7 @@ export function InstallExtensionDialog({
               Install BrowserOS neo
             </DialogTitle>
             <DialogDescription className="mt-1 text-[12px] text-ink-3 leading-snug">
-              {COWORK_REQUIREMENT_LINE}
+              {coworkRequirementLine()}
             </DialogDescription>
             <ol className="mt-4 flex gap-1 overflow-x-auto sm:flex-col sm:overflow-x-visible">
               {INSTALL_STEPS.map((railStep, railIndex) => {

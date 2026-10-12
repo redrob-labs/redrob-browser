@@ -209,7 +209,9 @@ export function Audit() {
                 disabled={isFetchingNextPage}
                 className="group inline-flex items-center gap-1.5 font-medium text-[13px] text-ink-2 transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isFetchingNextPage ? 'Loading...' : t('clLoadOlderTasks')}
+                {isFetchingNextPage
+                  ? t('clLoadingEllipsis')
+                  : t('clLoadOlderTasks')}
                 <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
               </button>
             </div>

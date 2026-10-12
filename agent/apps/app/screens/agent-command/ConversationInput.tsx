@@ -205,7 +205,7 @@ function CalmContextControls({
           <Folder className="size-3" />
           <span>{t('shWorkspace')}</span>
           <span className="font-mono text-[10.5px] text-muted-foreground/70">
-            {selectedFolder?.name ?? 'none'}
+            {selectedFolder?.name ?? t('stNoFolder')}
           </span>
         </button>
       </WorkspaceSelector>

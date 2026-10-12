@@ -344,3 +344,10 @@ stDisableName	Disable $1	$1 사용 중지
 stEnableName	Enable $1	$1 사용
 stImage	Image	이미지
 stAttachment	Attachment	첨부 파일
+stRewriting	Rewriting…	다시 쓰는 중…	Button, while the AI rewrites the prompt
+stProviderIcon	$1 icon	$1 아이콘	Image alt; $1 is a provider name
+stProviderLogo	$1 logo	$1 로고	Image alt; $1 is a provider name
+stNamedSetupGuide	$1 setup guide	$1 설정 가이드	Link; $1 is a provider name
+stDurationSeconds	$1 seconds	$1초	A run's duration under a minute
+stDurationMinSec	$1m $2s	$1분 $2초	A run's duration: minutes, seconds
+stNoFolder	none	없음	Workspace chip: no folder chosen

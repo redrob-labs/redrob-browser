@@ -52,8 +52,8 @@ function formatDuration(startedAt: string, completedAt?: string): string {
   const d = dayjs.duration(diff)
   const mins = Math.floor(d.asMinutes())
   const secs = d.seconds()
-  if (mins === 0) return `${secs} seconds`
-  return `${mins}m ${secs}s`
+  if (mins === 0) return t('stDurationSeconds', secs)
+  return t('stDurationMinSec', mins, secs)
 }
 
 export const RunResultDialog: FC<RunResultDialogProps> = ({

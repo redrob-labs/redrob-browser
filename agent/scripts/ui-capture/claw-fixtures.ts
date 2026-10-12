@@ -38,6 +38,7 @@ const copy = {
     loginReason: 'Sign in to Resy to continue',
     loginDetails: 'The booking page asks for an account.',
     resume: 'the reservation form',
+    inboxTab: 'Inbox',
     expense: 'File the May expense report',
     skillDesc: 'Check the inbox and draft what is owed',
     skillBody:
@@ -53,6 +54,7 @@ const copy = {
     loginReason: '계속하려면 Resy에 로그인하세요',
     loginDetails: '예약 페이지에서 계정을 요구합니다.',
     resume: '예약 양식',
+    inboxTab: '받은편지함',
     expense: '5월 경비 보고서 제출',
     skillDesc: '받은편지함을 확인하고 답할 메일 초안을 쓰기',
     skillBody:
@@ -82,7 +84,7 @@ function sessions(c: (typeof copy)[FixtureLocale]): SessionSummary[] {
           {
             browserTabId: 11,
             url: 'https://mail.google.com/mail/u/0/#inbox',
-            title: 'Inbox',
+            title: c.inboxTab,
             toolCount: 14,
             lastToolName: 'type',
             lastActivityAt: NOW - 10_000,

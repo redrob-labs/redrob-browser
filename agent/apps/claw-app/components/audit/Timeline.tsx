@@ -189,7 +189,10 @@ function TimelineRow({
           T+{formatOffset(offsetMs)}
         </span>
         <div className="flex min-w-0 items-center gap-2">
-          <span className="font-mono font-semibold text-[12.5px] text-ink">
+          <span
+            className="font-mono font-semibold text-[12.5px] text-ink"
+            translate="no"
+          >
             {dispatch.toolName}
           </span>
           <span className="truncate text-[12.5px] text-ink-3">
@@ -310,7 +313,7 @@ function Block({
             ) : (
               <Copy className="size-3" />
             )}
-            {copied ? 'copied' : 'copy'}
+            {copied ? t('clCopied2') : t('clCopyLower')}
           </button>
         )}
       </div>

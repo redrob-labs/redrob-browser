@@ -6,6 +6,8 @@
  * Pure formatters for the Skills list and detail. No React, no side effects.
  */
 
+import { t } from '@browseros/i18n'
+
 /** Every skill is namespaced under this prefix so it never collides with a
  *  user's own agent skills and the whole set autocompletes on `/neo`. */
 export const NEO_SKILL_PREFIX = 'neo-'
@@ -93,14 +95,14 @@ export function formatRelativeTime(
 ): string {
   const minutes = Math.floor(Math.max(0, now - epochMs) / 60_000)
   if (minutes < 1) {
-    return 'just now'
+    return t('clJustNow')
   }
   if (minutes < 60) {
-    return `${minutes}m ago`
+    return t('clMinutesAgo', minutes)
   }
   const hours = Math.floor(minutes / 60)
   if (hours < 24) {
-    return `${hours}h ago`
+    return t('clHoursAgo', hours)
   }
-  return `${Math.floor(hours / 24)}d ago`
+  return t('clDaysAgo', Math.floor(hours / 24))
 }

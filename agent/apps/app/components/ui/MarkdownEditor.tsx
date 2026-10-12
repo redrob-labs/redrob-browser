@@ -101,7 +101,7 @@ function CopyMarkdownButton({
       title={t('stCopyRawMarkdown')}
     >
       {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-      <span>{copied ? 'Copied' : t('stCopyMarkdown')}</span>
+      <span>{copied ? t('stCopied') : t('stCopyMarkdown')}</span>
     </button>
   )
 }

@@ -78,7 +78,9 @@ export function TaskHeader({ detail }: TaskHeaderProps) {
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <AgentDot slug={task.slug} />
-              <span className="font-semibold text-ink">{task.slug}</span>
+              <span className="font-semibold text-ink" translate="no">
+                {task.slug}
+              </span>
               <StatusBadge status={task.status} />
               {task.errorCount > 0 && (
                 <span className="text-[12.5px] text-red">
@@ -110,8 +112,8 @@ export function TaskHeader({ detail }: TaskHeaderProps) {
               {task.endedAt
                 ? new Date(task.endedAt).toLocaleString()
                 : task.status === 'live'
-                  ? 'still running'
-                  : 'idle'}
+                  ? t('clStillRunning')
+                  : t('clIdleLower')}
             </dd>
           </div>
           <div>
@@ -141,12 +143,20 @@ export function TaskHeader({ detail }: TaskHeaderProps) {
           </div>
           <div className="col-span-2">
             <dt className="text-ink-3">{t('clSite')}</dt>
-            <dd className="font-mono text-ink-2">{task.site ?? 'none'}</dd>
+            {task.site ? (
+              <dd className="font-mono text-ink-2" translate="no">
+                {task.site}
+              </dd>
+            ) : (
+              <dd className="font-mono text-ink-2">{t('clNoSite')}</dd>
+            )}
           </div>
           <div className="col-span-2">
             <dt className="text-ink-3">{t('clSession')}</dt>
             <dd className="flex items-center gap-2 font-mono text-ink-2">
-              <span className="truncate">{task.sessionId}</span>
+              <span className="truncate" translate="no">
+                {task.sessionId}
+              </span>
               <button
                 type="button"
                 onClick={() => {

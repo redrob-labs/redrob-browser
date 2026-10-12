@@ -386,7 +386,12 @@ async function captureOne(
   const pretendardLoaded =
     /^pretendard$/i.test(found.fonts.family) &&
     found.fonts.loaded.some((f) => /^Pretendard /.test(f))
-  const fontFail = found.fonts.failed.length + (pretendardLoaded ? 0 : 1)
+  // Plus every place Hangul is set in a stack without Pretendard: with no Hangul in that face the text
+  // draws as empty boxes, which the loaded faces above never show.
+  const fontFail =
+    found.fonts.failed.length +
+    (pretendardLoaded ? 0 : 1) +
+    found.hangulFace.length
   const metrics: Metrics = {
     offPalette: found.offPalette.length,
     contrast: found.contrast.length,
@@ -413,6 +418,7 @@ async function captureOne(
           what: `body family ${found.fonts.family}; failed: ${found.fonts.failed.join(', ') || 'none'}`,
           where: found.fonts.loaded.join(', '),
         },
+        ...found.hangulFace,
       ],
     },
   }

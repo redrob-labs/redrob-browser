@@ -35,7 +35,7 @@ export const HubProviderRow: FC<HubProviderRowProps> = ({
         {iconUrl ? (
           <img
             src={iconUrl}
-            alt={`${provider.name} icon`}
+            alt={t('stProviderIcon', provider.name)}
             className="h-full w-full object-cover"
           />
         ) : (

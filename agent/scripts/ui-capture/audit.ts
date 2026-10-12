@@ -25,6 +25,8 @@ export interface AuditResult {
   foreignIcons: Finding[]
   untranslated: Finding[]
   fonts: { family: string; loaded: string[]; failed: string[] }
+  /** Hangul set in a font stack that never reaches Pretendard: the platform draws it, or draws boxes. */
+  hangulFace: Finding[]
 }
 
 export function audit(input: AuditInput): AuditResult {
@@ -197,7 +199,7 @@ export function audit(input: AuditInput): AuditResult {
   if (input.locale === 'ko') {
     // Names are never translated (l10n/10-sidebar.tsv): products, providers, platforms, acronyms.
     const allow =
-      /^(Redrob|Pretendard|MCP|API|URL|PDF|AI|ID|OAuth|LLM|ACP|CLI|Gmail|Google|Calendar|Slack|Notion|GPT|gpt|redrob\/auto|example\.com|Linux|Console|Code|Auto|Browser|Helper|Chrome|Safe|Storage|macOS|Mac|OpenAI|Anthropic|Gemini|Mistral|DeepSeek|xAI|Grok|Ollama|OpenRouter|Moonshot|Kimi|Qwen|Cohere|Perplexity|Groq|Claude|Codex|GitHub|Copilot|OpenClaw|Hermes|Microsoft|Edge|ChatGPT|utils\.ts)$/
+      /^(Redrob|Pretendard|MCP|API|URL|PDF|AI|ID|OAuth|LLM|ACP|CLI|Gmail|Google|Calendar|Slack|Notion|GPT|gpt|redrob\/auto|example\.com|Linux|Console|Code|Auto|Browser|Helper|Chrome|Safe|Storage|macOS|Mac|OpenAI|Anthropic|Gemini|Mistral|DeepSeek|xAI|Grok|Ollama|OpenRouter|Moonshot|Kimi|Qwen|Cohere|Perplexity|Groq|Claude|Desktop|Cursor|Codex|GitHub|Copilot|OpenClaw|Hermes|Microsoft|Edge|ChatGPT|utils\.ts)$/
     const walker = document.createTreeWalker(
       document.body,
       NodeFilter.SHOW_TEXT,
@@ -222,6 +224,9 @@ export function audit(input: AuditInput): AuditResult {
         (w) => !allow.test(w),
       )
       if (words.length === 0 || /^https?:|@|\//.test(t)) continue
+      // A Korean sentence that names something ("Resy에 로그인하세요") is translated: the Latin word in
+      // it is the name, which stays as written.
+      if (/[\uac00-\ud7a3]/.test(t)) continue
       if (seen.has(t)) continue
       seen.add(t)
       untranslated.push({ what: t.slice(0, 80), where: describe(parent) })
@@ -308,6 +313,25 @@ export function audit(input: AuditInput): AuditResult {
     if (f.status === 'loaded') loaded.push(name)
     else if (f.status === 'error') failed.push(name)
   })
+  const hangulFace: Finding[] = []
+  {
+    const seenStacks = new Set<string>()
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      const t = (n.textContent ?? '').trim()
+      const el = n.parentElement
+      if (!t || !el || !/[\uac00-\ud7a3]/.test(t) || !visible(el)) continue
+      const stack = getComputedStyle(el).fontFamily
+      if (/pretendard/i.test(stack)) continue
+      const key = `${stack}|${describe(el)}`
+      if (seenStacks.has(key)) continue
+      seenStacks.add(key)
+      hangulFace.push({
+        what: `${stack}: "${t.slice(0, 30)}"`,
+        where: describe(el),
+      })
+    }
+  }
   const family = getComputedStyle(document.body)
     .fontFamily.split(',')[0]
     .replace(/["']/g, '')
@@ -324,6 +348,7 @@ export function audit(input: AuditInput): AuditResult {
       loaded: Array.from(new Set(loaded)).sort(),
       failed: Array.from(new Set(failed)).sort(),
     },
+    hangulFace,
   }
 }
 

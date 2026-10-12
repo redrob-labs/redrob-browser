@@ -156,7 +156,7 @@ function formatContextWindow(tokens: number): string {
 function setupGuideLabel(type: ProviderType, providerName?: string): string {
   if (type === 'moonshot') return t('stHowToGetAKimi')
   return providerName
-    ? `${providerName} setup guide`
+    ? t('stNamedSetupGuide', providerName)
     : t('stProviderSetupGuide')
 }
 

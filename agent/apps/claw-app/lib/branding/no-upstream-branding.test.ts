@@ -41,7 +41,10 @@ const IDENT = /[A-Za-z0-9_$]/
  */
 const UPSTREAM_ARTEFACTS: [file: string, text: string][] = [
   ['screens/mcp/install-guide.data.ts', 'browserclaw-claude-desktop/releases'],
-  ['screens/mcp/install-guide.data.ts', 'BrowserOS neo with Claude Cowork'],
+  [
+    'screens/mcp/install-guide.data.ts',
+    "UPSTREAM_EXTENSION_NAME = 'BrowserOS neo'",
+  ],
   ['screens/mcp/install-guide.data.ts', 'Download the BrowserOS neo extension'],
   [
     'screens/mcp/install-guide.data.ts',
