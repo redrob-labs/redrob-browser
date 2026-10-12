@@ -317,10 +317,14 @@ clSecondsAgo	$1s ago	$1초 전	Relative time, compact
 clMinutesAgo	$1m ago	$1분 전	Relative time, compact
 clHoursAgo	$1h ago	$1시간 전	Relative time, compact
 clDaysAgo	$1d ago	$1일 전	Relative time, compact
+clDurationMs	$1ms	$1ms	Elapsed time under a second; ms is the unit in both languages
+clDurationSeconds	$1s	$1초	Elapsed time under a minute
+clDurationMinutes	$1m $2s	$1분 $2초	Elapsed time under an hour: $1 minutes, $2 seconds
+clDurationHours	$1h $2m	$1시간 $2분	Elapsed time of an hour or more: $1 hours, $2 minutes
 clWaitingBrowserActivity	Waiting for browser activity	브라우저 활동을 기다리는 중	Running card, before the agent opens a tab
 clLoadingEllipsis	Loading…	불러오는 중…
 clNTokens	$1 tokens	토큰 $1개	Tooltip on a token count
-clCoworkRequirement	To use $1 with Claude Cowork, you need to install this extension.	Claude Cowork에서 $1를 쓰려면 이 확장 프로그램을 설치해야 합니다.	$1 is the upstream extension's name, BrowserOS neo
+clCoworkRequirement	To drive Redrob from Claude Cowork, install the $1 extension for Claude Desktop.	Claude Cowork에서 Redrob을 쓰려면 Claude Desktop용 $1 확장 프로그램을 설치하세요.	$1 is the upstream extension's own name (BrowserOS neo): it names the file the user installs, not our product
 clInControlOfOn	You are in control of $1 on $2.	지금 $2에서 $1을(를) 직접 조작하고 있습니다.	$1 is the task, $2 the site
 clTimeOfTotal	$1 of $2	$2 중 $1	Scrubber position: elapsed of total time
 clNoSite	none	없음	Task detail: the task touched no site

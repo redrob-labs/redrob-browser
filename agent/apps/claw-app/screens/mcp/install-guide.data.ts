@@ -102,7 +102,7 @@ export const INSTALL_STEPS: readonly InstallStep[] = [
   {
     id: 'confirm-install',
     title: t('clClickInstall'),
-    body: 'Claude shows the BrowserOS neo extension details. Click Install to finish — Claude can now drive BrowserOS neo.',
+    body: 'Claude shows the BrowserOS neo extension details. Click Install to finish — Claude can now drive Redrob.',
     image: {
       src: `${IMAGE_BASE}/step-confirm-install.webp`,
       alt: "Claude Desktop's BrowserOS neo extension details sheet with the Install button in the top right",
