@@ -34,6 +34,11 @@ on:
         required: false
         default: true
         type: boolean
+      replace_published:
+        description: "Overwrite this version's CDN files when they differ (needs CloudFront invalidation rights)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -526,6 +531,8 @@ jobs:
         # the aliasing actually happens -- and not another flag here.
         env:
           APP_VERSION: ${{ steps.version.outputs.version }}
+          REPLACE_PUBLISHED: ${{ inputs.replace_published }}
+          CDN_DISTRIBUTION_ID: ${{ vars.REDROB_CDN_DISTRIBUTION_ID }}
         run: bash .github/scripts/cdn-publish.sh cdn
 
       - name: publish the Sparkle appcasts
