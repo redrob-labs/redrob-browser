@@ -15,7 +15,9 @@ import {
 } from '../../../src/api/services/hiring-outreach'
 import type { BrowserToolCall } from '../../../src/api/services/mcp/browser-tool-dispatch'
 import {
+  afterConnectorCall,
   applyHiringSend,
+  authorizeConnectorCall,
   guardHiringSend,
   recordHiringPress,
   setOutreachSource,
@@ -340,5 +342,110 @@ describe('Talent Scout outreach', () => {
       note: 'needs-you',
     })
     expect(guardHiringSend(call('run', {}))).toBeNull()
+  })
+})
+
+describe('Talent Scout email', () => {
+  const sendArgs = (to: string, body: string, server = 'Gmail') => ({
+    server_name: server,
+    category_name: 'GMAIL_EMAIL',
+    action_name: 'gmail_send_email',
+    body_schema: JSON.stringify({ to, subject: 'Backend Engineer', body }),
+  })
+
+  it('only to an address the person published, and only that one email from that mailbox', async () => {
+    const { outreach, store, role, personId } = await setup()
+    await expect(
+      outreach.draft(role.id, personId, {
+        notice: NOTICE,
+        language: 'en',
+        body: 'Hi',
+        email: { connector: 'Gmail', recipient: 'guessed@example.com' },
+      }),
+    ).rejects.toBeInstanceOf(OutreachRefusedError)
+    const d = await outreach.draft(role.id, personId, {
+      notice: NOTICE,
+      language: 'en',
+      body: 'Hi Jiwon, we are hiring a Backend Engineer in Seoul.',
+      email: { connector: 'Gmail', recipient: 'jiwon@example.com' },
+    })
+    if (d.status !== 'drafted') throw new Error()
+    expect([
+      d.message.channel,
+      d.message.recipient,
+      d.message.connector,
+    ]).toEqual(['email', 'jiwon@example.com', 'Gmail'])
+    outreach.approve([d.message.id])
+    const { instruction } = await outreach.start(d.message.id, 'c1')
+    expect(instruction).toContain('from my Gmail to jiwon@example.com')
+
+    // The browser is not part of an email run.
+    expect(
+      guardHiringSend(call('navigate', { url: 'https://mail.google.com/' }))
+        ?.isError,
+    ).toBe(true)
+    expect(
+      authorizeConnectorCall('c1', 'discover_server_categories_or_actions', {}),
+    ).toBeUndefined()
+    expect(
+      authorizeConnectorCall(
+        'c1',
+        'execute_action',
+        sendArgs('other@example.com', d.message.body),
+      ),
+    ).toBeDefined()
+    expect(
+      authorizeConnectorCall(
+        'c1',
+        'execute_action',
+        sendArgs('jiwon@example.com', 'Something else entirely'),
+      ),
+    ).toBeDefined()
+    expect(
+      authorizeConnectorCall(
+        'c1',
+        'execute_action',
+        sendArgs('jiwon@example.com', d.message.body, 'Outlook Mail'),
+      ),
+    ).toBeDefined()
+    const ok = sendArgs('jiwon@example.com', d.message.body)
+    expect(authorizeConnectorCall('c1', 'execute_action', ok)).toBeUndefined()
+    afterConnectorCall('c1', 'execute_action', ok)
+    expect(outreach.get(d.message.id)?.status).toBe('sent')
+    expect(authorizeConnectorCall('c1', 'execute_action', ok)).toBe(
+      'execute_action: this email was already sent.',
+    )
+    expect(store.peopleOnRole(role.id)[0]?.stage).toBe('contacted')
+    // Outside a run, connector calls are untouched.
+    expect(
+      authorizeConnectorCall('other', 'execute_action', ok),
+    ).toBeUndefined()
+  })
+
+  it('one email an hour to a domain', async () => {
+    const { outreach, store, role, personId } = await setup()
+    const other = await store.upsertPerson(role.id, {
+      ...jiwon,
+      url: 'https://www.linkedin.com/in/other',
+      name: 'Other',
+      contact: [{ kind: 'email', value: 'other@example.com' }],
+    })
+    const send = async (pid: string, to: string, conversation: string) => {
+      const d = await outreach.draft(role.id, pid, {
+        notice: NOTICE,
+        language: 'en',
+        body: 'Hi there, a role.',
+        email: { connector: 'Gmail', recipient: to },
+      })
+      if (d.status !== 'drafted') throw new Error()
+      outreach.approve([d.message.id])
+      await outreach.start(d.message.id, conversation)
+      return d.message
+    }
+    await send(personId, 'jiwon@example.com', 'c1')
+    outreach.markSent('c1')
+    await expect(
+      send(other.personId, 'other@example.com', 'c2'),
+    ).rejects.toMatchObject({ code: 'domain-hourly' })
   })
 })

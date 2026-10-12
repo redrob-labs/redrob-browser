@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS `hiring_messages` (
 	`role_id` text NOT NULL,
 	`person_id` text NOT NULL,
 	`channel` text NOT NULL,
+	`recipient` text,
+	`connector` text,
 	`sequence` integer DEFAULT 0 NOT NULL,
 	`body` text NOT NULL,
 	`status` text DEFAULT 'draft' NOT NULL,

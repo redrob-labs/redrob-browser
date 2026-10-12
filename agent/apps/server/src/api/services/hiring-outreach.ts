@@ -31,6 +31,9 @@ import {
   automaticAllowed,
   DRAFT_SYSTEM,
   draftPrompt,
+  EMAIL_CONNECTORS,
+  type EmailConnector,
+  type EmailRun,
   FOLLOW_UP_SYSTEM,
   timeZoneFor,
   withNotice,
@@ -55,8 +58,10 @@ const RUN_TTL_MS = 30 * 60_000
 export interface ActiveOutreachRun {
   messageId: string
   body: string
-  /** The person's profile host: the only site the run may go to. */
+  /** The person's profile host: the only site the run may go to. Empty for email. */
   host: string
+  /** For an email: the mailbox and the one address. The browser is not used. */
+  email?: EmailRun
   sent: boolean
   expiresAt: number
 }
@@ -134,6 +139,7 @@ export class HiringOutreach {
       .map((m) => ({
         personId: m.personId,
         channel: m.channel,
+        domain: m.recipient?.split('@')[1]?.toLowerCase(),
         sentAt: m.sentAt ?? m.updatedAt,
         sequence: m.sequence,
       }))
@@ -178,6 +184,30 @@ export class HiringOutreach {
     return this.get(id) as HiringMessageRow
   }
 
+  /** The channel a message goes on, or a refusal: an email only to an address the person gave. */
+  private channelFor(
+    record: { site: string; contact: Array<{ kind: string; value?: string }> },
+    email?: { connector: EmailConnector; recipient: string },
+  ): string {
+    if (!email) {
+      if (siteById(record.site as SiteId).send === 'none')
+        throw new OutreachRefusedError('no-channel')
+      return record.site
+    }
+    if (!EMAIL_CONNECTORS.includes(email.connector))
+      throw new OutreachRefusedError('no-channel')
+    // Never an address Redrob found elsewhere: only one the person published or applied with.
+    const want = email.recipient.trim().toLowerCase()
+    if (
+      !record.contact.some(
+        (c) => c.kind === 'email' && c.value?.toLowerCase() === want,
+      )
+    ) {
+      throw new OutreachRefusedError('no-channel')
+    }
+    return 'email'
+  }
+
   /** A first message (sequence 0) or a follow-up, written by the model or by the recruiter (`body`). */
   async draft(
     roleId: string,
@@ -188,14 +218,15 @@ export class HiringOutreach {
       tone?: string
       body?: string
       sequence?: number
+      /** Send by email from this mailbox, to an address the person published or applied with. */
+      email?: { connector: EmailConnector; recipient: string }
     },
   ): Promise<DraftOutcome> {
     const { role, person } = this.person(roleId, personId)
     if (person.stage === 'set-aside')
       throw new OutreachRefusedError('set-aside')
-    const channel = person.record.site as SiteId
-    if (siteById(channel).send === 'none')
-      throw new OutreachRefusedError('no-channel')
+    const email = input.email
+    const channel = this.channelFor(person.record, email)
     const sentBefore = this.list(roleId).filter(
       (m) => m.personId === personId && m.status === 'sent',
     )
@@ -268,6 +299,8 @@ export class HiringOutreach {
       roleId,
       personId,
       channel,
+      recipient: email?.recipient.trim() ?? null,
+      connector: email?.connector ?? null,
       sequence,
       body,
       status: automatic ? 'approved' : 'draft',
@@ -355,6 +388,7 @@ export class HiringOutreach {
       {
         personId: message.personId,
         channel: message.channel,
+        domain: message.recipient?.split('@')[1]?.toLowerCase(),
         sequence: message.sequence,
         timeZone: timeZoneFor(
           [person.record.location, role.location],
@@ -366,7 +400,10 @@ export class HiringOutreach {
       {
         optedOut: await this.store.isSuppressed(person.record),
         replied,
-        channelOpen: siteById(message.channel as SiteId).send !== 'none',
+        channelOpen:
+          message.channel === 'email'
+            ? Boolean(message.recipient && message.connector)
+            : siteById(message.channel as SiteId).send !== 'none',
       },
       this.limits(),
       this.now(),
@@ -388,7 +425,35 @@ export class HiringOutreach {
       this.update(id, { note: refused })
       throw new OutreachRefusedError(refused)
     }
-    const { person } = this.person(message.roleId, message.personId)
+    const { role, person } = this.person(message.roleId, message.personId)
+    if (message.channel === 'email' && message.recipient && message.connector) {
+      const email: EmailRun = {
+        connector: message.connector as EmailConnector,
+        recipient: message.recipient,
+        body: message.body,
+      }
+      this.runs.set(conversationId, {
+        messageId: id,
+        body: message.body,
+        host: '',
+        email,
+        sent: false,
+        expiresAt: this.now() + RUN_TTL_MS,
+      })
+      this.update(id, { status: 'sending', note: null })
+      return {
+        instruction: [
+          `Send this exact email from my ${email.connector} to ${email.recipient}, about the ${role.title} role.`,
+          '',
+          `Use the ${email.connector} connector's send action once: to ${email.recipient} only, no cc or bcc, subject "${role.title}", and the body below exactly as written. Then stop and tell me it was sent.`,
+          `If ${email.connector} is not connected, stop and tell me. Do not use the browser for this.`,
+          '',
+          '<<<',
+          message.body,
+          '>>>',
+        ].join('\n'),
+      }
+    }
     const site = siteById(message.channel as SiteId)
     const host = new URL(person.record.url).hostname.replace(
       /^([a-z]{2,3}|www)\./,

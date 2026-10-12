@@ -184,6 +184,20 @@
           "notNull": true,
           "autoincrement": false
         },
+        "recipient": {
+          "name": "recipient",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "connector": {
+          "name": "connector",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "sequence": {
           "name": "sequence",
           "type": "integer",

@@ -40,6 +40,16 @@ export interface KlavisToolAdapterDeps {
 export interface KlavisMcpRegistrationOptions {
   /** Returns a user-facing rejection when the current MCP caller lacks authority. */
   authorizeCall?: () => string | undefined
+  /**
+   * A further check on one connector call, with its arguments: returns a rejection, or undefined.
+   * Talent Scout uses it to hold an email run to the one approved message and recipient.
+   */
+  authorizeToolCall?: (
+    toolName: string,
+    args: Record<string, unknown>,
+  ) => string | undefined
+  /** Told of every connector call that returned without an error. */
+  afterToolCall?: (toolName: string, args: Record<string, unknown>) => void
 }
 
 type ConnectorToolPayload =
@@ -365,7 +375,9 @@ export function registerKlavisTools(
         ),
       },
       async (args: Record<string, unknown>) => {
-        const rejection = rejectUnauthorizedMcpCall(options)
+        const rejection =
+          rejectUnauthorizedMcpCall(options) ??
+          rejectToolCall(options, strataTool.name, args)
         if (rejection) return rejection
 
         const startTime = performance.now()
@@ -405,6 +417,7 @@ export function registerKlavisTools(
             })
           }
 
+          if (!result?.isError) options.afterToolCall?.(strataTool.name, args)
           return result
         } catch (error) {
           const errorText =
@@ -441,6 +454,17 @@ export function registerKlavisTools(
 }
 
 /** Keeps connector handlers behind the same lease as browser-tool handlers. */
+function rejectToolCall(
+  options: KlavisMcpRegistrationOptions,
+  toolName: string,
+  args: Record<string, unknown>,
+): CallToolResult | undefined {
+  const message = options.authorizeToolCall?.(toolName, args)
+  return message
+    ? { content: [{ type: 'text' as const, text: message }], isError: true }
+    : undefined
+}
+
 function rejectUnauthorizedMcpCall(options: KlavisMcpRegistrationOptions) {
   const message = options.authorizeCall?.()
   if (!message) return undefined

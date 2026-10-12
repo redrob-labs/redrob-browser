@@ -20,6 +20,44 @@ import {
   useOutreachActions,
 } from '@/modules/hiring/hiring.hooks'
 import { screenProblem } from '@/modules/hiring/labels'
+import { useGetUserMCPIntegrations } from '@/modules/mcp/user-integrations.hooks'
+
+type Mailbox = 'Gmail' | 'Outlook Mail'
+
+/** How a message can go: the site's own channel, or email from a connected mailbox to a published address. */
+function useChannels(person: PersonOnRole) {
+  const { data: integrations } = useGetUserMCPIntegrations()
+  let site: string = person.record.site
+  let siteCarries = false
+  let ats = false
+  try {
+    const found = siteById(person.record.site as SiteId)
+    site = found.name
+    siteCarries = found.send !== 'none'
+    ats = Boolean(found.ats)
+  } catch {}
+  const mailboxes = (['Gmail', 'Outlook Mail'] as const).filter((name) =>
+    integrations?.integrations.some(
+      (i) => i.name === name && i.is_authenticated,
+    ),
+  )
+  // Only an address the person published or applied with.
+  const address = person.record.contact.find(
+    (c) => c.kind === 'email' && c.value,
+  )?.value
+  const options: Array<{ id: 'site' | Mailbox; label: string }> = [
+    ...(siteCarries
+      ? [{ id: 'site' as const, label: t('hiringViaSite', site) }]
+      : []),
+    ...(address
+      ? mailboxes.map((m) => ({
+          id: m,
+          label: t('hiringViaEmail', m === 'Gmail' ? 'Gmail' : 'Outlook'),
+        }))
+      : []),
+  ]
+  return { site, ats, address, mailboxes, options }
+}
 
 export const WriteMessage: FC<{
   role: Role
@@ -28,21 +66,62 @@ export const WriteMessage: FC<{
 }> = ({ role, person, sequence = 0 }) => {
   const actions = useOutreachActions()
   const [own, setOwn] = useState<{ reason: string; text: string } | null>(null)
-  let site: string = person.record.site
-  try {
-    site = siteById(person.record.site as SiteId).name
-  } catch {}
-  const notice = t('hiringNotice', site)
+  const { site, ats, address, mailboxes, options } = useChannels(person)
+  const [via, setVia] = useState<string>('site')
+  const chosen = options.find((o) => o.id === via)?.id ?? options[0]?.id
+  const email =
+    chosen && chosen !== 'site' && address
+      ? { connector: chosen, recipient: address }
+      : undefined
   const base = {
     roleId: role.id,
     personId: person.id,
-    notice,
+    notice: email
+      ? t(
+          'hiringNoticeEmail',
+          ats
+            ? t('hiringNoticeEmailApplied')
+            : t('hiringNoticeEmailGave', site),
+        )
+      : t('hiringNotice', site),
     language: getLocale(),
     sequence,
+    email,
   }
+  if (!options.length) {
+    return address && !mailboxes.length ? (
+      <span className="text-[12px] text-[var(--text-tertiary)]">
+        {t('hiringConnectMailbox')}
+      </span>
+    ) : null
+  }
+  const picker =
+    options.length > 1 ? (
+      <span className="flex flex-wrap items-center gap-2 text-[12px]">
+        <label htmlFor={`via-${person.id}`}>{t('hiringSendVia')}</label>
+        <select
+          id={`via-${person.id}`}
+          className="rr-select rr-select--sm"
+          value={chosen}
+          onChange={(e) => setVia(e.target.value)}
+        >
+          {options.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        {email ? (
+          <span className="text-[var(--text-tertiary)]">
+            {t('hiringViaEmailHint', email.recipient)}
+          </span>
+        ) : null}
+      </span>
+    ) : null
   if (own) {
     return (
-      <div className="space-y-2">
+      <div className="w-full space-y-2">
+        {picker}
         <p className="text-[12px] text-[var(--text-secondary)]">
           {t('hiringWriteYourself', own.reason)}
         </p>
@@ -76,26 +155,29 @@ export const WriteMessage: FC<{
     )
   }
   return (
-    <button
-      type="button"
-      className="rr-btn rr-btn--secondary rr-btn--sm"
-      disabled={actions.draft.isPending}
-      aria-busy={actions.draft.isPending}
-      onClick={() =>
-        actions.draft.mutate(base, {
-          onSuccess: (out) => {
-            if (out.status === 'drafted') toast.success(t('hiringDrafted'))
-            else setOwn({ reason: screenProblem(out.reason), text: '' })
-          },
-        })
-      }
-    >
-      {actions.draft.isPending
-        ? t('hiringWriting')
-        : sequence
-          ? t('hiringWriteFollowUp')
-          : t('hiringWrite')}
-    </button>
+    <span className="flex flex-wrap items-center gap-2">
+      {picker}
+      <button
+        type="button"
+        className="rr-btn rr-btn--secondary rr-btn--sm"
+        disabled={actions.draft.isPending}
+        aria-busy={actions.draft.isPending}
+        onClick={() =>
+          actions.draft.mutate(base, {
+            onSuccess: (out) => {
+              if (out.status === 'drafted') toast.success(t('hiringDrafted'))
+              else setOwn({ reason: screenProblem(out.reason), text: '' })
+            },
+          })
+        }
+      >
+        {actions.draft.isPending
+          ? t('hiringWriting')
+          : sequence
+            ? t('hiringWriteFollowUp')
+            : t('hiringWrite')}
+      </button>
+    </span>
   )
 }
 

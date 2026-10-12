@@ -113,3 +113,104 @@ export function timeZoneFor(
   }
   return fallback
 }
+
+/** The recruiter's mailboxes Talent Scout sends from, by their connector names. */
+export const EMAIL_CONNECTORS = ['Gmail', 'Outlook Mail'] as const
+export type EmailConnector = (typeof EMAIL_CONNECTORS)[number]
+
+/** One approved email being sent: what the connector guard holds the agent to. */
+export interface EmailRun {
+  connector: EmailConnector
+  recipient: string
+  body: string
+}
+
+// Action names are snake_case or camelCase (gmail_send_email, sendMail), so no word boundaries.
+const SENDS = /(send|reply|forward|create_?message)/i
+const RECIPIENT_KEYS =
+  /^(to|cc|bcc|recipients?|torecipients|ccrecipients|bccrecipients|emailaddress|address)$/i
+const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi
+
+function parseMaybeJson(value: unknown): unknown {
+  if (typeof value !== 'string') return value
+  const text = value.trim()
+  if (!text.startsWith('{') && !text.startsWith('[')) return value
+  try {
+    return JSON.parse(text)
+  } catch {
+    return value
+  }
+}
+
+function walk(
+  value: unknown,
+  visit: (key: string, value: unknown) => void,
+  key = '',
+): void {
+  const v = parseMaybeJson(value)
+  if (Array.isArray(v)) {
+    for (const item of v) walk(item, visit, key)
+  } else if (v && typeof v === 'object') {
+    for (const [k, inner] of Object.entries(v)) walk(inner, visit, k)
+  } else {
+    visit(key, v)
+  }
+}
+
+const stripHtml = (s: string) =>
+  s
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+
+/**
+ * Whether a connector call may run while an approved email is being sent, and whether it is the send.
+ * Discovery calls are allowed; the one action that sends must be on the approved mailbox, to the
+ * approved address only (no cc or bcc to anyone else), with the approved text as its body. Anything
+ * else that sends is refused.
+ */
+export function emailCallVerdict(
+  toolName: string,
+  args: Record<string, unknown>,
+  run: EmailRun,
+): { allow: false; reason: string } | { allow: true; sends: boolean } {
+  if (toolName !== 'execute_action') return { allow: true, sends: false }
+  const server = String(args.server_name ?? '')
+  const action = `${String(args.category_name ?? '')} ${String(args.action_name ?? '')}`
+  if (!SENDS.test(action)) {
+    return {
+      allow: false,
+      reason: 'execute_action: only sending the approved email is allowed now.',
+    }
+  }
+  if (server !== run.connector) {
+    return {
+      allow: false,
+      reason: `execute_action: this email is sent from ${run.connector} only.`,
+    }
+  }
+  const recipients = new Set<string>()
+  const texts: string[] = []
+  walk(args, (key, value) => {
+    if (typeof value !== 'string') return
+    if (RECIPIENT_KEYS.test(key))
+      for (const m of value.match(EMAIL) ?? []) recipients.add(m.toLowerCase())
+    texts.push(value)
+  })
+  const want = run.recipient.trim().toLowerCase()
+  if (recipients.size === 0 || [...recipients].some((r) => r !== want)) {
+    return {
+      allow: false,
+      reason: `execute_action: this email goes to ${run.recipient} only, with no one else copied.`,
+    }
+  }
+  if (!texts.some((t) => sameMessage(run.body, stripHtml(t)))) {
+    return {
+      allow: false,
+      reason:
+        'execute_action: the body must be the approved message, exactly as written.',
+    }
+  }
+  return { allow: true, sends: true }
+}

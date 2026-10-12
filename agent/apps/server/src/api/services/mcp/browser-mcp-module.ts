@@ -22,6 +22,10 @@ import type { KlavisService } from '../klavis'
 import type { ServerActivity } from '../server-activity'
 import { dispatchBrowserTool } from './browser-tool-dispatch'
 import { ConversationTabGroups } from './conversation-tab-groups'
+import {
+  afterConnectorCall,
+  authorizeConnectorCall,
+} from './guards/hiring-send'
 import { MCP_INSTRUCTIONS } from './mcp-prompt'
 
 export { BROWSEROS_TOOL_LEASE_HEADER } from '../../../lib/browser-tool-lease'
@@ -182,6 +186,11 @@ export class BrowserMcpModule {
           }
           return undefined
         },
+        // A Talent Scout email run holds connector calls to the one approved email.
+        authorizeToolCall: (toolName, args) =>
+          authorizeConnectorCall(lease?.conversationId, toolName, args),
+        afterToolCall: (toolName, args) =>
+          afterConnectorCall(lease?.conversationId, toolName, args),
       },
     )
     return server

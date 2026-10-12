@@ -150,6 +150,10 @@ export const hiringMessages = sqliteTable(
       .references(() => hiringPeople.id, { onDelete: 'cascade' }),
     /** The site's id, whose own channel carries it. */
     channel: text('channel').notNull(),
+    /** For email: the address the person published or applied with. Nothing else is ever written to. */
+    recipient: text('recipient'),
+    /** For email: which of the recruiter's connected mailboxes sends it. */
+    connector: text('connector'),
     /** 0 for the first message, then 1 and 2 for follow-ups. */
     sequence: integer('sequence').notNull().default(0),
     body: text('body').notNull(),

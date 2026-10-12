@@ -15,7 +15,11 @@ import {
   errorResult,
   type ToolResult,
 } from '@browseros/browser-mcp/tools/framework'
-import { isPaidControl, sameMessage } from '@browseros/hiring/outreach'
+import {
+  emailCallVerdict,
+  isPaidControl,
+  sameMessage,
+} from '@browseros/hiring/outreach'
 import { isConsequential } from '@browseros/playbooks/playbook'
 import type { ActiveOutreachRun, HiringOutreach } from '../../hiring-outreach'
 import type {
@@ -81,6 +85,12 @@ export function guardHiringSendCall(
 ): ToolResult | null {
   if (!run) return null
   const name = call.tool.name
+  // An email is sent through the mailbox connector; the browser is not part of it.
+  if (run.email && name !== 'tabs' && name !== 'snapshot') {
+    return errorResult(
+      `${name}: this message is an email, sent from ${run.email.connector}. Use its send action, not the browser.`,
+    )
+  }
   if (
     name === 'navigate' &&
     typeof call.args.url === 'string' &&
@@ -131,4 +141,37 @@ export const recordHiringPress: BrowserToolGuard = (call) => {
   if (outreach?.activeRun(call.lease?.conversationId))
     call.hiringPressed = pressed(call)
   return null
+}
+
+/**
+ * The connector seam for an email run (browser-mcp-module passes these to Klavis): discovery is
+ * allowed, the one send must be the approved email, and its success marks the message sent.
+ */
+export function authorizeConnectorCall(
+  conversationId: string | undefined,
+  toolName: string,
+  args: Record<string, unknown>,
+): string | undefined {
+  const run = outreach?.activeRun(conversationId)
+  if (!run) return undefined
+  if (!run.email) {
+    return toolName === 'execute_action'
+      ? 'execute_action: this message is sent on the site, in the browser, not through a connector.'
+      : undefined
+  }
+  if (run.sent && toolName === 'execute_action')
+    return 'execute_action: this email was already sent.'
+  const verdict = emailCallVerdict(toolName, args, run.email)
+  return verdict.allow ? undefined : verdict.reason
+}
+
+export function afterConnectorCall(
+  conversationId: string | undefined,
+  toolName: string,
+  args: Record<string, unknown>,
+): void {
+  const run = outreach?.activeRun(conversationId)
+  if (!run?.email || run.sent || !conversationId) return
+  const verdict = emailCallVerdict(toolName, args, run.email)
+  if (verdict.allow && verdict.sends) outreach?.markSent(conversationId)
 }

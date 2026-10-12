@@ -269,7 +269,7 @@ const currentMigrationHistory = [
   },
   {
     tag: '0016_add_hiring_messages',
-    hash: '7fcd32b062339b38fe72d490181f6a7d2bf5e156776d11d56e83e5062cfb6dc0',
+    hash: '81ffce013838ed5be45bbe734c04752434e49010f2959984a0240cebf17b81b6',
     createdAt: 1791769742000,
   },
 ]
@@ -461,6 +461,8 @@ const currentSchemaStatements = [
 	role_id text NOT NULL,
 	person_id text NOT NULL,
 	channel text NOT NULL,
+	recipient text,
+	connector text,
 	sequence integer DEFAULT 0 NOT NULL,
 	body text NOT NULL,
 	status text DEFAULT 'draft' NOT NULL,

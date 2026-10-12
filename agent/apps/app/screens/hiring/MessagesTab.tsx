@@ -57,7 +57,12 @@ const Draft: FC<{ message: HiringMessage; person?: PersonOnRole }> = ({
             {person?.record.name ?? ''}
           </b>
           <span className="ml-2 text-[13px] text-[var(--text-secondary)]">
-            <span translate="no">{siteName(message.channel)}</span> ·{' '}
+            <span translate="no">
+              {message.channel === 'email'
+                ? `${t('hiringEmailLabel')} · ${message.recipient ?? ''}`
+                : siteName(message.channel)}
+            </span>{' '}
+            ·{' '}
             {message.sequence
               ? t('hiringFollowUpLabel', message.sequence)
               : t('hiringFirstMessage')}

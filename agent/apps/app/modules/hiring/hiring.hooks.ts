@@ -300,6 +300,8 @@ export interface HiringMessage {
   roleId: string
   personId: string
   channel: string
+  recipient: string | null
+  connector: string | null
   sequence: number
   body: string
   status: 'draft' | 'approved' | 'sending' | 'sent' | 'not-sent' | 'stopped'
@@ -363,6 +365,7 @@ export function useOutreachActions() {
         language: string
         body?: string
         sequence?: number
+        email?: { connector: 'Gmail' | 'Outlook Mail'; recipient: string }
       }
     >({
       mutationFn: async ({ roleId, personId, ...body }) =>
