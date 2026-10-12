@@ -63,6 +63,72 @@
       },
       "destination": "resources/db/migrations",
       "recursive": true
+    },
+    {
+      "name": "onnxruntime-node - linux x64",
+      "source": {
+        "type": "local",
+        "path": "node_modules/onnxruntime-node/bin/napi-v6/linux/x64"
+      },
+      "destination": "resources/bin/third_party/onnxruntime",
+      "os": ["linux"],
+      "arch": ["x64"],
+      "recursive": true
+    },
+    {
+      "name": "onnxruntime-node - linux arm64",
+      "source": {
+        "type": "local",
+        "path": "node_modules/onnxruntime-node/bin/napi-v6/linux/arm64"
+      },
+      "destination": "resources/bin/third_party/onnxruntime",
+      "os": ["linux"],
+      "arch": ["arm64"],
+      "recursive": true
+    },
+    {
+      "name": "onnxruntime-node - macos x64",
+      "source": {
+        "type": "local",
+        "path": "node_modules/onnxruntime-node/bin/napi-v6/darwin/x64"
+      },
+      "destination": "resources/bin/third_party/onnxruntime",
+      "os": ["macos"],
+      "arch": ["x64"],
+      "recursive": true
+    },
+    {
+      "name": "onnxruntime-node - macos arm64",
+      "source": {
+        "type": "local",
+        "path": "node_modules/onnxruntime-node/bin/napi-v6/darwin/arm64"
+      },
+      "destination": "resources/bin/third_party/onnxruntime",
+      "os": ["macos"],
+      "arch": ["arm64"],
+      "recursive": true
+    },
+    {
+      "name": "onnxruntime-node - windows x64",
+      "source": {
+        "type": "local",
+        "path": "node_modules/onnxruntime-node/bin/napi-v6/win32/x64"
+      },
+      "destination": "resources/bin/third_party/onnxruntime",
+      "os": ["windows"],
+      "arch": ["x64"],
+      "recursive": true
+    },
+    {
+      "name": "onnxruntime-node - windows arm64",
+      "source": {
+        "type": "local",
+        "path": "node_modules/onnxruntime-node/bin/napi-v6/win32/arm64"
+      },
+      "destination": "resources/bin/third_party/onnxruntime",
+      "os": ["windows"],
+      "arch": ["arm64"],
+      "recursive": true
     }
   ]
 }

@@ -9,6 +9,7 @@
 
 import {
   type BuildProductDescriptor,
+  onnxruntimePlugin,
   wasmBinaryPlugin,
 } from '@browseros/build-server-tools'
 
@@ -45,6 +46,7 @@ export const browserosServerBuildProduct: BuildProductDescriptor = {
   },
   bundle: {
     external: ['node-pty'],
-    plugins: [wasmBinaryPlugin()],
+    // onnxruntimePlugin: the privacy model's runtime, opened from resources/bin/third_party/onnxruntime.
+    plugins: [wasmBinaryPlugin(), onnxruntimePlugin()],
   },
 }

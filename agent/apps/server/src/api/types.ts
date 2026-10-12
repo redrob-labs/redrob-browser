@@ -16,6 +16,7 @@ import {
 } from '@browseros/shared/schemas/browser-context'
 import { LLMConfigSchema } from '@browseros/shared/schemas/llm'
 import { z } from 'zod'
+import type { PrivacyGate } from '../lib/privacy/gate'
 import type { ServerActivity } from './services/server-activity'
 
 export type { BrowserContext }
@@ -166,4 +167,6 @@ export interface HttpServerConfig {
   aiSdkDevtoolsEnabled?: boolean
   activity?: ServerActivity
   onShutdown?: () => void
+  /** Injectable for tests; the routes create the server's one gate otherwise. */
+  privacyGate?: PrivacyGate
 }

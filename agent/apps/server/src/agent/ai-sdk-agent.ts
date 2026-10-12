@@ -29,6 +29,8 @@ import {
 } from 'ai'
 import { logger } from '../lib/logger'
 import { metrics } from '../lib/metrics'
+import type { PrivacyGate } from '../lib/privacy/gate'
+import { privacyMiddleware } from '../lib/privacy/middleware'
 import { buildFilesystemToolSet } from '../tools/filesystem/build-toolset'
 import { createReadTool } from '../tools/filesystem/read'
 import { createCompactionPrepareStep, type StepWithUsage } from './compaction'
@@ -55,6 +57,8 @@ export interface AiSdkAgentConfig {
   browserosId?: string
   aiSdkDevtoolsEnabled?: boolean
   outputFileAccess?: BrowserOutputFileAccess
+  /** Privacy Protection, around every call this agent makes to its model. */
+  privacyGate?: PrivacyGate
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -164,6 +168,16 @@ export class AiSdkAgent {
         conversationId: config.resolvedConfig.conversationId,
         provider: config.resolvedConfig.provider,
         model: config.resolvedConfig.model,
+      })
+    }
+    // Outermost, so DevTools (when on) records what the provider was actually sent: labels.
+    if (config.privacyGate) {
+      model = wrapLanguageModel({
+        model: model as LanguageModelV4,
+        middleware: privacyMiddleware(
+          config.privacyGate,
+          config.resolvedConfig.conversationId,
+        ),
       })
     }
 

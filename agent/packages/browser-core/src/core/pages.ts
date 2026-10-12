@@ -109,6 +109,11 @@ export class PageManager {
     return this.pages.get(pageId)
   }
 
+  /** The pages registered so far, without asking the browser: as of the last list or attach. */
+  known(): PageInfo[] {
+    return [...this.pages.values()]
+  }
+
   getTabId(pageId: number): number | undefined {
     return this.pages.get(pageId)?.tabId
   }

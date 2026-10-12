@@ -12,6 +12,12 @@ import type { OAuthTokenManager } from '../../lib/clients/oauth/token-manager'
 import { getDb } from '../../lib/db'
 import { HiringStore } from '../../lib/hiring/store'
 import { logger } from '../../lib/logger'
+import { DetectorSource } from '../../lib/privacy/detector-source'
+import { PrivacyGate } from '../../lib/privacy/gate'
+import {
+  isNeverReadSite,
+  PrivacySettingsStore,
+} from '../../lib/privacy/settings'
 import { requireTrustedOrigin } from '../middleware/require-trusted-origin'
 import { BackgroundReader } from '../services/background-reader'
 import { ConversationRuns } from '../services/conversation-runs'
@@ -19,6 +25,7 @@ import { HiringSourcing } from '../services/hiring-sourcing'
 import type { KlavisService } from '../services/klavis'
 import { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
 import { SmartCompare } from '../services/smart-compare'
+import { setNeverReadSitesSource } from '../services/mcp/guards/never-read-sites'
 import type { Env, HttpServerConfig } from '../types'
 import { defaultCorsConfig } from '../utils/cors'
 import { requireTrustedAppOrigin } from '../utils/request-auth'
@@ -32,6 +39,7 @@ import { createKlavisRoutes } from './klavis'
 import { createMcpRoutes } from './mcp'
 import { createMcpManagerRoutes } from './mcp-manager'
 import { createOAuthRoutes } from './oauth'
+import { createPrivacyRoutes } from './privacy'
 import { createProviderRoutes } from './provider'
 import { createProvidersRoutes } from './providers'
 import { createRedrobConsoleRoutes } from './redrob-console'
@@ -58,7 +66,18 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
   const { activity } = config
   const acpRuntime = new AcpAgentRuntime({ serverPort: port, resourcesDir })
   const conversationRuns = new ConversationRuns({ activity })
-  const reader = new BackgroundReader(browserSession)
+  const privacyGate =
+    config.privacyGate ??
+    new PrivacyGate(
+      new PrivacySettingsStore(),
+      new DetectorSource({ resourcesDir }),
+    )
+  setNeverReadSitesSource(() => privacyGate.settings.get().neverReadSites)
+  // Background reads (Smart Compare, Talent Scout) never open a site the person listed.
+  const reader = new BackgroundReader(browserSession, {
+    neverRead: (url) =>
+      isNeverReadSite(url, privacyGate.settings.get().neverReadSites),
+  })
   const smartCompare = new SmartCompare(reader)
   const hiringStore = new HiringStore(() => getDb())
   const hiringSourcing = new HiringSourcing(hiringStore, reader)
@@ -136,6 +155,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
           activity,
           acpRuntime,
           conversationRuns,
+          privacyGate,
         }),
       )
       // Protected routes. The extension-origin auth middleware is applied per
@@ -162,13 +182,19 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .use('/compare/*', requireTrustedAppOrigin())
       // Other people's details: only the extension may ask.
       .use('/hiring/*', requireTrustedAppOrigin())
+      // The names a person asked to keep private are in these settings.
+      .use('/privacy/*', requireTrustedAppOrigin())
       .route('/acpx/probe', createAcpxProbeRoutes({ resourcesDir }))
       .route('/agents', resolvedAgentRoutes)
       .route('/conversations', createConversationRoutes())
       .route('/providers', createProvidersRoutes())
       .route('/redrob-console', createRedrobConsoleRoutes())
       .route('/test-provider', createProviderRoutes({ browserosId }))
-      .route('/refine-prompt', createRefinePromptRoutes({ browserosId }))
+      .route(
+        '/refine-prompt',
+        createRefinePromptRoutes({ browserosId, privacyGate }),
+      )
+      .route('/privacy', createPrivacyRoutes({ gate: privacyGate }))
       .route('/compare', createSmartCompareRoutes({ compare: smartCompare }))
       .route(
         '/hiring',

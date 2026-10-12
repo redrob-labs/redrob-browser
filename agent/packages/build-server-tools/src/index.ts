@@ -26,6 +26,7 @@ export { compiledBinaryPath, compileProductBinaries } from './compile'
 export { loadBuildConfig } from './config'
 export { getTargetRules, loadManifest } from './manifest'
 export { writeArtifactMetadata } from './metadata'
+export { onnxruntimePlugin } from './onnxruntime'
 export {
   recoverVersionedTargets,
   runCompiledResourceBuild,
