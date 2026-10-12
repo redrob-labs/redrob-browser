@@ -579,3 +579,113 @@ export function useInterviewActions() {
     }),
   }
 }
+
+export type AtsId = 'greenhouse' | 'lever' | 'ashby' | 'workday'
+export type ConnectableAts = Exclude<AtsId, 'workday'>
+
+export type AtsConnectInput =
+  | { ats: 'greenhouse'; clientId: string; clientSecret: string }
+  | { ats: 'lever'; key: string; email: string }
+  | { ats: 'ashby'; key: string }
+
+export type AtsSaveOutcome =
+  | {
+      status: 'saved'
+      ats: AtsId
+      candidateId?: string
+      via: 'api' | 'browser'
+    }
+  | { status: 'needs-you'; reason: string }
+
+/** Thrown when the ATS refused a connection, with its code ("bad-key"). */
+export class AtsRefused extends Error {
+  constructor(readonly code: string) {
+    super(code)
+  }
+}
+
+export function useAtsConnections() {
+  const { baseUrl } = useAgentServerUrl()
+  return useQuery<Array<{ ats: ConnectableAts; connected: boolean }>>({
+    queryKey: [...HIRING_KEY, 'ats', baseUrl],
+    enabled: Boolean(baseUrl),
+    queryFn: async () => {
+      const response = await fetch(`${baseUrl}/hiring/ats`)
+      if (!response.ok) return []
+      return (
+        (await response.json()) as {
+          connections: Array<{ ats: ConnectableAts; connected: boolean }>
+        }
+      ).connections
+    },
+  })
+}
+
+export function useAtsActions() {
+  const { baseUrl } = useAgentServerUrl()
+  const queryClient = useQueryClient()
+  const refresh = () => queryClient.invalidateQueries({ queryKey: HIRING_KEY })
+  return {
+    connect: useMutation<unknown, Error, AtsConnectInput>({
+      mutationFn: async (input) => {
+        const response = await fetch(
+          `${baseUrl}/hiring/ats/connect`,
+          json(input),
+        )
+        if (response.status === 409) {
+          const body = (await response.json().catch(() => ({}))) as {
+            error?: { code?: string }
+          }
+          throw new AtsRefused(body.error?.code ?? 'rejected')
+        }
+        return ok(response)
+      },
+      onSuccess: refresh,
+    }),
+    disconnect: useMutation<unknown, Error, ConnectableAts>({
+      mutationFn: async (ats) =>
+        ok(await fetch(`${baseUrl}/hiring/ats/disconnect`, json({ ats }))),
+      onSuccess: refresh,
+    }),
+    save: useMutation<
+      AtsSaveOutcome,
+      Error,
+      { roleId: string; personId: string; ats: ConnectableAts; locale: string }
+    >({
+      mutationFn: async ({ roleId, personId, ...body }) =>
+        ok(
+          await fetch(
+            `${baseUrl}/hiring/roles/${roleId}/people/${personId}/ats`,
+            json(body),
+          ),
+        ),
+      onSuccess: refresh,
+    }),
+    startBrowser: useMutation<
+      { instruction: string },
+      Error,
+      {
+        roleId: string
+        personId: string
+        ats: AtsId
+        conversationId: string
+        locale: string
+        stage?: string
+      }
+    >({
+      mutationFn: async ({ roleId, personId, ...body }) =>
+        ok(
+          await fetch(
+            `${baseUrl}/hiring/roles/${roleId}/people/${personId}/ats/browser`,
+            json(body),
+          ),
+        ),
+      onSuccess: refresh,
+    }),
+    end: useMutation<AtsSaveOutcome, Error, string>({
+      mutationFn: async (conversationId) =>
+        ok(await fetch(`${baseUrl}/hiring/ats/end`, json({ conversationId }))),
+      onSuccess: refresh,
+    }),
+  }
+}

@@ -47,6 +47,10 @@
     "./schedule": {
       "types": "./src/schedule.ts",
       "default": "./src/schedule.ts"
+    },
+    "./ats": {
+      "types": "./src/ats.ts",
+      "default": "./src/ats.ts"
     }
   },
   "dependencies": {

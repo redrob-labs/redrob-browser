@@ -42,6 +42,11 @@ export const HiringChips: FC<{ panel: HiringPanel }> = ({ panel }) => (
         {t('hiringPanelFindTimes', panel.findTimes.name)}
       </button>
     ) : null}
+    {panel.saveToAts ? (
+      <button type="button" className="rr-prompt" onClick={panel.saveToAts.run}>
+        {t('hiringPanelSaveTo', panel.saveToAts.name, panel.saveToAts.ats)}
+      </button>
+    ) : null}
     {panel.book ? (
       <button type="button" className="rr-prompt" onClick={panel.book.run}>
         {t('hiringPanelBook', panel.book.name)}

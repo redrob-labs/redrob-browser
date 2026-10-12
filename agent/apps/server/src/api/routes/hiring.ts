@@ -7,6 +7,7 @@
  * people's details.
  */
 
+import { ATS_IDS, CONNECTABLE_ATS } from '@browseros/hiring/ats'
 import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
@@ -20,6 +21,7 @@ import {
   type HiringStore,
   SET_ASIDE_REASONS,
 } from '../../lib/hiring/store'
+import type { HiringAts } from '../services/hiring-ats'
 import {
   type HiringOutreach,
   OutreachRefusedError,
@@ -64,6 +66,7 @@ export function createHiringRoutes(deps: {
   screening: HiringScreening
   outreach: HiringOutreach
   scheduling?: HiringScheduling
+  ats?: HiringAts
   policy?: HiringPolicySource
 }) {
   const { store, sourcing, screening, outreach } = deps
@@ -456,4 +459,112 @@ export function createHiringRoutes(deps: {
     .get('/record', (c) =>
       c.json({ events: store.record(c.req.query('roleId') || undefined) }),
     )
+    .get('/ats', (c) => c.json({ connections: deps.ats?.connections() ?? [] }))
+    .post(
+      '/ats/connect',
+      zValidator(
+        'json',
+        z.discriminatedUnion('ats', [
+          z.object({
+            ats: z.literal('greenhouse'),
+            clientId: z.string().trim().min(1).max(500),
+            clientSecret: z.string().trim().min(1).max(500),
+            userId: z.string().trim().regex(/^\d+$/).max(20).optional(),
+          }),
+          z.object({
+            ats: z.literal('lever'),
+            key: z.string().trim().min(1).max(500),
+            email: z.string().trim().email().max(320),
+          }),
+          z.object({
+            ats: z.literal('ashby'),
+            key: z.string().trim().min(1).max(500),
+          }),
+        ]),
+      ),
+      async (c) => {
+        if (!deps.ats) return c.json({ error: { code: 'unavailable' } }, 503)
+        try {
+          await deps.ats.connect(c.req.valid('json'))
+          return c.json({ connected: true })
+        } catch (error) {
+          const code = (error as { code?: string }).code ?? 'unreachable'
+          return c.json({ error: { message: code, code } }, 409)
+        }
+      },
+    )
+    .post(
+      '/ats/disconnect',
+      zValidator('json', z.object({ ats: z.enum(CONNECTABLE_ATS) })),
+      (c) => {
+        deps.ats?.disconnect(c.req.valid('json').ats)
+        return c.json({ connected: false })
+      },
+    )
+    .post(
+      '/roles/:id/people/:personId/ats',
+      zValidator(
+        'json',
+        z.object({
+          ats: z.enum(CONNECTABLE_ATS),
+          locale: z.string().min(2).max(20),
+        }),
+      ),
+      (c) =>
+        guard(c, async () => {
+          const { ats, locale } = c.req.valid('json')
+          if (!deps.ats) return { status: 'needs-you', reason: 'unavailable' }
+          return deps.ats.saveViaApi(
+            c.req.param('id'),
+            c.req.param('personId'),
+            ats,
+            locale,
+          )
+        }),
+    )
+    .post(
+      '/roles/:id/people/:personId/ats/browser',
+      zValidator(
+        'json',
+        z.object({
+          ats: z.enum(ATS_IDS),
+          conversationId: z.string().min(1),
+          locale: z.string().min(2).max(20),
+          stage: z.string().trim().max(80).optional(),
+        }),
+      ),
+      (c) =>
+        guard(c, () => {
+          if (!deps.ats)
+            throw new HiringInputError('no-ats', 'ATS saving is unavailable')
+          return deps.ats.startBrowser(
+            c.req.param('id'),
+            c.req.param('personId'),
+            c.req.valid('json'),
+          )
+        }),
+    )
+    .post(
+      '/ats/end',
+      zValidator('json', z.object({ conversationId: z.string().min(1) })),
+      (c) =>
+        c.json(
+          deps.ats?.end(c.req.valid('json').conversationId) ?? {
+            status: 'needs-you',
+            reason: 'no-run',
+          },
+        ),
+    )
+    .get('/ats/receipts/:id', async (c) => {
+      try {
+        const bytes = await deps.ats?.receipt(c.req.param('id'))
+        if (!bytes) throw new Error()
+        return c.body(new Uint8Array(bytes), 200, {
+          'content-type': 'image/png',
+          'cache-control': 'no-store',
+        })
+      } catch {
+        return c.json({ error: { message: 'no receipt' } }, 404)
+      }
+    })
 }

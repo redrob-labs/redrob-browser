@@ -14,6 +14,7 @@ import { formatRelative, t, tNodes } from '@browseros/i18n'
 import { Trash2 } from '@browseros/icons'
 import { type FC, useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { AtsConnections, SaveToAts } from '@/components/hiring/Ats'
 import { CandidateNotice } from '@/components/hiring/CandidateNotice'
 import { CriteriaEditor } from '@/components/hiring/CriteriaEditor'
 import {
@@ -363,6 +364,14 @@ const People: FC<{ role: Role }> = ({ role }) => {
                     {person.stage === 'replied' ? (
                       <OfferTimes role={role} person={person} />
                     ) : null}
+                    {[
+                      'shortlisted',
+                      'contacted',
+                      'replied',
+                      'interview',
+                    ].includes(person.stage) ? (
+                      <SaveToAts role={role} person={person} />
+                    ) : null}
                     <button
                       type="button"
                       className="rr-btn rr-btn--ghost rr-btn--sm"
@@ -457,7 +466,23 @@ const Record: FC<{ roleId?: string }> = ({ roleId }) => {
               key={event.id}
               className="flex items-center justify-between gap-3 px-4 py-2"
             >
-              <span>{eventText(event)}</span>
+              <span>
+                {eventText(event)}
+                {event.kind === 'saved-to-ats' &&
+                typeof event.detail?.receipt === 'string' ? (
+                  <>
+                    {' · '}
+                    <a
+                      className="rr-link"
+                      href={`${baseUrl}/hiring/ats/receipts/${event.detail.receipt}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {t('hiringReceipt')}
+                    </a>
+                  </>
+                ) : null}
+              </span>
               <span className="shrink-0 text-[12px] text-[var(--text-tertiary)]">
                 {event.actor === 'recruiter'
                   ? t('hiringByYou')
@@ -530,6 +555,7 @@ export const HiringPage: FC = () => {
               setRoleId(id)
             }}
           />
+          <AtsConnections />
         </TabsContent>
         <TabsContent value="people">
           {role ? (

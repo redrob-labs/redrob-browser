@@ -27,6 +27,7 @@ import { applyConversationTabs } from './effects/conversation-tabs'
 import { applyJobReceipts } from './effects/job-receipts'
 import { applyTabGroups } from './effects/tab-groups'
 import { guardConversationRunning } from './guards/conversation-running'
+import { applyHiringAts, guardHiringAts } from './guards/hiring-ats'
 import {
   applyHiringSend,
   guardHiringSend,
@@ -65,6 +66,8 @@ export interface BrowserToolCall {
   jobPressed?: string
   /** During a Talent Scout send: the control this call presses, read before it runs. */
   hiringPressed?: string
+  /** While saving to an ATS: the control this call presses, read before it runs. */
+  atsPressed?: string
 }
 
 export interface BrowserToolEffectContext {
@@ -111,6 +114,7 @@ const GUARDS: readonly NamedToolGuard[] = [
   { name: 'job-apply', run: guardJobApply },
   { name: 'hiring-send', run: guardHiringSend },
   { name: 'hiring-press', run: recordHiringPress },
+  { name: 'hiring-ats', run: guardHiringAts },
 ]
 
 const EFFECTS: readonly NamedToolEffect[] = [
@@ -118,6 +122,7 @@ const EFFECTS: readonly NamedToolEffect[] = [
   { name: 'tab-groups', run: applyTabGroups },
   { name: 'job-receipts', run: applyJobReceipts },
   { name: 'hiring-send', run: applyHiringSend },
+  { name: 'hiring-ats', run: applyHiringAts },
 ]
 
 const OBSERVERS: readonly NamedToolObserver[] = [

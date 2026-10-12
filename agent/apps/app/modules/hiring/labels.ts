@@ -126,6 +126,14 @@ export function eventText(event: HiringEvent): string {
       return t('hiringEventBooked')
     case 'mode-changed':
       return t('hiringEventMode')
+    case 'saved-to-ats':
+      return d.stage
+        ? t('hiringEventSavedToStage', atsName(String(d.ats)), String(d.stage))
+        : t('hiringEventSavedTo', atsName(String(d.ats)))
+    case 'ats-connected':
+      return t('hiringEventAtsConnected', atsName(String(d.ats)))
+    case 'ats-disconnected':
+      return t('hiringEventAtsDisconnected', atsName(String(d.ats)))
     default:
       return t('hiringEventOther')
   }
@@ -149,4 +157,30 @@ const SEND_REFUSAL: Record<string, MessageKey> = {
 /** Why a message can't go now, in words. */
 export function sendRefusalText(code: string): string {
   return t(SEND_REFUSAL[code] ?? 'hiringWhyNeedsYou')
+}
+
+const ATS_NAME: Record<string, string> = {
+  greenhouse: 'Greenhouse',
+  lever: 'Lever',
+  ashby: 'Ashby',
+  workday: 'Workday',
+}
+
+/** The system's own name: the copy says "Saved to Greenhouse", not "the ATS". */
+export function atsName(id: string): string {
+  return ATS_NAME[id] ?? id
+}
+
+const ATS_PROBLEM: Record<string, MessageKey> = {
+  'bad-key': 'hiringAtsWhyBadKey',
+  'no-permission': 'hiringAtsWhyNoPermission',
+  'no-user': 'hiringAtsWhyNoUser',
+  rejected: 'hiringAtsWhyRejected',
+  unreachable: 'hiringAtsWhyUnreachable',
+  'not-connected': 'hiringAtsWhyNotConnected',
+  'not-shortlisted': 'hiringAtsWhyNotShortlisted',
+}
+
+export function atsProblem(code: string): string {
+  return t(ATS_PROBLEM[code] ?? 'hiringAtsWhyRejected')
 }

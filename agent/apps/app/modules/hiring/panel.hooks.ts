@@ -8,10 +8,12 @@
  * are sent from here, and interview times are found in, and booked on, the recruiter's calendar.
  */
 
-import { t } from '@browseros/i18n'
+import { getLocale, t } from '@browseros/i18n'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
+  type AtsSaveRequest,
+  atsSaveRequestStorage,
   type HiringPage,
   hiringPageByTabStorage,
   type TimesRequest,
@@ -22,6 +24,7 @@ import {
   type PersonOnRole,
   type Role,
   type SetAsideReason,
+  useAtsActions,
   useHiringActions,
   useInterviewActions,
   useInterviews,
@@ -30,7 +33,12 @@ import {
   usePeople,
   useRoles,
 } from './hiring.hooks'
-import { screenProblem, sendRefusalText, sourceProblem } from './labels'
+import {
+  atsName,
+  screenProblem,
+  sendRefusalText,
+  sourceProblem,
+} from './labels'
 
 const READ_MESSAGE = 'redrob:hiring:read-page'
 
@@ -226,6 +234,74 @@ function useScheduling(options: {
   }
 }
 
+/**
+ * "Save <name> to <ATS>" in the recruiter's own tab, asked on the Hiring page when that system is not
+ * connected. The stage-change guard holds the run; when the chat finishes the server says whether
+ * the note was saved, and keeps the screenshot.
+ */
+function useAtsSaving(options: {
+  conversationId: string
+  status: ChatStatus
+  send: (message: string) => void
+}) {
+  const ats = useAtsActions()
+  const [request, setRequest] = useState<AtsSaveRequest | null>(null)
+  const running = useRef<AtsSaveRequest | null>(null)
+  const previous = useRef(options.status)
+
+  useEffect(() => {
+    void atsSaveRequestStorage.getValue().then(setRequest)
+    return atsSaveRequestStorage.watch((next) => setRequest(next ?? null))
+  }, [])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only reacts to the chat finishing
+  useEffect(() => {
+    const was = previous.current
+    previous.current = options.status
+    const finished =
+      (was === 'streaming' || was === 'submitted') &&
+      (options.status === 'ready' || options.status === 'error')
+    const run = running.current
+    if (!finished || !run) return
+    running.current = null
+    ats.end.mutate(options.conversationId, {
+      onSuccess: (out) =>
+        out.status === 'saved'
+          ? toast.success(t('hiringSavedTo', atsName(run.ats)))
+          : toast(t('hiringPanelNotSaved', atsName(run.ats))),
+    })
+  }, [options.status])
+
+  return request
+    ? {
+        name: request.name,
+        ats: atsName(request.ats),
+        run: () =>
+          ats.startBrowser.mutate(
+            {
+              roleId: request.roleId,
+              personId: request.personId,
+              ats: request.ats,
+              stage: request.stage,
+              locale: getLocale(),
+              conversationId: options.conversationId,
+            },
+            {
+              onSuccess: ({ instruction }) => {
+                running.current = request
+                void atsSaveRequestStorage.setValue(null)
+                options.send(instruction)
+              },
+              onError: () => {
+                void atsSaveRequestStorage.setValue(null)
+                toast.error(t('hiringPanelNotSaved', atsName(request.ats)))
+              },
+            },
+          ),
+      }
+    : null
+}
+
 export function useHiringPanel(options: {
   conversationId: string
   status: ChatStatus
@@ -233,6 +309,7 @@ export function useHiringPanel(options: {
 }) {
   const sending = useSending(options)
   const scheduling = useScheduling(options)
+  const saveToAts = useAtsSaving(options)
   const { page, tabId } = useActiveHiringPage()
   const { data: roles = [] } = useRoles()
   const actions = useHiringActions()
@@ -393,9 +470,15 @@ export function useHiringPanel(options: {
     sendNext: sending.sendNext,
     findTimes: scheduling.findTimes,
     book: scheduling.book,
+    saveToAts,
     hasChips:
       Boolean(page && !showing && !reviewedList) ||
-      Boolean(sending.sendNext || scheduling.findTimes || scheduling.book),
+      Boolean(
+        sending.sendNext ||
+          scheduling.findTimes ||
+          scheduling.book ||
+          saveToAts,
+      ),
   }
 }
 

@@ -10,6 +10,7 @@ import { cors } from 'hono/cors'
 import { AcpAgentRuntime } from '../../lib/agents/acp/acp-agent-runtime'
 import type { OAuthTokenManager } from '../../lib/clients/oauth/token-manager'
 import { getDb } from '../../lib/db'
+import { atsCredentialStore } from '../../lib/hiring/ats-credentials'
 import { providerCompleter } from '../../lib/hiring/model'
 import { HiringStore } from '../../lib/hiring/store'
 import { JobStore } from '../../lib/jobs/store'
@@ -30,6 +31,7 @@ import {
 import { requireTrustedOrigin } from '../middleware/require-trusted-origin'
 import { BackgroundReader } from '../services/background-reader'
 import { ConversationRuns } from '../services/conversation-runs'
+import { HiringAts } from '../services/hiring-ats'
 import { HiringOutreach } from '../services/hiring-outreach'
 import { HiringScheduling } from '../services/hiring-scheduling'
 import { HiringScreening } from '../services/hiring-screening'
@@ -37,6 +39,7 @@ import { HiringSourcing } from '../services/hiring-sourcing'
 import type { KlavisService } from '../services/klavis'
 import { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
 import { setJobReceiptStore } from '../services/mcp/effects/job-receipts'
+import { setAtsSource } from '../services/mcp/guards/hiring-ats'
 import {
   setOutreachSource,
   setSchedulingSource,
@@ -130,6 +133,11 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
   setOutreachSource(hiringOutreach)
   const hiringScheduling = new HiringScheduling(hiringStore)
   setSchedulingSource(hiringScheduling)
+  const hiringAts = new HiringAts(
+    hiringStore,
+    atsCredentialStore(() => getDb(), browserosId ?? 'local'),
+  )
+  setAtsSource(hiringAts)
   const hiringScreening = new HiringScreening(
     hiringStore,
     privacyGate,
@@ -268,6 +276,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
           screening: hiringScreening,
           outreach: hiringOutreach,
           scheduling: hiringScheduling,
+          ats: hiringAts,
           policy: hiringPolicy,
         }),
       )

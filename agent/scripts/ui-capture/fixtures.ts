@@ -819,6 +819,14 @@ export function hiringFixtures(locale: FixtureLocale) {
   ]
   return {
     '/hiring/interviews': { interviews },
+    // One system connected, so both the connected and the "Connect" rows are measured.
+    '/hiring/ats': {
+      connections: [
+        { ats: 'greenhouse', connected: true },
+        { ats: 'lever', connected: false },
+        { ats: 'ashby', connected: false },
+      ],
+    },
     '/hiring/roles/role-1/interviews': { interviews },
     '/hiring/messages': {
       messages,

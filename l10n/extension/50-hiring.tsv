@@ -231,3 +231,37 @@ hiringPickUnclear	Their reply doesn't name one time clearly. Pick it yourself.	�
 hiringCancelInterview	Cancel	취소
 hiringEventTimesFound	Found interview times	면접 가능 시간을 찾았어요
 hiringEventBooked	Booked an interview	면접을 예약했어요
+hiringAtsTitle	Your ATS (optional)	채용 관리 도구 연결 (선택)
+hiringAtsLede	Without a connection, Redrob saves in your own ATS tab, from the side panel. With one, it saves directly.	연결하지 않으면 사이드 패널에서 내 채용 관리 도구 탭에 직접 저장해요. 연결하면 바로 저장돼요.
+hiringAtsConnect	Connect $1	$1 연결
+hiringAtsConnected	$1 is connected	$1 연결됨
+hiringAtsDisconnect	Disconnect	연결 해제
+hiringAtsKeyHint	Paste the connection key your $1 admin gave you. It stays on this computer.	$1 관리자에게 받은 연결 키를 붙여 넣으세요. 이 컴퓨터에만 저장돼요.
+hiringAtsGreenhouseHint	Your Greenhouse admin creates a Harvest V3 (OAuth) credential and gives you its client ID and secret.	Greenhouse 관리자가 Harvest V3 (OAuth) 자격 증명을 만들어 클라이언트 ID와 시크릿을 알려 줘요.
+hiringAtsClientId	Client ID	클라이언트 ID
+hiringAtsClientSecret	Client secret	클라이언트 시크릿
+hiringAtsKey	Connection key	연결 키
+hiringAtsLeverEmail	Your Lever email	내 Lever 이메일
+hiringAtsConnectButton	Connect	연결
+hiringAtsCancel	Cancel	취소
+hiringAtsDidConnect	Connected $1	$1에 연결했어요
+hiringSaveTo	Save to $1	$1에 저장
+hiringSaveIn	Save in	저장할 곳
+hiringSaveStage	Move to stage (optional, as named in $1)	단계 이동 (선택, $1에 있는 이름 그대로)
+hiringSaveQueued	Open the side panel to save in your $1 tab.	$1 탭에 저장하려면 사이드 패널을 여세요.
+hiringSavedTo	Saved to $1	$1에 저장했어요
+hiringPanelSaveTo	Save $1 to $2	$1님을 $2에 저장
+hiringPanelNotSaved	It wasn't saved. $1 is unchanged; try again from Hiring.	저장하지 못했어요. $1는 그대로예요. 채용에서 다시 시도하세요.
+hiringAtsWhyBadKey	the connection key didn't work	연결 키가 맞지 않아요
+hiringAtsWhyNoPermission	the key doesn't allow this; ask your admin	이 키로는 할 수 없어요. 관리자에게 문의하세요
+hiringAtsWhyNoUser	no Lever user has that email	그 이메일의 Lever 사용자가 없어요
+hiringAtsWhyRejected	the ATS refused it	채용 관리 도구에서 거부했어요
+hiringAtsWhyUnreachable	the ATS couldn't be reached	채용 관리 도구에 연결할 수 없어요
+hiringAtsWhyNotConnected	it isn't connected	연결되어 있지 않아요
+hiringAtsWhyNotShortlisted	only people you shortlisted are saved	관심 후보에 담은 사람만 저장돼요
+hiringAtsFailed	Couldn't save: $1	저장하지 못했어요: $1
+hiringEventSavedTo	Saved to $1	$1에 저장했어요
+hiringEventSavedToStage	Saved to $1 · stage: $2	$1에 저장 · 단계: $2
+hiringEventAtsConnected	Connected $1	$1 연결
+hiringEventAtsDisconnected	Disconnected $1	$1 연결 해제
+hiringReceipt	Receipt	저장 화면

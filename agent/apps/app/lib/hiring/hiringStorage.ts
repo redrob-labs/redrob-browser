@@ -37,3 +37,17 @@ export const timesRequestStorage = storage.defineItem<TimesRequest | null>(
     fallback: null,
   },
 )
+
+/** "Save to <ATS>" without a connection, waiting for the side panel to save it in the recruiter's tab. */
+export interface AtsSaveRequest {
+  roleId: string
+  personId: string
+  name: string
+  ats: 'greenhouse' | 'lever' | 'ashby' | 'workday'
+  stage?: string
+}
+
+export const atsSaveRequestStorage = storage.defineItem<AtsSaveRequest | null>(
+  'local:hiring.atsSaveRequest',
+  { fallback: null },
+)
