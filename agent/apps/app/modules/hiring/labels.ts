@@ -67,6 +67,8 @@ export function sourceProblem(status: SourceStatus): string {
       return t('hiringStatusNone')
     case 'never-read':
       return t('hiringStatusNeverRead')
+    case 'region':
+      return t('hiringStatusRegion')
     default:
       return t('hiringStatusFailed')
   }

@@ -803,6 +803,8 @@ export function hiringFixtures(locale: FixtureLocale) {
       messages,
       today: [{ channel: 'linkedin', sent: 6, cap: 25 }],
     },
+    // No team policy: the usual case.
+    '/hiring/policy': { policy: null },
     '/hiring/roles': { roles: [role] },
     '/hiring/roles/role-1/people': { people },
     '/hiring/record': { events },

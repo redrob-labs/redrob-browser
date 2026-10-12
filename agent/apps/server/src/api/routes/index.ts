@@ -106,12 +106,22 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       isNeverReadSite(url, privacyGate.settings.get().neverReadSites),
   })
   const smartCompare = new SmartCompare(reader)
-  const hiringStore = new HiringStore(() => getDb())
-  const hiringSourcing = new HiringSourcing(hiringStore, reader)
+  // A business workspace's Talent Scout limits, from its signed team policy; null for everyone else.
+  const hiringPolicy = () => teamPolicy?.policy()?.policy.hiring ?? null
+  const hiringStore = new HiringStore(() => getDb(), {
+    retentionDays: () => hiringPolicy()?.retentionDays,
+  })
+  const hiringSourcing = new HiringSourcing(
+    hiringStore,
+    reader,
+    Date.now,
+    () => hiringPolicy()?.regions ?? null,
+  )
   const hiringOutreach = new HiringOutreach(
     hiringStore,
     privacyGate,
     providerCompleter(browserosId),
+    { policy: hiringPolicy },
   )
   setOutreachSource(hiringOutreach)
   const hiringScreening = new HiringScreening(
@@ -251,6 +261,7 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
           sourcing: hiringSourcing,
           screening: hiringScreening,
           outreach: hiringOutreach,
+          policy: hiringPolicy,
         }),
       )
       .route('/scheduled-jobs', createScheduledJobRoutes())

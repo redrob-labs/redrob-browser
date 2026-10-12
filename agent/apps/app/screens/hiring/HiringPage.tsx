@@ -31,6 +31,7 @@ import {
   type Refused,
   type Role,
   useHiringActions,
+  useHiringPolicy,
   usePeople,
   useRecord,
   useRoles,
@@ -216,6 +217,7 @@ const People: FC<{ role: Role }> = ({ role }) => {
   const actions = useHiringActions()
   const [open, setOpen] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const { data: policy } = useHiringPolicy()
   if (!people.length) {
     return (
       <div className="rr-empty rr-empty--compact">
@@ -397,7 +399,11 @@ const People: FC<{ role: Role }> = ({ role }) => {
                     </button>
                   </span>
                   {notice === person.id ? (
-                    <CandidateNotice role={role} person={person} />
+                    <CandidateNotice
+                      role={role}
+                      person={person}
+                      auditHref={policy?.auditHref ?? undefined}
+                    />
                   ) : null}
                 </div>
               ) : null}

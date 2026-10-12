@@ -79,6 +79,7 @@ export type SourceStatus =
   | 'limit'
   | 'never-read'
   | 'unknown-site'
+  | 'region'
 
 type ScreenOutcome =
   | { status: 'screened'; evaluation: Evaluation }
@@ -427,4 +428,28 @@ export function useOutreachActions() {
       onSuccess: refresh,
     }),
   }
+}
+
+/** A business workspace's Talent Scout limits; null for everyone else. */
+export interface HiringPolicyStatus {
+  automatic: boolean
+  retentionDays: number
+  regions: string[] | null
+  auditHref: string | null
+  noticeHref: string | null
+}
+
+export function useHiringPolicy() {
+  const { baseUrl } = useAgentServerUrl()
+  return useQuery<HiringPolicyStatus | null>({
+    queryKey: [...HIRING_KEY, 'policy', baseUrl],
+    enabled: Boolean(baseUrl),
+    queryFn: async () => {
+      const response = await fetch(`${baseUrl}/hiring/policy`)
+      // A server older than team policy has no route: no policy.
+      if (!response.ok) return null
+      return ((await response.json()) as { policy: HiringPolicyStatus | null })
+        .policy
+    },
+  })
 }

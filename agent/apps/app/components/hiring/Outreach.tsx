@@ -16,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   type PersonOnRole,
   type Role,
+  useHiringPolicy,
   useOutreachActions,
 } from '@/modules/hiring/hiring.hooks'
 import { screenProblem } from '@/modules/hiring/labels'
@@ -165,7 +166,9 @@ const MODES = [
 /** How much Redrob does on this role. Automatic is not offered where a law needs more first. */
 export const RoleMode: FC<{ role: Role }> = ({ role }) => {
   const actions = useOutreachActions()
-  const automaticOk = automaticAllowed(role.location)
+  const { data: policy } = useHiringPolicy()
+  const teamOff = policy?.automatic === false
+  const automaticOk = automaticAllowed(role.location) && !teamOff
   const current = MODES.find((m) => m.id === role.mode) ?? MODES[0]
   return (
     <div className="space-y-2">
@@ -194,7 +197,7 @@ export const RoleMode: FC<{ role: Role }> = ({ role }) => {
       <p className="text-[12px] text-[var(--text-secondary)]">
         {automaticOk
           ? t(current.hint)
-          : `${t(current.hint)} ${t('hiringModeAutomaticBlocked')}`}
+          : `${t(current.hint)} ${teamOff ? t('hiringModeTeamOff') : t('hiringModeAutomaticBlocked')}`}
       </p>
     </div>
   )

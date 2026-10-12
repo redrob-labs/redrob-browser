@@ -183,3 +183,6 @@ hiringNoticeCopy	Copy notice	고지문 복사
 hiringNoticeCopied	Copied. Send it in your reply.	복사했어요. 답장에 붙여 보내세요.
 hiringNoticeCriterion	$1: $2	$1: $2
 hiringExportCsv	Export for an audit (CSV)	감사용으로 내보내기 (CSV)
+hiringModeTeamOff	Your team turned Automatic off for Talent Scout.	팀에서 인재 스카우트의 자동 모드를 껐어요.
+hiringNoticeAudit	Read the independent audit of this tool	이 도구에 대한 독립 감사 보기
+hiringStatusRegion	your team doesn't use Talent Scout in this site's region	팀에서 이 사이트의 지역에서는 인재 스카우트를 쓰지 않아요

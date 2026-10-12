@@ -108,6 +108,8 @@ export class HiringStore {
     private readonly options: {
       now?: () => number
       saltPath?: string
+      /** A workspace's shorter retention, in days, from its signed team policy. */
+      retentionDays?: () => number | undefined
     } = {},
   ) {}
 
@@ -572,7 +574,10 @@ export class HiringStore {
 
   /** Deletes people with no activity for 180 days. Returns how many. */
   purgeInactive(): number {
-    const cutoff = this.now() - RETENTION_MS
+    const days = this.options.retentionDays?.()
+    const cutoff =
+      this.now() -
+      (days ? Math.min(RETENTION_MS, days * 86_400_000) : RETENTION_MS)
     const stale = this.db
       .select({ id: hiringPeople.id })
       .from(hiringPeople)

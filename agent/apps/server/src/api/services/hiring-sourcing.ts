@@ -38,6 +38,8 @@ export type SourceStatus =
   | 'limit'
   | 'never-read'
   | 'unknown-site'
+  /** The workspace's policy does not allow Talent Scout in this site's region. */
+  | 'region'
 
 export interface SourceResult {
   url: string
@@ -53,7 +55,13 @@ export class HiringSourcing {
     private readonly store: HiringStore,
     private readonly reader: BackgroundReader | null,
     private readonly now: () => number = Date.now,
+    private readonly regions: () => readonly string[] | null = () => null,
   ) {}
+
+  private regionAllowed(region: string): boolean {
+    const allowed = this.regions()
+    return !allowed || region === 'any' || allowed.includes(region)
+  }
 
   private async keep(
     roleId: string,
@@ -85,8 +93,11 @@ export class HiringSourcing {
     roleId: string,
     page: { url: string; html: string },
   ): Promise<SourceResult[]> {
-    if (!recognisePage(page.url))
-      return [{ url: page.url, status: 'unknown-site' }]
+    const recognised = recognisePage(page.url)
+    if (!recognised) return [{ url: page.url, status: 'unknown-site' }]
+    if (!this.regionAllowed(recognised.site.region)) {
+      return [{ url: page.url, status: 'region' }]
+    }
     return this.keep(roleId, page.url, extractPage(page.html, page.url))
   }
 
@@ -100,6 +111,10 @@ export class HiringSourcing {
     const limited = new Set<string>()
     for (const url of urls) {
       const page = recognisePage(url)
+      if (page && !this.regionAllowed(page.site.region)) {
+        out.push({ url, status: 'region' })
+        continue
+      }
       if (page && limited.has(page.site.id)) {
         out.push({ url, status: 'limit' })
         continue

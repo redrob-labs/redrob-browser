@@ -93,6 +93,29 @@ const skillSchema = z
   })
   .strict()
 
+const hiringSchema = z
+  .object({
+    /** false turns Automatic off on every role. */
+    automatic: z.boolean(),
+    /** Daily message caps per site id, applied as maximums. */
+    perSitePerDay: z
+      .record(z.string().max(40), z.number().int().min(0).max(1_000))
+      .optional(),
+    emailPerDay: z.number().int().min(0).max(1_000).optional(),
+    /** Days without activity before a person is deleted; at most the product's 180. */
+    retentionDays: z.number().int().min(1).max(180).optional(),
+    /** Regions Talent Scout may source in; sites for any region stay open. */
+    regions: z
+      .array(z.enum(['KR', 'IN', 'US']))
+      .max(3)
+      .optional(),
+    shareSuppressions: z.boolean().optional(),
+    /** The company's independent bias audit and candidate notice, linked from the notice. */
+    auditHref: z.string().url().max(2_000).optional(),
+    noticeHref: z.string().url().max(2_000).optional(),
+  })
+  .strict()
+
 export const teamPolicySchema = z
   .object({
     v: z.literal(TEAM_POLICY_SCHEMA_VERSION),
@@ -124,6 +147,13 @@ export const teamPolicySchema = z
       .strict(),
     playbooks: z.array(playbookSchema).max(LIMITS.playbooks),
     skills: z.array(skillSchema).max(LIMITS.skills),
+    /**
+     * Talent Scout's limits for this workspace (Recruit plan §4.9). Optional, so every policy signed
+     * before it existed still verifies. It can only narrow: lower caps, a shorter retention, fewer
+     * regions, Automatic off. It has no field that lowers the privacy floor or turns on rejections.
+     * Mirror in redrob-cowork policy.ts and the console before a console signs one.
+     */
+    hiring: hiringSchema.optional(),
   })
   .strict()
 

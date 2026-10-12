@@ -70,10 +70,12 @@ export function noticeText(parts: ReturnType<typeof noticeParts>): string {
   ].join('\n')
 }
 
-export const CandidateNotice: FC<{ role: Role; person: PersonOnRole }> = ({
-  role,
-  person,
-}) => {
+export const CandidateNotice: FC<{
+  role: Role
+  person: PersonOnRole
+  /** The company's independent audit, from its team policy. */
+  auditHref?: string
+}> = ({ role, person, auditHref }) => {
   const parts = noticeParts(role, person)
   return (
     <div className="space-y-2">
@@ -87,6 +89,8 @@ export const CandidateNotice: FC<{ role: Role; person: PersonOnRole }> = ({
         humanReview={parts.humanReview}
         rightsLabel={t('hiringNoticeRights')}
         rights={parts.rights}
+        auditHref={auditHref}
+        auditLabel={t('hiringNoticeAudit')}
       />
       <span className="flex justify-end">
         <button

@@ -20,6 +20,7 @@
 import { activeCriteria } from '@browseros/hiring/criteria'
 import {
   canSend,
+  capLimits,
   DEFAULT_LIMITS,
   isOptOut,
   type OutreachLimits,
@@ -40,6 +41,10 @@ import {
   type HiringMessageRow,
   hiringMessages,
 } from '../../lib/db/schema/hiring'
+import {
+  type HiringPolicySource,
+  NO_HIRING_POLICY,
+} from '../../lib/hiring/policy'
 import { HiringInputError, type HiringStore } from '../../lib/hiring/store'
 import type { PrivacyGate } from '../../lib/privacy/gate'
 import type { Complete } from './hiring-screening'
@@ -78,8 +83,22 @@ export class HiringOutreach {
       limits?: OutreachLimits
       /** The recruiter's own time zone, for a recipient whose place is unknown. */
       timeZone?: string
+      /** A business workspace's hiring limits, from its signed team policy. */
+      policy?: HiringPolicySource
     } = {},
   ) {}
+
+  private policy() {
+    return (this.options.policy ?? NO_HIRING_POLICY)()
+  }
+
+  /** The product's limits, lowered by the workspace's policy where it has one. */
+  private limits(): OutreachLimits {
+    return capLimits(
+      this.options.limits ?? DEFAULT_LIMITS,
+      this.policy() ?? undefined,
+    )
+  }
 
   private now(): number {
     return (this.options.now ?? Date.now)()
@@ -122,7 +141,7 @@ export class HiringOutreach {
 
   /** Today's sends per channel, against its cap: what the Messages tab shows under the queue. */
   today(): Array<{ channel: string; sent: number; cap: number }> {
-    const limits = this.options.limits ?? DEFAULT_LIMITS
+    const limits = this.limits()
     const day = new Date(this.now()).toDateString()
     const counts = new Map<string, number>()
     for (const m of this.history()) {
@@ -241,6 +260,7 @@ export class HiringOutreach {
       person.evaluation?.meetsEveryMust === true &&
       activeCriteria(role.criteria).some((c) => c.kind === 'must') &&
       automaticAllowed(role.location) &&
+      this.policy()?.automatic !== false &&
       !(await this.store.isSuppressed(person.record))
     const now = this.now()
     const message: HiringMessageRow = {
@@ -348,7 +368,7 @@ export class HiringOutreach {
         replied,
         channelOpen: siteById(message.channel as SiteId).send !== 'none',
       },
-      this.options.limits ?? DEFAULT_LIMITS,
+      this.limits(),
       this.now(),
     )
   }

@@ -12,6 +12,10 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { HIRING_MODES, HIRING_STAGES } from '../../lib/db/schema/hiring'
 import {
+  type HiringPolicySource,
+  hiringPolicyStatus,
+} from '../../lib/hiring/policy'
+import {
   HiringInputError,
   type HiringStore,
   SET_ASIDE_REASONS,
@@ -55,6 +59,7 @@ export function createHiringRoutes(deps: {
   sourcing: HiringSourcing
   screening: HiringScreening
   outreach: HiringOutreach
+  policy?: HiringPolicySource
 }) {
   const { store, sourcing, screening, outreach } = deps
   const guard = async <T>(
@@ -84,6 +89,9 @@ export function createHiringRoutes(deps: {
     }
   }
   return new Hono()
+    .get('/policy', (c) =>
+      c.json({ policy: hiringPolicyStatus(deps.policy?.() ?? null) }),
+    )
     .get('/roles', (c) => c.json({ roles: store.listRoles() }))
     .post('/roles', zValidator('json', RoleSchema), (c) => {
       const result = store.createRole(c.req.valid('json'))
