@@ -10,6 +10,7 @@ import { cors } from 'hono/cors'
 import { AcpAgentRuntime } from '../../lib/agents/acp/acp-agent-runtime'
 import type { OAuthTokenManager } from '../../lib/clients/oauth/token-manager'
 import { getDb } from '../../lib/db'
+import { providerCompleter } from '../../lib/hiring/model'
 import { HiringStore } from '../../lib/hiring/store'
 import { logger } from '../../lib/logger'
 import { DetectorSource } from '../../lib/privacy/detector-source'
@@ -21,11 +22,12 @@ import {
 import { requireTrustedOrigin } from '../middleware/require-trusted-origin'
 import { BackgroundReader } from '../services/background-reader'
 import { ConversationRuns } from '../services/conversation-runs'
+import { HiringScreening } from '../services/hiring-screening'
 import { HiringSourcing } from '../services/hiring-sourcing'
 import type { KlavisService } from '../services/klavis'
 import { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
-import { SmartCompare } from '../services/smart-compare'
 import { setNeverReadSitesSource } from '../services/mcp/guards/never-read-sites'
+import { SmartCompare } from '../services/smart-compare'
 import type { Env, HttpServerConfig } from '../types'
 import { defaultCorsConfig } from '../utils/cors'
 import { requireTrustedAppOrigin } from '../utils/request-auth'
@@ -81,6 +83,11 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
   const smartCompare = new SmartCompare(reader)
   const hiringStore = new HiringStore(() => getDb())
   const hiringSourcing = new HiringSourcing(hiringStore, reader)
+  const hiringScreening = new HiringScreening(
+    hiringStore,
+    privacyGate,
+    providerCompleter(browserosId),
+  )
   // People with no activity for 180 days are deleted (Recruit plan §4.6): soon after start, then daily.
   const purge = () => {
     try {
@@ -198,7 +205,11 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .route('/compare', createSmartCompareRoutes({ compare: smartCompare }))
       .route(
         '/hiring',
-        createHiringRoutes({ store: hiringStore, sourcing: hiringSourcing }),
+        createHiringRoutes({
+          store: hiringStore,
+          sourcing: hiringSourcing,
+          screening: hiringScreening,
+        }),
       )
       .route('/scheduled-jobs', createScheduledJobRoutes())
       .route('/scheduled-job-runs', createScheduledJobRunRoutes())

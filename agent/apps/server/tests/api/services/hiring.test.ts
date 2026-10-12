@@ -14,6 +14,7 @@ import { Hono } from 'hono'
 import { createHiringRoutes } from '../../../src/api/routes/hiring'
 import type { BackgroundReader } from '../../../src/api/services/background-reader'
 import { ReadBudgetError } from '../../../src/api/services/background-reader'
+import { HiringScreening } from '../../../src/api/services/hiring-screening'
 import { HiringSourcing } from '../../../src/api/services/hiring-sourcing'
 import { openBrowserOsDatabase } from '../../../src/lib/db/client'
 import { HiringStore, RETENTION_MS } from '../../../src/lib/hiring/store'
@@ -46,7 +47,24 @@ function setup(reader: BackgroundReader | null = null) {
   const sourcing = new HiringSourcing(store, reader, () => clock)
   const app = new Hono().route(
     '/hiring',
-    createHiringRoutes({ store, sourcing }),
+    createHiringRoutes({
+      store,
+      sourcing,
+      screening: new HiringScreening(
+        store,
+        {
+          label: async (_k: string, t: string[]) => ({
+            texts: t,
+            found: [],
+            newDetails: 0,
+            detection: 'patterns' as const,
+          }),
+          restore: (_k: string, t: string) => t,
+          forget: () => {},
+        },
+        null,
+      ),
+    }),
   )
   return { dir, store, sourcing, app, advance: (ms: number) => (clock += ms) }
 }

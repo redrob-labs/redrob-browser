@@ -16,6 +16,7 @@ import {
   type HiringStore,
   SET_ASIDE_REASONS,
 } from '../../lib/hiring/store'
+import type { HiringScreening } from '../services/hiring-screening'
 import type { HiringSourcing } from '../services/hiring-sourcing'
 
 const CriterionSchema = z.object({
@@ -48,8 +49,9 @@ function failure(error: unknown) {
 export function createHiringRoutes(deps: {
   store: HiringStore
   sourcing: HiringSourcing
+  screening: HiringScreening
 }) {
-  const { store, sourcing } = deps
+  const { store, sourcing, screening } = deps
   const guard = async <T>(
     c: { json: (b: unknown, s?: number) => Response },
     run: () => Promise<T> | T,
@@ -103,6 +105,24 @@ export function createHiringRoutes(deps: {
         guard(c, () =>
           store.reviseCriteria(c.req.param('id'), c.req.valid('json').criteria),
         ),
+    )
+    .post(
+      '/criteria/propose',
+      zValidator(
+        'json',
+        z.object({ description: z.string().min(1).max(20_000) }),
+      ),
+      (c) => guard(c, () => screening.propose(c.req.valid('json').description)),
+    )
+    .post('/roles/:id/screen', (c) =>
+      guard(c, async () => ({
+        results: await screening.screenRole(c.req.param('id')),
+      })),
+    )
+    .post('/roles/:id/people/:personId/screen', (c) =>
+      guard(c, () =>
+        screening.screen(c.req.param('id'), c.req.param('personId')),
+      ),
     )
     .get('/roles/:id/people', (c) =>
       c.json({ people: store.peopleOnRole(c.req.param('id')) }),

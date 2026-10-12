@@ -72,7 +72,7 @@ type RefineProviderResolution =
  *    resolving through a list that only ever held LLM providers, so a coding
  *    agent as the default has never stopped a prompt being refined.
  */
-async function resolveRefineProvider(
+export async function resolveRefineProvider(
   store: RefineProviderLookup,
   inline: { providerId?: string; provider?: string; model?: string },
 ): Promise<RefineProviderResolution> {
