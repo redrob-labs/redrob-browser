@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+import { t } from '@browseros/i18n'
 import { Copy } from '@browseros/icons'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -22,14 +23,14 @@ export function RunSkillButton({ name, size = 'sm' }: RunSkillButtonProps) {
     }
     void navigator.clipboard.writeText(skillCommand(name)).then(() => {
       toast.success(`Copied ${skillCommand(name)}`, {
-        description: 'Paste it into your coding agent to run this skill.',
+        description: t('clPasteItIntoYourCoding'),
       })
     })
   }
   return (
     <Button size={size} variant="outline" className="rounded-9" onClick={onRun}>
       <Copy />
-      Run
+      {t('clRun')}
     </Button>
   )
 }

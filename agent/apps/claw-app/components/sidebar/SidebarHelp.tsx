@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Activity, BookOpen, RotateCcw } from '@browseros/icons'
 import type { ComponentType, SVGProps } from 'react'
 import { useLocation, useNavigate } from 'react-router'
@@ -63,7 +64,7 @@ export function SidebarHelp({ expanded = false }: SidebarHelpProps) {
           expanded ? 'opacity-100' : 'opacity-0',
         )}
       >
-        Help
+        {t('clHelp')}
       </div>
       <div className="space-y-1">
         {helpItems.map((item) => {

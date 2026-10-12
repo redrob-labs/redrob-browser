@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Globe } from '@browseros/icons'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { cn } from '@/lib/utils'
@@ -158,7 +159,7 @@ function SessionMiniScreencast({
         <img
           data-preview-url={src}
           src={src}
-          alt={`Live view of ${site}`}
+          alt={t('clLiveViewOf', site)}
           className="h-full w-full object-cover"
           onError={() => setSrc(null)}
         />

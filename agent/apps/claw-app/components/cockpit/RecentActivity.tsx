@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tCount } from '@browseros/i18n'
 import { ChevronDown, History } from '@browseros/icons'
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router'
@@ -85,7 +86,7 @@ export function RecentActivity() {
           to="/audit"
           className="group inline-flex items-center gap-2.5 font-medium text-[12px] text-cyanotype-blue leading-4 transition-colors hover:text-cyanotype-blue-hover"
         >
-          <span>View all activity</span>
+          <span>{t('clViewAllActivity')}</span>
           <span
             aria-hidden
             className="h-px w-[22px] bg-current transition-[width] group-hover:w-8"
@@ -123,12 +124,12 @@ function SectionHeader({
           className="group flex w-full cursor-pointer items-center gap-3.5 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyanotype-blue/40"
         >
           <span className="shrink-0 font-medium text-[15px] text-cyanotype-ink leading-[18px]">
-            Recent activity
+            {t('clRecentActivity')}
           </span>
           <span aria-hidden className="h-px flex-1 bg-cyanotype-border" />
           <span className="flex shrink-0 items-center gap-2">
             <span className="text-[11px] text-cyanotype-muted tabular-nums leading-[14px]">
-              {sessionCount} {sessionCount === 1 ? 'session' : 'sessions'}
+              {tCount('clSessions', sessionCount)}
             </span>
             <ChevronDown
               aria-hidden
@@ -158,8 +159,8 @@ function ActivityBody({
   if (tasks.length === 0) {
     return (
       <EmptyState
-        title="No recent activity"
-        hint="Tool calls from connected agents will appear here."
+        title={t('clNoRecentActivity')}
+        hint={t('clToolCallsAppearHere')}
         icon={<History className="size-5" />}
       />
     )
@@ -205,12 +206,12 @@ function ActivityList({ tasks, now }: { tasks: TaskSummary[]; now: number }) {
               </span>
               {isLive && (
                 <span className="shrink-0 rounded-full bg-cyanotype-live px-2 py-0.5 font-semibold text-[10px] text-cyanotype-live-ink">
-                  LIVE
+                  {t('clLive2')}
                 </span>
               )}
               {isStopped && (
                 <span className="shrink-0 font-medium text-[10px] text-cyanotype-muted">
-                  STOPPED
+                  {t('clStopped2')}
                 </span>
               )}
               <span className="shrink-0 text-[11px] text-cyanotype-muted tabular-nums leading-4">

@@ -9,6 +9,7 @@
  */
 
 import type { SessionScreenshot } from '@browseros/claw-api'
+import { t } from '@browseros/i18n'
 import type { ToolDispatchRow } from '@/modules/api/audit.hooks'
 
 export interface TabGroup {
@@ -59,7 +60,7 @@ export function groupDispatchesByTab(
     groups.push({
       id: 'session',
       pageId: null,
-      label: 'Session',
+      label: t('clSession'),
       displayUrl: null,
       displayTitle: null,
       dispatches,

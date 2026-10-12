@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import {
   AlertTriangle,
   Check,
@@ -36,7 +37,7 @@ interface ActivityStatusMeta {
 
 const STATUS_META: Record<ActivityRowData['status'], ActivityStatusMeta> = {
   blocked: {
-    label: 'Blocked',
+    label: t('clBlocked'),
     textClass: 'text-red',
     bgClass: 'bg-red-tint',
     borderClass: 'border-red/20',
@@ -44,7 +45,7 @@ const STATUS_META: Record<ActivityRowData['status'], ActivityStatusMeta> = {
     icon: Lock,
   },
   'needs-human': {
-    label: 'Needs you',
+    label: t('clNeedsYou'),
     textClass: 'text-amber',
     bgClass: 'bg-amber-tint',
     borderClass: 'border-amber',
@@ -52,7 +53,7 @@ const STATUS_META: Record<ActivityRowData['status'], ActivityStatusMeta> = {
     icon: AlertTriangle,
   },
   'needs-ok': {
-    label: 'Needs your OK',
+    label: t('clNeedsYourOk'),
     textClass: 'text-amber',
     bgClass: 'bg-amber-tint',
     borderClass: 'border-amber',
@@ -60,7 +61,7 @@ const STATUS_META: Record<ActivityRowData['status'], ActivityStatusMeta> = {
     icon: AlertTriangle,
   },
   allowed: {
-    label: 'Allowed',
+    label: t('clAllowed'),
     textClass: 'text-green',
     bgClass: 'bg-card',
     borderClass: 'border-border-2',
@@ -68,7 +69,7 @@ const STATUS_META: Record<ActivityRowData['status'], ActivityStatusMeta> = {
     icon: Check,
   },
   running: {
-    label: 'Running',
+    label: t('clRunning'),
     textClass: 'text-green',
     bgClass: 'bg-card',
     borderClass: 'border-border-2',
@@ -76,7 +77,7 @@ const STATUS_META: Record<ActivityRowData['status'], ActivityStatusMeta> = {
     icon: AlertTriangle,
   },
   done: {
-    label: 'Done',
+    label: t('clDone'),
     textClass: 'text-ink-3',
     bgClass: 'bg-card',
     borderClass: 'border-border-2',
@@ -195,7 +196,7 @@ export function ActivityRow({ row }: ActivityRowProps) {
           className="inline-flex shrink-0 items-center gap-1.5 self-center whitespace-nowrap rounded-md border border-border-2 bg-card px-2.5 py-1.5 font-bold text-[12px] text-accent-ink transition hover:brightness-95"
         >
           <History className="size-3.5" />
-          Replay
+          {t('clReplay')}
         </Link>
       ) : (
         <ChevronRight className="size-4 shrink-0 self-center text-ink-4" />

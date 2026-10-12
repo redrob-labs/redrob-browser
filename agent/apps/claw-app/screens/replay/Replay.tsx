@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+import { t } from '@browseros/i18n'
 import { ArrowLeft, History } from '@browseros/icons'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router'
@@ -116,8 +117,8 @@ export function Replay() {
   const back = () =>
     cameFromInAppFlow ? navigate(-1) : navigate(`/audit/${replay.sessionId}`)
   const stats: { label: string; value: string }[] = [
-    { label: 'Duration', value: replay.duration },
-    { label: 'Steps', value: replay.steps },
+    { label: t('clDuration'), value: replay.duration },
+    { label: t('clSteps'), value: replay.steps },
   ]
 
   return (
@@ -129,12 +130,12 @@ export function Replay() {
           className="flex items-center gap-1.5 font-semibold text-ink-2 text-sm hover:text-ink"
         >
           <ArrowLeft className="size-4" />
-          Audit trail
+          {t('clAuditTrail')}
         </button>
         <span className="h-5 w-px bg-border-2" />
         <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-tint px-2.5 py-0.5 font-bold text-[10.5px] text-accent-ink uppercase tracking-wider">
           <History className="size-3" />
-          Replay
+          {t('clReplay')}
         </span>
         <div className="min-w-0 flex-1">
           <div className="truncate font-bold text-ink text-sm">
@@ -179,7 +180,7 @@ export function Replay() {
                           : undefined
                       }
                     >
-                      Tab {idx + 1}
+                      {t('clTabN', idx + 1)}
                     </TabsTrigger>
                   ))}
                 </TabsList>
@@ -191,7 +192,7 @@ export function Replay() {
                   onClick={resumeFollow}
                   className="ml-auto shrink-0 rounded-full bg-accent-tint px-2.5 py-1 font-semibold text-accent-ink text-xs"
                 >
-                  Resume follow
+                  {t('clResumeFollow')}
                 </button>
               )}
             </div>
@@ -201,8 +202,10 @@ export function Replay() {
               role="status"
               className="rounded-lg border border-amber bg-amber-tint px-3 py-2 font-medium text-ink-2 text-xs"
             >
-              Recording incomplete — playback starts at{' '}
-              {formatIncompleteOffset(view.incompleteUntilMs)}
+              {t(
+                'clRecordingIncomplete',
+                formatIncompleteOffset(view.incompleteUntilMs),
+              )}
             </div>
           )}
           {view.incompleteUntilMs === null && view.knownIncomplete && (
@@ -210,7 +213,7 @@ export function Replay() {
               role="status"
               className="rounded-lg border border-amber bg-amber-tint px-3 py-2 font-medium text-ink-2 text-xs"
             >
-              Recording incomplete — this replay contains a known gap
+              {t('clRecordingIncompleteThisReplayContains')}
             </div>
           )}
           <div className="relative flex min-h-0 flex-1 flex-col gap-3">
@@ -228,7 +231,7 @@ export function Replay() {
                 />
               ) : (
                 <div className="flex flex-1 items-center justify-center rounded-2xl border border-border-2 bg-card text-ink-3 text-sm shadow-sm">
-                  No visual recording for this tab
+                  {t('clNoVisualRecordingForThis')}
                 </div>
               )}
             </div>

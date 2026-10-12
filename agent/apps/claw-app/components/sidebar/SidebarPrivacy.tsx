@@ -9,6 +9,7 @@
  * cockpit and the local server's telemetry.
  */
 
+import { t } from '@browseros/i18n'
 import { ShieldCheck } from '@browseros/icons'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -83,7 +84,7 @@ export function SidebarPrivacy({ expanded = false }: SidebarPrivacyProps) {
           expanded ? 'opacity-100' : 'opacity-0',
         )}
       >
-        Privacy
+        {t('clPrivacy')}
       </span>
     </button>
   )
@@ -95,27 +96,23 @@ export function SidebarPrivacy({ expanded = false }: SidebarPrivacyProps) {
       ) : (
         <Tooltip>
           <TooltipTrigger render={<DialogTrigger render={trigger} />} />
-          <TooltipContent side="right">Privacy</TooltipContent>
+          <TooltipContent side="right">{t('clPrivacy')}</TooltipContent>
         </Tooltip>
       )}
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Privacy & analytics</DialogTitle>
+          <DialogTitle>{t('clPrivacyAnalytics')}</DialogTitle>
           <DialogDescription>
-            Redrob collects anonymous, aggregate usage (which agents connect and
-            which screens you open) to improve the product. It never collects
-            the pages you browse, your prompts, tool inputs or outputs, or any
-            page content. One in five analytics sessions may also record
-            interactions with the Redrob cockpit. All inputs are masked, and
-            task, audit, and replay content is blocked from those recordings. No
-            account or personal data is used.
+            {t('clRedrobCollectsAnonymousAggregateUsage')}
           </DialogDescription>
         </DialogHeader>
         <label
           htmlFor="share-anonymous-usage"
           className="flex items-center justify-between gap-4 rounded-lg border border-border px-4 py-3"
         >
-          <span className="font-medium text-sm">Share anonymous usage</span>
+          <span className="font-medium text-sm">
+            {t('clShareAnonymousUsage')}
+          </span>
           <Switch
             id="share-anonymous-usage"
             checked={consent}

@@ -144,7 +144,11 @@
     Segoe UI, sans-serif;
   /* The system's voice face, for the cockpit's one italic emphasis; it ships with tokens.css. */
   --font-serif: Newsreader, "Nanum Myeongjo", Georgia, "Times New Roman", serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Hangul has no monospace face here: Pretendard and Wanted Sans take those glyphs, before the
+     generic family, so Korean in a mono line never draws as empty boxes. */
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Consolas, Pretendard, "Wanted Sans",
+    monospace;
 
   /* Shadows, via variable indirection — the structural bit.
      `@theme` values are resolved at BUILD time, so a literal colour here is

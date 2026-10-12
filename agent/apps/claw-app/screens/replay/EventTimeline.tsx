@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Layers } from '@browseros/icons'
 import { cn } from '@/lib/utils'
 import { formatTime, KIND_STYLE, VERB_META } from './replay.helpers'
@@ -35,7 +36,7 @@ export function EventTimeline({
     <aside className="flex w-[320px] shrink-0 flex-col border-border border-l bg-card">
       <header className="flex items-center gap-1.5 border-border border-b px-4 py-3 font-bold text-ink text-sm">
         <Layers className="size-3.5 text-ink-3" />
-        Action timeline
+        {t('clActionTimeline')}
       </header>
       <div className="flex flex-1 flex-col overflow-y-auto px-3 py-2">
         {actions.map((action, i) => {

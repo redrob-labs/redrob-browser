@@ -22,26 +22,40 @@ import { readFileSync } from 'node:fs'
 import { Glob } from 'bun'
 import { parseSync } from 'oxc-parser'
 
-const ENFORCED = ['apps/app-onboard/src', 'apps/app', 'apps/claw-onboard/src']
+const ENFORCED = [
+  'apps/app-onboard/src',
+  'apps/app',
+  'apps/claw-onboard/src',
+  'apps/claw-app',
+]
 
 /**
- * Vendored ai-elements and shadcn files that nothing in apps/app imports, so no person ever reads their
- * text. They are listed rather than translated; the check below fails the moment one of them is imported,
- * so a file cannot start rendering while still skipped.
+ * Vendored ai-elements and shadcn files that nothing in the app imports, so no person ever reads their
+ * text. They are listed rather than translated; the check below fails the moment one of them is imported
+ * from outside the list, so a file cannot start rendering while still skipped. An entry ending in `/` is
+ * a whole directory.
  */
-const NOT_RENDERED = [
-  'components/ai-elements/artifact.tsx',
-  'components/ai-elements/chain-of-thought.tsx',
-  'components/ai-elements/context.tsx',
-  'components/ai-elements/inline-citation.tsx',
-  'components/ai-elements/open-in-chat.tsx',
-  'components/ai-elements/plan.tsx',
-  'components/ai-elements/prompt-input.tsx',
-  'components/ai-elements/sources.tsx',
-  'components/ai-elements/tool.tsx',
-  'components/ai-elements/web-preview.tsx',
-  'components/ui/sidebar.tsx',
-]
+const NOT_RENDERED: Record<string, string[]> = {
+  'apps/app': [
+    'components/ai-elements/artifact.tsx',
+    'components/ai-elements/chain-of-thought.tsx',
+    'components/ai-elements/context.tsx',
+    'components/ai-elements/inline-citation.tsx',
+    'components/ai-elements/open-in-chat.tsx',
+    'components/ai-elements/plan.tsx',
+    'components/ai-elements/prompt-input.tsx',
+    'components/ai-elements/sources.tsx',
+    'components/ai-elements/tool.tsx',
+    'components/ai-elements/web-preview.tsx',
+    'components/ui/sidebar.tsx',
+  ],
+  // claw-app vendors the whole ai-elements kit and renders none of it.
+  'apps/claw-app': ['components/ai-elements/'],
+}
+const skippedIn = (root: string, rel: string) =>
+  (NOT_RENDERED[root] ?? []).some((e) =>
+    e.endsWith('/') ? rel.startsWith(e) : rel === e,
+  )
 
 const ATTRS = new Set([
   'placeholder',
@@ -280,24 +294,27 @@ function check(file: string): Finding[] {
 
 const findings: Finding[] = []
 let files = 0
-for (const rel of NOT_RENDERED) {
-  const stem = rel.replace(/\.tsx?$/, '')
-  for await (const other of new Glob('**/*.{ts,tsx}').scan('apps/app')) {
-    if (/node_modules|\/dist\/|\.wxt\/|\.output\//.test(other) || other === rel)
-      continue
-    if (readFileSync(`apps/app/${other}`, 'utf8').includes(`/${stem}'`))
-      findings.push({
-        file: `apps/app/${other}`,
-        line: 1,
-        text: `imports ${rel}, listed as not rendered: translate it and drop it from NOT_RENDERED`,
-      })
+for (const [root, entries] of Object.entries(NOT_RENDERED)) {
+  for await (const other of new Glob('**/*.{ts,tsx}').scan(root)) {
+    if (/node_modules|\/dist\/|\.wxt\/|\.output\//.test(other)) continue
+    if (skippedIn(root, other)) continue
+    const src = readFileSync(`${root}/${other}`, 'utf8')
+    for (const e of entries) {
+      const stem = e.endsWith('/') ? e : `${e.replace(/\.tsx?$/, '')}'`
+      if (src.includes(`/${stem}`))
+        findings.push({
+          file: `${root}/${other}`,
+          line: 1,
+          text: `imports ${e}, listed as not rendered: translate it and drop it from NOT_RENDERED`,
+        })
+    }
   }
 }
 for (const root of ENFORCED) {
   for await (const rel of new Glob('**/*.{ts,tsx}').scan(root)) {
     if (/\.test\.|\.stories\.|messages\.generated/.test(rel)) continue
     if (/node_modules|\/dist\/|\.wxt\/|\.output\//.test(rel)) continue
-    if (root === 'apps/app' && NOT_RENDERED.includes(rel)) continue
+    if (skippedIn(root, rel)) continue
     files++
     findings.push(...check(`${root}/${rel}`))
   }

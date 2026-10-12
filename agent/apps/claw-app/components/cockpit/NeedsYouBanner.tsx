@@ -8,6 +8,7 @@
  */
 
 import type { HelpRequest } from '@browseros/claw-api'
+import { t } from '@browseros/i18n'
 import { Hand, Square, TriangleAlert } from '@browseros/icons'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -67,12 +68,12 @@ export function NeedsYouBanner({
           <div className="flex items-center gap-3">
             <h2 className="font-semibold text-[15px] text-ink leading-tight">
               {pending.length === 1
-                ? 'One agent needs you right now'
-                : `${pending.length} agents need you right now`}
+                ? t('clOneAgentNeedsYouRight')
+                : t('clAgentsNeedYouNow', pending.length)}
             </h2>
             {pending.length > 1 && (
               <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--accent-orange-4)] px-2 py-0.5 font-mono text-[10px] text-white uppercase tracking-[0.1em]">
-                {pending.length} need you
+                {t('clNeedYouN', pending.length)}
               </span>
             )}
           </div>
@@ -119,7 +120,7 @@ export function NeedsYouBanner({
                 disabled={pendingTakeOverSessionId === session.sessionId}
                 className={cn('shrink-0', needsYouTone.action)}
               >
-                Take over
+                {t('clTakeOver')}
               </Button>
             </li>
           ))}
@@ -166,7 +167,7 @@ function FeaturedRequest({
       )}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <span className="mr-auto inline-flex items-center gap-1.5 font-mono text-[11px] text-ink-3 uppercase tracking-[0.08em]">
-          Waiting
+          {t('clWaiting')}
           <span className="tabular-nums">
             {waitLabel(help.requestedAt, now)}
           </span>
@@ -180,7 +181,7 @@ function FeaturedRequest({
           className={needsYouTone.action}
         >
           <Hand className="size-3.5" />
-          Take over
+          {t('clTakeOver')}
         </Button>
         <Button
           type="button"
@@ -189,10 +190,10 @@ function FeaturedRequest({
           data-stop-session={session.sessionId}
           onClick={() => onStop(session.sessionId)}
           disabled={isStopPending}
-          aria-label="Stop session"
+          aria-label={t('clStopSession')}
         >
           <Square className="size-3.5" />
-          Stop
+          {t('clStop')}
         </Button>
       </div>
     </>

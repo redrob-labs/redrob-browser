@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import * as React from "react"
 import useEmblaCarousel, {
   type UseEmblaCarouselType,
@@ -203,7 +204,7 @@ function CarouselPrevious({
       {...props}
     >
       <IconChevronLeft />
-      <span className="sr-only">Previous slide</span>
+      <span className="sr-only">{t('clPreviousSlide')}</span>
     </Button>
   )
 }
@@ -233,7 +234,7 @@ function CarouselNext({
       {...props}
     >
       <IconChevronRight />
-      <span className="sr-only">Next slide</span>
+      <span className="sr-only">{t('clNextSlide')}</span>
     </Button>
   )
 }

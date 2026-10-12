@@ -1,0 +1,311 @@
+# The claw cockpit extension (agent/apps/claw-app), English and Korean.
+#
+# key <TAB> English <TAB> Korean [<TAB> description]
+#
+# Terminology follows 30-app.tsv (agent 에이전트). "Cockpit" is 콕핏, "audit" 감사, "replay" 리플레이, "harness" 하네스, as the screens name them.
+
+clTaskNotFound	Task not found	작업을 찾을 수 없음
+clSession	Session	세션
+clNoMeasuredRunsYet	No measured runs yet.	아직 측정된 실행이 없습니다.
+clTokens	tokens	토큰
+clLinkedInto	Linked into	연결된 에이전트
+clNotLinkedIntoAnyAgent	Not linked into any agent.	연결된 에이전트가 없습니다.
+clRunHistory	Run history	실행 기록
+clNewSkill	New skill	새 스킬
+clActions	Actions	작업
+clSaved	saved	절약
+clNotMeasured	not measured	측정 안 됨
+clNoSkillsYet	No skills yet	아직 스킬이 없습니다
+clRestartPlayback	Restart playback	처음부터 재생
+clPlaybackPosition	Playback position	재생 위치
+clNavigate	Navigate	이동
+clRead	Read	읽기
+clClick	Click	클릭
+clType	Type	입력
+clAttach	Attach	첨부
+clSubmit	Submit	제출
+clDuration	Duration	소요 시간
+clSteps	Steps	단계
+clEndpointUrl	Endpoint URL	엔드포인트 URL
+clOpenSettings	Open Settings	설정 열기
+clExtensions	Extensions	확장 프로그램
+clDownload	Download	다운로드
+clInstallExtension	Install Extension	확장 프로그램 설치
+clPickTheFile	Pick the file	파일 선택
+clClickInstall	Click Install	설치 누르기
+clAddTheMcpServer	Add the MCP server	MCP 서버 추가
+clInstallTheSkill	Install the skill	스킬 설치
+clExtension	Extension	확장 프로그램
+clResolvingTheEndpoint	Resolving the endpoint	엔드포인트를 확인하는 중
+clCommandCopied	Command copied	명령을 복사했습니다
+clCopyCommand	Copy command	명령 복사
+clManual	Manual	수동
+clCouldNotBringTheAgent	Could not bring the agent tab forward	에이전트 탭을 앞으로 가져오지 못했습니다
+clHandedBackToTheAgent	Handed back to the agent	에이전트에게 넘겼습니다
+clTheAgentAlreadyStoppedWaiting	The agent already stopped waiting	에이전트가 이미 대기를 멈췄습니다
+clCouldNotHandBackTo	Could not hand back to the agent	에이전트에게 넘기지 못했습니다
+clCouldNotStopTheAgent	Could not stop the agent	에이전트를 멈추지 못했습니다
+clHandOffYourFirstTask	Hand off your first task	첫 작업 맡기기
+clManageAgents	Manage agents	에이전트 관리
+clTokenUsageNotMeasuredFor	Token usage not measured for this session	이 세션의 토큰 사용량은 측정되지 않았습니다
+clFailed	Failed	실패
+clStopped	Stopped	중지됨
+clLoadOlderTasks	Load older tasks	이전 작업 더 보기
+clRunning	Running	실행 중
+clNeedsOk	Needs OK	승인 필요
+clYourTurn	Your turn	내 차례
+clBlocked	Blocked	차단됨
+clCompleted	Completed	완료
+clAsleep	Asleep	대기 중
+clIdle	Idle	유휴
+clStuck	Stuck	멈춤
+clPreviousSlide	Previous slide	이전 슬라이드
+clNextSlide	Next slide	다음 슬라이드
+clClose	Close	닫기
+clDeleteThisSkill	Delete this skill?	이 스킬을 삭제할까요?
+clName	Name	이름
+clDescription	Description	설명
+clCheckTheInboxAndDraft	Check the inbox and draft what is owed	받은편지함을 확인하고 답할 메일 초안을 쓰기
+clSiteOptional	Site (optional)	사이트 (선택)
+clOneStepPerLine	One step per line	한 줄에 한 단계
+clLearnedNotesOptional	Learned notes (optional)	학습한 메모 (선택)
+clOneNotePerLine	One note per line	한 줄에 메모 하나
+clSite	Site	사이트
+clLeaveEmptyToClear	Leave empty to clear	비워 두면 지워집니다
+clLearnedNotes	Learned notes	학습한 메모
+clPasteItIntoYourCoding	Paste it into your coding agent to run this skill.	코딩 에이전트에 붙여 넣으면 이 스킬이 실행됩니다.
+clPrivacy	Privacy	개인 정보
+clPrivacyAnalytics	Privacy & analytics	개인 정보 & 분석
+clShareAnonymousUsage	Share anonymous usage	익명 사용 정보 보내기
+clSystem	System	시스템
+clLight	Light	라이트
+clGray	Gray	그레이
+clTheme	Theme	테마
+clHarness	Harness	하네스
+clWhatAreYourAgents	What are your agents	에이전트가 지금
+clRightNow	right now?	일은?
+clEGSignedIn2fa	e.g. signed in, 2FA done	예: 로그인 완료, 2단계 인증 완료
+clHandingBack	Handing back…	넘기는 중…
+clHandBackToTheAgent	Hand back to the agent	에이전트에게 넘기기
+clRunningNow	Running now	지금 실행 중
+clSavedStatsWindow	Saved stats window	절약 통계 기간
+clFewer	fewer	적게
+clCouldNotSaveYourResponse	Could not save your response. The invitation may appear again.	응답을 저장하지 못했습니다. 초대가 다시 나타날 수 있습니다.
+clFeedbackCallInvitation	Feedback call invitation	의견 통화 초대
+clDismiss	Dismiss	닫기
+clViewAllActivity	View all activity	모든 활동 보기
+clNoRecentActivity	No recent activity	최근 활동이 없습니다
+clCopyTask	Copy task	작업 복사
+clCopied	Copied	복사됨
+clCopy	Copy	복사
+clStopped2	STOPPED	중지됨
+clNeedsYourOk	Needs your OK	승인이 필요합니다
+clAllowed	Allowed	허용됨
+clDone	Done	완료
+clCancellingSession	Cancelling session	세션을 취소하는 중
+clStopSession	Stop session	세션 중지
+clCancelling	Cancelling	취소하는 중
+clOneAgentNeedsYouRight	One agent needs you right now	지금 에이전트 하나가 도움을 기다립니다
+clTakeOver	Take over	직접 조작
+clNoScreenshot	no screenshot	스크린샷 없음
+clTryClearingThemOrWidening	Try clearing them or widening the search window.	필터를 지우거나 검색 기간을 넓혀 보세요.
+clManageAuditFiles	Manage audit files	감사 파일 관리
+clRecordings	Recordings	녹화
+clTotal	Total	합계
+clCustomRetentionDays	Custom retention days	사용자 지정 보관 일수
+clCleaningUp	Cleaning up…	정리하는 중…
+clCleanUpNow	Clean up now	지금 정리
+clCleanUpAuditDataNow	Clean up audit data now?	지금 감사 데이터를 정리할까요?
+clCancel	Cancel	취소
+clScreenshotPreview	Screenshot preview	스크린샷 미리보기
+clPreviousScreenshot	Previous screenshot	이전 스크린샷
+clNextScreenshot	Next screenshot	다음 스크린샷
+clAll	All	전체
+clSearchSessionsSummaries	search sessions, summaries…	세션, 요약 검색…
+clClearSearch	Clear search	검색 지우기
+clStarted	Started	시작
+clEnded	Ended	종료
+clTools	Tools	도구
+clTokens2	Tokens	토큰
+clCopySessionId	Copy session id	세션 ID 복사
+clCopied2	copied	복사됨
+clWatchTheRrwebSessionReplay	Watch the rrweb session replay	rrweb 세션 리플레이 보기
+clNoReplayRecordedForThis	No replay recorded for this session yet	이 세션에는 아직 녹화된 리플레이가 없습니다
+clTimeline	Timeline	타임라인
+clArgs	args	인수
+clResult	result	결과
+clScreenshot	screenshot	스크린샷
+clPage	page	페이지
+clSkills	Skills	스킬
+clCouldNotLoadThisSkill	Could not load this skill. Check that Redrob is running and try again.	이 스킬을 불러오지 못했습니다. Redrob이 실행 중인지 확인하고 다시 시도하세요.
+clEdit	Edit	편집
+clThisSkillHasNotRun	This skill has not run yet.	이 스킬은 아직 실행되지 않았습니다.
+clRun	Run	실행
+clAgent	Agent	에이전트
+clResult2	Result	결과
+clWhen	When	시간
+clClean	clean	정상
+clSkillsRedrobLinkedIntoYour	Skills Redrob linked into your coding agents. Re-run one by name.	Redrob이 코딩 에이전트에 연결한 스킬입니다. 이름으로 다시 실행하세요.
+clCouldNotLoadYourSkills	Could not load your skills. Check that Redrob is running and try again.	스킬을 불러오지 못했습니다. Redrob이 실행 중인지 확인하고 다시 시도하세요.
+clSkill	Skill	스킬
+clRuns	Runs	실행
+clTokensSaved	Tokens saved	절약한 토큰
+clDelete	Delete	삭제
+clWhenYourCodingAgentSaves	When your coding agent saves a repeatable browser task with Redrob, it shows up here, linked into your agents and re-runnable by name. You can also write one yourself.	코딩 에이전트가 반복할 수 있는 브라우저 작업을 Redrob으로 저장하면 여기에 나타나고, 에이전트에 연결되어 이름으로 다시 실행할 수 있습니다. 직접 만들 수도 있습니다.
+clActionTimeline	Action timeline	작업 타임라인
+clAuditTrail	Audit trail	감사 기록
+clReplay	Replay	리플레이
+clResumeFollow	Resume follow	다시 따라가기
+clRecordingIncompleteThisReplayContains	Recording incomplete — this replay contains a known gap	녹화가 완전하지 않습니다 — 이 리플레이에는 알려진 공백이 있습니다
+clNoVisualRecordingForThis	No visual recording for this tab	이 탭에는 화면 녹화가 없습니다
+clOneEndpointEveryHarness	One endpoint, every harness.	엔드포인트 하나로 모든 하네스를.
+clConnectedAgents	Connected agents	연결된 에이전트
+clScreenshotCouldNotBeLoaded	Screenshot could not be loaded — the steps above still apply.	스크린샷을 불러오지 못했습니다 — 위 단계는 그대로 따라 하면 됩니다.
+clDownloadTheExtension	Download the extension	확장 프로그램 다운로드
+clAllReleases	all releases	모든 릴리스
+clBack	Back	뒤로
+clNext	Next	다음
+clConnectAnyOtherAgent	Connect any other agent	다른 에이전트 연결
+clConnectingAListedAgentDoes	Connecting a listed agent does two things, so doing it by hand means doing both. The MCP server lets your agent reach the browser. The skill teaches it how to use it.	목록의 에이전트를 연결하면 두 가지가 이루어지므로, 직접 연결하려면 둘 다 해야 합니다. MCP 서버는 에이전트가 브라우저에 닿게 하고, 스킬은 그 사용법을 알려 줍니다.
+clFullSetupGuide	Full setup guide	전체 설정 가이드
+clGiveClaudeDesktopAReal	Give Claude Desktop a real browser.	Claude Desktop에 진짜 브라우저를 주세요.
+clShowMeHow	Show me how	방법 보기
+clConnected	Connected	연결됨
+clDisconnect	Disconnect	연결 해제
+clConnect	Connect	연결
+clAnyOtherAgent	Any other agent	다른 에이전트
+clNotOnTheListAbove	Not on the list above?	위 목록에 없나요?
+clLive	Live	실행 중
+clAudit	Audit	감사
+clDeleteSkill	Delete skill	스킬 삭제
+clASkillRedrobLinksInto	A skill Redrob links into your agents and you re-run by name.	Redrob이 에이전트에 연결하고 이름으로 다시 실행하는 스킬입니다.
+clSaveSkill	Save skill	스킬 저장
+clSavingReRendersTheSkill	Saving re-renders the SKILL.md and re-links it into your agents.	저장하면 SKILL.md를 다시 만들고 에이전트에 다시 연결합니다.
+clSave	Save	저장
+clHelp	Help	도움말
+clRedrobCollectsAnonymousAggregateUsage	Redrob collects anonymous, aggregate usage (which agents connect and which screens you open) to improve the product. It never collects the pages you browse, your prompts, tool inputs or outputs, or any page content. One in five analytics sessions may also record interactions with the Redrob cockpit. All inputs are masked, and task, audit, and replay content is blocked from those recordings. No account or personal data is used.	Redrob은 제품을 개선하려고 익명의 집계 사용 정보(어떤 에이전트가 연결되고 어떤 화면을 여는지)를 수집합니다. 방문한 페이지, 프롬프트, 도구 입력과 출력, 페이지 내용은 절대 수집하지 않습니다. 분석 세션 다섯 개 중 하나는 Redrob 콕핏에서의 조작을 녹화할 수 있습니다. 모든 입력은 가려지며, 작업·감사·리플레이 내용은 녹화에서 제외됩니다. 계정이나 개인 정보는 쓰지 않습니다.
+clComingSoon	Coming soon	곧 제공
+clWorkingOn	working on	하고 있는
+clNoteForTheAgentOptional	Note for the agent (optional)	에이전트에게 남길 메모 (선택)
+clSinceYouStarted	Since you started	시작한 뒤로
+clHumanTimeSaved	Human time saved	절약한 사람의 시간
+clSessionsToolCalls	Sessions · tool calls	세션 · 도구 호출
+clYouReOneOfOur	You're one of our most active users	가장 활발한 사용자 중 한 분입니다
+clWeDLikeToHear	We'd like to hear what you use neo for and what we should fix.	neo를 어디에 쓰는지, 무엇을 고쳐야 할지 듣고 싶습니다.
+clBookA15MinuteChat	Book a 15 minute chat	15분 대화 예약
+clNoThanks	No thanks	괜찮습니다
+clRecentActivity	Recent activity	최근 활동
+clLive2	LIVE	실행 중
+clOnScreen	on screen	화면에 표시 중
+clFollowLive	Follow live	실시간 따라가기
+clStop	Stop	중지
+clPausedHere	Paused here	여기서 일시 정지
+clNeedsYou	Needs you	도움 필요
+clWaiting	Waiting	대기 중
+clStorageUsedBySessionsScreenshots	Storage used by sessions, screenshots, and replays.	세션, 스크린샷, 리플레이가 쓰는 저장 공간입니다.
+clCouldNotLoadAuditStorage	Could not load audit storage usage.	감사 저장 공간 사용량을 불러오지 못했습니다.
+clAutomaticallyDeleteAuditLogOlder	Automatically delete audit log older than	다음보다 오래된 감사 로그를 자동으로 삭제
+cl7Days	7 days	7일
+cl30Days	30 days	30일
+clCustom	Custom	사용자 지정
+clNever	Never	안 함
+clCouldNotSaveTheRetention	Could not save the retention policy.	보관 정책을 저장하지 못했습니다.
+clDeleteAndReclaim	Delete and reclaim	삭제하고 공간 확보
+clNoScreenshotsCapturedForThis	No screenshots captured for this task.	이 작업에는 캡처된 스크린샷이 없습니다.
+clViewSessionReplay	View Session Replay	세션 리플레이 보기
+clOpenFinalUrl	Open final URL	최종 URL 열기
+clExpandAll	Expand all	모두 펼치기
+clCollapseAll	Collapse all	모두 접기
+clNoExtraDetailRecorded	No extra detail recorded.	추가로 기록된 내용이 없습니다.
+clStillRunningNoSessionClose	Still running, no session-close received yet.	아직 실행 중이며 세션 종료 신호를 받지 못했습니다.
+clCouldNotReachLine	could not $1 the cockpit.	콕핏에 $1 못했습니다.	$1 is the accent word clReach
+clReach	reach	연결하지
+clCheckClawServer	Check that the local claw-server is running.	로컬 claw-server가 실행 중인지 확인하세요.
+clAuditNoMatchLine	nothing $1 these filters.	이 필터와 $1 항목이 없습니다.
+clMatches	matches	일치하는
+clAuditQuietLine	the audit is $1 so far.	감사 기록이 아직 $1.
+clQuiet	quiet	조용합니다
+clAuditQuietHint	Connect an agent from the MCP page and run a tool. Sessions land here within a few seconds.	MCP 페이지에서 에이전트를 연결하고 도구를 실행하세요. 몇 초 안에 세션이 여기에 나타납니다.
+clAuditErrorLine	could not $1 the audit.	감사 기록을 $1 못했습니다.
+clLoad	load	불러오지
+clAuditErrorHint	Check that the cockpit server is running and the audit database is reachable.	콕핏 서버가 실행 중이고 감사 데이터베이스에 연결할 수 있는지 확인하세요.
+clHeroLine	What are your agents $1 right now?	에이전트가 지금 $1 일은?	$1 is the accent clWorkingOn
+clYouWatchLine	You watch. Your agent $1	지켜보기만 하세요. 에이전트가 $1	$1 is the accent clWorks
+clWelcome	WELCOME	환영합니다
+clYouWatchPrefix	You watch. Your agent	지켜보기만 하세요. 에이전트가
+clWorks	works.	일합니다.
+clOnboardSubhead	Your agents are wired in. Watch a quick demo, then hand your first task to any of them.	에이전트가 연결되었습니다. 짧은 데모를 보고 첫 작업을 맡겨 보세요.
+clReadDocs	Read the docs	문서 보기
+clCleanKeepForever	Retention is set to Never, so this only removes orphaned audit files and reclaims disk space. Continue?	보관 기간이 ‘안 함’으로 설정되어 있어 연결이 끊긴 감사 파일만 지우고 디스크 공간을 확보합니다. 계속할까요?
+clCleanOlderThan	This permanently deletes all audit data, screenshots, and replays older than $1 days, then reclaims the disk space. Continue?	$1일보다 오래된 감사 데이터, 스크린샷, 리플레이를 모두 영구 삭제하고 디스크 공간을 확보합니다. 계속할까요?
+clScreenshotOf	Screenshot of $1	$1 스크린샷
+clScreenshotCap	Screenshot	스크린샷
+clScreenshotsN	Screenshots $1	스크린샷 $1
+clScreenshotN	Screenshot $1	스크린샷 $1
+clErrorsOne	$1 error	오류 $1개
+clErrorsOther	$1 errors	오류 $1개
+clMakeRuleOn	Make a rule on $1	$1에 규칙 만들기
+clEventsOne	$1 event	이벤트 $1개
+clEventsOther	$1 events	이벤트 $1개
+clMs	$1 ms	$1ms
+clScreenshotAt	Screenshot at T+$1	T+$1 시점 스크린샷
+clCopyName	Copy $1	$1 복사
+clSessionClosed	session closed	세션 종료
+clSessionStopped	session stopped	세션 중지
+clSessionErrored	session errored ($1)	세션 오류 ($1)
+clUnknown	unknown	알 수 없음
+clLastFrame	Last frame	마지막 화면
+clWatch	Watch	보기
+clInControlOf	You are in control of $1	지금 $1을(를) 직접 조작하고 있습니다
+clResumesAt	When done, the agent resumes at: $1	끝나면 에이전트가 이어서 진행합니다: $1
+clLiveViewOf	Live view of $1	$1 실시간 화면
+clNeedYouN	$1 need you	$1개가 도움 필요
+clAgentsNeedYouNow	$1 agents need you right now	지금 에이전트 $1개가 도움을 기다립니다
+clLiveN	$1 live	$1개 실행 중
+clTokensSavedWindow	Tokens saved · $1	절약한 토큰 · $1
+clUsedN	used $1	사용 $1
+clScreenshotAgentSpend	a screenshot-first agent would spend $1	스크린샷 중심 에이전트라면 $1 사용
+clSessionPreviewFrom	Session preview from $1	$1 세션 미리보기
+clTabsOne	$1 tab	탭 $1개
+clTabsOther	$1 tabs	탭 $1개
+clHeroFrom	Hero from $1	$1 대표 화면
+clToolsOne	$1 tool	도구 $1개
+clToolsOther	$1 tools	도구 $1개
+clDeleteSkillDesc	This removes $1 and unlinks its skill from your coding agents. Its run history is discarded.	$1을(를) 삭제하고 코딩 에이전트에서 이 스킬의 연결을 해제합니다. 실행 기록도 삭제됩니다.
+clSavedAsSlash	Saved as /$1 so you can find it with /neo in your agent. Lowercase letters, digits, and hyphens.	/$1(으)로 저장되어 에이전트에서 /neo로 찾을 수 있습니다. 영문 소문자, 숫자, 하이픈만 쓸 수 있습니다.
+clEditName	Edit $1	$1 편집
+clDisconnectName	Disconnect $1	$1 연결 해제
+clConnectName	Connect $1	$1 연결
+clStepNofM	step $1 of $2	$2단계 중 $1단계
+clNofMConnected	$1 of $2 connected	$2개 중 $1개 연결됨
+clJumpTo	Jump to $1	$1(으)로 이동
+clToolCancelled	$1: cancelled by operator	$1: 사용자가 취소함
+clToolErrored	$1: errored	$1: 오류
+clNavigateTo	Navigate to $1	$1(으)로 이동
+clTabN	Tab $1	탭 $1
+clRecordingIncomplete	Recording incomplete — playback starts at $1	녹화가 완전하지 않습니다 — $1부터 재생됩니다
+clOperatesOn	operates on $1	$1에서 작동
+clTokensOtherBrowsers	$1 tokens in other browsers	다른 브라우저에서는 토큰 $1개
+clNoDispatches	No dispatches for this session id. It may have been pruned or never existed.	이 세션 ID에 기록된 실행이 없습니다. 정리되었거나 처음부터 없었을 수 있습니다.
+clScreenshots	Screenshots	스크린샷
+clTieBack	Then come back here to watch it run.	그런 다음 여기로 돌아와 실행을 지켜보세요.
+clWaitingFirstRun	Waiting for your first run. Come back the moment you press enter.	첫 실행을 기다리는 중입니다. Enter를 누르면 바로 돌아오세요.
+clCopiedPasteIt	Copied. Paste it into your agent, then watch it here.	복사했습니다. 에이전트에 붙여 넣고 여기서 지켜보세요.
+clPasteThisPrompt	Paste this prompt into your agent.	이 프롬프트를 에이전트에 붙여 넣으세요.
+clStarterPrompt	Using Redrob, search for the current monthly prices of streaming services such as Netflix, Disney plus, Hulu, Max and Apple TV	Redrob으로 Netflix, Disney plus, Hulu, Max, Apple TV 같은 스트리밍 서비스의 현재 월 요금을 찾아 줘	Sent to the agent as written
+clConnectedSuffix	connected	개 연결됨	Follows a count
+clToolCallsAppearHere	Tool calls from connected agents will appear here.	연결된 에이전트의 도구 호출이 여기에 표시됩니다.
+clSessionsOne	$1 session	세션 $1개
+clSessionsOther	$1 sessions	세션 $1개
+clCopiedCheck	Copied ✓	복사됨 ✓
+clFailedConnect	Failed to connect.	연결하지 못했습니다.
+clFailedDisconnect	Failed to disconnect.	연결을 해제하지 못했습니다.
+clCouldNotClean	Could not clean up audit files.	감사 파일을 정리하지 못했습니다.
+clNoBrowserActivity	No browser activity	브라우저 활동 없음
+clCouldNotDeleteSkill	Could not delete the skill	스킬을 삭제하지 못했습니다
+clCouldNotSaveSkill	Could not save the skill	스킬을 저장하지 못했습니다
+clManualCardLine	Connect it by hand: add the endpoint, then install the skill.	직접 연결하세요: 엔드포인트를 추가한 뒤 스킬을 설치합니다.
+clManualAddMcpBody	Point your agent at the endpoint URL from this page and add it as a streamable HTTP MCP server named $1. Where that setting lives depends on the agent, so check its own MCP documentation.	에이전트에 이 페이지의 엔드포인트 URL을 $1(이)라는 이름의 스트리밍 HTTP MCP 서버로 추가하세요. 설정 위치는 에이전트마다 다르니 해당 에이전트의 MCP 문서를 확인하세요.	$1 is the server name, browseros-neo
+clManualAddMcpNote	Read the URL from the top of this page rather than assuming a port. It is a loopback address and the port is not the same across builds.	포트를 짐작하지 말고 이 페이지 위쪽의 URL을 그대로 쓰세요. 루프백 주소이며 빌드마다 포트가 다릅니다.
+clManualSkillBody	The MCP server gives your agent the tools. The skill tells it how to use them: to work in its own tabs instead of yours, to name its session so you can find it in the cockpit, and to reach for this browser rather than its own fetcher.	MCP 서버는 에이전트에게 도구를 주고, 스킬은 그 사용법을 알려 줍니다. 내 탭이 아니라 자기 탭에서 일하고, 콕핏에서 찾을 수 있게 세션 이름을 붙이고, 자체 가져오기 도구 대신 이 브라우저를 쓰도록 합니다.
+clManualSkillNote	Run this in your project, or add -g to install it for every project.	프로젝트에서 실행하거나, -g를 붙이면 모든 프로젝트에 설치됩니다.

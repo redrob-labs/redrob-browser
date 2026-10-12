@@ -42,12 +42,14 @@ const ONBOARDING_POSTER_URL =
 
 const CAN_AI_AUTOMATE = {
   youtubeId: 'rIZ8OBHL7Zo',
+  // i18n-ignore: a video's own title
   title: 'Can AI Agents Finally Automate the Web?',
   channel: 'Better Stack',
 } as const
 
 const FUTURE_OF_BROWSING = {
   youtubeId: 'lUvgw7v-avA',
+  // i18n-ignore: a video's own title
   title: 'The Future of Browsing Is Here',
   channel: 'Tech With Mobin',
 } as const

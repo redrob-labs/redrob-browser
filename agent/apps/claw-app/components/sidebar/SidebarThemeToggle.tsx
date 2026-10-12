@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Monitor, Moon, Sun } from '@browseros/icons'
 import { type ComponentType, type SVGProps, useRef } from 'react'
 import { useTheme } from '@/components/theme-provider'
@@ -35,9 +36,9 @@ interface ThemeOption {
 // the .dark class stay as they are: color-scheme: dark is what form
 // controls understand, and ~63 live dark: utilities compile against it.
 const themeOptions: ThemeOption[] = [
-  { value: 'system', label: 'System', icon: Monitor },
-  { value: 'light', label: 'Light', icon: Sun },
-  { value: 'dark', label: 'Gray', icon: Moon },
+  { value: 'system', label: t('clSystem'), icon: Monitor },
+  { value: 'light', label: t('clLight'), icon: Sun },
+  { value: 'dark', label: t('clGray'), icon: Moon },
 ]
 
 export interface SidebarThemeToggleProps {
@@ -87,7 +88,9 @@ export function SidebarThemeToggle({
     <DropdownMenu modal={false}>
       <Tooltip>
         <TooltipTrigger render={trigger} />
-        {expanded ? null : <TooltipContent side="right">Theme</TooltipContent>}
+        {expanded ? null : (
+          <TooltipContent side="right">{t('clTheme')}</TooltipContent>
+        )}
       </Tooltip>
       <DropdownMenuContent
         anchor={() => triggerRef.current}

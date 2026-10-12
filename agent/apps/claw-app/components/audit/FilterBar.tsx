@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Check, ChevronDown, Search, X } from '@browseros/icons'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -98,7 +99,7 @@ export function FilterBar({
           className="ph-no-capture min-w-52 bg-popover before:hidden"
         >
           <DropdownMenuItem onClick={() => onAgentChange(null)}>
-            <span className="flex-1">All</span>
+            <span className="flex-1">{t('clAll')}</span>
             {selectedAgentSlug === null && <Check className="size-3.5" />}
           </DropdownMenuItem>
           {agentOptions.map((opt) => (
@@ -135,7 +136,7 @@ export function FilterBar({
           className="ph-no-capture min-w-44 bg-popover before:hidden"
         >
           <DropdownMenuItem onClick={() => onStatusChange(null)}>
-            <span className="flex-1">All</span>
+            <span className="flex-1">{t('clAll')}</span>
             {selectedStatus === null && <Check className="size-3.5" />}
           </DropdownMenuItem>
           {statusOptions.map((opt) => (
@@ -172,7 +173,7 @@ export function FilterBar({
             className="ph-no-capture max-h-64 min-w-52 overflow-y-auto bg-popover before:hidden"
           >
             <DropdownMenuItem onClick={() => onSiteChange(null)}>
-              <span className="flex-1">All</span>
+              <span className="flex-1">{t('clAll')}</span>
               {selectedSite === null && <Check className="size-3.5" />}
             </DropdownMenuItem>
             {siteOptions.map((opt) => (
@@ -201,7 +202,7 @@ export function FilterBar({
         <Input
           value={localSearch}
           onChange={(e) => setLocalSearch(e.target.value)}
-          placeholder="search sessions, summaries..."
+          placeholder={t('clSearchSessionsSummaries')}
           // pr-7 reserves space for the inline clear button so the
           // text never sits under the icon.
           className="h-8 w-64 rounded-9 border-none bg-card pr-7 pl-8 font-mono text-[13px] text-ink shadow-xs placeholder:text-ink-3 focus-visible:ring-0"
@@ -210,7 +211,7 @@ export function FilterBar({
           <button
             type="button"
             onClick={clearSearch}
-            aria-label="Clear search"
+            aria-label={t('clClearSearch')}
             data-testid="filter-search-clear"
             className="absolute right-1.5 inline-flex size-5 items-center justify-center rounded text-ink-3 transition-colors hover:bg-card-tint hover:text-ink"
           >
@@ -226,13 +227,13 @@ function StatusPill({ status }: { status: TaskStatus }) {
   if (status === 'live') {
     return (
       <span className="inline-flex items-center rounded-full bg-cyanotype-live px-2.5 py-[3px] font-semibold text-[11px] text-cyanotype-live-ink leading-[14px]">
-        Live
+        {t('clLive')}
       </span>
     )
   }
   if (status === 'failed') {
-    return <span className="text-red">Failed</span>
+    return <span className="text-red">{t('clFailed')}</span>
   }
-  if (status === 'cancelled') return <span>Stopped</span>
-  return <span>Done</span>
+  if (status === 'cancelled') return <span>{t('clStopped')}</span>
+  return <span>{t('clDone')}</span>
 }

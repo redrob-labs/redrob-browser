@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { useState } from 'react'
 
 interface EndpointStripProps {
@@ -43,10 +44,10 @@ export function EndpointStrip({ label, value }: EndpointStripProps) {
             <button
               type="button"
               onClick={copy}
-              aria-label={`Copy ${label}`}
+              aria-label={t('clCopyName', label)}
               className="shrink-0 rounded px-1.5 py-0.5 text-[12px] text-white/90 transition-colors hover:bg-white/10 hover:text-white"
             >
-              {copied ? 'Copied ✓' : 'Copy'}
+              {copied ? t('clCopiedCheck') : t('clCopy')}
             </button>
           </>
         ) : (

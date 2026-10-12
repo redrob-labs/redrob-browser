@@ -5,6 +5,7 @@
  */
 
 import type { Skill } from '@browseros/claw-api'
+import { t } from '@browseros/i18n'
 import { Plus } from '@browseros/icons'
 import type { ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
@@ -46,10 +47,10 @@ export function Skills() {
       <header className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h1 className="font-extrabold text-3xl leading-tight tracking-tight md:text-4xl">
-            Skills
+            {t('clSkills')}
           </h1>
           <p className="text-ink-2 text-sm">
-            Skills Redrob linked into your coding agents. Re-run one by name.
+            {t('clSkillsRedrobLinkedIntoYour')}
           </p>
         </div>
         <SkillFormDialog
@@ -57,17 +58,14 @@ export function Skills() {
           trigger={
             <Button size="sm" className="rounded-9">
               <Plus />
-              New skill
+              {t('clNewSkill')}
             </Button>
           }
         />
       </header>
 
       {isError ? (
-        <SkillsNotice>
-          Could not load your skills. Check that Redrob is running and try
-          again.
-        </SkillsNotice>
+        <SkillsNotice>{t('clCouldNotLoadYourSkills')}</SkillsNotice>
       ) : isLoading ? (
         <SkillsSkeleton />
       ) : skills.length === 0 ? (
@@ -83,7 +81,7 @@ export function Skills() {
                     'h-auto font-medium text-[12px] text-ledger-head-ink',
                   )}
                 >
-                  Skill
+                  {t('clSkill')}
                 </TableHead>
                 <TableHead
                   className={cn(
@@ -91,7 +89,7 @@ export function Skills() {
                     'h-auto w-24 text-right font-medium text-[12px] text-ledger-head-ink',
                   )}
                 >
-                  Runs
+                  {t('clRuns')}
                 </TableHead>
                 <TableHead
                   className={cn(
@@ -99,7 +97,7 @@ export function Skills() {
                     'h-auto w-40 text-right font-medium text-[12px] text-ledger-head-ink',
                   )}
                 >
-                  Tokens saved
+                  {t('clTokensSaved')}
                 </TableHead>
                 <TableHead
                   className={cn(
@@ -107,7 +105,7 @@ export function Skills() {
                     'h-auto w-44 font-medium text-[12px] text-ledger-head-ink',
                   )}
                 >
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">{t('clActions')}</span>
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -158,10 +156,10 @@ function SkillRow({ skill, onOpen }: { skill: Skill; onOpen: () => void }) {
             <span className="text-[13px] text-ink">
               {formatTokens(Math.max(0, skill.tokenSavings.saved))}
             </span>
-            <span className="text-[11px] text-ink-3">saved</span>
+            <span className="text-[11px] text-ink-3">{t('clSaved')}</span>
           </div>
         ) : (
-          <span className="text-[13px] text-ink-3">not measured</span>
+          <span className="text-[13px] text-ink-3">{t('clNotMeasured')}</span>
         )}
       </TableCell>
       <TableCell
@@ -179,7 +177,7 @@ function SkillRow({ skill, onOpen }: { skill: Skill; onOpen: () => void }) {
                 size="sm"
                 className="rounded-9 text-red hover:text-red"
               >
-                Delete
+                {t('clDelete')}
               </Button>
             }
           />
@@ -209,11 +207,9 @@ function SkillsEmpty() {
   return (
     <div className="flex flex-col items-center gap-4 rounded-9 border border-ledger-border border-dashed bg-card px-6 py-16 text-center">
       <div className="flex flex-col gap-1">
-        <p className="font-semibold text-base text-ink">No skills yet</p>
+        <p className="font-semibold text-base text-ink">{t('clNoSkillsYet')}</p>
         <p className="mx-auto max-w-md text-ink-2 text-sm">
-          When your coding agent saves a repeatable browser task with Redrob ,
-          it shows up here, linked into your agents and re-runnable by name. You
-          can also write one yourself.
+          {t('clWhenYourCodingAgentSaves')}
         </p>
       </div>
       <SkillFormDialog
@@ -221,7 +217,7 @@ function SkillsEmpty() {
         trigger={
           <Button size="sm" className="rounded-9">
             <Plus />
-            New skill
+            {t('clNewSkill')}
           </Button>
         }
       />

@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router'
 import {
@@ -78,11 +79,8 @@ export function TaskDetailPage() {
     return (
       <div className="mx-auto w-full max-w-5xl px-8 pt-10 pb-20">
         <EmptyState
-          title="Task not found"
-          hint={
-            error?.message ??
-            'No dispatches for this session id. It may have been pruned or never existed.'
-          }
+          title={t('clTaskNotFound')}
+          hint={error?.message ?? t('clNoDispatches')}
         />
       </div>
     )

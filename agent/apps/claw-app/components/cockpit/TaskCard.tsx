@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tCount } from '@browseros/i18n'
 import { ChevronRight } from '@browseros/icons'
 import { NavLink } from 'react-router'
 import { AgentDot } from '@/components/audit/AgentDot'
@@ -71,7 +72,7 @@ export function TaskCard({ task, now }: TaskCardProps) {
                     screenshotId,
                     screenshotBaseUrl,
                   )}
-                  alt={`Hero from ${task.label}`}
+                  alt={t('clHeroFrom', task.label)}
                   className="h-full w-full object-cover"
                   loading="lazy"
                   decoding="async"
@@ -83,7 +84,7 @@ export function TaskCard({ task, now }: TaskCardProps) {
           </div>
         ) : (
           <div className="flex w-32 shrink-0 items-center justify-center rounded-md border border-border-2 border-dashed bg-bg-sunken text-[10.5px] text-ink-3 uppercase">
-            <span className="px-2 text-center">no screenshot</span>
+            <span className="px-2 text-center">{t('clNoScreenshot')}</span>
           </div>
         )}
         <div className="min-w-0 flex-1 space-y-1.5">
@@ -91,14 +92,12 @@ export function TaskCard({ task, now }: TaskCardProps) {
           <div className="flex items-center gap-3 text-[12.5px] text-ink-3">
             <span className="font-mono">{formatDuration(task.durationMs)}</span>
             <span className="text-ink-3">•</span>
-            <span>
-              {task.dispatchCount} tool{task.dispatchCount === 1 ? '' : 's'}
-            </span>
+            <span>{tCount('clTools', task.dispatchCount)}</span>
             {task.errorCount > 0 && (
               <>
                 <span className="text-ink-3">•</span>
                 <span className="text-red">
-                  {task.errorCount} error{task.errorCount === 1 ? '' : 's'}
+                  {tCount('clErrors', task.errorCount)}
                 </span>
               </>
             )}

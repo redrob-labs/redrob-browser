@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tCount } from '@browseros/i18n'
 import {
   Check,
   ChevronDown,
@@ -87,7 +88,7 @@ export function Timeline({
   return (
     <section className="rounded-2xl border border-border-2 bg-card p-4">
       <header className="flex items-center justify-between gap-3 pb-3">
-        <h2 className="font-semibold text-ink">Timeline</h2>
+        <h2 className="font-semibold text-ink">{t('clTimeline')}</h2>
         <div className="flex items-center gap-1.5">
           <Button
             type="button"
@@ -99,7 +100,7 @@ export function Timeline({
             data-testid="timeline-expand-all"
           >
             <ChevronsUpDown className="size-3.5" />
-            Expand all
+            {t('clExpandAll')}
           </Button>
           <Button
             type="button"
@@ -111,10 +112,10 @@ export function Timeline({
             data-testid="timeline-collapse-all"
           >
             <ChevronsDownUp className="size-3.5" />
-            Collapse all
+            {t('clCollapseAll')}
           </Button>
           <span className="pl-2 text-[12.5px] text-ink-3">
-            {dispatches.length} event{dispatches.length === 1 ? '' : 's'}
+            {tCount('clEvents', dispatches.length)}
           </span>
         </div>
       </header>
@@ -196,27 +197,27 @@ function TimelineRow({
           </span>
         </div>
         <span className="font-mono text-[11.5px] text-ink-3">
-          {dispatch.durationMs ?? 0}ms
+          {t('clMs', dispatch.durationMs ?? 0)}
         </span>
       </button>
       {expanded && (
         <div className="mt-2 space-y-2 border-border-2 border-t px-1 pt-2">
           {dispatch.argsJson && (
-            <Block label="args" copyText={dispatch.argsJson}>
+            <Block label={t('clArgs')} copyText={dispatch.argsJson}>
               <pre className="overflow-x-auto whitespace-pre-wrap break-all text-[11.5px]">
                 {dispatch.argsJson}
               </pre>
             </Block>
           )}
           {dispatch.resultMeta && (
-            <Block label="result" copyText={dispatch.resultMeta}>
+            <Block label={t('clResult')} copyText={dispatch.resultMeta}>
               <pre className="overflow-x-auto whitespace-pre-wrap break-all text-[11.5px]">
                 {dispatch.resultMeta}
               </pre>
             </Block>
           )}
           {isScreenshot && screenshotBaseUrl !== null && (
-            <Block label="screenshot">
+            <Block label={t('clScreenshot')}>
               <button
                 type="button"
                 onClick={() => onScreenshotClick(screenshotId)}
@@ -229,7 +230,7 @@ function TimelineRow({
                       screenshotId,
                       screenshotBaseUrl,
                     )}
-                    alt={`Screenshot at T+${formatOffset(offsetMs)}`}
+                    alt={t('clScreenshotAt', formatOffset(offsetMs))}
                     className="h-full w-full object-cover"
                     loading="lazy"
                   />
@@ -238,7 +239,7 @@ function TimelineRow({
             </Block>
           )}
           {isScreenshot && screenshotBaseUrl === null && (
-            <Block label="screenshot">
+            <Block label={t('clScreenshot')}>
               <div className="w-64 overflow-hidden rounded-md border border-border-2">
                 <AspectRatio ratio={16 / 10}>
                   <div className="h-full w-full animate-pulse bg-card-tint" />
@@ -247,7 +248,7 @@ function TimelineRow({
             </Block>
           )}
           {dispatch.url && (
-            <Block label="page" copyText={dispatch.url}>
+            <Block label={t('clPage')} copyText={dispatch.url}>
               <a
                 href={dispatch.url}
                 target="_blank"
@@ -264,7 +265,7 @@ function TimelineRow({
             !dispatch.url && (
               <div className="text-[12px] text-ink-3">
                 <ImageIcon className="mr-1 inline size-3" />
-                No extra detail recorded.
+                {t('clNoExtraDetailRecorded')}
               </div>
             )}
         </div>
@@ -301,7 +302,7 @@ function Block({
             type="button"
             onClick={handleCopy}
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10.5px] text-ink-3 uppercase tracking-wide transition-colors hover:bg-card-tint hover:text-ink"
-            aria-label={`Copy ${label}`}
+            aria-label={t('clCopyName', label)}
             data-testid={`timeline-block-copy-${label}`}
           >
             {copied ? (
@@ -329,7 +330,7 @@ function SessionEndRow({
     return (
       <li className="flex items-center gap-3 px-2 py-1.5 text-[12.5px] text-ink-3">
         <span className="inline-block size-2 animate-pulse rounded-full bg-accent" />
-        Still running, no session-close received yet.
+        {t('clStillRunningNoSessionClose')}
       </li>
     )
   }
@@ -339,12 +340,11 @@ function SessionEndRow({
       <span className="inline-block size-2 rounded-full bg-ink-3" />
       <span className="font-mono">T+{formatOffset(offset)}</span>
       <span>
-        session{' '}
         {endEvent.kind === 'closed'
-          ? 'closed'
+          ? t('clSessionClosed')
           : endEvent.kind === 'cancelled'
-            ? 'stopped'
-            : `errored (${endEvent.reason ?? 'unknown'})`}
+            ? t('clSessionStopped')
+            : t('clSessionErrored', endEvent.reason ?? t('clUnknown'))}
       </span>
     </li>
   )

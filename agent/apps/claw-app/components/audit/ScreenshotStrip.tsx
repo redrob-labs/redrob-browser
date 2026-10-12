@@ -8,6 +8,7 @@
  */
 
 import type { SessionScreenshot } from '@browseros/claw-api'
+import { t, tNodes } from '@browseros/i18n'
 import { useMemo } from 'react'
 import { AspectRatio } from '@/components/ui/aspect-ratio'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
@@ -61,7 +62,7 @@ export function ScreenshotStrip({
   if (meta.length === 0) {
     return (
       <div className="rounded-2xl border border-border-2 bg-card px-4 py-3 text-ink-3 text-sm">
-        No screenshots captured for this task.
+        {t('clNoScreenshotsCapturedForThis')}
       </div>
     )
   }
@@ -70,8 +71,12 @@ export function ScreenshotStrip({
     <section className="rounded-2xl border border-border-2 bg-card p-3">
       <header className="flex items-center justify-between px-1 pb-2 text-[12.5px] text-ink-3">
         <span>
-          Screenshots{' '}
-          <span className="font-mono text-ink-2">({meta.length})</span>
+          {tNodes(
+            'clScreenshotsN',
+            <span key="a" className="font-mono text-ink-2">
+              ({meta.length})
+            </span>,
+          )}
         </span>
       </header>
       <ScrollArea className="w-full">
@@ -92,7 +97,7 @@ export function ScreenshotStrip({
                 {screenshotBaseUrl !== null ? (
                   <img
                     src={taskScreenshotUrl(sessionId, s.id, screenshotBaseUrl)}
-                    alt={`Screenshot ${idx + 1}`}
+                    alt={t('clScreenshotN', idx + 1)}
                     className="h-full w-full object-cover"
                     loading="lazy"
                   />

@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { ArrowRight } from '@browseros/icons'
 import {
   flexRender,
@@ -107,7 +108,7 @@ export function Audit() {
     <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-6 px-8 pt-8 pb-16">
       <header className="flex items-start justify-between gap-4">
         <h1 className="font-extrabold text-3xl leading-tight tracking-tight md:text-4xl">
-          Audit
+          {t('clAudit')}
         </h1>
         <ManageAuditFilesDialog />
       </header>
@@ -208,7 +209,7 @@ export function Audit() {
                 disabled={isFetchingNextPage}
                 className="group inline-flex items-center gap-1.5 font-medium text-[13px] text-ink-2 transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isFetchingNextPage ? 'Loading...' : 'Load older tasks'}
+                {isFetchingNextPage ? 'Loading...' : t('clLoadOlderTasks')}
                 <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
               </button>
             </div>

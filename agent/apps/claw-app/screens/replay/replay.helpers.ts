@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import {
   CheckCircle2,
   Compass,
@@ -27,13 +28,13 @@ export interface VerbMeta {
 }
 
 export const VERB_META: Record<ReplayVerb, VerbMeta> = {
-  navigate: { label: 'Navigate', Icon: Compass, iconClass: 'text-blue' },
-  read: { label: 'Read', Icon: Eye, iconClass: 'text-ink-3' },
-  click: { label: 'Click', Icon: MousePointer, iconClass: 'text-ink-2' },
-  type: { label: 'Type', Icon: Type, iconClass: 'text-ink-2' },
-  attach: { label: 'Attach', Icon: Paperclip, iconClass: 'text-ink-2' },
-  submit: { label: 'Submit', Icon: Send, iconClass: 'text-accent-ink' },
-  done: { label: 'Done', Icon: CheckCircle2, iconClass: 'text-green' },
+  navigate: { label: t('clNavigate'), Icon: Compass, iconClass: 'text-blue' },
+  read: { label: t('clRead'), Icon: Eye, iconClass: 'text-ink-3' },
+  click: { label: t('clClick'), Icon: MousePointer, iconClass: 'text-ink-2' },
+  type: { label: t('clType'), Icon: Type, iconClass: 'text-ink-2' },
+  attach: { label: t('clAttach'), Icon: Paperclip, iconClass: 'text-ink-2' },
+  submit: { label: t('clSubmit'), Icon: Send, iconClass: 'text-accent-ink' },
+  done: { label: t('clDone'), Icon: CheckCircle2, iconClass: 'text-green' },
 }
 
 interface KindStyle {

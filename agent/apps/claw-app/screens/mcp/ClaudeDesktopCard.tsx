@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { ArrowRight } from '@browseros/icons'
 import { useState } from 'react'
 import { InstallExtensionDialog } from './InstallExtensionDialog'
@@ -27,7 +28,9 @@ export function ClaudeDesktopCard() {
         <h2 className="font-semibold text-cyanotype-ink text-lg">
           Claude Desktop
         </h2>
-        <span className="text-[12px] text-cyanotype-muted">Extension</span>
+        <span className="text-[12px] text-cyanotype-muted">
+          {t('clExtension')}
+        </span>
       </header>
       <button
         type="button"
@@ -38,7 +41,7 @@ export function ClaudeDesktopCard() {
           <ClaudeMark className="size-7 shrink-0" />
           <div className="min-w-0 flex-1 space-y-1">
             <p className="font-semibold text-[15px] text-cyanotype-ink leading-snug">
-              Give Claude Desktop a real browser.
+              {t('clGiveClaudeDesktopAReal')}
             </p>
             <p className="text-[13px] text-cyanotype-muted leading-snug">
               {COWORK_REQUIREMENT_LINE}
@@ -47,7 +50,7 @@ export function ClaudeDesktopCard() {
         </div>
         <div className="mt-3 flex justify-end">
           <span className="inline-flex items-center gap-1 text-[12px] text-cyanotype-blue transition-colors group-hover:text-cyanotype-blue-hover">
-            Show me how
+            {t('clShowMeHow')}
             <ArrowRight
               aria-hidden
               className="size-3.5 transition-transform group-hover:translate-x-0.5"

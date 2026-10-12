@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { ArrowLeft, ArrowRight, Check, Download } from '@browseros/icons'
 import { useEffect, useState } from 'react'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -64,6 +65,7 @@ export function InstallExtensionDialog({
         <div className="flex flex-col sm:flex-row">
           <nav className="shrink-0 border-border-2 border-b bg-bg-sunken px-5 py-5 sm:w-60 sm:border-r sm:border-b-0">
             <DialogTitle className="font-semibold text-[15px] text-ink leading-snug">
+              {/* i18n-ignore: the upstream bundle, by its own name (see lib/branding UPSTREAM_ARTEFACTS) */}
               Install BrowserOS neo
             </DialogTitle>
             <DialogDescription className="mt-1 text-[12px] text-ink-3 leading-snug">
@@ -114,7 +116,7 @@ export function InstallExtensionDialog({
 
           <div className="flex min-w-0 flex-1 flex-col px-6 py-5">
             <p className="pr-10 font-mono text-[10.5px] text-ink-3 uppercase tracking-[0.08em]">
-              step {index + 1} of {INSTALL_STEPS.length}
+              {t('clStepNofM', index + 1, INSTALL_STEPS.length)}
             </p>
             <h3 className="mt-1 pr-10 font-semibold text-[17px] text-ink leading-snug">
               {step.title}
@@ -135,8 +137,7 @@ export function InstallExtensionDialog({
                 failedImages.has(step.image.src) ? (
                   <div className="flex h-full items-center justify-center px-6 text-center">
                     <p className="text-[13px] text-ink-3 leading-snug">
-                      Screenshot could not be loaded — the steps above still
-                      apply.
+                      {t('clScreenshotCouldNotBeLoaded')}
                     </p>
                   </div>
                 ) : (
@@ -170,7 +171,7 @@ export function InstallExtensionDialog({
                     className={cn(buttonVariants({ size: 'lg' }), 'px-4')}
                   >
                     <Download aria-hidden />
-                    Download the extension
+                    {t('clDownloadTheExtension')}
                   </a>
                   <a
                     href={EXTENSION_RELEASES_URL}
@@ -178,7 +179,7 @@ export function InstallExtensionDialog({
                     rel="noreferrer"
                     className="font-mono text-[10.5px] text-ink-3 uppercase tracking-[0.08em] underline-offset-4 transition-colors hover:text-accent hover:underline"
                   >
-                    all releases
+                    {t('clAllReleases')}
                   </a>
                 </div>
               )}
@@ -192,12 +193,12 @@ export function InstallExtensionDialog({
                 onClick={() => setIndex((prev) => Math.max(0, prev - 1))}
               >
                 <ArrowLeft aria-hidden />
-                Back
+                {t('clBack')}
               </Button>
               {isLast ? (
                 <Button size="sm" onClick={() => onOpenChange(false)}>
                   <Check aria-hidden />
-                  Done
+                  {t('clDone')}
                 </Button>
               ) : (
                 <Button
@@ -206,7 +207,7 @@ export function InstallExtensionDialog({
                     setIndex((prev) => Math.min(lastIndex, prev + 1))
                   }
                 >
-                  Next
+                  {t('clNext')}
                   <ArrowRight aria-hidden />
                 </Button>
               )}

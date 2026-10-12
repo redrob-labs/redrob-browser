@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { ArrowUpRight } from '@browseros/icons'
 import { NavLink, useLocation } from 'react-router'
 import { cn } from '@/lib/utils'
@@ -61,7 +62,7 @@ export function SupportingTile({
               screenshotId,
               screenshotBaseUrl,
             )}
-            alt={`Session preview from ${task.label}`}
+            alt={t('clSessionPreviewFrom', task.label)}
             loading="lazy"
             decoding="async"
             className="absolute inset-0 h-full w-full object-cover object-top"
@@ -112,10 +113,12 @@ function Caption({
         <span className="truncate">{task.label}</span>
         {isLive && (
           <span className="rounded-full bg-cyanotype-live px-2 py-0.5 font-semibold text-[10px] text-cyanotype-live-ink">
-            LIVE
+            {t('clLive2')}
           </span>
         )}
-        {isStopped && <span className={toneClasses.subdued}>STOPPED</span>}
+        {isStopped && (
+          <span className={toneClasses.subdued}>{t('clStopped2')}</span>
+        )}
       </div>
       <h3 className="truncate font-bold text-[14px] leading-5 tracking-[-0.02em]">
         {task.name}

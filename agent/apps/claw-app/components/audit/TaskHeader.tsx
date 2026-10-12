@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tCount } from '@browseros/i18n'
 import {
   ChevronLeft,
   Copy,
@@ -69,7 +70,7 @@ export function TaskHeader({ detail }: TaskHeaderProps) {
         className="inline-flex items-center gap-1 text-[12.5px] text-ink-3 hover:text-ink"
       >
         <ChevronLeft className="size-3.5" />
-        Back
+        {t('clBack')}
       </button>
 
       <header className="rounded-2xl border border-border-2 bg-card p-5">
@@ -81,7 +82,7 @@ export function TaskHeader({ detail }: TaskHeaderProps) {
               <StatusBadge status={task.status} />
               {task.errorCount > 0 && (
                 <span className="text-[12.5px] text-red">
-                  {task.errorCount} error{task.errorCount === 1 ? '' : 's'}
+                  {tCount('clErrors', task.errorCount)}
                 </span>
               )}
             </div>
@@ -98,13 +99,13 @@ export function TaskHeader({ detail }: TaskHeaderProps) {
 
         <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-2 text-[12.5px] md:grid-cols-4">
           <div>
-            <dt className="text-ink-3">Started</dt>
+            <dt className="text-ink-3">{t('clStarted')}</dt>
             <dd className="font-mono text-ink-2">
               {new Date(task.startedAt).toLocaleString()}
             </dd>
           </div>
           <div>
-            <dt className="text-ink-3">Ended</dt>
+            <dt className="text-ink-3">{t('clEnded')}</dt>
             <dd className="font-mono text-ink-2">
               {task.endedAt
                 ? new Date(task.endedAt).toLocaleString()
@@ -114,17 +115,17 @@ export function TaskHeader({ detail }: TaskHeaderProps) {
             </dd>
           </div>
           <div>
-            <dt className="text-ink-3">Duration</dt>
+            <dt className="text-ink-3">{t('clDuration')}</dt>
             <dd className="font-mono text-ink-2">
               {formatDuration(task.durationMs)}
             </dd>
           </div>
           <div>
-            <dt className="text-ink-3">Tools</dt>
+            <dt className="text-ink-3">{t('clTools')}</dt>
             <dd className="font-mono text-ink-2">{task.dispatchCount}</dd>
           </div>
           <div>
-            <dt className="text-ink-3">Tokens</dt>
+            <dt className="text-ink-3">{t('clTokens2')}</dt>
             <dd
               className="font-mono text-ink-2"
               title={
@@ -139,11 +140,11 @@ export function TaskHeader({ detail }: TaskHeaderProps) {
             </dd>
           </div>
           <div className="col-span-2">
-            <dt className="text-ink-3">Site</dt>
+            <dt className="text-ink-3">{t('clSite')}</dt>
             <dd className="font-mono text-ink-2">{task.site ?? 'none'}</dd>
           </div>
           <div className="col-span-2">
-            <dt className="text-ink-3">Session</dt>
+            <dt className="text-ink-3">{t('clSession')}</dt>
             <dd className="flex items-center gap-2 font-mono text-ink-2">
               <span className="truncate">{task.sessionId}</span>
               <button
@@ -157,12 +158,14 @@ export function TaskHeader({ detail }: TaskHeaderProps) {
                     })
                 }}
                 className="rounded p-1 text-ink-3 hover:bg-bg-sunken"
-                aria-label="Copy session id"
+                aria-label={t('clCopySessionId')}
               >
                 <Copy className="size-3" />
               </button>
               {copied && (
-                <span className="text-[11px] text-accent">copied</span>
+                <span className="text-[11px] text-accent">
+                  {t('clCopied2')}
+                </span>
               )}
             </dd>
           </div>
@@ -180,12 +183,12 @@ export function TaskHeader({ detail }: TaskHeaderProps) {
             }
             title={
               replayReady
-                ? 'Watch the rrweb session replay'
-                : 'No replay recorded for this session yet'
+                ? t('clWatchTheRrwebSessionReplay')
+                : t('clNoReplayRecordedForThis')
             }
           >
             <PlayCircle className="mr-1.5 size-3.5" />
-            View Session Replay
+            {t('clViewSessionReplay')}
           </Button>
           {finalUrl && (
             <Button
@@ -194,13 +197,13 @@ export function TaskHeader({ detail }: TaskHeaderProps) {
               onClick={() => window.open(finalUrl, '_blank', 'noreferrer')}
             >
               <ExternalLink className="mr-1.5 size-3.5" />
-              Open final URL
+              {t('clOpenFinalUrl')}
             </Button>
           )}
           {task.site && (
             <Button variant="ghost" size="sm">
               <Settings2 className="mr-1.5 size-3.5" />
-              Make a rule on {task.site}
+              {t('clMakeRuleOn', task.site)}
             </Button>
           )}
         </div>

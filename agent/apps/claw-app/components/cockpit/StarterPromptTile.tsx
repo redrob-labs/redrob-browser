@@ -9,6 +9,7 @@
  * "listening" without waiting for the polling probe.
  */
 
+import { t } from '@browseros/i18n'
 import { Check, Copy, Sparkles } from '@browseros/icons'
 import { useState } from 'react'
 
@@ -56,7 +57,7 @@ export function StarterPromptTile({
           className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 font-semibold text-[13px] text-accent-foreground transition hover:opacity-90 active:scale-[0.99]"
         >
           {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-          {copied ? 'Copied' : 'Copy task'}
+          {copied ? t('clCopied') : t('clCopyTask')}
         </button>
       </div>
     )
@@ -72,7 +73,7 @@ export function StarterPromptTile({
         className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-bg-sunken px-2.5 py-1 font-semibold text-[12px] text-ink-2 transition hover:bg-card-tint hover:text-ink"
       >
         {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-        {copied ? 'Copied' : 'Copy'}
+        {copied ? t('clCopied') : t('clCopy')}
       </button>
     </div>
   )

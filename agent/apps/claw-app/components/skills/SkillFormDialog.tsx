@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+import { t } from '@browseros/i18n'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQueryClient } from '@tanstack/react-query'
 import { type ReactElement, useState } from 'react'
@@ -133,7 +134,7 @@ function CreateForm({ onClose }: { onClose: () => void }) {
       {
         loading: 'Saving the skill…',
         success: `Saved /${name}`,
-        error: 'Could not save the skill',
+        error: t('clCouldNotSaveSkill'),
       },
     )
   })
@@ -142,23 +143,23 @@ function CreateForm({ onClose }: { onClose: () => void }) {
     <Form {...form}>
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <DialogHeader>
-          <DialogTitle>New skill</DialogTitle>
-          <DialogDescription>
-            A skill Redrob links into your agents and you re-run by name.
-          </DialogDescription>
+          <DialogTitle>{t('clNewSkill')}</DialogTitle>
+          <DialogDescription>{t('clASkillRedrobLinksInto')}</DialogDescription>
         </DialogHeader>
         <FormField
           control={form.control}
           name="name"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Name</FormLabel>
+              <FormLabel>{t('clName')}</FormLabel>
               <FormControl>
                 <div className="flex h-9 w-full items-center overflow-hidden rounded-md border border-input bg-transparent shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
                   <span className="flex h-full select-none items-center bg-card-tint px-2.5 font-mono text-ink-2 text-sm">
+                    {/* i18n-ignore: the slash-command prefix */}
                     neo-
                   </span>
                   <Input
+                    // i18n-ignore: a sample skill name
                     placeholder="inbox-sweep"
                     className="h-full flex-1 rounded-none border-0 font-mono shadow-none focus-visible:ring-0"
                     {...field}
@@ -166,9 +167,11 @@ function CreateForm({ onClose }: { onClose: () => void }) {
                 </div>
               </FormControl>
               <FormDescription>
-                Saved as /{field.value ? neoName(field.value) : 'neo-<name>'} so
-                you can find it with /neo in your agent. Lowercase letters,
-                digits, and hyphens.
+                {t(
+                  'clSavedAsSlash',
+                  // i18n-ignore: a slash command, not copy
+                  field.value ? neoName(field.value) : 'neo-<name>',
+                )}
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -179,12 +182,9 @@ function CreateForm({ onClose }: { onClose: () => void }) {
           name="description"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Description</FormLabel>
+              <FormLabel>{t('clDescription')}</FormLabel>
               <FormControl>
-                <Input
-                  placeholder="Check the inbox and draft what is owed"
-                  {...field}
-                />
+                <Input placeholder={t('clCheckTheInboxAndDraft')} {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -195,8 +195,9 @@ function CreateForm({ onClose }: { onClose: () => void }) {
           name="site"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Site (optional)</FormLabel>
+              <FormLabel>{t('clSiteOptional')}</FormLabel>
               <FormControl>
+                {/* i18n-ignore: a sample site */}
                 <Input placeholder="mail.google.com" {...field} />
               </FormControl>
               <FormMessage />
@@ -208,9 +209,13 @@ function CreateForm({ onClose }: { onClose: () => void }) {
           name="steps"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Steps</FormLabel>
+              <FormLabel>{t('clSteps')}</FormLabel>
               <FormControl>
-                <Textarea rows={4} placeholder="One step per line" {...field} />
+                <Textarea
+                  rows={4}
+                  placeholder={t('clOneStepPerLine')}
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -221,9 +226,13 @@ function CreateForm({ onClose }: { onClose: () => void }) {
           name="learnedNotes"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Learned notes (optional)</FormLabel>
+              <FormLabel>{t('clLearnedNotesOptional')}</FormLabel>
               <FormControl>
-                <Textarea rows={3} placeholder="One note per line" {...field} />
+                <Textarea
+                  rows={3}
+                  placeholder={t('clOneNotePerLine')}
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -233,12 +242,12 @@ function CreateForm({ onClose }: { onClose: () => void }) {
           <DialogClose
             render={
               <Button variant="outline" type="button">
-                Cancel
+                {t('clCancel')}
               </Button>
             }
           />
           <Button type="submit" disabled={create.isPending}>
-            Save skill
+            {t('clSaveSkill')}
           </Button>
         </DialogFooter>
       </form>
@@ -289,7 +298,7 @@ function EditForm({
       {
         loading: 'Saving…',
         success: `Saved /${name}`,
-        error: 'Could not save the skill',
+        error: t('clCouldNotSaveSkill'),
       },
     )
   })
@@ -298,9 +307,9 @@ function EditForm({
     <Form {...form}>
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <DialogHeader>
-          <DialogTitle>Edit {name}</DialogTitle>
+          <DialogTitle>{t('clEditName', name)}</DialogTitle>
           <DialogDescription>
-            Saving re-renders the SKILL.md and re-links it into your agents.
+            {t('clSavingReRendersTheSkill')}
           </DialogDescription>
         </DialogHeader>
         <FormField
@@ -308,7 +317,7 @@ function EditForm({
           name="description"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Description</FormLabel>
+              <FormLabel>{t('clDescription')}</FormLabel>
               <FormControl>
                 <Input {...field} />
               </FormControl>
@@ -321,9 +330,9 @@ function EditForm({
           name="site"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Site</FormLabel>
+              <FormLabel>{t('clSite')}</FormLabel>
               <FormControl>
-                <Input placeholder="Leave empty to clear" {...field} />
+                <Input placeholder={t('clLeaveEmptyToClear')} {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -334,9 +343,13 @@ function EditForm({
           name="steps"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Steps</FormLabel>
+              <FormLabel>{t('clSteps')}</FormLabel>
               <FormControl>
-                <Textarea rows={5} placeholder="One step per line" {...field} />
+                <Textarea
+                  rows={5}
+                  placeholder={t('clOneStepPerLine')}
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -347,9 +360,13 @@ function EditForm({
           name="learnedNotes"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Learned notes</FormLabel>
+              <FormLabel>{t('clLearnedNotes')}</FormLabel>
               <FormControl>
-                <Textarea rows={3} placeholder="One note per line" {...field} />
+                <Textarea
+                  rows={3}
+                  placeholder={t('clOneNotePerLine')}
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -359,12 +376,12 @@ function EditForm({
           <DialogClose
             render={
               <Button variant="outline" type="button">
-                Cancel
+                {t('clCancel')}
               </Button>
             }
           />
           <Button type="submit" disabled={update.isPending}>
-            Save
+            {t('clSave')}
           </Button>
         </DialogFooter>
       </form>

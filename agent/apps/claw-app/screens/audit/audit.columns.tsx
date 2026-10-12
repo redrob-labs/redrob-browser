@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import type { ColumnDef } from '@tanstack/react-table'
 import { cn } from '@/lib/utils'
 import type { TaskSummary } from '@/modules/api/audit.hooks'
@@ -154,7 +155,7 @@ function TokensCell({ task }: { task: TaskSummary }) {
     return (
       <span
         className="text-[12px] text-ledger-ink-3 tabular-nums"
-        title="Token usage not measured for this session"
+        title={t('clTokenUsageNotMeasuredFor')}
       >
         —
       </span>
@@ -183,17 +184,23 @@ function LiveInlineChip() {
     <span
       className={cn(STATE_CHIP, 'bg-cyanotype-live text-cyanotype-live-ink')}
     >
-      Live
+      {t('clLive')}
     </span>
   )
 }
 
 function FailedInlineChip() {
-  return <span className={cn(STATE_CHIP, 'bg-red-tint text-red')}>Failed</span>
+  return (
+    <span className={cn(STATE_CHIP, 'bg-red-tint text-red')}>
+      {t('clFailed')}
+    </span>
+  )
 }
 
 function StoppedInlineChip() {
   return (
-    <span className={cn(STATE_CHIP, 'bg-card-tint text-ink-3')}>Stopped</span>
+    <span className={cn(STATE_CHIP, 'bg-card-tint text-ink-3')}>
+      {t('clStopped')}
+    </span>
   )
 }

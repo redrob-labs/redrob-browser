@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -42,12 +43,12 @@ export function InControlBar({
       <div className="mx-auto flex max-w-[1040px] flex-col gap-2">
         <div className="flex flex-col gap-0.5">
           <p className="font-semibold text-[14px] text-ink">
-            You are in control of {session.label}
+            {t('clInControlOf', session.label)}
             {site ? ` on ${site}` : ''}.
           </p>
           {help?.resumeHint && (
             <p className="text-[13px] text-ink-2">
-              When done, the agent resumes at: {help.resumeHint}
+              {t('clResumesAt', help.resumeHint)}
             </p>
           )}
         </div>
@@ -57,13 +58,13 @@ export function InControlBar({
               htmlFor="hand-back-note"
               className="font-mono text-[10.5px] text-ink-3 uppercase tracking-[0.08em]"
             >
-              Note for the agent (optional)
+              {t('clNoteForTheAgentOptional')}
             </Label>
             <Input
               id="hand-back-note"
               value={note}
               onChange={(event) => setNote(event.target.value)}
-              placeholder="e.g. signed in, 2FA done"
+              placeholder={t('clEGSignedIn2fa')}
               className="bg-card"
             />
           </div>
@@ -75,7 +76,7 @@ export function InControlBar({
             disabled={isHandingBack}
             className={needsYouTone.action}
           >
-            {isHandingBack ? 'Handing back…' : 'Hand back to the agent'}
+            {isHandingBack ? t('clHandingBack') : t('clHandBackToTheAgent')}
           </Button>
           <Button
             type="button"
@@ -85,7 +86,7 @@ export function InControlBar({
             onClick={onCancel}
             disabled={isHandingBack}
           >
-            Cancel
+            {t('clCancel')}
           </Button>
         </div>
       </div>

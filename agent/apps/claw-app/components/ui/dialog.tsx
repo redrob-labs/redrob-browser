@@ -9,6 +9,7 @@
 
 "use client"
 
+import { t } from '@browseros/i18n'
 import * as React from "react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 
@@ -81,7 +82,7 @@ function DialogContent({
           >
             <IconX
             />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t('clClose')}</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>
@@ -119,7 +120,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close render={<Button variant="outline" />}>
-          Close
+          {t('clClose')}
         </DialogPrimitive.Close>
       )}
     </div>

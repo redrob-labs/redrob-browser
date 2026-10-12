@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Loader2 } from '@browseros/icons'
 import { HarnessIcon } from '@/components/harness/HarnessIcon'
 import { cn } from '@/lib/utils'
@@ -51,8 +52,8 @@ export function ConnectionRow({
       disabled={isPending}
       aria-label={
         state.installed
-          ? `Disconnect ${state.harness}`
-          : `Connect ${state.harness}`
+          ? t('clDisconnectName', state.harness)
+          : t('clConnectName', state.harness)
       }
       className={cn(
         'group block w-full border-cyanotype-border border-t text-left transition-colors',
@@ -97,13 +98,13 @@ function RowAction({
     return (
       <div className="flex shrink-0 items-center gap-3">
         <span className="font-semibold text-[12px] text-cyanotype-live-text">
-          Connected
+          {t('clConnected')}
         </span>
         <span aria-hidden className="text-[16px] text-cyanotype-border">
           ·
         </span>
         <span className="inline-flex items-center gap-1 text-[12px] text-cyanotype-muted transition-colors group-hover:text-cyanotype-ink">
-          Disconnect
+          {t('clDisconnect')}
           <ActionArrow />
         </span>
       </div>
@@ -116,7 +117,7 @@ function RowAction({
         'transition-colors group-hover:text-cyanotype-blue-hover',
       )}
     >
-      Connect
+      {t('clConnect')}
       <ActionArrow />
     </span>
   )

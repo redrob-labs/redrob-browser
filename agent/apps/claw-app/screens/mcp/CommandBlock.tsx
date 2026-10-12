@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t } from '@browseros/i18n'
 import { Check, Copy } from '@browseros/icons'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
@@ -64,7 +65,7 @@ export function CommandBlock({
       {isPending ? (
         <span
           role="status"
-          aria-label="Resolving the endpoint"
+          aria-label={t('clResolvingTheEndpoint')}
           className="h-[18px] min-w-0 flex-1 animate-pulse rounded bg-border-2"
         />
       ) : (
@@ -76,18 +77,18 @@ export function CommandBlock({
         type="button"
         onClick={copy}
         disabled={isPending}
-        aria-label={copied ? 'Command copied' : 'Copy command'}
+        aria-label={copied ? t('clCommandCopied') : t('clCopyCommand')}
         className="inline-flex shrink-0 items-center gap-1.5 self-center rounded-lg border border-border-2 bg-card px-2 py-1 text-[11.5px] text-ink-3 transition-colors hover:border-border-strong hover:text-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40"
       >
         {copied ? (
           <>
             <Check aria-hidden className="size-3.5 text-green" />
-            Copied
+            {t('clCopied')}
           </>
         ) : (
           <>
             <Copy aria-hidden className="size-3.5" />
-            Copy
+            {t('clCopy')}
           </>
         )}
       </button>
