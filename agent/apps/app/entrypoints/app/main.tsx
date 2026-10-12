@@ -15,14 +15,22 @@ import { Toaster } from '@/components/ui/sonner'
 import { AnalyticsProvider } from '@/lib/analytics/AnalyticsProvider.tsx'
 import { QueryProvider } from '@/lib/query/QueryProvider'
 import { sentryRootErrorHandler } from '@/lib/sentry/sentryRootErrorHandler.ts'
+import { maybeShowLaunchSplash } from '@/lib/splash/launch-splash'
 import {
   applyTheme,
   mirroredTheme,
+  readTheme,
   resolveTheme,
 } from '@/lib/theme/browser-color-scheme'
 import { App } from './App'
 
 const $root = document.getElementById('root')
+
+// The new tab's first frame, for the launch splash to hand over to.
+const firstFrame = new Promise<void>((resolve) =>
+  requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+)
+void maybeShowLaunchSplash(readTheme(), firstFrame)
 
 if ($root) {
   // Before the first render: a module script runs before first paint, so a dark page is never white.
