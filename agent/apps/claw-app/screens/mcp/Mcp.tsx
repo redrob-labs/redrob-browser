@@ -21,7 +21,6 @@ import {
   useDisconnectHarness,
 } from '@/modules/api/connections.hooks'
 import { resolveCanonicalMcpEndpointUrl } from '@/modules/api/mcp-endpoint'
-import { ClaudeDesktopCard } from './ClaudeDesktopCard'
 import { ConnectionRow } from './ConnectionRow'
 import { HeroCard } from './HeroCard'
 import { ManualSetupCard } from './ManualSetupCard'
@@ -131,7 +130,9 @@ export function Mcp() {
           </div>
         )}
       </section>
-      <ClaudeDesktopCard />
+      {/* The Claude Desktop card is withheld: the only extension to offer is the upstream's own
+          (its manifest, icon and the name Claude Desktop shows are all theirs). It returns when a
+          Redrob-branded extension ships; ClaudeDesktopCard and InstallExtensionDialog stay for that. */}
       <ManualSetupCard endpointUrl={url} />
     </div>
   )

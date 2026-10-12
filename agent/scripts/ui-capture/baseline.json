@@ -108,7 +108,7 @@
     "fonts": 0
   },
   "claw-mcp.dark.en": {
-    "offPalette": 4,
+    "offPalette": 3,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -117,7 +117,7 @@
     "fonts": 0
   },
   "claw-mcp.dark.ko": {
-    "offPalette": 4,
+    "offPalette": 3,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -126,7 +126,7 @@
     "fonts": 0
   },
   "claw-mcp.light.en": {
-    "offPalette": 5,
+    "offPalette": 4,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
@@ -135,7 +135,7 @@
     "fonts": 0
   },
   "claw-mcp.light.ko": {
-    "offPalette": 5,
+    "offPalette": 4,
     "contrast": 0,
     "focusMissing": 0,
     "roundIcons": 0,
