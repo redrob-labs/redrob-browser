@@ -33,6 +33,7 @@ export interface ProviderRow {
   hasAccessKeyId: boolean
   hasSecretAccessKey: boolean
   hasSessionToken: boolean
+  viaLauncher: boolean
   resourceName: string | null
   region: string | null
   reasoningEffort: string | null
@@ -85,6 +86,7 @@ export function toProviderConfig(row: ProviderRow): LlmProviderConfig | null {
     hasAccessKeyId: row.hasAccessKeyId,
     hasSecretAccessKey: row.hasSecretAccessKey,
     hasSessionToken: row.hasSessionToken,
+    viaLauncher: row.viaLauncher,
     resourceName: orUndefined(row.resourceName),
     region: orUndefined(row.region),
     reasoningEffort: orUndefined(row.reasoningEffort),
