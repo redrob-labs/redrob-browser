@@ -4,6 +4,38 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
+## 0.1.8 — 2026-10-13
+
+**The extension and the agent apps are on Redrob UI, end to end.** Every page the browser ships — the new tab,
+the side panel's chat and history, settings, onboarding, the scheduled-tasks and connected-apps pages, and both
+agent apps (the cockpit and its onboarding) — now draws its tokens, type, components and icons from
+`@redrob-labs/ui` 1.3.1, the same release as the window's own chrome. One colour scheme covers the window and
+the pages: choosing light, dark or system in either place changes both, and the pages pick the scheme up before
+their first paint so a dark page is never white for a frame. Every stylesheet enters through one file, in a
+declared cascade layer, so a third-party sheet can no longer repaint the system's primitives.
+
+**English and Korean, everywhere.** The side panel, the app frame, settings, diagnostics, onboarding, the
+extension manifest and both agent apps are localised, and a check fails the build on any hard-coded UI string.
+The agent app's durations read `4분 0초` in Korean rather than `4m 0s`.
+
+**2026 icons and a launch splash.** Every icon slot — the app icons on all three platforms, the Windows
+installer and Start tiles, the document and PDF icons, the product favicon and the extension's action icons —
+is the 2026 brand set, and the first new tab of a browser session opens on a short Redrob splash that hands
+over to the page's first frame. It never runs in a frame or on a deep link.
+
+**The agent apps no longer name the product they were forked from.** Their mark, name, promo copy and hosts are
+Redrob's; the one remaining mention — the Claude Desktop extension, which is the upstream's own file — is
+withheld from the MCP page until a Redrob-branded extension ships.
+
+**Connect apps** shows a built-in app's description even when the app synced before the catalogue loaded.
+
+### Under the hood
+
+The agent extension is at 0.0.165. Every extension and onboarding screen is captured in CI, light and dark,
+English and Korean, and measured for off-palette colours, contrast, missing focus rings, foreign icons and
+untranslated copy against a ratcheted baseline; a dev `.deb` is built on the runner and its chrome measured from
+pixels. The CDN publish step can replace an already-published version on request.
+
 ## 0.1.7 — 2026-10-10
 
 **macOS and Windows ship from the same release as Linux.** 0.1.6 added a signed and notarized macOS app and a
