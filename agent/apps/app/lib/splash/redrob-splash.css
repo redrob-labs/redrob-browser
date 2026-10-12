@@ -1,0 +1,177 @@
+/* Redrob launch splash - Redrob Design System 2026.
+   Values are the DS tokens (tokens.css), inlined with the token named, so the splash
+   paints before the app's own stylesheet arrives. */
+
+@font-face {
+  font-family: 'Redrob Splash Pretendard';
+  src: local('Pretendard SemiBold'), local('Pretendard-SemiBold'), url('./Pretendard-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: block;
+}
+
+.rs-splash {
+  --rs-ground: #ffffff; /* surface-base, light */
+  --rs-ink: #0a0b0c; /* ink-primary, light */
+  --rs-wash: linear-gradient(130deg, #2b52ff1f 0%, #6ff4f014 46%, #ffffff00 100%); /* wash-brand */
+  --rs-entrance: cubic-bezier(0.05, 0.7, 0.1, 1); /* easing-entrance */
+  --rs-exit: cubic-bezier(0.3, 0, 0.8, 0.15); /* easing-exit */
+  --rs-symbol: cubic-bezier(.45, 0, .25, 1); /* the product symbols' one curve */
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--rs-ground);
+  color: var(--rs-ink);
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: drag; /* a frameless window can still be moved while it starts */
+  transition: opacity 280ms var(--rs-exit);
+}
+.rs-splash--dark {
+  --rs-ground: #0a0b0c; /* redrob-black, surface-base dark */
+  --rs-ink: #f8f9fb; /* gray-1, ink-primary dark */
+  --rs-wash: linear-gradient(130deg, #2b52ff24 0%, #6ff4f00f 55%, #ffffff00 100%); /* wash-deep */
+}
+.rs-splash--out { opacity: 0; pointer-events: none; }
+.rs-splash [hidden] { display: none !important; }
+
+/* The ground: the brand wash arriving at 40 degrees, as MarkReveal's. */
+.rs-splash__ground {
+  position: absolute;
+  inset: 0;
+  background: var(--rs-wash);
+  background-size: 200% 200%;
+  opacity: 0;
+  animation: rs-ground 2200ms var(--rs-entrance) forwards;
+}
+@keyframes rs-ground {
+  0% { background-position: 122% 122%; opacity: 0; }
+  35% { opacity: 1; }
+  100% { background-position: 2% 2%; opacity: 1; }
+}
+
+.rs-splash__beat { position: relative; display: flex; flex-direction: column; align-items: center; }
+
+/* ---- Beat 1: MarkReveal (components/bundle.css), the lockup at md, sm on a small window. */
+.rs-splash__lock { position: relative; line-height: 0; width: 360px; }
+@media (max-width: 560px) { .rs-splash__lock { width: 240px; } } /* MarkReveal sm; never below 240 */
+.rs-splash__art {
+  display: block;
+  width: 100%;
+  height: auto;
+  clip-path: polygon(-40% 0%, -31.6% 0%, -48.4% 100%, -40% 100%);
+  animation: rs-wipe 1400ms var(--rs-entrance) forwards;
+}
+@keyframes rs-wipe {
+  from { clip-path: polygon(-40% 0%, -31.6% 0%, -48.4% 100%, -40% 100%); }
+  to { clip-path: polygon(-40% 0%, 128.4% 0%, 111.6% 100%, -40% 100%); }
+}
+.rs-splash__sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  -webkit-mask-image: var(--rs-mask);
+  mask-image: var(--rs-mask);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  background: linear-gradient(130deg, rgba(255, 255, 255, 0) 40%, rgba(255, 255, 255, 0.95) 50%, rgba(255, 255, 255, 0) 60%);
+  background-size: 300% 300%;
+  animation: rs-sheen 1400ms var(--rs-entrance) forwards;
+}
+@keyframes rs-sheen {
+  from { background-position: 124% 124%; opacity: 1; }
+  85% { opacity: 1; }
+  to { background-position: -30% -30%; opacity: 0; }
+}
+/* The hand-over: the threshold crosses back along the same 40 degree edge. The lockup
+   itself never moves or fades; it is covered, as it was uncovered. */
+.rs-splash__brand--cover .rs-splash__art {
+  animation: rs-cover 320ms var(--rs-exit) forwards;
+}
+@keyframes rs-cover {
+  from { clip-path: polygon(-40% 0%, 128.4% 0%, 111.6% 100%, -40% 100%); }
+  to { clip-path: polygon(111.6% 0%, 128.4% 0%, 111.6% 100%, 94.8% 100%); }
+}
+
+/* ---- Beat 2: the product. Icon 112px, the name 20px Pretendard SemiBold under it. */
+.rs-splash__product { gap: 20px; }
+.rs-splash--product .rs-splash__product { animation: rs-arrive 220ms var(--rs-entrance) both; }
+@keyframes rs-arrive { from { opacity: 0; } to { opacity: 1; } }
+.rs-splash__icon { width: 112px; height: 112px; line-height: 0; }
+.rs-splash__icon .rs-icon { width: 100%; height: 100%; display: block; overflow: visible; }
+.rs-splash--product .rs-splash__icon { animation: rs-settle 600ms var(--rs-symbol) both; }
+@keyframes rs-settle { from { transform: scale(0.9); opacity: 0; } to { transform: none; opacity: 1; } }
+.rs-splash__name {
+  margin: 0;
+  font-family: 'Redrob Splash Pretendard', Pretendard, 'Wanted Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 28px;
+  letter-spacing: -0.01em;
+  color: var(--rs-ink);
+  white-space: nowrap;
+}
+
+/* Launch light: one 1.6s pass across the tile once it has settled. */
+.rs-icon .rs-launchlight { transform: translate(-1100px, -923px); }
+.rs-splash--product .rs-icon .rs-launchlight { animation: rs-pass 1600ms var(--rs-symbol) 600ms both; }
+@keyframes rs-pass { from { transform: translate(-1100px, -923px); } to { transform: translate(1100px, 923px); } }
+
+/* Working state: one 2.8s loop, at rest for at least half of it; light crosses the
+   glass door once every two loops. Starts after the launch pass. */
+.rs-icon .rs-doorlight { transform: translate(-1100px, -923px); }
+.rs-splash--product .rs-icon .rs-doorlight { animation: rs-door 5600ms var(--rs-symbol) 2200ms infinite; }
+@keyframes rs-door {
+  0% { transform: translate(-1100px, -923px); }
+  30%, 100% { transform: translate(1100px, 923px); }
+}
+.rs-icon .rs-p { transform-box: view-box; }
+.rs-splash--product .rs-icon .rs-p { animation-duration: 2800ms; animation-timing-function: var(--rs-symbol); animation-iteration-count: infinite; animation-delay: 1200ms; animation-fill-mode: both; }
+
+/* Code: the cursor fades softly instead of blinking hard (never below 30 percent). */
+.rs-splash--product .rs-code-cursor { animation-name: rs-code; }
+@keyframes rs-code { 0% { opacity: 1; } 22% { opacity: 0.35; } 44%, 100% { opacity: 1; } }
+
+/* Office: the two cells dim and recover in turn, a recalculation. */
+.rs-splash--product .rs-office-a { animation-name: rs-office-a; }
+.rs-splash--product .rs-office-b { animation-name: rs-office-b; }
+@keyframes rs-office-a { 0% { opacity: 1; } 12% { opacity: 0.45; } 26%, 100% { opacity: 1; } }
+@keyframes rs-office-b { 0%, 18% { opacity: 1; } 30% { opacity: 0.45; } 44%, 100% { opacity: 1; } }
+
+/* Browser: the agent on the orbit swells slightly and settles (10 percent of the part). */
+.rs-icon .rs-browser-agent { transform-box: fill-box; transform-origin: center; }
+.rs-splash--product .rs-browser-agent { animation-name: rs-browser; }
+@keyframes rs-browser { 0% { transform: none; } 20% { transform: scale(1.1); } 44%, 100% { transform: none; } }
+
+/* Cowork: the pointer presses once toward its tip, then rests. */
+.rs-icon .rs-cowork-pointer { transform-box: fill-box; transform-origin: 0 0; }
+.rs-splash--product .rs-cowork-pointer { animation-name: rs-cowork; }
+@keyframes rs-cowork { 0% { transform: none; } 14% { transform: translate(-0.35px, -0.35px) scale(0.94); } 30%, 100% { transform: none; } }
+
+/* Design: the square glides into the circle so the cut-out overlap grows, then back. */
+.rs-splash--product .rs-design-sq { animation-name: rs-design; }
+@keyframes rs-design { 0% { transform: none; } 22% { transform: translate(-0.9px, -0.9px); } 46%, 100% { transform: none; } }
+
+/* Reduced motion, reduced transparency, forced colors: everything is simply there. */
+@media (prefers-reduced-motion: reduce) {
+  .rs-splash { transition: none; }
+  .rs-splash *, .rs-splash *::before { animation: none !important; }
+  .rs-splash__art { clip-path: none; }
+  .rs-splash__sheen { display: none; }
+  .rs-splash__ground { opacity: 1; background-position: 2% 2%; }
+}
+.rs-splash--still *, .rs-splash--still *::before { animation: none !important; }
+.rs-splash--still .rs-splash__art { clip-path: none; }
+.rs-splash--still .rs-splash__sheen { display: none; }
+.rs-splash--still .rs-splash__ground { opacity: 1; background-position: 2% 2%; }
+@media (prefers-reduced-transparency: reduce) { .rs-splash__ground { display: none; } }
+@media (forced-colors: active) { .rs-splash__ground, .rs-splash__sheen { display: none; } }
+
+/* Browser: the new tab is held back while the once-per-session check runs (launch-splash.ts). */
+.rs-splash-pending #root { visibility: hidden; }
