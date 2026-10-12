@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tNodes } from '@browseros/i18n'
 import { PlugZap } from '@browseros/icons'
 import { Button } from '@/components/ui/button'
 import { DisplayHeading, Em, StepCopy } from '../components/DisplayHeading'
@@ -33,24 +34,20 @@ export function ReadyStep({ onDone }: ReadyStepProps) {
   return (
     <StepWrap>
       <DisplayHeading>
-        All <Em>set!</Em>
+        {tNodes('clawAllSet', <Em key="em">{t('clawSet')}</Em>)}
       </DisplayHeading>
-      <StepCopy>
-        We connected this browser to the agents already installed on your
-        machine. Try it out &mdash; copy one of these into your agent:
-      </StepCopy>
+      <StepCopy>{t('clawWeConnectedThisBrowserTo')}</StepCopy>
       <div className="mb-4 flex flex-col gap-2.5">
         {STARTER_PROMPTS.slice(0, 2).map((prompt) => (
           <StarterPromptTile key={prompt} prompt={prompt} />
         ))}
       </div>
       <p className="mb-6 max-w-[470px] text-[12.5px] text-ink-3 leading-[1.5]">
-        Agent doesn&rsquo;t see this browser yet? Restart it once, so it picks
-        up the connection.
+        {t('clawAgentDoesnRsquoTSee')}
       </p>
       <Button type="button" size="lg" onClick={onDone}>
         <PlugZap className="size-4" />
-        Open the MCP page
+        {t('clawOpenTheMcpPage')}
       </Button>
     </StepWrap>
   )

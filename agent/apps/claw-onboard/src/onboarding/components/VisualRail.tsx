@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tNodes } from '@browseros/i18n'
 import { Lock, ShieldCheck, Zap } from '@browseros/icons'
 
 /** Renders the persistent BrowserOS neo visual rail beside the onboarding steps. */
@@ -40,8 +41,12 @@ export function VisualRail() {
       </div>
       <div className="relative">
         <div className="mb-[18px] font-serif text-[23px] text-ink italic leading-snug">
-          &ldquo;Your agents&rsquo; browser.{' '}
-          <span className="text-accent">Not yours.</span>&rdquo;
+          {tNodes(
+            'clawRailQuote',
+            <span key="a" className="text-accent">
+              {t('clawNotYours')}
+            </span>,
+          )}
         </div>
         <div className="flex flex-col gap-3">
           {FEATURES.map((f) => {
@@ -61,7 +66,7 @@ export function VisualRail() {
         </div>
       </div>
       <div className="relative text-[11.5px] text-ink-3">
-        Signed build for Mac. v1.0.
+        {t('clawSignedBuildForMacV1')}
       </div>
     </div>
   )
@@ -70,18 +75,17 @@ export function VisualRail() {
 const FEATURES = [
   {
     icon: Lock,
-    title: 'Signed in as you.',
-    description: 'Uses the sessions you already have.',
+    title: t('clawSignedInAsYou'),
+    description: t('clawUsesTheSessionsYouAlready'),
   },
   {
     icon: Zap,
-    title: 'Watch every step.',
-    description: 'See every agent in real time.',
+    title: t('clawWatchEveryStep'),
+    description: t('clawSeeEveryAgentInReal'),
   },
   {
     icon: ShieldCheck,
-    title: 'Everything stays local.',
-    description:
-      'All data is stored on this machine. Open source and privacy-first.',
+    title: t('clawEverythingStaysLocal'),
+    description: t('clawAllDataIsStoredOn'),
   },
 ] as const

@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { t, tNodes } from '@browseros/i18n'
 import { Zap } from '@browseros/icons'
 import { Button } from '@/components/ui/button'
 import { DisplayHeading, Em, StepCopy } from '../components/DisplayHeading'
@@ -22,19 +23,16 @@ export function WelcomeStep({ onPrimary, onSkip }: WelcomeStepProps) {
   return (
     <StepWrap>
       <DisplayHeading>
-        Your second browser. For your <Em>agents.</Em>
+        {tNodes('clawSecondBrowser', <Em key="em">{t('clawAgents')}</Em>)}
       </DisplayHeading>
-      <StepCopy>
-        Not a Chrome replacement. This browser is for your agents, where Claude,
-        Codex, and Cursor work.
-      </StepCopy>
+      <StepCopy>{t('clawNotAChromeReplacementThis')}</StepCopy>
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" size="lg" onClick={onPrimary}>
           <Zap className="size-4" />
-          Set it up
+          {t('clawSetItUp')}
         </Button>
         <Button type="button" size="lg" variant="ghost" onClick={onSkip}>
-          Already set up? Reconnect.
+          {t('clawAlreadySetUpReconnect')}
         </Button>
       </div>
     </StepWrap>

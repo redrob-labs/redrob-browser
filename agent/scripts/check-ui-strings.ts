@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs'
 import { Glob } from 'bun'
 import { parseSync } from 'oxc-parser'
 
-const ENFORCED = ['apps/app-onboard/src', 'apps/app']
+const ENFORCED = ['apps/app-onboard/src', 'apps/app', 'apps/claw-onboard/src']
 
 /**
  * Vendored ai-elements and shadcn files that nothing in apps/app imports, so no person ever reads their
