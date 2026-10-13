@@ -12,6 +12,7 @@ import {
   dbProviderStore,
   type ProviderStore,
 } from '../../lib/providers/provider-store'
+import { withLauncherFallback } from '../../lib/redrob-shared-account'
 import { AgentLLMConfigSchema } from '../types'
 
 interface ProviderRouteDeps {
@@ -80,7 +81,13 @@ export function createProviderRoutes(deps: ProviderRouteDeps = {}) {
       const stored = config.providerId
         ? await store.getWithCredentials(config.providerId)
         : null
-      const resolved = mergeStoredCredentials(config, stored)
+      // A Redrob Console provider with no key of its own -- saved without one,
+      // or not yet saved -- is tested with Redrob Launcher's shared sign-in,
+      // exactly as a chat request would use it.
+      const resolved = withLauncherFallback(
+        config.provider,
+        mergeStoredCredentials(config, stored),
+      ).config
 
       logger.info('Testing provider connection', {
         provider: resolved.provider,

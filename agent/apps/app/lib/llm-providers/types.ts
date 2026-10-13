@@ -81,6 +81,11 @@ export interface LlmProviderConfig {
   hasAccessKeyId?: boolean
   hasSecretAccessKey?: boolean
   hasSessionToken?: boolean
+
+  // A Redrob Console provider with no key of its own while Redrob Launcher is
+  // signed in on this computer: requests use the launcher's shared key. Read
+  // from the server with the row; the key itself never reaches the app.
+  viaLauncher?: boolean
 }
 
 /**

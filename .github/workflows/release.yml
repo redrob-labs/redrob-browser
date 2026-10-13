@@ -123,6 +123,14 @@ jobs:
           pkill -f "$unpacked/opt/redrob" || true
           pkill -f "Xvfb :99" || true
 
+      - name: the names Redrob Launcher installs from
+        # `redrob.py package` writes the .deb twice: under its Debian name (the apt pool/ convention) and as
+        # redrob-browser-<version>-linux-x86_64.deb, the one shape Redrob Launcher reads
+        # (redrob-launcher crates/core/src/platform.rs). This is the gate that the second copy is there and
+        # parses, so a renamed or mis-tokened asset fails here rather than shipping; the live sign-and-publish
+        # path runs the same check against the release itself before it undrafts.
+        run: python3 scripts/check_asset_names.py --dir out/artifacts --stage build
+
       - uses: actions/upload-artifact@v4
         with:
           name: redrob-browser-deb

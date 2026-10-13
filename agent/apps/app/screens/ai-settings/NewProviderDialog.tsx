@@ -78,6 +78,7 @@ import { track } from '@/lib/metrics/track'
 import { cn } from '@/lib/utils'
 import { useAgentServerUrl } from '@/modules/browseros/agent-server-url.hooks'
 import { useCapabilities } from '@/modules/browseros/capabilities.hooks'
+import { useLauncherSignIn } from '@/modules/llm-providers/launcher-sign-in.hooks'
 import {
   getIncompleteCatalogHint,
   getModelPickerRows,
@@ -179,7 +180,7 @@ function getVisibleProviderTypeOptions(
   )
 }
 
-function isProviderTestable(input: {
+export function isProviderTestable(input: {
   type: ProviderType
   modelId: string
   baseUrl?: string
@@ -200,10 +201,20 @@ function isProviderTestable(input: {
     hasSecretAccessKey?: boolean
     hasSessionToken?: boolean
   }
+  /**
+   * Redrob Launcher is signed in on this computer. A Redrob Console provider
+   * with no key of its own then runs on the launcher's shared key, so for that
+   * one type it satisfies the requirement a key would.
+   */
+  launcherSignedIn?: boolean
 }): boolean {
   if (!input.modelId) return false
 
-  const hasApiKey = Boolean(input.apiKey || input.stored?.hasApiKey)
+  const hasApiKey = Boolean(
+    input.apiKey ||
+      input.stored?.hasApiKey ||
+      (input.type === 'redrob-console' && input.launcherSignedIn),
+  )
   const hasAccessKeyId = Boolean(
     input.accessKeyId || input.stored?.hasAccessKeyId,
   )
@@ -303,6 +314,20 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
   // provider type re-requires the new type's own credential.
   const typeUnchanged = watchedType === initialValues?.type
   const savedApiKey = Boolean(initialValues?.hasApiKey) && typeUnchanged
+
+  // Redrob Console with no key of its own, typed or saved, while Redrob
+  // Launcher is signed in: the provider runs on the launcher's shared key, so
+  // the form says so and stops asking for one. A key of the app's own, once
+  // entered or saved, wins over the launcher's.
+  const launcher = useLauncherSignIn(
+    agentServerUrl,
+    open && watchedType === 'redrob-console',
+  )
+  const launcherFallback =
+    watchedType === 'redrob-console' &&
+    Boolean(launcher?.signedIn) &&
+    !watchedApiKey &&
+    !savedApiKey
   const savedAccessKeyId =
     Boolean(initialValues?.hasAccessKeyId) && typeUnchanged
   const savedSecretAccessKey =
@@ -521,6 +546,7 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
     // A saved credential only counts while the type is unchanged; after a type
     // switch the Test needs the new type's own credential entered.
     stored: typeUnchanged ? initialValues : undefined,
+    launcherSignedIn: launcherFallback,
   })
 
   const handleTest = async () => {
@@ -880,24 +906,33 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
             </FormItem>
           )}
         />
-        {watchedType === 'redrob-console' && (
-          <RedrobConsoleConnect
-            agentServerUrl={agentServerUrl}
-            onKey={(apiKey) =>
-              form.setValue('apiKey', apiKey, {
-                shouldDirty: true,
-                shouldValidate: true,
-              })
-            }
-          />
-        )}
+        {watchedType === 'redrob-console' &&
+          (launcherFallback ? (
+            <p
+              className="flex items-center gap-1.5 text-sm"
+              data-testid="launcher-signed-in"
+            >
+              <Check className="size-4 text-primary" />
+              {t('stSignedInWithLauncher')}
+              {launcher?.accountName ? ` · ${launcher.accountName}` : ''}
+            </p>
+          ) : (
+            <RedrobConsoleConnect
+              agentServerUrl={agentServerUrl}
+              onKey={(apiKey) =>
+                form.setValue('apiKey', apiKey, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+              }
+            />
+          ))}
         <FormField
           control={form.control}
           name="apiKey"
           render={({ field }) => {
-            const isApiKeyOptional = ['ollama', 'lmstudio'].includes(
-              watchedType,
-            )
+            const isApiKeyOptional =
+              ['ollama', 'lmstudio'].includes(watchedType) || launcherFallback
             return (
               <FormItem>
                 <FormLabel>
@@ -910,9 +945,11 @@ export const NewProviderDialog: FC<NewProviderDialogProps> = ({
                     placeholder={
                       savedApiKey
                         ? KEEP_SAVED_PLACEHOLDER
-                        : isApiKeyOptional
-                          ? t('stEnterYourApiKeyOptional')
-                          : t('stEnterYourApiKey')
+                        : launcherFallback
+                          ? t('stLeaveBlankForLauncher')
+                          : isApiKeyOptional
+                            ? t('stEnterYourApiKeyOptional')
+                            : t('stEnterYourApiKey')
                     }
                     {...field}
                   />

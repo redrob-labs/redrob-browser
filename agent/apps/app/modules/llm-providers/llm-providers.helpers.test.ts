@@ -32,6 +32,7 @@ function row(overrides: Partial<ProviderRow> = {}): ProviderRow {
     hasAccessKeyId: false,
     hasSecretAccessKey: false,
     hasSessionToken: false,
+    viaLauncher: false,
     resourceName: null,
     region: null,
     reasoningEffort: null,
@@ -84,6 +85,16 @@ describe('toProviderConfig', () => {
     )
 
     expect(converted).toMatchObject({ hasApiKey: true, region: 'us-east-1' })
+    expect(converted?.apiKey).toBeUndefined()
+  })
+
+  // The launcher's key never reaches the app either: the row only says that a
+  // keyless Redrob Console provider would run on it.
+  it('carries whether Redrob Launcher supplies the key', () => {
+    const converted = toProviderConfig(
+      row({ type: 'redrob-console', hasApiKey: false, viaLauncher: true }),
+    )
+    expect(converted).toMatchObject({ hasApiKey: false, viaLauncher: true })
     expect(converted?.apiKey).toBeUndefined()
   })
 

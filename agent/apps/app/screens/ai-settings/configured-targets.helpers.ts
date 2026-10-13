@@ -14,6 +14,11 @@ import type { AcpAgent } from '@/modules/agents/acp-agent-types'
 import type { TargetRowAction } from './ConfiguredTargetRow'
 
 export function providerDescription(provider: LlmProviderConfig): string {
+  // The key in use is Redrob Launcher's: say so where a key of the app's own
+  // would otherwise be implied by the row.
+  if (provider.viaLauncher) {
+    return `${t('stSignedInWithLauncher')} · ${provider.modelId}`
+  }
   return provider.baseUrl
     ? `${provider.modelId} · ${provider.baseUrl}`
     : provider.modelId

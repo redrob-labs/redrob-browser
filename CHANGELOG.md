@@ -4,6 +4,28 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
+## 0.1.9 — 2026-10-13
+
+**Signed in once, through Redrob Launcher.** A Redrob Console provider saved without a workspace key now runs on
+the sign-in Redrob Launcher keeps in its shared account file (`~/.config/redrob-shared/account.json` on Linux,
+`~/Library/Application Support/ai.redrob.shared/account.json` on macOS, `%APPDATA%\Redrob\Shared\account.json` on
+Windows; `REDROB_SHARED_DIR` overrides the directory). The agent server reads the file at the moment it builds a
+request, so signing in, signing out or rotating the key in the launcher takes effect on the next request without a
+restart. A key the provider has of its own always wins; nothing here writes the shared file, and the key never
+reaches a page or the extension. The Redrob Console form says *Signed in with Redrob Launcher · account* and makes
+the key optional while that is true, in English and Korean.
+
+**Installable from Redrob Launcher.** Every platform's release now also carries the one name the launcher
+installs: `redrob-browser-<version>-linux-x86_64.deb`, `redrob-browser-<version>-macos-aarch64.dmg` and
+`redrob-browser-<version>-windows-x64-portable.zip` (the unpacked application, `redrob-browser.exe` at the top).
+The Debian package, the macOS zip Sparkle updates from and the Windows installer keep their names.
+
+### Under the hood
+
+`scripts/check_asset_names.py` is the launcher's asset parser transliterated; it self-tests in CI, runs over
+`out/artifacts` at the end of every `package`, and reads the release's own asset list back before
+`sign-and-publish.yml` undrafts it.
+
 ## 0.1.8 — 2026-10-13
 
 **The extension and the agent apps are on Redrob UI, end to end.** Every page the browser ships — the new tab,

@@ -6,6 +6,7 @@
 
 import type { LLMConfig } from '@browseros/shared/schemas/llm'
 import type { ProviderRow } from '../../lib/db/schema'
+import { withLauncherFallback } from '../../lib/redrob-shared-account'
 import type {
   BrowserOsChatRequest,
   HydratedBrowserOsChatRequest,
@@ -30,10 +31,16 @@ export type HydrationResult =
     }
   | { ok: false; error: string }
 
-/** The stored row as an outbound LLM config. Shared with /refine-prompt. */
+/**
+ * The stored row as an outbound LLM config. Shared with /refine-prompt.
+ *
+ * A Redrob Console row with no key of its own takes Redrob Launcher's shared sign-in, read here -- at the
+ * moment the request is built -- so a sign-in or sign-out in the launcher applies to the next request.
+ */
 export function providerRowToLlmConfig(
-  row: ProviderRow,
+  stored: ProviderRow,
 ): Partial<LLMConfig> & { model?: string } {
+  const { config: row } = withLauncherFallback(stored.type, stored)
   return {
     provider: row.type as LLMConfig['provider'],
     providerId: row.id,
