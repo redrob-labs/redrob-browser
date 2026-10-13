@@ -281,10 +281,71 @@ def cmd_package(args: argparse.Namespace) -> None:
         arch = built.stem.rsplit("_", 1)[-1]
         shutil.copy2(built, cdn / f"redrob-browser-{arch}-{product_version()}.deb")
 
+        # A THIRD name, for Redrob Launcher, which installs an asset only when it reads
+        # <stem>-<version>-<os>-<arch>.<ext> with its own arch spelling (x86_64, not amd64). The Debian name has
+        # no such segment and the CDN name puts the version last, so neither is one the launcher opens. This copy
+        # goes to the release beside the Debian one; scripts/check_asset_names.py is the gate.
+        launcher = artifacts / launcher_asset_name(f"linux-{LAUNCHER_ARCH.get(arch, arch)}", ".deb")
+        shutil.copy2(built, launcher)
+        found.append(launcher)
+
     if not found:
         sys.exit(f"the installer target produced no .deb in out/{args.flavour}")
     for path in found + sorted(cdn.glob("*.deb")):
         print(f"{path.relative_to(ROOT)}  {path.stat().st_size // (1024 * 1024)} MB")
+    check_launcher_names(artifacts)
+
+
+# Debian/Chromium architecture names -> the launcher's tokens (redrob-launcher crates/core/src/platform.rs).
+LAUNCHER_ARCH = {"amd64": "x86_64", "x64": "x64", "arm64": "aarch64", "x86_64": "x86_64"}
+
+
+def launcher_asset_name(token: str, suffix: str) -> str:
+    """`redrob-browser-<version>-<os>-<arch><suffix>`, the shape Redrob Launcher's parser reads."""
+    return f"redrob-browser-{product_version()}-{token}{suffix}"
+
+
+def check_launcher_names(artifacts: Path) -> None:
+    """Fail the package step when a shipped platform has no launcher-installable name in out/artifacts."""
+    run([sys.executable, str(ROOT / "scripts" / "check_asset_names.py"), "--dir", str(artifacts),
+         "--version", product_version()], ROOT)
+
+
+def write_portable_zip(archive: Path, target: Path) -> None:
+    """Re-container the installer's chrome.7z as a launcher-shaped portable zip.
+
+    The 7z holds one top-level directory, Chrome-bin/, and the zip holds that directory's CONTENTS: Redrob
+    Launcher expects the executable at the archive's top level (crates/native/src/install.rs, find_binary looks
+    for `<id>.exe` or `bin/<id>.exe`), so `chrome.exe` is also copied to `redrob-browser.exe` beside itself.
+    chrome.exe is a stub that loads chrome.dll from the version directory next to its own file, so the copy
+    runs the same browser; chrome.exe stays because chrome_proxy.exe and the PWA launcher look for it by name.
+    """
+    if not archive.exists():
+        sys.exit(f"{archive} is missing: the mini_installer target did not produce its archive")
+    sevenzip = None
+    for candidate in (SRC / "third_party" / "lzma_sdk" / "bin" / "host_platform" / "7zr",
+                      SRC / "third_party" / "lzma_sdk" / "bin" / "host_platform" / "7za"):
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            sevenzip = str(candidate)
+            break
+    if sevenzip is None:
+        sevenzip = shutil.which("7zr") or shutil.which("7za") or shutil.which("7z")
+    if sevenzip is None:
+        sys.exit("no 7-Zip to read chrome.7z with: expected third_party/lzma_sdk/bin/host_platform/7zr in the checkout")
+    staging = ROOT / "out" / "portable"
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    run([sevenzip, "x", "-y", "-bso0", "-bsp0", f"-o{staging}", str(archive)], ROOT)
+    top = staging / "Chrome-bin"
+    if not (top / "chrome.exe").exists():
+        sys.exit(f"chrome.7z did not unpack to Chrome-bin/chrome.exe under {staging}")
+    shutil.copy2(top / "chrome.exe", top / "redrob-browser.exe")
+    target.unlink(missing_ok=True)
+    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        for path in sorted(top.rglob("*")):
+            if path.is_file():
+                zf.write(path, path.relative_to(top).as_posix())
+    shutil.rmtree(staging, ignore_errors=True)
 
 
 def package_windows(args: argparse.Namespace) -> None:
@@ -322,6 +383,19 @@ def package_windows(args: argparse.Namespace) -> None:
     for target in (artifacts / name, cdn / name):
         shutil.copy2(built, target)
         print(f"{target.relative_to(ROOT)}  {target.stat().st_size // (1024 * 1024)} MB")
+
+    # The portable zip, for Redrob Launcher. The launcher installs .msi or -portable.zip on Windows and nothing
+    # else -- a self-extracting setup.exe is not a format it opens -- and this build makes no .msi. The
+    # installer's own payload is already the unpacked application: mini_installer_archive stages every file
+    # FILES.cfg lists into Chrome-bin/ (chrome.exe at the top, the versioned directory with chrome.dll beside it)
+    # and stores that as chrome.7z, so the portable zip is that archive re-containered, not a second opinion
+    # about which files make up the browser. Extracted with the 7-Zip the Chromium tree ships for the host,
+    # so this needs nothing installed on the machine (docs/BUILD.md).
+    cpu = _gn_value((out / "args.gn").read_text(encoding="utf-8"), "target_cpu") or "x64"
+    portable = artifacts / launcher_asset_name(f"windows-{LAUNCHER_ARCH.get(cpu, cpu)}", "-portable.zip")
+    write_portable_zip(out / "chrome.7z", portable)
+    print(f"{portable.relative_to(ROOT)}  {portable.stat().st_size // (1024 * 1024)} MB")
+    check_launcher_names(artifacts)
 
     # Optional last step: wrap mini_installer.exe in a branded setup window,
     # redrob_setup.exe, beside the staged artifact. Off by default and leaves the
