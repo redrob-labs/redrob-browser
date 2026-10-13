@@ -297,6 +297,44 @@ jobs:
           esac
           ditto -c -k --keepParent "$app" "staging/redrob-browser-macos-${arch}-$(cat REDROB_VERSION).zip"
 
+      - name: the names Redrob Launcher installs from -- a .dmg, and the zip under the launcher's name
+        # Redrob Launcher installs an asset only when its name reads <stem>-<version>-<os>-<arch>.<ext>, and on
+        # macOS the only <ext> it opens is .dmg (redrob-launcher crates/core/src/platform.rs: it mounts the image
+        # and copies `Redrob Browser.app` into /Applications). Neither the Sparkle zip above nor the .app.zip
+        # qualifies, so the stapled app is also written into a disk image here, on the one machine in this
+        # pipeline that has hdiutil. The Sparkle zip keeps its name: scripts/sparkle_appcast.py and the appcast
+        # step key on `redrob-browser-macos-<arch>-<version>.zip`, and renaming it would break self-update.
+        # The zip is ALSO copied under the launcher's name so a reader of the release sees one naming scheme;
+        # the launcher itself will pick the .dmg. The image is codesigned so Gatekeeper attributes it; the app
+        # inside carries its own notarization ticket.
+        run: |
+          set -euo pipefail
+          app="$(find signed -maxdepth 3 -type d -name '*.app' | head -1)"
+          version="$(cat REDROB_VERSION)"
+          archs="$(lipo -archs "$app/Contents/MacOS/$(basename "$app" .app)")"
+          case "$archs" in
+            arm64) arch=arm64; token=macos-aarch64 ;;
+            x86_64) arch=x86_64; token=macos-x86_64 ;;
+            *) arch=universal; token=macos-universal ;;
+          esac
+          mkdir -p launcher dmgroot
+          ditto "$app" "dmgroot/$(basename "$app")"
+          ln -s /Applications dmgroot/Applications
+          dmg="launcher/redrob-browser-${version}-${token}.dmg"
+          hdiutil create -volname "Redrob Browser" -srcfolder dmgroot -ov -format UDZO -fs HFS+ "$dmg"
+          codesign --sign "$SIGNING_IDENTITY" --force --timestamp --keychain "$SIGNING_KEYCHAIN" "$dmg"
+          codesign --verify --verbose=2 "$dmg"
+          # The image must hold the stapled app, by the same checks the previous step made on the loose one.
+          mount="$(hdiutil attach -nobrowse -readonly -noverify "$dmg" | awk -F'\t' '/\/Volumes\//{print $NF}')"
+          test -n "$mount" || { echo "::error::$dmg did not mount"; exit 1; }
+          mounted="$(find "$mount" -maxdepth 1 -type d -name '*.app' | head -1)"
+          codesign --verify --deep --strict "$mounted"
+          xcrun stapler validate "$mounted"
+          hdiutil detach "$mount"
+          cp "staging/redrob-browser-macos-${arch}-${version}.zip" "launcher/redrob-browser-${version}-${token}.zip"
+          ls -l launcher
+          python3 scripts/check_asset_names.py --names launcher/*.dmg --version "$version" --no-platforms
+
       - name: clean up the keychain
         if: always()
         run: |
@@ -309,6 +347,14 @@ jobs:
         with:
           name: signed-macos
           path: staging/*.zip
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        # Separate from signed-macos on purpose: the publish job copies staging/ to the CDN, and these two
+        # belong on the GitHub release only -- the CDN's download page and the appcast have their own names.
+        with:
+          name: launcher-macos
+          path: launcher/*
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------------------------------
@@ -464,6 +510,35 @@ jobs:
           name: signed-windows
           path: staging
 
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: launcher-macos
+          path: launcher
+
+      - name: the names Redrob Launcher installs from
+        # <stem>-<version>-<os>-<arch>[-portable].<ext>, redrob-launcher's one shape for every app's release
+        # (crates/core/src/platform.rs). The Debian name stays -- it is the apt pool/ convention and what
+        # build_repo.py reads -- and the launcher gets a copy under its own spelling of the architecture. The
+        # Windows portable zip is made by `redrob.py package` on the build host and already sits on the draft;
+        # the macOS .dmg arrived from the signing job above. scripts/check_asset_names.py then reads the release
+        # back and refuses to undraft a version that ships a platform the launcher cannot install.
+        run: |
+          set -euo pipefail
+          mkdir -p launcher
+          for f in staging/*.deb; do
+            [ -f "$f" ] || continue
+            arch="$(basename "$f" .deb)"
+            arch="${arch##*_}"
+            case "$arch" in
+              amd64) token=linux-x86_64 ;;
+              arm64) token=linux-aarch64 ;;
+              *) echo "::error::no launcher token for Debian architecture $arch"; exit 1 ;;
+            esac
+            cp "$f" "launcher/redrob-browser-${{ steps.version.outputs.version }}-${token}.deb"
+          done
+          ls -l launcher || true
+
       - name: what is about to be published
         run: |
           set -euo pipefail
@@ -491,6 +566,20 @@ jobs:
           for f in staging/*.sha256; do
             gh release upload "${{ inputs.tag }}" "$f" --clobber
           done
+          shopt -s nullglob
+          for f in launcher/*.deb launcher/*.dmg launcher/*.zip; do
+            gh release upload "${{ inputs.tag }}" "$f" --clobber
+            echo "uploaded $(basename "$f")"
+          done
+          ( cd launcher && for f in *.deb *.dmg *.zip; do sha256sum "$f" > "$f.sha256"; done )
+          for f in launcher/*.sha256; do
+            gh release upload "${{ inputs.tag }}" "$f" --clobber
+          done
+
+      - name: every shipped platform has a name Redrob Launcher can install
+        # Read back from the release itself, not from the directories here: what the launcher sees is the
+        # asset list, and the Windows portable zip never passes through this job.
+        run: python3 scripts/check_asset_names.py --release "${{ inputs.tag }}" --version "${{ steps.version.outputs.version }}"
 
       - name: name the .deb the way the CDN aliases it
         # cdn-publish.sh derives the version-free `latest/` alias by deleting a `-<version>` segment from the

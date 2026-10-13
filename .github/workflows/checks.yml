@@ -53,6 +53,12 @@ jobs:
         # one subcommand that reaches the broken line.
         run: python3 -m compileall -q scripts/
 
+      - name: release asset names parse the way Redrob Launcher reads them
+        # scripts/check_asset_names.py mirrors redrob-launcher's parser; its self-test holds the known-good
+        # names (redrob-browser-<version>-linux-x86_64.deb, -macos-aarch64.dmg, -windows-x64-portable.zip) and
+        # the known-bad ones (amd64, mac, x64 on Linux, a leading v). Both packaging paths call it as a gate.
+        run: python3 scripts/check_asset_names.py --self-test
+
       - name: version and changelog agree
         run: |
           set -euo pipefail

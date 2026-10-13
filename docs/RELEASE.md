@@ -101,6 +101,32 @@ Verified end to end with a throwaway key and a synthetic package, not by inspect
 `Release.gpg` produce a good signature, every index file's SHA256 and size match what `Release` claims, and the
 `Filename` in `Packages` is repository-relative and resolves into `pool/`.
 
+## What a release's assets are called
+
+Every asset is published under the name its consumer keys on, and one asset can have more than one consumer:
+
+| asset | name | who reads it |
+| --- | --- | --- |
+| Linux package | `redrob-browser-stable_<ver>+<chromium>-1_amd64.deb` | apt `pool/` convention, `build_repo.py` |
+| Linux package | `redrob-browser-<ver>-linux-x86_64.deb` | **Redrob Launcher** |
+| macOS app | `redrob-browser-macos-arm64-<ver>.zip` | Sparkle appcast, `cdn-publish.sh` |
+| macOS app | `redrob-browser-<ver>-macos-aarch64.dmg` (and the same zip under `-macos-aarch64.zip`) | **Redrob Launcher** (the `.dmg`) |
+| Windows installer | `redrob-browser-x64-<ver>-setup.exe` | the signed installer, `cdn-publish.sh` |
+| Windows portable | `redrob-browser-<ver>-windows-x64-portable.zip` | **Redrob Launcher** |
+
+Redrob Launcher installs an asset only when its name reads `<stem>-<version>-<os>-<arch>[-portable].<ext>` with its
+own tokens — `linux-x86_64`, `macos-aarch64`, `windows-x64`, never `amd64`, `arm64` on macOS, or `x64` on Linux —
+and only in a format it opens: `.deb` on Linux, `.dmg` on macOS, `.msi` or `-portable.zip` on Windows. A
+`-setup.exe` is not one of them, which is why the portable zip exists: `redrob.py package --flavour win_cross`
+re-containers the installer's own `chrome.7z` (the unpacked application, `chrome.exe` at the top) and adds a
+`redrob-browser.exe` copy of the stub the launcher looks for. The `.dmg` is made in `sign-and-publish.yml` from the
+signed, notarized app, because only the mac runner has `hdiutil`.
+
+`scripts/check_asset_names.py` is the parser transliterated from `redrob-launcher/crates/core/src/platform.rs`,
+and it runs three times: as a self-test in `checks.yml`, over `out/artifacts` at the end of every `package`, and
+over the release's actual asset list in `sign-and-publish.yml` before the undraft. A platform that ships without
+a launcher-readable name fails the release there.
+
 ## Steps
 
 The build happens on a workstation, and only the artefacts travel. That is not a workaround — no runner carrying
