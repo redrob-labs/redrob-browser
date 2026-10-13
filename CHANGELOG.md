@@ -4,6 +4,14 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
+## Unreleased
+
+**The built-in Redrob Code agent shares one engine with the rest of the machine.** The agent now runs
+`redrob acp --attach`, which makes the browser a thin client of the single Redrob Code daemon every Redrob app
+on the machine attaches to (redrob-code 0.6.0 or later) rather than an engine process of its own; the daemon
+starts on first use and goes away after ten idle minutes with no clients. A Redrob Code agent saved before this
+change keeps working — the flag is added when the agent launches, so there is nothing to re-add.
+
 ## 0.1.8 — 2026-10-13
 
 **The extension and the agent apps are on Redrob UI, end to end.** Every page the browser ships — the new tab,

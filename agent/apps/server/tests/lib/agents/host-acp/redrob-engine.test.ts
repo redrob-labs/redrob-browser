@@ -8,6 +8,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   resolveRedrobEngine,
   stderrSaysCommandNotFound,
+  withSharedEngine,
 } from '../../../../src/lib/agents/host-acp/redrob-engine'
 
 const WIN_ENV = {
@@ -64,6 +65,69 @@ describe('resolveRedrobEngine', () => {
         exists,
       ),
     ).toBe('/home/u/.redrob/bin/redrob')
+  })
+})
+
+describe('withSharedEngine', () => {
+  it('attaches `redrob acp` to the shared engine daemon', () => {
+    expect(withSharedEngine(['redrob', 'acp'])).toEqual([
+      'redrob',
+      'acp',
+      '--attach',
+    ])
+  })
+
+  it('keeps extra arguments after the flag', () => {
+    expect(withSharedEngine(['redrob', 'acp', '--cwd', '/w'])).toEqual([
+      'redrob',
+      'acp',
+      '--attach',
+      '--cwd',
+      '/w',
+    ])
+  })
+
+  it('recognises a resolved install path on either platform', () => {
+    expect(
+      withSharedEngine([
+        'C:\\Users\\u\\AppData\\Local\\Redrob\\bin\\redrob.exe',
+        'acp',
+      ]),
+    ).toEqual([
+      'C:\\Users\\u\\AppData\\Local\\Redrob\\bin\\redrob.exe',
+      'acp',
+      '--attach',
+    ])
+    expect(withSharedEngine(['/home/u/.redrob/bin/redrob', 'acp'])).toEqual([
+      '/home/u/.redrob/bin/redrob',
+      'acp',
+      '--attach',
+    ])
+  })
+
+  it('does not add the flag twice', () => {
+    expect(withSharedEngine(['redrob', 'acp', '--attach'])).toEqual([
+      'redrob',
+      'acp',
+      '--attach',
+    ])
+  })
+
+  it('leaves other engine subcommands and other agents alone', () => {
+    expect(withSharedEngine(['redrob', 'serve'])).toEqual(['redrob', 'serve'])
+    expect(withSharedEngine(['redrob'])).toEqual(['redrob'])
+    expect(withSharedEngine(['opencode', 'acp'])).toEqual(['opencode', 'acp'])
+    expect(withSharedEngine(['redrob-cli', 'acp'])).toEqual([
+      'redrob-cli',
+      'acp',
+    ])
+  })
+
+  it("returns a copy, never the caller's array", () => {
+    const argv = ['redrob', 'acp']
+    const out = withSharedEngine(argv)
+    expect(out).not.toBe(argv)
+    expect(argv).toEqual(['redrob', 'acp'])
   })
 })
 

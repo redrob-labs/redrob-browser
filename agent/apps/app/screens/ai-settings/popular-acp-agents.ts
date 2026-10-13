@@ -28,11 +28,16 @@ export interface PopularAcpAgent {
  * Redrob Code, the Redrob engine. `redrob acp` is its own ACP server over
  * stdio (packages/redrob/src/cli/cmd/acp.ts in redrob-code), so it is added as
  * a custom agent with this command rather than through an adapter package.
+ * `--attach` (redrob-code >= 0.6.0) makes it a thin client of the one shared
+ * Redrob Code daemon on this machine -- the one recorded in
+ * ~/.redrob/run/server.json, started via `redrob service start` when absent --
+ * instead of an engine process of its own; the daemon exits after ten idle
+ * minutes with no clients.
  */
 export const REDROB_CODE_AGENT = {
   id: 'redrob-code',
   label: 'Redrob Code',
-  command: 'redrob acp',
+  command: 'redrob acp --attach',
 } as const
 
 export const POPULAR_ACP_AGENTS: PopularAcpAgent[] = [
