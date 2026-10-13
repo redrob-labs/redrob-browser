@@ -13,11 +13,14 @@ redrob-launcher's crates/core/src/platform.rs (parse_asset_name + Platform::toke
 The packager's own names stay beside the launcher's, because other consumers depend on them exactly:
 the Debian name is the apt pool/ convention, `redrob-browser-macos-<arch>-<version>.zip` is what the Sparkle
 appcast and cdn-publish.sh key on, and the `-setup.exe` is the signed Windows installer. Those are passed
-through; this script only insists that every platform a release ships ALSO has a launcher-readable asset.
+through; this script only insists that every platform a release ships ALSO has a launcher-readable asset, and
+that the release carries `redrob-launcher.json` (schema 1, sharedAccount true -- redrob-launcher's
+docs/release-manifest.md), which sign-and-publish.yml writes beside the renamed assets.
 
     check_asset_names.py --dir out/artifacts        # what `redrob.py package` wrote
     check_asset_names.py --release v0.1.9           # what is on a GitHub release (needs gh)
     check_asset_names.py --names a.deb b.zip ...    # any list
+    check_asset_names.py --manifest launcher/redrob-launcher.json   # the launcher manifest's content alone
     check_asset_names.py --self-test                # the parser against known-good and known-bad names
 """
 from __future__ import annotations
@@ -27,9 +30,16 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 STEM = "redrob-browser"
+
+# The one more asset every release carries beside its installers: redrob-launcher/docs/release-manifest.md.
+# Redrob Launcher reads it from the release's own download URL to learn that this version reads the launcher's
+# shared account file, so a release without it is a release the launcher has to guess about.
+MANIFEST = "redrob-launcher.json"
+MANIFEST_TEXT = '{ "schema": 1, "sharedAccount": true }\n'
 
 # Suffix order matters: `-portable.zip` and `.tar.gz` must win over a shorter match. Same list as the
 # launcher's KINDS.
@@ -105,12 +115,29 @@ PLATFORMS: list[tuple[str, re.Pattern[str], str, set[str]]] = [
 ]
 
 
+def check_manifest(text: str) -> list[str]:
+    """Problems with the content of redrob-launcher.json; empty means the launcher reads it as intended."""
+    try:
+        data = json.loads(text)
+    except ValueError as e:
+        return [f"{MANIFEST}: not JSON ({e})"]
+    problems: list[str] = []
+    if not isinstance(data, dict):
+        return [f"{MANIFEST}: must be a JSON object, got {type(data).__name__}"]
+    if data.get("schema") != 1:
+        problems.append(f"{MANIFEST}: schema must be 1, got {data.get('schema')!r}")
+    if data.get("sharedAccount") is not True:
+        problems.append(f"{MANIFEST}: sharedAccount must be true, got {data.get('sharedAccount')!r}")
+    return problems
+
+
 def check(names: list[str], version: str | None, require_platforms: bool = True, stage: str = "release") -> list[str]:
     """Problems with this asset list; empty means the launcher can install every platform it ships.
 
     `stage="build"` is what `redrob.py package` writes on the build host, where the macOS .dmg does not exist
     yet: it is made from the SIGNED, notarized app on the mac runner (sign-and-publish.yml), so at build time a
-    mac .app.zip without a .dmg is correct, not a gap. `stage="release"` asks for everything.
+    mac .app.zip without a .dmg is correct, not a gap. `stage="release"` asks for everything -- including the
+    launcher manifest, which sign-and-publish.yml writes beside the renamed assets rather than the packager.
     """
     problems: list[str] = []
     parsed = {n: parse(n) for n in names}
@@ -139,6 +166,9 @@ def check(names: list[str], version: str | None, require_platforms: bool = True,
             if not have:
                 want = " or ".join(launcher_name(version or "<version>", token, k) for k in sorted(kinds))
                 problems.append(f"{label} ships ({', '.join(shipped)}) but no launcher-installable asset: want {want}")
+        if stage == "release" and MANIFEST not in names:
+            problems.append(f"{MANIFEST} is missing: every release carries it so Redrob Launcher learns this "
+                            f"version reads the shared account file (redrob-launcher docs/release-manifest.md)")
     return problems
 
 
@@ -171,7 +201,7 @@ def self_test() -> None:
     # A 0.1.8-shaped release fails on every platform; the 0.1.9 shape passes.
     old = ["redrob-browser-macos-arm64-0.1.8.app.zip", "redrob-browser-macos-arm64-0.1.8.zip",
            "redrob-browser-stable_0.1.8+155.0.8059.26-1_amd64.deb", "redrob-browser-x64-0.1.8-setup.exe",
-           "redrob-browser-x64-0.1.8-setup.exe.sha256"]
+           "redrob-browser-x64-0.1.8-setup.exe.sha256", MANIFEST]
     problems = check(old, "0.1.8")
     assert len(problems) == 3, problems
     assert all("no launcher-installable asset" in p for p in problems), problems
@@ -181,10 +211,28 @@ def self_test() -> None:
     assert check(new, "0.1.9") == [f"{n}: launcher-named but carries version 0.1.8, not 0.1.9" for n in new[-3:]]
     assert check(old + ["redrob-browser-0.1.8-linux-amd64.deb"], "0.1.8")[0].startswith(
         "redrob-browser-0.1.8-linux-amd64.deb: looks launcher-shaped")
+    # A release without the launcher manifest fails, and only at release stage: the build host does not write it.
+    without = [n for n in new if n != MANIFEST]
+    assert check(without, "0.1.8") == [f"{MANIFEST} is missing: every release carries it so Redrob Launcher "
+                                       f"learns this version reads the shared account file "
+                                       f"(redrob-launcher docs/release-manifest.md)"], check(without, "0.1.8")
+    assert check(without, "0.1.8", require_platforms=False) == []
     # On the build host the mac .dmg is not made yet, so only Linux and Windows are required there.
-    build = [n for n in new if not n.endswith(".dmg")]
+    build = [n for n in new if not n.endswith(".dmg") and n != MANIFEST]
     assert check(build, "0.1.8", stage="build") == [], check(build, "0.1.8", stage="build")
-    assert len(check(build, "0.1.8")) == 1
+    assert len(check(build, "0.1.8")) == 2
+    # The manifest's content: exactly what redrob-launcher/docs/release-manifest.md reads.
+    assert json.loads(MANIFEST_TEXT) == {"schema": 1, "sharedAccount": True}
+    assert MANIFEST_TEXT.endswith("\n")
+    assert check_manifest(MANIFEST_TEXT) == []
+    assert check_manifest('{"schema":1,"sharedAccount":true,"later":"ignored"}') == []
+    assert check_manifest("not json")[0].startswith(f"{MANIFEST}: not JSON")
+    assert check_manifest("[1]") == [f"{MANIFEST}: must be a JSON object, got list"]
+    assert check_manifest('{"schema": 2, "sharedAccount": true}') == [f"{MANIFEST}: schema must be 1, got 2"]
+    assert check_manifest('{"schema": 1, "sharedAccount": false}') == [f"{MANIFEST}: sharedAccount must be true, got False"]
+    assert check_manifest('{"schema": 1, "sharedAccount": "true"}') == [f"{MANIFEST}: sharedAccount must be true, got 'true'"]
+    assert check_manifest("{}") == [f"{MANIFEST}: schema must be 1, got None",
+                                    f"{MANIFEST}: sharedAccount must be true, got None"]
     print("check_asset_names: self-test ok")
 
 
@@ -194,6 +242,7 @@ def main() -> int:
     src.add_argument("--dir", help="directory whose file names are the assets (e.g. out/artifacts)")
     src.add_argument("--release", help="GitHub release tag to read the asset names from, via gh")
     src.add_argument("--names", nargs="+", help="asset names given directly")
+    src.add_argument("--manifest", help=f"only check the content of this {MANIFEST} file")
     src.add_argument("--self-test", action="store_true")
     ap.add_argument("--version", help="the version every launcher-named asset must carry "
                                       "(default: REDROB_VERSION beside this script's repository)")
@@ -206,14 +255,31 @@ def main() -> int:
     if args.self_test:
         self_test()
         return 0
+    if args.manifest:
+        problems = check_manifest(Path(args.manifest).read_text(encoding="utf-8"))
+        for p in problems:
+            print(f"PROBLEM: {p}", file=sys.stderr)
+        if problems:
+            return 1
+        print(f"ok: {args.manifest} is a schema-1 manifest with sharedAccount true")
+        return 0
 
     stage = args.stage or ("build" if args.dir else "release")
+    manifest_text: str | None = None
     if args.dir:
         names = sorted(p.name for p in Path(args.dir).iterdir() if p.is_file())
+        if MANIFEST in names:
+            manifest_text = (Path(args.dir) / MANIFEST).read_text(encoding="utf-8")
     elif args.release:
         out = subprocess.run(["gh", "release", "view", args.release, "--json", "assets"],
                              check=True, capture_output=True, text=True).stdout
         names = sorted(a["name"] for a in json.loads(out)["assets"])
+        if MANIFEST in names:
+            # What the launcher will read is the uploaded asset, so read that back rather than any local copy.
+            with tempfile.TemporaryDirectory() as tmp:
+                subprocess.run(["gh", "release", "download", args.release, "-p", MANIFEST, "-D", tmp,
+                                "--clobber"], check=True)
+                manifest_text = (Path(tmp) / MANIFEST).read_text(encoding="utf-8")
     else:
         names = [Path(n).name for n in args.names]
 
@@ -224,18 +290,23 @@ def main() -> int:
 
     if args.dir and version:
         # The packager leaves earlier versions' files in the directory; only this version's are the release.
-        names = [n for n in names if version in n]
+        # The manifest carries no version in its name and belongs to every release.
+        names = [n for n in names if version in n or n == MANIFEST]
 
     print(f"{len(names)} asset name(s), version {version or '(unchecked)'}, stage {stage}:")
     for n in names:
         p = parse(n)
-        print(f"  {'launcher ' + p['token'] + ' ' + p['kind'] if p else '-':40} {n}")
+        label = "launcher " + p["token"] + " " + p["kind"] if p else ("launcher manifest" if n == MANIFEST else "-")
+        print(f"  {label:40} {n}")
     problems = check(names, version, require_platforms=not args.no_platforms, stage=stage)
+    if manifest_text is not None:
+        problems += check_manifest(manifest_text)
     for p in problems:
         print(f"PROBLEM: {p}", file=sys.stderr)
     if problems:
         return 1
-    print("ok: every shipped platform has a name Redrob Launcher installs")
+    print("ok: every shipped platform has a name Redrob Launcher installs"
+          + (f", and {MANIFEST} reads schema 1 / sharedAccount true" if manifest_text is not None else ""))
     return 0
 
 

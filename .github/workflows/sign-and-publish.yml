@@ -537,6 +537,12 @@ jobs:
             esac
             cp "$f" "launcher/redrob-browser-${{ steps.version.outputs.version }}-${token}.deb"
           done
+          # The launcher manifest, beside the renamed assets (redrob-launcher docs/release-manifest.md): the
+          # launcher reads it from the release to learn that this version reads its shared account file, which
+          # develop does since the shared-account change (#110). Written here, in the one job that publishes,
+          # and checked for content before anything is uploaded.
+          printf '{ "schema": 1, "sharedAccount": true }\n' > launcher/redrob-launcher.json
+          python3 scripts/check_asset_names.py --manifest launcher/redrob-launcher.json
           ls -l launcher || true
 
       - name: what is about to be published
@@ -567,18 +573,20 @@ jobs:
             gh release upload "${{ inputs.tag }}" "$f" --clobber
           done
           shopt -s nullglob
-          for f in launcher/*.deb launcher/*.dmg launcher/*.zip; do
+          for f in launcher/*.deb launcher/*.dmg launcher/*.zip launcher/redrob-launcher.json; do
             gh release upload "${{ inputs.tag }}" "$f" --clobber
             echo "uploaded $(basename "$f")"
           done
-          ( cd launcher && for f in *.deb *.dmg *.zip; do sha256sum "$f" > "$f.sha256"; done )
+          ( cd launcher && for f in *.deb *.dmg *.zip redrob-launcher.json; do sha256sum "$f" > "$f.sha256"; done )
           for f in launcher/*.sha256; do
             gh release upload "${{ inputs.tag }}" "$f" --clobber
           done
 
       - name: every shipped platform has a name Redrob Launcher can install
         # Read back from the release itself, not from the directories here: what the launcher sees is the
-        # asset list, and the Windows portable zip never passes through this job.
+        # asset list, and the Windows portable zip never passes through this job. The same read-back refuses a
+        # release without redrob-launcher.json, and downloads that asset to check its content is what the
+        # launcher expects (schema 1, sharedAccount true).
         run: python3 scripts/check_asset_names.py --release "${{ inputs.tag }}" --version "${{ steps.version.outputs.version }}"
 
       - name: name the .deb the way the CDN aliases it
