@@ -281,4 +281,26 @@ describe('resolveAcpSpawnCommand (custom)', () => {
       'acp',
     ])
   })
+
+  it('attaches a saved `redrob acp` agent to the shared engine daemon', () => {
+    const out = resolveAcpSpawnCommand({
+      agentType: 'custom',
+      customCommand: 'redrob acp',
+      env: { PATH: '/usr/bin', HOME: '/nonexistent' },
+      platform: 'linux',
+      resolveLoginShellPath: noLoginPath,
+    })
+    expect(out.argv).toEqual(['redrob', 'acp', '--attach'])
+  })
+
+  it('does not attach twice when the saved command already has the flag', () => {
+    const out = resolveAcpSpawnCommand({
+      agentType: 'custom',
+      customCommand: 'redrob acp --attach',
+      env: { PATH: '/usr/bin', HOME: '/nonexistent' },
+      platform: 'linux',
+      resolveLoginShellPath: noLoginPath,
+    })
+    expect(out.argv).toEqual(['redrob', 'acp', '--attach'])
+  })
 })

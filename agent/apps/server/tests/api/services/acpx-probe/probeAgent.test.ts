@@ -398,6 +398,9 @@ describe('probeAcpAgent — a command that is not installed', () => {
       command: 'redrob acp',
       platform: 'win32',
     })
+    // On Windows the command rides inside a base64url payload for the node relay.
+    const payload = Buffer.from(lastCall?.argv?.at(-1) ?? '', 'base64url')
+    expect(payload.toString('utf8')).toContain('--attach')
     expect(out.error?.code).toBe('agent_not_found')
     expect(out.error?.message).toContain('Redrob Code is not installed')
     expect(out.error?.message).toContain(
@@ -430,5 +433,16 @@ describe('probeAcpAgent — a command that is not installed', () => {
     })
     const out = await probeAcpAgent({ type: 'custom', command: 'redrob acp' })
     expect(out.error?.code).toBe('agent_crashed')
+  })
+
+  it('probes `redrob acp` attached to the shared engine daemon, once', async () => {
+    nextResult = baseProbeResult()
+    await probeAcpAgent({ type: 'custom', command: 'redrob acp' })
+    const argv = [...(lastCall?.argv ?? [])]
+    expect(argv.slice(argv.indexOf('acp'))).toEqual(['acp', '--attach'])
+    await probeAcpAgent({ type: 'custom', command: 'redrob acp --attach' })
+    expect((lastCall?.argv ?? []).filter((a) => a === '--attach')).toHaveLength(
+      1,
+    )
   })
 })
