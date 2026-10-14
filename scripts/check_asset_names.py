@@ -51,7 +51,6 @@ KINDS: list[tuple[str, str]] = [
     ("AppImage", ".AppImage"),
     ("deb", ".deb"),
     ("rpm", ".rpm"),
-    ("flatpak", ".flatpak"),
 ]
 
 # Every token Platform::tokens can look for, and which kinds install on that OS.
@@ -63,10 +62,9 @@ TOKENS: dict[str, set[str]] = {
     "macos-aarch64": {"dmg"},
     "macos-arm64": {"dmg"},
     "macos-x86_64": {"dmg"},
-    "linux-x86_64": {"AppImage", "deb", "rpm", "flatpak", "tar.gz"},
-    "linux-aarch64": {"AppImage", "deb", "rpm", "flatpak", "tar.gz"},
-    "linux-riscv64": {"AppImage", "deb", "rpm", "flatpak", "tar.gz"},
-    "freebsd-x86_64": {"tar.gz"},
+    "linux-x86_64": {"AppImage", "deb", "rpm", "tar.gz"},
+    "linux-aarch64": {"AppImage", "deb", "rpm", "tar.gz"},
+    "linux-riscv64": {"AppImage", "deb", "rpm", "tar.gz"},
 }
 
 # What the launcher's version parser accepts: digits-first semver with an optional pre-release.
