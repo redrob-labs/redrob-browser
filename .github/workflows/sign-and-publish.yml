@@ -13,10 +13,17 @@
 #   local:  redrob.py build && redrob.py package
 #           gh release create v0.1.4 --draft --title ... <artefacts>
 #   here:   workflow_dispatch with tag=v0.1.4
-#             sign-linux    (nothing to sign -- see the job)
-#             sign-macos    codesign -> notarytool -> stapler -> three checks
-#             sign-windows  azure/login (OIDC) -> signtool /dlib (Artifact Signing) -> verify /pa + Get-AuthenticodeSignature
-#           publish: replace the release's assets with the signed ones, undraft, then CDN
+#             probe         read the draft: which platforms are on it, which commit it points at
+#             sign-macos    codesign -> notarytool -> stapler -> three checks; .dmg for Redrob Launcher
+#             sign-windows  azure/login (OIDC) -> redrob-labs/.github/actions/sign-windows
+#             collect       the .deb and the Windows portable zip, published as built
+#             cdn           cdn.redrob.ai: installers, Sparkle appcasts, the apt repository
+#             publish       redrob-labs/.github release-publish: SHA256SUMS.txt, redrob-launcher.json,
+#                           the draft's assets replaced with the signed set, published as latest
+#
+# Signing and publishing are the organisation's one copy of each (redrob-labs/.github): the Windows recipe
+# is `actions/sign-windows`, the release step is `release-publish.yml`. What stays here is what is this
+# repository's alone -- the Chromium mac signing driver, the Sparkle feeds, the apt repository, the CDN.
 #
 # WHAT A SIGNATURE HERE MEANS. It attests that the holder of the certificate approved these bytes. It does
 # NOT attest that the bytes came from this source tree, because the build happened on a machine this workflow
@@ -29,10 +36,10 @@ on:
       tag:
         description: "Release tag carrying the unsigned artefacts (e.g. v0.1.4)"
         required: true
-      undraft:
-        description: "Publish the release once signing verifies"
+      dry_run:
+        description: "Sign only: verify the signatures and keep the signed files as workflow artifacts; touch neither the release nor the CDN"
         required: false
-        default: true
+        default: false
         type: boolean
       replace_published:
         description: "Overwrite this version's CDN files when they differ (needs CloudFront invalidation rights)"
@@ -52,25 +59,95 @@ jobs:
     # Windows machine to boot, look at a list of filenames and exit. The signing jobs are gated on this.
     runs-on: ubuntu-latest
     outputs:
+      version: ${{ steps.version.outputs.version }}
+      target: ${{ steps.assets.outputs.target }}
       mac: ${{ steps.assets.outputs.mac }}
       win: ${{ steps.assets.outputs.win }}
       deb: ${{ steps.assets.outputs.deb }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@v4
+
+      - name: the tag and the version have to agree
+        # A tag that does not match REDROB_VERSION means the artefacts on it were built from a different tree
+        # than this checkout, and every path below -- the CDN filename, the latest/ alias, the release title
+        # -- would be named after the wrong one.
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(cat REDROB_VERSION)"
+          if [ "${{ inputs.tag }}" != "v$version" ]; then
+            echo "::error::tag ${{ inputs.tag }} does not match REDROB_VERSION $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - id: assets
         run: |
           set -euo pipefail
-          names="$(gh release view "${{ inputs.tag }}" \
-            --repo "${{ github.repository }}" --json assets -q '.assets[].name')"
+          gh release view "${{ inputs.tag }}" --repo "${{ github.repository }}" --json assets,targetCommitish,isDraft > release.json
+          names="$(jq -r '.assets[].name' release.json)"
           echo "assets on ${{ inputs.tag }}:"
           printf '  %s\n' $names
           has() { printf '%s\n' $names | grep -qE "$1" && echo true || echo false; }
+          # The commit the draft was created against is the commit the tag will point at when the release
+          # is published; release-publish takes it as `target` so publishing from any ref keeps that.
+          target="$(jq -r '.targetCommitish' release.json)"
+          test -n "$target" || { echo "::error::the release has no target commit"; exit 1; }
+          echo "target: $target  draft: $(jq -r .isDraft release.json)"
           {
+            echo "target=$target"
             echo "mac=$(has '\.app\.zip$')"
             echo "win=$(has 'setup\.exe$')"
             echo "deb=$(has '\.deb$')"
           } >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------------------------------
+  collect:
+    name: collect the artefacts published as built
+    needs: probe
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: the Linux package and the Windows portable zip
+        # Nothing to sign in either. A .deb is not itself signed in this ecosystem -- what gets signed is
+        # the apt repository's Release file, which the cdn job produces with scripts/build_repo.py, gated on
+        # a signing key. The Windows portable zip is the unpacked application re-containered by `redrob.py
+        # package` on the build host for Redrob Launcher, which installs no -setup.exe; it rides the draft
+        # beside the installer. Both are collected here so the publish job sees every asset as a `release-*`
+        # artifact and the draft's own upload can be replaced wholesale.
+        run: |
+          set -euo pipefail
+          mkdir -p staging
+          gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" -p '*.deb' -D staging || \
+            echo "::notice::no .deb on this release"
+          gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" -p '*-portable.zip' -D staging || \
+            echo "::notice::no Windows portable zip on this release"
+          # <stem>-<version>-<os>-<arch>.<ext>, redrob-launcher's one shape for every app's release
+          # (crates/core/src/platform.rs). The Debian name stays -- it is the apt pool/ convention and what
+          # build_repo.py reads -- and the launcher gets a copy under its own spelling of the architecture.
+          for f in staging/*.deb; do
+            [ -f "$f" ] || continue
+            arch="$(basename "$f" .deb)"
+            arch="${arch##*_}"
+            case "$arch" in
+              amd64) token=linux-x86_64 ;;
+              arm64) token=linux-aarch64 ;;
+              *) echo "::error::no launcher token for Debian architecture $arch"; exit 1 ;;
+            esac
+            cp "$f" "staging/redrob-browser-${{ needs.probe.outputs.version }}-${token}.deb"
+          done
+          ls -l staging || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-as-built
+          path: staging
+          # A release with neither is possible (mac and Windows only); the publish job then has the signed
+          # artifacts alone, and fails on its own if there is nothing at all.
+          if-no-files-found: ignore
 
   # ---------------------------------------------------------------------------------------------------
   sign-macos:
@@ -345,17 +422,18 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: signed-macos
+          name: release-macos
           path: staging/*.zip
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
-        # Separate from signed-macos on purpose: the publish job copies staging/ to the CDN, and these two
+        # Separate from release-macos on purpose: the cdn job copies the Sparkle zip to the CDN, and these two
         # belong on the GitHub release only -- the CDN's download page and the appcast have their own names.
         with:
-          name: launcher-macos
+          name: release-macos-launcher
           path: launcher/*
           if-no-files-found: error
+
 
   # ---------------------------------------------------------------------------------------------------
   sign-windows:
@@ -373,17 +451,16 @@ jobs:
       id-token: write
     env:
       GH_TOKEN: ${{ github.token }}
-      # A plain ID (not a credential); here so the login step can be skipped when signing is not set up.
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
     steps:
-      - uses: actions/checkout@v4
-
       - name: require the Artifact Signing identifiers
         # Six names, all plain identifiers, all redrob-labs organization secrets. Do not recreate them as
         # repository secrets (a same-named repository secret would override the org one). No certificate
         # file and no client secret exist anywhere in this job: the credential is the OIDC login below.
+        # The shared action would only WARN and leave the file unsigned when the three signing inputs are
+        # empty -- right for a fork's dry run, wrong for a release -- so the names are required here first.
         shell: bash
         env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
@@ -408,129 +485,63 @@ jobs:
 
       - name: download the installer
         # BEFORE the Azure login, deliberately: GitHub's OIDC token lives minutes, and the login must sit
-        # immediately before signtool with nothing long between them. The download is the only step here
+        # immediately before signing with nothing long between them. The download is the only step here
         # that can take a while, so it goes first.
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p incoming
-          gh release download "${{ inputs.tag }}" -p '*setup.exe' -D incoming
-          ls -la incoming
-          test -n "$(find incoming -name '*setup.exe' | head -1)" || { echo "::error::no setup.exe was downloaded"; exit 1; }
-
-      - name: fetch signtool's Artifact Signing plug-in
-        # Also before the login, for the same reason. The dlib from the Microsoft.ArtifactSigning.Client
-        # NuGet package authenticates with DefaultAzureCredential, which is what the `az login` below
-        # leaves behind.
-        shell: pwsh
-        run: |
-          $client = Join-Path $env:RUNNER_TEMP 'artifact-signing'
-          New-Item -ItemType Directory -Force -Path $client | Out-Null
-          $pkg = Join-Path $client 'client.zip'
-          Invoke-WebRequest -Uri 'https://www.nuget.org/api/v2/package/Microsoft.ArtifactSigning.Client' -OutFile $pkg
-          Expand-Archive -Path $pkg -DestinationPath (Join-Path $client 'client') -Force
-          $dlib = Get-ChildItem -Path (Join-Path $client 'client') -Recurse -Filter Azure.CodeSigning.Dlib.dll |
-            Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
-          if (-not $dlib) { throw 'Azure.CodeSigning.Dlib.dll (x64) not found in Microsoft.ArtifactSigning.Client' }
-          "ARTIFACT_SIGNING_DLIB=$($dlib.FullName)" >> $env:GITHUB_ENV
-          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
-            Where-Object { $_.FullName -like "*\x64\*" } | Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $signtool) { throw "signtool.exe was not found in the Windows SDK" }
-          "SIGNTOOL=$($signtool.FullName)" >> $env:GITHUB_ENV
-          Write-Host "dlib: $($dlib.FullName)"
-          Write-Host "signtool: $($signtool.FullName)"
+          mkdir -p staging
+          gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" -p '*setup.exe' -D staging
+          ls -la staging
+          test -n "$(find staging -name '*setup.exe' | head -1)" || { echo "::error::no setup.exe was downloaded"; exit 1; }
 
       # Azure Artifact Signing, authenticated with OpenID Connect: the job's GitHub token is exchanged
       # for an Azure token against the organization's app registration, whose federated credential
       # accepts `repo:redrob-labs@<org id>/*:environment:release`. No client secret exists anywhere.
-      # The login comes AFTER every download and IMMEDIATELY before signtool: GitHub's OIDC token lives
+      # The login comes AFTER the download and IMMEDIATELY before signing: GitHub's OIDC token lives
       # minutes, and a login done before a long step left signtool without a usable credential (it then
       # waited on a browser). No token caching, no sidecar -- just the ordering.
       - name: Log in to Azure (OIDC)
-        if: env.AZURE_CLIENT_ID != ''
         uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: sign it
-        # An RFC 3161 timestamp (/tr, never the legacy /t) from Artifact Signing's own authority: without a
-        # timestamp the signature expires with the certificate, so an installer downloaded after the cert's
-        # expiry stops validating even though it was signed while the cert was good.
-        shell: pwsh
-        env:
-          ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
-          ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
-          ARTIFACT_SIGNING_CERT_PROFILE: ${{ secrets.ARTIFACT_SIGNING_CERT_PROFILE }}
-        run: |
-          $exe = Get-ChildItem -Path incoming -Filter "*setup.exe" | Select-Object -First 1
-          if (-not $exe) { throw "no setup.exe was downloaded" }
-          $metadata = Join-Path $env:RUNNER_TEMP 'artifact-signing\metadata.json'
-          @{
-            Endpoint               = $env:ARTIFACT_SIGNING_ENDPOINT.TrimEnd('/')
-            CodeSigningAccountName = $env:ARTIFACT_SIGNING_ACCOUNT
-            CertificateProfileName = $env:ARTIFACT_SIGNING_CERT_PROFILE
-            # Only the credentials a CI runner or a developer shell can satisfy. Without this list a
-            # missing login falls through to InteractiveBrowserCredential, which opens a browser nobody
-            # sees and waits forever (one release hung 30 minutes on it). Now it fails in seconds.
-            ExcludeCredentials     = @(
-              'InteractiveBrowserCredential', 'ManagedIdentityCredential', 'SharedTokenCacheCredential',
-              'VisualStudioCredential', 'VisualStudioCodeCredential', 'AzurePowerShellCredential',
-              'AzureDeveloperCliCredential', 'WorkloadIdentityCredential'
-            )
-          } | ConvertTo-Json | Set-Content -Path $metadata -Encoding utf8
-          Write-Host "Signing with Azure Artifact Signing: $($exe.Name)"
-          & $env:SIGNTOOL sign /v /fd SHA256 /td SHA256 /tr "http://timestamp.acs.microsoft.com" `
-            /d "Redrob Browser" /du "https://github.com/redrob-labs/redrob-browser" `
-            /dlib $env:ARTIFACT_SIGNING_DLIB /dmdf $metadata `
-            $exe.FullName
-          if ($LASTEXITCODE -ne 0) { throw "signtool sign failed with $LASTEXITCODE" }
-
-      - name: verify the Authenticode signature
-        # A Public Trust certificate chains to a Microsoft root every Windows trusts, so the FULL check must
-        # pass: `signtool verify /pa` walks the chain and checks the timestamp, and Get-AuthenticodeSignature
-        # has to say Valid -- nothing else. The old NotTrusted/UnknownError allowance existed for a
-        # certificate whose root the runner did not carry; that certificate is gone, and with it the
-        # allowance. The signer also has to be the organisation's certificate, not whatever profile the
-        # account happened to point at.
-        shell: pwsh
-        run: |
-          $exe = Get-ChildItem -Path incoming -Filter "*setup.exe" | Select-Object -First 1
-          & $env:SIGNTOOL verify /pa /v $exe.FullName
-          if ($LASTEXITCODE -ne 0) { throw "signtool verify /pa failed with $LASTEXITCODE" }
-          $signature = Get-AuthenticodeSignature -FilePath $exe.FullName
-          if (-not $signature.SignerCertificate) { throw "The installer has no Authenticode signer certificate" }
-          if ($signature.Status -ne 'Valid') {
-            throw "Invalid Authenticode signature: $($signature.Status) ($($signature.StatusMessage))"
-          }
-          if (-not $signature.TimeStamperCertificate) { throw "The signature carries no timestamp" }
-          $subject = $signature.SignerCertificate.Subject
-          if ($subject -notlike '*CN=McKinley Rice, Inc.*') {
-            throw "The installer is signed by '$subject', not by the organisation's certificate (CN=McKinley Rice, Inc.)"
-          }
-          Write-Host "$($exe.FullName) signed by $subject"
-          New-Item -ItemType Directory -Force -Path staging | Out-Null
-          Copy-Item $exe.FullName "staging/$($exe.Name)"
+      - name: sign and verify the installer
+        # The organisation's one copy of the recipe (redrob-labs/.github/actions/sign-windows): signtool with
+        # the Artifact Signing dlib and an ExcludeCredentials list, an RFC 3161 timestamp, then
+        # `signtool verify /pa` with Status Valid and the signer's CN compared to McKinley Rice, Inc. It prints
+        # `<file> signed by CN=...`, which is the line a release's log is read for.
+        uses: redrob-labs/.github/actions/sign-windows@main
+        with:
+          files: staging/*setup.exe
+          description: Redrob Browser
+          url: https://github.com/redrob-labs/redrob-browser
+          endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          account: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          cert-profile: ${{ secrets.ARTIFACT_SIGNING_CERT_PROFILE }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: signed-windows
+          name: release-windows
           path: staging/*.exe
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------------------------------
-  publish:
-    name: replace the assets, undraft, publish to the CDN
-    needs: [probe, sign-macos, sign-windows]
+  cdn:
+    name: publish to cdn.redrob.ai
+    needs: [probe, collect, sign-macos, sign-windows]
     # SKIPPED is not FAILED, and the difference is the whole workflow. A Linux-only release skips both signing
     # jobs, and a plain `needs:` would then skip this one too -- publishing nothing, which is exactly the case
     # this exists to serve. So the condition admits success and skipped and refuses only a real failure:
-    # an artefact that was meant to be signed and could not be must never reach the CDN.
-    if: ${{ !cancelled() && needs.sign-macos.result != 'failure' && needs.sign-windows.result != 'failure' }}
+    # an artefact that was meant to be signed and could not be must never reach the CDN. A dry run stops
+    # before this job: the signed files stay as workflow artifacts and nothing public changes.
+    if: ${{ !cancelled() && !inputs.dry_run && needs.collect.result == 'success' && needs.sign-macos.result != 'failure' && needs.sign-windows.result != 'failure' }}
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      APP_VERSION: ${{ needs.probe.outputs.version }}
       # The same names every other product in this organisation uses. preflight.yml confirms all three reach
       # this repository.
       REDROB_CDN_BUCKET: ${{ vars.REDROB_CDN_BUCKET }}
@@ -542,80 +553,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: the tag and the version have to agree
-        # A tag that does not match REDROB_VERSION means the artefacts on it were built from a different tree
-        # than this checkout, and every path below -- the CDN filename, the latest/ alias -- would be named
-        # after the wrong one.
-        id: version
-        run: |
-          set -euo pipefail
-          version="$(cat REDROB_VERSION)"
-          if [ "${{ inputs.tag }}" != "v$version" ]; then
-            echo "::error::tag ${{ inputs.tag }} does not match REDROB_VERSION $version"
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - name: collect the Linux artefacts as built
-        # Nothing to sign here. A .deb is not itself signed in this ecosystem -- what gets signed is the apt
-        # repository's Release file, which is a different artefact produced by scripts/build_repo.py and
-        # gated on a signing key this repository does not yet have. So Linux is download-and-publish, and
-        # saying that plainly is better than a job that looks like it signs something.
-        run: |
-          set -euo pipefail
-          mkdir -p staging
-          gh release download "${{ inputs.tag }}" -p '*.deb' -D staging || \
-            echo "::notice::no .deb on this release"
-          ls -la staging || true
-
       - uses: actions/download-artifact@v4
-        continue-on-error: true
+        # Everything the release will carry, the same set release-publish merges: the signed installers and
+        # the as-built Linux and portable files.
         with:
-          name: signed-macos
+          pattern: release-*
           path: staging
+          merge-multiple: true
 
-      - uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: signed-windows
-          path: staging
-
-      - uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: launcher-macos
-          path: launcher
-
-      - name: the names Redrob Launcher installs from
-        # <stem>-<version>-<os>-<arch>[-portable].<ext>, redrob-launcher's one shape for every app's release
-        # (crates/core/src/platform.rs). The Debian name stays -- it is the apt pool/ convention and what
-        # build_repo.py reads -- and the launcher gets a copy under its own spelling of the architecture. The
-        # Windows portable zip is made by `redrob.py package` on the build host and already sits on the draft;
-        # the macOS .dmg arrived from the signing job above. scripts/check_asset_names.py then reads the release
-        # back and refuses to undraft a version that ships a platform the launcher cannot install.
-        run: |
-          set -euo pipefail
-          mkdir -p launcher
-          for f in staging/*.deb; do
-            [ -f "$f" ] || continue
-            arch="$(basename "$f" .deb)"
-            arch="${arch##*_}"
-            case "$arch" in
-              amd64) token=linux-x86_64 ;;
-              arm64) token=linux-aarch64 ;;
-              *) echo "::error::no launcher token for Debian architecture $arch"; exit 1 ;;
-            esac
-            cp "$f" "launcher/redrob-browser-${{ steps.version.outputs.version }}-${token}.deb"
-          done
-          # The launcher manifest, beside the renamed assets (redrob-launcher docs/release-manifest.md): the
-          # launcher reads it from the release to learn that this version reads its shared account file, which
-          # develop does since the shared-account change (#110). Written here, in the one job that publishes,
-          # and checked for content before anything is uploaded.
-          printf '{ "schema": 1, "sharedAccount": true }\n' > launcher/redrob-launcher.json
-          python3 scripts/check_asset_names.py --manifest launcher/redrob-launcher.json
-          ls -l launcher || true
-
-      - name: what is about to be published
+      - name: every shipped platform has a name Redrob Launcher can install
+        # Checked over the exact file set release-publish uploads, BEFORE anything is published: a platform
+        # that ships without a launcher-readable name fails the release here. `redrob-launcher.json` is named
+        # with them because release-publish writes it beside the assets (launcher_manifest: true); its content
+        # is the one line scripts/check_asset_names.py's self-test pins.
         run: |
           set -euo pipefail
           if [ -z "$(ls -A staging 2>/dev/null)" ]; then
@@ -626,38 +576,7 @@ jobs:
             printf '%s  %s bytes\n' "$(basename "$f")" "$(stat -c%s "$f")"
             sha256sum "$f" | awk '{print "  sha256 "$1}'
           done
-
-      - name: put the signed assets back on the release
-        # --clobber, because the unsigned upload of the same name is what is being replaced. This is the step
-        # that makes the draft worth using: until it runs, the only assets are unsigned and nobody can reach
-        # them.
-        run: |
-          set -euo pipefail
-          for f in staging/*.zip staging/*.exe; do
-            [ -f "$f" ] || continue
-            gh release upload "${{ inputs.tag }}" "$f" --clobber
-            echo "uploaded $(basename "$f")"
-          done
-          ( cd staging && for f in *; do sha256sum "$f" > "$f.sha256"; done )
-          for f in staging/*.sha256; do
-            gh release upload "${{ inputs.tag }}" "$f" --clobber
-          done
-          shopt -s nullglob
-          for f in launcher/*.deb launcher/*.dmg launcher/*.zip launcher/redrob-launcher.json; do
-            gh release upload "${{ inputs.tag }}" "$f" --clobber
-            echo "uploaded $(basename "$f")"
-          done
-          ( cd launcher && for f in *.deb *.dmg *.zip redrob-launcher.json; do sha256sum "$f" > "$f.sha256"; done )
-          for f in launcher/*.sha256; do
-            gh release upload "${{ inputs.tag }}" "$f" --clobber
-          done
-
-      - name: every shipped platform has a name Redrob Launcher can install
-        # Read back from the release itself, not from the directories here: what the launcher sees is the
-        # asset list, and the Windows portable zip never passes through this job. The same read-back refuses a
-        # release without redrob-launcher.json, and downloads that asset to check its content is what the
-        # launcher expects (schema 1, sharedAccount true).
-        run: python3 scripts/check_asset_names.py --release "${{ inputs.tag }}" --version "${{ steps.version.outputs.version }}"
+          python3 scripts/check_asset_names.py --names staging/* redrob-launcher.json --version "$APP_VERSION"
 
       - name: name the .deb the way the CDN aliases it
         # cdn-publish.sh derives the version-free `latest/` alias by deleting a `-<version>` segment from the
@@ -670,18 +589,20 @@ jobs:
         # carries the Debian name the pool/ convention requires, so the same rule has to exist a second time.
         # Its first home is `cmd_package` in scripts/redrob.py; keep the two in step.
         #
-        # Everything else is copied through untouched: mac and Windows artefacts are already named with a
-        # `-<version>` segment, and the .sha256 files are skipped because the script writes its own.
+        # The CDN carries the packager's names only: the mac Sparkle zip, the Windows installer, the Debian
+        # package under its CDN spelling. The launcher-named copies (.dmg, -linux-x86_64.deb, -portable.zip,
+        # the -macos-aarch64.zip) belong on the GitHub release, which is where Redrob Launcher reads.
         run: |
           set -euo pipefail
           mkdir -p cdn
           for f in staging/*.deb; do
             [ -f "$f" ] || continue
+            case "$f" in *-linux-*.deb) continue ;; esac   # the launcher-named copy: same bytes, not for the CDN
             arch="$(basename "$f" .deb)"
             arch="${arch##*_}"
-            cp "$f" "cdn/redrob-browser-${arch}-${{ steps.version.outputs.version }}.deb"
+            cp "$f" "cdn/redrob-browser-${arch}-${APP_VERSION}.deb"
           done
-          for f in staging/*.zip staging/*.exe staging/*.dmg staging/*.pkg; do
+          for f in staging/redrob-browser-macos-*-"$APP_VERSION".zip staging/*setup.exe; do
             [ -f "$f" ] || continue
             cp "$f" cdn/
           done
@@ -697,7 +618,6 @@ jobs:
         # echo. If versioned-only preview publishing is wanted later, that is a change to the script -- where
         # the aliasing actually happens -- and not another flag here.
         env:
-          APP_VERSION: ${{ steps.version.outputs.version }}
           REPLACE_PUBLISHED: ${{ inputs.replace_published }}
           CDN_DISTRIBUTION_ID: ${{ vars.REDROB_CDN_DISTRIBUTION_ID }}
         run: bash .github/scripts/cdn-publish.sh cdn
@@ -709,7 +629,6 @@ jobs:
         # immutable versioned key, never latest/, so an update a client already started cannot change under
         # it. Short cache: the feed is the one file that has to move at every release.
         env:
-          APP_VERSION: ${{ steps.version.outputs.version }}
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
           set -euo pipefail
@@ -772,7 +691,6 @@ jobs:
         # machines can see and others cannot, with the signature the difference.
         env:
           REDROB_SIGNING_KEY: ${{ secrets.REDROB_SIGNING_KEY }}
-          APP_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           if [ -z "${REDROB_SIGNING_KEY:-}" ]; then
@@ -781,13 +699,21 @@ jobs:
             echo "::notice::To turn it on see docs/RELEASE.md, 'Turning the update channel on'."
             exit 0
           fi
-          if ! ls staging/*.deb >/dev/null 2>&1; then
+          # build_repo.py reads the Debian-named package; the launcher-named copy is the same bytes and is
+          # not a second package for the pool.
+          mkdir -p pool
+          for f in staging/*.deb; do
+            [ -f "$f" ] || continue
+            case "$f" in *-linux-*.deb) continue ;; esac
+            cp "$f" pool/
+          done
+          if ! ls pool/*.deb >/dev/null 2>&1; then
             echo "::notice::no .deb in this release, so there is nothing to put in a repository"
             exit 0
           fi
 
           # build_repo.py reads out/artifacts by default; point it at what this job downloaded.
-          python3 scripts/build_repo.py --artifacts staging --out out/repo
+          python3 scripts/build_repo.py --artifacts pool --out out/repo
 
           # Verify BEFORE uploading, against the public key the repository itself carries -- which is the
           # same key.include embeds, so this is the check apt will make on a user's machine. Verifying
@@ -821,11 +747,25 @@ jobs:
           done
           echo "apt repository published: https://${CDN_PUBLIC_HOST}/${CDN_PREFIX}/apt/"
 
-      - name: undraft the release
-        # Last. Everything before it can fail and leave a draft nobody has seen; once this runs the artefacts
-        # are public, so it goes after the signatures verified and after the CDN accepted them.
-        if: ${{ inputs.undraft }}
-        run: |
-          set -euo pipefail
-          gh release edit "${{ inputs.tag }}" --draft=false
-          gh release view "${{ inputs.tag }}" --json isDraft,url -q '"draft=" + (.isDraft|tostring) + "  " + .url'
+  # ---------------------------------------------------------------------------------------------------
+  publish:
+    # Last, and the organisation's one copy of the step (redrob-labs/.github release-publish.yml): every
+    # `release-*` artifact is merged, SHA256SUMS.txt is written over all of them, redrob-launcher.json
+    # (`{ "schema": 1, "sharedAccount": true }`) is added, and the DRAFT's assets are replaced with that set
+    # -- so the unsigned .app.zip, the mac packaging kit and the unsigned installer leave the release and
+    # only signed, launcher-readable files remain. Then it is published as latest (prerelease when the
+    # version carries a `-`). After the CDN, so a page link never resolves before the bytes behind it.
+    # `tag` is the draft's own tag and `target` the commit it was drafted against, so the published tag
+    # points at the commit that was built, whatever ref this workflow was dispatched from.
+    needs: [probe, collect, sign-macos, sign-windows, cdn]
+    if: ${{ !cancelled() && !inputs.dry_run && needs.cdn.result == 'success' && needs.sign-macos.result != 'failure' && needs.sign-windows.result != 'failure' }}
+    uses: redrob-labs/.github/.github/workflows/release-publish.yml@main
+    permissions:
+      contents: write
+    with:
+      version: ${{ needs.probe.outputs.version }}
+      title: Redrob Browser
+      tag: ${{ inputs.tag }}
+      target: ${{ needs.probe.outputs.target }}
+      launcher_manifest: true
+      publish: true

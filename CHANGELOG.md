@@ -19,6 +19,13 @@ result only when the full Authenticode check passes and the signer is `CN=McKinl
 not-trusted allowance is gone. The vendored build system's Windows signer follows the same recipe. No
 certificate file, password or client secret exists anywhere in this repository's configuration any more.
 
+**Signing, publishing and the branch rules are the organisation's shared copies.** The Windows signing step
+is `redrob-labs/.github/actions/sign-windows`; the release is created by the shared `release-publish.yml`,
+which writes `SHA256SUMS.txt` and `redrob-launcher.json`, replaces the draft's assets with the signed set and
+publishes it as latest (prerelease when the version carries a `-`); `gitflow.yml` calls the org-wide reusable
+workflow with its one type list. `sign-and-publish.yml` gained a `dry_run` input that signs and verifies without
+touching the release or the CDN, and lost `undraft` — a release is published when its signatures verify.
+
 ## 0.1.8 — 2026-10-13
 
 **The extension and the agent apps are on Redrob UI, end to end.** Every page the browser ships — the new tab,

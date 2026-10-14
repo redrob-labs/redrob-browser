@@ -1,0 +1,4 @@
+self-hosted-runner:
+  # release.yml and ui-build.yml declare the Chromium build machine that does not exist yet (see release.yml).
+  labels:
+    - chromium-build
