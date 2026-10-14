@@ -12,6 +12,13 @@ on the machine attaches to (redrob-code 0.6.0 or later) rather than an engine pr
 starts on first use and goes away after ten idle minutes with no clients. A Redrob Code agent saved before this
 change keeps working — the flag is added when the agent launches, so there is nothing to re-add.
 
+**The Windows installer is signed through Azure Artifact Signing over OpenID Connect.** `sign-and-publish.yml`
+no longer imports a certificate file: the signing job logs in to Azure with the job's own identity token
+immediately before `signtool` runs, signs with the organisation's Public Trust certificate, and accepts the
+result only when the full Authenticode check passes and the signer is `CN=McKinley Rice, Inc.` — the old
+not-trusted allowance is gone. The vendored build system's Windows signer follows the same recipe. No
+certificate file, password or client secret exists anywhere in this repository's configuration any more.
+
 ## 0.1.8 — 2026-10-13
 
 **The extension and the agent apps are on Redrob UI, end to end.** Every page the browser ships — the new tab,
