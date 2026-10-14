@@ -18,8 +18,8 @@ from unittest import mock
 from . import logger, utils
 
 
-FAKE_PASSWORD = "FAKE_ESIGNER_PASSWORD_FOR_REDACTION_TEST"
-FAKE_TOTP = "FAKE_ESIGNER_TOTP_FOR_REDACTION_TEST"
+FAKE_PASSWORD = "FAKE_SIGNER_PASSWORD_FOR_REDACTION_TEST"
+FAKE_TOTP = "FAKE_SIGNER_TOTP_FOR_REDACTION_TEST"
 FAKE_KEYCHAIN_PASSWORD = "FAKE_KEYCHAIN_PASSWORD_FOR_REDACTION_TEST"
 FAKE_PEM_PRIVATE_KEY = """-----BEGIN FAKE TEST PRIVATE KEY-----
 FAKE_PRIVATE_KEY_PAYLOAD_LINE_ONE_FOR_REDACTION_TEST
@@ -85,7 +85,7 @@ class CommandRedactionTest(unittest.TestCase):
     def test_redacts_configured_secret_values_from_arbitrary_text(self):
         with mock.patch.dict(
             os.environ,
-            {"ESIGNER_PASSWORD": FAKE_PASSWORD},
+            {"MACOS_CERTIFICATE_PWD": FAKE_PASSWORD},
             clear=False,
         ):
             displayed = utils.redact_sensitive_text(
@@ -125,7 +125,7 @@ class CommandRedactionTest(unittest.TestCase):
 
         with mock.patch.dict(
             os.environ,
-            {"ESIGNER_PASSWORD": secret},
+            {"MACOS_CERTIFICATE_PWD": secret},
             clear=False,
         ):
             displayed = utils.redact_sensitive_text(" | ".join(representations))
@@ -139,7 +139,7 @@ class LoggingSinkRedactionTest(unittest.TestCase):
         with (
             mock.patch.dict(
                 os.environ,
-                {"ESIGNER_PASSWORD": FAKE_PASSWORD},
+                {"MACOS_CERTIFICATE_PWD": FAKE_PASSWORD},
                 clear=False,
             ),
             mock.patch.object(logger, "_ensure_log_file", return_value=file_output),
@@ -225,7 +225,7 @@ class RunCommandRedactionTest(unittest.TestCase):
         with (
             mock.patch.dict(
                 os.environ,
-                {"ESIGNER_PASSWORD": FAKE_PASSWORD},
+                {"MACOS_CERTIFICATE_PWD": FAKE_PASSWORD},
                 clear=False,
             ),
             mock.patch.object(utils.subprocess, "Popen", return_value=process),

@@ -15,7 +15,7 @@
 #   here:   workflow_dispatch with tag=v0.1.4
 #             sign-linux    (nothing to sign -- see the job)
 #             sign-macos    codesign -> notarytool -> stapler -> three checks
-#             sign-windows  signtool -> Get-AuthenticodeSignature
+#             sign-windows  azure/login (OIDC) -> signtool /dlib (Artifact Signing) -> verify /pa + Get-AuthenticodeSignature
 #           publish: replace the release's assets with the signed ones, undraft, then CDN
 #
 # WHAT A SIGNATURE HERE MEANS. It attests that the holder of the certificate approved these bytes. It does
@@ -363,83 +363,153 @@ jobs:
     needs: probe
     if: needs.probe.outputs.win == 'true'
     runs-on: windows-2022
+    # `release` is the environment the organization's federated credential names
+    # (repo:redrob-labs@<org id>/<repo>@<id>:environment:release); any other name is refused.
+    environment: release
+    permissions:
+      # Read: this job only downloads the draft's asset; the publish job is the one that writes.
+      contents: read
+      # The OIDC token `azure/login` exchanges for the Artifact Signing credential.
+      id-token: write
     env:
-      WINDOWS_CERTIFICATE: ${{ secrets.WIN_CSC_LINK }}
-      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
       GH_TOKEN: ${{ github.token }}
+      # A plain ID (not a credential); here so the login step can be skipped when signing is not set up.
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: require the Windows signing certificate
+      - name: require the Artifact Signing identifiers
+        # Six names, all plain identifiers, all redrob-labs organization secrets. Do not recreate them as
+        # repository secrets (a same-named repository secret would override the org one). No certificate
+        # file and no client secret exist anywhere in this job: the credential is the OIDC login below.
         shell: bash
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_CERT_PROFILE: ${{ secrets.ARTIFACT_SIGNING_CERT_PROFILE }}
         run: |
           set -euo pipefail
           missing=()
-          for name in WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD; do
+          for name in \
+            AZURE_CLIENT_ID \
+            AZURE_TENANT_ID \
+            AZURE_SUBSCRIPTION_ID \
+            ARTIFACT_SIGNING_ENDPOINT \
+            ARTIFACT_SIGNING_ACCOUNT \
+            ARTIFACT_SIGNING_CERT_PROFILE; do
             if [ -z "${!name:-}" ]; then missing+=("$name"); fi
           done
           if [ "${#missing[@]}" -gt 0 ]; then
-            printf 'Missing Windows signing secrets: %s\n' "${missing[*]}" >&2
+            printf 'Missing Windows signing configuration: %s\n' "${missing[*]}" >&2
             exit 1
           fi
 
       - name: download the installer
+        # BEFORE the Azure login, deliberately: GitHub's OIDC token lives minutes, and the login must sit
+        # immediately before signtool with nothing long between them. The download is the only step here
+        # that can take a while, so it goes first.
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p incoming
           gh release download "${{ inputs.tag }}" -p '*setup.exe' -D incoming
           ls -la incoming
+          test -n "$(find incoming -name '*setup.exe' | head -1)" || { echo "::error::no setup.exe was downloaded"; exit 1; }
 
-      - name: import the signing certificate
-        # Copied from redrob-design's step of the same name: WIN_CSC_LINK is a base64 PFX, imported into
-        # CurrentUser\My, and the THUMBPRINT is what the signing tool is then pointed at.
-        id: certificate
+      - name: fetch signtool's Artifact Signing plug-in
+        # Also before the login, for the same reason. The dlib from the Microsoft.ArtifactSigning.Client
+        # NuGet package authenticates with DefaultAzureCredential, which is what the `az login` below
+        # leaves behind.
         shell: pwsh
         run: |
-          $pfx = Join-Path $env:RUNNER_TEMP "redrob-code-signing.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-          $imported = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
-          Remove-Item $pfx -Force
-          if (-not $imported.Thumbprint) { throw "The certificate imported without a thumbprint" }
-          Write-Host "Imported $($imported.Subject)"
-          "thumbprint=$($imported.Thumbprint)" >> $env:GITHUB_OUTPUT
+          $client = Join-Path $env:RUNNER_TEMP 'artifact-signing'
+          New-Item -ItemType Directory -Force -Path $client | Out-Null
+          $pkg = Join-Path $client 'client.zip'
+          Invoke-WebRequest -Uri 'https://www.nuget.org/api/v2/package/Microsoft.ArtifactSigning.Client' -OutFile $pkg
+          Expand-Archive -Path $pkg -DestinationPath (Join-Path $client 'client') -Force
+          $dlib = Get-ChildItem -Path (Join-Path $client 'client') -Recurse -Filter Azure.CodeSigning.Dlib.dll |
+            Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+          if (-not $dlib) { throw 'Azure.CodeSigning.Dlib.dll (x64) not found in Microsoft.ArtifactSigning.Client' }
+          "ARTIFACT_SIGNING_DLIB=$($dlib.FullName)" >> $env:GITHUB_ENV
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -like "*\x64\*" } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe was not found in the Windows SDK" }
+          "SIGNTOOL=$($signtool.FullName)" >> $env:GITHUB_ENV
+          Write-Host "dlib: $($dlib.FullName)"
+          Write-Host "signtool: $($signtool.FullName)"
+
+      # Azure Artifact Signing, authenticated with OpenID Connect: the job's GitHub token is exchanged
+      # for an Azure token against the organization's app registration, whose federated credential
+      # accepts `repo:redrob-labs@<org id>/*:environment:release`. No client secret exists anywhere.
+      # The login comes AFTER every download and IMMEDIATELY before signtool: GitHub's OIDC token lives
+      # minutes, and a login done before a long step left signtool without a usable credential (it then
+      # waited on a browser). No token caching, no sidecar -- just the ordering.
+      - name: Log in to Azure (OIDC)
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: sign it
-        # An RFC 3161 timestamp, not the legacy /t: without a timestamp the signature expires with the
-        # certificate, so an installer downloaded after the cert's expiry stops validating even though it was
-        # signed while the cert was good.
+        # An RFC 3161 timestamp (/tr, never the legacy /t) from Artifact Signing's own authority: without a
+        # timestamp the signature expires with the certificate, so an installer downloaded after the cert's
+        # expiry stops validating even though it was signed while the cert was good.
         shell: pwsh
+        env:
+          ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_CERT_PROFILE: ${{ secrets.ARTIFACT_SIGNING_CERT_PROFILE }}
         run: |
           $exe = Get-ChildItem -Path incoming -Filter "*setup.exe" | Select-Object -First 1
           if (-not $exe) { throw "no setup.exe was downloaded" }
-          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
-            Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1
-          if (-not $signtool) { throw "signtool.exe was not found in the Windows SDK" }
-          Write-Host "signtool: $($signtool.FullName)"
-          & $signtool.FullName sign `
-            /sha1 "${{ steps.certificate.outputs.thumbprint }}" `
-            /fd sha256 /td sha256 /tr "http://timestamp.digicert.com" `
+          $metadata = Join-Path $env:RUNNER_TEMP 'artifact-signing\metadata.json'
+          @{
+            Endpoint               = $env:ARTIFACT_SIGNING_ENDPOINT.TrimEnd('/')
+            CodeSigningAccountName = $env:ARTIFACT_SIGNING_ACCOUNT
+            CertificateProfileName = $env:ARTIFACT_SIGNING_CERT_PROFILE
+            # Only the credentials a CI runner or a developer shell can satisfy. Without this list a
+            # missing login falls through to InteractiveBrowserCredential, which opens a browser nobody
+            # sees and waits forever (one release hung 30 minutes on it). Now it fails in seconds.
+            ExcludeCredentials     = @(
+              'InteractiveBrowserCredential', 'ManagedIdentityCredential', 'SharedTokenCacheCredential',
+              'VisualStudioCredential', 'VisualStudioCodeCredential', 'AzurePowerShellCredential',
+              'AzureDeveloperCliCredential', 'WorkloadIdentityCredential'
+            )
+          } | ConvertTo-Json | Set-Content -Path $metadata -Encoding utf8
+          Write-Host "Signing with Azure Artifact Signing: $($exe.Name)"
+          & $env:SIGNTOOL sign /v /fd SHA256 /td SHA256 /tr "http://timestamp.acs.microsoft.com" `
+            /d "Redrob Browser" /du "https://github.com/redrob-labs/redrob-browser" `
+            /dlib $env:ARTIFACT_SIGNING_DLIB /dmdf $metadata `
             $exe.FullName
-          if ($LASTEXITCODE -ne 0) { throw "signtool failed with $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "signtool sign failed with $LASTEXITCODE" }
 
       - name: verify the Authenticode signature
-        # The accepted-status list is redrob-design's, and it is deliberate: this organisation's certificate
-        # is not trusted on a fresh runner, so Status comes back UnknownError or NotTrusted rather than Valid.
-        # Rejecting anything but Valid would redden a correct signature. Only an unsigned file or a broken
-        # hash is a failure.
+        # A Public Trust certificate chains to a Microsoft root every Windows trusts, so the FULL check must
+        # pass: `signtool verify /pa` walks the chain and checks the timestamp, and Get-AuthenticodeSignature
+        # has to say Valid -- nothing else. The old NotTrusted/UnknownError allowance existed for a
+        # certificate whose root the runner did not carry; that certificate is gone, and with it the
+        # allowance. The signer also has to be the organisation's certificate, not whatever profile the
+        # account happened to point at.
         shell: pwsh
         run: |
           $exe = Get-ChildItem -Path incoming -Filter "*setup.exe" | Select-Object -First 1
-          $signature = Get-AuthenticodeSignature $exe.FullName
+          & $env:SIGNTOOL verify /pa /v $exe.FullName
+          if ($LASTEXITCODE -ne 0) { throw "signtool verify /pa failed with $LASTEXITCODE" }
+          $signature = Get-AuthenticodeSignature -FilePath $exe.FullName
           if (-not $signature.SignerCertificate) { throw "The installer has no Authenticode signer certificate" }
-          $accepted = @("Valid", "UnknownError", "NotTrusted")
-          if ($accepted -notcontains $signature.Status.ToString()) {
+          if ($signature.Status -ne 'Valid') {
             throw "Invalid Authenticode signature: $($signature.Status) ($($signature.StatusMessage))"
           }
           if (-not $signature.TimeStamperCertificate) { throw "The signature carries no timestamp" }
-          Write-Host "Signed by: $($signature.SignerCertificate.Subject) status=$($signature.Status)"
+          $subject = $signature.SignerCertificate.Subject
+          if ($subject -notlike '*CN=McKinley Rice, Inc.*') {
+            throw "The installer is signed by '$subject', not by the organisation's certificate (CN=McKinley Rice, Inc.)"
+          }
+          Write-Host "$($exe.FullName) signed by $subject"
           New-Item -ItemType Directory -Force -Path staging | Out-Null
           Copy-Item $exe.FullName "staging/$($exe.Name)"
 

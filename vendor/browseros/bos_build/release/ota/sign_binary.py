@@ -24,7 +24,7 @@ from ...lib.utils import (
     log_success,
     IS_MACOS,
 )
-from ...steps.sign.windows import sign_with_codesigntool
+from ...steps.sign.windows import sign_with_artifact_signing
 
 
 def sign_macos_binary(
@@ -248,11 +248,12 @@ def sign_windows_binary(
 ) -> bool:
     """Use the browser build's Windows signer for OTA binaries.
 
-    Sharing the signer keeps credentials out of cmd.exe parsing when the
-    bundled Java launcher is available, and reports redacted tool errors
-    before a later Authenticode check can obscure the original failure.
+    Sharing the signer means one Azure Artifact Signing path, one metadata
+    file and one verification (signtool verify /pa plus a Valid
+    Get-AuthenticodeSignature from the organisation's certificate) for the
+    installer and for every OTA binary alike.
     """
-    return sign_with_codesigntool([binary_path], env)
+    return sign_with_artifact_signing([binary_path], env)
 
 
 def sign_server_bundle_macos(

@@ -315,8 +315,8 @@ model step — worth reading before building a second answer to it.
    never been compiled. Two things are known to be wrong before the first build: font registration
    uses `AddFontResourceExW`/`FR_PRIVATE`, which registers with GDI where the renderer sandbox only
    reaches fonts through the DirectWrite proxy, so it must become a DirectWrite custom font
-   collection; and `WIN_CSC_LINK` holds a base64 PFX, which since 2023-06-01 can no longer be
-   reissued for a publicly-trusted code-signing cert.
+   collection. Signing itself is settled: `sign-and-publish.yml` signs with Azure Artifact Signing over
+   OpenID Connect (no certificate file anywhere), the same way redrob-cad and redrob-launcher do.
 5. macOS. The workflow exists and has never run; the app icon needs `actool` on a Mac.
 6. Accounts and sync — through redrob-auth, once console 0.28.0 and the unmetered-workspace work
    settle.

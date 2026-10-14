@@ -114,7 +114,9 @@ class BundleDerivationTest(unittest.TestCase):
             SimpleNamespace(
                 env=SimpleNamespace(
                     macos_certificate_name="cert",
-                    code_sign_tool_path="tool",
+                    artifact_signing_endpoint="https://example.codesigning.azure.net",
+                    artifact_signing_account="account",
+                    artifact_signing_cert_profile="profile",
                     has_r2_config=lambda: True,
                 )
             ),
@@ -130,7 +132,9 @@ class BundleDerivationTest(unittest.TestCase):
             SimpleNamespace(
                 env=SimpleNamespace(
                     macos_certificate_name="cert",
-                    code_sign_tool_path="tool",
+                    artifact_signing_endpoint="https://example.codesigning.azure.net",
+                    artifact_signing_account="account",
+                    artifact_signing_cert_profile="profile",
                     has_r2_config=lambda: True,
                 )
             ),

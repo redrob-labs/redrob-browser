@@ -21,8 +21,6 @@ SENSITIVE_ENV_VARS: frozenset[str] = frozenset(
         "BROWSEROS_CONTROLLER_KEY",
         "BUGREPORTER_KEY",
         "CLOUDFLARE_API_TOKEN",
-        "ESIGNER_PASSWORD",
-        "ESIGNER_TOTP_SECRET",
         "GITHUB_TOKEN",
         "GH_TOKEN",
         "MACOS_CERTIFICATE_P12",
@@ -149,34 +147,19 @@ class EnvConfig:
         return os.environ.get("MACOS_KEYCHAIN_PATH")
 
     @property
-    def code_sign_tool_path(self) -> Optional[str]:
-        """Path to Windows code signing tool directory (legacy, use CODE_SIGN_TOOL_EXE instead)"""
-        return os.environ.get("CODE_SIGN_TOOL_PATH")
+    def artifact_signing_endpoint(self) -> Optional[str]:
+        """Azure Artifact Signing endpoint, e.g. https://krc.codesigning.azure.net (not a secret)"""
+        return os.environ.get("ARTIFACT_SIGNING_ENDPOINT")
 
     @property
-    def code_sign_tool_exe(self) -> Optional[str]:
-        """Path to CodeSignTool executable (CodeSignTool.sh on macOS/Linux, CodeSignTool.bat on Windows)"""
-        return os.environ.get("CODE_SIGN_TOOL_EXE")
+    def artifact_signing_account(self) -> Optional[str]:
+        """Azure Artifact Signing account name (not a secret)"""
+        return os.environ.get("ARTIFACT_SIGNING_ACCOUNT")
 
     @property
-    def esigner_username(self) -> Optional[str]:
-        """eSigner username for Windows code signing"""
-        return os.environ.get("ESIGNER_USERNAME")
-
-    @property
-    def esigner_password(self) -> Optional[str]:
-        """eSigner password for Windows code signing"""
-        return os.environ.get("ESIGNER_PASSWORD")
-
-    @property
-    def esigner_totp_secret(self) -> Optional[str]:
-        """eSigner TOTP secret for Windows code signing"""
-        return os.environ.get("ESIGNER_TOTP_SECRET")
-
-    @property
-    def esigner_credential_id(self) -> Optional[str]:
-        """eSigner credential ID for Windows code signing"""
-        return os.environ.get("ESIGNER_CREDENTIAL_ID")
+    def artifact_signing_cert_profile(self) -> Optional[str]:
+        """Azure Artifact Signing certificate profile name (not a secret)"""
+        return os.environ.get("ARTIFACT_SIGNING_CERT_PROFILE")
 
     @property
     def r2_account_id(self) -> Optional[str]:
@@ -238,11 +221,9 @@ class EnvConfig:
     def get_windows_signing_config(self) -> dict:
         """Return the Windows signing configuration."""
         return {
-            "code_sign_tool_path": self.code_sign_tool_path or "",
-            "username": self.esigner_username or "",
-            "password": self.esigner_password or "",
-            "totp_secret": self.esigner_totp_secret or "",
-            "credential_id": self.esigner_credential_id or "",
+            "endpoint": self.artifact_signing_endpoint or "",
+            "account": self.artifact_signing_account or "",
+            "cert_profile": self.artifact_signing_cert_profile or "",
         }
 
     def validate_required(self, *var_names: str) -> None:

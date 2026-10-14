@@ -6,9 +6,9 @@
 # unlistable; the only place that can answer is a job running inside the repository.
 #
 # It prints PRESENT or ABSENT and nothing else. Never a value, never a length -- a length is a hint, and the
-# whole point of a preflight is that it is safe to run and read. The missing-name loop is copied from
-# redrob-design's own "Require the Windows signing certificate" step so the convention matches the rest of the
-# org rather than being invented here.
+# whole point of a preflight is that it is safe to run and read. The missing-name loop is the same shape as the
+# "require" steps in sign-and-publish.yml so the convention matches the rest of the org rather than being
+# invented here.
 name: preflight
 
 on:
@@ -30,9 +30,15 @@ jobs:
       # The apt repository's signing key. Ours alone -- no sibling runs an apt repository, so unlike the three
       # above there is no other workflow to confirm the name from. This job is the only way to know.
       REDROB_SIGNING_KEY: ${{ secrets.REDROB_SIGNING_KEY }}
-      # Windows Authenticode, as redrob-design uses it.
-      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      # Windows Authenticode through Azure Artifact Signing over OpenID Connect, as redrob-cad and
+      # redrob-launcher use it. All six are plain identifiers: the credential is the job's OIDC token,
+      # which no preflight can see -- a run of sign-and-publish.yml is the only test of that.
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+      ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+      ARTIFACT_SIGNING_CERT_PROFILE: ${{ secrets.ARTIFACT_SIGNING_CERT_PROFILE }}
       # Apple signing and notarization, as redrob-design uses them.
       APPLE_CODESIGN_CERT_P12_BASE64: ${{ secrets.APPLE_CODESIGN_CERT_P12_BASE64 }}
       APPLE_CODESIGN_CERT_PASSWORD: ${{ secrets.APPLE_CODESIGN_CERT_PASSWORD }}
@@ -48,8 +54,12 @@ jobs:
           REDROB_CDN_ACCESS_KEY_ID
           REDROB_CDN_SECRET_ACCESS_KEY
           REDROB_SIGNING_KEY
-          WIN_CSC_LINK
-          WIN_CSC_KEY_PASSWORD
+          AZURE_CLIENT_ID
+          AZURE_TENANT_ID
+          AZURE_SUBSCRIPTION_ID
+          ARTIFACT_SIGNING_ENDPOINT
+          ARTIFACT_SIGNING_ACCOUNT
+          ARTIFACT_SIGNING_CERT_PROFILE
           APPLE_CODESIGN_CERT_P12_BASE64
           APPLE_CODESIGN_CERT_PASSWORD
           APPLE_NOTARY_API_KEY_ID
