@@ -24,12 +24,13 @@ Both branches are protected the same way: pull requests only, force pushes and d
 required reviews, admin enforcement off. The required status check is `repo integrity`, which is the
 job name inside `checks.yml`.
 
-Working branches are `<type>/<short-slug>` and the allowed types are `feat`, `fix`, `docs`, `chore`,
-`test`, `refactor`, `perf`, `hotfix`, `release` and `sync`. `gitflow.yml` now enforces that list on
-every pull request, so a prefix outside it fails the check instead of merging: the `kiro/` branches
-already in this repository are what the rule exists to catch, because a branch name states what the
-change is and not which tool produced it. Nothing in the tracked tree declared a type list before
-this, so this set is the shared default rather than a list copied from a document here.
+Working branches are `<type>/<short-slug>` and the allowed types are the organisation's one list --
+`feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `perf`, `ci`, `build`, `sync`, `hotfix` and `release`
+-- kept in `redrob-labs/.github/.github/workflows/gitflow.yml`. This repository's `gitflow.yml` only
+calls that reusable workflow (it is the org's `workflow-templates/gitflow.yml`, verbatim), so a prefix
+outside the list fails the check instead of merging: the `kiro/` branches already in this repository
+are what the rule exists to catch, because a branch name states what the change is and not which tool
+produced it. Do not add a type list here; there is one, and it is there.
 
 Two things to know before you trust what you read in the tree. `CONTRIBUTING.md` still describes the
 older model, one long-lived `main` with no `develop`, and says in as many words that this repository
@@ -87,8 +88,10 @@ the manual pass in `docs/TESTING.md` against an installed `.deb`.
 `repo integrity`. It deliberately does not build the browser: it runs `check_repo.py`, then
 `compileall` over `scripts/`, then prints both versions. It is the only workflow that inspects the
 tree on a pull request, and `gitflow.yml` is the other workflow that runs on one: `gitflow.yml` judges
-the branch name on `pull_request` and, on `push` to `main`, whether `main` is contained in `develop`.
-Both report on a pull request, so either can be a required check.
+the branch name on `pull_request` (check `gitflow / branch name follows the convention`) and, on `push`
+to `main`, whether `main` is contained in `develop` (`gitflow / main is contained in develop`), opening
+the back-merge pull request itself when it is not. Both report on a pull request, so either can be a
+required check.
 
 `release.yml` triggers on tags matching `v*` and on `workflow_dispatch`, runs on a self-hosted runner
 labelled `[self-hosted, linux, x64, chromium-build]` with a 700 minute timeout, and re-runs
@@ -100,7 +103,10 @@ request and a required check that never reports blocks the merge forever. `prefl
 answer which org credentials this repository can actually see, printing PRESENT or ABSENT and never a
 value; `windows.yml` and `macos.yml` are dispatch-only on purpose because their first runs are
 expected to fail on disk and on never-compiled platform code, and `sign-and-publish.yml` signs
-artefacts a local build produced and uploaded to a draft release.
+artefacts a local build produced and uploaded to a draft release. Its Windows signing step is the
+organisation's `redrob-labs/.github/actions/sign-windows` and its last job is the organisation's
+`release-publish.yml`; only the Chromium mac signing driver, the Sparkle feeds, the apt repository and
+the CDN publish are this repository's own.
 
 ## What you will get wrong on the first attempt
 

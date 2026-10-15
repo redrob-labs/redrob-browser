@@ -133,8 +133,22 @@ class ServerOTAModule(Step):
             if not context.env.macos_certificate_name:
                 raise ValidationError("MACOS_CERTIFICATE_NAME required for signing")
         elif IS_WINDOWS():
-            if not context.env.code_sign_tool_path:
-                raise ValidationError("CODE_SIGN_TOOL_PATH required for signing")
+            missing = [
+                name
+                for name, value in (
+                    ("ARTIFACT_SIGNING_ENDPOINT", context.env.artifact_signing_endpoint),
+                    ("ARTIFACT_SIGNING_ACCOUNT", context.env.artifact_signing_account),
+                    (
+                        "ARTIFACT_SIGNING_CERT_PROFILE",
+                        context.env.artifact_signing_cert_profile,
+                    ),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValidationError(
+                    f"{', '.join(missing)} required for signing"
+                )
 
         if not context.env.has_r2_config():
             raise ValidationError(

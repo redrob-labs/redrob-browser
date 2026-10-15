@@ -124,11 +124,12 @@ signed, notarized app, because only the mac runner has `hdiutil`.
 
 `scripts/check_asset_names.py` is the parser transliterated from `redrob-launcher/crates/core/src/platform.rs`,
 and it runs three times: as a self-test in `checks.yml`, over `out/artifacts` at the end of every `package`, and
-over the release's actual asset list in `sign-and-publish.yml` before the undraft. A platform that ships without
-a launcher-readable name fails the release there, and so does a release without `redrob-launcher.json`: the
-publish job writes that one-line manifest (`{ "schema": 1, "sharedAccount": true }`, see redrob-launcher's
-`docs/release-manifest.md`) beside the renamed assets and uploads it with its `.sha256`, so Redrob Launcher
-learns on its own that the release reads the launcher's shared account file.
+over the exact file set about to be published in `sign-and-publish.yml`'s `cdn` job, before anything is public. A
+platform that ships without a launcher-readable name fails the release there. `redrob-launcher.json` (the one-line
+manifest `{ "schema": 1, "sharedAccount": true }`, see redrob-launcher's `docs/release-manifest.md`) and
+`SHA256SUMS.txt` are written by the organisation's shared publish job (`redrob-labs/.github` `release-publish.yml`,
+called with `launcher_manifest: true`) beside the assets, so Redrob Launcher learns on its own that the release
+reads the launcher's shared account file.
 
 ## Steps
 
@@ -149,9 +150,15 @@ are the live path.
 8. `gh release create "v$(cat REDROB_VERSION)" out/artifacts/* --draft --title "Redrob Browser $(cat
    REDROB_VERSION)"` — a DRAFT, because nothing unsigned should be visible to a user.
 9. Dispatch `sign-and-publish.yml` with `tag=v<version>`. It signs what the draft carries, verifies every
-   signature, replaces the assets, undrafts, then publishes to the CDN. On a Linux-only release there is nothing
-   to sign and the job says so — the `.deb`'s integrity is the apt repository's signature, which is a separate
-   key and a separate decision.
+   signature, publishes to the CDN, then hands the signed set to the shared `release-publish.yml`, which
+   replaces the draft's assets with it (the unsigned `.app.zip`, the mac packaging kit and the unsigned
+   installer leave the release), adds `SHA256SUMS.txt` and `redrob-launcher.json`, and publishes the release
+   as latest — the tag stays on the commit the draft was created against. On a Linux-only release there is
+   nothing to sign and the job says so — the `.deb`'s integrity is the apt repository's signature, which is a
+   separate key and a separate decision. `dry_run=true` stops after signing: the signed files are kept as
+   workflow artifacts (`release-macos`, `release-windows`) and neither the release nor the CDN changes, which
+   is how the signing jobs are exercised against a draft without publishing it. Because the publish job
+   replaces the draft's assets, a second run against the same tag needs the unsigned inputs uploaded again.
 
 ## What this repo cannot do yet
 

@@ -1,14 +1,34 @@
 #!/usr/bin/env python3
 # Copyright 2025 BrowserOS contributors
+# Copyright 2026 Janghoon Lee (Redrob) and contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
 # See the NOTICE file at the repository root for provenance.
-"""Windows signing module for BrowserOS"""
+"""Windows signing module: Authenticode through Azure Artifact Signing.
 
+Upstream signs with SSL.com's eSigner, which takes a username, a password and
+a TOTP secret. This fork signs with Azure Artifact Signing instead, through
+signtool's ``/dlib`` plug-in from the Microsoft.ArtifactSigning.Client NuGet
+package. There is no certificate file, no password and no client secret
+anywhere in this module: the plug-in authenticates with DefaultAzureCredential,
+so the credential is whatever ``az login`` left behind -- in CI the
+``azure/login`` step that exchanged the job's OpenID Connect token right before
+this step runs, on a developer machine an interactive ``az login``.
+
+Three plain identifiers configure it (``ARTIFACT_SIGNING_ENDPOINT``,
+``ARTIFACT_SIGNING_ACCOUNT``, ``ARTIFACT_SIGNING_CERT_PROFILE``); none of them
+is a secret. The signature is then checked twice -- ``signtool verify /pa /v``
+and ``Get-AuthenticodeSignature`` -- and anything but ``Valid`` from a signer
+other than the organisation's certificate fails the step.
+"""
+
+import json
 import os
 import shutil
 import subprocess
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import List, Optional
 from ...core.step import Step, ValidationError, step
@@ -26,22 +46,55 @@ from ...lib.utils import (
     log_warning,
     join_paths,
     IS_WINDOWS,
-    get_command_secret_values,
-    redact_command,
-    redact_sensitive_text,
 )
+
+
+ARTIFACT_SIGNING_ENV_VARS: tuple[str, ...] = (
+    "ARTIFACT_SIGNING_ENDPOINT",
+    "ARTIFACT_SIGNING_ACCOUNT",
+    "ARTIFACT_SIGNING_CERT_PROFILE",
+)
+
+# The signtool plug-in. The package is fetched from NuGet at signing time; a
+# pre-extracted copy can be named with ARTIFACT_SIGNING_DLIB to skip that.
+ARTIFACT_SIGNING_CLIENT_PACKAGE = "Microsoft.ArtifactSigning.Client"
+ARTIFACT_SIGNING_CLIENT_URL = (
+    f"https://www.nuget.org/api/v2/package/{ARTIFACT_SIGNING_CLIENT_PACKAGE}"
+)
+ARTIFACT_SIGNING_DLIB_NAME = "Azure.CodeSigning.Dlib.dll"
+
+# Azure Artifact Signing's own RFC 3161 timestamp authority. /tr, never the
+# legacy /t: without an RFC 3161 timestamp the signature expires with the
+# certificate.
+DEFAULT_TIMESTAMP_URL = "http://timestamp.acs.microsoft.com"
+
+# Only the credentials a CI runner or a developer shell can satisfy. Without
+# this list a missing login falls through to InteractiveBrowserCredential, which
+# opens a browser nobody sees and waits forever. With it, a missing login fails
+# in seconds and names the credential chain.
+EXCLUDED_CREDENTIALS: tuple[str, ...] = (
+    "InteractiveBrowserCredential",
+    "ManagedIdentityCredential",
+    "SharedTokenCacheCredential",
+    "VisualStudioCredential",
+    "VisualStudioCodeCredential",
+    "AzurePowerShellCredential",
+    "AzureDeveloperCliCredential",
+    "WorkloadIdentityCredential",
+)
+
+# The organisation's Public Trust certificate. A signature from any other
+# subject -- a test profile, a mis-pointed account -- is a failure, not a
+# warning. ARTIFACT_SIGNING_EXPECTED_SUBJECT overrides it for another
+# organisation's build of this tree.
+DEFAULT_EXPECTED_SIGNER_SUBJECT = "CN=McKinley Rice, Inc."
 
 
 @step(
     "sign_windows",
     phase="sign",
     platforms=("windows",),
-    env=(
-        "CODE_SIGN_TOOL_PATH",
-        "ESIGNER_USERNAME",
-        "ESIGNER_PASSWORD",
-        "ESIGNER_TOTP_SECRET",
-    ),
+    env=ARTIFACT_SIGNING_ENV_VARS,
 )
 class WindowsSignModule(Step):
     produces = ["signed_installer"]
@@ -58,24 +111,13 @@ class WindowsSignModule(Step):
                 f"Build output directory not found: {build_output_dir}"
             )
 
-        env = ctx.env
-        if not env.code_sign_tool_path:
-            raise ValidationError("CODE_SIGN_TOOL_PATH environment variable not set")
-
-        missing = []
-        if not env.esigner_username:
-            missing.append("ESIGNER_USERNAME")
-        if not env.esigner_password:
-            missing.append("ESIGNER_PASSWORD")
-        if not env.esigner_totp_secret:
-            missing.append("ESIGNER_TOTP_SECRET")
-
+        missing = missing_artifact_signing_env(ctx.env)
         if missing:
             raise ValidationError(
                 f"Missing environment variables: {', '.join(missing)}"
             )
 
-        _warn_about_suspicious_esigner_values(env)
+        _warn_about_suspicious_values(ctx.env)
 
     def execute(self, ctx: Context) -> None:
         log_info("\n🔏 Signing Windows binaries...")
@@ -112,7 +154,7 @@ class WindowsSignModule(Step):
         for binary in binaries_to_sign:
             log_info(f"Found binary to sign: {binary.name}")
 
-        if not sign_with_codesigntool(binaries_to_sign, env):
+        if not sign_with_artifact_signing(binaries_to_sign, env):
             raise RuntimeError("Failed to sign executables")
 
     def _build_mini_installer(self, ctx: Context) -> None:
@@ -128,7 +170,7 @@ class WindowsSignModule(Step):
                 f"mini_installer.exe not found at: {mini_installer_path}"
             )
 
-        if not sign_with_codesigntool([mini_installer_path], env):
+        if not sign_with_artifact_signing([mini_installer_path], env):
             raise RuntimeError("Failed to sign mini_installer.exe")
 
         return mini_installer_path
@@ -187,67 +229,26 @@ def build_mini_installer(ctx: Context) -> bool:
     return build_target(ctx, "mini_installer")
 
 
-def _legacy_codesigntool_path(env: EnvConfig) -> Optional[Path]:
-    """Return the configured legacy CodeSignTool launcher path."""
-    if env.code_sign_tool_exe:
-        return Path(env.code_sign_tool_exe)
-    if env.code_sign_tool_path:
-        return Path(env.code_sign_tool_path) / "CodeSignTool.bat"
-    return None
-
-
-def _resolve_codesigntool_java_invocation(
-    env: EnvConfig,
-) -> Optional[tuple[list[str], Path]]:
-    """Resolve SSL.com CodeSignTool to its bundled Java and jar invocation."""
-    if env.code_sign_tool_exe:
-        tool_root = Path(env.code_sign_tool_exe).parent
-    elif env.code_sign_tool_path:
-        tool_root = Path(env.code_sign_tool_path)
-    else:
-        return None
-
-    jars = sorted(
-        (tool_root / "jar").glob("code_sign_tool*.jar"),
-        key=lambda path: path.name,
+def missing_artifact_signing_env(env: EnvConfig) -> List[str]:
+    """Return the ARTIFACT_SIGNING_* names that are unset or blank."""
+    values = (
+        env.artifact_signing_endpoint,
+        env.artifact_signing_account,
+        env.artifact_signing_cert_profile,
     )
-    if not jars:
-        return None
-    jar = jars[-1]
-
-    java_candidates = []
-    for name in ("java.exe", "java"):
-        java_candidates.extend(sorted(tool_root.glob(f"jdk-*/bin/{name}")))
-
-    java_home = os.environ.get("JAVA_HOME")
-    if java_home:
-        java_home_path = Path(java_home)
-        java_candidates.extend(
-            [
-                java_home_path / "bin" / "java.exe",
-                java_home_path / "bin" / "java",
-            ]
-        )
-
-    java_from_path = shutil.which("java")
-    if java_from_path:
-        java_candidates.append(Path(java_from_path))
-
-    java = next(
-        (candidate for candidate in java_candidates if candidate.exists()), None
-    )
-    if java is None:
-        return None
-
-    return ([str(java), "-jar", str(jar)], tool_root)
+    return [
+        name
+        for name, value in zip(ARTIFACT_SIGNING_ENV_VARS, values)
+        if not (value or "").strip()
+    ]
 
 
-def _warn_about_suspicious_esigner_values(env: EnvConfig) -> None:
-    """Warn when eSigner env values look copied with shell-only decoration."""
+def _warn_about_suspicious_values(env: EnvConfig) -> None:
+    """Warn when configuration values look copied with shell-only decoration."""
     for name, value in (
-        ("ESIGNER_USERNAME", env.esigner_username),
-        ("ESIGNER_PASSWORD", env.esigner_password),
-        ("ESIGNER_TOTP_SECRET", env.esigner_totp_secret),
+        ("ARTIFACT_SIGNING_ENDPOINT", env.artifact_signing_endpoint),
+        ("ARTIFACT_SIGNING_ACCOUNT", env.artifact_signing_account),
+        ("ARTIFACT_SIGNING_CERT_PROFILE", env.artifact_signing_cert_profile),
     ):
         if not value:
             continue
@@ -257,190 +258,242 @@ def _warn_about_suspicious_esigner_values(env: EnvConfig) -> None:
             log_warning(f"{name} appears to include wrapping quote characters")
 
 
-def sign_with_codesigntool(
+def find_signtool() -> Optional[Path]:
+    """Locate signtool.exe: SIGNTOOL, then PATH, then the newest x64 Windows Kit."""
+    configured = os.environ.get("SIGNTOOL")
+    if configured:
+        path = Path(configured)
+        return path if path.exists() else None
+
+    on_path = shutil.which("signtool.exe") or shutil.which("signtool")
+    if on_path:
+        return Path(on_path)
+
+    program_files = os.environ.get("ProgramFiles(x86)") or os.environ.get(
+        "PROGRAMFILES(X86)"
+    )
+    if not program_files:
+        return None
+    kits = Path(program_files) / "Windows Kits" / "10" / "bin"
+    if not kits.exists():
+        return None
+    candidates = sorted(
+        (
+            p
+            for p in kits.rglob("signtool.exe")
+            if p.parent.name.lower() == "x64"
+        ),
+        key=lambda p: str(p),
+    )
+    return candidates[-1] if candidates else None
+
+
+def resolve_artifact_signing_dlib(work_dir: Path) -> Path:
+    """Return the x64 Azure.CodeSigning.Dlib.dll, downloading the client if needed.
+
+    ARTIFACT_SIGNING_DLIB names an already-extracted plug-in (a developer machine
+    or an offline runner). Otherwise the NuGet package is fetched into work_dir
+    and expanded there; a NuGet package is a zip.
+    """
+    configured = os.environ.get("ARTIFACT_SIGNING_DLIB")
+    if configured:
+        dlib = Path(configured)
+        if not dlib.exists():
+            raise RuntimeError(f"ARTIFACT_SIGNING_DLIB does not exist: {dlib}")
+        return dlib
+
+    import requests
+
+    package = work_dir / "artifact-signing-client.nupkg"
+    log_info(f"Downloading {ARTIFACT_SIGNING_CLIENT_PACKAGE} from NuGet...")
+    response = requests.get(ARTIFACT_SIGNING_CLIENT_URL, timeout=120)
+    response.raise_for_status()
+    package.write_bytes(response.content)
+
+    client_dir = work_dir / "client"
+    with zipfile.ZipFile(package) as archive:
+        archive.extractall(client_dir)
+
+    for candidate in sorted(client_dir.rglob(ARTIFACT_SIGNING_DLIB_NAME)):
+        if "x64" in {part.lower() for part in candidate.parts}:
+            return candidate
+    raise RuntimeError(
+        f"{ARTIFACT_SIGNING_DLIB_NAME} (x64) not found in "
+        f"{ARTIFACT_SIGNING_CLIENT_PACKAGE}"
+    )
+
+
+def write_artifact_signing_metadata(path: Path, env: EnvConfig) -> Path:
+    """Write the /dmdf metadata signtool hands to the Artifact Signing plug-in."""
+    endpoint = (env.artifact_signing_endpoint or "").strip().rstrip("/")
+    metadata = {
+        "Endpoint": endpoint,
+        "CodeSigningAccountName": (env.artifact_signing_account or "").strip(),
+        "CertificateProfileName": (env.artifact_signing_cert_profile or "").strip(),
+        "ExcludeCredentials": list(EXCLUDED_CREDENTIALS),
+    }
+    path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def expected_signer_subject() -> str:
+    return (
+        os.environ.get("ARTIFACT_SIGNING_EXPECTED_SUBJECT")
+        or DEFAULT_EXPECTED_SIGNER_SUBJECT
+    )
+
+
+def _log_process_output(result) -> None:
+    if result.stdout:
+        for line in result.stdout.splitlines():
+            if line.strip():
+                log_info(line.strip())
+    if result.stderr:
+        for line in result.stderr.splitlines():
+            if line.strip():
+                log_error(line.strip())
+
+
+def verify_authenticode(signtool: Path, binary: Path) -> bool:
+    """Full Authenticode verification, twice, and the signer must be ours.
+
+    `signtool verify /pa /v` walks the chain to a trusted root and checks the
+    timestamp; a Public Trust certificate chains to a Microsoft root every
+    Windows trusts, so this MUST pass -- there is no NotTrusted or UnknownError
+    allowance. Get-AuthenticodeSignature then has to say Valid, and the subject
+    it reports has to be the organisation's certificate.
+    """
+    verify = subprocess.run(
+        [str(signtool), "verify", "/pa", "/v", str(binary)],
+        capture_output=True,
+        text=True,
+    )
+    _log_process_output(verify)
+    if getattr(verify, "returncode", 0) != 0:
+        log_error(f"✗ signtool verify /pa failed for {binary.name}")
+        return False
+
+    escaped = str(binary).replace("'", "''")
+    script = (
+        f"$s = Get-AuthenticodeSignature -LiteralPath '{escaped}'; "
+        "Write-Output $s.Status; "
+        "Write-Output $s.SignerCertificate.Subject"
+    )
+    probe = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+    )
+    lines = [line.strip() for line in (probe.stdout or "").splitlines() if line.strip()]
+    status = lines[0] if lines else ""
+    subject = lines[1] if len(lines) > 1 else ""
+    if getattr(probe, "returncode", 0) != 0 or status != "Valid":
+        log_error(
+            f"✗ {binary.name} Authenticode status is '{status or 'unknown'}', not Valid"
+        )
+        if probe.stderr:
+            log_error(probe.stderr.strip())
+        return False
+
+    expected = expected_signer_subject()
+    if expected not in subject:
+        log_error(
+            f"✗ {binary.name} is signed by '{subject}', expected '{expected}'"
+        )
+        return False
+
+    log_success(f"{binary} signed by {subject}")
+    return True
+
+
+def sign_with_artifact_signing(
     binaries: List[Path],
     env: Optional[EnvConfig] = None,
 ) -> bool:
-    """Sign binaries using SSL.com CodeSignTool
+    """Sign binaries with Azure Artifact Signing and verify every signature.
 
     Args:
-        binaries: List of binary paths to sign
+        binaries: Binary paths to sign, in place.
         env: Optional EnvConfig instance. If not provided, creates a new one.
     """
-    log_info("Using SSL.com CodeSignTool for signing...")
+    log_info("Using Azure Artifact Signing (signtool /dlib)...")
 
     if env is None:
         env = EnvConfig()
 
-    direct_invocation = _resolve_codesigntool_java_invocation(env)
-    codesigntool_path = _legacy_codesigntool_path(env)
-
-    if direct_invocation is None and codesigntool_path is None:
-        log_error("CODE_SIGN_TOOL_EXE or CODE_SIGN_TOOL_PATH not set in .env file")
-        log_error("Set CODE_SIGN_TOOL_EXE=/path/to/CodeSignTool.sh (macOS/Linux)")
-        log_error("Or CODE_SIGN_TOOL_PATH=C:/src/CodeSignTool-v1.3.2-windows (Windows)")
-        return False
-
-    if direct_invocation is None:
-        assert codesigntool_path is not None
-        if not codesigntool_path.exists():
-            log_error(f"CodeSignTool not found at: {codesigntool_path}")
-            return False
-
-    if not all([env.esigner_username, env.esigner_password, env.esigner_totp_secret]):
-        log_error("Missing required eSigner environment variables in .env:")
-        log_error("  ESIGNER_USERNAME=your-email")
-        log_error("  ESIGNER_PASSWORD=your-password")
-        log_error("  ESIGNER_TOTP_SECRET=your-totp-secret")
-        if not env.esigner_credential_id:
-            log_warning("  ESIGNER_CREDENTIAL_ID is recommended but optional")
-        return False
-
-    if direct_invocation is None:
-        log_warning(
-            "Could not resolve CodeSignTool Java and jar; falling back to "
-            "CodeSignTool.bat via cmd.exe. Passwords containing cmd.exe "
-            "metacharacters may be mangled."
+    missing = missing_artifact_signing_env(env)
+    if missing:
+        log_error("Missing required Artifact Signing environment variables:")
+        for name in missing:
+            log_error(f"  {name}")
+        log_error(
+            "The Azure credential itself comes from `az login` "
+            "(azure/login with the job's OpenID Connect token in CI)."
         )
+        return False
+
+    signtool = find_signtool()
+    if signtool is None:
+        log_error("signtool.exe not found (install the Windows SDK or set SIGNTOOL)")
+        return False
+
+    missing_files = [binary for binary in binaries if not binary.exists()]
+    if missing_files:
+        for binary in missing_files:
+            log_error(f"✗ Binary to sign does not exist: {binary}")
+        return False
+
+    timestamp_url = os.environ.get("WINDOWS_TIMESTAMP_URL") or DEFAULT_TIMESTAMP_URL
+    work_dir = Path(tempfile.mkdtemp(prefix="artifact-signing-"))
+    try:
+        dlib = resolve_artifact_signing_dlib(work_dir)
+        metadata = write_artifact_signing_metadata(work_dir / "metadata.json", env)
+        log_info(
+            f"Signing with {env.artifact_signing_account} / "
+            f"{env.artifact_signing_cert_profile}: "
+            + ", ".join(binary.name for binary in binaries)
+        )
+
+        cmd = [
+            str(signtool),
+            "sign",
+            "/v",
+            "/fd",
+            "SHA256",
+            "/td",
+            "SHA256",
+            "/tr",
+            timestamp_url,
+            "/dlib",
+            str(dlib),
+            "/dmdf",
+            str(metadata),
+            *(str(binary) for binary in binaries),
+        ]
+        log_info(f"Running: {' '.join(cmd)}")
+        result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
+        _log_process_output(result)
+        if getattr(result, "returncode", 0) != 0:
+            log_error(
+                f"✗ signtool sign failed with exit code {result.returncode} "
+                "- authentication or signing error"
+            )
+            return False
+    except Exception as e:
+        log_error(f"Failed to sign: {e}")
+        return False
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
     all_success = True
     for binary in binaries:
-        secret_values: tuple[str, ...] = ()
         try:
-            log_info(f"Signing {binary.name}...")
-
-            temp_output_dir = binary.parent / "signed_temp"
-            temp_output_dir.mkdir(exist_ok=True)
-
-            if direct_invocation is not None:
-                cmd_prefix, tool_root = direct_invocation
-                cmd = [
-                    *cmd_prefix,
-                    "sign",
-                    "-username",
-                    env.esigner_username,
-                    "-password",
-                    env.esigner_password,
-                ]
-            else:
-                assert codesigntool_path is not None
-                tool_root = codesigntool_path.parent
-                # Direct Java is the invariant: credentials must never pass
-                # through cmd.exe parsing. This fallback preserves the
-                # previous working shape only for unexpected layouts; .bat
-                # dispatch reparses %*.
-                cmd = [
-                    str(codesigntool_path),
-                    "sign",
-                    "-username",
-                    env.esigner_username,
-                    "-password",
-                    f'"{env.esigner_password}"',
-                ]
-
-            if env.esigner_credential_id:
-                cmd.extend(["-credential_id", env.esigner_credential_id])
-
-            cmd.extend(
-                [
-                    "-totp_secret",
-                    env.esigner_totp_secret,
-                    "-input_file_path",
-                    str(binary),
-                    "-output_dir_path",
-                    str(temp_output_dir),
-                    "-override",
-                ]
-            )
-
-            secret_values = get_command_secret_values(cmd)
-            log_info(f"Running: {redact_command(cmd)}")
-
-            if direct_invocation is not None:
-                result = subprocess.run(
-                    cmd,
-                    shell=False,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(tool_root),
-                    env={**os.environ, "CODE_SIGN_TOOL_PATH": str(tool_root)},
-                )
-            else:
-                cmd_str = " ".join(cmd)
-                result = subprocess.run(
-                    cmd_str,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(tool_root),
-                )
-
-            # Redact the original streams before normalizing whitespace: a
-            # credential may itself contain spaces or newlines, and trimming
-            # first would prevent the exact-value redactor from matching it.
-            if result.stdout:
-                safe_stdout = redact_sensitive_text(result.stdout, secret_values)
-                for line in safe_stdout.splitlines():
-                    if line.strip():
-                        log_info(line.strip())
-            if result.stderr:
-                safe_stderr = redact_sensitive_text(result.stderr, secret_values)
-                for line in safe_stderr.splitlines():
-                    if line.strip() and "WARNING" not in line:
-                        log_error(line.strip())
-
-            if getattr(result, "returncode", 0) != 0 or (
-                result.stdout and "Error:" in result.stdout
-            ):
-                log_error(
-                    f"✗ Failed to sign {binary.name} - Authentication or signing error"
-                )
+            if not verify_authenticode(signtool, binary):
                 all_success = False
-                continue
-
-            signed_file = temp_output_dir / binary.name
-            if signed_file.exists():
-                shutil.move(str(signed_file), str(binary))
-                log_info(f"Moved signed {binary.name} to original location")
-
-            try:
-                temp_output_dir.rmdir()
-            except Exception:
-                pass
-
-            escaped_binary_path = str(binary).replace("'", "''")
-            verify_cmd = [
-                "powershell",
-                "-Command",
-                f"(Get-AuthenticodeSignature -LiteralPath '{escaped_binary_path}').Status",
-            ]
-            try:
-                verify_result = subprocess.run(
-                    verify_cmd, capture_output=True, text=True
-                )
-                if "Valid" in verify_result.stdout:
-                    log_success(f"✓ {binary.name} signed and verified successfully")
-                else:
-                    log_error(
-                        f"✗ {binary.name} signing verification failed - Status: {verify_result.stdout.strip()}"
-                    )
-                    all_success = False
-            except Exception as e:
-                # Windows releases require successful Authenticode verification.
-                # Cross-signing hosts may lack PowerShell, but a broken verifier
-                # on Windows must stop packaging and OTA publication.
-                if IS_WINDOWS():
-                    safe_error = redact_sensitive_text(str(e), secret_values)
-                    log_error(
-                        f"Could not verify signature for {binary.name}: {safe_error}"
-                    )
-                    all_success = False
-                else:
-                    log_warning(f"Could not verify signature for {binary.name}")
-
         except Exception as e:
-            safe_error = redact_sensitive_text(str(e), secret_values)
-            log_error(f"Failed to sign {binary.name}: {safe_error}")
+            # Windows releases require successful Authenticode verification. A
+            # broken verifier must stop packaging and OTA publication.
+            log_error(f"Could not verify signature for {binary.name}: {e}")
             all_success = False
 
     return all_success
@@ -455,22 +508,11 @@ def check_signing_environment(env: Optional[EnvConfig] = None) -> bool:
     if env is None:
         env = EnvConfig()
 
-    if not env.code_sign_tool_exe and not env.code_sign_tool_path:
-        log_error("CODE_SIGN_TOOL_EXE or CODE_SIGN_TOOL_PATH not set")
-        return False
-
-    missing = []
-    if not env.esigner_username:
-        missing.append("ESIGNER_USERNAME")
-    if not env.esigner_password:
-        missing.append("ESIGNER_PASSWORD")
-    if not env.esigner_totp_secret:
-        missing.append("ESIGNER_TOTP_SECRET")
-
+    missing = missing_artifact_signing_env(env)
     if missing:
         log_error(f"Missing environment variables: {', '.join(missing)}")
         return False
 
-    _warn_about_suspicious_esigner_values(env)
+    _warn_about_suspicious_values(env)
 
     return True
