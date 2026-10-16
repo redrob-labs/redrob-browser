@@ -117,7 +117,10 @@ jobs:
         # a signing key. The Windows portable zip is the unpacked application re-containered by `redrob.py
         # package` on the build host for Redrob Launcher, which installs no -setup.exe; it rides the draft
         # beside the installer. Both are collected here so the publish job sees every asset as a `release-*`
-        # artifact and the draft's own upload can be replaced wholesale.
+        # artifact and the draft's own upload can be replaced wholesale. Both already carry the release's
+        # one name shape, redrob-browser-<version>-<os>-<arch>.<ext> (redrob-launcher crates/core/src/
+        # platform.rs): `redrob.py package` writes the .deb to the release as -linux-x86_64.deb and keeps
+        # the Debian name in out/deb for the apt pool, so nothing is renamed here.
         run: |
           set -euo pipefail
           mkdir -p staging
@@ -125,20 +128,6 @@ jobs:
             echo "::notice::no .deb on this release"
           gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" -p '*-portable.zip' -D staging || \
             echo "::notice::no Windows portable zip on this release"
-          # <stem>-<version>-<os>-<arch>.<ext>, redrob-launcher's one shape for every app's release
-          # (crates/core/src/platform.rs). The Debian name stays -- it is the apt pool/ convention and what
-          # build_repo.py reads -- and the launcher gets a copy under its own spelling of the architecture.
-          for f in staging/*.deb; do
-            [ -f "$f" ] || continue
-            arch="$(basename "$f" .deb)"
-            arch="${arch##*_}"
-            case "$arch" in
-              amd64) token=linux-x86_64 ;;
-              arm64) token=linux-aarch64 ;;
-              *) echo "::error::no launcher token for Debian architecture $arch"; exit 1 ;;
-            esac
-            cp "$f" "staging/redrob-browser-${{ needs.probe.outputs.version }}-${token}.deb"
-          done
           ls -l staging || true
 
       - uses: actions/upload-artifact@v4
@@ -363,41 +352,38 @@ jobs:
           xcrun stapler validate "$app"
           spctl --assess --type execute --verbose=2 "$app"
           mkdir -p staging
-          # ditto again on the way out, for the same reason as on the way in. Named by architecture and
-          # version: cdn-publish.sh derives the latest/ alias from the -<version> segment, and the appcast
-          # step picks the feed (arm64 or x86_64) from the architecture.
+          # ditto again on the way out, for the same reason as on the way in. Named the way every asset on
+          # the release is, redrob-browser-<version>-macos-<arch>.zip; the cdn job copies it under the CDN's
+          # own spelling (redrob-browser-macos-<arch>-<version>.zip) for cdn-publish.sh and the appcast.
           archs="$(lipo -archs "$app/Contents/MacOS/$(basename "$app" .app)")"
           case "$archs" in
             arm64) arch=arm64 ;;
             x86_64) arch=x86_64 ;;
             *) arch=universal ;;
           esac
-          ditto -c -k --keepParent "$app" "staging/redrob-browser-macos-${arch}-$(cat REDROB_VERSION).zip"
+          ditto -c -k --keepParent "$app" "staging/redrob-browser-$(cat REDROB_VERSION)-macos-${arch}.zip"
 
-      - name: the names Redrob Launcher installs from -- a .dmg, and the zip under the launcher's name
+      - name: the name Redrob Launcher installs from -- a .dmg
         # Redrob Launcher installs an asset only when its name reads <stem>-<version>-<os>-<arch>.<ext>, and on
         # macOS the only <ext> it opens is .dmg (redrob-launcher crates/core/src/platform.rs: it mounts the image
-        # and copies `Redrob Browser.app` into /Applications). Neither the Sparkle zip above nor the .app.zip
-        # qualifies, so the stapled app is also written into a disk image here, on the one machine in this
-        # pipeline that has hdiutil. The Sparkle zip keeps its name: scripts/sparkle_appcast.py and the appcast
-        # step key on `redrob-browser-macos-<arch>-<version>.zip`, and renaming it would break self-update.
-        # The zip is ALSO copied under the launcher's name so a reader of the release sees one naming scheme;
-        # the launcher itself will pick the .dmg. The image is codesigned so Gatekeeper attributes it; the app
-        # inside carries its own notarization ticket.
+        # and copies `Redrob Browser.app` into /Applications). The Sparkle zip above is not one it opens, so the
+        # stapled app is also written into a disk image here, on the one machine in this pipeline that has
+        # hdiutil. Same stem as the zip: redrob-browser-<version>-macos-<arch>. The image is codesigned so
+        # Gatekeeper attributes it; the app inside carries its own notarization ticket.
         run: |
           set -euo pipefail
           app="$(find signed -maxdepth 3 -type d -name '*.app' | head -1)"
           version="$(cat REDROB_VERSION)"
           archs="$(lipo -archs "$app/Contents/MacOS/$(basename "$app" .app)")"
           case "$archs" in
-            arm64) arch=arm64; token=macos-aarch64 ;;
-            x86_64) arch=x86_64; token=macos-x86_64 ;;
-            *) arch=universal; token=macos-universal ;;
+            arm64) arch=arm64 ;;
+            x86_64) arch=x86_64 ;;
+            *) arch=universal ;;
           esac
           mkdir -p launcher dmgroot
           ditto "$app" "dmgroot/$(basename "$app")"
           ln -s /Applications dmgroot/Applications
-          dmg="launcher/redrob-browser-${version}-${token}.dmg"
+          dmg="launcher/redrob-browser-${version}-macos-${arch}.dmg"
           hdiutil create -volname "Redrob Browser" -srcfolder dmgroot -ov -format UDZO -fs HFS+ "$dmg"
           codesign --sign "$SIGNING_IDENTITY" --force --timestamp --keychain "$SIGNING_KEYCHAIN" "$dmg"
           codesign --verify --verbose=2 "$dmg"
@@ -408,7 +394,6 @@ jobs:
           codesign --verify --deep --strict "$mounted"
           xcrun stapler validate "$mounted"
           hdiutil detach "$mount"
-          cp "staging/redrob-browser-macos-${arch}-${version}.zip" "launcher/redrob-browser-${version}-${token}.zip"
           ls -l launcher
           python3 scripts/check_asset_names.py --names launcher/*.dmg --version "$version" --no-platforms
 
@@ -427,8 +412,8 @@ jobs:
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
-        # Separate from release-macos on purpose: the cdn job copies the Sparkle zip to the CDN, and these two
-        # belong on the GitHub release only -- the CDN's download page and the appcast have their own names.
+        # Separate from release-macos on purpose: the cdn job copies the Sparkle zip to the CDN, and the .dmg
+        # belongs on the GitHub release only -- the CDN's download page and the appcast have their own names.
         with:
           name: release-macos-launcher
           path: launcher/*
@@ -578,33 +563,39 @@ jobs:
           done
           python3 scripts/check_asset_names.py --names staging/* redrob-launcher.json --version "$APP_VERSION"
 
-      - name: name the .deb the way the CDN aliases it
-        # cdn-publish.sh derives the version-free `latest/` alias by deleting a `-<version>` segment from the
-        # filename, and a Debian name separates its fields with underscores -- so it correctly REFUSES
-        # `redrob-browser-stable_0.1.4+153.0.8010.36-1_amd64.deb` rather than publishing a `latest/` that does not
-        # update. That refusal is what failed the first real run of this workflow.
+      - name: name the files the way the CDN has always published them
+        # The GitHub release carries ONE name shape, redrob-browser-<version>-<os>-<arch><suffix>, which is what
+        # Redrob Launcher reads. cdn.redrob.ai keeps the names it has served since the first releases --
+        # redrob-browser-amd64-<version>.deb, redrob-browser-macos-<arch>-<version>.zip,
+        # redrob-browser-x64-<version>-setup.exe -- because cdn-publish.sh aliases each to a version-free
+        # `latest/` name by deleting the `-<version>` segment, and the download page and the Sparkle appcast
+        # link those. Renaming the CDN files would move every `latest/` link, so the translation happens here,
+        # once, from the release's spelling to the CDN's. `redrob.py package` writes the same CDN names into
+        # `out/cdn` on the release.yml path; keep the two in step.
         #
-        # `redrob.py package` already writes this name, into `out/cdn`, and on the release.yml path that directory
-        # is the artefact the CDN job downloads. Here the artefact arrives from the RELEASE instead, where it
-        # carries the Debian name the pool/ convention requires, so the same rule has to exist a second time.
-        # Its first home is `cmd_package` in scripts/redrob.py; keep the two in step.
-        #
-        # The CDN carries the packager's names only: the mac Sparkle zip, the Windows installer, the Debian
-        # package under its CDN spelling. The launcher-named copies (.dmg, -linux-x86_64.deb, -portable.zip,
-        # the -macos-aarch64.zip) belong on the GitHub release, which is where Redrob Launcher reads.
+        # The .dmg and the portable zip belong on the GitHub release only, which is where the launcher reads.
         run: |
           set -euo pipefail
           mkdir -p cdn
-          for f in staging/*.deb; do
+          for f in staging/redrob-browser-"$APP_VERSION"-linux-*.deb; do
             [ -f "$f" ] || continue
-            case "$f" in *-linux-*.deb) continue ;; esac   # the launcher-named copy: same bytes, not for the CDN
-            arch="$(basename "$f" .deb)"
-            arch="${arch##*_}"
+            token="$(basename "$f" .deb)"; token="${token##*-linux-}"
+            case "$token" in
+              x86_64) arch=amd64 ;;
+              aarch64) arch=arm64 ;;
+              *) echo "::error::no Debian architecture for launcher token linux-$token"; exit 1 ;;
+            esac
             cp "$f" "cdn/redrob-browser-${arch}-${APP_VERSION}.deb"
           done
-          for f in staging/redrob-browser-macos-*-"$APP_VERSION".zip staging/*setup.exe; do
+          for f in staging/redrob-browser-"$APP_VERSION"-macos-*.zip; do
             [ -f "$f" ] || continue
-            cp "$f" cdn/
+            arch="$(basename "$f" .zip)"; arch="${arch##*-macos-}"
+            cp "$f" "cdn/redrob-browser-macos-${arch}-${APP_VERSION}.zip"
+          done
+          for f in staging/redrob-browser-"$APP_VERSION"-windows-*-setup.exe; do
+            [ -f "$f" ] || continue
+            arch="$(basename "$f" -setup.exe)"; arch="${arch##*-windows-}"
+            cp "$f" "cdn/redrob-browser-${arch}-${APP_VERSION}-setup.exe"
           done
           ls -l cdn
 
@@ -699,13 +690,16 @@ jobs:
             echo "::notice::To turn it on see docs/RELEASE.md, 'Turning the update channel on'."
             exit 0
           fi
-          # build_repo.py reads the Debian-named package; the launcher-named copy is the same bytes and is
-          # not a second package for the pool.
+          # The pool/ holds the package under its Debian name, <package>_<version>_<arch>.deb -- the apt
+          # convention, and the name `redrob.py package` keeps in out/deb. The release carries the launcher's
+          # name instead, so the Debian name is read back out of the package's own control file here.
           mkdir -p pool
           for f in staging/*.deb; do
             [ -f "$f" ] || continue
-            case "$f" in *-linux-*.deb) continue ;; esac
-            cp "$f" pool/
+            pkg="$(dpkg-deb -f "$f" Package)"
+            ver="$(dpkg-deb -f "$f" Version)"
+            arch="$(dpkg-deb -f "$f" Architecture)"
+            cp "$f" "pool/${pkg}_${ver}_${arch}.deb"
           done
           if ! ls pool/*.deb >/dev/null 2>&1; then
             echo "::notice::no .deb in this release, so there is nothing to put in a repository"
@@ -753,7 +747,7 @@ jobs:
     # `release-*` artifact is merged, SHA256SUMS.txt is written over all of them, redrob-launcher.json
     # (`{ "schema": 1, "sharedAccount": true }`) is added, and the DRAFT's assets are replaced with that set
     # -- so the unsigned .app.zip, the mac packaging kit and the unsigned installer leave the release and
-    # only signed, launcher-readable files remain. Then it is published as latest (prerelease when the
+    # only signed files remain, every one named redrob-browser-<version>-<os>-<arch><suffix>. Then it is published as latest (prerelease when the
     # version carries a `-`). After the CDN, so a page link never resolves before the bytes behind it.
     # `tag` is the draft's own tag and `target` the commit it was drafted against, so the published tag
     # points at the commit that was built, whatever ref this workflow was dispatched from.
