@@ -10,12 +10,13 @@ macos-aarch64, windows-x64, ...) and an extension it knows how to install: .deb/
 Linux, .dmg on macOS, .msi or -portable.zip on Windows. The parser below is a transliteration of
 redrob-launcher's crates/core/src/platform.rs (parse_asset_name + Platform::tokens); keep them in step.
 
-The packager's own names stay beside the launcher's, because other consumers depend on them exactly:
-the Debian name is the apt pool/ convention, `redrob-browser-macos-<arch>-<version>.zip` is what the Sparkle
-appcast and cdn-publish.sh key on, and the `-setup.exe` is the signed Windows installer. Those are passed
-through; this script only insists that every platform a release ships ALSO has a launcher-readable asset, and
-that the release carries `redrob-launcher.json` (schema 1, sharedAccount true -- redrob-launcher's
-docs/release-manifest.md), which sign-and-publish.yml writes beside the renamed assets.
+EVERY asset on a release carries that shape, `redrob-browser-<version>-<os>-<arch><suffix>`, including the ones
+the launcher does not install (`-setup.exe`, the Sparkle `.zip`, `.app.zip`, `-packaging.zip`): one naming scheme
+for a reader of the release, and the launcher picks the kinds it opens. The packager's other names live
+elsewhere -- the Debian name in out/deb and the apt pool/, the CDN's own spelling in out/cdn -- never on the
+release. This script insists that every platform a release ships has a launcher-INSTALLABLE asset, and that the
+release carries `redrob-launcher.json` (schema 1, sharedAccount true -- redrob-launcher's
+docs/release-manifest.md), which sign-and-publish.yml writes beside the assets.
 
     check_asset_names.py --dir out/artifacts        # what `redrob.py package` wrote
     check_asset_names.py --release v0.1.9           # what is on a GitHub release (needs gh)
@@ -103,15 +104,18 @@ def launcher_name(version: str, token: str, kind: str) -> str:
     return f"{STEM}-{version}-{token}{suffix}"
 
 
-# Which packager output means "this release ships platform X", and what the launcher then needs to see.
-# Each entry: a regex over the packager's own names, the launcher token, and the kinds that satisfy it.
+# Which asset means "this release ships platform X", and what the launcher then needs to see.
+# Each entry: a regex over the release's names, the launcher token, and the kinds that satisfy it. A Linux .deb
+# is its own evidence; Windows ships an installer the launcher does not open, so it needs the portable zip (or
+# an .msi) beside it; a mac ships as a zip (unsigned .app.zip on the draft, the Sparkle zip once signed) and
+# needs the .dmg.
 PLATFORMS: list[tuple[str, re.Pattern[str], str, set[str]]] = [
-    ("Linux x86_64", re.compile(r"_amd64\.deb$"), "linux-x86_64", {"deb"}),
-    ("Linux aarch64", re.compile(r"_arm64\.deb$"), "linux-aarch64", {"deb"}),
-    ("Windows x64", re.compile(r"-x64-.*-setup\.exe$"), "windows-x64", {"msi", "portable-zip"}),
-    ("macOS arm64", re.compile(r"-macos-arm64-.*\.app\.zip$|-macos-arm64-[0-9].*\.zip$"), "macos-aarch64", {"dmg"}),
-    ("macOS x86_64", re.compile(r"-macos-x86_64-.*\.app\.zip$|-macos-x86_64-[0-9].*\.zip$"), "macos-x86_64", {"dmg"}),
-    ("macOS universal", re.compile(r"-macos-universal-.*\.zip$"), "macos-universal", {"dmg"}),
+    ("Linux x86_64", re.compile(r"-linux-x86_64\.deb$"), "linux-x86_64", {"deb"}),
+    ("Linux aarch64", re.compile(r"-linux-aarch64\.deb$"), "linux-aarch64", {"deb"}),
+    ("Windows x64", re.compile(r"-windows-x64-setup\.exe$"), "windows-x64", {"msi", "portable-zip"}),
+    ("macOS arm64", re.compile(r"-macos-arm64(\.app)?\.zip$"), "macos-arm64", {"dmg"}),
+    ("macOS x86_64", re.compile(r"-macos-x86_64(\.app)?\.zip$"), "macos-x86_64", {"dmg"}),
+    ("macOS universal", re.compile(r"-macos-universal(\.app)?\.zip$"), "macos-universal", {"dmg"}),
 ]
 
 
@@ -186,8 +190,9 @@ def self_test() -> None:
         assert launcher_name(version, token, kind) == name
     bad = [
         "redrob-browser-stable_0.1.9+155.0.8059.26-1_amd64.deb",  # Debian name: no -<version> segment
-        "redrob-browser-macos-arm64-0.1.9.zip",  # packager's mac name: version last, plain .zip
-        "redrob-browser-x64-0.1.9-setup.exe",  # exe installer: not a kind the launcher installs
+        "redrob-browser-macos-arm64-0.1.9.zip",  # the 0.1.8 mac name: version last, plain .zip
+        "redrob-browser-0.1.9-windows-x64-setup.exe",  # exe installer: not a kind the launcher installs
+        "redrob-browser-0.1.9-macos-arm64.app.zip",  # the unsigned app: not a kind the launcher installs
         "redrob-browser-0.1.9-linux-amd64.deb",  # amd64 is not a launcher token
         "redrob-browser-0.1.9-linux-x64.deb",  # x64 is Windows-only
         "redrob-browser-0.1.9-macos-aarch64.zip",  # plain zip does not install on macOS
@@ -198,17 +203,19 @@ def self_test() -> None:
     ]
     for name in bad:
         assert parse(name) is None, name
-    # A 0.1.8-shaped release fails on every platform; the 0.1.9 shape passes.
-    old = ["redrob-browser-macos-arm64-0.1.8.app.zip", "redrob-browser-macos-arm64-0.1.8.zip",
-           "redrob-browser-stable_0.1.8+155.0.8059.26-1_amd64.deb", "redrob-browser-x64-0.1.8-setup.exe",
-           "redrob-browser-x64-0.1.8-setup.exe.sha256", MANIFEST]
+    # A release carrying only what the build host uploads (the unsigned mac app, the installer) fails on the
+    # platforms whose installable asset is made later (the signed .dmg, the portable zip); the full set passes.
+    old = ["redrob-browser-0.1.8-macos-arm64.app.zip", "redrob-browser-0.1.8-macos-arm64-packaging.zip",
+           "redrob-browser-0.1.8-macos-arm64.zip", "redrob-browser-0.1.8-linux-x86_64.deb",
+           "redrob-browser-0.1.8-windows-x64-setup.exe", "redrob-browser-0.1.8-windows-x64-setup.exe.sha256",
+           MANIFEST]
     problems = check(old, "0.1.8")
-    assert len(problems) == 3, problems
+    assert len(problems) == 2, problems
     assert all("no launcher-installable asset" in p for p in problems), problems
-    new = old + ["redrob-browser-0.1.8-linux-x86_64.deb", "redrob-browser-0.1.8-macos-aarch64.dmg",
-                 "redrob-browser-0.1.8-windows-x64-portable.zip"]
+    new = old + ["redrob-browser-0.1.8-macos-arm64.dmg", "redrob-browser-0.1.8-windows-x64-portable.zip"]
     assert check(new, "0.1.8") == [], check(new, "0.1.8")
-    assert check(new, "0.1.9") == [f"{n}: launcher-named but carries version 0.1.8, not 0.1.9" for n in new[-3:]]
+    assert check(new, "0.1.9") == [f"{n}: launcher-named but carries version 0.1.8, not 0.1.9"
+                                   for n in ["redrob-browser-0.1.8-linux-x86_64.deb"] + new[-2:]]
     assert check(old + ["redrob-browser-0.1.8-linux-amd64.deb"], "0.1.8")[0].startswith(
         "redrob-browser-0.1.8-linux-amd64.deb: looks launcher-shaped")
     # A release without the launcher manifest fails, and only at release stage: the build host does not write it.
@@ -221,6 +228,12 @@ def self_test() -> None:
     build = [n for n in new if not n.endswith(".dmg") and n != MANIFEST]
     assert check(build, "0.1.8", stage="build") == [], check(build, "0.1.8", stage="build")
     assert len(check(build, "0.1.8")) == 2
+    # The signed set release-publish uploads: the Sparkle zip stands in for the .app.zip as the mac evidence.
+    signed = ["redrob-browser-0.1.8-macos-arm64.zip", "redrob-browser-0.1.8-macos-arm64.dmg",
+              "redrob-browser-0.1.8-linux-x86_64.deb", "redrob-browser-0.1.8-windows-x64-setup.exe",
+              "redrob-browser-0.1.8-windows-x64-portable.zip", "SHA256SUMS.txt", MANIFEST]
+    assert check(signed, "0.1.8") == [], check(signed, "0.1.8")
+    assert "no launcher-installable asset" in check([n for n in signed if not n.endswith(".dmg")], "0.1.8")[0]
     # The manifest's content: exactly what redrob-launcher/docs/release-manifest.md reads.
     assert json.loads(MANIFEST_TEXT) == {"schema": 1, "sharedAccount": True}
     assert MANIFEST_TEXT.endswith("\n")

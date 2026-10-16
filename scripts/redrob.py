@@ -197,7 +197,7 @@ def cmd_check(_: argparse.Namespace) -> None:
 
 
 def cmd_package(args: argparse.Namespace) -> None:
-    """Build the Linux installer packages and collect them under out/artifacts.
+    """Build the Linux installer packages and collect them under out/artifacts (release names), out/deb, out/cdn.
 
     `chrome/installer/linux:stable_deb` is upstream's own packaging target and produces the .deb. Using it rather
     than assembling an archive by hand is the difference between a package that installs, registers a .desktop
@@ -246,8 +246,10 @@ def cmd_package(args: argparse.Namespace) -> None:
 
     artifacts = ROOT / "out" / "artifacts"
     cdn = ROOT / "out" / "cdn"
+    deb_dir = ROOT / "out" / "deb"
     artifacts.mkdir(parents=True, exist_ok=True)
     cdn.mkdir(parents=True, exist_ok=True)
+    deb_dir.mkdir(parents=True, exist_ok=True)
     found = []
     # ONLY this version's package. The installer target writes into the output directory and leaves what it wrote
     # there, so after a version bump the previous release's .deb is still sitting beside the new one -- and a glob
@@ -259,44 +261,43 @@ def cmd_package(args: argparse.Namespace) -> None:
     if stale:
         print(f"ignoring {len(stale)} stale package(s) from an earlier version: {', '.join(stale)}")
     for built in sorted(p for p in out.glob("*.deb") if expected in p.name):
-        # TWO names, because two consumers want different things and neither is wrong.
+        # THREE names, because three consumers want different things and none is wrong.
         #
-        # out/artifacts keeps the Debian name exactly as built. That name is the convention inside a repository's
-        # pool/ and it is what `redrob.py repo` copies, so it must not be prettified.
+        # out/deb keeps the Debian name exactly as built. That name is the convention inside a repository's
+        # pool/ and it is what `redrob.py repo` (scripts/build_repo.py) copies, so it must not be prettified. It
+        # does NOT go to the GitHub release: every asset there carries the launcher's one shape.
         #
-        # Earlier this directory got a `redrob-browser_<ours>_` prefix bolted on, from when the built name carried
+        # Earlier this got a `redrob-browser_<ours>_` prefix bolted on, from when the built name carried
         # CHROMIUM's version and ours appeared nowhere. Now that the installer stamps our version into the package
         # itself, that prefix only produced
         # redrob-browser_0.1.0_redrob-browser-stable_0.1.0+153.0.8010.36-1_amd64.deb -- the version twice and the
         # product name twice. Removed.
-        target = artifacts / built.name
-        shutil.copy2(built, target)
-        found.append(target)
+        shutil.copy2(built, deb_dir / built.name)
 
         # out/cdn is for .github/scripts/cdn-publish.sh, which derives the version-free `latest/` alias by
         # deleting a `-<version>` segment from the filename. A Debian name separates fields with underscores, so
-        # that segment does not exist in it and the script correctly refuses the file. This is the same shape the
-        # other products publish under -- redrob-design-x64-<version>-setup.exe aliasing to
-        # redrob-design-x64-setup.exe -- so a download page links a name that does not go stale.
+        # that segment does not exist in it and the script correctly refuses the file. The CDN keeps the name it
+        # has published under since 0.1.0 -- redrob-browser-amd64-<version>.deb aliasing to
+        # redrob-browser-amd64.deb -- so a download page's link does not go stale.
         arch = built.stem.rsplit("_", 1)[-1]
         shutil.copy2(built, cdn / f"redrob-browser-{arch}-{product_version()}.deb")
 
-        # A THIRD name, for Redrob Launcher, which installs an asset only when it reads
-        # <stem>-<version>-<os>-<arch>.<ext> with its own arch spelling (x86_64, not amd64). The Debian name has
-        # no such segment and the CDN name puts the version last, so neither is one the launcher opens. This copy
-        # goes to the release beside the Debian one; scripts/check_asset_names.py is the gate.
+        # out/artifacts is the GitHub release: redrob-browser-<version>-<os>-<arch>.<ext>, the one shape Redrob
+        # Launcher's parser reads (redrob-launcher crates/core/src/platform.rs), with its own arch spelling
+        # (x86_64, not amd64). scripts/check_asset_names.py is the gate.
         launcher = artifacts / launcher_asset_name(f"linux-{LAUNCHER_ARCH.get(arch, arch)}", ".deb")
         shutil.copy2(built, launcher)
         found.append(launcher)
 
     if not found:
         sys.exit(f"the installer target produced no .deb in out/{args.flavour}")
-    for path in found + sorted(cdn.glob("*.deb")):
+    for path in found + sorted(cdn.glob("*.deb")) + sorted(deb_dir.glob("*.deb")):
         print(f"{path.relative_to(ROOT)}  {path.stat().st_size // (1024 * 1024)} MB")
     check_launcher_names(artifacts)
 
 
 # Debian/Chromium architecture names -> the launcher's tokens (redrob-launcher crates/core/src/platform.rs).
+# Linux knows only x86_64/aarch64; macOS names its CPUs as the build does (arm64, x86_64, universal).
 LAUNCHER_ARCH = {"amd64": "x86_64", "x64": "x64", "arm64": "aarch64", "x86_64": "x86_64"}
 
 
@@ -376,11 +377,15 @@ def package_windows(args: argparse.Namespace) -> None:
     artifacts.mkdir(parents=True, exist_ok=True)
     cdn.mkdir(parents=True, exist_ok=True)
 
-    # The name the sibling repos already publish under: redrob-design-x64-<version>-setup.exe, which
-    # cdn-publish.sh aliases to redrob-design-x64-setup.exe by deleting the -<version> segment. Copying that
-    # convention rather than inventing one is the whole reason the alias works without touching the script.
-    name = f"redrob-browser-x64-{product_version()}-setup.exe"
-    for target in (artifacts / name, cdn / name):
+    # Two names for the installer. out/artifacts is the GitHub release and carries the launcher's one shape,
+    # redrob-browser-<version>-windows-x64-setup.exe (redrob-launcher crates/core/src/platform.rs reads
+    # `-setup.exe` as a suffix). out/cdn keeps the name cdn.redrob.ai has published under since 0.1.4 --
+    # redrob-browser-x64-<version>-setup.exe, which cdn-publish.sh aliases to redrob-browser-x64-setup.exe by
+    # deleting the -<version> segment -- so the download page's link does not go stale.
+    cpu = _gn_value((out / "args.gn").read_text(encoding="utf-8"), "target_cpu") or "x64"
+    token = f"windows-{LAUNCHER_ARCH.get(cpu, cpu)}"
+    for target in (artifacts / launcher_asset_name(token, "-setup.exe"),
+                   cdn / f"redrob-browser-{cpu}-{product_version()}-setup.exe"):
         shutil.copy2(built, target)
         print(f"{target.relative_to(ROOT)}  {target.stat().st_size // (1024 * 1024)} MB")
 
@@ -391,8 +396,7 @@ def package_windows(args: argparse.Namespace) -> None:
     # and stores that as chrome.7z, so the portable zip is that archive re-containered, not a second opinion
     # about which files make up the browser. Extracted with the 7-Zip the Chromium tree ships for the host,
     # so this needs nothing installed on the machine (docs/BUILD.md).
-    cpu = _gn_value((out / "args.gn").read_text(encoding="utf-8"), "target_cpu") or "x64"
-    portable = artifacts / launcher_asset_name(f"windows-{LAUNCHER_ARCH.get(cpu, cpu)}", "-portable.zip")
+    portable = artifacts / launcher_asset_name(token, "-portable.zip")
     write_portable_zip(out / "chrome.7z", portable)
     print(f"{portable.relative_to(ROOT)}  {portable.stat().st_size // (1024 * 1024)} MB")
     check_launcher_names(artifacts)
@@ -415,8 +419,8 @@ def package_windows(args: argparse.Namespace) -> None:
         wrapped = setup_out / "redrob_setup.exe"
         if not wrapped.exists():
             sys.exit("the setup wrapper produced no redrob_setup.exe")
-        branded = f"redrob-browser-x64-{product_version()}-setup-branded.exe"
-        for target in (artifacts / branded, cdn / branded):
+        branded = launcher_asset_name(token, "-setup-branded.exe")
+        for target in (artifacts / branded, cdn / f"redrob-browser-{cpu}-{product_version()}-setup-branded.exe"):
             shutil.copy2(wrapped, target)
             print(f"{target.relative_to(ROOT)}  {target.stat().st_size // (1024 * 1024)} MB")
 
@@ -447,7 +451,9 @@ def package_mac(args: argparse.Namespace) -> None:
 
     Two archives, both with symlinks kept (`zip -y`), because the framework's Versions/Current links are what
     codesign walks: `<name>.app.zip` is the app, `<name>-packaging.zip` is the `<product> Packaging` directory
-    (target chrome/installer/mac) that the workflow's signing driver and build_props_config.py come from.
+    (target chrome/installer/mac) that the workflow's signing driver and build_props_config.py come from. The
+    stem is the launcher's shape, redrob-browser-<version>-macos-<cpu>, so every asset on the release reads the
+    same way; the mac CPU names are the build's own (arm64, x86_64, universal), all of which the launcher reads.
     """
     out = SRC / "out" / args.flavour
     app = out / "Redrob Browser.app"
@@ -466,7 +472,7 @@ def package_mac(args: argparse.Namespace) -> None:
     artifacts = ROOT / "out" / "artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
     cpu = _gn_value((out / "args.gn").read_text(encoding="utf-8"), "target_cpu") or "arm64"
-    stem = f"redrob-browser-macos-{cpu}-{product_version()}"
+    stem = launcher_asset_name(f"macos-{cpu}", "")
     for source, name in ((app, f"{stem}.app.zip"), (packaging, f"{stem}-packaging.zip")):
         target = artifacts / name
         target.unlink(missing_ok=True)
@@ -475,7 +481,7 @@ def package_mac(args: argparse.Namespace) -> None:
 
 
 def cmd_repo(args: argparse.Namespace) -> None:
-    """Build a signed apt repository from out/artifacts. See scripts/build_repo.py for the key handling."""
+    """Build a signed apt repository from the Debian-named packages in out/deb. See scripts/build_repo.py."""
     cmd = [sys.executable, str(ROOT / "scripts" / "build_repo.py")]
     if args.unsigned:
         cmd.append("--unsigned")
@@ -1146,7 +1152,7 @@ def main() -> None:
                          help="cap parallel compile jobs for the installer build (0 = autoninja's default)")
     package.set_defaults(func=cmd_package)
 
-    repo = sub.add_parser("repo", help="build a signed apt repository from out/artifacts")
+    repo = sub.add_parser("repo", help="build a signed apt repository from the Debian-named packages in out/deb")
     repo.add_argument("--unsigned", action="store_true",
                       help="build it without signing. An unsigned repository means every future update is "
                            "whatever the network hands the user, so it has to be asked for")

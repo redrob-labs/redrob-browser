@@ -232,10 +232,10 @@ cd ..\..\..\
 python scripts\redrob.py package --flavour windows
 ```
 
-This writes `out/artifacts/redrob-browser-x64-<version>-setup.exe` and the same name into `out/cdn/`. That name is
-the convention the sibling repos already publish under — `redrob-design-x64-<version>-setup.exe` aliasing to
-`redrob-design-x64-setup.exe` — so `.github/scripts/cdn-publish.sh` derives the version-free `latest/` link by
-deleting the `-<version>` segment with no change to the script.
+This writes `out/artifacts/redrob-browser-<version>-windows-x64-setup.exe` — the release's one name shape,
+`redrob-browser-<version>-<os>-<arch><suffix>` — and `out/cdn/redrob-browser-x64-<version>-setup.exe`, the name
+cdn.redrob.ai has published under since 0.1.4, which `.github/scripts/cdn-publish.sh` aliases to
+`redrob-browser-x64-setup.exe` by deleting the `-<version>` segment.
 
 ### 9. Hand it to CI to sign
 
@@ -279,7 +279,7 @@ verification and the same signer check. On a developer machine the credential is
 `signtool.exe`.
 
 ```powershell
-gh release create v0.1.4 --draft --title "Redrob Browser 0.1.4" --notes "..." out\artifacts\redrob-browser-x64-0.1.4-setup.exe
+gh release create v0.1.4 --draft --title "Redrob Browser 0.1.4" --notes "..." out\artifacts\redrob-browser-0.1.4-windows-x64-setup.exe
 gh workflow run sign-and-publish.yml -f tag=v0.1.4            # -f dry_run=true: sign and verify only
 ```
 
@@ -342,7 +342,7 @@ python3 scripts/redrob.py package --flavour win_cross --jobs 14
 ```
 
 `package` picks the Windows path from the flavour's `target_os`, so it builds `mini_installer` and stages
-`out/artifacts/redrob-browser-x64-<version>-setup.exe` like the native build. `--jobs` caps parallel compiles;
+`out/artifacts/redrob-browser-<version>-windows-x64-setup.exe` like the native build. `--jobs` caps parallel compiles;
 without it autoninja uses every core. The optional branded `--with-setup` wrapper renders its art by running
 `chrome.exe`, so it still needs a Windows host.
 

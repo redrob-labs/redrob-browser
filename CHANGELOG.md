@@ -6,6 +6,15 @@ upstream's four-week cadence whether we ship anything or not — the two numbers
 
 ## Unreleased
 
+**Every release asset is named the way Redrob Launcher reads it.** `redrob-browser-<version>-<os>-<arch><suffix>`
+— `redrob-browser-0.1.9-windows-x64-setup.exe`, `-macos-arm64.zip`, `-macos-arm64.dmg`, `-linux-x86_64.deb`,
+`-windows-x64-portable.zip` — for the signed set and for the draft's unsigned `.app.zip` and `-packaging.zip`
+alike. The Debian-named package moved out of the release into `out/deb` (what `redrob.py repo` reads), and
+`sign-and-publish.yml` rebuilds that name from the package's control file for the apt pool. cdn.redrob.ai keeps
+the names it has always served (`redrob-browser-x64-<version>-setup.exe`, `redrob-browser-macos-arm64-<version>.zip`,
+`redrob-browser-amd64-<version>.deb`), so no `latest/` link or appcast enclosure moved. The 0.1.8 release's
+assets were renamed in place to the same shape.
+
 **The built-in Redrob Code agent shares one engine with the rest of the machine.** The agent now runs
 `redrob acp --attach`, which makes the browser a thin client of the single Redrob Code daemon every Redrob app
 on the machine attaches to (redrob-code 0.6.0 or later) rather than an engine process of its own; the daemon
