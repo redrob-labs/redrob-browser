@@ -124,8 +124,9 @@ above, and the CDN keeps its names so no `latest/` link moved.
 Redrob Launcher installs an asset only when its name reads `<stem>-<version>-<os>-<arch>[-portable].<ext>` with its
 own tokens — `linux-x86_64`, `macos-arm64`, `windows-x64`, never `amd64`, `x64` on Linux, or a Chromium suffix on
 the version —
-and only in a format it opens: `.deb` on Linux, `.dmg` on macOS, `.msi` or `-portable.zip` on Windows. A
-`-setup.exe` is not one of them, which is why the portable zip exists: `redrob.py package --flavour win_cross`
+and only in a format it opens: `.deb` on Linux, `.dmg` on macOS, `-setup.exe` (run with `--silent`, launcher
+0.4.0+), `.msi` or `-portable.zip` on Windows. The portable zip is optional beside the setup: `redrob.py package
+--flavour win_cross`
 re-containers the installer's own `chrome.7z` (the unpacked application, `chrome.exe` at the top) and adds a
 `redrob-browser.exe` copy of the stub the launcher looks for. The `.dmg` is made in `sign-and-publish.yml` from the
 signed, notarized app, because only the mac runner has `hdiutil`.
