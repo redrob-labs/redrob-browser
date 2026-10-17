@@ -27,11 +27,16 @@ import { logger } from './lib/logger'
 import { selfHealMcpLinks } from './lib/mcp-manager'
 import { metrics } from './lib/metrics'
 import { isPortInUseError } from './lib/port-binding'
+import type { AppBridgeHandle } from './lib/redrob-bridge/app-bridge'
+import { startBrowserBridge } from './lib/redrob-bridge/browser-bridge'
 import { Sentry } from './lib/sentry'
 import { VERSION } from './version'
 
+const BRIDGE_STOP_TIMEOUT_MS = 1500
+
 export class Application {
   private config: ServerConfig
+  private bridge: AppBridgeHandle | undefined
 
   constructor(config: ServerConfig) {
     this.config = config
@@ -128,12 +133,27 @@ export class Application {
 
     this.logStartupSummary()
 
+    // Hand the shared Redrob Code daemon this browser's tools. Best effort: the
+    // helper logs and answers undefined when no daemon can be reached.
+    this.bridge = await startBrowserBridge({ browser, version: VERSION })
+
     metrics.log('http_server.started', { version: VERSION })
   }
 
-  stop(reason?: string): void {
+  async stop(reason?: string): Promise<void> {
     logger.info('Shutting down server...', { reason })
     removeServerConfigSync()
+
+    if (this.bridge) {
+      const bridge = this.bridge
+      this.bridge = undefined
+      await Promise.race([
+        bridge.stop().catch(() => undefined),
+        new Promise<void>((resolve) =>
+          setTimeout(resolve, BRIDGE_STOP_TIMEOUT_MS),
+        ),
+      ])
+    }
 
     // Immediate exit keeps the port free; signal exits stay non-zero so Chromium restarts us.
     const code =

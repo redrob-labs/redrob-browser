@@ -68,6 +68,19 @@ Tools organized by category:
 | **Console** | `get_console_messages` |
 | **Other** | `browseros_info`, `handle_dialog`, `wait_for`, `download`, `export_pdf`, `output_file`, `nudges` |
 
+## Control from Redrob Code
+
+When the shared Redrob Code daemon is running on the same machine, the server registers itself with it as app `browser` (`src/lib/redrob-bridge/`): it serves a small MCP tool set on loopback and the daemon connects it for every session, so a prompt in any Redrob surface can drive this browser while it is up. The bridge starts after the HTTP server is up, unregisters on shutdown, and is skipped with a log line when no daemon can be reached.
+
+- `list_tabs` - every open tab with id, title and url, active tab marked
+- `open_tab` - open a url in a new tab, answers the tab id
+- `navigate` - load a url in a tab (active by default), answers final url and title
+- `read_page` - the page's readable text as markdown, capped (default 8000 chars) with the total
+- `find` - up to 20 interactive elements matching a query, as ref, role and text
+- `click` - click an element by ref, answers the tab's url and title afterwards
+- `type_text` - type into an element by ref, optionally pressing Enter
+- `screenshot` - save a PNG of a tab under the tool-output directory, answers the path
+
 ## Agent Loop
 
 The agent loop uses the [Vercel AI SDK](https://sdk.vercel.ai) to orchestrate multi-step browser automation:
