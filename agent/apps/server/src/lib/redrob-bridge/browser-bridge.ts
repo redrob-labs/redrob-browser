@@ -21,7 +21,11 @@ import type { BrowserSession } from '@browseros/browser-core/core/session'
 import { writeTempToolOutputBinaryFile } from '@browseros/browser-mcp/output-file'
 import { z } from 'zod'
 import { logger } from '../logger'
-import { type AppBridgeHandle, startAppBridge, type ToolDef } from './app-bridge'
+import {
+  type AppBridgeHandle,
+  startAppBridge,
+  type ToolDef,
+} from './app-bridge'
 
 const APP_NAME = 'browser'
 const DEFAULT_READ_CHARS = 8000
@@ -164,12 +168,15 @@ function buildTools(browser: Browser, session: BrowserSession): ToolDef[] {
         for (const line of text.split('\n')) {
           const ref = /\[ref=(e\d+)\]/.exec(line)
           if (!ref) continue
-          const body = line.replace(/^\s*-\s*/, '').replace(/\s*\[ref=e\d+\].*$/, '')
+          const body = line
+            .replace(/^\s*-\s*/, '')
+            .replace(/\s*\[ref=e\d+\].*$/, '')
           if (!body.toLowerCase().includes(needle)) continue
           matches.push(`${ref[1]}  ${body}`)
           if (matches.length >= MAX_FIND_RESULTS) break
         }
-        if (matches.length === 0) return `no interactive element matches "${query}" on tab ${pageId}`
+        if (matches.length === 0)
+          return `no interactive element matches "${query}" on tab ${pageId}`
         return matches.join('\n')
       },
     },

@@ -7,18 +7,32 @@
  * and `zod`. Do not edit here; change it upstream and copy the file again. Protocol:
  * redrob-code `docs/APP-BRIDGE.md`.
  */
-import { randomUUID } from "node:crypto"
-import http from "node:http"
-import type { AddressInfo } from "node:net"
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
-import type { AnySchema } from "@modelcontextprotocol/sdk/server/zod-compat.js"
-import { parseWithCompat, toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js"
-import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js"
-import { connectOrStart, type DaemonConnection, type DaemonOptions } from "@redrob-labs/sdk/daemon"
+import { randomUUID } from 'node:crypto'
+import http from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
+import type { AnySchema } from '@modelcontextprotocol/sdk/server/zod-compat.js'
+import {
+  parseWithCompat,
+  toJsonSchemaCompat,
+} from '@modelcontextprotocol/sdk/server/zod-json-schema-compat.js'
+import {
+  CallToolRequestSchema,
+  type CallToolResult,
+  ListToolsRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js'
+import {
+  connectOrStart,
+  type DaemonConnection,
+  type DaemonOptions,
+} from '@redrob-labs/sdk/daemon'
 
 /** A JSON Schema object describing the tool's arguments (`type: "object"`). */
-export type JsonSchema = { readonly type: "object"; readonly [key: string]: unknown }
+export type JsonSchema = {
+  readonly type: 'object'
+  readonly [key: string]: unknown
+}
 
 /** What a tool handler may answer: a plain string becomes one text content block. */
 export type ToolResult = string | CallToolResult
@@ -32,7 +46,9 @@ export type ToolDef = {
    * Schema object (passed to the engine as is, not validated here). Omitted: no arguments.
    */
   readonly input?: AnySchema | JsonSchema
-  readonly handler: (args: Record<string, unknown>) => ToolResult | Promise<ToolResult>
+  readonly handler: (
+    args: Record<string, unknown>,
+  ) => ToolResult | Promise<ToolResult>
 }
 
 export type StartAppBridgeOptions = {
@@ -61,46 +77,61 @@ export type AppBridgeHandle = {
   readonly stop: () => Promise<void>
 }
 
-const NO_ARGS: JsonSchema = { type: "object", properties: {} }
+const NO_ARGS: JsonSchema = { type: 'object', properties: {} }
 
 function isZodSchema(input: AnySchema | JsonSchema): input is AnySchema {
-  return typeof input === "object" && input !== null && ("_def" in input || "_zod" in input || "~standard" in input)
+  return (
+    typeof input === 'object' &&
+    input !== null &&
+    ('_def' in input || '_zod' in input || '~standard' in input)
+  )
 }
 
 function inputSchema(def: ToolDef): JsonSchema {
   if (!def.input) return NO_ARGS
-  if (isZodSchema(def.input)) return toJsonSchemaCompat(def.input, { strictUnions: true }) as JsonSchema
+  if (isZodSchema(def.input))
+    return toJsonSchemaCompat(def.input, { strictUnions: true }) as JsonSchema
   return def.input
 }
 
 function toCallResult(result: ToolResult): CallToolResult {
-  if (typeof result === "string") return { content: [{ type: "text", text: result }] }
+  if (typeof result === 'string')
+    return { content: [{ type: 'text', text: result }] }
   return result
 }
 
 function failure(message: string): CallToolResult {
-  return { isError: true, content: [{ type: "text", text: message }] }
+  return { isError: true, content: [{ type: 'text', text: message }] }
 }
 
-type Session = { readonly server: McpServer; readonly transport: StreamableHTTPServerTransport }
+type Session = {
+  readonly server: McpServer
+  readonly transport: StreamableHTTPServerTransport
+}
 
 /**
  * Serve `tools` over MCP on 127.0.0.1 and bridge the server into the shared daemon. Resolves once
  * the daemon has accepted the registration; rejects when the daemon cannot be reached or refuses
  * the app (the HTTP server is closed again in that case).
  */
-export async function startAppBridge(options: StartAppBridgeOptions): Promise<AppBridgeHandle> {
-  const path = options.path ?? "/mcp"
+export async function startAppBridge(
+  options: StartAppBridgeOptions,
+): Promise<AppBridgeHandle> {
+  const path = options.path ?? '/mcp'
   let tools = new Map(options.tools.map((t) => [t.name, t] as const))
   const sessions = new Map<string, Session>()
 
   const newServer = (): McpServer => {
     const server = new McpServer(
-      { name: options.name, version: options.version ?? "0.0.0" },
+      { name: options.name, version: options.version ?? '0.0.0' },
       { capabilities: { tools: { listChanged: true } } },
     )
     server.server.setRequestHandler(ListToolsRequestSchema, () => ({
-      tools: [...tools.values()].map((t) => ({ name: t.name, description: t.description, inputSchema: inputSchema(t) })),
+      tools: [...tools.values()].map((t) => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: inputSchema(t),
+      })),
     }))
     server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const def = tools.get(request.params.name)
@@ -110,7 +141,9 @@ export async function startAppBridge(options: StartAppBridgeOptions): Promise<Ap
         try {
           args = parseWithCompat(def.input, args) as Record<string, unknown>
         } catch (cause) {
-          return failure(`Invalid arguments for ${def.name}: ${cause instanceof Error ? cause.message : String(cause)}`)
+          return failure(
+            `Invalid arguments for ${def.name}: ${cause instanceof Error ? cause.message : String(cause)}`,
+          )
         }
       }
       try {
@@ -123,26 +156,30 @@ export async function startAppBridge(options: StartAppBridgeOptions): Promise<Ap
   }
 
   const httpServer = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1")
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     if (url.pathname !== path) {
       res.writeHead(404).end()
       return
     }
     try {
-      const sessionId = req.headers["mcp-session-id"]
-      if (typeof sessionId === "string") {
+      const sessionId = req.headers['mcp-session-id']
+      if (typeof sessionId === 'string') {
         const session = sessions.get(sessionId)
         if (!session) {
-          res.writeHead(404, { "content-type": "application/json" }).end(
-            JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "Session not found" }, id: null }),
+          res.writeHead(404, { 'content-type': 'application/json' }).end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              error: { code: -32001, message: 'Session not found' },
+              id: null,
+            }),
           )
           return
         }
         await session.transport.handleRequest(req, res)
         return
       }
-      if (req.method !== "POST") {
-        res.writeHead(405, { allow: "POST" }).end()
+      if (req.method !== 'POST') {
+        res.writeHead(405, { allow: 'POST' }).end()
         return
       }
       // No session yet: this must be `initialize`. The transport answers 400 itself when it is not,
@@ -165,10 +202,13 @@ export async function startAppBridge(options: StartAppBridgeOptions): Promise<Ap
       if (!transport.sessionId) await server.close().catch(() => undefined)
     } catch (cause) {
       if (!res.headersSent) {
-        res.writeHead(500, { "content-type": "application/json" }).end(
+        res.writeHead(500, { 'content-type': 'application/json' }).end(
           JSON.stringify({
-            jsonrpc: "2.0",
-            error: { code: -32603, message: cause instanceof Error ? cause.message : String(cause) },
+            jsonrpc: '2.0',
+            error: {
+              code: -32603,
+              message: cause instanceof Error ? cause.message : String(cause),
+            },
             id: null,
           }),
         )
@@ -177,8 +217,10 @@ export async function startAppBridge(options: StartAppBridgeOptions): Promise<Ap
   })
 
   const port = await new Promise<number>((resolve, reject) => {
-    httpServer.once("error", reject)
-    httpServer.listen(0, "127.0.0.1", () => resolve((httpServer.address() as AddressInfo).port))
+    httpServer.once('error', reject)
+    httpServer.listen(0, '127.0.0.1', () =>
+      resolve((httpServer.address() as AddressInfo).port),
+    )
   })
   const mcpUrl = `http://127.0.0.1:${port}${path}`
 
@@ -213,7 +255,8 @@ export async function startAppBridge(options: StartAppBridgeOptions): Promise<Ap
     },
     setTools: (next) => {
       tools = new Map(next.map((t) => [t.name, t] as const))
-      for (const session of sessions.values()) session.server.sendToolListChanged()
+      for (const session of sessions.values())
+        session.server.sendToolListChanged()
     },
     stop: async () => {
       if (stopped) return
@@ -239,7 +282,10 @@ type BridgedApp = {
   readonly lastSeen: number
 }
 
-type BridgedAppList = { readonly apps: readonly BridgedApp[]; readonly ttlMs: number }
+type BridgedAppList = {
+  readonly apps: readonly BridgedApp[]
+  readonly ttlMs: number
+}
 
 type AppRegistration = { readonly id: string; readonly ttlMs: number }
 
@@ -254,12 +300,14 @@ type AppRegisterInput = {
 }
 
 function appsBase(connection: DaemonConnection): string {
-  return `${connection.url.replace(/\/+$/, "")}/v1/apps`
+  return `${connection.url.replace(/\/+$/, '')}/v1/apps`
 }
 
 async function refuse(response: Response, what: string): Promise<never> {
-  const body = await response.text().catch(() => "")
-  throw new Error(`The engine refused to ${what} (${response.status})${body ? `: ${body}` : ""}`)
+  const body = await response.text().catch(() => '')
+  throw new Error(
+    `The engine refused to ${what} (${response.status})${body ? `: ${body}` : ''}`,
+  )
 }
 
 const apps = {
@@ -270,8 +318,8 @@ const apps = {
     fetchImpl: typeof fetch = fetch,
   ): Promise<AppRegistration> {
     const response = await fetchImpl(`${appsBase(connection)}/register`, {
-      method: "POST",
-      headers: { ...connection.headers, "content-type": "application/json" },
+      method: 'POST',
+      headers: { ...connection.headers, 'content-type': 'application/json' },
       body: JSON.stringify({
         name: input.name,
         mcp_url: input.mcpUrl,
@@ -280,34 +328,54 @@ const apps = {
         ...(input.tools !== undefined ? { tools: input.tools } : {}),
       }),
     })
-    if (!response.ok) return refuse(response, "bridge the app")
+    if (!response.ok) return refuse(response, 'bridge the app')
     return (await response.json()) as AppRegistration
   },
 
   /** `POST /v1/apps/:id/heartbeat`. Resolves to undefined on 404: the registration is gone, register again. */
-  async heartbeat(connection: DaemonConnection, id: string, fetchImpl: typeof fetch = fetch): Promise<BridgedApp | undefined> {
-    const response = await fetchImpl(`${appsBase(connection)}/${encodeURIComponent(id)}/heartbeat`, {
-      method: "POST",
-      headers: connection.headers,
-    })
+  async heartbeat(
+    connection: DaemonConnection,
+    id: string,
+    fetchImpl: typeof fetch = fetch,
+  ): Promise<BridgedApp | undefined> {
+    const response = await fetchImpl(
+      `${appsBase(connection)}/${encodeURIComponent(id)}/heartbeat`,
+      {
+        method: 'POST',
+        headers: connection.headers,
+      },
+    )
     if (response.status === 404) return undefined
-    if (!response.ok) return refuse(response, "keep the bridge alive")
+    if (!response.ok) return refuse(response, 'keep the bridge alive')
     return (await response.json()) as BridgedApp
   },
 
   /** `DELETE /v1/apps/:id`. */
-  async unregister(connection: DaemonConnection, id: string, fetchImpl: typeof fetch = fetch): Promise<void> {
-    const response = await fetchImpl(`${appsBase(connection)}/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-      headers: connection.headers,
-    })
-    if (!response.ok && response.status !== 404) return refuse(response, "unbridge the app")
+  async unregister(
+    connection: DaemonConnection,
+    id: string,
+    fetchImpl: typeof fetch = fetch,
+  ): Promise<void> {
+    const response = await fetchImpl(
+      `${appsBase(connection)}/${encodeURIComponent(id)}`,
+      {
+        method: 'DELETE',
+        headers: connection.headers,
+      },
+    )
+    if (!response.ok && response.status !== 404)
+      return refuse(response, 'unbridge the app')
   },
 
   /** `GET /v1/apps`. */
-  async list(connection: DaemonConnection, fetchImpl: typeof fetch = fetch): Promise<BridgedAppList> {
-    const response = await fetchImpl(appsBase(connection), { headers: connection.headers })
-    if (!response.ok) return refuse(response, "list bridged apps")
+  async list(
+    connection: DaemonConnection,
+    fetchImpl: typeof fetch = fetch,
+  ): Promise<BridgedAppList> {
+    const response = await fetchImpl(appsBase(connection), {
+      headers: connection.headers,
+    })
+    if (!response.ok) return refuse(response, 'list bridged apps')
     return (await response.json()) as BridgedAppList
   },
 }
@@ -336,9 +404,13 @@ async function bridgeApp(
   let stopped = false
   const beat = async () => {
     if (stopped) return
-    const alive = await apps.heartbeat(connection, id, fetchImpl).catch(() => null)
+    const alive = await apps
+      .heartbeat(connection, id, fetchImpl)
+      .catch(() => null)
     if (alive === undefined && !stopped) {
-      const again = await apps.register(connection, input, fetchImpl).catch(() => undefined)
+      const again = await apps
+        .register(connection, input, fetchImpl)
+        .catch(() => undefined)
       if (again) id = again.id
     }
   }
