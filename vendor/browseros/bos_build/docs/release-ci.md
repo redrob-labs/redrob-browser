@@ -210,7 +210,9 @@ server builds need `BROWSEROS_CONFIG_URL`, `POSTHOG_API_KEY`, and `SENTRY_DSN`;
 BrowserOS neo server builds need `CLAW_POSTHOG_KEY`. Extension builds need the
 matching signing key and build-time secrets.
 
-Windows signing needs the eSigner secrets and `SPARKLE_PRIVATE_KEY`. macOS uses
+Windows signing needs the Azure Artifact Signing identifiers (`ARTIFACT_SIGNING_ENDPOINT`,
+`ARTIFACT_SIGNING_ACCOUNT`, `ARTIFACT_SIGNING_CERT_PROFILE`), an `az login` done over OpenID
+Connect right before the step, and `SPARKLE_PRIVATE_KEY`. macOS uses
 repository variables `BROWSEROS_REPO_PATH` and `BROWSEROS_CHROMIUM_SRC` plus
 the signing and notarization secrets on the persistent builder. Signed macOS
 releases require separate base64-encoded Developer ID provisioning profiles:

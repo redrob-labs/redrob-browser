@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a signed apt repository from the .deb files in out/artifacts.
+"""Build a signed apt repository from the Debian-named .deb files in out/deb.
 
 This is the last piece between "a tag" and "something a user can install and keep updated". A .deb on a releases
 page is installable exactly once; an apt repository is what makes `apt upgrade` work, and a SIGNED one is what
@@ -83,7 +83,9 @@ def sign(repo_dists: pathlib.Path, release: pathlib.Path, key_id: str, home: pat
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--artifacts", type=pathlib.Path, default=ROOT / "out" / "artifacts")
+    parser.add_argument("--artifacts", type=pathlib.Path, default=ROOT / "out" / "deb",
+                        help="directory holding the Debian-named .deb files (default out/deb, written by "
+                             "`redrob.py package`; out/artifacts carries the launcher-named release copies)")
     parser.add_argument("--out", type=pathlib.Path, default=ROOT / "out" / "repo")
     parser.add_argument("--unsigned", action="store_true",
                         help="build the repository without signing it. An unsigned apt repository means every "

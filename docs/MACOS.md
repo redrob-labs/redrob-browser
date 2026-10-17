@@ -124,7 +124,7 @@ python3 scripts/redrob.py build   --flavour mac_cross --jobs 14
 python3 scripts/redrob.py package --flavour mac_cross --jobs 14
 ```
 
-`package` writes `out/artifacts/redrob-browser-macos-<cpu>-<version>.app.zip` and `...-packaging.zip`, the two
+`package` writes `out/artifacts/redrob-browser-<version>-macos-<cpu>.app.zip` and `...-packaging.zip`, the two
 names the workflow downloads. It refuses to package if any file under `Contents/Resources/**/bin` is not
 Mach-O: 0.1.6 shipped a Linux ELF BrowserClaw server that way, from a hand-written args.gn that lacked
 `browseros_package_all_server_resources = false`, and notarization did not object.

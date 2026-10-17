@@ -13,7 +13,7 @@ guessing.
 | `redrob.py package --flavour windows` | wired — builds `chrome/installer/mini_installer` |
 | UI font registration (`AddFontResourceExW`, `FR_PRIVATE`) | written, never compiled |
 | `.github/workflows/windows.yml` | manual dispatch, never run |
-| Authenticode signing | **absent** |
+| Authenticode signing | `sign-and-publish.yml`: Azure Artifact Signing over OpenID Connect through the org's `redrob-labs/.github/actions/sign-windows`, on a hosted runner |
 | Update channel (Omaha / an equivalent) | **absent** |
 | App icon (`.ico` in the installer's resources) | **absent** — the build carries Chromium's |
 
@@ -232,24 +232,60 @@ cd ..\..\..\
 python scripts\redrob.py package --flavour windows
 ```
 
-This writes `out/artifacts/redrob-browser-x64-<version>-setup.exe` and the same name into `out/cdn/`. That name is
-the convention the sibling repos already publish under — `redrob-design-x64-<version>-setup.exe` aliasing to
-`redrob-design-x64-setup.exe` — so `.github/scripts/cdn-publish.sh` derives the version-free `latest/` link by
-deleting the `-<version>` segment with no change to the script.
+This writes `out/artifacts/redrob-browser-<version>-windows-x64-setup.exe` — the release's one name shape,
+`redrob-browser-<version>-<os>-<arch><suffix>` — and `out/cdn/redrob-browser-x64-<version>-setup.exe`, the name
+cdn.redrob.ai has published under since 0.1.4, which `.github/scripts/cdn-publish.sh` aliases to
+`redrob-browser-x64-setup.exe` by deleting the `-<version>` segment.
 
 ### 9. Hand it to CI to sign
 
 The installer is unsigned at this point. `.github/workflows/sign-and-publish.yml` signs it on a hosted runner
-with the organisation's Authenticode certificate — which works precisely because signing needs no Chromium
-checkout, so the disk wall that stops a CI build does not apply.
+with the organisation's Public Trust certificate through **Azure Artifact Signing** — which works precisely
+because signing needs no Chromium checkout, so the disk wall that stops a CI build does not apply.
+
+The signing step itself is the organisation's one copy, `redrob-labs/.github/actions/sign-windows`, the
+same step redrob-cut, redrob-cad and redrob-launcher run; this repository keeps no signing recipe of its
+own. How the `sign-windows` job authenticates, because it is the part that differs from every "import the
+PFX" recipe on the web:
+
+- **OpenID Connect, not a certificate file.** The job has `environment: release` and
+  `permissions: id-token: write`; `azure/login@v3` exchanges the job's GitHub OIDC token for an Azure
+  token against the organisation's app registration, whose federated credential accepts
+  `repo:redrob-labs/*:environment:release`. There is no `.pfx`, no password and no client secret anywhere
+  in this repository or its secrets.
+- **Six plain identifiers, all redrob-labs organisation secrets:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+  `AZURE_SUBSCRIPTION_ID` (for the login) and `ARTIFACT_SIGNING_ENDPOINT`, `ARTIFACT_SIGNING_ACCOUNT`,
+  `ARTIFACT_SIGNING_CERT_PROFILE` (for signtool's metadata). None of them is a credential. Do not recreate
+  them as repository secrets — a same-named repository secret overrides the organisation one.
+  `.github/workflows/preflight.yml` reports which of the six reach this repository.
+- **The login sits immediately before signing.** GitHub's OIDC token lives minutes. The installer download
+  happens BEFORE `azure/login`, and the shared action runs right after it. The browser's build is not on the
+  runner at all, so unlike redrob-cad there is no build to split the job around.
+- **The shared action's metadata excludes every credential a runner cannot satisfy** (`InteractiveBrowserCredential`,
+  `ManagedIdentityCredential`, `SharedTokenCacheCredential`, `VisualStudioCredential`,
+  `VisualStudioCodeCredential`, `AzurePowerShellCredential`, `AzureDeveloperCliCredential`,
+  `WorkloadIdentityCredential`), so a missing login fails in seconds instead of waiting on a browser
+  nobody sees.
+- **Verification is the full check.** `signtool verify /pa` must pass with Status `Valid` — a Public Trust
+  certificate chains to a root every Windows trusts, so the old `NotTrusted`/`UnknownError` allowance is
+  gone. The signer's CN must be `McKinley Rice, Inc.` (compared on the CN attribute, since Windows renders
+  the subject as `CN="McKinley Rice, Inc.", O=...`), and the action prints `<file> signed by CN=...`.
+
+The vendored build system's own Windows signer (`vendor/browseros/bos_build/steps/sign/windows.py`, used
+by `redrob.py package` on a Windows host and by the OTA server signer) follows the same recipe: the same
+three `ARTIFACT_SIGNING_*` variables, the same NuGet plug-in, the same metadata, the same two-step
+verification and the same signer check. On a developer machine the credential is an interactive
+`az login`. `ARTIFACT_SIGNING_DLIB` points it at a pre-extracted plug-in; `SIGNTOOL` at a specific
+`signtool.exe`.
 
 ```powershell
-gh release create v0.1.4 --draft --title "Redrob Browser 0.1.4" --notes "..." out\artifacts\redrob-browser-x64-0.1.4-setup.exe
-gh workflow run sign-and-publish.yml -f tag=v0.1.4
+gh release create v0.1.4 --draft --title "Redrob Browser 0.1.4" --notes "..." out\artifacts\redrob-browser-0.1.4-windows-x64-setup.exe
+gh workflow run sign-and-publish.yml -f tag=v0.1.4            # -f dry_run=true: sign and verify only
 ```
 
-A DRAFT release, so no user sees the unsigned file. The workflow replaces the asset with the signed one,
-publishes to the CDN, and undrafts last. The tag must match `REDROB_VERSION` or the publish job refuses — bump
+A DRAFT release, so no user sees the unsigned file. The workflow signs the installer, publishes to the CDN, and
+last hands the signed set to the organisation's `release-publish.yml`, which replaces the draft's assets and
+publishes the release. The tag must match `REDROB_VERSION` or the `probe` job refuses — bump
 `REDROB_VERSION` and `sources/chrome/installer/linux/common/redrob-version.txt` together, and add the
 `CHANGELOG.md` section, before building for a release.
 
@@ -306,7 +342,7 @@ python3 scripts/redrob.py package --flavour win_cross --jobs 14
 ```
 
 `package` picks the Windows path from the flavour's `target_os`, so it builds `mini_installer` and stages
-`out/artifacts/redrob-browser-x64-<version>-setup.exe` like the native build. `--jobs` caps parallel compiles;
+`out/artifacts/redrob-browser-<version>-windows-x64-setup.exe` like the native build. `--jobs` caps parallel compiles;
 without it autoninja uses every core. The optional branded `--with-setup` wrapper renders its art by running
 `chrome.exe`, so it still needs a Windows host.
 
@@ -328,13 +364,13 @@ not get to treat upstream's warnings as its own errors, and a first build on a n
 
 ## Not done, and why it is listed rather than attempted
 
-**Signing — the certificate already exists, so this is wiring, not procurement.** An unsigned `setup.exe`
-triggers SmartScreen and reaches users as a warning. This document previously called that a purchase; it is not.
-`redrob-design/cdn.yml` signs its own Windows installer with `secrets.WIN_CSC_LINK` and
-`secrets.WIN_CSC_KEY_PASSWORD`, and `.github/workflows/preflight.yml` confirms both are visible to **this**
-repository. What is missing is the import-certificate and verify-Authenticode steps in `windows.yml`, which
-should be copied from `redrob-design` rather than written fresh — including its habit of verifying the signature
-after producing it, because a signing step that silently no-ops produces an unsigned binary and a green run.
+**Signing — done, in `sign-and-publish.yml`, and never exercised against a real installer.** Step 9 above
+describes it. A Windows installer here is a multi-hour Chromium build on our own machine, so there is no
+throwaway build to try the job on; what there is since the `dry_run` input is a signing-only run against
+any draft that carries a `-setup.exe`, which signs and verifies and publishes nothing. The shared action
+verifies the signature after producing it for exactly that reason — a signing step that silently no-ops
+produces an unsigned binary and a green run, and `verify /pa` plus a `Valid` status plus the signer check
+is what turns that into a red one.
 
 The org also carries the full Apple set (`APPLE_CODESIGN_CERT_P12_BASE64`, `APPLE_CODESIGN_CERT_PASSWORD`,
 `APPLE_NOTARY_API_KEY_ID`, `APPLE_NOTARY_API_ISSUER_ID`, `APPLE_NOTARY_API_KEY_P8_BASE64`), all confirmed

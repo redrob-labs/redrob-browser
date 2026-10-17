@@ -545,16 +545,16 @@ class RequiredEnvTest(unittest.TestCase):
             ],
         )
 
-    def test_signed_windows_requires_esigner_and_sparkle_key(self):
-        # parity with release.*.windows.yaml required_envs
+    def test_signed_windows_requires_artifact_signing_and_sparkle_key(self):
+        # Azure Artifact Signing: three plain identifiers, no credential. The
+        # Azure login itself is ambient (azure/login over OpenID Connect).
         env = required_env(plan(RELEASE, "x64", "windows"))
         self.assertEqual(
             env,
             [
-                "CODE_SIGN_TOOL_PATH",
-                "ESIGNER_USERNAME",
-                "ESIGNER_PASSWORD",
-                "ESIGNER_TOTP_SECRET",
+                "ARTIFACT_SIGNING_ENDPOINT",
+                "ARTIFACT_SIGNING_ACCOUNT",
+                "ARTIFACT_SIGNING_CERT_PROFILE",
                 "SPARKLE_PRIVATE_KEY",
             ],
         )

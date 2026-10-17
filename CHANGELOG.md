@@ -4,7 +4,14 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
-## 0.1.9 — 2026-10-13
+## 0.2.0 — 2026-10-17
+
+**Redrob Code can drive this browser.** While the browser runs, its agent server registers itself with the
+Redrob Code daemon on the machine (redrob-code 0.7.0 or later) as the app `browser`, and the daemon's agent —
+the phone chat included — gets eight tools over the browser session the built-in agent already uses: list the
+tabs, open one, navigate, read a page, find an element, click it, type into it, take a screenshot. Nothing
+leaves the machine: the bridge is MCP over loopback, the registration is dropped when the browser quits, and when
+no daemon is reachable the browser says so once in its log and carries on without it.
 
 **Signed in once, through Redrob Launcher.** A Redrob Console provider saved without a workspace key now runs on
 the sign-in Redrob Launcher keeps in its shared account file (`~/.config/redrob-shared/account.json` on Linux,
@@ -15,16 +22,41 @@ restart. A key the provider has of its own always wins; nothing here writes the 
 reaches a page or the extension. The Redrob Console form says *Signed in with Redrob Launcher · account* and makes
 the key optional while that is true, in English and Korean.
 
-**Installable from Redrob Launcher.** Every platform's release now also carries the one name the launcher
-installs: `redrob-browser-<version>-linux-x86_64.deb`, `redrob-browser-<version>-macos-aarch64.dmg` and
-`redrob-browser-<version>-windows-x64-portable.zip` (the unpacked application, `redrob-browser.exe` at the top).
-The Debian package, the macOS zip Sparkle updates from and the Windows installer keep their names.
+**Every release asset is named the way Redrob Launcher reads it.** `redrob-browser-<version>-<os>-<arch><suffix>`
+— `redrob-browser-0.2.0-windows-x64-setup.exe`, `-macos-arm64.zip`, `-macos-arm64.dmg`, `-linux-x86_64.deb`,
+`-windows-x64-portable.zip` — for the signed set and for the draft's unsigned `.app.zip` and `-packaging.zip`
+alike. The Debian-named package moved out of the release into `out/deb` (what `redrob.py repo` reads), and
+`sign-and-publish.yml` rebuilds that name from the package's control file for the apt pool. cdn.redrob.ai keeps
+the names it has always served (`redrob-browser-x64-<version>-setup.exe`, `redrob-browser-macos-arm64-<version>.zip`,
+`redrob-browser-amd64-<version>.deb`), so no `latest/` link or appcast enclosure moved. The 0.1.8 release's
+assets were renamed in place to the same shape.
+
+**The built-in Redrob Code agent shares one engine with the rest of the machine.** The agent now runs
+`redrob acp --attach`, which makes the browser a thin client of the single Redrob Code daemon every Redrob app
+on the machine attaches to (redrob-code 0.6.0 or later) rather than an engine process of its own; the daemon
+starts on first use and goes away after ten idle minutes with no clients. A Redrob Code agent saved before this
+change keeps working — the flag is added when the agent launches, so there is nothing to re-add.
+
+**The Windows installer is signed through Azure Artifact Signing over OpenID Connect.** `sign-and-publish.yml`
+no longer imports a certificate file: the signing job logs in to Azure with the job's own identity token
+immediately before `signtool` runs, signs with the organisation's Public Trust certificate, and accepts the
+result only when the full Authenticode check passes and the signer is `CN=McKinley Rice, Inc.` — the old
+not-trusted allowance is gone. The vendored build system's Windows signer follows the same recipe. No
+certificate file, password or client secret exists anywhere in this repository's configuration any more.
+
+**Signing, publishing and the branch rules are the organisation's shared copies.** The Windows signing step
+is `redrob-labs/.github/actions/sign-windows`; the release is created by the shared `release-publish.yml`,
+which writes `SHA256SUMS.txt` and `redrob-launcher.json`, replaces the draft's assets with the signed set and
+publishes it as latest (prerelease when the version carries a `-`); `gitflow.yml` calls the org-wide reusable
+workflow with its one type list. `sign-and-publish.yml` gained a `dry_run` input that signs and verifies without
+touching the release or the CDN, and lost `undraft` — a release is published when its signatures verify.
 
 ### Under the hood
 
 `scripts/check_asset_names.py` is the launcher's asset parser transliterated; it self-tests in CI, runs over
 `out/artifacts` at the end of every `package`, and reads the release's own asset list back before
-`sign-and-publish.yml` undrafts it.
+`sign-and-publish.yml` publishes it. 0.1.9 was prepared on 2026-10-13 but never built or tagged; everything it
+carried ships here.
 
 ## 0.1.8 — 2026-10-13
 

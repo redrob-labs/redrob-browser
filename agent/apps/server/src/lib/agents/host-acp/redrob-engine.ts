@@ -75,6 +75,28 @@ export function resolveRedrobEngine(
 }
 
 /**
+ * `redrob acp` as `redrob acp --attach`, so the browser's agent is a thin client of the ONE shared Redrob Code
+ * daemon on this machine (redrob-code >= 0.6.0: the daemon in ~/.redrob/run/server.json, started via
+ * `redrob service start` when absent) instead of an engine process of its own. Agents saved before the preset
+ * changed still carry the bare command in the database, so the flag is added at launch. `argv[0]` must already
+ * be the engine (bare name or a resolved install path); anything else, any other subcommand, and a command
+ * that already carries `--attach` come back as given.
+ */
+export function withSharedEngine(argv: readonly string[]): string[] {
+  const out = [...argv]
+  if (argv.length < 2 || argv[1] !== 'acp') return out
+  if (!isRedrobEngine(argv[0] as string)) return out
+  if (argv.includes('--attach')) return out
+  out.splice(2, 0, '--attach')
+  return out
+}
+
+function isRedrobEngine(command: string): boolean {
+  const base = command.split(/[\\/]/).pop() ?? command
+  return /^redrob(\.(exe|cmd|bat))?$/i.test(base)
+}
+
+/**
  * Whether a child's stderr says its program was not found. cmd.exe reports it as "is not recognized"
  * and exits 1, and a POSIX shell or `env` says "not found" -- so the probe sees an agent that "crashed"
  * before initialize when the truth is that it was never there.
