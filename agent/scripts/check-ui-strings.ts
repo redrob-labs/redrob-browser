@@ -137,6 +137,8 @@ const NAMES = new Set([
   'OpenClaw',
   'Hermes',
   'Chrome',
+  'Firefox',
+  'Safari',
   'macOS',
   'Windows',
   'Linux',
