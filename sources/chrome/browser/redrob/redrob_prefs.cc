@@ -22,6 +22,12 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   // 90 days rather than forever. A default that keeps everything for the life of the profile is a
   // decision made on the user's behalf that they never see the consequences of until they look.
   registry->RegisterIntegerPref(kMemoryRetentionDays, 90);
+  registry->RegisterBooleanPref(kMemoryMigrated, false);
+  registry->RegisterListPref(kMemoryRuns);
+  registry->RegisterDoublePref(kMemoryLastConsolidationMs, 0);
+  // Off: the agent's own tab history is still browsing history, and handing it to a model is the
+  // user's call to make, not a default.
+  registry->RegisterBooleanPref(kMemoryHistoryInput, false);
 
   registry->RegisterListPref(kModelProviders);
   registry->RegisterStringPref(kSelectedProviderId, std::string());

@@ -28,11 +28,23 @@ inline constexpr char kWorkingFolder[] = "redrob.working_folder";
 // last_run_ms, next_run_ms, task_id}. See routine_store.h for the field contract.
 inline constexpr char kRoutines[] = "redrob.routines";
 
-// Memory. Entries are a list of dicts {id, text, source, created_ms, pinned}. Retention is in days;
-// 0 means keep indefinitely, and the sweep runs on startup and daily after that.
+// Memory. The memory itself is files under <profile>/Redrob/memory (memory_store.h); these are its
+// settings and its run log. Retention is in days for episodic files; 0 means keep indefinitely, and the
+// sweep runs on startup and daily after that.
 inline constexpr char kMemoryEnabled[] = "redrob.memory.enabled";
+// The pre-files store, a list of dicts {id, text, source, created_ms, pinned}. Read once by the
+// migration into files and then emptied; kept registered so that read has something to read.
 inline constexpr char kMemoryEntries[] = "redrob.memory.entries";
 inline constexpr char kMemoryRetentionDays[] = "redrob.memory.retention_days";
+// True once kMemoryEntries has been moved into files.
+inline constexpr char kMemoryMigrated[] = "redrob.memory.migrated";
+// Memory runs, oldest first, at most 30: dicts {id, kind, started_ms, duration_ms, tokens, finished,
+// has_snapshot, files: [{path, added, removed}]}. Each row's id names its snapshot directory.
+inline constexpr char kMemoryRuns[] = "redrob.memory.runs";
+// When the last consolidation run started, unix ms. 0 = never.
+inline constexpr char kMemoryLastConsolidationMs[] = "redrob.memory.last_consolidation_ms";
+// Whether extraction is shown the titles and URLs the agent's tab visited during the task. Off.
+inline constexpr char kMemoryHistoryInput[] = "redrob.memory.history_input";
 
 // Model providers: a list of dicts {id, kind, label, model, endpoint, secret_b64}. `secret_b64` is
 // OSCrypt-encrypted bytes, base64'd for prefs -- never a plaintext key, and never sent to a renderer.
