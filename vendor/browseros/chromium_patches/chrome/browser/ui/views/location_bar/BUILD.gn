@@ -1,0 +1,20 @@
+diff --git a/chrome/browser/ui/views/location_bar/BUILD.gn b/chrome/browser/ui/views/location_bar/BUILD.gn
+--- a/chrome/browser/ui/views/location_bar/BUILD.gn
++++ b/chrome/browser/ui/views/location_bar/BUILD.gn
+@@ -96,6 +96,8 @@ source_set("impl") {
+       "omnibox_popup_file_selector.cc",
+       "record_replay_page_action_controller.cc",
+       "selected_keyword_view.cc",
++      "redrob_agent_chip.cc",
++      "redrob_agent_chip.h",
+       "webui_content_setting_image_control.cc",
+       "webui_location_bar.cc",
+       "zoom_bubble_coordinator.cc",
+@@ -156,6 +158,7 @@ source_set("impl") {
+       "//chrome/browser/ui/views/toolbar",
+       "//chrome/browser/ui/views/user_education:impl",
+       "//chrome/browser/ui/views/zoom",
++      "//chrome/browser/redrob/resources:redrob_strings",
+       "//chrome/browser/ui/web_applications",
+       "//chrome/browser/ui/webui:webui_util",
+       "//chrome/browser/ui/webui/cr_components/composebox",

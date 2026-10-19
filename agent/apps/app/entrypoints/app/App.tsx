@@ -14,15 +14,18 @@ import { SettingsSidebarLayout } from '@/components/layout/SettingsSidebarLayout
 import { SidebarLayout } from '@/components/layout/SidebarLayout'
 import { diagnosticsCopy } from '@/lib/diagnostics/diagnostics-copy'
 import { AgentCommandHome } from '@/screens/agent-command/AgentCommandHome'
+import { AgentPasswordsPage } from '@/screens/agent-passwords/AgentPasswordsPage'
 import { AISettingsPage } from '@/screens/ai-settings/AISettingsPage'
 import { ConnectMCP } from '@/screens/connect-mcp/ConnectMCP'
 import { CustomizationPage } from '@/screens/customization/CustomizationPage'
 import { LlmHubPage } from '@/screens/llm-hub/LlmHubPage'
 import { MCPSettingsPage } from '@/screens/mcp-settings/MCPSettingsPage'
+import { MemorySettingsPage } from '@/screens/memory-settings/MemorySettingsPage'
 import { NewTabChat } from '@/screens/newtab/index/NewTabChat'
 import { NewTabLayout } from '@/screens/newtab/layout/NewTabLayout'
 import { Personalize } from '@/screens/newtab/personalize/Personalize'
 import { OnboardingAiPage } from '@/screens/onboarding-ai/OnboardingAiPage'
+import { QuickWindow } from '@/screens/quick-window/QuickWindow'
 import { ScheduledTasksPage } from '@/screens/scheduled-tasks/ScheduledTasksPage'
 
 const OptionsRedirect: FC = () => {
@@ -35,6 +38,7 @@ const OptionsRedirect: FC = () => {
     'connect-mcp': '/connect-apps',
     mcp: '/settings/mcp',
     customization: '/settings/customization',
+    memory: '/settings/memory',
     search: '/settings/ai',
     scheduled: '/scheduled',
   }
@@ -65,6 +69,8 @@ export const App: FC = () => {
             <Route path="chat" element={<LlmHubPage />} />
             <Route path="mcp" element={<MCPSettingsPage />} />
             <Route path="customization" element={<CustomizationPage />} />
+            <Route path="memory" element={<MemorySettingsPage />} />
+            <Route path="passwords" element={<AgentPasswordsPage />} />
             <Route
               path="diagnostics"
               element={<DiagnosticsPage tr={diagnosticsCopy} />}
@@ -108,6 +114,9 @@ export const App: FC = () => {
           element={<Navigate to="/settings/ai" replace />}
         />
         <Route path="/options/*" element={<OptionsRedirect />} />
+
+        {/* CAP-5: the page inside the native quick window. No layout: the window is the frame. */}
+        <Route path="/quick" element={<QuickWindow />} />
 
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>

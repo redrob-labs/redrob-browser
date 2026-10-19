@@ -194,4 +194,24 @@ substitutions:
             "dependencies": ["permission:redrobPrivate.tasks"],
             "contexts": ["privileged_extension"]
           },
+          "redrobPrivate.readMemoryFile": {
+            "dependencies": ["permission:redrobPrivate.memory"],
+            "contexts": ["privileged_extension"]
+          },
+          "redrobPrivate.revertMemoryRun": {
+            "dependencies": ["permission:redrobPrivate.memory"],
+            "contexts": ["privileged_extension"]
+          },
+          "redrobPrivate.runMemoryConsolidation": {
+            "dependencies": ["permission:redrobPrivate.memory"],
+            "contexts": ["privileged_extension"]
+          },
+          "redrobPrivate.setMemoryHistoryInput": {
+            "dependencies": ["permission:redrobPrivate.memory"],
+            "contexts": ["privileged_extension"]
+          },
+          "redrobPrivate.writeMemoryFile": {
+            "dependencies": ["permission:redrobPrivate.memory"],
+            "contexts": ["privileged_extension"]
+          },
       count: 1

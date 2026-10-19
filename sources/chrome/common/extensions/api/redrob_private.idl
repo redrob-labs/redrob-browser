@@ -84,7 +84,9 @@ namespace redrobPrivate {
     steered,
     queuedMessage,
     planned,
-    routine
+    routine,
+    // A guard-mode task is waiting for the user to allow or decline one click.
+    needsConfirmation
   };
 
   dictionary StepDetail {
@@ -114,6 +116,9 @@ namespace redrobPrivate {
     Effort effort;
     DOMString model;
     DOMString[] queued;
+    // The visible text of the control a guard-mode task is waiting to press.
+    // Set only while the task is blockedOnPolicy on a confirmation.
+    DOMString? awaitingConfirmation;
   };
 
   dictionary ModelOption {
@@ -145,7 +150,9 @@ namespace redrobPrivate {
     DOMString? taskId;
     StartError? error;
   };
-  enum RoutineKind { cron, heartbeat };
+  // consolidate is the built-in memory review: one per profile, reported so
+  // Settings can show it, refused by addRoutine and removeRoutine.
+  enum RoutineKind { cron, heartbeat, consolidate };
   enum EngineState { notInstalled, starting, ready, failed };
 
   dictionary Routine {
@@ -163,18 +170,52 @@ namespace redrobPrivate {
     DOMString lastError;
   };
 
-  dictionary MemoryEntry {
+  // Memory is a folder of markdown files (docs/MEMORY.md). A file is named by
+  // its path relative to that folder, with '/' separators.
+  dictionary MemoryFile {
+    DOMString path;
+    double bytes;
+    double modifiedMs;
+  };
+
+  // What a run did to one file, in lines.
+  dictionary MemoryFileChange {
+    DOMString path;
+    long added;
+    long removed;
+  };
+
+  // Who changed memory: extraction after a task, consolidation, the user in
+  // Settings, or a revert.
+  enum MemoryRunKind { extract, consolidate, user, revert };
+
+  dictionary MemoryRun {
+    // Also the name of the run's snapshot. Pass it to revertMemoryRun.
     DOMString id;
-    DOMString text;
-    DOMString source;
-    double createdMs;
-    boolean pinned;
+    MemoryRunKind kind;
+    double startedMs;
+    // 0 while the run is still going.
+    double durationMs;
+    // 0 when the engine reported no usage.
+    double tokens;
+    MemoryFileChange[] files;
+    boolean finished;
+    // Only a run that wrote something has a snapshot, and only such a run can
+    // be reverted.
+    boolean revertible;
   };
 
   dictionary MemorySettings {
     boolean enabled;
     long retentionDays;
-    MemoryEntry[] entries;
+    // Whether extraction may see the titles and URLs the agent's own tab
+    // visited during the task.
+    boolean historyInput;
+    MemoryFile[] files;
+    // Newest first, at most 30.
+    MemoryRun[] runs;
+    // When consolidation last ran, unix ms; 0 = never.
+    double lastConsolidationMs;
   };
 
   dictionary Provider {
@@ -280,7 +321,104 @@ namespace redrobPrivate {
     DOMString? baseUrl;
   };
 
+  // --- Agent sign-in (CAP-9). See docs/CREDENTIALS.md. -----------------
+  //
+  // Nothing here carries a password. The passwords stay in the profile's own
+  // password store; these say when the agent may ask that store to fill, and
+  // record that it did.
+  enum AgentCredentialPolicy { always, whileUnlocked, never };
+
+  // One per-site override. allow: that site fills without the unlock window.
+  // Not allowed (deny): that site is refused under every policy.
+  dictionary AgentCredentialSite {
+    DOMString origin;
+    boolean allow;
+  };
+
+  // One agent sign-in, as the audit trail recorded it. `outcome` is one of
+  // filled, noSavedLogin, refused, locked, severalLogins, noSigninForm,
+  // needsVerification, failed.
+  dictionary AgentCredentialRecord {
+    double timeMs;
+    DOMString origin;
+    DOMString username;
+    DOMString taskId;
+    DOMString outcome;
+  };
+
+  // A task paused until the user acts: an unlock (needsUnlock) or a one-time
+  // code / passkey / CAPTCHA the agent will not answer.
+  dictionary AgentCredentialWait {
+    DOMString taskId;
+    DOMString prompt;
+    DOMString origin;
+    boolean needsUnlock;
+  };
+
+  dictionary AgentCredentialSettings {
+    AgentCredentialPolicy policy;
+    long unlockMinutes;
+    // Whether an unlock window is open right now.
+    boolean unlocked;
+    // Off-the-record profiles never let the agent sign in.
+    boolean offTheRecord;
+    AgentCredentialSite[] sites;
+    // Newest first.
+    AgentCredentialRecord[] history;
+    AgentCredentialWait[] waiting;
+  };
+
+  callback GetAgentCredentialSettingsCallback =
+      void (AgentCredentialSettings settings);
+
   callback GetEngineCredentialCallback = void (EngineCredential result);
+
+  // --- CAP-4 / SUB-1..4 -------------------------------------------------
+  //
+  // One way to connect a provider, as the ENGINE lists it. `index` is what
+  // beginEngineSignIn and finishEngineSignIn take.
+  dictionary EngineAuthMethod {
+    long index;
+    // "oauth" (a subscription or account sign-in) or "api" (a key).
+    DOMString type;
+    // What the engine calls this method ("label" is reserved in this idl).
+    DOMString methodLabel;
+  };
+
+  // A provider the engine can route to. Never carries a credential.
+  dictionary EngineProvider {
+    DOMString id;
+    DOMString name;
+    // Where the engine says the credential came from: "env", "config",
+    // "custom", "api" or "launcher". Empty when it did not say.
+    DOMString source;
+    boolean connected;
+    // Redrob Console manages this provider for the signed-in organisation.
+    boolean consoleManaged;
+    long modelCount;
+    EngineAuthMethod[] methods;
+  };
+
+  // What the engine reports about its accounts. `engineReady` false means the
+  // engine is not serving yet, and the lists are empty for that reason only.
+  dictionary EngineAccount {
+    boolean engineReady;
+    EngineProvider[] providers;
+    // The Redrob Console organisation the engine is signed in to, or empty.
+    DOMString consoleOrg;
+  };
+
+  dictionary EngineSignInStart {
+    // Set when the sign-in could not start.
+    DOMString? error;
+    // What the engine says to tell the user.
+    DOMString instructions;
+    // True when the provider shows the user a code to paste back.
+    boolean needsCode;
+  };
+
+  callback GetEngineAccountCallback = void (EngineAccount account);
+  callback EngineSignInStartCallback = void (EngineSignInStart start);
   callback GetEngineInstallStateCallback = void (EngineInstallInfo info);  callback GetSettingsCallback = void (AgentSettings settings);
   callback ListModelsCallback = void (ModelOption[] options);
   callback ListTasksCallback = void (Task[] tasks);
@@ -336,14 +474,17 @@ namespace redrobPrivate {
     // Sets how many days memory entries are kept before they age out.
     static void setMemoryRetentionDays(long days);
 
-    // Clears all memory entries. Named for what it does, not softened: it is
-    // irreversible and the UI must confirm before calling it.
+    // Deletes every memory file, every snapshot and the run history. Named for
+    // what it does, not softened: it is irreversible and the UI must confirm
+    // before calling it.
     static void forgetAllMemory();
 
-    // Removes one memory entry. Resolves true if it existed and was removed.
+    // Deletes one memory file. |id| is the file's path. Recorded as a user run,
+    // so it can be reverted. Resolves true if the file is gone.
     static void removeMemory(DOMString id, BoolCallback callback);
 
-    // Pins or unpins a memory entry so it is kept regardless of retention.
+    // Retired: memory is files now, and files are not pinned. Kept so the
+    // function id stays stable; always resolves false.
     static void setMemoryPinned(DOMString id, boolean pinned, BoolCallback callback);
 
     // Removes a saved routine. Resolves true if it existed.
@@ -566,6 +707,142 @@ namespace redrobPrivate {
     // reason startImport() reports that way. A second call while one is already
     // running is ignored.
     static void installEngine();
+
+    // --- Memory files (CAP-19) ---------------------------------------------
+
+    // Reads one memory file. |callback|: its content, or nothing when the path
+    // is not a memory path or no such file exists.
+    static void readMemoryFile(DOMString path, StringCallback callback);
+
+    // Replaces (or creates) one memory file with what the user typed in
+    // Settings. Recorded as a user run, snapshotted first, so it can be
+    // reverted. Resolves false when the path or the size is refused.
+    static void writeMemoryFile(DOMString path,
+                                DOMString content,
+                                BoolCallback callback);
+
+    // Puts the memory files back the way they were before run |runId| first
+    // wrote. The revert is itself a run and can be reverted.
+    static void revertMemoryRun(DOMString runId, BoolCallback callback);
+
+    // Starts a consolidation run now, without the daily and three-run gate.
+    // Resolves false when memory is off, one is already running, or there is
+    // no engine.
+    static void runMemoryConsolidation(BoolCallback callback);
+
+    // Lets extraction see the titles and URLs the agent's own tab visited
+    // during a task. Off by default.
+    static void setMemoryHistoryInput(boolean enabled);
+
+    // --- CAP-4: work that survives the window closing -------------------
+
+    // Whether agent tasks keep the browser running after the last window
+    // closes. On by default.
+    static void getKeepTasksRunning(BooleanPrefCallback callback);
+    static void setKeepTasksRunning(boolean enabled);
+
+    // Answers a guard-mode confirmation (Task.awaitingConfirmation). |allow|
+    // runs exactly that one click; declining tells the agent the user said no.
+    // |callback|: false when the task is not waiting on one.
+    static void answerTaskConfirmation(DOMString taskId,
+                                       boolean allow,
+                                       BoolCallback callback);
+
+    // --- SUB-1..4: providers and subscriptions, asked of the engine ------
+
+    // The providers the engine knows, which are connected, and how each can
+    // be connected. Asked of the engine every time -- the browser keeps no
+    // provider list of its own.
+    static void getEngineAccount(GetEngineAccountCallback callback);
+
+    // Starts a sign-in with the engine's own OAuth. The BROWSER opens the
+    // provider's page in a new tab; the caller only learns whether a code
+    // must be pasted back.
+    static void beginEngineSignIn(DOMString providerId,
+                                  long method,
+                                  EngineSignInStartCallback callback);
+
+    // Finishes it. |code| is empty when the engine catches the redirect
+    // itself; the call then resolves once the user has finished in the other
+    // tab. |callback|: nothing on success, otherwise the reason.
+    static void finishEngineSignIn(DOMString providerId,
+                                   long method,
+                                   DOMString code,
+                                   StringCallback callback);
+
+    // Gives the engine an API key for |providerId|. The key goes one way, into
+    // the engine's own store; nothing reads it back.
+    // |callback|: nothing on success, otherwise the reason.
+    static void setEngineProviderKey(DOMString providerId,
+                                     DOMString key,
+                                     StringCallback callback);
+
+    // Tells the engine to forget the credential it holds for |providerId|.
+    static void disconnectEngineProvider(DOMString providerId,
+                                         BoolCallback callback);
+
+    // --- Agent sign-in (CAP-9) ----------------------------------------------
+
+    // The agent sign-in settings: policy, unlock window, per-site list, the
+    // audit trail and the tasks waiting for the user. No secret is in it.
+    static void getAgentCredentialSettings(
+        GetAgentCredentialSettingsCallback callback);
+
+    // Sets when the agent may sign in with saved passwords.
+    static void setAgentCredentialPolicy(AgentCredentialPolicy policy);
+
+    // How long one unlock lasts, in minutes (1 to 1440). Values outside that
+    // range are ignored rather than stored.
+    static void setAgentCredentialUnlockMinutes(long minutes);
+
+    // Adds or changes a per-site override. |origin| must be an http(s)
+    // origin. Resolves false when it was not stored.
+    static void setAgentCredentialSite(DOMString origin,
+                                       boolean allow,
+                                       BoolCallback callback);
+
+    // Removes a per-site override. Resolves true if it existed.
+    static void removeAgentCredentialSite(DOMString origin,
+                                          BoolCallback callback);
+
+    // Asks the operating system to re-authenticate the user, modal to this
+    // page's window, and opens the unlock window on success. Every task
+    // waiting for the unlock then continues. Where the platform has no device
+    // authenticator, this call -- made by a click in this UI, never by a tool
+    // -- is the proof that a person is present.
+    static void unlockAgentCredentials(BoolCallback callback);
+
+    // Closes the unlock window now.
+    static void lockAgentCredentials();
+
+    // The user finished the one-time code, passkey or CAPTCHA a task was
+    // waiting on. Resolves false when that task was not waiting.
+    static void resumeCredentialTask(DOMString taskId, BoolCallback callback);
+
+    // Deletes the agent sign-in history. Irreversible; the UI confirms first.
+    static void clearAgentCredentialHistory();
+
+    // --- Native entrances: the quick window (CAP-5) ------------------------
+    //
+    // The quick window is a native always-on-top window opened by a global
+    // shortcut; its page is this extension's #/quick route.
+
+    // The quick window's shortcut preset: "primary_shift_space" (Ctrl+Shift+
+    // Space, Command+Shift+Space on macOS), "alt_shift_space", or "off".
+    static void getQuickWindowShortcut(StringPrefCallback callback);
+
+    // Sets the quick window's shortcut preset. Accepts the three values above;
+    // any other value is ignored rather than stored, because this arrives from
+    // a renderer and a shortcut is registered with the OS from it.
+    static void setQuickWindowShortcut(DOMString preset);
+
+    // Opens the agent chat for |prompt| in the last active browser window (a
+    // new one when there is none), the same path the address bar's agent mode
+    // takes, and closes the quick window.
+    static void startQuickTask(DOMString prompt);
+
+    // Closes the quick window. Nothing happens when it is not open.
+    static void closeQuickWindow();
   };
 
   interface Events {

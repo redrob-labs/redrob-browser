@@ -5,6 +5,7 @@
 #include "chrome/browser/redrob/agent_tabs.h"
 
 #include <map>
+#include <set>
 #include <vector>
 
 #include "base/no_destructor.h"
@@ -16,8 +17,11 @@
 #include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "components/sessions/core/session_id.h"
 #include "components/tab_groups/tab_group_color.h"
 #include "components/tab_groups/tab_group_visual_data.h"
+#include "components/tabs/public/tab_interface.h"
+#include "ui/base/base_window.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
@@ -32,6 +36,14 @@ namespace {
 std::map<const Profile*, tab_groups::TabGroupId>& GroupRegistry() {
   static base::NoDestructor<std::map<const Profile*, tab_groups::TabGroupId>> registry;
   return *registry;
+}
+
+// The windows OpenInAgentGroupCreatingWindow made, by session id. A window the agent opened for itself
+// is not evidence that the user is at the browser, so HasUserWindow skips these. Ids rather than pointers:
+// a closed window's id simply never matches again, where a stale pointer would be a use-after-free.
+std::set<SessionID::id_type>& AgentWindows() {
+  static base::NoDestructor<std::set<SessionID::id_type>> windows;
+  return *windows;
 }
 
 }  // namespace
@@ -82,12 +94,23 @@ content::WebContents* AgentTabs::OpenInAgentGroup(Profile* profile,
 
   // Navigate() can retarget, so the browser that actually received the tab is read back out of params
   // rather than assumed to be the one asked.
-  BrowserWindowInterface* actual = params.browser;
-  if (!actual || !params.navigated_or_inserted_contents) {
+  if (!params.browser || !params.navigated_or_inserted_contents) {
+    return nullptr;
+  }
+  return GroupAgentTab(profile, params.navigated_or_inserted_contents, group_title);
+}
+
+// static
+content::WebContents* AgentTabs::GroupAgentTab(Profile* profile,
+                                               content::WebContents* contents,
+                                               const std::string& group_title) {
+  tabs::TabInterface* tab = tabs::TabInterface::MaybeGetFromContents(contents);
+  BrowserWindowInterface* actual = tab ? tab->GetBrowserWindowInterface() : nullptr;
+  if (!actual) {
     return nullptr;
   }
   TabStripModel* model = actual->GetTabStripModel();
-  const int index = model->GetIndexOfWebContents(params.navigated_or_inserted_contents);
+  const int index = model->GetIndexOfWebContents(contents);
   if (index == TabStripModel::kNoTab) {
     return nullptr;
   }
@@ -102,7 +125,7 @@ content::WebContents* AgentTabs::OpenInAgentGroup(Profile* profile,
 
   if (existing.has_value()) {
     model->AddToExistingGroup({index}, existing.value());
-    return params.navigated_or_inserted_contents;
+    return contents;
   }
 
   const tab_groups::TabGroupId group = model->AddToNewGroup({index});
@@ -114,7 +137,79 @@ content::WebContents* AgentTabs::OpenInAgentGroup(Profile* profile,
                                             tab_groups::TabGroupColorId::kGrey,
                                             /*is_collapsed=*/false));
   GroupRegistry().insert_or_assign(profile, group);
-  return params.navigated_or_inserted_contents;
+  return contents;
+}
+
+// static
+content::WebContents* AgentTabs::OpenInAgentGroupCreatingWindow(Profile* profile,
+                                                               const GURL& url,
+                                                               const std::string& group_title) {
+  if (!profile || !IsUrlAgentMayOpen(url)) {
+    return nullptr;
+  }
+  if (ProfileBrowserCollection::GetForProfile(profile)->FindTabbedBrowser()) {
+    return OpenInAgentGroup(profile, url, group_title);
+  }
+
+  // No window. One is opened for the task -- inactive, so it does not take focus from whatever the user
+  // is doing in another application, and then minimized, so it does not cover it either. It is still an
+  // ordinary window with ordinary tabs: the user can restore it, watch, take over or close it, which is
+  // the reason the agent never browses anywhere else (docs/ARCHITECTURE.md section 7).
+  NavigateParams params(profile, url, ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
+  params.disposition = WindowOpenDisposition::NEW_WINDOW;
+  params.window_action = NavigateParams::WindowAction::kShowWindowInactive;
+  Navigate(&params);
+  if (!params.browser || !params.navigated_or_inserted_contents) {
+    return nullptr;
+  }
+  AgentWindows().insert(params.browser->GetSessionID().id());
+  if (ui::BaseWindow* window = params.browser->GetWindow()) {
+    window->Minimize();
+  }
+  return GroupAgentTab(profile, params.navigated_or_inserted_contents, group_title);
+}
+
+// static
+bool AgentTabs::HasUserWindow(Profile* profile) {
+  if (!profile) {
+    return false;
+  }
+  bool found = false;
+  ProfileBrowserCollection::GetForProfile(profile)->ForEach(
+      [&found](BrowserWindowInterface* browser) {
+        if (browser->GetType() == BrowserWindowInterface::TYPE_NORMAL &&
+            !AgentWindows().contains(browser->GetSessionID().id())) {
+          found = true;
+          return false;
+        }
+        return true;
+      });
+  return found;
+}
+
+// static
+bool AgentTabs::Reveal(content::WebContents* contents) {
+  tabs::TabInterface* tab = contents ? tabs::TabInterface::MaybeGetFromContents(contents) : nullptr;
+  BrowserWindowInterface* browser = tab ? tab->GetBrowserWindowInterface() : nullptr;
+  if (!browser) {
+    return false;
+  }
+  TabStripModel* model = browser->GetTabStripModel();
+  const int index = model->GetIndexOfWebContents(contents);
+  if (index == TabStripModel::kNoTab) {
+    return false;
+  }
+  model->ActivateTabAt(index);
+  if (ui::BaseWindow* window = browser->GetWindow()) {
+    if (window->IsMinimized()) {
+      window->Restore();
+    }
+    window->Show();
+    window->Activate();
+  }
+  // The user has now seen this window, so it counts as theirs from here on.
+  AgentWindows().erase(browser->GetSessionID().id());
+  return true;
 }
 
 }  // namespace redrob

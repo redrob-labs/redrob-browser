@@ -26,6 +26,7 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/redrob/agent_entry.h"
 #include "chrome/browser/redrob/agent_service_factories.h"
 #include "chrome/browser/redrob/memory_store.h"
 #include "chrome/browser/redrob/model_store.h"
@@ -169,7 +170,12 @@ void RedrobPrivateGetImportSourcesFunction::OnSourcesDetected() {
     const uint16_t services = profile.services_supported;
     source.has_bookmarks = (services & user_data_importer::FAVORITES) != 0;
     source.has_history = (services & user_data_importer::HISTORY) != 0;
-    source.has_passwords = (services & user_data_importer::PASSWORDS) != 0;
+    // Firefox passwords are NSS-encrypted and not carried (the onboarding step
+    // points at the CSV export instead), so the bit upstream sets on Windows and
+    // Linux is not passed on.
+    source.has_passwords =
+        (services & user_data_importer::PASSWORDS) != 0 &&
+        profile.importer_type != user_data_importer::TYPE_FIREFOX;
     source.has_search_engines =
         (services & user_data_importer::SEARCH_ENGINES) != 0;
     // Always false, and not an oversight: upstream defines a COOKIES bit and
@@ -223,6 +229,38 @@ RedrobPrivateForgetAllMemoryFunction::Run() {
 namespace {
 Profile* ProfileOf(content::BrowserContext* ctx) {
   return Profile::FromBrowserContext(ctx);
+}
+
+redrob_private::MemoryRun ToPrivateMemoryRun(const MemoryStore::Run& run) {
+  redrob_private::MemoryRun wire;
+  wire.id = run.id;
+  switch (run.kind) {
+    case MemoryStore::RunKind::kExtract:
+      wire.kind = redrob_private::MemoryRunKind::kExtract;
+      break;
+    case MemoryStore::RunKind::kConsolidate:
+      wire.kind = redrob_private::MemoryRunKind::kConsolidate;
+      break;
+    case MemoryStore::RunKind::kUser:
+      wire.kind = redrob_private::MemoryRunKind::kUser;
+      break;
+    case MemoryStore::RunKind::kRevert:
+      wire.kind = redrob_private::MemoryRunKind::kRevert;
+      break;
+  }
+  wire.started_ms = static_cast<double>(run.started_ms);
+  wire.duration_ms = static_cast<double>(run.duration_ms);
+  wire.tokens = static_cast<double>(run.tokens);
+  wire.finished = run.finished;
+  wire.revertible = run.has_snapshot;
+  for (const MemoryStore::FileChange& change : run.files) {
+    redrob_private::MemoryFileChange file;
+    file.path = change.path;
+    file.added = change.added;
+    file.removed = change.removed;
+    wire.files.push_back(std::move(file));
+  }
+  return wire;
 }
 
 redrob_private::PermissionMode ToPrivateMode(
@@ -287,7 +325,9 @@ RoutineStore::Routine FromPrivateRoutine(const redrob_private::Routine& wire) {
   routine.prompt = wire.prompt;
   routine.kind = wire.kind == redrob_private::RoutineKind::kHeartbeat
                      ? RoutineStore::Kind::kHeartbeat
-                     : RoutineStore::Kind::kCron;
+                     : (wire.kind == redrob_private::RoutineKind::kConsolidate
+                            ? RoutineStore::Kind::kConsolidate
+                            : RoutineStore::Kind::kCron);
   routine.every_minutes = wire.every_minutes;
   routine.mode = FromPrivateMode(wire.mode);
   routine.effort = FromPrivateEffort(wire.effort);
@@ -349,6 +389,8 @@ redrob_private::StepKind ToPrivateStepKind(redrob::mojom::StepKind kind) {
       return redrob_private::StepKind::kPlanned;
     case redrob::mojom::StepKind::kRoutine:
       return redrob_private::StepKind::kRoutine;
+    case redrob::mojom::StepKind::kNeedsConfirmation:
+      return redrob_private::StepKind::kNeedsConfirmation;
   }
   // A step kind this build does not know is still a step that happened, so it
   // is reported as thinking rather than dropped from the record.
@@ -430,6 +472,7 @@ redrob_private::Task ToPrivateTask(const redrob::mojom::Task& task) {
   out.effort = ToPrivateEffort(task.effort);
   out.model = task.model;
   out.queued = task.queued;
+  out.awaiting_confirmation = task.awaiting_confirmation;
   for (const auto& step : task.steps) {
     redrob_private::Step wire;
     wire.kind = ToPrivateStepKind(step->kind);
@@ -451,21 +494,31 @@ redrob_private::Task ToPrivateTask(const redrob::mojom::Task& task) {
 ExtensionFunction::ResponseAction RedrobPrivateRemoveMemoryFunction::Run() {
   auto params = redrob_private::RemoveMemory::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params);
-  const bool ok =
-      MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
-          ->Remove(params->id);
-  return RespondNow(
-      ArgumentList(redrob_private::RemoveMemory::Results::Create(ok)));
+  // A deletion from Settings is a user run like an edit is, so it is
+  // snapshotted and can be reverted.
+  MemoryStore* memory =
+      MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()));
+  const std::string run_id = memory->BeginRun(MemoryStore::RunKind::kUser);
+  memory->DeleteFile(
+      run_id, params->id,
+      base::BindOnce(&RedrobPrivateRemoveMemoryFunction::OnDone, this, run_id));
+  return RespondLater();
+}
+
+void RedrobPrivateRemoveMemoryFunction::OnDone(std::string run_id,
+                                               bool ok,
+                                               const std::string& message) {
+  MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
+      ->EndRun(run_id, 0);
+  Respond(ArgumentList(redrob_private::RemoveMemory::Results::Create(ok)));
 }
 
 ExtensionFunction::ResponseAction RedrobPrivateSetMemoryPinnedFunction::Run() {
   auto params = redrob_private::SetMemoryPinned::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params);
-  const bool ok =
-      MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
-          ->SetPinned(params->id, params->pinned);
+  // Retired with the list store: files are not pinned. See the idl.
   return RespondNow(
-      ArgumentList(redrob_private::SetMemoryPinned::Results::Create(ok)));
+      ArgumentList(redrob_private::SetMemoryPinned::Results::Create(false)));
 }
 
 ExtensionFunction::ResponseAction RedrobPrivateRemoveRoutineFunction::Run() {
@@ -522,14 +575,18 @@ ExtensionFunction::ResponseAction RedrobPrivateGetSettingsFunction::Run() {
   MemoryStore* memory = MemoryStoreFactory::GetForProfile(profile);
   out.memory.enabled = memory->enabled();
   out.memory.retention_days = memory->retention_days();
-  for (const MemoryStore::Entry& e : memory->List()) {
-    redrob_private::MemoryEntry wire;
-    wire.id = e.id;
-    wire.text = e.text;
-    wire.source = e.source;
-    wire.created_ms = static_cast<double>(e.created_at_ms);
-    wire.pinned = e.pinned;
-    out.memory.entries.push_back(std::move(wire));
+  out.memory.history_input = memory->history_input();
+  out.memory.last_consolidation_ms =
+      static_cast<double>(memory->last_consolidation_ms());
+  for (const MemoryStore::FileInfo& f : memory->files()) {
+    redrob_private::MemoryFile wire;
+    wire.path = f.path;
+    wire.bytes = static_cast<double>(f.bytes);
+    wire.modified_ms = static_cast<double>(f.modified_ms);
+    out.memory.files.push_back(std::move(wire));
+  }
+  for (const MemoryStore::Run& r : memory->Runs()) {
+    out.memory.runs.push_back(ToPrivateMemoryRun(r));
   }
 
   // Model providers + engine state.
@@ -592,7 +649,9 @@ ExtensionFunction::ResponseAction RedrobPrivateGetSettingsFunction::Run() {
     wire.prompt = r.prompt;
     wire.kind = r.kind == RoutineStore::Kind::kHeartbeat
                     ? redrob_private::RoutineKind::kHeartbeat
-                    : redrob_private::RoutineKind::kCron;
+                    : (r.kind == RoutineStore::Kind::kConsolidate
+                           ? redrob_private::RoutineKind::kConsolidate
+                           : redrob_private::RoutineKind::kCron);
     wire.every_minutes = r.every_minutes;
     wire.mode = ToPrivateMode(r.mode);
     wire.effort = ToPrivateEffort(r.effort);
@@ -1214,6 +1273,486 @@ ExtensionFunction::ResponseAction RedrobPrivateInstallEngineFunction::Run() {
   // startImport does.
   RedrobPrivateEngineInstallerFactory::GetForBrowserContext(browser_context())
       ->Install();
+  return RespondNow(NoArguments());
+}
+
+// --- Memory files (CAP-19) ---------------------------------------------------
+
+ExtensionFunction::ResponseAction RedrobPrivateReadMemoryFileFunction::Run() {
+  auto params = redrob_private::ReadMemoryFile::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
+      ->ReadFile(params->path,
+                 base::BindOnce(&RedrobPrivateReadMemoryFileFunction::OnRead,
+                                this));
+  return RespondLater();
+}
+
+void RedrobPrivateReadMemoryFileFunction::OnRead(
+    std::optional<std::string> content) {
+  // Nothing rather than an empty string when there is no such file: an empty
+  // file is a real answer and a missing one is a different one.
+  base::ListValue result;
+  if (content) {
+    result.Append(std::move(*content));
+  }
+  Respond(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateWriteMemoryFileFunction::Run() {
+  auto params = redrob_private::WriteMemoryFile::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  MemoryStore* memory =
+      MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()));
+  // The user's edit goes through the same write path as the agent's: a run
+  // row, a snapshot before the first write, and +/- counts.
+  const std::string run_id = memory->BeginRun(MemoryStore::RunKind::kUser);
+  memory->WriteFile(
+      run_id, params->path, params->content,
+      base::BindOnce(&RedrobPrivateWriteMemoryFileFunction::OnDone, this,
+                     run_id));
+  return RespondLater();
+}
+
+void RedrobPrivateWriteMemoryFileFunction::OnDone(std::string run_id,
+                                                  bool ok,
+                                                  const std::string& message) {
+  MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
+      ->EndRun(run_id, 0);
+  Respond(ArgumentList(redrob_private::WriteMemoryFile::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateRevertMemoryRunFunction::Run() {
+  auto params = redrob_private::RevertMemoryRun::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
+      ->Revert(params->run_id,
+               base::BindOnce(&RedrobPrivateRevertMemoryRunFunction::OnDone,
+                              this));
+  return RespondLater();
+}
+
+void RedrobPrivateRevertMemoryRunFunction::OnDone(bool ok,
+                                                  const std::string& message) {
+  Respond(ArgumentList(redrob_private::RevertMemoryRun::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateRunMemoryConsolidationFunction::Run() {
+  TaskStore* tasks = TaskStoreFactory::GetForProfile(ProfileOf(browser_context()));
+  const bool started = tasks && tasks->StartConsolidation(/*force=*/true);
+  return RespondNow(ArgumentList(
+      redrob_private::RunMemoryConsolidation::Results::Create(started)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetMemoryHistoryInputFunction::Run() {
+  auto params = redrob_private::SetMemoryHistoryInput::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
+      ->SetHistoryInput(params->enabled);
+  return RespondNow(NoArguments());
+}
+
+// --- CAP-4 / SUB-1..4 (feat/parity-run) ------------------------------------
+
+ExtensionFunction::ResponseAction
+RedrobPrivateGetKeepTasksRunningFunction::Run() {
+  return RespondNow(ArgumentList(
+      redrob_private::GetKeepTasksRunning::Results::Create(
+          Profile::FromBrowserContext(browser_context())
+              ->GetPrefs()
+              ->GetBoolean(redrob::prefs::kKeepTasksRunning))));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetKeepTasksRunningFunction::Run() {
+  auto params = redrob_private::SetKeepTasksRunning::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  Profile::FromBrowserContext(browser_context())
+      ->GetPrefs()
+      ->SetBoolean(redrob::prefs::kKeepTasksRunning, params->enabled);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateAnswerTaskConfirmationFunction::Run() {
+  auto params = redrob_private::AnswerTaskConfirmation::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const bool answered =
+      TaskStoreFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()))
+          ->AnswerConfirmation(params->task_id, params->allow);
+  return RespondNow(ArgumentList(
+      redrob_private::AnswerTaskConfirmation::Results::Create(answered)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateGetEngineAccountFunction::Run() {
+  TaskStoreFactory::GetForProfile(Profile::FromBrowserContext(browser_context()))
+      ->GetEngineAccount(base::BindOnce(
+          &RedrobPrivateGetEngineAccountFunction::OnAccount, this));
+  return RespondLater();
+}
+
+void RedrobPrivateGetEngineAccountFunction::OnAccount(
+    redrob::TaskStore::EngineAccount account) {
+  redrob_private::EngineAccount out;
+  out.engine_ready = account.engine_ready;
+  out.console_org = account.console_org;
+  for (const auto& provider : account.providers) {
+    redrob_private::EngineProvider wire;
+    wire.id = provider.id;
+    wire.name = provider.name;
+    wire.source = provider.source;
+    wire.connected = provider.connected;
+    wire.console_managed = provider.console_managed;
+    wire.model_count = static_cast<int>(provider.model_count);
+    for (const auto& method : provider.methods) {
+      redrob_private::EngineAuthMethod wire_method;
+      wire_method.index = method.index;
+      wire_method.type = method.type;
+      wire_method.method_label = method.label;
+      wire.methods.push_back(std::move(wire_method));
+    }
+    out.providers.push_back(std::move(wire));
+  }
+  Respond(WithArguments(out.ToValue()));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateBeginEngineSignInFunction::Run() {
+  auto params = redrob_private::BeginEngineSignIn::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  TaskStoreFactory::GetForProfile(Profile::FromBrowserContext(browser_context()))
+      ->BeginEngineSignIn(
+          params->provider_id, params->method,
+          base::BindOnce(&RedrobPrivateBeginEngineSignInFunction::OnStarted,
+                         this));
+  return RespondLater();
+}
+
+void RedrobPrivateBeginEngineSignInFunction::OnStarted(
+    redrob::TaskStore::SignInStart start) {
+  redrob_private::EngineSignInStart out;
+  if (!start.error.empty()) {
+    out.error = start.error;
+  }
+  out.instructions = start.instructions;
+  out.needs_code = start.needs_code;
+  Respond(WithArguments(out.ToValue()));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateFinishEngineSignInFunction::Run() {
+  auto params = redrob_private::FinishEngineSignIn::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  TaskStoreFactory::GetForProfile(Profile::FromBrowserContext(browser_context()))
+      ->FinishEngineSignIn(
+          params->provider_id, params->method, params->code,
+          base::BindOnce(&RedrobPrivateFinishEngineSignInFunction::OnDone, this));
+  return RespondLater();
+}
+
+void RedrobPrivateFinishEngineSignInFunction::OnDone(std::string error) {
+  base::ListValue result;
+  if (!error.empty()) {
+    result.Append(std::move(error));
+  }
+  Respond(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetEngineProviderKeyFunction::Run() {
+  auto params = redrob_private::SetEngineProviderKey::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // The key is handed straight to the store and not kept on this object.
+  TaskStoreFactory::GetForProfile(Profile::FromBrowserContext(browser_context()))
+      ->SetEngineApiKey(
+          params->provider_id, params->key,
+          base::BindOnce(&RedrobPrivateSetEngineProviderKeyFunction::OnDone,
+                         this));
+  return RespondLater();
+}
+
+void RedrobPrivateSetEngineProviderKeyFunction::OnDone(std::string error) {
+  base::ListValue result;
+  if (!error.empty()) {
+    result.Append(std::move(error));
+  }
+  Respond(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateDisconnectEngineProviderFunction::Run() {
+  auto params = redrob_private::DisconnectEngineProvider::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  TaskStoreFactory::GetForProfile(Profile::FromBrowserContext(browser_context()))
+      ->DisconnectEngineProvider(
+          params->provider_id,
+          base::BindOnce(&RedrobPrivateDisconnectEngineProviderFunction::OnDone,
+                         this));
+  return RespondLater();
+}
+
+void RedrobPrivateDisconnectEngineProviderFunction::OnDone(bool ok) {
+  Respond(ArgumentList(
+      redrob_private::DisconnectEngineProvider::Results::Create(ok)));
+}
+
+// --- Agent sign-in (CAP-9) ---------------------------------------------------
+//
+// Every value below arrives from a renderer and is bounded here. None of these
+// can read a password: the settings tree is a policy, a list of origins, and an
+// audit trail of usernames and outcomes.
+
+namespace {
+
+redrob_private::AgentCredentialPolicy ToPrivatePolicy(
+    redrob::CredentialTools::Policy policy) {
+  switch (policy) {
+    case redrob::CredentialTools::Policy::kAlways:
+      return redrob_private::AgentCredentialPolicy::kAlways;
+    case redrob::CredentialTools::Policy::kWhileUnlocked:
+      return redrob_private::AgentCredentialPolicy::kWhileUnlocked;
+    case redrob::CredentialTools::Policy::kNever:
+      return redrob_private::AgentCredentialPolicy::kNever;
+  }
+  return redrob_private::AgentCredentialPolicy::kWhileUnlocked;
+}
+
+TaskStore* AgentTasks(content::BrowserContext* context) {
+  return TaskStoreFactory::GetForProfile(Profile::FromBrowserContext(context));
+}
+
+}  // namespace
+
+ExtensionFunction::ResponseAction
+RedrobPrivateGetAgentCredentialSettingsFunction::Run() {
+  Profile* profile = Profile::FromBrowserContext(browser_context());
+  TaskStore* tasks = AgentTasks(browser_context());
+  redrob_private::AgentCredentialSettings out;
+  if (!tasks) {
+    // No task store means an off-the-record profile, where the agent never
+    // signs in. Said so rather than shown as an empty, editable policy.
+    out.policy = redrob_private::AgentCredentialPolicy::kNever;
+    out.off_the_record = true;
+    return RespondNow(ArgumentList(
+        redrob_private::GetAgentCredentialSettings::Results::Create(out)));
+  }
+  redrob::CredentialTools* credentials = tasks->credentials();
+  PrefService* prefs = profile->GetPrefs();
+
+  out.policy = ToPrivatePolicy(credentials->policy());
+  out.unlock_minutes =
+      static_cast<int>(credentials->UnlockWindow().InMinutes());
+  out.unlocked = credentials->IsUnlocked();
+  out.off_the_record = credentials->IsOffTheRecord();
+
+  for (const auto [origin, value] :
+       prefs->GetDict(redrob::prefs::kAgentCredentialsSites)) {
+    if (!value.is_string()) {
+      continue;
+    }
+    redrob_private::AgentCredentialSite site;
+    site.origin = origin;
+    site.allow = value.GetString() == "allow";
+    out.sites.push_back(std::move(site));
+  }
+
+  // Newest first: the pref appends, the table reads from the top.
+  const base::ListValue& audit =
+      prefs->GetList(redrob::prefs::kAgentCredentialsAudit);
+  for (auto it = audit.rbegin(); it != audit.rend(); ++it) {
+    const base::DictValue* entry = it->GetIfDict();
+    if (!entry) {
+      continue;
+    }
+    redrob_private::AgentCredentialRecord record;
+    record.time_ms = entry->FindDouble("time_ms").value_or(0);
+    const std::string* origin = entry->FindString("origin");
+    const std::string* username = entry->FindString("username");
+    const std::string* task_id = entry->FindString("task_id");
+    const std::string* outcome = entry->FindString("outcome");
+    record.origin = origin ? *origin : std::string();
+    record.username = username ? *username : std::string();
+    record.task_id = task_id ? *task_id : std::string();
+    record.outcome = outcome ? *outcome : std::string();
+    out.history.push_back(std::move(record));
+  }
+
+  for (const TaskStore::CredentialWait& wait : tasks->CredentialWaits()) {
+    redrob_private::AgentCredentialWait entry;
+    entry.task_id = wait.task_id;
+    entry.prompt = wait.prompt;
+    entry.origin = wait.origin;
+    entry.needs_unlock = wait.needs_unlock;
+    out.waiting.push_back(std::move(entry));
+  }
+
+  return RespondNow(ArgumentList(
+      redrob_private::GetAgentCredentialSettings::Results::Create(out)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetAgentCredentialPolicyFunction::Run() {
+  auto params = redrob_private::SetAgentCredentialPolicy::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  int value = -1;
+  switch (params->policy) {
+    case redrob_private::AgentCredentialPolicy::kAlways:
+      value = static_cast<int>(redrob::CredentialTools::Policy::kAlways);
+      break;
+    case redrob_private::AgentCredentialPolicy::kWhileUnlocked:
+      value = static_cast<int>(redrob::CredentialTools::Policy::kWhileUnlocked);
+      break;
+    case redrob_private::AgentCredentialPolicy::kNever:
+      value = static_cast<int>(redrob::CredentialTools::Policy::kNever);
+      break;
+    case redrob_private::AgentCredentialPolicy::kNone:
+      break;
+  }
+  if (value >= 0) {
+    Profile::FromBrowserContext(browser_context())
+        ->GetPrefs()
+        ->SetInteger(redrob::prefs::kAgentCredentialsPolicy, value);
+  }
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetAgentCredentialUnlockMinutesFunction::Run() {
+  auto params =
+      redrob_private::SetAgentCredentialUnlockMinutes::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // Ignored rather than clamped: a value outside the range is a page bug, and
+  // silently storing a different number than the one shown is worse.
+  if (params->minutes >= 1 && params->minutes <= 24 * 60) {
+    Profile::FromBrowserContext(browser_context())
+        ->GetPrefs()
+        ->SetInteger(redrob::prefs::kAgentCredentialsUnlockMinutes,
+                     params->minutes);
+  }
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetAgentCredentialSiteFunction::Run() {
+  auto params = redrob_private::SetAgentCredentialSite::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  TaskStore* tasks = AgentTasks(browser_context());
+  const bool ok =
+      tasks && tasks->credentials()->SetSite(params->origin, params->allow);
+  return RespondNow(ArgumentList(
+      redrob_private::SetAgentCredentialSite::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateRemoveAgentCredentialSiteFunction::Run() {
+  auto params =
+      redrob_private::RemoveAgentCredentialSite::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  TaskStore* tasks = AgentTasks(browser_context());
+  const bool ok = tasks && tasks->credentials()->RemoveSite(params->origin);
+  return RespondNow(ArgumentList(
+      redrob_private::RemoveAgentCredentialSite::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateUnlockAgentCredentialsFunction::Run() {
+  // The OS prompt is parented to the window of the page that asked, so it
+  // appears over the settings the user just clicked in.
+  TaskStore* tasks = AgentTasks(browser_context());
+  if (!tasks) {
+    return RespondNow(ArgumentList(
+        redrob_private::UnlockAgentCredentials::Results::Create(false)));
+  }
+  tasks->UnlockCredentials(
+      GetSenderWebContents(),
+      base::BindOnce(&RedrobPrivateUnlockAgentCredentialsFunction::OnUnlocked,
+                     this));
+  return RespondLater();
+}
+
+void RedrobPrivateUnlockAgentCredentialsFunction::OnUnlocked(bool unlocked) {
+  Respond(ArgumentList(
+      redrob_private::UnlockAgentCredentials::Results::Create(unlocked)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateLockAgentCredentialsFunction::Run() {
+  if (TaskStore* tasks = AgentTasks(browser_context())) {
+    tasks->credentials()->Lock();
+  }
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateResumeCredentialTaskFunction::Run() {
+  auto params = redrob_private::ResumeCredentialTask::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  TaskStore* tasks = AgentTasks(browser_context());
+  const bool ok = tasks && tasks->ResumeAfterVerification(params->task_id);
+  return RespondNow(ArgumentList(
+      redrob_private::ResumeCredentialTask::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateClearAgentCredentialHistoryFunction::Run() {
+  Profile::FromBrowserContext(browser_context())
+      ->GetPrefs()
+      ->ClearPref(redrob::prefs::kAgentCredentialsAudit);
+  return RespondNow(NoArguments());
+}
+
+// --- Native entrances: the quick window (CAP-5) ------------------------------
+//
+// The window itself is Views code above this target; these reach it only
+// through redrob::CloseQuickWindow and the pref its service observes, so
+// nothing here depends on chrome/browser/ui.
+
+ExtensionFunction::ResponseAction
+RedrobPrivateGetQuickWindowShortcutFunction::Run() {
+  return RespondNow(ArgumentList(
+      redrob_private::GetQuickWindowShortcut::Results::Create(
+          Profile::FromBrowserContext(browser_context())
+              ->GetPrefs()
+              ->GetString(redrob::prefs::kQuickWindowShortcut))));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetQuickWindowShortcutFunction::Run() {
+  auto params = redrob_private::SetQuickWindowShortcut::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // Three known presets and nothing else. The value becomes a key combination
+  // registered with the OS, so a renderer must not be able to name one.
+  const std::string& preset = params->preset;
+  if (preset != redrob::prefs::kQuickWindowShortcutPrimaryShiftSpace &&
+      preset != redrob::prefs::kQuickWindowShortcutAltShiftSpace &&
+      preset != redrob::prefs::kQuickWindowShortcutOff) {
+    return RespondNow(NoArguments());
+  }
+  // The window's service observes this pref and moves the registration.
+  Profile::FromBrowserContext(browser_context())
+      ->GetPrefs()
+      ->SetString(redrob::prefs::kQuickWindowShortcut, preset);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateStartQuickTaskFunction::Run() {
+  auto params = redrob_private::StartQuickTask::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // Closed first so the browser window the task opens in is the one in front.
+  // The close is deferred inside the window, so this call's own frame is not
+  // freed under it.
+  redrob::CloseQuickWindow();
+  redrob::OpenAgentChat(Profile::FromBrowserContext(browser_context()),
+                        params->prompt, /*context_tab_id=*/std::nullopt);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateCloseQuickWindowFunction::Run() {
+  redrob::CloseQuickWindow();
   return RespondNow(NoArguments());
 }
 

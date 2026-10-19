@@ -58,6 +58,31 @@ class RedrobAgentProvider : public AutocompleteProvider {
   // testable with no omnibox, no profile and no browser.
   static bool WantsAgentRow(const std::u16string& text, bool from_omnibox_focus);
 
+  // AGENT MODE (CAP-3). The suggestion row above is reachable and never preferred. Agent mode
+  // is the other half: the person has SAID they are talking to the agent, by starting the line
+  // with `>` and a space (or by pressing Tab on the row, which writes that prefix for them).
+  // In agent mode the row IS the default match, so Enter starts the task -- the one case where
+  // that is what Enter must do -- and the location bar shows a "Redrob" chip so the mode is
+  // visible rather than inferred from a punctuation mark.
+  //
+  // The prefix is the mode, and it lives in the text on purpose. Keyword mode keeps its state
+  // in the edit model and needs a search-engine entry to hang it on; a mode that is just the
+  // first two characters needs neither, survives a tab switch with the text, and is undone by
+  // the same Backspace that undoes any other typing.
+  static constexpr char16_t kAgentModePrefix[] = u"> ";
+
+  // Above every typed-URL and what-you-typed score, so the default is ours whenever the person
+  // asked for agent mode -- and only then.
+  static constexpr int kAgentModeRelevance = 1600;
+
+  // True when `text` is in agent mode: `>` followed by whitespace, after any leading spaces.
+  static bool IsAgentModeText(const std::u16string& text);
+  // The request inside agent-mode text, trimmed; empty when `text` is not in agent mode.
+  static std::u16string AgentModePrompt(const std::u16string& text);
+  // `text` with the agent-mode prefix in front, for Tab on the row. Text already in agent mode
+  // is returned unchanged.
+  static std::u16string ToAgentModeText(const std::u16string& text);
+
  private:
   ~RedrobAgentProvider() override;
 };

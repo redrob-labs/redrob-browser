@@ -39,7 +39,7 @@ const initialOnboardingState: BrowserOSOnboardingState = {
   sources: [],
 }
 
-/** Maps Chromium importer status into the local three-step onboarding screen state. */
+/** Maps Chromium importer status into the local three-step onboarding screen state. A cancelled import returns to the picker. */
 export function importPhaseFor(status: BrowserOSImportStatus): ImportPhase {
   if (status === 'importing') return 'importing'
   if (status === 'failed') return 'failed'
@@ -174,6 +174,8 @@ export function Onboarding() {
                   onImport={startImport}
                   onRefresh={() => bridge.refreshSources()}
                   onContinue={() => goTo(2)}
+                  onCancel={() => bridge.cancelImport()}
+                  onOpenPasswordManager={() => bridge.openPasswordManager()}
                 />
               )}
               {step === 2 && <SetupAgentStep onSetup={finishOnboarding} />}

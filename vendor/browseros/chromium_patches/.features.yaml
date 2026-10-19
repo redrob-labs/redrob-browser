@@ -563,9 +563,12 @@ features:
     files:
       - chrome/browser/autocomplete/chrome_autocomplete_provider_client.cc
       - chrome/browser/autocomplete/chrome_autocomplete_provider_client.h
+      - chrome/browser/ui/omnibox/omnibox_edit_model.cc
+      - chrome/browser/ui/views/location_bar/BUILD.gn
       - chrome/browser/ui/views/location_bar/location_bar_view.cc
       - components/omnibox/browser/BUILD.gn
       - components/omnibox/browser/actions/omnibox_action.h
+      - components/omnibox/browser/actions/omnibox_action_client_delegator.h
       - components/omnibox/browser/actions/omnibox_action_concepts.h
       - components/omnibox/browser/autocomplete_classifier.cc
       - components/omnibox/browser/autocomplete_controller.cc
@@ -640,3 +643,8 @@ features:
     description: "build: sign the macOS app on a release runner (Gatekeeper asked after notarization, not before)"
     files:
       - chrome/installer/mac/signing/chromium_config.py
+
+  redrob-agent-credentials:
+    description: "feat: agent sign-in over the profile password store (CAP-9)"
+    files:
+      - components/password_manager/core/browser/actor_login/internal/BUILD.gn

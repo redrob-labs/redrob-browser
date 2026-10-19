@@ -41,6 +41,10 @@ class RoutineStore : public KeyedService {
     kCron,
     // Wakes an existing task.
     kHeartbeat,
+    // Built in, one per profile: reviews the memory files (TaskStore::StartConsolidation). Daily, and
+    // only when at least three extraction runs happened since the last one. Cannot be added or removed
+    // by the user; it can be switched off and run now like any other.
+    kConsolidate,
   };
 
   struct Routine {
@@ -79,6 +83,8 @@ class RoutineStore : public KeyedService {
 
  private:
   void Save(const std::vector<Routine>& routines);
+  // Adds the built-in consolidation routine when the list has none. Returns true if it added one.
+  static bool EnsureConsolidation(std::vector<Routine>& routines);
   // Arms the timer for the earliest enabled routine. One timer for all of them: a timer per routine
   // would be one more thing to keep consistent with a list the user edits.
   void Rearm();

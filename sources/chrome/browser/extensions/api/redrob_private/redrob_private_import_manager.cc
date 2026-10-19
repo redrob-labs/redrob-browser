@@ -89,7 +89,12 @@ void RedrobPrivateImportManager::OnSourcesDetected(int source_index) {
   const uint16_t wanted =
       user_data_importer::FAVORITES | user_data_importer::HISTORY |
       user_data_importer::PASSWORDS | user_data_importer::SEARCH_ENGINES;
-  const uint16_t items = source.services_supported & wanted;
+  uint16_t items = source.services_supported & wanted;
+  // Firefox passwords are NSS-encrypted and out of scope: the user exports a
+  // CSV from Firefox and imports it in the password manager instead.
+  if (source.importer_type == user_data_importer::TYPE_FIREFOX) {
+    items &= ~static_cast<uint16_t>(user_data_importer::PASSWORDS);
+  }
   if (!items) {
     Broadcast(redrob_private::ToString(redrob_private::ImportState::kFailed),
               "There is nothing in that browser this one can read.");

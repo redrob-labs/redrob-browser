@@ -33,6 +33,7 @@ import { AddProviderDialogs, useAddProvider } from './add-provider.hooks'
 import { ConfiguredTargetsList } from './ConfiguredTargetsList'
 import { useCodingAgents } from './coding-agents.hooks'
 import { useDefaultChatTarget } from './default-chat-target.hooks'
+import { EngineSubscriptions } from './EngineSubscriptions'
 import { NewProviderDialog } from './NewProviderDialog'
 
 /**
@@ -159,6 +160,8 @@ export const BrowserOsAiPane: FC = () => {
           {t('stPickWhatRunsYourChats')}
         </p>
       </div>
+
+      <EngineSubscriptions />
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">

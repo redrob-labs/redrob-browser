@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_REDROB_SIDECAR_CLIENT_H_
 #define CHROME_BROWSER_REDROB_SIDECAR_CLIENT_H_
 
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -33,8 +34,9 @@ namespace redrob {
 //  * loopback only, on a port the OS chose. Nothing routable is ever bound.
 //  * Basic credentials generated per launch, held here and never given to a renderer.
 //  * the API key is passed in the child's environment, not on a command line where `ps` would show it.
-//  * the sidecar's storage is redirected to a per-launch temporary path, so a browser profile and an
-//    Office session cannot see each other's sessions.
+//  * the sidecar's storage is redirected to a directory inside the browser profile (or, when the owner
+//    sets none, a per-launch temporary path), so a browser profile and an Office session cannot see
+//    each other's sessions -- and a provider the user connected survives the next launch (SUB-2).
 //
 // This class does not parse model output and does not execute tools. The sidecar proposes tool calls;
 // deciding which of them the browser is willing to run is the caller's business, and that division is
@@ -167,6 +169,30 @@ class SidecarClient {
   void FetchProviders(ProvidersCallback callback);
   void CancelCompletion();
 
+  // SUB-2. Where the engine keeps its data (XDG_DATA_HOME for the child), set by the owner before the
+  // first EnsureStarted. A connected subscription or an API key given to the engine lives in the engine's
+  // own store under this directory, so a per-launch temporary directory -- which is what an unset value
+  // still means -- forgets every sign-in at the next launch. The owner passes a directory INSIDE the
+  // browser profile, which keeps the isolation the temporary directory existed for: a profile and another
+  // product's session still cannot see each other's state.
+  void SetDataDirectory(const base::FilePath& dir);
+
+  // SUB-1..4. One request to the engine's own account surface -- its provider list, its auth methods,
+  // starting and finishing a sign-in, storing or removing a key -- authenticated with this launch's
+  // credential. `path` is an engine path such as "/provider"; `json_body` is sent as the request body
+  // when present. Answers with the HTTP status (0 when the engine is not serving or the request never
+  // completed) and the body. `timeout` bounds the request: finishing an OAuth sign-in waits for the user
+  // in another tab, so that call passes minutes where a listing passes seconds.
+  //
+  // Generic on purpose, and private to the browser process: the request may CARRY a provider key the
+  // user typed (PUT /auth/<id>), which is why the caller is TaskStore and never a renderer.
+  using EngineCallback = base::OnceCallback<void(int status, std::optional<std::string> body)>;
+  void EngineRequest(const std::string& method,
+                     const std::string& path,
+                     std::optional<std::string> json_body,
+                     base::TimeDelta timeout,
+                     EngineCallback callback);
+
  private:
   struct LaunchResult;
   // SSE framing and delta accumulation. Defined in the .cc: the wire format is an implementation
@@ -199,6 +225,13 @@ class SidecarClient {
   std::unique_ptr<network::SimpleURLLoader> capabilities_loader_;
   int health_attempts_ = 0;
   std::unique_ptr<CompletionStream> completion_;
+  // SUB-2: see SetDataDirectory. Empty means a per-launch temporary directory.
+  base::FilePath persistent_data_dir_;
+  // EngineRequest's loaders in flight, by a local id. Several can be outstanding at once -- a provider
+  // listing and an auth-methods listing are fetched together -- which is why this is not one member.
+  std::map<int, std::unique_ptr<network::SimpleURLLoader>> engine_loaders_;
+  int next_engine_loader_id_ = 0;
+  void OnEngineResponse(int loader_id, EngineCallback callback, std::optional<std::string> body);
 
   base::WeakPtrFactory<SidecarClient> weak_factory_{this};
 };

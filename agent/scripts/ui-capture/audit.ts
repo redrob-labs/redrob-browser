@@ -199,7 +199,7 @@ export function audit(input: AuditInput): AuditResult {
   if (input.locale === 'ko') {
     // Names are never translated (l10n/10-sidebar.tsv): products, providers, platforms, acronyms.
     const allow =
-      /^(Redrob|Pretendard|MCP|API|URL|PDF|AI|ID|OAuth|LLM|ACP|CLI|Gmail|Google|Calendar|Slack|Notion|GPT|gpt|redrob\/auto|example\.com|Linux|Console|Code|Auto|Browser|Helper|Chrome|Safe|Storage|macOS|Mac|OpenAI|Anthropic|Gemini|Mistral|DeepSeek|xAI|Grok|Ollama|OpenRouter|Moonshot|Kimi|Qwen|Cohere|Perplexity|Groq|Claude|Desktop|Cursor|Codex|GitHub|Copilot|OpenClaw|Hermes|Microsoft|Edge|ChatGPT|utils\.ts)$/
+      /^(Redrob|Pretendard|MCP|API|URL|PDF|AI|ID|OAuth|LLM|ACP|CLI|Gmail|Google|Calendar|Slack|Notion|GPT|gpt|redrob\/auto|example\.com|Linux|Console|Code|Auto|Browser|Helper|Chrome|Safe|Storage|macOS|Mac|OpenAI|Anthropic|Gemini|Mistral|DeepSeek|xAI|Grok|Ollama|OpenRouter|Moonshot|Kimi|Qwen|Cohere|Perplexity|Groq|Claude|Desktop|Cursor|Codex|GitHub|Copilot|OpenClaw|Hermes|Microsoft|Edge|Firefox|Safari|ChatGPT|utils\.ts)$/
     const walker = document.createTreeWalker(
       document.body,
       NodeFilter.SHOW_TEXT,

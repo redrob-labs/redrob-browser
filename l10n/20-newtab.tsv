@@ -82,3 +82,19 @@ taskEngineStopped	The Redrob Code engine stopped responding.	Redrob Code 엔진�
 taskEngineTooOld	This browser needs a newer Redrob Code engine. Update it, then start the task again.	이 브라우저에는 더 새로운 Redrob Code 엔진이 필요합니다. 업데이트한 뒤 작업을 다시 시작하세요.	Task error when the engine does not implement the chat-completions contract this browser needs
 taskEngineCredential	The Redrob Code engine refused this browser's credential.	Redrob Code 엔진이 이 브라우저의 자격 증명을 거부했습니다.	Task error when the engine rejects the per-launch credential
 taskEngineNoAnswer	The engine ended the task without producing an answer.	엔진이 답변을 내지 않고 작업을 끝냈습니다.	Task error when a turn completes with no text and no tool call
+# CAP-4: tasks that outlive their window, the guard-mode confirmation, and the OS notifications.
+taskNeedsConfirmation	Waiting for you: press "$1"?	확인 대기: "$1"을(를) 누를까요?	Trace line when a guard-mode task asks before a send, post, pay or delete click; $1 is the control's text
+taskConfirmationDeclined	You declined: "$1"	거절함: "$1"	Trace line after the user declines a guarded click; $1 is the control's text
+taskNotifyNeedsYou	Task needs you: $1	작업 확인 필요: $1	OS notification title when a task waits for a confirmation; $1 is the task's prompt
+taskNotifyNeedsYouBody	The agent wants to press "$1". Allow it?	에이전트가 "$1"을(를) 누르려고 합니다. 허용할까요?	OS notification body for a guarded click; $1 is the control's text
+taskNotifyAllow	Allow	허용	Notification button that lets the guarded click run
+taskNotifyDecline	Decline	거절	Notification button that refuses the guarded click
+taskNotifyDone	Task done: $1	작업 완료: $1	OS notification title when a task finishes with no browser window open; $1 is the task's prompt
+taskNotifyFailed	Task stopped: $1	작업 중단: $1	OS notification title when a task fails with no browser window open; $1 is the task's prompt
+taskNotifyOpen	Click to see what it did.	눌러서 작업 내용을 확인하세요.	OS notification body for a finished task
+taskNotifySource	Redrob tasks	Redrob 작업	Source line of a task notification
+taskTurnIdle	The engine went silent in the middle of a step, so the task was stopped. Try again, or choose Ultrabrowse for long work.	엔진이 단계 도중 응답하지 않아 작업을 멈췄습니다. 다시 시도하거나, 오래 걸리는 일은 울트라브라우즈를 선택하세요.	Task error when a non-Ultrabrowse turn streams nothing for several minutes
+engineAccountUnreachable	The Redrob engine is not running yet. Try again in a moment.	Redrob 엔진이 아직 실행 중이 아닙니다. 잠시 후 다시 시도하세요.	Settings error when the engine cannot be asked about providers
+engineAccountRefused	The engine refused the request (status $1).	엔진이 요청을 거부했습니다(상태 $1).	Settings error when the engine answers an account request with an error and no reason; $1 is the HTTP status
+engineSignInNoPage	The engine did not return a sign-in page for that provider.	엔진이 이 제공자의 로그인 페이지를 돌려주지 않았습니다.	Settings error when an OAuth sign-in has no authorize URL
+engineSignInFailed	The sign-in did not complete. Try again.	로그인이 완료되지 않았습니다. 다시 시도하세요.	Settings error when the engine reports the OAuth callback failed

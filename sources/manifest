@@ -161,3 +161,16 @@ sources/chrome/browser/extensions/api/redrob_private/redrob_private_engine_insta
 # be copied by hand into the one checkout that had ever built.
 vendor/browseros/resources/BROWSEROS_VERSION	chrome/BROWSEROS_VERSION
 
+
+# Agent sign-in over the profile password store (CAP-9). See docs/CREDENTIALS.md.
+sources/chrome/browser/redrob/credential_tools.h  chrome/browser/redrob/credential_tools.h
+sources/chrome/browser/redrob/credential_tools.cc  chrome/browser/redrob/credential_tools.cc
+# CAP-3 / CAP-5: the native entrances to the agent (address bar agent mode, quick window).
+sources/chrome/browser/redrob/agent_entry.h	chrome/browser/redrob/agent_entry.h
+sources/chrome/browser/redrob/agent_entry.cc	chrome/browser/redrob/agent_entry.cc
+sources/chrome/browser/ui/views/location_bar/redrob_agent_chip.h	chrome/browser/ui/views/location_bar/redrob_agent_chip.h
+sources/chrome/browser/ui/views/location_bar/redrob_agent_chip.cc	chrome/browser/ui/views/location_bar/redrob_agent_chip.cc
+sources/chrome/browser/ui/views/redrob/quick_window_service.h	chrome/browser/ui/views/redrob/quick_window_service.h
+sources/chrome/browser/ui/views/redrob/quick_window_service.cc	chrome/browser/ui/views/redrob/quick_window_service.cc
+sources/chrome/browser/ui/views/redrob/quick_window_view.h	chrome/browser/ui/views/redrob/quick_window_view.h
+sources/chrome/browser/ui/views/redrob/quick_window_view.cc	chrome/browser/ui/views/redrob/quick_window_view.cc
