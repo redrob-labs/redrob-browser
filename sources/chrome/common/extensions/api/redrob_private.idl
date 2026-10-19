@@ -821,6 +821,28 @@ namespace redrobPrivate {
 
     // Deletes the agent sign-in history. Irreversible; the UI confirms first.
     static void clearAgentCredentialHistory();
+
+    // --- Native entrances: the quick window (CAP-5) ------------------------
+    //
+    // The quick window is a native always-on-top window opened by a global
+    // shortcut; its page is this extension's #/quick route.
+
+    // The quick window's shortcut preset: "primary_shift_space" (Ctrl+Shift+
+    // Space, Command+Shift+Space on macOS), "alt_shift_space", or "off".
+    static void getQuickWindowShortcut(StringPrefCallback callback);
+
+    // Sets the quick window's shortcut preset. Accepts the three values above;
+    // any other value is ignored rather than stored, because this arrives from
+    // a renderer and a shortcut is registered with the OS from it.
+    static void setQuickWindowShortcut(DOMString preset);
+
+    // Opens the agent chat for |prompt| in the last active browser window (a
+    // new one when there is none), the same path the address bar's agent mode
+    // takes, and closes the quick window.
+    static void startQuickTask(DOMString prompt);
+
+    // Closes the quick window. Nothing happens when it is not open.
+    static void closeQuickWindow();
   };
 
   interface Events {

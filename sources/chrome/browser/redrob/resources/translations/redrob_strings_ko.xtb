@@ -331,4 +331,6 @@
 <translation id="4871640486507090474"><ph name="ARG1"/>에 채울 로그인 양식이 없습니다</translation>
 <translation id="8303361436705245932"><ph name="ARG1"/>에 로그인하지 못했습니다</translation>
 <translation id="4730264112266697177"><ph name="ARG1"/>에서 확인을 마쳐 작업을 계속합니다</translation>
+<translation id="7010122215008966338">Enter를 누르면 검색 대신 에이전트에게 맡깁니다. &gt;를 지우면 에이전트 모드를 나갑니다.</translation>
+<translation id="5070477933993871097">Redrob에게 묻기</translation>
 </translationbundle>

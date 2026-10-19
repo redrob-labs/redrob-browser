@@ -2,7 +2,7 @@ diff --git a/chrome/browser/browseros/core/browseros_constants.h b/chrome/browse
 new file mode 100644
 --- /dev/null
 +++ b/chrome/browser/browseros/core/browseros_constants.h
-@@ -0,0 +1,239 @@
+@@ -0,0 +1,240 @@
 +// Copyright 2024 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -136,6 +136,7 @@ new file mode 100644
 +    {"/settings", kAgentExtensionId, "app.html", "/settings"},
 +    {"/mcp", kAgentExtensionId, "app.html", "/mcp"},
 +    {"/onboarding", kAgentExtensionId, "app.html", "/onboarding"},
++    {"/quick", kAgentExtensionId, "app.html", "/quick"},
 +    {"/claw", kBrowserClawExtensionId, "newtab.html", ""},
 +};
 +

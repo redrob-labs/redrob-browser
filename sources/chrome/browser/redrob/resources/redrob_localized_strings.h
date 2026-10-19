@@ -342,6 +342,8 @@ inline constexpr webui::LocalizedString kRedrobLocalizedStrings[] = {
     {"taskCredentialNoForm", IDS_REDROB_TASK_CREDENTIAL_NO_FORM},
     {"taskCredentialFailed", IDS_REDROB_TASK_CREDENTIAL_FAILED},
     {"taskCredentialResumed", IDS_REDROB_TASK_CREDENTIAL_RESUMED},
+    {"entryAgentChipTooltip", IDS_REDROB_ENTRY_AGENT_CHIP_TOOLTIP},
+    {"entryQuickWindowTitle", IDS_REDROB_ENTRY_QUICK_WINDOW_TITLE},
 };
 
 }  // namespace redrob

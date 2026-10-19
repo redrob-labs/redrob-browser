@@ -55,6 +55,9 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterIntegerPref(kAgentCredentialsUnlockMinutes, 15);
   registry->RegisterDictionaryPref(kAgentCredentialsSites);
   registry->RegisterListPref(kAgentCredentialsAudit);
+  // CAP-5. On by default: the shortcut is the quick window's only entrance, and a feature reachable
+  // only after finding a setting is one nobody finds. Settings can change or turn it off.
+  registry->RegisterStringPref(kQuickWindowShortcut, kQuickWindowShortcutPrimaryShiftSpace);
 }
 
 }  // namespace redrob::prefs

@@ -1,7 +1,7 @@
 diff --git a/extensions/browser/extension_function_histogram_value.h b/extensions/browser/extension_function_histogram_value.h
 --- a/extensions/browser/extension_function_histogram_value.h
 +++ b/extensions/browser/extension_function_histogram_value.h
-@@ -2051,8 +2051,117 @@ enum HistogramValue {
+@@ -2051,8 +2051,123 @@ enum HistogramValue {
    ENTERPRISE_WEBRTC_STARTCAPTURE = 1986,
    ENTERPRISE_WEBRTC_GETCAPTURESTATUS = 1987,
    ENTERPRISE_WEBRTC_STOPCAPTURE = 1988,
@@ -116,6 +116,12 @@ diff --git a/extensions/browser/extension_function_histogram_value.h b/extension
 +  REDROBPRIVATE_LOCKAGENTCREDENTIALS = 2206,
 +  REDROBPRIVATE_RESUMECREDENTIALTASK = 2207,
 +  REDROBPRIVATE_CLEARAGENTCREDENTIALHISTORY = 2208,
++  // CAP-5, the quick window. Appended after the last value on develop; a
++  // parallel branch appending here too must renumber on merge, not reuse.
++  REDROBPRIVATE_GETQUICKWINDOWSHORTCUT = 2300,
++  REDROBPRIVATE_SETQUICKWINDOWSHORTCUT = 2301,
++  REDROBPRIVATE_STARTQUICKTASK = 2302,
++  REDROBPRIVATE_CLOSEQUICKWINDOW = 2303,
    ENUM_BOUNDARY
  };
  // LINT.ThenChange(/tools/metrics/histograms/metadata/extensions/enums.xml:ExtensionFunctions)

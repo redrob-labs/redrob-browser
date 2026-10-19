@@ -425,6 +425,8 @@
       <message name="IDS_REDROB_TASK_CREDENTIAL_NO_FORM" desc="Trace line when the page has no fillable sign-in form; $1 is the site">No sign-in form on <ph name="ARG1">$1<ex>1</ex></ph> to fill</message>
       <message name="IDS_REDROB_TASK_CREDENTIAL_FAILED" desc="Trace line when filling failed for another reason; $1 is the site">Could not sign in on <ph name="ARG1">$1<ex>1</ex></ph></message>
       <message name="IDS_REDROB_TASK_CREDENTIAL_RESUMED" desc="Trace line when the user resumes a task that waited for them; $1 is the site">Continuing after you finished on <ph name="ARG1">$1<ex>1</ex></ph></message>
+      <message name="IDS_REDROB_ENTRY_AGENT_CHIP_TOOLTIP" desc="Tooltip and accessible name on the address bar's agent-mode chip">Enter hands this to the agent instead of searching. Delete the &gt; to leave agent mode.</message>
+      <message name="IDS_REDROB_ENTRY_QUICK_WINDOW_TITLE" desc="Accessible title of the quick window opened by the global shortcut">Ask Redrob</message>
     </messages>
   </release>
 </grit>

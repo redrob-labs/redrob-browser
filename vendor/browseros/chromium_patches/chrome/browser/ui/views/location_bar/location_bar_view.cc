@@ -1,7 +1,15 @@
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/browser/ui/views/location_bar/location_bar_view.cc
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
-@@ -239,6 +239,11 @@ LocationBarView::LocationBarView(BrowserWindowInterface* browser,
+@@ -68,6 +68,7 @@
+ #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
+ #include "chrome/browser/ui/views/location_bar/omnibox_popup_file_selector.h"
+ #include "chrome/browser/ui/views/location_bar/selected_keyword_view.h"
++#include "chrome/browser/ui/views/location_bar/redrob_agent_chip.h"
+ #include "chrome/browser/ui/views/omnibox/omnibox_context_menu.h"
+ #include "chrome/browser/ui/views/omnibox/omnibox_popup_aim_presenter.h"
+ #include "chrome/browser/ui/views/omnibox/omnibox_popup_closer.h"
+@@ -239,6 +240,11 @@ LocationBarView::LocationBarView(BrowserWindowInterface* browser,
                   !v->GetOmniboxController()->IsPopupOpen();
          }));
      views::FocusRing::Get(this)->SetOutsetFocusRingDisabled(true);
@@ -13,7 +21,38 @@ diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/
      views::InstallPillHighlightPathGenerator(this);
  
  #if BUILDFLAG(OS_LEVEL_GEOLOCATION_PERMISSION_SUPPORTED)
-@@ -1420,11 +1425,36 @@ void LocationBarView::RefreshBackground() {
+@@ -455,6 +461,8 @@ void LocationBarView::Init() {
+ 
+   selected_keyword_view_ = AddChildView(std::make_unique<SelectedKeywordView>(
+       this, profile_, omnibox_controller_.get(), font_list));
++  // Redrob: the agent-mode chip (CAP-3), shown by Layout while the line starts with "> ".
++  RedrobAgentChip::Install(this);
+ 
+   SkColor icon_color = color_provider->GetColor(kColorOmniboxResultsIcon);
+ 
+@@ -853,7 +861,20 @@ void LocationBarView::Layout(PassKey) {
+     }
+   }
+ 
+-  if (ShouldShowKeywordBubble()) {
++  // Redrob: the agent-mode chip (CAP-3).
++  RedrobAgentChip* redrob_agent_chip = RedrobAgentChip::FindIn(this);
++  const bool show_redrob_agent_chip =
++      redrob_agent_chip && omnibox_view_ && !ShouldShowKeywordBubble() &&
++      RedrobAgentChip::IsAgentMode(omnibox_view_->GetText());
++  if (redrob_agent_chip) {
++    redrob_agent_chip->SetVisible(show_redrob_agent_chip);
++  }
++  if (show_redrob_agent_chip) {
++    location_icon_view_->SetVisible(false);
++    leading_decorations.AddDecoration(
++        vertical_padding, location_height, false, kLeadingDecorationMaxFraction,
++        /*intra_item_padding=*/0, icon_left, redrob_agent_chip);
++  } else if (ShouldShowKeywordBubble()) {
+     location_icon_view_->SetVisible(false);
+     leading_decorations.AddDecoration(
+         vertical_padding, location_height, false, kLeadingDecorationMaxFraction,
+@@ -1420,11 +1441,36 @@ void LocationBarView::RefreshBackground() {
    if (is_popup_mode_) {
      SetBackground(views::CreateSolidBackground(background_color_));
    } else {

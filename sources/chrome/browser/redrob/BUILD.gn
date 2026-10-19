@@ -105,6 +105,17 @@ source_set("sidecar") {
     "//components/password_manager/core/browser/actor_login/internal:delegate",
     "//services/metrics/public/cpp:metrics_cpp",
   ]
+
+  # CAP-3 / CAP-5: the one place a native entrance (address bar, quick window) hands a request to the
+  # agent page. It names the agent extension by id, from chrome/browser/browseros/core.
+  sources += [
+    "agent_entry.cc",
+    "agent_entry.h",
+  ]
+  deps += [
+    "//chrome/browser/browseros/core",
+    "//chrome/browser/browseros/core:product",
+  ]
 }
 
 # The UI typeface, beside the executable.

@@ -78,3 +78,32 @@ Chromium's four-week train.
 Zen gave the previous fork spaces, split view and compact mode for free because Firefox's chrome is
 JavaScript. None of that comes across. Re-earn them from usage data rather than from the old feature
 list -- the two of them we actually miss are worth building, and the rest were free rather than chosen.
+
+## The two native entrances to the agent
+
+Both end in the same place the new tab's composer does: the agent extension's
+`app.html#/home/chat?q=<text>&mode=agent[&tabs=<id>]` route, opened by `redrob::OpenAgentChat`
+(`sources/chrome/browser/redrob/agent_entry.*`). There is no second task path: the extension's chat is
+the task a person can see and come back to, and it does not read `TaskStore`.
+
+**Agent mode in the address bar (CAP-3).** The agent row comes from
+`sources/components/omnibox/browser/redrob_agent_provider.*`; its match type is
+`NAVSUGGEST_PERSONALIZED` (an existing type, so no omnibox enum moves) and it navigates nowhere on its
+own -- a `takeover_action` calls `StartRedrobAgentTask` on the provider client, which reads the tab
+the address bar belongs to and calls `OpenAgentChat`. Typing `> ` at the start of the line, or Tab on
+the agent row (`rewrite/chrome/browser/ui/omnibox/omnibox_edit_model.cc.yaml`), puts the line in agent
+mode: the row becomes the default match so Enter starts the task, and the location bar shows the
+"Redrob" chip in the page icon's slot (`sources/chrome/browser/ui/views/location_bar/redrob_agent_chip.*`,
+laid out by `rewrite/chrome/browser/ui/views/location_bar/location_bar_view.cc.yaml`). The mode is the
+text itself, so Backspace over the `>` leaves it.
+
+**The quick window (CAP-5).** `sources/chrome/browser/ui/views/redrob/quick_window_service.*` is a
+profile service created at startup that registers a global shortcut through Chromium's
+`ui::GlobalAcceleratorListener` (or offers it to the desktop's portal where the desktop owns shortcuts)
+and owns a frameless, always-on-top `views::Widget`. The widget holds one WebView
+(`quick_window_view.*`) showing the extension's `#/quick` route -- `chrome://redrob/quick` by its
+product URL -- which is `agent/apps/app/screens/quick-window/QuickWindow.tsx`: one input and the recent
+conversations. Enter calls `redrobPrivate.startQuickTask`, which closes the window and opens the task
+in the last active browser window (a new one when none is open); Esc, or the shortcut again, closes it.
+The shortcut is a preset (`redrob.quick_window.shortcut`: Ctrl/Cmd+Shift+Space by default,
+Alt/Option+Shift+Space, or off), chosen in Customize (`QuickWindowSettingsCard.tsx`).

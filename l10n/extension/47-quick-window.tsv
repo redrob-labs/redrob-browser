@@ -1,0 +1,19 @@
+# The quick window (CAP-5): its page (agent/apps/app/screens/quick-window) and its settings row
+# (screens/customization/QuickWindowSettingsCard.tsx). English and Korean.
+#
+# key <TAB> English <TAB> Korean [<TAB> description]
+#
+# Terminology follows l10n/10-sidebar.tsv. Product names are NOT translated: Redrob.
+
+# The window
+qwPlaceholder	Ask Redrob to do something…	Redrob에게 맡길 일을 입력하세요…	Placeholder in the quick window's one input
+qwInputLabel	What should Redrob do?	Redrob이 무엇을 할까요?	Accessible name of the quick window's input
+qwHint	Enter to start · Esc to close	Enter로 시작 · Esc로 닫기	Key hint at the foot of the quick window
+qwRecent	Recent tasks	최근 작업	Heading above the recent conversations in the quick window
+qwNoRecent	Tasks you start appear here.	시작한 작업이 여기에 표시됩니다.	Shown in the quick window when there are no recent conversations
+
+# The settings row
+qwSettingsGroup	Quick window	빠른 창	Group heading on the Customize page
+qwShortcut	Shortcut	단축키	Row name: the quick window's global shortcut
+qwShortcutHint	Opens a small Redrob window from any app, even when no browser window is open.	브라우저 창이 열려 있지 않아도 어떤 앱에서든 작은 Redrob 창을 엽니다.	Row description
+qwShortcutOff	Off	끄기	Shortcut choice: no global shortcut

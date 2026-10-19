@@ -788,6 +788,44 @@ class RedrobPrivateClearAgentCredentialHistoryFunction
   ResponseAction Run() override;
 };
 
+// --- Native entrances: the quick window (CAP-5) ------------------------------
+
+class RedrobPrivateGetQuickWindowShortcutFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getQuickWindowShortcut",
+                             REDROBPRIVATE_GETQUICKWINDOWSHORTCUT)
+ protected:
+  ~RedrobPrivateGetQuickWindowShortcutFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetQuickWindowShortcutFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setQuickWindowShortcut",
+                             REDROBPRIVATE_SETQUICKWINDOWSHORTCUT)
+ protected:
+  ~RedrobPrivateSetQuickWindowShortcutFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateStartQuickTaskFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.startQuickTask",
+                             REDROBPRIVATE_STARTQUICKTASK)
+ protected:
+  ~RedrobPrivateStartQuickTaskFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateCloseQuickWindowFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.closeQuickWindow",
+                             REDROBPRIVATE_CLOSEQUICKWINDOW)
+ protected:
+  ~RedrobPrivateCloseQuickWindowFunction() override = default;
+  ResponseAction Run() override;
+};
+
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_

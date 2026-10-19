@@ -97,3 +97,9 @@ substitutions:
         REDROBPRIVATE_LOCKAGENTCREDENTIALS = 2206,
         REDROBPRIVATE_RESUMECREDENTIALTASK = 2207,
         REDROBPRIVATE_CLEARAGENTCREDENTIALHISTORY = 2208,
+        // CAP-5, the quick window. Appended after the last value on develop; a
+        // parallel branch appending here too must renumber on merge, not reuse.
+        REDROBPRIVATE_GETQUICKWINDOWSHORTCUT = 2300,
+        REDROBPRIVATE_SETQUICKWINDOWSHORTCUT = 2301,
+        REDROBPRIVATE_STARTQUICKTASK = 2302,
+        REDROBPRIVATE_CLOSEQUICKWINDOW = 2303,
