@@ -549,6 +549,95 @@ class RedrobPrivateInstallEngineFunction : public ExtensionFunction {
   ResponseAction Run() override;
 };
 
+// --- Agent sign-in (CAP-9). See chrome/browser/redrob/credential_tools.h. ---
+
+class RedrobPrivateGetAgentCredentialSettingsFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getAgentCredentialSettings",
+                             REDROBPRIVATE_GETAGENTCREDENTIALSETTINGS)
+ protected:
+  ~RedrobPrivateGetAgentCredentialSettingsFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetAgentCredentialPolicyFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setAgentCredentialPolicy",
+                             REDROBPRIVATE_SETAGENTCREDENTIALPOLICY)
+ protected:
+  ~RedrobPrivateSetAgentCredentialPolicyFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetAgentCredentialUnlockMinutesFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setAgentCredentialUnlockMinutes",
+                             REDROBPRIVATE_SETAGENTCREDENTIALUNLOCKMINUTES)
+ protected:
+  ~RedrobPrivateSetAgentCredentialUnlockMinutesFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetAgentCredentialSiteFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setAgentCredentialSite",
+                             REDROBPRIVATE_SETAGENTCREDENTIALSITE)
+ protected:
+  ~RedrobPrivateSetAgentCredentialSiteFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateRemoveAgentCredentialSiteFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.removeAgentCredentialSite",
+                             REDROBPRIVATE_REMOVEAGENTCREDENTIALSITE)
+ protected:
+  ~RedrobPrivateRemoveAgentCredentialSiteFunction() override = default;
+  ResponseAction Run() override;
+};
+
+// Answers after the OS prompt closes, so it holds itself in the callback.
+class RedrobPrivateUnlockAgentCredentialsFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.unlockAgentCredentials",
+                             REDROBPRIVATE_UNLOCKAGENTCREDENTIALS)
+ protected:
+  ~RedrobPrivateUnlockAgentCredentialsFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnUnlocked(bool unlocked);
+};
+
+class RedrobPrivateLockAgentCredentialsFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.lockAgentCredentials",
+                             REDROBPRIVATE_LOCKAGENTCREDENTIALS)
+ protected:
+  ~RedrobPrivateLockAgentCredentialsFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateResumeCredentialTaskFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.resumeCredentialTask",
+                             REDROBPRIVATE_RESUMECREDENTIALTASK)
+ protected:
+  ~RedrobPrivateResumeCredentialTaskFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateClearAgentCredentialHistoryFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.clearAgentCredentialHistory",
+                             REDROBPRIVATE_CLEARAGENTCREDENTIALHISTORY)
+ protected:
+  ~RedrobPrivateClearAgentCredentialHistoryFunction() override = default;
+  ResponseAction Run() override;
+};
+
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_REDROB_PRIVATE_REDROB_PRIVATE_API_H_
