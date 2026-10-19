@@ -286,6 +286,53 @@ namespace redrobPrivate {
   };
 
   callback GetEngineCredentialCallback = void (EngineCredential result);
+
+  // --- CAP-4 / SUB-1..4 -------------------------------------------------
+  //
+  // One way to connect a provider, as the ENGINE lists it. `index` is what
+  // beginEngineSignIn and finishEngineSignIn take.
+  dictionary EngineAuthMethod {
+    long index;
+    // "oauth" (a subscription or account sign-in) or "api" (a key).
+    DOMString type;
+    // What the engine calls this method ("label" is reserved in this idl).
+    DOMString methodLabel;
+  };
+
+  // A provider the engine can route to. Never carries a credential.
+  dictionary EngineProvider {
+    DOMString id;
+    DOMString name;
+    // Where the engine says the credential came from: "env", "config",
+    // "custom", "api" or "launcher". Empty when it did not say.
+    DOMString source;
+    boolean connected;
+    // Redrob Console manages this provider for the signed-in organisation.
+    boolean consoleManaged;
+    long modelCount;
+    EngineAuthMethod[] methods;
+  };
+
+  // What the engine reports about its accounts. `engineReady` false means the
+  // engine is not serving yet, and the lists are empty for that reason only.
+  dictionary EngineAccount {
+    boolean engineReady;
+    EngineProvider[] providers;
+    // The Redrob Console organisation the engine is signed in to, or empty.
+    DOMString consoleOrg;
+  };
+
+  dictionary EngineSignInStart {
+    // Set when the sign-in could not start.
+    DOMString? error;
+    // What the engine says to tell the user.
+    DOMString instructions;
+    // True when the provider shows the user a code to paste back.
+    boolean needsCode;
+  };
+
+  callback GetEngineAccountCallback = void (EngineAccount account);
+  callback EngineSignInStartCallback = void (EngineSignInStart start);
   callback GetEngineInstallStateCallback = void (EngineInstallInfo info);  callback GetSettingsCallback = void (AgentSettings settings);
   callback ListModelsCallback = void (ModelOption[] options);
   callback ListTasksCallback = void (Task[] tasks);
@@ -571,6 +618,53 @@ namespace redrobPrivate {
     // reason startImport() reports that way. A second call while one is already
     // running is ignored.
     static void installEngine();
+
+    // --- CAP-4: work that survives the window closing -------------------
+
+    // Whether agent tasks keep the browser running after the last window
+    // closes. On by default.
+    static void getKeepTasksRunning(BooleanPrefCallback callback);
+    static void setKeepTasksRunning(boolean enabled);
+
+    // Answers a guard-mode confirmation (Task.awaitingConfirmation). |allow|
+    // runs exactly that one click; declining tells the agent the user said no.
+    // |callback|: false when the task is not waiting on one.
+    static void answerTaskConfirmation(DOMString taskId,
+                                       boolean allow,
+                                       BoolCallback callback);
+
+    // --- SUB-1..4: providers and subscriptions, asked of the engine ------
+
+    // The providers the engine knows, which are connected, and how each can
+    // be connected. Asked of the engine every time -- the browser keeps no
+    // provider list of its own.
+    static void getEngineAccount(GetEngineAccountCallback callback);
+
+    // Starts a sign-in with the engine's own OAuth. The BROWSER opens the
+    // provider's page in a new tab; the caller only learns whether a code
+    // must be pasted back.
+    static void beginEngineSignIn(DOMString providerId,
+                                  long method,
+                                  EngineSignInStartCallback callback);
+
+    // Finishes it. |code| is empty when the engine catches the redirect
+    // itself; the call then resolves once the user has finished in the other
+    // tab. |callback|: nothing on success, otherwise the reason.
+    static void finishEngineSignIn(DOMString providerId,
+                                   long method,
+                                   DOMString code,
+                                   StringCallback callback);
+
+    // Gives the engine an API key for |providerId|. The key goes one way, into
+    // the engine's own store; nothing reads it back.
+    // |callback|: nothing on success, otherwise the reason.
+    static void setEngineProviderKey(DOMString providerId,
+                                     DOMString key,
+                                     StringCallback callback);
+
+    // Tells the engine to forget the credential it holds for |providerId|.
+    static void disconnectEngineProvider(DOMString providerId,
+                                         BoolCallback callback);
   };
 
   interface Events {

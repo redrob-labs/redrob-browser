@@ -1,7 +1,7 @@
 diff --git a/extensions/browser/extension_function_histogram_value.h b/extensions/browser/extension_function_histogram_value.h
 --- a/extensions/browser/extension_function_histogram_value.h
 +++ b/extensions/browser/extension_function_histogram_value.h
-@@ -2051,8 +2051,93 @@ enum HistogramValue {
+@@ -2051,8 +2051,103 @@ enum HistogramValue {
    ENTERPRISE_WEBRTC_STARTCAPTURE = 1986,
    ENTERPRISE_WEBRTC_GETCAPTURESTATUS = 1987,
    ENTERPRISE_WEBRTC_STOPCAPTURE = 1988,
@@ -92,6 +92,16 @@ diff --git a/extensions/browser/extension_function_histogram_value.h b/extension
 +  REDROBPRIVATE_SETAUTOMATICPICTUREINPICTUREENABLED = 2064,
 +  REDROBPRIVATE_GETCOLORSCHEME = 2065,
 +  REDROBPRIVATE_SETCOLORSCHEME = 2066,
++  // feat/parity-run (CAP-4, SUB-1..4). Numbered from 2100 so the parity branches, which all
++  // append here at once, do not collide on a number; a gap costs nothing.
++  REDROBPRIVATE_GETKEEPTASKSRUNNING = 2100,
++  REDROBPRIVATE_SETKEEPTASKSRUNNING = 2101,
++  REDROBPRIVATE_ANSWERTASKCONFIRMATION = 2102,
++  REDROBPRIVATE_GETENGINEACCOUNT = 2103,
++  REDROBPRIVATE_BEGINENGINESIGNIN = 2104,
++  REDROBPRIVATE_FINISHENGINESIGNIN = 2105,
++  REDROBPRIVATE_SETENGINEPROVIDERKEY = 2106,
++  REDROBPRIVATE_DISCONNECTENGINEPROVIDER = 2107,
    ENUM_BOUNDARY
  };
  // LINT.ThenChange(/tools/metrics/histograms/metadata/extensions/enums.xml:ExtensionFunctions)

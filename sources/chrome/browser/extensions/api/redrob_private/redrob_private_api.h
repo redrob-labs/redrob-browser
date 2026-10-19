@@ -10,6 +10,7 @@
 #include "chrome/browser/importer/importer_list.h"
 #include <string>
 
+#include "chrome/browser/redrob/task_store.h"
 #include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
 #include "chrome/common/extensions/api/redrob_private.h"
 #include "extensions/browser/extension_function.h"
@@ -547,6 +548,95 @@ class RedrobPrivateInstallEngineFunction : public ExtensionFunction {
  protected:
   ~RedrobPrivateInstallEngineFunction() override = default;
   ResponseAction Run() override;
+};
+
+// --- CAP-4 / SUB-1..4 (feat/parity-run) ------------------------------------
+
+class RedrobPrivateGetKeepTasksRunningFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getKeepTasksRunning",
+                             REDROBPRIVATE_GETKEEPTASKSRUNNING)
+ protected:
+  ~RedrobPrivateGetKeepTasksRunningFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetKeepTasksRunningFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setKeepTasksRunning",
+                             REDROBPRIVATE_SETKEEPTASKSRUNNING)
+ protected:
+  ~RedrobPrivateSetKeepTasksRunningFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateAnswerTaskConfirmationFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.answerTaskConfirmation",
+                             REDROBPRIVATE_ANSWERTASKCONFIRMATION)
+ protected:
+  ~RedrobPrivateAnswerTaskConfirmationFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateGetEngineAccountFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getEngineAccount",
+                             REDROBPRIVATE_GETENGINEACCOUNT)
+ protected:
+  ~RedrobPrivateGetEngineAccountFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnAccount(redrob::TaskStore::EngineAccount account);
+};
+
+class RedrobPrivateBeginEngineSignInFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.beginEngineSignIn",
+                             REDROBPRIVATE_BEGINENGINESIGNIN)
+ protected:
+  ~RedrobPrivateBeginEngineSignInFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnStarted(redrob::TaskStore::SignInStart start);
+};
+
+class RedrobPrivateFinishEngineSignInFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.finishEngineSignIn",
+                             REDROBPRIVATE_FINISHENGINESIGNIN)
+ protected:
+  ~RedrobPrivateFinishEngineSignInFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnDone(std::string error);
+};
+
+class RedrobPrivateSetEngineProviderKeyFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setEngineProviderKey",
+                             REDROBPRIVATE_SETENGINEPROVIDERKEY)
+ protected:
+  ~RedrobPrivateSetEngineProviderKeyFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnDone(std::string error);
+};
+
+class RedrobPrivateDisconnectEngineProviderFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.disconnectEngineProvider",
+                             REDROBPRIVATE_DISCONNECTENGINEPROVIDER)
+ protected:
+  ~RedrobPrivateDisconnectEngineProviderFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnDone(bool ok);
 };
 
 }  // namespace extensions

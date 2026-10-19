@@ -1220,4 +1220,150 @@ ExtensionFunction::ResponseAction RedrobPrivateInstallEngineFunction::Run() {
   return RespondNow(NoArguments());
 }
 
+// --- CAP-4 / SUB-1..4 (feat/parity-run) ------------------------------------
+
+ExtensionFunction::ResponseAction
+RedrobPrivateGetKeepTasksRunningFunction::Run() {
+  return RespondNow(ArgumentList(
+      redrob_private::GetKeepTasksRunning::Results::Create(
+          Profile::FromBrowserContext(browser_context())
+              ->GetPrefs()
+              ->GetBoolean(redrob::prefs::kKeepTasksRunning))));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetKeepTasksRunningFunction::Run() {
+  auto params = redrob_private::SetKeepTasksRunning::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  Profile::FromBrowserContext(browser_context())
+      ->GetPrefs()
+      ->SetBoolean(redrob::prefs::kKeepTasksRunning, params->enabled);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateAnswerTaskConfirmationFunction::Run() {
+  auto params = redrob_private::AnswerTaskConfirmation::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  const bool answered =
+      TaskStoreFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()))
+          ->AnswerConfirmation(params->task_id, params->allow);
+  return RespondNow(ArgumentList(
+      redrob_private::AnswerTaskConfirmation::Results::Create(answered)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateGetEngineAccountFunction::Run() {
+  TaskStoreFactory::GetForProfile(Profile::FromBrowserContext(browser_context()))
+      ->GetEngineAccount(base::BindOnce(
+          &RedrobPrivateGetEngineAccountFunction::OnAccount, this));
+  return RespondLater();
+}
+
+void RedrobPrivateGetEngineAccountFunction::OnAccount(
+    redrob::TaskStore::EngineAccount account) {
+  redrob_private::EngineAccount out;
+  out.engine_ready = account.engine_ready;
+  out.console_org = account.console_org;
+  for (const auto& provider : account.providers) {
+    redrob_private::EngineProvider wire;
+    wire.id = provider.id;
+    wire.name = provider.name;
+    wire.source = provider.source;
+    wire.connected = provider.connected;
+    wire.console_managed = provider.console_managed;
+    wire.model_count = static_cast<int>(provider.model_count);
+    for (const auto& method : provider.methods) {
+      redrob_private::EngineAuthMethod wire_method;
+      wire_method.index = method.index;
+      wire_method.type = method.type;
+      wire_method.method_label = method.label;
+      wire.methods.push_back(std::move(wire_method));
+    }
+    out.providers.push_back(std::move(wire));
+  }
+  Respond(WithArguments(out.ToValue()));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateBeginEngineSignInFunction::Run() {
+  auto params = redrob_private::BeginEngineSignIn::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  TaskStoreFactory::GetForProfile(Profile::FromBrowserContext(browser_context()))
+      ->BeginEngineSignIn(
+          params->provider_id, params->method,
+          base::BindOnce(&RedrobPrivateBeginEngineSignInFunction::OnStarted,
+                         this));
+  return RespondLater();
+}
+
+void RedrobPrivateBeginEngineSignInFunction::OnStarted(
+    redrob::TaskStore::SignInStart start) {
+  redrob_private::EngineSignInStart out;
+  if (!start.error.empty()) {
+    out.error = start.error;
+  }
+  out.instructions = start.instructions;
+  out.needs_code = start.needs_code;
+  Respond(WithArguments(out.ToValue()));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateFinishEngineSignInFunction::Run() {
+  auto params = redrob_private::FinishEngineSignIn::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  TaskStoreFactory::GetForProfile(Profile::FromBrowserContext(browser_context()))
+      ->FinishEngineSignIn(
+          params->provider_id, params->method, params->code,
+          base::BindOnce(&RedrobPrivateFinishEngineSignInFunction::OnDone, this));
+  return RespondLater();
+}
+
+void RedrobPrivateFinishEngineSignInFunction::OnDone(std::string error) {
+  base::ListValue result;
+  if (!error.empty()) {
+    result.Append(std::move(error));
+  }
+  Respond(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetEngineProviderKeyFunction::Run() {
+  auto params = redrob_private::SetEngineProviderKey::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // The key is handed straight to the store and not kept on this object.
+  TaskStoreFactory::GetForProfile(Profile::FromBrowserContext(browser_context()))
+      ->SetEngineApiKey(
+          params->provider_id, params->key,
+          base::BindOnce(&RedrobPrivateSetEngineProviderKeyFunction::OnDone,
+                         this));
+  return RespondLater();
+}
+
+void RedrobPrivateSetEngineProviderKeyFunction::OnDone(std::string error) {
+  base::ListValue result;
+  if (!error.empty()) {
+    result.Append(std::move(error));
+  }
+  Respond(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateDisconnectEngineProviderFunction::Run() {
+  auto params = redrob_private::DisconnectEngineProvider::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  TaskStoreFactory::GetForProfile(Profile::FromBrowserContext(browser_context()))
+      ->DisconnectEngineProvider(
+          params->provider_id,
+          base::BindOnce(&RedrobPrivateDisconnectEngineProviderFunction::OnDone,
+                         this));
+  return RespondLater();
+}
+
+void RedrobPrivateDisconnectEngineProviderFunction::OnDone(bool ok) {
+  Respond(ArgumentList(
+      redrob_private::DisconnectEngineProvider::Results::Create(ok)));
+}
+
 }  // namespace extensions
