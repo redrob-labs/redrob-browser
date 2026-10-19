@@ -3027,6 +3027,51 @@ void TaskStore::ParkForUser(const std::string& task_id,
   Notify(task_id);
 }
 
+void TaskStore::LoginFromBridge(content::WebContents* page,
+                                const std::string& username_hint,
+                                base::OnceCallback<void(std::string)> callback) {
+  if (!page || !page->GetPrimaryMainFrame()) {
+    std::move(callback).Run("There is no such tab. Open the site's sign-in page first.");
+    return;
+  }
+  // The tab's committed origin, never a URL from the caller, exactly as for a task.
+  const url::Origin origin = page->GetPrimaryMainFrame()->GetLastCommittedOrigin();
+  switch (credentials()->Check(origin)) {
+    case CredentialTools::Gate::kRefused: {
+      credentials()->RecordUse(kBridgeAuditId, origin, std::string(),
+                               CredentialTools::Outcome::kPolicyRefused);
+      CredentialTools::Result refused;
+      refused.outcome = CredentialTools::Outcome::kPolicyRefused;
+      refused.origin = origin;
+      std::move(callback).Run(CredentialTools::ToolResultText(refused));
+      return;
+    }
+    case CredentialTools::Gate::kLocked:
+      credentials()->RecordUse(kBridgeAuditId, origin, std::string(), CredentialTools::Outcome::kLocked);
+      std::move(callback).Run(
+          "Signing in needs the user to unlock the browser's passwords first, in the browser itself. Ask "
+          "them to unlock, then call login again.");
+      return;
+    case CredentialTools::Gate::kAllowed:
+      break;
+  }
+  credentials()->Login(page, username_hint,
+                       base::BindOnce(&TaskStore::OnBridgeLoginResult, weak_factory_.GetWeakPtr(),
+                                      std::move(callback)));
+}
+
+void TaskStore::OnBridgeLoginResult(base::OnceCallback<void(std::string)> callback,
+                                    CredentialTools::Result result) {
+  credentials()->RecordUse(kBridgeAuditId, result.origin, result.username, result.outcome);
+  if (result.outcome == CredentialTools::Outcome::kLocked) {
+    std::move(callback).Run(
+        "Signing in needs the user to unlock the browser's passwords first, in the browser itself. Ask "
+        "them to unlock, then call login again.");
+    return;
+  }
+  std::move(callback).Run(CredentialTools::ToolResultText(result));
+}
+
 void TaskStore::UnlockCredentials(content::WebContents* anchor,
                                   base::OnceCallback<void(bool)> callback) {
   credentials()->Unlock(anchor, base::BindOnce(&TaskStore::OnCredentialsUnlocked,

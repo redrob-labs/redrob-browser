@@ -231,5 +231,35 @@ function buildTools(browser: Browser, session: BrowserSession): ToolDef[] {
         return path
       },
     },
+    {
+      name: 'login',
+      description:
+        "Sign in on a tab with a login the user saved in the browser's password manager, under the user's agent sign-in settings. The browser fills the password itself; you never see it. Answers what happened (filled as which account, several accounts, no saved login, locked, refused). Then press the site's own sign-in button with click.",
+      input: z.object({
+        tab_id: tabId,
+        username_hint: z
+          .string()
+          .optional()
+          .describe(
+            'Which saved account to use when several match. Omitted: the only one.',
+          ),
+      }),
+      handler: async ({ tab_id, username_hint }) => {
+        const pageId = await resolveTab(tab_id as number | undefined)
+        const info =
+          (await session.pages.refresh(pageId)) ??
+          session.pages.getInfo(pageId)
+        if (!info) throw new Error(`No open tab with id ${pageId}.`)
+        // Browser.redrobLogin runs in the browser process (TaskStore::LoginFromBridge): the same policy,
+        // per-site list, unlock window and audit log as the in-browser agent's login tool.
+        const result = (await session.cdp('Browser.redrobLogin', {
+          targetId: info.targetId,
+          ...(typeof username_hint === 'string' && username_hint
+            ? { usernameHint: username_hint }
+            : {}),
+        })) as { text?: string }
+        return `tab ${pageId}: ${result.text ?? '(no answer)'}`
+      },
+    },
   ]
 }

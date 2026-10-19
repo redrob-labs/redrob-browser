@@ -2,7 +2,7 @@ diff --git a/chrome/browser/devtools/protocol/browser_handler.cc b/chrome/browse
 index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a2889fbc5d3 100644
 --- a/chrome/browser/devtools/protocol/browser_handler.cc
 +++ b/chrome/browser/devtools/protocol/browser_handler.cc
-@@ -4,24 +4,39 @@
+@@ -4,24 +4,41 @@
  
  #include "chrome/browser/devtools/protocol/browser_handler.h"
  
@@ -22,6 +22,8 @@ index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a28
  #include "chrome/browser/devtools/devtools_dock_tile.h"
  #include "chrome/browser/profiles/profile.h"
  #include "chrome/browser/profiles/profile_manager.h"
++#include "chrome/browser/redrob/task_store.h"
++#include "chrome/browser/redrob/task_store_factory.h"
  #include "chrome/browser/ui/browser_commands.h"
 +#include "chrome/browser/ui/browser_tabstrip.h"
  #include "chrome/browser/ui/browser_window.h"
@@ -42,7 +44,7 @@ index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a28
  #include "content/public/browser/browser_task_traits.h"
  #include "content/public/browser/browser_thread.h"
  #include "content/public/browser/devtools_agent_host.h"
-@@ -35,6 +50,19 @@ using protocol::Response;
+@@ -35,6 +52,19 @@ using protocol::Response;
  
  namespace {
  
@@ -62,7 +64,7 @@ index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a28
  BrowserWindow* GetBrowserWindow(int window_id) {
    BrowserWindow* result = nullptr;
    ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
-@@ -76,6 +104,398 @@ std::unique_ptr<protocol::Browser::Bounds> GetBrowserWindowBounds(
+@@ -76,6 +106,398 @@ std::unique_ptr<protocol::Browser::Bounds> GetBrowserWindowBounds(
        .Build();
  }
  
@@ -461,7 +463,7 @@ index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a28
  }  // namespace
  
  BrowserHandler::BrowserHandler(protocol::UberDispatcher* dispatcher,
-@@ -126,6 +546,67 @@ Response BrowserHandler::GetWindowForTarget(
+@@ -126,6 +548,67 @@ Response BrowserHandler::GetWindowForTarget(
    return Response::Success();
  }
  
@@ -529,7 +531,7 @@ index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a28
  Response BrowserHandler::GetWindowBounds(
      int window_id,
      std::unique_ptr<protocol::Browser::Bounds>* out_bounds) {
-@@ -305,3 +786,666 @@ protocol::Response BrowserHandler::AddPrivacySandboxEnrollmentOverride(
+@@ -305,3 +788,695 @@ protocol::Response BrowserHandler::AddPrivacySandboxEnrollmentOverride(
        net::SchemefulSite(url_to_add));
    return Response::Success();
  }
@@ -1195,4 +1197,33 @@ index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a28
 +
 +  *out_group = BuildTabGroupInfo(target_bwi, new_gid);
 +  return Response::Success();
++}
++
++// Redrob: the app bridge's `login` tool. Everything that decides and fills is TaskStore::LoginFromBridge,
++// the same gate, fill path and audit log the in-browser agent's tool uses; this only finds the tab.
++void BrowserHandler::RedrobLogin(const std::string& target_id,
++                                 std::optional<std::string> username_hint,
++                                 std::unique_ptr<RedrobLoginCallback> callback) {
++  TabLookupResult lookup;
++  Response response = ResolveTabIdentifier(target_id, std::nullopt, &lookup);
++  if (!response.IsSuccess()) {
++    callback->sendFailure(std::move(response));
++    return;
++  }
++  Profile* profile =
++      Profile::FromBrowserContext(lookup.web_contents->GetBrowserContext());
++  redrob::TaskStore* tasks =
++      profile ? redrob::TaskStoreFactory::GetForProfile(profile) : nullptr;
++  if (!tasks) {
++    callback->sendFailure(
++        Response::ServerError("Agent sign-in is not available here"));
++    return;
++  }
++  tasks->LoginFromBridge(
++      lookup.web_contents, username_hint.value_or(std::string()),
++      base::BindOnce(
++          [](std::unique_ptr<RedrobLoginCallback> callback, std::string text) {
++            callback->sendSuccess(text);
++          },
++          std::move(callback)));
 +}
