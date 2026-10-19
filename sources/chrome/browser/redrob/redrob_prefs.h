@@ -111,6 +111,12 @@ inline constexpr char kWindowTranslucencyEnabled[] =
 inline constexpr char kAutomaticPictureInPictureEnabled[] =
     "redrob.picture_in_picture.automatic";
 
+// CAP-4. Whether an agent task keeps the browser running after its last window closes. On by default:
+// a task that stops because a window closed is a chat, not an agent. While any task is queued, running
+// or waiting for the user, TaskStore holds a process and a profile keep-alive; with this off it holds
+// neither and closing the last window ends the task with the browser, which was the old behaviour.
+inline constexpr char kKeepTasksRunning[] = "redrob.tasks.keep_running_after_close";
+
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
 }  // namespace redrob::prefs

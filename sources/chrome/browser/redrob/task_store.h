@@ -7,6 +7,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,7 @@
 #include "base/observer_list.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
+#include "url/gurl.h"
 #include "base/files/file_path.h"
 #include "chrome/browser/redrob/memory_store.h"
 #include "chrome/browser/redrob/sidecar_client.h"
@@ -24,6 +26,8 @@
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 class Profile;
+class ScopedKeepAlive;
+class ScopedProfileKeepAlive;
 
 namespace content {
 class WebContents;
@@ -140,6 +144,77 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   void OnCompletionFinished(const std::string& finish_reason) override;
   void OnCompletionFailed(const std::string& message) override;
 
+  // KeyedService. Drops the keep-alives before the profile goes away; see UpdateKeepAlive.
+  void Shutdown() override;
+
+  // CAP-4 / guard. Answers the confirmation a guard-mode task is waiting on (Task.awaiting_confirmation).
+  // `allow` performs exactly that one action and nothing else; declining answers the engine that the
+  // user said no. False when the task is unknown or is not waiting on one. Reached from the task
+  // notification's buttons and from redrobPrivate.answerTaskConfirmation.
+  bool AnswerConfirmation(const std::string& task_id, bool allow);
+
+  // SUB-1..4. The engine's own account surface, asked through the sidecar -- never a list kept in the
+  // browser, because a second list is a second truth (docs/PRODUCT-BACKLOG.md SUB-1). Nothing secret is
+  // in these structs: the engine's provider records can carry a key, and it is dropped while parsing.
+  struct EngineAuthMethod {
+    // The index the engine's authorize/callback routes take.
+    int index = 0;
+    // "oauth" (a subscription or account sign-in) or "api" (a key).
+    std::string type;
+    std::string label;
+  };
+  struct EngineProvider {
+    std::string id;
+    std::string name;
+    // Where the engine says this provider's credential came from: "env", "config", "custom", "api" or
+    // "launcher". Reported so the surface can say WHERE a connection lives rather than only that it does.
+    std::string source;
+    bool connected = false;
+    // True when Redrob Console manages this provider for the signed-in organisation.
+    bool console_managed = false;
+    size_t model_count = 0;
+    std::vector<EngineAuthMethod> methods;
+  };
+  struct EngineAccount {
+    // False when the engine is not serving yet (or is not installed); everything else is then empty and
+    // the caller must say so rather than render an empty list as "no providers".
+    bool engine_ready = false;
+    std::vector<EngineProvider> providers;
+    // The Redrob Console organisation the engine is signed in to, when it reports one.
+    std::string console_org;
+  };
+  using EngineAccountCallback = base::OnceCallback<void(EngineAccount)>;
+  void GetEngineAccount(EngineAccountCallback callback);
+
+  struct SignInStart {
+    // Empty on success.
+    std::string error;
+    // What the engine says to tell the user, e.g. which code to expect.
+    std::string instructions;
+    // True when the provider shows the user a code to paste back (the engine's "code" method); false when
+    // the engine catches the redirect itself ("auto") and FinishEngineSignIn just waits for it.
+    bool needs_code = false;
+  };
+  // Asks the engine for the provider's authorize page and opens it in a new tab -- the browser opens it,
+  // not the page that asked, so the user sees exactly where they are signing in.
+  void BeginEngineSignIn(const std::string& provider_id,
+                         int method,
+                         base::OnceCallback<void(SignInStart)> callback);
+  // Completes it. For "auto" the engine answers once the provider redirected back to it, which can take
+  // as long as the user takes in the other tab. `code` is empty for "auto". Answers an empty string on
+  // success, otherwise the engine's reason.
+  void FinishEngineSignIn(const std::string& provider_id,
+                          int method,
+                          const std::string& code,
+                          base::OnceCallback<void(std::string)> callback);
+  // SUB-3. Hands the engine a key for `provider_id`. The key goes one way: into the engine's store, never
+  // back out of the browser, never into a pref and never into a log.
+  void SetEngineApiKey(const std::string& provider_id,
+                       const std::string& key,
+                       base::OnceCallback<void(std::string)> callback);
+  void DisconnectEngineProvider(const std::string& provider_id,
+                                base::OnceCallback<void(bool)> callback);
+
  private:
   // What the engine proposed, held until the turn ends. Tools are run only after a turn completes: a
   // tool call whose arguments arrived in a stream that then failed is one the browser must not run.
@@ -181,6 +256,12 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
     // Pages the agent's tab visited, {url, title}. Handed to extraction only when the user turned
     // history input on; never the user's own history.
     std::vector<std::pair<std::string, std::string>> visited;
+    // CAP-4 / guard: the click this task is waiting for the user to allow or decline. Held while the
+    // task is kBlockedOnPolicy; it is counted in `pending_tools`, so the turn cannot move on without it.
+    std::optional<ProposedToolCall> awaiting;
+    // The last page the agent opened. When the window holding the task's tab is closed, the next page
+    // tool tells the engine to open this again rather than just "there is no page".
+    GURL last_url;
   };
 
   // A hidden task that maintains memory: extraction after a task, or consolidation. Not listed, not
@@ -252,6 +333,36 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
 
   std::map<std::string, MemoryTaskInfo> memory_tasks_;
 
+  // CAP-4. Holds the process and the profile alive while any task is not finished, and lets go when the
+  // last one ends. Called from Notify, because every state change goes through Notify.
+  void UpdateKeepAlive();
+  // Raises the OS notification for a task that finished while no user window is open, or that is waiting
+  // on the user. At most once per state.
+  void AnnounceTask(const std::string& task_id);
+  void OnTaskNotificationClicked(const std::string& task_id, std::optional<int> button);
+  // Runs a click or a type the permission check has already passed. Split out so an allowed
+  // confirmation runs the identical code path the unconfirmed click would have.
+  void DispatchPageAction(const std::string& task_id,
+                          const ProposedToolCall& call,
+                          bool is_click,
+                          const std::string& target,
+                          const std::string& text);
+  // Ultrabrowse never stops for silence; the other efforts give up on a turn the engine has said nothing
+  // in for kTurnIdleTimeout, instead of spinning a card forever. Re-armed on every streamed event.
+  void ArmIdleWatch();
+  void OnTurnIdle();
+  // Starts the engine if needed. True when it is serving now.
+  bool EngineReady();
+  void OnEngineAuthorize(base::OnceCallback<void(SignInStart)> callback,
+                         int status,
+                         std::optional<std::string> body);
+  // Shared tail of finishing a sign-in, saving a key and disconnecting: success refreshes the model list;
+  // failure answers the engine's reason. `expect_true` is for the OAuth callback, which answers a boolean.
+  void OnEngineAccountChange(base::OnceCallback<void(std::string)> callback,
+                             bool expect_true,
+                             int status,
+                             std::optional<std::string> body);
+
   std::map<std::string, mojom::TaskPtr> tasks_;
   std::map<std::string, Conversation> conversations_;
   // Held for the life of the task: the subscription IS the request, so dropping it stops the frames.
@@ -295,6 +406,15 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
     std::string price_band;
   };
   std::vector<ModelRecord> model_options_;
+
+  // CAP-4. Present exactly while some task is unfinished and the user has left the keep-running setting
+  // on. See UpdateKeepAlive.
+  std::unique_ptr<ScopedKeepAlive> keep_alive_;
+  std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive_;
+  // The state each task was last announced in, so one finish raises one notification.
+  std::map<std::string, mojom::TaskState> announced_;
+  base::OneShotTimer idle_timer_;
+  bool shutting_down_ = false;
 };
 
 }  // namespace redrob

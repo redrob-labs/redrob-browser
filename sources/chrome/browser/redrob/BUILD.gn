@@ -77,6 +77,17 @@ source_set("sidecar") {
     "//net/traffic_annotation",
     "//url",
   ]
+
+  # CAP-4: tasks that survive the window closing hold a process and a profile keep-alive, announce
+  # themselves through the OS notification service, and may open a window of their own.
+  deps += [
+    "//chrome/browser/notifications",
+    "//chrome/browser/profiles/keep_alive",
+    "//chrome/common:url_constants",
+    "//components/keep_alive_registry",
+    "//components/sessions:session_id",
+    "//ui/message_center/public/cpp",
+  ]
 }
 
 # The UI typeface, beside the executable.

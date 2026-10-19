@@ -4,6 +4,7 @@
 
 #include "chrome/browser/redrob/task_store.h"
 
+#include <memory>
 #include <set>
 #include <utility>
 
@@ -30,10 +31,25 @@
 #include "chrome/browser/redrob/page_tools.h"
 #include "chrome/browser/redrob/redrob_prefs.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
+#include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
+#include "chrome/browser/notifications/notification_display_service.h"
+#include "chrome/browser/notifications/notification_display_service_factory.h"
+#include "chrome/browser/notifications/notification_handler.h"
+#include "chrome/browser/ui/navigator/browser_navigator.h"
+#include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/browser/ui/thumbnails/thumbnail_tab_helper.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/webui_url_constants.h"
+#include "components/keep_alive_registry/keep_alive_registry.h"
+#include "components/keep_alive_registry/keep_alive_types.h"
+#include "components/keep_alive_registry/scoped_keep_alive.h"
+#include "ui/base/models/image_model.h"
+#include "ui/message_center/public/cpp/notification.h"
+#include "ui/message_center/public/cpp/notification_delegate.h"
+#include "ui/message_center/public/cpp/notifier_id.h"
 #include "components/tabs/public/tab_interface.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
@@ -66,21 +82,60 @@ int ToolBudget(mojom::Effort effort) {
     case mojom::Effort::kStandard:
       return 8;
     case mojom::Effort::kUltrabrowse:
-      return 32;
+      // Ultrabrowse is the deep pass, and its budget is what makes it one: enough rounds to plan, walk a
+      // dozen sources and reconcile them. Still a ceiling -- the loop is driven by model output.
+      return 96;
   }
+}
+
+// How long a turn may stream nothing at all before a non-Ultrabrowse task gives up on it. A turn that has
+// said nothing for this long is stuck, and a card that spins forever tells the user nothing. Ultrabrowse
+// is exempt: a long silent stretch of reasoning is what the user asked for.
+constexpr base::TimeDelta kTurnIdleTimeout = base::Minutes(3);
+
+// What a click's TARGET TEXT says it will do, for the guard-mode question "does this need the user". The
+// control's own visible words, matched case-insensitively: a model that wants to send, post, pay or delete
+// something has to name the button that does it, and that name is what the user would read before
+// pressing it themselves. A list rather than a classifier, deliberately -- it errs toward asking, and an
+// extra question is cheap where an unwanted payment is not.
+constexpr const char* kConsequentialWords[] = {
+    // English
+    "send", "post", "publish", "submit", "reply", "tweet", "share", "pay", "purchase", "buy",
+    "checkout", "check out", "place order", "order now", "donate", "transfer", "withdraw", "subscribe",
+    "unsubscribe", "delete", "remove", "discard", "erase", "archive", "cancel order",
+    "cancel subscription", "close account", "confirm", "sign", "book now", "reserve", "accept",
+    // Korean
+    "보내기", "전송", "게시", "등록", "올리기", "답장", "공유", "결제", "구매", "주문", "송금", "이체",
+    "출금", "후원", "구독", "삭제", "제거", "탈퇴", "해지", "예약", "신청", "동의", "서명", "승인",
+};
+
+bool IsConsequentialClick(const std::string& target) {
+  const std::string lowered = base::ToLowerASCII(target);
+  for (const char* word : kConsequentialWords) {
+    if (lowered.find(word) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // What the engine is told about the effort, in the field an OpenAI-compatible endpoint already has for
 // it. If the engine ignores it, the budget and the plan step still make the setting mean something --
 // which is why effort is not implemented as this line alone.
-const char* ReasoningEffort(mojom::Effort effort) {
+//
+// Ultrabrowse asks for the engine's HIGHEST effort. On the engine's own route (`redrob/...` models) that is
+// "max": the console validates the level against its own enum (low | medium | high | xhigh | max) and the
+// engine passes it through verbatim. Every other model -- an engine-routed third-party model, or a
+// provider the user connected directly -- gets "high", the top of the OpenAI-compatible scale every such
+// endpoint accepts; sending "max" there would be refused with a 400 rather than ignored.
+const char* ReasoningEffort(mojom::Effort effort, const std::string& wire_model, bool direct) {
   switch (effort) {
     case mojom::Effort::kQuick:
       return "low";
     case mojom::Effort::kStandard:
       return "medium";
     case mojom::Effort::kUltrabrowse:
-      return "high";
+      return !direct && base::StartsWith(wire_model, "redrob/") ? "max" : "high";
   }
 }
 
@@ -435,6 +490,13 @@ TaskStore::TaskStore(Profile* profile,
   // A task answered by the user's own provider never launches the local engine, so the loader
   // factory has to arrive by a path that does not go through EnsureStarted.
   sidecar_->SetLoaderFactory(url_loader_factory_);
+  // SUB-2. The engine's store lives in the profile, so a subscription connected today is still connected
+  // after a restart. Inside the profile directory rather than a shared location: another product's engine
+  // session still cannot see this profile's.
+  if (profile_) {
+    sidecar_->SetDataDirectory(
+        profile_->GetPath().Append(FILE_PATH_LITERAL("Redrob")).Append(FILE_PATH_LITERAL("engine")));
+  }
   // Looked up once here rather than per write: the blocking-thread check needs it, and PathService is
   // not something to call from a write path on every save.
   base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir_);
@@ -668,10 +730,12 @@ void TaskStore::StartTurn(const std::string& task_id) {
   // the only one that can work), then the model this task was started with, then the default. kModel is
   // a WIRE value, not a label -- cycle 37's capture confirmed the engine receives it verbatim.
   const std::string& task_model = task->second->model;
-  request.Set("model", provider ? provider->model
-                                : (task_model.empty() ? std::string(kModel) : task_model));
+  const std::string wire_model =
+      provider ? provider->model : (task_model.empty() ? std::string(kModel) : task_model);
+  request.Set("model", wire_model);
   request.Set("stream", true);
-  request.Set("reasoning_effort", ReasoningEffort(task->second->effort));
+  request.Set("reasoning_effort",
+              ReasoningEffort(task->second->effort, wire_model, provider.has_value()));
   request.Set("messages", conversation->second.messages.Clone());
   request.Set("tools", IsMemoryTask(task_id)
                            ? MemoryTaskTools()
@@ -699,6 +763,7 @@ void TaskStore::StartTurn(const std::string& task_id) {
   conversation->second.turn_text_started = false;
   task->second->state = mojom::TaskState::kRunning;
   Notify(task_id);
+  ArmIdleWatch();
 
   if (provider) {
     // The credential is fetched at the moment the request is built, and asynchronously, because an
@@ -751,6 +816,7 @@ void TaskStore::OnCompletionText(std::string_view text) {
     task->second->narration->append(text);
     conversation->second.assistant_text.append(text);
   }
+  ArmIdleWatch();
   ScheduleNotify(active_task_id_);
 }
 
@@ -766,6 +832,7 @@ void TaskStore::OnCompletionReasoning(std::string_view text) {
     AddStep(active_task_id_, mojom::StepKind::kThinking, "Thinking");
   }
   AddStepDetail(active_task_id_, std::string(text), std::string());
+  ArmIdleWatch();
   ScheduleNotify(active_task_id_);
 }
 
@@ -777,9 +844,11 @@ void TaskStore::OnCompletionToolCall(const std::string& id,
     return;
   }
   conversation->second.proposed.push_back({id, name, arguments_json});
+  ArmIdleWatch();
 }
 
 void TaskStore::OnCompletionFinished(const std::string& finish_reason) {
+  idle_timer_.Stop();
   const std::string task_id = active_task_id_;
   active_task_id_.clear();
 
@@ -969,7 +1038,14 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
     }
     const GURL url(*url_string);
     const std::string* reason = arguments->FindString("reason");
-    content::WebContents* contents = AgentTabs::OpenInAgentGroup(profile_, url, kAgentTabGroupTitle);
+    // CAP-4: with "keep running tasks after closing windows" on, a task whose window was closed gets a
+    // minimized window of its own rather than a refusal.
+    const bool keep_running =
+        profile_ && profile_->GetPrefs()->GetBoolean(prefs::kKeepTasksRunning);
+    content::WebContents* contents =
+        keep_running
+            ? AgentTabs::OpenInAgentGroupCreatingWindow(profile_, url, kAgentTabGroupTitle)
+            : AgentTabs::OpenInAgentGroup(profile_, url, kAgentTabGroupTitle);
     if (!contents) {
       FinishTool(task_id, call,
                  "That page could not be opened. Only http and https pages can be opened, and a "
@@ -982,6 +1058,7 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
     if (conversation->second.visited.size() < kExtractionMaxSteps) {
       conversation->second.visited.emplace_back(url.spec(), std::string());
     }
+    conversation->second.last_url = url;
 
     mojom::Step* step = AddStep(task_id, mojom::StepKind::kOpenedPage,
                                 reason && !reason->empty() ? *reason : "Opened a page");
@@ -999,6 +1076,15 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
 
   content::WebContents* page = conversation->second.page.get();
   if (!page) {
+    // The tab is gone -- the user closed it, or closed the window it was in. Saying which page it was
+    // lets the engine pick the work back up with one open_page instead of starting over.
+    if (conversation->second.last_url.is_valid()) {
+      FinishTool(task_id, call,
+                 "The tab this task was using has been closed, possibly with its window. Call "
+                 "open_page again with " +
+                     conversation->second.last_url.spec() + " to continue where you were.");
+      return;
+    }
     FinishTool(task_id, call, "There is no page open for this task. Open one first.");
     return;
   }
@@ -1053,28 +1139,22 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
       return;
     }
     ++conversation->second.pending_tools;
-    auto done = base::BindOnce(
-        [](base::WeakPtr<TaskStore> store, std::string task_id, ProposedToolCall call,
-           mojom::StepKind kind, std::string label, bool ok) {
-          if (!store) {
-            return;
-          }
-          if (ok) {
-            store->AddStep(task_id, kind, label);
-            store->Notify(task_id);
-          }
-          store->FinishTool(task_id, call,
-                            ok ? "Done." : "Nothing on the page matched that. Read the page and use "
-                                           "the text the user would see.");
-        },
-        weak_factory_.GetWeakPtr(), task_id, call,
-        is_click ? mojom::StepKind::kClicked : mojom::StepKind::kTyped,
-        is_click ? "Clicked \"" + *target + "\"" : "Filled \"" + *target + "\"");
-    if (is_click) {
-      PageTools::ClickByName(page, *target, std::move(done));
-    } else {
-      PageTools::TypeIntoField(page, *target, *text, std::move(done));
+    // Guard mode: a click that sends, posts, pays or deletes waits for the user, in every effort --
+    // Ultrabrowse's larger budget buys more reading, never fewer questions. The task stops in
+    // kBlockedOnPolicy with the control named; the user answers from the task notification or the
+    // surface, and only then does the click run, through the same dispatch as any other.
+    if (is_click && task->second->mode == mojom::PermissionMode::kGuard &&
+        IsConsequentialClick(*target)) {
+      conversation->second.awaiting = call;
+      task->second->awaiting_confirmation = *target;
+      task->second->state = mojom::TaskState::kBlockedOnPolicy;
+      AddStep(task_id, mojom::StepKind::kNeedsConfirmation,
+              l10n_util::GetStringFUTF8(IDS_REDROB_TASK_NEEDS_CONFIRMATION,
+                                        base::UTF8ToUTF16(*target)));
+      Notify(task_id);
+      return;
     }
+    DispatchPageAction(task_id, call, is_click, *target, text ? *text : std::string());
     return;
   }
 
@@ -1146,6 +1226,47 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
   FinishTool(task_id, call, "This browser does not offer a tool by that name.");
 }
 
+void TaskStore::DispatchPageAction(const std::string& task_id,
+                                   const ProposedToolCall& call,
+                                   bool is_click,
+                                   const std::string& target_text,
+                                   const std::string& typed_text) {
+  auto conversation = conversations_.find(task_id);
+  content::WebContents* page =
+      conversation == conversations_.end() ? nullptr : conversation->second.page.get();
+  if (!page) {
+    FinishTool(task_id, call,
+               "The tab this task was using has been closed. Open the page again and retry.");
+    return;
+  }
+  const std::string* target = &target_text;
+  const std::string* text = is_click ? nullptr : &typed_text;
+  {
+    auto done = base::BindOnce(
+        [](base::WeakPtr<TaskStore> store, std::string task_id, ProposedToolCall call,
+           mojom::StepKind kind, std::string label, bool ok) {
+          if (!store) {
+            return;
+          }
+          if (ok) {
+            store->AddStep(task_id, kind, label);
+            store->Notify(task_id);
+          }
+          store->FinishTool(task_id, call,
+                            ok ? "Done." : "Nothing on the page matched that. Read the page and use "
+                                           "the text the user would see.");
+        },
+        weak_factory_.GetWeakPtr(), task_id, call,
+        is_click ? mojom::StepKind::kClicked : mojom::StepKind::kTyped,
+        is_click ? "Clicked \"" + *target + "\"" : "Filled \"" + *target + "\"");
+    if (is_click) {
+      PageTools::ClickByName(page, *target, std::move(done));
+    } else {
+      PageTools::TypeIntoField(page, *target, *text, std::move(done));
+    }
+  }
+}
+
 void TaskStore::FinishTool(const std::string& task_id,
                            const ProposedToolCall& call,
                            const std::string& result) {
@@ -1197,6 +1318,7 @@ bool TaskStore::DrainQueued(const std::string& task_id) {
 }
 
 void TaskStore::OnCompletionFailed(const std::string& message) {
+  idle_timer_.Stop();
   const std::string task_id = active_task_id_;
   active_task_id_.clear();
   if (task_id.empty()) {
@@ -1366,7 +1488,25 @@ void TaskStore::CancelTask(const std::string& task_id) {
     return;
   }
   it->second->state = mojom::TaskState::kCancelled;
+  // A confirmation the user never answered goes with the task: there is nothing left to allow.
+  it->second->awaiting_confirmation.reset();
+  if (auto conversation = conversations_.find(task_id); conversation != conversations_.end()) {
+    // Answered in the history, not just dropped: a later follow-up on this task would otherwise send the
+    // engine a tool call with no reply.
+    if (const std::optional<ProposedToolCall>& awaiting = conversation->second.awaiting) {
+      base::DictValue message =
+          TextMessage("tool", "The user stopped the task before answering, so it was not done.");
+      message.Set("tool_call_id", awaiting->id);
+      message.Set("name", awaiting->name);
+      conversation->second.messages.Append(std::move(message));
+      if (conversation->second.pending_tools > 0) {
+        --conversation->second.pending_tools;
+      }
+    }
+    conversation->second.awaiting.reset();
+  }
   if (active_task_id_ == task_id) {
+    idle_timer_.Stop();
     // Stops delivery as well as the request: the stream's remaining deltas belong to a task the user
     // has already stopped.
     sidecar_->CancelCompletion();
@@ -1399,6 +1539,19 @@ mojom::FollowUpOutcome TaskStore::SendFollowUp(const std::string& task_id,
   }
 
   const bool interrupt = mode == mojom::FollowUpMode::kInterrupt;
+  // Interrupting a task that is waiting on a guard-mode confirmation declines that confirmation and takes
+  // the new instruction at the boundary the decline creates. Starting a turn directly would send the
+  // engine a history holding a tool call with no answer, which it rejects.
+  if (interrupt && conversation->second.awaiting.has_value()) {
+    if (conversation->second.queued.size() >= kMaxQueuedFollowUps) {
+      return mojom::FollowUpOutcome::kRejected;
+    }
+    conversation->second.queued.push_back(prompt);
+    task->second->queued.push_back(prompt);
+    AddStep(task_id, mojom::StepKind::kSteered, "Steered: " + prompt);
+    AnswerConfirmation(task_id, /*allow=*/false);
+    return mojom::FollowUpOutcome::kInterrupted;
+  }
   if (!interrupt) {
     // Queued, including for kAuto: pressing Enter on a running task should not throw away the work it
     // is in the middle of. Interrupting is a thing the user asks for by name.
@@ -1687,6 +1840,538 @@ void TaskStore::Notify(const std::string& task_id) {
   for (Observer& observer : observers_) {
     observer.OnTaskChanged(*it->second);
   }
+  // CAP-4. Every state change passes through here, which is what makes these two the single place the
+  // keep-alive and the notifications are decided.
+  UpdateKeepAlive();
+  AnnounceTask(task_id);
+}
+
+// --- CAP-4: work that survives the window closing ---------------------------------------------------
+
+void TaskStore::Shutdown() {
+  // The profile is going away (the user quit, or the profile is being torn down). Nothing may hold it
+  // from here on, and a keep-alive registered during shutdown is a CHECK failure.
+  shutting_down_ = true;
+  idle_timer_.Stop();
+  profile_keep_alive_.reset();
+  keep_alive_.reset();
+}
+
+void TaskStore::UpdateKeepAlive() {
+  bool wanted = false;
+  if (!shutting_down_ && profile_ && !profile_->IsOffTheRecord() &&
+      profile_->GetPrefs()->GetBoolean(prefs::kKeepTasksRunning) &&
+      !KeepAliveRegistry::GetInstance()->IsShuttingDown()) {
+    for (const auto& [id, task] : tasks_) {
+      if (!IsTerminal(task->state)) {
+        wanted = true;
+        break;
+      }
+    }
+  }
+  if (wanted == (keep_alive_ != nullptr)) {
+    return;
+  }
+  if (!wanted) {
+    profile_keep_alive_.reset();
+    keep_alive_.reset();
+    return;
+  }
+  // Existing origins rather than new ones of ours: background work keeping the process and the profile
+  // up is exactly what these two describe, and a new enumerator would be four upstream files and a
+  // histogram enum to carry at every uprev for a label.
+  keep_alive_ = std::make_unique<ScopedKeepAlive>(KeepAliveOrigin::BACKGROUND_MODE_MANAGER,
+                                                  KeepAliveRestartOption::DISABLED);
+  profile_keep_alive_ =
+      ScopedProfileKeepAlive::TryAcquire(profile_, ProfileKeepAliveOrigin::kBackgroundMode);
+}
+
+namespace {
+
+std::string NotificationIdFor(const std::string& task_id) {
+  return "redrob-task-" + task_id;
+}
+
+// What a task is called in a notification. Tasks have no title of their own; the prompt is what the user
+// typed, so it is what they will recognise -- trimmed to one line.
+std::u16string TaskTitleFor(const mojom::Task& task) {
+  std::string title = task.prompt;
+  if (const size_t newline = title.find('\n'); newline != std::string::npos) {
+    title.resize(newline);
+  }
+  constexpr size_t kMaxTitleBytes = 80;
+  if (title.size() > kMaxTitleBytes) {
+    // Cut on a character boundary, never inside a multi-byte sequence.
+    size_t cut = kMaxTitleBytes;
+    while (cut > 0 && (static_cast<unsigned char>(title[cut]) & 0xC0) == 0x80) {
+      --cut;
+    }
+    title.resize(cut);
+    title += "\u2026";
+  }
+  return base::UTF8ToUTF16(title);
+}
+
+}  // namespace
+
+void TaskStore::AnnounceTask(const std::string& task_id) {
+  auto it = tasks_.find(task_id);
+  if (it == tasks_.end() || !profile_ || shutting_down_) {
+    return;
+  }
+  const mojom::Task& task = *it->second;
+  const bool done = task.state == mojom::TaskState::kSucceeded;
+  const bool failed = task.state == mojom::TaskState::kFailed;
+  const bool needs_you = task.state == mojom::TaskState::kBlockedOnPolicy &&
+                         task.awaiting_confirmation.has_value();
+  NotificationDisplayService* display = NotificationDisplayServiceFactory::GetForProfile(profile_);
+  if (!display) {
+    return;
+  }
+  const std::string notification_id = NotificationIdFor(task_id);
+
+  auto announced = announced_.find(task_id);
+  const bool already = announced != announced_.end() && announced->second == task.state;
+  if (!done && !failed && !needs_you) {
+    // Running again, or cancelled: an earlier "needs you" no longer describes the task.
+    if (announced != announced_.end()) {
+      display->Close(NotificationHandler::Type::TRANSIENT, notification_id);
+      announced_.erase(announced);
+    }
+    return;
+  }
+  if (already) {
+    return;
+  }
+  // "Needs you" always: the task cannot move until the user answers, and the browser's own surface may
+  // not be on screen. "Done" and "failed" only when no window of the user's is open -- someone at the
+  // browser is already watching the task.
+  if (!needs_you && AgentTabs::HasUserWindow(profile_)) {
+    return;
+  }
+  announced_[task_id] = task.state;
+
+  message_center::RichNotificationData rich;
+  std::u16string title;
+  std::u16string message;
+  if (needs_you) {
+    title = l10n_util::GetStringFUTF16(IDS_REDROB_TASK_NOTIFY_NEEDS_YOU, TaskTitleFor(task));
+    message = l10n_util::GetStringFUTF16(IDS_REDROB_TASK_NOTIFY_NEEDS_YOU_BODY,
+                                         base::UTF8ToUTF16(*task.awaiting_confirmation));
+    rich.buttons.emplace_back(l10n_util::GetStringUTF16(IDS_REDROB_TASK_NOTIFY_ALLOW));
+    rich.buttons.emplace_back(l10n_util::GetStringUTF16(IDS_REDROB_TASK_NOTIFY_DECLINE));
+    rich.never_timeout = true;
+  } else if (done) {
+    title = l10n_util::GetStringFUTF16(IDS_REDROB_TASK_NOTIFY_DONE, TaskTitleFor(task));
+    message = l10n_util::GetStringUTF16(IDS_REDROB_TASK_NOTIFY_OPEN);
+  } else {
+    title = l10n_util::GetStringFUTF16(IDS_REDROB_TASK_NOTIFY_FAILED, TaskTitleFor(task));
+    message = base::UTF8ToUTF16(task.error.value_or(std::string()));
+  }
+
+  message_center::Notification notification(
+      message_center::NOTIFICATION_TYPE_SIMPLE, notification_id, title, message, ui::ImageModel(),
+      /*display_source=*/l10n_util::GetStringUTF16(IDS_REDROB_TASK_NOTIFY_SOURCE),
+      /*origin_url=*/GURL(),
+      message_center::NotifierId(message_center::NotifierType::SYSTEM_COMPONENT, "redrob.tasks"),
+      rich,
+      base::MakeRefCounted<message_center::HandleNotificationClickDelegate>(
+          base::BindRepeating(&TaskStore::OnTaskNotificationClicked, weak_factory_.GetWeakPtr(),
+                              task_id)));
+  display->Display(NotificationHandler::Type::TRANSIENT, notification, /*metadata=*/nullptr);
+}
+
+void TaskStore::OnTaskNotificationClicked(const std::string& task_id, std::optional<int> button) {
+  auto task = tasks_.find(task_id);
+  if (task == tasks_.end()) {
+    return;
+  }
+  // The two buttons exist only on a "needs you" notification: 0 allows the one action, 1 declines it.
+  if (button.has_value() && task->second->awaiting_confirmation.has_value()) {
+    AnswerConfirmation(task_id, button.value() == 0);
+    return;
+  }
+  if (NotificationDisplayService* display =
+          profile_ ? NotificationDisplayServiceFactory::GetForProfile(profile_) : nullptr) {
+    display->Close(NotificationHandler::Type::TRANSIENT, NotificationIdFor(task_id));
+  }
+  // Opening the task means showing what it worked on: its own tab, in its own window, restored. There is
+  // no separate task page to open since the task view moved into the extension, and a tab the user can
+  // see is the task's record anyway. When that tab is gone, a new window -- the user clicked to come back
+  // to the browser, so a window is what they asked for.
+  auto conversation = conversations_.find(task_id);
+  if (conversation != conversations_.end() && conversation->second.page &&
+      AgentTabs::Reveal(conversation->second.page.get())) {
+    return;
+  }
+  if (!profile_) {
+    return;
+  }
+  NavigateParams params(profile_, GURL(chrome::kChromeUINewTabURL), ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
+  params.disposition = WindowOpenDisposition::NEW_WINDOW;
+  params.window_action = NavigateParams::WindowAction::kShowWindow;
+  Navigate(&params);
+}
+
+bool TaskStore::AnswerConfirmation(const std::string& task_id, bool allow) {
+  auto task = tasks_.find(task_id);
+  auto conversation = conversations_.find(task_id);
+  if (task == tasks_.end() || conversation == conversations_.end() ||
+      !conversation->second.awaiting.has_value() ||
+      task->second->state != mojom::TaskState::kBlockedOnPolicy) {
+    return false;
+  }
+  const ProposedToolCall call = *conversation->second.awaiting;
+  const std::string target = task->second->awaiting_confirmation.value_or(std::string());
+  conversation->second.awaiting.reset();
+  task->second->awaiting_confirmation.reset();
+  task->second->state = mojom::TaskState::kRunning;
+  if (!allow) {
+    AddStep(task_id, mojom::StepKind::kRefused,
+            l10n_util::GetStringFUTF8(IDS_REDROB_TASK_CONFIRMATION_DECLINED,
+                                      base::UTF8ToUTF16(target)));
+    Notify(task_id);
+    FinishTool(task_id, call,
+               "The user declined that action, so it was not performed. Do not try it again in this "
+               "task; finish what you can without it, or ask the user how they want to proceed.");
+    return true;
+  }
+  Notify(task_id);
+  // `pending_tools` already counts this call: it was raised when the click was proposed, and it is the
+  // reason the turn waited. The dispatch's own answer is what brings it back down.
+  DispatchPageAction(task_id, call, /*is_click=*/true, target, std::string());
+  return true;
+}
+
+void TaskStore::ArmIdleWatch() {
+  auto task = tasks_.find(active_task_id_);
+  if (task == tasks_.end() || task->second->effort == mojom::Effort::kUltrabrowse) {
+    idle_timer_.Stop();
+    return;
+  }
+  idle_timer_.Start(FROM_HERE, kTurnIdleTimeout,
+                    base::BindOnce(&TaskStore::OnTurnIdle, base::Unretained(this)));
+}
+
+void TaskStore::OnTurnIdle() {
+  const std::string task_id = active_task_id_;
+  if (task_id.empty()) {
+    return;
+  }
+  sidecar_->CancelCompletion();
+  active_task_id_.clear();
+  FinishTask(task_id, mojom::TaskState::kFailed,
+             l10n_util::GetStringUTF8(IDS_REDROB_TASK_TURN_IDLE));
+  // Something else may have been waiting for the stream this turn held.
+  for (const auto& [id, other] : tasks_) {
+    if (other->state == mojom::TaskState::kQueued) {
+      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE, base::BindOnce(&TaskStore::StartTurn, weak_factory_.GetWeakPtr(), id));
+      break;
+    }
+  }
+}
+
+// --- SUB-1..4: the engine's providers, sign-in and keys ---------------------------------------------
+
+bool TaskStore::EngineReady() {
+  sidecar_->EnsureStarted(
+      url_loader_factory_,
+      base::BindRepeating(&TaskStore::OnSidecarStatusChanged, base::Unretained(this)));
+  return sidecar_->status() == SidecarClient::Status::kReady;
+}
+
+namespace {
+
+bool IsSuccess(int status) {
+  return status >= 200 && status < 300;
+}
+
+// The engine's error envelope says why a sign-in or a key was refused. Read the most specific field it
+// carries; fall back to a sentence of ours rather than to a status code a person cannot act on.
+std::string EngineErrorMessage(int status, const std::optional<std::string>& body) {
+  if (body) {
+    if (std::optional<base::DictValue> parsed =
+            base::JSONReader::ReadDict(*body, base::JSON_PARSE_RFC)) {
+      if (const base::DictValue* data = parsed->FindDict("data")) {
+        if (const std::string* message = data->FindString("message");
+            message && !message->empty()) {
+          return *message;
+        }
+      }
+      if (const std::string* message = parsed->FindString("message");
+          message && !message->empty()) {
+        return *message;
+      }
+    }
+  }
+  if (status == 0) {
+    return l10n_util::GetStringUTF8(IDS_REDROB_ENGINE_ACCOUNT_UNREACHABLE);
+  }
+  return l10n_util::GetStringFUTF8(IDS_REDROB_ENGINE_ACCOUNT_REFUSED,
+                                   base::NumberToString16(status));
+}
+
+// Provider ids travel into a URL path. The engine's ids are lowercase words with dashes and dots;
+// anything else is refused before it can reach a path.
+bool IsPlainProviderId(const std::string& id) {
+  if (id.empty() || id.size() > 128) {
+    return false;
+  }
+  for (char c : id) {
+    if (!(base::IsAsciiAlphaNumeric(c) || c == '-' || c == '_' || c == '.')) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::set<std::string> StringSet(const base::ListValue* list) {
+  std::set<std::string> out;
+  if (list) {
+    for (const base::Value& value : *list) {
+      if (value.is_string()) {
+        out.insert(value.GetString());
+      }
+    }
+  }
+  return out;
+}
+
+// The three engine answers, joined. Nothing secret survives this: a provider record can carry the
+// credential itself in `key`, and `key` is never read.
+TaskStore::EngineAccount ParseEngineAccount(const std::optional<std::string>& providers_body,
+                                            const std::optional<std::string>& methods_body,
+                                            const std::optional<std::string>& console_body) {
+  TaskStore::EngineAccount account;
+  account.engine_ready = true;
+  std::optional<base::DictValue> listing =
+      providers_body ? base::JSONReader::ReadDict(*providers_body, base::JSON_PARSE_RFC)
+                     : std::nullopt;
+  std::optional<base::DictValue> methods =
+      methods_body ? base::JSONReader::ReadDict(*methods_body, base::JSON_PARSE_RFC)
+                   : std::nullopt;
+  std::optional<base::DictValue> console =
+      console_body ? base::JSONReader::ReadDict(*console_body, base::JSON_PARSE_RFC)
+                   : std::nullopt;
+  std::set<std::string> managed;
+  if (console) {
+    if (const std::string* org = console->FindString("activeOrgName")) {
+      account.console_org = *org;
+    }
+    managed = StringSet(console->FindList("consoleManagedProviders"));
+  }
+  if (!listing) {
+    return account;
+  }
+  const std::set<std::string> connected = StringSet(listing->FindList("connected"));
+  const base::ListValue* all = listing->FindList("all");
+  if (!all) {
+    return account;
+  }
+  for (const base::Value& value : *all) {
+    const base::DictValue* record = value.GetIfDict();
+    const std::string* id = record ? record->FindString("id") : nullptr;
+    if (!id) {
+      continue;
+    }
+    TaskStore::EngineProvider provider;
+    provider.id = *id;
+    const std::string* name = record->FindString("name");
+    provider.name = name ? *name : *id;
+    if (const std::string* source = record->FindString("source")) {
+      provider.source = *source;
+    }
+    provider.connected = connected.contains(*id);
+    provider.console_managed = managed.contains(*id);
+    if (const base::DictValue* models = record->FindDict("models")) {
+      provider.model_count = models->size();
+    }
+    if (const base::ListValue* ways = methods ? methods->FindList(*id) : nullptr) {
+      int index = 0;
+      for (const base::Value& way : *ways) {
+        if (const base::DictValue* method = way.GetIfDict()) {
+          TaskStore::EngineAuthMethod entry;
+          entry.index = index;
+          const std::string* type = method->FindString("type");
+          const std::string* label = method->FindString("label");
+          entry.type = type ? *type : std::string();
+          entry.label = label ? *label : std::string();
+          provider.methods.push_back(std::move(entry));
+        }
+        ++index;
+      }
+    }
+    account.providers.push_back(std::move(provider));
+  }
+  return account;
+}
+
+// Collects the three listing answers in whatever order they land.
+struct PendingAccount {
+  TaskStore::EngineAccountCallback callback;
+  std::optional<std::string> providers;
+  std::optional<std::string> methods;
+  std::optional<std::string> console;
+  int outstanding = 3;
+};
+
+void CollectAccountPart(std::shared_ptr<PendingAccount> pending,
+                        int part,
+                        int status,
+                        std::optional<std::string> body) {
+  if (IsSuccess(status)) {
+    if (part == 0) {
+      pending->providers = std::move(body);
+    } else if (part == 1) {
+      pending->methods = std::move(body);
+    } else {
+      pending->console = std::move(body);
+    }
+  }
+  if (--pending->outstanding == 0) {
+    std::move(pending->callback)
+        .Run(ParseEngineAccount(pending->providers, pending->methods, pending->console));
+  }
+}
+
+}  // namespace
+
+void TaskStore::GetEngineAccount(EngineAccountCallback callback) {
+  if (!EngineReady()) {
+    std::move(callback).Run(EngineAccount());
+    return;
+  }
+  auto pending = std::make_shared<PendingAccount>();
+  pending->callback = std::move(callback);
+  sidecar_->EngineRequest("GET", "/provider", std::nullopt, base::Seconds(10),
+                          base::BindOnce(&CollectAccountPart, pending, 0));
+  sidecar_->EngineRequest("GET", "/provider/auth", std::nullopt, base::Seconds(10),
+                          base::BindOnce(&CollectAccountPart, pending, 1));
+  sidecar_->EngineRequest("GET", "/experimental/console", std::nullopt, base::Seconds(10),
+                          base::BindOnce(&CollectAccountPart, pending, 2));
+}
+
+void TaskStore::BeginEngineSignIn(const std::string& provider_id,
+                                  int method,
+                                  base::OnceCallback<void(SignInStart)> callback) {
+  if (!IsPlainProviderId(provider_id) || method < 0 || !EngineReady()) {
+    SignInStart start;
+    start.error = l10n_util::GetStringUTF8(IDS_REDROB_ENGINE_ACCOUNT_UNREACHABLE);
+    std::move(callback).Run(std::move(start));
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("method", method);
+  sidecar_->EngineRequest(
+      "POST", "/provider/" + provider_id + "/oauth/authorize", base::WriteJson(payload),
+      base::Seconds(30),
+      base::BindOnce(&TaskStore::OnEngineAuthorize, weak_factory_.GetWeakPtr(),
+                     std::move(callback)));
+}
+
+void TaskStore::OnEngineAuthorize(base::OnceCallback<void(SignInStart)> callback,
+                                  int status,
+                                  std::optional<std::string> body) {
+  SignInStart start;
+  std::optional<base::DictValue> parsed =
+      body ? base::JSONReader::ReadDict(*body, base::JSON_PARSE_RFC) : std::nullopt;
+  const std::string* url = parsed ? parsed->FindString("url") : nullptr;
+  const GURL authorize = url ? GURL(*url) : GURL();
+  if (!IsSuccess(status) || !authorize.is_valid() || !authorize.SchemeIs("https")) {
+    start.error = IsSuccess(status) ? l10n_util::GetStringUTF8(IDS_REDROB_ENGINE_SIGN_IN_NO_PAGE)
+                                    : EngineErrorMessage(status, body);
+    std::move(callback).Run(std::move(start));
+    return;
+  }
+  if (const std::string* instructions = parsed->FindString("instructions")) {
+    start.instructions = *instructions;
+  }
+  const std::string* kind = parsed->FindString("method");
+  start.needs_code = kind && *kind == "code";
+  // Opened by the browser, in a tab the user can see, so where they are signing in is never a page's
+  // claim.
+  if (profile_) {
+    NavigateParams params(profile_, authorize, ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
+    params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
+    Navigate(&params);
+  }
+  std::move(callback).Run(std::move(start));
+}
+
+void TaskStore::FinishEngineSignIn(const std::string& provider_id,
+                                   int method,
+                                   const std::string& code,
+                                   base::OnceCallback<void(std::string)> callback) {
+  if (!IsPlainProviderId(provider_id) || method < 0 || code.size() > 4096 || !EngineReady()) {
+    std::move(callback).Run(l10n_util::GetStringUTF8(IDS_REDROB_ENGINE_ACCOUNT_UNREACHABLE));
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("method", method);
+  if (!code.empty()) {
+    payload.Set("code", code);
+  }
+  // The engine answers once the user has finished in the other tab, so this waits minutes, not seconds.
+  sidecar_->EngineRequest(
+      "POST", "/provider/" + provider_id + "/oauth/callback", base::WriteJson(payload),
+      base::Minutes(10),
+      base::BindOnce(&TaskStore::OnEngineAccountChange, weak_factory_.GetWeakPtr(),
+                     std::move(callback), /*expect_true=*/true));
+}
+
+void TaskStore::SetEngineApiKey(const std::string& provider_id,
+                                const std::string& key,
+                                base::OnceCallback<void(std::string)> callback) {
+  const std::string trimmed(base::TrimWhitespaceASCII(key, base::TRIM_ALL));
+  if (!IsPlainProviderId(provider_id) || trimmed.empty() || trimmed.size() > 4096 ||
+      !EngineReady()) {
+    std::move(callback).Run(l10n_util::GetStringUTF8(IDS_REDROB_ENGINE_ACCOUNT_UNREACHABLE));
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("type", "api");
+  payload.Set("key", trimmed);
+  sidecar_->EngineRequest("PUT", "/auth/" + provider_id, base::WriteJson(payload),
+                          base::Seconds(10),
+                          base::BindOnce(&TaskStore::OnEngineAccountChange,
+                                         weak_factory_.GetWeakPtr(), std::move(callback),
+                                         /*expect_true=*/false));
+}
+
+void TaskStore::DisconnectEngineProvider(const std::string& provider_id,
+                                         base::OnceCallback<void(bool)> callback) {
+  if (!IsPlainProviderId(provider_id) || !EngineReady()) {
+    std::move(callback).Run(false);
+    return;
+  }
+  sidecar_->EngineRequest(
+      "DELETE", "/auth/" + provider_id, std::nullopt, base::Seconds(10),
+      base::BindOnce(&TaskStore::OnEngineAccountChange, weak_factory_.GetWeakPtr(),
+                     base::BindOnce([](base::OnceCallback<void(bool)> done,
+                                       std::string error) { std::move(done).Run(error.empty()); },
+                                    std::move(callback)),
+                     /*expect_true=*/false));
+}
+
+void TaskStore::OnEngineAccountChange(base::OnceCallback<void(std::string)> callback,
+                                      bool expect_true,
+                                      int status,
+                                      std::optional<std::string> body) {
+  // The OAuth callback answers `true` on success and can answer 200 `false`; the key routes only answer
+  // a status. Either way a refused change keeps the engine's reason.
+  const bool ok = IsSuccess(status) &&
+                  (!expect_true ||
+                   (body && base::TrimWhitespaceASCII(*body, base::TRIM_ALL) == "true"));
+  if (!ok) {
+    std::move(callback).Run(IsSuccess(status)
+                                ? l10n_util::GetStringUTF8(IDS_REDROB_ENGINE_SIGN_IN_FAILED)
+                                : EngineErrorMessage(status, body));
+    return;
+  }
+  // What is connected decides what the task chooser can offer.
+  RefreshModels();
+  std::move(callback).Run(std::string());
 }
 
 // --- CAP-1/CAP-2: page context for skill arming -------------------------------------------------

@@ -31,6 +31,8 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "build/build_config.h"
+#include "net/http/http_request_headers.h"
+#include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/resource_request.h"
@@ -522,7 +524,7 @@ void SidecarClient::EnsureStarted(
   base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
       base::BindOnce(
-          [](std::string credentials) {
+          [](std::string credentials, base::FilePath persistent_dir) {
             auto result = std::make_unique<LaunchResult>();
 
             std::optional<base::FilePath> engine = SidecarClient::FindEngineBinary();
@@ -531,8 +533,16 @@ void SidecarClient::EnsureStarted(
               return result;
             }
 
-            base::FilePath data_dir;
-            if (!base::CreateNewTempDirectory(FILE_PATH_LITERAL("redrob_sidecar"), &data_dir)) {
+            // SUB-2: the profile's own engine directory when the owner gave one, so a sign-in survives
+            // the next launch; a fresh temporary directory otherwise.
+            base::FilePath data_dir = persistent_dir;
+            if (!data_dir.empty()) {
+              if (!base::CreateDirectory(data_dir)) {
+                result->failure = "could not create the engine's data directory in the profile";
+                return result;
+              }
+            } else if (!base::CreateNewTempDirectory(FILE_PATH_LITERAL("redrob_sidecar"),
+                                                     &data_dir)) {
               result->failure = "could not create a private data directory";
               return result;
             }
@@ -609,7 +619,7 @@ void SidecarClient::EnsureStarted(
             result->failure = "the engine never printed a loopback listener";
             return result;
           },
-          basic_credentials_),
+          basic_credentials_, persistent_data_dir_),
       base::BindOnce(&SidecarClient::OnLaunched, weak_factory_.GetWeakPtr()));
 }
 
@@ -967,6 +977,83 @@ void SidecarClient::StartDirectCompletion(const std::string& endpoint,          
   }
   completion_ = std::make_unique<CompletionStream>(delegate, std::move(loader));
   completion_->Start(url_loader_factory_.get());
+}
+
+void SidecarClient::SetDataDirectory(const base::FilePath& dir) {
+  persistent_data_dir_ = dir;
+}
+
+void SidecarClient::EngineRequest(const std::string& method,
+                                  const std::string& path,
+                                  std::optional<std::string> json_body,
+                                  base::TimeDelta timeout,
+                                  EngineCallback callback) {
+  if (status_ != Status::kReady || base_url_.empty() || path.empty() || path.front() != '/') {
+    std::move(callback).Run(0, std::nullopt);
+    return;
+  }
+
+  static constexpr net::NetworkTrafficAnnotationTag kAnnotation =
+      net::DefineNetworkTrafficAnnotation("redrob_sidecar_account", R"(
+        semantics {
+          sender: "Redrob AI surface"
+          description:
+            "Asks the locally launched Redrob Code engine which AI providers it can sign in to and "
+            "which are connected, starts or finishes a sign-in the user asked for in Redrob settings, "
+            "and hands the engine an API key the user typed, or tells it to forget one. The request "
+            "never leaves the machine; the engine itself talks to the provider."
+          trigger: "The user opens the subscriptions section of Redrob settings, or acts in it."
+          data:
+            "A generated per-launch credential for the local process; for a key the user saves, that "
+            "key; for a sign-in, the provider id and, when the provider shows the user a code to paste, "
+            "that code."
+          destination: LOCAL
+        }
+        policy {
+          cookies_allowed: NO
+          setting: "Only sent when the user uses the subscriptions section of Redrob settings."
+          policy_exception_justification: "Does not contact a remote server."
+        })");
+
+  auto request = std::make_unique<network::ResourceRequest>();
+  request->url = GURL(base_url_ + path);
+  request->method = method;
+  request->credentials_mode = network::mojom::CredentialsMode::kOmit;
+  request->headers.SetHeader(net::HttpRequestHeaders::kAuthorization,
+                             "Basic " + base::Base64Encode("redrob:" + basic_credentials_));
+  request->headers.SetHeader(net::HttpRequestHeaders::kAccept, "application/json");
+
+  auto loader = network::SimpleURLLoader::Create(std::move(request), kAnnotation);
+  if (json_body.has_value()) {
+    loader->AttachStringForUpload(std::move(json_body).value(), "application/json");
+  }
+  loader->SetTimeoutDuration(timeout);
+  // A 4xx carries the engine's own error envelope, which is the reason a sign-in failed; read it.
+  loader->SetAllowHttpErrorResults(true);
+  const int id = ++next_engine_loader_id_;
+  network::SimpleURLLoader* raw = loader.get();
+  engine_loaders_[id] = std::move(loader);
+  raw->DownloadToString(
+      url_loader_factory_.get(),
+      base::BindOnce(&SidecarClient::OnEngineResponse, weak_factory_.GetWeakPtr(), id,
+                     std::move(callback)),
+      // The provider listing carries every provider the engine knows and every model of each. Large,
+      // bounded.
+      /*max_body_size=*/8 * 1024 * 1024);
+}
+
+void SidecarClient::OnEngineResponse(int loader_id,
+                                     EngineCallback callback,
+                                     std::optional<std::string> body) {
+  auto it = engine_loaders_.find(loader_id);
+  int status = 0;
+  if (it != engine_loaders_.end()) {
+    if (it->second->ResponseInfo() && it->second->ResponseInfo()->headers) {
+      status = it->second->ResponseInfo()->headers->response_code();
+    }
+    engine_loaders_.erase(it);
+  }
+  std::move(callback).Run(status, std::move(body));
 }
 
 void SidecarClient::CancelCompletion() {
