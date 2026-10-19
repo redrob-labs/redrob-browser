@@ -247,7 +247,7 @@ index 142bd94887c32abbc4e840521a8a4e892eb71ce8..ac1935136b73c64b2ccab2a5d78974a4
    experimental type PermissionType extends string
      enum
        ar
-@@ -304,6 +535,39 @@ domain Browser
+@@ -304,6 +535,41 @@ domain Browser
        # position and size are returned.
        Bounds bounds
  
@@ -278,6 +278,8 @@ index 142bd94887c32abbc4e840521a8a4e892eb71ce8..ac1935136b73c64b2ccab2a5d78974a4
 +  experimental command redrobLogin
 +    parameters
 +      Target.TargetID targetId
++      # The per-run secret the browser gave the agent server it launched. Any other caller is refused.
++      string bridgeToken
 +      # Picks between several saved accounts.
 +      optional string usernameHint
 +    returns

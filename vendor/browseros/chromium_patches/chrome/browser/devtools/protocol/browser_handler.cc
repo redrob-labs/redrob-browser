@@ -2,7 +2,7 @@ diff --git a/chrome/browser/devtools/protocol/browser_handler.cc b/chrome/browse
 index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a2889fbc5d3 100644
 --- a/chrome/browser/devtools/protocol/browser_handler.cc
 +++ b/chrome/browser/devtools/protocol/browser_handler.cc
-@@ -4,24 +4,41 @@
+@@ -4,24 +4,42 @@
  
  #include "chrome/browser/devtools/protocol/browser_handler.h"
  
@@ -22,6 +22,7 @@ index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a28
  #include "chrome/browser/devtools/devtools_dock_tile.h"
  #include "chrome/browser/profiles/profile.h"
  #include "chrome/browser/profiles/profile_manager.h"
++#include "chrome/browser/redrob/app_bridge_token.h"
 +#include "chrome/browser/redrob/task_store.h"
 +#include "chrome/browser/redrob/task_store_factory.h"
  #include "chrome/browser/ui/browser_commands.h"
@@ -531,7 +532,7 @@ index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a28
  Response BrowserHandler::GetWindowBounds(
      int window_id,
      std::unique_ptr<protocol::Browser::Bounds>* out_bounds) {
-@@ -305,3 +788,695 @@ protocol::Response BrowserHandler::AddPrivacySandboxEnrollmentOverride(
+@@ -305,3 +789,703 @@ protocol::Response BrowserHandler::AddPrivacySandboxEnrollmentOverride(
        net::SchemefulSite(url_to_add));
    return Response::Success();
  }
@@ -1202,8 +1203,16 @@ index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a28
 +// Redrob: the app bridge's `login` tool. Everything that decides and fills is TaskStore::LoginFromBridge,
 +// the same gate, fill path and audit log the in-browser agent's tool uses; this only finds the tab.
 +void BrowserHandler::RedrobLogin(const std::string& target_id,
++                                 const std::string& bridge_token,
 +                                 std::optional<std::string> username_hint,
 +                                 std::unique_ptr<RedrobLoginCallback> callback) {
++  // Only the agent server this browser launched holds the per-run secret. Any other program on the
++  // debugging port is refused before a tab is even looked up.
++  if (!redrob::IsAppBridgeToken(bridge_token)) {
++    callback->sendFailure(
++        Response::ServerError("Agent sign-in is only available to the app bridge"));
++    return;
++  }
 +  TabLookupResult lookup;
 +  Response response = ResolveTabIdentifier(target_id, std::nullopt, &lookup);
 +  if (!response.IsSuccess()) {

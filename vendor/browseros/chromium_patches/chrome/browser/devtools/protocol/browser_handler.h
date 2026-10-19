@@ -35,7 +35,7 @@ index e1424aa52cbf6..aa49d245cc034 100644
    protocol::Response GetWindowBounds(
        int window_id,
        std::unique_ptr<protocol::Browser::Bounds>* out_bounds) override;
-@@ -41,6 +57,113 @@ class BrowserHandler : public protocol::Browser::Backend {
+@@ -41,6 +57,114 @@ class BrowserHandler : public protocol::Browser::Backend {
    protocol::Response AddPrivacySandboxEnrollmentOverride(
        const std::string& in_url) override;
  
@@ -143,6 +143,7 @@ index e1424aa52cbf6..aa49d245cc034 100644
 +
 +  // Redrob agent sign-in for the app bridge. Async: the password store answers later.
 +  void RedrobLogin(const std::string& target_id,
++                   const std::string& bridge_token,
 +                   std::optional<std::string> username_hint,
 +                   std::unique_ptr<RedrobLoginCallback> callback) override;
 +

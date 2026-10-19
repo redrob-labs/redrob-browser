@@ -13,7 +13,7 @@ index 2e694986c7617565320e7259f4548ba6e75561b4..34eaeedaa4997dcc9f6e907a6c36f7b3
      "protocol/pwa.cc",
      "protocol/pwa.h",
      "protocol/security.cc",
-@@ -410,8 +414,14 @@ static_library("devtools") {
+@@ -410,8 +414,16 @@ static_library("devtools") {
      deps += [
        "//chrome/app:command_ids",
        "//chrome/browser/badging",
@@ -23,7 +23,9 @@ index 2e694986c7617565320e7259f4548ba6e75561b4..34eaeedaa4997dcc9f6e907a6c36f7b3
        "//chrome/browser/custom_handlers",
        "//chrome/browser/first_party_sets",
 +      "//chrome/browser/history",
-+      # Redrob: Browser.redrobLogin hands the app bridge's sign-in to TaskStore.
++      # Redrob: Browser.redrobLogin hands the app bridge's sign-in to TaskStore, and only to a caller
++      # holding the app-bridge secret.
++      "//chrome/browser/redrob:app_bridge_token",
 +      "//chrome/browser/redrob:sidecar",
        "//chrome/browser/ui/media_router",
        "//chrome/browser/ui/startup",

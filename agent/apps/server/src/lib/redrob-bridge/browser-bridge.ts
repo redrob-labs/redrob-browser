@@ -250,10 +250,18 @@ function buildTools(browser: Browser, session: BrowserSession): ToolDef[] {
           (await session.pages.refresh(pageId)) ??
           session.pages.getInfo(pageId)
         if (!info) throw new Error(`No open tab with id ${pageId}.`)
+        const bridgeToken = process.env.REDROB_APP_BRIDGE_TOKEN
+        if (!bridgeToken) {
+          throw new Error(
+            'Agent sign-in needs the browser that launched this server (no app-bridge secret).',
+          )
+        }
         // Browser.redrobLogin runs in the browser process (TaskStore::LoginFromBridge): the same policy,
-        // per-site list, unlock window and audit log as the in-browser agent's login tool.
+        // per-site list, unlock window and audit log as the in-browser agent's login tool. The browser
+        // refuses any caller without the per-run secret it put in this process's environment.
         const result = (await session.cdp('Browser.redrobLogin', {
           targetId: info.targetId,
+          bridgeToken,
           ...(typeof username_hint === 'string' && username_hint
             ? { usernameHint: username_hint }
             : {}),
