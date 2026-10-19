@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/media/extension_media_access_handler.cc b/chrome/browser/media/extension_media_access_handler.cc
-index c3b79e679637fd8b4a7ffa6caabe18a31afdc12b..09835e2648a7e141bacd9e35ac30d61fb24d6f94 100644
+index c3b79e679637f..09835e2648a7e 100644
 --- a/chrome/browser/media/extension_media_access_handler.cc
 +++ b/chrome/browser/media/extension_media_access_handler.cc
 @@ -6,6 +6,7 @@

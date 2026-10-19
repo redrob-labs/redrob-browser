@@ -1,5 +1,5 @@
 diff --git a/extensions/browser/external_install_info.cc b/extensions/browser/external_install_info.cc
-index 4605419ba144b5560d29a7c5dcc4f402e68b1c75..70b443ed262441d851036a0a219c2837b40d8893 100644
+index 4605419ba144b..70b443ed26244 100644
 --- a/extensions/browser/external_install_info.cc
 +++ b/extensions/browser/external_install_info.cc
 @@ -22,12 +22,14 @@ ExternalInstallInfoFile::ExternalInstallInfoFile(

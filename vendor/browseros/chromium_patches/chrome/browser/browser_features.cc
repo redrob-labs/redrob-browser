@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/browser_features.cc b/chrome/browser/browser_features.cc
-index c502836b808fbb2414f6f65f671458577cc278ef..17dd3f1d41b299fbe337c1522bf0283513332e74 100644
+index c502836b808fb..17dd3f1d41b29 100644
 --- a/chrome/browser/browser_features.cc
 +++ b/chrome/browser/browser_features.cc
 @@ -34,6 +34,13 @@ BASE_FEATURE(kBookmarkTriggerForPreconnect, base::FEATURE_ENABLED_BY_DEFAULT);

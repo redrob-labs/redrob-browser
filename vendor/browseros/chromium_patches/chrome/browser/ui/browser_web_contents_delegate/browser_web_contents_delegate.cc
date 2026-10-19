@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
-index d3fa7eea6db807d9a9b3467da4f468c555468b26..06847a35125ce4936598892e941ef5f07027f9c1 100644
+index d3fa7eea6db80..06847a35125ce 100644
 --- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
 +++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
 @@ -13,6 +13,7 @@

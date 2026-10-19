@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/webui/side_panel/customize_chrome/customize_toolbar/customize_toolbar_handler.cc b/chrome/browser/ui/webui/side_panel/customize_chrome/customize_toolbar/customize_toolbar_handler.cc
-index 7f51aadbe7ca492a928817a016de74bb9a2cc300..996656fae4a7d487eb0ef0f335abcedee11c07fc 100644
+index 7f51aadbe7ca4..996656fae4a7d 100644
 --- a/chrome/browser/ui/webui/side_panel/customize_chrome/customize_toolbar/customize_toolbar_handler.cc
 +++ b/chrome/browser/ui/webui/side_panel/customize_chrome/customize_toolbar/customize_toolbar_handler.cc
 @@ -98,6 +98,9 @@ MojoActionForChromeAction(actions::ActionId action_id) {

@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/metrics/chrome_metrics_service_client.cc b/chrome/browser/metrics/chrome_metrics_service_client.cc
-index 2ba2503503c7cf2905110bb994e798ecde8adb2b..1f0e489e1ebb209605d5711a87fcb6c94c1535ed 100644
+index 2ba2503503c7c..1f0e489e1ebb2 100644
 --- a/chrome/browser/metrics/chrome_metrics_service_client.cc
 +++ b/chrome/browser/metrics/chrome_metrics_service_client.cc
 @@ -29,6 +29,7 @@

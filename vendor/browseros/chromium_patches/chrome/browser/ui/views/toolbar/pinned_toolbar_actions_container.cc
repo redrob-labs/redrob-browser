@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc b/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc
-index 9f47ccc8056035587393766d4032746f0bf1e4f8..b963e60930b5375b2e89abfdcc78b8372f76e1f7 100644
+index 9f47ccc805603..b963e60930b53 100644
 --- a/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc
 +++ b/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc
 @@ -18,6 +18,7 @@

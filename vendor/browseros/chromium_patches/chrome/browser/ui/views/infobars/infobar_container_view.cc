@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/infobars/infobar_container_view.cc b/chrome/browser/ui/views/infobars/infobar_container_view.cc
-index 38cc2a11258cfb55520e3a0afc4b3a600d7d3eca..c9781bc2c65ee1ae3058cd880c5756a10a6c1fc2 100644
+index 38cc2a11258cf..c9781bc2c65ee 100644
 --- a/chrome/browser/ui/views/infobars/infobar_container_view.cc
 +++ b/chrome/browser/ui/views/infobars/infobar_container_view.cc
 @@ -126,8 +126,7 @@ void InfoBarContainerView::Layout(PassKey) {

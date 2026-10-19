@@ -1,5 +1,5 @@
 diff --git a/content/public/browser/devtools_manager_delegate.h b/content/public/browser/devtools_manager_delegate.h
-index 069a7b48a71ed650b2088721e61fc7d6d7947c08..dbe928914713f552eddc01dde051cf3f17a082d6 100644
+index 069a7b48a71ed..dbe928914713f 100644
 --- a/content/public/browser/devtools_manager_delegate.h
 +++ b/content/public/browser/devtools_manager_delegate.h
 @@ -101,6 +101,14 @@ class CONTENT_EXPORT DevToolsManagerDelegate {

@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/toolbar/toolbar_pref_names.cc b/chrome/browser/ui/toolbar/toolbar_pref_names.cc
-index d93b933b81c6773b5f162c68ec9eba1fc0c3852f..97108501076f94b68e019de2f69ef89865e4389e 100644
+index d93b933b81c67..97108501076f9 100644
 --- a/chrome/browser/ui/toolbar/toolbar_pref_names.cc
 +++ b/chrome/browser/ui/toolbar/toolbar_pref_names.cc
 @@ -4,8 +4,10 @@

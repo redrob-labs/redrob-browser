@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/profiles/profile_picker.h b/chrome/browser/ui/profiles/profile_picker.h
-index 0b9bf211c55c2e5574f9497d9145b866488d013d..041d71a23c89b9eb236d203148e33f15528e42fa 100644
+index 0b9bf211c55c2..041d71a23c89b 100644
 --- a/chrome/browser/ui/profiles/profile_picker.h
 +++ b/chrome/browser/ui/profiles/profile_picker.h
 @@ -7,6 +7,7 @@

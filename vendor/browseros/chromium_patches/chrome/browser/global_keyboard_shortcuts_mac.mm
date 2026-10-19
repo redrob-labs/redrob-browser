@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/global_keyboard_shortcuts_mac.mm b/chrome/browser/global_keyboard_shortcuts_mac.mm
-index 1bbe4c5fab65668acadce3f60c0e6d181f83036e..5f85229344b0eb26fa2942b8af495cf4187f35d3 100644
+index 1bbe4c5fab656..5f85229344b0e 100644
 --- a/chrome/browser/global_keyboard_shortcuts_mac.mm
 +++ b/chrome/browser/global_keyboard_shortcuts_mac.mm
 @@ -15,6 +15,7 @@
@@ -10,7 +10,7 @@ index 1bbe4c5fab65668acadce3f60c0e6d181f83036e..5f85229344b0eb26fa2942b8af495cf4
  #include "chrome/browser/ui/tabs/features.h"
  #include "chrome/browser/ui/ui_features.h"
  #include "ui/base/accelerators/accelerator.h"
-@@ -165,6 +166,18 @@ CommandForKeyEventResult ShortcutCommand(int cmd) {
+@@ -165,6 +166,18 @@ const std::vector<KeyboardShortcutData>& GetShortcutsNotPresentInMainMenu() {
      keys.push_back(
          {true, false, true, false, kVK_ANSI_Z, IDC_FOCUS_PREV_TAB_GROUP});
  

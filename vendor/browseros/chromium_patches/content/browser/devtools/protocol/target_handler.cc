@@ -1,5 +1,5 @@
 diff --git a/content/browser/devtools/protocol/target_handler.cc b/content/browser/devtools/protocol/target_handler.cc
-index e77c87427f88569d10830c31e665cf93f6e8dce3..a9a3db3622d24a4c3e2f711db05badf54b3cdd7a 100644
+index e77c87427f885..a9a3db3622d24 100644
 --- a/content/browser/devtools/protocol/target_handler.cc
 +++ b/content/browser/devtools/protocol/target_handler.cc
 @@ -135,6 +135,19 @@ std::unique_ptr<Target::TargetInfo> BuildTargetInfo(

@@ -1,5 +1,5 @@
 diff --git a/extensions/browser/crx_installer.h b/extensions/browser/crx_installer.h
-index 27352c236270b9b4122272c0d4373da0a82614a8..975f7fb8aa7d075e3077b7446bf83a916c41bafd 100644
+index 27352c236270b..975f7fb8aa7d0 100644
 --- a/extensions/browser/crx_installer.h
 +++ b/extensions/browser/crx_installer.h
 @@ -21,6 +21,7 @@

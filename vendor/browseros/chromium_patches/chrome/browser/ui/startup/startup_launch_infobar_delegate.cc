@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/startup/startup_launch_infobar_delegate.cc b/chrome/browser/ui/startup/startup_launch_infobar_delegate.cc
-index 76f2f624f92e0e590dadf9ce98658d3cd8548f0f..efd1b97eb2f922c04d51eb0c85185c1e2b4c1c0f 100644
+index 76f2f624f92e0..efd1b97eb2f92 100644
 --- a/chrome/browser/ui/startup/startup_launch_infobar_delegate.cc
 +++ b/chrome/browser/ui/startup/startup_launch_infobar_delegate.cc
 @@ -15,11 +15,10 @@

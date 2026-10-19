@@ -234,6 +234,16 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   // The user says they finished the verification a task was waiting on. False when it was not waiting.
   bool ResumeAfterVerification(const std::string& task_id);
 
+  // The app bridge's `login` tool (agent/apps/server/src/lib/redrob-bridge/browser-bridge.ts), reached over
+  // CDP as Browser.redrobLogin. Same gate, same fill path and same audit log as the task tool; the audit
+  // record carries kBridgeAuditId as its task id. The bridge has no task to park, so a locked store
+  // answers at once and the caller is told to ask the user to unlock. `callback` gets the model-facing text,
+  // which, like every other sign-in answer, cannot carry a password.
+  static constexpr char kBridgeAuditId[] = "app-bridge";
+  void LoginFromBridge(content::WebContents* page,
+                       const std::string& username_hint,
+                       base::OnceCallback<void(std::string)> callback);
+
  private:
   // What the engine proposed, held until the turn ends. Tools are run only after a turn completes: a
   // tool call whose arguments arrived in a stream that then failed is one the browser must not run.
@@ -461,6 +471,8 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
                    const url::Origin& origin,
                    bool needs_unlock);
   void OnCredentialsUnlocked(base::OnceCallback<void(bool)> callback, bool unlocked);
+  void OnBridgeLoginResult(base::OnceCallback<void(std::string)> callback,
+                           CredentialTools::Result result);
   std::map<std::string, PendingCredentialCall> credential_waits_;
   std::unique_ptr<CredentialTools> credentials_;
 };

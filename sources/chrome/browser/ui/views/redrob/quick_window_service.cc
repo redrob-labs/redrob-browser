@@ -9,11 +9,15 @@
 #include "base/functional/bind.h"
 #include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
+#include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
+#include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/redrob/agent_entry.h"
 #include "chrome/browser/redrob/redrob_prefs.h"
 #include "chrome/browser/redrob/resources/grit/redrob_strings.h"
 #include "chrome/browser/ui/views/redrob/quick_window_view.h"
+#include "components/keep_alive_registry/keep_alive_types.h"
+#include "components/keep_alive_registry/scoped_keep_alive.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/view_type_utils.h"
@@ -74,6 +78,9 @@ void QuickWindowService::Shutdown() {
     widget_.reset();
     widget_delegate_.reset();
   }
+  // The profile is already going; holding it would only be released here anyway.
+  profile_keep_alive_.reset();
+  keep_alive_.reset();
   weak_factory_.InvalidateWeakPtrs();
 }
 
@@ -183,6 +190,13 @@ void QuickWindowService::Show() {
   // on screen, each for a different person, is a way to send a request to the wrong profile.
   CloseQuickWindow();
 
+  // Before anything is built: with no browser window open this window is all there is, and the process
+  // would otherwise begin to exit as soon as the last browser window had gone.
+  keep_alive_ = std::make_unique<ScopedKeepAlive>(KeepAliveOrigin::BACKGROUND_MODE_MANAGER,
+                                                  KeepAliveRestartOption::DISABLED);
+  profile_keep_alive_ =
+      ScopedProfileKeepAlive::TryAcquire(profile_, ProfileKeepAliveOrigin::kBackgroundMode);
+
   // The contents is made here, not by the WebView, so it can be told it hosts an extension page
   // before the page loads. Without the observer the extension's API bindings never reach the frame
   // and the page renders with no chrome.* to call.
@@ -244,6 +258,10 @@ void QuickWindowService::Close() {
   auto task_runner = base::SingleThreadTaskRunner::GetCurrentDefault();
   task_runner->DeleteSoon(FROM_HERE, std::move(widget_));
   task_runner->DeleteSoon(FROM_HERE, std::move(widget_delegate_));
+  // Released after the window is freed, in the same queue: if this was the last thing keeping the
+  // process up, shutdown must not start while the window's WebContents (the profile's) is still alive.
+  task_runner->DeleteSoon(FROM_HERE, std::move(profile_keep_alive_));
+  task_runner->DeleteSoon(FROM_HERE, std::move(keep_alive_));
 }
 
 void QuickWindowService::OnWidgetDestroying(views::Widget* widget) {

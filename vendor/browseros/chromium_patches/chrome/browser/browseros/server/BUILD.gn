@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..f291703753d8a98bc66727e28b6175193514301d
 --- /dev/null
 +++ b/chrome/browser/browseros/server/BUILD.gn
-@@ -0,0 +1,182 @@
+@@ -0,0 +1,184 @@
 +# Copyright 2024 The Chromium Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -80,6 +80,8 @@ index 0000000000000000000000000000000000000000..f291703753d8a98bc66727e28b617519
 +    "//base",
 +    "//chrome/browser:browser_process",
 +    "//chrome/browser/browseros/core:product",
++    # Redrob: the app-bridge secret handed to the server it launches.
++    "//chrome/browser/redrob:app_bridge_token",
 +    "//chrome/common",
 +    "//components/prefs",
 +    "//content/public/browser",

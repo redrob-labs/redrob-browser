@@ -1,5 +1,5 @@
 diff --git a/third_party/blink/public/devtools_protocol/domains/Browser.pdl b/third_party/blink/public/devtools_protocol/domains/Browser.pdl
-index 142bd94887c32abbc4e840521a8a4e892eb71ce8..ac1935136b73c64b2ccab2a5d78974a43a0198d2 100644
+index 142bd94887c32..b738d575e21b0 100644
 --- a/third_party/blink/public/devtools_protocol/domains/Browser.pdl
 +++ b/third_party/blink/public/devtools_protocol/domains/Browser.pdl
 @@ -8,6 +8,16 @@
@@ -247,7 +247,7 @@ index 142bd94887c32abbc4e840521a8a4e892eb71ce8..ac1935136b73c64b2ccab2a5d78974a4
    experimental type PermissionType extends string
      enum
        ar
-@@ -304,6 +535,28 @@ domain Browser
+@@ -304,6 +535,41 @@ domain Browser
        # position and size are returned.
        Bounds bounds
  
@@ -272,6 +272,19 @@ index 142bd94887c32abbc4e840521a8a4e892eb71ce8..ac1935136b73c64b2ccab2a5d78974a4
 +      Target.TargetID targetId
 +      # Browser window id that contains the tab.
 +      WindowID windowId
++
++  # Redrob: sign in on the tab with a login saved in the password manager, under the agent sign-in policy.
++  # The password is filled by the browser and never returned.
++  experimental command redrobLogin
++    parameters
++      Target.TargetID targetId
++      # The per-run secret the browser gave the agent server it launched. Any other caller is refused.
++      string bridgeToken
++      # Picks between several saved accounts.
++      optional string usernameHint
++    returns
++      # Model-facing outcome text. Never carries a password.
++      string text
 +
    # Set position and/or size of the browser window.
    experimental command setWindowBounds

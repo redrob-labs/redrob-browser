@@ -1,5 +1,5 @@
 diff --git a/extensions/browser/process_manager.cc b/extensions/browser/process_manager.cc
-index d097a45600c4b40ea984d6935c49f5c2b8cbbd6f..96ccf9172e2f9f23e8fb9e88f3930b718ff54ed8 100644
+index d097a45600c4b..96ccf9172e2f9 100644
 --- a/extensions/browser/process_manager.cc
 +++ b/extensions/browser/process_manager.cc
 @@ -23,6 +23,7 @@

@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/extensions/chrome_extension_system.cc b/chrome/browser/extensions/chrome_extension_system.cc
-index c31a741d21e0206ee73860aa4cf7c643125f4c04..a5e396187dbcee97ee5cecc5ca1c66ff8c5c2447 100644
+index c31a741d21e02..a5e396187dbce 100644
 --- a/chrome/browser/extensions/chrome_extension_system.cc
 +++ b/chrome/browser/extensions/chrome_extension_system.cc
 @@ -18,6 +18,7 @@

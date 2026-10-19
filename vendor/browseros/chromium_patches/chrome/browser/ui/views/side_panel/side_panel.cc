@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/side_panel/side_panel.cc b/chrome/browser/ui/views/side_panel/side_panel.cc
-index ab8999f84de6992bbf403b92ef5c3a5ad0386390..434d766c2caf635b0bd0acb38533496cb963b048 100644
+index ab8999f84de69..434d766c2caf6 100644
 --- a/chrome/browser/ui/views/side_panel/side_panel.cc
 +++ b/chrome/browser/ui/views/side_panel/side_panel.cc
 @@ -131,7 +131,7 @@ class ContentParentBackground : public views::Background {

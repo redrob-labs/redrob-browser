@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/new_tab_footer/footer_controller.cc b/chrome/browser/ui/views/new_tab_footer/footer_controller.cc
-index 7b33ea502d408a80c1bd520a83ec27eb9e299a2e..a19b0c873786e9f6d7f87ced0040413d5485708f 100644
+index 7b33ea502d408..a19b0c873786e 100644
 --- a/chrome/browser/ui/views/new_tab_footer/footer_controller.cc
 +++ b/chrome/browser/ui/views/new_tab_footer/footer_controller.cc
 @@ -214,14 +214,7 @@ bool NewTabFooterController::ContentsViewFooterCotroller::

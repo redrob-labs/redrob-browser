@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/browser_window/internal/browser_window_features.cc b/chrome/browser/ui/browser_window/internal/browser_window_features.cc
-index f911366792f8af3d948ccdf081890a12009714e5..b16714e445524233a579f6c1563222001ca0e095 100644
+index f911366792f8a..b16714e445524 100644
 --- a/chrome/browser/ui/browser_window/internal/browser_window_features.cc
 +++ b/chrome/browser/ui/browser_window/internal/browser_window_features.cc
 @@ -150,6 +150,7 @@

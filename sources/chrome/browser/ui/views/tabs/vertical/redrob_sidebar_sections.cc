@@ -75,6 +75,11 @@ constexpr size_t kMaxChatRows = 6;
 constexpr int kWorkspaceMenuEmptyCommandId = 100000;
 constexpr int kWorkspaceMenuSaveCommandId = 100001;
 
+// The recent-chats menu (horizontal tabs) shares ExecuteCommand with the workspace menu, so its ids live in a
+// range of their own: kChatsMenuFirstCommandId + an index into `menu_chat_ids_`, and one disabled sentinel.
+constexpr int kChatsMenuEmptyCommandId = 199999;
+constexpr int kChatsMenuFirstCommandId = 200000;
+
 std::unique_ptr<views::Label> MakeHeading(int message_id) {
   auto label = std::make_unique<views::Label>(l10n_util::GetStringUTF16(message_id));
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -347,6 +352,23 @@ void RedrobSidebarSections::AttachToolbarAccess() {
 
   toolbar_avatar_.SetView(access->AddChildView(std::make_unique<AvatarToolbarButton>(browser_)));
 
+  // Recent chats, because the sidebar's chats section is hidden with the column too. A menu of the same rows
+  // rather than a second list: RecentChats() feeds both, and a row here opens exactly what a row there does.
+  auto* chats = access->AddChildView(std::make_unique<views::ImageButton>());
+  chats->SetCallback(base::BindRepeating(
+      [](RedrobSidebarSections* self, views::ImageButton* button) { self->ShowChatsMenu(button); },
+      base::Unretained(this), base::Unretained(chats)));
+  chats->SetImageModel(views::Button::STATE_NORMAL,
+                       ui::ImageModel::FromVectorIcon(vector_icons::kChatSparkIcon,
+                                                      sidebar_tokens::kRowForeground,
+                                                      sidebar_tokens::kFaviconSize));
+  chats->SetImageHorizontalAlignment(views::ImageButton::ALIGN_CENTER);
+  chats->SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
+  chats->SetPreferredSize(gfx::Size(sidebar_tokens::kRowHeight, sidebar_tokens::kRowHeight));
+  chats->GetViewAccessibility().SetName(l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_CHATS));
+  chats->SetTooltipText(l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_CHATS));
+  views::InstallCircleHighlightPathGenerator(chats);
+
   // Settings, because in horizontal mode the sidebar foot -- the product's only way into settings, there is
   // no app menu -- is hidden with the column. Same page and same singleton-tab rule as the foot's row.
   auto* settings = access->AddChildView(std::make_unique<views::ImageButton>(base::BindRepeating(
@@ -440,26 +462,35 @@ void RedrobSidebarSections::OnTaskChanged(const mojom::Task& task) {
   RebuildChats();
 }
 
+std::vector<mojom::TaskPtr> RedrobSidebarSections::RecentChats() const {
+  std::vector<mojom::TaskPtr> tasks;
+  if (!browser_) {
+    return tasks;
+  }
+  redrob::TaskStore* store = redrob::TaskStoreFactory::GetForProfile(browser_->GetProfile());
+  if (!store) {
+    return tasks;
+  }
+  tasks = store->ListTasks();
+  // Newest first, and capped: this is a sidebar, not a history page. The full list is on the new tab.
+  std::sort(tasks.begin(), tasks.end(), [](const mojom::TaskPtr& a, const mojom::TaskPtr& b) {
+    return a->started_at_ms > b->started_at_ms;
+  });
+  if (tasks.size() > kMaxChatRows) {
+    tasks.resize(kMaxChatRows);
+  }
+  return tasks;
+}
+
 void RedrobSidebarSections::RebuildChats() {
   chats_list_->RemoveAllChildViews();
   if (!browser_) {
     return;
   }
-  redrob::TaskStore* store = redrob::TaskStoreFactory::GetForProfile(browser_->GetProfile());
-  if (!store) {
-    return;
-  }
 
-  std::vector<mojom::TaskPtr> tasks = store->ListTasks();
-  // Newest first, and capped: this is a sidebar, not a history page. The full list is on the new tab.
-  std::sort(tasks.begin(), tasks.end(), [](const mojom::TaskPtr& a, const mojom::TaskPtr& b) {
-    return a->started_at_ms > b->started_at_ms;
-  });
+  const std::vector<mojom::TaskPtr> tasks = RecentChats();
   size_t shown = 0;
   for (const mojom::TaskPtr& task : tasks) {
-    if (shown >= kMaxChatRows) {
-      break;
-    }
     // The prompt is the name, because that is what the user typed and therefore what they will
     // recognise. Elided by the row rather than truncated here, so the full text stays in the tooltip.
     auto* row = chats_list_->AddChildView(MakeRow(
@@ -711,8 +742,47 @@ std::vector<int> RedrobSidebarSections::UngroupedTabIndices() const {
   return indices;
 }
 
+void RedrobSidebarSections::ShowChatsMenu(views::View* anchor) {
+  if (!browser_ || !anchor || !anchor->GetWidget()) {
+    return;
+  }
+  menu_chat_ids_.clear();
+  chats_menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
+  for (const mojom::TaskPtr& task : RecentChats()) {
+    chats_menu_model_->AddItemWithIcon(
+        kChatsMenuFirstCommandId + static_cast<int>(menu_chat_ids_.size()),
+        base::UTF8ToUTF16(task->prompt),
+        ui::ImageModel::FromVectorIcon(vector_icons::kChatSparkIcon,
+                                       sidebar_tokens::kMutedForeground,
+                                       sidebar_tokens::kFaviconSize));
+    menu_chat_ids_.push_back(task->id);
+  }
+  // The same empty state the sidebar draws, as a disabled item rather than a menu that declines to open.
+  if (menu_chat_ids_.empty()) {
+    chats_menu_model_->AddItem(kChatsMenuEmptyCommandId,
+                               l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_CHATS_EMPTY));
+    chats_menu_model_->SetEnabledAt(chats_menu_model_->GetItemCount() - 1, false);
+  }
+  // No mnemonics: the labels are the user's own prompts, and an '&' in one must stay an '&'.
+  chats_menu_runner_ = std::make_unique<views::MenuRunner>(chats_menu_model_.get(),
+                                                           views::MenuRunner::NO_FLAGS);
+  chats_menu_runner_->RunMenuAt(anchor->GetWidget(), nullptr, anchor->GetBoundsInScreen(),
+                                views::MenuAnchorPosition::kTopRight,
+                                ui::mojom::MenuSourceType::kNone);
+}
+
 void RedrobSidebarSections::ExecuteCommand(int command_id, int event_flags) {
   if (!browser_) {
+    return;
+  }
+  if (command_id == kChatsMenuEmptyCommandId) {
+    return;
+  }
+  if (command_id >= kChatsMenuFirstCommandId) {
+    const size_t chat = static_cast<size_t>(command_id - kChatsMenuFirstCommandId);
+    if (chat < menu_chat_ids_.size()) {
+      OpenChat(menu_chat_ids_[chat]);
+    }
     return;
   }
   // The sentinels first, because the index path below casts the id and would read far past the vector.

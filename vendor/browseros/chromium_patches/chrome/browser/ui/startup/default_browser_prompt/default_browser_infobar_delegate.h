@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/startup/default_browser_prompt/default_browser_infobar_delegate.h b/chrome/browser/ui/startup/default_browser_prompt/default_browser_infobar_delegate.h
-index 2f2eece414c41285704de005fce2acda224d32b1..207587516423e3a1fae15da362a8bcd65201da62 100644
+index 2f2eece414c41..207587516423e 100644
 --- a/chrome/browser/ui/startup/default_browser_prompt/default_browser_infobar_delegate.h
 +++ b/chrome/browser/ui/startup/default_browser_prompt/default_browser_infobar_delegate.h
 @@ -40,7 +40,7 @@ class DefaultBrowserInfoBarDelegate : public ConfirmInfoBarDelegate {

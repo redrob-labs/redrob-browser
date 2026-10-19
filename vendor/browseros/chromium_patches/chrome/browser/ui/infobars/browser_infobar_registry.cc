@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/infobars/browser_infobar_registry.cc b/chrome/browser/ui/infobars/browser_infobar_registry.cc
-index 1e83612fa63a4985595945242e82d307cf943082..900b00d37438dad96b8d9474455fddb90844865f 100644
+index 1e83612fa63a4..900b00d37438d 100644
 --- a/chrome/browser/ui/infobars/browser_infobar_registry.cc
 +++ b/chrome/browser/ui/infobars/browser_infobar_registry.cc
 @@ -51,12 +51,12 @@
