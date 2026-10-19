@@ -14,6 +14,7 @@ import { SettingsSidebarLayout } from '@/components/layout/SettingsSidebarLayout
 import { SidebarLayout } from '@/components/layout/SidebarLayout'
 import { diagnosticsCopy } from '@/lib/diagnostics/diagnostics-copy'
 import { AgentCommandHome } from '@/screens/agent-command/AgentCommandHome'
+import { AgentPasswordsPage } from '@/screens/agent-passwords/AgentPasswordsPage'
 import { AISettingsPage } from '@/screens/ai-settings/AISettingsPage'
 import { ConnectMCP } from '@/screens/connect-mcp/ConnectMCP'
 import { CustomizationPage } from '@/screens/customization/CustomizationPage'
@@ -65,6 +66,7 @@ export const App: FC = () => {
             <Route path="chat" element={<LlmHubPage />} />
             <Route path="mcp" element={<MCPSettingsPage />} />
             <Route path="customization" element={<CustomizationPage />} />
+            <Route path="passwords" element={<AgentPasswordsPage />} />
             <Route
               path="diagnostics"
               element={<DiagnosticsPage tr={diagnosticsCopy} />}
