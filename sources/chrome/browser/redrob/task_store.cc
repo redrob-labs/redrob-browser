@@ -907,8 +907,12 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
     return;
   }
 
-  std::optional<base::DictValue> arguments =
-      base::JSONReader::ReadDict(call.arguments_json, base::JSON_PARSE_RFC);
+  // A tool with no parameters (memory_list) may arrive with no argument text at all.
+  std::optional<base::DictValue> arguments = base::JSONReader::ReadDict(
+      base::TrimWhitespaceASCII(call.arguments_json, base::TRIM_ALL).empty()
+          ? std::string_view("{}")
+          : std::string_view(call.arguments_json),
+      base::JSON_PARSE_RFC);
   if (!arguments) {
     FinishTool(task_id, call, "Those arguments were not readable JSON.");
     return;
