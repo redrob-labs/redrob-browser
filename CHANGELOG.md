@@ -4,6 +4,41 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
+## 0.3.0 — 2026-10-19
+
+**Tabs start across the top.** A new profile opens with the familiar horizontal tab strip; the sidebar is one
+switch away in Settings (Use vertical tabs), and a profile that already chose the sidebar keeps it. With tabs on
+top the toolbar carries the account button and a Settings button at its trailing edge, and saved tab groups show
+in the bookmark bar so a group is reopened from there.
+
+**The agent can sign in for you, without seeing the password.** A `login` tool fills the page from the profile's
+own password store. The model is told only the outcome and the username. Settings > Passwords and the agent sets
+when it may: always, only while unlocked (the default, unlocked by the OS's own re-authentication for a window you
+choose), or never — per site as well — and lists every sign-in it made. Codes, passkeys and CAPTCHAs stay with you:
+the task waits until you finish them.
+
+**Memory you can read, edit and undo.** What the agent remembers is a folder of plain markdown files in the profile
+(by day, by site, people, projects, you). After each task it notes what mattered; once a day it consolidates. Every
+run is listed with what it changed and can be reverted. Retention is forever, 30 or 90 days. Settings > Memory.
+
+**Ask from the address bar or from anywhere.** Type `>` and a space in the address bar to give the agent a task with
+the current page as context. Ctrl+Shift+Space (Cmd on macOS) opens a small window that starts a task without the
+browser in front; the shortcut can be changed or turned off.
+
+**Tasks keep running when you close the window.** The browser stays up while a task is queued, running or waiting
+for you, and tells you through the system's notifications when it is done or needs you. In guard mode a click that
+would send, post, pay or delete waits for your OK. Effort has a third level, Ultrabrowse, for long jobs.
+
+**Models and subscriptions come from the engine.** The provider list, subscription sign-in and your own API key are
+the engine's, shown as it reports them; where it reports no usage the page links to Redrob Console instead of
+showing a number.
+
+**Skills follow the page.** Each request names the page the task is on, so Redrob Code 0.9.0 or later loads the
+skills written for that site.
+
+**Import from Firefox and Safari**, with progress per item and a Cancel button. Passwords from those browsers come
+across as a CSV you export there and import in the password manager.
+
 ## 0.2.0 — 2026-10-17
 
 **Redrob Code can drive this browser.** While the browser runs, its agent server registers itself with the
