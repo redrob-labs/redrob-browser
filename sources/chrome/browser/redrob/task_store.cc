@@ -2739,8 +2739,8 @@ void TaskStore::StartExtraction(const std::string& task_id) {
     }
     if (step->kind == mojom::StepKind::kOpenedPage) {
       for (const mojom::StepDetailPtr& detail : step->details) {
-        if (!detail->source.empty()) {
-          hosts.insert(detail->source);
+        if (detail->source && !detail->source->empty()) {
+          hosts.insert(*detail->source);
         }
       }
     }
