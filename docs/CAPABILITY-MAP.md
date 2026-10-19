@@ -44,9 +44,9 @@ Item ids in the last column refer to `docs/PRODUCT-BACKLOG.md`.
 | Selection actions the user defines | Select text or an area, get YOUR actions: prompt templates with the selection substituted, open-URL, copy. Configurable icon, name, colour, hotkey | no | CAP-10 (new) |
 | Per-site notification subscriptions the agent consumes | The agent watches a site's notifications and reacts; revocable per site | no | CAP-11 (new) |
 | A launch surface listing what it can already act in | Named apps with example prompts, instead of an empty box | no | — |
-| Work that survives the window closing | An agent task is not a chat | no | CAP-4 |
+| Work that survives the window closing | An agent task is not a chat | partial — TaskStore holds process and profile keep-alives while a task is unfinished (setting on by default), reopens agent pages in a minimized window, and notifies on done / needs-you; not yet run end to end, and the task view itself has no in-tree surface since A-7 | CAP-4 |
 | Side-panel session policy on tab change | New session per tab, or keep the session | no | — |
-| Task notifications, separable | Needs-attention / task done / routine done, independently | no | — |
+| Task notifications, separable | Needs-attention / task done / routine done, independently | partial — needs-you (with Allow / Decline) and done / failed are raised by TaskStore; not separately switchable | — |
 | Completion sound | Including a custom file | no | — |
 
 ## 3. What the agent can actually do
@@ -85,12 +85,12 @@ Item ids in the last column refer to `docs/PRODUCT-BACKLOG.md`.
 | Consolidation runs are listed, inspectable and revertible, and can be triggered by hand | Memory you can audit and undo | no | CAP-19 |
 | Context compaction as a USER setting | Reserve and keep-recent token budgets the user controls | no | — |
 | Retry policy as a USER setting | Attempts and backoff the user controls | partial — retry exists in the engine, not exposed | — |
-| Connect a subscription you already pay for | Reuse an existing paid plan; your own quota is spent | partial — the engine already has an OAuth path; the browser does not expose it | SUB-1..2 |
-| Own API key | Behind the subscriptions, stored by the engine | partial — engine yes, browser no | SUB-3 |
+| Connect a subscription you already pay for | Reuse an existing paid plan; your own quota is spent | partial — Settings lists the engine's providers and signs in through the engine's OAuth, and the engine store now lives in the profile; the SUB-2 acceptance (the provider's own usage moves) has not been run on a real account | SUB-1..2 |
+| Own API key | Behind the subscriptions, stored by the engine | partial — behind the sign-in buttons in Settings, handed to the engine's store and never read back; not yet run end to end | SUB-3 |
 | A separate model for image generation | Not the same model as chat | no | — |
 | The user edits the model catalogue | Add and remove models | no | — |
 | Model pins that migrate | An old pin is rewritten, not left broken | no | — |
-| Plan and usage, with the source stated | What is connected and what was spent | no | SUB-4 |
+| Plan and usage, with the source stated | What is connected and what was spent | partial — shows the Console organisation and where each credential came from; the engine has no usage endpoint, so Redrob links to Console billing and other providers say usage is not reported | SUB-4 |
 | Usage statistics | Sessions, last active, weekly average, an activity heatmap | no | CAP-20 (new) |
 | Commercial state in the UI | Trial ended, payment failed, billing expired — where a person will see it | no | — |
 | Referral | An invite link that credits both sides | no | — |

@@ -20,3 +20,41 @@ appearanceLanguage	Language	언어	Row name
 appearanceLanguageHint	Redrob follows your browser’s language until you choose one.	언어를 선택하기 전까지는 브라우저 언어를 따릅니다.	Row description while no language has been chosen
 appearanceLanguageChosen	You chose this language.	직접 선택한 언어입니다.	Row description once a language has been chosen; followed by the reset button
 appearanceLanguageReset	Use the browser’s language	브라우저 언어 사용	Button that clears the choice
+# SUB-1..4: subscriptions and providers as the engine reports them; CAP-4: tasks after the window closes.
+engGroup	Subscriptions and providers	구독과 제공자	Settings group: what the engine can sign in to
+engLoading	Asking the Redrob engine…	Redrob 엔진에 확인하는 중…	Row shown while the provider list loads
+engNotReady	The Redrob engine is not running yet	Redrob 엔진이 아직 실행 중이 아닙니다	Row when the engine cannot be asked
+engNotReadyHint	The provider list comes from the engine, so it appears once the engine has started.	제공자 목록은 엔진에서 가져오므로 엔진이 시작되면 나타납니다.	Explains why the list is empty
+engRetry	Try again	다시 시도	Button that asks the engine again
+engPlan	Plan	플랜	Row label for the connected Redrob plan
+engConsoleOrg	Signed in to Redrob Console as $1. Plan details and spend are in Redrob Console.	Redrob Console에 $1(으)로 로그인됨. 플랜과 사용 금액은 Redrob Console에 있습니다.	$1 is the organisation name the engine reports
+engNoConsoleOrg	The engine reports no Redrob Console sign-in.	엔진에 Redrob Console 로그인 정보가 없습니다.	Plan row when no organisation is reported
+engNoneConnected	No provider is connected yet	아직 연결된 제공자가 없습니다	Row when nothing is connected
+engConnectedFrom	Connected · credential from $1	연결됨 · 자격 증명 출처: $1	$1 says where the engine got the credential
+engNotConnected	Not connected	연결 안 됨	Provider status
+engConsoleManaged	managed by Redrob Console	Redrob Console에서 관리	Suffix when the Console manages a provider
+engModelCount	$1 models	모델 $1개	$1 is a count
+engUsageFromConsole	Usage is reported by Redrob Console, not by this browser.	사용량은 이 브라우저가 아니라 Redrob Console이 보고합니다.	Where the Redrob usage number comes from
+engOpenConsoleUsage	Open usage in Redrob Console	Redrob Console에서 사용량 보기	Link to the Console billing page
+engUsageNotReported	The engine does not report usage for this provider. Check it in your account with the provider.	엔진은 이 제공자의 사용량을 보고하지 않습니다. 제공자 계정에서 확인하세요.	Shown instead of a usage figure
+engFinishInTab	Finish signing in in the tab that just opened.	방금 열린 탭에서 로그인을 마치세요.	Shown while the engine waits for an OAuth redirect
+engPasteCode	Paste the code the provider showed you	제공자가 보여 준 코드를 붙여 넣으세요	Code field for OAuth methods that show a code
+engSubmitCode	Connect	연결	Button that sends the pasted code
+engSignIn	Sign in	로그인	Fallback label for an OAuth method with no name
+engUseApiKey	Use an API key instead	대신 API 키 사용	Button that reveals the key field, behind the subscription options
+engApiKey	API key	API 키	Key field label
+engSaveKey	Save key	키 저장	Button that hands the key to the engine
+engDisconnect	Disconnect	연결 해제	Button that makes the engine forget a credential
+engDisconnectFailed	The engine could not forget that credential.	엔진이 이 자격 증명을 지우지 못했습니다.	Error after a failed disconnect
+engAddProvider	Connect another provider	다른 제공자 연결	Row label above the provider search
+engAddProviderHint	Search the providers the engine can sign in to.	엔진이 로그인할 수 있는 제공자를 검색하세요.	Hint for the provider search
+engSearchProviders	Search providers	제공자 검색	Placeholder of the provider search
+engSourceEnv	an environment variable	환경 변수	Credential source
+engSourceConfig	the engine's config file	엔진 설정 파일	Credential source
+engSourceStore	the engine's sign-in store	엔진 로그인 저장소	Credential source: auth stored by the engine
+engSourceLauncher	Redrob Launcher	Redrob Launcher	Credential source: the computer-wide sign-in
+engSourceBuiltIn	the engine's built-in setup	엔진 기본 설정	Credential source
+engSourceUnknown	the engine	엔진	Credential source when the engine did not say
+engTasksGroup	Agent tasks	에이전트 작업	Settings group for task behaviour
+engKeepRunning	Keep running tasks after closing windows	창을 닫아도 작업 계속 실행	Toggle label
+engKeepRunningHint	A task keeps working when you close the last window; the pages it needs reopen in a minimized window, and you get a notification when it is done or needs you.	마지막 창을 닫아도 작업이 계속됩니다. 필요한 페이지는 최소화된 창에서 다시 열리고, 끝나거나 확인이 필요하면 알림이 옵니다.	Toggle description
