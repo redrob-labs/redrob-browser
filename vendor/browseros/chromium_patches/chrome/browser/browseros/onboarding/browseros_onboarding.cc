@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/browseros/onboarding/browseros_onboarding.cc b/chrome/browser/browseros/onboarding/browseros_onboarding.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..0809951dcf660ba1f9a3704bdcf5cbf88b3d9646
+index 0000000000000000000000000000000000000000..b828c3d8d302dc934f4dead3560dc624bbe296a0
 --- /dev/null
 +++ b/chrome/browser/browseros/onboarding/browseros_onboarding.cc
-@@ -0,0 +1,794 @@
+@@ -0,0 +1,883 @@
 +// Copyright 2026 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -28,6 +28,7 @@ index 0000000000000000000000000000000000000000..0809951dcf660ba1f9a3704bdcf5cbf8
 +#include "base/supports_user_data.h"
 +#include "base/task/sequenced_task_runner.h"
 +#include "base/values.h"
++#include "build/build_config.h"
 +#include "chrome/browser/browser_process.h"
 +#include "chrome/browser/importer/external_process_importer_host.h"
 +#include "chrome/browser/importer/importer_list.h"
@@ -38,6 +39,7 @@ index 0000000000000000000000000000000000000000..0809951dcf660ba1f9a3704bdcf5cbf8
 +#include "chrome/grit/browseros_onboarding_resources.h"
 +#include "chrome/grit/browseros_onboarding_resources_map.h"
 +#include "components/user_data_importer/common/importer_data_types.h"
++#include "components/user_data_importer/common/importer_type.h"
 +#include "content/public/browser/navigation_entry.h"
 +#include "content/public/browser/navigation_handle.h"
 +#include "content/public/browser/navigation_throttle.h"
@@ -161,6 +163,57 @@ index 0000000000000000000000000000000000000000..0809951dcf660ba1f9a3704bdcf5cbf8
 +  return items;
 +}
 +
++// Redrob: sources whose saved passwords this step does not copy. Firefox keeps
++// them NSS-encrypted, Safari keeps them in the system keychain, and the
++// Chromium-family importer deliberately carries no passwords. For these the
++// step offers the CSV route instead: export from that browser, then import
++// the file in the password manager.
++bool PasswordsNeedCsvExport(
++    const user_data_importer::SourceProfile& source_profile) {
++  switch (source_profile.importer_type) {
++    case user_data_importer::TYPE_FIREFOX:
++#if BUILDFLAG(IS_MAC)
++    case user_data_importer::TYPE_SAFARI:
++#endif
++    case user_data_importer::TYPE_CHROMIUM_BASED:
++      return true;
++    default:
++      return false;
++  }
++}
++
++// Redrob: what the step offers and imports for one source. Upstream's Firefox
++// detection advertises PASSWORDS on Windows and Linux (it loads NSS into the
++// browser process); that path is out of scope here, so the bit is dropped for
++// every source that takes the CSV route, and the checklist never promises it.
++uint16_t SupportedImportItems(
++    const user_data_importer::SourceProfile& source_profile) {
++  uint16_t items =
++      source_profile.services_supported & kBrowserOSImportableItems;
++  if (PasswordsNeedCsvExport(source_profile)) {
++    items &= ~static_cast<uint16_t>(user_data_importer::PASSWORDS);
++  }
++  return items;
++}
++
++// Redrob: a stable family name for the source, so the page can pick the
++// product mark and the copy that fits it without parsing display names.
++const char* SourceKind(
++    const user_data_importer::SourceProfile& source_profile) {
++  switch (source_profile.importer_type) {
++    case user_data_importer::TYPE_FIREFOX:
++      return "firefox";
++#if BUILDFLAG(IS_MAC)
++    case user_data_importer::TYPE_SAFARI:
++      return "safari";
++#endif
++    case user_data_importer::TYPE_BOOKMARKS_FILE:
++      return "bookmarksFile";
++    default:
++      return "chromium";
++  }
++}
++
 +}  // namespace
 +
 +BrowserOSOnboardingSetupState::BrowserOSOnboardingSetupState() = default;
@@ -196,6 +249,9 @@ index 0000000000000000000000000000000000000000..0809951dcf660ba1f9a3704bdcf5cbf8
 +    kImporting,
 +    kSucceeded,
 +    kFailed,
++    // Redrob: the user stopped the import. Whatever finished before the stop
++    // stays in the profile; the page returns to the picker.
++    kCancelled,
 +  };
 +
 +  struct ImportRequestSelection {
@@ -232,6 +288,24 @@ index 0000000000000000000000000000000000000000..0809951dcf660ba1f9a3704bdcf5cbf8
 +        "browserosOnboardingRetrySetup",
 +        base::BindRepeating(&BrowserOSOnboardingHandler::HandleRetrySetup,
 +                            base::Unretained(this)));
++    // Redrob: Cancel on the import step.
++    web_ui()->RegisterMessageCallback(
++        "browserosOnboardingCancelImport",
++        base::BindRepeating(&BrowserOSOnboardingHandler::HandleCancelImport,
++                            base::Unretained(this)));
++  }
++
++  // Redrob: stops a running import. ExternalProcessImporterHost::Cancel()
++  // stops the utility-process importer, then reports ImportEnded() to this
++  // observer synchronously and deletes itself, so the terminal state is sent
++  // from ImportEnded() and importer_host_ is cleared there. A cancel with no
++  // import running is ignored: the page may race a click against the end.
++  void HandleCancelImport(const base::ListValue& args) {
++    if (!IsImportRunning() || !importer_host_) {
++      return;
++    }
++    import_cancelled_ = true;
++    importer_host_->Cancel();
 +  }
 +
 +  void OnJavascriptDisallowed() override {
@@ -489,8 +563,7 @@ index 0000000000000000000000000000000000000000..0809951dcf660ba1f9a3704bdcf5cbf8
 +  uint16_t GetEffectiveImportItems(
 +      const user_data_importer::SourceProfile& source_profile,
 +      const ImportRequestSelection& selection) const {
-+    uint16_t supported_items =
-+        source_profile.services_supported & kBrowserOSImportableItems;
++    uint16_t supported_items = SupportedImportItems(source_profile);
 +    return selection.has_selected_items
 +               ? (selection.selected_items & supported_items)
 +               : supported_items;
@@ -509,7 +582,7 @@ index 0000000000000000000000000000000000000000..0809951dcf660ba1f9a3704bdcf5cbf8
 +    for (size_t i = 0; importer_list_ && i < importer_list_->count(); ++i) {
 +      const user_data_importer::SourceProfile& source_profile =
 +          importer_list_->GetSourceProfileAt(i);
-+      uint16_t services = source_profile.services_supported;
++      uint16_t services = SupportedImportItems(source_profile);
 +      std::string browser_name =
 +          base::UTF16ToUTF8(source_profile.importer_name);
 +      std::string profile_name = base::UTF16ToUTF8(source_profile.profile);
@@ -524,6 +597,11 @@ index 0000000000000000000000000000000000000000..0809951dcf660ba1f9a3704bdcf5cbf8
 +      source.Set("isManaged", source_profile.is_managed);
 +      source.Set("supportedItems", ImportItemsFromMask(services));
 +      source.Set("recommendedItems", ImportItemsFromMask(services));
++      // Redrob: which browser family this is, and whether its saved passwords
++      // take the export-a-CSV route. Optional on the page, which ships
++      // separately from this binary.
++      source.Set("kind", SourceKind(source_profile));
++      source.Set("passwordsViaCsv", PasswordsNeedCsvExport(source_profile));
 +      sources.Append(std::move(source));
 +    }
 +    return sources;
@@ -538,6 +616,8 @@ index 0000000000000000000000000000000000000000..0809951dcf660ba1f9a3704bdcf5cbf8
 +        return "succeeded";
 +      case ImportSourceResultStatus::kFailed:
 +        return "failed";
++      case ImportSourceResultStatus::kCancelled:
++        return "cancelled";
 +    }
 +    NOTREACHED();
 +  }
@@ -669,6 +749,11 @@ index 0000000000000000000000000000000000000000..0809951dcf660ba1f9a3704bdcf5cbf8
 +    }
 +
 +    current_item_ = user_data_importer::NONE;
++    if (import_cancelled_) {
++      import_result_->status = ImportSourceResultStatus::kCancelled;
++      SendState("cancelled");
++      return;
++    }
 +    import_result_->status = import_did_succeed_
 +                                 ? ImportSourceResultStatus::kSucceeded
 +                                 : ImportSourceResultStatus::kFailed;
@@ -707,6 +792,7 @@ index 0000000000000000000000000000000000000000..0809951dcf660ba1f9a3704bdcf5cbf8
 +    completed_items_ = user_data_importer::NONE;
 +    imported_items_ = user_data_importer::NONE;
 +    import_did_succeed_ = false;
++    import_cancelled_ = false;
 +    import_result_.reset();
 +  }
 +
@@ -723,6 +809,9 @@ index 0000000000000000000000000000000000000000..0809951dcf660ba1f9a3704bdcf5cbf8
 +  uint16_t imported_items_ = user_data_importer::NONE;
 +  bool importer_list_loaded_ = false;
 +  bool import_did_succeed_ = false;
++  // Redrob: set by HandleCancelImport() so ImportEnded() reports a stop, not
++  // a failure.
++  bool import_cancelled_ = false;
 +  base::WeakPtrFactory<BrowserOSOnboardingHandler> weak_ptr_factory_{this};
 +};
 +
