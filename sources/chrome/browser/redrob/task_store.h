@@ -164,6 +164,11 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
     // turns' text appended to one string ran together mid-sentence, which read as one confused
     // statement rather than as an answer and then a correction.
     bool turn_text_started = false;
+    // CAP-1: the http(s) tab the user was on when they started the task, sent as
+    // redrob_context until the agent opens a tab of its own. URL and title only -- never the
+    // page's contents, and never anything the agent may act on.
+    std::string context_url;
+    std::string context_title;
   };
 
   void OnSidecarStatusChanged(SidecarClient::Status status);
@@ -203,6 +208,11 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   // Prose arrives token by token; a Mojo message per token would send the whole task hundreds of times
   // for one paragraph. Coalesced so the page updates promptly without that traffic.
   void ScheduleNotify(const std::string& task_id);
+  // CAP-1: records the user's active http(s) tab on a new task (see Conversation::context_url).
+  void CaptureContextTab(const std::string& task_id);
+  // CAP-1: {page_url, page_title} of the task's agent tab, else of the tab it started from; nullopt
+  // when neither is an http(s) page.
+  static std::optional<base::DictValue> RedrobContext(const Conversation& conversation);
 
   std::map<std::string, mojom::TaskPtr> tasks_;
   std::map<std::string, Conversation> conversations_;
