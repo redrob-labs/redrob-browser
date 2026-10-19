@@ -102,14 +102,10 @@ void QuickWindowService::UpdateRegistration() {
     listener->OnCommandsChanged(
         kAcceleratorGroup, profile_->GetBaseName().AsUTF8Unsafe(), commands,
         gfx::kNullAcceleratedWidget,
-        base::BindRepeating(
-            [](base::WeakPtr<QuickWindowService> self, const std::string& group,
-               const std::string& command_id) {
-              if (self) {
-                self->ExecuteCommand(group, command_id);
-              }
-            },
-            portal_weak_factory_.GetWeakPtr()));
+        // A method bound to a WeakPtr, not a lambda holding one: only the former reports itself
+        // cancelled, which is what PruneStaleCommands reads to withdraw the binding.
+        base::BindRepeating(&QuickWindowService::ExecuteCommand,
+                            portal_weak_factory_.GetWeakPtr()));
     registered_ = accelerator;
     registered_externally_ = true;
     return;
