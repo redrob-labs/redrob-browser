@@ -85,7 +85,7 @@ source_set("sidecar") {
   deps += [
     "//chrome/browser/notifications",
     "//chrome/browser/profiles/keep_alive",
-    "//chrome/common:url_constants",
+    "//chrome/common",
     "//components/keep_alive_registry",
     "//components/sessions:session_id",
     "//ui/message_center/public/cpp",
