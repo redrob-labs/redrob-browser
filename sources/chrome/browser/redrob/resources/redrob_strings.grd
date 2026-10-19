@@ -185,6 +185,21 @@
       <message name="IDS_REDROB_TASK_ENGINE_TOO_OLD" desc="Task error when the engine does not implement the chat-completions contract this browser needs">This browser needs a newer Redrob Code engine. Update it, then start the task again.</message>
       <message name="IDS_REDROB_TASK_ENGINE_CREDENTIAL" desc="Task error when the engine rejects the per-launch credential">The Redrob Code engine refused this browser's credential.</message>
       <message name="IDS_REDROB_TASK_ENGINE_NO_ANSWER" desc="Task error when a turn completes with no text and no tool call">The engine ended the task without producing an answer.</message>
+      <message name="IDS_REDROB_TASK_NEEDS_CONFIRMATION" desc="Trace line when a guard-mode task asks before a send, post, pay or delete click; $1 is the control's text">Waiting for you: press "<ph name="ARG1">$1<ex>1</ex></ph>"?</message>
+      <message name="IDS_REDROB_TASK_CONFIRMATION_DECLINED" desc="Trace line after the user declines a guarded click; $1 is the control's text">You declined: "<ph name="ARG1">$1<ex>1</ex></ph>"</message>
+      <message name="IDS_REDROB_TASK_NOTIFY_NEEDS_YOU" desc="OS notification title when a task waits for a confirmation; $1 is the task's prompt">Task needs you: <ph name="ARG1">$1<ex>1</ex></ph></message>
+      <message name="IDS_REDROB_TASK_NOTIFY_NEEDS_YOU_BODY" desc="OS notification body for a guarded click; $1 is the control's text">The agent wants to press "<ph name="ARG1">$1<ex>1</ex></ph>". Allow it?</message>
+      <message name="IDS_REDROB_TASK_NOTIFY_ALLOW" desc="Notification button that lets the guarded click run">Allow</message>
+      <message name="IDS_REDROB_TASK_NOTIFY_DECLINE" desc="Notification button that refuses the guarded click">Decline</message>
+      <message name="IDS_REDROB_TASK_NOTIFY_DONE" desc="OS notification title when a task finishes with no browser window open; $1 is the task's prompt">Task done: <ph name="ARG1">$1<ex>1</ex></ph></message>
+      <message name="IDS_REDROB_TASK_NOTIFY_FAILED" desc="OS notification title when a task fails with no browser window open; $1 is the task's prompt">Task stopped: <ph name="ARG1">$1<ex>1</ex></ph></message>
+      <message name="IDS_REDROB_TASK_NOTIFY_OPEN" desc="OS notification body for a finished task">Click to see what it did.</message>
+      <message name="IDS_REDROB_TASK_NOTIFY_SOURCE" desc="Source line of a task notification">Redrob tasks</message>
+      <message name="IDS_REDROB_TASK_TURN_IDLE" desc="Task error when a non-Ultrabrowse turn streams nothing for several minutes">The engine went silent in the middle of a step, so the task was stopped. Try again, or choose Ultrabrowse for long work.</message>
+      <message name="IDS_REDROB_ENGINE_ACCOUNT_UNREACHABLE" desc="Settings error when the engine cannot be asked about providers">The Redrob engine is not running yet. Try again in a moment.</message>
+      <message name="IDS_REDROB_ENGINE_ACCOUNT_REFUSED" desc="Settings error when the engine answers an account request with an error and no reason; $1 is the HTTP status">The engine refused the request (status <ph name="ARG1">$1<ex>1</ex></ph>).</message>
+      <message name="IDS_REDROB_ENGINE_SIGN_IN_NO_PAGE" desc="Settings error when an OAuth sign-in has no authorize URL">The engine did not return a sign-in page for that provider.</message>
+      <message name="IDS_REDROB_ENGINE_SIGN_IN_FAILED" desc="Settings error when the engine reports the OAuth callback failed">The sign-in did not complete. Try again.</message>
       <message name="IDS_REDROB_OB_WELCOME_TITLE" desc="Heading of the first step">Welcome to Redrob</message>
       <message name="IDS_REDROB_OB_WELCOME_BODY" desc="Body of the first step">A browser that can do the work, not just show you the page.</message>
       <message name="IDS_REDROB_OB_ACCOUNT_TITLE" desc="Heading of the account step, which explains the account rather than creating one">What a Redrob account is for</message>

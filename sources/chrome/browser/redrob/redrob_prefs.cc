@@ -40,6 +40,9 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(kHorizontalTabShrinkEnabled, true);
   registry->RegisterBooleanPref(kWindowTranslucencyEnabled, false);
   registry->RegisterBooleanPref(kAutomaticPictureInPictureEnabled, false);
+
+  // CAP-4: tasks outlive the window by default. See the header.
+  registry->RegisterBooleanPref(kKeepTasksRunning, true);
 }
 
 }  // namespace redrob::prefs

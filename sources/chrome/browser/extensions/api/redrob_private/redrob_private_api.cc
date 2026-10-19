@@ -349,6 +349,8 @@ redrob_private::StepKind ToPrivateStepKind(redrob::mojom::StepKind kind) {
       return redrob_private::StepKind::kPlanned;
     case redrob::mojom::StepKind::kRoutine:
       return redrob_private::StepKind::kRoutine;
+    case redrob::mojom::StepKind::kNeedsConfirmation:
+      return redrob_private::StepKind::kNeedsConfirmation;
   }
   // A step kind this build does not know is still a step that happened, so it
   // is reported as thinking rather than dropped from the record.
@@ -430,6 +432,7 @@ redrob_private::Task ToPrivateTask(const redrob::mojom::Task& task) {
   out.effort = ToPrivateEffort(task.effort);
   out.model = task.model;
   out.queued = task.queued;
+  out.awaiting_confirmation = task.awaiting_confirmation;
   for (const auto& step : task.steps) {
     redrob_private::Step wire;
     wire.kind = ToPrivateStepKind(step->kind);

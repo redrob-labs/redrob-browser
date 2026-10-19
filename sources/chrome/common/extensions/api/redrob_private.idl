@@ -84,7 +84,9 @@ namespace redrobPrivate {
     steered,
     queuedMessage,
     planned,
-    routine
+    routine,
+    // A guard-mode task is waiting for the user to allow or decline one click.
+    needsConfirmation
   };
 
   dictionary StepDetail {
@@ -114,6 +116,9 @@ namespace redrobPrivate {
     Effort effort;
     DOMString model;
     DOMString[] queued;
+    // The visible text of the control a guard-mode task is waiting to press.
+    // Set only while the task is blockedOnPolicy on a confirmation.
+    DOMString? awaitingConfirmation;
   };
 
   dictionary ModelOption {

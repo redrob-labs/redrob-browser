@@ -91,6 +91,21 @@
 <translation id="4012014001858417000">이 브라우저에는 더 새로운 Redrob Code 엔진이 필요합니다. 업데이트한 뒤 작업을 다시 시작하세요.</translation>
 <translation id="3123778915167158807">Redrob Code 엔진이 이 브라우저의 자격 증명을 거부했습니다.</translation>
 <translation id="9068726448942312492">엔진이 답변을 내지 않고 작업을 끝냈습니다.</translation>
+<translation id="4796962311156298718">확인 대기: "<ph name="ARG1"/>"을(를) 누를까요?</translation>
+<translation id="4373309418812287115">거절함: "<ph name="ARG1"/>"</translation>
+<translation id="6764719428417475308">작업 확인 필요: <ph name="ARG1"/></translation>
+<translation id="5910612823086285890">에이전트가 "<ph name="ARG1"/>"을(를) 누르려고 합니다. 허용할까요?</translation>
+<translation id="5039804452771397117">허용</translation>
+<translation id="951991426597076286">거절</translation>
+<translation id="5482866180639445146">작업 완료: <ph name="ARG1"/></translation>
+<translation id="8557495873765456461">작업 중단: <ph name="ARG1"/></translation>
+<translation id="7471762478073426373">눌러서 작업 내용을 확인하세요.</translation>
+<translation id="6390725104162375994">Redrob 작업</translation>
+<translation id="6009398070708153484">엔진이 단계 도중 응답하지 않아 작업을 멈췄습니다. 다시 시도하거나, 오래 걸리는 일은 울트라브라우즈를 선택하세요.</translation>
+<translation id="7835926385853363932">Redrob 엔진이 아직 실행 중이 아닙니다. 잠시 후 다시 시도하세요.</translation>
+<translation id="4319739413524284863">엔진이 요청을 거부했습니다(상태 <ph name="ARG1"/>).</translation>
+<translation id="5920837269562052045">엔진이 이 제공자의 로그인 페이지를 돌려주지 않았습니다.</translation>
+<translation id="8002535928054511024">로그인이 완료되지 않았습니다. 다시 시도하세요.</translation>
 <translation id="4528376918166094974">Redrob 시작하기</translation>
 <translation id="2258327572870166617">페이지를 보여주는 데서 끝나지 않고, 일까지 하는 브라우저입니다.</translation>
 <translation id="1720175012154841771">Redrob 계정이 하는 일</translation>

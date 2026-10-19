@@ -76,6 +76,10 @@ enum StepKind {
   kPlanned,
   // A routine started this task, or woke it.
   kRoutine,
+  // CAP-4 / Ultrabrowse. In guard mode the agent wanted to press something that sends, posts, pays or
+  // deletes, and the task is waiting in kBlockedOnPolicy for the user to allow or decline that one
+  // action. The label names the control; nothing has been clicked yet.
+  kNeedsConfirmation,
 };
 
 // One step the agent took, as the page needs to render it.
@@ -123,6 +127,9 @@ struct Task {
   // Instructions the user typed while this task was mid-run, still waiting for a safe boundary. Their
   // own words, echoed back so they can see what is pending rather than wondering if it was lost.
   array<string> queued;
+  // Set while the task is kBlockedOnPolicy on a guard-mode confirmation: the visible text of the control
+  // the agent asked to press. Cleared once the user answers. Null otherwise.
+  string? awaiting_confirmation;
 };
 
 // One model the local engine says this machine can actually run. Mirrors the fields the engine's
@@ -223,6 +230,10 @@ interface TaskHost {
   // parameter, the encoding and any extra parameters it requires, so the side that holds the template
   // is the side that must build the URL.
   SearchWithDefaultProvider(string query);
+  // Answers a guard-mode confirmation (Task.awaiting_confirmation). `allow` runs exactly the one action
+  // that was asked about; declining tells the engine the user said no. False when the task is not
+  // waiting on one.
+  AnswerConfirmation(string task_id, bool allow) => (bool answered);
 };
 
 interface PageHandlerFactory {
