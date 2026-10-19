@@ -365,6 +365,27 @@ void RedrobSidebarSections::AttachToolbarAccess() {
 
   toolbar_avatar_.SetView(access->AddChildView(std::make_unique<AvatarToolbarButton>(browser_)));
 
+  // Settings, because in horizontal mode the sidebar foot -- the product's only way into settings, there is
+  // no app menu -- is hidden with the column. Same page and same singleton-tab rule as the foot's row.
+  auto* settings = access->AddChildView(std::make_unique<views::ImageButton>(base::BindRepeating(
+      [](BrowserWindowInterface* browser) {
+        NavigateParams params(browser, GURL("chrome://redrob/settings"),
+                              ui::PAGE_TRANSITION_AUTO_BOOKMARK);
+        params.disposition = WindowOpenDisposition::SINGLETON_TAB;
+        Navigate(&params);
+      },
+      base::Unretained(browser_.get()))));
+  settings->SetImageModel(views::Button::STATE_NORMAL,
+                          ui::ImageModel::FromVectorIcon(vector_icons::kSettingsIcon,
+                                                         sidebar_tokens::kRowForeground,
+                                                         sidebar_tokens::kFaviconSize));
+  settings->SetImageHorizontalAlignment(views::ImageButton::ALIGN_CENTER);
+  settings->SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
+  settings->SetPreferredSize(gfx::Size(sidebar_tokens::kRowHeight, sidebar_tokens::kRowHeight));
+  settings->GetViewAccessibility().SetName(l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_SETTINGS));
+  settings->SetTooltipText(l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_SETTINGS));
+  views::InstallCircleHighlightPathGenerator(settings);
+
   access->SetProperty(views::kMarginsKey, gfx::Insets::VH(0, 4));
   // Tracked, not owned: the toolbar owns it as a child, and the tracker clears itself if the toolbar goes
   // first -- the two are torn down in an order neither chooses.
