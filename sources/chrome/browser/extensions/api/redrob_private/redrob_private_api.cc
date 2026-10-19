@@ -26,6 +26,7 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/api/redrob_private/redrob_private_folder_picker.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/redrob/agent_entry.h"
 #include "chrome/browser/redrob/agent_service_factories.h"
 #include "chrome/browser/redrob/memory_store.h"
 #include "chrome/browser/redrob/model_store.h"
@@ -1214,6 +1215,57 @@ ExtensionFunction::ResponseAction RedrobPrivateInstallEngineFunction::Run() {
   // startImport does.
   RedrobPrivateEngineInstallerFactory::GetForBrowserContext(browser_context())
       ->Install();
+  return RespondNow(NoArguments());
+}
+
+// --- Native entrances: the quick window (CAP-5) ------------------------------
+//
+// The window itself is Views code above this target; these reach it only
+// through redrob::CloseQuickWindow and the pref its service observes, so
+// nothing here depends on chrome/browser/ui.
+
+ExtensionFunction::ResponseAction
+RedrobPrivateGetQuickWindowShortcutFunction::Run() {
+  return RespondNow(ArgumentList(
+      redrob_private::GetQuickWindowShortcut::Results::Create(
+          Profile::FromBrowserContext(browser_context())
+              ->GetPrefs()
+              ->GetString(redrob::prefs::kQuickWindowShortcut))));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetQuickWindowShortcutFunction::Run() {
+  auto params = redrob_private::SetQuickWindowShortcut::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // Three known presets and nothing else. The value becomes a key combination
+  // registered with the OS, so a renderer must not be able to name one.
+  const std::string& preset = params->preset;
+  if (preset != redrob::prefs::kQuickWindowShortcutPrimaryShiftSpace &&
+      preset != redrob::prefs::kQuickWindowShortcutAltShiftSpace &&
+      preset != redrob::prefs::kQuickWindowShortcutOff) {
+    return RespondNow(NoArguments());
+  }
+  // The window's service observes this pref and moves the registration.
+  Profile::FromBrowserContext(browser_context())
+      ->GetPrefs()
+      ->SetString(redrob::prefs::kQuickWindowShortcut, preset);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateStartQuickTaskFunction::Run() {
+  auto params = redrob_private::StartQuickTask::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // Closed first so the browser window the task opens in is the one in front.
+  // The close is deferred inside the window, so this call's own frame is not
+  // freed under it.
+  redrob::CloseQuickWindow();
+  redrob::OpenAgentChat(Profile::FromBrowserContext(browser_context()),
+                        params->prompt, /*context_tab_id=*/std::nullopt);
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateCloseQuickWindowFunction::Run() {
+  redrob::CloseQuickWindow();
   return RespondNow(NoArguments());
 }
 

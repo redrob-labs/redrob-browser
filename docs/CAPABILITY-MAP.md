@@ -38,9 +38,9 @@ Item ids in the last column refer to `docs/PRODUCT-BACKLOG.md`.
 | capability | what a person gets | us | item |
 |---|---|---|---|
 | Agent in a side panel | A conversation beside the page | yes — native, and again in our extension | — |
-| Agent in the address bar | Type intent where you already type | no | CAP-3 |
+| Agent in the address bar | Type intent where you already type | yes — `> ` or Tab on the agent row enters agent mode, a "Redrob" chip shows it, Enter opens the agent chat with the tab attached | CAP-3 |
 | Agent owns its own tabs, and they expire | The agent opens tabs and tidies up after itself | partial — we have agent tabs, no idle policy | — |
-| A global quick window | Own shortcut, own size, reachable without the browser focused | no | CAP-5 |
+| A global quick window | Own shortcut, own size, reachable without the browser focused | yes — Ctrl/Cmd+Shift+Space opens a frameless always-on-top window; shortcut preset or off in Customize | CAP-5 |
 | Selection actions the user defines | Select text or an area, get YOUR actions: prompt templates with the selection substituted, open-URL, copy. Configurable icon, name, colour, hotkey | no | CAP-10 (new) |
 | Per-site notification subscriptions the agent consumes | The agent watches a site's notifications and reacts; revocable per site | no | CAP-11 (new) |
 | A launch surface listing what it can already act in | Named apps with example prompts, instead of an empty box | no | — |

@@ -99,6 +99,16 @@ inline constexpr char kWindowTranslucencyEnabled[] =
 inline constexpr char kAutomaticPictureInPictureEnabled[] =
     "redrob.picture_in_picture.automatic";
 
+// The quick window's global shortcut (CAP-5), as a PRESET ID rather than a key string. A key string
+// would arrive from the settings page and could name any combination on the machine -- including a
+// plain letter, which a global shortcut would then steal from every other application. The window
+// code maps each id to an accelerator with the platform's primary modifier (Ctrl, or Command on
+// macOS). "off" disables the shortcut; an id this build does not know behaves as "off".
+inline constexpr char kQuickWindowShortcut[] = "redrob.quick_window.shortcut";
+inline constexpr char kQuickWindowShortcutPrimaryShiftSpace[] = "primary_shift_space";
+inline constexpr char kQuickWindowShortcutAltShiftSpace[] = "alt_shift_space";
+inline constexpr char kQuickWindowShortcutOff[] = "off";
+
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
 }  // namespace redrob::prefs

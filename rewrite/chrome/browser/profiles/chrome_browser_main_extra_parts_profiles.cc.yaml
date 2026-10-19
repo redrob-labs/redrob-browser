@@ -15,3 +15,20 @@ substitutions:
       pattern: "  AboutSigninInternalsFactory::GetInstance();"
       replace: "  redrob::TaskStoreFactory::GetInstance();\n  redrob::MemoryStoreFactory::GetInstance();\n  redrob::ModelStoreFactory::GetInstance();\n  redrob::RoutineStoreFactory::GetInstance();\n  redrob::RpcServerFactory::GetInstance();\n  AboutSigninInternalsFactory::GetInstance();"
       count: 1
+  # ---- CAP-5: the quick window's service
+  - description: |
+      The quick window service's header. It is Views code (chrome/browser/ui/views/redrob), which this
+      target already reaches through its //chrome/browser/ui dep.
+    insert_after:
+      anchor: '#include "chrome/browser/record_replay/task_store_factory.h"'
+      count: 1
+      lines: |
+        #include "chrome/browser/ui/views/redrob/quick_window_service.h"
+  - description: |
+      Register the quick window service. It is created with the profile, because it owns the global
+      shortcut and nothing else would ever create it.
+    insert_after:
+      anchor: '  AboutSigninInternalsFactory::GetInstance();'
+      count: 1
+      lines: |
+        redrob::QuickWindowServiceFactory::GetInstance();

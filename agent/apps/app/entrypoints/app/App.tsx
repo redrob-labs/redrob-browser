@@ -23,6 +23,7 @@ import { NewTabChat } from '@/screens/newtab/index/NewTabChat'
 import { NewTabLayout } from '@/screens/newtab/layout/NewTabLayout'
 import { Personalize } from '@/screens/newtab/personalize/Personalize'
 import { OnboardingAiPage } from '@/screens/onboarding-ai/OnboardingAiPage'
+import { QuickWindow } from '@/screens/quick-window/QuickWindow'
 import { ScheduledTasksPage } from '@/screens/scheduled-tasks/ScheduledTasksPage'
 
 const OptionsRedirect: FC = () => {
@@ -108,6 +109,9 @@ export const App: FC = () => {
           element={<Navigate to="/settings/ai" replace />}
         />
         <Route path="/options/*" element={<OptionsRedirect />} />
+
+        {/* CAP-5: the page inside the native quick window. No layout: the window is the frame. */}
+        <Route path="/quick" element={<QuickWindow />} />
 
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>

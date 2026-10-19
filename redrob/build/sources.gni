@@ -107,3 +107,22 @@ redrob_chrome_browser_ui_deps = [
 # locale-pak prefix in chrome_repack_locales.gni. A list exists to absorb GROWTH, and those four do not
 # grow: each is one target learning about one thing of ours, once. Putting them here would add a name to
 # read without removing an edit to make.
+
+# CAP-5: the global quick window. In the chrome/browser/ui dice branch with the first-run flow
+# controller, because that branch is the one hook into chrome/browser/ui:ui this tree already has and
+# it is on for every desktop platform we ship (Linux, macOS, Windows). Appended here rather than
+# written into the lists above so a merge with other work on those lists is a union.
+redrob_chrome_browser_ui_dice_sources += [
+  "//chrome/browser/ui/views/redrob/quick_window_service.cc",
+  "//chrome/browser/ui/views/redrob/quick_window_service.h",
+  "//chrome/browser/ui/views/redrob/quick_window_view.cc",
+  "//chrome/browser/ui/views/redrob/quick_window_view.h",
+]
+
+redrob_chrome_browser_ui_deps += [
+  # agent_entry (the task path the quick window shares with the address bar) and the shortcut pref.
+  "//chrome/browser/redrob:sidecar",
+  # IDS_REDROB_ENTRY_* for the window's title.
+  "//chrome/browser/redrob/resources:redrob_strings",
+  "//ui/base/accelerators/global_accelerator_listener",
+]

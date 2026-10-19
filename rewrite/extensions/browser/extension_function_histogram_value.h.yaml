@@ -73,3 +73,9 @@ substitutions:
         REDROBPRIVATE_SETAUTOMATICPICTUREINPICTUREENABLED = 2064,
         REDROBPRIVATE_GETCOLORSCHEME = 2065,
         REDROBPRIVATE_SETCOLORSCHEME = 2066,
+        // CAP-5, the quick window. Appended after the last value on develop; a
+        // parallel branch appending here too must renumber on merge, not reuse.
+        REDROBPRIVATE_GETQUICKWINDOWSHORTCUT = 2067,
+        REDROBPRIVATE_SETQUICKWINDOWSHORTCUT = 2068,
+        REDROBPRIVATE_STARTQUICKTASK = 2069,
+        REDROBPRIVATE_CLOSEQUICKWINDOW = 2070,

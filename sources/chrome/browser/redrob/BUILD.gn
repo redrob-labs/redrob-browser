@@ -79,7 +79,7 @@ source_set("sidecar") {
   ]
 
   # CAP-3 / CAP-5: the one place a native entrance (address bar, quick window) hands a request to the
-  # agent page. It names the agent extension by id, which is a BrowserOS constant.
+  # agent page. It names the agent extension by id, from chrome/browser/browseros/core.
   sources += [
     "agent_entry.cc",
     "agent_entry.h",

@@ -11,6 +11,7 @@ import { t } from '@browseros/i18n'
 import type { FC } from 'react'
 import { SettingsHeader } from '@/components/settings/SettingsLayout'
 import { AppearanceSettings } from './AppearanceSettings'
+import { QuickWindowSettingsCard } from './QuickWindowSettingsCard'
 import { ToolbarSettingsCard } from './ToolbarSettingsCard'
 
 export const CustomizationPage: FC = () => {
@@ -19,6 +20,7 @@ export const CustomizationPage: FC = () => {
       <SettingsHeader title={t('customizeTitle')} lede={t('customizeLede')} />
       <AppearanceSettings />
       <ToolbarSettingsCard />
+      <QuickWindowSettingsCard />
     </div>
   )
 }
