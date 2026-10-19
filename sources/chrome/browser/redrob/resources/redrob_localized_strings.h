@@ -108,6 +108,7 @@ inline constexpr webui::LocalizedString kRedrobLocalizedStrings[] = {
     {"taskNotifyNeedsYouBody", IDS_REDROB_TASK_NOTIFY_NEEDS_YOU_BODY},
     {"taskNotifyAllow", IDS_REDROB_TASK_NOTIFY_ALLOW},
     {"taskNotifyDecline", IDS_REDROB_TASK_NOTIFY_DECLINE},
+    {"taskNotifyUnlock", IDS_REDROB_TASK_NOTIFY_UNLOCK},
     {"taskNotifyDone", IDS_REDROB_TASK_NOTIFY_DONE},
     {"taskNotifyFailed", IDS_REDROB_TASK_NOTIFY_FAILED},
     {"taskNotifyOpen", IDS_REDROB_TASK_NOTIFY_OPEN},
