@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "chrome/browser/importer/importer_list.h"
+#include <optional>
 #include <string>
 
 #include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
@@ -154,6 +155,9 @@ class RedrobPrivateRemoveMemoryFunction : public ExtensionFunction {
  protected:
   ~RedrobPrivateRemoveMemoryFunction() override = default;
   ResponseAction Run() override;
+
+ private:
+  void OnDone(std::string run_id, bool ok, const std::string& message);
 };
 
 class RedrobPrivateSetMemoryPinnedFunction : public ExtensionFunction {
@@ -546,6 +550,62 @@ class RedrobPrivateInstallEngineFunction : public ExtensionFunction {
                              REDROBPRIVATE_INSTALLENGINE)
  protected:
   ~RedrobPrivateInstallEngineFunction() override = default;
+  ResponseAction Run() override;
+};
+
+// --- Memory files (CAP-19) ---------------------------------------------------
+
+class RedrobPrivateReadMemoryFileFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.readMemoryFile",
+                             REDROBPRIVATE_READMEMORYFILE)
+ protected:
+  ~RedrobPrivateReadMemoryFileFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnRead(std::optional<std::string> content);
+};
+
+class RedrobPrivateWriteMemoryFileFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.writeMemoryFile",
+                             REDROBPRIVATE_WRITEMEMORYFILE)
+ protected:
+  ~RedrobPrivateWriteMemoryFileFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnDone(std::string run_id, bool ok, const std::string& message);
+};
+
+class RedrobPrivateRevertMemoryRunFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.revertMemoryRun",
+                             REDROBPRIVATE_REVERTMEMORYRUN)
+ protected:
+  ~RedrobPrivateRevertMemoryRunFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnDone(bool ok, const std::string& message);
+};
+
+class RedrobPrivateRunMemoryConsolidationFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.runMemoryConsolidation",
+                             REDROBPRIVATE_RUNMEMORYCONSOLIDATION)
+ protected:
+  ~RedrobPrivateRunMemoryConsolidationFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetMemoryHistoryInputFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setMemoryHistoryInput",
+                             REDROBPRIVATE_SETMEMORYHISTORYINPUT)
+ protected:
+  ~RedrobPrivateSetMemoryHistoryInputFunction() override = default;
   ResponseAction Run() override;
 };
 

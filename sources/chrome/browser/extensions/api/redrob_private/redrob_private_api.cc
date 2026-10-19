@@ -230,6 +230,38 @@ Profile* ProfileOf(content::BrowserContext* ctx) {
   return Profile::FromBrowserContext(ctx);
 }
 
+redrob_private::MemoryRun ToPrivateMemoryRun(const MemoryStore::Run& run) {
+  redrob_private::MemoryRun wire;
+  wire.id = run.id;
+  switch (run.kind) {
+    case MemoryStore::RunKind::kExtract:
+      wire.kind = redrob_private::MemoryRunKind::kExtract;
+      break;
+    case MemoryStore::RunKind::kConsolidate:
+      wire.kind = redrob_private::MemoryRunKind::kConsolidate;
+      break;
+    case MemoryStore::RunKind::kUser:
+      wire.kind = redrob_private::MemoryRunKind::kUser;
+      break;
+    case MemoryStore::RunKind::kRevert:
+      wire.kind = redrob_private::MemoryRunKind::kRevert;
+      break;
+  }
+  wire.started_ms = static_cast<double>(run.started_ms);
+  wire.duration_ms = static_cast<double>(run.duration_ms);
+  wire.tokens = static_cast<double>(run.tokens);
+  wire.finished = run.finished;
+  wire.revertible = run.has_snapshot;
+  for (const MemoryStore::FileChange& change : run.files) {
+    redrob_private::MemoryFileChange file;
+    file.path = change.path;
+    file.added = change.added;
+    file.removed = change.removed;
+    wire.files.push_back(std::move(file));
+  }
+  return wire;
+}
+
 redrob_private::PermissionMode ToPrivateMode(
     redrob::mojom::PermissionMode mode) {
   switch (mode) {
@@ -292,7 +324,9 @@ RoutineStore::Routine FromPrivateRoutine(const redrob_private::Routine& wire) {
   routine.prompt = wire.prompt;
   routine.kind = wire.kind == redrob_private::RoutineKind::kHeartbeat
                      ? RoutineStore::Kind::kHeartbeat
-                     : RoutineStore::Kind::kCron;
+                     : (wire.kind == redrob_private::RoutineKind::kConsolidate
+                            ? RoutineStore::Kind::kConsolidate
+                            : RoutineStore::Kind::kCron);
   routine.every_minutes = wire.every_minutes;
   routine.mode = FromPrivateMode(wire.mode);
   routine.effort = FromPrivateEffort(wire.effort);
@@ -456,21 +490,31 @@ redrob_private::Task ToPrivateTask(const redrob::mojom::Task& task) {
 ExtensionFunction::ResponseAction RedrobPrivateRemoveMemoryFunction::Run() {
   auto params = redrob_private::RemoveMemory::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params);
-  const bool ok =
-      MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
-          ->Remove(params->id);
-  return RespondNow(
-      ArgumentList(redrob_private::RemoveMemory::Results::Create(ok)));
+  // A deletion from Settings is a user run like an edit is, so it is
+  // snapshotted and can be reverted.
+  MemoryStore* memory =
+      MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()));
+  const std::string run_id = memory->BeginRun(MemoryStore::RunKind::kUser);
+  memory->DeleteFile(
+      run_id, params->id,
+      base::BindOnce(&RedrobPrivateRemoveMemoryFunction::OnDone, this, run_id));
+  return RespondLater();
+}
+
+void RedrobPrivateRemoveMemoryFunction::OnDone(std::string run_id,
+                                               bool ok,
+                                               const std::string& message) {
+  MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
+      ->EndRun(run_id, 0);
+  Respond(ArgumentList(redrob_private::RemoveMemory::Results::Create(ok)));
 }
 
 ExtensionFunction::ResponseAction RedrobPrivateSetMemoryPinnedFunction::Run() {
   auto params = redrob_private::SetMemoryPinned::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params);
-  const bool ok =
-      MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
-          ->SetPinned(params->id, params->pinned);
+  // Retired with the list store: files are not pinned. See the idl.
   return RespondNow(
-      ArgumentList(redrob_private::SetMemoryPinned::Results::Create(ok)));
+      ArgumentList(redrob_private::SetMemoryPinned::Results::Create(false)));
 }
 
 ExtensionFunction::ResponseAction RedrobPrivateRemoveRoutineFunction::Run() {
@@ -527,14 +571,18 @@ ExtensionFunction::ResponseAction RedrobPrivateGetSettingsFunction::Run() {
   MemoryStore* memory = MemoryStoreFactory::GetForProfile(profile);
   out.memory.enabled = memory->enabled();
   out.memory.retention_days = memory->retention_days();
-  for (const MemoryStore::Entry& e : memory->List()) {
-    redrob_private::MemoryEntry wire;
-    wire.id = e.id;
-    wire.text = e.text;
-    wire.source = e.source;
-    wire.created_ms = static_cast<double>(e.created_at_ms);
-    wire.pinned = e.pinned;
-    out.memory.entries.push_back(std::move(wire));
+  out.memory.history_input = memory->history_input();
+  out.memory.last_consolidation_ms =
+      static_cast<double>(memory->last_consolidation_ms());
+  for (const MemoryStore::FileInfo& f : memory->files()) {
+    redrob_private::MemoryFile wire;
+    wire.path = f.path;
+    wire.bytes = static_cast<double>(f.bytes);
+    wire.modified_ms = static_cast<double>(f.modified_ms);
+    out.memory.files.push_back(std::move(wire));
+  }
+  for (const MemoryStore::Run& r : memory->Runs()) {
+    out.memory.runs.push_back(ToPrivateMemoryRun(r));
   }
 
   // Model providers + engine state.
@@ -597,7 +645,9 @@ ExtensionFunction::ResponseAction RedrobPrivateGetSettingsFunction::Run() {
     wire.prompt = r.prompt;
     wire.kind = r.kind == RoutineStore::Kind::kHeartbeat
                     ? redrob_private::RoutineKind::kHeartbeat
-                    : redrob_private::RoutineKind::kCron;
+                    : (r.kind == RoutineStore::Kind::kConsolidate
+                           ? redrob_private::RoutineKind::kConsolidate
+                           : redrob_private::RoutineKind::kCron);
     wire.every_minutes = r.every_minutes;
     wire.mode = ToPrivateMode(r.mode);
     wire.effort = ToPrivateEffort(r.effort);
@@ -1219,6 +1269,84 @@ ExtensionFunction::ResponseAction RedrobPrivateInstallEngineFunction::Run() {
   // startImport does.
   RedrobPrivateEngineInstallerFactory::GetForBrowserContext(browser_context())
       ->Install();
+  return RespondNow(NoArguments());
+}
+
+// --- Memory files (CAP-19) ---------------------------------------------------
+
+ExtensionFunction::ResponseAction RedrobPrivateReadMemoryFileFunction::Run() {
+  auto params = redrob_private::ReadMemoryFile::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
+      ->ReadFile(params->path,
+                 base::BindOnce(&RedrobPrivateReadMemoryFileFunction::OnRead,
+                                this));
+  return RespondLater();
+}
+
+void RedrobPrivateReadMemoryFileFunction::OnRead(
+    std::optional<std::string> content) {
+  // Nothing rather than an empty string when there is no such file: an empty
+  // file is a real answer and a missing one is a different one.
+  base::ListValue result;
+  if (content) {
+    result.Append(std::move(*content));
+  }
+  Respond(ArgumentList(std::move(result)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateWriteMemoryFileFunction::Run() {
+  auto params = redrob_private::WriteMemoryFile::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  MemoryStore* memory =
+      MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()));
+  // The user's edit goes through the same write path as the agent's: a run
+  // row, a snapshot before the first write, and +/- counts.
+  const std::string run_id = memory->BeginRun(MemoryStore::RunKind::kUser);
+  memory->WriteFile(
+      run_id, params->path, params->content,
+      base::BindOnce(&RedrobPrivateWriteMemoryFileFunction::OnDone, this,
+                     run_id));
+  return RespondLater();
+}
+
+void RedrobPrivateWriteMemoryFileFunction::OnDone(std::string run_id,
+                                                  bool ok,
+                                                  const std::string& message) {
+  MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
+      ->EndRun(run_id, 0);
+  Respond(ArgumentList(redrob_private::WriteMemoryFile::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction RedrobPrivateRevertMemoryRunFunction::Run() {
+  auto params = redrob_private::RevertMemoryRun::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
+      ->Revert(params->run_id,
+               base::BindOnce(&RedrobPrivateRevertMemoryRunFunction::OnDone,
+                              this));
+  return RespondLater();
+}
+
+void RedrobPrivateRevertMemoryRunFunction::OnDone(bool ok,
+                                                  const std::string& message) {
+  Respond(ArgumentList(redrob_private::RevertMemoryRun::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateRunMemoryConsolidationFunction::Run() {
+  TaskStore* tasks = TaskStoreFactory::GetForProfile(ProfileOf(browser_context()));
+  const bool started = tasks && tasks->StartConsolidation(/*force=*/true);
+  return RespondNow(ArgumentList(
+      redrob_private::RunMemoryConsolidation::Results::Create(started)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetMemoryHistoryInputFunction::Run() {
+  auto params = redrob_private::SetMemoryHistoryInput::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  MemoryStoreFactory::GetForProfile(ProfileOf(browser_context()))
+      ->SetHistoryInput(params->enabled);
   return RespondNow(NoArguments());
 }
 

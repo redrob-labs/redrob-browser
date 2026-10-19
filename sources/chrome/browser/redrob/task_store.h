@@ -16,6 +16,7 @@
 #include "base/timer/timer.h"
 #include "base/values.h"
 #include "base/files/file_path.h"
+#include "chrome/browser/redrob/memory_store.h"
 #include "chrome/browser/redrob/sidecar_client.h"
 #include "chrome/browser/ui/thumbnails/thumbnail_image.h"
 #include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
@@ -30,7 +31,6 @@ class WebContents;
 
 namespace redrob {
 
-class MemoryStore;
 class ModelStore;
 
 // The tasks of one profile, the sidecar that answers them, and the tool loop between the two.
@@ -125,6 +125,12 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   // routine that starts a fresh one. False when the id is unknown.
   bool WakeTask(const std::string& task_id, const std::string& prompt);
 
+  // Starts a hidden consolidation run over the memory files. Without `force` it runs only when at least
+  // three extraction runs finished since the last one and the last one is a day old -- the built-in
+  // routine calls it that way; Settings' "Run consolidation now" passes force. False when nothing
+  // started: memory off, not due, one already running, or no engine.
+  bool StartConsolidation(bool force);
+
   // SidecarClient::CompletionDelegate
   void OnCompletionText(std::string_view text) override;
   void OnCompletionReasoning(std::string_view text) override;
@@ -169,6 +175,19 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
     // page's contents, and never anything the agent may act on.
     std::string context_url;
     std::string context_title;
+    // True from creation until the memory search for this task's prompt has answered. The first turn
+    // waits for it, because the hits go into the history BEFORE the user's message.
+    bool awaiting_memory = false;
+    // Pages the agent's tab visited, {url, title}. Handed to extraction only when the user turned
+    // history input on; never the user's own history.
+    std::vector<std::pair<std::string, std::string>> visited;
+  };
+
+  // A hidden task that maintains memory: extraction after a task, or consolidation. Not listed, not
+  // notified, opens no tabs, and is the ONLY kind of task offered memory_write / memory_edit.
+  struct MemoryTaskInfo {
+    std::string run_id;
+    bool consolidate = false;
   };
 
   void OnSidecarStatusChanged(SidecarClient::Status status);
@@ -213,6 +232,25 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   // CAP-1: {page_url, page_title} of the task's agent tab, else of the tab it started from; nullopt
   // when neither is an http(s) page.
   static std::optional<base::DictValue> RedrobContext(const Conversation& conversation);
+
+  // --- Memory runs ----------------------------------------------------------------------------------
+  bool IsMemoryTask(const std::string& task_id) const;
+  // Creates and posts the first turn of a hidden memory task. Returns its id, or empty.
+  std::string StartMemoryTask(bool consolidate, const std::string& prompt);
+  // Queues the extraction run for a task that just succeeded.
+  void StartExtraction(const std::string& task_id);
+  // The memory_* and recall tools. Returns false when `call` is not one of them.
+  bool RunMemoryTool(const std::string& task_id,
+                     const ProposedToolCall& call,
+                     const base::DictValue& arguments);
+  void OnMemoryPrefill(std::string task_id, std::vector<MemoryStore::SearchHit> hits);
+  // Starts the oldest queued task when nothing is streaming. Posted from FinishTask, because a task
+  // that finished while another waited used to leave the waiting one queued for good.
+  void StartNextQueued();
+  // Drops a finished memory task from every map.
+  void ForgetMemoryTask(const std::string& task_id);
+
+  std::map<std::string, MemoryTaskInfo> memory_tasks_;
 
   std::map<std::string, mojom::TaskPtr> tasks_;
   std::map<std::string, Conversation> conversations_;

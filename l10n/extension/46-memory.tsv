@@ -1,0 +1,53 @@
+# The Memory settings page (agent/apps/app/screens/memory-settings), English and Korean.
+#
+# key <TAB> English <TAB> Korean [<TAB> description]
+#
+# Terminology follows l10n/40-settings.tsv and l10n/45-memory.tsv: memory 메모리 / run 실행 / revert 되돌리기.
+# File names (USER.md, episodic/) are never translated: they are the names on disk.
+
+stNavMemory	Memory	메모리	Settings navigation link to the memory page
+memTitle	Memory	메모리	Page title
+memLede	What the agent carries from one task to the next: plain markdown files you can read, edit and roll back. After a task the browser writes down what was worth keeping, and once a day it tidies those notes.	에이전트가 작업 사이에 가져가는 것입니다. 직접 읽고 고치고 되돌릴 수 있는 마크다운 파일이며, 작업이 끝나면 브라우저가 남길 만한 내용을 적고 하루에 한 번 정리합니다.	Page lede under the title
+memUnavailable	Memory settings are available in the Redrob browser.	메모리 설정은 Redrob 브라우저에서 사용할 수 있습니다.	Shown when the page runs outside the browser
+memGroupGeneral	General	일반	Group heading
+memEnabled	Let the agent keep memory	에이전트가 메모리를 유지하도록 허용	Row name of the on/off switch
+memEnabledHint	When off, tasks neither read nor write memory, and nothing is noted after a task.	끄면 작업이 메모리를 읽거나 쓰지 않고, 작업 후에도 아무것도 기록하지 않습니다.	Row description
+memRetention	Keep daily notes for	일별 기록 보관 기간	Row name of the retention picker
+memRetentionHint	Only the daily notes in episodic/ age out. Facts moved into other files stay until you delete them.	episodic/의 일별 기록만 기간이 지나면 지워집니다. 다른 파일로 옮겨진 내용은 직접 지울 때까지 남습니다.	Row description
+mem30Days	30 days	30일	Retention option
+mem90Days	90 days	90일	Retention option
+memForever	Until I delete them	직접 삭제할 때까지	Retention option: keep daily notes indefinitely
+memHistory	Use the pages the agent visited	에이전트가 방문한 페이지 사용	Row name of the history input switch
+memHistoryHint	Lets the after-task note see the titles and addresses of pages the agent's own tab opened during that task. Never your own browsing history.	작업 후 기록에 그 작업 중 에이전트 탭이 연 페이지의 제목과 주소를 넘깁니다. 사용자 본인의 방문 기록은 넘기지 않습니다.	Row description
+memGroupFiles	Files	파일	Group heading
+memFilesEmpty	No memory files yet.	아직 메모리 파일이 없습니다.	Shown when there are no files
+memBytes	$1 bytes	$1바이트	File size; $1 is a number
+memOpen	Open	열기	Button that opens a file in the editor
+memClose	Close	닫기	Button that closes the editor
+memSave	Save	저장	Button that saves the edited file
+memSaved	Saved. You can undo it from the run history.	저장했습니다. 실행 기록에서 되돌릴 수 있습니다.	Toast after saving
+memSaveFailed	That could not be saved. Files are at most 64 KiB, and names use lower-case letters, digits, - and _ only.	저장하지 못했습니다. 파일은 64KiB 이하이고, 이름에는 영문 소문자, 숫자, -, _만 쓸 수 있습니다.	Toast when saving failed
+memDelete	Delete	삭제	Button that deletes a file
+memDeleted	Deleted. You can undo it from the run history.	삭제했습니다. 실행 기록에서 되돌릴 수 있습니다.	Toast after deleting a file
+memLoadFailed	That file could not be read.	파일을 읽지 못했습니다.	Toast when opening a file failed
+memEditorLabel	Contents of $1	$1 내용	Accessible name of the editor; $1 is the file path
+memGroupRuns	Run history	실행 기록	Group heading
+memRunsEmpty	Nothing has changed memory yet.	아직 메모리를 바꾼 실행이 없습니다.	Shown when there are no runs
+memKindExtract	After a task	작업 후 기록	Kind of run: notes written after a task
+memKindConsolidate	Consolidation	정리	Kind of run: the daily review
+memKindUser	Your edit	직접 수정	Kind of run: an edit made on this page
+memKindRevert	Revert	되돌리기	Kind of run: a revert
+memRunning	Running	실행 중	A run that has not finished
+memSeconds	$1 s	$1초	Duration of a run; $1 is a number of seconds
+memTokens	$1 tokens	토큰 $1개	Tokens a run used; $1 is a number
+memNoChanges	No changes	변경 없음	A run that changed no file
+memRevert	Revert	되돌리기	Button that undoes one run
+memReverted	Reverted. The revert is a run of its own, so it can be undone too.	되돌렸습니다. 되돌리기도 하나의 실행이므로 다시 되돌릴 수 있습니다.	Toast after reverting
+memRevertFailed	That run could not be reverted. Its snapshot may no longer be kept.	이 실행을 되돌리지 못했습니다. 스냅숏이 더 이상 보관되지 않을 수 있습니다.	Toast when reverting failed
+memConsolidateNow	Run consolidation now	지금 정리 실행	Button that starts the daily review now
+memConsolidateStarted	Consolidation started. It appears in the run history when it finishes.	정리를 시작했습니다. 끝나면 실행 기록에 나타납니다.	Toast after starting consolidation
+memConsolidateFailed	Consolidation did not start: memory is off, one is already running, or no engine is available.	정리를 시작하지 못했습니다. 메모리가 꺼져 있거나, 이미 실행 중이거나, 사용할 수 있는 엔진이 없습니다.	Toast when consolidation could not start
+memForget	Forget everything	전부 지우기	Button that deletes all memory
+memForgetConfirm	Delete every memory file, every snapshot and the run history? This cannot be undone.	모든 메모리 파일, 스냅숏, 실행 기록을 지울까요? 되돌릴 수 없습니다.	Confirmation before deleting all memory
+memForgotten	Everything was deleted.	전부 지웠습니다.	Toast after deleting all memory
+memUpdateFailed	That setting could not be changed.	설정을 바꾸지 못했습니다.	Toast when a setting failed to update

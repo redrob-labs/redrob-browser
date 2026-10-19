@@ -4,6 +4,7 @@
 
 #include "chrome/browser/redrob/task_store.h"
 
+#include <set>
 #include <utility>
 
 #include "base/functional/bind.h"
@@ -13,6 +14,7 @@
 #include "base/strings/escape.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "base/uuid.h"
 #include "base/base64.h"
@@ -99,8 +101,64 @@ constexpr char kToolClick[] = "click";
 constexpr char kToolType[] = "type_text";
 constexpr char kToolSaveFile[] = "save_file";
 constexpr char kToolPlan[] = "plan_research";
-constexpr char kToolRemember[] = "remember";
 constexpr char kToolRecall[] = "recall";
+// Memory files. Read and list are offered to every task while memory is on; write and edit only to the
+// hidden memory tasks, so an ordinary task cannot rewrite memory as a side effect of what it browsed.
+constexpr char kToolMemoryRead[] = "memory_read";
+constexpr char kToolMemoryList[] = "memory_list";
+constexpr char kToolMemoryWrite[] = "memory_write";
+constexpr char kToolMemoryEdit[] = "memory_edit";
+
+// Tool rounds a memory task may take: enough to list, read a handful of files and write a few.
+constexpr int kMemoryToolBudget = 16;
+// How much of a finished task's answer extraction is shown. The tail, because that is the conclusion.
+constexpr size_t kExtractionAnswerBytes = 6000;
+constexpr size_t kExtractionMaxSteps = 60;
+
+// The one system message every memory task gets.
+constexpr char kMemorySystemPrompt[] =
+    "You maintain the memory of the Redrob browser's agent: a folder of markdown files the user can "
+    "read, edit and revert. Use memory_list and memory_read to see what is there, and memory_write or "
+    "memory_edit to change it. Write short, plain markdown bullets a person can check at a glance. "
+    "Record only what is durable and useful for future tasks: what the user wants, how they like "
+    "things done, and paths through websites that worked. Never record passwords, payment details, "
+    "one-time codes, or anything the user did not show you. When you are done, answer with one line "
+    "saying what you changed, or that nothing was worth keeping.";
+
+// Extraction: what to keep from ONE finished task. English on purpose: it is model input, not UI.
+constexpr char kExtractionPrompt[] =
+    "A browser task just finished. Decide what from it is worth remembering, then:\n"
+    "1. Append to the episodic file named below (create it with a '# YYYY-MM-DD' heading if it does "
+    "not exist): one bullet per thing worth keeping -- what the user asked for, what worked, and "
+    "anything they told you about themselves. Do not copy page contents.\n"
+    "2. For each site where a path through it worked (a search URL, which menu led where, a form "
+    "that needed a particular order), update sites/<host>.md, e.g. sites/example.com.md, with that "
+    "path. Edit the existing file rather than rewriting it when one exists.\n"
+    "3. If you created a new file, add one line for it to MEMORY.md.\n"
+    "If nothing in the task is worth keeping, change nothing and say so.";
+
+// Consolidation: the offline review of the episodic log.
+constexpr char kConsolidationPrompt[] =
+    "Review the memory as a whole. Read MEMORY.md, USER.md and the files in episodic/. Then:\n"
+    "1. Move durable facts out of the episodic files into where they belong: USER.md for who the "
+    "user is and what they prefer, people/<name>.md for people they work with, projects/<name>.md "
+    "for ongoing work, and sites/<host>.md for paths through websites. Merge duplicates and drop "
+    "anything later episodes contradict.\n"
+    "2. Leave the episodic files themselves in place; they age out on their own.\n"
+    "3. Rewrite MEMORY.md as the index: one line per file, saying what it holds.\n"
+    "Keep every file short. Prefer editing over rewriting.";
+
+std::string TodayName() {
+  base::Time::Exploded exploded;
+  base::Time::Now().LocalExplode(&exploded);
+  return base::StringPrintf("%04d-%02d-%02d", exploded.year, exploded.month,
+                            exploded.day_of_month);
+}
+
+bool IsMemoryToolName(const std::string& name) {
+  return name == kToolRecall || name == kToolMemoryRead || name == kToolMemoryList ||
+         name == kToolMemoryWrite || name == kToolMemoryEdit;
+}
 
 // How many remembered entries a new task is given unasked, and how many `recall` returns. Small on
 // purpose: memory that fills the context is memory that crowds out the task.
@@ -173,6 +231,70 @@ base::DictValue StringArrayProperty(const std::string& description) {
   return property;
 }
 
+// The memory tools. `writable` adds memory_write and memory_edit, and is true ONLY for a memory task.
+void AppendMemoryTools(base::ListValue& tools, bool writable) {
+  {
+    base::DictValue properties;
+    properties.Set("query", StringProperty("What you are trying to recall."));
+    base::ListValue required;
+    required.Append("query");
+    tools.Append(MakeTool(kToolRecall,
+                          "Search the memory files for lines matching a query. The most relevant lines "
+                          "are given to you at the start of a task, so use this only when you need "
+                          "something the task did not begin with.",
+                          std::move(properties), std::move(required)));
+  }
+  tools.Append(MakeTool(kToolMemoryList,
+                        "List the memory files, with their sizes. MEMORY.md is the index.",
+                        base::DictValue(), base::ListValue()));
+  {
+    base::DictValue properties;
+    properties.Set("path", StringProperty(
+        "A memory file's relative path, e.g. USER.md or sites/example.com.md."));
+    base::ListValue required;
+    required.Append("path");
+    tools.Append(MakeTool(kToolMemoryRead, "Read one memory file in full.", std::move(properties),
+                          std::move(required)));
+  }
+  if (!writable) {
+    return;
+  }
+  {
+    base::DictValue properties;
+    properties.Set("path", StringProperty(
+        "Relative path ending in .md, lower-case letters, digits, '-', '_' and '/' only."));
+    properties.Set("content", StringProperty("The complete new content of the file, in markdown."));
+    base::ListValue required;
+    required.Append("path");
+    required.Append("content");
+    tools.Append(MakeTool(kToolMemoryWrite,
+                          "Create or replace a memory file. At most 64 KiB a file.",
+                          std::move(properties), std::move(required)));
+  }
+  {
+    base::DictValue properties;
+    properties.Set("path", StringProperty("The memory file to edit."));
+    properties.Set("old", StringProperty(
+        "Text that occurs exactly once in the file. Use an empty-looking but real anchor such as the "
+        "last line when appending."));
+    properties.Set("new", StringProperty("What to replace it with."));
+    base::ListValue required;
+    required.Append("path");
+    required.Append("old");
+    required.Append("new");
+    tools.Append(MakeTool(kToolMemoryEdit,
+                          "Replace one exact passage in a memory file. Prefer this over memory_write "
+                          "for an existing file.",
+                          std::move(properties), std::move(required)));
+  }
+}
+
+base::ListValue MemoryTaskTools() {
+  base::ListValue tools;
+  AppendMemoryTools(tools, /*writable=*/true);
+  return tools;
+}
+
 base::ListValue BrowserTools(mojom::PermissionMode mode, mojom::Effort effort, bool memory_enabled) {
   base::ListValue tools;
 
@@ -214,34 +336,10 @@ base::ListValue BrowserTools(mojom::PermissionMode mode, mojom::Effort effort, b
                           std::move(properties), std::move(required)));
   }
 
-  // Memory, when the user has it on. Declared in every permission mode because it touches nothing
-  // outside the profile's own memory list -- and it is the ONE thing the agent stores that the user can
-  // read back, edit and delete in Settings, which is what makes storing it defensible at all.
+  // Memory, when the user has it on. Declared in every permission mode because reading touches nothing
+  // outside the profile's own memory folder. Writing is NOT declared here: only a memory task may write.
   if (memory_enabled) {
-    {
-      base::DictValue properties;
-      properties.Set("fact", StringProperty(
-          "One durable fact or preference about the user, in a sentence they would recognise as true "
-          "about themselves. Not a page's contents and not a fact about the world."));
-      base::ListValue required;
-      required.Append("fact");
-      tools.Append(MakeTool(kToolRemember,
-                            "Remember something about this user for future tasks. Use it for a stated "
-                            "preference or a stable detail they will not want to repeat -- never for "
-                            "what a page said, and never for anything they did not tell you.",
-                            std::move(properties), std::move(required)));
-    }
-    {
-      base::DictValue properties;
-      properties.Set("query", StringProperty("What you are trying to recall."));
-      base::ListValue required;
-      required.Append("query");
-      tools.Append(MakeTool(kToolRecall,
-                            "Look through what you already remember about this user. The most relevant "
-                            "entries are given to you at the start of a task, so use this only when you "
-                            "need something the task did not begin with.",
-                            std::move(properties), std::move(required)));
-    }
+    AppendMemoryTools(tools, /*writable=*/false);
   }
 
   if (mode != mojom::PermissionMode::kReadOnly) {
@@ -383,40 +481,19 @@ std::string TaskStore::CreateTask(const std::string& prompt,
   Conversation conversation;
   conversation.messages.Append(TextMessage("system", SystemPrompt(effort)));
 
+  conversation.messages.Append(TextMessage("user", prompt));
   // What we already know, searched with the task's own words. Given to the engine as a system message
   // AND recorded as a step, because an answer shaped by something the user told the browser weeks ago
-  // is only fair if they can see that it was.
-  if (memory_ && memory_->enabled()) {
-    const std::vector<MemoryStore::Entry> hits = memory_->Search(prompt, kMemoryHits);
-    if (!hits.empty()) {
-      std::string recalled =
-          "Things this user has told you before, which may or may not be relevant here:";
-      for (const MemoryStore::Entry& entry : hits) {
-        recalled += "\n- " + entry.text;
-      }
-      conversation.messages.Append(TextMessage("system", recalled));
-      // The step is added after the task is in the map, which it now is.
-      mojom::Step* step = nullptr;
-      {
-        mojom::StepPtr owned = mojom::Step::New();
-        owned->kind = mojom::StepKind::kSearchedMemory;
-        owned->label = "Recalled " + base::NumberToString(hits.size()) +
-                       (hits.size() == 1 ? " thing you told me" : " things you told me");
-        owned->started_at_ms = NowMs();
-        tasks_[task_id]->steps.push_back(std::move(owned));
-        step = tasks_[task_id]->steps.back().get();
-      }
-      for (const MemoryStore::Entry& entry : hits) {
-        mojom::StepDetailPtr detail = mojom::StepDetail::New();
-        detail->text = entry.text;
-        detail->source = entry.source;
-        step->details.push_back(std::move(detail));
-      }
-    }
-  }
-
-  conversation.messages.Append(TextMessage("user", prompt));
+  // is only fair if they can see that it was. The search reads files, so it answers later; the first
+  // turn waits for it (see StartTurn).
+  const bool search_memory = memory_ && memory_->enabled();
+  conversation.awaiting_memory = search_memory;
   conversations_[task_id] = std::move(conversation);
+  if (search_memory) {
+    memory_->Search(prompt, kMemoryHits,
+                    base::BindOnce(&TaskStore::OnMemoryPrefill, weak_factory_.GetWeakPtr(),
+                                   task_id));
+  }
 
   // Bounded history. Without this the map is a renderer-driven allocation for the life of the profile.
   while (tasks_.size() > kMaxTasks) {
@@ -454,7 +531,8 @@ std::pair<std::optional<std::string>, std::optional<mojom::StartError>> TaskStor
 
   size_t running = 0;
   for (const auto& [id, task] : tasks_) {
-    if (!IsTerminal(task->state)) {
+    // Memory tasks are the browser's own housekeeping; they never count against the user's tasks.
+    if (!IsTerminal(task->state) && !IsMemoryTask(id)) {
       ++running;
     }
   }
@@ -488,7 +566,8 @@ std::string TaskStore::StartRoutineTask(const std::string& title,
   }
   size_t running = 0;
   for (const auto& [id, task] : tasks_) {
-    if (!IsTerminal(task->state)) {
+    // Memory tasks are the browser's own housekeeping; they never count against the user's tasks.
+    if (!IsTerminal(task->state) && !IsMemoryTask(id)) {
       ++running;
     }
   }
@@ -551,11 +630,23 @@ void TaskStore::StartTurn(const std::string& task_id) {
     return;
   }
 
+  // The memory search for this task's prompt has not answered yet; OnMemoryPrefill starts the turn.
+  if (conversation->second.awaiting_memory) {
+    task->second->state = mojom::TaskState::kQueued;
+    Notify(task_id);
+    return;
+  }
+
   // One stream per client. A second task must wait rather than silently replace the first, which the
   // concurrency ceiling in StartTask is what keeps bounded.
   if (!active_task_id_.empty() && active_task_id_ != task_id) {
     task->second->state = mojom::TaskState::kQueued;
     Notify(task_id);
+    return;
+  }
+  // Already streaming this very task: a second start would be a duplicate request. Reachable now that
+  // StartNextQueued can start a task that also has its own StartTurn posted.
+  if (active_task_id_ == task_id) {
     return;
   }
 
@@ -582,12 +673,14 @@ void TaskStore::StartTurn(const std::string& task_id) {
   request.Set("stream", true);
   request.Set("reasoning_effort", ReasoningEffort(task->second->effort));
   request.Set("messages", conversation->second.messages.Clone());
-  request.Set("tools", BrowserTools(task->second->mode, task->second->effort,
-                                   memory_ && memory_->enabled()));
+  request.Set("tools", IsMemoryTask(task_id)
+                           ? MemoryTaskTools()
+                           : BrowserTools(task->second->mode, task->second->effort,
+                                          memory_ && memory_->enabled()));
   // CAP-1/CAP-2: the page the task is on, so the engine can arm the skills whose `urls:` match it.
   // Built-in engine only: a user's own provider is a third-party endpoint, where an unknown field
   // can be refused outright and where the URL the user is reading has no reason to go.
-  if (!provider) {
+  if (!provider && !IsMemoryTask(task_id)) {
     std::optional<base::DictValue> context = RedrobContext(conversation->second);
     if (context.has_value()) {
       request.Set("redrob_context", std::move(context).value());
@@ -747,7 +840,9 @@ void TaskStore::OnCompletionFinished(const std::string& finish_reason) {
     return;
   }
 
-  if (conversation->second.tool_rounds >= ToolBudget(task->second->effort)) {
+  const int budget =
+      IsMemoryTask(task_id) ? kMemoryToolBudget : ToolBudget(task->second->effort);
+  if (conversation->second.tool_rounds >= budget) {
     FinishTask(task_id, mojom::TaskState::kFailed,
                "The task reached the number of steps this effort setting allows. Ask again with a "
                "deeper effort, or narrow the question.");
@@ -777,7 +872,10 @@ bool TaskStore::ModeAllows(mojom::PermissionMode mode, const std::string& tool) 
   }
   // Memory is the profile's own list, reviewable and deletable in Settings. Gated by the memory
   // setting -- which is why these are not even declared when it is off -- not by permission mode.
-  if (tool == kToolRemember || tool == kToolRecall) {
+  //
+  // memory_write and memory_edit are NOT allowed here in any mode: they belong to memory tasks, which
+  // RunTool dispatches before this question is asked.
+  if (tool == kToolRecall || tool == kToolMemoryRead || tool == kToolMemoryList) {
     return true;
   }
   if (tool == kToolClick || tool == kToolType || tool == kToolSaveFile) {
@@ -793,10 +891,26 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
     return;
   }
 
+  // A memory task may use the memory tools and nothing else -- no tabs, no files, no clicks.
+  const bool memory_task = IsMemoryTask(task_id);
+  if (memory_task && !IsMemoryToolName(call.name)) {
+    FinishTool(task_id, call, "This is a memory task. Only the memory tools are available here.");
+    return;
+  }
+
   // Refusals are recorded in the trace, not swallowed. Someone watching should see what the agent
   // wanted to do and did not get to do -- that is the difference between a permission boundary and a
   // silent failure.
-  if (!ModeAllows(task->second->mode, call.name)) {
+  if (!memory_task && !ModeAllows(task->second->mode, call.name)) {
+    if (call.name == kToolMemoryWrite || call.name == kToolMemoryEdit) {
+      AddStep(task_id, mojom::StepKind::kRefused,
+              l10n_util::GetStringUTF8(IDS_REDROB_TASK_MEMORY_WRITE_REFUSED));
+      Notify(task_id);
+      FinishTool(task_id, call,
+                 "Memory is written after the task, by the browser's own memory run, not during it. "
+                 "Carry on with the task.");
+      return;
+    }
     AddStep(task_id, mojom::StepKind::kRefused,
             "Refused: " + call.name + " is not allowed in this mode");
     Notify(task_id);
@@ -806,70 +920,18 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
     return;
   }
 
-  std::optional<base::DictValue> arguments =
-      base::JSONReader::ReadDict(call.arguments_json, base::JSON_PARSE_RFC);
+  // A tool with no parameters (memory_list) may arrive with no argument text at all.
+  std::optional<base::DictValue> arguments = base::JSONReader::ReadDict(
+      base::TrimWhitespaceASCII(call.arguments_json, base::TRIM_ALL).empty()
+          ? std::string_view("{}")
+          : std::string_view(call.arguments_json),
+      base::JSON_PARSE_RFC);
   if (!arguments) {
     FinishTool(task_id, call, "Those arguments were not readable JSON.");
     return;
   }
 
-  if (call.name == kToolRemember) {
-    const std::string* fact = arguments->FindString("fact");
-    if (!fact) {
-      FinishTool(task_id, call, "remember needs a fact argument.");
-      return;
-    }
-    if (!memory_ || !memory_->enabled()) {
-      FinishTool(task_id, call,
-                 "Memory is switched off for this browser, so nothing was stored. Do not ask again "
-                 "during this task.");
-      return;
-    }
-    // The task's own prompt is the entry's source, so Settings can answer "why do you know this".
-    const std::string id = memory_->Remember(*fact, task->second->prompt);
-    if (id.empty()) {
-      FinishTool(task_id, call, "That could not be remembered.");
-      return;
-    }
-    mojom::Step* step = AddStep(task_id, mojom::StepKind::kSearchedMemory, "Remembered a detail");
-    if (step) {
-      mojom::StepDetailPtr detail = mojom::StepDetail::New();
-      detail->text = *fact;
-      step->details.push_back(std::move(detail));
-    }
-    Notify(task_id);
-    FinishTool(task_id, call,
-               "Remembered. The user can see and delete it in Settings, so do not treat it as private "
-               "to you.");
-    return;
-  }
-
-  if (call.name == kToolRecall) {
-    const std::string* query = arguments->FindString("query");
-    if (!query) {
-      FinishTool(task_id, call, "recall needs a query argument.");
-      return;
-    }
-    if (!memory_ || !memory_->enabled()) {
-      FinishTool(task_id, call, "Memory is switched off for this browser. There is nothing to recall.");
-      return;
-    }
-    const std::vector<MemoryStore::Entry> hits = memory_->Search(*query, kMemoryHits);
-    mojom::Step* step = AddStep(task_id, mojom::StepKind::kSearchedMemory,
-                                "Looked back for \"" + *query + "\"");
-    std::string answer;
-    for (const MemoryStore::Entry& entry : hits) {
-      answer += "- " + entry.text + "\n";
-      if (step) {
-        mojom::StepDetailPtr detail = mojom::StepDetail::New();
-        detail->text = entry.text;
-        detail->source = entry.source;
-        step->details.push_back(std::move(detail));
-      }
-    }
-    Notify(task_id);
-    FinishTool(task_id, call,
-               answer.empty() ? "Nothing remembered matches that." : answer);
+  if (IsMemoryToolName(call.name) && RunMemoryTool(task_id, call, *arguments)) {
     return;
   }
 
@@ -917,6 +979,9 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
     // Weak: the tab belongs to the tab strip and the user can close it between one tool call and the
     // next, so every later page tool has to re-check that it is still there.
     conversation->second.page = contents->GetWeakPtr();
+    if (conversation->second.visited.size() < kExtractionMaxSteps) {
+      conversation->second.visited.emplace_back(url.spec(), std::string());
+    }
 
     mojom::Step* step = AddStep(task_id, mojom::StepKind::kOpenedPage,
                                 reason && !reason->empty() ? *reason : "Opened a page");
@@ -939,6 +1004,21 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
   }
 
   if (call.name == kToolReadPage) {
+    // The title is known by the time the agent reads the page; recorded for extraction's history input.
+    {
+      const std::string committed = page->GetLastCommittedURL().spec();
+      const std::string title = base::UTF16ToUTF8(page->GetTitle());
+      bool found = false;
+      for (auto& [visited_url, visited_title] : conversation->second.visited) {
+        if (visited_url == committed) {
+          visited_title = title;
+          found = true;
+        }
+      }
+      if (!found && conversation->second.visited.size() < kExtractionMaxSteps) {
+        conversation->second.visited.emplace_back(committed, title);
+      }
+    }
     ++conversation->second.pending_tools;
     PageTools::ReadPageText(
         page, base::BindOnce(
@@ -1137,6 +1217,21 @@ void TaskStore::FinishTask(const std::string& task_id,
     task->second->error = error;
   }
   Notify(task_id);
+
+  if (IsMemoryTask(task_id)) {
+    // The run closes whatever the outcome: a failed run that wrote half its changes still has a
+    // snapshot and a row, and the user can revert it from Settings. The engine reports no token usage
+    // over this endpoint today, so the count stays 0 until it does.
+    memory_->EndRun(memory_tasks_[task_id].run_id, 0);
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&TaskStore::ForgetMemoryTask, weak_factory_.GetWeakPtr(), task_id));
+  } else if (state == mojom::TaskState::kSucceeded && memory_ && memory_->enabled()) {
+    StartExtraction(task_id);
+  }
+  // Posted: this can run inside the stream that just finished, and starting a turn replaces it.
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&TaskStore::StartNextQueued, weak_factory_.GetWeakPtr()));
 }
 
 std::vector<mojom::ModelOptionPtr> TaskStore::ListModels() const {
@@ -1385,14 +1480,16 @@ std::vector<mojom::TaskPtr> TaskStore::ListTasks() const {
   std::vector<mojom::TaskPtr> out;
   out.reserve(tasks_.size());
   for (const auto& [id, task] : tasks_) {
-    out.push_back(task->Clone());
+    if (!IsMemoryTask(id)) {
+      out.push_back(task->Clone());
+    }
   }
   return out;
 }
 
 mojom::TaskPtr TaskStore::GetTask(const std::string& task_id) const {
   auto it = tasks_.find(task_id);
-  return it == tasks_.end() ? nullptr : it->second->Clone();
+  return it == tasks_.end() || IsMemoryTask(task_id) ? nullptr : it->second->Clone();
 }
 
 bool TaskStore::SetPermissionMode(const std::string& task_id, mojom::PermissionMode mode) {
@@ -1467,12 +1564,20 @@ void TaskStore::OnSidecarStatusChanged(SidecarClient::Status status) {
   }
   const std::string message = l10n_util::GetStringUTF8(message_id);
   active_task_id_.clear();
+  std::vector<std::string> failed_memory_tasks;
   for (auto& [id, task] : tasks_) {
     if (!IsTerminal(task->state)) {
       task->state = mojom::TaskState::kFailed;
       task->error = message;
       Notify(id);
+      if (IsMemoryTask(id)) {
+        failed_memory_tasks.push_back(id);
+      }
     }
+  }
+  for (const std::string& id : failed_memory_tasks) {
+    memory_->EndRun(memory_tasks_[id].run_id, 0);
+    ForgetMemoryTask(id);
   }
 }
 
@@ -1575,7 +1680,8 @@ void TaskStore::ScheduleNotify(const std::string& task_id) {
 
 void TaskStore::Notify(const std::string& task_id) {
   auto it = tasks_.find(task_id);
-  if (it == tasks_.end()) {
+  // Memory tasks are hidden: no page renders them, so no observer hears about them.
+  if (it == tasks_.end() || IsMemoryTask(task_id)) {
     return;
   }
   for (Observer& observer : observers_) {
@@ -1635,6 +1741,334 @@ std::optional<base::DictValue> TaskStore::RedrobContext(const Conversation& conv
     context.Set("page_title", title);
   }
   return context;
+}
+
+// --- Memory runs --------------------------------------------------------------------------------------
+
+bool TaskStore::IsMemoryTask(const std::string& task_id) const {
+  return memory_tasks_.count(task_id) > 0;
+}
+
+void TaskStore::OnMemoryPrefill(std::string task_id, std::vector<MemoryStore::SearchHit> hits) {
+  auto task = tasks_.find(task_id);
+  auto conversation = conversations_.find(task_id);
+  if (task == tasks_.end() || conversation == conversations_.end() ||
+      !conversation->second.awaiting_memory) {
+    return;
+  }
+  conversation->second.awaiting_memory = false;
+  if (!hits.empty()) {
+    std::string recalled =
+        "Lines from this user's memory files that may or may not be relevant here (path:line):";
+    for (const MemoryStore::SearchHit& hit : hits) {
+      recalled += "\n- " + hit.path + ":" + base::NumberToString(hit.line) + ": " + hit.snippet;
+    }
+    // Before the user's message, which is the last one in a task that has not had a turn yet.
+    base::ListValue& messages = conversation->second.messages;
+    auto position = messages.end();
+    if (!messages.empty()) {
+      --position;
+    }
+    messages.Insert(position, base::Value(TextMessage("system", recalled)));
+    mojom::Step* step =
+        AddStep(task_id, mojom::StepKind::kSearchedMemory,
+                l10n_util::GetStringFUTF8(IDS_REDROB_TASK_MEMORY_RECALLED,
+                                          base::NumberToString16(hits.size())));
+    if (step) {
+      for (const MemoryStore::SearchHit& hit : hits) {
+        mojom::StepDetailPtr detail = mojom::StepDetail::New();
+        detail->text = hit.snippet;
+        detail->source = hit.path;
+        step->details.push_back(std::move(detail));
+      }
+    }
+  }
+  if (!IsTerminal(task->second->state)) {
+    StartTurn(task_id);
+  }
+}
+
+bool TaskStore::RunMemoryTool(const std::string& task_id,
+                              const ProposedToolCall& call,
+                              const base::DictValue& arguments) {
+  auto conversation = conversations_.find(task_id);
+  if (conversation == conversations_.end()) {
+    return false;
+  }
+  if (!memory_ || !memory_->enabled()) {
+    FinishTool(task_id, call,
+               "Memory is switched off for this browser. Do not use the memory tools in this task.");
+    return true;
+  }
+  const bool memory_task = IsMemoryTask(task_id);
+
+  if (call.name == kToolMemoryList) {
+    std::string answer;
+    for (const MemoryStore::FileInfo& file : memory_->files()) {
+      answer += file.path + " (" + base::NumberToString(file.bytes) + " bytes)\n";
+    }
+    FinishTool(task_id, call, answer.empty() ? "There are no memory files yet." : answer);
+    return true;
+  }
+
+  if (call.name == kToolRecall) {
+    const std::string* query = arguments.FindString("query");
+    if (!query) {
+      FinishTool(task_id, call, "recall needs a query argument.");
+      return true;
+    }
+    ++conversation->second.pending_tools;
+    memory_->Search(
+        *query, kMemoryHits,
+        base::BindOnce(
+            [](base::WeakPtr<TaskStore> store, std::string task_id, ProposedToolCall call,
+               std::string query, std::vector<MemoryStore::SearchHit> hits) {
+              if (!store) {
+                return;
+              }
+              mojom::Step* step = store->AddStep(task_id, mojom::StepKind::kSearchedMemory,
+                                                 "Looked back for \"" + query + "\"");
+              std::string answer;
+              for (const MemoryStore::SearchHit& hit : hits) {
+                answer += hit.path + ":" + base::NumberToString(hit.line) + ": " + hit.snippet + "\n";
+                if (step) {
+                  mojom::StepDetailPtr detail = mojom::StepDetail::New();
+                  detail->text = hit.snippet;
+                  detail->source = hit.path;
+                  step->details.push_back(std::move(detail));
+                }
+              }
+              store->Notify(task_id);
+              store->FinishTool(task_id, call,
+                                answer.empty() ? "Nothing in memory matches that." : answer);
+            },
+            weak_factory_.GetWeakPtr(), task_id, call, *query));
+    return true;
+  }
+
+  const std::string* path = arguments.FindString("path");
+  if (!path) {
+    FinishTool(task_id, call, call.name + " needs a path argument.");
+    return true;
+  }
+
+  if (call.name == kToolMemoryRead) {
+    ++conversation->second.pending_tools;
+    memory_->ReadFile(
+        *path, base::BindOnce(
+                   [](base::WeakPtr<TaskStore> store, std::string task_id, ProposedToolCall call,
+                      std::string path, std::optional<std::string> content) {
+                     if (!store) {
+                       return;
+                     }
+                     if (!content) {
+                       store->FinishTool(task_id, call,
+                                         "There is no memory file at " + path +
+                                             ". memory_list shows what exists.");
+                       return;
+                     }
+                     store->AddStep(task_id, mojom::StepKind::kSearchedMemory,
+                                    l10n_util::GetStringFUTF8(IDS_REDROB_TASK_MEMORY_READ,
+                                                              base::UTF8ToUTF16(path)));
+                     store->Notify(task_id);
+                     store->FinishTool(task_id, call,
+                                       content->empty() ? "(empty file)" : *content);
+                   },
+                   weak_factory_.GetWeakPtr(), task_id, call, *path));
+    return true;
+  }
+
+  if (call.name != kToolMemoryWrite && call.name != kToolMemoryEdit) {
+    return false;
+  }
+  // The write boundary, checked a second time where the write happens rather than only where the tool
+  // is declared: a model can name a tool it was never offered.
+  if (!memory_task) {
+    AddStep(task_id, mojom::StepKind::kRefused,
+            l10n_util::GetStringUTF8(IDS_REDROB_TASK_MEMORY_WRITE_REFUSED));
+    Notify(task_id);
+    FinishTool(task_id, call, "Only the browser's memory run may change memory.");
+    return true;
+  }
+  const std::string run_id = memory_tasks_[task_id].run_id;
+  auto done = base::BindOnce(
+      [](base::WeakPtr<TaskStore> store, std::string task_id, ProposedToolCall call,
+         std::string path, bool ok, const std::string& message) {
+        if (!store) {
+          return;
+        }
+        store->FinishTool(task_id, call, ok ? "Saved " + path + "." : message);
+      },
+      weak_factory_.GetWeakPtr(), task_id, call, *path);
+  if (call.name == kToolMemoryWrite) {
+    const std::string* content = arguments.FindString("content");
+    if (!content) {
+      FinishTool(task_id, call, "memory_write needs path and content.");
+      return true;
+    }
+    ++conversation->second.pending_tools;
+    memory_->WriteFile(run_id, *path, *content, std::move(done));
+    return true;
+  }
+  const std::string* old_text = arguments.FindString("old");
+  const std::string* new_text = arguments.FindString("new");
+  if (!old_text || !new_text) {
+    FinishTool(task_id, call, "memory_edit needs path, old and new.");
+    return true;
+  }
+  ++conversation->second.pending_tools;
+  memory_->EditFile(run_id, *path, *old_text, *new_text, std::move(done));
+  return true;
+}
+
+std::string TaskStore::StartMemoryTask(bool consolidate, const std::string& prompt) {
+  if (!memory_ || !memory_->enabled() || prompt.empty()) {
+    return std::string();
+  }
+  sidecar_->EnsureStarted(
+      url_loader_factory_,
+      base::BindRepeating(&TaskStore::OnSidecarStatusChanged, base::Unretained(this)));
+  const bool direct = models_ && models_->Selected().has_value();
+  if (!direct && (sidecar_->status() == SidecarClient::Status::kUnavailable ||
+                  sidecar_->status() == SidecarClient::Status::kFailed)) {
+    return std::string();
+  }
+
+  const std::string task_id = base::Uuid::GenerateRandomV4().AsLowercaseString();
+  mojom::TaskPtr task = mojom::Task::New();
+  task->id = task_id;
+  task->prompt = consolidate ? "Memory consolidation" : "Memory extraction";
+  task->state = mojom::TaskState::kQueued;
+  task->started_at_ms = NowMs();
+  // Read-only: the browser tools a mode would grant are not declared to a memory task at all, but the
+  // record should not claim a permission the task does not have.
+  task->mode = mojom::PermissionMode::kReadOnly;
+  task->effort = mojom::Effort::kStandard;
+  tasks_[task_id] = std::move(task);
+
+  Conversation conversation;
+  conversation.messages.Append(TextMessage("system", kMemorySystemPrompt));
+  conversation.messages.Append(TextMessage("user", prompt));
+  conversations_[task_id] = std::move(conversation);
+
+  MemoryTaskInfo info;
+  info.consolidate = consolidate;
+  info.run_id = memory_->BeginRun(consolidate ? MemoryStore::RunKind::kConsolidate
+                                              : MemoryStore::RunKind::kExtract);
+  memory_tasks_[task_id] = std::move(info);
+
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&TaskStore::StartTurn, weak_factory_.GetWeakPtr(), task_id));
+  return task_id;
+}
+
+void TaskStore::StartExtraction(const std::string& task_id) {
+  auto task = tasks_.find(task_id);
+  auto conversation = conversations_.find(task_id);
+  if (task == tasks_.end() || conversation == conversations_.end()) {
+    return;
+  }
+  std::string prompt = kExtractionPrompt;
+  prompt += "\n\nThe episodic file for today is episodic/" + TodayName() + ".md.";
+  prompt += "\n\n## What the user asked\n" + task->second->prompt;
+
+  const std::string answer = task->second->narration.value_or(std::string());
+  prompt += "\n\n## The final answer\n";
+  prompt += answer.size() > kExtractionAnswerBytes
+                ? answer.substr(answer.size() - kExtractionAnswerBytes)
+                : answer;
+
+  // The step list carries labels and hosts, never page text.
+  prompt += "\n\n## What the agent did\n";
+  std::set<std::string> hosts;
+  size_t listed = 0;
+  for (const mojom::StepPtr& step : task->second->steps) {
+    if (step->kind == mojom::StepKind::kThinking) {
+      continue;
+    }
+    if (step->kind == mojom::StepKind::kOpenedPage) {
+      for (const mojom::StepDetailPtr& detail : step->details) {
+        if (!detail->source.empty()) {
+          hosts.insert(detail->source);
+        }
+      }
+    }
+    if (listed++ >= kExtractionMaxSteps) {
+      break;
+    }
+    prompt += "- " + step->label + "\n";
+  }
+  if (!hosts.empty()) {
+    prompt += "\n## Sites the agent used\n";
+    for (const std::string& host : hosts) {
+      prompt += "- " + host + "\n";
+    }
+  }
+  // Titles and URLs only when the user turned history input on, and only this task's own tab.
+  if (memory_->history_input() && !conversation->second.visited.empty()) {
+    prompt += "\n## Pages the agent's tab visited during this task\n";
+    for (const auto& [url, title] : conversation->second.visited) {
+      prompt += "- " + (title.empty() ? url : title + " -- " + url) + "\n";
+    }
+  }
+  StartMemoryTask(/*consolidate=*/false, prompt);
+}
+
+bool TaskStore::StartConsolidation(bool force) {
+  if (!memory_ || !memory_->enabled()) {
+    return false;
+  }
+  for (const auto& [id, info] : memory_tasks_) {
+    if (info.consolidate) {
+      return false;
+    }
+  }
+  if (!force) {
+    if (memory_->ExtractionRunsSinceConsolidation() < 3) {
+      return false;
+    }
+    const int64_t last = memory_->last_consolidation_ms();
+    if (last > 0 && NowMs() - last < base::Days(1).InMilliseconds()) {
+      return false;
+    }
+  }
+  std::string prompt = kConsolidationPrompt;
+  prompt += "\n\nToday is " + TodayName() + ".";
+  return !StartMemoryTask(/*consolidate=*/true, prompt).empty();
+}
+
+void TaskStore::StartNextQueued() {
+  if (!active_task_id_.empty()) {
+    return;
+  }
+  // Oldest first, so the user's waiting task goes before a memory run queued behind it.
+  std::string next;
+  int64_t oldest = 0;
+  for (const auto& [id, task] : tasks_) {
+    if (task->state != mojom::TaskState::kQueued) {
+      continue;
+    }
+    auto conversation = conversations_.find(id);
+    if (conversation == conversations_.end() || conversation->second.awaiting_memory) {
+      continue;
+    }
+    if (next.empty() || task->started_at_ms < oldest) {
+      next = id;
+      oldest = task->started_at_ms;
+    }
+  }
+  if (!next.empty()) {
+    StartTurn(next);
+  }
+}
+
+void TaskStore::ForgetMemoryTask(const std::string& task_id) {
+  if (!IsMemoryTask(task_id) || active_task_id_ == task_id) {
+    return;
+  }
+  memory_tasks_.erase(task_id);
+  conversations_.erase(task_id);
+  tasks_.erase(task_id);
 }
 
 }  // namespace redrob

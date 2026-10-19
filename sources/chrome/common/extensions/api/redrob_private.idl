@@ -145,7 +145,9 @@ namespace redrobPrivate {
     DOMString? taskId;
     StartError? error;
   };
-  enum RoutineKind { cron, heartbeat };
+  // consolidate is the built-in memory review: one per profile, reported so
+  // Settings can show it, refused by addRoutine and removeRoutine.
+  enum RoutineKind { cron, heartbeat, consolidate };
   enum EngineState { notInstalled, starting, ready, failed };
 
   dictionary Routine {
@@ -163,18 +165,52 @@ namespace redrobPrivate {
     DOMString lastError;
   };
 
-  dictionary MemoryEntry {
+  // Memory is a folder of markdown files (docs/MEMORY.md). A file is named by
+  // its path relative to that folder, with '/' separators.
+  dictionary MemoryFile {
+    DOMString path;
+    double bytes;
+    double modifiedMs;
+  };
+
+  // What a run did to one file, in lines.
+  dictionary MemoryFileChange {
+    DOMString path;
+    long added;
+    long removed;
+  };
+
+  // Who changed memory: extraction after a task, consolidation, the user in
+  // Settings, or a revert.
+  enum MemoryRunKind { extract, consolidate, user, revert };
+
+  dictionary MemoryRun {
+    // Also the name of the run's snapshot. Pass it to revertMemoryRun.
     DOMString id;
-    DOMString text;
-    DOMString source;
-    double createdMs;
-    boolean pinned;
+    MemoryRunKind kind;
+    double startedMs;
+    // 0 while the run is still going.
+    double durationMs;
+    // 0 when the engine reported no usage.
+    double tokens;
+    MemoryFileChange[] files;
+    boolean finished;
+    // Only a run that wrote something has a snapshot, and only such a run can
+    // be reverted.
+    boolean revertible;
   };
 
   dictionary MemorySettings {
     boolean enabled;
     long retentionDays;
-    MemoryEntry[] entries;
+    // Whether extraction may see the titles and URLs the agent's own tab
+    // visited during the task.
+    boolean historyInput;
+    MemoryFile[] files;
+    // Newest first, at most 30.
+    MemoryRun[] runs;
+    // When consolidation last ran, unix ms; 0 = never.
+    double lastConsolidationMs;
   };
 
   dictionary Provider {
@@ -336,14 +372,17 @@ namespace redrobPrivate {
     // Sets how many days memory entries are kept before they age out.
     static void setMemoryRetentionDays(long days);
 
-    // Clears all memory entries. Named for what it does, not softened: it is
-    // irreversible and the UI must confirm before calling it.
+    // Deletes every memory file, every snapshot and the run history. Named for
+    // what it does, not softened: it is irreversible and the UI must confirm
+    // before calling it.
     static void forgetAllMemory();
 
-    // Removes one memory entry. Resolves true if it existed and was removed.
+    // Deletes one memory file. |id| is the file's path. Recorded as a user run,
+    // so it can be reverted. Resolves true if the file is gone.
     static void removeMemory(DOMString id, BoolCallback callback);
 
-    // Pins or unpins a memory entry so it is kept regardless of retention.
+    // Retired: memory is files now, and files are not pinned. Kept so the
+    // function id stays stable; always resolves false.
     static void setMemoryPinned(DOMString id, boolean pinned, BoolCallback callback);
 
     // Removes a saved routine. Resolves true if it existed.
@@ -566,6 +605,32 @@ namespace redrobPrivate {
     // reason startImport() reports that way. A second call while one is already
     // running is ignored.
     static void installEngine();
+
+    // --- Memory files (CAP-19) ---------------------------------------------
+
+    // Reads one memory file. |callback|: its content, or nothing when the path
+    // is not a memory path or no such file exists.
+    static void readMemoryFile(DOMString path, StringCallback callback);
+
+    // Replaces (or creates) one memory file with what the user typed in
+    // Settings. Recorded as a user run, snapshotted first, so it can be
+    // reverted. Resolves false when the path or the size is refused.
+    static void writeMemoryFile(DOMString path,
+                                DOMString content,
+                                BoolCallback callback);
+
+    // Puts the memory files back the way they were before run |runId| first
+    // wrote. The revert is itself a run and can be reverted.
+    static void revertMemoryRun(DOMString runId, BoolCallback callback);
+
+    // Starts a consolidation run now, without the daily and three-run gate.
+    // Resolves false when memory is off, one is already running, or there is
+    // no engine.
+    static void runMemoryConsolidation(BoolCallback callback);
+
+    // Lets extraction see the titles and URLs the agent's own tab visited
+    // during a task. Off by default.
+    static void setMemoryHistoryInput(boolean enabled);
   };
 
   interface Events {
