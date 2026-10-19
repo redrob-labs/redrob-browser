@@ -301,4 +301,14 @@
 <translation id="7347428928871851497">응답이 멈췄습니다</translation>
 <translation id="6975159765440984670">설치되지 않아 작업을 실행할 수 없습니다</translation>
 <translation id="2665921124100154890">모델 <ph name="ARG1"/>개</translation>
+<translation id="6390112279266459499">에이전트가 저장된 비밀번호로 로그인하도록 허용</translation>
+<translation id="3534218932115275712"><ph name="ARG2"/>에 <ph name="ARG1"/>(으)로 로그인했습니다</translation>
+<translation id="5107157953248573426">확인 필요: 에이전트가 <ph name="ARG1"/>에 로그인하려면 저장된 비밀번호 잠금을 해제하세요</translation>
+<translation id="2068592931669251963">확인 필요: <ph name="ARG1"/>에서 본인 확인을 마쳐 주세요</translation>
+<translation id="2644382486003049001"><ph name="ARG1"/>에 로그인하지 않았습니다: 설정에서 허용하지 않았습니다</translation>
+<translation id="5423996994194643845"><ph name="ARG1"/>에 저장된 로그인 정보가 없습니다</translation>
+<translation id="147416564865118159"><ph name="ARG1"/>에 저장된 로그인 정보가 여러 개라 어느 것을 쓸지 물었습니다</translation>
+<translation id="4871640486507090474"><ph name="ARG1"/>에 채울 로그인 양식이 없습니다</translation>
+<translation id="8303361436705245932"><ph name="ARG1"/>에 로그인하지 못했습니다</translation>
+<translation id="4730264112266697177"><ph name="ARG1"/>에서 확인을 마쳐 작업을 계속합니다</translation>
 </translationbundle>

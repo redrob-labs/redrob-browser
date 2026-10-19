@@ -31,8 +31,10 @@
 #include "chrome/browser/ui/thumbnails/thumbnail_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 namespace redrob {
 namespace {
@@ -292,6 +294,36 @@ base::ListValue BrowserTools(mojom::PermissionMode mode, mojom::Effort effort, b
   }
 
   return tools;
+}
+
+// Agent sign-in (CAP-9). Declared only when the profile's policy offers it and the task may change a page
+// -- see TaskStore::StartTurn. The descriptions tell the model the boundary in advance: it names an account
+// at most, never a site and never a password, and it hands verification prompts back to the person.
+void AppendCredentialTools(base::ListValue& tools) {
+  {
+    base::DictValue properties;
+    properties.Set("username_hint", StringProperty(
+        "Optional. The saved username to use when the site has several. Leave it out the first time."));
+    tools.Append(MakeTool(CredentialTools::kToolLogin,
+                          "Sign in on the page you most recently opened, with a login the user saved in "
+                          "this browser's password manager. The browser fills the form itself: you are told "
+                          "which account was used, never the password. It matches the site the tab is "
+                          "showing, so open the site's sign-in page first. It never submits; click the "
+                          "site's sign-in button afterwards.",
+                          std::move(properties), base::ListValue()));
+  }
+  {
+    base::DictValue properties;
+    properties.Set("reason", StringProperty(
+        "What the page is asking for, e.g. \"a one-time code sent by text\" or \"a passkey\"."));
+    base::ListValue required;
+    required.Append("reason");
+    tools.Append(MakeTool(CredentialTools::kToolAskUserToVerify,
+                          "Hand the tab back to the user when a site asks for a one-time code, a passkey, a "
+                          "security key, a CAPTCHA or any other proof that a person is present. Never try "
+                          "to answer one yourself. The task waits until the user says they are done.",
+                          std::move(properties), std::move(required)));
+  }
 }
 
 std::string SystemPrompt(mojom::Effort effort) {
@@ -580,6 +612,13 @@ void TaskStore::StartTurn(const std::string& task_id) {
   request.Set("messages", conversation->second.messages.Clone());
   request.Set("tools", BrowserTools(task->second->mode, task->second->effort,
                                    memory_ && memory_->enabled()));
+  // Agent sign-in (CAP-9): not offered in read-only (filling a form changes a page), in an off-the-record
+  // profile, or when the user's policy is Never.
+  if (task->second->mode != mojom::PermissionMode::kReadOnly && credentials()->IsOffered()) {
+    if (base::ListValue* tools = request.FindList("tools")) {
+      AppendCredentialTools(*tools);
+    }
+  }
 
   std::optional<std::string> body = base::WriteJson(request);
   if (!body.has_value()) {
@@ -770,6 +809,11 @@ bool TaskStore::ModeAllows(mojom::PermissionMode mode, const std::string& tool) 
   if (tool == kToolClick || tool == kToolType || tool == kToolSaveFile) {
     return mode != mojom::PermissionMode::kReadOnly;
   }
+  // Agent sign-in fills a form, so it is a page-changing tool. Its own policy is checked in
+  // RunCredentialTool; this is only the permission-mode half of the question.
+  if (tool == CredentialTools::kToolLogin || tool == CredentialTools::kToolAskUserToVerify) {
+    return mode != mojom::PermissionMode::kReadOnly;
+  }
   return false;
 }
 
@@ -916,6 +960,13 @@ void TaskStore::RunTool(const std::string& task_id, const ProposedToolCall& call
     }
     Notify(task_id);
     FinishTool(task_id, call, "Opened " + url.spec() + " as a tab in the user's browser.");
+    return;
+  }
+
+  // Agent sign-in (CAP-9). Its own dispatch, because its answer may be "wait for the user".
+  if (call.name == CredentialTools::kToolLogin ||
+      call.name == CredentialTools::kToolAskUserToVerify) {
+    RunCredentialTool(task_id, call, *arguments);
     return;
   }
 
@@ -1258,6 +1309,8 @@ void TaskStore::CancelTask(const std::string& task_id) {
     return;
   }
   it->second->state = mojom::TaskState::kCancelled;
+  // A sign-in waiting for the user is dropped with the task, so a later unlock cannot resume it.
+  credential_waits_.erase(task_id);
   if (active_task_id_ == task_id) {
     // Stops delivery as well as the request: the stream's remaining deltas belong to a task the user
     // has already stopped.
@@ -1321,6 +1374,19 @@ mojom::FollowUpOutcome TaskStore::SendFollowUp(const std::string& task_id,
     conversation->second.pending_tools = 0;
     sidecar_->CancelCompletion();
     active_task_id_.clear();
+  }
+  // Steering answers a parked sign-in instead of leaving its call unanswered in the history, which an
+  // OpenAI-compatible endpoint rejects; the wait goes with it.
+  if (auto wait = credential_waits_.find(task_id); wait != credential_waits_.end()) {
+    base::DictValue answer =
+        TextMessage("tool", "The user gave a new instruction instead of finishing this sign-in.");
+    answer.Set("tool_call_id", wait->second.call.id);
+    answer.Set("name", wait->second.call.name);
+    conversation->second.messages.Append(std::move(answer));
+    if (conversation->second.pending_tools > 0) {
+      --conversation->second.pending_tools;
+    }
+    credential_waits_.erase(wait);
   }
   conversation->second.messages.Append(TextMessage("user", prompt));
   conversation->second.tool_rounds = 0;
@@ -1568,6 +1634,270 @@ void TaskStore::Notify(const std::string& task_id) {
   for (Observer& observer : observers_) {
     observer.OnTaskChanged(*it->second);
   }
+}
+
+// --- Agent sign-in (CAP-9) -----------------------------------------------------------------------------
+//
+// The tool loop's half of credential_tools.h. What lives here is the TASK side: which tab, when to park,
+// what goes in the trace. Everything that touches the password store is behind CredentialTools, and every
+// string the model receives about a sign-in comes from CredentialTools::ToolResultText.
+
+namespace {
+
+std::u16string SiteLabel(const url::Origin& origin) {
+  return base::UTF8ToUTF16(origin.opaque() ? std::string("this page") : origin.Serialize());
+}
+
+}  // namespace
+
+CredentialTools* TaskStore::credentials() {
+  if (!credentials_) {
+    credentials_ = std::make_unique<CredentialTools>(profile_);
+  }
+  return credentials_.get();
+}
+
+std::vector<TaskStore::CredentialWait> TaskStore::CredentialWaits() const {
+  std::vector<CredentialWait> out;
+  for (const auto& [task_id, wait] : credential_waits_) {
+    auto task = tasks_.find(task_id);
+    if (task == tasks_.end()) {
+      continue;
+    }
+    CredentialWait entry;
+    entry.task_id = task_id;
+    entry.prompt = task->second->prompt;
+    entry.origin = wait.origin.opaque() ? std::string() : wait.origin.Serialize();
+    entry.needs_unlock = wait.needs_unlock;
+    out.push_back(std::move(entry));
+  }
+  return out;
+}
+
+void TaskStore::RunCredentialTool(const std::string& task_id,
+                                  const ProposedToolCall& call,
+                                  const base::DictValue& arguments) {
+  auto conversation = conversations_.find(task_id);
+  if (conversation == conversations_.end()) {
+    return;
+  }
+  // The agent tab, never the tab in front of the user, and never a URL from the model: the origin matched
+  // is whatever this tab has committed.
+  content::WebContents* page = conversation->second.page.get();
+  if (!page || !page->GetPrimaryMainFrame()) {
+    FinishTool(task_id, call,
+               "There is no page open for this task. Open the site's sign-in page first.");
+    return;
+  }
+  const url::Origin origin = page->GetPrimaryMainFrame()->GetLastCommittedOrigin();
+
+  if (credential_waits_.contains(task_id)) {
+    FinishTool(task_id, call,
+               "Another sign-in step in this task is already waiting for the user. Wait for it.");
+    return;
+  }
+
+  if (call.name == CredentialTools::kToolAskUserToVerify) {
+    // The agent saw a code, passkey or CAPTCHA prompt. It hands the tab back; it never answers one.
+    credentials()->RecordUse(task_id, origin, std::string(),
+                             CredentialTools::Outcome::kNeedsVerification);
+    ++conversation->second.pending_tools;
+    ParkForUser(task_id, call, std::string(), origin, /*needs_unlock=*/false);
+    return;
+  }
+
+  const std::string* hint_value = arguments.FindString("username_hint");
+  const std::string hint = hint_value ? *hint_value : std::string();
+  switch (credentials()->Check(origin)) {
+    case CredentialTools::Gate::kRefused: {
+      credentials()->RecordUse(task_id, origin, std::string(),
+                               CredentialTools::Outcome::kPolicyRefused);
+      AddStep(task_id, mojom::StepKind::kRefused,
+              l10n_util::GetStringFUTF8(IDS_REDROB_TASK_CREDENTIAL_REFUSED, SiteLabel(origin)));
+      Notify(task_id);
+      CredentialTools::Result refused;
+      refused.outcome = CredentialTools::Outcome::kPolicyRefused;
+      refused.origin = origin;
+      FinishTool(task_id, call, CredentialTools::ToolResultText(refused));
+      return;
+    }
+    case CredentialTools::Gate::kLocked:
+      credentials()->RecordUse(task_id, origin, std::string(), CredentialTools::Outcome::kLocked);
+      ++conversation->second.pending_tools;
+      ParkForUser(task_id, call, hint, origin, /*needs_unlock=*/true);
+      return;
+    case CredentialTools::Gate::kAllowed:
+      break;
+  }
+  ++conversation->second.pending_tools;
+  StartLogin(task_id, call, hint);
+}
+
+void TaskStore::StartLogin(const std::string& task_id,
+                           const ProposedToolCall& call,
+                           const std::string& username_hint) {
+  auto conversation = conversations_.find(task_id);
+  if (conversation == conversations_.end()) {
+    return;
+  }
+  content::WebContents* page = conversation->second.page.get();
+  if (!page) {
+    FinishTool(task_id, call,
+               "The tab this task was signing in on has been closed. Open the site's sign-in page "
+               "again.");
+    return;
+  }
+  credentials()->Login(page, username_hint,
+                       base::BindOnce(&TaskStore::OnLoginResult, weak_factory_.GetWeakPtr(), task_id,
+                                      call, username_hint));
+}
+
+void TaskStore::OnLoginResult(std::string task_id,
+                              ProposedToolCall call,
+                              std::string username_hint,
+                              CredentialTools::Result result) {
+  auto task = tasks_.find(task_id);
+  if (task == tasks_.end() || IsTerminal(task->second->state)) {
+    // Cancelled while the store answered. The fill, if one happened, is on the user's own tab; nothing
+    // is owed to an engine that is no longer asking.
+    return;
+  }
+  credentials()->RecordUse(task_id, result.origin, result.username, result.outcome);
+
+  using Outcome = CredentialTools::Outcome;
+  if (result.outcome == Outcome::kLocked || result.outcome == Outcome::kNeedsVerification) {
+    ParkForUser(task_id, call, username_hint, result.origin,
+                /*needs_unlock=*/result.outcome == Outcome::kLocked);
+    return;
+  }
+
+  const std::u16string site = SiteLabel(result.origin);
+  mojom::StepKind kind = mojom::StepKind::kUsedCredential;
+  std::string label;
+  switch (result.outcome) {
+    case Outcome::kFilled:
+      label = l10n_util::GetStringFUTF8(IDS_REDROB_TASK_CREDENTIAL_SIGNED_IN,
+                                        base::UTF8ToUTF16(result.username), site);
+      break;
+    case Outcome::kNoSavedLogin:
+      label = l10n_util::GetStringFUTF8(IDS_REDROB_TASK_CREDENTIAL_NO_LOGIN, site);
+      break;
+    case Outcome::kSeveralLogins:
+      label = l10n_util::GetStringFUTF8(IDS_REDROB_TASK_CREDENTIAL_SEVERAL, site);
+      break;
+    case Outcome::kNoSigninForm:
+      label = l10n_util::GetStringFUTF8(IDS_REDROB_TASK_CREDENTIAL_NO_FORM, site);
+      break;
+    case Outcome::kPolicyRefused:
+      kind = mojom::StepKind::kRefused;
+      label = l10n_util::GetStringFUTF8(IDS_REDROB_TASK_CREDENTIAL_REFUSED, site);
+      break;
+    case Outcome::kLocked:
+    case Outcome::kNeedsVerification:
+    case Outcome::kFailed:
+      label = l10n_util::GetStringFUTF8(IDS_REDROB_TASK_CREDENTIAL_FAILED, site);
+      break;
+  }
+  if (mojom::Step* step = AddStep(task_id, kind, label)) {
+    // The trace shows which account, so the person watching can see the agent signed in as the one they
+    // meant. Usernames only: Result has no field a password could be in.
+    std::vector<std::string> accounts = result.usernames;
+    if (!result.username.empty()) {
+      accounts = {result.username};
+    }
+    for (const std::string& account : accounts) {
+      mojom::StepDetailPtr detail = mojom::StepDetail::New();
+      detail->text = account;
+      detail->source = result.origin.opaque() ? std::string() : result.origin.host();
+      step->details.push_back(std::move(detail));
+    }
+  }
+  Notify(task_id);
+  FinishTool(task_id, call, CredentialTools::ToolResultText(result));
+}
+
+void TaskStore::ParkForUser(const std::string& task_id,
+                            const ProposedToolCall& call,
+                            const std::string& username_hint,
+                            const url::Origin& origin,
+                            bool needs_unlock) {
+  auto task = tasks_.find(task_id);
+  if (task == tasks_.end()) {
+    return;
+  }
+  // The call stays UNANSWERED: it is counted in pending_tools, so FinishTool for any sibling call does not
+  // start the next turn, and the engine is not told anything until the user has acted.
+  PendingCredentialCall wait;
+  wait.call = call;
+  wait.username_hint = username_hint;
+  wait.origin = origin;
+  wait.needs_unlock = needs_unlock;
+  credential_waits_[task_id] = std::move(wait);
+  task->second->state = mojom::TaskState::kBlockedOnPolicy;
+  AddStep(task_id, mojom::StepKind::kUsedCredential,
+          l10n_util::GetStringFUTF8(needs_unlock ? IDS_REDROB_TASK_CREDENTIAL_WAITING_UNLOCK
+                                                 : IDS_REDROB_TASK_CREDENTIAL_WAITING_VERIFY,
+                                    SiteLabel(origin)));
+  Notify(task_id);
+}
+
+void TaskStore::UnlockCredentials(content::WebContents* anchor,
+                                  base::OnceCallback<void(bool)> callback) {
+  credentials()->Unlock(anchor, base::BindOnce(&TaskStore::OnCredentialsUnlocked,
+                                               weak_factory_.GetWeakPtr(), std::move(callback)));
+}
+
+void TaskStore::OnCredentialsUnlocked(base::OnceCallback<void(bool)> callback, bool unlocked) {
+  if (unlocked) {
+    // Every task that was waiting for THIS goes on. Collected first: StartLogin can answer synchronously,
+    // and answering edits the map.
+    std::vector<std::pair<std::string, PendingCredentialCall>> resumed;
+    for (auto it = credential_waits_.begin(); it != credential_waits_.end();) {
+      if (it->second.needs_unlock) {
+        resumed.emplace_back(it->first, std::move(it->second));
+        it = credential_waits_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (auto& [task_id, wait] : resumed) {
+      auto task = tasks_.find(task_id);
+      if (task == tasks_.end() || IsTerminal(task->second->state)) {
+        continue;
+      }
+      task->second->state = mojom::TaskState::kRunning;
+      Notify(task_id);
+      // The gate again, not just the unlock: the user may have denied the site while the task waited.
+      if (credentials()->Check(wait.origin) == CredentialTools::Gate::kRefused) {
+        CredentialTools::Result refused;
+        refused.outcome = CredentialTools::Outcome::kPolicyRefused;
+        refused.origin = wait.origin;
+        FinishTool(task_id, wait.call, CredentialTools::ToolResultText(refused));
+        continue;
+      }
+      StartLogin(task_id, wait.call, wait.username_hint);
+    }
+  }
+  std::move(callback).Run(unlocked);
+}
+
+bool TaskStore::ResumeAfterVerification(const std::string& task_id) {
+  auto wait = credential_waits_.find(task_id);
+  auto task = tasks_.find(task_id);
+  if (wait == credential_waits_.end() || wait->second.needs_unlock || task == tasks_.end() ||
+      IsTerminal(task->second->state)) {
+    return false;
+  }
+  const PendingCredentialCall resumed = std::move(wait->second);
+  credential_waits_.erase(wait);
+  task->second->state = mojom::TaskState::kRunning;
+  AddStep(task_id, mojom::StepKind::kUsedCredential,
+          l10n_util::GetStringFUTF8(IDS_REDROB_TASK_CREDENTIAL_RESUMED, SiteLabel(resumed.origin)));
+  Notify(task_id);
+  FinishTool(task_id, resumed.call,
+             "The user says they finished the verification. Read the page to see where it landed "
+             "before you continue, and do not repeat the sign-in unless the page asks for it.");
+  return true;
 }
 
 }  // namespace redrob

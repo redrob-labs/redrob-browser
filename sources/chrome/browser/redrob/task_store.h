@@ -16,6 +16,7 @@
 #include "base/timer/timer.h"
 #include "base/values.h"
 #include "base/files/file_path.h"
+#include "chrome/browser/redrob/credential_tools.h"
 #include "chrome/browser/redrob/sidecar_client.h"
 #include "chrome/browser/ui/thumbnails/thumbnail_image.h"
 #include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
@@ -134,6 +135,25 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   void OnCompletionFinished(const std::string& finish_reason) override;
   void OnCompletionFailed(const std::string& message) override;
 
+  // --- Agent sign-in (CAP-9). See credential_tools.h. ---
+  //
+  // The profile's agent sign-in state: policy, unlock window, per-site list, audit. Created on first use.
+  CredentialTools* credentials();
+  // A task parked because signing in needs the user. Origins only; nothing secret is ever parked.
+  struct CredentialWait {
+    std::string task_id;
+    std::string prompt;
+    std::string origin;
+    // True: waiting for an unlock. False: waiting for the user to finish a code / passkey / CAPTCHA.
+    bool needs_unlock = false;
+  };
+  std::vector<CredentialWait> CredentialWaits() const;
+  // Re-authenticates the user (anchored to `anchor`'s window), and on success resumes every task that was
+  // waiting for the unlock. Reachable only from the component UI, never from a tool.
+  void UnlockCredentials(content::WebContents* anchor, base::OnceCallback<void(bool)> callback);
+  // The user says they finished the verification a task was waiting on. False when it was not waiting.
+  bool ResumeAfterVerification(const std::string& task_id);
+
  private:
   // What the engine proposed, held until the turn ends. Tools are run only after a turn completes: a
   // tool call whose arguments arrived in a stream that then failed is one the browser must not run.
@@ -247,6 +267,36 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
     std::string price_band;
   };
   std::vector<ModelRecord> model_options_;
+
+  // --- Agent sign-in (CAP-9). ---
+  struct PendingCredentialCall {
+    ProposedToolCall call;
+    std::string username_hint;
+    url::Origin origin;
+    bool needs_unlock = false;
+  };
+  // Dispatches login / ask_user_to_verify. `arguments` is the parsed call.
+  void RunCredentialTool(const std::string& task_id,
+                         const ProposedToolCall& call,
+                         const base::DictValue& arguments);
+  // Fills on the task's page. The call is already counted in pending_tools.
+  void StartLogin(const std::string& task_id,
+                  const ProposedToolCall& call,
+                  const std::string& username_hint);
+  void OnLoginResult(std::string task_id,
+                     ProposedToolCall call,
+                     std::string username_hint,
+                     CredentialTools::Result result);
+  // Holds the call unanswered and moves the task to kBlockedOnPolicy until the user acts. The call must
+  // already be counted in pending_tools, which is what stops the next turn from starting.
+  void ParkForUser(const std::string& task_id,
+                   const ProposedToolCall& call,
+                   const std::string& username_hint,
+                   const url::Origin& origin,
+                   bool needs_unlock);
+  void OnCredentialsUnlocked(base::OnceCallback<void(bool)> callback, bool unlocked);
+  std::map<std::string, PendingCredentialCall> credential_waits_;
+  std::unique_ptr<CredentialTools> credentials_;
 };
 
 }  // namespace redrob

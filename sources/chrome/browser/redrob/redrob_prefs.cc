@@ -40,6 +40,13 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(kHorizontalTabShrinkEnabled, true);
   registry->RegisterBooleanPref(kWindowTranslucencyEnabled, false);
   registry->RegisterBooleanPref(kAutomaticPictureInPictureEnabled, false);
+
+  // Agent sign-in. While-unlocked by default: an agent that can sign in to anything the user ever saved,
+  // with nobody present, is a decision the user should make by name rather than inherit.
+  registry->RegisterIntegerPref(kAgentCredentialsPolicy, 1);
+  registry->RegisterIntegerPref(kAgentCredentialsUnlockMinutes, 15);
+  registry->RegisterDictionaryPref(kAgentCredentialsSites);
+  registry->RegisterListPref(kAgentCredentialsAudit);
 }
 
 }  // namespace redrob::prefs

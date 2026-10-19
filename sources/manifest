@@ -161,3 +161,7 @@ sources/chrome/browser/extensions/api/redrob_private/redrob_private_engine_insta
 # be copied by hand into the one checkout that had ever built.
 vendor/browseros/resources/BROWSEROS_VERSION	chrome/BROWSEROS_VERSION
 
+
+# Agent sign-in over the profile password store (CAP-9). See docs/CREDENTIALS.md.
+sources/chrome/browser/redrob/credential_tools.h  chrome/browser/redrob/credential_tools.h
+sources/chrome/browser/redrob/credential_tools.cc  chrome/browser/redrob/credential_tools.cc

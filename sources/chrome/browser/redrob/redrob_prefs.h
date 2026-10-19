@@ -99,6 +99,22 @@ inline constexpr char kWindowTranslucencyEnabled[] =
 inline constexpr char kAutomaticPictureInPictureEnabled[] =
     "redrob.picture_in_picture.automatic";
 
+// --- Agent sign-in (CAP-9). See credential_tools.h and docs/CREDENTIALS.md. ---
+//
+// None of these hold a secret. The passwords stay in the profile's own password store; these say when the
+// agent may ask that store to fill, and record that it did.
+
+// CredentialTools::Policy as an integer: 0 always, 1 while unlocked (the default), 2 never.
+inline constexpr char kAgentCredentialsPolicy[] = "redrob.agent_credentials.policy";
+// How long one OS re-authentication keeps the agent's sign-in unlocked, in minutes.
+inline constexpr char kAgentCredentialsUnlockMinutes[] = "redrob.agent_credentials.unlock_minutes";
+// Per-site overrides: a dict {serialized origin: "allow" | "deny"}. "deny" refuses that site under every
+// policy; "allow" lets that site fill without the unlock window under kWhileUnlocked. kNever wins over both.
+inline constexpr char kAgentCredentialsSites[] = "redrob.agent_credentials.sites";
+// The audit trail: a list of dicts {time_ms, origin, username, task_id, outcome}, newest last, capped at
+// CredentialTools::kMaxAuditRecords. Usernames only -- there is no field a password could go in.
+inline constexpr char kAgentCredentialsAudit[] = "redrob.agent_credentials.audit";
+
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
 }  // namespace redrob::prefs
