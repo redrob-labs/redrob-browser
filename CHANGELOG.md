@@ -4,6 +4,22 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
+## 0.4.0 — 2026-10-20
+
+**Your phone can sign you in, too.** The app-bridge tools Redrob Code's daemon gets (the phone chat included) now
+have `login`: the same password-store fill, the same per-site policy and the same sign-in record as the built-in
+agent, and the password still never reaches the model. Only the agent server this browser started can ask for
+it; another program on the debugging port is refused.
+
+**Unlock where the task stops.** A task waiting on a locked password store shows Unlock in its "needs you"
+notification. It asks the OS to re-authenticate and then carries on; Settings stays the fallback.
+
+**The quick window stands on its own.** Ctrl+Shift+Space keeps the browser running while the small window is
+open, even with no browser window left.
+
+**Recent chats with tabs on top.** The toolbar gains a chats button next to account and Settings, listing the
+same recent chats as the sidebar.
+
 ## 0.3.0 — 2026-10-19
 
 **Tabs start across the top.** A new profile opens with the familiar horizontal tab strip; the sidebar is one

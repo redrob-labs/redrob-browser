@@ -17,6 +17,7 @@ index 0000000000000000000000000000000000000000..69ccd172300d28bbe36817bf526711bb
 +#include "base/command_line.h"
 +#include "base/environment.h"
 +#include "base/logging.h"
++#include "base/process/environment_internal.h"
 +#include "base/strings/utf_string_conversions.h"
 +#include "base/threading/scoped_thread_priority.h"
 +#include "base/win/scoped_process_information.h"
@@ -35,9 +36,8 @@ index 0000000000000000000000000000000000000000..69ccd172300d28bbe36817bf526711bb
 +  base::EnvironmentMap changes;
 +  changes[base::UTF8ToWide(redrob::kAppBridgeTokenEnv)] =
 +      base::UTF8ToWide(redrob::AppBridgeToken());
-+  wchar_t* parent_env = ::GetEnvironmentStringsW();
-+  std::wstring env_block = base::AlterEnvironment(parent_env, changes);
-+  ::FreeEnvironmentStringsW(parent_env);
++  std::wstring env_block = base::internal::AlterEnvironment(
++      base::internal::GetEnvironment(), changes);
 +
 +  PROCESS_INFORMATION raw_process_info = {};
 +  std::wstring writable_command_line = command_line.GetCommandLineString();
