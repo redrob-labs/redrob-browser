@@ -841,7 +841,10 @@ void MemoryStore::OnChanged(std::string run_id, DoneCallback callback, ChangeRes
 
 void MemoryStore::Search(const std::string& query, size_t limit, SearchCallback callback) {
   if (!enabled() || root_.empty()) {
-    std::move(callback).Run({});
+    // Answered asynchronously even here: TaskStore starts a task's first turn from this callback and
+    // relies on it not running inside the call that created the task.
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback), std::vector<SearchHit>()));
     return;
   }
   file_runner_->PostTaskAndReplyWithResult(
