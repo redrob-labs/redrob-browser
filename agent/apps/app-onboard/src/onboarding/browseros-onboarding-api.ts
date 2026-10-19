@@ -23,6 +23,8 @@ export type BrowserOSImportStatus =
   | 'succeeded'
   | 'failed'
   | 'completed'
+  /** The user stopped the import; anything already copied stays. */
+  | 'cancelled'
 
 /** Native owns extension preparation independently of the browser-data importer. */
 export type BrowserOSSetupState = 'idle' | 'preparing' | 'failed' | 'ready'
@@ -33,6 +35,7 @@ export const BrowserOSOnboardingMessage = {
   START_IMPORT: 'browserosOnboardingStartImport',
   COMPLETE: 'browserosOnboardingComplete',
   RETRY_SETUP: 'browserosOnboardingRetrySetup',
+  CANCEL_IMPORT: 'browserosOnboardingCancelImport',
 } as const
 
 export type BrowserOSOnboardingMessage =
@@ -47,6 +50,10 @@ export interface BrowserOSImportSource {
   isManaged: boolean
   supportedItems: BrowserOSImportItem[]
   recommendedItems: BrowserOSImportItem[]
+  /** Browser family, e.g. 'firefox', 'safari', 'chromium'. Absent from older native builds. */
+  kind?: string
+  /** Saved passwords are not copied from this source; the step offers the CSV export route. */
+  passwordsViaCsv?: boolean
 }
 
 export interface BrowserOSImportProgress {
@@ -68,6 +75,7 @@ export type BrowserOSImportSourceResultStatus =
   | 'importing'
   | 'succeeded'
   | 'failed'
+  | 'cancelled'
 
 export interface BrowserOSImportSourceResult {
   sourceId: string

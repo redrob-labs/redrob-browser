@@ -13,6 +13,8 @@ import {
   ArrowRight,
   ChevronDown,
   Download,
+  ExternalLink,
+  KeyRound,
   Lock,
   RefreshCw,
 } from '@browseros/icons'
@@ -54,6 +56,44 @@ interface ImportStepProps {
   onImport: () => void
   onRefresh: () => void
   onContinue: () => void
+  /** Stops a running import. */
+  onCancel?: () => void
+  /** Opens the password manager for the CSV route. */
+  onOpenPasswordManager?: () => void
+}
+
+/** Sources whose saved passwords are not copied: say how to bring them anyway. */
+function PasswordsViaCsvNotice({
+  browserName,
+  onOpenPasswordManager,
+}: {
+  browserName: string
+  onOpenPasswordManager?: () => void
+}) {
+  return (
+    <div className="mb-4 flex items-start gap-3 rounded-xl border border-border-2 bg-card p-4">
+      <KeyRound aria-hidden className="mt-0.5 size-4 shrink-0 text-ink-2" />
+      <div className="flex-1">
+        <div className="mb-1 font-bold text-[13px] text-ink">
+          {t('onboardPasswordsViaCsvTitle')}
+        </div>
+        <p className="mb-2.5 text-[12.5px] text-ink-2">
+          {t('onboardPasswordsViaCsvBody', browserName)}
+        </p>
+        {onOpenPasswordManager && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={onOpenPasswordManager}
+          >
+            <ExternalLink aria-hidden className="size-3.5" />
+            {t('onboardOpenPasswordManager')}
+          </Button>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function importButtonLabelFor(
@@ -89,6 +129,8 @@ export function ImportStep({
   onImport,
   onRefresh,
   onContinue,
+  onCancel,
+  onOpenPasswordManager,
 }: ImportStepProps) {
   const [permissionOpen, setPermissionOpen] = useState(false)
   const [showAllProfiles, setShowAllProfiles] = useState(false)
@@ -274,6 +316,20 @@ export function ImportStep({
               onToggle={toggleImportItem}
             />
           )}
+          {selectedSource?.passwordsViaCsv && (
+            <PasswordsViaCsvNotice
+              browserName={selectedSource.browserName}
+              onOpenPasswordManager={onOpenPasswordManager}
+            />
+          )}
+          {state.status === 'cancelled' && (
+            <div
+              role="status"
+              className="mb-4 rounded-xl border border-border-2 bg-card p-4 text-[12.5px] text-ink-2"
+            >
+              {t('onboardImportCancelled')}
+            </div>
+          )}
           {state.error && (
             <div className="mb-4 rounded-xl border border-amber/30 bg-amber-tint p-4 text-[12.5px] text-ink-2">
               {state.error.message}
@@ -322,6 +378,10 @@ export function ImportStep({
             progress={completedItems}
             sourceLabel={currentSourceLabel}
             total={totalItems}
+            items={checkedItems}
+            completedItems={importedItems}
+            currentItem={state.progress?.currentItem}
+            onCancel={onCancel}
           />
           {needsPermission && <MacKeychainReminder />}
         </>

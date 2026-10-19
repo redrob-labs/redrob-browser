@@ -169,7 +169,12 @@ void RedrobPrivateGetImportSourcesFunction::OnSourcesDetected() {
     const uint16_t services = profile.services_supported;
     source.has_bookmarks = (services & user_data_importer::FAVORITES) != 0;
     source.has_history = (services & user_data_importer::HISTORY) != 0;
-    source.has_passwords = (services & user_data_importer::PASSWORDS) != 0;
+    // Firefox passwords are NSS-encrypted and not carried (the onboarding step
+    // points at the CSV export instead), so the bit upstream sets on Windows and
+    // Linux is not passed on.
+    source.has_passwords =
+        (services & user_data_importer::PASSWORDS) != 0 &&
+        profile.importer_type != user_data_importer::TYPE_FIREFOX;
     source.has_search_engines =
         (services & user_data_importer::SEARCH_ENGINES) != 0;
     // Always false, and not an oversight: upstream defines a COOKIES bit and

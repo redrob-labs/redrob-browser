@@ -95,3 +95,14 @@ onboardFinishingSetup	Finishing setup	설정을 마무리하는 중	Heading whil
 onboardPreparingRedrob	Preparing Redrob. This should only take a moment.	Redrob을 준비하고 있습니다. 잠시만 기다려 주세요.
 onboardSetupFailed	Setup didn’t finish	설정을 마치지 못했습니다
 onboardPleaseTryAgain	Please try again.	다시 시도해 주세요.
+
+# Import: cancel, per-item progress, and the CSV route for passwords
+onboardCancelImport	Cancel	취소	Button that stops a running import
+onboardImportCancelled	Import stopped. Anything already copied stays in Redrob.	가져오기를 멈췄습니다. 이미 복사된 항목은 Redrob에 남아 있습니다.	Shown on the picker after the user cancelled an import
+onboardImportProgressByItem	Progress by item	항목별 진행 상황	Accessible name of the per-item progress list
+onboardItemStateDone	Done	완료	One item finished copying
+onboardItemStateCopying	Copying…	복사 중…	One item is being copied now
+onboardItemStateWaiting	Waiting	대기 중	One item has not started yet
+onboardPasswordsViaCsvTitle	Saved passwords come across as a file	저장된 비밀번호는 파일로 가져옵니다	Heading of the row shown for sources whose passwords cannot be copied directly
+onboardPasswordsViaCsvBody	$1 does not hand its saved passwords to other browsers. Export them from $1 as a CSV file, then import that file in Password Manager.	$1은(는) 저장된 비밀번호를 다른 브라우저에 직접 넘겨주지 않습니다. $1에서 비밀번호를 CSV 파일로 내보낸 뒤, 비밀번호 관리자에서 그 파일을 가져오세요.	$1 is the source browser's name, e.g. Firefox
+onboardOpenPasswordManager	Open Password Manager	비밀번호 관리자 열기	Button that opens the password manager to import a CSV file

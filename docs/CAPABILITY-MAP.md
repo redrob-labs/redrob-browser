@@ -100,9 +100,9 @@ Item ids in the last column refer to `docs/PRODUCT-BACKLOG.md`.
 | capability | what a person gets | us | item |
 |---|---|---|---|
 | Import from other browsers | Bookmarks, history, cookies | yes — six Chromium-family browsers | — |
-| Import from Firefox and Safari | The two families we cannot read today | no | ONB-5 |
+| Import from Firefox and Safari | Firefox bookmarks, history and form data; Safari bookmarks and history (macOS). Saved passwords go by CSV export into the password manager, which the import step explains with a button | yes — upstream's own importers, offered by the onboarding import step; not yet proved against a real profile | ONB-5 |
 | Import a browser's ENCRYPTED store | Saved passwords and cookies protected by the OS. Needs a privileged service; the platform's app-bound encryption already ships with our fork, we just have nothing that uses it | no | ONB-5 |
-| Import progress, cancellable | A long import you can watch and stop | no | ONB-4 |
+| Import progress, cancellable | A long import you can watch and stop | yes — overall bar plus one bar per item type (done / copying / waiting; the importer reports item boundaries, not percentages) and a Cancel that stops the importer | ONB-4 |
 | A credential vault | Login, passkey, TOTP, identity, card, note, SSH key, API credential; biometric unlock | no — Chromium's own store is our default | CAP-9 |
 | First-class support for OTHER password managers | The product works with the manager you already use | no | — |
 | Multiple profiles with a switcher | Separate identities in one install | partial — Chromium profiles exist; no surface of ours | — |
