@@ -1499,4 +1499,209 @@ void RedrobPrivateDisconnectEngineProviderFunction::OnDone(bool ok) {
       redrob_private::DisconnectEngineProvider::Results::Create(ok)));
 }
 
+// --- Agent sign-in (CAP-9) ---------------------------------------------------
+//
+// Every value below arrives from a renderer and is bounded here. None of these
+// can read a password: the settings tree is a policy, a list of origins, and an
+// audit trail of usernames and outcomes.
+
+namespace {
+
+redrob_private::AgentCredentialPolicy ToPrivatePolicy(
+    redrob::CredentialTools::Policy policy) {
+  switch (policy) {
+    case redrob::CredentialTools::Policy::kAlways:
+      return redrob_private::AgentCredentialPolicy::kAlways;
+    case redrob::CredentialTools::Policy::kWhileUnlocked:
+      return redrob_private::AgentCredentialPolicy::kWhileUnlocked;
+    case redrob::CredentialTools::Policy::kNever:
+      return redrob_private::AgentCredentialPolicy::kNever;
+  }
+  return redrob_private::AgentCredentialPolicy::kWhileUnlocked;
+}
+
+TaskStore* AgentTasks(content::BrowserContext* context) {
+  return TaskStoreFactory::GetForProfile(Profile::FromBrowserContext(context));
+}
+
+}  // namespace
+
+ExtensionFunction::ResponseAction
+RedrobPrivateGetAgentCredentialSettingsFunction::Run() {
+  Profile* profile = Profile::FromBrowserContext(browser_context());
+  TaskStore* tasks = AgentTasks(browser_context());
+  redrob_private::AgentCredentialSettings out;
+  if (!tasks) {
+    // No task store means an off-the-record profile, where the agent never
+    // signs in. Said so rather than shown as an empty, editable policy.
+    out.policy = redrob_private::AgentCredentialPolicy::kNever;
+    out.off_the_record = true;
+    return RespondNow(ArgumentList(
+        redrob_private::GetAgentCredentialSettings::Results::Create(out)));
+  }
+  redrob::CredentialTools* credentials = tasks->credentials();
+  PrefService* prefs = profile->GetPrefs();
+
+  out.policy = ToPrivatePolicy(credentials->policy());
+  out.unlock_minutes =
+      static_cast<int>(credentials->UnlockWindow().InMinutes());
+  out.unlocked = credentials->IsUnlocked();
+  out.off_the_record = credentials->IsOffTheRecord();
+
+  for (const auto [origin, value] :
+       prefs->GetDict(redrob::prefs::kAgentCredentialsSites)) {
+    if (!value.is_string()) {
+      continue;
+    }
+    redrob_private::AgentCredentialSite site;
+    site.origin = origin;
+    site.allow = value.GetString() == "allow";
+    out.sites.push_back(std::move(site));
+  }
+
+  // Newest first: the pref appends, the table reads from the top.
+  const base::ListValue& audit =
+      prefs->GetList(redrob::prefs::kAgentCredentialsAudit);
+  for (auto it = audit.rbegin(); it != audit.rend(); ++it) {
+    const base::DictValue* entry = it->GetIfDict();
+    if (!entry) {
+      continue;
+    }
+    redrob_private::AgentCredentialRecord record;
+    record.time_ms = entry->FindDouble("time_ms").value_or(0);
+    const std::string* origin = entry->FindString("origin");
+    const std::string* username = entry->FindString("username");
+    const std::string* task_id = entry->FindString("task_id");
+    const std::string* outcome = entry->FindString("outcome");
+    record.origin = origin ? *origin : std::string();
+    record.username = username ? *username : std::string();
+    record.task_id = task_id ? *task_id : std::string();
+    record.outcome = outcome ? *outcome : std::string();
+    out.history.push_back(std::move(record));
+  }
+
+  for (const TaskStore::CredentialWait& wait : tasks->CredentialWaits()) {
+    redrob_private::AgentCredentialWait entry;
+    entry.task_id = wait.task_id;
+    entry.prompt = wait.prompt;
+    entry.origin = wait.origin;
+    entry.needs_unlock = wait.needs_unlock;
+    out.waiting.push_back(std::move(entry));
+  }
+
+  return RespondNow(ArgumentList(
+      redrob_private::GetAgentCredentialSettings::Results::Create(out)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetAgentCredentialPolicyFunction::Run() {
+  auto params = redrob_private::SetAgentCredentialPolicy::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  int value = -1;
+  switch (params->policy) {
+    case redrob_private::AgentCredentialPolicy::kAlways:
+      value = static_cast<int>(redrob::CredentialTools::Policy::kAlways);
+      break;
+    case redrob_private::AgentCredentialPolicy::kWhileUnlocked:
+      value = static_cast<int>(redrob::CredentialTools::Policy::kWhileUnlocked);
+      break;
+    case redrob_private::AgentCredentialPolicy::kNever:
+      value = static_cast<int>(redrob::CredentialTools::Policy::kNever);
+      break;
+    case redrob_private::AgentCredentialPolicy::kNone:
+      break;
+  }
+  if (value >= 0) {
+    Profile::FromBrowserContext(browser_context())
+        ->GetPrefs()
+        ->SetInteger(redrob::prefs::kAgentCredentialsPolicy, value);
+  }
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetAgentCredentialUnlockMinutesFunction::Run() {
+  auto params =
+      redrob_private::SetAgentCredentialUnlockMinutes::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  // Ignored rather than clamped: a value outside the range is a page bug, and
+  // silently storing a different number than the one shown is worse.
+  if (params->minutes >= 1 && params->minutes <= 24 * 60) {
+    Profile::FromBrowserContext(browser_context())
+        ->GetPrefs()
+        ->SetInteger(redrob::prefs::kAgentCredentialsUnlockMinutes,
+                     params->minutes);
+  }
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateSetAgentCredentialSiteFunction::Run() {
+  auto params = redrob_private::SetAgentCredentialSite::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  TaskStore* tasks = AgentTasks(browser_context());
+  const bool ok =
+      tasks && tasks->credentials()->SetSite(params->origin, params->allow);
+  return RespondNow(ArgumentList(
+      redrob_private::SetAgentCredentialSite::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateRemoveAgentCredentialSiteFunction::Run() {
+  auto params =
+      redrob_private::RemoveAgentCredentialSite::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  TaskStore* tasks = AgentTasks(browser_context());
+  const bool ok = tasks && tasks->credentials()->RemoveSite(params->origin);
+  return RespondNow(ArgumentList(
+      redrob_private::RemoveAgentCredentialSite::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateUnlockAgentCredentialsFunction::Run() {
+  // The OS prompt is parented to the window of the page that asked, so it
+  // appears over the settings the user just clicked in.
+  TaskStore* tasks = AgentTasks(browser_context());
+  if (!tasks) {
+    return RespondNow(ArgumentList(
+        redrob_private::UnlockAgentCredentials::Results::Create(false)));
+  }
+  tasks->UnlockCredentials(
+      GetSenderWebContents(),
+      base::BindOnce(&RedrobPrivateUnlockAgentCredentialsFunction::OnUnlocked,
+                     this));
+  return RespondLater();
+}
+
+void RedrobPrivateUnlockAgentCredentialsFunction::OnUnlocked(bool unlocked) {
+  Respond(ArgumentList(
+      redrob_private::UnlockAgentCredentials::Results::Create(unlocked)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateLockAgentCredentialsFunction::Run() {
+  if (TaskStore* tasks = AgentTasks(browser_context())) {
+    tasks->credentials()->Lock();
+  }
+  return RespondNow(NoArguments());
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateResumeCredentialTaskFunction::Run() {
+  auto params = redrob_private::ResumeCredentialTask::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
+  TaskStore* tasks = AgentTasks(browser_context());
+  const bool ok = tasks && tasks->ResumeAfterVerification(params->task_id);
+  return RespondNow(ArgumentList(
+      redrob_private::ResumeCredentialTask::Results::Create(ok)));
+}
+
+ExtensionFunction::ResponseAction
+RedrobPrivateClearAgentCredentialHistoryFunction::Run() {
+  Profile::FromBrowserContext(browser_context())
+      ->GetPrefs()
+      ->ClearPref(redrob::prefs::kAgentCredentialsAudit);
+  return RespondNow(NoArguments());
+}
+
 }  // namespace extensions

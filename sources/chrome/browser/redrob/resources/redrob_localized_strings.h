@@ -332,6 +332,16 @@ inline constexpr webui::LocalizedString kRedrobLocalizedStrings[] = {
     {"taskMemoryWriteRefused", IDS_REDROB_TASK_MEMORY_WRITE_REFUSED},
     {"seRoutineConsolidateTitle", IDS_REDROB_SE_ROUTINE_CONSOLIDATE_TITLE},
     {"seRoutineConsolidateNotDue", IDS_REDROB_SE_ROUTINE_CONSOLIDATE_NOT_DUE},
+    {"agentCredentialsUnlockPrompt", IDS_REDROB_AGENT_CREDENTIALS_UNLOCK_PROMPT},
+    {"taskCredentialSignedIn", IDS_REDROB_TASK_CREDENTIAL_SIGNED_IN},
+    {"taskCredentialWaitingUnlock", IDS_REDROB_TASK_CREDENTIAL_WAITING_UNLOCK},
+    {"taskCredentialWaitingVerify", IDS_REDROB_TASK_CREDENTIAL_WAITING_VERIFY},
+    {"taskCredentialRefused", IDS_REDROB_TASK_CREDENTIAL_REFUSED},
+    {"taskCredentialNoLogin", IDS_REDROB_TASK_CREDENTIAL_NO_LOGIN},
+    {"taskCredentialSeveral", IDS_REDROB_TASK_CREDENTIAL_SEVERAL},
+    {"taskCredentialNoForm", IDS_REDROB_TASK_CREDENTIAL_NO_FORM},
+    {"taskCredentialFailed", IDS_REDROB_TASK_CREDENTIAL_FAILED},
+    {"taskCredentialResumed", IDS_REDROB_TASK_CREDENTIAL_RESUMED},
 };
 
 }  // namespace redrob

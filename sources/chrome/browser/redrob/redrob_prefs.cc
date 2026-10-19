@@ -49,6 +49,12 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 
   // CAP-4: tasks outlive the window by default. See the header.
   registry->RegisterBooleanPref(kKeepTasksRunning, true);
+  // Agent sign-in. While-unlocked by default: an agent that can sign in to anything the user ever saved,
+  // with nobody present, is a decision the user should make by name rather than inherit.
+  registry->RegisterIntegerPref(kAgentCredentialsPolicy, 1);
+  registry->RegisterIntegerPref(kAgentCredentialsUnlockMinutes, 15);
+  registry->RegisterDictionaryPref(kAgentCredentialsSites);
+  registry->RegisterListPref(kAgentCredentialsAudit);
 }
 
 }  // namespace redrob::prefs

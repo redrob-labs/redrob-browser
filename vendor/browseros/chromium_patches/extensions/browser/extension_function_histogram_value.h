@@ -1,7 +1,7 @@
 diff --git a/extensions/browser/extension_function_histogram_value.h b/extensions/browser/extension_function_histogram_value.h
 --- a/extensions/browser/extension_function_histogram_value.h
 +++ b/extensions/browser/extension_function_histogram_value.h
-@@ -2051,8 +2051,108 @@ enum HistogramValue {
+@@ -2051,8 +2051,117 @@ enum HistogramValue {
    ENTERPRISE_WEBRTC_STARTCAPTURE = 1986,
    ENTERPRISE_WEBRTC_GETCAPTURESTATUS = 1987,
    ENTERPRISE_WEBRTC_STOPCAPTURE = 1988,
@@ -107,6 +107,15 @@ diff --git a/extensions/browser/extension_function_histogram_value.h b/extension
 +  REDROBPRIVATE_FINISHENGINESIGNIN = 2105,
 +  REDROBPRIVATE_SETENGINEPROVIDERKEY = 2106,
 +  REDROBPRIVATE_DISCONNECTENGINEPROVIDER = 2107,
++  REDROBPRIVATE_GETAGENTCREDENTIALSETTINGS = 2200,
++  REDROBPRIVATE_SETAGENTCREDENTIALPOLICY = 2201,
++  REDROBPRIVATE_SETAGENTCREDENTIALUNLOCKMINUTES = 2202,
++  REDROBPRIVATE_SETAGENTCREDENTIALSITE = 2203,
++  REDROBPRIVATE_REMOVEAGENTCREDENTIALSITE = 2204,
++  REDROBPRIVATE_UNLOCKAGENTCREDENTIALS = 2205,
++  REDROBPRIVATE_LOCKAGENTCREDENTIALS = 2206,
++  REDROBPRIVATE_RESUMECREDENTIALTASK = 2207,
++  REDROBPRIVATE_CLEARAGENTCREDENTIALHISTORY = 2208,
    ENUM_BOUNDARY
  };
  // LINT.ThenChange(/tools/metrics/histograms/metadata/extensions/enums.xml:ExtensionFunctions)

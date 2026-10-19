@@ -640,3 +640,8 @@ features:
     description: "build: sign the macOS app on a release runner (Gatekeeper asked after notarization, not before)"
     files:
       - chrome/installer/mac/signing/chromium_config.py
+
+  redrob-agent-credentials:
+    description: "feat: agent sign-in over the profile password store (CAP-9)"
+    files:
+      - components/password_manager/core/browser/actor_login/internal/BUILD.gn

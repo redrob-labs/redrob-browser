@@ -415,6 +415,16 @@
       <message name="IDS_REDROB_TASK_MEMORY_WRITE_REFUSED" desc="Trace line when an ordinary task tries to change a memory file">Refused: memory is written after the task, not during it</message>
       <message name="IDS_REDROB_SE_ROUTINE_CONSOLIDATE_TITLE" desc="Title of the built-in routine that reviews the memory files once a day">Memory consolidation</message>
       <message name="IDS_REDROB_SE_ROUTINE_CONSOLIDATE_NOT_DUE" desc="Why the built-in memory consolidation routine did not run this time">Skipped: fewer than three new memory runs since the last one, or it ran within the last day.</message>
+      <message name="IDS_REDROB_AGENT_CREDENTIALS_UNLOCK_PROMPT" desc="Reason shown in the OS re-authentication dialog when the user unlocks agent sign-in">let the agent sign in with your saved passwords</message>
+      <message name="IDS_REDROB_TASK_CREDENTIAL_SIGNED_IN" desc="Trace line when the agent filled a saved login; $1 is the username, $2 the site">Signed in as <ph name="ARG1">$1<ex>1</ex></ph> on <ph name="ARG2">$2<ex>2</ex></ph></message>
+      <message name="IDS_REDROB_TASK_CREDENTIAL_WAITING_UNLOCK" desc="Trace line when a task is paused until the user unlocks agent sign-in; $1 is the site">Waiting for you: unlock saved passwords to let the agent sign in to <ph name="ARG1">$1<ex>1</ex></ph></message>
+      <message name="IDS_REDROB_TASK_CREDENTIAL_WAITING_VERIFY" desc="Trace line when a task is paused for a one-time code, passkey or CAPTCHA the agent must not answer; $1 is the site">Waiting for you: finish the verification on <ph name="ARG1">$1<ex>1</ex></ph></message>
+      <message name="IDS_REDROB_TASK_CREDENTIAL_REFUSED" desc="Trace line when agent sign-in is refused by policy or by the per-site list; $1 is the site">Did not sign in to <ph name="ARG1">$1<ex>1</ex></ph>: your settings do not allow it</message>
+      <message name="IDS_REDROB_TASK_CREDENTIAL_NO_LOGIN" desc="Trace line when the password manager has no login for the site; $1 is the site">No saved login for <ph name="ARG1">$1<ex>1</ex></ph></message>
+      <message name="IDS_REDROB_TASK_CREDENTIAL_SEVERAL" desc="Trace line when more than one account matches; $1 is the site">Several saved logins for <ph name="ARG1">$1<ex>1</ex></ph>; asked which one to use</message>
+      <message name="IDS_REDROB_TASK_CREDENTIAL_NO_FORM" desc="Trace line when the page has no fillable sign-in form; $1 is the site">No sign-in form on <ph name="ARG1">$1<ex>1</ex></ph> to fill</message>
+      <message name="IDS_REDROB_TASK_CREDENTIAL_FAILED" desc="Trace line when filling failed for another reason; $1 is the site">Could not sign in on <ph name="ARG1">$1<ex>1</ex></ph></message>
+      <message name="IDS_REDROB_TASK_CREDENTIAL_RESUMED" desc="Trace line when the user resumes a task that waited for them; $1 is the site">Continuing after you finished on <ph name="ARG1">$1<ex>1</ex></ph></message>
     </messages>
   </release>
 </grit>

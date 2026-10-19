@@ -1,0 +1,12 @@
+diff --git a/components/password_manager/core/browser/actor_login/internal/BUILD.gn b/components/password_manager/core/browser/actor_login/internal/BUILD.gn
+index a648ec8de19e1..2d5d2365d31b2 100644
+--- a/components/password_manager/core/browser/actor_login/internal/BUILD.gn
++++ b/components/password_manager/core/browser/actor_login/internal/BUILD.gn
+@@ -31,6 +31,7 @@ source_set("delegate") {
+     "//chrome/browser/password_manager/actor_login:*",
+     "//chrome/browser/password_manager/actor_login/internal:*",
+     "//components/password_manager/core/browser/actor_login:*",
++    "//chrome/browser/redrob:*",
+     "//components/password_manager/core/browser/actor_login/test:*",
+     "//ios/chrome/browser/passwords/model/actor_login:*",
+   ]

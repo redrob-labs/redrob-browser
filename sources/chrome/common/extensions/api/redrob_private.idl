@@ -321,6 +321,56 @@ namespace redrobPrivate {
     DOMString? baseUrl;
   };
 
+  // --- Agent sign-in (CAP-9). See docs/CREDENTIALS.md. -----------------
+  //
+  // Nothing here carries a password. The passwords stay in the profile's own
+  // password store; these say when the agent may ask that store to fill, and
+  // record that it did.
+  enum AgentCredentialPolicy { always, whileUnlocked, never };
+
+  // One per-site override. allow: that site fills without the unlock window.
+  // Not allowed (deny): that site is refused under every policy.
+  dictionary AgentCredentialSite {
+    DOMString origin;
+    boolean allow;
+  };
+
+  // One agent sign-in, as the audit trail recorded it. `outcome` is one of
+  // filled, noSavedLogin, refused, locked, severalLogins, noSigninForm,
+  // needsVerification, failed.
+  dictionary AgentCredentialRecord {
+    double timeMs;
+    DOMString origin;
+    DOMString username;
+    DOMString taskId;
+    DOMString outcome;
+  };
+
+  // A task paused until the user acts: an unlock (needsUnlock) or a one-time
+  // code / passkey / CAPTCHA the agent will not answer.
+  dictionary AgentCredentialWait {
+    DOMString taskId;
+    DOMString prompt;
+    DOMString origin;
+    boolean needsUnlock;
+  };
+
+  dictionary AgentCredentialSettings {
+    AgentCredentialPolicy policy;
+    long unlockMinutes;
+    // Whether an unlock window is open right now.
+    boolean unlocked;
+    // Off-the-record profiles never let the agent sign in.
+    boolean offTheRecord;
+    AgentCredentialSite[] sites;
+    // Newest first.
+    AgentCredentialRecord[] history;
+    AgentCredentialWait[] waiting;
+  };
+
+  callback GetAgentCredentialSettingsCallback =
+      void (AgentCredentialSettings settings);
+
   callback GetEngineCredentialCallback = void (EngineCredential result);
 
   // --- CAP-4 / SUB-1..4 -------------------------------------------------
@@ -730,6 +780,47 @@ namespace redrobPrivate {
     // Tells the engine to forget the credential it holds for |providerId|.
     static void disconnectEngineProvider(DOMString providerId,
                                          BoolCallback callback);
+
+    // --- Agent sign-in (CAP-9) ----------------------------------------------
+
+    // The agent sign-in settings: policy, unlock window, per-site list, the
+    // audit trail and the tasks waiting for the user. No secret is in it.
+    static void getAgentCredentialSettings(
+        GetAgentCredentialSettingsCallback callback);
+
+    // Sets when the agent may sign in with saved passwords.
+    static void setAgentCredentialPolicy(AgentCredentialPolicy policy);
+
+    // How long one unlock lasts, in minutes (1 to 1440). Values outside that
+    // range are ignored rather than stored.
+    static void setAgentCredentialUnlockMinutes(long minutes);
+
+    // Adds or changes a per-site override. |origin| must be an http(s)
+    // origin. Resolves false when it was not stored.
+    static void setAgentCredentialSite(DOMString origin,
+                                       boolean allow,
+                                       BoolCallback callback);
+
+    // Removes a per-site override. Resolves true if it existed.
+    static void removeAgentCredentialSite(DOMString origin,
+                                          BoolCallback callback);
+
+    // Asks the operating system to re-authenticate the user, modal to this
+    // page's window, and opens the unlock window on success. Every task
+    // waiting for the unlock then continues. Where the platform has no device
+    // authenticator, this call -- made by a click in this UI, never by a tool
+    // -- is the proof that a person is present.
+    static void unlockAgentCredentials(BoolCallback callback);
+
+    // Closes the unlock window now.
+    static void lockAgentCredentials();
+
+    // The user finished the one-time code, passkey or CAPTCHA a task was
+    // waiting on. Resolves false when that task was not waiting.
+    static void resumeCredentialTask(DOMString taskId, BoolCallback callback);
+
+    // Deletes the agent sign-in history. Irreversible; the UI confirms first.
+    static void clearAgentCredentialHistory();
   };
 
   interface Events {
