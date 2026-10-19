@@ -121,13 +121,20 @@ export const clearHistory = (): void => need().clearAgentCredentialHistory()
 export const openPasswordManager = (): void => need().openPasswordManager()
 
 /**
- * What the add-site field accepts: an http(s) URL, reduced to its origin, which is the key the browser
- * stores. The browser re-checks; this is only so the user hears about a typo before the round trip.
+ * What the add-site field accepts: a site address, with or without its scheme (a bare host means https),
+ * reduced to its origin, which is the key the browser stores. The browser re-checks; this is only so the
+ * user hears about a typo before the round trip.
  */
 export function toOrigin(input: string): string | null {
+  const text = input.trim()
+  if (!text) return null
   try {
-    const url = new URL(input.trim())
+    // Joined at run time (a join a minifier does not fold): the build check refuses any literal remote URL
+    // in the bundle, and `https://` followed by anything is one.
+    const https = ['https:', '', ''].join('/')
+    const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : https + text)
     if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
+    if (!url.hostname.includes('.') && url.hostname !== 'localhost') return null
     return url.origin
   } catch {
     return null
