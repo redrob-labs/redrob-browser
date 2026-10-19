@@ -312,6 +312,11 @@ inline constexpr webui::LocalizedString kRedrobLocalizedStrings[] = {
     {"seEngineFailed", IDS_REDROB_SE_ENGINE_FAILED},
     {"seEngineNotInstalled", IDS_REDROB_SE_ENGINE_NOT_INSTALLED},
     {"seEngineModelCount", IDS_REDROB_SE_ENGINE_MODEL_COUNT},
+    {"taskMemoryRecalled", IDS_REDROB_TASK_MEMORY_RECALLED},
+    {"taskMemoryRead", IDS_REDROB_TASK_MEMORY_READ},
+    {"taskMemoryWriteRefused", IDS_REDROB_TASK_MEMORY_WRITE_REFUSED},
+    {"seRoutineConsolidateTitle", IDS_REDROB_SE_ROUTINE_CONSOLIDATE_TITLE},
+    {"seRoutineConsolidateNotDue", IDS_REDROB_SE_ROUTINE_CONSOLIDATE_NOT_DUE},
 };
 
 }  // namespace redrob

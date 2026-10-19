@@ -78,8 +78,9 @@ RoutineStore::Routine FromDict(const base::DictValue& dict) {
     routine.last_error = *error;
   }
   const std::string* kind = dict.FindString("kind");
-  routine.kind = (kind && *kind == "heartbeat") ? RoutineStore::Kind::kHeartbeat
-                                                : RoutineStore::Kind::kCron;
+  routine.kind = (kind && *kind == "heartbeat")     ? RoutineStore::Kind::kHeartbeat
+                 : (kind && *kind == "consolidate") ? RoutineStore::Kind::kConsolidate
+                                                    : RoutineStore::Kind::kCron;
   routine.every_minutes =
       std::clamp(dict.FindInt("every_minutes").value_or(1440), kMinMinutes, kMaxMinutes);
   routine.mode = IntToMode(dict.FindInt("mode").value_or(1));
@@ -97,7 +98,13 @@ base::DictValue ToDict(const RoutineStore::Routine& routine) {
   dict.Set("prompt", routine.prompt);
   dict.Set("task_id", routine.task_id);
   dict.Set("last_error", routine.last_error);
-  dict.Set("kind", routine.kind == RoutineStore::Kind::kHeartbeat ? "heartbeat" : "cron");
+  const char* kind = "cron";
+  if (routine.kind == RoutineStore::Kind::kHeartbeat) {
+    kind = "heartbeat";
+  } else if (routine.kind == RoutineStore::Kind::kConsolidate) {
+    kind = "consolidate";
+  }
+  dict.Set("kind", kind);
   dict.Set("every_minutes", routine.every_minutes);
   dict.Set("mode", ModeToInt(routine.mode));
   dict.Set("effort", static_cast<int>(routine.effort));
@@ -116,7 +123,7 @@ RoutineStore::RoutineStore(Profile* profile, TaskStore* tasks)
   // races the tab strip the task wants to open a tab in.
   std::vector<Routine> routines = List();
   const int64_t now = NowMs();
-  bool changed = false;
+  bool changed = EnsureConsolidation(routines);
   for (Routine& routine : routines) {
     if (routine.next_run_ms == 0) {
       routine.next_run_ms = now + base::Minutes(routine.every_minutes).InMilliseconds();
@@ -148,6 +155,28 @@ std::vector<RoutineStore::Routine> RoutineStore::List() const {
   return routines;
 }
 
+// static
+bool RoutineStore::EnsureConsolidation(std::vector<Routine>& routines) {
+  for (const Routine& routine : routines) {
+    if (routine.kind == Kind::kConsolidate) {
+      return false;
+    }
+  }
+  Routine routine;
+  routine.id = base::Uuid::GenerateRandomV4().AsLowercaseString();
+  routine.title = l10n_util::GetStringUTF8(IDS_REDROB_SE_ROUTINE_CONSOLIDATE_TITLE);
+  // Not what the engine is told -- that prompt lives in TaskStore -- but a routine with an empty prompt
+  // reads as broken in every list that shows one.
+  routine.prompt = routine.title;
+  routine.kind = Kind::kConsolidate;
+  routine.every_minutes = 60 * 24;
+  routine.mode = mojom::PermissionMode::kReadOnly;
+  routine.enabled = true;
+  routine.next_run_ms = NowMs() + base::Days(1).InMilliseconds();
+  routines.push_back(std::move(routine));
+  return true;
+}
+
 void RoutineStore::Save(const std::vector<Routine>& routines) {
   if (!profile_) {
     return;
@@ -167,6 +196,10 @@ std::string RoutineStore::Add(const Routine& request) {
   // A heartbeat with no task to wake is not a routine, it is a routine that will fail every time it
   // fires. Refused at the point it is created, where the user can still see why.
   if (request.kind == Kind::kHeartbeat && request.task_id.empty()) {
+    return std::string();
+  }
+  // There is one consolidation routine and the browser owns it.
+  if (request.kind == Kind::kConsolidate) {
     return std::string();
   }
   std::vector<Routine> routines = List();
@@ -194,6 +227,22 @@ bool RoutineStore::Update(const Routine& request) {
     if (request.prompt.empty() || request.prompt.size() > kMaxPromptBytes) {
       return false;
     }
+    // The built-in stays what it is: its kind, title and prompt are the browser's. Only switching it
+    // on or off and its interval are the user's to change.
+    if (routine.kind == Kind::kConsolidate || request.kind == Kind::kConsolidate) {
+      if (routine.kind != Kind::kConsolidate) {
+        return false;
+      }
+      const int minutes = std::clamp(request.every_minutes, kMinMinutes, kMaxMinutes);
+      if (minutes != routine.every_minutes) {
+        routine.every_minutes = minutes;
+        routine.next_run_ms = NowMs() + base::Minutes(minutes).InMilliseconds();
+      }
+      routine.enabled = request.enabled;
+      Save(routines);
+      Rearm();
+      return true;
+    }
     const int minutes = std::clamp(request.every_minutes, kMinMinutes, kMaxMinutes);
     // Changing the interval re-bases the next run from now. Keeping an old next_run_ms after the user
     // shortened the interval would make the change look ignored.
@@ -219,7 +268,11 @@ bool RoutineStore::Update(const Routine& request) {
 bool RoutineStore::Remove(const std::string& id) {
   std::vector<Routine> routines = List();
   const size_t before = routines.size();
-  std::erase_if(routines, [&id](const Routine& routine) { return routine.id == id; });
+  // The built-in consolidation routine is switched off, not removed: removing it would only bring it
+  // back at the next launch.
+  std::erase_if(routines, [&id](const Routine& routine) {
+    return routine.id == id && routine.kind != Kind::kConsolidate;
+  });
   if (routines.size() == before) {
     return false;
   }
@@ -263,6 +316,13 @@ std::string RoutineStore::Fire(Routine& routine) {
   routine.last_error.clear();
   if (!tasks_) {
     routine.last_error = l10n_util::GetStringUTF8(IDS_REDROB_SE_ROUTINE_ENGINE_UNAVAILABLE);
+    return std::string();
+  }
+  if (routine.kind == Kind::kConsolidate) {
+    if (!tasks_->StartConsolidation(/*force=*/false)) {
+      routine.last_error = l10n_util::GetStringUTF8(IDS_REDROB_SE_ROUTINE_CONSOLIDATE_NOT_DUE);
+    }
+    // No task id: a memory run is hidden, so there is no task for Settings to link to.
     return std::string();
   }
   if (routine.kind == Kind::kHeartbeat) {

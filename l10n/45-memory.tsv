@@ -1,0 +1,11 @@
+# Memory runs (chrome/browser/redrob/task_store.cc, routine_store.cc), English and Korean.
+#
+# key <TAB> English <TAB> Korean [<TAB> description]
+#
+# Terminology follows 40-settings.tsv: memory 메모리 / task 작업 / routine 루틴.
+
+taskMemoryRecalled	Recalled $1 lines from memory	메모리에서 $1줄을 불러왔습니다	Trace line at the start of a task; $1 is how many lines of the memory files matched its prompt
+taskMemoryRead	Read $1 from memory	메모리에서 $1 파일을 읽었습니다	Trace line when the agent reads a memory file; $1 is the file's path, e.g. USER.md
+taskMemoryWriteRefused	Refused: memory is written after the task, not during it	거부됨: 메모리는 작업 중이 아니라 작업이 끝난 뒤에 기록됩니다	Trace line when an ordinary task tries to change a memory file
+seRoutineConsolidateTitle	Memory consolidation	메모리 정리	Title of the built-in routine that reviews the memory files once a day
+seRoutineConsolidateNotDue	Skipped: fewer than three new memory runs since the last one, or it ran within the last day.	건너뜀: 지난번 이후 새 메모리 기록이 세 번 미만이거나, 하루 안에 이미 실행했습니다.	Why the built-in memory consolidation routine did not run this time

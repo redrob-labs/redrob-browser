@@ -301,4 +301,9 @@
 <translation id="7347428928871851497">응답이 멈췄습니다</translation>
 <translation id="6975159765440984670">설치되지 않아 작업을 실행할 수 없습니다</translation>
 <translation id="2665921124100154890">모델 <ph name="ARG1"/>개</translation>
+<translation id="5436320722030472802">메모리에서 <ph name="ARG1"/>줄을 불러왔습니다</translation>
+<translation id="1216563188941400826">메모리에서 <ph name="ARG1"/> 파일을 읽었습니다</translation>
+<translation id="3102021462396493469">거부됨: 메모리는 작업 중이 아니라 작업이 끝난 뒤에 기록됩니다</translation>
+<translation id="2925258627289598570">메모리 정리</translation>
+<translation id="6098891582875693255">건너뜀: 지난번 이후 새 메모리 기록이 세 번 미만이거나, 하루 안에 이미 실행했습니다.</translation>
 </translationbundle>
