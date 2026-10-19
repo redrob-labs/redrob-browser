@@ -29,6 +29,9 @@
 #include "chrome/browser/redrob/redrob_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/thumbnails/thumbnail_tab_helper.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "components/tabs/public/tab_interface.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
@@ -471,6 +474,7 @@ std::pair<std::optional<std::string>, std::optional<mojom::StartError>> TaskStor
   }
 
   const std::string task_id = CreateTask(prompt, mode, effort, model);
+  CaptureContextTab(task_id);
   StartTurn(task_id);
   return {task_id, std::nullopt};
 }
@@ -580,6 +584,15 @@ void TaskStore::StartTurn(const std::string& task_id) {
   request.Set("messages", conversation->second.messages.Clone());
   request.Set("tools", BrowserTools(task->second->mode, task->second->effort,
                                    memory_ && memory_->enabled()));
+  // CAP-1/CAP-2: the page the task is on, so the engine can arm the skills whose `urls:` match it.
+  // Built-in engine only: a user's own provider is a third-party endpoint, where an unknown field
+  // can be refused outright and where the URL the user is reading has no reason to go.
+  if (!provider) {
+    std::optional<base::DictValue> context = RedrobContext(conversation->second);
+    if (context.has_value()) {
+      request.Set("redrob_context", std::move(context).value());
+    }
+  }
 
   std::optional<std::string> body = base::WriteJson(request);
   if (!body.has_value()) {
@@ -1568,6 +1581,60 @@ void TaskStore::Notify(const std::string& task_id) {
   for (Observer& observer : observers_) {
     observer.OnTaskChanged(*it->second);
   }
+}
+
+// --- CAP-1/CAP-2: page context for skill arming -------------------------------------------------
+
+void TaskStore::CaptureContextTab(const std::string& task_id) {
+  auto conversation = conversations_.find(task_id);
+  if (conversation == conversations_.end() || !profile_) {
+    return;
+  }
+  BrowserWindowInterface* browser =
+      ProfileBrowserCollection::GetForProfile(profile_)->FindTabbedBrowser();
+  if (!browser || !browser->GetTabStripModel()) {
+    return;
+  }
+  content::WebContents* active = browser->GetTabStripModel()->GetActiveWebContents();
+  if (!active) {
+    return;
+  }
+  const GURL& url = active->GetLastCommittedURL();
+  // Only an http(s) page counts as context. A chrome:// surface (the new tab
+  // page the task was typed on, Settings) says nothing about which site skill applies.
+  if (!url.is_valid() || !url.SchemeIsHTTPOrHTTPS()) {
+    return;
+  }
+  conversation->second.context_url = url.spec();
+  conversation->second.context_title = base::UTF16ToUTF8(active->GetTitle());
+}
+
+// static
+std::optional<base::DictValue> TaskStore::RedrobContext(const Conversation& conversation) {
+  std::string url;
+  std::string title;
+  // The agent's own tab wins: once the task has opened a page, that page is what its next step acts
+  // on, so it is the page a site skill has to describe.
+  if (content::WebContents* page = conversation.page.get()) {
+    const GURL& committed = page->GetLastCommittedURL();
+    if (committed.is_valid() && committed.SchemeIsHTTPOrHTTPS()) {
+      url = committed.spec();
+      title = base::UTF16ToUTF8(page->GetTitle());
+    }
+  }
+  if (url.empty()) {
+    url = conversation.context_url;
+    title = conversation.context_title;
+  }
+  if (url.empty()) {
+    return std::nullopt;
+  }
+  base::DictValue context;
+  context.Set("page_url", url);
+  if (!title.empty()) {
+    context.Set("page_title", title);
+  }
+  return context;
 }
 
 }  // namespace redrob

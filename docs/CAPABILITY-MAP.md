@@ -56,9 +56,9 @@ Item ids in the last column refer to `docs/PRODUCT-BACKLOG.md`.
 | Code as the tool interface | The model writes a script instead of calling one tool at a time | yes — ours reaches MCP servers | — |
 | Typed domain objects in that script | First-class handles for the page, the screen, the mail account, the vault — not a tool list | no | CAP-12 (new) |
 | A real document toolchain in that script | Read AND write Word, Excel, PowerPoint, PDF with the actual libraries | no | CAP-13 (new) |
-| Reusable skills as data | A folder with instructions; the engine already loads exactly this shape | partial — loader exists, we ship none | CAP-1 |
-| Skills that arm themselves | Frontmatter naming URL patterns and keywords, so a skill loads when the tab or prompt matches | no | CAP-2 |
-| A skill that writes skills | Turn a repeated instruction into a saved one | no | CAP-1 |
+| Reusable skills as data | A folder with instructions; the engine already loads exactly this shape | yes — ten site skills ship in the engine (redrob-code `packages/core/src/plugin/skill/browser/`) | CAP-1 |
+| Skills that arm themselves | Frontmatter naming URL patterns and keywords, so a skill loads when the tab or prompt matches | yes — engine arms on `urls:`/`keywords:`; the browser sends `redrob_context.page_url` (task_store.cc `RedrobContext`) | CAP-2 |
+| A skill that writes skills | Turn a repeated instruction into a saved one | yes — engine built-in `skill-writer` | CAP-1 |
 | Curated tool-server presets | Named presets for desktop apps, not a blank server form | no | CAP-14 (new) |
 | Tool servers over local process and HTTP, with per-server tool inventories | Bring your own tools, and see which of them are live | partial — we support MCP; no inventory or presets | — |
 | Solving a human-verification challenge | The agent gets past a checkbox instead of stopping | no | — |
