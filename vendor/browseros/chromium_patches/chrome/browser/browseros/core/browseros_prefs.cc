@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..f09b13c6c45676dc7ed83f51ff28aaa8bd202b50
 --- /dev/null
 +++ b/chrome/browser/browseros/core/browseros_prefs.cc
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,136 @@
 +// Copyright 2025 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -31,7 +31,9 @@ index 0000000000000000000000000000000000000000..f09b13c6c45676dc7ed83f51ff28aaa8
 +  registry->RegisterBooleanPref(prefs::kShowToolbarLabels,
 +                                show_toolbar_controls_by_default);
 +  registry->RegisterBooleanPref(prefs::kVerticalTabsEnabled, false);
-+  registry->RegisterBooleanPref(prefs::kShowTabGroupsInBookmarkBar, false);
++  // Redrob: on. With tabs across the top there is no workspace switcher in the toolbar, so a saved tab
++  // group is reopened from the bookmark bar.
++  registry->RegisterBooleanPref(prefs::kShowTabGroupsInBookmarkBar, true);
 +
 +  registry->RegisterStringPref(prefs::kProviders, "");
 +  registry->RegisterStringPref(prefs::kCustomProviders, "[]");
