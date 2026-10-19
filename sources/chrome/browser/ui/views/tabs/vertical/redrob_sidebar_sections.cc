@@ -337,31 +337,13 @@ void RedrobSidebarSections::AttachToolbarAccess() {
     return;
   }
 
-  // Workspace name + chevron, then the avatar, at the toolbar's trailing edge (the app menu there is hidden).
-  // The same order as the sidebar header reads, so switching tab layout does not reorder the controls.
+  // The avatar, then Settings, at the toolbar's trailing edge (the app menu there is hidden). No workspace
+  // switcher here: with tabs across the top, tab groups already show as chips in the tab strip and reopen
+  // from the saved-groups button, so a second switcher beside the avatar only read as a second account.
   auto access = std::make_unique<views::View>();
   auto* layout = access->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kHorizontal, gfx::Insets(), 4));
   layout->set_cross_axis_alignment(views::BoxLayout::CrossAxisAlignment::kCenter);
-
-  auto* workspace = access->AddChildView(std::make_unique<views::LabelButton>(
-      base::BindRepeating(
-          [](RedrobSidebarSections* self) {
-            self->ShowWorkspaceMenu(self->toolbar_workspace_button_.view());
-          },
-          base::Unretained(this)),
-      std::u16string()));
-  workspace->SetElideBehavior(gfx::ELIDE_TAIL);
-  workspace->SetMaxSize(gfx::Size(180, 0));
-  workspace->SetImageModel(
-      views::Button::STATE_NORMAL,
-      ui::ImageModel::FromVectorIcon(vector_icons::kKeyboardArrowDownIcon,
-                                     sidebar_tokens::kMutedForeground,
-                                     sidebar_tokens::kHeaderGlyphSize));
-  // Chevron after the name, as in the sidebar: a RIGHT-aligned LabelButton draws its image after the label.
-  workspace->SetHorizontalAlignment(gfx::ALIGN_RIGHT);
-  workspace->SetImageLabelSpacing(2);
-  toolbar_workspace_button_.SetView(workspace);
 
   toolbar_avatar_.SetView(access->AddChildView(std::make_unique<AvatarToolbarButton>(browser_)));
 
@@ -445,7 +427,6 @@ RedrobSidebarSections::~RedrobSidebarSections() {
   // The toolbar pair's buttons call back into this object, so it leaves with it.
   if (views::View* access = toolbar_access_.view()) {
     toolbar_avatar_.SetView(nullptr);
-    toolbar_workspace_button_.SetView(nullptr);
     toolbar_access_.SetView(nullptr);
     if (access->parent()) {
       access->parent()->RemoveChildViewT(access);
@@ -640,9 +621,6 @@ void RedrobSidebarSections::UpdateWorkspaceButton() {
   }
 
   workspace_button_->SetText(label);
-  if (auto* button = views::AsViewClass<views::LabelButton>(toolbar_workspace_button_.view())) {
-    button->SetText(label);
-  }
   // Never disabled. It used to be `SetEnabled(count > 0)`, which made the header's only dropdown a control
   // that could not be pressed for as long as the user had no workspaces -- i.e. from the moment the browser
   // was installed, which is exactly when they would press it to find out what a workspace is. The empty case
@@ -651,9 +629,6 @@ void RedrobSidebarSections::UpdateWorkspaceButton() {
   workspace_button_->SetTooltipText(
       l10n_util::GetStringUTF16(count > 0 ? IDS_REDROB_SIDEBAR_SWITCH_WORKSPACE
                                           : IDS_REDROB_SIDEBAR_SAVE_GROUP_FOR_WORKSPACE));
-  if (auto* button = views::AsViewClass<views::LabelButton>(toolbar_workspace_button_.view())) {
-    button->SetTooltipText(workspace_button_->GetTooltipText());
-  }
 }
 
 void RedrobSidebarSections::ShowWorkspaceMenu(views::View* anchor) {

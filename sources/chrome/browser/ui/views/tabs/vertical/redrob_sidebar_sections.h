@@ -102,10 +102,10 @@ class RedrobSidebarSections : public views::View,
   // views::View
   void AddedToWidget() override;
 
-  // Horizontal tabs (CAP: tabs across the top). The sidebar column is hidden then, and with it the workspace
-  // switcher and the avatar it carries. The same two controls are put in the toolbar instead, built and owned
-  // here so the workspace logic stays in one class. Idempotent: called from the constructor and again once
-  // this view has a widget, because the toolbar may not exist yet when the column is built.
+  // Horizontal tabs. The sidebar column is hidden then, and with it the avatar and the Settings row at its
+  // foot. Those two are put in the toolbar instead (the workspace switcher is not: tab groups show in the tab
+  // strip there). Idempotent: called from the constructor and again once this view has a widget, because the
+  // toolbar may not exist yet when the column is built.
   void AttachToolbarAccess();
   // Shows the toolbar pair only while tabs are horizontal, and registers whichever avatar is VISIBLE with the
   // toolbar -- every bubble anchors to the registered one, so it must never be the hidden copy.
@@ -145,7 +145,6 @@ class RedrobSidebarSections : public views::View,
   views::ViewTracker toolbar_;
   views::ViewTracker toolbar_access_;
   views::ViewTracker toolbar_avatar_;
-  views::ViewTracker toolbar_workspace_button_;
   base::CallbackListSubscription mode_subscription_;
 
   std::vector<base::Uuid> menu_workspace_ids_;
