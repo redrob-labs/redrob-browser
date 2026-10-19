@@ -103,7 +103,7 @@ Item ids in the last column refer to `docs/PRODUCT-BACKLOG.md`.
 | Import from Firefox and Safari | The two families we cannot read today | no | ONB-5 |
 | Import a browser's ENCRYPTED store | Saved passwords and cookies protected by the OS. Needs a privileged service; the platform's app-bound encryption already ships with our fork, we just have nothing that uses it | no | ONB-5 |
 | Import progress, cancellable | A long import you can watch and stop | no | ONB-4 |
-| A credential vault | Login, passkey, TOTP, identity, card, note, SSH key, API credential; biometric unlock | no — Chromium's own store is our default | CAP-9 |
+| A credential vault | Login, passkey, TOTP, identity, card, note, SSH key, API credential; biometric unlock | partial — no second vault by design: the agent signs in with LOGINS from the profile's own password store (`login` tool, fill by the password manager, the model sees a username only), behind a policy (always / while unlocked by OS re-auth, default / never), a per-site list and an AI sign-in history in Settings; codes, passkeys and CAPTCHAs are handed to the user. Passkey, TOTP, card, note, SSH and API-credential types are not built (`docs/CREDENTIALS.md`) | CAP-9 |
 | First-class support for OTHER password managers | The product works with the manager you already use | no | — |
 | Multiple profiles with a switcher | Separate identities in one install | partial — Chromium profiles exist; no surface of ours | — |
 | Sync across devices | partial everywhere: theirs is experimental and OFF; ours is unbuilt | no | — |
