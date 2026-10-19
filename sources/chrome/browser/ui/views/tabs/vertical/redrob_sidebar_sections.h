@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_REDROB_SIDEBAR_SECTIONS_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/callback_list.h"
@@ -98,6 +99,11 @@ class RedrobSidebarSections : public views::View,
   void UpdateWorkspaceButton();
   // Opens the workspace menu under `anchor`: the sidebar's button, or the toolbar's in horizontal mode.
   void ShowWorkspaceMenu(views::View* anchor);
+  // Horizontal tabs: the recent-chats section is hidden with the column, so the toolbar's chats button opens
+  // the same rows (same TaskStore list, same order and cap, same OpenChat) as a menu under `anchor`.
+  void ShowChatsMenu(views::View* anchor);
+  // The recent chats both surfaces show: newest first, at most kMaxChatRows.
+  std::vector<mojom::TaskPtr> RecentChats() const;
 
   // views::View
   void AddedToWidget() override;
@@ -150,6 +156,12 @@ class RedrobSidebarSections : public views::View,
   std::vector<base::Uuid> menu_workspace_ids_;
   std::unique_ptr<ui::SimpleMenuModel> workspace_menu_model_;
   std::unique_ptr<views::MenuRunner> workspace_menu_runner_;
+
+  // The toolbar's recent-chats menu (horizontal tabs). Task ids in menu order, captured when the menu is
+  // built so a command maps to the row the user saw.
+  std::vector<std::string> menu_chat_ids_;
+  std::unique_ptr<ui::SimpleMenuModel> chats_menu_model_;
+  std::unique_ptr<views::MenuRunner> chats_menu_runner_;
 
   base::ScopedObservation<tab_groups::TabGroupSyncService,
                           tab_groups::TabGroupSyncService::Observer>
