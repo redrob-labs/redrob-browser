@@ -30,7 +30,7 @@ index 0000000000000000000000000000000000000000..f09b13c6c45676dc7ed83f51ff28aaa8
 +                                show_toolbar_controls_by_default);
 +  registry->RegisterBooleanPref(prefs::kShowToolbarLabels,
 +                                show_toolbar_controls_by_default);
-+  registry->RegisterBooleanPref(prefs::kVerticalTabsEnabled, true);
++  registry->RegisterBooleanPref(prefs::kVerticalTabsEnabled, false);
 +  registry->RegisterBooleanPref(prefs::kShowTabGroupsInBookmarkBar, false);
 +
 +  registry->RegisterStringPref(prefs::kProviders, "");
