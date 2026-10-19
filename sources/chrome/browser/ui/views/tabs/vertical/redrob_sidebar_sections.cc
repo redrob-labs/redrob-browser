@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "base/functional/bind.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -56,6 +57,7 @@
 #include "ui/views/layout/flex_layout.h"
 #include "ui/views/layout/layout_types.h"
 #include "ui/views/view_class_properties.h"
+#include "ui/views/view_utils.h"
 
 namespace redrob {
 namespace {
@@ -315,12 +317,22 @@ void RedrobSidebarSections::AddedToWidget() {
   AttachToolbarAccess();
 }
 
+ToolbarView* RedrobSidebarSections::FindToolbar() {
+  // Up the view tree rather than BrowserView::GetBrowserViewForBrowser: that goes through the native window,
+  // which is not associated with the browser yet while the window is being built -- exactly when this runs.
+  for (views::View* view = parent(); view; view = view->parent()) {
+    if (BrowserView* browser_view = views::AsViewClass<BrowserView>(view)) {
+      return browser_view->toolbar();
+    }
+  }
+  return nullptr;
+}
+
 void RedrobSidebarSections::AttachToolbarAccess() {
-  if (!browser_ || toolbar_access_) {
+  if (!browser_ || toolbar_access_.view()) {
     return;
   }
-  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
-  ToolbarView* toolbar = browser_view ? browser_view->toolbar() : nullptr;
+  ToolbarView* toolbar = FindToolbar();
   if (!toolbar) {
     return;
   }
@@ -332,32 +344,41 @@ void RedrobSidebarSections::AttachToolbarAccess() {
       views::BoxLayout::Orientation::kHorizontal, gfx::Insets(), 4));
   layout->set_cross_axis_alignment(views::BoxLayout::CrossAxisAlignment::kCenter);
 
-  toolbar_workspace_button_ = access->AddChildView(std::make_unique<views::LabelButton>(
+  auto* workspace = access->AddChildView(std::make_unique<views::LabelButton>(
       base::BindRepeating(
           [](RedrobSidebarSections* self) {
-            self->ShowWorkspaceMenu(self->toolbar_workspace_button_);
+            self->ShowWorkspaceMenu(self->toolbar_workspace_button_.view());
           },
           base::Unretained(this)),
       std::u16string()));
-  toolbar_workspace_button_->SetElideBehavior(gfx::ELIDE_TAIL);
-  toolbar_workspace_button_->SetMaxSize(gfx::Size(180, 0));
-  toolbar_workspace_button_->SetImageModel(
+  workspace->SetElideBehavior(gfx::ELIDE_TAIL);
+  workspace->SetMaxSize(gfx::Size(180, 0));
+  workspace->SetImageModel(
       views::Button::STATE_NORMAL,
       ui::ImageModel::FromVectorIcon(vector_icons::kKeyboardArrowDownIcon,
                                      sidebar_tokens::kMutedForeground,
                                      sidebar_tokens::kHeaderGlyphSize));
   // Chevron after the name, as in the sidebar: a RIGHT-aligned LabelButton draws its image after the label.
-  toolbar_workspace_button_->SetHorizontalAlignment(gfx::ALIGN_RIGHT);
-  toolbar_workspace_button_->SetImageLabelSpacing(2);
+  workspace->SetHorizontalAlignment(gfx::ALIGN_RIGHT);
+  workspace->SetImageLabelSpacing(2);
+  toolbar_workspace_button_.SetView(workspace);
 
-  toolbar_avatar_ = access->AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
+  toolbar_avatar_.SetView(access->AddChildView(std::make_unique<AvatarToolbarButton>(browser_)));
 
-  const size_t index = toolbar->children().size();
   access->SetProperty(views::kMarginsKey, gfx::Insets::VH(0, 4));
-  toolbar_access_ = toolbar->AddChildViewAt(std::move(access), index);
+  // Tracked, not owned: the toolbar owns it as a child, and the tracker clears itself if the toolbar goes
+  // first -- the two are torn down in an order neither chooses.
+  toolbar_access_.SetView(toolbar->AddChildView(std::move(access)));
+  toolbar_.SetView(toolbar);
 
   UpdateWorkspaceButton();
   OnTabStripModeChanged();
+  // This runs as the window is put together, BEFORE the toolbar's own Init adds back, reload and the address
+  // field -- so the pair would sit first in the row, under the navigation buttons. Moved to the end once the
+  // toolbar has its children.
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&RedrobSidebarSections::OnTabStripModeChanged,
+                                weak_factory_.GetWeakPtr()));
 }
 
 void RedrobSidebarSections::OnTabStripModeChanged() {
@@ -367,15 +388,20 @@ void RedrobSidebarSections::OnTabStripModeChanged() {
   const tabs::VerticalTabStripStateController* controller =
       tabs::VerticalTabStripStateController::From(browser_);
   const bool vertical = !controller || controller->ShouldDisplayVerticalTabs();
-  if (toolbar_access_) {
-    toolbar_access_->SetVisible(!vertical);
+  ToolbarView* toolbar = FindToolbar();
+  if (views::View* access = toolbar_access_.view()) {
+    access->SetVisible(!vertical);
+    // Always the trailing child: the toolbar lays its row out in child order.
+    if (toolbar && access->parent() == toolbar) {
+      toolbar->ReorderChildView(access, toolbar->children().size());
+    }
   }
-  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
-  ToolbarView* toolbar = browser_view ? browser_view->toolbar() : nullptr;
   if (!toolbar) {
     return;
   }
-  AvatarToolbarButton* visible = vertical ? avatar_.get() : toolbar_avatar_.get();
+  // The registered avatar is the one every profile bubble anchors to, so it is always the VISIBLE one.
+  AvatarToolbarButton* visible =
+      vertical ? avatar_.get() : views::AsViewClass<AvatarToolbarButton>(toolbar_avatar_.view());
   if (visible) {
     toolbar->SetRedrobAvatarButton(visible);
   }
@@ -383,21 +409,25 @@ void RedrobSidebarSections::OnTabStripModeChanged() {
 }
 
 RedrobSidebarSections::~RedrobSidebarSections() {
-  // The toolbar holds a raw pointer to a button THIS view owns, so it has to be told before the button goes
-  // away. Views are destroyed in an order neither of them chooses, and this moved here with the avatar -- the
-  // account row used to carry it, and leaving it behind would have left the toolbar pointing at freed memory.
-  if (browser_ && avatar_) {
+  // The toolbar holds a raw pointer to whichever avatar is registered, and both are owned by views this one
+  // does not outlive in any fixed order, so it is told before they go away.
+  // The tracked toolbar, not FindToolbar(): walking up the tree is unsafe while the window is being torn down.
+  if (auto* toolbar = views::AsViewClass<ToolbarView>(toolbar_.view())) {
+    toolbar->SetRedrobAvatarButton(nullptr);
+  } else if (browser_ && avatar_) {
     if (BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
-      if (ToolbarView* toolbar = browser_view->toolbar()) {
-        toolbar->SetRedrobAvatarButton(nullptr);
-        // The toolbar pair's buttons call back into this object, so it leaves with it.
-        if (toolbar_access_ && toolbar_access_->parent() == toolbar) {
-          toolbar->RemoveChildViewT(toolbar_access_.get());
-        }
-        toolbar_access_ = nullptr;
-        toolbar_avatar_ = nullptr;
-        toolbar_workspace_button_ = nullptr;
+      if (ToolbarView* fallback = browser_view->toolbar()) {
+        fallback->SetRedrobAvatarButton(nullptr);
       }
+    }
+  }
+  // The toolbar pair's buttons call back into this object, so it leaves with it.
+  if (views::View* access = toolbar_access_.view()) {
+    toolbar_avatar_.SetView(nullptr);
+    toolbar_workspace_button_.SetView(nullptr);
+    toolbar_access_.SetView(nullptr);
+    if (access->parent()) {
+      access->parent()->RemoveChildViewT(access);
     }
   }
 }
@@ -589,8 +619,8 @@ void RedrobSidebarSections::UpdateWorkspaceButton() {
   }
 
   workspace_button_->SetText(label);
-  if (toolbar_workspace_button_) {
-    toolbar_workspace_button_->SetText(label);
+  if (auto* button = views::AsViewClass<views::LabelButton>(toolbar_workspace_button_.view())) {
+    button->SetText(label);
   }
   // Never disabled. It used to be `SetEnabled(count > 0)`, which made the header's only dropdown a control
   // that could not be pressed for as long as the user had no workspaces -- i.e. from the moment the browser
@@ -600,8 +630,8 @@ void RedrobSidebarSections::UpdateWorkspaceButton() {
   workspace_button_->SetTooltipText(
       l10n_util::GetStringUTF16(count > 0 ? IDS_REDROB_SIDEBAR_SWITCH_WORKSPACE
                                           : IDS_REDROB_SIDEBAR_SAVE_GROUP_FOR_WORKSPACE));
-  if (toolbar_workspace_button_) {
-    toolbar_workspace_button_->SetTooltipText(workspace_button_->GetTooltipText());
+  if (auto* button = views::AsViewClass<views::LabelButton>(toolbar_workspace_button_.view())) {
+    button->SetTooltipText(workspace_button_->GetTooltipText());
   }
 }
 
