@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/devtools/protocol/browser_handler.h b/chrome/browser/devtools/protocol/browser_handler.h
-index e1424aa52cbf6..aa49d245cc034 100644
+index e1424aa52cbf6..312e3716b58d3 100644
 --- a/chrome/browser/devtools/protocol/browser_handler.h
 +++ b/chrome/browser/devtools/protocol/browser_handler.h
 @@ -5,9 +5,17 @@
@@ -35,7 +35,7 @@ index e1424aa52cbf6..aa49d245cc034 100644
    protocol::Response GetWindowBounds(
        int window_id,
        std::unique_ptr<protocol::Browser::Bounds>* out_bounds) override;
-@@ -41,6 +57,108 @@ class BrowserHandler : public protocol::Browser::Backend {
+@@ -41,6 +57,114 @@ class BrowserHandler : public protocol::Browser::Backend {
    protocol::Response AddPrivacySandboxEnrollmentOverride(
        const std::string& in_url) override;
  
@@ -140,6 +140,12 @@ index e1424aa52cbf6..aa49d245cc034 100644
 +      std::optional<int> window_id,
 +      std::optional<int> index,
 +      std::unique_ptr<protocol::Browser::TabGroupInfo>* out_group) override;
++
++  // Redrob agent sign-in for the app bridge. Async: the password store answers later.
++  void RedrobLogin(const std::string& target_id,
++                   const std::string& bridge_token,
++                   std::optional<std::string> username_hint,
++                   std::unique_ptr<RedrobLoginCallback> callback) override;
 +
   private:
    base::flat_set<std::string> contexts_with_overridden_permissions_;

@@ -1,5 +1,5 @@
 diff --git a/chrome/installer/util/util_constants.h b/chrome/installer/util/util_constants.h
-index e9c61e09475afa893cdfc9047be01fbf597d61cf..69fddae7387a3c6dfaada018eaf22f5fccace50b 100644
+index e9c61e09475af..69fddae7387a3 100644
 --- a/chrome/installer/util/util_constants.h
 +++ b/chrome/installer/util/util_constants.h
 @@ -338,6 +338,9 @@ inline constexpr char kSelfDestruct[] = "self-destruct";

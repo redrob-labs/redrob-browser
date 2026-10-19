@@ -1,5 +1,5 @@
 diff --git a/components/search/ntp_features.cc b/components/search/ntp_features.cc
-index 0f87f2cc8845c3b428f65545f4efe1bfeb524471..2f0d9531070ba2308c299832b4e7edf09154002a 100644
+index 0f87f2cc8845c..2f0d9531070ba 100644
 --- a/components/search/ntp_features.cc
 +++ b/components/search/ntp_features.cc
 @@ -270,7 +270,7 @@ BASE_FEATURE(kNtpStarterChip, base::FEATURE_ENABLED_BY_DEFAULT);

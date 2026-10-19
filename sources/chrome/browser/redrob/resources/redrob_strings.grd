@@ -191,6 +191,7 @@
       <message name="IDS_REDROB_TASK_NOTIFY_NEEDS_YOU_BODY" desc="OS notification body for a guarded click; $1 is the control's text">The agent wants to press "<ph name="ARG1">$1<ex>1</ex></ph>". Allow it?</message>
       <message name="IDS_REDROB_TASK_NOTIFY_ALLOW" desc="Notification button that lets the guarded click run">Allow</message>
       <message name="IDS_REDROB_TASK_NOTIFY_DECLINE" desc="Notification button that refuses the guarded click">Decline</message>
+      <message name="IDS_REDROB_TASK_NOTIFY_UNLOCK" desc="Notification button on a task waiting for agent sign-in to be unlocked; opens the OS re-authentication">Unlock</message>
       <message name="IDS_REDROB_TASK_NOTIFY_DONE" desc="OS notification title when a task finishes with no browser window open; $1 is the task's prompt">Task done: <ph name="ARG1">$1<ex>1</ex></ph></message>
       <message name="IDS_REDROB_TASK_NOTIFY_FAILED" desc="OS notification title when a task fails with no browser window open; $1 is the task's prompt">Task stopped: <ph name="ARG1">$1<ex>1</ex></ph></message>
       <message name="IDS_REDROB_TASK_NOTIFY_OPEN" desc="OS notification body for a finished task">Click to see what it did.</message>

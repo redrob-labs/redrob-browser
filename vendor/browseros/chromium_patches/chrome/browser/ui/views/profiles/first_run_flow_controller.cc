@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/profiles/first_run_flow_controller.cc b/chrome/browser/ui/views/profiles/first_run_flow_controller.cc
-index e6a815e2c00d48131a0b3b24c51c1830dc67afe4..975a05f938d2d05d34411e99e31759f615c97397 100644
+index e6a815e2c00d4..975a05f938d2d 100644
 --- a/chrome/browser/ui/views/profiles/first_run_flow_controller.cc
 +++ b/chrome/browser/ui/views/profiles/first_run_flow_controller.cc
 @@ -25,6 +25,9 @@

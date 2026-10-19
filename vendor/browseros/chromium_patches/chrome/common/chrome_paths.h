@@ -1,5 +1,5 @@
 diff --git a/chrome/common/chrome_paths.h b/chrome/common/chrome_paths.h
-index e36249713bfd5c254a322c3c55fd31d129937fab..c921498ec328004f82b0661a2e84826ef8d49843 100644
+index e36249713bfd5..c921498ec3280 100644
 --- a/chrome/common/chrome_paths.h
 +++ b/chrome/common/chrome_paths.h
 @@ -126,6 +126,9 @@ enum {

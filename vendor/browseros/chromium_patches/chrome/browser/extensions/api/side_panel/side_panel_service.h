@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/extensions/api/side_panel/side_panel_service.h b/chrome/browser/extensions/api/side_panel/side_panel_service.h
-index e25c3c06d4f97170b4413edbb139151c83873391..8c395ef466b11f2f63410c36b80f9bed54377ae5 100644
+index e25c3c06d4f97..8c395ef466b11 100644
 --- a/chrome/browser/extensions/api/side_panel/side_panel_service.h
 +++ b/chrome/browser/extensions/api/side_panel/side_panel_service.h
 @@ -165,6 +165,26 @@ class SidePanelService : public BrowserContextKeyedAPI,

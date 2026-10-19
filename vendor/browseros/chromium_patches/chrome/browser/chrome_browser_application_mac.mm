@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/chrome_browser_application_mac.mm b/chrome/browser/chrome_browser_application_mac.mm
-index 823b03b27cc31d2535d748dcf79b3a1e78a3d7ca..8bdcd99ae6ac9367c0855b27b32533ce50f5dfea 100644
+index 823b03b27cc31..8bdcd99ae6ac9 100644
 --- a/chrome/browser/chrome_browser_application_mac.mm
 +++ b/chrome/browser/chrome_browser_application_mac.mm
 @@ -10,13 +10,16 @@
@@ -66,7 +66,7 @@ index 823b03b27cc31d2535d748dcf79b3a1e78a3d7ca..8bdcd99ae6ac9367c0855b27b32533ce
  // Calling -[NSEvent description] is rather slow to build up the event
  // description. The description is stored in a crash key to aid debugging, so
  // this helper function constructs a shorter, but still useful, description.
-@@ -193,6 +236,8 @@ - (void)finishLaunching {
+@@ -193,6 +236,8 @@ std::string DescriptionForNSEvent(NSEvent* event) {
        base::mac::MacOSVersion() >= 14'00'00 &&
        base::FeatureList::IsEnabled(
            features::kSonomaAccessibilityActivationRefinements);

@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/sync/prefs/chrome_syncable_prefs_database.cc b/chrome/browser/sync/prefs/chrome_syncable_prefs_database.cc
-index fb79fc34ddd781e9802524f5b41b5b55514895b2..4c21ff0f83860e744e91fb5be9b9ff7d52c2edc8 100644
+index fb79fc34ddd78..4c21ff0f83860 100644
 --- a/chrome/browser/sync/prefs/chrome_syncable_prefs_database.cc
 +++ b/chrome/browser/sync/prefs/chrome_syncable_prefs_database.cc
 @@ -450,6 +450,9 @@ enum {

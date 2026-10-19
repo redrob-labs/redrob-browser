@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_action_item_util.cc b/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_action_item_util.cc
-index 86b2acf28bf8fc2c05ff5decf7af9ef439036787..d7382a8a0182013de32c7986aae4e18ac85d6ec8 100644
+index 86b2acf28bf8f..d7382a8a01820 100644
 --- a/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_action_item_util.cc
 +++ b/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_action_item_util.cc
 @@ -9,10 +9,13 @@

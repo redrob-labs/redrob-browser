@@ -2,6 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+# The per-run secret that marks the agent server as the only caller of Browser.redrobLogin. Its own
+# target with nothing but //base, so the devtools handler and the server launcher can both depend on it
+# without pulling in the sidecar.
+source_set("app_bridge_token") {
+  sources = [ "app_bridge_token.h" ]
+  deps = [ "//base" ]
+}
+
 source_set("sidecar") {
   sources = [
     "agent_service_factories.cc",

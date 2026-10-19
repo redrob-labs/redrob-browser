@@ -1,5 +1,5 @@
 diff --git a/third_party/blink/public/devtools_protocol/domains/Target.pdl b/third_party/blink/public/devtools_protocol/domains/Target.pdl
-index 222ac7602584eaab647ad3841b99ad9dfa735d2e..2722bf0b07c290eb950cc814799ae54be650361c 100644
+index 222ac7602584e..2722bf0b07c29 100644
 --- a/third_party/blink/public/devtools_protocol/domains/Target.pdl
 +++ b/third_party/blink/public/devtools_protocol/domains/Target.pdl
 @@ -39,6 +39,12 @@ domain Target

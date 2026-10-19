@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/toolbar/toolbar_actions_model.cc b/chrome/browser/ui/toolbar/toolbar_actions_model.cc
-index 0536936bb62fe838e03435925d24930425cd1c50..143cd8680138dd6098fbbf52513c9b68838e586e 100644
+index 0536936bb62fe..143cd8680138d 100644
 --- a/chrome/browser/ui/toolbar/toolbar_actions_model.cc
 +++ b/chrome/browser/ui/toolbar/toolbar_actions_model.cc
 @@ -19,6 +19,7 @@

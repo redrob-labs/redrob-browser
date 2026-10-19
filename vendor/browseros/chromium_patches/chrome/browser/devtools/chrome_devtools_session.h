@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/devtools/chrome_devtools_session.h b/chrome/browser/devtools/chrome_devtools_session.h
-index f703912a1b785a1f17c786b9645c84a2f38aa2d4..33d55e8ac7bed3fb2f05d048556dcd68b619b8f9 100644
+index f703912a1b785..33d55e8ac7bed 100644
 --- a/chrome/browser/devtools/chrome_devtools_session.h
 +++ b/chrome/browser/devtools/chrome_devtools_session.h
 @@ -16,11 +16,13 @@ class DevToolsAgentHostClientChannel;

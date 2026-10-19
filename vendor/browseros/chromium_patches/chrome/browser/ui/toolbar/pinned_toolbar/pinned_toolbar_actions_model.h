@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h b/chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h
-index a183b49e14fbd5d7a74f01132d24ce13706ead47..994b90982961a3d6ca866c41f2a0d71499a03da6 100644
+index a183b49e14fbd..994b90982961a 100644
 --- a/chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h
 +++ b/chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h
 @@ -55,6 +55,9 @@ class PinnedToolbarActionsModel : public KeyedService {

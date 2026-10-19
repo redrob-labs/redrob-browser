@@ -1,5 +1,5 @@
 diff --git a/chrome/installer/setup/setup_main.cc b/chrome/installer/setup/setup_main.cc
-index 8689571a44a1393ac6afde429d7302cf336d1814..33b8bd852a17d909c959afb3034b9b00a6e478fb 100644
+index 8689571a44a13..33b8bd852a17d 100644
 --- a/chrome/installer/setup/setup_main.cc
 +++ b/chrome/installer/setup/setup_main.cc
 @@ -50,7 +50,6 @@

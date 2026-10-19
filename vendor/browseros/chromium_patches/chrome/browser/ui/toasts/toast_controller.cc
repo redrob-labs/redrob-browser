@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/toasts/toast_controller.cc b/chrome/browser/ui/toasts/toast_controller.cc
-index fe034ae01f3d7f44675a10d52c081197f89edda3..6d3a077f0b33a12ab41824bb44f781b2dd219bf9 100644
+index fe034ae01f3d7..6d3a077f0b33a 100644
 --- a/chrome/browser/ui/toasts/toast_controller.cc
 +++ b/chrome/browser/ui/toasts/toast_controller.cc
 @@ -294,8 +294,8 @@ void ToastController::ShowToast(ToastParams params) {

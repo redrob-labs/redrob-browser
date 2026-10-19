@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/toolbar/pinned_toolbar/BUILD.gn b/chrome/browser/ui/toolbar/pinned_toolbar/BUILD.gn
-index 9c30ac7d1569433cbf3190489cafdc690fae24e8..30637ea109075e74e6baff1ea5f63e6fbac45e11 100644
+index 9c30ac7d15694..30637ea109075 100644
 --- a/chrome/browser/ui/toolbar/pinned_toolbar/BUILD.gn
 +++ b/chrome/browser/ui/toolbar/pinned_toolbar/BUILD.gn
 @@ -40,6 +40,8 @@ source_set("impl") {

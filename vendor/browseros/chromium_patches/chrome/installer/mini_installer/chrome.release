@@ -1,5 +1,5 @@
 diff --git a/chrome/installer/mini_installer/chrome.release b/chrome/installer/mini_installer/chrome.release
-index 037b80488cf24ffe8be09cb4166be618141cdd33..fa9cb239f78963ad80da37e370e77d1a1f5fe76a 100644
+index 037b80488cf24..fa9cb239f7896 100644
 --- a/chrome/installer/mini_installer/chrome.release
 +++ b/chrome/installer/mini_installer/chrome.release
 @@ -38,9 +38,11 @@ vk_swiftshader.dll: %(VersionDir)s\

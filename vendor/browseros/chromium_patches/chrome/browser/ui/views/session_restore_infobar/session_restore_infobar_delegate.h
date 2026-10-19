@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/session_restore_infobar/session_restore_infobar_delegate.h b/chrome/browser/ui/views/session_restore_infobar/session_restore_infobar_delegate.h
-index 7fb5a1d2364c2e9b2354fb93a81c442cfa5e7562..dc130791ac7c8912a56d56350f54a04e0549ad70 100644
+index 7fb5a1d2364c2..dc130791ac7c8 100644
 --- a/chrome/browser/ui/views/session_restore_infobar/session_restore_infobar_delegate.h
 +++ b/chrome/browser/ui/views/session_restore_infobar/session_restore_infobar_delegate.h
 @@ -44,7 +44,7 @@ class SessionRestoreInfoBarDelegate : public ConfirmInfoBarDelegate {

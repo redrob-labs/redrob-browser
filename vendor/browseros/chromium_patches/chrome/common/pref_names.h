@@ -1,5 +1,5 @@
 diff --git a/chrome/common/pref_names.h b/chrome/common/pref_names.h
-index a4b175a64f5a58eec344df0b38c49df459f16ba7..6c0ed877f379d0190bdf2d0f62d9efd703e4a704 100644
+index a4b175a64f5a5..6c0ed877f379d 100644
 --- a/chrome/common/pref_names.h
 +++ b/chrome/common/pref_names.h
 @@ -485,13 +485,11 @@ inline constexpr char kDeskAPIThirdPartyAllowlist[] =

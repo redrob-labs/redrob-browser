@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/devtools/protocol/browser_handler_android.cc b/chrome/browser/devtools/protocol/browser_handler_android.cc
-index 7e68ad976d8e1d480d4297e7ade562c2b2f693a7..b922032ae70de5a1c6c2b1a64df4c8b35b60574d 100644
+index 7e68ad976d8e1..b922032ae70de 100644
 --- a/chrome/browser/devtools/protocol/browser_handler_android.cc
 +++ b/chrome/browser/devtools/protocol/browser_handler_android.cc
 @@ -15,6 +15,7 @@

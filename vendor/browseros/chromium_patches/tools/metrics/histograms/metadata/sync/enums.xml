@@ -1,5 +1,5 @@
 diff --git a/tools/metrics/histograms/metadata/sync/enums.xml b/tools/metrics/histograms/metadata/sync/enums.xml
-index 7a8a498db48db021ff99622865c690c373954a54..3149d091d4b9c17e9b7088657aa34058c7836a9c 100644
+index 7a8a498db48db..3149d091d4b9c 100644
 --- a/tools/metrics/histograms/metadata/sync/enums.xml
 +++ b/tools/metrics/histograms/metadata/sync/enums.xml
 @@ -826,6 +826,7 @@ chromium-metrics-reviews@google.com.

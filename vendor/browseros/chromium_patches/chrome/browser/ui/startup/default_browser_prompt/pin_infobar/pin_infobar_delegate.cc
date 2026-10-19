@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/startup/default_browser_prompt/pin_infobar/pin_infobar_delegate.cc b/chrome/browser/ui/startup/default_browser_prompt/pin_infobar/pin_infobar_delegate.cc
-index f658f4cd4a495fce85b24c94c7c99b9c5279a836..0dd1092f7e91fe10de380bd32d2db9734cf32045 100644
+index f658f4cd4a495..0dd1092f7e91f 100644
 --- a/chrome/browser/ui/startup/default_browser_prompt/pin_infobar/pin_infobar_delegate.cc
 +++ b/chrome/browser/ui/startup/default_browser_prompt/pin_infobar/pin_infobar_delegate.cc
 @@ -14,10 +14,10 @@

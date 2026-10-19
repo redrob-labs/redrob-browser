@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/ui/cocoa/dock_icon.mm b/chrome/browser/ui/cocoa/dock_icon.mm
-index 3cb3285ab04fa7042369858ae868adc04db50c25..a87d0941f8f567c945e8aa3ed079f50e3c80592d 100644
+index 3cb3285ab04fa..a87d0941f8f56 100644
 --- a/chrome/browser/ui/cocoa/dock_icon.mm
 +++ b/chrome/browser/ui/cocoa/dock_icon.mm
-@@ -30,6 +30,28 @@
+@@ -30,6 +30,28 @@ constexpr struct {
      {1, 3, 0.2},
  };
  
@@ -31,7 +31,7 @@ index 3cb3285ab04fa7042369858ae868adc04db50c25..a87d0941f8f567c945e8aa3ed079f50e
  }  // namespace
  
  // A view that draws our dock tile.
-@@ -45,6 +67,8 @@ @interface DockTileView : NSView
+@@ -45,6 +67,8 @@ constexpr struct {
  // Indicates the amount of progress made of the download. Ranges from [0..1].
  @property(nonatomic) float progress;
  
@@ -40,7 +40,7 @@ index 3cb3285ab04fa7042369858ae868adc04db50c25..a87d0941f8f567c945e8aa3ed079f50e
  @end
  
  @implementation DockTileView
-@@ -52,6 +76,7 @@ @implementation DockTileView
+@@ -52,6 +76,7 @@ constexpr struct {
  @synthesize downloads = _downloads;
  @synthesize indeterminate = _indeterminate;
  @synthesize progress = _progress;
@@ -48,7 +48,7 @@ index 3cb3285ab04fa7042369858ae868adc04db50c25..a87d0941f8f567c945e8aa3ed079f50e
  
  - (void)drawRect:(NSRect)dirtyRect {
    // This needs to draw the current app icon, whether it's using the default
-@@ -70,6 +95,9 @@ - (void)drawRect:(NSRect)dirtyRect {
+@@ -70,6 +95,9 @@ constexpr struct {
    // Therefore, use [NSImage imageNamed:NSImageNameApplicationIcon].
  
    NSImage* appIcon = [NSImage imageNamed:NSImageNameApplicationIcon];
@@ -58,7 +58,7 @@ index 3cb3285ab04fa7042369858ae868adc04db50c25..a87d0941f8f567c945e8aa3ed079f50e
    [appIcon drawInRect:self.bounds
               fromRect:NSZeroRect
              operation:NSCompositingOperationSourceOver
-@@ -215,6 +243,19 @@ - (void)updateIcon {
+@@ -215,6 +243,19 @@ constexpr struct {
    [NSApp.dockTile display];
  }
  

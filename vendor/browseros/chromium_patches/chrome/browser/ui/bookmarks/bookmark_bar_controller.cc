@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/bookmarks/bookmark_bar_controller.cc b/chrome/browser/ui/bookmarks/bookmark_bar_controller.cc
-index 68287f6eb78bf85479a488bee3be414657db072a..68a6097cd7e59f93735d9eeafea2f2fce4b1735d 100644
+index 68287f6eb78bf..68a6097cd7e59 100644
 --- a/chrome/browser/ui/bookmarks/bookmark_bar_controller.cc
 +++ b/chrome/browser/ui/bookmarks/bookmark_bar_controller.cc
 @@ -7,6 +7,7 @@

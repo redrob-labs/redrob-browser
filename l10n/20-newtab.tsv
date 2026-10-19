@@ -89,6 +89,7 @@ taskNotifyNeedsYou	Task needs you: $1	작업 확인 필요: $1	OS notification t
 taskNotifyNeedsYouBody	The agent wants to press "$1". Allow it?	에이전트가 "$1"을(를) 누르려고 합니다. 허용할까요?	OS notification body for a guarded click; $1 is the control's text
 taskNotifyAllow	Allow	허용	Notification button that lets the guarded click run
 taskNotifyDecline	Decline	거절	Notification button that refuses the guarded click
+taskNotifyUnlock	Unlock	잠금 해제	Notification button on a task waiting for agent sign-in to be unlocked; opens the OS re-authentication
 taskNotifyDone	Task done: $1	작업 완료: $1	OS notification title when a task finishes with no browser window open; $1 is the task's prompt
 taskNotifyFailed	Task stopped: $1	작업 중단: $1	OS notification title when a task fails with no browser window open; $1 is the task's prompt
 taskNotifyOpen	Click to see what it did.	눌러서 작업 내용을 확인하세요.	OS notification body for a finished task

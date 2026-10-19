@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/ui_features.cc b/chrome/browser/ui/ui_features.cc
-index 24f6808a21b00c50a101a1a4c0100ff80561e227..2e97ba8345c24bfd0f59672ff5d726bf007dae5d 100644
+index 24f6808a21b00..2e97ba8345c24 100644
 --- a/chrome/browser/ui/ui_features.cc
 +++ b/chrome/browser/ui/ui_features.cc
 @@ -147,7 +147,7 @@ BASE_FEATURE(kExtensionsPinnedByDefault, base::FEATURE_DISABLED_BY_DEFAULT);

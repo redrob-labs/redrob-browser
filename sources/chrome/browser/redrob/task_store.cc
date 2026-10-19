@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/strings/string_util.h"
 #include "base/json/json_writer.h"
@@ -1990,6 +1991,12 @@ void TaskStore::AnnounceTask(const std::string& task_id) {
   const bool failed = task.state == mojom::TaskState::kFailed;
   const bool needs_you = task.state == mojom::TaskState::kBlockedOnPolicy &&
                          task.awaiting_confirmation.has_value();
+  // A sign-in parked on a locked store (While unlocked policy) also needs the user, and the notification
+  // carries the unlock itself so they do not have to find Settings first. See OnTaskNotificationClicked.
+  const auto credential_wait = credential_waits_.find(task_id);
+  const bool needs_unlock = task.state == mojom::TaskState::kBlockedOnPolicy && !needs_you &&
+                            credential_wait != credential_waits_.end() &&
+                            credential_wait->second.needs_unlock;
   NotificationDisplayService* display = NotificationDisplayServiceFactory::GetForProfile(profile_);
   if (!display) {
     return;
@@ -1998,7 +2005,7 @@ void TaskStore::AnnounceTask(const std::string& task_id) {
 
   auto announced = announced_.find(task_id);
   const bool already = announced != announced_.end() && announced->second == task.state;
-  if (!done && !failed && !needs_you) {
+  if (!done && !failed && !needs_you && !needs_unlock) {
     // Running again, or cancelled: an earlier "needs you" no longer describes the task.
     if (announced != announced_.end()) {
       display->Close(NotificationHandler::Type::TRANSIENT, notification_id);
@@ -2012,7 +2019,7 @@ void TaskStore::AnnounceTask(const std::string& task_id) {
   // "Needs you" always: the task cannot move until the user answers, and the browser's own surface may
   // not be on screen. "Done" and "failed" only when no window of the user's is open -- someone at the
   // browser is already watching the task.
-  if (!needs_you && AgentTabs::HasUserWindow(profile_)) {
+  if (!needs_you && !needs_unlock && AgentTabs::HasUserWindow(profile_)) {
     return;
   }
   announced_[task_id] = task.state;
@@ -2020,7 +2027,15 @@ void TaskStore::AnnounceTask(const std::string& task_id) {
   message_center::RichNotificationData rich;
   std::u16string title;
   std::u16string message;
-  if (needs_you) {
+  if (needs_unlock) {
+    const url::Origin& origin = credential_wait->second.origin;
+    title = l10n_util::GetStringFUTF16(IDS_REDROB_TASK_NOTIFY_NEEDS_YOU, TaskTitleFor(task));
+    message = l10n_util::GetStringFUTF16(
+        IDS_REDROB_TASK_CREDENTIAL_WAITING_UNLOCK,
+        base::UTF8ToUTF16(origin.opaque() ? std::string("this page") : origin.Serialize()));
+    rich.buttons.emplace_back(l10n_util::GetStringUTF16(IDS_REDROB_TASK_NOTIFY_UNLOCK));
+    rich.never_timeout = true;
+  } else if (needs_you) {
     title = l10n_util::GetStringFUTF16(IDS_REDROB_TASK_NOTIFY_NEEDS_YOU, TaskTitleFor(task));
     message = l10n_util::GetStringFUTF16(IDS_REDROB_TASK_NOTIFY_NEEDS_YOU_BODY,
                                          base::UTF8ToUTF16(*task.awaiting_confirmation));
@@ -2056,6 +2071,20 @@ void TaskStore::OnTaskNotificationClicked(const std::string& task_id, std::optio
   if (button.has_value() && task->second->awaiting_confirmation.has_value()) {
     AnswerConfirmation(task_id, button.value() == 0);
     return;
+  }
+  // The one button on a "locked" notification: the same OS re-authentication Settings uses, anchored to the
+  // task's own tab so the prompt has a window to sit over. A successful unlock resumes every task waiting
+  // for it and retries the fill (OnCredentialsUnlocked). Never with no anchor: CredentialTools::Unlock
+  // treats a missing anchor as "no device authenticator", which would skip the prompt on macOS/Windows.
+  if (auto wait = credential_waits_.find(task_id);
+      button.has_value() && wait != credential_waits_.end() && wait->second.needs_unlock) {
+    auto conversation = conversations_.find(task_id);
+    content::WebContents* anchor =
+        conversation != conversations_.end() ? conversation->second.page.get() : nullptr;
+    if (anchor && AgentTabs::Reveal(anchor)) {
+      UnlockCredentials(anchor, base::DoNothing());
+      return;
+    }
   }
   if (NotificationDisplayService* display =
           profile_ ? NotificationDisplayServiceFactory::GetForProfile(profile_) : nullptr) {
@@ -3025,6 +3054,51 @@ void TaskStore::ParkForUser(const std::string& task_id,
                                                  : IDS_REDROB_TASK_CREDENTIAL_WAITING_VERIFY,
                                     SiteLabel(origin)));
   Notify(task_id);
+}
+
+void TaskStore::LoginFromBridge(content::WebContents* page,
+                                const std::string& username_hint,
+                                base::OnceCallback<void(std::string)> callback) {
+  if (!page || !page->GetPrimaryMainFrame()) {
+    std::move(callback).Run("There is no such tab. Open the site's sign-in page first.");
+    return;
+  }
+  // The tab's committed origin, never a URL from the caller, exactly as for a task.
+  const url::Origin origin = page->GetPrimaryMainFrame()->GetLastCommittedOrigin();
+  switch (credentials()->Check(origin)) {
+    case CredentialTools::Gate::kRefused: {
+      credentials()->RecordUse(kBridgeAuditId, origin, std::string(),
+                               CredentialTools::Outcome::kPolicyRefused);
+      CredentialTools::Result refused;
+      refused.outcome = CredentialTools::Outcome::kPolicyRefused;
+      refused.origin = origin;
+      std::move(callback).Run(CredentialTools::ToolResultText(refused));
+      return;
+    }
+    case CredentialTools::Gate::kLocked:
+      credentials()->RecordUse(kBridgeAuditId, origin, std::string(), CredentialTools::Outcome::kLocked);
+      std::move(callback).Run(
+          "Signing in needs the user to unlock the browser's passwords first, in the browser itself. Ask "
+          "them to unlock, then call login again.");
+      return;
+    case CredentialTools::Gate::kAllowed:
+      break;
+  }
+  credentials()->Login(page, username_hint,
+                       base::BindOnce(&TaskStore::OnBridgeLoginResult, weak_factory_.GetWeakPtr(),
+                                      std::move(callback)));
+}
+
+void TaskStore::OnBridgeLoginResult(base::OnceCallback<void(std::string)> callback,
+                                    CredentialTools::Result result) {
+  credentials()->RecordUse(kBridgeAuditId, result.origin, result.username, result.outcome);
+  if (result.outcome == CredentialTools::Outcome::kLocked) {
+    std::move(callback).Run(
+        "Signing in needs the user to unlock the browser's passwords first, in the browser itself. Ask "
+        "them to unlock, then call login again.");
+    return;
+  }
+  std::move(callback).Run(CredentialTools::ToolResultText(result));
 }
 
 void TaskStore::UnlockCredentials(content::WebContents* anchor,

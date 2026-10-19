@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/extensions/external_provider_impl.h b/chrome/browser/extensions/external_provider_impl.h
-index 3959d466ab6d3fc30f22f4d4fab51fbf06b4c943..e03613dc8238d616dbd3ee26bb3f4a05365d517d 100644
+index 3959d466ab6d3..e03613dc8238d 100644
 --- a/chrome/browser/extensions/external_provider_impl.h
 +++ b/chrome/browser/extensions/external_provider_impl.h
 @@ -15,6 +15,7 @@

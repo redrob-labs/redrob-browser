@@ -1,5 +1,5 @@
 diff --git a/chrome/app/chrome_command_ids.h b/chrome/app/chrome_command_ids.h
-index 67f37eafaa58de562f7930cde137812301b086b3..120509d707d69c311c93a715c8c57564c0f30114 100644
+index 67f37eafaa58d..120509d707d69 100644
 --- a/chrome/app/chrome_command_ids.h
 +++ b/chrome/app/chrome_command_ids.h
 @@ -292,6 +292,10 @@

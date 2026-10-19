@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/side_panel/side_panel_helper.cc b/chrome/browser/ui/views/side_panel/side_panel_helper.cc
-index e1e7ccb48cdf3e0baaee33fad31ebcb669110435..1cae6c2ed8d5f97614189d5e9446c38d8729a36b 100644
+index e1e7ccb48cdf3..1cae6c2ed8d5f 100644
 --- a/chrome/browser/ui/views/side_panel/side_panel_helper.cc
 +++ b/chrome/browser/ui/views/side_panel/side_panel_helper.cc
 @@ -18,6 +18,7 @@
