@@ -23,6 +23,7 @@
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tab_search_bubble_host.h"
 #include "chrome/common/webui_url_constants.h"
@@ -187,7 +188,9 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   // persists it, and syncs it, so inventing a parallel one would mean two things the user has to keep
   // in step by hand.
   workspace_button_ = lead->AddChildView(std::make_unique<views::LabelButton>(
-      base::BindRepeating(&RedrobSidebarSections::ShowWorkspaceMenu, base::Unretained(this)),
+      base::BindRepeating(
+          [](RedrobSidebarSections* self) { self->ShowWorkspaceMenu(self->workspace_button_); },
+          base::Unretained(this)),
       std::u16string()));
   workspace_button_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   workspace_button_->SetMinSize(gfx::Size(0, sidebar_tokens::kRowHeight));
@@ -295,6 +298,88 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
     }
   }
 
+  if (browser_) {
+    if (tabs::VerticalTabStripStateController* controller =
+            tabs::VerticalTabStripStateController::From(browser_)) {
+      mode_subscription_ = controller->RegisterOnModeChanged(base::BindRepeating(
+          [](RedrobSidebarSections* self, tabs::VerticalTabStripStateController*) {
+            self->OnTabStripModeChanged();
+          },
+          base::Unretained(this)));
+    }
+  }
+  AttachToolbarAccess();
+}
+
+void RedrobSidebarSections::AddedToWidget() {
+  AttachToolbarAccess();
+}
+
+void RedrobSidebarSections::AttachToolbarAccess() {
+  if (!browser_ || toolbar_access_) {
+    return;
+  }
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
+  ToolbarView* toolbar = browser_view ? browser_view->toolbar() : nullptr;
+  if (!toolbar) {
+    return;
+  }
+
+  // Workspace name + chevron, then the avatar, at the toolbar's trailing edge (the app menu there is hidden).
+  // The same order as the sidebar header reads, so switching tab layout does not reorder the controls.
+  auto access = std::make_unique<views::View>();
+  auto* layout = access->SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::Orientation::kHorizontal, gfx::Insets(), 4));
+  layout->set_cross_axis_alignment(views::BoxLayout::CrossAxisAlignment::kCenter);
+
+  toolbar_workspace_button_ = access->AddChildView(std::make_unique<views::LabelButton>(
+      base::BindRepeating(
+          [](RedrobSidebarSections* self) {
+            self->ShowWorkspaceMenu(self->toolbar_workspace_button_);
+          },
+          base::Unretained(this)),
+      std::u16string()));
+  toolbar_workspace_button_->SetElideBehavior(gfx::ELIDE_TAIL);
+  toolbar_workspace_button_->SetMaxSize(gfx::Size(180, 0));
+  toolbar_workspace_button_->SetImageModel(
+      views::Button::STATE_NORMAL,
+      ui::ImageModel::FromVectorIcon(vector_icons::kKeyboardArrowDownIcon,
+                                     sidebar_tokens::kMutedForeground,
+                                     sidebar_tokens::kHeaderGlyphSize));
+  // Chevron after the name, as in the sidebar: a RIGHT-aligned LabelButton draws its image after the label.
+  toolbar_workspace_button_->SetHorizontalAlignment(gfx::ALIGN_RIGHT);
+  toolbar_workspace_button_->SetImageLabelSpacing(2);
+
+  toolbar_avatar_ = access->AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
+
+  const size_t index = toolbar->children().size();
+  access->SetProperty(views::kMarginsKey, gfx::Insets::VH(0, 4));
+  toolbar_access_ = toolbar->AddChildViewAt(std::move(access), index);
+
+  UpdateWorkspaceButton();
+  OnTabStripModeChanged();
+}
+
+void RedrobSidebarSections::OnTabStripModeChanged() {
+  if (!browser_) {
+    return;
+  }
+  const tabs::VerticalTabStripStateController* controller =
+      tabs::VerticalTabStripStateController::From(browser_);
+  const bool vertical = !controller || controller->ShouldDisplayVerticalTabs();
+  if (toolbar_access_) {
+    toolbar_access_->SetVisible(!vertical);
+  }
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
+  ToolbarView* toolbar = browser_view ? browser_view->toolbar() : nullptr;
+  if (!toolbar) {
+    return;
+  }
+  AvatarToolbarButton* visible = vertical ? avatar_.get() : toolbar_avatar_.get();
+  if (visible) {
+    toolbar->SetRedrobAvatarButton(visible);
+  }
+  toolbar->InvalidateLayout();
 }
 
 RedrobSidebarSections::~RedrobSidebarSections() {
@@ -305,6 +390,13 @@ RedrobSidebarSections::~RedrobSidebarSections() {
     if (BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
       if (ToolbarView* toolbar = browser_view->toolbar()) {
         toolbar->SetRedrobAvatarButton(nullptr);
+        // The toolbar pair's buttons call back into this object, so it leaves with it.
+        if (toolbar_access_ && toolbar_access_->parent() == toolbar) {
+          toolbar->RemoveChildViewT(toolbar_access_.get());
+        }
+        toolbar_access_ = nullptr;
+        toolbar_avatar_ = nullptr;
+        toolbar_workspace_button_ = nullptr;
       }
     }
   }
@@ -497,6 +589,9 @@ void RedrobSidebarSections::UpdateWorkspaceButton() {
   }
 
   workspace_button_->SetText(label);
+  if (toolbar_workspace_button_) {
+    toolbar_workspace_button_->SetText(label);
+  }
   // Never disabled. It used to be `SetEnabled(count > 0)`, which made the header's only dropdown a control
   // that could not be pressed for as long as the user had no workspaces -- i.e. from the moment the browser
   // was installed, which is exactly when they would press it to find out what a workspace is. The empty case
@@ -505,9 +600,15 @@ void RedrobSidebarSections::UpdateWorkspaceButton() {
   workspace_button_->SetTooltipText(
       l10n_util::GetStringUTF16(count > 0 ? IDS_REDROB_SIDEBAR_SWITCH_WORKSPACE
                                           : IDS_REDROB_SIDEBAR_SAVE_GROUP_FOR_WORKSPACE));
+  if (toolbar_workspace_button_) {
+    toolbar_workspace_button_->SetTooltipText(workspace_button_->GetTooltipText());
+  }
 }
 
-void RedrobSidebarSections::ShowWorkspaceMenu() {
+void RedrobSidebarSections::ShowWorkspaceMenu(views::View* anchor) {
+  if (!anchor) {
+    anchor = workspace_button_;
+  }
   menu_workspace_ids_ = WorkspaceIds();
   if (!browser_) {
     return;
@@ -556,8 +657,8 @@ void RedrobSidebarSections::ShowWorkspaceMenu() {
 
   workspace_menu_runner_ = std::make_unique<views::MenuRunner>(
       workspace_menu_model_.get(), views::MenuRunner::HAS_MNEMONICS);
-  workspace_menu_runner_->RunMenuAt(GetWidget(), nullptr,
-                                    workspace_button_->GetBoundsInScreen(),
+  workspace_menu_runner_->RunMenuAt(anchor->GetWidget(), nullptr,
+                                    anchor->GetBoundsInScreen(),
                                     views::MenuAnchorPosition::kTopLeft,
                                     ui::mojom::MenuSourceType::kNone);
 }

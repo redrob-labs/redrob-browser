@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 
+#include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
 #include "base/scoped_observation.h"
 #include "base/uuid.h"
@@ -92,7 +93,20 @@ class RedrobSidebarSections : public views::View,
   void ShowTabSearch();
   void StartNewTask();
   void UpdateWorkspaceButton();
-  void ShowWorkspaceMenu();
+  // Opens the workspace menu under `anchor`: the sidebar's button, or the toolbar's in horizontal mode.
+  void ShowWorkspaceMenu(views::View* anchor);
+
+  // views::View
+  void AddedToWidget() override;
+
+  // Horizontal tabs (CAP: tabs across the top). The sidebar column is hidden then, and with it the workspace
+  // switcher and the avatar it carries. The same two controls are put in the toolbar instead, built and owned
+  // here so the workspace logic stays in one class. Idempotent: called from the constructor and again once
+  // this view has a widget, because the toolbar may not exist yet when the column is built.
+  void AttachToolbarAccess();
+  // Shows the toolbar pair only while tabs are horizontal, and registers whichever avatar is VISIBLE with the
+  // toolbar -- every bubble anchors to the registered one, so it must never be the hidden copy.
+  void OnTabStripModeChanged();
   // The tabs in this window that belong to no group. What "save these tabs as a workspace" acts on.
   std::vector<int> UngroupedTabIndices() const;
   // The saved groups a switcher should offer, in menu order. Rebuilt per menu rather than cached: the
@@ -119,6 +133,14 @@ class RedrobSidebarSections : public views::View,
   raw_ptr<views::Label> tabs_heading_ = nullptr;
   raw_ptr<views::LabelButton> new_tab_row_ = nullptr;
   bool collapsed_ = false;
+
+  // The toolbar's copy of the workspace switcher and avatar, for horizontal tabs. The VIEW is owned by the
+  // toolbar (it is the toolbar's child); this class removes it again in its destructor, because the
+  // workspace button calls back into this object.
+  raw_ptr<views::View> toolbar_access_ = nullptr;
+  raw_ptr<AvatarToolbarButton> toolbar_avatar_ = nullptr;
+  raw_ptr<views::LabelButton> toolbar_workspace_button_ = nullptr;
+  base::CallbackListSubscription mode_subscription_;
 
   std::vector<base::Uuid> menu_workspace_ids_;
   std::unique_ptr<ui::SimpleMenuModel> workspace_menu_model_;
