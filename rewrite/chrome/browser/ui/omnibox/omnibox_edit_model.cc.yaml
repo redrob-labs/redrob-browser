@@ -1,0 +1,26 @@
+# CAP-3. Tab on the address bar's agent row enters agent mode.
+#
+# The agent row ("Ask the agent ...") is offered under what the person typed and is never the default:
+# Enter must keep navigating to the URL they meant. Tab on that row is the deliberate step from
+# "offered" to "chosen": it rewrites the line as `> <text>`, which is agent mode, and from there the
+# row is the default match and the location bar shows the "Redrob" chip (see
+# components/omnibox/browser/redrob_agent_provider.h and location_bar_view.cc.yaml).
+#
+# Done by rewriting the TEXT rather than by setting edit-model state, because the mode is the text --
+# a mode held in the model would need clearing on every path that leaves it, and keyword mode shows
+# how many of those there are. Backspace over the marker leaves agent mode with no code of ours.
+#
+# Only forward Tab, only on our row, only when the line is not already in agent mode. Every other Tab
+# falls through to upstream's own stepping untouched.
+substitutions:
+  - description: Include the agent provider, for its type and the agent-mode text helpers.
+    insert_after:
+      anchor: '#include "components/omnibox/browser/omnibox_text_util.h"'
+      count: 1
+      lines: |
+        #include "components/omnibox/browser/redrob_agent_provider.h"
+  - description: Tab on the agent row writes the agent-mode prefix instead of stepping the selection.
+    regex:
+      pattern: "void OmniboxEditModel::OnTabPressed(bool shift) {\n"
+      replace: "void OmniboxEditModel::OnTabPressed(bool shift) {\n  // Redrob: Tab on the agent row enters agent mode. See\n  // rewrite/chrome/browser/ui/omnibox/omnibox_edit_model.cc.yaml.\n  if (!shift && view_ && !is_keyword_selected() &&\n      !RedrobAgentProvider::IsAgentModeText(user_text_)) {\n    const OmniboxPopupSelection selection = GetPopupSelection();\n    const AutocompleteResult& result = autocomplete_controller()->result();\n    if (selection.state == OmniboxPopupSelection::NORMAL &&\n        selection.line < result.size()) {\n      const AutocompleteMatch& match = result.match_at(selection.line);\n      if (match.provider &&\n          match.provider->type() == AutocompleteProvider::TYPE_REDROB_AGENT) {\n        view_->SetUserText(RedrobAgentProvider::ToAgentModeText(user_text_),\n                           /*update_popup=*/true);\n        return;\n      }\n    }\n  }\n\n"
+      count: 1

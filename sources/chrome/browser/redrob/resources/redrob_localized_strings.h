@@ -312,6 +312,8 @@ inline constexpr webui::LocalizedString kRedrobLocalizedStrings[] = {
     {"seEngineFailed", IDS_REDROB_SE_ENGINE_FAILED},
     {"seEngineNotInstalled", IDS_REDROB_SE_ENGINE_NOT_INSTALLED},
     {"seEngineModelCount", IDS_REDROB_SE_ENGINE_MODEL_COUNT},
+    {"entryAgentChipTooltip", IDS_REDROB_ENTRY_AGENT_CHIP_TOOLTIP},
+    {"entryQuickWindowTitle", IDS_REDROB_ENTRY_QUICK_WINDOW_TITLE},
 };
 
 }  // namespace redrob

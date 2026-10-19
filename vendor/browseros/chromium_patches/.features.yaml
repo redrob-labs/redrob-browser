@@ -563,9 +563,12 @@ features:
     files:
       - chrome/browser/autocomplete/chrome_autocomplete_provider_client.cc
       - chrome/browser/autocomplete/chrome_autocomplete_provider_client.h
+      - chrome/browser/ui/omnibox/omnibox_edit_model.cc
+      - chrome/browser/ui/views/location_bar/BUILD.gn
       - chrome/browser/ui/views/location_bar/location_bar_view.cc
       - components/omnibox/browser/BUILD.gn
       - components/omnibox/browser/actions/omnibox_action.h
+      - components/omnibox/browser/actions/omnibox_action_client_delegator.h
       - components/omnibox/browser/actions/omnibox_action_concepts.h
       - components/omnibox/browser/autocomplete_classifier.cc
       - components/omnibox/browser/autocomplete_controller.cc

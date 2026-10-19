@@ -395,6 +395,8 @@
       <message name="IDS_REDROB_SE_ENGINE_FAILED" desc="Built-in engine state: was running and broke">Stopped responding</message>
       <message name="IDS_REDROB_SE_ENGINE_NOT_INSTALLED" desc="Built-in engine state: no engine binary was found anywhere">Not installed, so tasks cannot run</message>
       <message name="IDS_REDROB_SE_ENGINE_MODEL_COUNT" desc="How many models the engine reported; $1 is the count"><ph name="ARG1">$1<ex>1</ex></ph> models</message>
+      <message name="IDS_REDROB_ENTRY_AGENT_CHIP_TOOLTIP" desc="Tooltip and accessible name on the address bar's agent-mode chip">Enter hands this to the agent instead of searching. Delete the &gt; to leave agent mode.</message>
+      <message name="IDS_REDROB_ENTRY_QUICK_WINDOW_TITLE" desc="Accessible title of the quick window opened by the global shortcut">Ask Redrob</message>
     </messages>
   </release>
 </grit>
