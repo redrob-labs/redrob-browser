@@ -8,6 +8,8 @@ source_set("sidecar") {
     "agent_service_factories.h",
     "agent_tabs.cc",
     "agent_tabs.h",
+    "credential_tools.cc",
+    "credential_tools.h",
     "memory_store.cc",
     "memory_store.h",
     "model_store.cc",
@@ -76,6 +78,43 @@ source_set("sidecar") {
     "//net",
     "//net/traffic_annotation",
     "//url",
+  ]
+
+  # CAP-4: tasks that survive the window closing hold a process and a profile keep-alive, announce
+  # themselves through the OS notification service, and may open a window of their own.
+  deps += [
+    "//chrome/browser/notifications",
+    "//chrome/browser/profiles/keep_alive",
+    "//chrome/common",
+    "//components/keep_alive_registry",
+    "//components/sessions:session_id",
+    "//ui/message_center/public/cpp",
+  ]
+
+  # Agent sign-in (credential_tools.cc). The browser's own agent-login service matches and fills; the
+  # delegate target is visibility-restricted upstream, and the rewrite rule on its BUILD.gn is what lets
+  # this target see it.
+  deps += [
+    "//chrome/browser/device_reauth",
+    "//chrome/browser/password_manager/actor_login:factories",
+    "//components/device_reauth",
+    "//components/password_manager/content/browser",
+    "//components/password_manager/core/browser",
+    "//components/password_manager/core/browser/actor_login:actor_login_service_impl",
+    "//components/password_manager/core/browser/actor_login:common",
+    "//components/password_manager/core/browser/actor_login/internal:delegate",
+    "//services/metrics/public/cpp:metrics_cpp",
+  ]
+
+  # CAP-3 / CAP-5: the one place a native entrance (address bar, quick window) hands a request to the
+  # agent page. It names the agent extension by id, from chrome/browser/browseros/core.
+  sources += [
+    "agent_entry.cc",
+    "agent_entry.h",
+  ]
+  deps += [
+    "//chrome/browser/browseros/core",
+    "//chrome/browser/browseros/core:product",
   ]
 }
 

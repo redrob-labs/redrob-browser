@@ -7,6 +7,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,7 +16,10 @@
 #include "base/observer_list.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
+#include "url/gurl.h"
 #include "base/files/file_path.h"
+#include "chrome/browser/redrob/memory_store.h"
+#include "chrome/browser/redrob/credential_tools.h"
 #include "chrome/browser/redrob/sidecar_client.h"
 #include "chrome/browser/ui/thumbnails/thumbnail_image.h"
 #include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
@@ -23,6 +27,8 @@
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 class Profile;
+class ScopedKeepAlive;
+class ScopedProfileKeepAlive;
 
 namespace content {
 class WebContents;
@@ -30,7 +36,6 @@ class WebContents;
 
 namespace redrob {
 
-class MemoryStore;
 class ModelStore;
 
 // The tasks of one profile, the sidecar that answers them, and the tool loop between the two.
@@ -125,6 +130,12 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   // routine that starts a fresh one. False when the id is unknown.
   bool WakeTask(const std::string& task_id, const std::string& prompt);
 
+  // Starts a hidden consolidation run over the memory files. Without `force` it runs only when at least
+  // three extraction runs finished since the last one and the last one is a day old -- the built-in
+  // routine calls it that way; Settings' "Run consolidation now" passes force. False when nothing
+  // started: memory off, not due, one already running, or no engine.
+  bool StartConsolidation(bool force);
+
   // SidecarClient::CompletionDelegate
   void OnCompletionText(std::string_view text) override;
   void OnCompletionReasoning(std::string_view text) override;
@@ -133,6 +144,95 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
                             const std::string& arguments_json) override;
   void OnCompletionFinished(const std::string& finish_reason) override;
   void OnCompletionFailed(const std::string& message) override;
+
+  // KeyedService. Drops the keep-alives before the profile goes away; see UpdateKeepAlive.
+  void Shutdown() override;
+
+  // CAP-4 / guard. Answers the confirmation a guard-mode task is waiting on (Task.awaiting_confirmation).
+  // `allow` performs exactly that one action and nothing else; declining answers the engine that the
+  // user said no. False when the task is unknown or is not waiting on one. Reached from the task
+  // notification's buttons and from redrobPrivate.answerTaskConfirmation.
+  bool AnswerConfirmation(const std::string& task_id, bool allow);
+
+  // SUB-1..4. The engine's own account surface, asked through the sidecar -- never a list kept in the
+  // browser, because a second list is a second truth (docs/PRODUCT-BACKLOG.md SUB-1). Nothing secret is
+  // in these structs: the engine's provider records can carry a key, and it is dropped while parsing.
+  struct EngineAuthMethod {
+    // The index the engine's authorize/callback routes take.
+    int index = 0;
+    // "oauth" (a subscription or account sign-in) or "api" (a key).
+    std::string type;
+    std::string label;
+  };
+  struct EngineProvider {
+    std::string id;
+    std::string name;
+    // Where the engine says this provider's credential came from: "env", "config", "custom", "api" or
+    // "launcher". Reported so the surface can say WHERE a connection lives rather than only that it does.
+    std::string source;
+    bool connected = false;
+    // True when Redrob Console manages this provider for the signed-in organisation.
+    bool console_managed = false;
+    size_t model_count = 0;
+    std::vector<EngineAuthMethod> methods;
+  };
+  struct EngineAccount {
+    // False when the engine is not serving yet (or is not installed); everything else is then empty and
+    // the caller must say so rather than render an empty list as "no providers".
+    bool engine_ready = false;
+    std::vector<EngineProvider> providers;
+    // The Redrob Console organisation the engine is signed in to, when it reports one.
+    std::string console_org;
+  };
+  using EngineAccountCallback = base::OnceCallback<void(EngineAccount)>;
+  void GetEngineAccount(EngineAccountCallback callback);
+
+  struct SignInStart {
+    // Empty on success.
+    std::string error;
+    // What the engine says to tell the user, e.g. which code to expect.
+    std::string instructions;
+    // True when the provider shows the user a code to paste back (the engine's "code" method); false when
+    // the engine catches the redirect itself ("auto") and FinishEngineSignIn just waits for it.
+    bool needs_code = false;
+  };
+  // Asks the engine for the provider's authorize page and opens it in a new tab -- the browser opens it,
+  // not the page that asked, so the user sees exactly where they are signing in.
+  void BeginEngineSignIn(const std::string& provider_id,
+                         int method,
+                         base::OnceCallback<void(SignInStart)> callback);
+  // Completes it. For "auto" the engine answers once the provider redirected back to it, which can take
+  // as long as the user takes in the other tab. `code` is empty for "auto". Answers an empty string on
+  // success, otherwise the engine's reason.
+  void FinishEngineSignIn(const std::string& provider_id,
+                          int method,
+                          const std::string& code,
+                          base::OnceCallback<void(std::string)> callback);
+  // SUB-3. Hands the engine a key for `provider_id`. The key goes one way: into the engine's store, never
+  // back out of the browser, never into a pref and never into a log.
+  void SetEngineApiKey(const std::string& provider_id,
+                       const std::string& key,
+                       base::OnceCallback<void(std::string)> callback);
+  void DisconnectEngineProvider(const std::string& provider_id,
+                                base::OnceCallback<void(bool)> callback);
+  // --- Agent sign-in (CAP-9). See credential_tools.h. ---
+  //
+  // The profile's agent sign-in state: policy, unlock window, per-site list, audit. Created on first use.
+  CredentialTools* credentials();
+  // A task parked because signing in needs the user. Origins only; nothing secret is ever parked.
+  struct CredentialWait {
+    std::string task_id;
+    std::string prompt;
+    std::string origin;
+    // True: waiting for an unlock. False: waiting for the user to finish a code / passkey / CAPTCHA.
+    bool needs_unlock = false;
+  };
+  std::vector<CredentialWait> CredentialWaits() const;
+  // Re-authenticates the user (anchored to `anchor`'s window), and on success resumes every task that was
+  // waiting for the unlock. Reachable only from the component UI, never from a tool.
+  void UnlockCredentials(content::WebContents* anchor, base::OnceCallback<void(bool)> callback);
+  // The user says they finished the verification a task was waiting on. False when it was not waiting.
+  bool ResumeAfterVerification(const std::string& task_id);
 
  private:
   // What the engine proposed, held until the turn ends. Tools are run only after a turn completes: a
@@ -164,6 +264,30 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
     // turns' text appended to one string ran together mid-sentence, which read as one confused
     // statement rather than as an answer and then a correction.
     bool turn_text_started = false;
+    // CAP-1: the http(s) tab the user was on when they started the task, sent as
+    // redrob_context until the agent opens a tab of its own. URL and title only -- never the
+    // page's contents, and never anything the agent may act on.
+    std::string context_url;
+    std::string context_title;
+    // True from creation until the memory search for this task's prompt has answered. The first turn
+    // waits for it, because the hits go into the history BEFORE the user's message.
+    bool awaiting_memory = false;
+    // Pages the agent's tab visited, {url, title}. Handed to extraction only when the user turned
+    // history input on; never the user's own history.
+    std::vector<std::pair<std::string, std::string>> visited;
+    // CAP-4 / guard: the click this task is waiting for the user to allow or decline. Held while the
+    // task is kBlockedOnPolicy; it is counted in `pending_tools`, so the turn cannot move on without it.
+    std::optional<ProposedToolCall> awaiting;
+    // The last page the agent opened. When the window holding the task's tab is closed, the next page
+    // tool tells the engine to open this again rather than just "there is no page".
+    GURL last_url;
+  };
+
+  // A hidden task that maintains memory: extraction after a task, or consolidation. Not listed, not
+  // notified, opens no tabs, and is the ONLY kind of task offered memory_write / memory_edit.
+  struct MemoryTaskInfo {
+    std::string run_id;
+    bool consolidate = false;
   };
 
   void OnSidecarStatusChanged(SidecarClient::Status status);
@@ -203,6 +327,60 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
   // Prose arrives token by token; a Mojo message per token would send the whole task hundreds of times
   // for one paragraph. Coalesced so the page updates promptly without that traffic.
   void ScheduleNotify(const std::string& task_id);
+  // CAP-1: records the user's active http(s) tab on a new task (see Conversation::context_url).
+  void CaptureContextTab(const std::string& task_id);
+  // CAP-1: {page_url, page_title} of the task's agent tab, else of the tab it started from; nullopt
+  // when neither is an http(s) page.
+  static std::optional<base::DictValue> RedrobContext(const Conversation& conversation);
+
+  // --- Memory runs ----------------------------------------------------------------------------------
+  bool IsMemoryTask(const std::string& task_id) const;
+  // Creates and posts the first turn of a hidden memory task. Returns its id, or empty.
+  std::string StartMemoryTask(bool consolidate, const std::string& prompt);
+  // Queues the extraction run for a task that just succeeded.
+  void StartExtraction(const std::string& task_id);
+  // The memory_* and recall tools. Returns false when `call` is not one of them.
+  bool RunMemoryTool(const std::string& task_id,
+                     const ProposedToolCall& call,
+                     const base::DictValue& arguments);
+  void OnMemoryPrefill(std::string task_id, std::vector<MemoryStore::SearchHit> hits);
+  // Starts the oldest queued task when nothing is streaming. Posted from FinishTask, because a task
+  // that finished while another waited used to leave the waiting one queued for good.
+  void StartNextQueued();
+  // Drops a finished memory task from every map.
+  void ForgetMemoryTask(const std::string& task_id);
+
+  std::map<std::string, MemoryTaskInfo> memory_tasks_;
+
+  // CAP-4. Holds the process and the profile alive while any task is not finished, and lets go when the
+  // last one ends. Called from Notify, because every state change goes through Notify.
+  void UpdateKeepAlive();
+  // Raises the OS notification for a task that finished while no user window is open, or that is waiting
+  // on the user. At most once per state.
+  void AnnounceTask(const std::string& task_id);
+  void OnTaskNotificationClicked(const std::string& task_id, std::optional<int> button);
+  // Runs a click or a type the permission check has already passed. Split out so an allowed
+  // confirmation runs the identical code path the unconfirmed click would have.
+  void DispatchPageAction(const std::string& task_id,
+                          const ProposedToolCall& call,
+                          bool is_click,
+                          const std::string& target,
+                          const std::string& text);
+  // Ultrabrowse never stops for silence; the other efforts give up on a turn the engine has said nothing
+  // in for kTurnIdleTimeout, instead of spinning a card forever. Re-armed on every streamed event.
+  void ArmIdleWatch();
+  void OnTurnIdle();
+  // Starts the engine if needed. True when it is serving now.
+  bool EngineReady();
+  void OnEngineAuthorize(base::OnceCallback<void(SignInStart)> callback,
+                         int status,
+                         std::optional<std::string> body);
+  // Shared tail of finishing a sign-in, saving a key and disconnecting: success refreshes the model list;
+  // failure answers the engine's reason. `expect_true` is for the OAuth callback, which answers a boolean.
+  void OnEngineAccountChange(base::OnceCallback<void(std::string)> callback,
+                             bool expect_true,
+                             int status,
+                             std::optional<std::string> body);
 
   std::map<std::string, mojom::TaskPtr> tasks_;
   std::map<std::string, Conversation> conversations_;
@@ -247,6 +425,44 @@ class TaskStore : public KeyedService, public SidecarClient::CompletionDelegate 
     std::string price_band;
   };
   std::vector<ModelRecord> model_options_;
+
+  // CAP-4. Present exactly while some task is unfinished and the user has left the keep-running setting
+  // on. See UpdateKeepAlive.
+  std::unique_ptr<ScopedKeepAlive> keep_alive_;
+  std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive_;
+  // The state each task was last announced in, so one finish raises one notification.
+  std::map<std::string, mojom::TaskState> announced_;
+  base::OneShotTimer idle_timer_;
+  bool shutting_down_ = false;
+  // --- Agent sign-in (CAP-9). ---
+  struct PendingCredentialCall {
+    ProposedToolCall call;
+    std::string username_hint;
+    url::Origin origin;
+    bool needs_unlock = false;
+  };
+  // Dispatches login / ask_user_to_verify. `arguments` is the parsed call.
+  void RunCredentialTool(const std::string& task_id,
+                         const ProposedToolCall& call,
+                         const base::DictValue& arguments);
+  // Fills on the task's page. The call is already counted in pending_tools.
+  void StartLogin(const std::string& task_id,
+                  const ProposedToolCall& call,
+                  const std::string& username_hint);
+  void OnLoginResult(std::string task_id,
+                     ProposedToolCall call,
+                     std::string username_hint,
+                     CredentialTools::Result result);
+  // Holds the call unanswered and moves the task to kBlockedOnPolicy until the user acts. The call must
+  // already be counted in pending_tools, which is what stops the next turn from starting.
+  void ParkForUser(const std::string& task_id,
+                   const ProposedToolCall& call,
+                   const std::string& username_hint,
+                   const url::Origin& origin,
+                   bool needs_unlock);
+  void OnCredentialsUnlocked(base::OnceCallback<void(bool)> callback, bool unlocked);
+  std::map<std::string, PendingCredentialCall> credential_waits_;
+  std::unique_ptr<CredentialTools> credentials_;
 };
 
 }  // namespace redrob

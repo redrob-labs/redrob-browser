@@ -22,6 +22,12 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   // 90 days rather than forever. A default that keeps everything for the life of the profile is a
   // decision made on the user's behalf that they never see the consequences of until they look.
   registry->RegisterIntegerPref(kMemoryRetentionDays, 90);
+  registry->RegisterBooleanPref(kMemoryMigrated, false);
+  registry->RegisterListPref(kMemoryRuns);
+  registry->RegisterDoublePref(kMemoryLastConsolidationMs, 0);
+  // Off: the agent's own tab history is still browsing history, and handing it to a model is the
+  // user's call to make, not a default.
+  registry->RegisterBooleanPref(kMemoryHistoryInput, false);
 
   registry->RegisterListPref(kModelProviders);
   registry->RegisterStringPref(kSelectedProviderId, std::string());
@@ -40,6 +46,18 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(kHorizontalTabShrinkEnabled, true);
   registry->RegisterBooleanPref(kWindowTranslucencyEnabled, false);
   registry->RegisterBooleanPref(kAutomaticPictureInPictureEnabled, false);
+
+  // CAP-4: tasks outlive the window by default. See the header.
+  registry->RegisterBooleanPref(kKeepTasksRunning, true);
+  // Agent sign-in. While-unlocked by default: an agent that can sign in to anything the user ever saved,
+  // with nobody present, is a decision the user should make by name rather than inherit.
+  registry->RegisterIntegerPref(kAgentCredentialsPolicy, 1);
+  registry->RegisterIntegerPref(kAgentCredentialsUnlockMinutes, 15);
+  registry->RegisterDictionaryPref(kAgentCredentialsSites);
+  registry->RegisterListPref(kAgentCredentialsAudit);
+  // CAP-5. On by default: the shortcut is the quick window's only entrance, and a feature reachable
+  // only after finding a setting is one nobody finds. Settings can change or turn it off.
+  registry->RegisterStringPref(kQuickWindowShortcut, kQuickWindowShortcutPrimaryShiftSpace);
 }
 
 }  // namespace redrob::prefs

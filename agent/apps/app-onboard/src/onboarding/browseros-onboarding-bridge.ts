@@ -27,7 +27,14 @@ export interface BrowserOSOnboardingBridge {
     receiveState: (state: BrowserOSOnboardingState) => void,
   ): () => void
   startImport(request: BrowserOSStartImportRequest): void
+  /** Stops a running import. Items already copied stay in the profile. */
+  cancelImport(): void
+  /** Opens the password manager, where an exported CSV is imported. */
+  openPasswordManager(): void
 }
+
+/** Where a CSV exported from another browser is imported. */
+export const PASSWORD_MANAGER_URL = 'chrome://password-manager/settings'
 
 interface BrowserOSOnboardingBridgeOptions {
   chrome?: BrowserOSOnboardingChrome | null
@@ -75,10 +82,17 @@ function emitMockState(state: BrowserOSOnboardingState) {
   getHostWindow()?.browserosOnboarding?.receiveState(state)
 }
 
+// Bumped by a mock cancel so progress scheduled for the stopped run is dropped.
+let mockImportGeneration = 0
+
 function scheduleMockState(state: BrowserOSOnboardingState, delayMs: number) {
   const hostWindow = getHostWindow()
   const schedule = hostWindow?.setTimeout ?? globalThis.setTimeout
-  schedule(() => emitMockState(state), delayMs)
+  const generation = mockImportGeneration
+  schedule(() => {
+    if (generation !== mockImportGeneration) return
+    emitMockState(state)
+  }, delayMs)
 }
 
 function recommendedItemsFor(request: BrowserOSStartImportRequest) {
@@ -301,6 +315,31 @@ export function createBrowserOSOnboardingBridge(
         return
       }
       emitMockImport(request, mockIsSync)
+    },
+    cancelImport() {
+      if (currentState?.status !== 'importing') return
+      if (!isMock) {
+        chromeBridge.send(BrowserOSOnboardingMessage.CANCEL_IMPORT)
+        return
+      }
+      mockImportGeneration += 1
+      const progress = currentState.progress
+      emitMockState(
+        createState(
+          'cancelled',
+          progress ? { ...progress, currentItem: undefined } : undefined,
+          currentState.results?.map((result) => ({
+            ...result,
+            status: 'cancelled' as const,
+          })),
+        ),
+      )
+    },
+    openPasswordManager() {
+      // window.open, not navigation: this page must stay where it is. In the
+      // first-run window Chromium hosts the opened page in its own popup; in a
+      // tab it opens beside this one.
+      getHostWindow()?.open(PASSWORD_MANAGER_URL, '_blank')
     },
   }
 }

@@ -8,8 +8,10 @@
 #include <memory>
 
 #include "chrome/browser/importer/importer_list.h"
+#include <optional>
 #include <string>
 
+#include "chrome/browser/redrob/task_store.h"
 #include "chrome/browser/ui/webui/redrob/redrob.mojom.h"
 #include "chrome/common/extensions/api/redrob_private.h"
 #include "extensions/browser/extension_function.h"
@@ -154,6 +156,9 @@ class RedrobPrivateRemoveMemoryFunction : public ExtensionFunction {
  protected:
   ~RedrobPrivateRemoveMemoryFunction() override = default;
   ResponseAction Run() override;
+
+ private:
+  void OnDone(std::string run_id, bool ok, const std::string& message);
 };
 
 class RedrobPrivateSetMemoryPinnedFunction : public ExtensionFunction {
@@ -546,6 +551,278 @@ class RedrobPrivateInstallEngineFunction : public ExtensionFunction {
                              REDROBPRIVATE_INSTALLENGINE)
  protected:
   ~RedrobPrivateInstallEngineFunction() override = default;
+  ResponseAction Run() override;
+};
+
+// --- Memory files (CAP-19) ---------------------------------------------------
+
+class RedrobPrivateReadMemoryFileFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.readMemoryFile",
+                             REDROBPRIVATE_READMEMORYFILE)
+ protected:
+  ~RedrobPrivateReadMemoryFileFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnRead(std::optional<std::string> content);
+};
+
+class RedrobPrivateWriteMemoryFileFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.writeMemoryFile",
+                             REDROBPRIVATE_WRITEMEMORYFILE)
+ protected:
+  ~RedrobPrivateWriteMemoryFileFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnDone(std::string run_id, bool ok, const std::string& message);
+};
+
+class RedrobPrivateRevertMemoryRunFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.revertMemoryRun",
+                             REDROBPRIVATE_REVERTMEMORYRUN)
+ protected:
+  ~RedrobPrivateRevertMemoryRunFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnDone(bool ok, const std::string& message);
+};
+
+class RedrobPrivateRunMemoryConsolidationFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.runMemoryConsolidation",
+                             REDROBPRIVATE_RUNMEMORYCONSOLIDATION)
+ protected:
+  ~RedrobPrivateRunMemoryConsolidationFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetMemoryHistoryInputFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setMemoryHistoryInput",
+                             REDROBPRIVATE_SETMEMORYHISTORYINPUT)
+ protected:
+  ~RedrobPrivateSetMemoryHistoryInputFunction() override = default;
+  ResponseAction Run() override;
+};
+
+// --- CAP-4 / SUB-1..4 (feat/parity-run) ------------------------------------
+
+class RedrobPrivateGetKeepTasksRunningFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getKeepTasksRunning",
+                             REDROBPRIVATE_GETKEEPTASKSRUNNING)
+ protected:
+  ~RedrobPrivateGetKeepTasksRunningFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetKeepTasksRunningFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setKeepTasksRunning",
+                             REDROBPRIVATE_SETKEEPTASKSRUNNING)
+ protected:
+  ~RedrobPrivateSetKeepTasksRunningFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateAnswerTaskConfirmationFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.answerTaskConfirmation",
+                             REDROBPRIVATE_ANSWERTASKCONFIRMATION)
+ protected:
+  ~RedrobPrivateAnswerTaskConfirmationFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateGetEngineAccountFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getEngineAccount",
+                             REDROBPRIVATE_GETENGINEACCOUNT)
+ protected:
+  ~RedrobPrivateGetEngineAccountFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnAccount(redrob::TaskStore::EngineAccount account);
+};
+
+class RedrobPrivateBeginEngineSignInFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.beginEngineSignIn",
+                             REDROBPRIVATE_BEGINENGINESIGNIN)
+ protected:
+  ~RedrobPrivateBeginEngineSignInFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnStarted(redrob::TaskStore::SignInStart start);
+};
+
+class RedrobPrivateFinishEngineSignInFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.finishEngineSignIn",
+                             REDROBPRIVATE_FINISHENGINESIGNIN)
+ protected:
+  ~RedrobPrivateFinishEngineSignInFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnDone(std::string error);
+};
+
+class RedrobPrivateSetEngineProviderKeyFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setEngineProviderKey",
+                             REDROBPRIVATE_SETENGINEPROVIDERKEY)
+ protected:
+  ~RedrobPrivateSetEngineProviderKeyFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnDone(std::string error);
+};
+
+class RedrobPrivateDisconnectEngineProviderFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.disconnectEngineProvider",
+                             REDROBPRIVATE_DISCONNECTENGINEPROVIDER)
+ protected:
+  ~RedrobPrivateDisconnectEngineProviderFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnDone(bool ok);
+};
+
+// --- Agent sign-in (CAP-9). See chrome/browser/redrob/credential_tools.h. ---
+
+class RedrobPrivateGetAgentCredentialSettingsFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getAgentCredentialSettings",
+                             REDROBPRIVATE_GETAGENTCREDENTIALSETTINGS)
+ protected:
+  ~RedrobPrivateGetAgentCredentialSettingsFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetAgentCredentialPolicyFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setAgentCredentialPolicy",
+                             REDROBPRIVATE_SETAGENTCREDENTIALPOLICY)
+ protected:
+  ~RedrobPrivateSetAgentCredentialPolicyFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetAgentCredentialUnlockMinutesFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setAgentCredentialUnlockMinutes",
+                             REDROBPRIVATE_SETAGENTCREDENTIALUNLOCKMINUTES)
+ protected:
+  ~RedrobPrivateSetAgentCredentialUnlockMinutesFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetAgentCredentialSiteFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setAgentCredentialSite",
+                             REDROBPRIVATE_SETAGENTCREDENTIALSITE)
+ protected:
+  ~RedrobPrivateSetAgentCredentialSiteFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateRemoveAgentCredentialSiteFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.removeAgentCredentialSite",
+                             REDROBPRIVATE_REMOVEAGENTCREDENTIALSITE)
+ protected:
+  ~RedrobPrivateRemoveAgentCredentialSiteFunction() override = default;
+  ResponseAction Run() override;
+};
+
+// Answers after the OS prompt closes, so it holds itself in the callback.
+class RedrobPrivateUnlockAgentCredentialsFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.unlockAgentCredentials",
+                             REDROBPRIVATE_UNLOCKAGENTCREDENTIALS)
+ protected:
+  ~RedrobPrivateUnlockAgentCredentialsFunction() override = default;
+  ResponseAction Run() override;
+
+ private:
+  void OnUnlocked(bool unlocked);
+};
+
+class RedrobPrivateLockAgentCredentialsFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.lockAgentCredentials",
+                             REDROBPRIVATE_LOCKAGENTCREDENTIALS)
+ protected:
+  ~RedrobPrivateLockAgentCredentialsFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateResumeCredentialTaskFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.resumeCredentialTask",
+                             REDROBPRIVATE_RESUMECREDENTIALTASK)
+ protected:
+  ~RedrobPrivateResumeCredentialTaskFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateClearAgentCredentialHistoryFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.clearAgentCredentialHistory",
+                             REDROBPRIVATE_CLEARAGENTCREDENTIALHISTORY)
+ protected:
+  ~RedrobPrivateClearAgentCredentialHistoryFunction() override = default;
+  ResponseAction Run() override;
+};
+
+// --- Native entrances: the quick window (CAP-5) ------------------------------
+
+class RedrobPrivateGetQuickWindowShortcutFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.getQuickWindowShortcut",
+                             REDROBPRIVATE_GETQUICKWINDOWSHORTCUT)
+ protected:
+  ~RedrobPrivateGetQuickWindowShortcutFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateSetQuickWindowShortcutFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.setQuickWindowShortcut",
+                             REDROBPRIVATE_SETQUICKWINDOWSHORTCUT)
+ protected:
+  ~RedrobPrivateSetQuickWindowShortcutFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateStartQuickTaskFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.startQuickTask",
+                             REDROBPRIVATE_STARTQUICKTASK)
+ protected:
+  ~RedrobPrivateStartQuickTaskFunction() override = default;
+  ResponseAction Run() override;
+};
+
+class RedrobPrivateCloseQuickWindowFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("redrobPrivate.closeQuickWindow",
+                             REDROBPRIVATE_CLOSEQUICKWINDOW)
+ protected:
+  ~RedrobPrivateCloseQuickWindowFunction() override = default;
   ResponseAction Run() override;
 };
 

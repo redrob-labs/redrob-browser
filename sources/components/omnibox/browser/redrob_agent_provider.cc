@@ -51,6 +51,34 @@ bool RedrobAgentProvider::WantsAgentRow(const std::u16string& text,
   return trimmed.find(u' ') != std::u16string::npos;
 }
 
+// static
+bool RedrobAgentProvider::IsAgentModeText(const std::u16string& text) {
+  const size_t first = text.find_first_not_of(u" \t");
+  if (first == std::u16string::npos || text[first] != u'>') {
+    return false;
+  }
+  // `>` alone is not yet the mode: the space is what says "I am done typing the marker". Without
+  // it a URL fragment or a quoted line beginning with `>` would flip the address bar mid-word.
+  return first + 1 < text.size() &&
+         (text[first + 1] == u' ' || text[first + 1] == u'\t');
+}
+
+// static
+std::u16string RedrobAgentProvider::AgentModePrompt(const std::u16string& text) {
+  if (!IsAgentModeText(text)) {
+    return std::u16string();
+  }
+  return Trim(text.substr(text.find(u'>') + 1));
+}
+
+// static
+std::u16string RedrobAgentProvider::ToAgentModeText(const std::u16string& text) {
+  if (IsAgentModeText(text)) {
+    return text;
+  }
+  return std::u16string(kAgentModePrefix) + Trim(text);
+}
+
 RedrobAgentProvider::RedrobAgentProvider()
     : AutocompleteProvider(AutocompleteProvider::TYPE_REDROB_AGENT) {}
 
@@ -70,6 +98,33 @@ void RedrobAgentProvider::Start(const AutocompleteInput& input,
 
   const bool from_focus =
       input.focus_type() != metrics::OmniboxFocusType::INTERACTION_DEFAULT;
+
+  // Agent mode: the person asked for the agent, so the row is offered as the default and Enter
+  // starts the task. An empty request after the marker still gets no row -- Enter on "> " must not
+  // open an empty conversation.
+  if (!from_focus && IsAgentModeText(input.text())) {
+    const std::u16string agent_prompt = AgentModePrompt(input.text());
+    if (agent_prompt.empty()) {
+      return;
+    }
+    AutocompleteMatch match(this, kAgentModeRelevance, /*deletable=*/false,
+                            AutocompleteMatchType::NAVSUGGEST_PERSONALIZED);
+    match.allowed_to_be_default_match = true;
+    // The edit keeps exactly what was typed, marker included. A default match whose fill text
+    // differed from the input would rewrite the line under the caret on every keystroke.
+    match.fill_into_edit = input.text();
+    match.destination_url = GURL();
+    match.contents = agent_prompt;
+    match.contents_class.push_back(
+        ACMatchClassification(0, ACMatchClassification::NONE));
+    match.description = l10n_util::GetStringUTF16(IDS_OMNIBOX_REDROB_ASK_AGENT);
+    match.description_class.push_back(
+        ACMatchClassification(0, ACMatchClassification::DIM));
+    match.takeover_action = base::MakeRefCounted<RedrobAgentAction>(agent_prompt);
+    matches_.push_back(std::move(match));
+    return;
+  }
+
   if (!WantsAgentRow(input.text(), from_focus)) {
     return;
   }

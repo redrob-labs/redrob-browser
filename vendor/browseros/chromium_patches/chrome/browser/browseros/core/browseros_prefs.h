@@ -34,7 +34,7 @@ index 0000000000000000000000000000000000000000..19e8b58261088485efa15d05db4819df
 +// Boolean: Show labels on BrowserOS toolbar actions (default: true)
 +inline constexpr char kShowToolbarLabels[] = "browseros.show_toolbar_labels";
 +
-+// Boolean: Enable vertical tabs (default: true)
++// Boolean: Enable vertical tabs (default: false; tabs start across the top)
 +inline constexpr char kVerticalTabsEnabled[] =
 +    "browseros.vertical_tabs_enabled";
 +

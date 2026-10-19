@@ -446,7 +446,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 3,
+    "untranslated": 4,
     "fonts": 1
   },
   "onboard-import.light.en": {
@@ -464,7 +464,7 @@
     "focusMissing": 0,
     "roundIcons": 0,
     "foreignIcons": 0,
-    "untranslated": 3,
+    "untranslated": 4,
     "fonts": 1
   },
   "onboard-welcome.dark.en": {

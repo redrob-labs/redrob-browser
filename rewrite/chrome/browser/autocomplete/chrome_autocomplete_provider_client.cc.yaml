@@ -1,30 +1,35 @@
-# PA-5. Starting the task, on the side of the seam that can.
+# PA-5 / CAP-3. Starting the task, on the side of the seam that can.
 #
-# THE TAB CONTEXT IS READ HERE, once, when the row is actually chosen. The provider runs on
-# every keystroke, so reading the tab there would walk the tab model dozens of times while
-# someone types a sentence.
+# THE TASK OPENS IN THE AGENT PAGE, THE SAME WAY THE NEW TAB OPENS ONE. The first version of this hook
+# called TaskStore::StartTask, which made a task no surface lists: the agent extension owns the new
+# tab, the side panel and their conversations, and it does not read TaskStore. The request went
+# somewhere the person could not follow. redrob::OpenAgentChat navigates to the extension's own
+# `#/home/chat?q=...&mode=agent&tabs=<id>` route, which is exactly what the new tab's composer does,
+# so the address bar and the new tab now start one kind of task.
 #
-# `web_contents_getter_` is used rather than finding a window for this profile, because it is
-# the contents the omnibox belongs to -- the tab whose address bar the user typed in. Looking
-# up "a tabbed browser for this profile" can answer with a different window, and the context
-# would then describe a page the user is not looking at, which is worse than no context.
+# THE TAB CONTEXT IS READ HERE, once, when the row is actually chosen. The provider runs on every
+# keystroke, so reading the tab there would walk the tab model dozens of times while someone types a
+# sentence.
 #
-# A non-http(s) tab contributes NOTHING rather than its URL. A new-tab page, an error page or
-# one of our own surfaces is not the page the user meant, and sending `chrome://newtab` as
-# their context would be a confident wrong answer.
+# `web_contents_getter_` is used rather than finding a window for this profile, because it is the
+# contents the omnibox belongs to -- the tab whose address bar the user typed in. Looking up "a tabbed
+# browser for this profile" can answer with a different window, and the context would then describe a
+# page the user is not looking at, which is worse than no context.
 #
-# The permission mode is the NARROWEST one, and that is the security decision in this change.
-# The user typed one sentence into the address bar: they saw no folder picker and no
-# permission prompt, so the widest thing this may do is read. `kGuard` and `kFullAccess` are
-# decisions made in a surface that asks for them.
+# A non-http(s) tab contributes NOTHING rather than its id. A new-tab page, an error page or one of our
+# own surfaces is not the page the user meant, and attaching it would be a confident wrong answer.
+#
+# The context is the tab's extension id (SessionID), not its URL and title: the agent page reads those
+# itself through chrome.tabs, the same as when a person attaches a tab in the new tab's composer, so
+# the agent sees the live tab rather than a snapshot of two strings.
 substitutions:
   - description: Include what the agent-task hook needs.
     regex:
       pattern: "#include \"chrome/browser/profiles/profile.h\"\n"
-      replace: "#include \"chrome/browser/profiles/profile.h\"\n#include \"chrome/browser/redrob/task_store.h\"\n#include \"chrome/browser/redrob/task_store_factory.h\"\n#include \"chrome/browser/ui/webui/redrob/redrob.mojom.h\"\n"
+      replace: "#include \"chrome/browser/profiles/profile.h\"\n#include \"chrome/browser/redrob/agent_entry.h\"\n#include \"components/sessions/content/session_tab_helper.h\"\n"
       count: 1
   - description: Implement the agent-task hook.
     regex:
       pattern: "void ChromeAutocompleteProviderClient::PromptPageTranslation() {\n"
-      replace: "void ChromeAutocompleteProviderClient::StartRedrobAgentTask(\n    const std::u16string& prompt) {\n  redrob::TaskStore* store = redrob::TaskStoreFactory::GetForProfile(profile_);\n  if (!store) {\n    return;\n  }\n\n  std::vector<std::string> context_refs;\n  if (auto* web_contents = GetWebContents(web_contents_getter_)) {\n    const GURL url = web_contents->GetLastCommittedURL();\n    if (url.is_valid() && url.SchemeIsHTTPOrHTTPS()) {\n      context_refs.push_back(url.spec());\n      const std::u16string title = web_contents->GetTitle();\n      if (!title.empty()) {\n        context_refs.push_back(base::UTF16ToUTF8(title));\n      }\n    }\n  }\n\n  store->StartTask(base::UTF16ToUTF8(prompt), context_refs,\n                   redrob::mojom::PermissionMode::kReadOnly,\n                   redrob::mojom::Effort::kStandard,\n                   /*model=*/std::string());\n}\n\nvoid ChromeAutocompleteProviderClient::PromptPageTranslation() {\n"
+      replace: "void ChromeAutocompleteProviderClient::StartRedrobAgentTask(\n    const std::u16string& prompt) {\n  std::optional<int> context_tab_id;\n  if (auto* web_contents = GetWebContents(web_contents_getter_)) {\n    const GURL url = web_contents->GetLastCommittedURL();\n    if (url.is_valid() && url.SchemeIsHTTPOrHTTPS()) {\n      const SessionID id = sessions::SessionTabHelper::IdForTab(web_contents);\n      if (id.is_valid()) {\n        context_tab_id = id.id();\n      }\n    }\n  }\n\n  redrob::OpenAgentChat(profile_, base::UTF16ToUTF8(prompt), context_tab_id);\n}\n\nvoid ChromeAutocompleteProviderClient::PromptPageTranslation() {\n"
       count: 1

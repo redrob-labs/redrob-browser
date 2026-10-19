@@ -8,7 +8,9 @@
 #include <memory>
 #include <vector>
 
+#include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
 #include "base/uuid.h"
 #include "chrome/browser/redrob/task_store.h"
@@ -17,9 +19,11 @@
 #include "ui/menus/simple_menu_model.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/view.h"
+#include "ui/views/view_tracker.h"
 
 class AvatarToolbarButton;
 class BrowserWindowInterface;
+class ToolbarView;
 
 namespace views {
 class BoxLayout;
@@ -92,7 +96,22 @@ class RedrobSidebarSections : public views::View,
   void ShowTabSearch();
   void StartNewTask();
   void UpdateWorkspaceButton();
-  void ShowWorkspaceMenu();
+  // Opens the workspace menu under `anchor`: the sidebar's button, or the toolbar's in horizontal mode.
+  void ShowWorkspaceMenu(views::View* anchor);
+
+  // views::View
+  void AddedToWidget() override;
+
+  // Horizontal tabs. The sidebar column is hidden then, and with it the avatar and the Settings row at its
+  // foot. Those two are put in the toolbar instead (the workspace switcher is not: tab groups show in the tab
+  // strip there). Idempotent: called from the constructor and again once this view has a widget, because the
+  // toolbar may not exist yet when the column is built.
+  void AttachToolbarAccess();
+  // Shows the toolbar pair only while tabs are horizontal, and registers whichever avatar is VISIBLE with the
+  // toolbar -- every bubble anchors to the registered one, so it must never be the hidden copy.
+  void OnTabStripModeChanged();
+  // This window's toolbar, found up the view tree. Null until this view is in the BrowserView.
+  ToolbarView* FindToolbar();
   // The tabs in this window that belong to no group. What "save these tabs as a workspace" acts on.
   std::vector<int> UngroupedTabIndices() const;
   // The saved groups a switcher should offer, in menu order. Rebuilt per menu rather than cached: the
@@ -120,6 +139,14 @@ class RedrobSidebarSections : public views::View,
   raw_ptr<views::LabelButton> new_tab_row_ = nullptr;
   bool collapsed_ = false;
 
+  // The toolbar's copy of the workspace switcher and avatar, for horizontal tabs. The VIEW is owned by the
+  // toolbar (it is the toolbar's child); this class removes it again in its destructor, because the
+  // workspace button calls back into this object.
+  views::ViewTracker toolbar_;
+  views::ViewTracker toolbar_access_;
+  views::ViewTracker toolbar_avatar_;
+  base::CallbackListSubscription mode_subscription_;
+
   std::vector<base::Uuid> menu_workspace_ids_;
   std::unique_ptr<ui::SimpleMenuModel> workspace_menu_model_;
   std::unique_ptr<views::MenuRunner> workspace_menu_runner_;
@@ -128,6 +155,7 @@ class RedrobSidebarSections : public views::View,
                           tab_groups::TabGroupSyncService::Observer>
       tab_group_observation_{this};
   base::ScopedObservation<redrob::TaskStore, redrob::TaskStore::Observer> task_observation_{this};
+  base::WeakPtrFactory<RedrobSidebarSections> weak_factory_{this};
 };
 
 }  // namespace redrob

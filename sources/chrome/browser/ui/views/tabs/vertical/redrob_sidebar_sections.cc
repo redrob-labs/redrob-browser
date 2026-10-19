@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "base/functional/bind.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -23,6 +24,7 @@
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tab_search_bubble_host.h"
 #include "chrome/common/webui_url_constants.h"
@@ -55,6 +57,7 @@
 #include "ui/views/layout/flex_layout.h"
 #include "ui/views/layout/layout_types.h"
 #include "ui/views/view_class_properties.h"
+#include "ui/views/view_utils.h"
 
 namespace redrob {
 namespace {
@@ -187,7 +190,9 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
   // persists it, and syncs it, so inventing a parallel one would mean two things the user has to keep
   // in step by hand.
   workspace_button_ = lead->AddChildView(std::make_unique<views::LabelButton>(
-      base::BindRepeating(&RedrobSidebarSections::ShowWorkspaceMenu, base::Unretained(this)),
+      base::BindRepeating(
+          [](RedrobSidebarSections* self) { self->ShowWorkspaceMenu(self->workspace_button_); },
+          base::Unretained(this)),
       std::u16string()));
   workspace_button_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   workspace_button_->SetMinSize(gfx::Size(0, sidebar_tokens::kRowHeight));
@@ -295,17 +300,136 @@ RedrobSidebarSections::RedrobSidebarSections(BrowserWindowInterface* browser) : 
     }
   }
 
+  if (browser_) {
+    if (tabs::VerticalTabStripStateController* controller =
+            tabs::VerticalTabStripStateController::From(browser_)) {
+      mode_subscription_ = controller->RegisterOnModeChanged(base::BindRepeating(
+          [](RedrobSidebarSections* self, tabs::VerticalTabStripStateController*) {
+            self->OnTabStripModeChanged();
+          },
+          base::Unretained(this)));
+    }
+  }
+  AttachToolbarAccess();
+}
+
+void RedrobSidebarSections::AddedToWidget() {
+  AttachToolbarAccess();
+}
+
+ToolbarView* RedrobSidebarSections::FindToolbar() {
+  // Up the view tree rather than BrowserView::GetBrowserViewForBrowser: that goes through the native window,
+  // which is not associated with the browser yet while the window is being built -- exactly when this runs.
+  for (views::View* view = parent(); view; view = view->parent()) {
+    if (BrowserView* browser_view = views::AsViewClass<BrowserView>(view)) {
+      return browser_view->toolbar();
+    }
+  }
+  return nullptr;
+}
+
+void RedrobSidebarSections::AttachToolbarAccess() {
+  if (!browser_ || toolbar_access_.view()) {
+    return;
+  }
+  ToolbarView* toolbar = FindToolbar();
+  if (!toolbar) {
+    return;
+  }
+
+  // The avatar, then Settings, at the toolbar's trailing edge (the app menu there is hidden). No workspace
+  // switcher here: with tabs across the top, tab groups already show as chips in the tab strip and reopen
+  // from the saved-groups button, so a second switcher beside the avatar only read as a second account.
+  auto access = std::make_unique<views::View>();
+  auto* layout = access->SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::Orientation::kHorizontal, gfx::Insets(), 4));
+  layout->set_cross_axis_alignment(views::BoxLayout::CrossAxisAlignment::kCenter);
+
+  toolbar_avatar_.SetView(access->AddChildView(std::make_unique<AvatarToolbarButton>(browser_)));
+
+  // Settings, because in horizontal mode the sidebar foot -- the product's only way into settings, there is
+  // no app menu -- is hidden with the column. Same page and same singleton-tab rule as the foot's row.
+  auto* settings = access->AddChildView(std::make_unique<views::ImageButton>(base::BindRepeating(
+      [](BrowserWindowInterface* browser) {
+        NavigateParams params(browser, GURL("chrome://redrob/settings"),
+                              ui::PAGE_TRANSITION_AUTO_BOOKMARK);
+        params.disposition = WindowOpenDisposition::SINGLETON_TAB;
+        Navigate(&params);
+      },
+      base::Unretained(browser_.get()))));
+  settings->SetImageModel(views::Button::STATE_NORMAL,
+                          ui::ImageModel::FromVectorIcon(vector_icons::kSettingsIcon,
+                                                         sidebar_tokens::kRowForeground,
+                                                         sidebar_tokens::kFaviconSize));
+  settings->SetImageHorizontalAlignment(views::ImageButton::ALIGN_CENTER);
+  settings->SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
+  settings->SetPreferredSize(gfx::Size(sidebar_tokens::kRowHeight, sidebar_tokens::kRowHeight));
+  settings->GetViewAccessibility().SetName(l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_SETTINGS));
+  settings->SetTooltipText(l10n_util::GetStringUTF16(IDS_REDROB_SIDEBAR_SETTINGS));
+  views::InstallCircleHighlightPathGenerator(settings);
+
+  access->SetProperty(views::kMarginsKey, gfx::Insets::VH(0, 4));
+  // Tracked, not owned: the toolbar owns it as a child, and the tracker clears itself if the toolbar goes
+  // first -- the two are torn down in an order neither chooses.
+  toolbar_access_.SetView(toolbar->AddChildView(std::move(access)));
+  toolbar_.SetView(toolbar);
+
+  UpdateWorkspaceButton();
+  OnTabStripModeChanged();
+  // This runs as the window is put together, BEFORE the toolbar's own Init adds back, reload and the address
+  // field -- so the pair would sit first in the row, under the navigation buttons. Moved to the end once the
+  // toolbar has its children.
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&RedrobSidebarSections::OnTabStripModeChanged,
+                                weak_factory_.GetWeakPtr()));
+}
+
+void RedrobSidebarSections::OnTabStripModeChanged() {
+  if (!browser_) {
+    return;
+  }
+  const tabs::VerticalTabStripStateController* controller =
+      tabs::VerticalTabStripStateController::From(browser_);
+  const bool vertical = !controller || controller->ShouldDisplayVerticalTabs();
+  ToolbarView* toolbar = FindToolbar();
+  if (views::View* access = toolbar_access_.view()) {
+    access->SetVisible(!vertical);
+    // Always the trailing child: the toolbar lays its row out in child order.
+    if (toolbar && access->parent() == toolbar) {
+      toolbar->ReorderChildView(access, toolbar->children().size());
+    }
+  }
+  if (!toolbar) {
+    return;
+  }
+  // The registered avatar is the one every profile bubble anchors to, so it is always the VISIBLE one.
+  AvatarToolbarButton* visible =
+      vertical ? avatar_.get() : views::AsViewClass<AvatarToolbarButton>(toolbar_avatar_.view());
+  if (visible) {
+    toolbar->SetRedrobAvatarButton(visible);
+  }
+  toolbar->InvalidateLayout();
 }
 
 RedrobSidebarSections::~RedrobSidebarSections() {
-  // The toolbar holds a raw pointer to a button THIS view owns, so it has to be told before the button goes
-  // away. Views are destroyed in an order neither of them chooses, and this moved here with the avatar -- the
-  // account row used to carry it, and leaving it behind would have left the toolbar pointing at freed memory.
-  if (browser_ && avatar_) {
+  // The toolbar holds a raw pointer to whichever avatar is registered, and both are owned by views this one
+  // does not outlive in any fixed order, so it is told before they go away.
+  // The tracked toolbar, not FindToolbar(): walking up the tree is unsafe while the window is being torn down.
+  if (auto* toolbar = views::AsViewClass<ToolbarView>(toolbar_.view())) {
+    toolbar->SetRedrobAvatarButton(nullptr);
+  } else if (browser_ && avatar_) {
     if (BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
-      if (ToolbarView* toolbar = browser_view->toolbar()) {
-        toolbar->SetRedrobAvatarButton(nullptr);
+      if (ToolbarView* fallback = browser_view->toolbar()) {
+        fallback->SetRedrobAvatarButton(nullptr);
       }
+    }
+  }
+  // The toolbar pair's buttons call back into this object, so it leaves with it.
+  if (views::View* access = toolbar_access_.view()) {
+    toolbar_avatar_.SetView(nullptr);
+    toolbar_access_.SetView(nullptr);
+    if (access->parent()) {
+      access->parent()->RemoveChildViewT(access);
     }
   }
 }
@@ -507,7 +631,10 @@ void RedrobSidebarSections::UpdateWorkspaceButton() {
                                           : IDS_REDROB_SIDEBAR_SAVE_GROUP_FOR_WORKSPACE));
 }
 
-void RedrobSidebarSections::ShowWorkspaceMenu() {
+void RedrobSidebarSections::ShowWorkspaceMenu(views::View* anchor) {
+  if (!anchor) {
+    anchor = workspace_button_;
+  }
   menu_workspace_ids_ = WorkspaceIds();
   if (!browser_) {
     return;
@@ -556,8 +683,8 @@ void RedrobSidebarSections::ShowWorkspaceMenu() {
 
   workspace_menu_runner_ = std::make_unique<views::MenuRunner>(
       workspace_menu_model_.get(), views::MenuRunner::HAS_MNEMONICS);
-  workspace_menu_runner_->RunMenuAt(GetWidget(), nullptr,
-                                    workspace_button_->GetBoundsInScreen(),
+  workspace_menu_runner_->RunMenuAt(anchor->GetWidget(), nullptr,
+                                    anchor->GetBoundsInScreen(),
                                     views::MenuAnchorPosition::kTopLeft,
                                     ui::mojom::MenuSourceType::kNone);
 }

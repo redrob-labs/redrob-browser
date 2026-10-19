@@ -65,6 +65,18 @@ export const MOCK_BROWSEROS_IMPORT_SOURCES: readonly BrowserOSImportSource[] = [
     supportedItems: ['history', 'bookmarks', 'cookies', 'passwords'],
     recommendedItems: ['history', 'bookmarks', 'cookies'],
   },
+  {
+    id: 'firefox-default',
+    displayName: 'Firefox - default-release',
+    browserName: 'Firefox',
+    profileName: 'default-release',
+    accountName: '',
+    isManaged: false,
+    kind: 'firefox',
+    passwordsViaCsv: true,
+    supportedItems: ['history', 'bookmarks', 'autofill'],
+    recommendedItems: ['history', 'bookmarks', 'autofill'],
+  },
 ]
 
 export const DEFAULT_BROWSEROS_IMPORT_SOURCE_ID =

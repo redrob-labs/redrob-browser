@@ -430,8 +430,10 @@ jobs:
     # (repo:redrob-labs@<org id>/<repo>@<id>:environment:release); any other name is refused.
     environment: release
     permissions:
-      # Read: this job only downloads the draft's asset; the publish job is the one that writes.
-      contents: read
+      # Write, not read: the asset lives on a DRAFT release, and a read-only token cannot see a
+      # draft at all (`gh release download` answers "release not found"). The job still only
+      # downloads; the publish job is the one that edits the release.
+      contents: write
       # The OIDC token `azure/login` exchanges for the Artifact Signing credential.
       id-token: write
     env:

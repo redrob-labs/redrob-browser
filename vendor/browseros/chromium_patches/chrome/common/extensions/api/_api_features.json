@@ -12,7 +12,7 @@ diff --git a/chrome/common/extensions/api/_api_features.json b/chrome/common/ext
    "browsingData": {
      "dependencies": ["permission:browsingData"],
      "contexts": ["privileged_extension"]
-@@ -865,6 +869,182 @@
+@@ -865,6 +869,202 @@
      "dependencies": ["permission:readingList"],
      "contexts": ["privileged_extension"]
    },
@@ -190,6 +190,26 @@ diff --git a/chrome/common/extensions/api/_api_features.json b/chrome/common/ext
 +  },
 +  "redrobPrivate.withdrawQueuedFollowUp": {
 +    "dependencies": ["permission:redrobPrivate.tasks"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.readMemoryFile": {
++    "dependencies": ["permission:redrobPrivate.memory"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.revertMemoryRun": {
++    "dependencies": ["permission:redrobPrivate.memory"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.runMemoryConsolidation": {
++    "dependencies": ["permission:redrobPrivate.memory"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.setMemoryHistoryInput": {
++    "dependencies": ["permission:redrobPrivate.memory"],
++    "contexts": ["privileged_extension"]
++  },
++  "redrobPrivate.writeMemoryFile": {
++    "dependencies": ["permission:redrobPrivate.memory"],
 +    "contexts": ["privileged_extension"]
 +  },
    "resourcesPrivate": [{

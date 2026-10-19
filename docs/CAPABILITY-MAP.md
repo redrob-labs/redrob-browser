@@ -38,15 +38,15 @@ Item ids in the last column refer to `docs/PRODUCT-BACKLOG.md`.
 | capability | what a person gets | us | item |
 |---|---|---|---|
 | Agent in a side panel | A conversation beside the page | yes — native, and again in our extension | — |
-| Agent in the address bar | Type intent where you already type | no | CAP-3 |
+| Agent in the address bar | Type intent where you already type | yes — `> ` or Tab on the agent row enters agent mode, a "Redrob" chip shows it, Enter opens the agent chat with the tab attached | CAP-3 |
 | Agent owns its own tabs, and they expire | The agent opens tabs and tidies up after itself | partial — we have agent tabs, no idle policy | — |
-| A global quick window | Own shortcut, own size, reachable without the browser focused | no | CAP-5 |
+| A global quick window | Own shortcut, own size, reachable without the browser focused | yes — Ctrl/Cmd+Shift+Space opens a frameless always-on-top window; shortcut preset or off in Customize | CAP-5 |
 | Selection actions the user defines | Select text or an area, get YOUR actions: prompt templates with the selection substituted, open-URL, copy. Configurable icon, name, colour, hotkey | no | CAP-10 (new) |
 | Per-site notification subscriptions the agent consumes | The agent watches a site's notifications and reacts; revocable per site | no | CAP-11 (new) |
 | A launch surface listing what it can already act in | Named apps with example prompts, instead of an empty box | no | — |
-| Work that survives the window closing | An agent task is not a chat | no | CAP-4 |
+| Work that survives the window closing | An agent task is not a chat | partial — TaskStore holds process and profile keep-alives while a task is unfinished (setting on by default), reopens agent pages in a minimized window, and notifies on done / needs-you; not yet run end to end, and the task view itself has no in-tree surface since A-7 | CAP-4 |
 | Side-panel session policy on tab change | New session per tab, or keep the session | no | — |
-| Task notifications, separable | Needs-attention / task done / routine done, independently | no | — |
+| Task notifications, separable | Needs-attention / task done / routine done, independently | partial — needs-you (with Allow / Decline) and done / failed are raised by TaskStore; not separately switchable | — |
 | Completion sound | Including a custom file | no | — |
 
 ## 3. What the agent can actually do
@@ -56,9 +56,9 @@ Item ids in the last column refer to `docs/PRODUCT-BACKLOG.md`.
 | Code as the tool interface | The model writes a script instead of calling one tool at a time | yes — ours reaches MCP servers | — |
 | Typed domain objects in that script | First-class handles for the page, the screen, the mail account, the vault — not a tool list | no | CAP-12 (new) |
 | A real document toolchain in that script | Read AND write Word, Excel, PowerPoint, PDF with the actual libraries | no | CAP-13 (new) |
-| Reusable skills as data | A folder with instructions; the engine already loads exactly this shape | partial — loader exists, we ship none | CAP-1 |
-| Skills that arm themselves | Frontmatter naming URL patterns and keywords, so a skill loads when the tab or prompt matches | no | CAP-2 |
-| A skill that writes skills | Turn a repeated instruction into a saved one | no | CAP-1 |
+| Reusable skills as data | A folder with instructions; the engine already loads exactly this shape | yes — ten site skills ship in the engine (redrob-code `packages/core/src/plugin/skill/browser/`) | CAP-1 |
+| Skills that arm themselves | Frontmatter naming URL patterns and keywords, so a skill loads when the tab or prompt matches | yes — engine arms on `urls:`/`keywords:`; the browser sends `redrob_context.page_url` (task_store.cc `RedrobContext`) | CAP-2 |
+| A skill that writes skills | Turn a repeated instruction into a saved one | yes — engine built-in `skill-writer` | CAP-1 |
 | Curated tool-server presets | Named presets for desktop apps, not a blank server form | no | CAP-14 (new) |
 | Tool servers over local process and HTTP, with per-server tool inventories | Bring your own tools, and see which of them are live | partial — we support MCP; no inventory or presets | — |
 | Solving a human-verification challenge | The agent gets past a checkbox instead of stopping | no | — |
@@ -85,12 +85,12 @@ Item ids in the last column refer to `docs/PRODUCT-BACKLOG.md`.
 | Consolidation runs are listed, inspectable and revertible, and can be triggered by hand | Memory you can audit and undo | no | CAP-19 |
 | Context compaction as a USER setting | Reserve and keep-recent token budgets the user controls | no | — |
 | Retry policy as a USER setting | Attempts and backoff the user controls | partial — retry exists in the engine, not exposed | — |
-| Connect a subscription you already pay for | Reuse an existing paid plan; your own quota is spent | partial — the engine already has an OAuth path; the browser does not expose it | SUB-1..2 |
-| Own API key | Behind the subscriptions, stored by the engine | partial — engine yes, browser no | SUB-3 |
+| Connect a subscription you already pay for | Reuse an existing paid plan; your own quota is spent | partial — Settings lists the engine's providers and signs in through the engine's OAuth, and the engine store now lives in the profile; the SUB-2 acceptance (the provider's own usage moves) has not been run on a real account | SUB-1..2 |
+| Own API key | Behind the subscriptions, stored by the engine | partial — behind the sign-in buttons in Settings, handed to the engine's store and never read back; not yet run end to end | SUB-3 |
 | A separate model for image generation | Not the same model as chat | no | — |
 | The user edits the model catalogue | Add and remove models | no | — |
 | Model pins that migrate | An old pin is rewritten, not left broken | no | — |
-| Plan and usage, with the source stated | What is connected and what was spent | no | SUB-4 |
+| Plan and usage, with the source stated | What is connected and what was spent | partial — shows the Console organisation and where each credential came from; the engine has no usage endpoint, so Redrob links to Console billing and other providers say usage is not reported | SUB-4 |
 | Usage statistics | Sessions, last active, weekly average, an activity heatmap | no | CAP-20 (new) |
 | Commercial state in the UI | Trial ended, payment failed, billing expired — where a person will see it | no | — |
 | Referral | An invite link that credits both sides | no | — |
@@ -100,10 +100,10 @@ Item ids in the last column refer to `docs/PRODUCT-BACKLOG.md`.
 | capability | what a person gets | us | item |
 |---|---|---|---|
 | Import from other browsers | Bookmarks, history, cookies | yes — six Chromium-family browsers | — |
-| Import from Firefox and Safari | The two families we cannot read today | no | ONB-5 |
+| Import from Firefox and Safari | Firefox bookmarks, history and form data; Safari bookmarks and history (macOS). Saved passwords go by CSV export into the password manager, which the import step explains with a button | yes — upstream's own importers, offered by the onboarding import step; not yet proved against a real profile | ONB-5 |
 | Import a browser's ENCRYPTED store | Saved passwords and cookies protected by the OS. Needs a privileged service; the platform's app-bound encryption already ships with our fork, we just have nothing that uses it | no | ONB-5 |
-| Import progress, cancellable | A long import you can watch and stop | no | ONB-4 |
-| A credential vault | Login, passkey, TOTP, identity, card, note, SSH key, API credential; biometric unlock | no — Chromium's own store is our default | CAP-9 |
+| Import progress, cancellable | A long import you can watch and stop | yes — overall bar plus one bar per item type (done / copying / waiting; the importer reports item boundaries, not percentages) and a Cancel that stops the importer | ONB-4 |
+| A credential vault | Login, passkey, TOTP, identity, card, note, SSH key, API credential; biometric unlock | partial — no second vault by design: the agent signs in with LOGINS from the profile's own password store (`login` tool, fill by the password manager, the model sees a username only), behind a policy (always / while unlocked by OS re-auth, default / never), a per-site list and an AI sign-in history in Settings; codes, passkeys and CAPTCHAs are handed to the user. Passkey, TOTP, card, note, SSH and API-credential types are not built (`docs/CREDENTIALS.md`) | CAP-9 |
 | First-class support for OTHER password managers | The product works with the manager you already use | no | — |
 | Multiple profiles with a switcher | Separate identities in one install | partial — Chromium profiles exist; no surface of ours | — |
 | Sync across devices | partial everywhere: theirs is experimental and OFF; ours is unbuilt | no | — |

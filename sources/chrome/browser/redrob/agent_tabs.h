@@ -45,7 +45,29 @@ class AgentTabs {
   // report how many tabs a task has open.
   static std::optional<tab_groups::TabGroupId> GroupForProfile(Profile* profile);
 
+  // CAP-4. The same as OpenInAgentGroup, except that a profile with no ordinary window gets one: a new
+  // window, shown INACTIVE and then minimized, so a task whose window the user closed can keep working
+  // in real tabs without taking the screen. Only called when the user has left "keep running tasks after
+  // closing windows" on -- that setting is the request for exactly this window, which is why the plain
+  // OpenInAgentGroup still refuses to conjure one.
+  static content::WebContents* OpenInAgentGroupCreatingWindow(Profile* profile,
+                                                             const GURL& url,
+                                                             const std::string& group_title);
+
+  // True when this profile has a tabbed window the USER opened -- one that is not a window
+  // OpenInAgentGroupCreatingWindow made for a task. "Task done" is announced as a system notification
+  // only when this is false, because a person with a window open is already looking at the browser.
+  static bool HasUserWindow(Profile* profile);
+
+  // Brings `contents` to the front: its window activated (restored if minimized) and its tab selected.
+  // False when the contents is not in a tab strip any more.
+  static bool Reveal(content::WebContents* contents);
+
  private:
+  // Groups the tab at `contents` under the profile's agent group in whatever window holds it.
+  static content::WebContents* GroupAgentTab(Profile* profile,
+                                             content::WebContents* contents,
+                                             const std::string& group_title);
   static bool IsUrlAgentMayOpen(const GURL& url);
 };
 
