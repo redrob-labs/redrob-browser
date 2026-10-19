@@ -1384,6 +1384,18 @@ void TaskStore::CancelTask(const std::string& task_id) {
   // A confirmation the user never answered goes with the task: there is nothing left to allow.
   it->second->awaiting_confirmation.reset();
   if (auto conversation = conversations_.find(task_id); conversation != conversations_.end()) {
+    // Answered in the history, not just dropped: a later follow-up on this task would otherwise send the
+    // engine a tool call with no reply.
+    if (const std::optional<ProposedToolCall>& awaiting = conversation->second.awaiting) {
+      base::DictValue message =
+          TextMessage("tool", "The user stopped the task before answering, so it was not done.");
+      message.Set("tool_call_id", awaiting->id);
+      message.Set("name", awaiting->name);
+      conversation->second.messages.Append(std::move(message));
+      if (conversation->second.pending_tools > 0) {
+        --conversation->second.pending_tools;
+      }
+    }
     conversation->second.awaiting.reset();
   }
   if (active_task_id_ == task_id) {
@@ -1420,6 +1432,19 @@ mojom::FollowUpOutcome TaskStore::SendFollowUp(const std::string& task_id,
   }
 
   const bool interrupt = mode == mojom::FollowUpMode::kInterrupt;
+  // Interrupting a task that is waiting on a guard-mode confirmation declines that confirmation and takes
+  // the new instruction at the boundary the decline creates. Starting a turn directly would send the
+  // engine a history holding a tool call with no answer, which it rejects.
+  if (interrupt && conversation->second.awaiting.has_value()) {
+    if (conversation->second.queued.size() >= kMaxQueuedFollowUps) {
+      return mojom::FollowUpOutcome::kRejected;
+    }
+    conversation->second.queued.push_back(prompt);
+    task->second->queued.push_back(prompt);
+    AddStep(task_id, mojom::StepKind::kSteered, "Steered: " + prompt);
+    AnswerConfirmation(task_id, /*allow=*/false);
+    return mojom::FollowUpOutcome::kInterrupted;
+  }
   if (!interrupt) {
     // Queued, including for kAuto: pressing Enter on a running task should not throw away the work it
     // is in the middle of. Interrupting is a thing the user asks for by name.

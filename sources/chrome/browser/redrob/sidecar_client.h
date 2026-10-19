@@ -34,8 +34,9 @@ namespace redrob {
 //  * loopback only, on a port the OS chose. Nothing routable is ever bound.
 //  * Basic credentials generated per launch, held here and never given to a renderer.
 //  * the API key is passed in the child's environment, not on a command line where `ps` would show it.
-//  * the sidecar's storage is redirected to a per-launch temporary path, so a browser profile and an
-//    Office session cannot see each other's sessions.
+//  * the sidecar's storage is redirected to a directory inside the browser profile (or, when the owner
+//    sets none, a per-launch temporary path), so a browser profile and an Office session cannot see
+//    each other's sessions -- and a provider the user connected survives the next launch (SUB-2).
 //
 // This class does not parse model output and does not execute tools. The sidecar proposes tool calls;
 // deciding which of them the browser is willing to run is the caller's business, and that division is
