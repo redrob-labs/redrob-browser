@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/session_restore_infobar/session_restore_infobar_delegate.cc b/chrome/browser/ui/views/session_restore_infobar/session_restore_infobar_delegate.cc
-index 75ffc714223b2443ae89e08cd6d8418d932c864b..e54794ba9d7afe41749c5321b5b85c60bbb81a25 100644
+index 75ffc714223b2..e54794ba9d7af 100644
 --- a/chrome/browser/ui/views/session_restore_infobar/session_restore_infobar_delegate.cc
 +++ b/chrome/browser/ui/views/session_restore_infobar/session_restore_infobar_delegate.cc
 @@ -16,16 +16,14 @@

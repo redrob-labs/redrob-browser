@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/chrome_content_browser_client_navigation_throttles.cc b/chrome/browser/chrome_content_browser_client_navigation_throttles.cc
-index cba0d32176eb2bfd1f36c9dcb336122195099d31..e53838e5cab50aca5adedbd88f6be46c2f3ddc52 100644
+index cba0d32176eb2..e53838e5cab50 100644
 --- a/chrome/browser/chrome_content_browser_client_navigation_throttles.cc
 +++ b/chrome/browser/chrome_content_browser_client_navigation_throttles.cc
 @@ -95,6 +95,7 @@

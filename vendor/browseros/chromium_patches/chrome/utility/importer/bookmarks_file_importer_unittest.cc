@@ -1,5 +1,5 @@
 diff --git a/chrome/utility/importer/bookmarks_file_importer_unittest.cc b/chrome/utility/importer/bookmarks_file_importer_unittest.cc
-index 4f49f1fb79ffc63820b56e4d2dfbd5e70d0ee26e..b68f1600421eaedfcff9e408d20dc96ab3fc7ef9 100644
+index 4f49f1fb79ffc..b68f1600421ea 100644
 --- a/chrome/utility/importer/bookmarks_file_importer_unittest.cc
 +++ b/chrome/utility/importer/bookmarks_file_importer_unittest.cc
 @@ -17,6 +17,7 @@

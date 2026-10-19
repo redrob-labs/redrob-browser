@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/devtools/protocol/browser_handler.cc b/chrome/browser/devtools/protocol/browser_handler.cc
-index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a2889fbc5d3 100644
+index 6af060d287872..be975cbaabf15 100644
 --- a/chrome/browser/devtools/protocol/browser_handler.cc
 +++ b/chrome/browser/devtools/protocol/browser_handler.cc
 @@ -4,24 +4,42 @@
@@ -45,7 +45,7 @@ index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a28
  #include "content/public/browser/browser_task_traits.h"
  #include "content/public/browser/browser_thread.h"
  #include "content/public/browser/devtools_agent_host.h"
-@@ -35,6 +52,19 @@ using protocol::Response;
+@@ -35,6 +53,19 @@ using protocol::Response;
  
  namespace {
  
@@ -65,7 +65,7 @@ index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a28
  BrowserWindow* GetBrowserWindow(int window_id) {
    BrowserWindow* result = nullptr;
    ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
-@@ -76,6 +106,398 @@ std::unique_ptr<protocol::Browser::Bounds> GetBrowserWindowBounds(
+@@ -76,6 +107,398 @@ std::unique_ptr<protocol::Browser::Bounds> GetBrowserWindowBounds(
        .Build();
  }
  
@@ -464,7 +464,7 @@ index 6af060d287872bf2ae881ff013c124eb7508c839..f2de902c3451c2822aaacc633c6c1a28
  }  // namespace
  
  BrowserHandler::BrowserHandler(protocol::UberDispatcher* dispatcher,
-@@ -126,6 +548,67 @@ Response BrowserHandler::GetWindowForTarget(
+@@ -126,6 +549,67 @@ Response BrowserHandler::GetWindowForTarget(
    return Response::Success();
  }
  

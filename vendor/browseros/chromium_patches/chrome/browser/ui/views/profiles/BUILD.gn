@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/profiles/BUILD.gn b/chrome/browser/ui/views/profiles/BUILD.gn
-index 65a890b86c0c0369943c3db3748311d0fc160b36..fd6a2ce08823194e1244d9bb305a5922dc36cb6f 100644
+index 65a890b86c0c0..fd6a2ce088231 100644
 --- a/chrome/browser/ui/views/profiles/BUILD.gn
 +++ b/chrome/browser/ui/views/profiles/BUILD.gn
 @@ -927,7 +927,11 @@ if (enable_dice_support) {

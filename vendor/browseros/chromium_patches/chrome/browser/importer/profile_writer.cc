@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/importer/profile_writer.cc b/chrome/browser/importer/profile_writer.cc
-index 35842f390f52847f831c29b11c4a3bfad78c0e8a..15d16e897247878bd912e61f5f5725244e4f4f31 100644
+index 35842f390f528..15d16e8972478 100644
 --- a/chrome/browser/importer/profile_writer.cc
 +++ b/chrome/browser/importer/profile_writer.cc
 @@ -11,6 +11,7 @@

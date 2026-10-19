@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
-index 774e32188161b70bd96fddd794c652cd7c1067e9..7a832c3b792038586038afb03f5aabea7f896c84 100644
+index 774e32188161b..7a832c3b79203 100644
 --- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
 +++ b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
 @@ -14,6 +14,7 @@

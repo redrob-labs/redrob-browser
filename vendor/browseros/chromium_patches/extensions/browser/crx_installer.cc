@@ -1,5 +1,5 @@
 diff --git a/extensions/browser/crx_installer.cc b/extensions/browser/crx_installer.cc
-index f683c189470a2a9234398cdbde0833800877e764..5061adbcaec3924876c132c9ed97b1d2ff7b58c6 100644
+index f683c189470a2..5061adbcaec39 100644
 --- a/extensions/browser/crx_installer.cc
 +++ b/extensions/browser/crx_installer.cc
 @@ -1254,9 +1254,20 @@ void CrxInstaller::ConfirmReEnable() {

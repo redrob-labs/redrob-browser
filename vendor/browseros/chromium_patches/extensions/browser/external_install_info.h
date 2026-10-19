@@ -1,5 +1,5 @@
 diff --git a/extensions/browser/external_install_info.h b/extensions/browser/external_install_info.h
-index 44d216fb33fa837ec311f9c5594f7a286ef5026e..cef6df11da78279b546268bd7fd841012eab8509 100644
+index 44d216fb33fa8..cef6df11da782 100644
 --- a/extensions/browser/external_install_info.h
 +++ b/extensions/browser/external_install_info.h
 @@ -14,6 +14,16 @@

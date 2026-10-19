@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/profiles/profile_window.h b/chrome/browser/profiles/profile_window.h
-index c15abac6889a1f7b642bca80ce4aa97a42406738..cb4b66df594f048bdfc4a1dcca0ca667a34b8cc1 100644
+index c15abac6889a1..cb4b66df594f0 100644
 --- a/chrome/browser/profiles/profile_window.h
 +++ b/chrome/browser/profiles/profile_window.h
 @@ -5,6 +5,8 @@

@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/chrome_browser_main_win.cc b/chrome/browser/chrome_browser_main_win.cc
-index 14bf87c503bb167c79f838b82fcf4810ddede740..91c94b2bc86f7264c52806de7a010ac94150d987 100644
+index 14bf87c503bb1..91c94b2bc86f7 100644
 --- a/chrome/browser/chrome_browser_main_win.cc
 +++ b/chrome/browser/chrome_browser_main_win.cc
 @@ -58,6 +58,7 @@

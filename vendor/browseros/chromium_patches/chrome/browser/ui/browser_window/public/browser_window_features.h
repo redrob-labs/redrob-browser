@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/browser_window/public/browser_window_features.h b/chrome/browser/ui/browser_window/public/browser_window_features.h
-index 309eced7f092e28c5c9f7119696860068d626ed9..f15b13500665faf520cffa05ffb9e9315e1228ef 100644
+index 309eced7f092e..f15b13500665f 100644
 --- a/chrome/browser/ui/browser_window/public/browser_window_features.h
 +++ b/chrome/browser/ui/browser_window/public/browser_window_features.h
 @@ -112,6 +112,7 @@ class TabMenuModelDelegate;

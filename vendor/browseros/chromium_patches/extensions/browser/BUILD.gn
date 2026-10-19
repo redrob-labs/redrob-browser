@@ -1,5 +1,5 @@
 diff --git a/extensions/browser/BUILD.gn b/extensions/browser/BUILD.gn
-index 1486919f4f9ad15ff8ed300f5185b98d534d76a7..87610e68d5b6bbb3e9cb084fa2d4f15acefbb7e6 100644
+index 1486919f4f9ad..87610e68d5b6b 100644
 --- a/extensions/browser/BUILD.gn
 +++ b/extensions/browser/BUILD.gn
 @@ -616,6 +616,7 @@ source_set("browser_sources") {

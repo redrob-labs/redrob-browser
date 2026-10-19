@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/pdf/infobar/pdf_infobar_delegate.cc b/chrome/browser/ui/pdf/infobar/pdf_infobar_delegate.cc
-index 6a2b16400ffe1358bd790f1b8b8082d0a2a21ab0..d99305cf7fd5ba9337805342690a503e6a277e9c 100644
+index 6a2b16400ffe1..d99305cf7fd5b 100644
 --- a/chrome/browser/ui/pdf/infobar/pdf_infobar_delegate.cc
 +++ b/chrome/browser/ui/pdf/infobar/pdf_infobar_delegate.cc
 @@ -12,10 +12,9 @@

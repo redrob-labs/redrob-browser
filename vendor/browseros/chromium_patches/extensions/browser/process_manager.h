@@ -1,5 +1,5 @@
 diff --git a/extensions/browser/process_manager.h b/extensions/browser/process_manager.h
-index 285cff03bba8e09e0225c36b2dd176cfc7243a2c..b7ddd2946ebab58f83c2c0f4c369ddc719f2fd11 100644
+index 285cff03bba8e..b7ddd2946ebab 100644
 --- a/extensions/browser/process_manager.h
 +++ b/extensions/browser/process_manager.h
 @@ -434,6 +434,11 @@ class ProcessManager : public KeyedService,

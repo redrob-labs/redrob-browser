@@ -1,5 +1,5 @@
 diff --git a/base/threading/thread_restrictions.h b/base/threading/thread_restrictions.h
-index db88f6ab7629f41a1c51945c570a82c35e9ef723..4dbd375f1d10a3f0caa0b7fc78c49d5fa2c7f91a 100644
+index db88f6ab7629f..4dbd375f1d10a 100644
 --- a/base/threading/thread_restrictions.h
 +++ b/base/threading/thread_restrictions.h
 @@ -206,6 +206,9 @@ namespace scheduler {

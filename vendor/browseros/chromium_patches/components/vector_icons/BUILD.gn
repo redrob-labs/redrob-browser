@@ -1,5 +1,5 @@
 diff --git a/components/vector_icons/BUILD.gn b/components/vector_icons/BUILD.gn
-index 74b4515d8820387320813371a396073d35a21f7e..e059ff229f7fefb603f7cb12ac5f10e3dd64befc 100644
+index 74b4515d88203..e059ff229f7fe 100644
 --- a/components/vector_icons/BUILD.gn
 +++ b/components/vector_icons/BUILD.gn
 @@ -92,6 +92,7 @@ if (current_toolchain == default_toolchain) {

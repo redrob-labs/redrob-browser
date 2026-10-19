@@ -1,5 +1,5 @@
 diff --git a/tools/metrics/histograms/metadata/extensions/enums.xml b/tools/metrics/histograms/metadata/extensions/enums.xml
-index 460630d8491054408e0e404cb576d147822515a9..473354944833273e0d3c5ef30282b2973f007b31 100644
+index 460630d849105..4733549448332 100644
 --- a/tools/metrics/histograms/metadata/extensions/enums.xml
 +++ b/tools/metrics/histograms/metadata/extensions/enums.xml
 @@ -2921,6 +2921,33 @@ Called by update_extension_histograms.py.-->

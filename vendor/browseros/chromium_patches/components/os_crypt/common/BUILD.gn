@@ -1,5 +1,5 @@
 diff --git a/components/os_crypt/common/BUILD.gn b/components/os_crypt/common/BUILD.gn
-index 10db0687101b69542f9dd33592d0655c7343e3c8..cd8867bee10c5ac1e8ea2e56e9543de79667d18e 100644
+index 10db0687101b6..cd8867bee10c5 100644
 --- a/components/os_crypt/common/BUILD.gn
 +++ b/components/os_crypt/common/BUILD.gn
 @@ -2,6 +2,9 @@

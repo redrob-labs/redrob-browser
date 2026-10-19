@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/profiles/profile_management_flow_controller.cc b/chrome/browser/ui/views/profiles/profile_management_flow_controller.cc
-index daa3aca3add5f627304b9b2818067be10a119a2c..1f4efe21614b77cbec837316fec0fd7bf4cda5f4 100644
+index daa3aca3add5f..1f4efe21614b7 100644
 --- a/chrome/browser/ui/views/profiles/profile_management_flow_controller.cc
 +++ b/chrome/browser/ui/views/profiles/profile_management_flow_controller.cc
 @@ -4,6 +4,9 @@

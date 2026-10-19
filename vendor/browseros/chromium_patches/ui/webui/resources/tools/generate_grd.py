@@ -1,5 +1,5 @@
 diff --git a/ui/webui/resources/tools/generate_grd.py b/ui/webui/resources/tools/generate_grd.py
-index 7ff7e7e99304817095fbea3d3a3d29ce71e2492c..9652872d48345d41440929f86a58a096dfe961ae 100644
+index 7ff7e7e993048..9652872d48345 100644
 --- a/ui/webui/resources/tools/generate_grd.py
 +++ b/ui/webui/resources/tools/generate_grd.py
 @@ -37,6 +37,10 @@
