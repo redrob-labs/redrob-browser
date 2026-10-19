@@ -20,6 +20,8 @@
 #include "ui/views/widget/widget_observer.h"
 
 class Profile;
+class ScopedKeepAlive;
+class ScopedProfileKeepAlive;
 
 namespace views {
 class Widget;
@@ -96,6 +98,11 @@ class QuickWindowService : public KeyedService,
 
   std::unique_ptr<views::WidgetDelegate> widget_delegate_;
   std::unique_ptr<views::Widget> widget_;
+  // Held while the window exists: with no browser window open, the quick window is otherwise the only
+  // thing on screen and nothing keeps the process (or the profile) from exiting under it. Same origins
+  // the surviving-task keep-alive uses (TaskStore::UpdateKeepAlive).
+  std::unique_ptr<ScopedKeepAlive> keep_alive_;
+  std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive_;
 
   // Separate from `weak_factory_` because invalidating it is how a portal binding is withdrawn, and
   // that must not also cancel the window's own close callbacks.
