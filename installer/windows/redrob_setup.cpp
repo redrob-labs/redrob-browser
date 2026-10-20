@@ -928,7 +928,9 @@ static bool BrowserRunning(const std::wstring& appDir) {
   bool found = false;
   PROCESSENTRY32W pe = {sizeof(pe)};
   for (BOOL ok = Process32FirstW(snap, &pe); ok && !found; ok = Process32NextW(snap, &pe)) {
-    if (lstrcmpiW(pe.szExeFile, L"chrome.exe") != 0) continue;
+    // Redrob: redrob-browser.exe since 0.5; chrome.exe is an install from before the rename.
+    if (lstrcmpiW(pe.szExeFile, L"redrob-browser.exe") != 0 &&
+        lstrcmpiW(pe.szExeFile, L"chrome.exe") != 0) continue;
     HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
     if (!h) continue;
     wchar_t path[MAX_PATH];
@@ -955,7 +957,7 @@ void SetupApp::EnsureBrowserLaunched() {
     if (BrowserRunning(appDir)) return;
     Sleep(250);
   }
-  const std::wstring exe = appDir + L"chrome.exe";
+  const std::wstring exe = appDir + L"redrob-browser.exe";
   if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES) return;
   ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, appDir.c_str(), SW_SHOWNORMAL);
 }

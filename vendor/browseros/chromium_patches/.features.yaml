@@ -678,6 +678,18 @@ features:
       - components/os_crypt/async/browser/freedesktop_secret_key_provider.cc
       - components/os_crypt/async/browser/freedesktop_secret_key_provider.h
 
+  redrob-windows-exe-name:
+    description: "chore: the Windows browser executable is redrob-browser.exe"
+    files:
+      - build/win/reorder-imports.py
+      - chrome/app/chrome_exe.ver
+      - chrome/browser/safe_browsing/incident_reporting/binary_integrity_analyzer_win.cc
+      - chrome/chrome_proxy/chrome_proxy_main_win.cc
+      - chrome/installer/launcher_support/chrome_launcher_support.cc
+      - chrome/installer/setup/install_worker.cc
+      - chrome/installer/setup/setup_constants.cc
+      - chrome/tools/build/win/FILES.cfg
+
   redrob-build:
     description: "build: redrob's build configuration"
     files:

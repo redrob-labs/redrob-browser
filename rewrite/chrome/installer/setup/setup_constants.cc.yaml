@@ -1,0 +1,16 @@
+# Redrob: the Windows browser executable is redrob-browser.exe, not chrome.exe.
+#
+# Upstream names it chrome.exe on every build, branded or not. The portable zip used to ship a copy
+# under our name beside the original, and Task Manager, the file's properties and the firewall all
+# said chrome.exe. Every place that names the file is one rule in this set; chrome.dll keeps its name
+# because nothing user-facing shows it.
+#
+# Windows reads <exe name>.VisualElementsManifest.xml for the Start menu tile, so the manifest
+# follows the executable's name or the tile loses its colours and logo.
+
+substitutions:
+  - description: |
+      The tile manifest is keyed by the executable's name.
+    regex:
+      pattern: "const wchar_t kVisualElementsManifest[] = L\"chrome.VisualElementsManifest.xml\";"
+      replace: "const wchar_t kVisualElementsManifest[] = L\"redrob-browser.VisualElementsManifest.xml\";"
