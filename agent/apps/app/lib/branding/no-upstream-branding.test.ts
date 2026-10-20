@@ -26,13 +26,6 @@ const EXTENSIONS = /\.(ts|tsx|html)$/
 
 // Lines that name an upstream host for a functional reason, with that reason.
 const ALLOWED: Record<string, string> = {
-  // The upstream account site's origin, kept so its pages can still reach
-  // app.html (web_accessible_resources). Never shown, never linked.
-  'lib/constants/productWebHost.ts':
-    "export const PRODUCT_WEB_HOST = 'browseros.com'",
-  // No version is listed in CHANGELOG_VERSIONS, so this is never opened.
-  'lib/changelog/changelog-config.ts':
-    "const CHANGELOG_BASE_URL = 'https://docs.browseros.com/changelog'",
   // Developer tooling: where web-ext looks for an installed binary on macOS.
   'web-ext.config.ts':
     "'/Applications/BrowserOS.app/Contents/MacOS/BrowserOS',",
