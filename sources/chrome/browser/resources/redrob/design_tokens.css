@@ -1,6 +1,6 @@
 /* VENDORED FROM THE REDROB DESIGN SYSTEM -- DO NOT EDIT. */
-/* source: @redrob-labs/ui@1.3.1  dist/styles/tokens.css */
-/* commit: 49f54c9b33855e4e4442aa8e10c8c400529f4303 */
+/* source: @redrob-labs/ui@1.8.0  dist/styles/tokens.css */
+/* commit: 865233123cbdc88724f0eb65c3c9d554ad953841 */
 /* */
 /* Regenerate with: python3 scripts/vendor_design_system.py --update */
 /* A value changed here is a value that disagrees with every other Redrob product. */
@@ -157,11 +157,11 @@
   --product-code-6: #02a252; --product-code-7: #00783b; --product-code-8: #005d2c; --product-code-9: #00441f; --product-code-10: #002a10;
   --product-code-wash: var(--product-code-1); --product-code-fill: var(--product-code-2); --product-code-line: var(--product-code-3);
   --product-code-beyond-light: linear-gradient(130deg, #3abe6c 75%, #97efaf 89%, #e9fded 100%); --product-code-beyond-brand: linear-gradient(130deg, #5ddb87 75%, #3abe6c 89%, #02a252 100%); --product-code-beyond-deep: linear-gradient(130deg, #02a252 75%, #00783b 100%);
-  --product-desk: #d87101;
-  --product-desk-1: #fff5ee; --product-desk-2: #ffe6d5; --product-desk-3: #ffcba8; --product-desk-4: #ffa664; --product-desk-5: #eb8227;
-  --product-desk-6: #d87101; --product-desk-7: #964d00; --product-desk-8: #763b00; --product-desk-9: #582a00; --product-desk-10: #371800;
-  --product-desk-wash: var(--product-desk-1); --product-desk-fill: var(--product-desk-2); --product-desk-line: var(--product-desk-3);
-  --product-desk-beyond-light: linear-gradient(130deg, #eb8227 75%, #ffcba8 89%, #fff5ee 100%); --product-desk-beyond-brand: linear-gradient(130deg, #ffa664 75%, #eb8227 89%, #d87101 100%); --product-desk-beyond-deep: linear-gradient(130deg, #d87101 75%, #964d00 100%);
+  --product-cowork: #d87101;
+  --product-cowork-1: #fff5ee; --product-cowork-2: #ffe6d5; --product-cowork-3: #ffcba8; --product-cowork-4: #ffa664; --product-cowork-5: #eb8227;
+  --product-cowork-6: #d87101; --product-cowork-7: #964d00; --product-cowork-8: #763b00; --product-cowork-9: #582a00; --product-cowork-10: #371800;
+  --product-cowork-wash: var(--product-cowork-1); --product-cowork-fill: var(--product-cowork-2); --product-cowork-line: var(--product-cowork-3);
+  --product-cowork-beyond-light: linear-gradient(130deg, #eb8227 75%, #ffcba8 89%, #fff5ee 100%); --product-cowork-beyond-brand: linear-gradient(130deg, #ffa664 75%, #eb8227 89%, #d87101 100%); --product-cowork-beyond-deep: linear-gradient(130deg, #d87101 75%, #964d00 100%);
   --product-office: #fe4d3e;
   --product-office-1: #fff4f2; --product-office-2: #ffe4e0; --product-office-3: #ffc8c0; --product-office-4: #ffa193; --product-office-5: #ff6c5b;
   --product-office-6: #fe4d3e; --product-office-7: #b81610; --product-office-8: #950001; --product-office-9: #6f0001; --product-office-10: #470000;
@@ -241,7 +241,7 @@
   --product-router-wash: var(--product-router-10); --product-router-fill: var(--product-router-9); --product-router-line: var(--product-router-8);
   --product-chat-wash: var(--product-chat-10); --product-chat-fill: var(--product-chat-9); --product-chat-line: var(--product-chat-8);
   --product-code-wash: var(--product-code-10); --product-code-fill: var(--product-code-9); --product-code-line: var(--product-code-8);
-  --product-desk-wash: var(--product-desk-10); --product-desk-fill: var(--product-desk-9); --product-desk-line: var(--product-desk-8);
+  --product-cowork-wash: var(--product-cowork-10); --product-cowork-fill: var(--product-cowork-9); --product-cowork-line: var(--product-cowork-8);
   --product-office-wash: var(--product-office-10); --product-office-fill: var(--product-office-9); --product-office-line: var(--product-office-8);
   --product-browser-wash: var(--product-browser-10); --product-browser-fill: var(--product-browser-9); --product-browser-line: var(--product-browser-8);
   --product-design-wash: var(--product-design-10); --product-design-fill: var(--product-design-9); --product-design-line: var(--product-design-8);
