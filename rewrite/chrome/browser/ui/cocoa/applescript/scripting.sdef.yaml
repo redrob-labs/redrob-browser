@@ -1,0 +1,11 @@
+# The AppleScript dictionary's suite, as Script Editor shows it.
+#
+# Script Editor lists the suite by this name ("Chromium Suite") under our app. Only the human-readable
+# name and description change; the four-letter code `CrSu` is what scripts bind to and stays.
+
+substitutions:
+  - description: |
+      Name the suite after the product.
+    regex:
+      pattern: "<suite name=\"Chromium Suite\" code=\"CrSu\" description=\"Common classes and commands for Chrome.\">"
+      replace: "<suite name=\"Redrob Suite\" code=\"CrSu\" description=\"Common classes and commands for Redrob.\">"

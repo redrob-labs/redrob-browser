@@ -666,6 +666,18 @@ features:
       - chrome/installer/linux/debian/additional_deps
       - chrome/installer/linux/debian/build_repo_package.py
 
+  redrob-brand-os:
+    description: "chore: redrob's name where the OS shows the browser (desktop id, icon, man, AppleScript)"
+    files:
+      - chrome/app/resources/manpage.1.in
+      - chrome/browser/shell_integration_linux.cc
+      - chrome/browser/ui/cocoa/applescript/scripting.sdef
+      - chrome/common/channel_info_posix.cc
+      - chrome/installer/linux/common/appdata.xml.template
+      - chrome/installer/linux/debian/control.template
+      - components/os_crypt/async/browser/freedesktop_secret_key_provider.cc
+      - components/os_crypt/async/browser/freedesktop_secret_key_provider.h
+
   redrob-build:
     description: "build: redrob's build configuration"
     files:

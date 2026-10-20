@@ -1,0 +1,11 @@
+# The .deb control file: give the package a Homepage.
+#
+# `apt show redrob-browser` and every package manager GUI read Homepage from here. Upstream leaves it
+# out; PRODUCTURL (chromium-browser.info) already holds our site.
+
+substitutions:
+  - description: |
+      Add the Homepage field from PRODUCTURL.
+    regex:
+      pattern: "Architecture: @@architecture\n"
+      replace: "Architecture: @@architecture\nHomepage: @@PRODUCTURL\n"
