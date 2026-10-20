@@ -1,4 +1,4 @@
-# Fast checks, on every push and pull request.
+# Fast checks, on every pull request (no push trigger: a merge to develop/main is a PR that already passed).
 #
 # Deliberately does NOT build the browser. A Chromium build needs 40-60 GB of disk, tens of GB of RAM and
 # hours of CPU; a GitHub-hosted runner has 14 GB of disk, 16 GB of RAM and a 6-hour job ceiling. A workflow
@@ -12,10 +12,8 @@
 name: checks
 
 on:
-  push:
-    branches: ["**"]
-    tags-ignore: ["**"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,14 +25,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The default fetch-depth of 1 is fine: every check reads the working tree, not history.
-          fetch-depth: 1
+          # Depth 2 so the PR merge commit can be compared with its first parent (the base).
+          fetch-depth: 2
+
+      - name: changes (docs-only PRs skip the rest)
+        id: changes
+        # A docs-only PR has nothing check_repo can disagree with. The job keeps running and reports success,
+        # so the required "repo integrity" check is still satisfied. Version bumps are NOT skipped: the
+        # version-and-changelog agreement is exactly what check_repo guards on a release bump.
+        run: |
+          set -euo pipefail
+          heavy=true
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            files=$(git diff --name-only HEAD^1 HEAD)
+            heavy=false
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              # CHANGELOG.md is NOT docs here: check_repo reads it against REDROB_VERSION. Markdown under
+              # sources/, patches/ etc. is walked by check_repo too, so only top-level docs count.
+              case "$f" in
+                CHANGELOG.md) heavy=true ;;
+                */*.md) case "$f" in docs/*|.github/*) ;; *) heavy=true ;; esac ;;
+                *.md|docs/*|LICENSE*) ;;
+                *) heavy=true ;;
+              esac
+            done <<< "$files"
+          fi
+          echo "heavy=$heavy" | tee -a "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@v5
+        if: steps.changes.outputs.heavy == 'true'
         with:
           python-version: "3.12"
 
-      - name: PyYAML, so the rule parsers can be compared against each other
+      - if: steps.changes.outputs.heavy == 'true'
+        name: PyYAML, so the rule parsers can be compared against each other
         # The ONLY dependency this repository's tooling installs anywhere, and it is installed to make a check
         # possible rather than to make the tooling work: plaster reads rules with PyYAML when it is importable
         # and with a built-in subset parser when it is not, and the generated patch must not depend on which.
@@ -45,34 +70,40 @@ jobs:
         # build host has. This is the test environment, not a runtime requirement.
         run: python3 -m pip install --quiet pyyaml
 
-      - name: sources, branding, patch names, versions
+      - if: steps.changes.outputs.heavy == 'true'
+        name: sources, branding, patch names, versions
         run: python3 scripts/check_repo.py
 
-      - name: the tooling itself parses
+      - if: steps.changes.outputs.heavy == 'true'
+        name: the tooling itself parses
         # A syntax error in redrob.py is a broken release pipeline, and it is invisible until someone runs the
         # one subcommand that reaches the broken line.
         run: python3 -m compileall -q scripts/
 
-      - name: release asset names parse the way Redrob Launcher reads them
+      - if: steps.changes.outputs.heavy == 'true'
+        name: release asset names parse the way Redrob Launcher reads them
         # scripts/check_asset_names.py mirrors redrob-launcher's parser; its self-test holds the known-good
         # names (redrob-browser-<version>-linux-x86_64.deb, -macos-arm64.dmg, -windows-x64-portable.zip) and
         # the known-bad ones (amd64, mac, x64 on Linux, a leading v). Both packaging paths call it as a gate.
         run: python3 scripts/check_asset_names.py --self-test
 
-      - name: version and changelog agree
+      - if: steps.changes.outputs.heavy == 'true'
+        name: version and changelog agree
         run: |
           set -euo pipefail
           python3 scripts/redrob.py version
           echo "REDROB_VERSION=$(cat REDROB_VERSION)"
           echo "CHROMIUM_VERSION=$(cat CHROMIUM_VERSION)"
 
-      - name: the browser's colours come from the design system
+      - if: steps.changes.outputs.heavy == 'true'
+        name: the browser's colours come from the design system
         # Offline and instant: it reads the tree, not the registry. Catches a hex typed into the chrome, and
         # catches a token reference that no longer resolves -- which the C++ compiler would otherwise report
         # three hours into a Chromium build on the release runner.
         run: python3 scripts/check_design_tokens.py
 
-      - name: the vendored design system matches its pin
+      - if: steps.changes.outputs.heavy == 'true'
+        name: the vendored design system matches its pin
         # This one DOES reach the registry, because the question is whether the copy in the tree is still the
         # release it claims to be. A published npm version is immutable, so a mismatch is an edited vendored
         # file or a moved pin, never a new release.
