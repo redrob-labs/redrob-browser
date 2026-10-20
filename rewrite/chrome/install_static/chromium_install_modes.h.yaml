@@ -3,14 +3,16 @@
 substitutions:
   - description: |
       Windows install identity: the %LOCALAPPDATA% folder, the app name and id, the file-type
-      descriptions shown in Open With, and the launch URL scheme were all upstream's. The setup GUID
+      descriptions shown in Open With, and the launch URL scheme were all upstream's. The launch
+      scheme is redrob-browser, not redrob: redrob:// belongs to Redrob Launcher, which opens any
+      Redrob app from a link, and two handlers for one scheme means whichever installed last wins. The setup GUID
       and the three COM CLSIDs were too, which would make an install of this browser and one of
       upstream's register over each other; they are fresh values. Windows has not shipped, so no
       install is orphaned. The other product's branch above is unreachable here
       (browseros_allow_runtime_product_override is false) and is left as upstream wrote it.
     regex:
       pattern: "inline constexpr wchar_t kProductPathName[] = L\"BrowserOS\";\ninline constexpr ProductInstallIdentity kProductInstallIdentity = {\n    .base_app_name = L\"BrowserOS\",\n    .base_app_id = L\"BrowserOS\",\n    .browser_prog_id_prefix = L\"BOSHTML\",\n    .browser_prog_id_description = L\"BrowserOS HTML Document\",\n    .direct_launch_url_scheme = \"browseros\",\n    .pdf_prog_id_prefix = L\"BOSPDF\",\n    .pdf_prog_id_description = L\"BrowserOS PDF Document\",\n    .active_setup_guid = L\"{0EF5669B-7FD7-4138-A91F-E466631ADE97}\",\n"
-      replace: "inline constexpr wchar_t kProductPathName[] = L\"Redrob\";\ninline constexpr ProductInstallIdentity kProductInstallIdentity = {\n    .base_app_name = L\"Redrob\",\n    .base_app_id = L\"Redrob\",\n    .browser_prog_id_prefix = L\"RedrobHTML\",\n    .browser_prog_id_description = L\"Redrob HTML Document\",\n    .direct_launch_url_scheme = \"redrob\",\n    .pdf_prog_id_prefix = L\"RedrobPDF\",\n    .pdf_prog_id_description = L\"Redrob PDF Document\",\n    .active_setup_guid = L\"{6B7F1FD9-15D5-40D2-9C26-7BF04115328C}\",\n"
+      replace: "inline constexpr wchar_t kProductPathName[] = L\"Redrob\";\ninline constexpr ProductInstallIdentity kProductInstallIdentity = {\n    .base_app_name = L\"Redrob\",\n    .base_app_id = L\"Redrob\",\n    .browser_prog_id_prefix = L\"RedrobHTML\",\n    .browser_prog_id_description = L\"Redrob HTML Document\",\n    .direct_launch_url_scheme = \"redrob-browser\",\n    .pdf_prog_id_prefix = L\"RedrobPDF\",\n    .pdf_prog_id_description = L\"Redrob PDF Document\",\n    .active_setup_guid = L\"{6B7F1FD9-15D5-40D2-9C26-7BF04115328C}\",\n"
       count: 1
   - description: |
       (continued)

@@ -70,7 +70,7 @@ diff --git a/chrome/install_static/chromium_install_modes.h b/chrome/install_sta
 +    .base_app_id = L"Redrob",
 +    .browser_prog_id_prefix = L"RedrobHTML",
 +    .browser_prog_id_description = L"Redrob HTML Document",
-+    .direct_launch_url_scheme = "redrob",
++    .direct_launch_url_scheme = "redrob-browser",
 +    .pdf_prog_id_prefix = L"RedrobPDF",
 +    .pdf_prog_id_description = L"Redrob PDF Document",
 +    .active_setup_guid = L"{6B7F1FD9-15D5-40D2-9C26-7BF04115328C}",
