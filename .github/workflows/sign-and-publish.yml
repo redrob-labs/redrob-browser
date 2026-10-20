@@ -567,11 +567,12 @@ jobs:
 
       # The launcher icon: the 512 px app icon as one more release asset, named in redrob-launcher.json
       # (`icon`) by release-publish (launcher_icon) so Redrob Launcher's catalog shows this release's own
-      # logo. Uploaded under the `release-*` prefix the publish job collects; not a CDN file.
+      # logo. Uploaded under the `release-*` prefix the publish job collects; not a CDN file. Full bleed,
+      # not the macOS appiconset file, which carries Apple's 100 px margin.
       - name: stage the launcher icon
         run: |
           mkdir -p "$RUNNER_TEMP/launcher-icon"
-          cp branding/icons/mac/appiconset/appicon_512.png "$RUNNER_TEMP/launcher-icon/redrob-browser.png"
+          cp branding/icons/launcher_icon_512.png "$RUNNER_TEMP/launcher-icon/redrob-browser.png"
       - uses: actions/upload-artifact@v4
         with:
           name: release-launcher-icon
