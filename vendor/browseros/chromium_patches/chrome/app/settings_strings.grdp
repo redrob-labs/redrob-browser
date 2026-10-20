@@ -1,5 +1,5 @@
 diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
-index caae29834c2cf..1d4203a8b8e97 100644
+index caae29834c2cf..1f872a6c8d331 100644
 --- a/chrome/app/settings_strings.grdp
 +++ b/chrome/app/settings_strings.grdp
 @@ -55,20 +55,20 @@
@@ -571,7 +571,20 @@ index caae29834c2cf..1d4203a8b8e97 100644
        Ask every time
      </message>
      <message name="IDS_SETTINGS_GOOGLE_ACCOUNT" desc="Label for the section that takes the user to the Google Account website from Related Google services.">
-@@ -3825,16 +3825,16 @@
+@@ -3806,6 +3806,12 @@
+       <message name="IDS_SETTINGS_IMPORT_AUTOFILL_FORM_DATA_CHECKBOX" desc="Checkbox for importing form data for autofill">
+         Autofill form data
+       </message>
++      <message name="IDS_SETTINGS_IMPORT_EXTENSIONS_CHECKBOX" desc="Checkbox for importing extensions">
++        Extensions
++      </message>
++      <message name="IDS_SETTINGS_IMPORT_COOKIES_CHECKBOX" desc="Checkbox for importing login sessions (cookies)">
++        Login sessions
++      </message>
+ 
+       <message name="IDS_SETTINGS_IMPORT_CHOOSE_FILE" desc="Text for the Choose File on dialog">
+         Choose File
+@@ -3825,16 +3831,16 @@
      <message name="IDS_SETTINGS_HISTORY_SEARCH_SETTING_LABEL" desc="Title of the page of the settings that enables history search.">
        History search, powered by AI
      </message>
@@ -591,7 +604,7 @@ index caae29834c2cf..1d4203a8b8e97 100644
        You can search in the address bar using "@history", as well as from the History page
      </message>
      <message name="IDS_SETTINGS_HISTORY_SEARCH_WHEN_ON_LOG_START" desc="This string is a bullet point in the ‘When on’ column, which describes the behavior of this feature. This string explains that the AI-powered history search results will only use data about sites the user visits after they turn on this feature. Earlier history data, from when the feature setting was turned off, won’t appear in the search results. The tone should be informative.">
-@@ -3846,31 +3846,31 @@
+@@ -3846,31 +3852,31 @@
      <message name="IDS_SETTINGS_HISTORY_SEARCH_CONSIDER_DATA_ENCRYPTED" desc="This is a bullet point in the ‘Things to consider’ column, which describes things users should consider about a feature. This string explains that AI features will save data to the user’s device in order to provide the feature’s respective benefit. The data will be appropriately encrypted for security. The tone should be informative.">
        As you browse sites, their page contents are encrypted and saved to your device
      </message>
@@ -630,7 +643,7 @@ index caae29834c2cf..1d4203a8b8e97 100644
        Use everyday language to search your browsing history and find sites you visited. You can also ask questions and get answers based on your browsing history. The setting is off.
      </message>
  
-@@ -3945,7 +3945,7 @@
+@@ -3945,7 +3951,7 @@
        </message>
      </if>
      <if expr="not is_chromeos">
@@ -639,7 +652,7 @@ index caae29834c2cf..1d4203a8b8e97 100644
          Use graphics acceleration when available
        </message>
        <if expr="is_win">
-@@ -3953,28 +3953,28 @@
+@@ -3953,28 +3959,28 @@
            Enable Process Isolation
          </message>
          <message name="IDS_SETTINGS_SYSTEM_ISOLATION_STATE_SUBLABEL" desc="Sublabel for the Enable process isolation toggle.">
@@ -678,7 +691,7 @@ index caae29834c2cf..1d4203a8b8e97 100644
          Browser proxy settings are controlled by multiple sources
        </message>
      </if>
-@@ -3983,10 +3983,10 @@
+@@ -3983,10 +3989,10 @@
          On-device AI
        </message>
        <message name="IDS_SETTINGS_SYSTEM_FEATURE_ON_DEVICE_AI_ENABLED_SUB_LABEL" desc="This string describes what turning off the toggle implies.">
@@ -691,7 +704,7 @@ index caae29834c2cf..1d4203a8b8e97 100644
        </message>
      </if>
  
-@@ -4236,7 +4236,7 @@
+@@ -4236,7 +4242,7 @@
      <message name="IDS_SETTINGS_SAFETY_HUB" desc="Name of a page in settings that gives users an overview over their safety status and where users can take action to improve their safety.">
        Safety Check
      </message>
@@ -700,7 +713,7 @@ index caae29834c2cf..1d4203a8b8e97 100644
        Go to Safety Check
      </message>
      <message name="IDS_SETTINGS_SAFETY_HUB_PAGE_CARD_SECTION_HEADER" desc="The title of the first section in the Safety Hub page. The 'Safety at a glance' section gives an overview about the current state of passwords, browser version and safe browsing setting of the browser. ">
-@@ -4254,19 +4254,19 @@
+@@ -4254,19 +4260,19 @@
      <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_CHECK_SUBHEADER_SOME_TIME_AGO" desc="Subtitle of the passwords card in the Safety Hub page which explains how recently passwords were checked for issues. The passwords card contains information about password issues which are detected automatically. This text is shown below a header which explains there are no issues and indicates that passwords were checked for issues some time ago.">
        Checked <ph name="NUM_DAYS_HOURS_MINUTES">$1<ex>2 days</ex></ph> ago
      </message>
@@ -725,7 +738,7 @@ index caae29834c2cf..1d4203a8b8e97 100644
        Your organization turned off saving passwords
      </message>
      <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORD_NAVIGATION_ARIA_LABEL" desc="Safety Check settings page (chrome://settings/safetyCheck) gives users an overview over their safety status. Password card in this page shows if there is any insecure password stored. This string is for the accesibility label for the card to call out where to navigation will happen (chrome://password-manager/passwords) if the card is clicked.">
-@@ -4276,7 +4276,7 @@
+@@ -4276,7 +4282,7 @@
        Enhanced Safe Browsing is on
      </message>
      <message name="IDS_SETTINGS_SAFETY_HUB_SB_ON_ENHANCED_SUBHEADER" desc="Safety Hub settings page (chrome://settings/safetyHub) gives users an overview over their safety status. Safe browsing card in this page shows the current state of Safe browsing setting (chrome://settings/security). This string is the body text of the Safe Browsing card when the current state is Enhanced protection.">
@@ -734,7 +747,7 @@ index caae29834c2cf..1d4203a8b8e97 100644
      </message>
      <message name="IDS_SETTINGS_SAFETY_HUB_SB_ON_STANDARD_HEADER" desc="Safety Hub settings page (chrome://settings/safetyHub) gives users an overview over their safety status. Safe browsing card in this page shows the current state of Safe browsing setting (chrome://settings/security). This string is the headline of the Safe Browsing card when the current state is Standard protection.">
        Safe Browsing is on
-@@ -4312,12 +4312,12 @@
+@@ -4312,12 +4318,12 @@
        Safe Browsing
      </message>
      <if expr="not is_chromeos">
@@ -749,7 +762,7 @@ index caae29834c2cf..1d4203a8b8e97 100644
          Restart your device to finish updating
        </message>
      </if>
-@@ -4331,27 +4331,27 @@
+@@ -4331,27 +4337,27 @@
         =1 {You can stop this site from sending future notifications.}
         other {You can stop these sites from sending future notifications.}}
      </message>
@@ -782,7 +795,7 @@ index caae29834c2cf..1d4203a8b8e97 100644
        Safe Browsing is off
      </message>
      <message name="IDS_SETTINGS_SAFETY_HUB_PASSWORDS_MODULE_NAME" desc="The entry point shown on the screenshot leads to Safety Check settings page (chrome://settings/safetyCheck) when at least on of the Safety Check modules have recommendations. The subheader of the entry point lists the modules with recommendations. This string is the upper case version (i.e. version that comes first in the sentence) for the name of passwords module.">
-@@ -4382,14 +4382,14 @@
+@@ -4382,14 +4388,14 @@
        ,
      </message>
  
@@ -802,7 +815,7 @@ index caae29834c2cf..1d4203a8b8e97 100644
        </message>
        <message name="IDS_SETTINGS_AI_PAGE_MAIN_MANAGED_LEARN_MORE_ACCESSIBILITY_LABEL" desc="This string is found in a link that takes the user to the AI features and policies help center article when the user taps it. The tone should be informative">
          Learn more about using generative AI at work
-@@ -4411,8 +4411,8 @@
+@@ -4411,8 +4417,8 @@
        <message name="IDS_SETTINGS_PASSWORD_CHANGE_LABEL" desc="Primary label for password change entry in settings. The user is in settings and this string represents the name of the feature. We were careful to choose “automated” and not “automatic” because we don’t want to give the user the impression that this will happen without their knowledge. There is an ‘automated’ process that the user initiates, but the process isn’t ‘automatic’ in the sense that it might be happening behind the scenes without the user’s knowledge.">
          Automated Password Change
        </message>
@@ -813,7 +826,7 @@ index caae29834c2cf..1d4203a8b8e97 100644
        </message>
        <message name="IDS_SETTINGS_PASSWORD_CHANGE_DATA_BREACH" desc="Bullet 1 of 2 that appears beneath the “When used” subtitle. This string is repetitive of the feature description, but we want to have a complete description of what happens when the feature is used. * “Google Password Manager asks…”: This part is similar to the general feature description above, but it’s written as if the feature is being used by the user, so we use “asks” and not “can offer”. * “Strong password”: As an existing autofill feature, Google Password Manager can offer to generate and save passwords for the user. These passwords are typically stronger than passwords the user might create on their own">
          If one of your passwords is found in a data breach, Google Password Manager asks if you want it changed to a strong password
-@@ -4431,13 +4431,13 @@
+@@ -4431,13 +4437,13 @@
        </message>
  
        <!-- Security settings toast confirmation -->
@@ -830,7 +843,7 @@ index caae29834c2cf..1d4203a8b8e97 100644
          Enhanced protection is off
        </message>
        <message name="IDS_SYNC_ERROR_BOOKMARKS_LIMIT_EXCEEDED_DESCRIPTION" desc="Description of the sync error when the user has exceeded the bookmarks limit.">
-@@ -4447,23 +4447,23 @@
+@@ -4447,23 +4453,23 @@
    </if>
  
    <!-- Experimental settings strings -->
