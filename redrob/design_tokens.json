@@ -2372,6 +2372,211 @@
       }
     },
     {
+      "name": "product-cowork",
+      "kind": "color",
+      "light": "#d87101",
+      "dark": "#d87101",
+      "themed": false,
+      "argb": {
+        "light": "0xFFD87101",
+        "dark": "0xFFD87101"
+      }
+    },
+    {
+      "name": "product-cowork-1",
+      "kind": "color",
+      "light": "#fff5ee",
+      "dark": "#fff5ee",
+      "themed": false,
+      "argb": {
+        "light": "0xFFFFF5EE",
+        "dark": "0xFFFFF5EE"
+      }
+    },
+    {
+      "name": "product-cowork-10",
+      "kind": "color",
+      "light": "#371800",
+      "dark": "#371800",
+      "themed": false,
+      "argb": {
+        "light": "0xFF371800",
+        "dark": "0xFF371800"
+      }
+    },
+    {
+      "name": "product-cowork-2",
+      "kind": "color",
+      "light": "#ffe6d5",
+      "dark": "#ffe6d5",
+      "themed": false,
+      "argb": {
+        "light": "0xFFFFE6D5",
+        "dark": "0xFFFFE6D5"
+      }
+    },
+    {
+      "name": "product-cowork-3",
+      "kind": "color",
+      "light": "#ffcba8",
+      "dark": "#ffcba8",
+      "themed": false,
+      "argb": {
+        "light": "0xFFFFCBA8",
+        "dark": "0xFFFFCBA8"
+      }
+    },
+    {
+      "name": "product-cowork-4",
+      "kind": "color",
+      "light": "#ffa664",
+      "dark": "#ffa664",
+      "themed": false,
+      "argb": {
+        "light": "0xFFFFA664",
+        "dark": "0xFFFFA664"
+      }
+    },
+    {
+      "name": "product-cowork-5",
+      "kind": "color",
+      "light": "#eb8227",
+      "dark": "#eb8227",
+      "themed": false,
+      "argb": {
+        "light": "0xFFEB8227",
+        "dark": "0xFFEB8227"
+      }
+    },
+    {
+      "name": "product-cowork-6",
+      "kind": "color",
+      "light": "#d87101",
+      "dark": "#d87101",
+      "themed": false,
+      "argb": {
+        "light": "0xFFD87101",
+        "dark": "0xFFD87101"
+      }
+    },
+    {
+      "name": "product-cowork-7",
+      "kind": "color",
+      "light": "#964d00",
+      "dark": "#964d00",
+      "themed": false,
+      "argb": {
+        "light": "0xFF964D00",
+        "dark": "0xFF964D00"
+      }
+    },
+    {
+      "name": "product-cowork-8",
+      "kind": "color",
+      "light": "#763b00",
+      "dark": "#763b00",
+      "themed": false,
+      "argb": {
+        "light": "0xFF763B00",
+        "dark": "0xFF763B00"
+      }
+    },
+    {
+      "name": "product-cowork-9",
+      "kind": "color",
+      "light": "#582a00",
+      "dark": "#582a00",
+      "themed": false,
+      "argb": {
+        "light": "0xFF582A00",
+        "dark": "0xFF582A00"
+      }
+    },
+    {
+      "name": "product-cowork-beyond-brand",
+      "kind": "gradient",
+      "light": "linear-gradient(130deg, #ffa664 75%, #eb8227 89%, #d87101 100%)",
+      "dark": "linear-gradient(130deg, #ffa664 75%, #eb8227 89%, #d87101 100%)",
+      "themed": false
+    },
+    {
+      "name": "product-cowork-beyond-deep",
+      "kind": "gradient",
+      "light": "linear-gradient(130deg, #d87101 75%, #964d00 100%)",
+      "dark": "linear-gradient(130deg, #d87101 75%, #964d00 100%)",
+      "themed": false
+    },
+    {
+      "name": "product-cowork-beyond-light",
+      "kind": "gradient",
+      "light": "linear-gradient(130deg, #eb8227 75%, #ffcba8 89%, #fff5ee 100%)",
+      "dark": "linear-gradient(130deg, #eb8227 75%, #ffcba8 89%, #fff5ee 100%)",
+      "themed": false
+    },
+    {
+      "name": "product-cowork-fill",
+      "kind": "color",
+      "light": "#ffe6d5",
+      "dark": "#582a00",
+      "themed": true,
+      "chain": {
+        "light": [
+          "product-cowork-fill",
+          "product-cowork-2"
+        ],
+        "dark": [
+          "product-cowork-fill",
+          "product-cowork-9"
+        ]
+      },
+      "argb": {
+        "light": "0xFFFFE6D5",
+        "dark": "0xFF582A00"
+      }
+    },
+    {
+      "name": "product-cowork-line",
+      "kind": "color",
+      "light": "#ffcba8",
+      "dark": "#763b00",
+      "themed": true,
+      "chain": {
+        "light": [
+          "product-cowork-line",
+          "product-cowork-3"
+        ],
+        "dark": [
+          "product-cowork-line",
+          "product-cowork-8"
+        ]
+      },
+      "argb": {
+        "light": "0xFFFFCBA8",
+        "dark": "0xFF763B00"
+      }
+    },
+    {
+      "name": "product-cowork-wash",
+      "kind": "color",
+      "light": "#fff5ee",
+      "dark": "#371800",
+      "themed": true,
+      "chain": {
+        "light": [
+          "product-cowork-wash",
+          "product-cowork-1"
+        ],
+        "dark": [
+          "product-cowork-wash",
+          "product-cowork-10"
+        ]
+      },
+      "argb": {
+        "light": "0xFFFFF5EE",
+        "dark": "0xFF371800"
+      }
+    },
+    {
       "name": "product-design",
       "kind": "color",
       "light": "#c162f4",
@@ -2574,211 +2779,6 @@
       "argb": {
         "light": "0xFFFAF4FF",
         "dark": "0xFF35004B"
-      }
-    },
-    {
-      "name": "product-desk",
-      "kind": "color",
-      "light": "#d87101",
-      "dark": "#d87101",
-      "themed": false,
-      "argb": {
-        "light": "0xFFD87101",
-        "dark": "0xFFD87101"
-      }
-    },
-    {
-      "name": "product-desk-1",
-      "kind": "color",
-      "light": "#fff5ee",
-      "dark": "#fff5ee",
-      "themed": false,
-      "argb": {
-        "light": "0xFFFFF5EE",
-        "dark": "0xFFFFF5EE"
-      }
-    },
-    {
-      "name": "product-desk-10",
-      "kind": "color",
-      "light": "#371800",
-      "dark": "#371800",
-      "themed": false,
-      "argb": {
-        "light": "0xFF371800",
-        "dark": "0xFF371800"
-      }
-    },
-    {
-      "name": "product-desk-2",
-      "kind": "color",
-      "light": "#ffe6d5",
-      "dark": "#ffe6d5",
-      "themed": false,
-      "argb": {
-        "light": "0xFFFFE6D5",
-        "dark": "0xFFFFE6D5"
-      }
-    },
-    {
-      "name": "product-desk-3",
-      "kind": "color",
-      "light": "#ffcba8",
-      "dark": "#ffcba8",
-      "themed": false,
-      "argb": {
-        "light": "0xFFFFCBA8",
-        "dark": "0xFFFFCBA8"
-      }
-    },
-    {
-      "name": "product-desk-4",
-      "kind": "color",
-      "light": "#ffa664",
-      "dark": "#ffa664",
-      "themed": false,
-      "argb": {
-        "light": "0xFFFFA664",
-        "dark": "0xFFFFA664"
-      }
-    },
-    {
-      "name": "product-desk-5",
-      "kind": "color",
-      "light": "#eb8227",
-      "dark": "#eb8227",
-      "themed": false,
-      "argb": {
-        "light": "0xFFEB8227",
-        "dark": "0xFFEB8227"
-      }
-    },
-    {
-      "name": "product-desk-6",
-      "kind": "color",
-      "light": "#d87101",
-      "dark": "#d87101",
-      "themed": false,
-      "argb": {
-        "light": "0xFFD87101",
-        "dark": "0xFFD87101"
-      }
-    },
-    {
-      "name": "product-desk-7",
-      "kind": "color",
-      "light": "#964d00",
-      "dark": "#964d00",
-      "themed": false,
-      "argb": {
-        "light": "0xFF964D00",
-        "dark": "0xFF964D00"
-      }
-    },
-    {
-      "name": "product-desk-8",
-      "kind": "color",
-      "light": "#763b00",
-      "dark": "#763b00",
-      "themed": false,
-      "argb": {
-        "light": "0xFF763B00",
-        "dark": "0xFF763B00"
-      }
-    },
-    {
-      "name": "product-desk-9",
-      "kind": "color",
-      "light": "#582a00",
-      "dark": "#582a00",
-      "themed": false,
-      "argb": {
-        "light": "0xFF582A00",
-        "dark": "0xFF582A00"
-      }
-    },
-    {
-      "name": "product-desk-beyond-brand",
-      "kind": "gradient",
-      "light": "linear-gradient(130deg, #ffa664 75%, #eb8227 89%, #d87101 100%)",
-      "dark": "linear-gradient(130deg, #ffa664 75%, #eb8227 89%, #d87101 100%)",
-      "themed": false
-    },
-    {
-      "name": "product-desk-beyond-deep",
-      "kind": "gradient",
-      "light": "linear-gradient(130deg, #d87101 75%, #964d00 100%)",
-      "dark": "linear-gradient(130deg, #d87101 75%, #964d00 100%)",
-      "themed": false
-    },
-    {
-      "name": "product-desk-beyond-light",
-      "kind": "gradient",
-      "light": "linear-gradient(130deg, #eb8227 75%, #ffcba8 89%, #fff5ee 100%)",
-      "dark": "linear-gradient(130deg, #eb8227 75%, #ffcba8 89%, #fff5ee 100%)",
-      "themed": false
-    },
-    {
-      "name": "product-desk-fill",
-      "kind": "color",
-      "light": "#ffe6d5",
-      "dark": "#582a00",
-      "themed": true,
-      "chain": {
-        "light": [
-          "product-desk-fill",
-          "product-desk-2"
-        ],
-        "dark": [
-          "product-desk-fill",
-          "product-desk-9"
-        ]
-      },
-      "argb": {
-        "light": "0xFFFFE6D5",
-        "dark": "0xFF582A00"
-      }
-    },
-    {
-      "name": "product-desk-line",
-      "kind": "color",
-      "light": "#ffcba8",
-      "dark": "#763b00",
-      "themed": true,
-      "chain": {
-        "light": [
-          "product-desk-line",
-          "product-desk-3"
-        ],
-        "dark": [
-          "product-desk-line",
-          "product-desk-8"
-        ]
-      },
-      "argb": {
-        "light": "0xFFFFCBA8",
-        "dark": "0xFF763B00"
-      }
-    },
-    {
-      "name": "product-desk-wash",
-      "kind": "color",
-      "light": "#fff5ee",
-      "dark": "#371800",
-      "themed": true,
-      "chain": {
-        "light": [
-          "product-desk-wash",
-          "product-desk-1"
-        ],
-        "dark": [
-          "product-desk-wash",
-          "product-desk-10"
-        ]
-      },
-      "argb": {
-        "light": "0xFFFFF5EE",
-        "dark": "0xFF371800"
       }
     },
     {

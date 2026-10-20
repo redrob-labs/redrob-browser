@@ -1,6 +1,6 @@
 /* VENDORED FROM THE REDROB DESIGN SYSTEM -- DO NOT EDIT. */
-/* source: @redrob-labs/ui@1.3.1  dist/styles/system.css */
-/* commit: 49f54c9b33855e4e4442aa8e10c8c400529f4303 */
+/* source: @redrob-labs/ui@1.8.0  dist/styles/system.css */
+/* commit: 865233123cbdc88724f0eb65c3c9d554ad953841 */
 /* */
 /* Regenerate with: python3 scripts/vendor_design_system.py --update */
 /* A value changed here is a value that disagrees with every other Redrob product. */
@@ -2287,6 +2287,21 @@ span.rr-card__title, span.rr-card__desc { display: block; }
 .rr-schedule__last { flex: none; display: flex; align-items: center; gap: var(--space-2); font-size: 12px; color: var(--ink-muted); }
 .rr-schedule--off .rr-schedule__name,
 .rr-schedule--off .rr-schedule__when { color: var(--ink-muted); }
+/* In a narrow column (a phone, or a schedules list beside a side panel) the name and cadence were
+   squeezed to a few characters a line while the last run and the switch kept their width. Below
+   480px the body takes the whole row and the last run and switch wrap under it. The row reflows on
+   its own width, as ModelGuide does; the viewport query is the fallback for browsers without
+   container queries. Wrapping is harmless when wide: the body's flex basis is 0, so nothing breaks
+   onto a second line until the body is forced to 100%. */
+.rr-schedule { container: rr-schedule / inline-size; flex-wrap: wrap; row-gap: var(--space-2); }
+@media (max-width: 480px) {
+  .rr-schedule__body { flex-basis: 100%; }
+  .rr-schedule__last { margin-inline-end: auto; }
+}
+@container rr-schedule (max-width: 480px) {
+  .rr-schedule__body { flex-basis: 100%; }
+  .rr-schedule__last { margin-inline-end: auto; }
+}
 
 /* ---- CheckIn ------------------------------------------------------------ */
 /* The agent has stopped and needs a person. It waits; it does not guess. */
@@ -2870,13 +2885,13 @@ a.rr-evidence__source:focus-visible { outline: var(--focus-ring-width) solid var
   /* The suite card's spectrum: eight lines of one width with one gap between each, the teal
      seam first, then the seven products in suite order at step 4 (20-color.md; literal here
      because product variables belong to AppShell). Each line 1% of the band's width. */
-  --spec-1: #7AC6FF;
-  --spec-2: #5FD2D6;
-  --spec-3: #5DDB87;
-  --spec-4: #FFA664;
-  --spec-5: #FFA193;
-  --spec-6: #FF98CA;
-  --spec-7: #DCA2FF;
+  --spec-1: #85C8E8;
+  --spec-2: #FFA475;
+  --spec-3: #70D2C0;
+  --spec-4: #7FC5FF;
+  --spec-5: #FFA28C;
+  --spec-6: #ED99FA;
+  --spec-7: #CAACFF;
   --spec-t: max(4px, 1cqw);
   position: absolute; top: 0; bottom: 0; left: var(--cut-x); width: calc(var(--spec-t) * 15);
   transform: skewX(-40deg); transform-origin: 0 100%;
@@ -2891,14 +2906,13 @@ a.rr-evidence__source:focus-visible { outline: var(--focus-ring-width) solid var
 /* ---- Product grounds on a Band (20-color.md, The three product grounds) ---------
    The ramps are literal here, as the spectrum's are: --product-* belongs to AppShell.
    --pg-1/3/4/5/6/7 are steps 1, 3, 4, 5, 6 (the mark) and 7 of the product's ramp. */
-.rr-band--p-router { --pg-1: #F0F8FF; --pg-3: #B3DEFF; --pg-4: #7AC6FF; --pg-5: #37ABF5; --pg-mark: #1194DD; --pg-7: #0069A1; }
-.rr-band--p-chat { --pg-1: #E9FBFB; --pg-3: #98E8EA; --pg-4: #5FD2D6; --pg-5: #3DB5B9; --pg-mark: #149CA0; --pg-7: #007275; }
-.rr-band--p-code { --pg-1: #E9FDED; --pg-3: #97EFAF; --pg-4: #5DDB87; --pg-5: #3ABE6C; --pg-mark: #02A252; --pg-7: #00783B; }
-.rr-band--p-desk { --pg-1: #FFF5EE; --pg-3: #FFCBA8; --pg-4: #FFA664; --pg-5: #EB8227; --pg-mark: #D87101; --pg-7: #964D00; }
-.rr-band--p-office { --pg-1: #FFF4F2; --pg-3: #FFC8C0; --pg-4: #FFA193; --pg-5: #FF6C5B; --pg-mark: #FE4D3E; --pg-7: #B81610; }
-.rr-band--p-browser { --pg-1: #FFF3F8; --pg-3: #FFC4DE; --pg-4: #FF98CA; --pg-5: #FF58B4; --pg-mark: #F14AA8; --pg-7: #AD1373; }
-.rr-band--p-design { --pg-1: #FAF4FF; --pg-3: #EAC9FF; --pg-4: #DCA2FF; --pg-5: #CD72FF; --pg-mark: #C162F4; --pg-7: #8832B2; }
-.rr-band--p-console { --pg-1: #EEF4FF; --pg-3: #BAD2FF; --pg-4: #8AAFFF; --pg-5: #507FFF; --pg-mark: #2B52FF; --pg-7: #1733D5; }
+.rr-band--p-chat { --pg-1: #F1F8FC; --pg-3: #B9DEF0; --pg-4: #85C8E8; --pg-5: #59ADD2; --pg-mark: #006B8D; --pg-7: #0F5670; }
+.rr-band--p-code { --pg-1: #F8F5FF; --pg-3: #DECEFF; --pg-4: #CAACFF; --pg-5: #B483FF; --pg-mark: #7B47BF; --pg-7: #623B96; }
+.rr-band--p-cowork { --pg-1: #FFF4EF; --pg-3: #FFCAB0; --pg-4: #FFA475; --pg-5: #F97620; --pg-mark: #EB6900; --pg-7: #B6530F; }
+.rr-band--p-office { --pg-1: #FFF4F1; --pg-3: #FFC9BC; --pg-4: #FFA28C; --pg-5: #FD6F50; --pg-mark: #BA2F0C; --pg-7: #932A12; }
+.rr-band--p-browser { --pg-1: #F0F9F7; --pg-3: #B1E4D9; --pg-4: #70D2C0; --pg-5: #34B9A4; --pg-mark: #00A28E; --pg-7: #127E6F; }
+.rr-band--p-design { --pg-1: #FCF3FE; --pg-3: #F4C4FB; --pg-4: #ED99FA; --pg-5: #D773E7; --pg-mark: #CB68DB; --pg-7: #9D52A9; }
+.rr-band--p-console { --pg-1: #F0F8FF; --pg-3: #B5DDFF; --pg-4: #7FC5FF; --pg-5: #2DA9FE; --pg-mark: #0096E9; --pg-7: #1175B4; }
 /* Section tick in the product's mark: the one place the page names where you are. */
 .rr-band--product .rr-tick { background: var(--pg-mark); }
 /* Light ground: the field stays white, the far side of the cut is lit in the product,
@@ -3780,7 +3794,7 @@ a.rr-article__author:focus-visible { outline: var(--focus-ring-width) solid var(
 
 /* ------------------------------------------------- What the screens changed */
 /* Streaming's label: the line that says what it is doing, beside the text it is
-   producing. See ScreenDesk. */
+   producing. See ScreenCowork. */
 .rr-streaming__label { color: var(--ink-secondary); margin-right: var(--space-2); }
 
 /* Hangul must not break mid-syllable-block in a data cell. The keep-all rule is scoped
@@ -3801,7 +3815,7 @@ a.rr-article__author:focus-visible { outline: var(--focus-ring-width) solid var(
 
 /* ==========================================================================
    AppShell: the frame a product screen lives in
-   Built after a real Desk screen had to hand-roll forty lines of chrome.
+   Built after a real Cowork screen had to hand-roll forty lines of chrome.
    ========================================================================== */
 
 .rr-shell {
@@ -3813,6 +3827,27 @@ a.rr-article__author:focus-visible { outline: var(--focus-ring-width) solid var(
   color: var(--ink-primary);
 }
 .rr-shell--norail { grid-template-columns: 232px minmax(0, 1fr); }
+/* Round 1.7.0: `surface="flat"` joins the shell-owned regions into one continuous ground, so a
+   downstream app no longer overrides four DS surface classes to get a flat workspace. ONLY the flat
+   selector reads --rr-shell-surface: raised keeps plain tokens, so a stray hook on an ancestor can
+   never flatten a raised shell, and raised regions keep exactly their 1.6.0 backgrounds. An app
+   tunes the flat ground by setting --rr-shell-surface anywhere above the shell -- no class override. */
+.rr-shell[data-surface="flat"],
+.rr-shell[data-surface="flat"] .rr-shell__side,
+.rr-shell[data-surface="flat"] .rr-shell__main,
+.rr-shell[data-surface="flat"] .rr-shell__work,
+.rr-shell[data-surface="flat"] .rr-shell__foot,
+.rr-shell[data-surface="flat"] .rr-shell__rail { background: var(--rr-shell-surface, var(--surface-base)); }
+/* Dark theme: the flat side must also win over the more specific dark raised rule
+   ([data-theme=dark] .rr-shell__side), hence the theme-scoped selector here. */
+[data-theme="dark"] .rr-shell[data-surface="flat"] .rr-shell__side { background: var(--rr-shell-surface, var(--surface-base)); }
+/* Flat makes the sidebar the same ground as the nav rows, so the default hover/current/fold states
+   (which rely on the sidebar being sunken) go invisible. Give them their own ground in flat -- tunable
+   via --rr-shell-nav-active -- so wayfinding and the selected-row contrast survive. Dark already uses
+   sunken on a base side, so it is unaffected. */
+.rr-shell[data-surface="flat"] .rr-shell__nav a:hover,
+.rr-shell[data-surface="flat"] .rr-shell__nav a[aria-current],
+.rr-shell[data-surface="flat"] .rr-shell__fold:hover { background: var(--rr-shell-nav-active, var(--surface-sunken)); }
 
 .rr-shell__skip {
   position: absolute; left: -9999px; top: 0; z-index: 100;
@@ -3839,7 +3874,7 @@ a.rr-article__author:focus-visible { outline: var(--focus-ring-width) solid var(
 .rr-shell[data-product="router"]  { --product-mark: var(--product-router);  --product-wash: var(--product-router-wash);  --product-fill: var(--product-router-fill);  --product-line: var(--product-router-line); }
 .rr-shell[data-product="chat"]    { --product-mark: var(--product-chat);    --product-wash: var(--product-chat-wash);    --product-fill: var(--product-chat-fill);    --product-line: var(--product-chat-line); }
 .rr-shell[data-product="code"]    { --product-mark: var(--product-code);    --product-wash: var(--product-code-wash);    --product-fill: var(--product-code-fill);    --product-line: var(--product-code-line); }
-.rr-shell[data-product="desk"]    { --product-mark: var(--product-desk);    --product-wash: var(--product-desk-wash);    --product-fill: var(--product-desk-fill);    --product-line: var(--product-desk-line); }
+.rr-shell[data-product="cowork"]    { --product-mark: var(--product-cowork);    --product-wash: var(--product-cowork-wash);    --product-fill: var(--product-cowork-fill);    --product-line: var(--product-cowork-line); }
 .rr-shell[data-product="office"]  { --product-mark: var(--product-office);  --product-wash: var(--product-office-wash);  --product-fill: var(--product-office-fill);  --product-line: var(--product-office-line); }
 .rr-shell[data-product="browser"] { --product-mark: var(--product-browser); --product-wash: var(--product-browser-wash); --product-fill: var(--product-browser-fill); --product-line: var(--product-browser-line); }
 .rr-shell[data-product="design"]  { --product-mark: var(--product-design);  --product-wash: var(--product-design-wash);  --product-fill: var(--product-design-fill);  --product-line: var(--product-design-line); }
@@ -3852,6 +3887,11 @@ a.rr-article__author:focus-visible { outline: var(--focus-ring-width) solid var(
 [data-theme="dark"] .rr-shell[data-product] .rr-shell__side {
   background-image: linear-gradient(180deg, color-mix(in srgb, var(--product-wash) 55%, transparent) 0, transparent 132px);
 }
+.rr-shell[data-surface="flat"] .rr-shell__side { background-image: none; }
+/* The dark product-wash rule above is (0,4,0), more specific than the flat rule, so flat alone would
+   not remove the wash in dark. Match its specificity to guarantee flat is one continuous ground in
+   both themes -- the band at the top of the sidebar is exactly the seam flat exists to remove. */
+[data-theme="dark"] .rr-shell[data-surface="flat"][data-product] .rr-shell__side { background-image: none; }
 
 .rr-shell__brand { display: flex; align-items: center; gap: var(--space-2); min-width: 0; overflow: hidden;
   padding: var(--space-5) var(--space-4) var(--space-4); }
@@ -4585,6 +4625,88 @@ a.rr-article__author:focus-visible { outline: var(--focus-ring-width) solid var(
 .rr-guide__method summary { cursor: pointer; font-weight: 600; color: var(--ink-primary); }
 .rr-guide__method > div { margin-top: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); max-width: 72ch; }
 .rr-guide__method p { margin: 0; }
+/* The comparison strip (summary="glance"): four five-step meters per row, under one set of heads. The heads
+   sit on the row's own grid and padding, so every column lines up with the strip below it. */
+.rr-guide__col { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.rr-guide__glancehead { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: var(--space-3); padding: 0 calc(var(--space-3) + 1px); }
+.rr-guide__glancecols, .rr-guide__glance { display: grid; grid-template-columns: repeat(4, minmax(0, 64px)); gap: 14px; }
+.rr-guide__glancecols span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 16px; font-weight: 600; color: var(--ink-secondary); }
+.rr-guide__glance { margin: 2px 0; }
+.rr-guide__glancedim { display: flex; gap: 2px; align-items: center; height: 16px; }
+.rr-guide__glancedim i { flex: 1 1 0; height: 6px; border-radius: 1px; background: var(--chart-track); }
+.rr-guide__glancedim i.is-on { background: var(--chart-good); }
+/* Partly estimated: the same steps, hatched, as Chart marks an estimate. */
+.rr-guide__glance.is-estimated .rr-guide__glancedim i.is-on { background: repeating-linear-gradient(130deg, var(--chart-good) 0 2px, transparent 2px 4px); box-shadow: inset 0 0 0 1px var(--chart-good); }
+.rr-guide__row.is-benchmark .rr-guide__glance { opacity: 0.45; }
+.rr-guide__glancetags { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.rr-guide__thinking { display: inline-block; font-size: 12px; line-height: 16px; color: var(--ink-secondary); }
+.rr-guide__dhead .rr-guide__thinking { margin-bottom: 2px; }
+.rr-guide__unavail { margin: 0; font-size: 13px; line-height: 20px; color: var(--ink-secondary); }
+/* Quality against price (map, advanced). */
+.rr-guide__map { margin: 0 0 var(--space-2); padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-base); }
+.rr-guide__map svg { display: block; width: 100%; height: auto; overflow: visible; }
+.rr-guide__mapaxis { stroke: var(--border-strong); stroke-width: 1; }
+.rr-guide__maptick { font-size: 10px; fill: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.rr-guide__mapname { font-size: 10px; font-weight: 600; fill: var(--ink-secondary); }
+.rr-guide__mapline { fill: none; stroke: var(--chart-good); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.rr-guide__mapdot { cursor: pointer; outline: none; }
+.rr-guide__mapdot circle { fill: var(--surface-raised); stroke: var(--border-strong); stroke-width: 1.5; }
+.rr-guide__mapdot text { font-size: 11px; font-weight: 700; fill: var(--ink-primary); pointer-events: none; }
+.rr-guide__mapdot.is-frontier circle { stroke: var(--chart-good); }
+.rr-guide__mapdot.is-benchmark circle { stroke-dasharray: 2 2; }
+.rr-guide__mapdot.is-benchmark text { fill: var(--ink-muted); }
+.rr-guide__mapdot.is-current circle { fill: var(--action-primary); stroke: var(--action-primary); }
+.rr-guide__mapdot.is-current text { fill: var(--ink-on-brand); }
+.rr-guide__mapdot:hover circle { stroke-width: 2.5; }
+.rr-guide__mapdot:focus-visible circle { stroke: var(--focus-ring); stroke-width: 3; }
+.rr-guide__mapkey { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); font-size: 12px; line-height: 16px; color: var(--ink-secondary); }
+.rr-guide__mapkey i { flex: none; width: 18px; border-top: 1.5px dashed var(--chart-good); }
+/* A run with a task card: card, scorecard, folded answer, run facts. */
+.rr-guide__sample--card { gap: var(--space-5); }
+.rr-guide__card { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); border-radius: var(--radius-md); background: var(--surface-sunken); }
+.rr-guide__brief { margin: 0; font-size: 15px; line-height: 23px; font-weight: 600; color: var(--ink-primary); }
+.rr-guide__cardpart { display: flex; flex-direction: column; gap: 4px; }
+.rr-guide__cardlist { margin: 0; padding-left: 1.2em; font-size: 13px; line-height: 20px; color: var(--ink-primary); }
+ul.rr-guide__cardlist { list-style: disc; }
+ol.rr-guide__cardlist { list-style: decimal; }
+.rr-guide__cardlist li + li { margin-top: 2px; }
+.rr-guide__cardnote { margin: 0; font-size: 12px; line-height: 18px; color: var(--ink-secondary); font-style: italic; }
+.rr-guide__hard { margin: 0; font-size: 13px; line-height: 20px; color: var(--ink-primary); }
+.rr-guide__exact summary, .rr-guide__answer summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-brand); }
+.rr-guide__exact[open] summary, .rr-guide__answer[open] summary { margin-bottom: var(--space-2); }
+.rr-guide__exact .rr-guide__prompt { max-height: 320px; overflow-y: auto; white-space: pre-wrap; font-size: 13px; line-height: 20px; }
+.rr-guide__scorecard { display: flex; flex-direction: column; gap: var(--space-2); }
+.rr-guide__scorehead { margin: 0; display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); font-size: 12px; font-weight: 600; color: var(--ink-secondary); }
+.rr-guide__scorehead b { font-size: 15px; color: var(--ink-primary); font-variant-numeric: tabular-nums; }
+.rr-guide__checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; }
+.rr-guide__check { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: var(--space-2); padding: var(--space-2) var(--space-3); font-size: 13px; line-height: 20px; color: var(--ink-primary); background: var(--surface-base); }
+.rr-guide__check + .rr-guide__check { border-top: 1px solid var(--border-subtle); }
+.rr-guide__mark { font-weight: 700; text-align: center; }
+.rr-guide__check.is-pass .rr-guide__mark { color: var(--status-success); }
+.rr-guide__check.is-partial .rr-guide__mark { color: var(--status-warning); }
+.rr-guide__check.is-miss .rr-guide__mark { color: var(--status-danger); }
+.rr-guide__checkbody { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rr-guide__quote { display: block; font-size: 12px; line-height: 18px; color: var(--ink-secondary); quotes: "\201C" "\201D"; overflow-wrap: anywhere; }
+.rr-guide__run { display: flex; flex-direction: column; gap: var(--space-2); }
+.rr-guide__runfacts { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: var(--space-2) var(--space-4); margin: 0; }
+.rr-guide__runfacts dt { font-size: 11px; color: var(--ink-secondary); }
+.rr-guide__runfacts dd { margin: 1px 0 0; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Rendered output (markdown): its own blocks, not pre-wrapped text. */
+.rr-guide__output--rich { white-space: normal; }
+.rr-guide__output--rich > :first-child { margin-top: 0; }
+.rr-guide__output--rich > :last-child { margin-bottom: 0; }
+.rr-guide__output--rich :is(h1, h2, h3, h4) { margin: var(--space-4) 0 var(--space-2); line-height: 1.3; font-weight: 700; }
+.rr-guide__output--rich h1 { font-size: 18px; }
+.rr-guide__output--rich h2 { font-size: 16px; }
+.rr-guide__output--rich :is(h3, h4) { font-size: 14px; }
+.rr-guide__output--rich :is(p, ul, ol, blockquote, pre, table) { margin: 0 0 var(--space-3); }
+.rr-guide__output--rich :is(ul, ol) { padding-left: 1.25em; }
+.rr-guide__output--rich table { border-collapse: collapse; font-size: 13px; display: block; overflow-x: auto; }
+.rr-guide__output--rich :is(th, td) { padding: 4px 8px; border: 1px solid var(--border-subtle); text-align: left; vertical-align: top; }
+.rr-guide__output--rich th { background: var(--surface-sunken); font-weight: 600; }
+.rr-guide__output--rich code { font-family: var(--font-mono); font-size: 12px; }
+.rr-guide__output--rich pre { padding: var(--space-3); border-radius: var(--radius-sm); background: var(--surface-sunken); overflow-x: auto; white-space: pre; }
+.rr-guide__output--rich blockquote { padding-left: var(--space-3); border-left: 2px solid var(--border-strong); color: var(--ink-secondary); }
 .rr-model__guide { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink-brand); text-decoration: none; }
 .rr-model__guide:hover { text-decoration: underline; text-underline-offset: 3px; }
 @media (max-width: 900px) {
@@ -4620,7 +4742,7 @@ a.rr-article__author:focus-visible { outline: var(--focus-ring-width) solid var(
 }
 
 /* =====================================================================
-   How Desk works for you: Redrob Auto in ModelPicker, the status line
+   How Cowork works for you: Redrob Auto in ModelPicker, the status line
    under the composer, and the receipts an answer leaves in the chat.
    ===================================================================== */
 
@@ -4659,8 +4781,11 @@ a.rr-article__author:focus-visible { outline: var(--focus-ring-width) solid var(
 /* ---- ComposerStatus ---- */
 .rr-cstatus { position: relative; }
 .rr-cstatus__row { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 var(--space-1); }
-.rr-cstatus__item { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-full);
+.rr-cstatus__item { display: inline-flex; align-items: center; gap: var(--rr-cstatus-gap, 7px); height: 30px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-full);
   background: none; font: inherit; font-size: 13px; color: var(--ink-secondary); cursor: pointer; white-space: nowrap; }
+/* Round 1.7.0: compact tightens the chip gap. The default lives in the FALLBACK, not a root
+   declaration, so a downstream app can set --rr-cstatus-gap on any ancestor and win. */
+.rr-cstatus[data-density="compact"] .rr-cstatus__item { gap: var(--rr-cstatus-gap, var(--space-1)); }
 .rr-cstatus__item:hover, .rr-cstatus__item[aria-expanded="true"] { background: var(--surface-sunken); }
 .rr-cstatus__item:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
 .rr-cstatus__icon { display: inline-flex; color: var(--ink-muted); }
@@ -4671,8 +4796,21 @@ a.rr-article__author:focus-visible { outline: var(--focus-ring-width) solid var(
 .rr-cstatus__item--warn .rr-cstatus__icon, .rr-cstatus__item--warn .rr-cstatus__value { color: var(--status-warning); }
 .rr-cstatus__panel { position: absolute; z-index: 30; left: 0; right: 0; bottom: calc(100% + var(--space-2));
   max-height: min(600px, 72vh); overflow-y: auto; overscroll-behavior: contain;
-  padding: var(--space-5); border: 1px solid var(--border-subtle); border-radius: var(--radius-xl); background: var(--surface-raised); box-shadow: var(--shadow-lg); }
+  padding: var(--rr-cstatus-panel-pad, var(--space-5)); border: 1px solid var(--border-subtle); border-radius: var(--radius-xl); background: var(--surface-raised); box-shadow: var(--shadow-lg); }
+/* Round 1.7.0: once the panel is FLOATED (useFloating sets data-side), it is anchored to the active
+   chip button for x, so it must NOT span the row. Give it a real, readable width -- tunable by a
+   downstream app via --rr-cstatus-panel-w with no DS-class override. The closed / SSR / small-screen
+   fallback keeps left:0;right:0 above, so default markup and parity are unchanged. */
+.rr-cstatus__panel[data-side] { left: auto; right: auto; width: min(var(--rr-cstatus-panel-w, 480px), calc(100vw - 16px)); }
+/* data-align is a styling hook mirroring the `align` prop; JS does the real positioning when floated,
+   but these keep the non-floated fallback (SSR / skipBelow / anchor-null) aligned too. */
+.rr-cstatus[data-align="center"] .rr-cstatus__panel:not([data-side]) { left: 50%; right: auto; transform: translateX(-50%); }
+.rr-cstatus[data-align="end"] .rr-cstatus__panel:not([data-side]) { left: auto; right: 0; }
 @media (max-width: 720px) { .rr-cstatus__name { display: none; } }
+/* Round 1.7.0 (a11y): in compact density the name is the chip's ONLY visible label (value + level are
+   dropped and the icon is aria-hidden), so it must stay visible even below 720px -- otherwise the
+   button would have no accessible name. */
+@media (max-width: 720px) { .rr-cstatus[data-density="compact"] .rr-cstatus__name { display: inline; } }
 
 /* Level bars and the running light */
 .rr-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
@@ -4734,6 +4872,55 @@ a.rr-article__author:focus-visible { outline: var(--focus-ring-width) solid var(
 .rr-seg button { height: 30px; padding: 0 14px; border: 0; border-radius: var(--radius-full); background: none; font: inherit; font-size: 13px; font-weight: 600; color: var(--ink-secondary); cursor: pointer; }
 .rr-seg button[aria-checked="true"] { background: var(--surface-raised); color: var(--ink-primary); box-shadow: var(--shadow-sm); }
 .rr-seg button:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
+
+/* ---- Status panels: compact density + consumer malleability -----------------------------------------
+   The three safeguard panels (Privacy, Memory, Cross-check) ship a roomy settings-page layout by default
+   and a `compact` one for a composer popover, where a chip opens them in a few hundred pixels. The words
+   never change between the two; only the room they take. Each root also reads three custom properties, so a
+   downstream app can tune padding, inner gap and width from its own stylesheet without overriding rules or
+   reaching through `rr-` internals: `--rr-panel-pad` (root padding), `--rr-panel-gap` (space between parts)
+   and `--rr-panel-maxw` (width). Each falls back to today's value, so unset means unchanged. The canonical
+   `.rr-xcheck` rule lives later in the file; it reads the same two of these so Cross-check honours them too. */
+.rr-privacy, .rr-memscope, .rr-xcheck {
+  gap: var(--rr-panel-gap, var(--space-4));
+  padding: var(--rr-panel-pad, 0);
+}
+.rr-privacy, .rr-memscope { max-width: var(--rr-panel-maxw, none); }
+
+/* A smaller status card: the composer popover cannot spend 28px of icon and a 17px title on a header the
+   chip already names. Its padding is the card's own, not the panel's `--rr-panel-pad`. */
+.rr-scard--sm { grid-template-columns: 20px minmax(0, 1fr); gap: 10px; padding: var(--space-3); border-radius: var(--radius-md); }
+.rr-scard--sm .rr-scard__icon svg { width: 20px; height: 20px; }
+.rr-scard--sm .rr-scard__title { font-size: 14px; line-height: 20px; }
+.rr-scard--sm .rr-scard__sub { margin-top: 1px; font-size: 12px; line-height: 18px; }
+
+/* Compact Privacy / Memory / Cross-check: tighter gaps, a smaller lede, the privacy levels in one column
+   so three cards do not force the popover wide. Doubled class on each so the compact gap outranks the
+   canonical `.rr-xcheck` rule that sets the roomy gap later in the file. */
+.rr-privacy.rr-privacy--compact, .rr-memscope.rr-memscope--compact, .rr-xcheck.rr-xcheck--compact { gap: var(--rr-panel-gap, var(--space-3)); }
+.rr-privacy--compact .rr-panellede, .rr-memscope--compact .rr-panellede, .rr-xcheck--compact .rr-panellede { font-size: 13px; line-height: 20px; }
+.rr-privacy--compact .rr-privacy__levels { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+.rr-privacy--compact .rr-privacy__level { padding: var(--space-2) var(--space-3); }
+.rr-memscope--compact .rr-memscope__options { gap: var(--space-2); }
+.rr-xcheck--compact .rr-xcheck__row { gap: var(--space-1); padding-bottom: var(--space-3); }
+.rr-xcheck--compact .rr-xcheck__name { font-size: 14px; line-height: 20px; }
+.rr-xcheck--compact .rr-xcheck__text { font-size: 13px; line-height: 20px; }
+.rr-xcheck--compact .rr-xcheck__note { font-size: 12px; line-height: 18px; }
+
+/* A privacy level the person can choose: the same card, now a native radio inside a <label>. The platform
+   gives arrow-key movement, a single Tab stop and grouping; the <input> is hidden and the card itself shows
+   the checked and focus states. The read-only <div> path is unchanged. */
+label.rr-privacy__level { position: relative; display: block; color: inherit; cursor: pointer; }
+.rr-privacy__levelinput { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; clip: rect(0 0 0 0); clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
+.rr-privacy__leveldetail { display: block; margin: 6px 0 0; font-size: 12px; line-height: 18px; color: var(--ink-secondary); }
+label.rr-privacy__level:hover:not([data-on="true"]) { border-color: color-mix(in srgb, var(--status-success) 40%, var(--border-subtle)); }
+label.rr-privacy__level:has(.rr-privacy__levelinput:focus-visible) { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
+/* Locked: the radios still show and read, but choosing does nothing (guarded in JS); dim without greying out. */
+label.rr-privacy__level:has(.rr-privacy__levelinput[aria-disabled="true"]) { cursor: default; }
+.rr-privacy__levellocked { margin: var(--space-1) 0 0; font-size: 12px; line-height: 18px; color: var(--ink-secondary); }
+@media (forced-colors: active) {
+  label.rr-privacy__level[data-on="true"] { outline: 2px solid Highlight; }
+}
 
 /* ---- AnswerReceipt ---- */
 .rr-receipt { display: flex; flex-direction: column; gap: var(--space-2); }
@@ -5084,7 +5271,7 @@ a.rr-pbrow:hover, button.rr-pbrow:hover { border-color: var(--border-strong); }
 .rr-composer__tools > .rr-cmode + * { margin-left: 4px; }
 
 /* ---- CrossCheckSetting ------------------------------------------------- */
-.rr-xcheck { display: flex; flex-direction: column; gap: var(--space-4); max-width: 560px; }
+.rr-xcheck { display: flex; flex-direction: column; gap: var(--rr-panel-gap, var(--space-4)); max-width: var(--rr-panel-maxw, 560px); }
 .rr-xcheck__title { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; color: var(--ink-primary); }
 .rr-xcheck__row { display: flex; flex-direction: column; gap: var(--space-2); padding-bottom: var(--space-4); border-bottom: 1px solid var(--border-subtle); }
 .rr-xcheck__name { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; color: var(--ink-primary); }

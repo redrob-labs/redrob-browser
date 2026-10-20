@@ -181,7 +181,7 @@ const MAP = {
   Monitor: 'monitor',
   Moon: 'moon',
   Sun: 'sun',
-  Palette: 'brush',
+  Palette: 'sliders',
   Plug: 'plug',
   PlugZap: 'plug',
   User: 'user',

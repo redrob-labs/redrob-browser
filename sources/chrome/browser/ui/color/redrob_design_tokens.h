@@ -1,6 +1,6 @@
 // VENDORED FROM THE REDROB DESIGN SYSTEM -- DO NOT EDIT.
-// source: @redrob-labs/ui@1.3.1  dist/native/redrob_tokens.h
-// commit: 49f54c9b33855e4e4442aa8e10c8c400529f4303
+// source: @redrob-labs/ui@1.8.0  dist/native/redrob_tokens.h
+// commit: 865233123cbdc88724f0eb65c3c9d554ad953841
 //
 // Regenerate with: python3 scripts/vendor_design_system.py --update
 // A value changed here is a value that disagrees with every other Redrob product.
@@ -179,6 +179,20 @@ namespace light {
   constexpr uint32_t kProductConsoleFill = 0xFFD9E6FF;  // --product-console-fill
   constexpr uint32_t kProductConsoleLine = 0xFFBAD2FF;  // --product-console-line
   constexpr uint32_t kProductConsoleWash = 0xFFEEF4FF;  // --product-console-wash
+  constexpr uint32_t kProductCowork = 0xFFD87101;       // --product-cowork (same in both themes)
+  constexpr uint32_t kProductCowork1 = 0xFFFFF5EE;      // --product-cowork-1 (same in both themes)
+  constexpr uint32_t kProductCowork10 = 0xFF371800;     // --product-cowork-10 (same in both themes)
+  constexpr uint32_t kProductCowork2 = 0xFFFFE6D5;      // --product-cowork-2 (same in both themes)
+  constexpr uint32_t kProductCowork3 = 0xFFFFCBA8;      // --product-cowork-3 (same in both themes)
+  constexpr uint32_t kProductCowork4 = 0xFFFFA664;      // --product-cowork-4 (same in both themes)
+  constexpr uint32_t kProductCowork5 = 0xFFEB8227;      // --product-cowork-5 (same in both themes)
+  constexpr uint32_t kProductCowork6 = 0xFFD87101;      // --product-cowork-6 (same in both themes)
+  constexpr uint32_t kProductCowork7 = 0xFF964D00;      // --product-cowork-7 (same in both themes)
+  constexpr uint32_t kProductCowork8 = 0xFF763B00;      // --product-cowork-8 (same in both themes)
+  constexpr uint32_t kProductCowork9 = 0xFF582A00;      // --product-cowork-9 (same in both themes)
+  constexpr uint32_t kProductCoworkFill = 0xFFFFE6D5;   // --product-cowork-fill
+  constexpr uint32_t kProductCoworkLine = 0xFFFFCBA8;   // --product-cowork-line
+  constexpr uint32_t kProductCoworkWash = 0xFFFFF5EE;   // --product-cowork-wash
   constexpr uint32_t kProductDesign = 0xFFC162F4;       // --product-design (same in both themes)
   constexpr uint32_t kProductDesign1 = 0xFFFAF4FF;      // --product-design-1 (same in both themes)
   constexpr uint32_t kProductDesign10 = 0xFF35004B;     // --product-design-10 (same in both themes)
@@ -193,20 +207,6 @@ namespace light {
   constexpr uint32_t kProductDesignFill = 0xFFF4E4FF;   // --product-design-fill
   constexpr uint32_t kProductDesignLine = 0xFFEAC9FF;   // --product-design-line
   constexpr uint32_t kProductDesignWash = 0xFFFAF4FF;   // --product-design-wash
-  constexpr uint32_t kProductDesk = 0xFFD87101;         // --product-desk (same in both themes)
-  constexpr uint32_t kProductDesk1 = 0xFFFFF5EE;        // --product-desk-1 (same in both themes)
-  constexpr uint32_t kProductDesk10 = 0xFF371800;       // --product-desk-10 (same in both themes)
-  constexpr uint32_t kProductDesk2 = 0xFFFFE6D5;        // --product-desk-2 (same in both themes)
-  constexpr uint32_t kProductDesk3 = 0xFFFFCBA8;        // --product-desk-3 (same in both themes)
-  constexpr uint32_t kProductDesk4 = 0xFFFFA664;        // --product-desk-4 (same in both themes)
-  constexpr uint32_t kProductDesk5 = 0xFFEB8227;        // --product-desk-5 (same in both themes)
-  constexpr uint32_t kProductDesk6 = 0xFFD87101;        // --product-desk-6 (same in both themes)
-  constexpr uint32_t kProductDesk7 = 0xFF964D00;        // --product-desk-7 (same in both themes)
-  constexpr uint32_t kProductDesk8 = 0xFF763B00;        // --product-desk-8 (same in both themes)
-  constexpr uint32_t kProductDesk9 = 0xFF582A00;        // --product-desk-9 (same in both themes)
-  constexpr uint32_t kProductDeskFill = 0xFFFFE6D5;     // --product-desk-fill
-  constexpr uint32_t kProductDeskLine = 0xFFFFCBA8;     // --product-desk-line
-  constexpr uint32_t kProductDeskWash = 0xFFFFF5EE;     // --product-desk-wash
   constexpr uint32_t kProductOffice = 0xFFFE4D3E;       // --product-office (same in both themes)
   constexpr uint32_t kProductOffice1 = 0xFFFFF4F2;      // --product-office-1 (same in both themes)
   constexpr uint32_t kProductOffice10 = 0xFF470000;     // --product-office-10 (same in both themes)
@@ -405,6 +405,20 @@ namespace dark {
   constexpr uint32_t kProductConsoleFill = 0xFF061460;  // --product-console-fill
   constexpr uint32_t kProductConsoleLine = 0xFF09209C;  // --product-console-line
   constexpr uint32_t kProductConsoleWash = 0xFF030C34;  // --product-console-wash
+  constexpr uint32_t kProductCowork = 0xFFD87101;       // --product-cowork (same in both themes)
+  constexpr uint32_t kProductCowork1 = 0xFFFFF5EE;      // --product-cowork-1 (same in both themes)
+  constexpr uint32_t kProductCowork10 = 0xFF371800;     // --product-cowork-10 (same in both themes)
+  constexpr uint32_t kProductCowork2 = 0xFFFFE6D5;      // --product-cowork-2 (same in both themes)
+  constexpr uint32_t kProductCowork3 = 0xFFFFCBA8;      // --product-cowork-3 (same in both themes)
+  constexpr uint32_t kProductCowork4 = 0xFFFFA664;      // --product-cowork-4 (same in both themes)
+  constexpr uint32_t kProductCowork5 = 0xFFEB8227;      // --product-cowork-5 (same in both themes)
+  constexpr uint32_t kProductCowork6 = 0xFFD87101;      // --product-cowork-6 (same in both themes)
+  constexpr uint32_t kProductCowork7 = 0xFF964D00;      // --product-cowork-7 (same in both themes)
+  constexpr uint32_t kProductCowork8 = 0xFF763B00;      // --product-cowork-8 (same in both themes)
+  constexpr uint32_t kProductCowork9 = 0xFF582A00;      // --product-cowork-9 (same in both themes)
+  constexpr uint32_t kProductCoworkFill = 0xFF582A00;   // --product-cowork-fill
+  constexpr uint32_t kProductCoworkLine = 0xFF763B00;   // --product-cowork-line
+  constexpr uint32_t kProductCoworkWash = 0xFF371800;   // --product-cowork-wash
   constexpr uint32_t kProductDesign = 0xFFC162F4;       // --product-design (same in both themes)
   constexpr uint32_t kProductDesign1 = 0xFFFAF4FF;      // --product-design-1 (same in both themes)
   constexpr uint32_t kProductDesign10 = 0xFF35004B;     // --product-design-10 (same in both themes)
@@ -419,20 +433,6 @@ namespace dark {
   constexpr uint32_t kProductDesignFill = 0xFF540075;   // --product-design-fill
   constexpr uint32_t kProductDesignLine = 0xFF6E1A94;   // --product-design-line
   constexpr uint32_t kProductDesignWash = 0xFF35004B;   // --product-design-wash
-  constexpr uint32_t kProductDesk = 0xFFD87101;         // --product-desk (same in both themes)
-  constexpr uint32_t kProductDesk1 = 0xFFFFF5EE;        // --product-desk-1 (same in both themes)
-  constexpr uint32_t kProductDesk10 = 0xFF371800;       // --product-desk-10 (same in both themes)
-  constexpr uint32_t kProductDesk2 = 0xFFFFE6D5;        // --product-desk-2 (same in both themes)
-  constexpr uint32_t kProductDesk3 = 0xFFFFCBA8;        // --product-desk-3 (same in both themes)
-  constexpr uint32_t kProductDesk4 = 0xFFFFA664;        // --product-desk-4 (same in both themes)
-  constexpr uint32_t kProductDesk5 = 0xFFEB8227;        // --product-desk-5 (same in both themes)
-  constexpr uint32_t kProductDesk6 = 0xFFD87101;        // --product-desk-6 (same in both themes)
-  constexpr uint32_t kProductDesk7 = 0xFF964D00;        // --product-desk-7 (same in both themes)
-  constexpr uint32_t kProductDesk8 = 0xFF763B00;        // --product-desk-8 (same in both themes)
-  constexpr uint32_t kProductDesk9 = 0xFF582A00;        // --product-desk-9 (same in both themes)
-  constexpr uint32_t kProductDeskFill = 0xFF582A00;     // --product-desk-fill
-  constexpr uint32_t kProductDeskLine = 0xFF763B00;     // --product-desk-line
-  constexpr uint32_t kProductDeskWash = 0xFF371800;     // --product-desk-wash
   constexpr uint32_t kProductOffice = 0xFFFE4D3E;       // --product-office (same in both themes)
   constexpr uint32_t kProductOffice1 = 0xFFFFF4F2;      // --product-office-1 (same in both themes)
   constexpr uint32_t kProductOffice10 = 0xFF470000;     // --product-office-10 (same in both themes)
