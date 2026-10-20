@@ -13,3 +13,8 @@ substitutions:
       pattern: "print(f\"BrowserOS resources validated ({len(required_resources)} resources)\")\n"
       replace: "print(f\"Redrob agent resources validated ({len(required_resources)} resources)\")\n"
       count: 1
+  - description: |
+      Redrob: the agent server executable is redrob-agent-server, the name the OS shows (macOS firewall prompt, Task Manager, ps).
+    regex:
+      pattern: "[\"bin/browseros_server\"]"
+      replace: "[\"bin/redrob-agent-server\"]"

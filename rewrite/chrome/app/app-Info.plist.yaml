@@ -13,3 +13,13 @@ substitutions:
       pattern: "</dict>\n</plist>"
       replace: "  <key>SUPublicEDKey</key>\n  <string>5lWrkUbHu7MqrCIW4bmFzx1KUoIqx8ugydJSAcAZXlQ=</string>\n  <key>SUEnableAutomaticChecks</key>\n  <true/>\n  <key>SUScheduledCheckInterval</key>\n  <integer>3600</integer>\n  <key>SUAllowsAutomaticUpdates</key>\n  <true/>\n  <key>SUAutomaticallyUpdate</key>\n  <true/>\n\t<key>CrProductDirName</key>\n\t<string>${BROWSEROS_PRODUCT_DIR_NAME}</string>\n</dict>\n</plist>"
       count: 1
+  - description: |
+      Finder's "Kind" for a .crx and a web-app shortcut, which named Chromium under our app.
+    regex:
+      pattern: "<string>Chromium Extension</string>"
+      replace: "<string>Redrob Extension</string>"
+  - description: |
+      The same for the shortcut type.
+    regex:
+      pattern: "<string>Chromium Shortcut</string>"
+      replace: "<string>Redrob Shortcut</string>"

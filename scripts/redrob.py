@@ -317,9 +317,8 @@ def write_portable_zip(archive: Path, target: Path) -> None:
 
     The 7z holds one top-level directory, Chrome-bin/, and the zip holds that directory's CONTENTS: Redrob
     Launcher expects the executable at the archive's top level (crates/native/src/install.rs, find_binary looks
-    for `<id>.exe` or `bin/<id>.exe`), so `chrome.exe` is also copied to `redrob-browser.exe` beside itself.
-    chrome.exe is a stub that loads chrome.dll from the version directory next to its own file, so the copy
-    runs the same browser; chrome.exe stays because chrome_proxy.exe and the PWA launcher look for it by name.
+    for `<id>.exe` or `bin/<id>.exe`), and the browser is built as `redrob-browser.exe`, so the archive's own
+    layout already is that shape. Before 0.5 it was chrome.exe plus a copy under our name.
     """
     if not archive.exists():
         sys.exit(f"{archive} is missing: the mini_installer target did not produce its archive")
@@ -338,9 +337,8 @@ def write_portable_zip(archive: Path, target: Path) -> None:
     staging.mkdir(parents=True)
     run([sevenzip, "x", "-y", "-bso0", "-bsp0", f"-o{staging}", str(archive)], ROOT)
     top = staging / "Chrome-bin"
-    if not (top / "chrome.exe").exists():
-        sys.exit(f"chrome.7z did not unpack to Chrome-bin/chrome.exe under {staging}")
-    shutil.copy2(top / "chrome.exe", top / "redrob-browser.exe")
+    if not (top / "redrob-browser.exe").exists():
+        sys.exit(f"chrome.7z did not unpack to Chrome-bin/redrob-browser.exe under {staging}")
     target.unlink(missing_ok=True)
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         for path in sorted(top.rglob("*")):
@@ -362,7 +360,7 @@ def package_windows(args: argparse.Namespace) -> None:
     exists the gate belongs here too -- see docs/WINDOWS.md.
     """
     out = SRC / "out" / args.flavour
-    if not (out / "chrome.exe").exists():
+    if not (out / "redrob-browser.exe").exists():
         sys.exit(f"nothing built in out/{args.flavour}: run build first")
 
     jobs = ["-j", str(args.jobs)] if getattr(args, "jobs", 0) else []
@@ -392,7 +390,7 @@ def package_windows(args: argparse.Namespace) -> None:
     # The portable zip, for Redrob Launcher. The launcher installs .msi or -portable.zip on Windows and nothing
     # else -- a self-extracting setup.exe is not a format it opens -- and this build makes no .msi. The
     # installer's own payload is already the unpacked application: mini_installer_archive stages every file
-    # FILES.cfg lists into Chrome-bin/ (chrome.exe at the top, the versioned directory with chrome.dll beside it)
+    # FILES.cfg lists into Chrome-bin/ (redrob-browser.exe at the top, the versioned directory with chrome.dll beside it)
     # and stores that as chrome.7z, so the portable zip is that archive re-containered, not a second opinion
     # about which files make up the browser. Extracted with the 7-Zip the Chromium tree ships for the host,
     # so this needs nothing installed on the machine (docs/BUILD.md).
@@ -889,7 +887,7 @@ def stage_agent_server(target: str) -> None:
     # depends on a developer's local secrets file. --no-upload keeps it off the release bucket.
     run([bun, "scripts/build/server.ts", f"--target={target}", "--no-upload", "--ci"], AGENT)
     built = AGENT / "dist" / "prod" / "server" / target / "resources"
-    binary = built / "bin" / ("browseros_server.exe" if target.startswith("windows") else "browseros_server")
+    binary = built / "bin" / ("redrob-agent-server.exe" if target.startswith("windows") else "redrob-agent-server")
     if not binary.is_file():
         sys.exit(f"agent server build produced no {binary.relative_to(ROOT)}")
     if SERVER_RESOURCES.name != "resources" or SERVER_RESOURCES.parent.name != "server":
@@ -1100,13 +1098,13 @@ def google_api_args() -> str:
 def built_binary(flavour: str) -> pathlib.Path:
     """The launchable thing a build produces, which is a different path on each platform.
 
-    Linux leaves `chrome` in the output directory. Windows leaves `chrome.exe` beside it. macOS produces an
+    Linux leaves `chrome` in the output directory. Windows leaves `redrob-browser.exe` beside it. macOS produces an
     .app bundle whose executable is several directories inside it and carries the BRANDED name, so it does not
     even share a stem with the other two.
     """
     out = SRC / "out" / flavour
     if sys.platform == "win32":
-        return out / "chrome.exe"
+        return out / "redrob-browser.exe"
     if sys.platform == "darwin":
         return out / "Redrob Browser.app" / "Contents" / "MacOS" / "Redrob Browser"
     return out / "chrome"

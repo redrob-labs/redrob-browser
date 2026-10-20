@@ -1,6 +1,6 @@
 diff --git a/chrome/browser/browseros/server/BUILD.gn b/chrome/browser/browseros/server/BUILD.gn
 new file mode 100644
-index 0000000000000000000000000000000000000000..f291703753d8a98bc66727e28b6175193514301d
+index 0000000000000000000000000000000000000000..6e8c39a87dda532344cd753698086dced08faa4c
 --- /dev/null
 +++ b/chrome/browser/browseros/server/BUILD.gn
 @@ -0,0 +1,184 @@
@@ -15,7 +15,7 @@ index 0000000000000000000000000000000000000000..f291703753d8a98bc66727e28b617519
 +_browserclaw_server_resources =
 +    "//chrome/browser/browseros/claw_server/resources"
 +
-+_browseros_server_binary_name = "browseros_server"
++_browseros_server_binary_name = "redrob-agent-server"
 +_browserclaw_server_binary_name = "browseros-claw-server"
 +
 +if (is_win) {

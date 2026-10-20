@@ -7,7 +7,8 @@
  * See the NOTICE file for provenance.
  */
 
-const CHANGELOG_BASE_URL = 'https://docs.browseros.com/changelog'
+const CHANGELOG_BASE_URL =
+  'https://github.com/redrob-labs/redrob-browser/releases'
 
 type ChangelogVersionConfig = {
   showChangelog: true

@@ -1,0 +1,11 @@
+diff --git a/chrome/installer/linux/debian/control.template b/chrome/installer/linux/debian/control.template
+index 1d7dff3e689ed..05cc227916140 100644
+--- a/chrome/installer/linux/debian/control.template
++++ b/chrome/installer/linux/debian/control.template
+@@ -10,5 +10,6 @@ Provides: @@deb_provides
+ Pre-Depends: @@deb_pre_depends
+ Depends: @@deb_depends
+ Architecture: @@architecture
++Homepage: @@PRODUCTURL
+ Description: @@SHORTDESC
+  @@FULLDESC

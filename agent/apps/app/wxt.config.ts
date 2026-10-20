@@ -13,7 +13,6 @@ import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'wxt'
 import { archiveSourceMaps } from './lib/build/archive-source-maps'
 import { LEGACY_AGENT_EXTENSION_ID } from './lib/constants/legacyAgentExtensionId'
-import { PRODUCT_WEB_HOST } from './lib/constants/productWebHost'
 
 // biome-ignore lint/style/noProcessEnv: build config file needs env access
 const env = process.env
@@ -41,13 +40,13 @@ export default defineConfig({
     externally_connectable: {
       ids: [REPORTER_EXTENSION_ID],
     },
+    // Only the previous agent extension may load app.html. Web pages may not:
+    // the upstream account site used to be listed here, which let a site we do
+    // not control frame the panel.
     web_accessible_resources: [
       {
         resources: ['app.html'],
-        matches: [
-          `https://${PRODUCT_WEB_HOST}/*`,
-          `https://*.${PRODUCT_WEB_HOST}/*`,
-        ],
+        matches: [],
         extension_ids: [LEGACY_AGENT_EXTENSION_ID],
       },
     ],

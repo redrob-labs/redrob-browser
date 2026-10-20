@@ -263,12 +263,12 @@ jobs:
           fi
           ents="vendor/browseros/resources/entitlements/browseros-executable-entitlements.plist"
           test -f "$ents" || { echo "::error::$ents is missing"; exit 1; }
-          server="$APP_PATH/Contents/Resources/BrowserOSServer/default/resources/bin/browseros_server"
+          server="$APP_PATH/Contents/Resources/BrowserOSServer/default/resources/bin/redrob-agent-server"
           if [ -f "$server" ]; then
-            sign --options runtime --identifier ai.redrob.Browser.browseros_server --entitlements "$ents" "$server"
+            sign --options runtime --identifier ai.redrob.Browser.redrob-agent-server --entitlements "$ents" "$server"
             codesign --verify --verbose=2 "$server"
           else
-            echo "no browseros_server in the bundle"
+            echo "no redrob-agent-server in the bundle"
           fi
           # Anything else Apple would scan: list every Mach-O that still carries no Developer ID signature,
           # so the next rejection names its file here instead of in a notary log.
@@ -567,11 +567,12 @@ jobs:
 
       # The launcher icon: the 512 px app icon as one more release asset, named in redrob-launcher.json
       # (`icon`) by release-publish (launcher_icon) so Redrob Launcher's catalog shows this release's own
-      # logo. Uploaded under the `release-*` prefix the publish job collects; not a CDN file.
+      # logo. Uploaded under the `release-*` prefix the publish job collects; not a CDN file. Full bleed,
+      # not the macOS appiconset file, which carries Apple's 100 px margin.
       - name: stage the launcher icon
         run: |
           mkdir -p "$RUNNER_TEMP/launcher-icon"
-          cp branding/icons/mac/appiconset/appicon_512.png "$RUNNER_TEMP/launcher-icon/redrob-browser.png"
+          cp branding/icons/launcher_icon_512.png "$RUNNER_TEMP/launcher-icon/redrob-browser.png"
       - uses: actions/upload-artifact@v4
         with:
           name: release-launcher-icon

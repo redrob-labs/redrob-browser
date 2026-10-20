@@ -53,3 +53,11 @@ protect:
   - download Chrome
   - Get Chrome
   - get Chrome on
+
+  # Google's own product and service names, not the browser. "Gemini in Chrome" is the name of
+  # Google's feature; "Chrome for Testing" is Google's automation build; the cloud management console
+  # is Google's admin product. Renaming any of them names something we do not publish.
+  - Chrome for Testing
+  - Gemini in Chrome
+  - Chrome Browser Cloud Management
+  - Chrome Sync

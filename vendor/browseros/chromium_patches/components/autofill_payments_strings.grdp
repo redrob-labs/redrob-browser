@@ -1,7 +1,55 @@
 diff --git a/components/autofill_payments_strings.grdp b/components/autofill_payments_strings.grdp
+index 80f5a653a4726..1a58c35508f3d 100644
 --- a/components/autofill_payments_strings.grdp
 +++ b/components/autofill_payments_strings.grdp
-@@ -287,13 +287,13 @@
+@@ -61,8 +61,8 @@
+   <message name="IDS_AUTOFILL_GOOGLE_WALLET_LOGO_ACCESSIBLE_NAME" desc="The accessible name for the Google Wallet logo.">
+     Google Wallet logo
+   </message>
+-  <message name="IDS_AUTOFILL_CHROME_LOGO_ACCESSIBLE_NAME" desc="The accessible name for the Chrome logo.">
+-    Chrome logo
++  <message name="IDS_AUTOFILL_CHROME_LOGO_ACCESSIBLE_NAME" desc="The accessible name for the Redrob logo.">
++    Redrob logo
+   </message>
+ 
+   <if expr="not is_android">
+@@ -115,7 +115,7 @@
+   <if expr="is_ios">
+     <then>
+       <message name="IDS_AUTOFILL_SAVE_CARD_ONLY_PROMPT_EXPLANATION_LOCAL" desc="Explanation text for the Autofill save card prompt to save a card locally. It is shown when a new card is used during checkout, and sync is not enabled. This prompt description is shown on iOS bottomsheet.">
+-        Pay faster when your card is saved. Card details are saved to Chrome on your device.
++        Pay faster when your card is saved. Card details are saved to Redrob on your device.
+       </message>
+     </then>
+     <else>
+@@ -257,10 +257,10 @@
+     </message>
+   </if>
+   <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_UPLOAD_EXPLANATION_TOOLTIP" desc="The tooltip hover text that explains why credit card upload to Google Payments is being offered.">
+-    Chrome is offering to save your cards in your Google Account because you are signed in. You can change this behavior in settings.
++    Redrob is offering to save your cards in your Google Account because you are signed in. You can change this behavior in settings.
+   </message>
+   <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_UPLOAD_EXPLANATION_AND_CARDHOLDER_NAME_TOOLTIP" desc="The tooltip hover text that explains why credit card upload to Google Account is being offered and where the suggested cardholder name came from.">
+-    Chrome is offering to save your cards in your Google Account because you are signed in. You can change this behavior in settings. The cardholder name comes from your account.
++    Redrob is offering to save your cards in your Google Account because you are signed in. You can change this behavior in settings. The cardholder name comes from your account.
+   </message>
+   <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_LOADING_THROBBER_ACCESSIBLE_NAME" desc="Accessible name announced by the screenreader for save card bubble in loading state showing a throbber.">
+     Saving card info
+@@ -276,24 +276,24 @@
+     </message>
+     <if expr="_google_chrome">
+       <message name="IDS_AUTOFILL_SAVE_AND_FILL_DIALOG_EXPLANATION_LOCAL" desc="Explanation text for the Autofill Save and Fill dialog for cards that will be saved locally.">
+-        Autofill this card for purchases made in Chrome when it's saved on this device
++        Autofill this card for purchases made in Redrob when it's saved on this device
+       </message>
+       <message name="IDS_AUTOFILL_SAVE_AND_FILL_DIALOG_EXPLANATION_UPLOAD" desc="Explanation text for the Autofill Save and Fill dialog for cards that will be saved to the GPay server.">
+-        Autofill this card for purchases made in Chrome when it's saved to use with Google Pay
++        Autofill this card for purchases made in Redrob when it's saved to use with Google Pay
+       </message>
+       <message name="IDS_AUTOFILL_SAVE_AND_FILL_TO_WALLET_DIALOG_EXPLANATION_UPLOAD" desc="Explanation text for the Autofill Save and Fill dialog for cards that will be saved to Google Wallet.">
+-        Autofill this card for purchases made in Chrome when it's saved in Google Wallet
++        Autofill this card for purchases made in Redrob when it's saved in Google Wallet
+       </message>
      </if>
      <if expr="not _google_chrome">
        <message name="IDS_AUTOFILL_SAVE_AND_FILL_DIALOG_EXPLANATION_LOCAL" desc="Explanation text for the Autofill Save and Fill dialog for cards that will be saved locally.">
@@ -18,7 +66,69 @@ diff --git a/components/autofill_payments_strings.grdp b/components/autofill_pay
        </message>
      </if>
      <message name="IDS_AUTOFILL_SAVE_AND_FILL_DIALOG_CARD_NUMBER_LABEL" desc="The label text for the card number textfield.">
-@@ -609,13 +609,13 @@
+@@ -441,7 +441,7 @@
+     </message>
+   </if>
+   <if expr="is_ios">
+-    <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_NAVIGATION_TITLE_VERIFICATION" desc="Title for the IOS navigation bar view when a credit card unmasking related prompt is shown. Such dialog is shown when the user wants to fill a credit card into the form but Chrome needs to finish some verification steps before filling the form.">
++    <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_NAVIGATION_TITLE_VERIFICATION" desc="Title for the IOS navigation bar view when a credit card unmasking related prompt is shown. Such dialog is shown when the user wants to fill a credit card into the form but Redrob needs to finish some verification steps before filling the form.">
+       Verification
+     </message>
+     <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_CVC_FIELD_TITLE" desc="The name of the field for credit card verification code in the card unmasking dialog. The text field where this is presented can be very narrow, so please prefer to translate this to the most common abbreviated form. [CHAR_LIMIT=4]">
+@@ -542,10 +542,10 @@
+       Verified
+     </message>
+   </if>
+-  <message name="IDS_AUTOFILL_3DS_FETCH_VCN_PROGRESS_DIALOG_LOADING_MESSAGE" desc="Message to be displayed after a VCN 3DS authentication has completed, and Chrome is attempting to retrieve the virtual card from the Payments server. If the authentication was successful, a confirmation message will display in the progress dialog and then the virtual card will be filled. If the authentication was not successful, an error message will be displayed.">
++  <message name="IDS_AUTOFILL_3DS_FETCH_VCN_PROGRESS_DIALOG_LOADING_MESSAGE" desc="Message to be displayed after a VCN 3DS authentication has completed, and Redrob is attempting to retrieve the virtual card from the Payments server. If the authentication was successful, a confirmation message will display in the progress dialog and then the virtual card will be filled. If the authentication was not successful, an error message will be displayed.">
+     Verifying...
+   </message>
+-  <message name="IDS_AUTOFILL_3DS_FETCH_VCN_PROGRESS_DIALOG_CONFIRMATION_MESSAGE" desc="Message to be displayed after a VCN 3DS authentication has successfully completed, and Chrome is going to fill the virtual card.">
++  <message name="IDS_AUTOFILL_3DS_FETCH_VCN_PROGRESS_DIALOG_CONFIRMATION_MESSAGE" desc="Message to be displayed after a VCN 3DS authentication has successfully completed, and Redrob is going to fill the virtual card.">
+     Your card is verified
+   </message>
+   <message name="IDS_AUTOFILL_IBAN_UNMASK_ERROR_DIALOG_TITLE" desc="Title displayed when there is a server failure during the process of unmasking a server IBAN.">
+@@ -557,13 +557,13 @@
+ 
+   <!-- DeviceAuthentication titles-->
+   <if expr="is_macosx">
+-    <message name="IDS_PAYMENTS_AUTOFILL_FILLING_MANDATORY_REAUTH" desc="Text that appears in the payments autofill mandatory re-authentication popup, asking the user to authenticate using biometric or device unlock before filling. Note: MacOS has the wording 'Google Chrome is trying to' prepended onto the message during user auth, and it will add a period at the end.">
++    <message name="IDS_PAYMENTS_AUTOFILL_FILLING_MANDATORY_REAUTH" desc="Text that appears in the payments autofill mandatory re-authentication popup, asking the user to authenticate using biometric or device unlock before filling. Note: MacOS has the wording 'Redrob is trying to' prepended onto the message during user auth, and it will add a period at the end.">
+       verify it's you so it can fill in your payment info
+     </message>
+-    <message name="IDS_PAYMENTS_AUTOFILL_MANDATORY_REAUTH_PROMPT" desc="Message to be displayed to the user in the device authentication prompt when they click on the mandatory auth toggle on the Payments settings page, irrespective to enable or disable it. When mandatory auth toggle is enabled, we would authenticate the user before autofilling in the payment details. Note: MacOS has the wording 'Google Chrome is trying to' prepended onto the message during user auth, and it will add a period at the end.">
++    <message name="IDS_PAYMENTS_AUTOFILL_MANDATORY_REAUTH_PROMPT" desc="Message to be displayed to the user in the device authentication prompt when they click on the mandatory auth toggle on the Payments settings page, irrespective to enable or disable it. When mandatory auth toggle is enabled, we would authenticate the user before autofilling in the payment details. Note: MacOS has the wording 'Redrob is trying to' prepended onto the message during user auth, and it will add a period at the end.">
+       modify settings for filling payment methods
+     </message>
+-    <message name="IDS_PAYMENTS_AUTOFILL_EDIT_CARD_MANDATORY_REAUTH_PROMPT" desc="Message to be displayed to the user in the device authentication prompt when they try to edit a local card on the Payments settings page if the mandatory auth toggle is enabled. If the user auth was successful, we would then show the edit card dialog. Note: MacOS has the wording 'Google Chrome is trying to' prepended onto the message during user auth, and it will add a period at the end.">
++    <message name="IDS_PAYMENTS_AUTOFILL_EDIT_CARD_MANDATORY_REAUTH_PROMPT" desc="Message to be displayed to the user in the device authentication prompt when they try to edit a local card on the Payments settings page if the mandatory auth toggle is enabled. If the user auth was successful, we would then show the edit card dialog. Note: MacOS has the wording 'Redrob is trying to' prepended onto the message during user auth, and it will add a period at the end.">
+       edit payment methods
+     </message>
+   </if>
+@@ -580,7 +580,7 @@
+   </if>
+   <if expr="is_win">
+     <message name="IDS_PAYMENTS_AUTOFILL_FILLING_MANDATORY_REAUTH" desc="Text that appears in the payments autofill mandatory re-authentication popup, asking the user to authenticate using biometric or device unlock before filling.">
+-      Google Chrome is trying to verify it's you so it can fill in your payment info.
++      Redrob is trying to verify it's you so it can fill in your payment info.
+     </message>
+   </if>
+   <if expr="is_ios">
+@@ -598,24 +598,24 @@
+     </message>
+     <if expr="_google_chrome">
+       <message name="IDS_PAYMENTS_AUTOFILL_FILLING_MANDATORY_REAUTH" desc="Text that appears in the payments autofill mandatory re-authentication popup as the sublabel, asking the user to authenticate using biometric or device unlock before filling.">
+-        Verify it's you so Chrome can fill in your payment info.
++        Verify it's you so Redrob can fill in your payment info.
+       </message>
+       <message name="IDS_PAYMENTS_AUTOFILL_SETTINGS_TOGGLE_MANDATORY_REAUTH" desc="Text that appears in the payments autofill mandatory re-authentication popup as the sublabel when users try to switch the mandatory reauth settings page toggle, asking the user to authenticate using biometric or device unlock before the toggle is switched.">
+-        Google Chrome is trying to modify settings for filling payment methods.
++        Redrob is trying to modify settings for filling payment methods.
+       </message>
+       <message name="IDS_PAYMENTS_AUTOFILL_SETTINGS_EDIT_MANDATORY_REAUTH" desc="Text that appears in the payments autofill mandatory re-authentication popup as the sublabel when users try to edit cards in the settings page, asking the user to authenticate using biometric or device unlock first.">
+-        Google Chrome is trying to edit payment methods.
++        Redrob is trying to edit payment methods.
+       </message>
      </if>
      <if expr="not _google_chrome">
        <message name="IDS_PAYMENTS_AUTOFILL_FILLING_MANDATORY_REAUTH" desc="Text that appears in the payments autofill mandatory re-authentication popup as the sublabel, asking the user to authenticate using biometric or device unlock before filling.">
@@ -35,3 +145,179 @@ diff --git a/components/autofill_payments_strings.grdp b/components/autofill_pay
        </message>
      </if>
    </if>
+@@ -774,7 +774,7 @@
+     You're all set
+   </message>
+   <message name="IDS_AUTOFILL_MANDATORY_REAUTH_CONFIRMATION_EXPLANATION" desc="Explanation text for the mandatory reauth confirmation prompt that is displayed to the user after opting into mandatory reauth. Mandatory reauth requires the user to unlock their device or pass a biometric auth when autofilling payment method information.">
+-    Chrome will now verify it's you before filling in payment methods. You can update this at any time in <ph name="IDS_AUTOFILL_MANDATORY_REAUTH_CONFIRMATION_SETTINGS_LINK">$1<ex>settings</ex></ph>.
++    Redrob will now verify it's you before filling in payment methods. You can update this at any time in <ph name="IDS_AUTOFILL_MANDATORY_REAUTH_CONFIRMATION_SETTINGS_LINK">$1<ex>settings</ex></ph>.
+   </message>
+   <message name="IDS_AUTOFILL_MANDATORY_REAUTH_CONFIRMATION_SETTINGS_LINK" desc="A link to the settings page for the mandatory reauth confirmation prompt that is displayed to the user after opting into mandatory reauth. Mandatory reauth requires the user to unlock their device or pass a biometric auth when autofilling payment method information.">
+     settings
+@@ -961,22 +961,22 @@
+   <message name="IDS_AUTOFILL_VIRTUAL_CARD_DISABLED_SUGGESTION_OPTION_VALUE" desc="Text to be displayed for a virtual card option in the credit card suggestion list when the virtual card is disabled(opted-out) by the merchant. This suggestion will be grayed-out and the user will not be able to preview or select this option.">
+       Merchant doesn't accept this virtual card
+   </message>
+-  <message name="IDS_AUTOFILL_CARD_INFO_RETRIEVAL_SUGGESTION_IPH_BUBBLE_LABEL" desc="Text shown in the `In-Product Help(IPH)` bubble for card info retrieval suggestions on Chrome Desktop and Android. It is specifically for card info retrieval enrolled card. Card info will be copied after the user clicks the suggestion.">
++  <message name="IDS_AUTOFILL_CARD_INFO_RETRIEVAL_SUGGESTION_IPH_BUBBLE_LABEL" desc="Text shown in the `In-Product Help(IPH)` bubble for card info retrieval suggestions on Redrob Desktop and Android. It is specifically for card info retrieval enrolled card. Card info will be copied after the user clicks the suggestion.">
+       You can autofill this card because your <ph name="CARD_ISSUER_NAME">$1<ex>PayPay</ex></ph> account is linked to Google Pay
+   </message>
+-  <message name="IDS_AUTOFILL_CARD_INFO_RETRIEVAL_SUGGESTION_IPH_BUBBLE_LABEL_SCREENREADER" desc="Text shown in the `In-Product Help(IPH)` bubble for card info retrieval suggestions on Chrome Desktop. It is specifically for card info retrieval enrolled card. Card info will be copied after the user clicks the suggestion.">
++  <message name="IDS_AUTOFILL_CARD_INFO_RETRIEVAL_SUGGESTION_IPH_BUBBLE_LABEL_SCREENREADER" desc="Text shown in the `In-Product Help(IPH)` bubble for card info retrieval suggestions on Redrob Desktop. It is specifically for card info retrieval enrolled card. Card info will be copied after the user clicks the suggestion.">
+       Now you can autofill your <ph name="CARD_ISSUER_NAME">$1<ex>PayPay</ex></ph> cards because your <ph name="CARD_ISSUER_NAME">$1<ex>PayPay</ex></ph> account is linked to Google Pay.
+   </message>
+-  <message name="IDS_AUTOFILL_CARD_BNPL_AFFIRM_OR_ZIP_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP" desc="Text shown in the `In-Product Help(IPH)` bubble to educate users when using BNPL suggestion you can pay over time on Chrome Desktop. Used when the possible available BNPL issuers are Affirm and Zip.">
++  <message name="IDS_AUTOFILL_CARD_BNPL_AFFIRM_OR_ZIP_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP" desc="Text shown in the `In-Product Help(IPH)` bubble to educate users when using BNPL suggestion you can pay over time on Redrob Desktop. Used when the possible available BNPL issuers are Affirm and Zip.">
+       Use Affirm or Zip to pay over time
+   </message>
+-  <message name="IDS_AUTOFILL_CARD_BNPL_AFFIRM_OR_ZIP_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP_SCREENREADER" desc="Text shown in the `In-Product Help(IPH)` bubble to educate users when using BNPL suggestion you can pay over time on Chrome Desktop. Used when the possible available BNPL issuers are Affirm and Zip.">
++  <message name="IDS_AUTOFILL_CARD_BNPL_AFFIRM_OR_ZIP_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP_SCREENREADER" desc="Text shown in the `In-Product Help(IPH)` bubble to educate users when using BNPL suggestion you can pay over time on Redrob Desktop. Used when the possible available BNPL issuers are Affirm and Zip.">
+       Use Affirm or Zip to pay over time
+   </message>
+-  <message name="IDS_AUTOFILL_CARD_BNPL_AFFIRM_ZIP_OR_KLARNA_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP" desc="Text shown in the `In-Product Help(IPH)` bubble to educate users when using BNPL suggestion you can pay over time on Chrome Desktop. Used when the possible available BNPL issuers are Affirm, Zip, and Klarna.">
++  <message name="IDS_AUTOFILL_CARD_BNPL_AFFIRM_ZIP_OR_KLARNA_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP" desc="Text shown in the `In-Product Help(IPH)` bubble to educate users when using BNPL suggestion you can pay over time on Redrob Desktop. Used when the possible available BNPL issuers are Affirm, Zip, and Klarna.">
+       Use Affirm, Zip, or Klarna to pay over time
+   </message>
+-  <message name="IDS_AUTOFILL_CARD_BNPL_AFFIRM_ZIP_OR_KLARNA_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP_SCREENREADER" desc="Text shown in the `In-Product Help(IPH)` bubble to educate users when using BNPL suggestion you can pay over time on Chrome Desktop. Used when the possible available BNPL issuers are Affirm, Zip, and Klarna.">
++  <message name="IDS_AUTOFILL_CARD_BNPL_AFFIRM_ZIP_OR_KLARNA_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP_SCREENREADER" desc="Text shown in the `In-Product Help(IPH)` bubble to educate users when using BNPL suggestion you can pay over time on Redrob Desktop. Used when the possible available BNPL issuers are Affirm, Zip, and Klarna.">
+       Use Affirm, Zip, or Klarna to pay over time
+   </message>
+   <message name="IDS_AUTOFILL_CARD_BNPL_SUGGESTION_WITH_GOOGLE_PAY_IPH_BUBBLE_LABEL_DESKTOP" desc="Text shown in the `In-Product Help(IPH)` bubble to educate users that when using a BNPL suggestion, you can pay over time with Google Pay.">
+@@ -1066,19 +1066,19 @@
+   <message name="IDS_AUTOFILL_A11Y_ANNOUNCEMENT_CONCATENATE_TWO_STRINGS" desc="Generic template to concatenate two accessibility announcements with a comma.">
+       <ph name="STRING_1">$1<ex>Tab announcement</ex></ph>, <ph name="STRING_2">$2<ex>Footnote announcement</ex></ph>
+   </message>
+-  <message name="IDS_AUTOFILL_CARD_INFO_RETRIEVAL_SUGGESTION_IPH_BUBBLE_FALLBACK_LABEL" desc="Text shown in the `In-Product Help(IPH)` bubble for card info retrieval suggestions on Chrome Android when the issuer_id is not present in the card. It is specifically for card info retrieval enrolled card. Card info will be copied after the user clicks the suggestion.">
++  <message name="IDS_AUTOFILL_CARD_INFO_RETRIEVAL_SUGGESTION_IPH_BUBBLE_FALLBACK_LABEL" desc="Text shown in the `In-Product Help(IPH)` bubble for card info retrieval suggestions on Redrob Android when the issuer_id is not present in the card. It is specifically for card info retrieval enrolled card. Card info will be copied after the user clicks the suggestion.">
+       You can autofill this card because your account is linked to Google Pay
+   </message>
+-  <message name="IDS_AUTOFILL_DISABLED_VIRTUAL_CARD_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP" desc="Text shown in the `In-Product Help(IPH)` bubble for disabled and grayed out virtual card suggestions on Chrome Desktop.">
++  <message name="IDS_AUTOFILL_DISABLED_VIRTUAL_CARD_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP" desc="Text shown in the `In-Product Help(IPH)` bubble for disabled and grayed out virtual card suggestions on Redrob Desktop.">
+       Cards not accepted by this merchant are disabled
+   </message>
+-  <message name="IDS_AUTOFILL_DISABLED_VIRTUAL_CARD_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP_SCREENREADER" is_accessibility_with_no_ui="true" desc="Screenreader text for the `In-Product Help(IPH)` bubble for grayed out virtual card suggestions on Chrome Desktop.">
++  <message name="IDS_AUTOFILL_DISABLED_VIRTUAL_CARD_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP_SCREENREADER" is_accessibility_with_no_ui="true" desc="Screenreader text for the `In-Product Help(IPH)` bubble for grayed out virtual card suggestions on Redrob Desktop.">
+       Cards not accepted by this merchant are disabled such as virtual cards.
+   </message>
+-  <message name="IDS_AUTOFILL_DOWNSTREAM_CARD_AWARENESS_IPH_BUBBLE_LABEL" desc="Text shown in the `In-Product Help(IPH)` bubble for externally-saved card suggestions. This IPH is displayed when a user interacts with a payment form for the first time after adding a card through other Google services outside of Chrome.">
++  <message name="IDS_AUTOFILL_DOWNSTREAM_CARD_AWARENESS_IPH_BUBBLE_LABEL" desc="Text shown in the `In-Product Help(IPH)` bubble for externally-saved card suggestions. This IPH is displayed when a user interacts with a payment form for the first time after adding a card through other Google services outside of Redrob.">
+       You can autofill cards that are saved in Google Wallet
+   </message>
+-  <message name="IDS_AUTOFILL_DOWNSTREAM_CARD_AWARENESS_IPH_BUBBLE_LABEL_SCREENREADER" is_accessibility_with_no_ui="true" desc="Screenreader text for the `In-Product Help(IPH)` bubble for downstream card awareness. This IPH is displayed when a user interacts with a payment form for the first time after adding a card through other Google services outside of Chrome.">
++  <message name="IDS_AUTOFILL_DOWNSTREAM_CARD_AWARENESS_IPH_BUBBLE_LABEL_SCREENREADER" is_accessibility_with_no_ui="true" desc="Screenreader text for the `In-Product Help(IPH)` bubble for downstream card awareness. This IPH is displayed when a user interacts with a payment form for the first time after adding a card through other Google services outside of Redrob.">
+       You can autofill cards that are saved in Google Wallet.
+   </message>
+   <!-- virtual cards related strings - end -->
+@@ -1100,7 +1100,7 @@
+   <message name="IDS_AUTOFILL_AUTHENTICATION_MODE_GET_EMAIL" desc="The label for the email authentication mode option shown in the Autofill card unmask authentication selection dialog on Desktop. If selected, we will display a new dialog where the user will be prompted to enter the OTP from the email message they received.">
+     Get an email
+   </message>
+-  <message name="IDS_AUTOFILL_AUTHENTICATION_MODE_THREE_DOMAIN_SECURE" desc="The label for the text message authentication mode option shown in the Autofill card unmask authentication selection dialog on Desktop. Only shown when there are multiple unmask options presented to the user. If selected, Chrome will open a pop-up so that the user can verify on their bank's website.">
++  <message name="IDS_AUTOFILL_AUTHENTICATION_MODE_THREE_DOMAIN_SECURE" desc="The label for the text message authentication mode option shown in the Autofill card unmask authentication selection dialog on Desktop. Only shown when there are multiple unmask options presented to the user. If selected, Redrob will open a pop-up so that the user can verify on their bank's website.">
+     Via Strong Customer Authentication (SCA)
+   </message>
+   <message name="IDS_AUTOFILL_CARD_UNMASK_AUTHENTICATION_SELECTION_DIALOG_CURRENT_INFO_NOT_SEEN_TEXT" desc="The current info not seen text shown in the Autofill card unmask authentication selection dialog on Desktop and Android. It is the footer text on the dialog, and it instructs the user on what to do if they can not see their most up to date authentication information. This dialog lets the user choose the method of authentication when unmasking a server card, including a virtual card." formatter_data="android_java">
+@@ -1115,7 +1115,7 @@
+   <message name="IDS_AUTOFILL_CARD_UNMASK_AUTHENTICATION_SELECTION_DIALOG_CVC_CHALLENGE_INFO" desc="Text that is shown for the security code challenge option in the Card Unmask Authentication Selection Dialog. This text lets the user know where the location of the security code is on their card. If the user selects this challenge option and then accepts the dialog, the user will be prompted to enter this security code. An example of a security code is the CVC on the back of the user's credit card.">
+       This is the <ph name="NUMBER_OF_DIGITS">$1<ex>3</ex></ph>-digit code on the <ph name="SIDE_OF_CARD">$2<ex>back of your card</ex></ph>
+     </message>
+-  <message name="IDS_AUTOFILL_CARD_UNMASK_AUTHENTICATION_SELECTION_DIALOG_THREE_DOMAIN_SECURE_CHALLENGE_INFO" desc="Text that is shown for the 3DS challenge option in the Card Unmask Authentication Selection Dialog. If the user selects this challenge option and then accepts the dialog, Chrome will open a pop-up so that the user can verify on their bank's website.">
++  <message name="IDS_AUTOFILL_CARD_UNMASK_AUTHENTICATION_SELECTION_DIALOG_THREE_DOMAIN_SECURE_CHALLENGE_INFO" desc="Text that is shown for the 3DS challenge option in the Card Unmask Authentication Selection Dialog. If the user selects this challenge option and then accepts the dialog, Redrob will open a pop-up so that the user can verify on their bank's website.">
+     Opens a pop-up to verify on your bank's website
+     </message>
+   <message name="IDS_AUTOFILL_CARD_UNMASK_OTP_INPUT_DIALOG_TITLE" desc="The title for the dialog that lets the user type in the OTP they received on Desktop and Android. This message is shown right next to the logo for the dialog, and it lets the users know the action that is required in this dialog, which is to enter their verification code (OTP)." formatter_data="android_java">
+@@ -1139,13 +1139,13 @@
+   <message name="IDS_AUTOFILL_CARD_UNMASK_OTP_INPUT_DIALOG_ENTER_CORRECT_CODE_LABEL" desc="This text is shown after an OTP is already sent, when the user enters an incorrect OTP code. It directs the user to enter the correct code that was sent to them.">
+     Enter correct code
+   </message>
+-  <message name="IDS_AUTOFILL_LOADING_AND_CONSENT_DIALOG_TITLE_VCN_3DS" desc="This text is shown as the title for the user consent dialog and progress dialog for VCN 3DS. If the user accepts the user consent dialog, Chrome will open a pop-up and initiate the VCN 3DS flow. The progress dialog notifies the user when a Payments server call is in progress.">
++  <message name="IDS_AUTOFILL_LOADING_AND_CONSENT_DIALOG_TITLE_VCN_3DS" desc="This text is shown as the title for the user consent dialog and progress dialog for VCN 3DS. If the user accepts the user consent dialog, Redrob will open a pop-up and initiate the VCN 3DS flow. The progress dialog notifies the user when a Payments server call is in progress.">
+     Your bank wants to verify it's you
+   </message>
+-  <message name="IDS_AUTOFILL_PAYMENTS_WINDOW_USER_CONSENT_DIALOG_DESCRIPTION_VCN_3DS" desc="This text is shown as the description for the user consent dialog for VCN 3DS. If the user accepts the dialog, Chrome will open a pop-up and initiate the VCN 3DS flow.">
++  <message name="IDS_AUTOFILL_PAYMENTS_WINDOW_USER_CONSENT_DIALOG_DESCRIPTION_VCN_3DS" desc="This text is shown as the description for the user consent dialog for VCN 3DS. If the user accepts the dialog, Redrob will open a pop-up and initiate the VCN 3DS flow.">
+     When you continue you'll be taken to your bank's website. After you verify, you'll automatically be returned to finish your purchase.
+   </message>
+-  <message name="IDS_AUTOFILL_PAYMENTS_WINDOW_USER_CONSENT_DIALOG_OK_BUTTON_LABEL_VCN_3DS" desc="This text is shown as the accept button label for the user consent dialog for VCN 3DS. If the user accepts the dialog, Chrome will open a pop-up and initiate the VCN 3DS flow.">
++  <message name="IDS_AUTOFILL_PAYMENTS_WINDOW_USER_CONSENT_DIALOG_OK_BUTTON_LABEL_VCN_3DS" desc="This text is shown as the accept button label for the user consent dialog for VCN 3DS. If the user accepts the dialog, Redrob will open a pop-up and initiate the VCN 3DS flow.">
+     Continue
+   </message>
+   <message name="IDS_AUTOFILL_PAYMENTS_WINDOW_USER_CONSENT_DIALOG_ACCEPTANCE_ACCESSIBILITY_ANNOUNCEMENT" is_accessibility_with_no_ui="true" desc="This text is announced to the user after they have accepted the VCN 3DS consent dialog, to let the user know that the VCN 3DS pop-up is loading the bank verification website. Otherwise screen reader users would not know what is happening during the flow.">
+@@ -1264,13 +1264,13 @@
+       </message>
+     </else>
+   </if>
+-  <message name="IDS_AUTOFILL_BNPL_FETCH_VCN_PROGRESS_DIALOG_TITLE" desc="The title of the progress dialog to be displayed after the user reviewed their payment plan for the Buy-Now-Pay-Later transaction, and Chrome is attempting to retrieve the virtual card from the Payments server. If the retrieval was successful, a confirmation message will display in the progress dialog and then the virtual card will be filled.">
++  <message name="IDS_AUTOFILL_BNPL_FETCH_VCN_PROGRESS_DIALOG_TITLE" desc="The title of the progress dialog to be displayed after the user reviewed their payment plan for the Buy-Now-Pay-Later transaction, and Redrob is attempting to retrieve the virtual card from the Payments server. If the retrieval was successful, a confirmation message will display in the progress dialog and then the virtual card will be filled.">
+     Getting ready for checkout
+   </message>
+-  <message name="IDS_AUTOFILL_BNPL_PROGRESS_DIALOG_LOADING_MESSAGE" desc="The description text of the progress dialog to be displayed after the user reviewed their payment plan for the the Buy-Now-Pay-Later transaction, and Chrome is attempting to retrieve the virtual card from the Payments server.">
++  <message name="IDS_AUTOFILL_BNPL_PROGRESS_DIALOG_LOADING_MESSAGE" desc="The description text of the progress dialog to be displayed after the user reviewed their payment plan for the the Buy-Now-Pay-Later transaction, and Redrob is attempting to retrieve the virtual card from the Payments server.">
+     Just a few more seconds...
+   </message>
+-  <message name="IDS_AUTOFILL_BNPL_FETCH_VCN_PROGRESS_DIALOG_CONFIRMATION_MESSAGE" desc="The description text of the progress dialog to be displayed after Chrome successfully retrieved the virtual card from the Payments server, and Chrome is going to fill the virtual card.">
++  <message name="IDS_AUTOFILL_BNPL_FETCH_VCN_PROGRESS_DIALOG_CONFIRMATION_MESSAGE" desc="The description text of the progress dialog to be displayed after Redrob successfully retrieved the virtual card from the Payments server, and Redrob is going to fill the virtual card.">
+     Done!
+   </message>
+   <message name="IDS_AUTOFILL_BNPL_ERROR_DIALOG_TITLE" desc="The title text of an error dialog informing the user that something went wrong in the Buy Now Pay Later flow." formatter_data="android_java">
+@@ -1447,7 +1447,7 @@
+       Check out faster with autofill
+     </message>
+     <message name="IDS_AUTOFILL_CREATE_FIRST_CREDIT_CARD_SUMMARY" desc="Summary for a call to action settings preference to add a new autofill credit card when the user does not have any cards added." formatter_data="android_java">
+-      Save a payment method in your Google Account to autofill it for purchases made in Chrome
++      Save a payment method in your Google Account to autofill it for purchases made in Redrob
+     </message>
+     <message name="IDS_AUTOFILL_CREATE_FIRST_CREDIT_CARD_BUTTON_TEXT" desc="Button text for a call to action settings preference to add a new autofill credit card when the user does not have any cards added." formatter_data="android_java">
+       Add payment method
+@@ -1480,7 +1480,7 @@
+     View autofill settings
+   </message>
+   <message name="IDS_AUTOFILL_CHURNED_USERS_CONFIRMATION_BUBBLE_DESCRIPTION" desc="Description for the churned users confirmation bubble, which comes after the user has accepted the churned users bubble, letting the user know that autofill is turned on.">
+-    Now you can save payment methods to autofill at checkout in Chrome. <ph name="LINK_TEXT">$1<ex>View autofill settings</ex></ph>
++    Now you can save payment methods to autofill at checkout in Redrob. <ph name="LINK_TEXT">$1<ex>View autofill settings</ex></ph>
+   </message>
+   <if expr="not is_android">
+     <message name="IDS_AUTOFILL_CHURNED_USERS_CONFIRMATION_BUBBLE_LOADING_THROBBER_ACCESSIBLE_NAME" desc="Accessible name announced by the screenreader for virtual card prompt in loading state showing a throbber." is_accessibility_with_no_ui="true" formatter_data="android_java">
+@@ -1536,7 +1536,7 @@
+     <message name="IDS_AUTOFILL_LOYALTY_CARD_AUTOFILL_BUTTON" desc="The label of the button, which would fill in the web form with a loyalty card number." formatter_data="android_java">
+       Autofill
+     </message>
+-    <message name="IDS_AUTOFILL_LOYALTY_CARD_WALLET_SETTINGS_BUTTON" desc="The label of the button, which redirects the user to the Google Wallet loyalty card settings in Chrome." formatter_data="android_java">
++    <message name="IDS_AUTOFILL_LOYALTY_CARD_WALLET_SETTINGS_BUTTON" desc="The label of the button, which redirects the user to the Google Wallet loyalty card settings in Redrob." formatter_data="android_java">
+       Wallet settings
+     </message>
+     <message name="IDS_AUTOFILL_PAYMENT_METHOD_BOTTOM_SHEET_CONTENT_DESCRIPTION" desc="Accessibility string read when the bottom sheet is opened. It describes the bottom sheet where a user can pick a payment method to fill into a form." formatter_data="android_java">
+@@ -1753,10 +1753,10 @@
+     This card is saved in Google Wallet so you can use it across Google products
+   </message>
+   <message name="IDS_AUTOFILL_SAVE_CARD_CONFIRMATION_FAILURE_DESCRIPTION_TEXT" desc="Description text for confirmation shown after save card upload to the server was unsuccessful.">
+-    This card couldn't be saved in your Google Account. It's saved to Chrome on this device instead.
++    This card couldn't be saved in your Google Account. It's saved to Redrob on this device instead.
+   </message>
+   <message name="IDS_AUTOFILL_SAVE_CARD_TO_WALLET_CONFIRMATION_FAILURE_DESCRIPTION_TEXT" desc="Description text for confirmation shown after Google Wallet save card upload to the server was unsuccessful.">
+-    This card couldn't be saved in Google Wallet. It's saved to Chrome on this device instead.
++    This card couldn't be saved in Google Wallet. It's saved to Redrob on this device instead.
+   </message>
+   <message name="IDS_AUTOFILL_SAVE_IBAN_CONFIRMATION_SUCCESS_DESCRIPTION_TEXT" desc="Description text for confirmation shown after upload save IBAN attempt was successful and it was uploaded to the server.">
+     This IBAN is saved in your Google Account so you can use it across Google services.
+@@ -1765,16 +1765,16 @@
+     This IBAN is saved in Google Wallet so you can use it across Google products.
+   </message>
+   <message name="IDS_AUTOFILL_SAVE_IBAN_CONFIRMATION_FAILURE_DESCRIPTION_TEXT" desc="Description text for confirmation shown after upload save IBAN attempt was failed and and it was not uploaded to the server.">
+-    This IBAN couldn't be saved in your Google Account. It's saved to Chrome on this device instead. Chrome will ask you again the next time you use this IBAN.
++    This IBAN couldn't be saved in your Google Account. It's saved to Redrob on this device instead. Redrob will ask you again the next time you use this IBAN.
+   </message>
+   <message name="IDS_AUTOFILL_SAVE_IBAN_TO_WALLET_CONFIRMATION_FAILURE_DESCRIPTION_TEXT" desc="Description text for confirmation shown after upload save IBAN to Google Wallet attempt was failed and and it was not uploaded to the server.">
+-     This IBAN couldn't be saved in Google Wallet. It's saved to Chrome on this device instead. Chrome will ask you again the next time you use this IBAN.
++     This IBAN couldn't be saved in Google Wallet. It's saved to Redrob on this device instead. Redrob will ask you again the next time you use this IBAN.
+   </message>
+   <message name="IDS_AUTOFILL_SAVE_IBAN_CONFIRMATION_FAILURE_HIT_MAX_STRIKE_DESCRIPTION_TEXT" desc="Description text for confirmation shown after upload save IBAN attempt was failed and and it was not uploaded to the server. Other than that, the number of offer-to-upload has hit the max strike.">
+-    This IBAN couldn't be saved in your Google Account. It's saved to Chrome on this device instead.
++    This IBAN couldn't be saved in your Google Account. It's saved to Redrob on this device instead.
+   </message>
+   <message name="IDS_AUTOFILL_SAVE_IBAN_TO_WALLET_CONFIRMATION_FAILURE_HIT_MAX_STRIKE_DESCRIPTION_TEXT" desc="Description text for confirmation shown after upload save IBAN to Google Wallet attempt was failed and and it was not uploaded to the server. Other than that, the number of offer-to-upload has hit the max strike.">
+-    This IBAN couldn't be saved in Google Wallet. It's saved to Chrome on this device instead.
++    This IBAN couldn't be saved in Google Wallet. It's saved to Redrob on this device instead.
+   </message>
+   <message name="IDS_AUTOFILL_VIRTUAL_CARD_ENROLL_CONFIRMATION_SUCCESS_DESCRIPTION_TEXT" desc="Description text for confirmation shown after virtual card enrollment is successful.">
+     You can now use a virtual card to check out more securely with autofill.

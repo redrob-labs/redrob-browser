@@ -4,6 +4,20 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
+## 0.5.0 — 2026-10-20
+
+**A new app icon.** Redrob Browser wears the 2026 design-system icon from @redrob-labs/ui 1.8.0 on every
+platform, in the dock, the taskbar, the launcher catalog and the extension.
+
+**Redrob everywhere you look.** The names the browser shows you say Redrob Browser instead of Chrome: page
+strings (Korean included), the Linux desktop entry, icon, man page and app-store metadata, the macOS document
+kinds, the Windows executable (`redrob-browser.exe`) and the agent server process. The default-browser prompt and
+the WebUI marks in dark mode use Redrob artwork. On Linux the password-store key lives in a "Redrob Safe Storage"
+keyring item, copied from the old Chromium item, which is left in place.
+
+**Redrob Launcher links open the launcher.** On Windows the browser registers `redrob-browser://` as its own
+launch scheme and leaves `redrob://` to Redrob Launcher, so `redrob://open/<app>` links no longer open the browser.
+
 ## 0.4.0 — 2026-10-20
 
 **Your phone can sign you in, too.** The app-bridge tools Redrob Code's daemon gets (the phone chat included) now

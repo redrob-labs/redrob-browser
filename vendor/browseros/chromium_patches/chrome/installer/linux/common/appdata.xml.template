@@ -1,0 +1,17 @@
+diff --git a/chrome/installer/linux/common/appdata.xml.template b/chrome/installer/linux/common/appdata.xml.template
+index ce6e867eae06b..94a2b8c7c5a04 100644
+--- a/chrome/installer/linux/common/appdata.xml.template
++++ b/chrome/installer/linux/common/appdata.xml.template
+@@ -13,12 +13,6 @@
+     </p>
+   </description>
+   <url type="homepage">@@PRODUCTURL</url>
+-  <screenshots>
+-    <screenshot type="default">
+-      <image>@@appstream_screenshot_url</image>
+-      <caption/>
+-    </screenshot>
+-  </screenshots>
+   <translation/>
+   <developer_name>@@DEVELOPER_NAME</developer_name>
+   <url type="bugtracker">@@BUGTRACKERURL</url>

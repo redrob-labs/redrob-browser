@@ -6,6 +6,10 @@
 
 substitutions:
   - description: |
+      Google Chrome -> Redrob where the browser speaks as itself, per presets/google-chrome.yaml. Runs before the short-name sweep, which protects Google Chrome.
+    rename:
+      preset: google-chrome
+  - description: |
       Chrome -> Redrob across the Settings strings shared with the official build, leaving every phrase in presets/short-name.yaml alone.
     rename:
       preset: short-name

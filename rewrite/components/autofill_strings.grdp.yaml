@@ -9,3 +9,11 @@ substitutions:
       Chromium -> Redrob across autofill, leaving every phrase in presets/product-name.yaml alone.
     rename:
       preset: product-name
+  - description: |
+      Google Chrome -> Redrob where the browser speaks as itself, per presets/google-chrome.yaml. Runs before the short-name sweep, which protects Google Chrome.
+    rename:
+      preset: google-chrome
+  - description: |
+      Chrome -> Redrob, leaving every phrase in presets/short-name.yaml alone.
+    rename:
+      preset: short-name

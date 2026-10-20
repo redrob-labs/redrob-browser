@@ -1,0 +1,37 @@
+diff --git a/chrome/app/resources/manpage.1.in b/chrome/app/resources/manpage.1.in
+index 25d3a92a98a6a..42b543a68d3ed 100644
+--- a/chrome/app/resources/manpage.1.in
++++ b/chrome/app/resources/manpage.1.in
+@@ -3,16 +3,16 @@
+ .TH @@PACKAGE 1 "" "" "USER COMMANDS"
+ 
+ .SH NAME
+-@@PACKAGE \- the web browser from Google
++@@PACKAGE \- the web browser from Redrob
+ 
+ .SH SYNOPSIS
+ .B @@PACKAGE
+ [\fIOPTION\fR] [\fIPATH\fR|\fIURL\fR]
+ 
+ .SH DESCRIPTION
+-See the Google Chrome help center for help on using the browser.
++See the Redrob site for help on using the browser.
+ .IP
+-<https://support.google.com/chrome/>
++<https://redrob.ai/>
+ .PP
+ This manpage only describes invocation, environment, and arguments.
+ 
+@@ -156,10 +156,8 @@ Default directory for cache data.  (Why?  See
+ .SH BUGS
+ Bug tracker:
+ .IP
+-http://code.google.com/p/chromium/issues/list
++https://github.com/redrob-labs/redrob-browser/issues
+ .PP
+-Be sure to do your search within "All Issues" before reporting bugs,
+-and be sure to pick the "Defect on Linux" template when filing a new one.
+ 
+ .SH AUTHOR
+-The Chromium team \- <http://www.chromium.org>
++Redrob \- <https://redrob.ai/>, built on Chromium by The Chromium Authors \- <https://www.chromium.org>

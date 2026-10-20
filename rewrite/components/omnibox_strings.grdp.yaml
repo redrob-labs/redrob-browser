@@ -13,3 +13,7 @@ substitutions:
       pattern: "  <message name=\"IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION\" desc=\"Description for the default search match.\">\n"
       replace: "  <message name=\"IDS_OMNIBOX_REDROB_ASK_AGENT\" desc=\"Trailing label on the address bar row that hands what the user typed to the agent instead of searching for it.\">\n    Ask the agent about this page\n  </message>\n  <message name=\"IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION\" desc=\"Description for the default search match.\">\n"
       count: 1
+  - description: |
+      Chrome -> Redrob, leaving every phrase in presets/short-name.yaml alone.
+    rename:
+      preset: short-name
