@@ -1,0 +1,89 @@
+diff --git a/components/permissions_strings.grdp b/components/permissions_strings.grdp
+index a9c5c50333e3b..cf9fcd049e281 100644
+--- a/components/permissions_strings.grdp
++++ b/components/permissions_strings.grdp
+@@ -55,13 +55,13 @@
+       Notifications are automatically blocked for all sites except ones you allow
+     </message>
+     <message name="IDS_NOTIFICATION_QUIET_PERMISSION_INFOBAR_PREDICTION_SERVICE_MESSAGE" desc="Text used as notification message when requesting permission for Web Notifications via a notification. Used when the prediction service has decided that the user will be very unlikely to grant this permission.">
+-      Chrome thinks you don't want notifications from this site. So, requests are hidden to reduce interruptions.
++      Redrob thinks you don't want notifications from this site. So, requests are hidden to reduce interruptions.
+     </message>
+     <message name="IDS_LOCATION_QUIET_PERMISSION_MESSAGE_UI" desc="Text used as notification message when requesting Gelocation permission. Used when quiet UI is enabled in settings.">
+       Location requests are automatically blocked for all sites except ones you allow
+     </message>
+     <message name="IDS_LOCATION_QUIET_PERMISSION_MESSAGE_UI_PREDICTION_SERVICE" desc="Text used as notification message when requesting permission for Geolocation. Used when the prediction service has decided that the user will be very unlikely to grant this permission.">
+-      Chrome thinks you don't want to use your location on this site. So, requests are hidden to reduce interruptions.
++      Redrob thinks you don't want to use your location on this site. So, requests are hidden to reduce interruptions.
+     </message>
+     <message name="IDS_MEDIA_CAPTURE_AUDIO_ONLY_INFOBAR_TEXT" desc="Text requesting permission for a site to access the computer's microphone.">
+       <ph name="HOST">$1<ex>html5rocks.com</ex></ph> wants to use your microphone
+@@ -78,7 +78,7 @@
+     <message name="IDS_STORAGE_ACCESS_INFOBAR_TEXT" desc="Permission request shown if the user is visiting a site needs access to its data while it is embedded into another site.">
+       <ph name="EMBEDDED_URL">$1<ex>news.site</ex></ph> wants to use cookies and site data on <ph name="TOP_LEVEL_URL">$2<ex>content_domain.site</ex></ph>
+     </message>
+-    <message name="IDS_MESSAGE_UPDATE_PERMISSIONS_BUTTON_TEXT" desc="Button text shown when Chrome does not have the necessary permission required to complete the requested tasks (e.g. a website has request location information, but Chrome is missing that Android permission).">
++    <message name="IDS_MESSAGE_UPDATE_PERMISSIONS_BUTTON_TEXT" desc="Button text shown when Redrob does not have the necessary permission required to complete the requested tasks (e.g. a website has request location information, but Redrob is missing that Android permission).">
+       Continue
+     </message>
+     <message name="IDS_MEDIA_CAPTURE_AUDIO_AND_VIDEO_INFOBAR_TEXT" desc="Text requesting permission for a site to access the computer's microphone and camera.">
+@@ -88,28 +88,28 @@
+       <ph name="ORIGIN">$1<ex>https://backgroundfetch.com</ex></ph> wants to download multiple files
+     </message>
+ 
+-    <message name="IDS_MESSAGE_MISSING_CAMERA_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android camera permission when a website has requested access to camera, but Chrome is missing the Android camera permission.">
++    <message name="IDS_MESSAGE_MISSING_CAMERA_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android camera permission when a website has requested access to camera, but Redrob is missing the Android camera permission.">
+       Allow camera?
+     </message>
+-    <message name="IDS_MESSAGE_MISSING_XR_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android scene understanding and hand tracking permission when a website has requested access to scene understanding and hand tracking, but Chrome is missing the Android scene understanding and hand tracking permission.">
++    <message name="IDS_MESSAGE_MISSING_XR_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android scene understanding and hand tracking permission when a website has requested access to scene understanding and hand tracking, but Redrob is missing the Android scene understanding and hand tracking permission.">
+       Allow an immersive experience?
+     </message>
+-    <message name="IDS_MESSAGE_MISSING_HAND_TRACKING_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android hand tracking permission when a website has requested access to scene understanding and hand tracking, but Chrome is missing the Android scene understanding and hand tracking permission.">
++    <message name="IDS_MESSAGE_MISSING_HAND_TRACKING_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android hand tracking permission when a website has requested access to scene understanding and hand tracking, but Redrob is missing the Android scene understanding and hand tracking permission.">
+       Allow hand tracking?
+     </message>
+-    <message name="IDS_MESSAGE_MISSING_STORAGE_ACCESS_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android storage access permission when a website has requested access to storage access, but Chrome is missing the Android storage access permission.">
++    <message name="IDS_MESSAGE_MISSING_STORAGE_ACCESS_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android storage access permission when a website has requested access to storage access, but Redrob is missing the Android storage access permission.">
+       Allow storage access?
+     </message>
+-    <message name="IDS_MESSAGE_MISSING_MICROPHONE_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android microphone permission when a website has requested access to microphone, but Chrome is missing the Android microphone permission.">
++    <message name="IDS_MESSAGE_MISSING_MICROPHONE_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android microphone permission when a website has requested access to microphone, but Redrob is missing the Android microphone permission.">
+       Allow microphone?
+     </message>
+-    <message name="IDS_MESSAGE_MISSING_LOCATION_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android location permission when a website has requested access to location, but Chrome is missing the Android location permission.">
++    <message name="IDS_MESSAGE_MISSING_LOCATION_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android location permission when a website has requested access to location, but Redrob is missing the Android location permission.">
+       Allow location?
+     </message>
+-    <message name="IDS_MESSAGE_MISSING_LOCAL_NETWORK_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android local network permission when a website has requested access to local network, but Chrome is missing the Android local network permission.">
++    <message name="IDS_MESSAGE_MISSING_LOCAL_NETWORK_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android local network permission when a website has requested access to local network, but Redrob is missing the Android local network permission.">
+       Connect to nearby devices?
+     </message>
+-    <message name="IDS_MESSAGE_MISSING_MICROPHONE_CAMERA_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android microphone and camera permission when a website has requested access to microphone and camera, but Chrome is missing the Android microphone and camera permission.">
++    <message name="IDS_MESSAGE_MISSING_MICROPHONE_CAMERA_PERMISSION_TITLE" desc="Title text shown in a prompt ui to ask whether user agrees to grant Android microphone and camera permission when a website has requested access to microphone and camera, but Redrob is missing the Android microphone and camera permission.">
+       Allow 2 permissions?
+     </message>
+     <message name="IDS_MOTION_AND_LIGHT_SENSORS_INFOBAR_TEXT" desc="Text requesting permission for a site to access the device's sensors">
+@@ -201,7 +201,7 @@ This will otherwise be blocked by your privacy settings. This will allow the con
+   <message name="IDS_STORAGE_ACCESS_PERMISSION_TWO_ORIGIN_EXPLANATION" desc="The body content of a dialog box that's prompting the user for permission. In the description below, “www.myfavoritesite.com” and “Google Docs” are just used as examples. This sentence describes the consequences of granting this permission. When the user agrees, both “www.myfavoritesite.com” and “Google Docs” can know that the user visited www.myfavoritesite.com.A user might visit a site called www.myfavoritesite.com. That site might embed content and services from other sites. Embedded content can include things like text, images, audio, and services (for example, Google Docs). In this example, the dialog box is shown by Google Docs. The permission is to enable a connection between www.myfavoritesite.com and Google Docs and to allow Google Docs to access information that services has previously saved about the user. For example, Google Docs would need this permission to verify the user's identity and display the user's documents as they browse www.myfavoritesite.com.">
+     <ph name="EMBEDDED_URL">$1<ex>google.com</ex></ph> will know that you visited <ph name="TOP_LEVEL_URL">$2<ex>top-level-site.com</ex></ph>
+   </message>
+-  <message name="IDS_STORAGE_ACCESS_PERMISSION_TWO_ORIGIN_LINK" desc="The last sentence of a dialog box that's prompting the user for permission. 1) “embedded content” is the name of a setting in Chrome settings.">
++  <message name="IDS_STORAGE_ACCESS_PERMISSION_TWO_ORIGIN_LINK" desc="The last sentence of a dialog box that's prompting the user for permission. 1) “embedded content” is the name of a setting in Redrob settings.">
+     Learn more about embedded content
+   </message>
+   <message name="IDS_WINDOW_MANAGEMENT_PERMISSION_FRAGMENT" desc="Permission request shown if the user is visiting a site that wants to manage windows. Follows a prompt: 'This site would like to:'">
+@@ -586,10 +586,10 @@ This will otherwise be blocked by your privacy settings. This will allow the con
+     You previously didn't allow <ph name="permission">$1<ex>camera</ex></ph> for this site
+   </message>
+   <message name ="IDS_PERMISSION_OFF_FOR_CHROME" desc="Text informing the user that they have turned the permission off for chrome">
+-    To use your <ph name="permission">$1<ex>camera</ex></ph> on this site, give <ph name="short_product_name">$2<ex>Chrome</ex></ph> access
++    To use your <ph name="permission">$1<ex>camera</ex></ph> on this site, give <ph name="short_product_name">$2<ex>Redrob</ex></ph> access
+   </message>
+-  <message name ="IDS_PERMISSION_CHROME_NEEDS_PERMISSION" desc="Text informing the user in the background that Chrome needs a permission in order to use it on the site the user is visiting">
+-    <ph name="short_product_name">$1<ex>Chrome</ex></ph> needs access to your device's <ph name="permission">$2<ex>camera</ex></ph>
++  <message name ="IDS_PERMISSION_CHROME_NEEDS_PERMISSION" desc="Text informing the user in the background that Redrob needs a permission in order to use it on the site the user is visiting">
++    <ph name="short_product_name">$1<ex>Redrob</ex></ph> needs access to your device's <ph name="permission">$2<ex>camera</ex></ph>
+   </message>
+     <message name="IDS_GEOLOCATION_NAME_FRAGMENT" desc="Text fragment identifying the geolocation permission">
+     location

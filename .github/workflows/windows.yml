@@ -119,7 +119,7 @@ jobs:
         run: |
           set -uo pipefail
           cd chromium/src/out/windows
-          ./chrome.exe --no-first-run --no-default-browser-check \
+          ./redrob-browser.exe --no-first-run --no-default-browser-check \
             --user-data-dir="$(mktemp -d)" "chrome://redrob" >launch.log 2>&1 &
           pid=$!
           sleep 45
@@ -146,7 +146,7 @@ jobs:
           cd chromium/src/out/windows
           profile="$(mktemp -d)"
           for attempt in 1 2; do
-            ./chrome.exe --no-first-run --no-default-browser-check \
+            ./redrob-browser.exe --no-first-run --no-default-browser-check \
               --user-data-dir="$profile" "chrome://redrob" >"relaunch-$attempt.log" 2>&1 &
             pid=$!
             sleep 30

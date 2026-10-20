@@ -1,0 +1,15 @@
+# The Linux desktop id: which .desktop file the running browser says it is.
+#
+# A Chromium-branded build answers `chromium-browser.desktop`, but our .deb installs
+# `redrob-browser.desktop` (installer.py names it after PACKAGE). The window then reports an id no
+# installed file has: the taskbar cannot group it under our icon, and "make default browser" registers
+# xdg-settings against Chromium's name, which on a machine with real Chromium points at Chromium.
+#
+# $CHROME_DESKTOP still overrides, as upstream intends for development builds.
+
+substitutions:
+  - description: |
+      Return the desktop file our package installs instead of Chromium's.
+    regex:
+      pattern: "  return \"chromium-browser.desktop\";\n"
+      replace: "  // Redrob: the name our .deb installs, see installer.py.\n  return \"redrob-browser.desktop\";\n"

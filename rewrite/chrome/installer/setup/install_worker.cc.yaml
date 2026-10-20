@@ -1,0 +1,17 @@
+# Redrob: the Windows browser executable is redrob-browser.exe, not chrome.exe.
+#
+# Upstream names it chrome.exe on every build, branded or not. The portable zip used to ship a copy
+# under our name beside the original, and Task Manager, the file's properties and the firewall all
+# said chrome.exe. Every place that names the file is one rule in this set; chrome.dll keeps its name
+# because nothing user-facing shows it.
+#
+# An install from before the rename left chrome.exe at the top of the install directory. Its
+# version directory is deleted by this update, so it can no longer start; remove it, best effort,
+# because it may still be running. Shortcuts are rewritten by setup's own update pass.
+
+substitutions:
+  - description: |
+      Delete the pre-rename executables after an update.
+    regex:
+      pattern: "  // Delete an old VisualElementsManifest unconditionally.\n"
+      replace: "  // Redrob: the browser was chrome.exe before 0.5. Remove what an older\n  // install left behind (ignore failure if it's in use).\n  for (const wchar_t* legacy :\n       {L\"chrome.exe\", L\"new_chrome.exe\", L\"old_chrome.exe\",\n        L\"chrome.VisualElementsManifest.xml\"}) {\n    install_list->AddDeleteTreeWorkItem(target_path.Append(legacy), temp_path)\n        ->set_best_effort(true);\n  }\n\n  // Delete an old VisualElementsManifest unconditionally.\n"

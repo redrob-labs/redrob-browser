@@ -512,25 +512,59 @@ features:
   redrob-brand-strings:
     description: "chore: redrob product name in upstream string tables"
     files:
+      - chrome/app/access_code_cast_strings.grdp
+      - chrome/app/actor_strings.grdp
+      - chrome/app/app_management_strings.grdp
+      - chrome/app/certificate_manager.grdp
       - chrome/app/chromium_strings.grd
+      - chrome/app/extensions_strings.grdp
+      - chrome/app/glic_strings.grdp
+      - chrome/app/media_router_strings.grdp
       - chrome/app/password_manager_ui_strings.grdp
+      - chrome/app/profiles_strings.grdp
+      - chrome/app/resources/chromium_strings_ko.xtb
+      - chrome/app/resources/generated_resources_ko.xtb
       - chrome/app/settings_chromium_strings.grdp
+      - chrome/app/shared_settings_strings.grdp
+      - chrome/app/skills_strings.grdp
+      - chrome/app/support_tool_strings.grdp
       - chrome/chrome_repack_locales.gni
       - components/autofill_payments_strings.grdp
       - components/autofill_strings.grdp
+      - components/browsing_data_strings.grdp
+      - components/collaboration_strings.grdp
+      - components/commerce_strings.grdp
       - components/components_chromium_strings.grd
+      - components/contextual_cueing_strings.grdp
       - components/embedder_support/user_agent_utils.cc
+      - components/enterprise_strings.grdp
+      - components/error_page_strings.grdp
+      - components/facilitated_payments_strings.grdp
+      - components/heavy_ad_intervention_strings.grdp
+      - components/history_strings.grdp
       - components/management_strings.grdp
       - components/new_or_sad_tab_strings.grdp
+      - components/omnibox_pedal_ui_strings.grdp
       - components/omnibox_strings.grdp
       - components/page_info_strings.grdp
       - components/password_manager_strings.grdp
+      - components/payments_strings.grdp
+      - components/permissions_strings.grdp
+      - components/personal_context_strings.grdp
+      - components/policy_strings.grdp
       - components/privacy_sandbox_strings.grd
       - components/reset_password_strings.grdp
       - components/search_engine_choice_strings.grdp
       - components/security_interstitials_strings.grdp
+      - components/send_tab_to_self_strings.grdp
+      - components/smart_tab_sharing.grdp
       - components/ssl_errors_strings.grdp
+      - components/strings/components_chromium_strings_ko.xtb
+      - components/strings/components_strings_ko.xtb
+      - components/strings/privacy_sandbox_strings_ko.xtb
       - extensions/strings/extensions_chromium_strings.grdp
+      - extensions/strings/extensions_strings.grd
+      - extensions/strings/extensions_strings_ko.xtb
       - tools/gritsettings/translation_expectations.pyl
 
   redrob-vertical-tabs:
@@ -631,6 +665,30 @@ features:
       - chrome/installer/linux/common/key.include
       - chrome/installer/linux/debian/additional_deps
       - chrome/installer/linux/debian/build_repo_package.py
+
+  redrob-brand-os:
+    description: "chore: redrob's name where the OS shows the browser (desktop id, icon, man, AppleScript)"
+    files:
+      - chrome/app/resources/manpage.1.in
+      - chrome/browser/shell_integration_linux.cc
+      - chrome/browser/ui/cocoa/applescript/scripting.sdef
+      - chrome/common/channel_info_posix.cc
+      - chrome/installer/linux/common/appdata.xml.template
+      - chrome/installer/linux/debian/control.template
+      - components/os_crypt/async/browser/freedesktop_secret_key_provider.cc
+      - components/os_crypt/async/browser/freedesktop_secret_key_provider.h
+
+  redrob-windows-exe-name:
+    description: "chore: the Windows browser executable is redrob-browser.exe"
+    files:
+      - build/win/reorder-imports.py
+      - chrome/app/chrome_exe.ver
+      - chrome/browser/safe_browsing/incident_reporting/binary_integrity_analyzer_win.cc
+      - chrome/chrome_proxy/chrome_proxy_main_win.cc
+      - chrome/installer/launcher_support/chrome_launcher_support.cc
+      - chrome/installer/setup/install_worker.cc
+      - chrome/installer/setup/setup_constants.cc
+      - chrome/tools/build/win/FILES.cfg
 
   redrob-build:
     description: "build: redrob's build configuration"

@@ -14,3 +14,8 @@ substitutions:
       pattern: "    \"BrowserOS server\",\n"
       replace: "    \"Redrob agent server\",\n"
       count: 1
+  - description: |
+      Redrob: the agent server executable is redrob-agent-server, the name the OS shows (macOS firewall prompt, Task Manager, ps).
+    regex:
+      pattern: "    FILE_PATH_LITERAL(\"browseros_server\"),"
+      replace: "    FILE_PATH_LITERAL(\"redrob-agent-server\"),"

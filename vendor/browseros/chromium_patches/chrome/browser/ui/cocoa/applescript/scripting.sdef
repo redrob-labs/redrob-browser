@@ -1,0 +1,13 @@
+diff --git a/chrome/browser/ui/cocoa/applescript/scripting.sdef b/chrome/browser/ui/cocoa/applescript/scripting.sdef
+index f991d613b4f5a..c94516fc383b9 100644
+--- a/chrome/browser/ui/cocoa/applescript/scripting.sdef
++++ b/chrome/browser/ui/cocoa/applescript/scripting.sdef
+@@ -188,7 +188,7 @@
+   <!--
+     CHROMIUM SUITE
+   -->
+-  <suite name="Chromium Suite" code="CrSu" description="Common classes and commands for Chrome.">
++  <suite name="Redrob Suite" code="CrSu" description="Common classes and commands for Redrob.">
+ 
+     <class-extension description="The application&apos;s top-level scripting object." extends="application">
+       <cocoa class="BrowserCrApplication"/>

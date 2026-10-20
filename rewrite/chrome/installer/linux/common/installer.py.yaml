@@ -190,3 +190,15 @@ substitutions:
                                 # so strip(1) would cut the program out of it. Nothing else is exempt.
                                 unstripped.append(path)
       count: 1
+  - description: |
+      Register our own launch scheme instead of chromium://. The Chromium branch claims chromium:// links,
+      so installing us took them from a real Chromium on the same machine. redrob-browser:// is the one
+      Windows registers (chromium_install_modes.h), so both platforms answer the same scheme.
+    regex:
+      pattern: "            self.uri_scheme = \"x-scheme-handler/chromium;\"\n"
+      replace: "            # Redrob: our scheme, the same one Windows registers, never Chromium's.\n            self.uri_scheme = \"x-scheme-handler/redrob-browser;\"\n"
+  - description: |
+      Redrob: the agent server executable is redrob-agent-server.
+    regex:
+      pattern: "\"BrowserOSServer/default/resources/bin/browseros_server\""
+      replace: "\"BrowserOSServer/default/resources/bin/redrob-agent-server\""

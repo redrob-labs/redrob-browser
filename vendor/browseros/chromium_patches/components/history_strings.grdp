@@ -1,0 +1,109 @@
+diff --git a/components/history_strings.grdp b/components/history_strings.grdp
+index 901f079a08626..0d5aae53b6fac 100644
+--- a/components/history_strings.grdp
++++ b/components/history_strings.grdp
+@@ -5,7 +5,7 @@
+   <message name="IDS_HISTORY_ACTION_MENU_DESCRIPTION" desc="Text used to identify the history entry drop-down menu for screen readers">
+     Actions
+   </message>
+-  <message name="IDS_HISTORY_ACTOR_TASK_TOOLTIP" desc="This string indicates entries in Chrome history that are the result of Gemini in Chrome browsing while performing an auto browse task for the user. When users view their Chrome history, this string appears as a tooltip on an auto browse history entry. This is a shortened version of the sentence: 'Auto browse worked on this task for you'. The tone should be short and telegraphic.">
++  <message name="IDS_HISTORY_ACTOR_TASK_TOOLTIP" desc="This string indicates entries in Redrob history that are the result of Gemini in Chrome browsing while performing an auto browse task for the user. When users view their Redrob history, this string appears as a tooltip on an auto browse history entry. This is a shortened version of the sentence: 'Auto browse worked on this task for you'. The tone should be short and telegraphic.">
+     Auto browse task
+   </message>
+   <message name="IDS_HISTORY_ARIA_ROLE_DESCRIPTION" desc="Text used for accessibility to describe the list of history entries.">
+@@ -44,13 +44,13 @@
+   <!-- Although navigation is handled programmatically, set the href for all -->
+   <!-- `IDS_HISTORY_OTHER_FORMS_OF_HISTORY_*` strings. This is for user -->
+   <!--  transparency, allowing them to see the destination URL on hover. -->
+-  <message name="IDS_HISTORY_OTHER_FORMS_OF_HISTORY_GMA_ONLY" desc="The notification at the bottom of the history page indicating that deleting Chrome browsing history will not delete other forms of history stored at Google My Activity.">
++  <message name="IDS_HISTORY_OTHER_FORMS_OF_HISTORY_GMA_ONLY" desc="The notification at the bottom of the history page indicating that deleting Redrob browsing history will not delete other forms of history stored at Google My Activity.">
+     Your Google Account may have other forms of browsing history at <ph name="BEGIN_LINK_GMA">&lt;a target="_blank" id="footerGoogleMyActivityLink" href="$1"&gt;</ph>myactivity.google.com<ph name="END_LINK_GMA">&lt;/a&gt;</ph>
+   </message>
+-  <message name="IDS_HISTORY_OTHER_FORMS_OF_HISTORY_GAA_ONLY" desc="The notification at the bottom of the history page indicating that deleting Chrome browsing history will not delete other forms of history stored at Gemini Apps Activity.">
++  <message name="IDS_HISTORY_OTHER_FORMS_OF_HISTORY_GAA_ONLY" desc="The notification at the bottom of the history page indicating that deleting Redrob browsing history will not delete other forms of history stored at Gemini Apps Activity.">
+     Your Google Account may have your <ph name="BEGIN_LINK_GAA">&lt;a target="_blank" id="footerGeminiAppsActivityLink" href="$1"&gt;</ph>Gemini Apps Activity<ph name="END_LINK_GAA">&lt;/a&gt;</ph>
+   </message>
+-  <message name="IDS_HISTORY_OTHER_FORMS_OF_HISTORY_GMA_AND_GAA" desc="The notification at the bottom of the history page indicating that deleting Chrome browsing history will not delete other forms of history stored at Google My Activity and Gemini Apps Activity.">
++  <message name="IDS_HISTORY_OTHER_FORMS_OF_HISTORY_GMA_AND_GAA" desc="The notification at the bottom of the history page indicating that deleting Redrob browsing history will not delete other forms of history stored at Google My Activity and Gemini Apps Activity.">
+     Your Google Account may have other forms of browsing history at <ph name="BEGIN_LINK_GMA">&lt;a target="_blank" id="footerGoogleMyActivityLink" href="$1"&gt;</ph>myactivity.google.com<ph name="END_LINK_GMA">&lt;/a&gt;</ph>, such as your <ph name="BEGIN_LINK_GAA">&lt;a target="_blank" id="footerGeminiAppsActivityLink" href="$2"&gt;</ph>Gemini Apps Activity<ph name="END_LINK_GAA">&lt;/a&gt;</ph>
+   </message>
+   <message name="IDS_HISTORY_LOADING" desc="Text shown when we're loading the user's history">
+@@ -136,13 +136,13 @@
+       Show Full History
+     </message>
+   </if>
+-  <message name="IDS_HISTORY_SOURCE_FILTER_CHIPS_ARIA_LABEL" desc="This string is the ARIA label of the filter chips that filter the history results when the user selects them; they sit next to each other on top of the Chrome history page, where users can see their browsing history.">
++  <message name="IDS_HISTORY_SOURCE_FILTER_CHIPS_ARIA_LABEL" desc="This string is the ARIA label of the filter chips that filter the history results when the user selects them; they sit next to each other on top of the Redrob history page, where users can see their browsing history.">
+     Auto browse filters
+   </message>
+-  <message name="IDS_HISTORY_SOURCE_FILTER_CHIP_ACTOR" desc="This string is found on a chip that filters the history results when the user selects it; it sits next to its opposite filter: 'You' (the user's browsing activity). It is at the top of the Chrome history page, where users can see their browsing history. This text is a noun and is short for the longer phrase 'Browsing history that AUTO BROWSE performed.' The users will then see entries in Chrome history that are the result of Gemini in Chrome browsing while performing an auto browse task for the user. The tone should be short and telegraphic.">
++  <message name="IDS_HISTORY_SOURCE_FILTER_CHIP_ACTOR" desc="This string is found on a chip that filters the history results when the user selects it; it sits next to its opposite filter: 'You' (the user's browsing activity). It is at the top of the Redrob history page, where users can see their browsing history. This text is a noun and is short for the longer phrase 'Browsing history that AUTO BROWSE performed.' The users will then see entries in Redrob history that are the result of Gemini in Chrome browsing while performing an auto browse task for the user. The tone should be short and telegraphic.">
+     Auto browse
+   </message>
+-  <message name="IDS_HISTORY_SOURCE_FILTER_CHIP_USER" desc="This string is found on a chip that filters the history results when the user selects it; it sits next to its opposite filter: 'Auto browse' (browsing activity from an auto browse task). It is at the top of the Chrome history page, where users can see their browsing history. This text is a noun and is short for the longer phrase 'Browsing history that YOU performed.' The tone should be short and telegraphic.">
++  <message name="IDS_HISTORY_SOURCE_FILTER_CHIP_USER" desc="This string is found on a chip that filters the history results when the user selects it; it sits next to its opposite filter: 'Auto browse' (browsing activity from an auto browse task). It is at the top of the Redrob history page, where users can see their browsing history. This text is a noun and is short for the longer phrase 'Browsing history that YOU performed.' The tone should be short and telegraphic.">
+     You
+   </message>
+   <message name="IDS_HISTORY_CLOSE_AND_RETURN_TO_PREFIX" desc="Text for the back-to-opener menu item. Format: Close and go back to &quot;[tab title]&quot;.">
+@@ -196,7 +196,7 @@
+     Get answers from your history, powered by AI
+   </message>
+   <message name="IDS_HISTORY_EMBEDDINGS_ANSWERS_PROMO_BODY" desc="On the history page, the body text of the promo for history search powered by AI with answerer." translateable="false">
+-    You can ask questions like "what ingredients were in that pasta recipe?" Using question words like "what" or "where" helps Chrome give you better answers. Or describe what you're looking for in a few words. As you visit more sites, you'll see more AI-powered results.
++    You can ask questions like "what ingredients were in that pasta recipe?" Using question words like "what" or "where" helps Redrob give you better answers. Or describe what you're looking for in a few words. As you visit more sites, you'll see more AI-powered results.
+   </message>
+   <message name="IDS_HISTORY_EMBEDDIGNS_PROMO_SETTINGS_LINK_TEXT" desc="On the history page, the text of the link to edit the user's history search setting." translateable="false">
+     Manage your history search setting
+@@ -291,7 +291,7 @@
+     Comparison tables
+   </message>
+   <message name="IDS_COMPARE_HISTORY_INFO" desc="Info disclaimer text for comparison tables tab in history.">
+-    Tabs you delete from your Chrome history will still show up in your comparison tables
++    Tabs you delete from your Redrob history will still show up in your comparison tables
+   </message>
+   <message name="IDS_COMPARE_HISTORY_MENU_ARIA_LABEL" desc="Aria label for menu button for a row in tab compare history">
+     More actions for comparison table <ph name="COMPARE_SET_NAME"><ex>e-bikes</ex>$1</ph>
+@@ -308,10 +308,10 @@
+ 
+   <!-- Critical actions -->
+   <!-- TODO(b/538113758): Make translatable when strings are finalized. -->
+-  <message name="IDS_HISTORY_SOURCE_FILTER_CHIP_ACTOR_GEMINI" desc="This string is found on a chip that filters the history results when the user selects it; it sits next to its opposite filter: 'You' (the user's browsing activity). It is at the top of the Chrome history page, where users can see their browsing history when Gemini performs tasks." translateable="false">
++  <message name="IDS_HISTORY_SOURCE_FILTER_CHIP_ACTOR_GEMINI" desc="This string is found on a chip that filters the history results when the user selects it; it sits next to its opposite filter: 'You' (the user's browsing activity). It is at the top of the Redrob history page, where users can see their browsing history when Gemini performs tasks." translateable="false">
+     Gemini
+   </message>
+-  <message name="IDS_HISTORY_ACTOR_TASK_TOOLTIP_GEMINI" desc="This string indicates entries in Chrome history that are the result of Gemini in Chrome browsing while performing a task for the user. When users view their Chrome history, this string appears as a tooltip on a Gemini history entry." translateable="false">
++  <message name="IDS_HISTORY_ACTOR_TASK_TOOLTIP_GEMINI" desc="This string indicates entries in Redrob history that are the result of Gemini in Chrome browsing while performing a task for the user. When users view their Redrob history, this string appears as a tooltip on a Gemini history entry." translateable="false">
+     Gemini task
+   </message>
+   <message name="IDS_HISTORY_REVIEW_GEMINI_ACTIVITY" desc="Command in the history entry drop-down menu. Opens Gemini Apps Activity page." translateable="false">
+@@ -323,7 +323,7 @@
+   <message name="IDS_HISTORY_GO_TO_GEMINI_CHAT_ERROR" desc="Toast notification shown when opening Gemini chat fails." translateable="false">
+     Couldn't open Gemini chat
+   </message>
+-  <message name="IDS_HISTORY_OTHER_FORMS_OF_HISTORY_GMA_AND_GAA_CRITICAL_ACTIONS" desc="The notification at the bottom of the history page indicating that deleting Chrome browsing history will not delete other forms of history stored at Google My Activity and Gemini Apps Activity, shown when critical actions are enabled." translateable="false">
++  <message name="IDS_HISTORY_OTHER_FORMS_OF_HISTORY_GMA_AND_GAA_CRITICAL_ACTIONS" desc="The notification at the bottom of the history page indicating that deleting Redrob browsing history will not delete other forms of history stored at Google My Activity and Gemini Apps Activity, shown when critical actions are enabled." translateable="false">
+     Your Google Account may have other forms of browsing history at <ph name="BEGIN_LINK_GMA">&lt;a target="_blank" id="footerGoogleMyActivityLink" href="$1"&gt;</ph>myactivity.google.com<ph name="END_LINK_GMA">&lt;/a&gt;</ph>, such as auto browse visits in your <ph name="BEGIN_LINK_GAA">&lt;a target="_blank" id="footerGeminiAppsActivityLink" href="$2"&gt;</ph>Gemini Apps Activity<ph name="END_LINK_GAA">&lt;/a&gt;</ph>
+   </message>
+   <message name="IDS_HISTORY_GEMINI_KEY_BROWSING_ACTIONS_TITLE" desc="Tooltip text for the expand button on history items for Gemini actor visits." translateable="false">
+@@ -368,16 +368,16 @@
+   <message name="IDS_HISTORY_CRITICAL_ACTION_CREDENTIALS_OTP_TOOLTIP" desc="Tooltip for credentials OTP verification code critical action in history item." translateable="false">
+     Verification codes
+   </message>
+-  <message name="IDS_HISTORY_CRITICAL_ACTION_APP_MENU_IPH_BODY" desc="Text shown in the IPH bubble attached to the Chrome app menu teaching users where to view Gemini's auto browse actions." translateable="false">
+-    In Chrome history, you can see the key actions that Gemini completed while browsing for you
++  <message name="IDS_HISTORY_CRITICAL_ACTION_APP_MENU_IPH_BODY" desc="Text shown in the IPH bubble attached to the Redrob app menu teaching users where to view Gemini's auto browse actions." translateable="false">
++    In Redrob history, you can see the key actions that Gemini completed while browsing for you
+   </message>
+-  <message name="IDS_HISTORY_CRITICAL_ACTION_APP_MENU_IPH_ACTION" desc="Button label on the app menu IPH bubble to navigate to Chrome history." translateable="false">
++  <message name="IDS_HISTORY_CRITICAL_ACTION_APP_MENU_IPH_ACTION" desc="Button label on the app menu IPH bubble to navigate to Redrob history." translateable="false">
+     Review key actions
+   </message>
+-  <message name="IDS_HISTORY_CRITICAL_ACTION_FILTER_CHIP_IPH_BODY" desc="Text shown in the IPH bubble attached to the Gemini filter chip on the Chrome history page." translateable="false">
++  <message name="IDS_HISTORY_CRITICAL_ACTION_FILTER_CHIP_IPH_BODY" desc="Text shown in the IPH bubble attached to the Gemini filter chip on the Redrob history page." translateable="false">
+     See the key actions that Gemini completed while browsing for you
+   </message>
+-  <message name="IDS_HISTORY_CRITICAL_ACTION_FILTER_CHIP_IPH_SCREENREADER" is_accessibility_with_no_ui="true" desc="Accessible screen reader text for the IPH bubble attached to the Gemini filter chip on the Chrome history page." translateable="false">
++  <message name="IDS_HISTORY_CRITICAL_ACTION_FILTER_CHIP_IPH_SCREENREADER" is_accessibility_with_no_ui="true" desc="Accessible screen reader text for the IPH bubble attached to the Gemini filter chip on the Redrob history page." translateable="false">
+     See the key actions that Gemini completed while browsing for you
+   </message>
+ 

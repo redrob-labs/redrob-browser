@@ -1,0 +1,18 @@
+# Redrob: the Windows browser executable is redrob-browser.exe, not chrome.exe.
+#
+# Upstream names it chrome.exe on every build, branded or not. The portable zip used to ship a copy
+# under our name beside the original, and Task Manager, the file's properties and the firewall all
+# said chrome.exe. Every place that names the file is one rule in this set; chrome.dll keeps its name
+# because nothing user-facing shows it.
+
+substitutions:
+  - description: |
+      Archive the renamed executable.
+    regex:
+      pattern: "    'filename': 'chrome.exe',\n"
+      replace: "    'filename': 'redrob-browser.exe',\n"
+  - description: |
+      And its symbols.
+    regex:
+      pattern: "    'filename': 'chrome.exe.pdb',\n"
+      replace: "    'filename': 'redrob-browser.exe.pdb',\n"

@@ -1,5 +1,5 @@
 diff --git a/chrome/common/chrome_constants.cc b/chrome/common/chrome_constants.cc
-index 1a6b899b4bc3a..74d94990b9765 100644
+index 1a6b899b4bc3a..cf9f68ad5bb65 100644
 --- a/chrome/common/chrome_constants.cc
 +++ b/chrome/common/chrome_constants.cc
 @@ -5,6 +5,7 @@
@@ -10,6 +10,18 @@ index 1a6b899b4bc3a..74d94990b9765 100644
  #include "chrome/common/chrome_version.h"
  
  #define FPL FILE_PATH_LITERAL
+@@ -32,9 +33,9 @@ const char kChromeVersion[] = CHROME_VERSION_STRING;
+ 
+ #if BUILDFLAG(IS_WIN)
+ const base::FilePath::CharType kBrowserProcessExecutableName[] =
+-    FPL("chrome.exe");
++    FPL("redrob-browser.exe");
+ const base::FilePath::CharType kHelperProcessExecutableName[] =
+-    FPL("chrome.exe");
++    FPL("redrob-browser.exe");
+ #elif BUILDFLAG(IS_MAC)
+ const base::FilePath::CharType kBrowserProcessExecutableName[] =
+     FPL(PRODUCT_FULLNAME_STRING);
 @@ -46,7 +47,12 @@ const base::FilePath::CharType kBrowserProcessExecutableName[] = FPL("chrome");
  const base::FilePath::CharType kHelperProcessExecutableName[] =
      FPL("sandboxed_process");
@@ -24,6 +36,18 @@ index 1a6b899b4bc3a..74d94990b9765 100644
  // Helper processes end up with a name of "exe" due to execing via
  // /proc/self/exe.  See bug 22703.
  const base::FilePath::CharType kHelperProcessExecutableName[] = FPL("exe");
+@@ -54,9 +60,9 @@ const base::FilePath::CharType kHelperProcessExecutableName[] = FPL("exe");
+ 
+ #if BUILDFLAG(IS_WIN)
+ const base::FilePath::CharType kBrowserProcessExecutablePath[] =
+-    FPL("chrome.exe");
++    FPL("redrob-browser.exe");
+ const base::FilePath::CharType kHelperProcessExecutablePath[] =
+-    FPL("chrome.exe");
++    FPL("redrob-browser.exe");
+ #elif BUILDFLAG(IS_MAC)
+ const base::FilePath::CharType kBrowserProcessExecutablePath[] =
+     FPL(PRODUCT_FULLNAME_STRING ".app/Contents/MacOS/" PRODUCT_FULLNAME_STRING);
 @@ -75,8 +81,15 @@ const base::FilePath::CharType kHelperProcessExecutablePath[] =
  const base::FilePath::CharType kBrowserProcessExecutablePath[] = FPL("chrome");
  const base::FilePath::CharType kHelperProcessExecutablePath[] = FPL("chrome");

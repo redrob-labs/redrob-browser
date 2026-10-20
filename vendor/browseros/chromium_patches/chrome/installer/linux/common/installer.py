@@ -1,5 +1,5 @@
 diff --git a/chrome/installer/linux/common/installer.py b/chrome/installer/linux/common/installer.py
-index 3970d8ebf641e..07d0b1cb33c68 100644
+index 3970d8ebf641e..5071db24e65cc 100644
 --- a/chrome/installer/linux/common/installer.py
 +++ b/chrome/installer/linux/common/installer.py
 @@ -33,6 +33,10 @@ class StandardPermissions:
@@ -7,7 +7,7 @@ index 3970d8ebf641e..07d0b1cb33c68 100644
  
  
 +# Redrob: where the build puts the agent server, relative to $root_out_dir and to the install dir alike.
-+AGENT_SERVER_BINARY = "BrowserOSServer/default/resources/bin/browseros_server"
++AGENT_SERVER_BINARY = "BrowserOSServer/default/resources/bin/redrob-agent-server"
 +
 +
  class ArtifactType:
@@ -120,7 +120,17 @@ index 3970d8ebf641e..07d0b1cb33c68 100644
          return artifacts
  
      def get_icon_artifacts(self) -> list[Artifact]:
-@@ -1224,7 +1288,12 @@ class Installer:
+@@ -919,7 +983,8 @@ class InstallerConfig:
+             if self.channel not in ["beta", "unstable", "canary"]:
+                 self.uri_scheme = "x-scheme-handler/google-chrome;"
+         else:
+-            self.uri_scheme = "x-scheme-handler/chromium;"
++            # Redrob: our scheme, the same one Windows registers, never Chromium's.
++            self.uri_scheme = "x-scheme-handler/redrob-browser;"
+ 
+         # apparmor profile
+         artifacts.append(
+@@ -1224,7 +1289,12 @@ class Installer:
                      if not str(path).startswith(str(install_dir)):
                          elf_outside.append(path)
  

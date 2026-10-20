@@ -1,0 +1,38 @@
+diff --git a/chrome/app/support_tool_strings.grdp b/chrome/app/support_tool_strings.grdp
+index 0d1e5cac02153..95e7532a481af 100644
+--- a/chrome/app/support_tool_strings.grdp
++++ b/chrome/app/support_tool_strings.grdp
+@@ -102,10 +102,10 @@
+             Select all
+         </message>
+         <!-- DataCollector strings -->
+-        <message name="IDS_SUPPORT_TOOL_CHROME_SYSTEM_INFO" desc="This is a data source name for internal Chrome logs.">
+-            Chrome System Information
++        <message name="IDS_SUPPORT_TOOL_CHROME_SYSTEM_INFO" desc="This is a data source name for internal Redrob logs.">
++            Redrob System Information
+         </message>
+-        <message name="IDS_SUPPORT_TOOL_CRASH_IDS" desc="An identification number is given every time Chrome crashes on the device. This data source collects those IDs.">
++        <message name="IDS_SUPPORT_TOOL_CRASH_IDS" desc="An identification number is given every time Redrob crashes on the device. This data source collects those IDs.">
+             Crash IDs
+         </message>
+         <message name="IDS_SUPPORT_TOOL_MEMORY_DETAILS" desc="This is the name of data source that gets memory usage details.">
+@@ -147,8 +147,8 @@
+         <message name="IDS_SUPPORT_TOOL_CHROMEOS_SYSTEM_LOGS" desc="System logs on ChromeOS.">
+             ChromeOS System Logs
+         </message>
+-        <message name="IDS_SUPPORT_TOOL_CHROMEOS_CHROME_USER_LOGS" desc="Chrome logs from user's session on ChromeOS.">
+-            ChromeOS Chrome User Logs
++        <message name="IDS_SUPPORT_TOOL_CHROMEOS_CHROME_USER_LOGS" desc="Redrob logs from user's session on ChromeOS.">
++            ChromeOS Redrob User Logs
+         </message>
+         <message name="IDS_SUPPORT_TOOL_CHROMEOS_BLUETOOTH_FLOSS" desc="Bluetooth logs if Floss is enabled on the device. Floss is the project that works on converging on a single Bluetooth stack between Android and ChromeOS.">
+             ChromeOS Bluetooth
+@@ -177,7 +177,7 @@
+         <message name="IDS_SUPPORT_TOOL_CHROMEOS_KIOSK_APP_LEVEL_LOGS" desc="Logs collected from service workers, app windows and browser during a ChromeOS kiosk app session.">
+             ChromeOS Kiosk App Logs
+         </message>
+-        <message name="IDS_SUPPORT_TOOL_CHROME_UPDATER" desc="Diagnostic information regarding Chrome's updater.">
++        <message name="IDS_SUPPORT_TOOL_CHROME_UPDATER" desc="Diagnostic information regarding Redrob's updater.">
+             Updater
+         </message>
+         <!-- PII type strings -->
