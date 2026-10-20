@@ -102,7 +102,13 @@ branding/icons/mac/iconset/icon_256x256.png          chrome/app/theme/chromium/m
 branding/icons/mac/iconset/icon_256x256@2x.png       chrome/app/theme/chromium/mac/Assets.xcassets/Icon.iconset/icon_256x256@2x.png      binary
 # The Windows "Set as default" modal draws a mock of Settings > Apps > Default apps. Upstream's mock
 # spells "Google Chrome" in outlined glyphs; ours swaps those two runs for <text> naming Redrob Browser.
-branding/default-browser/settings_illustration.svg chrome/browser/resources/default_browser/default_browser_modal/settings_illustration.svg text
+branding/webui/settings_illustration.svg chrome/browser/resources/default_browser/default_browser_modal/settings_illustration.svg text
+# WebUI marks loaded by file name rather than through the product logo (branding/make-icons.sh).
+# cr-toolbar and cr-drawer show chrome_logo_dark.svg as the page header icon in dark mode -- history,
+# downloads, bookmarks, extensions -- so a dark-mode user saw the Chrome logo on every one of them.
+branding/webui/chrome_logo_dark.svg      ui/webui/resources/images/chrome_logo_dark.svg      binary
+# The omnibox action ("pedal") icon in the WebUI searchbox, a monochrome Chrome logo used as a mask.
+branding/webui/chrome_product_cr23.svg   ui/webui/resources/cr_components/searchbox/icons/chrome_product_cr23.svg binary
 
 
 

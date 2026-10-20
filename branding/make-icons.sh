@@ -44,6 +44,19 @@ white  "$WORDMARK" x64 icons/about_product_logo_white@2x.png
 render "$MARK" 16x16 icons/favicon_product.png
 render "$MARK" 32x32 icons/favicon_product@2x.png
 
+echo "== WebUI marks that upstream ships as Chrome-logo SVG files"
+# WebUI pages load these by file name, not through the product logo. The symbol is the design system's
+# shipped PNG, wrapped unmodified in an SVG so the file name and type stay what WebUI expects.
+#   chrome_logo_dark.svg  cr-toolbar / cr-drawer header in dark mode: Solid White, for dark grounds.
+#   chrome_product_cr23   omnibox action icon, drawn as a CSS mask: only its alpha is used.
+wrap() {
+  printf '<svg xmlns="http://www.w3.org/2000/svg" width="%s" height="%s" viewBox="0 0 %s %s"><image width="%s" height="%s" href="data:image/png;base64,%s"/></svg>\n' \
+    "$2" "$2" "$2" "$2" "$2" "$2" "$(base64 -w0 "$1")" > "$3"
+}
+mkdir -p webui
+wrap "$REDROB_DESIGN_SYSTEM/assets/Symbol/redrob-symbol-solid-white.png" 24 webui/chrome_logo_dark.svg
+wrap "$REDROB_DESIGN_SYSTEM/assets/Symbol/redrob-symbol-solid.png" 16 webui/chrome_product_cr23.svg
+
 echo "== Windows document/PDF association icons"
 # Upstream draws a page behind the glyph; until we have that art these are the app icon, which is honest
 # rather than wrong -- the association still shows Redrob.
