@@ -1,5 +1,5 @@
 diff --git a/chrome/installer/linux/common/installer.py b/chrome/installer/linux/common/installer.py
-index 3970d8ebf641e..df209a73891be 100644
+index 3970d8ebf641e..5071db24e65cc 100644
 --- a/chrome/installer/linux/common/installer.py
 +++ b/chrome/installer/linux/common/installer.py
 @@ -33,6 +33,10 @@ class StandardPermissions:
@@ -7,7 +7,7 @@ index 3970d8ebf641e..df209a73891be 100644
  
  
 +# Redrob: where the build puts the agent server, relative to $root_out_dir and to the install dir alike.
-+AGENT_SERVER_BINARY = "BrowserOSServer/default/resources/bin/browseros_server"
++AGENT_SERVER_BINARY = "BrowserOSServer/default/resources/bin/redrob-agent-server"
 +
 +
  class ArtifactType:

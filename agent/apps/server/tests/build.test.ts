@@ -68,7 +68,7 @@ describe('server build', () => {
   )
   const stagedBinaryPath = resolve(
     rootDir,
-    `dist/prod/server/${target.id}/resources/bin/browseros_server${target.ext}`,
+    `dist/prod/server/${target.id}/resources/bin/redrob-agent-server${target.ext}`,
   )
   const zipPath = resolve(
     rootDir,

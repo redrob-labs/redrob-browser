@@ -197,3 +197,8 @@ substitutions:
     regex:
       pattern: "            self.uri_scheme = \"x-scheme-handler/chromium;\"\n"
       replace: "            # Redrob: our scheme, the same one Windows registers, never Chromium's.\n            self.uri_scheme = \"x-scheme-handler/redrob-browser;\"\n"
+  - description: |
+      Redrob: the agent server executable is redrob-agent-server.
+    regex:
+      pattern: "\"BrowserOSServer/default/resources/bin/browseros_server\""
+      replace: "\"BrowserOSServer/default/resources/bin/redrob-agent-server\""

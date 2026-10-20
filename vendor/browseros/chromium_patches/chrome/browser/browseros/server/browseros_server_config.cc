@@ -19,7 +19,7 @@ new file mode 100644
 +    Product::kBrowserOS,
 +    "Redrob agent server",
 +    FILE_PATH_LITERAL("BrowserOSServer"),
-+    FILE_PATH_LITERAL("browseros_server"),
++    FILE_PATH_LITERAL("redrob-agent-server"),
 +    FILE_PATH_LITERAL("config.json"),
 +    "/system/health",
 +    true,

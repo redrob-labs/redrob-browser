@@ -15,7 +15,7 @@ new file mode 100644
 +
 +script_dir = os.path.dirname(os.path.abspath(__file__))
 +resources_dir = os.path.join(script_dir, "resources")
-+required_resources = sys.argv[1:] or ["bin/browseros_server"]
++required_resources = sys.argv[1:] or ["bin/redrob-agent-server"]
 +
 +all_valid = True
 +for resource in required_resources:

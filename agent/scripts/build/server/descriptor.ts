@@ -33,7 +33,7 @@ export const browserosServerBuildProduct: BuildProductDescriptor = {
   entrypoint: SERVER_BUNDLE_ENTRYPOINT,
   distRoot: 'dist/prod/server',
   rawBinaryBaseName: 'browseros-server',
-  stagedBinaryBaseName: 'browseros_server',
+  stagedBinaryBaseName: 'redrob-agent-server',
   archiveBaseName: 'browseros-server-resources',
   defaultManifestPath: 'scripts/build/config/server-prod-resources.json',
   env: {
