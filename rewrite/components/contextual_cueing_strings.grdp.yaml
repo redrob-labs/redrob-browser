@@ -1,0 +1,15 @@
+# components/contextual_cueing_strings.grdp: the browser's own name in strings shared with the official build.
+#
+# Thin on purpose. The protected-phrase lists are in presets/, shared by every strings file, so a
+# phrase added there protects this file too.
+#
+# Added by the 0.5 brand sweep: these files say "Chrome" in plain text where the product means itself
+# ("Set Chrome as default browser" in the address bar actions, "give Chrome access in" OS permission
+# hints), which `$1`/IDS_PRODUCT_NAME branding cannot reach. The Korean translations are re-keyed to
+# the renamed English by the matching *_ko.xtb rule, or grit would fall back to English.
+
+substitutions:
+  - description: |
+      Chrome -> Redrob, leaving every phrase in presets/short-name.yaml alone.
+    rename:
+      preset: short-name

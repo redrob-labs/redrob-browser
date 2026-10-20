@@ -1,0 +1,60 @@
+diff --git a/chrome/app/extensions_strings.grdp b/chrome/app/extensions_strings.grdp
+index ef5434a3c6b0c..5b0f644bc41db 100644
+--- a/chrome/app/extensions_strings.grdp
++++ b/chrome/app/extensions_strings.grdp
+@@ -316,7 +316,7 @@
+   <message name="IDS_EXTENSIONS_ITEM_EXTENSION_WEBSITE" desc="Label for button to go to the website the extension developer specified.">
+     Open extension website
+   </message>
+-  <message name="IDS_EXTENSIONS_ITEM_CHROME_WEB_STORE" desc="Label for button to visit the Chrome web store.">
++  <message name="IDS_EXTENSIONS_ITEM_CHROME_WEB_STORE" desc="Label for button to visit the Redrob web store.">
+     View in Chrome Web Store
+   </message>
+   <message name="IDS_EXTENSIONS_VIEW_IN_DEVTOOLS" desc="Label for a button that opens DevTools for a specific error context">
+@@ -511,13 +511,13 @@
+   <message name="IDS_EXTENSIONS_EDIT_SHORTCUT_BUTTON_LABEL" desc="The label for a button to edit the shortcut.">
+     Edit shortcut <ph name="SHORTCUT">$1</ph> for <ph name="EXTENSION_NAME">$2</ph>
+   </message>
+-  <message name="IDS_EXTENSIONS_SET_SHORTCUT_IN_SYSTEM_SETTINGS" desc="The label to indicate that shortcuts are managed in system settings instead of within Chrome.">
++  <message name="IDS_EXTENSIONS_SET_SHORTCUT_IN_SYSTEM_SETTINGS" desc="The label to indicate that shortcuts are managed in system settings instead of within Redrob.">
+     Set in system settings
+   </message>
+   <message name="IDS_EXTENSIONS_SHORTCUT_SCOPE_LABEL" desc="The label for the dropdown menu that lets the user choose the scope of an extension command (within chrome or global).">
+     Scope of <ph name="SHORTCUT">$1</ph> for <ph name="EXTENSION_NAME">$2</ph>
+   </message>
+-  <message name="IDS_EXTENSIONS_SHORTCUT_SCOPE_GLOBAL" desc="The label to indicate that a shortcut will be triggerable globally (including outside of the Chrome application).">
++  <message name="IDS_EXTENSIONS_SHORTCUT_SCOPE_GLOBAL" desc="The label to indicate that a shortcut will be triggerable globally (including outside of the Redrob application).">
+     Global
+   </message>
+   <message name="IDS_EXTENSIONS_SHORTCUT_INPUT_LABEL" desc="The visual text label above the shortcut input field.">
+@@ -550,8 +550,8 @@
+   <message name="IDS_EXTENSIONS_SIDEBAR_DISCOVER_MORE" desc="The text displayed in the sidebar of the chrome://extensions page to open the Chrome Web Store to get more extensions.">
+     Discover more extensions and themes on the <ph name="BEGIN_LINK">&lt;a target="_blank" href="$1"&gt;</ph>Chrome Web Store<ph name="END_LINK">&lt;/a&gt; <ex>&lt;/a&gt;</ex> </ph>
+   </message>
+-  <message name="IDS_EXTENSIONS_MODERN_WEB_GUIDANCE_PROMO" desc="The promotional text displayed in the sidebar of the chrome://extensions page when Developer Mode is enabled. It encourages developers to download the Chrome Extensions and Chrome Web Store skill for their AI coding agents to get latest API updates and best practices.">
+-    Using AI coding agents to build extensions? Install the <ph name="BEGIN_LINK">&lt;a target="_blank" href="$1"&gt;</ph><ph name="CHROME_EXTENSIONS">Chrome Extensions<ex>Chrome Extensions</ex></ph> and <ph name="WEB_STORE_SKILL">Chrome Web Store skill<ex>Chrome Web Store skill</ex></ph><ph name="END_LINK">&lt;/a&gt;</ph> to teach your coding agent the latest API updates and best practices.
++  <message name="IDS_EXTENSIONS_MODERN_WEB_GUIDANCE_PROMO" desc="The promotional text displayed in the sidebar of the chrome://extensions page when Developer Mode is enabled. It encourages developers to download the Redrob Extensions and Chrome Web Store skill for their AI coding agents to get latest API updates and best practices.">
++    Using AI coding agents to build extensions? Install the <ph name="BEGIN_LINK">&lt;a target="_blank" href="$1"&gt;</ph><ph name="CHROME_EXTENSIONS">Redrob Extensions<ex>Redrob Extensions</ex></ph> and <ph name="WEB_STORE_SKILL">Chrome Web Store skill<ex>Chrome Web Store skill</ex></ph><ph name="END_LINK">&lt;/a&gt;</ph> to teach your coding agent the latest API updates and best practices.
+   </message>
+   <message name="IDS_EXTENSIONS_SIDEBAR_KEYBOARD_SHORTCUTS" desc="The text for the link to manage keyboard shortcuts for extensions.">
+     Keyboard shortcuts
+@@ -740,16 +740,16 @@
+     Supercharge your browser with extensions and themes
+   </message>
+   <message name="IDS_EXTENSIONS_ZERO_STATE_CHIPS_IPH_DESCRIPTION" desc="An one line description for the extensions zero state in-product-help promo.">
+-    Extensions are add-ons for Chrome that can help you do more
++    Extensions are add-ons for Redrob that can help you do more
+   </message>
+   <message name="IDS_EXTENSIONS_ZERO_STATE_CHIPS_WITH_LINK_IPH_LINK_LABEL" desc="A label of extensions links to chrome web store home page.">
+     Extensions
+   </message>
+   <message name="IDS_EXTENSIONS_ZERO_STATE_CHIPS_WITH_LINK_IPH_DESCRIPTION" desc="An one line description for the extensions zero state in-product-help promo with links to chrome web store home page.">
+-    are add-ons for Chrome that can help you do more
++    are add-ons for Redrob that can help you do more
+   </message>
+   <message name="IDS_EXTENSIONS_ZERO_STATE_PLAIN_LINK_IPH_DESCRIPTION" desc="An one line description for the extensions zero state in-product-help promo.">
+-    Extensions are add-ons to Chrome that can help you
++    Extensions are add-ons to Redrob that can help you
+   </message>
+   <message name="IDS_EXTENSIONS_ZERO_STATE_IPH_SHOPPING_CATEGORY_LABEL" desc="Label for the button that opens the Chrome Web Store shopping category page.">
+     Find coupons

@@ -520,7 +520,143 @@ def rewrite_insert_after(label: str, text: str, body: dict) -> str:
     return "\n".join(lines)
 
 
+_MESSAGE_RE = re.compile(r"<message\b[^>]*>.*?</message>", re.DOTALL)
+_MESSAGE_NAME_RE = re.compile(r'\bname="([^"]+)"')
+
+
+def _messages_by_name(text: str) -> dict[tuple[str, int], str]:
+    """Every <message> element keyed by (name, nth occurrence), so <if> branches pair up in order."""
+    seen: dict[str, int] = {}
+    out: dict[tuple[str, int], str] = {}
+    for match in _MESSAGE_RE.finditer(text):
+        element = match.group(0)
+        name = _MESSAGE_NAME_RE.search(element)
+        if not name:
+            continue
+        index = seen.get(name.group(1), 0)
+        seen[name.group(1)] = index + 1
+        out[(name.group(1), index)] = element
+    return out
+
+
+def _grit_message_id(element: str) -> str | None:
+    """The translation id grit gives one <message>, computed by grit itself.
+
+    Not reimplemented: whitespace trimming, ''' quoting, placeholder presentation and `meaning` all feed
+    the fingerprint, and a wrong id fails SILENTLY -- grit drops a translation it cannot match and shows
+    English. So the element is wrapped in the smallest grd grit accepts and grit is asked. None for a
+    message grit does not translate.
+    """
+    grit_dir = str(SRC / "tools" / "grit")
+    if grit_dir not in sys.path:
+        sys.path.insert(0, grit_dir)
+    import io  # noqa: PLC0415
+    from grit import grd_reader  # noqa: PLC0415
+    from grit.node import message as message_node  # noqa: PLC0415
+
+    wrapped = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<grit latest_public_release="0" current_release="1">\n'
+        "<release seq=\"1\"><messages fallback_to_english=\"true\">\n"
+        f"{element}\n"
+        "</messages></release></grit>\n"
+    )
+    root = grd_reader.Parse(io.StringIO(wrapped), dir=".", skip_validation_checks=True)
+    for node in root.Preorder():
+        if isinstance(node, message_node.MessageNode):
+            clique = node.GetCliques()[0]
+            return clique.GetId() if clique.IsTranslateable() else None
+    return None
+
+
+def _rename_with_presets(label: str, text: str, names: list[str]) -> str:
+    """Apply each preset's masked rename, tolerating zero matches (a translation may not name us)."""
+    for name in names:
+        preset = load_preset(label, name)
+        upstream, ours, protect = preset["from"], preset["to"], preset["protect"]
+        masks: dict[str, str] = {}
+        for index, phrase in enumerate(sorted(protect, key=len, reverse=True)):
+            if phrase in text:
+                token = f"\x00P{index}\x00"
+                masks[token] = phrase
+                text = text.replace(phrase, token)
+        text = text.replace(upstream, ours)
+        for token, phrase in masks.items():
+            text = text.replace(token, phrase)
+    return text
+
+
+def rewrite_rekey(label: str, text: str, body: dict) -> str:
+    """Keep a translation file in step with a strings file whose English our rules renamed.
+
+    A translation is keyed by a fingerprint of the English. Rename `Chrome` to `Redrob` in the English and
+    the fingerprint moves, so grit no longer finds the Korean and shows the English instead: every string
+    the brand sweep touches would quietly become untranslated. This walks the strings file `source` as
+    upstream has it and as its own rules leave it, and for every message:
+
+    - English changed: the old translation is copied under the NEW id, with `presets` applied to the
+      translated text. The old line stays, since another unrenamed message may still share its id.
+    - English unchanged: the translation is renamed in place, which is what fixes a Korean string that
+      hard-codes the name where the English used a placeholder.
+
+    `presets` is a space-separated list of preset names, applied in order.
+    """
+    if not isinstance(body, dict):
+        raise RuleError(f"{label}: `rekey` takes a mapping")
+    unknown = set(body) - {"source", "presets"}
+    if unknown or not body.get("source") or not body.get("presets"):
+        raise RuleError(f"{label}: `rekey` takes exactly `source` and `presets`")
+    source = body["source"]
+    names = str(body["presets"]).split()
+    rule = REWRITES / f"{source}.yaml"
+    if not rule.exists():
+        raise RuleError(f"{label}: {source} has no rule at rewrite/{source}.yaml, so nothing was renamed")
+    original = pristine(source)
+    rewritten = apply_substitutions(source, original, load_rules(rule))
+    before, after = _messages_by_name(original), _messages_by_name(rewritten)
+
+    translations = {
+        m.group(1): m for m in re.finditer(r'<translation id="(\d+)">(.*?)</translation>', text, re.DOTALL)
+    }
+    in_place: dict[str, str] = {}
+    added: list[tuple[str, str, str]] = []  # (anchor id, new id, translated text)
+    for key, old_element in before.items():
+        new_element = after.get(key)
+        if new_element is None:
+            continue
+        old_id = _grit_message_id(old_element)
+        if old_id is None or old_id not in translations:
+            continue
+        translated = translations[old_id].group(2)
+        renamed = _rename_with_presets(label, translated, names)
+        if new_element == old_element:
+            if renamed != translated:
+                in_place[old_id] = renamed
+            continue
+        new_id = _grit_message_id(new_element)
+        if new_id is None or new_id == old_id or new_id in translations:
+            continue
+        if any(new_id == row[1] for row in added):
+            continue
+        added.append((old_id, new_id, renamed))
+    if not in_place and not added:
+        raise RuleError(f"{label}: nothing to rekey from {source}; the rule has died")
+
+    after_anchor: dict[str, list[str]] = {}
+    for anchor, new_id, translated in added:
+        after_anchor.setdefault(anchor, []).append(f'<translation id="{new_id}">{translated}</translation>')
+
+    def replace(match: re.Match) -> str:
+        tid = match.group(1)
+        line = match.group(0) if tid not in in_place else f'<translation id="{tid}">{in_place[tid]}</translation>'
+        extra = after_anchor.get(tid)
+        return line if not extra else line + "".join("\n" + row for row in extra)
+
+    return re.sub(r'<translation id="(\d+)">(.*?)</translation>', replace, text, flags=re.DOTALL)
+
+
 REWRITERS = {
+    "rekey": rewrite_rekey,
     "regex": rewrite_regex,
     "make_virtual": rewrite_make_virtual,
     "add_friend": rewrite_add_friend,

@@ -1,0 +1,31 @@
+diff --git a/chrome/app/media_router_strings.grdp b/chrome/app/media_router_strings.grdp
+index 6a79222f596c2..26a99160df306 100644
+--- a/chrome/app/media_router_strings.grdp
++++ b/chrome/app/media_router_strings.grdp
+@@ -75,7 +75,7 @@
+   <message name="IDS_MEDIA_ROUTER_ISSUE_FAILED_TO_CAST" desc="Title of an issue shown when cast intialization failed with no clear reason">
+       Failed to cast. Please try again.
+   </message>
+-  <message name="IDS_MEDIA_ROUTER_ISSUE_CANNOT_TERMINATE" desc="Title of an issue shown when a Cast session cannot be stopped from Chrome side, and needs to be stopped using the remote control for the Cast device where the Cast session is running.">
++  <message name="IDS_MEDIA_ROUTER_ISSUE_CANNOT_TERMINATE" desc="Title of an issue shown when a Cast session cannot be stopped from Redrob side, and needs to be stopped using the remote control for the Cast device where the Cast session is running.">
+       Use remote to stop casting
+   </message>
+ 
+@@ -93,7 +93,7 @@
+     Permission to cast is rejected. Open a help center article in a new tab to learn more.
+   </message>
+   <message name="IDS_MEDIA_ROUTER_LOCAL_DISCOVERY_PERMISSION_REJECTED_LABEL" desc="The error message including the link to the OS settings page, shown when the browser does not have the permission to connect to devices on the local network.">
+-    To cast, give Chrome access in: <ph name="IDS_MEDIA_ROUTER_LOCAL_DISCOVERY_PERMISSION_REJECTED_LINK">$1<ex>System Settings</ex></ph> > Local Network > Chrome
++    To cast, give Redrob access in: <ph name="IDS_MEDIA_ROUTER_LOCAL_DISCOVERY_PERMISSION_REJECTED_LINK">$1<ex>System Settings</ex></ph> > Local Network > Redrob
+   </message>
+   <message name="IDS_MEDIA_ROUTER_LOCAL_DISCOVERY_PERMISSION_REJECTED_LINK" desc="Text for the link to the OS settings page allowing useres to turn on the permission. This string will be embedded in a longer sentence that makes up the whole label.">
+     System Settings
+@@ -346,7 +346,7 @@
+     Send debug logs (recommended)
+   </message>
+   <message name="IDS_MEDIA_ROUTER_FEEDBACK_PRIVACY_DATA_USAGE" desc="Text with details about data usage of details submitted in the feedback page.">
+-    Your Chrome version, operating system version, Cast settings,
++    Your Redrob version, operating system version, Cast settings,
+     mirroring performance stats, and communication channel diagnostic
+     logs will be submitted in addition to any information you choose
+     to include above. This feedback is used to diagnose problems and

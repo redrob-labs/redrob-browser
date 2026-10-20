@@ -1,0 +1,144 @@
+# components/strings/components_strings_ko.xtb: the Korean translations, kept in step with the renamed English.
+#
+# A translation is keyed by a fingerprint of its English. Each strings file below has a rule that
+# renames Chrome/Chromium to Redrob, which moves those fingerprints; without this file grit cannot find
+# the Korean any more and shows the English. `rekey` copies each affected translation to its new id and
+# renames the name inside it, and also renames the Korean where the English never named the product
+# (it used a placeholder) but the translator wrote the name out.
+
+substitutions:
+  - description: |
+      Re-key the Korean for components/management_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/management_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/new_or_sad_tab_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/new_or_sad_tab_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/autofill_strings.grdp, applying google-chrome product-name short-name-ko.
+    rekey:
+      source: components/autofill_strings.grdp
+      presets: google-chrome product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/ssl_errors_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/ssl_errors_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/search_engine_choice_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/search_engine_choice_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/page_info_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/page_info_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/reset_password_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/reset_password_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/password_manager_strings.grdp, applying google-chrome product-name short-name-ko.
+    rekey:
+      source: components/password_manager_strings.grdp
+      presets: google-chrome product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/autofill_payments_strings.grdp, applying google-chrome product-name short-name-ko.
+    rekey:
+      source: components/autofill_payments_strings.grdp
+      presets: google-chrome product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/security_interstitials_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/security_interstitials_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/omnibox_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/omnibox_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/omnibox_pedal_ui_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/omnibox_pedal_ui_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/collaboration_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/collaboration_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/facilitated_payments_strings.grdp, applying google-chrome product-name short-name-ko.
+    rekey:
+      source: components/facilitated_payments_strings.grdp
+      presets: google-chrome product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/send_tab_to_self_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/send_tab_to_self_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/contextual_cueing_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/contextual_cueing_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/policy_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/policy_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/smart_tab_sharing.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/smart_tab_sharing.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/history_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/history_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/payments_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/payments_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/commerce_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/commerce_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/permissions_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/permissions_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/browsing_data_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/browsing_data_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/enterprise_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/enterprise_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/error_page_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/error_page_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/heavy_ad_intervention_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/heavy_ad_intervention_strings.grdp
+      presets: product-name short-name-ko
+  - description: |
+      Re-key the Korean for components/personal_context_strings.grdp, applying product-name short-name-ko.
+    rekey:
+      source: components/personal_context_strings.grdp
+      presets: product-name short-name-ko

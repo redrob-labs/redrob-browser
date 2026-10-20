@@ -1,0 +1,35 @@
+# `Chrome` -> `Redrob` inside KOREAN translations, for the `rekey` rewriter.
+#
+# The Korean product name stays Latin, as every l10n/*.tsv row does ("Redrob 작업"), so the rename is
+# the same token. Korean particles follow the final consonant, and 크롬 and 레드롭 both end in one, so
+# 을/이/은/과 stay correct without touching the text around the name.
+#
+# The protected phrases are short-name's, in the forms the Korean translations actually use them.
+
+from: Chrome
+to: Redrob
+
+protect:
+  - "chrome://"
+  - "Chrome/"
+  - Google Chrome
+  - chrome.google.com
+  - ChromeOS
+  - Chrome OS
+  - Chromebook
+  - Chromecast
+  - ChromeVox
+  - Chrome 웹 스토어
+  - Chrome Web Store
+  - Chrome 앱
+  - Chrome Enterprise
+  - Chrome 원격 데스크톱
+  - Chrome Remote Desktop
+  - Chrome for Testing
+  - Chrome Browser Cloud Management
+  - Chrome 브라우저 클라우드 관리
+  - Gemini in Chrome
+  - Chrome의 Gemini
+  - Chrome 동기화
+  - Chrome 다운로드
+  - Chrome 받기
