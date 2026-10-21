@@ -26,9 +26,7 @@ export const PopularAppTiles: FC = () => (
           <div className="ui-tile__face flex h-14 w-14 items-center justify-center">
             <McpServerIcon serverName={app.icon} size={28} />
           </div>
-          <span className="line-clamp-1 max-w-18 text-xs">
-            {t(app.label)}
-          </span>
+          <span className="line-clamp-1 max-w-18 text-xs">{t(app.label)}</span>
         </a>
       ))}
     </div>

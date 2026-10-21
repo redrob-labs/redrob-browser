@@ -509,9 +509,7 @@ class TestConversationRuns {
   }
 }
 
-function moduleFixture(
-  options: { session?: BrowserSession } = {},
-) {
+function moduleFixture(options: { session?: BrowserSession } = {}) {
   const runs = new TestConversationRuns()
   const addCreatedPages = mock(() => {})
   const browserMcp = new BrowserMcpModule({

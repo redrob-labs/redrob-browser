@@ -10,6 +10,10 @@ import {
   createBrowserOutputFileAccess,
 } from '@browseros/browser-mcp/output-file'
 import {
+  type ChatError,
+  serializeChatError,
+} from '@browseros/shared/schemas/chat-error'
+import {
   createAgentUIStream,
   createUIMessageStream,
   createUIMessageStreamResponse,
@@ -17,10 +21,6 @@ import {
   type UIMessageChunk,
 } from 'ai'
 import { AiSdkAgent } from '../../agent/ai-sdk-agent'
-import {
-  type ChatError,
-  serializeChatError,
-} from '@browseros/shared/schemas/chat-error'
 import { toChatErrorText } from '../../agent/chat-error'
 import { formatUserMessage } from '../../agent/format-message'
 import {

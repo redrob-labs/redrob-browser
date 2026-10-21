@@ -115,7 +115,8 @@ export function toLlmProviderConfig(
  * behind it; in the composer the one doing the work is Redrob. A name the user typed is kept.
  */
 function displayName(provider: LlmProviderConfig): string {
-  return provider.type === 'redrob-console' && provider.name === 'Redrob Console'
+  return provider.type === 'redrob-console' &&
+    provider.name === 'Redrob Console'
     ? t('shRedrob')
     : provider.name
 }

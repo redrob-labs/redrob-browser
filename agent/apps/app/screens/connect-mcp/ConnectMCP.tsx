@@ -15,9 +15,9 @@ import { McpServerIcon } from '@/components/mcp/McpServerIcon'
 import { SettingsHeader } from '@/components/settings/SettingsLayout'
 import { Button } from '@/components/ui/button'
 import { CUSTOM_MCP_ADDED_EVENT } from '@/lib/constants/analyticsEvents'
-import { POPULAR_APPS } from '@/lib/popular-apps'
 import { useMcpServers } from '@/lib/mcp/mcpServerStorage'
 import { track } from '@/lib/metrics/track'
+import { POPULAR_APPS } from '@/lib/popular-apps'
 import { AddCustomMCPDialog } from './AddCustomMCPDialog'
 
 const openInTab = (url: string) => window.open(url, '_blank')?.focus()
@@ -80,7 +80,9 @@ export const ConnectMCP: FC = () => {
                 <McpServerIcon serverName={app.icon} size={20} />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="ui-settings-row__label mb-1">{t(app.label)}</div>
+                <div className="ui-settings-row__label mb-1">
+                  {t(app.label)}
+                </div>
                 <p className="ui-settings-row__desc">
                   {t('paTryAsking')} “{t(app.examplePrompt)}”
                 </p>

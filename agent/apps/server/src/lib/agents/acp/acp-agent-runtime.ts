@@ -27,9 +27,9 @@ import {
 import { getBrowserosDir } from '../../browseros-dir'
 import { logger } from '../../logger'
 import type { AcpAgentDefinition } from '../agent-types'
+import { stderrSaysCommandNotFound } from '../host-acp/redrob-engine'
 import { deriveAcpSessionKey } from '../storage/acp-agent-store'
 import { type AcpAgentPolicy, buildAcpAgentPolicy } from './acp-agent-policy'
-import { stderrSaysCommandNotFound } from '../host-acp/redrob-engine'
 import { ensureAcpWorkspace } from './browseros-instructions'
 
 export interface AcpAgentRuntimeOptions {
@@ -76,7 +76,10 @@ export class AcpAgentSessionBusyError extends Error {
  * it is there but signed out, or something else broke. The UI turns each into its own card, so the
  * person sees "install Redrob Code" instead of "Unable to start the ACP agent."
  */
-export type AcpAgentPreparationReason = 'not_installed' | 'signed_out' | 'failed'
+export type AcpAgentPreparationReason =
+  | 'not_installed'
+  | 'signed_out'
+  | 'failed'
 
 export class AcpAgentPreparationError extends Error {
   readonly reason: AcpAgentPreparationReason

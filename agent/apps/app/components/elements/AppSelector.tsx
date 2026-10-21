@@ -89,7 +89,9 @@ export const AppSelector: FC<AppSelectorProps> = ({
                     className="shrink-0"
                   />
                   <div className="min-w-0 flex-1">
-                    <span className="block truncate text-sm">{t(app.label)}</span>
+                    <span className="block truncate text-sm">
+                      {t(app.label)}
+                    </span>
                     <span className="block truncate text-muted-foreground text-xs">
                       {t(app.examplePrompt)}
                     </span>
