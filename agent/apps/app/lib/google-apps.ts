@@ -20,6 +20,8 @@ export interface GoogleApp {
   id: 'gmail' | 'drive' | 'docs' | 'calendar'
   name: 'Gmail' | 'Google Drive' | 'Google Docs' | 'Google Calendar'
   url: string
+  /** Short tile label, translated: Drive is 드라이브 in Korean. */
+  label: MessageKey
   /** One sentence the user could send as-is. Picking the app puts it in the composer. */
   examplePrompt: MessageKey
 }
@@ -29,24 +31,28 @@ export const GOOGLE_APPS: readonly GoogleApp[] = [
     id: 'gmail',
     name: 'Gmail',
     url: 'https://mail.google.com/',
+    label: 'gaGmail',
     examplePrompt: 'gaGmailExample',
   },
   {
     id: 'drive',
     name: 'Google Drive',
     url: 'https://drive.google.com/',
+    label: 'gaDrive',
     examplePrompt: 'gaDriveExample',
   },
   {
     id: 'docs',
     name: 'Google Docs',
     url: 'https://docs.google.com/document/',
+    label: 'gaDocs',
     examplePrompt: 'gaDocsExample',
   },
   {
     id: 'calendar',
     name: 'Google Calendar',
     url: 'https://calendar.google.com/',
+    label: 'gaCalendar',
     examplePrompt: 'gaCalendarExample',
   },
 ]

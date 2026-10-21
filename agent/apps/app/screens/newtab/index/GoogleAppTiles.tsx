@@ -27,7 +27,7 @@ export const GoogleAppTiles: FC = () => (
             <McpServerIcon serverName={app.name} size={28} />
           </div>
           <span className="line-clamp-1 max-w-18 text-xs">
-            {app.name.replace(/^Google /, '')}
+            {t(app.label)}
           </span>
         </a>
       ))}

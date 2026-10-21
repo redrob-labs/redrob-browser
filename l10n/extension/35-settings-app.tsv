@@ -368,3 +368,7 @@ gaDocsExample	Start a new Google Doc with a meeting notes outline	회의록 틀�
 gaCalendarExample	What's on my calendar tomorrow?	내일 일정 알려 줘
 gaRetired	No longer used	더는 안 씀
 gaRetiredDesc	Added through an outside service Redrob no longer uses. You can remove it: Google apps now work without connecting.	레드롭이 더는 쓰지 않는 외부 서비스로 추가한 앱이에요. 지워도 돼요. Google 앱은 이제 연결 없이 써요.
+gaGmail	Gmail	Gmail
+gaDrive	Drive	드라이브
+gaDocs	Docs	문서
+gaCalendar	Calendar	캘린더
