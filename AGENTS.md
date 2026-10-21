@@ -82,6 +82,13 @@ need the checkout: `docs/BUILD.md` measures `sync` at 40 to 60 GB and 40 to 80 m
 free before starting. There is no unit test suite in this repository; verification of the product is
 the manual pass in `docs/TESTING.md` against an installed `.deb`.
 
+**Build incrementally, never from scratch.** Those hours are a first build on a new host. Every build after
+that, release builds included, reuses the existing checkout and its `out/release`, `out/mac_cross` and
+`out/win_cross` directories, so ninja redoes only what changed: 0.6.0 built in 7m51s (Linux, official) and
+about 3 minutes each for mac and Windows on the 64-core build host. Do not create a fresh output directory,
+delete `out/`, or run a "cold" build to prove the patch set compiles from nothing; the release gate does not
+ask for one (`docs/RELEASE.md`). Use `--jobs 48` on that host.
+
 ## What CI actually runs
 
 `checks.yml` triggers on `push` to every branch and on `pull_request`, and its single job is named
