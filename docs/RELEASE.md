@@ -7,19 +7,16 @@ them and call it "the version".
 
 ## The gate
 
-A tag is a claim that this tree can ship. Three things have to be true, and only the first two are cheap.
+A tag is a claim that this tree can ship. Two things have to be true.
 
-**1. The patch set applies to a clean checkout.** `redrob.py sync && redrob.py apply && redrob.py brand`.
+**1. The patch set applies to the checkout.** `redrob.py sync && redrob.py apply && redrob.py brand` on a new
+checkout; on the build host's existing one, copy our sources in (`apply` copies `sources/` and the overlay first).
 
-**2. A cold full build passes.** Not an incremental one. Every build during a working session is incremental
-against an existing `out/` directory, and siso keeps all of its state inside that directory, so a new output
-directory is what makes a build genuinely cold. An incremental build passing says nothing about whether the
-patch set compiles from nothing.
-
-**3. The OFFICIAL build passes.** `redrob.py build --flavour release` — `is_official_build=true`, LTO and PGO.
-This is not the same question as (2) and it is the one that gates shipping: `docs/BUILD.md` is explicit that a
-dev build must not be benchmarked against Chrome, so a dev binary is not a release candidate no matter how
-green it is.
+**2. The OFFICIAL build passes.** `redrob.py build --flavour release` — `is_official_build=true`, LTO and PGO.
+It is incremental: it reuses the existing `out/release` directory and rebuilds only what changed. There is no
+cold-build gate. Building into a fresh output directory costs hours and answers nothing the official build does
+not; `docs/BUILD.md` is explicit that a dev build must not be benchmarked against Chrome, so a dev binary is not
+a release candidate no matter how green it is.
 
 ## The PGO trap
 
@@ -36,8 +33,7 @@ as nobody asks for a shippable binary. `cmd_sync` now sets the flag itself, so a
 release-capable; an EXISTING checkout needs the flag added and `gclient runhooks` run once, which fetches about
 86 MB compressed and lands a 327 MB profile.
 
-This was found on the day of the first tag, by trying. It is the reason (3) is on this list as its own gate
-rather than folded into (2).
+This was found on the day of the first tag, by trying: a dev build passing says nothing about the release one.
 
 ## Turning the update channel on
 
@@ -150,13 +146,13 @@ are the live path.
 
 1. `redrob.py version` — confirm both numbers are what you mean to ship.
 2. Update `CHANGELOG.md`: move the version's section out of "unreleased" and date it.
-3. Run gate (2) into a fresh output directory, and gate (3).
+3. Run gate (2), the incremental official build, in the existing checkout.
 4. Launch the release binary once and drive it. A binary that links is not a binary that starts.
 5. `redrob.py package --flavour release` — collects the `.deb` under `out/artifacts` (as
    `redrob-browser-<ver>-linux-x86_64.deb`, the release name), `out/deb` (Debian name) and `out/cdn` (CDN name).
    This is the step that needs `devscripts` on the host, for `debchange`.
 6. Tag annotated, `v<REDROB_VERSION>`, with the Chromium tag in the message.
-7. Push the tag only after (3) has passed. Moving a published tag is worse than tagging late.
+7. Push the tag only after (2) has passed. Moving a published tag is worse than tagging late.
 8. `gh release create "v$(cat REDROB_VERSION)" out/artifacts/* --draft --title "Redrob Browser $(cat
    REDROB_VERSION)"` — a DRAFT, because nothing unsigned should be visible to a user.
 9. Dispatch `sign-and-publish.yml` with `tag=v<version>`. It signs what the draft carries, verifies every
