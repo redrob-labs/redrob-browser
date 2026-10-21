@@ -353,3 +353,29 @@ stNamedSetupGuide	$1 setup guide	$1 설정 가이드	Link; $1 is a provider name
 stDurationSeconds	$1 seconds	$1초	A run's duration under a minute
 stDurationMinSec	$1m $2s	$1분 $2초	A run's duration: minutes, seconds
 stNoFolder	none	없음	Workspace chip: no folder chosen
+navHome	Home	홈
+navApps	Apps	앱
+paMenuTitle	Popular apps	인기 앱
+paMenuLede	Uses the accounts you're signed in to here. Pick one to see what to ask.	이 브라우저에 로그인한 계정으로 바로 써요. 고르면 물어볼 말을 넣어 드려요.
+paPageLede	Redrob works in these apps with the accounts you're signed in to in this browser. There is nothing to connect.	레드롭은 이 브라우저에 로그인한 계정으로 이 앱들을 그대로 써요. 따로 연결할 것이 없어요.
+paOpenApp	Open	열기
+paTryAsking	Try asking:	이렇게 물어보세요:
+paSignInHint	Not signed in to an app yet? Open it and sign in once; Redrob uses that tab from then on.	아직 로그인하지 않은 앱이 있나요? 열어서 한 번만 로그인하면 그다음부터 레드롭이 그 탭을 써요.
+paRetired	No longer used	더는 안 씀
+paRetiredDesc	Added through an outside service Redrob no longer uses. You can remove it: popular apps now work without connecting.	레드롭이 더는 쓰지 않는 외부 서비스로 추가한 앱이에요. 지워도 돼요. 인기 앱은 이제 연결 없이 써요.
+paGmail	Gmail	Gmail
+paDrive	Drive	드라이브
+paCalendar	Calendar	캘린더
+paYouTube	YouTube	YouTube
+paNotion	Notion	Notion
+paSlack	Slack	Slack
+paGitHub	GitHub	GitHub
+paFigma	Figma	Figma
+paGmailExample	Find this week's unread mail and summarize it	이번 주 안 읽은 메일을 찾아서 요약해 줘
+paDriveExample	Find the annual report template in my Drive and open it	드라이브에서 연차보고서 양식 문서를 찾아서 열어 줘
+paCalendarExample	What's on my calendar tomorrow?	내일 일정 알려 줘
+paYouTubeExample	Find a short video that explains this page's topic	이 페이지 주제를 설명하는 짧은 영상을 찾아 줘
+paNotionExample	Find my meeting notes from last week in Notion	Notion에서 지난주 회의록을 찾아 줘
+paSlackExample	Summarize the unread messages in my Slack channels	Slack 채널에서 안 읽은 메시지를 요약해 줘
+paGitHubExample	List the pull requests waiting for my review	내 리뷰를 기다리는 PR 목록을 보여 줘
+paFigmaExample	Open my most recent Figma file	가장 최근에 연 Figma 파일을 열어 줘

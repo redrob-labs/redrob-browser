@@ -21,10 +21,8 @@ export function describeMcpChange(
 ): string {
   const oldParts = (previousMcpKey ?? '').split(',').filter(Boolean)
   const newParts = currentMcpKey.split(',').filter(Boolean)
-  const oldKlavisState = oldParts.find((s) => s.startsWith('klavis:'))
-  const newKlavisState = newParts.find((s) => s.startsWith('klavis:'))
-  const oldServers = new Set(oldParts.filter((s) => !s.startsWith('klavis:')))
-  const newServers = new Set(newParts.filter((s) => !s.startsWith('klavis:')))
+  const oldServers = new Set(oldParts)
+  const newServers = new Set(newParts)
   const added = [...newServers].filter((s) => !oldServers.has(s))
   const removed = [...oldServers].filter((s) => !newServers.has(s))
 
@@ -40,19 +38,9 @@ export function describeMcpChange(
     )
   }
   if (parts.length === 0) {
-    if (
-      oldKlavisState !== 'klavis:ready' &&
-      newKlavisState === 'klavis:ready' &&
-      newServers.size > 0
-    ) {
-      parts.push(
-        `Klavis app integration tools are now available for the following connected apps: ${[...newServers].join(', ')}.`,
-      )
-    } else {
-      parts.push(
-        'Connected app integrations changed during this conversation. Use only tools that are currently registered.',
-      )
-    }
+    parts.push(
+      'Connected app integrations changed during this conversation. Use only tools that are currently registered.',
+    )
   }
   return parts.join(' ')
 }

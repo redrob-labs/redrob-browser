@@ -18,7 +18,6 @@ import { z } from 'zod/v4'
 import { logger } from '../../../lib/logger'
 import { shouldLogToolRegistration } from '../../../tools/registration-log-sampling'
 import type { ConversationRuns } from '../conversation-runs'
-import type { KlavisService } from '../klavis'
 import type { ServerActivity } from '../server-activity'
 import { dispatchBrowserTool } from './browser-tool-dispatch'
 import { ConversationTabGroups } from './conversation-tab-groups'
@@ -30,7 +29,6 @@ export interface BrowserMcpModuleDeps {
   version: string
   browserSession: BrowserSession
   conversationRuns: Pick<ConversationRuns, 'activeRun'>
-  klavis?: KlavisService
   activity?: ServerActivity
   tabGroups?: Pick<ConversationTabGroups, 'addCreatedPages'>
 }
@@ -141,7 +139,6 @@ export class BrowserMcpModule {
     const readOnly = Boolean(lease?.readOnly || input.requestedReadOnly)
     const source = lease?.source ?? 'mcp'
     const tools = readOnly ? READ_ONLY_BROWSER_TOOLS : BROWSER_TOOLS
-    const selectedServerNames = lease?.browserContext?.enabledMcpServers ?? []
 
     const server = createBrowserMcpServer({
       name: 'browseros_mcp',
@@ -164,26 +161,6 @@ export class BrowserMcpModule {
       },
     })
 
-    this.deps.klavis?.registerMcpTools(
-      server,
-      { selectedServerNames },
-      {
-        // Managed connectors bypass the browser executor, so repeat the two
-        // endpoint-wide guards at that protocol seam.
-        authorizeCall: () => {
-          if (
-            lease &&
-            !this.deps.conversationRuns.activeRun(lease.conversationId)
-          ) {
-            return 'MCP tools require an active conversation run.'
-          }
-          if (readOnly) {
-            return 'Managed connector tools are unavailable in read-only mode.'
-          }
-          return undefined
-        },
-      },
-    )
     return server
   }
 

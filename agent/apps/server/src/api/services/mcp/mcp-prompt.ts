@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-export const MCP_INSTRUCTIONS = `Redrob MCP Server — compact browser automation and 40+ external service integrations.
+import { POPULAR_APPS_GUIDANCE } from '../../../agent/popular-apps'
+
+export const MCP_INSTRUCTIONS = `Redrob MCP Server — compact browser automation, including the user's everyday apps in their own tabs.
 
 ## Browser Automation
 
@@ -26,26 +28,9 @@ Error recovery:
 - Element not visible → act kind="scroll", snapshot, retry once.
 - After 2 failed attempts → describe the blocker and ask user for guidance.
 
-## External Integrations (Klavis Strata)
+## Popular apps
 
-40+ services: Gmail, Slack, GitHub, Notion, Google Calendar, Jira, Linear, Figma, Salesforce, and more.
-
-Before using any Strata integration, call connector_mcp_servers(server_name) to verify the service is connected.
-- If connected → proceed with Strata discovery tools below.
-- If not connected → prompt the user with the returned authUrl to authenticate. After they confirm, call connector_mcp_servers again to verify.
-
-Progressive discovery — do not guess action names:
-1. connector_mcp_servers → check connection status first.
-2. discover_server_categories_or_actions → discover available actions.
-3. get_category_actions → expand categories from step 2.
-4. get_action_details → get parameter schema before executing.
-5. execute_action → use include_output_fields to limit response size.
-6. search_documentation → fallback keyword search.
-
-Authentication — when execute_action returns an auth error:
-1. Call connector_mcp_servers(server_name) to get a fresh authUrl.
-2. Prompt the user to open the authUrl and authenticate.
-3. Wait for explicit user confirmation before retrying.
+${POPULAR_APPS_GUIDANCE}
 
 ## General
 

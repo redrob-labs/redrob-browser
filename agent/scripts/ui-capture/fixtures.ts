@@ -214,23 +214,6 @@ export function fixturesFor(locale: FixtureLocale): Record<string, unknown> {
         },
       ],
     },
-    // modules/mcp/managed-mcp-servers.hooks.ts -- `servers` must be an array: ConnectMCP filters it.
-    '/klavis/servers': {
-      servers: [
-        { name: 'Gmail', description: 'Read, search and send email' },
-        { name: 'Google Calendar', description: 'Read and manage events' },
-        { name: 'Slack', description: 'Read channels and send messages' },
-        { name: 'Notion', description: 'Search and edit pages' },
-      ],
-      count: 4,
-    },
-    '/klavis/user-integrations': {
-      integrations: [
-        { name: 'Gmail', is_authenticated: true },
-        { name: 'Slack', is_authenticated: false },
-      ],
-      count: 2,
-    },
     // modules/agents/agents.hooks.ts
     '/agents': {
       agents: [

@@ -76,6 +76,12 @@ spErrContentFilter	Content was rejected	콘텐츠가 거부되었습니다
 spErrUnavailable	Provider unavailable	제공자를 사용할 수 없음
 spErrGeneric	Something went wrong	문제가 발생했습니다
 spErrAgentUnreachable	Unable to connect to the Redrob agent. Restart Redrob and try again.	Redrob 에이전트에 연결할 수 없습니다. Redrob을 다시 시작한 뒤 다시 시도하세요.
+spErrAgentNotInstalled	Redrob Code is not installed	Redrob Code가 설치되어 있지 않아요
+spErrAgentNotInstalledText	Agent mode runs on Redrob Code. Install it from AI settings, or switch to Chat to keep going.	에이전트 모드는 Redrob Code로 움직여요. AI 설정에서 설치하거나, 채팅으로 바꿔서 계속하세요.
+spErrAgentSignedOut	Sign in to Redrob Code	Redrob Code에 로그인해 주세요
+spErrAgentSignedOutText	Redrob Code is installed but not signed in. Sign in from AI settings, or switch to Chat to keep going.	Redrob Code는 설치됐지만 로그인이 안 되어 있어요. AI 설정에서 로그인하거나, 채팅으로 바꿔서 계속하세요.
+spErrAgentStartFailed	The agent did not start	에이전트를 시작하지 못했어요
+spErrAgentStartFailedText	Try again. If it keeps failing, check Redrob Code in AI settings, or switch to Chat.	다시 시도해 주세요. 계속 안 되면 AI 설정에서 Redrob Code를 확인하거나, 채팅으로 바꿔 주세요.
 spErrUnexpected	An unexpected error occurred	예기치 않은 오류가 발생했습니다
 spLearnMore	Learn more	자세히 알아보기
 spOpenAiSettings	Open AI settings	AI 설정 열기

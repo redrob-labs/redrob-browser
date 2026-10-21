@@ -13,7 +13,6 @@ import { getDb } from '../lib/db'
 import { logger } from '../lib/logger'
 import { Sentry } from '../lib/sentry'
 import { createApiRoutes } from './routes'
-import { KlavisService } from './services/klavis'
 import { ServerActivity } from './services/server-activity'
 import type { HttpServerConfig } from './types'
 
@@ -51,18 +50,13 @@ export async function createHttpServer(config: HttpServerConfig) {
     : null
   if (!browserosId) shutdownOAuth()
 
-  const klavis = new KlavisService({ browserosId })
-  klavis.start()
-
   const activity = new ServerActivity()
 
   const app = createApiRoutes({
     config: { ...config, activity },
-    klavis,
     tokenManager,
     onShutdown: () => {
       shutdownOAuth()
-      void klavis.stop()
       onShutdown?.()
     },
   })

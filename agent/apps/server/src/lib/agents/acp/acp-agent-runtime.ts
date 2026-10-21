@@ -6,6 +6,8 @@
 
 import { join } from 'node:path'
 import {
+  AcpxAgentNotFoundError,
+  AcpxAuthRequiredError,
   AcpxError,
   type AcpxProvider,
   type AcpxProviderSettings,
@@ -25,6 +27,7 @@ import {
 import { getBrowserosDir } from '../../browseros-dir'
 import { logger } from '../../logger'
 import type { AcpAgentDefinition } from '../agent-types'
+import { stderrSaysCommandNotFound } from '../host-acp/redrob-engine'
 import { deriveAcpSessionKey } from '../storage/acp-agent-store'
 import { type AcpAgentPolicy, buildAcpAgentPolicy } from './acp-agent-policy'
 import { ensureAcpWorkspace } from './browseros-instructions'
@@ -68,11 +71,34 @@ export class AcpAgentSessionBusyError extends Error {
   }
 }
 
+/**
+ * Why the agent did not start, in the terms the user can act on: the engine is not on this machine,
+ * it is there but signed out, or something else broke. The UI turns each into its own card, so the
+ * person sees "install Redrob Code" instead of "Unable to start the ACP agent."
+ */
+export type AcpAgentPreparationReason =
+  | 'not_installed'
+  | 'signed_out'
+  | 'failed'
+
 export class AcpAgentPreparationError extends Error {
-  constructor() {
+  readonly reason: AcpAgentPreparationReason
+
+  constructor(reason: AcpAgentPreparationReason = 'failed') {
     super('Unable to start the ACP agent.')
     this.name = 'AcpAgentPreparationError'
+    this.reason = reason
   }
+}
+
+export function classifyPreparationFailure(
+  error: unknown,
+): AcpAgentPreparationReason {
+  if (error instanceof AcpxAuthRequiredError) return 'signed_out'
+  if (error instanceof AcpxAgentNotFoundError) return 'not_installed'
+  const message = error instanceof Error ? error.message : String(error)
+  if (stderrSaysCommandNotFound(message)) return 'not_installed'
+  return 'failed'
 }
 
 /**
@@ -237,7 +263,7 @@ export class AcpAgentRuntime {
         conversationId: input.conversationId,
         error: error instanceof Error ? error.message : String(error),
       })
-      throw new AcpAgentPreparationError()
+      throw new AcpAgentPreparationError(classifyPreparationFailure(error))
     } finally {
       if (!streamStarted) this.activeTurns.delete(sessionKey)
     }

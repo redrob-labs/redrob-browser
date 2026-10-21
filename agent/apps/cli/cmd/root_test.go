@@ -40,7 +40,6 @@ func TestCommandName(t *testing.T) {
 		{"diff command", []string{"diff"}, "browseros-cli diff"},
 		{"unknown command", []string{"nonexistent"}, "unknown"},
 		{"subcommand", []string{"bookmark", "search"}, "browseros-cli bookmark search"},
-		{"strata subcommand", []string{"strata", "check"}, "browseros-cli strata check"},
 		{"known with extra args", []string{"snap", "extra"}, "browseros-cli snapshot"},
 	}
 	for _, tt := range tests {

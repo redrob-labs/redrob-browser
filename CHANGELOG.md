@@ -4,6 +4,24 @@ Redrob Browser's own versions. The Chromium release each one is cut from is in `
 upstream's four-week cadence whether we ship anything or not — the two numbers answer different questions, so
 `scripts/redrob.py version` prints both.
 
+## 0.6.0 — 2026-10-21
+
+**Your apps, no connecting.** Gmail, Drive, Calendar, YouTube, Notion, Slack, GitHub and Figma work through the
+accounts you are already signed in to in this browser. Ask "find the annual report template in my Drive and
+open it" and the agent searches Drive in a tab; it stops at a sign-in page and asks before it sends, shares or
+deletes anything. The outside connector service and its sign-in screen are gone, and Connect Apps is now Apps:
+each app with an Open button and a sentence to try. The composer's Apps menu puts that sentence in for you.
+
+**A new tab that starts with the assistant.** Ask is the first mode, and the browser remembers if you pick
+Search. Your popular apps sit in one row under the box; recent sites are gone, and scheduled task results are
+one thin line each.
+
+**It says why the agent did not start.** Instead of "Unable to start the ACP agent." you see whether Redrob Code
+is not installed or not signed in, with a link to AI settings and the Chat mode as the way to keep going.
+
+**Redrob by name.** The composer says 레드롭 / Redrob for the house model instead of Redrob Console, and the
+sidebar is translated.
+
 ## 0.5.0 — 2026-10-20
 
 **A new app icon.** Redrob Browser wears the 2026 design-system icon from @redrob-labs/ui 1.8.0 on every
