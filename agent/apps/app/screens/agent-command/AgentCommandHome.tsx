@@ -174,7 +174,11 @@ export const AgentCommandHome: FC = () => {
                 attachmentsEnabled={selectedProvider?.kind === 'acp'}
                 placeholder={
                   selectedProvider
-                    ? t('shAskProviderTask', selectedProvider.name)
+                    ? // The house model is Redrob to the user; "Redrob Console" is the billing
+                      // product behind it, not who does the work.
+                      selectedProvider.type === 'redrob-console'
+                      ? t('shAskRedrobTask')
+                      : t('shAskProviderTask', selectedProvider.name)
                     : noTarget
                       ? t('shDescribeATask')
                       : t('shLoadingProviders')
@@ -192,8 +196,12 @@ export const AgentCommandHome: FC = () => {
         </div>
 
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 pb-12">
-          <PopularAppTiles />
-          <RecentSites />
+          {/* Two rows of the same tiles read as one block: keep them close, so recent sites does
+              not sit alone halfway down the page. */}
+          <div className="flex flex-col gap-5">
+            <PopularAppTiles />
+            <RecentSites />
+          </div>
           <ScheduleResults />
         </div>
       </div>
