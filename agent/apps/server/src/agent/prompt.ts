@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { GOOGLE_APPS_GUIDANCE } from './google-apps'
+import { POPULAR_APPS_GUIDANCE } from './popular-apps'
 
 /**
  * BrowserOS Agent System Prompt v7
@@ -14,7 +14,7 @@ import { GOOGLE_APPS_GUIDANCE } from './google-apps'
  * descriptions and the runtime untrusted-content fence, so the prompt no longer
  * narrates a tool catalog, tool-selection tables, or per-tool error recovery.
  * What stays is what a tool cannot own: role/mode, the trust boundary, safety,
- * cross-tool execution workflow, Google apps in the user's own tabs, nudge behavior,
+ * cross-tool execution workflow, popular apps in the user's own tabs, nudge behavior,
  * response style, and dynamic page context.
  */
 
@@ -106,9 +106,9 @@ function getExternalIntegrations(
 ): string {
   // Chat mode has no browser tools, so there is no tab to open the app in.
   if (options?.chatMode) return ''
-  return `<google_apps>
-${GOOGLE_APPS_GUIDANCE}
-</google_apps>`
+  return `<popular_apps>
+${POPULAR_APPS_GUIDANCE}
+</popular_apps>`
 }
 
 // -----------------------------------------------------------------------------

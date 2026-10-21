@@ -24,7 +24,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
-import { GOOGLE_APPS } from '@/lib/google-apps'
+import { POPULAR_APPS } from '@/lib/popular-apps'
 
 export interface AppSelectorProps {
   children: ReactNode
@@ -37,7 +37,7 @@ export interface AppSelectorProps {
 }
 
 /**
- * The composer's Apps menu. It lists the Google apps the agent works in through the user's own
+ * The composer's Apps menu. It lists the popular apps the agent works in through the user's own
  * signed-in tabs: picking one shows what to ask, so a person who has never used the agent sees a
  * request that works instead of an empty box. Nothing here connects or authorizes anything.
  */
@@ -61,21 +61,21 @@ export const AppSelector: FC<AppSelectorProps> = ({
         align="end"
         className="w-80 p-0"
         role="dialog"
-        aria-label={t('gaMenuTitle')}
+        aria-label={t('paMenuTitle')}
       >
         <Command className="[&_svg:not([class*='text-'])]:text-muted-foreground">
           <div className="px-3 pt-3 pb-1">
-            <div className="font-medium text-sm">{t('gaMenuTitle')}</div>
+            <div className="font-medium text-sm">{t('paMenuTitle')}</div>
             <p className="mt-0.5 text-muted-foreground text-xs">
-              {t('gaMenuLede')}
+              {t('paMenuLede')}
             </p>
           </div>
           <CommandList className="max-h-72 overflow-auto">
             <CommandGroup>
-              {GOOGLE_APPS.map((app) => (
+              {POPULAR_APPS.map((app) => (
                 <CommandItem
                   key={app.id}
-                  value={app.name}
+                  value={t(app.label)}
                   onSelect={() => {
                     if (!onPickPrompt) return openInTab(app.url)
                     onPickPrompt(t(app.examplePrompt))
@@ -84,20 +84,20 @@ export const AppSelector: FC<AppSelectorProps> = ({
                   className="flex cursor-pointer items-center gap-3 px-3 py-2"
                 >
                   <McpServerIcon
-                    serverName={app.name}
+                    serverName={app.icon}
                     size={18}
                     className="shrink-0"
                   />
                   <div className="min-w-0 flex-1">
-                    <span className="block truncate text-sm">{app.name}</span>
+                    <span className="block truncate text-sm">{t(app.label)}</span>
                     <span className="block truncate text-muted-foreground text-xs">
                       {t(app.examplePrompt)}
                     </span>
                   </div>
                   <button
                     type="button"
-                    title={t('gaOpenApp')}
-                    aria-label={`${t('gaOpenApp')}: ${app.name}`}
+                    title={t('paOpenApp')}
+                    aria-label={`${t('paOpenApp')}: ${t(app.label)}`}
                     onClick={(event) => {
                       event.stopPropagation()
                       openInTab(app.url)

@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { GOOGLE_APPS_GUIDANCE } from '../../../agent/google-apps'
+import { POPULAR_APPS_GUIDANCE } from '../../../agent/popular-apps'
 
-export const MCP_INSTRUCTIONS = `Redrob MCP Server — compact browser automation, including the user's Google apps in their own tabs.
+export const MCP_INSTRUCTIONS = `Redrob MCP Server — compact browser automation, including the user's everyday apps in their own tabs.
 
 ## Browser Automation
 
@@ -28,9 +28,9 @@ Error recovery:
 - Element not visible → act kind="scroll", snapshot, retry once.
 - After 2 failed attempts → describe the blocker and ask user for guidance.
 
-## Google apps
+## Popular apps
 
-${GOOGLE_APPS_GUIDANCE}
+${POPULAR_APPS_GUIDANCE}
 
 ## General
 

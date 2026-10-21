@@ -59,7 +59,7 @@ describe('structure and size', () => {
       '<role>',
       '<security>',
       '<execution>',
-      '<google_apps>',
+      '<popular_apps>',
       '<workspace>',
       '<nudge_tools>',
       '<style>',
@@ -244,10 +244,10 @@ describe('execution', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 6. GOOGLE APPS
+// 6. POPULAR APPS
 // ---------------------------------------------------------------------------
 
-describe('google apps', () => {
+describe('popular apps', () => {
   it('sends Drive and Gmail work to the signed-in tabs and gates side effects', () => {
     const prompt = buildRegular()
     expect(prompt).toContain('https://drive.google.com/drive/search?q=')

@@ -41,7 +41,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { type StagedAttachment, stageAttachments } from '@/lib/attachments'
 import { ProviderIcon } from '@/lib/llm-providers/providerIcons'
 import type { ProviderType } from '@/lib/llm-providers/types'
-import { GOOGLE_APPS } from '@/lib/google-apps'
+import { POPULAR_APPS } from '@/lib/popular-apps'
 import { cn } from '@/lib/utils'
 import { useWorkspace } from '@/modules/workspace/workspace.hooks'
 
@@ -245,9 +245,9 @@ function CalmContextControls({
           className="inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
         >
           <span className="flex items-center -space-x-1.5">
-            {GOOGLE_APPS.slice(0, 3).map((app) => (
+            {POPULAR_APPS.slice(0, 3).map((app) => (
               <span key={app.id} className="rounded-full ring-2 ring-card">
-                <McpServerIcon serverName={app.name} size={12} />
+                <McpServerIcon serverName={app.icon} size={12} />
               </span>
             ))}
           </span>

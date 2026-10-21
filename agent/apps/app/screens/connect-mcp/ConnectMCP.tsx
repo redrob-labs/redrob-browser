@@ -15,7 +15,7 @@ import { McpServerIcon } from '@/components/mcp/McpServerIcon'
 import { SettingsHeader } from '@/components/settings/SettingsLayout'
 import { Button } from '@/components/ui/button'
 import { CUSTOM_MCP_ADDED_EVENT } from '@/lib/constants/analyticsEvents'
-import { GOOGLE_APPS, GOOGLE_SIGN_IN_URL } from '@/lib/google-apps'
+import { POPULAR_APPS } from '@/lib/popular-apps'
 import { useMcpServers } from '@/lib/mcp/mcpServerStorage'
 import { track } from '@/lib/metrics/track'
 import { AddCustomMCPDialog } from './AddCustomMCPDialog'
@@ -23,7 +23,7 @@ import { AddCustomMCPDialog } from './AddCustomMCPDialog'
 const openInTab = (url: string) => window.open(url, '_blank')?.focus()
 
 /**
- * Apps. Google apps come first and need no setup: the agent works in the user's own signed-in tabs,
+ * Apps. Popular apps come first and need no setup: the agent works in the user's own signed-in tabs,
  * so the page says how to use them rather than offering to connect them. Below that, a user can add
  * an MCP server of their own by URL. There is no third-party connector catalogue: sending a user
  * through someone else's Google consent screen to reach their own mail is exactly what made the
@@ -60,7 +60,7 @@ export const ConnectMCP: FC = () => {
     <div className="fade-in slide-in-from-bottom-5 animate-in space-y-6 duration-500">
       <SettingsHeader
         title={t('navApps')}
-        lede={t('gaPageLede')}
+        lede={t('paPageLede')}
         actions={
           <Button variant="outline" onClick={() => setAddingCustomMcp(true)}>
             <Plus className="h-4 w-4" />
@@ -69,20 +69,20 @@ export const ConnectMCP: FC = () => {
         }
       />
 
-      <section aria-labelledby="google-apps" className="ui-settings-group">
-        <h2 id="google-apps" className="ui-meta-label">
-          {t('gaMenuTitle')}
+      <section aria-labelledby="popular-apps" className="ui-settings-group">
+        <h2 id="popular-apps" className="ui-meta-label">
+          {t('paMenuTitle')}
         </h2>
         <div className="ui-card ui-settings-rows">
-          {GOOGLE_APPS.map((app) => (
+          {POPULAR_APPS.map((app) => (
             <div key={app.id} className="ui-settings-row">
               <div className="ui-sample flex h-10 w-10 shrink-0 items-center justify-center">
-                <McpServerIcon serverName={app.name} size={20} />
+                <McpServerIcon serverName={app.icon} size={20} />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="ui-settings-row__label mb-1">{app.name}</div>
+                <div className="ui-settings-row__label mb-1">{t(app.label)}</div>
                 <p className="ui-settings-row__desc">
-                  {t('gaTryAsking')} “{t(app.examplePrompt)}”
+                  {t('paTryAsking')} “{t(app.examplePrompt)}”
                 </p>
               </div>
               <Button
@@ -91,20 +91,13 @@ export const ConnectMCP: FC = () => {
                 onClick={() => openInTab(app.url)}
               >
                 <ExternalLink className="h-3.5 w-3.5" />
-                {t('gaOpenApp')}
+                {t('paOpenApp')}
               </Button>
             </div>
           ))}
         </div>
         <p className="mt-2 text-muted-foreground text-xs">
-          {t('gaSignInHint')}{' '}
-          <button
-            type="button"
-            onClick={() => openInTab(GOOGLE_SIGN_IN_URL)}
-            className="underline hover:text-foreground"
-          >
-            {t('gaSignInLink')}
-          </button>
+          {t('paSignInHint')}
         </p>
       </section>
 
@@ -130,13 +123,13 @@ export const ConnectMCP: FC = () => {
                     <span className="rr-badge rr-badge--sm rr-badge--subtle rr-badge--neutral">
                       {server.type === 'custom'
                         ? t('stCustom')
-                        : t('gaRetired')}
+                        : t('paRetired')}
                     </span>
                   </div>
                   <p className="ui-settings-row__desc">
                     {server.type === 'custom'
                       ? server.config?.description || server.config?.url
-                      : t('gaRetiredDesc')}
+                      : t('paRetiredDesc')}
                   </p>
                 </div>
                 <Button

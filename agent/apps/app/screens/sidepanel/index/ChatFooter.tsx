@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AppSelector } from '@/components/elements/AppSelector'
 import { WorkspaceSelector } from '@/components/elements/workspace-selector'
 import { McpServerIcon } from '@/components/mcp/McpServerIcon'
-import { GOOGLE_APPS } from '@/lib/google-apps'
+import { POPULAR_APPS } from '@/lib/popular-apps'
 import {
   type SelectedTextData,
   selectedTextStorage,
@@ -181,16 +181,16 @@ export const ChatFooter: FC<ChatFooterProps> = ({
               <button
                 type="button"
                 className="ui-panel-tool"
-                title={t('gaMenuTitle')}
-                aria-label={t('gaMenuTitle')}
+                title={t('paMenuTitle')}
+                aria-label={t('paMenuTitle')}
               >
                 <div className="flex items-center -space-x-1">
-                  {GOOGLE_APPS.slice(0, 3).map((app) => (
+                  {POPULAR_APPS.slice(0, 3).map((app) => (
                     <div
                       key={app.id}
                       className="rounded-full ring-2 ring-[var(--surface-base)]"
                     >
-                      <McpServerIcon serverName={app.name} size={14} />
+                      <McpServerIcon serverName={app.icon} size={14} />
                     </div>
                   ))}
                 </div>

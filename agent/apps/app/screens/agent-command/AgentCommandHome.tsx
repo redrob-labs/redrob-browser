@@ -19,9 +19,9 @@ import { openSidePanelWithSearch } from '@/lib/messaging/sidepanel/openSidepanel
 import { useCapabilities } from '@/modules/browseros/capabilities.hooks'
 import { stagePendingHomeMessage } from '@/modules/chat/pending-home-message'
 import { useChatTargetSelection } from '@/modules/chat/use-chat-target-selection'
-import { GoogleAppTiles } from '@/screens/newtab/index/GoogleAppTiles'
 import { ImportDataHint } from '@/screens/newtab/index/ImportDataHint'
 import { useShowImportHint } from '@/screens/newtab/index/import-hint.hooks'
+import { PopularAppTiles } from '@/screens/newtab/index/PopularAppTiles'
 import { RecentSites } from '@/screens/newtab/index/RecentSites'
 import { ScheduleResults } from '@/screens/newtab/index/ScheduleResults'
 import {
@@ -192,7 +192,7 @@ export const AgentCommandHome: FC = () => {
         </div>
 
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 pb-12">
-          <GoogleAppTiles />
+          <PopularAppTiles />
           <RecentSites />
           <ScheduleResults />
         </div>
