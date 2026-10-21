@@ -22,7 +22,6 @@ import { useChatTargetSelection } from '@/modules/chat/use-chat-target-selection
 import { ImportDataHint } from '@/screens/newtab/index/ImportDataHint'
 import { useShowImportHint } from '@/screens/newtab/index/import-hint.hooks'
 import { PopularAppTiles } from '@/screens/newtab/index/PopularAppTiles'
-import { RecentSites } from '@/screens/newtab/index/RecentSites'
 import { ScheduleResults } from '@/screens/newtab/index/ScheduleResults'
 import {
   ConversationInput,
@@ -196,12 +195,7 @@ export const AgentCommandHome: FC = () => {
         </div>
 
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 pb-12">
-          {/* Two rows of the same tiles read as one block: keep them close, so recent sites does
-              not sit alone halfway down the page. */}
-          <div className="flex flex-col gap-5">
-            <PopularAppTiles />
-            <RecentSites />
-          </div>
+          <PopularAppTiles />
           <ScheduleResults />
         </div>
       </div>
