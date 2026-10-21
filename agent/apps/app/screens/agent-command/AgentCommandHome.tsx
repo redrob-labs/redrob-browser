@@ -19,6 +19,7 @@ import { openSidePanelWithSearch } from '@/lib/messaging/sidepanel/openSidepanel
 import { useCapabilities } from '@/modules/browseros/capabilities.hooks'
 import { stagePendingHomeMessage } from '@/modules/chat/pending-home-message'
 import { useChatTargetSelection } from '@/modules/chat/use-chat-target-selection'
+import { GoogleAppTiles } from '@/screens/newtab/index/GoogleAppTiles'
 import { ImportDataHint } from '@/screens/newtab/index/ImportDataHint'
 import { useShowImportHint } from '@/screens/newtab/index/import-hint.hooks'
 import { RecentSites } from '@/screens/newtab/index/RecentSites'
@@ -30,13 +31,33 @@ import {
 import { HomeSearchInput } from './HomeSearchInput'
 import { resolveHomeLlmRoutingMode } from './home-compose.helpers'
 
-/** Search is the default: a new tab is opened to go somewhere far more often than to start a task. */
+/**
+ * Ask is the default. Users told us a Search box that lands on Google gives them no reason to use
+ * this browser over any other; the assistant is the reason. The last mode the user picked wins, so
+ * someone who opens tabs to type addresses keeps Search after choosing it once.
+ */
 type HomeMode = 'search' | 'ask'
-const DEFAULT_HOME_MODE: HomeMode = 'search'
+const DEFAULT_HOME_MODE: HomeMode = 'ask'
+const HOME_MODE_KEY = 'redrob.newtab.mode'
+
+function readHomeMode(): HomeMode {
+  try {
+    const saved = localStorage.getItem(HOME_MODE_KEY)
+    return saved === 'search' || saved === 'ask' ? saved : DEFAULT_HOME_MODE
+  } catch {
+    return DEFAULT_HOME_MODE
+  }
+}
+
+function saveHomeMode(mode: HomeMode) {
+  try {
+    localStorage.setItem(HOME_MODE_KEY, mode)
+  } catch {}
+}
 
 export const AgentCommandHome: FC = () => {
   const navigate = useNavigate()
-  const [homeMode, setHomeMode] = useState<HomeMode>(DEFAULT_HOME_MODE)
+  const [homeMode, setHomeMode] = useState<HomeMode>(readHomeMode)
   const showImportHint = useShowImportHint()
   const { supports, isLoading: capabilitiesLoading } = useCapabilities()
   const supportsInlineChat = supports(Feature.NEWTAB_CHAT_SUPPORT)
@@ -115,17 +136,20 @@ export const AgentCommandHome: FC = () => {
         <div className="flex flex-col items-center gap-5 pt-[max(18vh,24px)] text-center">
           <Tabs
             value={homeMode}
-            onValueChange={(value) => setHomeMode(value as HomeMode)}
+            onValueChange={(value) => {
+              setHomeMode(value as HomeMode)
+              saveHomeMode(value as HomeMode)
+            }}
             className="w-full max-w-3xl items-center gap-4"
           >
             <TabsList aria-label={t('shNewTabMode')}>
-              <TabsTrigger value="search" className="px-4">
-                <Search aria-hidden />
-                {t('shSearch')}
-              </TabsTrigger>
               <TabsTrigger value="ask" className="px-4">
                 <Sparkles aria-hidden />
                 {t('shAsk')}
+              </TabsTrigger>
+              <TabsTrigger value="search" className="px-4">
+                <Search aria-hidden />
+                {t('shSearch')}
               </TabsTrigger>
             </TabsList>
 
@@ -168,6 +192,7 @@ export const AgentCommandHome: FC = () => {
         </div>
 
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 pb-12">
+          <GoogleAppTiles />
           <RecentSites />
           <ScheduleResults />
         </div>
