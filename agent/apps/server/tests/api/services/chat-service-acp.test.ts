@@ -293,9 +293,8 @@ describe('ChatService ACP dispatch', () => {
       },
       abortSignal,
     )
-    expect(await failedResponse.text()).toContain(
-      'Unable to start the ACP agent.',
-    )
+    // The card names why the agent did not start, by code, so the UI can say it in the user's language.
+    expect(await failedResponse.text()).toContain('agent_start_failed')
 
     const retryResponse = await fixture.service.processMessage(
       {

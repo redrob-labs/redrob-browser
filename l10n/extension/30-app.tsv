@@ -114,6 +114,8 @@ shDismiss	Dismiss	닫기
 shSetUpYourAgent	Set up your $1	$1 설정하기	Heading; $1 is the emphasised word "agent"
 shRunningN	$1 running	$1개 실행 중	Badge; $1 is a count
 shAskProviderTask	Ask $1 to handle a task…	$1에게 맡길 일을 적어 주세요…	Composer placeholder; $1 is the provider name
+shAskRedrobTask	Ask Redrob to handle a task…	레드롭에게 맡길 일을 적어 주세요…	Composer placeholder when the house model is selected
+shRedrob	Redrob	레드롭	The house model's name in the composer's provider picker
 shMessageProvider	Message $1…	$1에게 메시지 보내기…	Composer placeholder; $1 is the provider name
 shRemoveName	Remove $1	$1 제거	Attachment chip; $1 is the file name
 shConnectName	Connect $1	$1 연결	Dialog title; $1 is the app name

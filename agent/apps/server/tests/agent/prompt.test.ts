@@ -59,7 +59,7 @@ describe('structure and size', () => {
       '<role>',
       '<security>',
       '<execution>',
-      '<external_integrations>',
+      '<popular_apps>',
       '<workspace>',
       '<nudge_tools>',
       '<style>',
@@ -244,42 +244,16 @@ describe('execution', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 6. EXTERNAL INTEGRATIONS (kept: it cannot move to remote tool descriptions)
+// 6. POPULAR APPS
 // ---------------------------------------------------------------------------
 
-describe('external integrations', () => {
-  it('renders the dynamic connected / declined lists', () => {
-    expect(buildRegular({ connectedApps: ['Gmail', 'Slack'] })).toContain(
-      'Connected apps (use Strata for these): Gmail, Slack',
-    )
-    expect(buildRegular({ connectedApps: [] })).toContain(
-      'No apps are currently connected via Strata.',
-    )
-    expect(buildRegular({ declinedApps: ['GitHub'] })).toContain(
-      'Declined apps (use browser automation, never Strata): GitHub',
-    )
-    expect(buildRegular({ declinedApps: [] })).not.toContain('Declined apps')
-  })
-
-  it('keeps the connect-check gate, discover-before-execute, and auth re-flow', () => {
+describe('popular apps', () => {
+  it('sends Drive and Gmail work to the signed-in tabs and gates side effects', () => {
     const prompt = buildRegular()
-    expect(prompt).toContain('Before any Strata tool, check the connected list')
-    expect(prompt).toContain('discover_server_categories_or_actions')
-    expect(prompt).toContain('get_action_details')
-    expect(prompt).toContain('execute_action')
-    expect(prompt).toContain('auth error')
-  })
-
-  it('keeps the side-effect confirmation rule', () => {
-    expect(buildRegular()).toContain(
-      'Confirm with the user before any action that sends, creates, modifies, or deletes external data',
-    )
-  })
-
-  it('drops the full static service catalog', () => {
-    // The 45-service inline list is gone; only the dynamic Connected list stays.
-    const prompt = buildRegular()
-    expect(prompt).not.toContain('## All Available Services')
+    expect(prompt).toContain('https://drive.google.com/drive/search?q=')
+    expect(prompt).toContain('https://mail.google.com/mail/u/0/#search/')
+    expect(prompt).toContain('Never type a password')
+    expect(prompt).toContain('Ask the user before anything that sends')
   })
 })
 
@@ -290,8 +264,6 @@ describe('external integrations', () => {
 describe('nudges', () => {
   it('keeps the card-only behavior, triggers, and once-per-conversation cap', () => {
     const prompt = buildRegular()
-    expect(prompt).toContain('before any browser work')
-    expect(prompt).toContain('ONLY this tool call and no other text')
     expect(prompt).toContain('suggest_schedule')
     expect(prompt).toContain('Write no text after it')
     expect(prompt).toContain('at most once per conversation')

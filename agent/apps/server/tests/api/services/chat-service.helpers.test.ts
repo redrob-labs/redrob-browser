@@ -16,39 +16,31 @@ import {
 
 describe('describeMcpChange', () => {
   it('reports a newly connected integration', () => {
-    expect(describeMcpChange('klavis:ready', 'slack,klavis:ready')).toBe(
+    expect(describeMcpChange('', 'slack')).toBe(
       'The following app integrations were connected: slack. Their tools are now available.',
     )
   })
 
   it('reports a disconnected integration', () => {
-    expect(describeMcpChange('slack,klavis:ready', 'klavis:ready')).toBe(
+    expect(describeMcpChange('slack', '')).toBe(
       'The following app integrations were disconnected: slack. Their tools are no longer available.',
     )
   })
 
   it('reports both additions and removals in one notice', () => {
-    expect(describeMcpChange('slack,klavis:ready', 'notion,klavis:ready')).toBe(
+    expect(describeMcpChange('slack', 'notion')).toBe(
       'The following app integrations were disconnected: slack. Their tools are no longer available. The following app integrations were connected: notion. Their tools are now available.',
     )
   })
 
-  it('reports Klavis becoming ready when the connected set is unchanged', () => {
-    expect(
-      describeMcpChange('slack,klavis:connecting', 'slack,klavis:ready'),
-    ).toBe(
-      'Klavis app integration tools are now available for the following connected apps: slack.',
-    )
-  })
-
   it('falls back to a generic notice when nothing meaningful changed', () => {
-    expect(describeMcpChange('klavis:ready', 'klavis:stopped')).toBe(
+    expect(describeMcpChange('slack', 'slack')).toBe(
       'Connected app integrations changed during this conversation. Use only tools that are currently registered.',
     )
   })
 
   it('treats an undefined previous key as no prior integrations', () => {
-    expect(describeMcpChange(undefined, 'slack,klavis:ready')).toBe(
+    expect(describeMcpChange(undefined, 'slack')).toBe(
       'The following app integrations were connected: slack. Their tools are now available.',
     )
   })

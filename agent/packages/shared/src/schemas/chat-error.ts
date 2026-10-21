@@ -26,6 +26,9 @@ export const CHAT_ERROR_CODES = [
   'content_filter', // upstream refused the content
   'connection_failed', // provider or agent server unreachable
   'provider_unavailable', // 5xx, overloaded, or upstream outage
+  'agent_not_installed', // agent mode needs Redrob Code and it is not on this machine
+  'agent_signed_out', // Redrob Code is there but not signed in
+  'agent_start_failed', // Redrob Code is there and signed in, and still did not start
   'unknown',
 ] as const
 

@@ -145,26 +145,24 @@ export const ScheduleResults: FC = () => {
             key={run.id}
             variant="ghost"
             onClick={() => viewRun(run)}
-            className="ui-card-btn w-full justify-start p-4 text-left"
+            className="ui-card-btn w-full justify-start p-3 text-left"
           >
-            <div className="flex w-full items-start gap-3">
-              {getStatusIcon(run.status)}
-              <div className="min-w-0 flex-1">
-                <div className="mb-1 flex items-center gap-2">
-                  <span className="truncate font-medium text-foreground text-sm">
-                    {run.job?.name}
-                  </span>
-                  <span className="flex items-center gap-1 text-muted-foreground text-xs">
-                    <Clock className="h-3 w-3" />
-                    {formatTimestamp(run.startedAt)}
-                  </span>
-                </div>
-                {run.result && (
-                  <p className="line-clamp-2 text-ellipsis text-muted-foreground text-xs">
-                    {run.result}
-                  </p>
-                )}
-              </div>
+            {/* One line, the same height as the header above: icon, name, time, then the result
+                cut to fit. The full result is one click away in the dialog. */}
+            <div className="flex w-full min-w-0 items-center gap-3">
+              <span className="flex size-4 shrink-0 items-center justify-center">
+                {getStatusIcon(run.status)}
+              </span>
+              <span className="max-w-[40%] truncate font-medium text-foreground text-sm">
+                {run.job?.name}
+              </span>
+              <span className="flex shrink-0 items-center gap-1 text-muted-foreground text-xs">
+                <Clock className="h-3 w-3" />
+                {formatTimestamp(run.startedAt)}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
+                {run.result ?? ''}
+              </span>
               {run.status === 'running' && (
                 <Button
                   variant="ghost"
@@ -173,7 +171,7 @@ export const ScheduleResults: FC = () => {
                     e.stopPropagation()
                     handleCancelRun(run.id)
                   }}
-                  className="ui-status--danger shrink-0"
+                  className="ui-status--danger -my-1 size-6! shrink-0"
                   aria-label={t('shCancelRun')}
                 >
                   <Square className="h-3.5 w-3.5" />
@@ -187,7 +185,7 @@ export const ScheduleResults: FC = () => {
                     e.stopPropagation()
                     handleRetryRun(run.jobId)
                   }}
-                  className="shrink-0"
+                  className="-my-1 size-6! shrink-0"
                   aria-label={t('shRetryRun')}
                 >
                   <RotateCcw className="h-3.5 w-3.5" />

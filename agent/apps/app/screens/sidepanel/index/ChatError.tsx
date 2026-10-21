@@ -39,7 +39,7 @@ interface ChatErrorView {
 const CODE_COPY: Partial<
   Record<
     ChatErrorEnvelope['code'],
-    { title: MessageKey; linkLabel: MessageKey }
+    { title: MessageKey; linkLabel: MessageKey; text?: MessageKey }
   >
 > = {
   rate_limited: { title: 'spErrRateLimited', linkLabel: 'spLearnMore' },
@@ -61,7 +61,32 @@ const CODE_COPY: Partial<
     title: 'spErrUnavailable',
     linkLabel: 'spLearnMore',
   },
+  // Agent mode runs on Redrob Code. Each way it can fail to start gets its own sentence in the user's
+  // language, and every one of them names the way out: settings, or the Chat segment beside it.
+  agent_not_installed: {
+    title: 'spErrAgentNotInstalled',
+    text: 'spErrAgentNotInstalledText',
+    linkLabel: 'spOpenAiSettings',
+  },
+  agent_signed_out: {
+    title: 'spErrAgentSignedOut',
+    text: 'spErrAgentSignedOutText',
+    linkLabel: 'spOpenAiSettings',
+  },
+  agent_start_failed: {
+    title: 'spErrAgentStartFailed',
+    text: 'spErrAgentStartFailedText',
+    linkLabel: 'spOpenAiSettings',
+  },
 }
+
+const SETTINGS_LINK_CODES: ReadonlySet<ChatErrorEnvelope['code']> = new Set([
+  'auth_failed',
+  'provider_config',
+  'agent_not_installed',
+  'agent_signed_out',
+  'agent_start_failed',
+])
 
 const AI_SETTINGS_URL = '/app.html#/settings/ai'
 
@@ -69,13 +94,11 @@ function fromEnvelope(envelope: ChatErrorEnvelope): ChatErrorView {
   const known = CODE_COPY[envelope.code]
   const url =
     envelope.docsUrl ??
-    (envelope.code === 'auth_failed' || envelope.code === 'provider_config'
-      ? AI_SETTINGS_URL
-      : undefined)
+    (SETTINGS_LINK_CODES.has(envelope.code) ? AI_SETTINGS_URL : undefined)
 
   return {
     title: known ? t(known.title) : envelope.title,
-    text: envelope.message,
+    text: known?.text ? t(known.text) : envelope.message,
     url,
     linkLabel: known ? t(known.linkLabel) : undefined,
     details: envelope.details,

@@ -10,6 +10,10 @@ import {
   createBrowserOutputFileAccess,
 } from '@browseros/browser-mcp/output-file'
 import {
+  type ChatError,
+  serializeChatError,
+} from '@browseros/shared/schemas/chat-error'
+import {
   createAgentUIStream,
   createUIMessageStream,
   createUIMessageStreamResponse,
@@ -41,7 +45,6 @@ import {
   type SaveConversationInput,
 } from '../../lib/conversations/conversation-store'
 import { logger } from '../../lib/logger'
-import type { KlavisService } from '../services/klavis'
 import type {
   BrowserMcpModule,
   BrowserToolLease,
@@ -70,7 +73,6 @@ import {
 
 export interface ChatServiceDeps {
   sessionStore: SessionStore
-  klavis?: KlavisService
   browser: Browser
   browserMcp: Pick<BrowserMcpModule, 'createLease'>
   browserosId?: string
@@ -660,9 +662,10 @@ export class ChatService {
         )
       }
       if (!(error instanceof AcpAgentPreparationError)) throw error
+      const errorText = serializeChatError(preparationChatError(error))
       stream = createUIMessageStream({
         execute({ writer }) {
-          writer.write({ type: 'error', errorText: error.message })
+          writer.write({ type: 'error', errorText })
         },
       })
     }
@@ -848,14 +851,9 @@ export class ChatService {
   }
 
   private buildMcpServerKey(browserContext?: BrowserContext): string {
-    const managed = browserContext?.enabledMcpServers?.slice().sort() ?? []
     const custom =
       browserContext?.customMcpServers?.map((s) => s.url).sort() ?? []
-    const klavisState =
-      managed.length > 0
-        ? `klavis:${this.deps.klavis?.getProxyStatus().state ?? 'disabled'}`
-        : null
-    return [klavisState, ...managed, ...custom].filter(Boolean).join(',')
+    return custom.join(',')
   }
 }
 
@@ -883,4 +881,36 @@ function conversationTabGroup(
       ? 'browseros'
       : `${request.target.type}:${request.target.agentId}`
   return { title: `${prefix}/${task}`, colorKey }
+}
+
+/**
+ * The card for an agent that did not start. Each reason is its own code so the UI can say what to do
+ * in the user's language; title and message here are the English fallback for an older extension.
+ */
+function preparationChatError(error: AcpAgentPreparationError): ChatError {
+  switch (error.reason) {
+    case 'not_installed':
+      return {
+        code: 'agent_not_installed',
+        title: 'Redrob Code is not installed',
+        message:
+          'Agent mode runs on Redrob Code. Install it, or switch to Chat to keep going.',
+        retryable: true,
+      }
+    case 'signed_out':
+      return {
+        code: 'agent_signed_out',
+        title: 'Sign in to Redrob Code',
+        message:
+          'Redrob Code is installed but not signed in. Sign in, or switch to Chat to keep going.',
+        retryable: true,
+      }
+    default:
+      return {
+        code: 'agent_start_failed',
+        title: 'The agent did not start',
+        message: 'Try again, or switch to Chat to keep going.',
+        retryable: true,
+      }
+  }
 }

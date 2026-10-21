@@ -11,7 +11,6 @@ import { AcpAgentRuntime } from '../../lib/agents/acp/acp-agent-runtime'
 import type { OAuthTokenManager } from '../../lib/clients/oauth/token-manager'
 import { requireTrustedOrigin } from '../middleware/require-trusted-origin'
 import { ConversationRuns } from '../services/conversation-runs'
-import type { KlavisService } from '../services/klavis'
 import { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
 import type { Env, HttpServerConfig } from '../types'
 import { defaultCorsConfig } from '../utils/cors'
@@ -21,7 +20,6 @@ import { createAgentRoutes } from './agents'
 import { createChatRoutes } from './chat'
 import { createConversationRoutes } from './conversations'
 import { createHealthRoute } from './health'
-import { createKlavisRoutes } from './klavis'
 import { createMcpRoutes } from './mcp'
 import { createMcpManagerRoutes } from './mcp-manager'
 import { createOAuthRoutes } from './oauth'
@@ -37,14 +35,13 @@ import { createStatusRoute } from './status'
 interface CreateApiRoutesDeps {
   agentRoutes?: Hono<Env>
   config: HttpServerConfig
-  klavis: KlavisService
   onShutdown: () => void
   tokenManager: OAuthTokenManager | null
 }
 
 /** Composes the BrowserOS HTTP API from the existing route factories. */
 export function createApiRoutes(deps: CreateApiRoutesDeps) {
-  const { agentRoutes, config, klavis, onShutdown, tokenManager } = deps
+  const { agentRoutes, config, onShutdown, tokenManager } = deps
   const { browser, browserosId, browserSession, port, resourcesDir, version } =
     config
   const { activity } = config
@@ -56,7 +53,6 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
     version,
     browserSession,
     conversationRuns,
-    klavis,
     activity,
   })
   const resolvedAgentRoutes =
@@ -85,7 +81,6 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
       .route('/shutdown', createShutdownRoute({ onShutdown }))
       .route('/status', createStatusRoute({ browser, activity }))
       .route('/oauth', oauthRoutes(tokenManager))
-      .route('/klavis', createKlavisRoutes({ klavis }))
       .route(
         '/mcp',
         createMcpRoutes({
@@ -96,7 +91,6 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
         '/mcp-manager',
         createMcpManagerRoutes({
           getMcpUrl: () => `http://127.0.0.1:${port}/mcp`,
-          klavis,
         }),
       )
       .route(
@@ -105,7 +99,6 @@ export function createApiRoutes(deps: CreateApiRoutesDeps) {
           browser,
           browserMcp,
           browserosId,
-          klavis,
           aiSdkDevtoolsEnabled: config.aiSdkDevtoolsEnabled,
           serverPort: port,
           resourcesDir,

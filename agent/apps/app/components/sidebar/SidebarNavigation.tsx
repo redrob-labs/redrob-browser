@@ -7,6 +7,7 @@
  * See the NOTICE file for provenance.
  */
 
+import { type MessageKey, t } from '@browseros/i18n'
 import { CalendarClock, Home, PlugZap, Settings } from '@browseros/icons'
 import type { FC } from 'react'
 import { NavLink, useLocation } from 'react-router'
@@ -25,21 +26,22 @@ export interface SidebarNavigationProps {
 }
 
 type NavItem = {
-  name: string
+  // A message key, not text: the label is looked up when it renders so it follows the language.
+  name: MessageKey
   to: string
   icon: typeof Home
 }
 
 const primaryNavItems: NavItem[] = [
-  { name: 'Home', to: '/home', icon: Home },
+  { name: 'navHome', to: '/home', icon: Home },
   {
-    name: 'Connect Apps',
+    name: 'navApps',
     to: '/connect-apps',
     icon: PlugZap,
   },
-  { name: 'Scheduled Tasks', to: '/scheduled', icon: CalendarClock },
+  { name: 'stScheduledTasks', to: '/scheduled', icon: CalendarClock },
   {
-    name: 'Settings',
+    name: 'shSettings',
     to: '/settings/ai',
     icon: Settings,
   },
@@ -82,7 +84,7 @@ export const SidebarNavigation: FC<SidebarNavigationProps> = ({
                     expanded ? 'opacity-100' : 'opacity-0',
                   )}
                 >
-                  {item.name}
+                  {t(item.name)}
                 </span>
               </NavLink>
             )
@@ -93,7 +95,7 @@ export const SidebarNavigation: FC<SidebarNavigationProps> = ({
                 <Tooltip disableHoverableContent>
                   <TooltipTrigger asChild>{navItem}</TooltipTrigger>
                   {!expanded && (
-                    <TooltipContent side="right">{item.name}</TooltipContent>
+                    <TooltipContent side="right">{t(item.name)}</TooltipContent>
                   )}
                 </Tooltip>
                 {item.to === '/home' && (

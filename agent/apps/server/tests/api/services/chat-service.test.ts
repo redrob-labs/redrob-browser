@@ -10,7 +10,6 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import type { UIMessageChunk } from 'ai'
 import * as _ai from 'ai'
-import type { KlavisProxyStatus } from '../../../src/api/services/klavis'
 
 interface MockMessage {
   id: string
@@ -158,18 +157,6 @@ const ChatService = class extends RealChatService {
   }
 }
 
-function createKlavisStub(
-  getStatus: () => KlavisProxyStatus = () => ({
-    state: 'stopped',
-  }),
-) {
-  return {
-    getProxyStatus: getStatus,
-    buildAiSdkToolSet: mock(() => ({})),
-    registerMcpTools: mock(() => {}),
-  }
-}
-
 function createSessionStore() {
   const sessions = new Map<string, StoredSession>()
   return {
@@ -242,7 +229,6 @@ describe('ChatService activity tracking', () => {
     }
     const service = new ChatService({
       sessionStore: createSessionStore() as never,
-      klavis: createKlavisStub() as never,
       browser: browser as never,
       browserSession: { pages: {} } as never,
       serverPort: 32123,
@@ -307,7 +293,6 @@ describe('ChatService scheduled task page lifecycle', () => {
     const sessionStore = createSessionStore()
     const service = new ChatService({
       sessionStore: sessionStore as never,
-      klavis: createKlavisStub() as never,
       browser: browser as never,
       registry: {} as never,
     })
@@ -381,7 +366,6 @@ describe('ChatService scheduled task page lifecycle', () => {
 
     const service = new ChatService({
       sessionStore: sessionStore as never,
-      klavis: createKlavisStub() as never,
       browser: browser as never,
       registry: {} as never,
     })
@@ -412,7 +396,6 @@ describe('ChatService scheduled task page lifecycle', () => {
     const sessionStore = createSessionStore()
     const service = new ChatService({
       sessionStore: sessionStore as never,
-      klavis: createKlavisStub() as never,
       browser: browser as never,
       registry: {} as never,
     })
@@ -459,219 +442,6 @@ describe('ChatService scheduled task page lifecycle', () => {
   })
 })
 
-describe('ChatService browser tool config', () => {
-  it('passes fresh lease tokens into new and rebuilt agent sessions', async () => {
-    const firstAgent = createFakeAgent()
-    const secondAgent = createFakeAgent()
-    agentToReturn = firstAgent
-    streamResponseHandler = async ({ onFinish, uiMessages }) => {
-      await onFinish({ messages: uiMessages ?? [] })
-      return new Response('ok')
-    }
-
-    let klavisStatus: KlavisProxyStatus = { state: 'connecting' }
-    const browser = {
-      resolveTabIds: mock(
-        async (tabIds: number[]) =>
-          new Map(tabIds.map((tabId) => [tabId, tabId + 100])),
-      ),
-      closePage: mock(async () => {}),
-    }
-    const service = new ChatService({
-      sessionStore: createSessionStore() as never,
-      klavis: createKlavisStub(() => klavisStatus) as never,
-      browser: browser as never,
-      browserSession: { pages: {} } as never,
-    })
-    const createCallsBefore = createAgentSpy.mock.calls.length
-    const request = {
-      target: BROWSEROS_TARGET,
-      persist: false,
-      conversationId: crypto.randomUUID(),
-      message: 'check integrations',
-      isScheduledTask: false,
-      mode: 'agent',
-      origin: 'sidepanel',
-      browserContext: {
-        activeTab: {
-          id: 3,
-          url: 'https://example.com',
-          title: 'Example',
-        },
-        enabledMcpServers: ['slack'],
-      },
-    } as never
-
-    await service.processMessage(request, new AbortController().signal)
-
-    agentToReturn = secondAgent
-    klavisStatus = { state: 'ready', toolCount: 0 }
-
-    await service.processMessage(
-      { ...request, message: 'check integrations again' },
-      new AbortController().signal,
-    )
-
-    const createCalls = createAgentSpy.mock.calls.slice(createCallsBefore)
-    expect(createCalls).toHaveLength(2)
-    for (const [config] of createCalls) {
-      expect(config).toMatchObject({
-        serverPort: 32123,
-        browserToolLeaseToken: expect.stringContaining('test-lease-'),
-      })
-      expect(config).not.toHaveProperty('browserSession')
-    }
-    const leaseTokens = createCalls.map(
-      ([config]) =>
-        (config as { browserToolLeaseToken: string }).browserToolLeaseToken,
-    )
-    expect(leaseTokens[0]).not.toBe(leaseTokens[1])
-  })
-})
-
-describe('ChatService Klavis session rebuilds', () => {
-  it('rebuilds a managed-app session when Klavis becomes ready', async () => {
-    const firstAgent = createFakeAgent()
-    const secondAgent = createFakeAgent()
-    agentToReturn = firstAgent
-    let lastPromptUiMessages: MockMessage[] | undefined
-    streamResponseHandler = async ({ onFinish, uiMessages }) => {
-      lastPromptUiMessages = uiMessages
-      await onFinish({ messages: uiMessages ?? [] })
-      return new Response('ok')
-    }
-
-    let klavisStatus: KlavisProxyStatus = { state: 'connecting' }
-    const browser = {
-      resolveTabIds: mock(
-        async (tabIds: number[]) =>
-          new Map(tabIds.map((tabId) => [tabId, tabId + 100])),
-      ),
-      closePage: mock(async () => {}),
-    }
-    const sessionStore = createSessionStore()
-    const service = new ChatService({
-      sessionStore: sessionStore as never,
-      klavis: createKlavisStub(() => klavisStatus) as never,
-      browser: browser as never,
-      registry: {} as never,
-    })
-    const createCallsBefore = createAgentSpy.mock.calls.length
-    const conversationId = crypto.randomUUID()
-    const request = {
-      target: BROWSEROS_TARGET,
-      persist: false,
-      conversationId,
-      message: 'check integrations',
-      isScheduledTask: false,
-      mode: 'agent',
-      origin: 'sidepanel',
-      browserContext: {
-        activeTab: {
-          id: 3,
-          url: 'https://example.com',
-          title: 'Example',
-        },
-        enabledMcpServers: ['slack'],
-      },
-    } as never
-
-    await service.processMessage(request, new AbortController().signal)
-
-    agentToReturn = secondAgent
-    klavisStatus = { state: 'ready', toolCount: 0 }
-
-    await service.processMessage(
-      { ...request, message: 'check integrations again' },
-      new AbortController().signal,
-    )
-
-    expect(createAgentSpy.mock.calls.length - createCallsBefore).toBe(2)
-    expect(firstAgent.dispose).toHaveBeenCalledTimes(1)
-    const firstCreateConfig = createAgentSpy.mock.calls[
-      createCallsBefore
-    ]?.[0] as { outputFileAccess?: unknown } | undefined
-    const secondCreateConfig = createAgentSpy.mock.calls[
-      createCallsBefore + 1
-    ]?.[0] as { outputFileAccess?: unknown } | undefined
-    expect(firstCreateConfig?.outputFileAccess).toBeDefined()
-    expect(secondCreateConfig?.outputFileAccess).toBe(
-      firstCreateConfig?.outputFileAccess,
-    )
-
-    expect(secondAgent.messages).toHaveLength(2)
-    const persistedRebuiltMessage =
-      secondAgent.messages[1]?.parts[0]?.text ?? ''
-    expect(persistedRebuiltMessage).toBe('check integrations again')
-
-    const promptRebuiltMessage =
-      lastPromptUiMessages?.at(-1)?.parts[0]?.text ?? ''
-    expect(promptRebuiltMessage).toContain(
-      'Klavis app integration tools are now available for the following connected apps: slack.',
-    )
-    expect(promptRebuiltMessage).not.toContain('klavis:connecting')
-    expect(promptRebuiltMessage).not.toContain('klavis:ready')
-  })
-
-  it('does not rebuild a session with no enabled managed apps when Klavis connects', async () => {
-    const firstAgent = createFakeAgent()
-    const secondAgent = createFakeAgent()
-    agentToReturn = firstAgent
-    streamResponseHandler = async ({ onFinish, uiMessages }) => {
-      await onFinish({ messages: uiMessages ?? [] })
-      return new Response('ok')
-    }
-
-    let klavisStatus: KlavisProxyStatus = { state: 'connecting' }
-    const browser = {
-      resolveTabIds: mock(
-        async (tabIds: number[]) =>
-          new Map(tabIds.map((tabId) => [tabId, tabId + 200])),
-      ),
-      closePage: mock(async () => {}),
-    }
-    const sessionStore = createSessionStore()
-    const service = new ChatService({
-      sessionStore: sessionStore as never,
-      klavis: createKlavisStub(() => klavisStatus) as never,
-      browser: browser as never,
-      registry: {} as never,
-    })
-    const createCallsBefore = createAgentSpy.mock.calls.length
-    const conversationId = crypto.randomUUID()
-    const request = {
-      target: BROWSEROS_TARGET,
-      persist: false,
-      conversationId,
-      message: 'check browser only',
-      isScheduledTask: false,
-      mode: 'agent',
-      origin: 'sidepanel',
-      browserContext: {
-        activeTab: {
-          id: 5,
-          url: 'https://example.com',
-          title: 'Example',
-        },
-      },
-    } as never
-
-    await service.processMessage(request, new AbortController().signal)
-
-    agentToReturn = secondAgent
-    klavisStatus = { state: 'ready', toolCount: 0 }
-
-    await service.processMessage(
-      { ...request, message: 'check browser only again' },
-      new AbortController().signal,
-    )
-
-    expect(createAgentSpy.mock.calls.length - createCallsBefore).toBe(1)
-    expect(firstAgent.dispose).not.toHaveBeenCalled()
-    expect(firstAgent.messages).toHaveLength(2)
-  })
-})
-
 describe('ChatService chat/agent mode switches', () => {
   // An agent's toolset and system prompt are frozen when the session is
   // built, so a mode change only takes effect if the session is rebuilt.
@@ -697,7 +467,6 @@ describe('ChatService chat/agent mode switches', () => {
     }
     return new ChatService({
       sessionStore: createSessionStore() as never,
-      klavis: createKlavisStub() as never,
       browser: browser as never,
       registry: {} as never,
     })
@@ -834,180 +603,6 @@ describe('ChatService chat/agent mode switches', () => {
   })
 })
 
-describe('ChatService single-rebuild reconciliation', () => {
-  beforeEach(() => {
-    resolveLLMConfigSpy.mockImplementation(async () => ({
-      provider: 'openai',
-      model: 'gpt-5',
-      apiKey: 'test-key',
-    }))
-  })
-
-  function makeService(getKlavis: () => KlavisProxyStatus) {
-    const browser = {
-      resolveTabIds: mock(
-        async (tabIds: number[]) =>
-          new Map(tabIds.map((tabId) => [tabId, tabId + 100])),
-      ),
-      closePage: mock(async () => {}),
-    }
-    return new ChatService({
-      sessionStore: createSessionStore() as never,
-      klavis: createKlavisStub(getKlavis) as never,
-      browser: browser as never,
-      registry: {} as never,
-    })
-  }
-
-  function captureStreamPrompt() {
-    const captured: { prompt?: MockMessage[] } = {}
-    streamResponseHandler = async ({ onFinish, uiMessages }) => {
-      captured.prompt = uiMessages
-      await onFinish({ messages: uiMessages ?? [] })
-      return new Response('ok')
-    }
-    return captured
-  }
-
-  it('rebuilds once and emits both notices when MCP servers and mode change together', async () => {
-    const firstAgent = createFakeAgent()
-    const secondAgent = createFakeAgent()
-    agentToReturn = firstAgent
-    const captured = captureStreamPrompt()
-
-    let klavis: KlavisProxyStatus = { state: 'connecting' }
-    const service = makeService(() => klavis)
-    const before = createAgentSpy.mock.calls.length
-    const conversationId = crypto.randomUUID()
-    const base = {
-      target: BROWSEROS_TARGET,
-      persist: false,
-      conversationId,
-      isScheduledTask: false,
-      origin: 'newtab',
-      browserContext: {
-        activeTab: { id: 3, url: 'https://example.com', title: 'Example' },
-        enabledMcpServers: ['slack'],
-      },
-    }
-
-    await service.processMessage(
-      { ...base, message: 'hi', mode: 'chat' } as never,
-      new AbortController().signal,
-    )
-    agentToReturn = secondAgent
-    klavis = { state: 'ready', toolCount: 0 }
-    await service.processMessage(
-      { ...base, message: 'now act', mode: 'agent' } as never,
-      new AbortController().signal,
-    )
-
-    expect(createAgentSpy.mock.calls.length - before).toBe(2)
-    expect(firstAgent.dispose).toHaveBeenCalledTimes(1)
-
-    const text = captured.prompt?.at(-1)?.parts[0]?.text ?? ''
-    expect(text).toContain(
-      'Klavis app integration tools are now available for the following connected apps: slack.',
-    )
-    expect(text).toContain('The user switched to agent mode')
-  })
-
-  it('rebuilds once and emits both notices when workspace and mode change together', async () => {
-    const firstAgent = createFakeAgent()
-    const secondAgent = createFakeAgent()
-    agentToReturn = firstAgent
-    const captured = captureStreamPrompt()
-
-    const service = makeService(() => ({ state: 'stopped' }))
-    const before = createAgentSpy.mock.calls.length
-    const conversationId = crypto.randomUUID()
-    const base = {
-      target: BROWSEROS_TARGET,
-      persist: false,
-      conversationId,
-      isScheduledTask: false,
-      origin: 'newtab',
-      browserContext: {
-        activeTab: { id: 3, url: 'https://example.com', title: 'Example' },
-      },
-    }
-
-    await service.processMessage(
-      { ...base, message: 'hi', mode: 'agent' } as never,
-      new AbortController().signal,
-    )
-    agentToReturn = secondAgent
-    await service.processMessage(
-      {
-        ...base,
-        message: 'restrict me',
-        mode: 'chat',
-        userWorkingDir: '/ws',
-      } as never,
-      new AbortController().signal,
-    )
-
-    expect(createAgentSpy.mock.calls.length - before).toBe(2)
-    expect(firstAgent.dispose).toHaveBeenCalledTimes(1)
-
-    const text = captured.prompt?.at(-1)?.parts[0]?.text ?? ''
-    expect(text).toContain(
-      'The user connected a workspace during this conversation, but read-only chat mode',
-    )
-    expect(text).toContain('The user switched to read-only chat mode')
-  })
-
-  it('keeps the workspace notice when MCP servers also change in the same turn', async () => {
-    const firstAgent = createFakeAgent()
-    const secondAgent = createFakeAgent()
-    agentToReturn = firstAgent
-    const captured = captureStreamPrompt()
-
-    let klavis: KlavisProxyStatus = { state: 'connecting' }
-    const service = makeService(() => klavis)
-    const before = createAgentSpy.mock.calls.length
-    const conversationId = crypto.randomUUID()
-    const base = {
-      target: BROWSEROS_TARGET,
-      persist: false,
-      conversationId,
-      isScheduledTask: false,
-      origin: 'newtab',
-      browserContext: {
-        activeTab: { id: 3, url: 'https://example.com', title: 'Example' },
-        enabledMcpServers: ['slack'],
-      },
-    }
-
-    await service.processMessage(
-      { ...base, message: 'hi', mode: 'agent' } as never,
-      new AbortController().signal,
-    )
-    agentToReturn = secondAgent
-    klavis = { state: 'ready', toolCount: 0 }
-    await service.processMessage(
-      {
-        ...base,
-        message: 'connect a workspace',
-        mode: 'agent',
-        userWorkingDir: '/ws',
-      } as never,
-      new AbortController().signal,
-    )
-
-    expect(createAgentSpy.mock.calls.length - before).toBe(2)
-    expect(firstAgent.dispose).toHaveBeenCalledTimes(1)
-
-    const text = captured.prompt?.at(-1)?.parts[0]?.text ?? ''
-    expect(text).toContain(
-      'Klavis app integration tools are now available for the following connected apps: slack.',
-    )
-    expect(text).toContain(
-      'The user connected a workspace during this conversation. Filesystem tools are now available. Working directory: /ws',
-    )
-  })
-})
-
 describe('ChatService history persistence', () => {
   beforeEach(() => {
     resolveLLMConfigSpy.mockImplementation(async () => ({
@@ -1081,7 +676,6 @@ describe('ChatService history persistence', () => {
     }
     const service = new ChatService({
       sessionStore: createSessionStore() as never,
-      klavis: createKlavisStub() as never,
       browser: persistenceBrowser() as never,
       conversationStore: conversationStore as never,
     })
@@ -1125,7 +719,6 @@ describe('ChatService history persistence', () => {
     const conversationId = crypto.randomUUID()
     const service = new ChatService({
       sessionStore: sessionStore as never,
-      klavis: createKlavisStub() as never,
       browser: persistenceBrowser() as never,
       conversationStore: conversationStore as never,
     })
@@ -1161,7 +754,6 @@ describe('ChatService history persistence', () => {
     }
     const service = new ChatService({
       sessionStore: createSessionStore() as never,
-      klavis: createKlavisStub() as never,
       browser: persistenceBrowser() as never,
       conversationStore: conversationStore as never,
     })
@@ -1214,7 +806,6 @@ describe('ChatService history persistence', () => {
     }
     const service = new ChatService({
       sessionStore: createSessionStore() as never,
-      klavis: createKlavisStub() as never,
       browser: persistenceBrowser() as never,
       conversationStore: conversationStore as never,
     })

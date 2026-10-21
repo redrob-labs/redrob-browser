@@ -286,7 +286,6 @@ export class AiSdkAgent {
         config.resolvedConfig.chatMode
       ) {
         delete tools.suggest_schedule
-        delete tools.suggest_app_connection
       }
       // Reply chips need someone to click them; a scheduled run has nobody.
       if (config.resolvedConfig.isScheduledTask) {
@@ -311,8 +310,6 @@ export class AiSdkAgent {
         scheduledTaskPageId: config.browserContext?.activeTab?.pageId,
         workspaceDir: workspaceDirForPrompt,
         chatMode: config.resolvedConfig.chatMode,
-        connectedApps: config.browserContext?.enabledMcpServers,
-        declinedApps: config.resolvedConfig.declinedApps,
         origin: config.resolvedConfig.origin,
         generatedOutputReadAvailable: 'filesystem_read' in filesystemTools,
       })
