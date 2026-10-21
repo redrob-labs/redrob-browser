@@ -148,7 +148,10 @@ export const ScheduleResults: FC = () => {
             className="ui-card-btn w-full justify-start p-4 text-left"
           >
             <div className="flex w-full items-start gap-3">
-              {getStatusIcon(run.status)}
+              {/* A fixed box, so the spinner and the check push the text to the same column. */}
+              <span className="flex size-4 shrink-0 items-center justify-center">
+                {getStatusIcon(run.status)}
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="mb-1 flex items-center gap-2">
                   <span className="truncate font-medium text-foreground text-sm">

@@ -110,11 +110,21 @@ export function toLlmProviderConfig(
   return target?.kind === 'llm' ? target.provider : undefined
 }
 
+/**
+ * The name a chat target shows. The house provider is stored as "Redrob Console", the billing product
+ * behind it; in the composer the one doing the work is Redrob. A name the user typed is kept.
+ */
+function displayName(provider: LlmProviderConfig): string {
+  return provider.type === 'redrob-console' && provider.name === 'Redrob Console'
+    ? t('shRedrob')
+    : provider.name
+}
+
 function toLlmTarget(provider: LlmProviderConfig): SidepanelChatTarget {
   return {
     kind: 'llm',
     id: provider.id,
-    name: provider.name,
+    name: displayName(provider),
     type: provider.type,
     provider,
   }
