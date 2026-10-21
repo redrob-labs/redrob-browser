@@ -15,7 +15,6 @@ import type { BrowserSession } from '@browseros/browser-core/core/session'
 import { createBrowserOutputFileAccess } from '@browseros/browser-mcp/output-file'
 import { TOOL_LIMITS } from '@browseros/shared/constants/limits'
 import type { ActiveConversationRun } from '../../../../src/api/services/conversation-runs'
-import { KlavisService } from '../../../../src/api/services/klavis/service'
 import { BrowserMcpModule } from '../../../../src/api/services/mcp/browser-mcp-module'
 import { createReadTool } from '../../../../src/tools/filesystem/read'
 
@@ -300,57 +299,6 @@ describe('BrowserMcpModule', () => {
     expect(result.content[0]?.text).toContain('active conversation run')
   })
 
-  it('applies conversation-running and read-only guards to managed connectors', async () => {
-    const getUserIntegrations = mock(async () => [])
-    const { browserMcp: runtime, runs } = moduleFixture({
-      klavis: new KlavisService({
-        browserosId: 'browseros-test',
-        client: { getUserIntegrations } as never,
-      }),
-    })
-    const conversationId = crypto.randomUUID()
-    const lease = runtime.createLease({
-      conversationId,
-      readOnly: false,
-      outputFileAccess: createBrowserOutputFileAccess(),
-    })
-    const server = inspect(runtime.createMcpServer({ leaseToken: lease.token }))
-
-    const inactive =
-      await server._registeredTools.connector_mcp_servers.handler({})
-    expect(inactive.isError).toBe(true)
-    expect(getUserIntegrations).not.toHaveBeenCalled()
-
-    runs.start(conversationId, 'connector-run')
-    const active = await server._registeredTools.connector_mcp_servers.handler(
-      {},
-    )
-    expect(active.isError).toBeUndefined()
-    expect(getUserIntegrations).toHaveBeenCalledTimes(1)
-
-    runs.finish(conversationId)
-    const finished =
-      await server._registeredTools.connector_mcp_servers.handler({})
-    expect(finished.isError).toBe(true)
-    expect(getUserIntegrations).toHaveBeenCalledTimes(1)
-
-    const readOnlyConversationId = crypto.randomUUID()
-    const readOnlyLease = runtime.createLease({
-      conversationId: readOnlyConversationId,
-      readOnly: true,
-      outputFileAccess: createBrowserOutputFileAccess(),
-    })
-    runs.start(readOnlyConversationId, 'read-only-connector-run')
-    const readOnlyServer = inspect(
-      runtime.createMcpServer({ leaseToken: readOnlyLease.token }),
-    )
-    const readOnly =
-      await readOnlyServer._registeredTools.connector_mcp_servers.handler({})
-    expect(readOnly.isError).toBe(true)
-    expect(readOnly.content[0]?.text).toContain('read-only')
-    expect(getUserIntegrations).toHaveBeenCalledTimes(1)
-  })
-
   it('refreshes mutable browser context without replacing the agent lease', async () => {
     let openedInWindow: number | undefined
     const session = browserSession()
@@ -562,7 +510,7 @@ class TestConversationRuns {
 }
 
 function moduleFixture(
-  options: { session?: BrowserSession; klavis?: KlavisService } = {},
+  options: { session?: BrowserSession } = {},
 ) {
   const runs = new TestConversationRuns()
   const addCreatedPages = mock(() => {})
@@ -570,7 +518,6 @@ function moduleFixture(
     version: 'test',
     browserSession: options.session ?? browserSession(),
     conversationRuns: runs,
-    klavis: options.klavis,
     tabGroups: { addCreatedPages },
   })
   return { addCreatedPages, browserMcp, runs }

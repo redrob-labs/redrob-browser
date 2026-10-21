@@ -27,7 +27,6 @@ import {
 } from '@/components/ai-elements/reasoning'
 import type { ChatAction } from '@/lib/chat-actions/types'
 import { ChatMessageActions } from './ChatMessageActions'
-import { ConnectAppCard } from './ConnectAppCard'
 import { getMessageSegments } from './getMessageSegments'
 import { JtbdPopup } from './JtbdPopup'
 import { ReplySuggestions } from './ReplySuggestions'
@@ -130,6 +129,8 @@ export const ChatMessages: FC<ChatMessagesProps> = ({
                               />
                             )
                           case 'nudge':
+                            // App-connection cards from before the connector catalogue was
+                            // removed are still in saved conversations; they render nothing.
                             return segment.nudgeType ===
                               'schedule_suggestion' ? (
                               <ScheduleSuggestionCard
@@ -137,13 +138,7 @@ export const ChatMessages: FC<ChatMessagesProps> = ({
                                 data={segment.data}
                                 isLastMessage={isLastMessage}
                               />
-                            ) : (
-                              <ConnectAppCard
-                                key={segment.key}
-                                data={segment.data}
-                                isLastMessage={isLastMessage}
-                              />
-                            )
+                            ) : null
                           case 'reply-suggestions':
                             return onReplySuggestionClick ? (
                               <ReplySuggestions

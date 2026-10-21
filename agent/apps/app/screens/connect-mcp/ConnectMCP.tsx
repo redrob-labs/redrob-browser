@@ -1,6 +1,7 @@
 /**
  * @license
  * Copyright 2025 BrowserOS
+ * Copyright 2026 Janghoon Lee (Redrob) and contributors
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Ported from BrowserOS (https://github.com/browseros-ai/BrowserOS).
@@ -8,175 +9,35 @@
  */
 
 import { t } from '@browseros/i18n'
-import { Check, Loader2, Plus, Trash2 } from '@browseros/icons'
+import { ExternalLink, Plus, Trash2 } from '@browseros/icons'
 import { type FC, useState } from 'react'
-import { toast } from 'sonner'
-import { ApiKeyDialog } from '@/components/mcp/ApiKeyDialog'
 import { McpServerIcon } from '@/components/mcp/McpServerIcon'
 import { SettingsHeader } from '@/components/settings/SettingsLayout'
 import { Button } from '@/components/ui/button'
-import {
-  CUSTOM_MCP_ADDED_EVENT,
-  MANAGED_MCP_ADDED_EVENT,
-} from '@/lib/constants/analyticsEvents'
+import { CUSTOM_MCP_ADDED_EVENT } from '@/lib/constants/analyticsEvents'
+import { GOOGLE_APPS, GOOGLE_SIGN_IN_URL } from '@/lib/google-apps'
 import { useMcpServers } from '@/lib/mcp/mcpServerStorage'
 import { track } from '@/lib/metrics/track'
-import { sentry } from '@/lib/sentry/sentry'
-import { useAddManagedServer } from '@/modules/mcp/add-managed-server.hooks'
-import { useGetMCPServersList } from '@/modules/mcp/managed-mcp-servers.hooks'
-import { useRemoveManagedServer } from '@/modules/mcp/remove-managed-server.hooks'
-import { useSubmitApiKey } from '@/modules/mcp/submit-api-key.hooks'
-import { useSyncRemoteIntegrations } from '@/modules/mcp/sync-remote-integrations.hooks'
-import { useGetUserMCPIntegrations } from '@/modules/mcp/user-integrations.hooks'
 import { AddCustomMCPDialog } from './AddCustomMCPDialog'
-import { AddManagedMCPDialog } from './AddManagedMCPDialog'
-import { AvailableManagedServers } from './AvailableManagedServers'
 
-const failedToAddMcp = (serverName: string, e: unknown) => {
-  toast.error(`Failed to add app: ${serverName}`)
-  sentry.captureException(e)
-}
-
-const failedToRemoveMcp = (serverName: string, e: unknown) => {
-  toast.error(`Failed to remove app: ${serverName}`)
-  sentry.captureException(e)
-}
+const openInTab = (url: string) => window.open(url, '_blank')?.focus()
 
 /**
+ * Apps. Google apps come first and need no setup: the agent works in the user's own signed-in tabs,
+ * so the page says how to use them rather than offering to connect them. Below that, a user can add
+ * an MCP server of their own by URL. There is no third-party connector catalogue: sending a user
+ * through someone else's Google consent screen to reach their own mail is exactly what made the
+ * old page look like phishing.
+ *
  * @public
  */
 export const ConnectMCP: FC = () => {
-  const { servers: createdServers, addServer, removeServer } = useMcpServers()
-  const [addingManagedMcp, setAddingManagedMcp] = useState(false)
+  const { servers, addServer, removeServer } = useMcpServers()
   const [addingCustomMcp, setAddingCustomMcp] = useState(false)
-  const [deletingServerId, setDeletingServerId] = useState<string | null>(null)
-  const [apiKeyServer, setApiKeyServer] = useState<{
-    name: string
-    description: string
-    apiKeyUrl: string
-  } | null>(null)
-
-  const { trigger: addManagedServerMutation } = useAddManagedServer()
-  const { trigger: removeManagedServerMutation } = useRemoveManagedServer()
-  const { trigger: submitApiKeyMutation, isMutating: isSubmittingApiKey } =
-    useSubmitApiKey()
-
-  const { data: serversList } = useGetMCPServersList()
-
-  const {
-    data: userMCPIntegrations,
-    isLoading: isUserMCPIntegrationsLoading,
-    mutate: mutateUserIntegrations,
-  } = useGetUserMCPIntegrations()
-
-  useSyncRemoteIntegrations()
-
-  const openAuthUrlForMCP = async (mcpName: string) => {
-    try {
-      const response = await addManagedServerMutation({
-        serverName: mcpName,
-      })
-
-      if (response.apiKeyUrl) {
-        setApiKeyServer({
-          name: mcpName,
-          description: '',
-          apiKeyUrl: response.apiKeyUrl,
-        })
-        return
-      }
-
-      if (!response.oauthUrl) {
-        failedToAddMcp(mcpName, 'No auth URL returned')
-        return
-      }
-
-      window.open(response.oauthUrl, '_blank')?.focus()
-    } catch (e) {
-      failedToAddMcp(mcpName, e)
-    }
-  }
-
-  const addManagedServer = async ({
-    name,
-    description,
-  }: {
-    name: string
-    description: string
-  }) => {
-    try {
-      const response = await addManagedServerMutation({
-        serverName: name,
-      })
-
-      if (!response.apiKeyUrl && !response.oauthUrl) {
-        failedToAddMcp(name, 'No auth URL returned')
-        return
-      }
-
-      addServer({
-        id: Date.now().toString(),
-        displayName: name,
-        type: 'managed',
-        managedServerName: name,
-        managedServerDescription: description,
-      })
-      track(MANAGED_MCP_ADDED_EVENT, { server_name: name })
-
-      if (response.apiKeyUrl) {
-        setApiKeyServer({ name, description, apiKeyUrl: response.apiKeyUrl })
-        return
-      }
-
-      window.open(response.oauthUrl, '_blank')?.focus()
-    } catch (e) {
-      failedToAddMcp(name, e)
-    }
-  }
-
-  const handleSubmitApiKey = async (apiKey: string) => {
-    if (!apiKeyServer) return
-    try {
-      await submitApiKeyMutation({
-        serverName: apiKeyServer.name,
-        apiKey,
-        apiKeyUrl: apiKeyServer.apiKeyUrl,
-      })
-      toast.success(`${apiKeyServer.name} connected successfully`)
-      setApiKeyServer(null)
-      mutateUserIntegrations()
-    } catch (e) {
-      toast.error(
-        `Failed to connect ${apiKeyServer.name}: ${e instanceof Error ? e.message : 'Unknown error'}`,
-      )
-      sentry.captureException(e)
-    }
-  }
-
-  const deleteManagedServer = async ({
-    id,
-    name,
-  }: {
-    id: string
-    name: string
-  }) => {
-    setDeletingServerId(id)
-    try {
-      const response = await removeManagedServerMutation({
-        serverName: name,
-      })
-      if (response.success) {
-        removeServer(id)
-        mutateUserIntegrations()
-      } else {
-        failedToRemoveMcp(name, 'Success not returned from server')
-      }
-    } catch (e) {
-      failedToRemoveMcp(name, e)
-    } finally {
-      setDeletingServerId(null)
-    }
-  }
+  // Entries from the removed connector catalogue are still in some users' storage. They no longer
+  // do anything, so they are not shown; removing one is the user's call, from here, below.
+  const customServers = servers.filter((server) => server.type === 'custom')
+  const staleServers = servers.filter((server) => server.type !== 'custom')
 
   const addCustomServer = (config: {
     name: string
@@ -195,59 +56,65 @@ export const ConnectMCP: FC = () => {
     track(CUSTOM_MCP_ADDED_EVENT)
   }
 
-  const availableServers = serversList?.servers.filter((eachServer) => {
-    const serverName = eachServer.name
-    if (
-      createdServers.find((server) => server.managedServerName === serverName)
-    ) {
-      return false
-    }
-    return true
-  })
-
-  const unauthenticatedServers: { name: string; description: string }[] = []
-  if (!isUserMCPIntegrationsLoading) {
-    for (const server of createdServers) {
-      if (server.type !== 'managed' || !server.managedServerName) continue
-      const integration = userMCPIntegrations?.integrations?.find(
-        (i) => i.name === server.managedServerName,
-      )
-      if (!integration?.is_authenticated) {
-        unauthenticatedServers.push({
-          name: server.managedServerName,
-          description: server.managedServerDescription ?? '',
-        })
-      }
-    }
-  }
-
   return (
     <div className="fade-in slide-in-from-bottom-5 animate-in space-y-6 duration-500">
       <SettingsHeader
-        title={t('stConnectedApps')}
-        lede={t('stConnectAppsLede')}
+        title={t('navApps')}
+        lede={t('gaPageLede')}
         actions={
-          <>
-            <Button onClick={() => setAddingManagedMcp(true)}>
-              <Plus className="h-4 w-4" />
-              <span>{t('stAddBuiltInApp')}</span>
-            </Button>
-            <Button variant="outline" onClick={() => setAddingCustomMcp(true)}>
-              <Plus className="h-4 w-4" />
-              <span>{t('stAddCustomApp2')}</span>
-            </Button>
-          </>
+          <Button variant="outline" onClick={() => setAddingCustomMcp(true)}>
+            <Plus className="h-4 w-4" />
+            <span>{t('stAddCustomApp2')}</span>
+          </Button>
         }
       />
 
-      {/* Created Servers */}
-      {createdServers.length > 0 && (
-        <section aria-labelledby="connected-apps" className="ui-settings-group">
-          <h2 id="connected-apps" className="ui-meta-label">
+      <section aria-labelledby="google-apps" className="ui-settings-group">
+        <h2 id="google-apps" className="ui-meta-label">
+          {t('gaMenuTitle')}
+        </h2>
+        <div className="ui-card ui-settings-rows">
+          {GOOGLE_APPS.map((app) => (
+            <div key={app.id} className="ui-settings-row">
+              <div className="ui-sample flex h-10 w-10 shrink-0 items-center justify-center">
+                <McpServerIcon serverName={app.name} size={20} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="ui-settings-row__label mb-1">{app.name}</div>
+                <p className="ui-settings-row__desc">
+                  {t('gaTryAsking')} “{t(app.examplePrompt)}”
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => openInTab(app.url)}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                {t('gaOpenApp')}
+              </Button>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-muted-foreground text-xs">
+          {t('gaSignInHint')}{' '}
+          <button
+            type="button"
+            onClick={() => openInTab(GOOGLE_SIGN_IN_URL)}
+            className="underline hover:text-foreground"
+          >
+            {t('gaSignInLink')}
+          </button>
+        </p>
+      </section>
+
+      {(customServers.length > 0 || staleServers.length > 0) && (
+        <section aria-labelledby="custom-apps" className="ui-settings-group">
+          <h2 id="custom-apps" className="ui-meta-label">
             {t('stYourConnectedApps')}
           </h2>
           <div className="ui-card ui-settings-rows">
-            {createdServers.map((server) => (
+            {[...customServers, ...staleServers].map((server) => (
               <div key={server.id} className="ui-settings-row">
                 <div className="ui-sample flex h-10 w-10 shrink-0 items-center justify-center">
                   <McpServerIcon
@@ -255,78 +122,31 @@ export const ConnectMCP: FC = () => {
                     size={20}
                   />
                 </div>
-                <div className="flex-1">
+                <div className="min-w-0 flex-1">
                   <div className="mb-1 flex items-center gap-2">
                     <span className="ui-settings-row__label">
                       {server.displayName}
                     </span>
-                    <span
-                      className={`rr-badge rr-badge--sm rr-badge--subtle ${
-                        server.type === 'managed'
-                          ? 'rr-badge--brand'
-                          : 'rr-badge--neutral'
-                      }`}
-                    >
-                      {server.type === 'managed'
-                        ? t('stBuiltIn')
-                        : t('stCustom')}
+                    <span className="rr-badge rr-badge--sm rr-badge--subtle rr-badge--neutral">
+                      {server.type === 'custom'
+                        ? t('stCustom')
+                        : t('gaRetired')}
                     </span>
                   </div>
                   <p className="ui-settings-row__desc">
-                    {/* The catalogue is read here as well as at sync time: an app synced before the
-                        catalogue arrived was stored with an empty description, and kept it. */}
-                    {server.managedServerDescription ||
-                      serversList?.servers.find(
-                        (s) => s.name === server.managedServerName,
-                      )?.description ||
-                      server.config?.description ||
-                      server.config?.url}
+                    {server.type === 'custom'
+                      ? server.config?.description || server.config?.url
+                      : t('gaRetiredDesc')}
                   </p>
                 </div>
-                {server.type === 'managed' &&
-                  (isUserMCPIntegrationsLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                  ) : userMCPIntegrations?.integrations?.find(
-                      (i) => i.name === server.managedServerName,
-                    )?.is_authenticated ? (
-                    <span className="rr-badge rr-badge--md rr-badge--subtle rr-badge--success gap-1">
-                      <Check className="h-3 w-3" />
-                      {t('stAuthenticated')}
-                    </span>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        server.managedServerName &&
-                        openAuthUrlForMCP(server.managedServerName)
-                      }
-                    >
-                      {t('stAuthenticate')}
-                    </Button>
-                  ))}
                 <Button
                   variant="ghost"
                   size="icon"
-                  disabled={deletingServerId === server.id}
-                  onClick={() => {
-                    if (server.type === 'managed' && server.managedServerName) {
-                      deleteManagedServer({
-                        id: server.id,
-                        name: server.managedServerName,
-                      })
-                    } else {
-                      removeServer(server.id)
-                    }
-                  }}
+                  onClick={() => removeServer(server.id)}
                   className="ui-row-delete"
                   title={t('stRemoveServer')}
                 >
-                  {deletingServerId === server.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4" />
-                  )}
+                  <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
             ))}
@@ -334,35 +154,10 @@ export const ConnectMCP: FC = () => {
         </section>
       )}
 
-      <AvailableManagedServers
-        availableServers={availableServers}
-        onAddServer={addManagedServer}
-        isLoading={false}
-      />
-
-      <AddManagedMCPDialog
-        open={addingManagedMcp}
-        onOpenChange={setAddingManagedMcp}
-        serversList={availableServers}
-        unauthenticatedServers={unauthenticatedServers}
-        onAddServer={addManagedServer}
-        onAuthenticate={openAuthUrlForMCP}
-      />
-
       <AddCustomMCPDialog
         open={addingCustomMcp}
         onOpenChange={setAddingCustomMcp}
         onAddServer={addCustomServer}
-      />
-
-      <ApiKeyDialog
-        open={!!apiKeyServer}
-        onOpenChange={(open) => {
-          if (!open) setApiKeyServer(null)
-        }}
-        serverName={apiKeyServer?.name ?? ''}
-        onSubmit={handleSubmitApiKey}
-        isSubmitting={isSubmittingApiKey}
       />
     </div>
   )

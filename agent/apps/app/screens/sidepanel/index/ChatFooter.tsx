@@ -8,19 +8,18 @@
  */
 
 import { t } from '@browseros/i18n'
-import { ChevronDown, Folder, Layers, PlugZap } from '@browseros/icons'
+import { ChevronDown, Folder, Layers } from '@browseros/icons'
 import type { FC, FormEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { AppSelector } from '@/components/elements/AppSelector'
 import { WorkspaceSelector } from '@/components/elements/workspace-selector'
 import { McpServerIcon } from '@/components/mcp/McpServerIcon'
-import { useMcpServers } from '@/lib/mcp/mcpServerStorage'
+import { GOOGLE_APPS } from '@/lib/google-apps'
 import {
   type SelectedTextData,
   selectedTextStorage,
 } from '@/lib/selected-text/selectedTextStorage'
 import type { ChatMode } from '@/modules/chat/chat-types'
-import { useGetUserMCPIntegrations } from '@/modules/mcp/user-integrations.hooks'
 import { useWorkspace } from '@/modules/workspace/workspace.hooks'
 import { ChatAttachedTabs } from './ChatAttachedTabs'
 import { ChatInput, type ChatInputHandle } from './ChatInput'
@@ -55,8 +54,6 @@ export const ChatFooter: FC<ChatFooterProps> = ({
   onRemoveTab,
 }) => {
   const { selectedFolder } = useWorkspace()
-  const { servers: mcpServers } = useMcpServers()
-  const { data: userMCPIntegrations } = useGetUserMCPIntegrations()
   const chatInputRef = useRef<ChatInputHandle>(null)
   const [selectionMap, setSelectionMap] = useState<
     Record<string, SelectedTextData>
@@ -107,13 +104,6 @@ export const ChatFooter: FC<ChatFooterProps> = ({
     window.addEventListener('focus', focusInput)
     return () => window.removeEventListener('focus', focusInput)
   }, [])
-
-  const connectedManagedServers = mcpServers.filter((s) => {
-    if (s.type !== 'managed' || !s.managedServerName) return false
-    return userMCPIntegrations?.integrations?.find(
-      (i) => i.name === s.managedServerName,
-    )?.is_authenticated
-  })
 
   return (
     <footer className="ui-panel-foot">
@@ -181,37 +171,29 @@ export const ChatFooter: FC<ChatFooterProps> = ({
               </button>
             </WorkspaceSelector>
 
-            <AppSelector side="top">
+            <AppSelector
+              side="top"
+              onPickPrompt={(prompt) => {
+                onInputChange(prompt)
+                chatInputRef.current?.focus()
+              }}
+            >
               <button
                 type="button"
                 className="ui-panel-tool"
-                title={t('spConnectApps')}
-                aria-label={t('spConnectApps')}
+                title={t('gaMenuTitle')}
+                aria-label={t('gaMenuTitle')}
               >
-                {connectedManagedServers.length > 0 ? (
-                  <>
-                    <div className="flex items-center -space-x-1">
-                      {connectedManagedServers.slice(0, 3).map((s) => (
-                        <div
-                          key={s.id}
-                          className="rounded-full ring-2 ring-[var(--surface-base)]"
-                        >
-                          <McpServerIcon
-                            serverName={s.managedServerName ?? ''}
-                            size={14}
-                          />
-                        </div>
-                      ))}
+                <div className="flex items-center -space-x-1">
+                  {GOOGLE_APPS.slice(0, 3).map((app) => (
+                    <div
+                      key={app.id}
+                      className="rounded-full ring-2 ring-[var(--surface-base)]"
+                    >
+                      <McpServerIcon serverName={app.name} size={14} />
                     </div>
-                    {connectedManagedServers.length > 3 && (
-                      <span className="font-medium text-xs">
-                        +{connectedManagedServers.length - 3}
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  <PlugZap className="h-4 w-4" />
-                )}
+                  ))}
+                </div>
                 <ChevronDown className="h-3 w-3" />
               </button>
             </AppSelector>

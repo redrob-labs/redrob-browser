@@ -353,3 +353,18 @@ stNamedSetupGuide	$1 setup guide	$1 설정 가이드	Link; $1 is a provider name
 stDurationSeconds	$1 seconds	$1초	A run's duration under a minute
 stDurationMinSec	$1m $2s	$1분 $2초	A run's duration: minutes, seconds
 stNoFolder	none	없음	Workspace chip: no folder chosen
+navHome	Home	홈
+navApps	Apps	앱
+gaMenuTitle	Google apps	Google 앱
+gaMenuLede	Uses the Google account you're signed in to here. Pick one to see what to ask.	이 브라우저에 로그인한 Google 계정으로 바로 써요. 고르면 물어볼 말을 넣어 드려요.
+gaPageLede	Redrob uses the Google account you're signed in to in this browser. There is nothing to connect.	레드롭은 이 브라우저에 로그인한 Google 계정을 그대로 써요. 따로 연결할 것이 없어요.
+gaOpenApp	Open	열기
+gaTryAsking	Try asking:	이렇게 물어보세요:
+gaSignInHint	Not signed in to Google yet?	아직 Google에 로그인하지 않았나요?
+gaSignInLink	Sign in	로그인하기
+gaGmailExample	Find this week's unread mail and summarize it	이번 주 안 읽은 메일을 찾아서 요약해 줘
+gaDriveExample	Find the annual report template in my Drive and open it	드라이브에서 연차보고서 양식 문서를 찾아서 열어 줘
+gaDocsExample	Start a new Google Doc with a meeting notes outline	회의록 틀로 새 Google 문서를 만들어 줘
+gaCalendarExample	What's on my calendar tomorrow?	내일 일정 알려 줘
+gaRetired	No longer used	더는 안 씀
+gaRetiredDesc	Added through an outside service Redrob no longer uses. You can remove it: Google apps now work without connecting.	레드롭이 더는 쓰지 않는 외부 서비스로 추가한 앱이에요. 지워도 돼요. Google 앱은 이제 연결 없이 써요.

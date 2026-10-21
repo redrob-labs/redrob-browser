@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+import { GOOGLE_APPS_GUIDANCE } from './google-apps'
+
 /**
  * BrowserOS Agent System Prompt v7
  *
@@ -12,7 +14,7 @@
  * descriptions and the runtime untrusted-content fence, so the prompt no longer
  * narrates a tool catalog, tool-selection tables, or per-tool error recovery.
  * What stays is what a tool cannot own: role/mode, the trust boundary, safety,
- * cross-tool execution workflow, the Strata integration flow, nudge behavior,
+ * cross-tool execution workflow, Google apps in the user's own tabs, nudge behavior,
  * response style, and dynamic page context.
  */
 
@@ -102,29 +104,11 @@ function getExternalIntegrations(
   _exclude: Set<string>,
   options?: BuildSystemPromptOptions,
 ): string {
-  const connectedApps = options?.connectedApps ?? []
-  const declinedApps = options?.declinedApps ?? []
-
-  const connectedList =
-    connectedApps.length > 0
-      ? `Connected apps (use Strata for these): ${connectedApps.join(', ')}.`
-      : 'No apps are currently connected via Strata.'
-
-  const declinedNote =
-    declinedApps.length > 0
-      ? ` Declined apps (use browser automation, never Strata): ${declinedApps.join(', ')}.`
-      : ''
-
-  return `<external_integrations>
-You have Strata tools (\`discover_server_categories_or_actions\`, \`execute_action\`, and others) for external services, but only for apps the user has connected and authenticated.
-
-${connectedList}${declinedNote}
-
-- Before any Strata tool, check the connected list. Connected → use Strata (faster than browser automation, no navigation). Declined → use browser automation, never Strata or a connection card. Neither → call \`suggest_app_connection\` and stop; do not use Strata until the user connects.
-- Flow: discover the categories/actions, get_action_details for the parameter schema, then execute_action. Don't guess action names; use \`include_output_fields\` to limit output.
-- If \`execute_action\` returns an auth error, call \`suggest_app_connection\` to re-connect (stop and wait); never open auth URLs yourself.
-- Confirm with the user before any action that sends, creates, modifies, or deletes external data.
-</external_integrations>`
+  // Chat mode has no browser tools, so there is no tab to open the app in.
+  if (options?.chatMode) return ''
+  return `<google_apps>
+${GOOGLE_APPS_GUIDANCE}
+</google_apps>`
 }
 
 // -----------------------------------------------------------------------------
@@ -147,8 +131,7 @@ Working directory: ${options.workspaceDir}. You can read, write, search, and exe
 
 function getNudges(): string {
   return `<nudge_tools>
-- \`suggest_app_connection\`: when the user's request needs a service that is neither connected nor declined, call this first, before any browser work. Your response must contain ONLY this tool call and no other text, since it renders a card, so any surrounding text confuses the user. (Exception: the user explicitly asks to connect a declined app.)
-- \`suggest_schedule\`: after finishing a task that could recur (monitoring prices, digests, reports) and needs no live interaction, or whenever the user asks to schedule/automate/repeat it, call this as your final tool call and infer the details. Write no text after it, since it also renders a card.
+- \`suggest_schedule\`: after finishing a task that could recur (monitoring prices, digests, reports) and needs no live interaction, or whenever the user asks to schedule/automate/repeat it, call this as your final tool call and infer the details. Write no text after it, since it renders a card.
 - Call each nudge tool at most once per conversation.
 </nudge_tools>`
 }
@@ -260,10 +243,6 @@ export interface BuildSystemPromptOptions {
   scheduledTaskPageId?: number
   workspaceDir?: string
   chatMode?: boolean
-  /** Apps the user has connected and authenticated via Strata (from enabledMcpServers). */
-  connectedApps?: string[]
-  /** Apps the user previously declined to connect (chose "do it manually"). */
-  declinedApps?: string[]
   /** Where the chat session originates from, which determines navigation behavior. */
   origin?: 'sidepanel' | 'newtab'
   /** Whether this prompt's tool set includes output-only filesystem_read. */

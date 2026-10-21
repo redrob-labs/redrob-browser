@@ -141,8 +141,8 @@ validated up front. Supported steps: `nav`, `back`, `forward`, `reload`, `eval`,
 
 ## Resources & integrations
 
-`bookmark`, `history`, `window`, and `group` manage browser resources; `strata` manages connected
-MCP apps (Gmail, Slack, GitHub, …); `info [topic]` describes BrowserOS features. Run
+`bookmark`, `history`, `window`, and `group` manage browser resources; `info [topic]` describes
+BrowserOS features. Run
 `browseros-cli <command> --help` for any command's flags.
 
 ## Troubleshooting

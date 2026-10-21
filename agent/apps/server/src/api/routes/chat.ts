@@ -28,7 +28,6 @@ import {
   ConversationRunNotFoundError,
   type ConversationRuns,
 } from '../services/conversation-runs'
-import type { KlavisService } from '../services/klavis'
 import type { BrowserMcpModule } from '../services/mcp/browser-mcp-module'
 import type { ServerActivity } from '../services/server-activity'
 import {
@@ -46,7 +45,6 @@ interface ChatRouteDeps {
   browser: Browser
   browserMcp: BrowserMcpModule
   browserosId?: string
-  klavis?: KlavisService
   aiSdkDevtoolsEnabled?: boolean
   serverPort: number
   resourcesDir?: string | null
@@ -78,7 +76,6 @@ export function createChatRoutes(deps: ChatRouteDeps): Hono<Env> {
   const sessionStore = new SessionStore()
   const service = new ChatService({
     sessionStore,
-    klavis: deps.klavis,
     browser: deps.browser,
     browserMcp: deps.browserMcp,
     browserosId,

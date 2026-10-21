@@ -6,10 +6,6 @@
  * Centralized timeout configuration.
  */
 
-export const KLAVIS_PROXY_RETRY_BACKOFF_MS = [
-  5_000, 10_000, 20_000, 40_000, 60_000,
-] as const
-
 export const TIMEOUTS = {
   // Agent/Tool execution
   TOOL_CALL: 120_000,
@@ -30,9 +26,6 @@ export const TIMEOUTS = {
   CDP_KEEPALIVE_INTERVAL: 30_000,
   CDP_KEEPALIVE_TIMEOUT: 10_000,
   CDP_REQUEST_TIMEOUT: 60_000,
-
-  // External API calls
-  KLAVIS_FETCH: 30_000,
 
   // Navigation/DOM
   NAVIGATION: 10_000,
