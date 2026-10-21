@@ -16,7 +16,7 @@ import { POPULAR_APPS } from '@/lib/popular-apps'
 export const PopularAppTiles: FC = () => (
   <nav aria-label={t('paMenuTitle')} className="space-y-4">
     <h2 className="ui-meta-label text-center">{t('paMenuTitle')}</h2>
-    <div className="flex flex-wrap items-center justify-center gap-6">
+    <div className="flex items-center justify-center gap-6 overflow-x-auto">
       {POPULAR_APPS.map((app) => (
         <a
           key={app.id}

@@ -41,20 +41,6 @@ export const POPULAR_APPS: readonly PopularApp[] = [
     examplePrompt: 'paDriveExample',
   },
   {
-    id: 'docs',
-    icon: 'Google Docs',
-    label: 'paDocs',
-    url: 'https://docs.google.com/document/',
-    examplePrompt: 'paDocsExample',
-  },
-  {
-    id: 'sheets',
-    icon: 'Google Sheets',
-    label: 'paSheets',
-    url: 'https://docs.google.com/spreadsheets/',
-    examplePrompt: 'paSheetsExample',
-  },
-  {
     id: 'calendar',
     icon: 'Google Calendar',
     label: 'paCalendar',
@@ -81,20 +67,6 @@ export const POPULAR_APPS: readonly PopularApp[] = [
     label: 'paSlack',
     url: 'https://app.slack.com/client',
     examplePrompt: 'paSlackExample',
-  },
-  {
-    id: 'outlook',
-    icon: 'Outlook Mail',
-    label: 'paOutlook',
-    url: 'https://outlook.office.com/mail/',
-    examplePrompt: 'paOutlookExample',
-  },
-  {
-    id: 'teams',
-    icon: 'Microsoft Teams',
-    label: 'paTeams',
-    url: 'https://teams.microsoft.com/',
-    examplePrompt: 'paTeamsExample',
   },
   {
     id: 'github',
