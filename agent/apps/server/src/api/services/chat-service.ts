@@ -17,6 +17,10 @@ import {
   type UIMessageChunk,
 } from 'ai'
 import { AiSdkAgent } from '../../agent/ai-sdk-agent'
+import {
+  type ChatError,
+  serializeChatError,
+} from '@browseros/shared/schemas/chat-error'
 import { toChatErrorText } from '../../agent/chat-error'
 import { formatUserMessage } from '../../agent/format-message'
 import {
@@ -660,9 +664,10 @@ export class ChatService {
         )
       }
       if (!(error instanceof AcpAgentPreparationError)) throw error
+      const errorText = serializeChatError(preparationChatError(error))
       stream = createUIMessageStream({
         execute({ writer }) {
-          writer.write({ type: 'error', errorText: error.message })
+          writer.write({ type: 'error', errorText })
         },
       })
     }
@@ -883,4 +888,36 @@ function conversationTabGroup(
       ? 'browseros'
       : `${request.target.type}:${request.target.agentId}`
   return { title: `${prefix}/${task}`, colorKey }
+}
+
+/**
+ * The card for an agent that did not start. Each reason is its own code so the UI can say what to do
+ * in the user's language; title and message here are the English fallback for an older extension.
+ */
+function preparationChatError(error: AcpAgentPreparationError): ChatError {
+  switch (error.reason) {
+    case 'not_installed':
+      return {
+        code: 'agent_not_installed',
+        title: 'Redrob Code is not installed',
+        message:
+          'Agent mode runs on Redrob Code. Install it, or switch to Chat to keep going.',
+        retryable: true,
+      }
+    case 'signed_out':
+      return {
+        code: 'agent_signed_out',
+        title: 'Sign in to Redrob Code',
+        message:
+          'Redrob Code is installed but not signed in. Sign in, or switch to Chat to keep going.',
+        retryable: true,
+      }
+    default:
+      return {
+        code: 'agent_start_failed',
+        title: 'The agent did not start',
+        message: 'Try again, or switch to Chat to keep going.',
+        retryable: true,
+      }
+  }
 }
