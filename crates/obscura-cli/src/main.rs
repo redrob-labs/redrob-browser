@@ -301,7 +301,9 @@ fn select_log_filter(verbose: bool, quiet: bool) -> &'static str {
     } else if quiet {
         "off"
     } else {
-        "warn"
+        // tiny_skia warns for every empty path it is asked to fill, which pages
+        // produce constantly; it is not actionable.
+        "warn,tiny_skia=error"
     }
 }
 
@@ -423,8 +425,11 @@ async fn run_cli() -> anyhow::Result<()> {
             std::env::set_var("TZ", tz);
         }
     } else if std::env::var_os("TZ").is_none() {
+        // Redrob Browser is used by a person: show their own time zone. The
+        // fixed Europe/Berlin default only suited scraping through a proxy.
+        let tz = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".to_string());
         unsafe {
-            std::env::set_var("TZ", "Europe/Berlin");
+            std::env::set_var("TZ", tz);
         }
     }
 
@@ -2682,7 +2687,7 @@ mod tests {
 
     #[test]
     fn default_filter_is_warn() {
-        assert_eq!(select_log_filter(false, false), "warn");
+        assert_eq!(select_log_filter(false, false), "warn,tiny_skia=error");
     }
 
     #[test]

@@ -102,6 +102,11 @@ pub enum Op {
         dy: f32,
         modifiers: u32,
     },
+    /// The link under a page point, for a middle click (autoscroll.rs).
+    LinkAt {
+        x: f32,
+        y: f32,
+    },
     Key {
         down: bool,
         key: String,
@@ -234,6 +239,8 @@ pub enum Event {
     },
     /// Result of FillLogin: "filled" or "no-form".
     Filled(String),
+    /// The answer to `Op::LinkAt`: the link's absolute URL, if any.
+    LinkAt(Option<String>),
     /// A file download began or changed state. Sent with tab 0.
     Download {
         guid: String,
@@ -619,6 +626,22 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
         }
         Op::DevtoolsOpen => {
             st.c.call(s, "Network.enable", json!({})).await?;
+        }
+        Op::LinkAt { x, y } => {
+            let expr = format!(
+                "(() => {{ const e = document.elementFromPoint({x}, {y}); const a = e && e.closest && e.closest('a[href]'); return a ? a.href : null }})()"
+            );
+            let r =
+                st.c.call(
+                    s,
+                    "Runtime.evaluate",
+                    json!({ "expression": expr, "returnByValue": true }),
+                )
+                .await;
+            let link = r
+                .ok()
+                .and_then(|r| r["result"]["value"].as_str().map(str::to_string));
+            st.emit(tab, Event::LinkAt(link));
         }
         Op::Evaluate(expr) => {
             let r = st
