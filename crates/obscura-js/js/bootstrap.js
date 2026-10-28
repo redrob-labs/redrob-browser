@@ -1185,7 +1185,12 @@ function _scheduleRenderingOpportunity() {
   if (_renderOpportunityScheduled || _renderOpportunityRunning
       || !_renderOpportunityHasWork()) return;
   _renderOpportunityScheduled = true;
-  _scheduleAfter(_RAF_FRAME_DELAY_MS, _runRenderingOpportunity);
+  // A frame cannot come sooner than its layout takes. When one layout costs
+  // 200ms (Drive) or 700ms (a long article), a 16ms cadence spent nearly all
+  // of the main thread re-laying out for observers and rAF while the page's
+  // own scripts waited; space the opportunities by the last layout cost.
+  const layoutMs = __obscuraCore.ops.op_last_layout_ms?.() ?? 0;
+  _scheduleAfter(Math.max(_RAF_FRAME_DELAY_MS, layoutMs), _runRenderingOpportunity);
 }
 
 function _runRenderingOpportunity() {

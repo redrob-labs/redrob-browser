@@ -8313,6 +8313,15 @@ fn http_get_bytes(url: &str) -> Option<Vec<u8>> {
 /// old per-call `ureq::get`) reads as a burst and gets 429'd, whereas reusing
 /// one pooled connection to the same host (as a browser does) both avoids most
 /// throttling and is much faster on an image-heavy page.
+/// Current stable Chrome on this OS, the same identity the engine's page
+/// transport presents (obscura-net `identity`).
+#[cfg(target_os = "macos")]
+const RESOURCE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
+#[cfg(target_os = "windows")]
+const RESOURCE_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const RESOURCE_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
+
 fn image_agent() -> &'static ureq::Agent {
     static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
     AGENT.get_or_init(|| {
@@ -8323,7 +8332,7 @@ fn image_agent() -> &'static ureq::Agent {
             // that gate on User-Agent (Akamai/Cloudflare image endpoints on
             // cnbc, techcrunch, arstechnica), so the images Chrome loads came
             // back blank; a real browser UA loads the same bytes Chrome does.
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+            .user_agent(RESOURCE_USER_AGENT)
             .resolver(SsrfGuardResolver)
             .build()
     })

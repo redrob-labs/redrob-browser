@@ -1163,9 +1163,9 @@ fn handle_http_json_blocking(
 
     let body = match endpoint {
         "version" => serde_json::to_string_pretty(&json!({
-            "Browser": "Chrome/145.0.0.0",
+            "Browser": obscura_net::identity::DEFAULT_PRODUCT,
             "Protocol-Version": "1.3",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+            "User-Agent": obscura_net::identity::DEFAULT_USER_AGENT,
             "V8-Version": "14.5.0.0",
             "WebKit-Version": "537.36",
             "webSocketDebuggerUrl": format!("ws://{}/devtools/browser", authority),
@@ -2049,6 +2049,23 @@ async fn process_with_interception(
     let (nav_done_tx, mut nav_done_rx) =
         mpsc::channel::<(obscura_browser::Page, Result<(), String>, bool)>(1);
     let nav_v8_lock = ctx.v8_lock.clone();
+    // A viewer that is watching this tab (an active screencast) gets the
+    // parsed document painted before its scripts run: the navigation pauses
+    // once the document commits, hands the page back for a short paint
+    // window, then runs scripts and subresources to load. Automation clients
+    // without a screencast keep the single-phase navigation.
+    #[cfg(feature = "render")]
+    let early_paint = send_command_response
+        && !(nav_method == "POST" && !nav_body.is_empty())
+        && session_for_events
+            .as_ref()
+            .is_some_and(|session| ctx.screencasts.contains_key(session));
+    #[cfg(not(feature = "render"))]
+    let early_paint = false;
+    let (commit_tx, mut commit_rx) = mpsc::channel::<(
+        obscura_browser::Page,
+        tokio::sync::oneshot::Sender<obscura_browser::Page>,
+    )>(1);
 
     tokio::task::spawn_local(async move {
         // Issue #19: serialize this connection's V8 work across its pages. This
@@ -2056,24 +2073,56 @@ async fn process_with_interception(
         // messages via `dispatch` (which takes the same per-connection lock), so
         // both sides coordinate on one page's isolate at a time on this thread.
         // The lock is per-connection, so other connections are unaffected (#430).
-        let _v8_guard = nav_v8_lock.lock_owned().await;
+        let mut v8_guard = Some(nav_v8_lock.clone().lock_owned().await);
         // Preloads (addBinding shims, addScriptToEvaluateOnNewDocument sources)
         // must run BEFORE the page's own scripts (CDP contract). Hand them
         // to the page so navigate_single can inject them at the right point.
         page.set_preload_scripts(preload_scripts);
-        let (result, cancelled) = tokio::select! {
-            result = async {
-                if !send_command_response {
-                    page.navigate_from_document(&url_owned, &nav_method, &nav_body).await
-                } else if nav_method == "POST" && !nav_body.is_empty() {
-                    page.navigate_with_wait_post(&url_owned, wait_until, &nav_method, &nav_body).await
-                } else {
-                    page.navigate_with_wait(&url_owned, wait_until).await
+        let mut cancel_rx = cancel_rx;
+        let mut finished: Option<(Result<(), String>, bool)> = None;
+        if early_paint {
+            let committed = tokio::select! {
+                result = page.commit_navigation(&url_owned, wait_until) => Some(result),
+                _ = &mut cancel_rx => None,
+            };
+            match committed {
+                None => finished = Some((Err("net::ERR_ABORTED".into()), true)),
+                Some(Err(error)) => finished = Some((Err(error.to_string()), false)),
+                Some(Ok(false)) => finished = Some((Ok(()), false)),
+                Some(Ok(true)) => {
+                    // The paint window runs CDP handlers on this page, and
+                    // they take the connection's V8 lock: release it meanwhile.
+                    drop(v8_guard.take());
+                    let (back_tx, back_rx) = tokio::sync::oneshot::channel();
+                    if commit_tx.send((page, back_tx)).await.is_err() {
+                        return;
+                    }
+                    page = match back_rx.await {
+                        Ok(page) => page,
+                        Err(_) => return,
+                    };
+                    v8_guard = Some(nav_v8_lock.clone().lock_owned().await);
                 }
-            } => (result.map_err(|e| e.to_string()), false),
-            _ = cancel_rx => (Err("net::ERR_ABORTED".into()), true),
+            }
+        }
+        let (result, cancelled) = match finished {
+            Some(finished) => finished,
+            None => tokio::select! {
+                result = async {
+                    if early_paint {
+                        page.finish_navigation().await
+                    } else if !send_command_response {
+                        page.navigate_from_document(&url_owned, &nav_method, &nav_body).await
+                    } else if nav_method == "POST" && !nav_body.is_empty() {
+                        page.navigate_with_wait_post(&url_owned, wait_until, &nav_method, &nav_body).await
+                    } else {
+                        page.navigate_with_wait(&url_owned, wait_until).await
+                    }
+                } => (result.map_err(|e| e.to_string()), false),
+                _ = &mut cancel_rx => (Err("net::ERR_ABORTED".into()), true),
+            },
         };
-        drop(_v8_guard);
+        drop(v8_guard);
         let _ = nav_done_tx.send((page, result, cancelled)).await;
     });
 
@@ -2110,6 +2159,21 @@ async fn process_with_interception(
                 navigate_result = result;
                 cancelled = was_cancelled;
                 break;
+            }
+            Some((committed_page, back_tx)) = commit_rx.recv() => {
+                let committed_page = early_paint_window(
+                    committed_page,
+                    ctx,
+                    reply_tx,
+                    rx,
+                    deferred,
+                    &page_id,
+                    &session_for_events,
+                )
+                .await;
+                if back_tx.send(committed_page).is_err() {
+                    tracing::warn!("navigation task ended during its paint window");
+                }
             }
             Some(intercepted) = async {
                 if let Some(ref mut irx) = intercept_rx {
@@ -2295,6 +2359,89 @@ async fn process_with_interception(
             let _ = reply_tx.send(json);
         }
     }
+}
+
+/// Methods the early paint window serves while a navigation is paused at
+/// commit. They read the parsed document and draw it; nothing here can run
+/// page script, navigate or close the page, so the navigation resumes on the
+/// same document.
+const EARLY_PAINT_METHODS: &[&str] = &[
+    "Page.captureScreenshot",
+    "Page.screencastFrameAck",
+    "Page.getLayoutMetrics",
+    "Page.redrobDisplayList",
+];
+
+/// Let a watching viewer paint a navigation's parsed document before its
+/// scripts run. The page is back in `ctx` for the window: emit a screencast
+/// change frame, then serve paint requests from this page's session until
+/// the viewer has been quiet for a moment (bounded). Everything else waits
+/// in `deferred` exactly as it does during the rest of the navigation.
+async fn early_paint_window(
+    page: obscura_browser::Page,
+    ctx: &mut CdpContext,
+    reply_tx: &mpsc::UnboundedSender<String>,
+    rx: &mut mpsc::UnboundedReceiver<ServerMessage>,
+    deferred: &mut std::collections::VecDeque<ServerMessage>,
+    page_id: &str,
+    session: &Option<String>,
+) -> obscura_browser::Page {
+    const QUIET: std::time::Duration = std::time::Duration::from_millis(100);
+    const LIMIT: std::time::Duration = std::time::Duration::from_millis(1000);
+    let started = std::time::Instant::now();
+    ctx.pages.push(page);
+    #[cfg(feature = "render")]
+    {
+        if let Err(error) = crate::domains::page::queue_screencast_frame(ctx, session, true) {
+            tracing::debug!("no commit screencast frame: {error}");
+        }
+        for event in ctx.pending_events.drain(..) {
+            if let Ok(json) = serde_json::to_string(&event) {
+                let _ = reply_tx.send(json);
+            }
+        }
+    }
+    let limit = tokio::time::Instant::now() + LIMIT;
+    loop {
+        let quiet = (tokio::time::Instant::now() + QUIET).min(limit);
+        let message = match tokio::time::timeout_at(quiet, rx.recv()).await {
+            Ok(Some(message)) => message,
+            Ok(None) | Err(_) => break,
+        };
+        match message {
+            ServerMessage::NewConnection { reply_tx: new_tx } => {
+                let pid = ctx.create_page();
+                let sid = format!("{}-session", pid);
+                ctx.sessions.insert(sid.clone(), pid.clone());
+                let _ = new_tx
+                    .send(json!({"__init": true, "pageId": pid, "sessionId": sid}).to_string());
+            }
+            ServerMessage::Cdp(msg) => {
+                let paint = serde_json::from_str::<CdpRequest>(&msg.text)
+                    .ok()
+                    .is_some_and(|command| {
+                        command.session_id.as_ref() == session.as_ref()
+                            && EARLY_PAINT_METHODS.contains(&command.method.as_str())
+                    });
+                if paint {
+                    process_cdp_message(&msg.text, ctx, &msg.reply_tx).await;
+                } else {
+                    deferred.push_back(ServerMessage::Cdp(msg));
+                }
+            }
+        }
+    }
+    tracing::debug!(
+        target: "obscura_browser::timing",
+        "early paint window {}ms",
+        started.elapsed().as_millis()
+    );
+    let index = ctx
+        .pages
+        .iter()
+        .position(|page| page.id == page_id)
+        .expect("the paint window serves no command that removes the page");
+    ctx.pages.remove(index)
 }
 
 async fn process_awaited_with_interception(
@@ -2484,9 +2631,9 @@ fn fast_path_response(text: &str) -> Option<String> {
         | "Target.setAutoAttach" => Some(json!({})),
         "Browser.getVersion" => Some(json!({
             "protocolVersion": "1.3",
-            "product": "Chrome/145.0.0.0",
+            "product": obscura_net::identity::DEFAULT_PRODUCT,
             "revision": "@0000000000000000000000000000000000000000",
-            "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+            "userAgent": obscura_net::identity::DEFAULT_USER_AGENT,
             "jsVersion": "14.5.0.0",
         })),
         "Browser.setDownloadBehavior" | "Browser.getWindowBounds" => Some(json!({})),
