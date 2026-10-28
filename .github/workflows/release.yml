@@ -278,6 +278,9 @@ jobs:
       - name: Build dependencies
         run: |
           sudo apt-get update
+          # The 22.04 image ships LLVM's libunwind-14-dev, which conflicts with the
+          # libunwind-dev that libgstreamer1.0-dev needs.
+          sudo apt-get purge -y libunwind-14-dev || true
           sudo apt-get install -y --no-install-recommends libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             libxkbcommon-dev libwayland-dev libx11-dev libdbus-1-dev pkg-config
       - name: Build and package
