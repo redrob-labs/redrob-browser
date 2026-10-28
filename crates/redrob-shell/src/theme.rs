@@ -420,3 +420,12 @@ pub fn elide(text: &str, max: usize) -> String {
     s.push('…');
     s
 }
+
+/// Follow the saved theme choice: "light", "dark", anything else follows the system.
+pub fn set_preference(ctx: &egui::Context, choice: &str) {
+    ctx.set_theme(match choice {
+        "light" => egui::ThemePreference::Light,
+        "dark" => egui::ThemePreference::Dark,
+        _ => egui::ThemePreference::System,
+    });
+}

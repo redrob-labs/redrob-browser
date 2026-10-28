@@ -26,6 +26,7 @@ impl Engine {
             .arg(storage)
             .arg("--ready-file")
             .arg(&ready)
+            .args(system_font_dirs().into_iter().flat_map(|d| [std::ffi::OsString::from("--font-dir"), d.into_os_string()]))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
@@ -65,4 +66,27 @@ fn sibling_binary(name: &str) -> PathBuf {
         .ok()
         .and_then(|p| p.parent().map(|d| d.join(&file)))
         .unwrap_or_else(|| PathBuf::from(file))
+}
+
+/// The OS font folders, so pages in Korean, Chinese, Japanese and other
+/// scripts the engine's bundled fonts lack render with the system's faces.
+fn system_font_dirs() -> Vec<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if cfg!(target_os = "macos") {
+        dirs.extend(["/System/Library/Fonts", "/Library/Fonts"].map(PathBuf::from));
+        dirs.extend(home.map(|h| h.join("Library/Fonts")));
+    } else if cfg!(windows) {
+        let windir = std::env::var_os("WINDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("C:\\Windows"));
+        dirs.push(windir.join("Fonts"));
+        dirs.extend(std::env::var_os("LOCALAPPDATA").map(|l| PathBuf::from(l).join("Microsoft\\Windows\\Fonts")));
+    } else {
+        dirs.extend(["/usr/share/fonts", "/usr/local/share/fonts"].map(PathBuf::from));
+        let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| home.as_ref().map(|h| h.join(".local/share")));
+        dirs.extend(data.map(|d| d.join("fonts")));
+        dirs.extend(home.map(|h| h.join(".fonts")));
+    }
+    // The engine refuses a folder that does not exist.
+    dirs.retain(|d| d.is_dir());
+    dirs
 }

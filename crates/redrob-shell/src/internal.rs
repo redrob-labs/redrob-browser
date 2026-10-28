@@ -40,6 +40,8 @@ pub struct Actions {
     pub open_new_tab: Option<String>,
     /// The search engine changed; the window applies it.
     pub search_engine: Option<String>,
+    /// The theme changed: "system", "light" or "dark".
+    pub theme: Option<String>,
 }
 
 pub fn ui(ui: &mut egui::Ui, url: &str, s: &mut State, profile: Option<&Profile>, vault: Option<&mut Vault>) -> Actions {
@@ -214,6 +216,16 @@ fn settings(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &m
                 if let Some(p) = profile {
                     let _ = p.set_setting("language", i18n::code(lang));
                 }
+            }
+        }
+    });
+    ui.add_space(12.0);
+    ui.strong(t("Theme"));
+    let theme = profile.and_then(|p| p.setting("theme")).unwrap_or_else(|| "system".to_string());
+    ui.horizontal(|ui| {
+        for (id, name) in [("system", t("Same as the system")), ("light", t("Light")), ("dark", t("Dark"))] {
+            if ui.selectable_label(theme == id, name).clicked() {
+                act.theme = Some(id.to_string());
             }
         }
     });

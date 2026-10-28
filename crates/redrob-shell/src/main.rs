@@ -77,6 +77,7 @@ fn main() -> anyhow::Result<()> {
         Box::new(move |cc| {
             let ctx = cc.egui_ctx.clone();
             theme::install(&ctx);
+            theme::set_preference(&ctx, &profile.as_ref().and_then(|p| p.setting("theme")).unwrap_or_default());
             let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
             let (upd_tx, upd_rx) = mpsc::channel();
             let (login_tx, login_rx) = mpsc::channel();
@@ -404,6 +405,10 @@ impl Window {
                 Event::Styles(styles) => t.devtools.set_styles(styles),
                 Event::Highlight(model) => t.devtools.set_highlight(model),
                 Event::Picked(node) => t.devtools.picked(node),
+                // Our own pages keep their redrob:// address while the engine
+                // tab underneath sits on about:blank.
+                Event::Navigated(url) | Event::UrlChanged(url) if url == NEW_TAB && internal::is_internal(&t.url) => {}
+                Event::Title(_) | Event::Loading(_) if internal::is_internal(&t.url) => {}
                 Event::Navigated(url) => {
                     self.media.drop_tab(tab);
                     self.drm.clear(tab);
@@ -1517,6 +1522,12 @@ impl eframe::App for Window {
                 let inner = Rect::from_min_max(egui::pos2(rect.center().x - column / 2.0, rect.top() + 24.0), egui::pos2(rect.center().x + column / 2.0, rect.bottom() - 16.0));
                 let mut page_ui = ui.new_child(egui::UiBuilder::new().max_rect(inner));
                 let act = internal::ui(&mut page_ui, &page_url, &mut self.internal, self.profile.as_ref(), self.vault.as_mut());
+                if let Some(choice) = act.theme {
+                    theme::set_preference(&ctx, &choice);
+                    if let Some(p) = &self.profile {
+                        let _ = p.set_setting("theme", &choice);
+                    }
+                }
                 if let Some(id) = act.search_engine {
                     model::set_search_engine(&id);
                     if let Some(p) = &self.profile {

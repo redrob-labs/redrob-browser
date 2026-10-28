@@ -54,17 +54,18 @@ fn forbidden_fallback() -> &'static [&'static str] {
 }
 
 fn han_unification(locale: &str) -> &'static [&'static str] {
+    // Noto CJK first, then the faces Linux distributions ship instead of it.
     match locale {
         // Japan
-        "ja" => &["Noto Sans CJK JP"],
+        "ja" => &["Noto Sans CJK JP", "Noto Sans JP", "Source Han Sans JP", "IPAGothic", "IPAexGothic", "TakaoGothic", "VL Gothic", "Droid Sans Fallback", "WenQuanYi Zen Hei"],
         // Korea
-        "ko" => &["Noto Sans CJK KR"],
+        "ko" => &["Noto Sans CJK KR", "Noto Sans KR", "Source Han Sans KR", "NanumGothic", "UnDotum", "Baekmuk Gulim", "Droid Sans Fallback", "WenQuanYi Zen Hei"],
         // Hong Kong
-        "zh-HK" => &["Noto Sans CJK HK"],
+        "zh-HK" => &["Noto Sans CJK HK", "Noto Sans HK", "Source Han Sans HC", "WenQuanYi Zen Hei", "Droid Sans Fallback"],
         // Taiwan
-        "zh-TW" => &["Noto Sans CJK TC"],
+        "zh-TW" => &["Noto Sans CJK TC", "Noto Sans TC", "Source Han Sans TC", "WenQuanYi Zen Hei", "AR PL UMing TW", "Droid Sans Fallback"],
         // Simplified Chinese is the default (also catches "zh-CN" for China)
-        _ => &["Noto Sans CJK SC"],
+        _ => &["Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Zen Hei", "WenQuanYi Micro Hei", "AR PL UMing CN", "Droid Sans Fallback"],
     }
 }
 
