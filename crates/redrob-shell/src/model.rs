@@ -18,6 +18,7 @@ pub struct Tab {
     pub content: (f32, f32),
     /// Opened by the agent rather than the person; shown with a marker.
     pub agent: bool,
+    pub devtools: crate::devtools::State,
 }
 
 impl Tab {
@@ -31,6 +32,7 @@ impl Tab {
             scroll: (0.0, 0.0),
             content: (0.0, 0.0),
             agent: false,
+            devtools: Default::default(),
         }
     }
 

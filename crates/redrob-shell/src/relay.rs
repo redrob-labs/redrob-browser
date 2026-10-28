@@ -35,8 +35,17 @@ pub async fn start(out: mpsc::UnboundedSender<String>, pending: Pending, events:
             let pending = pending.clone();
             let events = events.subscribe();
             tokio::spawn(async move {
-                if let Ok(ws) = tokio_tungstenite::accept_async(tcp).await {
-                    serve(ws, out, pending, events).await;
+                let mut path = String::new();
+                let callback = |req: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                                resp: tokio_tungstenite::tungstenite::handshake::server::Response| {
+                    path = req.uri().path().to_string();
+                    Ok(resp)
+                };
+                if let Ok(ws) = tokio_tungstenite::accept_hdr_async(tcp, callback).await {
+                    // /devtools/page/<targetId>: a client that speaks to one tab
+                    // without sessions, as the DevTools front end does.
+                    let page = path.strip_prefix("/devtools/page/").map(str::to_string);
+                    serve(ws, out, pending, events, page).await;
                 }
             });
         }
@@ -49,10 +58,28 @@ async fn serve(
     out: mpsc::UnboundedSender<String>,
     pending: Pending,
     mut events: broadcast::Receiver<Value>,
+    page: Option<String>,
 ) {
     let (mut sink, mut stream) = ws.split();
     let (reply_tx, mut reply_rx) = mpsc::unbounded_channel::<String>();
     let sessions: Arc<Mutex<HashSet<String>>> = Default::default();
+
+    // Page mode: attach once and speak for that session on the client's behalf.
+    let mut page_session: Option<String> = None;
+    if let Some(target) = &page {
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = oneshot::channel();
+        pending.lock().unwrap().insert(id, tx);
+        let msg = json!({ "id": id, "method": "Target.attachToTarget", "params": { "targetId": target, "flatten": true } });
+        if out.send(msg.to_string()).is_err() {
+            return;
+        }
+        let Ok(reply) = rx.await else { return };
+        let Some(s) = reply["result"]["sessionId"].as_str() else { return };
+        sessions.lock().unwrap().insert(s.to_string());
+        page_session = Some(s.to_string());
+    }
+    let page_mode = page_session.is_some();
 
     let writer = tokio::spawn(async move {
         while let Some(text) = reply_rx.recv().await {
@@ -67,11 +94,17 @@ async fn serve(
     let forward = tokio::spawn(async move {
         loop {
             match events.recv().await {
-                Ok(ev) => {
+                Ok(mut ev) => {
                     let mine = match ev.get("sessionId").and_then(Value::as_str) {
                         Some(s) => ev_sessions.lock().unwrap().contains(s),
-                        None => true,
+                        // A one-tab client has no use for browser-wide events.
+                        None => !page_mode,
                     };
+                    if page_mode {
+                        if let Some(o) = ev.as_object_mut() {
+                            o.remove("sessionId");
+                        }
+                    }
                     if mine && ev_tx.send(ev.to_string()).is_err() {
                         break;
                     }
@@ -89,6 +122,9 @@ async fn serve(
         let method = req["method"].as_str().unwrap_or_default().to_string();
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         req["id"] = json!(id);
+        if let (Some(s), None) = (&page_session, req.get("sessionId")) {
+            req["sessionId"] = json!(s);
+        }
         let (tx, rx) = oneshot::channel();
         pending.lock().unwrap().insert(id, tx);
         if out.send(req.to_string()).is_err() {
@@ -104,6 +140,11 @@ async fn serve(
                 }
             }
             reply["id"] = original;
+            if page_mode {
+                if let Some(o) = reply.as_object_mut() {
+                    o.remove("sessionId");
+                }
+            }
             let _ = reply_tx.send(reply.to_string());
         });
     }

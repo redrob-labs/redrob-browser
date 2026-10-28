@@ -7,6 +7,7 @@
 
 mod agent_bridge;
 mod cdp;
+mod devtools;
 mod engine;
 mod import_chrome;
 mod input;
@@ -83,6 +84,7 @@ fn main() -> anyhow::Result<()> {
                 profile,
                 last_session_save: std::time::Instant::now(),
                 show_downloads: false,
+                show_devtools: false,
                 vault: None,
                 pending_save: None,
                 agent_tx,
@@ -137,6 +139,7 @@ struct Window {
     profile: Option<profile::Profile>,
     last_session_save: std::time::Instant,
     show_downloads: bool,
+    show_devtools: bool,
     vault: Option<vault::Vault>,
     /// A sign-in the person just made, waiting for "save this password?".
     pending_save: Option<(String, String, zeroize::Zeroizing<String>)>,
@@ -230,6 +233,9 @@ impl Window {
             self.address = if t.url == NEW_TAB { String::new() } else { t.url.clone() };
             self.op(t.id, Op::Activate);
         }
+        if self.show_devtools {
+            self.devtools_opened();
+        }
     }
 
     fn navigate(&mut self, url: String) {
@@ -274,7 +280,12 @@ impl Window {
             match event {
                 Event::Tile { key, generation, image } => t.tiles.insert(ctx, key, generation, image),
                 Event::Invalidate => t.tiles.invalidate(),
+                Event::Console { level, text } => t.devtools.log(&level, text),
+                Event::NetRequest { id, method, url } => t.devtools.request(id, method, url),
+                Event::NetResponse { id, status, mime } => t.devtools.response(&id, status, mime),
+                Event::Dom(root) => t.devtools.dom = Some(root),
                 Event::Navigated(url) => {
+                    t.devtools.navigated();
                     t.url = url.clone();
                     t.title.clear();
                     t.tiles.clear();
@@ -380,6 +391,11 @@ impl Window {
             if let Some(id) = self.active_id() {
                 self.op(id, if back { Op::Back } else { Op::Forward });
             }
+        }
+        // F12 or Ctrl+Shift+I: developer tools.
+        let tools = ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F12) || i.consume_key(shift, Key::I));
+        if tools {
+            self.toggle_devtools();
         }
         // Ctrl+Shift+PageUp/PageDown move the active tab left or right.
         let (left, right) = ctx.input_mut(|i| (i.consume_key(shift, Key::PageUp), i.consume_key(shift, Key::PageDown)));
@@ -590,6 +606,38 @@ impl Window {
         self.notice = Some("Sending to Redrob Code...".to_string());
     }
 
+    fn toggle_devtools(&mut self) {
+        self.show_devtools = !self.show_devtools;
+        if self.show_devtools {
+            self.devtools_opened();
+        }
+    }
+
+    /// Network reporting starts the first time the tools open on a tab.
+    fn devtools_opened(&mut self) {
+        let Some(t) = self.model.active_tab_mut() else { return };
+        if !t.devtools.network_on {
+            t.devtools.network_on = true;
+            let id = t.id;
+            self.op(id, Op::DevtoolsOpen);
+        }
+    }
+
+    fn devtools_panel(&mut self, ui: &mut egui::Ui) {
+        let Some(t) = self.model.active_tab_mut() else { return };
+        let id = t.id;
+        let act = devtools::ui(ui, &mut t.devtools);
+        if let Some(expr) = act.evaluate {
+            self.op(id, Op::Evaluate(expr));
+        }
+        if act.refresh_dom {
+            self.op(id, Op::GetDom);
+        }
+        if act.close {
+            self.show_devtools = false;
+        }
+    }
+
     fn menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Menu", |ui| {
             if ui.button("New tab").clicked() {
@@ -598,6 +646,10 @@ impl Window {
             }
             if ui.button("Downloads").clicked() {
                 self.show_downloads = true;
+                ui.close();
+            }
+            if ui.button("Developer tools").clicked() {
+                self.toggle_devtools();
                 ui.close();
             }
             ui.separator();
@@ -834,6 +886,10 @@ impl eframe::App for Window {
                 });
             }
         });
+
+        if self.show_devtools {
+            egui::Panel::right("devtools").resizable(true).default_size(440.0).show_inside(ui, |ui| self.devtools_panel(ui));
+        }
 
         if self.show_downloads && !self.model.downloads.is_empty() {
             egui::Panel::bottom("downloads").show_inside(ui, |ui| self.downloads_panel(ui));

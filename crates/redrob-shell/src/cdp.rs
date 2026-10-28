@@ -85,6 +85,12 @@ pub enum Op {
     Text(String),
     /// Paint these document tiles for this paint generation.
     Tiles { keys: Vec<TileKey>, generation: u64 },
+    /// The developer tools opened on this tab: start reporting network traffic.
+    DevtoolsOpen,
+    /// Run JavaScript typed into the console.
+    Evaluate(String),
+    /// Send the whole document tree for the Elements panel.
+    GetDom,
     /// Type a saved login into the page's sign-in form.
     FillLogin { username: String, password: zeroize::Zeroizing<String> },
 }
@@ -111,6 +117,10 @@ pub enum Event {
     Opened { url: String, opener: Option<TabId> },
     /// The person signed in on a page; the window may offer to save it.
     LoginSubmitted { origin: String, username: String, password: zeroize::Zeroizing<String> },
+    Console { level: String, text: String },
+    NetRequest { id: String, method: String, url: String },
+    NetResponse { id: String, status: u16, mime: String },
+    Dom(Value),
     /// Result of FillLogin: "filled" or "no-form".
     Filled(String),
     /// A file download began or changed state. Sent with tab 0.
@@ -402,6 +412,26 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
             st.c.send(s, "Input.insertText", json!({ "text": text }));
             st.emit(tab, Event::Invalidate);
         }
+        Op::DevtoolsOpen => {
+            st.c.call(s, "Network.enable", json!({})).await?;
+        }
+        Op::Evaluate(expr) => {
+            let r = st
+                .c
+                .call(s, "Runtime.evaluate", json!({ "expression": expr, "returnByValue": true, "awaitPromise": true, "replMode": true }))
+                .await?;
+            let (level, text) = if let Some(ex) = r.get("exceptionDetails") {
+                ("error", ex["exception"]["description"].as_str().or(ex["text"].as_str()).unwrap_or("Error").to_string())
+            } else {
+                ("result", remote_object_text(&r["result"]))
+            };
+            st.emit(tab, Event::Console { level: level.to_string(), text });
+            st.emit(tab, Event::Invalidate);
+        }
+        Op::GetDom => {
+            let d = st.c.call(s, "DOM.getDocument", json!({ "depth": -1, "pierce": false })).await?;
+            st.emit(tab, Event::Dom(d["root"].clone()));
+        }
         Op::FillLogin { username, password } => {
             let doc = st.c.call(s, "Runtime.evaluate", json!({ "expression": "document" })).await?;
             let object_id = doc["result"]["objectId"].as_str().unwrap_or_default().to_string();
@@ -507,6 +537,42 @@ async fn on_event(st: &mut State, ev: Value) {
                 }
             }
         }
+        "Runtime.consoleAPICalled" => {
+            let level = match p["type"].as_str().unwrap_or("log") {
+                "error" | "assert" => "error",
+                "warning" => "warning",
+                "info" => "info",
+                "debug" => "debug",
+                _ => "log",
+            };
+            let text = p["args"].as_array().map(|a| a.iter().map(remote_object_text).collect::<Vec<_>>().join(" ")).unwrap_or_default();
+            st.emit(tab, Event::Console { level: level.to_string(), text });
+        }
+        "Runtime.exceptionThrown" => {
+            let d = &p["exceptionDetails"];
+            let text = d["exception"]["description"].as_str().or(d["text"].as_str()).unwrap_or("Uncaught error").to_string();
+            st.emit(tab, Event::Console { level: "error".to_string(), text });
+        }
+        "Network.requestWillBeSent" => {
+            st.emit(
+                tab,
+                Event::NetRequest {
+                    id: p["requestId"].as_str().unwrap_or_default().to_string(),
+                    method: p["request"]["method"].as_str().unwrap_or("GET").to_string(),
+                    url: p["request"]["url"].as_str().unwrap_or_default().to_string(),
+                },
+            );
+        }
+        "Network.responseReceived" => {
+            st.emit(
+                tab,
+                Event::NetResponse {
+                    id: p["requestId"].as_str().unwrap_or_default().to_string(),
+                    status: p["response"]["status"].as_u64().unwrap_or(0) as u16,
+                    mime: p["response"]["mimeType"].as_str().unwrap_or_default().to_string(),
+                },
+            );
+        }
         "Page.navigatedWithinDocument" => {
             if let Some(url) = p["url"].as_str() {
                 st.emit(tab, Event::UrlChanged(url.to_string()));
@@ -554,6 +620,20 @@ async fn step_history(st: &mut State, session: &str, delta: i64) -> anyhow::Resu
         st.c.call(Some(session), "Page.navigateToHistoryEntry", json!({ "entryId": entry["id"] })).await?;
     }
     Ok(())
+}
+
+/// A Runtime.RemoteObject as console text.
+fn remote_object_text(o: &Value) -> String {
+    if let Some(v) = o.get("value") {
+        return match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        };
+    }
+    if let Some(u) = o.get("unserializableValue").and_then(Value::as_str) {
+        return u.to_string();
+    }
+    o["description"].as_str().map(str::to_string).unwrap_or_else(|| o["type"].as_str().unwrap_or("undefined").to_string())
 }
 
 fn decode(data: &str) -> Option<egui::ColorImage> {
