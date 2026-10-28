@@ -4045,6 +4045,18 @@ pub(crate) struct GridCalcExpression {
     context_initialized: std::sync::atomic::AtomicBool,
 }
 
+impl PartialEq for GridCalcExpression {
+    fn eq(&self, other: &Self) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.expression == other.expression
+            && self.em_px.load(Relaxed) == other.em_px.load(Relaxed)
+            && self.rem_px.load(Relaxed) == other.rem_px.load(Relaxed)
+            && self.vw.load(Relaxed) == other.vw.load(Relaxed)
+            && self.vh.load(Relaxed) == other.vh.load(Relaxed)
+            && self.context_initialized.load(Relaxed) == other.context_initialized.load(Relaxed)
+    }
+}
+
 impl GridCalcExpression {
     fn parse(value: &str) -> Option<Self> {
         let value = value.trim().to_ascii_lowercase();

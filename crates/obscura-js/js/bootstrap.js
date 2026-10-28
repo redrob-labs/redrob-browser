@@ -64,6 +64,7 @@ const __obscuraCore = globalThis.Deno.core;
     //   Object.getOwnPropertyDescriptor(window, 'Node').enumerable
     // Pre-declaring them non-enumerable here is enough -- per the note above,
     // the later `globalThis.X = X` assignments only update the value.
+    'EventTarget', 'Window', 'HTMLDocument', 'HTMLElement', 'HTMLUnknownElement',
     'Node', 'Element', 'Document', 'DocumentFragment', 'DocumentType',
     'Navigator', 'PluginArray', 'Plugin', 'MimeType', 'MimeTypeArray',
     'Animation', 'KeyframeEffect', 'DocumentTimeline',
@@ -1185,7 +1186,12 @@ function _scheduleRenderingOpportunity() {
   if (_renderOpportunityScheduled || _renderOpportunityRunning
       || !_renderOpportunityHasWork()) return;
   _renderOpportunityScheduled = true;
-  _scheduleAfter(_RAF_FRAME_DELAY_MS, _runRenderingOpportunity);
+  // A frame cannot come sooner than its layout takes. When one layout costs
+  // 200ms (Drive) or 700ms (a long article), a 16ms cadence spent nearly all
+  // of the main thread re-laying out for observers and rAF while the page's
+  // own scripts waited; space the opportunities by the last layout cost.
+  const layoutMs = __obscuraCore.ops.op_last_layout_ms?.() ?? 0;
+  _scheduleAfter(Math.max(_RAF_FRAME_DELAY_MS, layoutMs), _runRenderingOpportunity);
 }
 
 function _runRenderingOpportunity() {
@@ -2060,9 +2066,10 @@ function _eventTargetDispatch(target, event) {
   }
 }
 
-function _domEventInvoke(target, event, capture, phase) {
+function _domEventInvoke(target, event, capture, phase, retargeted) {
   event.currentTarget = target;
   event.eventPhase = phase;
+  if (retargeted !== undefined) event.target = retargeted;
 
   // Content attributes and IDL event handlers participate in the non-capture
   // listener group. Keep their existing position ahead of listeners installed
@@ -2101,6 +2108,30 @@ function _domEventInvoke(target, event, capture, phase) {
 // and left eventPhase at NONE. Delegated framework handlers depend on capture
 // running before target/bubble listeners, so build the path once and dispatch
 // each phase explicitly.
+// "Get the parent" for event paths: a slotted node's parent is its assigned
+// slot, a shadow root's parent is its host unless a non-composed event started
+// in that shadow tree, and everything else follows parentNode.
+function _eventParent(node, event, targetRootRef) {
+  if (_shadowHostCount && (node.nodeType === 1 || node.nodeType === 3)) {
+    const parent = node.parentNode;
+    if (parent && parent._isShadowHost) {
+      const slotNid = +_dom("assigned_slot", node._nid);
+      if (slotNid >= 0) {
+        const slot = _wrap(slotNid);
+        if (slot) return slot;
+      }
+    }
+    return parent || null;
+  }
+  if (node instanceof ShadowRoot) {
+    if (!event.composed) {
+      if (targetRootRef.root === undefined) targetRootRef.root = targetRootRef.target.getRootNode();
+      if (targetRootRef.root === node) return null;
+    }
+    return node.host || null;
+  }
+  return node.parentNode || null;
+}
 function _domEventDispatch(target, event) {
   if (!event || typeof event.type === "undefined") {
     throw new TypeError("Failed to execute 'dispatchEvent' on 'EventTarget': parameter 1 is not of type 'Event'.");
@@ -2117,10 +2148,13 @@ function _domEventDispatch(target, event) {
   event._immediatePropagationStopped = false;
   event.target = target;
   const path = [];
-  let ancestor = target.parentNode || null;
+  const targetRootRef = { target, root: undefined };
+  let ancestor = _eventParent(target, event, targetRootRef);
+  let crossesShadow = target instanceof ShadowRoot;
   while (ancestor) {
     path.push(ancestor);
-    ancestor = ancestor.parentNode || null;
+    if (ancestor instanceof ShadowRoot) crossesShadow = true;
+    ancestor = _eventParent(ancestor, event, targetRootRef);
   }
   // Detached nodes have no event parent. Connected paths reach Window through
   // Document, except for load, whose Document parent is null by specification.
@@ -2128,23 +2162,46 @@ function _domEventDispatch(target, event) {
   if (reachesDocument && event.type !== "load") {
     path.push(globalThis);
   }
+  // Retargeting: listeners outside a shadow tree see its host as the target.
+  let targets = null;
+  if (crossesShadow) {
+    targets = new Array(path.length);
+    let current = target;
+    let previous = target;
+    for (let i = 0; i < path.length; i++) {
+      const entry = path[i];
+      if (previous instanceof ShadowRoot && entry === previous.host
+          && current !== previous.host && current.getRootNode() === previous) {
+        current = previous.host;
+      }
+      targets[i] = current;
+      previous = entry;
+    }
+  }
+  event._path = [target, ...path];
 
   try {
     for (let index = path.length - 1; index >= 0; index--) {
-      _domEventInvoke(path[index], event, true, 1);
+      const atTarget = targets && targets[index] === path[index];
+      _domEventInvoke(path[index], event, true, atTarget ? 2 : 1, targets ? targets[index] : undefined);
       if (event._propagationStopped) break;
     }
 
     if (!event._propagationStopped) {
-      _domEventInvoke(target, event, true, 2);
+      _domEventInvoke(target, event, true, 2, targets ? target : undefined);
       if (!event._immediatePropagationStopped) {
-        _domEventInvoke(target, event, false, 2);
+        _domEventInvoke(target, event, false, 2, targets ? target : undefined);
       }
     }
 
-    if (event.bubbles && !event._propagationStopped) {
-      for (const currentTarget of path) {
-        _domEventInvoke(currentTarget, event, false, 3);
+    if (!event._propagationStopped && (event.bubbles || targets)) {
+      for (let index = 0; index < path.length; index++) {
+        const currentTarget = path[index];
+        // A host whose shadow tree holds the target is AT_TARGET for its own
+        // listeners, so it hears even non-bubbling events (focus, load...).
+        const atTarget = targets && targets[index] === currentTarget;
+        if (!atTarget && !event.bubbles) continue;
+        _domEventInvoke(currentTarget, event, false, atTarget ? 2 : 3, targets ? targets[index] : undefined);
         if (event._propagationStopped) break;
       }
     }
@@ -2153,6 +2210,8 @@ function _domEventDispatch(target, event) {
     event.currentTarget = null;
     event.eventPhase = 0;
     event._dispatching = false;
+    event._path = null;
+    if (targets) event.target = target;
   }
 }
 
@@ -2323,6 +2382,8 @@ function _runPostConnectionSteps(nodes) {
   } finally {
     _postConnection = outer;
   }
+  if (_ceDefinitionCount) _ceConnected(nodes);
+  if (_shadowHostCount) _slotsMaybeChanged(nodes);
 }
 function _iframeConnectionPending(iframe) {
   const state = _postConnection;
@@ -2408,7 +2469,7 @@ function _registerForeignDocument() { _foreignDocumentCount++; }
 // A Document without a browsing context, backed by its own native tree root.
 function _createDetachedDocument(contentType, xml) {
   const nid = +_dom("create_document_fragment");
-  const DocumentClass = xml ? (globalThis.XMLDocument || Document) : Document;
+  const DocumentClass = xml ? (globalThis.XMLDocument || Document) : (globalThis.HTMLDocument || Document);
   const doc = new DocumentClass(nid);
   doc._detached = true;
   doc._contentType = contentType;
@@ -2657,6 +2718,8 @@ function _removeNode(parent, child, suppress, method = "removeChild") {
   const removedWindowNames = _windowNamedNamesInTree(child);
   if (child instanceof Element) _releaseLinkedStylesheetsIn(child);
   const parentConnected = parent.isConnected;
+  const ceGone = parentConnected && _ceDefinitionCount ? _ceCollectConnected(child) : null;
+  if (_shadowHostCount) _slotsMaybeChanged([child]);
   const removed = _dom("remove_child", child._nid) === "true";
   if (!removed) {
     throw _mutationError(method, "The node to be removed is not a child of this node.", "NotFoundError");
@@ -2667,17 +2730,21 @@ function _removeNode(parent, child, suppress, method = "removeChild") {
   _detachStyleSheetsInSubtree(child);
   _reconcileWindowNamedProperties(removedWindowNames);
   if (observed) _queueTreeMutationRecord(parent, [], [child], previousSibling, nextSibling);
+  if (ceGone) _ceDisconnected(ceGone);
 }
 
 // Move one node under `parent` before `child` (append when null). A node
 // that still has a parent is removed from it first, which old-parent
 // observers see as a removal (adopt runs "remove" before inserting).
 function _insertOneNode(parent, node, child, method, queueOldParentRecord) {
+  let ceMoved = null;
   if (node._shadowParent) {
     node._shadowParent.removeChild(node);
   } else {
     const oldParent = node.parentNode;
     if (oldParent) {
+      if (_ceDefinitionCount && node.isConnected) ceMoved = _ceCollectConnected(node);
+      if (_shadowHostCount) _slotsMaybeChanged([node]);
       if (queueOldParentRecord && _hasMutationObservers()) {
         const [previousSibling, nextSibling] = _recordSiblings(node);
         _queueTreeMutationRecord(oldParent, [], [node], previousSibling, nextSibling);
@@ -2697,6 +2764,7 @@ function _insertOneNode(parent, node, child, method, queueOldParentRecord) {
   _seedInsertedTreeState(node, parent, parentConnected);
   if (node._nodeDocument !== undefined) node._nodeDocument = undefined;
   _registerWindowNamedTree(node);
+  if (ceMoved) _ceDisconnected(ceMoved);
 }
 
 // "Insert": returns the inserted nodes. `suppress` skips parent's record.
@@ -2774,7 +2842,29 @@ function _attributePositionKey(node) {
   return _attributePositionOrder.get(node);
 }
 
-class Node {
+// EventTarget is the root of every DOM interface chain (Window, Node,
+// XMLHttpRequest, ...). Its three methods are the only listener methods on the
+// chain, as in browsers: polyfills (ShadyDOM, zone.js) capture or patch them on
+// EventTarget.prototype and expect every target to inherit the result. A null
+// receiver is the global object (a bare `addEventListener(...)` call).
+class EventTarget {
+  constructor() {}
+  addEventListener(type, callback, options) {
+    _eventTargetAdd(this == null ? globalThis : this, type, callback, options);
+  }
+  removeEventListener(type, callback, options) {
+    _eventTargetRemove(this == null ? globalThis : this, type, callback, options);
+  }
+  dispatchEvent(event) {
+    const target = this == null ? globalThis : this;
+    // Nodes propagate along the tree (and through shadow trees); other targets
+    // only reach their own listeners.
+    if (target instanceof Node && typeof target._nid === "number") return _domEventDispatch(target, event);
+    return _eventTargetDispatch(target, event);
+  }
+}
+
+class Node extends EventTarget {
   static ELEMENT_NODE = 1;
   static ATTRIBUTE_NODE = 2;
   static TEXT_NODE = 3;
@@ -2794,7 +2884,7 @@ class Node {
   static DOCUMENT_POSITION_CONTAINED_BY = 16;
   static DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 32;
 
-  constructor(nid) { this._nid = nid; }
+  constructor(nid) { super(); this._nid = nid; }
   get nodeType() { return +_dom("node_type", this._nid); }
   get nodeName() { return _domParse("node_name", this._nid) || ""; }
   get ownerDocument() { return _nodeDocumentOf(this); }
@@ -2826,6 +2916,9 @@ class Node {
     const observed = _hasMutationObservers();
     const removedNodes = observed ? oldChildren.map(_wrap).filter(Boolean) : null;
     const doc = _foreignDocumentCount ? _nodeDocumentForInsertion(this) : null;
+    const ceGone = _ceDefinitionCount && oldChildren.length && this.isConnected
+      ? _ceCollectConnected(this, false) : null;
+    if (_shadowHostCount && oldChildren.length) _slotsMaybeChanged([this]);
     for (const c of oldChildren) {
       const child = _wrap(c);
       if (child) _detachStyleSheetsInSubtree(child);
@@ -2845,6 +2938,7 @@ class Node {
     if (observed && (addedNodes.length || removedNodes.length)) {
       _queueTreeMutationRecord(this, addedNodes, removedNodes, null, null);
     }
+    if (ceGone) _ceDisconnected(ceGone);
   }
   get nodeValue() {
     const t = this.nodeType;
@@ -2934,7 +3028,9 @@ class Node {
       return clone;
     }
     if (t === 1) {
-      return _wrap(+_dom("clone_node", this._nid, deep ? "true" : "false"));
+      const clone = _wrap(+_dom("clone_node", this._nid, deep ? "true" : "false"));
+      if (_ceDefinitionCount && !_ceInTemplateContents(this)) _ceUpgradeClone(clone);
+      return clone;
     }
     // Clone structurally via real DOM nodes rather than round-tripping through a
     // throwaway <div>.innerHTML: the fragment parser discards elements that are
@@ -3068,15 +3164,6 @@ class Node {
     return true;
   }
   isSameNode(other) { return !!other && this._nid === other._nid; }
-  addEventListener(type, callback, options) {
-    _eventTargetAdd(this, type, callback, options);
-  }
-  removeEventListener(type, callback, options) {
-    _eventTargetRemove(this, type, callback, options);
-  }
-  dispatchEvent(event) {
-    return _eventTargetDispatch(this, event);
-  }
 }
 class CharacterData extends Node {
   get data() {
@@ -4129,7 +4216,12 @@ class Element extends Node {
       oldChildren = _domParse("child_nodes", this._nid) || [];
     }
     const html = String(v ?? "");
+    const ceConnected = _ceDefinitionCount ? this.isConnected : false;
+    const ceGone = ceConnected ? _ceCollectConnected(this, false) : null;
     _dom("set_inner_html", this._nid, html);
+    if (ceGone) _ceDisconnected(ceGone);
+    if (ceConnected) _ceConnected([this], false);
+    if (_shadowHostCount) _slotsMaybeChanged([this]);
     // HTML fragment parsing can introduce IDs without calling the JS
     // setAttribute path. Register those elements for Window named access
     // before script can synchronously read `window.someId`.
@@ -4256,8 +4348,10 @@ class Element extends Node {
       ? this.getAttribute(n)
       : null;
     const observedOldValue = _attributeOldValuesWanted() ? this.getAttribute(n) : null;
+    const ceOldValue = this._ceState === "custom" && _ceObservesAttribute(this, n) ? this.getAttribute(n) : undefined;
     const value = String(v);
     _dom("set_attribute", this._nid, n + "\0" + value);
+    if (n === "slot" && _shadowHostCount) _slotsMaybeChanged([this]);
     if (n === "src" && this.localName === "iframe" && !this.hasAttribute('srcdoc')) {
       if (value && value !== "about:blank") this._loadIframeSrc(value);
       else this._resetIframeFrame();
@@ -4282,6 +4376,7 @@ class Element extends Node {
     }
     if (popoverPrev !== undefined) this._popoverTypeMaybeChanged(popoverPrev);
     if (_hasMutationObservers()) _queueAttributeMutationRecord(this, n, null, observedOldValue);
+    if (ceOldValue !== undefined) _ceAttributeChanged(this, n, ceOldValue, value, null);
     if (this.localName === "source"
         && (n === "srcset" || n === "sizes" || n === "media" || n === "type")) {
       const picture = this.parentElement;
@@ -4300,8 +4395,10 @@ class Element extends Node {
     _ns_validateQualifiedName(ns, n);
     const localName = n.includes(":") ? n.slice(n.indexOf(":") + 1) : n;
     const observedOldValue = _attributeOldValuesWanted() ? this.getAttributeNS(ns, localName) : null;
+    const ceOldValue = this._ceState === "custom" && _ceObservesAttribute(this, localName) ? this.getAttributeNS(ns, localName) : undefined;
     _dom("set_attribute_ns", this._nid, ns + "\0" + n + "\0" + value);
     if (_hasMutationObservers()) _queueAttributeMutationRecord(this, localName, ns || null, observedOldValue);
+    if (ceOldValue !== undefined) _ceAttributeChanged(this, localName, ceOldValue, value, ns || null);
     // Namespace-aware writes can replace an attribute by namespace/local name
     // while changing its qualified name. Fall back to native reads afterwards
     // instead of maintaining a second, subtly different key space here.
@@ -4317,8 +4414,11 @@ class Element extends Node {
       ? this.getAttribute(n)
       : null;
     const observedOldValue = _hasMutationObservers() ? this.getAttribute(n) : null;
+    const ceOldValue = this._ceState === "custom" && _ceObservesAttribute(this, n) ? this.getAttribute(n) : null;
     _dom("remove_attribute", this._nid, n);
     if (observedOldValue !== null) _queueAttributeMutationRecord(this, n, null, observedOldValue);
+    if (ceOldValue !== null) _ceAttributeChanged(this, n, ceOldValue, null, null);
+    if (n === "slot" && _shadowHostCount) _slotsMaybeChanged([this]);
     if (this._nullNamespaceAttrs instanceof Map) {
       this._nullNamespaceAttrs.delete(n);
     }
@@ -4350,8 +4450,10 @@ class Element extends Node {
     n = String(n);
     if (ns === '' && n === 'srcdoc' && this.localName === 'iframe' && this.getAttributeNS(ns, n) === null) return;
     const observedOldValue = _hasMutationObservers() ? this.getAttributeNS(ns, n) : null;
+    const ceOldValue = this._ceState === "custom" && _ceObservesAttribute(this, n) ? this.getAttributeNS(ns, n) : null;
     _dom("remove_attribute_ns", this._nid, ns + "\0" + n);
     if (observedOldValue !== null) _queueAttributeMutationRecord(this, n, ns || null, observedOldValue);
+    if (ceOldValue !== null) _ceAttributeChanged(this, n, ceOldValue, null, ns || null);
     this._nullNamespaceAttrs = null;
     if (ns === '' && n === 'srcdoc' && this.localName === 'iframe') this._loadIframeSrc(this.getAttribute('src') || 'about:blank');
     if (ns === "" && n === "style") this._style._replaceFromAttribute("");
@@ -4475,15 +4577,6 @@ class Element extends Node {
         return element;
     }
     return null;
-  }
-  addEventListener(type, handler, opts) {
-    _eventTargetAdd(this, type, handler, opts);
-  }
-  removeEventListener(type, handler, opts) {
-    _eventTargetRemove(this, type, handler, opts);
-  }
-  dispatchEvent(event) {
-    return _domEventDispatch(this, event);
   }
   _resolveInlineHandler(name) {
     if (!_scriptingEnabled) return null;
@@ -5962,6 +6055,77 @@ class Element extends Node {
   }
 }
 
+// HTMLElement and the per-tag HTML interfaces (HTML "elements in the DOM").
+// Element keeps the shared member implementations; these classes give every
+// HTML element the browser's prototype chain and constructor name, e.g.
+// HTMLDivElement <- HTMLElement <- Element <- Node <- EventTarget.
+//
+// HTMLElement's constructor is the HTML "HTML element constructor": `new
+// MyElement()` for a defined custom element creates a fresh element of the
+// definition's local name. During an upgrade the construction stack entry is
+// consumed by Element's constructor instead, which returns the element being
+// upgraded.
+var _HTML_NS = "http://www.w3.org/1999/xhtml";
+var _htmlElementClassByTag = Object.create(null);
+class HTMLElement extends Element {
+  constructor(nid) {
+    let created = null;
+    if (nid === undefined) {
+      const entry = _customElementConstructionStack[_customElementConstructionStack.length - 1];
+      if (!(entry && entry.constructor === new.target)) {
+        const registry = globalThis.customElements;
+        const definition = registry && registry._defByCtor ? registry._defByCtor.get(new.target) : null;
+        if (!definition) throw new TypeError("Failed to construct 'HTMLElement': Illegal constructor");
+        created = definition;
+        nid = +_dom("create_element", definition.localName);
+      }
+    }
+    super(nid);
+    if (created) {
+      this._tagName = created.localName.toUpperCase();
+      this._lname = created.localName;
+      this._ns = _HTML_NS;
+      this._nullNamespaceAttrs = new Map();
+      _seedDetachedTreeState(this);
+      _cache.set(nid, this);
+      this._ceDef = created;
+      this._ceState = "custom";
+      if (created.localName !== created.name) this._ceIs = created.name;
+    }
+  }
+}
+Object.defineProperty(HTMLElement.prototype, Symbol.toStringTag, { value: "HTMLElement", configurable: true });
+class HTMLUnknownElement extends HTMLElement {}
+Object.defineProperty(HTMLUnknownElement.prototype, Symbol.toStringTag, { value: "HTMLUnknownElement", configurable: true });
+function _registerHTMLElementClass(C, tags) {
+  const name = C.name;
+  if (!Object.prototype.hasOwnProperty.call(C.prototype, Symbol.toStringTag)) {
+    Object.defineProperty(C.prototype, Symbol.toStringTag, { value: name, configurable: true });
+  }
+  _markNative(C);
+  for (const tag of tags) _htmlElementClassByTag[tag] = C;
+  return C;
+}
+function _defineHTMLElementClass(name, tags, Base = HTMLElement) {
+  const C = { [name]: class extends Base {} }[name];
+  return _registerHTMLElementClass(C, tags);
+}
+// Elements whose interface is HTMLElement itself (HTML's element index).
+for (const tag of ["abbr", "address", "article", "aside", "b", "bdi", "bdo", "cite", "code", "dd", "dfn",
+  "dt", "em", "figcaption", "figure", "footer", "header", "hgroup", "i", "kbd", "main", "mark", "nav",
+  "noscript", "rp", "rt", "ruby", "s", "samp", "search", "section", "small", "strong", "sub", "summary",
+  "sup", "u", "var", "wbr", "acronym", "basefont", "big", "center", "nobr", "noembed", "noframes",
+  "plaintext", "rb", "rtc", "strike", "tt"]) {
+  _htmlElementClassByTag[tag] = HTMLElement;
+}
+// Interface for an HTML element with no registered class: custom element
+// names (valid or not yet defined) are HTMLElement, anything else unknown.
+function _htmlElementClassForLocalName(localName) {
+  const C = _htmlElementClassByTag[localName];
+  if (C) return C;
+  return localName.includes("-") ? HTMLElement : HTMLUnknownElement;
+}
+
 // WHATWG "convert nodes into a node": a Node argument passes through, anything
 // else is stringified into a Text node, so e.g. append(null) inserts the text
 // "null" and append(undefined) inserts "undefined" per the (Node or DOMString)
@@ -6378,7 +6542,7 @@ class Document extends Node {
   evaluate(expression, contextNode, namespaceResolver, type, result) {
     return _makeXPathResult(type, _xpathFindNodes(expression, contextNode || this));
   }
-  createElement(t) {
+  createElement(t, options) {
     const localName = String(t).toLowerCase();
     const nid = +_dom("create_element", localName);
     const C = _elementClassForKnownName(
@@ -6400,8 +6564,15 @@ class Document extends Node {
       el._templateContent = this.createDocumentFragment();
       el._templateContent._fragmentContext = 'template';
     }
-    const definition = globalThis.customElements?._registry?.get(localName);
-    if (el && definition) globalThis.customElements._upgradeElement(el, definition);
+    // Only a document with a browsing context (this window's) has definitions;
+    // createHTMLDocument / DOMParser documents create uncustomized elements.
+    if ((_ceDefinitionCount || options) && this === globalThis.document) {
+      const isValue = options !== null && typeof options === "object" && options.is != null ? String(options.is) : null;
+      if (isValue !== null && !localName.includes("-")) el._ceIs = isValue;
+      const definition = _ceLookupDefinition(el);
+      if (definition) _ceUpgrade(el, definition);
+      else if (el._ceIs) _dom("set_attribute", el._nid, "is\0" + el._ceIs);
+    }
     return el;
   }
   createElementNS(ns, t) {
@@ -6525,15 +6696,6 @@ class Document extends Node {
     const range = new Range();
     if (this !== globalThis.document) { range._sc = this; range._ec = this; }
     return range;
-  }
-  addEventListener(type, fn, opts) {
-    _eventTargetAdd(this, type, fn, opts);
-  }
-  removeEventListener(type, fn, opts) {
-    _eventTargetRemove(this, type, fn, opts);
-  }
-  dispatchEvent(event) {
-    return _domEventDispatch(this, event);
   }
   createTreeWalker(root, whatToShow, filter) {
     // whatToShow is unsigned long; default SHOW_ALL only when the arg is omitted.
@@ -6959,12 +7121,17 @@ class DocumentFragment extends Node {
   get innerHTML() { return _domParse("inner_html", this._nid) ?? ""; }
   set innerHTML(v) {
     const html = String(v ?? "");
+    const ceConnected = _ceDefinitionCount ? this.isConnected : false;
+    const ceGone = ceConnected ? _ceCollectConnected(this, false) : null;
     if (this._fragmentContext) {
       _dom("set_inner_html_context", this._nid, _fragmentContextPayload(this._fragmentContext, html));
     } else {
       _dom("set_inner_html", this._nid, html);
     }
     _connectSrcdocFrames(this, html);
+    if (ceGone) _ceDisconnected(ceGone);
+    if (ceConnected) _ceConnected([this], false);
+    if (_shadowHostCount) _slotsMaybeChanged([this]);
   }
   querySelector(s) { return _wrapEl(+_dom("query_selector_scoped", this._nid, s)); }
   querySelectorAll(s) {
@@ -6993,6 +7160,7 @@ class DocumentFragment extends Node {
     const nid = +_dom("clone_node", this._nid, deep ? "true" : "false");
     const frag = new DocumentFragment(nid);
     _cache.set(nid, frag);
+    if (_ceDefinitionCount && deep && !_ceInTemplateContents(this)) _ceUpgradeClone(frag);
     return frag;
   }
 }
@@ -7128,7 +7296,7 @@ function _imageEncodingError() {
 // layout/paint. The render-only native op owns responsive candidate selection,
 // fetching, and metadata sniffing; bootstrap owns only the observable request
 // state and event timing.
-class HTMLImageElement extends Element {
+class HTMLImageElement extends HTMLElement {
   constructor(nid) {
     super(nid);
     this._imageRequest = 0;
@@ -7450,7 +7618,7 @@ _markNative(HTMLImageElement.prototype.decode);
 
 // Report only capabilities backed by a real decoder. Poster rendering is an
 // image operation and does not make any audio/video container playable.
-class HTMLMediaElement extends Element {
+class HTMLMediaElement extends HTMLElement {
   static NETWORK_EMPTY = 0;
   static NETWORK_IDLE = 1;
   static NETWORK_LOADING = 2;
@@ -7626,7 +7794,7 @@ class HTMLVideoElement extends HTMLMediaElement {
   get videoHeight() { return this.__media.videoHeight; }
 }
 class HTMLAudioElement extends HTMLMediaElement {}
-class HTMLTrackElement extends Element {
+class HTMLTrackElement extends HTMLElement {
   static NONE = 0;
   static LOADING = 1;
   static LOADED = 2;
@@ -7693,6 +7861,12 @@ function _elementClassFor(nid) {
   if (tag === "AUDIO") return HTMLAudioElement;
   if (tag === "VIDEO") return HTMLVideoElement;
   if (tag === "TRACK") return HTMLTrackElement;
+  // HTML tag names are ASCII-uppercase, but so is a foreign element created
+  // as createElementNS(ns, "INPUT"); only the HTML namespace has these
+  // interfaces.
+  if (tag && _domParse("namespace_uri", nid) === _HTML_NS) {
+    return _htmlElementClassForLocalName(tag.toLowerCase());
+  }
   return Element;
 }
 function _elementClassForKnownName(namespace, qualifiedName) {
@@ -7717,6 +7891,7 @@ function _elementClassForKnownName(namespace, qualifiedName) {
     if (tag === "AUDIO") return HTMLAudioElement;
     if (tag === "VIDEO") return HTMLVideoElement;
     if (tag === "TRACK") return HTMLTrackElement;
+    return _htmlElementClassForLocalName(localName);
   }
   return Element;
 }
@@ -7871,9 +8046,32 @@ Object.defineProperty(Element.prototype, 'onload', {
   enumerable: false,
 });
 
-globalThis.Window = globalThis.Window || function Window() {};
+// Window <- WindowProperties <- EventTarget, as in browsers. The global object
+// itself carries Window's members (it is a [Global] interface), so only the
+// EventTarget methods arrive through the chain; the bootstrap-time own
+// addEventListener/removeEventListener/dispatchEvent are removed so window
+// inherits EventTarget.prototype's (webcomponents polyfills read them there).
+globalThis.Window = (() => {
+  const Window = function Window() { throw new TypeError("Illegal constructor"); };
+  const windowProperties = Object.create(EventTarget.prototype);
+  Object.defineProperty(windowProperties, Symbol.toStringTag, { value: "WindowProperties", configurable: true });
+  Window.prototype = Object.create(windowProperties);
+  Object.defineProperty(Window.prototype, "constructor", { value: Window, writable: true, configurable: true, enumerable: false });
+  Object.defineProperty(Window.prototype, Symbol.toStringTag, { value: "Window", configurable: true });
+  Object.defineProperty(Window, "prototype", { writable: false });
+  Object.setPrototypeOf(Window, EventTarget);
+  _markNative(Window);
+  try { Object.setPrototypeOf(globalThis, Window.prototype); } catch (_e) {}
+  for (const name of ["addEventListener", "removeEventListener", "dispatchEvent"]) {
+    if (Object.prototype.hasOwnProperty.call(globalThis, name)) delete globalThis[name];
+  }
+  return Window;
+})();
 Object.defineProperty(globalThis.Window, Symbol.hasInstance, {
-  value(obj) { return obj === globalThis || (obj && obj.window === obj); },
+  value(obj) {
+    return obj === globalThis || (obj && obj.window === obj)
+      || (obj !== null && typeof obj === "object" && Window.prototype.isPrototypeOf(obj));
+  },
   configurable: true,
 });
 // A browser global is a Window object, not merely an object accepted by
@@ -8598,6 +8796,8 @@ class XMLHttpRequestEventTarget {
   }
 }
 globalThis.XMLHttpRequestEventTarget = XMLHttpRequestEventTarget;
+Object.setPrototypeOf(XMLHttpRequestEventTarget.prototype, EventTarget.prototype);
+Object.setPrototypeOf(XMLHttpRequestEventTarget, EventTarget);
 _markNative(XMLHttpRequestEventTarget);
 _markNative(XMLHttpRequestEventTarget.prototype.addEventListener);
 _markNative(XMLHttpRequestEventTarget.prototype.removeEventListener);
@@ -10610,7 +10810,7 @@ function _reconcileAdoptedStyleSheetAdopters(root, sheets) {
 function _adoptedStyleTarget(root) {
   if (!root) return null;
   if (root.nodeType === 9) return root.head || root.documentElement;
-  return root instanceof globalThis.ShadowRoot ? root : null;
+  return root instanceof ShadowRoot ? root : null;
 }
 
 function _syncAdoptedStyles(root) {
@@ -10889,7 +11089,7 @@ globalThis.__notifyMutation = function(type, target_nid, addedNodes, removedNode
   });
 };
 
-globalThis.ShadowRoot = class ShadowRoot extends DocumentFragment {
+class ShadowRoot extends DocumentFragment {
   constructor(nid, host, options) {
     super(nid);
     this._host = host;
@@ -10947,7 +11147,8 @@ globalThis.ShadowRoot = class ShadowRoot extends DocumentFragment {
   }
   setHTMLUnsafe(value) { this.innerHTML = String(value == null ? '' : value); }
   getHTML() { return this.innerHTML; }
-};
+}
+globalThis.ShadowRoot = ShadowRoot;
 // Constructible-stylesheet adoption, mirroring Document.adoptedStyleSheets.
 Object.defineProperty(globalThis.ShadowRoot.prototype, 'adoptedStyleSheets', {
   get() { return _adoptedStyleSheetsFor(this); },
@@ -10955,77 +11156,237 @@ Object.defineProperty(globalThis.ShadowRoot.prototype, 'adoptedStyleSheets', {
   configurable: true,
 });
 globalThis.__obscura_shadowHostNames = new Set(['article','aside','blockquote','body','div','footer','h1','h2','h3','h4','h5','h6','header','main','nav','p','section','span']);
-function _isConstructorCE(v) {
-  if (typeof v !== 'function') return false;
-  try { Reflect.construct(function () {}, [], v); return true; } catch (e) { return false; }
-}
+// Custom element registry and reactions (HTML "custom elements").
+//
+// Element state lives on the wrapper: `_ceState` is undefined ("undefined" or
+// "uncustomized"), "custom" or "failed", and `_ceDef` is the definition of a
+// custom element. Reactions run synchronously once the DOM operation that
+// caused them has finished, in the order the operation produced them, which
+// is what the per-[CEReactions]-method element queues amount to for script.
+//
+// Insertion and removal find the elements involved through one native walk
+// (`ce_candidates`: hyphenated or `is=` HTML elements, shadow-including tree
+// order), so pages without definitions pay nothing and pages with them pay
+// one native call per connected insertion.
 const _CE_RESERVED = new Set(['annotation-xml', 'color-profile', 'font-face', 'font-face-src', 'font-face-uri', 'font-face-format', 'font-face-name', 'missing-glyph']);
 function _isValidCustomElementName(name) {
   if (typeof name !== 'string' || _CE_RESERVED.has(name)) return false;
   // PotentialCustomElementName (approx): lowercase start, a hyphen, no uppercase.
-  return /^[a-z][a-z0-9._·À-￿-]*-[a-z0-9._·À-￿-]*$/.test(name);
+  return /^[a-z][a-z0-9._·À-\u{EFFFF}-]*-[a-z0-9._·À-\u{EFFFF}-]*$/u.test(name);
+}
+var _ceDefinitionCount = 0;
+function _ceReport(error) {
+  try { globalThis.reportError(error); } catch (_e) { try { console.error(error); } catch (_e2) {} }
+}
+function _ceCallback(element, name, args) {
+  const definition = element._ceDef;
+  const callback = definition && definition.callbacks[name];
+  if (typeof callback !== 'function') return;
+  try { callback.apply(element, args); } catch (error) { _ceReport(error); }
+}
+// The definition an element would take, by local name and `is` value.
+function _ceLookupDefinition(element) {
+  const registry = globalThis.customElements;
+  if (!registry || !registry._defs || element._ns && element._ns !== _HTML_NS) return null;
+  const localName = element.localName;
+  const isValue = element._ceIs || (localName.includes('-') ? null : element.getAttribute('is'));
+  const definition = registry._defs.get(isValue || localName);
+  if (!definition || definition.localName !== localName) return null;
+  return definition;
+}
+// "Upgrade an element".
+function _ceUpgrade(element, definition) {
+  if (element._ceState === 'custom' || element._ceState === 'failed') return;
+  if (element.namespaceURI !== _HTML_NS) return;
+  element._ceDef = definition;
+  element._ceState = 'precustomized';
+  const constructionEntry = { element, constructor: definition.ctor, constructed: false };
+  _customElementConstructionStack.push(constructionEntry);
+  try {
+    const constructed = Reflect.construct(definition.ctor, []);
+    if (constructed !== element) {
+      throw new TypeError("Failed to construct '" + definition.name + "': The result must be the element being upgraded.");
+    }
+  } catch (error) {
+    element._ceState = 'failed';
+    element._ceDef = null;
+    element.__customUpgradeFailed = true;
+    _ceReport(error);
+    return;
+  } finally {
+    const pending = _customElementConstructionStack.lastIndexOf(constructionEntry);
+    if (pending !== -1) _customElementConstructionStack.splice(pending, 1);
+  }
+  element._ceState = 'custom';
+  element.__customUpgraded = true;
+  // Attributes present at upgrade, then connection, in that order.
+  if (definition.callbacks.attributeChangedCallback && definition.observed.size) {
+    const attributes = element.attributes;
+    for (let i = 0; i < attributes.length; i++) {
+      const attribute = attributes[i];
+      if (!definition.observed.has(attribute.name) || attribute.namespaceURI) continue;
+      _ceCallback(element, 'attributeChangedCallback', [attribute.name, null, attribute.value, null]);
+    }
+  }
+  if (element.isConnected) _ceCallback(element, 'connectedCallback', []);
+}
+// "Try to upgrade an element".
+function _ceTryUpgrade(element) {
+  if (element._ceState) return;
+  const definition = _ceLookupDefinition(element);
+  if (definition) _ceUpgrade(element, definition);
+}
+function _ceCandidates(root, includeRoot, name) {
+  if (!root || typeof root._nid !== 'number') return [];
+  const ids = _domParse('ce_candidates', root._nid, (includeRoot ? '1' : '0') + '\0' + (name || '')) || [];
+  const out = [];
+  for (const nid of ids) {
+    const element = _wrapEl(+nid);
+    if (element) out.push(element);
+  }
+  return out;
+}
+// A node became connected: connected custom elements get connectedCallback,
+// undefined ones with a definition are upgraded (which connects them).
+function _ceConnected(nodes, includeRoot = true) {
+  if (!_ceDefinitionCount) return;
+  for (const node of nodes) {
+    if (!node || (node.nodeType !== 1 && node.nodeType !== 11) || !node.isConnected) continue;
+    for (const element of _ceCandidates(node, includeRoot, '')) {
+      if (element._ceState === 'custom') {
+        if (element.isConnected) _ceCallback(element, 'connectedCallback', []);
+      } else if (!element._ceState) {
+        _ceTryUpgrade(element);
+      }
+    }
+  }
+}
+// Custom elements under a node that is about to leave a connected tree.
+function _ceCollectConnected(node, includeRoot = true) {
+  if (!_ceDefinitionCount || !node || (node.nodeType !== 1 && node.nodeType !== 11)) return null;
+  const out = _ceCandidates(node, includeRoot, '').filter((element) => element._ceState === 'custom');
+  return out.length ? out : null;
+}
+function _ceDisconnected(elements) {
+  if (!elements) return;
+  for (const element of elements) _ceCallback(element, 'disconnectedCallback', []);
+}
+// Clone / importNode into this window's document: definitions apply at once
+// (the clone is created with the synchronous custom elements flag unset).
+function _ceUpgradeClone(clone) {
+  if (!_ceDefinitionCount || !clone) return;
+  const doc = _nodeDocumentOf(clone);
+  if (doc && doc !== globalThis.document) return;
+  for (const element of _ceCandidates(clone, true, '')) _ceTryUpgrade(element);
+}
+// Template contents belong to an inert document without definitions.
+function _ceInTemplateContents(node) {
+  const root = node.nodeType === 11 ? node : node.getRootNode();
+  return !!root && root._fragmentContext === 'template';
+}
+function _ceAttributeChanged(element, name, oldValue, newValue, namespace) {
+  const definition = element._ceDef;
+  if (element._ceState !== 'custom' || !definition || !definition.observed.has(name)) return;
+  _ceCallback(element, 'attributeChangedCallback', [name, oldValue, newValue, namespace || null]);
+}
+function _ceObservesAttribute(element, name) {
+  return element._ceState === 'custom' && !!element._ceDef && element._ceDef.observed.has(name);
+}
+function _ceAdopted(node, oldDocument, newDocument) {
+  if (!_ceDefinitionCount || oldDocument === newDocument) return;
+  for (const element of _ceCandidates(node, true, '')) {
+    if (element._ceState === 'custom') _ceCallback(element, 'adoptedCallback', [oldDocument, newDocument]);
+  }
+}
+function _isConstructorCE(v) {
+  if (typeof v !== 'function') return false;
+  try { Reflect.construct(function () {}, [], v); return true; } catch (e) { return false; }
 }
 class CustomElementRegistry {
-  constructor() { this._registry = new Map(); this._byCtor = new Map(); this._whenDefinedResolvers = new Map(); this._defining = false; }
+  constructor() {
+    this._registry = new Map();
+    this._defs = new Map();
+    this._byCtor = new Map();
+    this._defByCtor = new Map();
+    this._whenDefinedResolvers = new Map();
+    this._defining = false;
+  }
   define(name, cls, opts) {
+    name = String(name);
     if (!_isConstructorCE(cls)) throw new TypeError("Failed to execute 'define' on 'CustomElementRegistry': parameter 2 is not a constructor.");
     if (!_isValidCustomElementName(name)) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': \"" + name + "\" is not a valid custom element name", "SyntaxError");
-    if (this._defining) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': operation is not supported while a definition is in progress", "NotSupportedError");
     if (this._registry.has(name)) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': the name \"" + name + "\" has already been used with this registry", "NotSupportedError");
-    if (this._byCtor.has(cls)) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': the constructor has already been used with this registry", "NotSupportedError");
+    if (this._byCtor.has(cls)) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': this constructor has already been used with this registry", "NotSupportedError");
+    let localName = name;
+    const extendsName = opts && opts.extends != null ? String(opts.extends) : null;
+    if (extendsName !== null) {
+      if (_isValidCustomElementName(extendsName)) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': \"" + extendsName + "\" is a valid custom element name", "NotSupportedError");
+      if (_htmlElementClassForLocalName(extendsName) === HTMLUnknownElement) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': \"" + extendsName + "\" is an HTMLUnknownElement", "NotSupportedError");
+      localName = extendsName;
+    }
+    if (this._defining) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': this registry is already defining an element", "NotSupportedError");
     this._defining = true;
-    try { this._byCtor.set(cls, name); this._defineInner(name, cls, opts); } finally { this._defining = false; }
-  }
-  _defineInner(name, cls, opts) {
-    this._registry.set(name, cls);
-    // Upgrade existing matching elements: instantiate the class on each,
-    // fire connectedCallback if the element is in the document. Without
-    // this, lit / MusicKit / Polymer components never wire up their
-    // shadow DOM or render, leaving heavy chunks of YouTube,
-    // music.apple.com, and any web-component site as empty shells.
+    let definition;
     try {
-      const matches = globalThis.document?.querySelectorAll(name) || [];
-      for (const el of matches) this._upgradeElement(el, cls);
-    } catch (e) {}
+      const prototype = cls.prototype;
+      if (prototype === null || (typeof prototype !== 'object' && typeof prototype !== 'function')) {
+        throw new TypeError("Failed to execute 'define' on 'CustomElementRegistry': The prototype of the constructor is not an object.");
+      }
+      const callbacks = {};
+      for (const callbackName of ['connectedCallback', 'disconnectedCallback', 'adoptedCallback', 'attributeChangedCallback',
+        'formAssociatedCallback', 'formResetCallback', 'formDisabledCallback', 'formStateRestoreCallback']) {
+        const value = prototype[callbackName];
+        if (value !== undefined && typeof value !== 'function') {
+          throw new TypeError("Failed to execute 'define' on 'CustomElementRegistry': The '" + callbackName + "' property of the prototype is not a function.");
+        }
+        callbacks[callbackName] = value;
+      }
+      const observed = new Set();
+      if (callbacks.attributeChangedCallback) {
+        const list = cls.observedAttributes;
+        if (list !== undefined && list !== null) for (const attribute of list) observed.add(String(attribute));
+      }
+      const disabled = cls.disabledFeatures;
+      const disabledFeatures = disabled ? Array.from(disabled, String) : [];
+      definition = {
+        name, localName, ctor: cls, callbacks, observed,
+        formAssociated: !!cls.formAssociated,
+        disableInternals: disabledFeatures.includes('internals'),
+        disableShadow: disabledFeatures.includes('shadow'),
+      };
+    } finally {
+      this._defining = false;
+    }
+    this._registry.set(name, cls);
+    this._defs.set(name, definition);
+    this._byCtor.set(cls, name);
+    this._defByCtor.set(cls, definition);
+    _ceDefinitionCount++;
+    // Upgrade the document's matching elements in shadow-including tree order.
+    const doc = globalThis.document;
+    if (doc && typeof doc._nid === 'number') {
+      for (const element of _ceCandidates(doc, false, name)) {
+        if (!element._ceState && _ceLookupDefinition(element) === definition) _ceUpgrade(element, definition);
+      }
+    }
     const resolvers = this._whenDefinedResolvers.get(name);
     if (resolvers) {
-      for (const r of resolvers) r(cls);
       this._whenDefinedResolvers.delete(name);
+      for (const resolve of resolvers) resolve(cls);
     }
   }
+  // Kept for callers that upgrade one element against a known class.
   _upgradeElement(el, cls) {
-    if (el.__customUpgraded) return;
-    el.__customUpgraded = true;
-    try {
-      // Upgrade preserves object identity but installs the definition's
-      // prototype before running its class constructor. HTMLElement's
-      // constructor consumes this entry and returns `el`, so derived class
-      // fields and constructor-side state initialize on the real DOM wrapper.
-      const constructionEntry = { element: el, constructor: cls, constructed: false };
-      _customElementConstructionStack.push(constructionEntry);
-      let constructed;
-      try {
-        constructed = Reflect.construct(cls, []);
-      } finally {
-        const pending = _customElementConstructionStack.lastIndexOf(constructionEntry);
-        if (pending !== -1) _customElementConstructionStack.splice(pending, 1);
-      }
-      if (constructed !== el) {
-        throw new TypeError("Custom element constructor did not produce the element being upgraded");
-      }
-      if (typeof el.connectedCallback === 'function' && globalThis.document?.contains?.(el)) {
-        try { el.connectedCallback(); } catch (e) {}
-      }
-    } catch (e) {
-      el.__customUpgradeFailed = true;
-    }
+    const definition = this._defByCtor.get(cls);
+    if (definition) _ceUpgrade(el, definition);
   }
-  get(name) { return this._registry.get(name); }
+  get(name) { return this._registry.get(String(name)); }
   getName(cls) {
     if (!_isConstructorCE(cls)) throw new TypeError("Failed to execute 'getName' on 'CustomElementRegistry': parameter 1 is not a constructor.");
     return this._byCtor.has(cls) ? this._byCtor.get(cls) : null;
   }
   whenDefined(name) {
+    name = String(name);
     if (!_isValidCustomElementName(name)) return Promise.reject(new DOMException("Failed to execute 'whenDefined' on 'CustomElementRegistry': \"" + name + "\" is not a valid custom element name", "SyntaxError"));
     const cls = this._registry.get(name);
     if (cls) return Promise.resolve(cls);
@@ -11036,16 +11397,14 @@ class CustomElementRegistry {
     });
   }
   upgrade(root) {
-    if (!root || !root.querySelectorAll) return;
-    for (const [name, cls] of this._registry.entries()) {
-      const matches = root.querySelectorAll(name);
-      for (const el of matches) this._upgradeElement(el, cls);
-    }
+    if (!root || typeof root._nid !== 'number') return;
+    for (const element of _ceCandidates(root, true, '')) _ceTryUpgrade(element);
   }
 }
+for (const _m of ['define', 'get', 'getName', 'whenDefined', 'upgrade']) _markNative(CustomElementRegistry.prototype[_m]);
+_markNative(CustomElementRegistry);
 globalThis.CustomElementRegistry = CustomElementRegistry;
 globalThis.customElements = new CustomElementRegistry();
-globalThis.HTMLUnknownElement = Element;
 // ElementInternals: form-associated custom element internals. Validity/state
 // are JS-observable; ARIA reflection that needs the accessibility tree is not.
 globalThis.ElementInternals = class ElementInternals {
@@ -11358,8 +11717,20 @@ globalThis.IntersectionObserver = class IntersectionObserver {
     // loading viewports. Use each ancestor's padding box, independently by
     // axis, matching Chromium's rectangular overflow clip chain.
     let ancestor = target.parentNode || target.host || null;
+    // The root element's overflow, or the body's when the root's is
+    // `visible`, belongs to the viewport (CSS overflow propagation), so that
+    // element does not clip its descendants itself. YouTube's body is
+    // `overflow-y: scroll` with a zero-height box; clipping by it hid every
+    // lazily loaded thumbnail from the observer.
+    // Read lazily: most roots stop the walk before <body>.
+    const docElement = target.ownerDocument && target.ownerDocument.documentElement;
+    const bodyOwnsViewportOverflow = (element) => {
+      if (!docElement || element !== target.ownerDocument.body) return false;
+      const rootStyle = _ioElementStyle(docElement, measurements);
+      return !_ioClipsOverflow(rootStyle.overflowX) && !_ioClipsOverflow(rootStyle.overflowY);
+    };
     while (inRootTree && ancestor && ancestor !== this._root && ancestor.nodeType !== 9) {
-      if (ancestor instanceof Element) {
+      if (ancestor instanceof Element && ancestor !== docElement && !bodyOwnsViewportOverflow(ancestor)) {
         const style = _ioElementStyle(ancestor, measurements);
         const clipX = _ioClipsOverflow(style.overflowX);
         const clipY = _ioClipsOverflow(style.overflowY);
@@ -11607,6 +11978,7 @@ globalThis.Event = class Event {
   preventDefault() { if (this.cancelable) this.defaultPrevented=true; } stopPropagation(){ this._propagationStopped=true; } stopImmediatePropagation(){ this._propagationStopped=true; this._immediatePropagationStopped=true; }
   initEvent(type,bubbles,cancelable) { if (arguments.length < 1) throw new TypeError("Failed to execute 'initEvent' on 'Event': 1 argument required, but only 0 present."); this.type=String(type);this.bubbles=!!bubbles;this.cancelable=!!cancelable;this.defaultPrevented=false;this._propagationStopped=false;this._immediatePropagationStopped=false; }
   composedPath() {
+    if (this._path) return this._path.slice();
     if (!this.target) return [];
     const path = [];
     let n = this.target;
@@ -13995,13 +14367,16 @@ globalThis.CSS = {
   escape(s){ return s; }
 };
 
-globalThis.HTMLElement = Element;
-globalThis.HTMLDivElement = Element;
-globalThis.HTMLSpanElement = Element;
-globalThis.HTMLParagraphElement = Element;
-globalThis.HTMLAnchorElement = Element;
+globalThis.HTMLElement = HTMLElement;
+globalThis.HTMLUnknownElement = HTMLUnknownElement;
+_markNative(HTMLElement);
+_markNative(HTMLUnknownElement);
+globalThis.HTMLDivElement = _defineHTMLElementClass("HTMLDivElement", ["div"]);
+globalThis.HTMLSpanElement = _defineHTMLElementClass("HTMLSpanElement", ["span"]);
+globalThis.HTMLParagraphElement = _defineHTMLElementClass("HTMLParagraphElement", ["p"]);
+globalThis.HTMLAnchorElement = _defineHTMLElementClass("HTMLAnchorElement", ["a"]);
 globalThis.HTMLImageElement = HTMLImageElement;
-globalThis.HTMLInputElement = class HTMLInputElement extends Element {
+globalThis.HTMLInputElement = class HTMLInputElement extends HTMLElement {
   get readOnly() { return this.hasAttribute('readonly'); }
   set readOnly(v) { if (v) this.setAttribute('readonly', ''); else this.removeAttribute('readonly'); }
 };
@@ -14010,8 +14385,8 @@ Object.defineProperties(HTMLInputElement.prototype, {
   value: Object.getOwnPropertyDescriptor(Element.prototype, 'value'),
   checked: Object.getOwnPropertyDescriptor(Element.prototype, 'checked'),
 });
-globalThis.HTMLButtonElement = Element;
-globalThis.HTMLFormElement = class HTMLFormElement extends Element {
+globalThis.HTMLButtonElement = _defineHTMLElementClass("HTMLButtonElement", ["button"]);
+globalThis.HTMLFormElement = class HTMLFormElement extends HTMLElement {
   get elements() { return HTMLCollection._from(this.querySelectorAll("input, select, textarea, button, fieldset, output, object")); }
   get length() { return this.elements.length; }
   // Inherit submit() from Element.prototype: it dispatches the cancelable
@@ -14033,8 +14408,8 @@ globalThis.HTMLFormElement = class HTMLFormElement extends Element {
     }
   }
 };
-globalThis.HTMLSelectElement = Element;
-globalThis.HTMLTextAreaElement = class HTMLTextAreaElement extends Element {
+globalThis.HTMLSelectElement = _defineHTMLElementClass("HTMLSelectElement", ["select"]);
+globalThis.HTMLTextAreaElement = class HTMLTextAreaElement extends HTMLElement {
   get readOnly() { return this.hasAttribute('readonly'); }
   set readOnly(v) { if (v) this.setAttribute('readonly', ''); else this.removeAttribute('readonly'); }
   // `rows`/`cols` reflect the content attributes and drive the control's
@@ -14053,39 +14428,63 @@ globalThis.HTMLTextAreaElement = class HTMLTextAreaElement extends Element {
   }
   set cols(v) { this.setAttribute('cols', String(v)); }
 };
-globalThis.HTMLLabelElement = Element;
+globalThis.HTMLLabelElement = _defineHTMLElementClass("HTMLLabelElement", ["label"]);
 for (const proto of [HTMLInputElement.prototype, HTMLTextAreaElement.prototype]) {
   Object.defineProperty(proto, 'readOnly', { enumerable: true });
 }
-globalThis.HTMLTableElement = Element;
+globalThis.HTMLTableElement = _defineHTMLElementClass("HTMLTableElement", ["table"]);
+globalThis.HTMLTableSectionElement = _defineHTMLElementClass("HTMLTableSectionElement", ["thead", "tbody", "tfoot"]);
+globalThis.HTMLTableRowElement = _defineHTMLElementClass("HTMLTableRowElement", ["tr"]);
+globalThis.HTMLTableCellElement = _defineHTMLElementClass("HTMLTableCellElement", ["td", "th"]);
+globalThis.HTMLTableCaptionElement = _defineHTMLElementClass("HTMLTableCaptionElement", ["caption"]);
+globalThis.HTMLTableColElement = _defineHTMLElementClass("HTMLTableColElement", ["col", "colgroup"]);
 // <iframe> needs its own brand: with `HTMLIFrameElement = Element` every
 // element passed `instanceof HTMLIFrameElement`, so style-loader's
 // "insert target is an iframe" branch took `contentDocument.head` of <head>
 // itself and failed with "Couldn't find a style target".
-globalThis.HTMLIFrameElement = class HTMLIFrameElement extends Element {
+globalThis.HTMLIFrameElement = class HTMLIFrameElement extends HTMLElement {
   get srcdoc() { return this.getAttribute('srcdoc') || ''; }
   set srcdoc(value) { this.setAttribute('srcdoc', value); }
 };
-globalThis.HTMLCanvasElement = Element;
 // HTMLVideoElement and HTMLAudioElement are defined above with canPlayType support.
-globalThis.HTMLScriptElement = Element;
-globalThis.HTMLStyleElement = Element;
-globalThis.HTMLLinkElement = Element;
-globalThis.HTMLMetaElement = class HTMLMetaElement extends Element {
+globalThis.HTMLScriptElement = _defineHTMLElementClass("HTMLScriptElement", ["script"]);
+globalThis.HTMLStyleElement = _defineHTMLElementClass("HTMLStyleElement", ["style"]);
+globalThis.HTMLLinkElement = _defineHTMLElementClass("HTMLLinkElement", ["link"]);
+globalThis.HTMLMetaElement = class HTMLMetaElement extends HTMLElement {
   get httpEquiv() { return this.getAttribute('http-equiv') || ''; }
   set httpEquiv(value) { this.setAttribute('http-equiv', String(value)); }
 };
-globalThis.HTMLHeadElement = Element;
-globalThis.HTMLBodyElement = Element;
-globalThis.HTMLHtmlElement = Element;
-globalThis.HTMLBRElement = Element;
-globalThis.HTMLHRElement = Element;
-globalThis.HTMLUListElement = Element;
-globalThis.HTMLOListElement = Element;
-globalThis.HTMLLIElement = Element;
-globalThis.HTMLPreElement = Element;
-globalThis.HTMLHeadingElement = Element;
-globalThis.HTMLTemplateElement = Element;
+globalThis.HTMLHeadElement = _defineHTMLElementClass("HTMLHeadElement", ["head"]);
+globalThis.HTMLBodyElement = _defineHTMLElementClass("HTMLBodyElement", ["body"]);
+globalThis.HTMLHtmlElement = _defineHTMLElementClass("HTMLHtmlElement", ["html"]);
+globalThis.HTMLBRElement = _defineHTMLElementClass("HTMLBRElement", ["br"]);
+globalThis.HTMLHRElement = _defineHTMLElementClass("HTMLHRElement", ["hr"]);
+globalThis.HTMLUListElement = _defineHTMLElementClass("HTMLUListElement", ["ul"]);
+globalThis.HTMLOListElement = _defineHTMLElementClass("HTMLOListElement", ["ol"]);
+globalThis.HTMLLIElement = _defineHTMLElementClass("HTMLLIElement", ["li"]);
+globalThis.HTMLDListElement = _defineHTMLElementClass("HTMLDListElement", ["dl"]);
+globalThis.HTMLPreElement = _defineHTMLElementClass("HTMLPreElement", ["pre", "listing", "xmp"]);
+globalThis.HTMLHeadingElement = _defineHTMLElementClass("HTMLHeadingElement", ["h1", "h2", "h3", "h4", "h5", "h6"]);
+globalThis.HTMLTemplateElement = _defineHTMLElementClass("HTMLTemplateElement", ["template"]);
+globalThis.HTMLTitleElement = _defineHTMLElementClass("HTMLTitleElement", ["title"]);
+globalThis.HTMLBaseElement = _defineHTMLElementClass("HTMLBaseElement", ["base"]);
+globalThis.HTMLQuoteElement = _defineHTMLElementClass("HTMLQuoteElement", ["blockquote", "q"]);
+globalThis.HTMLPictureElement = _defineHTMLElementClass("HTMLPictureElement", ["picture"]);
+globalThis.HTMLSourceElement = _defineHTMLElementClass("HTMLSourceElement", ["source"]);
+globalThis.HTMLObjectElement = _defineHTMLElementClass("HTMLObjectElement", ["object"]);
+globalThis.HTMLEmbedElement = _defineHTMLElementClass("HTMLEmbedElement", ["embed"]);
+globalThis.HTMLMapElement = _defineHTMLElementClass("HTMLMapElement", ["map"]);
+globalThis.HTMLAreaElement = _defineHTMLElementClass("HTMLAreaElement", ["area"]);
+globalThis.HTMLOutputElement = _defineHTMLElementClass("HTMLOutputElement", ["output"]);
+globalThis.HTMLModElement = _defineHTMLElementClass("HTMLModElement", ["ins", "del"]);
+globalThis.HTMLTimeElement = _defineHTMLElementClass("HTMLTimeElement", ["time"]);
+globalThis.HTMLDataElement = _defineHTMLElementClass("HTMLDataElement", ["data"]);
+globalThis.HTMLMenuElement = _defineHTMLElementClass("HTMLMenuElement", ["menu"]);
+globalThis.HTMLMeterElement = _defineHTMLElementClass("HTMLMeterElement", ["meter"]);
+globalThis.HTMLParamElement = _defineHTMLElementClass("HTMLParamElement", ["param"]);
+globalThis.HTMLOptGroupElement = _defineHTMLElementClass("HTMLOptGroupElement", ["optgroup"]);
+globalThis.HTMLFontElement = _defineHTMLElementClass("HTMLFontElement", ["font"]);
+globalThis.HTMLDirectoryElement = _defineHTMLElementClass("HTMLDirectoryElement", ["dir"]);
 // <slot> needs its own brand: with `HTMLSlotElement = Element` every element
 // was an instance, but assignedElements() did not exist, so the common
 // `el instanceof HTMLSlotElement && el.assignedElements()` guard (Swiper's
@@ -14128,19 +14527,104 @@ function _slotAssignedNodes(slot, flatten) {
   }
   return out;
 }
-globalThis.HTMLSlotElement = class HTMLSlotElement extends Element {
+globalThis.HTMLSlotElement = class HTMLSlotElement extends HTMLElement {
   get name() { return this.getAttribute('name') || ''; }
   set name(v) { this.setAttribute('name', String(v)); }
   assignedNodes(options) { return _slotAssignedNodes(this, !!(options && options.flatten)); }
   assignedElements(options) { return this.assignedNodes(options).filter(n => n.nodeType === 1); }
 };
-globalThis.HTMLOptionElement = Element;
-globalThis.HTMLDataListElement = Element;
-globalThis.HTMLFieldSetElement = Element;
-globalThis.HTMLLegendElement = Element;
-globalThis.HTMLProgressElement = Element;
-globalThis.HTMLDetailsElement = Element;
-globalThis.HTMLDialogElement = Element;
+// Slottables (Element/Text.assignedSlot) and slotchange.
+//
+// Hosts are flagged on their wrapper when a shadow root is attached, so the
+// tree-mutation hooks only look for slot changes around real hosts. Changes
+// are collected per host and compared in a microtask against each slot's
+// previous assignment; a slot whose assigned nodes changed gets one
+// `slotchange` (bubbles), as HTML's "signal a slot change" does.
+var _shadowHostCount = 0;
+const _slotChangeHosts = new Set();
+const _slotAssignmentCache = new WeakMap();
+let _slotChangeQueued = false;
+function _markShadowHost(host) {
+  if (!host || host._isShadowHost) return;
+  host._isShadowHost = true;
+  _shadowHostCount++;
+  _queueSlotCheck(host);
+}
+function _queueSlotCheck(host) {
+  _slotChangeHosts.add(host);
+  if (_slotChangeQueued) return;
+  _slotChangeQueued = true;
+  queueMicrotask(_flushSlotChanges);
+}
+function _slotsMaybeChanged(nodes) {
+  for (const node of nodes) {
+    if (!node || typeof node._nid !== "number") continue;
+    if (node._isShadowHost) _queueSlotCheck(node);
+    const parent = node.parentNode;
+    if (parent && parent._isShadowHost) _queueSlotCheck(parent);
+    if (node.nodeType === 1 || node.nodeType === 11) {
+      const root = node.nodeType === 11 ? node : node.getRootNode();
+      if (root instanceof ShadowRoot && root.host) _queueSlotCheck(root.host);
+    }
+  }
+}
+function _flushSlotChanges() {
+  _slotChangeQueued = false;
+  const hosts = Array.from(_slotChangeHosts);
+  _slotChangeHosts.clear();
+  for (const host of hosts) {
+    const root = _shadowRootForHost(host, true);
+    if (!root) continue;
+    const ids = _domParse("query_selector_all_scoped", root._nid, "slot") || [];
+    for (const nid of ids) {
+      const slot = _wrapEl(+nid);
+      if (!(slot instanceof HTMLSlotElement)) continue;
+      const assigned = _domParse("assigned_nodes", slot._nid);
+      const key = assigned ? assigned.join(",") : "";
+      const previous = _slotAssignmentCache.get(slot);
+      if (previous === key || (previous === undefined && key === "")) continue;
+      _slotAssignmentCache.set(slot, key);
+      try { slot.dispatchEvent(new Event("slotchange", { bubbles: true })); } catch (error) { _ceReport(error); }
+    }
+  }
+}
+function _assignedSlotOf(node) {
+  if (!_shadowHostCount) return null;
+  const parent = node.parentNode;
+  if (!parent || parent.nodeType !== 1) return null;
+  const slotNid = +_dom("assigned_slot", node._nid);
+  if (slotNid < 0) return null;
+  const slot = _wrap(slotNid);
+  if (!slot) return null;
+  const root = slot.getRootNode();
+  // Closed shadow trees do not expose their slots.
+  if (root instanceof ShadowRoot && root.mode !== "open") return null;
+  return slot;
+}
+Object.defineProperty(Element.prototype, "assignedSlot", {
+  get() { return _assignedSlotOf(this); }, enumerable: true, configurable: true,
+});
+Object.defineProperty(Text.prototype, "assignedSlot", {
+  get() { return _assignedSlotOf(this); }, enumerable: true, configurable: true,
+});
+globalThis.HTMLOptionElement = _defineHTMLElementClass("HTMLOptionElement", ["option"]);
+globalThis.HTMLDataListElement = _defineHTMLElementClass("HTMLDataListElement", ["datalist"]);
+globalThis.HTMLFieldSetElement = _defineHTMLElementClass("HTMLFieldSetElement", ["fieldset"]);
+globalThis.HTMLLegendElement = _defineHTMLElementClass("HTMLLegendElement", ["legend"]);
+globalThis.HTMLProgressElement = _defineHTMLElementClass("HTMLProgressElement", ["progress"]);
+globalThis.HTMLDetailsElement = _defineHTMLElementClass("HTMLDetailsElement", ["details"]);
+globalThis.HTMLDialogElement = _defineHTMLElementClass("HTMLDialogElement", ["dialog"]);
+_registerHTMLElementClass(HTMLInputElement, ["input"]);
+_registerHTMLElementClass(HTMLFormElement, ["form"]);
+_registerHTMLElementClass(HTMLTextAreaElement, ["textarea"]);
+_registerHTMLElementClass(HTMLIFrameElement, ["iframe"]);
+_registerHTMLElementClass(HTMLMetaElement, ["meta"]);
+_registerHTMLElementClass(HTMLSlotElement, ["slot"]);
+_registerHTMLElementClass(HTMLImageElement, ["img"]);
+_registerHTMLElementClass(HTMLMediaElement, []);
+_registerHTMLElementClass(HTMLVideoElement, ["video"]);
+_registerHTMLElementClass(HTMLAudioElement, ["audio"]);
+_registerHTMLElementClass(HTMLTrackElement, ["track"]);
 // SVGAnimatedString backs the className and href reflections on SVG elements.
 // baseVal and animVal both read the live attribute (no SMIL animation), and
 // baseVal is writable. Used by the SVG-aware get className()/get href() above.
@@ -14378,6 +14862,24 @@ globalThis.DocumentType = DocumentType;
 globalThis.Node = Node;
 globalThis.Element = Element;
 globalThis.Document = Document;
+// document.all. In browsers it is an HTMLAllCollection that V8 marks
+// "undetectable": falsy, typeof "undefined", == null, yet !== undefined.
+// The embedder API that creates such objects is not reachable from here, so
+// this answers NaN, which keeps the two properties scripts rely on: it is
+// falsy (`if (document.all)` legacy-IE branches stay off) and it is strictly
+// unequal to every value, including undefined. Closure's polymer-resin
+// sanitizer (YouTube) passes falsy values through only when
+// `value !== document.all`; with document.all undefined every undefined
+// binding became the "zClosurez" placeholder and hid whole pages.
+Object.defineProperty(Document.prototype, "all", {
+  get() { return NaN; }, enumerable: true, configurable: true,
+});
+// The HTML document interface. Documents loaded as HTML and those from
+// createHTMLDocument are HTMLDocument; `new Document()` stays a plain Document.
+class HTMLDocument extends Document {}
+Object.defineProperty(HTMLDocument, "name", { value: "HTMLDocument" });
+globalThis.HTMLDocument = HTMLDocument;
+_markNative(HTMLDocument);
 // CSSStyleDeclaration is the type of element.style and getComputedStyle(); it is
 // pre-declared non-enumerable in _preHideInternals, but unlike the other WebIDL
 // interfaces it had no value assignment, leaving `window.CSSStyleDeclaration`
@@ -14411,7 +14913,9 @@ for (const _proto of [Document.prototype, DocumentFragment.prototype]) {
   _proto.prepend = Element.prototype.prepend;
   _proto.replaceChildren = Element.prototype.replaceChildren;
 }
-globalThis.EventTarget = Node;
+globalThis.EventTarget = EventTarget;
+_markNative(EventTarget);
+for (const _m of ['addEventListener', 'removeEventListener', 'dispatchEvent']) _markNative(EventTarget.prototype[_m]);
 globalThis.HTMLCollection = class HTMLCollection extends Array {
   item(i) {
     i = i >>> 0;
@@ -16124,7 +16628,7 @@ class _Canvas2D {
   getContextAttributes() { return { alpha: true, desynchronized: false, colorSpace: "srgb", willReadFrequently: false }; }
 }
 
-class HTMLCanvasElement extends Element {
+class HTMLCanvasElement extends HTMLElement {
   get width() {
     const raw = this.getAttribute('width');
     const parsed = raw === null ? 300 : Number.parseInt(raw, 10);
@@ -16153,6 +16657,7 @@ class HTMLCanvasElement extends Element {
   }
 }
 globalThis.HTMLCanvasElement = HTMLCanvasElement;
+_registerHTMLElementClass(HTMLCanvasElement, ["canvas"]);
 
 HTMLCanvasElement.prototype.getContext = function getContext(type) {
   if (type === '2d') {
@@ -16222,6 +16727,7 @@ Element.prototype.attachShadow = function attachShadow(opts) {
   shadow._treeConnected = this.isConnected;
   shadow._treeConnectedEpoch = _treeMutationEpoch;
   _cache.set(rootNid, shadow);
+  _markShadowHost(this);
   return shadow;
 };
 
@@ -16238,6 +16744,7 @@ function _shadowRootForHost(host, includeClosed) {
   if (!(root instanceof ShadowRoot)) {
     root = new ShadowRoot(rootNid, host, { mode: parts[1] });
     _cache.set(rootNid, root);
+    _markShadowHost(host);
   }
   return root;
 }
@@ -18029,6 +18536,9 @@ if (typeof Document !== 'undefined' && !Document.prototype.importNode) {
       throw new DOMException("Failed to execute 'importNode' on 'Document': The node provided is a document, which may not be imported.", "NotSupportedError");
     }
     const clone = node.cloneNode(!!deep);
+    // The clone belongs to this document, so its definitions apply even when
+    // the source was inert template contents.
+    if (_ceDefinitionCount && this === globalThis.document) _ceUpgradeClone(clone);
     return _stampNodeDocument(clone, this);
   };
 }
@@ -18047,10 +18557,13 @@ if (typeof Document !== 'undefined' && !Document.prototype.adoptNode) {
     if (node instanceof ShadowRoot) {
       throw new DOMException("Failed to execute 'adoptNode' on 'Document': The node provided is a shadow root, which may not be adopted.", "HierarchyRequestError");
     }
+    const oldDocument = _ceDefinitionCount ? _nodeDocumentOf(node) : null;
     const parent = node.parentNode;
     if (parent) parent.removeChild(node);
     if (node._nodeDocument !== undefined) node._nodeDocument = undefined;
-    return _stampNodeDocument(node, this);
+    _stampNodeDocument(node, this);
+    if (oldDocument && oldDocument !== this) _ceAdopted(node, oldDocument, this);
+    return node;
   };
 }
 
@@ -18312,7 +18825,7 @@ globalThis.__obscura_init = function() {
   _installWasmStreamingFallback();
 
   const documentNid = +_dom("document_node_id");
-  globalThis.document = new Document(documentNid);
+  globalThis.document = new HTMLDocument(documentNid);
   // parentNode on <html> reaches the backing document node. Keep that wrapper
   // canonical so getRootNode(), isConnected, and identity comparisons return
   // the same Document object exposed as globalThis.document.
@@ -19421,6 +19934,111 @@ if (typeof Response !== 'undefined' && Response.prototype && !Response.prototype
   globalThis.MediaKeyStatusMap = MediaKeyStatusMap;
   globalThis.MediaKeyMessageEvent = MediaKeyMessageEvent;
   globalThis.MediaEncryptedEvent = MediaEncryptedEvent;
+})();
+
+// Tag-specific members live on their HTML interfaces, as in browsers. They
+// were implemented once on Element.prototype (each checks the element's own
+// tag), which made every element answer `"value" in el`, `"text" in el`,
+// `"src" in el`... true. Feature tests read those answers: Closure's
+// polymer-resin (YouTube) treats a binding to a name the element's interface
+// has as a native, security-sensitive property and replaced
+// `ytFormattedString.text = {...}` with "zClosurez". Move each member to the
+// interfaces that define it; the implementation is shared and unchanged.
+(function _relocateTagSpecificMembers() {
+  const FORM_CONTROLS = ["button", "fieldset", "input", "object", "output", "select", "textarea"];
+  const TEXT_CONTROLS = ["input", "textarea"];
+  const HYPERLINK = ["a", "area"];
+  const SVG_HREF = ["SVGAElement", "SVGUseElement", "SVGImageElement", "SVGPatternElement",
+    "SVGLinearGradientElement", "SVGRadialGradientElement", "SVGTextPathElement", "SVGFilterElement",
+    "SVGScriptElement", "SVGFEImageElement", "SVGMPathElement", "SVGGradientElement"];
+  const table = {
+    accept: ["input"], action: ["form"], add: ["select"],
+    checked: ["input"], indeterminate: ["input"], files: ["input"], step: ["input"],
+    stepUp: ["input"], stepDown: ["input"], min: ["input", "meter"], max: ["input", "meter", "progress"],
+    valueAsDate: ["input"], valueAsNumber: ["input"], placeholder: TEXT_CONTROLS,
+    selectionStart: TEXT_CONTROLS, selectionEnd: TEXT_CONTROLS, selectionDirection: TEXT_CONTROLS,
+    setSelectionRange: TEXT_CONTROLS, setRangeText: TEXT_CONTROLS, select: TEXT_CONTROLS,
+    value: ["input", "textarea", "select", "option", "button", "output", "data", "li", "meter", "progress", "param"],
+    disabled: ["button", "input", "select", "textarea", "optgroup", "option", "fieldset", "link", "style"],
+    form: ["button", "fieldset", "input", "object", "output", "select", "textarea", "label", "legend", "option"],
+    labels: ["button", "input", "meter", "output", "progress", "select", "textarea"],
+    checkValidity: [...FORM_CONTROLS, "form"], reportValidity: [...FORM_CONTROLS, "form"],
+    setCustomValidity: FORM_CONTROLS, validity: FORM_CONTROLS, validationMessage: FORM_CONTROLS,
+    willValidate: FORM_CONTROLS,
+    name: ["button", "form", "fieldset", "iframe", "img", "input", "map", "meta", "object", "output",
+      "param", "select", "slot", "textarea", "embed", "details", "a"],
+    type: ["a", "button", "embed", "input", "link", "object", "ol", "script", "source", "style",
+      "select", "textarea", "output", "ul", "li", "SVGStyleElement", "SVGScriptElement"],
+    href: ["a", "area", "link", "base", ...SVG_HREF],
+    host: HYPERLINK, hostname: HYPERLINK, hash: HYPERLINK, origin: HYPERLINK, password: HYPERLINK,
+    pathname: HYPERLINK, port: HYPERLINK, protocol: HYPERLINK, search: HYPERLINK, username: HYPERLINK,
+    download: HYPERLINK, ping: HYPERLINK, hreflang: ["a", "link"],
+    referrerPolicy: ["a", "area", "img", "iframe", "link", "script"],
+    rel: ["a", "area", "link", "form"], relList: ["a", "area", "link", "form", "SVGAElement"],
+    target: ["a", "area", "base", "form", "SVGAElement"],
+    text: ["a", "option", "script", "title", "body"],
+    label: ["option", "optgroup", "track"], selected: ["option"],
+    options: ["select", "datalist"], selectedIndex: ["select"],
+    src: ["img", "iframe", "script", "input", "video", "audio", "source", "track", "embed"],
+    sizes: ["img", "link", "source"], sandbox: ["iframe"],
+    contentDocument: ["iframe", "object", "embed"], contentWindow: ["iframe", "object"],
+    sheet: ["link", "style", "SVGStyleElement"], content: ["template", "meta"],
+    open: ["dialog", "details"], show: ["dialog"], showModal: ["dialog"], close: ["dialog"],
+    returnValue: ["dialog"], requestClose: ["dialog"], closedBy: ["dialog"],
+    submit: ["form"], reset: ["form"], requestSubmit: ["form"],
+    htmlFor: ["label", "output"], control: ["label"],
+    getBBox: ["SVGGraphicsElement"], getComputedTextLength: ["SVGTextContentElement"],
+    getExtentOfChar: ["SVGTextContentElement"], getSubStringLength: ["SVGTextContentElement"],
+  };
+  const P = Element.prototype;
+  for (const name of Object.keys(table)) {
+    const descriptor = Object.getOwnPropertyDescriptor(P, name);
+    if (!descriptor) continue;
+    const seen = new Set();
+    for (const tag of table[name]) {
+      const C = tag.startsWith("SVG") ? globalThis[tag] : _htmlElementClassByTag[tag];
+      if (typeof C !== "function" || seen.has(C)) continue;
+      seen.add(C);
+      let inherited = false;
+      for (let proto = C.prototype; proto && proto !== P; proto = Object.getPrototypeOf(proto)) {
+        if (Object.prototype.hasOwnProperty.call(proto, name)) { inherited = true; break; }
+      }
+      if (!inherited) Object.defineProperty(C.prototype, name, descriptor);
+    }
+    delete P[name];
+  }
+})();
+
+// Element.prototype carries some tag-specific attributes (iframe.sandbox,
+// link.sizes, ...) as getters that answer undefined on other elements. In a
+// browser those names do not exist on, say, a custom element, so `el.sandbox =
+// x` creates an expando; with a getter-only accessor it threw instead (YouTube
+// sets such names on its own elements). Give each getter-only accessor a
+// setter: where the getter answers undefined the write becomes an own data
+// property, a DOMTokenList attribute forwards to its value ([PutForwards]),
+// and a genuine read-only attribute keeps ignoring the write.
+(function _installElementExpandoSetters() {
+  const prototypes = new Set([Element.prototype]);
+  for (const tag of Object.keys(_htmlElementClassByTag)) prototypes.add(_htmlElementClassByTag[tag].prototype);
+  for (const P of prototypes) for (const name of Object.getOwnPropertyNames(P)) {
+    const d = Object.getOwnPropertyDescriptor(P, name);
+    if (!d || typeof d.get !== 'function' || d.set || !d.configurable) continue;
+    const getter = d.get;
+    Object.defineProperty(P, name, {
+      get: getter,
+      set(value) {
+        let current;
+        try { current = getter.call(this); } catch (_e) { current = undefined; }
+        if (current === undefined) {
+          Object.defineProperty(this, name, { value, writable: true, configurable: true, enumerable: true });
+        } else if (current instanceof DOMTokenList) {
+          current.value = value;
+        }
+      },
+      enumerable: d.enumerable,
+      configurable: true,
+    });
+  }
 })();
 
 (function _markBuiltinsNative() {

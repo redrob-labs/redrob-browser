@@ -151,7 +151,7 @@ impl SelfUpdate {
 pub fn restart_if_requested() {
     let exe = RESTART.lock().unwrap_or_else(|e| e.into_inner()).take();
     if let Some(exe) = exe {
-        if let Err(e) = Command::new(&exe)
+        if let Err(e) = crate::startup::no_console(&mut Command::new(&exe))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -396,6 +396,7 @@ fn unpack(archive: &Path, into: &Path) -> anyhow::Result<()> {
             .filter(|p| p.is_file())
             .unwrap_or_else(|| PathBuf::from("tar.exe"));
         let mut c = Command::new(tar);
+        crate::startup::no_console(&mut c);
         c.arg("-xf").arg(archive).arg("-C").arg(into);
         c
     } else {

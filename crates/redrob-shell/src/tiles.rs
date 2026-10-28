@@ -2,7 +2,7 @@
 //! GPU textures, so scrolling moves textures instead of repainting the page.
 //! See docs/GPU-PAINT.md, phase A.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use egui::{pos2, vec2, Color32, Rect, TextureHandle, TextureOptions};
@@ -15,6 +15,8 @@ pub const TILE: f32 = 512.0;
 const IN_FLIGHT: usize = 2;
 /// A tile the engine never answered stops holding a slot after this long.
 const IN_FLIGHT_TIMEOUT: Duration = Duration::from_secs(3);
+/// Damage wider or taller than this many tiles repaints everything instead.
+const MAX_DAMAGE_TILES: i64 = 256;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct TileKey {
@@ -25,24 +27,76 @@ pub struct TileKey {
 #[derive(Default)]
 pub struct TileCache {
     tiles: HashMap<TileKey, (u64, TextureHandle)>,
-    pending: HashSet<(TileKey, u64)>,
+    /// The newest generation each tile has been asked for.
+    pending: HashMap<TileKey, u64>,
     /// Tiles rendered on the GPU (`gpu` feature), as egui native textures.
     #[cfg(feature = "gpu")]
     native: HashMap<TileKey, (u64, egui::TextureId)>,
     /// Native textures no longer shown, for the GPU painter to free.
     #[cfg(feature = "gpu")]
     released: Vec<egui::TextureId>,
-    /// Bumped whenever page pixels may have changed. A tile painted at an
-    /// older generation stays on screen until its replacement arrives.
+    /// Bumped whenever page pixels may have changed. A stale tile stays on
+    /// screen until its replacement arrives.
     pub generation: u64,
+    /// Every tile painted before this generation is stale.
+    full: u64,
+    /// A tile painted before its entry here is stale: the engine reported
+    /// damage over it (`Page.screencastFrame` `damage`).
+    dirty: HashMap<TileKey, u64>,
     in_flight: usize,
     last_request: Option<Instant>,
 }
 
 impl TileCache {
+    /// Anything on the page may have changed: every tile is stale.
     pub fn invalidate(&mut self) {
         self.generation += 1;
-        self.pending.clear();
+        self.full = self.generation;
+        self.dirty.clear();
+    }
+
+    /// Only these document rects (CSS px: x, y, width, height) changed:
+    /// tiles they touch are stale, every other tile stays as it is.
+    pub fn invalidate_rects(&mut self, rects: &[[f32; 4]]) {
+        if rects.is_empty() {
+            return;
+        }
+        let mut keys = Vec::new();
+        for &[x, y, w, h] in rects {
+            if !(x.is_finite() && y.is_finite() && w.is_finite() && h.is_finite()) {
+                return self.invalidate();
+            }
+            if w <= 0.0 || h <= 0.0 {
+                continue;
+            }
+            let x0 = ((x / TILE).floor() as i64).max(0);
+            let y0 = ((y / TILE).floor() as i64).max(0);
+            let x1 = ((x + w) / TILE).ceil() as i64;
+            let y1 = ((y + h) / TILE).ceil() as i64;
+            if x1 - x0 > MAX_DAMAGE_TILES || y1 - y0 > MAX_DAMAGE_TILES {
+                return self.invalidate();
+            }
+            for ty in y0..y1 {
+                for tx in x0..x1 {
+                    keys.push(TileKey {
+                        tx: tx as i32,
+                        ty: ty as i32,
+                    });
+                }
+            }
+        }
+        if keys.is_empty() {
+            return;
+        }
+        self.generation += 1;
+        for k in keys {
+            self.dirty.insert(k, self.generation);
+        }
+    }
+
+    /// The oldest generation a tile may have been painted at to be current.
+    fn required(&self, key: &TileKey) -> u64 {
+        self.full.max(self.dirty.get(key).copied().unwrap_or(0))
     }
 
     /// A new document: nothing from the old one may stay on screen.
@@ -76,13 +130,27 @@ impl TileCache {
         let generation = self.generation;
         let mut out = Vec::new();
         for &k in keys {
-            let fresh = self.tiles.get(&k).is_some_and(|(g, _)| *g == generation);
+            let required = self.required(&k);
+            let fresh = self.tiles.get(&k).is_some_and(|(g, _)| *g >= required);
             #[cfg(feature = "gpu")]
-            let fresh = fresh || self.native.get(&k).is_some_and(|(g, _)| *g == generation);
-            if !fresh && !self.pending.contains(&(k, generation)) {
+            let fresh = fresh || self.native.get(&k).is_some_and(|(g, _)| *g >= required);
+            let asked = self.pending.get(&k).is_some_and(|g| *g >= required);
+            if !fresh && !asked {
                 out.push(k);
             }
         }
+        // Only a few requests run at once, and a loading page damages its
+        // top tiles on every frame. In viewport order the first tile won
+        // every free slot, so the tiles right of and below it were never
+        // painted (YouTube showed only its top-left 512 px). Ask first for
+        // tiles with no request running, then missing tiles, then the
+        // longest-stale ones.
+        out.sort_by_key(|k| {
+            let painted = self.tiles.get(k).map(|(g, _)| *g);
+            #[cfg(feature = "gpu")]
+            let painted = painted.or_else(|| self.native.get(k).map(|(g, _)| *g));
+            (self.pending.contains_key(k), painted.is_some(), painted)
+        });
         if self
             .last_request
             .is_some_and(|t| t.elapsed() > IN_FLIGHT_TIMEOUT)
@@ -91,7 +159,7 @@ impl TileCache {
         }
         out.truncate(IN_FLIGHT.saturating_sub(self.in_flight));
         for &k in &out {
-            self.pending.insert((k, generation));
+            self.pending.insert(k, generation);
         }
         if !out.is_empty() {
             self.in_flight += out.len();
@@ -107,8 +175,15 @@ impl TileCache {
 
     /// The engine could not paint `key`; it is asked for again later.
     pub fn failed(&mut self, key: TileKey, generation: u64) {
-        self.pending.remove(&(key, generation));
+        self.forget_request(key, generation);
         self.answered();
+    }
+
+    /// The request for `key` at `generation` is answered; a newer one stays.
+    fn forget_request(&mut self, key: TileKey, generation: u64) {
+        if self.pending.get(&key).is_some_and(|g| *g <= generation) {
+            self.pending.remove(&key);
+        }
     }
 
     pub fn insert(
@@ -118,7 +193,7 @@ impl TileCache {
         generation: u64,
         image: egui::ColorImage,
     ) {
-        self.pending.remove(&(key, generation));
+        self.forget_request(key, generation);
         self.answered();
         #[cfg(feature = "gpu")]
         if let Some((g, id)) = self.native.get(&key).copied() {
@@ -153,7 +228,7 @@ impl TileCache {
         key: TileKey,
         generation: u64,
     ) -> Option<Option<egui::TextureId>> {
-        self.pending.remove(&(key, generation));
+        self.forget_request(key, generation);
         if self.tiles.get(&key).is_some_and(|(g, _)| *g > generation) {
             return None;
         }
@@ -167,7 +242,7 @@ impl TileCache {
     /// Show a GPU-rendered tile. It replaces any PNG tile at `key`.
     #[cfg(feature = "gpu")]
     pub fn insert_native(&mut self, key: TileKey, generation: u64, id: egui::TextureId) {
-        self.pending.remove(&(key, generation));
+        self.forget_request(key, generation);
         self.answered();
         self.tiles.remove(&key);
         if let Some((_, old)) = self.native.insert(key, (generation, id)) {

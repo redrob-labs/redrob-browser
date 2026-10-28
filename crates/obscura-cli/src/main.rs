@@ -121,6 +121,12 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         ready_file: Option<std::path::PathBuf>,
 
+        /// Exit when standard input closes. Redrob Browser's window holds the
+        /// other end, so the engine never outlives a window that crashed or
+        /// was killed.
+        #[arg(long, hide = true)]
+        exit_with_stdin: bool,
+
         /// Allow CDP clients to navigate to file:// URLs. Off by
         /// default so a CDP connection cannot read arbitrary local
         /// files. Enable only when serving local HTML for testing
@@ -301,7 +307,9 @@ fn select_log_filter(verbose: bool, quiet: bool) -> &'static str {
     } else if quiet {
         "off"
     } else {
-        "warn"
+        // tiny_skia warns for every empty path it is asked to fill, which pages
+        // produce constantly; it is not actionable.
+        "warn,tiny_skia=error"
     }
 }
 
@@ -423,8 +431,11 @@ async fn run_cli() -> anyhow::Result<()> {
             std::env::set_var("TZ", tz);
         }
     } else if std::env::var_os("TZ").is_none() {
+        // Redrob Browser is used by a person: show their own time zone. The
+        // fixed Europe/Berlin default only suited scraping through a proxy.
+        let tz = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".to_string());
         unsafe {
-            std::env::set_var("TZ", "Europe/Berlin");
+            std::env::set_var("TZ", tz);
         }
     }
 
@@ -473,6 +484,7 @@ async fn run_cli() -> anyhow::Result<()> {
             worker_max_age,
             worker_drain_timeout,
             ready_file,
+            exit_with_stdin,
             allow_file_access,
             storage_dir,
             font_dirs,
@@ -498,6 +510,15 @@ async fn run_cli() -> anyhow::Result<()> {
                     .filter(|s| !s.is_empty())
             });
             configure_font_directories(&font_dirs)?;
+            if exit_with_stdin {
+                std::thread::spawn(|| {
+                    use std::io::Read;
+                    let mut sink = [0u8; 64];
+                    let mut stdin = std::io::stdin();
+                    while matches!(stdin.read(&mut sink), Ok(n) if n > 0) {}
+                    std::process::exit(0);
+                });
+            }
             if ready_file.is_some() && workers != 1 {
                 anyhow::bail!("--ready-file requires --workers 1");
             }
@@ -2682,7 +2703,7 @@ mod tests {
 
     #[test]
     fn default_filter_is_warn() {
-        assert_eq!(select_log_filter(false, false), "warn");
+        assert_eq!(select_log_filter(false, false), "warn,tiny_skia=error");
     }
 
     #[test]

@@ -38,6 +38,7 @@ pub struct Palette {
     pub focus_ring: Color32,
     pub danger: Color32,
     pub warning: Color32,
+    pub success: Color32,
 }
 
 /// Lengths from the design system, in points.
@@ -139,6 +140,7 @@ impl Palette {
             focus_ring: c("focus-ring"),
             danger: c("status-danger"),
             warning: c("status-warning"),
+            success: c("status-success"),
         }
     }
 
@@ -512,4 +514,270 @@ pub fn set_preference(ctx: &egui::Context, choice: &str) {
         "dark" => egui::ThemePreference::Dark,
         _ => egui::ThemePreference::System,
     });
+}
+
+/// The title block of one of our own pages: icon, title, one line under it.
+pub fn page_header(ui: &mut Ui, icon: Icon, title: &str, subtitle: &str) {
+    let p = palette(ui);
+    ui.add_space(size::SPACE_6);
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::hover());
+        ui.painter().rect_filled(
+            rect,
+            CornerRadius::same(size::RADIUS_LG),
+            p.surface_brand_subtle,
+        );
+        icon.paint(
+            ui,
+            Rect::from_center_size(rect.center(), Vec2::splat(20.0)),
+            p.ink_brand,
+        );
+        ui.add_space(size::SPACE_3);
+        ui.vertical(|ui| {
+            ui.label(
+                egui::RichText::new(title)
+                    .size(27.0)
+                    .strong()
+                    .color(p.ink_primary),
+            );
+            if !subtitle.is_empty() {
+                ui.label(
+                    egui::RichText::new(subtitle)
+                        .size(13.0)
+                        .color(p.ink_secondary),
+                );
+            }
+        });
+    });
+    ui.add_space(size::SPACE_6);
+}
+
+/// A card: raised surface, subtle border, 12pt corners, a title and an
+/// optional line of help under it.
+pub fn card<R>(ui: &mut Ui, title: &str, help: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let p = palette(ui);
+    let r = egui::Frame::new()
+        .fill(p.surface_raised)
+        .stroke(Stroke::new(1.0, p.border_subtle))
+        .corner_radius(CornerRadius::same(size::RADIUS_LG))
+        .inner_margin(egui::Margin::same(20))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if !title.is_empty() {
+                ui.label(
+                    egui::RichText::new(title)
+                        .size(15.0)
+                        .strong()
+                        .color(p.ink_primary),
+                );
+            }
+            if !help.is_empty() {
+                ui.label(egui::RichText::new(help).size(13.0).color(p.ink_secondary));
+            }
+            if !title.is_empty() || !help.is_empty() {
+                ui.add_space(size::SPACE_3);
+            }
+            add(ui)
+        });
+    ui.add_space(size::SPACE_4);
+    r.inner
+}
+
+/// A segmented control: one pill group, the chosen item raised. Returns the
+/// id the person picked this frame.
+pub fn segmented<'a>(ui: &mut Ui, items: &[(&'a str, &str)], current: &str) -> Option<&'a str> {
+    let p = palette(ui);
+    let mut picked = None;
+    egui::Frame::new()
+        .fill(p.surface_sunken)
+        .corner_radius(CornerRadius::same(size::RADIUS_MD))
+        .inner_margin(egui::Margin::same(3))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                for (id, label) in items {
+                    let on = *id == current;
+                    let font = egui::FontId::proportional(13.0);
+                    let ink = if on { p.ink_primary } else { p.ink_secondary };
+                    let g = ui.painter().layout_no_wrap(label.to_string(), font, ink);
+                    let (rect, r) =
+                        ui.allocate_exact_size(Vec2::new(g.size().x + 24.0, 28.0), Sense::click());
+                    if on {
+                        ui.painter().rect_filled(
+                            rect,
+                            CornerRadius::same(size::RADIUS_SM),
+                            p.surface_base,
+                        );
+                        ui.painter().rect_stroke(
+                            rect,
+                            CornerRadius::same(size::RADIUS_SM),
+                            Stroke::new(1.0, p.border_subtle),
+                            egui::StrokeKind::Inside,
+                        );
+                    } else if r.hovered() {
+                        ui.painter().rect_filled(
+                            rect,
+                            CornerRadius::same(size::RADIUS_SM),
+                            p.border_subtle,
+                        );
+                    }
+                    let at = rect.center() - g.size() / 2.0;
+                    ui.painter().galley(at, g, ink);
+                    if r.clicked() && !on {
+                        picked = Some(*id);
+                    }
+                }
+            });
+        });
+    picked
+}
+
+/// A one-line text field in the design system's field style.
+pub fn text_field(
+    ui: &mut Ui,
+    text: &mut String,
+    hint: &str,
+    width: f32,
+    icon: Option<Icon>,
+) -> Response {
+    let p = palette(ui);
+    let (rect, _) =
+        ui.allocate_exact_size(Vec2::new(width, size::CONTROL_SM + 4.0), Sense::hover());
+    let id = ui.id().with(("field", hint));
+    let focused = ui.memory(|m| m.has_focus(id));
+    let radius = CornerRadius::same(size::RADIUS_MD);
+    ui.painter().rect_filled(rect, radius, p.surface_base);
+    let stroke = if focused {
+        Stroke::new(2.0, p.focus_ring)
+    } else {
+        Stroke::new(1.0, p.border_subtle)
+    };
+    ui.painter()
+        .rect_stroke(rect, radius, stroke, egui::StrokeKind::Inside);
+    let mut left = rect.left() + 12.0;
+    if let Some(icon) = icon {
+        icon.paint(
+            ui,
+            Rect::from_center_size(
+                egui::pos2(rect.left() + 20.0, rect.center().y),
+                Vec2::splat(15.0),
+            ),
+            p.ink_muted,
+        );
+        left = rect.left() + 34.0;
+    }
+    let inner = Rect::from_x_y_ranges(left..=(rect.right() - 10.0), rect.y_range().shrink(6.0));
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(inner)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    child.add(
+        egui::TextEdit::singleline(text)
+            .id(id)
+            .frame(egui::Frame::NONE)
+            .font(egui::FontId::proportional(13.0))
+            .text_color(p.ink_primary)
+            .desired_width(inner.width())
+            .hint_text(egui::RichText::new(hint).color(p.ink_muted)),
+    )
+}
+
+/// A list row with hover fill: a letter or icon badge, a main line, a muted
+/// second line and a muted right-hand note. Returns the row's response and
+/// whether its trailing remove button was pressed.
+pub fn list_row(
+    ui: &mut Ui,
+    badge: &str,
+    main: &str,
+    sub: &str,
+    note: &str,
+    removable: bool,
+) -> (Response, bool) {
+    let p = *palette(ui);
+    let h = if sub.is_empty() { 40.0 } else { 52.0 };
+    let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::click());
+    let hovered = r.hovered();
+    if hovered {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(size::RADIUS_MD), p.surface_sunken);
+    }
+    let c = egui::pos2(rect.left() + 22.0, rect.center().y);
+    ui.painter().circle_filled(c, 14.0, p.surface_brand_subtle);
+    ui.painter().text(
+        c,
+        egui::Align2::CENTER_CENTER,
+        badge,
+        egui::FontId::proportional(13.0),
+        p.ink_brand,
+    );
+    let note_w = if note.is_empty() { 0.0 } else { 120.0 };
+    let remove_w = if removable { 36.0 } else { 0.0 };
+    let text = Rect::from_x_y_ranges(
+        (rect.left() + 46.0)..=(rect.right() - note_w - remove_w - 8.0),
+        rect.y_range(),
+    );
+    let painter = ui.painter_at(text);
+    let main_y = if sub.is_empty() {
+        rect.center().y
+    } else {
+        rect.center().y - 9.0
+    };
+    painter.text(
+        egui::pos2(text.left(), main_y),
+        egui::Align2::LEFT_CENTER,
+        main,
+        egui::FontId::proportional(13.0),
+        p.ink_primary,
+    );
+    if !sub.is_empty() {
+        painter.text(
+            egui::pos2(text.left(), rect.center().y + 10.0),
+            egui::Align2::LEFT_CENTER,
+            sub,
+            egui::FontId::proportional(12.0),
+            p.ink_muted,
+        );
+    }
+    if !note.is_empty() {
+        let x = rect.right() - remove_w - 8.0;
+        ui.painter().text(
+            egui::pos2(x, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            note,
+            egui::FontId::proportional(12.0),
+            p.ink_muted,
+        );
+    }
+    let mut removed = false;
+    if removable && hovered {
+        let b = Rect::from_center_size(
+            egui::pos2(rect.right() - 20.0, rect.center().y),
+            Vec2::splat(28.0),
+        );
+        let br = ui.interact(b, ui.id().with(("remove", main, sub)), Sense::click());
+        if br.hovered() {
+            ui.painter()
+                .rect_filled(b, CornerRadius::same(size::RADIUS_SM), p.border_subtle);
+        }
+        Icon::Close.paint(
+            ui,
+            b.shrink(7.0),
+            if br.hovered() {
+                p.danger
+            } else {
+                p.ink_secondary
+            },
+        );
+        removed = br.clicked();
+    }
+    (r, removed)
+}
+
+/// A muted line for an empty list.
+pub fn empty_note(ui: &mut Ui, text: &str) {
+    let p = palette(ui);
+    ui.add_space(size::SPACE_2);
+    ui.label(egui::RichText::new(text).size(13.0).color(p.ink_muted));
+    ui.add_space(size::SPACE_2);
 }

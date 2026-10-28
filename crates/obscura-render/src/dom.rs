@@ -69,6 +69,10 @@ fn text_width(
 struct NativeButtonIntrinsicContent {
     text: String,
     atomic_width: f32,
+    /// An in-flow descendant has box geometry of its own (a block, flex or
+    /// grid box, inline-block, edges, or another font size), which a label
+    /// measured at the button's font cannot account for.
+    boxed: bool,
 }
 
 /// Collect the normal-flow content that contributes to an auto-sized
@@ -144,6 +148,23 @@ fn native_button_intrinsic_content(
             return;
         }
 
+        if let Some(style) = style {
+            let edges = style.padding.left
+                + style.padding.right
+                + style.border.left
+                + style.border.right
+                + style.margin.left.abs()
+                + style.margin.right.abs();
+            if style.display != crate::Display::Inline
+                || style.is_inline_block
+                || edges > 0.0
+                || style
+                    .font_size
+                    .is_some_and(|size| (size - font_size).abs() > 0.01)
+            {
+                content.boxed = true;
+            }
+        }
         for child in rendered_children(tree, id) {
             walk(tree, child, styles, font_size, content);
         }
@@ -286,6 +307,32 @@ impl OverflowClip {
         }
         self.rounded_offset.0 += dx;
         self.rounded_offset.1 += dy;
+    }
+
+    /// This clip moved by (`dx`, `dy`), rounded corner rects included, for
+    /// comparing clips across root scroll positions (paint damage).
+    pub(crate) fn shifted_with_corners(&self, dx: f32, dy: f32) -> Self {
+        fn shift(
+            chain: &RoundedOverflowClipChain,
+            dx: f32,
+            dy: f32,
+        ) -> Arc<RoundedOverflowClipChain> {
+            let mut clip = chain.clip;
+            clip.rect.x += dx;
+            clip.rect.y += dy;
+            Arc::new(RoundedOverflowClipChain {
+                clip,
+                parent: chain.parent.as_deref().map(|parent| shift(parent, dx, dy)),
+            })
+        }
+        let mut out = self.clone();
+        out.translate(dx, dy);
+        out.rounded = self.rounded.as_deref().map(|chain| shift(chain, dx, dy));
+        if out.rounded.is_none() {
+            // The offset only places rounded corners.
+            out.rounded_offset = (0.0, 0.0);
+        }
+        out
     }
 
     pub(crate) fn rounded_chain(&self) -> Option<&Arc<RoundedOverflowClipChain>> {
@@ -6737,17 +6784,23 @@ fn layout_dom_once(
             .filter_map(|(&id, style)| {
                 let node = tree.borrow_node(id)?;
                 let element = node.as_element()?;
-                (element.local.as_ref() == "button"
-                    && style.width == crate::Dimension::Auto
-                    && container_auto_inline_size(tree, id, style, &styles)
-                        != ContainerAutoInlineSize::StretchedGridItem)
-                    .then(|| {
-                        let font_size = style.font_size.unwrap_or(13.333_333).max(1.0);
-                        (
-                            id,
-                            native_button_intrinsic_content(tree, id, &styles, font_size),
-                        )
-                    })
+                if element.local.as_ref() != "button" || style.width != crate::Dimension::Auto {
+                    return None;
+                }
+                let sizing = container_auto_inline_size(tree, id, style, &styles);
+                if sizing == ContainerAutoInlineSize::StretchedGridItem {
+                    return None;
+                }
+                let font_size = style.font_size.unwrap_or(13.333_333).max(1.0);
+                let content = native_button_intrinsic_content(tree, id, &styles, font_size);
+                // A label of nested boxes (YouTube's chip: an inline-flex
+                // button around a padded 14px flex box whose text sits in an
+                // overflow:hidden box) is not one run of text at the button's
+                // font. Where the button already shrinks to fit, layout
+                // measures its real contents; the label approximation sized
+                // such chips to a few pixels and clipped their text.
+                (!content.boxed || sizing != ContainerAutoInlineSize::Intrinsic)
+                    .then_some((id, content))
             })
             .collect();
         let native_control_grid_stretch: HashMap<NodeId, (bool, bool)> = styles

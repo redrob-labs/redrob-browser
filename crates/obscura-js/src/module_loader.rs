@@ -256,6 +256,18 @@ impl ModuleLoader for ObscuraModuleLoader {
                 .ok_or_else(|| "No network context wired to module loader".to_string()),
         };
 
+        // A parser-discovered entry module the page already started fetching.
+        let prefetched = self
+            .page_state
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .and_then(|state| {
+                state
+                    .try_borrow_mut()
+                    .ok()
+                    .and_then(|mut state| state.module_prefetch.remove(&url))
+            });
+
         ModuleLoadResponse::Async(Pin::from(Box::new(async move {
             // deno_core propagates `is_dynamic_import` to every dependency edge in
             // the recursive graph, so this excludes parser-discovered/static
@@ -295,41 +307,68 @@ impl ModuleLoader for ObscuraModuleLoader {
                             error_text: None,
                         }),
                     });
-                    let request =
-                        obscura_net::ResourceRequest::module_script(&document_url, &referrer);
-                    #[cfg(feature = "stealth")]
-                    let resp = match stealth {
-                        Some(stealth) => {
-                            stealth
-                                .fetch_resource_with_callbacks(
-                                    &requested,
-                                    request,
-                                    callbacks.as_deref(),
-                                )
-                                .await
-                        }
+                    let prefetched = match prefetched {
+                        Some(task) => match task.await {
+                            Ok(Ok(resp)) => Some(resp),
+                            Ok(Err(error)) => {
+                                tracing::debug!(
+                                    "module prefetch failed, refetching {}: {}",
+                                    url,
+                                    error
+                                );
+                                None
+                            }
+                            Err(_) => None,
+                        },
+                        None => None,
+                    };
+                    let resp = match prefetched {
+                        Some(resp) => resp,
                         None => {
-                            client
-                                .fetch_resource_with_callbacks(
-                                    &requested,
-                                    request,
-                                    callbacks.as_deref(),
-                                )
-                                .await
+                            let request = obscura_net::ResourceRequest::module_script(
+                                &document_url,
+                                &referrer,
+                            );
+                            #[cfg(feature = "stealth")]
+                            let resp = match stealth {
+                                Some(stealth) => {
+                                    stealth
+                                        .fetch_resource_with_callbacks(
+                                            &requested,
+                                            request,
+                                            callbacks.as_deref(),
+                                        )
+                                        .await
+                                }
+                                None => {
+                                    client
+                                        .fetch_resource_with_callbacks(
+                                            &requested,
+                                            request,
+                                            callbacks.as_deref(),
+                                        )
+                                        .await
+                                }
+                            }
+                            .map_err(|e| {
+                                io_err(format!("Failed to fetch module {}: {}", url, e))
+                            })?;
+                            #[cfg(not(feature = "stealth"))]
+                            let resp = {
+                                let _ = &stealth;
+                                client
+                                    .fetch_resource_with_callbacks(
+                                        &requested,
+                                        request,
+                                        callbacks.as_deref(),
+                                    )
+                                    .await
+                                    .map_err(|e| {
+                                        io_err(format!("Failed to fetch module {}: {}", url, e))
+                                    })?
+                            };
+                            resp
                         }
-                    }
-                    .map_err(|e| io_err(format!("Failed to fetch module {}: {}", url, e)))?;
-                    #[cfg(not(feature = "stealth"))]
-                    let resp = {
-                        let _ = &stealth;
-                        client
-                            .fetch_resource_with_callbacks(
-                                &requested,
-                                request,
-                                callbacks.as_deref(),
-                            )
-                            .await
-                            .map_err(|e| io_err(format!("Failed to fetch module {}: {}", url, e)))?
                     };
                     // A response (including the blocked-tracker sentinel) is
                     // not a transport failure, even if evaluation later fails.

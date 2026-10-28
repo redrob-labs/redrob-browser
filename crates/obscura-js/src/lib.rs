@@ -2,6 +2,7 @@
 // so merges from upstream stay small. Correctness and suspicious lints still fail.
 #![allow(clippy::style, clippy::complexity, clippy::perf, dead_code)]
 pub mod cdp_watchdog;
+mod custom_elements;
 pub mod frame;
 mod import_map;
 pub mod indexed_db;
@@ -29,6 +30,6 @@ pub use obscura_render::{
     screenshot_png_scrolled_at_animation_time_with_surface_color,
     screenshot_png_scrolled_at_animation_time_with_surface_color_and_resources,
     validate_capture_region, AnimationSample, AnimationSampleMode, AnimationSampleTime,
-    CaptureError, CaptureRegion, CssMediaType, ImageRequestProfile, RenderResourceCache,
+    CaptureError, CaptureRegion, CssMediaType, ImageRequestProfile, Rect, RenderResourceCache,
     MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS,
 };

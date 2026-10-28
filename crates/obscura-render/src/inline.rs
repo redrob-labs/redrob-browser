@@ -1379,6 +1379,50 @@ impl TextEngine {
         self.items.is_empty()
     }
 
+    /// Each laid-out line of an item with generous bounds of its glyph ink
+    /// (layout coordinates), for paint damage. A line's glyph extent grows by
+    /// its line height on every side (ascenders, italics, first-line and
+    /// balance offsets), and by four more when the item paints a list marker
+    /// (either side, for right-to-left lines). `f` also receives the run.
+    pub(crate) fn for_each_item_line(
+        &self,
+        idx: usize,
+        mut f: impl FnMut(usize, crate::Rect, &cosmic_text::LayoutRun<'_>),
+    ) {
+        let Some(item) = self.items.get(idx) else {
+            return;
+        };
+        let marker = item.marker.is_some() || item.marker_buffer.is_some();
+        for (line, run) in item.buffer.layout_runs().enumerate() {
+            let mut x0 = 0.0_f32;
+            let mut x1 = run.line_w;
+            for glyph in run.glyphs {
+                x0 = x0.min(glyph.x + glyph.x_offset);
+                x1 = x1.max(glyph.x + glyph.x_offset + glyph.w);
+            }
+            let pad = run.line_height.max(1.0);
+            let mut pad_start = pad + item.first_line_offset.abs();
+            if marker {
+                pad_start += pad * 4.0;
+            }
+            let rect = crate::Rect {
+                x: item.origin.0 + x0 - pad_start,
+                y: item.origin.1 + run.line_top - pad,
+                width: x1 - x0 + 2.0 * pad_start,
+                height: run.line_height + 2.0 * pad,
+            };
+            if rect.x.is_finite() && rect.y.is_finite() && rect.width.is_finite() {
+                f(line, rect, &run);
+            }
+        }
+    }
+
+    /// Item placement that paint applies on top of its lines.
+    pub(crate) fn item_placement(&self, idx: usize) -> Option<[f32; 3]> {
+        let item = self.items.get(idx)?;
+        Some([item.origin.0, item.origin.1, item.first_line_offset])
+    }
+
     #[cfg(test)]
     pub(crate) fn item_text(&self, idx: usize) -> String {
         self.items[idx]

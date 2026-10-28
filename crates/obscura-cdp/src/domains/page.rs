@@ -746,7 +746,19 @@ pub(crate) fn queue_screencast_frame(
             .as_ref()
             .map(|js| js.activity_generation())
             .unwrap_or(0);
-        return Ok(push_screencast_frame(
+        // Redrob extension: which document-space rects changed since the
+        // previous signal frame. Omitted when the whole page may have changed.
+        let damage = page.take_paint_damage().map(|rects| {
+            rects
+                .into_iter()
+                .map(|r| {
+                    let (x0, y0) = (r.x.floor(), r.y.floor());
+                    let (x1, y1) = ((r.x + r.width).ceil(), (r.y + r.height).ceil());
+                    json!({ "x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0 })
+                })
+                .collect::<Vec<_>>()
+        });
+        let pushed = push_screencast_frame(
             ctx,
             cdp_session_id,
             &state,
@@ -754,7 +766,13 @@ pub(crate) fn queue_screencast_frame(
             viewport,
             scroll,
             activity_generation,
-        ));
+        );
+        if let (true, Some(damage)) = (pushed, damage) {
+            if let Some(frame) = ctx.pending_events.last_mut() {
+                frame.params["damage"] = Value::Array(damage);
+            }
+        }
+        return Ok(pushed);
     }
     let (viewport, scroll, raster, activity_generation) = {
         let page = ctx
@@ -886,6 +904,8 @@ pub(crate) fn command_can_change_screencast_frame(method: &str) -> bool {
         "Input.dispatchMouseEvent"
             | "Input.dispatchKeyEvent"
             | "Input.dispatchTouchEvent"
+            | "Input.insertText"
+            | "Input.imeSetComposition"
             | "Emulation.setDeviceMetricsOverride"
             | "Emulation.clearDeviceMetricsOverride"
             | "Emulation.setDefaultBackgroundColorOverride"

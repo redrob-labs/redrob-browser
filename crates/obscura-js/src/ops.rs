@@ -458,6 +458,12 @@ pub struct ObscuraState {
     /// hints instead of the rustls ClientHello op_fetch_url would otherwise send.
     #[cfg(feature = "stealth")]
     pub stealth_client: Option<Arc<StealthHttpClient>>,
+    /// Entry-module fetches the page started ahead of execution, keyed by
+    /// URL. The module loader takes a matching entry instead of fetching
+    /// again, so a document's module scripts download in parallel rather
+    /// than one round trip per script in document order.
+    pub module_prefetch:
+        HashMap<String, tokio::task::JoinHandle<Result<obscura_net::Response, String>>>,
     pub pending_navigation: Option<(String, String, String)>,
     /// The tab's session history as the owning page sees it: entry URLs, the
     /// index of this document's first entry, and the current index. Empty
@@ -534,6 +540,9 @@ pub struct ObscuraState {
     /// DOM/style/viewport changes clear this value but retain resource bytes.
     #[cfg(feature = "render")]
     pub prepared_render: Option<obscura_render::PreparedRender>,
+    /// Wall time of the most recent style+layout rebuild, in milliseconds.
+    /// Rendering opportunities are spaced at least this far apart.
+    pub last_layout_ms: u32,
     /// CSS media type selected for the next retained layout. Live pages use
     /// screen; PDF export switches to print for one synchronous capture and
     /// restores screen before returning.
@@ -623,6 +632,9 @@ pub struct ObscuraState {
     /// updates this resource independently of retained style/layout geometry.
     #[cfg(feature = "render")]
     pub(crate) canvas_surfaces: HashMap<NodeId, CanvasBackingSurface>,
+    /// What the last screencast frame's paint damage was measured against.
+    #[cfg(feature = "render")]
+    pub(crate) damage_snapshot: obscura_render::DamageSnapshot,
     #[cfg(feature = "render")]
     pub viewport: (f32, f32),
     /// Root scrolling offset in CSS pixels. With render enabled this is
@@ -779,6 +791,7 @@ impl ObscuraState {
             base_url_cache: RefCell::new(None),
             #[cfg(feature = "render")]
             prepared_render: None,
+            last_layout_ms: 0,
             #[cfg(feature = "render")]
             render_media: obscura_render::CssMediaType::Screen,
             #[cfg(feature = "render")]
@@ -806,6 +819,7 @@ impl ObscuraState {
             render_resource_events: Vec::new(),
             #[cfg(feature = "render")]
             intercept_block_patterns: Vec::new(),
+            module_prefetch: HashMap::new(),
             #[cfg(feature = "render")]
             render_resource_tasks: Vec::new(),
             #[cfg(feature = "render")]
@@ -824,6 +838,8 @@ impl ObscuraState {
             dynamic_fonts: Vec::new(),
             #[cfg(feature = "render")]
             canvas_surfaces: HashMap::new(),
+            #[cfg(feature = "render")]
+            damage_snapshot: obscura_render::DamageSnapshot::default(),
             #[cfg(feature = "render")]
             viewport: (1280.0, 720.0),
             #[cfg(feature = "render")]
@@ -1891,9 +1907,12 @@ pub(crate) fn queue_retained_style_mutation(
 
 /// Page-wide limit on concurrent background render-resource requests: the
 /// bound the navigation warmup stream always had, now shared by every load
-/// of the document however many scans or layout misses queue them.
+/// of the document however many scans or layout misses queue them. HTTP/2
+/// multiplexes these over one connection per origin; 16 kept the queue full
+/// for most of an image-heavy load (Wikipedia, redrob.io, Drive), so images
+/// waited on the cap rather than the network.
 #[cfg(feature = "render")]
-pub const RENDER_RESOURCE_CONCURRENCY: usize = 16;
+pub const RENDER_RESOURCE_CONCURRENCY: usize = 48;
 
 /// One finished page-transport load for the renderer cache.
 #[cfg(feature = "render")]
@@ -2857,6 +2876,29 @@ fn op_dom_inner(shared: SharedState, cmd: String, arg1: String, arg2: String) ->
                 }
                 None => "null".into(),
             }
+        }
+        // Custom element reaction candidates under a root, in shadow-including
+        // tree order (fragment parsing and insertion upgrade/connect them).
+        // arg2 is "<0|1 include root>\0<name or empty>".
+        "ce_candidates" => {
+            let nid = arg1.parse::<u32>().unwrap_or(0);
+            let (include_root, name) = arg2.split_once('\0').unwrap_or((arg2.as_str(), ""));
+            let ids: Vec<i32> = crate::custom_elements::candidates(
+                &dom,
+                NodeId::new(nid),
+                include_root == "1",
+                name,
+            )
+            .iter()
+            .map(|id| id.index() as i32)
+            .collect();
+            serde_json::to_string(&ids).unwrap_or("[]".into())
+        }
+        "assigned_slot" => {
+            let nid = arg1.parse::<u32>().unwrap_or(0);
+            dom.assigned_slot(NodeId::new(nid))
+                .map(|id| id.index().to_string())
+                .unwrap_or("-1".into())
         }
         "tag_name" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
@@ -4701,10 +4743,7 @@ async fn fetch_url_inner(
             .keys()
             .any(|k| k.eq_ignore_ascii_case("user-agent"))
         {
-            req = req.header(
-                "User-Agent",
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
-            );
+            req = req.header("User-Agent", obscura_net::identity::DEFAULT_USER_AGENT);
         }
 
         for (k, v) in &current_headers {
@@ -8224,6 +8263,7 @@ pub fn build_extension() -> Extension {
         op_text_decode(),
         op_url_encode_query(),
         op_begin_render_task(),
+        op_last_layout_ms(),
     ];
     // Only registered when the render feature is compiled in. bootstrap.js
     // probes with typeof before calling, so the op's absence is a clean fallback.
@@ -8539,6 +8579,9 @@ fn ensure_prepared_render_with_base_url(
             .then(|| state.prepared_render.take())
             .flatten();
         let mutations = std::mem::take(&mut state.pending_style_mutations);
+        let layout_started = std::time::Instant::now();
+        let retained = previous.is_some();
+        let mutation_count = mutations.len();
         let prepared = {
             let dom = state.dom.as_ref()?;
             match previous {
@@ -8600,6 +8643,15 @@ fn ensure_prepared_render_with_base_url(
                 .animation_timeline
                 .retain_nodes(|node| connected.contains(&node));
         }
+        state.last_layout_ms =
+            u32::try_from(layout_started.elapsed().as_millis()).unwrap_or(u32::MAX);
+        tracing::debug!(
+            target: "obscura_js::layout",
+            "layout rebuilt in {}us (retained {}, {} style mutations)",
+            layout_started.elapsed().as_micros(),
+            retained,
+            mutation_count,
+        );
         state.prepared_render = Some(prepared);
         state.resolved_scroll = None;
     }
@@ -8726,6 +8778,12 @@ pub(crate) fn begin_animation_task(state: &mut ObscuraState) {
     {
         state.style_query_cache = None;
     }
+}
+
+/// Milliseconds the last layout rebuild took (0 before the first one).
+#[op2(fast)]
+fn op_last_layout_ms(state: &OpState) -> u32 {
+    state.borrow::<SharedState>().borrow().last_layout_ms
 }
 
 #[op2(fast)]
