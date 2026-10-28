@@ -14,14 +14,17 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Spawn `redrob-browser serve` next to this binary on a free loopback port.
-    pub fn start() -> anyhow::Result<Self> {
+    /// Spawn `redrob-browser serve` next to this binary on a free loopback port,
+    /// keeping cookies and localStorage in `storage`.
+    pub fn start(storage: &std::path::Path) -> anyhow::Result<Self> {
         let exe = sibling_binary("redrob-browser");
         let ready = std::env::temp_dir().join(format!("redrob-browser-ready-{}.json", std::process::id()));
         let _ = std::fs::remove_file(&ready);
 
         let child = Command::new(&exe)
-            .args(["serve", "--host", "127.0.0.1", "--port", "0", "--ready-file"])
+            .args(["serve", "--host", "127.0.0.1", "--port", "0", "--storage-dir"])
+            .arg(storage)
+            .arg("--ready-file")
             .arg(&ready)
             .stdin(Stdio::null())
             .stdout(Stdio::null())

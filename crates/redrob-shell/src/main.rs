@@ -9,6 +9,7 @@ mod cdp;
 mod engine;
 mod input;
 mod model;
+mod profile;
 mod tiles;
 
 use std::sync::mpsc;
@@ -21,8 +22,19 @@ use tiles::TileCache;
 const NEW_TAB: &str = "about:blank";
 
 fn main() -> anyhow::Result<()> {
-    let engine = engine::Engine::start()?;
-    let start_url = std::env::args().nth(1).unwrap_or_else(|| NEW_TAB.to_string());
+    let profile = match profile::Profile::open_default() {
+        Ok(p) => Some(p),
+        Err(e) => {
+            eprintln!("redrob-browser: profile unavailable, nothing will be saved: {e}");
+            None
+        }
+    };
+    let storage = profile
+        .as_ref()
+        .map(|p| p.engine_dir())
+        .unwrap_or_else(|| std::env::temp_dir().join("redrob-browser-engine"));
+    let engine = engine::Engine::start(&storage)?;
+    let start_url = std::env::args().nth(1);
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -47,10 +59,20 @@ fn main() -> anyhow::Result<()> {
                     }
                 });
             });
+            let mut model = Model::default();
+            let mut restore = (Vec::new(), 0);
+            if let Some(p) = &profile {
+                if let Err(e) = p.load(&mut model) {
+                    eprintln!("redrob-browser: could not read bookmarks and history: {e}");
+                }
+                restore = p.load_session().unwrap_or_default();
+            }
             let mut window = Window {
                 commands: cmd_tx,
                 updates: upd_rx,
-                model: Model::default(),
+                model,
+                profile,
+                last_session_save: std::time::Instant::now(),
                 address: String::new(),
                 editing: false,
                 focus_address: false,
@@ -58,7 +80,12 @@ fn main() -> anyhow::Result<()> {
                 last_size: (0, 0, 0.0),
                 address_id: egui::Id::new("address"),
             };
-            window.open_tab(&start_url, true);
+            window.restore(restore.0, restore.1);
+            match start_url {
+                Some(url) => window.open_tab(&model::to_url(&url), true),
+                None if window.model.tabs.is_empty() => window.open_tab(NEW_TAB, true),
+                None => {}
+            }
             Ok(Box::new(window))
         }),
     );
@@ -70,6 +97,8 @@ struct Window {
     commands: tokio::sync::mpsc::UnboundedSender<Command>,
     updates: mpsc::Receiver<Update>,
     model: Model,
+    profile: Option<profile::Profile>,
+    last_session_save: std::time::Instant,
     /// Address field text; follows the active tab's URL unless the person is typing.
     address: String,
     editing: bool,
@@ -86,6 +115,37 @@ impl Window {
 
     fn active_id(&self) -> Option<TabId> {
         self.model.active_tab().map(|t| t.id)
+    }
+
+    /// Reopen the tabs from the last session in their order.
+    fn restore(&mut self, tabs: Vec<profile::SavedTab>, active: usize) {
+        for saved in tabs {
+            let id = self.model.alloc_id();
+            let mut tab = Tab::new(id, &saved.url);
+            tab.title = saved.title;
+            tab.loading = true;
+            self.model.tabs.push(tab);
+            self.op(id, Op::Open(saved.url));
+        }
+        if !self.model.tabs.is_empty() {
+            self.model.active = active.min(self.model.tabs.len() - 1);
+            self.activated();
+        }
+    }
+
+    fn save_bookmarks(&mut self) {
+        if let Some(p) = &mut self.profile {
+            if let Err(e) = p.save_bookmarks(&self.model.bookmarks) {
+                self.error = Some(format!("Could not save bookmarks: {e}"));
+            }
+        }
+    }
+
+    fn save_session(&mut self) {
+        self.last_session_save = std::time::Instant::now();
+        if let Some(p) = &mut self.profile {
+            let _ = p.save_session(&self.model);
+        }
     }
 
     fn open_tab(&mut self, url: &str, activate: bool) {
@@ -188,9 +248,15 @@ impl Window {
             let url_now = t.url.clone();
             if let Some((url, title)) = visited {
                 self.model.record_visit(&url, &title);
+                if let Some(p) = &self.profile {
+                    let _ = p.record_visit(&url, &title);
+                }
             }
             if let Some((url, title)) = titled {
                 self.model.set_history_title(&url, &title);
+                if let Some(p) = &self.profile {
+                    let _ = p.set_history_title(&url, &title);
+                }
             }
             if active && !self.editing {
                 self.address = if url_now == NEW_TAB { String::new() } else { url_now };
@@ -269,6 +335,7 @@ impl Window {
     fn toggle_bookmark(&mut self) {
         if let Some((url, title)) = self.model.active_tab().map(|t| (t.url.clone(), t.title.clone())) {
             self.model.toggle_bookmark(&url, &title);
+            self.save_bookmarks();
         }
     }
 
@@ -418,6 +485,7 @@ impl Window {
         });
         if let Some(i) = remove {
             self.model.bookmarks.remove(i);
+            self.save_bookmarks();
         }
         if let Some(url) = go_new_tab {
             self.open_tab(&url, false);
@@ -429,10 +497,18 @@ impl Window {
 }
 
 impl eframe::App for Window {
+    fn on_exit(&mut self) {
+        self.save_session();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.drain_updates(&ctx);
         self.shortcuts(&ctx);
+        // A crash must not lose the open tabs.
+        if self.last_session_save.elapsed() > std::time::Duration::from_secs(30) {
+            self.save_session();
+        }
 
         egui::Panel::top("chrome").show_inside(ui, |ui| {
             self.tab_bar(ui);
