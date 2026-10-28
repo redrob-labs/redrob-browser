@@ -23,6 +23,7 @@ render = ["obscura-browser/render", "obscura-cdp/render", "obscura-mcp/render"]
 display-list = ["render", "obscura-cdp/display-list"]
 
 [dependencies]
+iana-time-zone = "0.1"
 obscura-browser = { workspace = true }
 obscura-mcp = { workspace = true }
 obscura-cdp = { workspace = true }

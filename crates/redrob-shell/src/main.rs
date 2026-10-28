@@ -7,6 +7,7 @@
 
 mod account;
 mod agent_bridge;
+mod autoscroll;
 mod cdp;
 mod devtools;
 mod drm_tab;
@@ -212,6 +213,7 @@ fn main() -> anyhow::Result<()> {
                 error: None,
                 last_size: (0, 0, 0.0),
                 address_id: egui::Id::new("address"),
+                autoscroll: Default::default(),
                 incognito: false,
                 top_sites: None,
                 new_tab_query: String::new(),
@@ -248,6 +250,15 @@ fn main() -> anyhow::Result<()> {
     }
     self_update::restart_if_requested();
     result.map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// A prompt for Redrob Code: text typed after `/` (or the older `>`) in the
+/// address field or the new tab page.
+fn agent_prompt(text: &str) -> Option<&str> {
+    let t = text.trim();
+    t.strip_prefix('/')
+        .or_else(|| t.strip_prefix('>'))
+        .map(str::trim)
 }
 
 /// The window and taskbar icon, from the design system's app icon.
@@ -319,6 +330,7 @@ struct Window {
     error: Option<String>,
     last_size: (u32, u32, f32),
     address_id: egui::Id,
+    autoscroll: autoscroll::Autoscroll,
     /// A private window (`--incognito`).
     incognito: bool,
     /// Most visited sites for the new tab page, read once per new tab.
@@ -458,6 +470,7 @@ impl Window {
     }
 
     fn drain_updates(&mut self, ctx: &egui::Context) {
+        let mut open_links = Vec::new();
         while let Ok(Update { tab, event }) = self.updates.try_recv() {
             if let Event::Download {
                 guid,
@@ -603,6 +616,11 @@ impl Window {
                         self.notice = Some(i18n::t("No sign-in form on this page.").to_string());
                     }
                 }
+                Event::LinkAt(link) => {
+                    if let Some(url) = self.autoscroll.link_answer(link) {
+                        open_links.push(url);
+                    }
+                }
                 Event::Opened { .. }
                 | Event::Download { .. }
                 | Event::LoginSubmitted { .. }
@@ -611,6 +629,10 @@ impl Window {
                 | Event::MediaRects(_) => {}
             }
             let url_now = t.url.clone();
+            // Blank tabs and our own pages are not history.
+            let visited = visited.filter(|(u, _)| {
+                u.starts_with("http://") || u.starts_with("https://") || u.starts_with("file:")
+            });
             if let Some((url, title)) = visited {
                 self.model.record_visit(&url, &title);
                 if let Some(p) = &self.profile {
@@ -630,6 +652,9 @@ impl Window {
                     url_now
                 };
             }
+        }
+        for url in open_links {
+            self.open_tab(&url, false);
         }
         let title = match self.model.active_tab().map(|t| t.label().to_string()) {
             Some(l) if !l.is_empty() => format!("{l} - {}", t("Redrob Browser")),
@@ -1721,7 +1746,7 @@ impl Window {
                         self.editing = true;
                     }
                     if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                        if let Some(prompt) = self.address.trim().strip_prefix('>') {
+                        if let Some(prompt) = agent_prompt(&self.address) {
                             self.ask_agent(prompt.trim().to_string());
                         } else if !self.address.trim().is_empty() {
                             go = Some(model::to_url(&self.address));
@@ -2061,7 +2086,7 @@ impl Window {
         );
         if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
             let q = std::mem::take(&mut self.new_tab_query);
-            if let Some(prompt) = q.trim().strip_prefix('>') {
+            if let Some(prompt) = agent_prompt(&q) {
                 self.ask_agent(prompt.trim().to_string());
             } else if !q.trim().is_empty() {
                 self.navigate(model::to_url(&q));
@@ -2078,7 +2103,7 @@ impl Window {
             );
         }
         ui.label(
-            egui::RichText::new(t("Start with > to ask Redrob Code"))
+            egui::RichText::new(t("Start with / to ask Redrob Code"))
                 .size(12.0)
                 .color(p.ink_muted),
         );
@@ -2397,9 +2422,47 @@ impl eframe::App for Window {
                     self.editing = false;
                 }
                 let focused = response.has_focus();
+                // Middle-click autoscroll takes its clicks before the page sees them.
+                let mut events = ui.input(|i| i.events.clone());
+                let pointer = ui.input(|i| i.pointer.hover_pos());
+                let ask = self.autoscroll.filter(&mut events, rect);
+                let page_id = self.model.tabs[tab_index].id;
+                if let Some((x, y)) = ask.ask_link_at {
+                    self.op(page_id, Op::LinkAt { x, y });
+                }
+                if self.autoscroll.active() {
+                    let step = self.autoscroll.tick(pointer, rect);
+                    let t = &mut self.model.tabs[tab_index];
+                    let max_x = (t.content.0 - rect.width()).max(0.0);
+                    let max_y = (t.content.1 - rect.height()).max(0.0);
+                    t.scroll = (
+                        (t.scroll.0 + step.scroll.x).clamp(0.0, max_x),
+                        (t.scroll.1 + step.scroll.y).clamp(0.0, max_y),
+                    );
+                    if let Some((x, y)) = step.wheel_at {
+                        let (dx, dy) = (step.wheel.x, step.wheel.y);
+                        self.op(
+                            page_id,
+                            Op::Wheel {
+                                x,
+                                y,
+                                dx,
+                                dy,
+                                modifiers: 0,
+                            },
+                        );
+                    }
+                    let p = *theme::palette(ui);
+                    self.autoscroll.paint(
+                        ui.painter(),
+                        p.ink_primary,
+                        p.surface_base.gamma_multiply(0.9),
+                    );
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::AllScroll);
+                    ui.ctx().request_repaint();
+                }
                 if response.hovered() || focused || response.is_pointer_button_down_on() {
-                    let mut events = ui.input(|i| i.events.clone());
-                    let hover = ui.input(|i| i.pointer.hover_pos());
+                    let hover = pointer;
                     let t = &mut self.model.tabs[tab_index];
                     let mut ops = devtools::pick_input(
                         &mut t.devtools,

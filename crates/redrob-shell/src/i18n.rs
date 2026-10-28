@@ -111,6 +111,22 @@ fn ko(en: &str) -> Option<&'static str> {
         "Remove" => "삭제",
         "OK" => "확인",
         "Menu" => "메뉴",
+        "Pages you opened, newest first." => "연 페이지를 최근 순으로 보여 줘요.",
+        "Saved sign-ins, kept encrypted on this computer." => {
+            "저장한 로그인 정보예요. 이 컴퓨터에 암호화해서 보관해요."
+        }
+        "When Redrob Code may sign in for you. It never sees the password." => {
+            "Redrob Code가 대신 로그인해도 되는 때예요. 비밀번호는 보지 못해요."
+        }
+        "{0} saved" => "{0}개 저장됨",
+        "Nothing here yet." => "아직 아무것도 없어요.",
+        "The language of the browser's own screens." => "브라우저 화면에 쓰는 언어예요.",
+        "Used for words typed in the address bar." => {
+            "주소창에 단어를 입력하면 이 검색 엔진으로 찾아요."
+        }
+        "Prompts typed after / in the address bar go here. Only this computer is allowed." => {
+            "주소창에서 / 뒤에 입력한 요청을 이 주소로 보내요. 이 컴퓨터만 쓸 수 있어요."
+        }
         "New incognito window" => "새 시크릿 창",
         "Incognito" => "시크릿",
         "Incognito: this window keeps no history, cookies or passwords." => {
@@ -125,7 +141,7 @@ fn ko(en: &str) -> Option<&'static str> {
         "Light" => "밝게",
         "Dark" => "어둡게",
         "Import" => "가져오기",
-        "Start with > to ask Redrob Code" => "> 로 시작하면 Redrob Code에 물어봐요",
+        "Start with / to ask Redrob Code" => "/ 로 시작하면 Redrob Code에 물어봐요",
         "Downloads" => "다운로드",
         "Developer tools" => "개발자 도구",
         "Language" => "언어",
