@@ -94,6 +94,8 @@ mod image_capability_tests {
 }
 
 #[cfg(feature = "paint")]
+pub mod canvas;
+#[cfg(feature = "paint")]
 mod paint;
 #[cfg(feature = "paint")]
 pub use tiny_skia::Pixmap;

@@ -3688,6 +3688,30 @@ impl TextEngine {
         raster_scale: f32,
         print_economy: bool,
     ) {
+        // Glyphs are blitted pixel by pixel; the canvas sees the result as one image.
+        crate::canvas::direct_pixels(pixmap, |pixmap| {
+            self.paint_item_pixels(
+                idx,
+                pixmap,
+                offset,
+                clip_override,
+                clip_mask,
+                raster_scale,
+                print_economy,
+            )
+        })
+    }
+
+    fn paint_item_pixels(
+        &mut self,
+        idx: usize,
+        pixmap: &mut tiny_skia::Pixmap,
+        offset: (f32, f32),
+        clip_override: Option<Rect>,
+        clip_mask: Option<&tiny_skia::Mask>,
+        raster_scale: f32,
+        print_economy: bool,
+    ) {
         let TextEngine {
             font_system,
             swash,
