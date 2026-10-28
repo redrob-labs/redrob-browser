@@ -2858,6 +2858,29 @@ fn op_dom_inner(shared: SharedState, cmd: String, arg1: String, arg2: String) ->
                 None => "null".into(),
             }
         }
+        // Custom element reaction candidates under a root, in shadow-including
+        // tree order (fragment parsing and insertion upgrade/connect them).
+        // arg2 is "<0|1 include root>\0<name or empty>".
+        "ce_candidates" => {
+            let nid = arg1.parse::<u32>().unwrap_or(0);
+            let (include_root, name) = arg2.split_once('\0').unwrap_or((arg2.as_str(), ""));
+            let ids: Vec<i32> = crate::custom_elements::candidates(
+                &dom,
+                NodeId::new(nid),
+                include_root == "1",
+                name,
+            )
+            .iter()
+            .map(|id| id.index() as i32)
+            .collect();
+            serde_json::to_string(&ids).unwrap_or("[]".into())
+        }
+        "assigned_slot" => {
+            let nid = arg1.parse::<u32>().unwrap_or(0);
+            dom.assigned_slot(NodeId::new(nid))
+                .map(|id| id.index().to_string())
+                .unwrap_or("-1".into())
+        }
         "tag_name" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
             let name = dom
