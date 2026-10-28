@@ -6816,6 +6816,13 @@ fn single_media_query_applies_for_viewport(
     }
 
     for feature in compact.split('(') {
+        // Another engine's vendor-prefixed feature is unknown here, and an
+        // unknown feature never matches (Media Queries 4). YouTube's
+        // `(-ms-high-contrast:active),(forced-colors:active)` arms otherwise
+        // matched and drew forced-colors borders on every chip and button.
+        if feature.starts_with('-') && !feature.starts_with("-webkit-") {
+            return false;
+        }
         if let Some(value) = feature.strip_prefix("prefers-color-scheme:") {
             let value = value.split(')').next().unwrap_or(value);
             let expected = if media_type.dark_color_scheme() {
