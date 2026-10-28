@@ -102,6 +102,11 @@ pub enum Op {
         dy: f32,
         modifiers: u32,
     },
+    /// The link under a page point, for a middle click (autoscroll.rs).
+    LinkAt {
+        x: f32,
+        y: f32,
+    },
     Key {
         down: bool,
         key: String,
@@ -178,6 +183,8 @@ pub enum Event {
     },
     /// Pixels may have changed: repaint tiles.
     Invalidate,
+    /// Only these document rects (CSS px: x, y, width, height) changed.
+    Damage(Vec<[f32; 4]>),
     /// A different document: drop every tile.
     Navigated(String),
     /// Same document, new URL (fragment or history API).
@@ -234,6 +241,8 @@ pub enum Event {
     },
     /// Result of FillLogin: "filled" or "no-form".
     Filled(String),
+    /// The answer to `Op::LinkAt`: the link's absolute URL, if any.
+    LinkAt(Option<String>),
     /// A file download began or changed state. Sent with tab 0.
     Download {
         guid: String,
@@ -282,6 +291,41 @@ impl Conn {
         Ok(reply.get("result").cloned().unwrap_or(Value::Null))
     }
 
+    /// Send a command whose reply comes much later (a navigation replies at
+    /// load) without holding up this loop, so frames and tiles of the
+    /// loading page are handled meanwhile. `on_error` gets an error reply.
+    fn call_in_background(
+        &mut self,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+        on_error: impl FnOnce(String) + Send + 'static,
+    ) {
+        self.next += 1;
+        let id = self.next;
+        let mut msg = json!({ "id": id, "method": method, "params": params });
+        if let Some(s) = session {
+            msg["sessionId"] = json!(s);
+        }
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().unwrap().insert(id, tx);
+        if let Err(e) = self.out.send(msg.to_string()) {
+            on_error(e.to_string());
+            return;
+        }
+        let method = method.to_string();
+        tokio::spawn(async move {
+            let error = match tokio::time::timeout(Duration::from_secs(60), rx).await {
+                Ok(Ok(reply)) => reply.get("error").map(|err| format!("{method}: {err}")),
+                Ok(Err(_)) => None,
+                Err(_) => Some(format!("{method}: timed out")),
+            };
+            if let Some(error) = error {
+                on_error(error);
+            }
+        });
+    }
+
     /// Fire and forget: input events do not need their reply awaited.
     fn send(&mut self, session: Option<&str>, method: &str, params: Value) {
         self.next += 1;
@@ -313,6 +357,24 @@ struct State {
 impl State {
     fn emit(&self, tab: TabId, event: Event) {
         let _ = self.updates.send(Update { tab, event });
+    }
+
+    /// Navigate a tab without waiting for its load inside this loop.
+    fn navigate_in_background(
+        &mut self,
+        tab: TabId,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+    ) {
+        let updates = self.updates.clone();
+        self.c
+            .call_in_background(session, method, params, move |error| {
+                let _ = updates.send(Update {
+                    tab,
+                    event: Event::Error(error),
+                });
+            });
     }
 
     fn session(&self, tab: TabId) -> Option<String> {
@@ -443,18 +505,18 @@ pub async fn run(
     )
     .await?;
 
+    // Commands taken from the channel early while coalescing pointer moves.
+    let mut backlog: std::collections::VecDeque<Command> = std::collections::VecDeque::new();
     loop {
+        if let Some(cmd) = backlog.pop_front() {
+            run_command(&mut st, cmd, &mut commands, &mut backlog).await;
+            repaint();
+            continue;
+        }
         tokio::select! {
             cmd = commands.recv() => {
                 let Some(cmd) = cmd else { break };
-                match cmd {
-                    Command::Resize { width, height, scale } => resize(&mut st, (width, height, scale)).await,
-                    Command::Tab(tab, op) => {
-                        if let Err(e) = handle(&mut st, tab, op).await {
-                            st.emit(tab, Event::Error(e.to_string()));
-                        }
-                    }
-                }
+                run_command(&mut st, cmd, &mut commands, &mut backlog).await;
                 repaint();
             }
             ev = event_rx.recv() => {
@@ -465,6 +527,59 @@ pub async fn run(
         }
     }
     Ok(())
+}
+
+fn is_move(cmd: &Command, tab: TabId) -> bool {
+    matches!(cmd, Command::Tab(t, Op::Mouse { kind: "mouseMoved", .. }) if *t == tab)
+}
+
+/// Run one command. A pointer move first absorbs the moves queued behind it
+/// for the same tab, so the engine handles only the newest one: a page that
+/// takes hundreds of milliseconds per move otherwise fell seconds behind the
+/// pointer, and clicks waited behind the queue.
+async fn run_command(
+    st: &mut State,
+    mut cmd: Command,
+    commands: &mut tokio::sync::mpsc::UnboundedReceiver<Command>,
+    backlog: &mut std::collections::VecDeque<Command>,
+) {
+    if let Command::Tab(
+        tab,
+        Op::Mouse {
+            kind: "mouseMoved", ..
+        },
+    ) = &cmd
+    {
+        let tab = *tab;
+        while let Some(next) = backlog.front() {
+            if !is_move(next, tab) {
+                break;
+            }
+            cmd = backlog.pop_front().expect("front exists");
+        }
+        if backlog.is_empty() {
+            while let Ok(next) = commands.try_recv() {
+                if is_move(&next, tab) {
+                    cmd = next;
+                } else {
+                    backlog.push_back(next);
+                    break;
+                }
+            }
+        }
+    }
+    match cmd {
+        Command::Resize {
+            width,
+            height,
+            scale,
+        } => resize(st, (width, height, scale)).await,
+        Command::Tab(tab, op) => {
+            if let Err(e) = handle(st, tab, op).await {
+                st.emit(tab, Event::Error(e.to_string()));
+            }
+        }
+    }
 }
 
 async fn resize(st: &mut State, size: (u32, u32, f32)) {
@@ -502,8 +617,12 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
         if url != "about:blank" {
             let session = st.session(tab);
             st.emit(tab, Event::Loading(true));
-            st.c.call(session.as_deref(), "Page.navigate", json!({ "url": url }))
-                .await?;
+            st.navigate_in_background(
+                tab,
+                session.as_deref(),
+                "Page.navigate",
+                json!({ "url": url }),
+            );
         }
         return Ok(());
     }
@@ -549,13 +668,13 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
         }
         Op::Navigate(url) => {
             st.emit(tab, Event::Loading(true));
-            st.c.call(s, "Page.navigate", json!({ "url": url })).await?;
+            st.navigate_in_background(tab, s, "Page.navigate", json!({ "url": url }));
         }
         Op::Back => step_history(st, &session, -1).await?,
         Op::Forward => step_history(st, &session, 1).await?,
         Op::Reload => {
             st.emit(tab, Event::Loading(true));
-            st.c.call(s, "Page.reload", json!({})).await?;
+            st.navigate_in_background(tab, s, "Page.reload", json!({}));
         }
         Op::Stop => {
             st.c.call(s, "Page.stopLoading", json!({})).await?;
@@ -569,14 +688,14 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
             clicks,
             modifiers,
         } => {
-            st.c.send(
-                s,
-                "Input.dispatchMouseEvent",
-                json!({ "type": kind, "x": x, "y": y, "button": button, "clickCount": clicks, "modifiers": modifiers }),
-            );
-            if kind == "mouseReleased" {
-                st.emit(tab, Event::Invalidate);
+            let params = json!({ "type": kind, "x": x, "y": y, "button": button, "clickCount": clicks, "modifiers": modifiers });
+            if kind == "mouseMoved" {
+                // Wait for the engine, so the next move is coalesced (run_command).
+                st.c.call(s, "Input.dispatchMouseEvent", params).await?;
+            } else {
+                st.c.send(s, "Input.dispatchMouseEvent", params);
             }
+            // What a click changes comes back as screencast damage.
         }
         Op::Wheel {
             x,
@@ -610,15 +729,29 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
             st.c.call(s, "Input.dispatchKeyEvent", p).await?;
             if down {
                 report_scroll(st, tab).await;
-                st.emit(tab, Event::Invalidate);
             }
         }
         Op::Text(text) => {
             st.c.send(s, "Input.insertText", json!({ "text": text }));
-            st.emit(tab, Event::Invalidate);
         }
         Op::DevtoolsOpen => {
             st.c.call(s, "Network.enable", json!({})).await?;
+        }
+        Op::LinkAt { x, y } => {
+            let expr = format!(
+                "(() => {{ const e = document.elementFromPoint({x}, {y}); const a = e && e.closest && e.closest('a[href]'); return a ? a.href : null }})()"
+            );
+            let r =
+                st.c.call(
+                    s,
+                    "Runtime.evaluate",
+                    json!({ "expression": expr, "returnByValue": true }),
+                )
+                .await;
+            let link = r
+                .ok()
+                .and_then(|r| r["result"]["value"].as_str().map(str::to_string));
+            st.emit(tab, Event::LinkAt(link));
         }
         Op::Evaluate(expr) => {
             let r = st
@@ -644,7 +777,6 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
                     text,
                 },
             );
-            st.emit(tab, Event::Invalidate);
         }
         Op::GetDom => {
             let d =
@@ -888,7 +1020,7 @@ async fn on_event(st: &mut State, ev: Value) {
                     json!({ "sessionId": id }),
                 );
             }
-            st.emit(tab, Event::Invalidate);
+            st.emit(tab, frame_event(&p["damage"]));
         }
         "Page.frameNavigated" => {
             let frame = &p["frame"];
@@ -1027,6 +1159,23 @@ async fn on_event(st: &mut State, ev: Value) {
         }
         _ => {}
     }
+}
+
+/// A signal frame's `damage` (Redrob extension) names the document rects
+/// that changed; without it the whole page may have.
+fn frame_event(damage: &Value) -> Event {
+    let Some(rects) = damage.as_array() else {
+        return Event::Invalidate;
+    };
+    let mut out = Vec::with_capacity(rects.len());
+    for r in rects {
+        let field = |name: &str| r[name].as_f64().map(|v| v as f32);
+        match (field("x"), field("y"), field("width"), field("height")) {
+            (Some(x), Some(y), Some(w), Some(h)) => out.push([x, y, w, h]),
+            _ => return Event::Invalidate,
+        }
+    }
+    Event::Damage(out)
 }
 
 async fn report_scroll(st: &mut State, tab: TabId) {

@@ -6,6 +6,9 @@
 //! main thread, so this is a separate program the window starts. Agents do
 //! not reach this window: it has no CDP endpoint.
 
+// A GUI program on Windows: no console window behind the page.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[allow(dead_code)]
 #[path = "../i18n.rs"]

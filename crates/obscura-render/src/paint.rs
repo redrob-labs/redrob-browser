@@ -10,6 +10,9 @@ use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use obscura_dom::tree::DomTree;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+
+mod damage;
+pub use damage::DamageSnapshot;
 use tiny_skia::{
     Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, Point, Rect, SpreadMode,
     Transform,
@@ -31,15 +34,17 @@ use crate::dom::{
 
 const DEFAULT_RESOURCE_CACHE_ENTRIES: usize = 512;
 const DEFAULT_RESOURCE_CACHE_BYTES: usize = 64 * 1024 * 1024;
+/// Changed resource keys remembered between two paint-damage frames.
+const MAX_CHANGED_RESOURCES: usize = 256;
 /// CSS `content:url(...)` is only discoverable after cascade. Remember a
 /// bounded set of successful selections so repeated prepares can seed their
 /// intrinsic geometry before that cascade instead of always laying out twice.
 const DEFAULT_CONTENT_IMAGE_INTRINSIC_ENTRIES: usize = 256;
 const MISSING_RESOURCE_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
 /// Exact formats the renderer can decode. Do not use `image/*` or `*/*` here:
-/// either wildcard permits a content-negotiating server to choose AVIF,
-/// JPEG-XL, or another format that this build cannot rasterize.
-const IMAGE_ACCEPT: &str = "image/webp,image/apng,image/svg+xml,image/png,image/jpeg,image/gif,image/bmp,image/x-icon,image/vnd.microsoft.icon";
+/// either wildcard permits a content-negotiating server to choose JPEG-XL or
+/// another format that this build cannot rasterize.
+const IMAGE_ACCEPT: &str = "image/avif,image/webp,image/apng,image/svg+xml,image/png,image/jpeg,image/gif,image/bmp,image/x-icon,image/vnd.microsoft.icon";
 
 /// Synchronous byte loader used by [`RenderResourceCache`]. The default
 /// implementation uses Obscura's pooled image agent; tests and embedding
@@ -190,6 +195,11 @@ pub struct RenderResourceCache {
     sync_misses: Vec<(String, Option<ImageRequestProfile>, bool)>,
     sync_miss_keys: HashSet<String>,
     loader: Box<dyn RenderResourceLoader>,
+    /// Keys whose bytes, miss or cancellation changed since the last
+    /// [`Self::take_changed_resources`], for paint damage. Bounded: past
+    /// [`MAX_CHANGED_RESOURCES`] it only records that too much changed.
+    changed: Vec<String>,
+    changed_overflow: bool,
 }
 
 impl Default for RenderResourceCache {
@@ -234,6 +244,24 @@ impl RenderResourceCache {
             sync_misses: Vec::new(),
             sync_miss_keys: HashSet::new(),
             loader: Box::new(loader),
+            changed: Vec::new(),
+            changed_overflow: false,
+        }
+    }
+
+    /// Resource keys that appeared, failed, were cancelled or were evicted
+    /// since the previous call. `None`: more than can be listed changed.
+    pub fn take_changed_resources(&mut self) -> Option<Vec<String>> {
+        let overflow = std::mem::take(&mut self.changed_overflow);
+        let changed = std::mem::take(&mut self.changed);
+        (!overflow).then_some(changed)
+    }
+
+    fn note_changed(&mut self, key: &str) {
+        if self.changed.len() >= MAX_CHANGED_RESOURCES {
+            self.changed_overflow = true;
+        } else if !self.changed.iter().any(|known| known == key) {
+            self.changed.push(key.to_string());
         }
     }
 
@@ -351,8 +379,18 @@ impl RenderResourceCache {
     pub fn seed_shared(&mut self, url: String, bytes: Arc<[u8]>) {
         let url = network_resource_url(&url);
         self.stopped.remove(&url);
+        // The page layer seeds the same response again on later loads; the
+        // same bytes paint the same pixels, so that is not paint damage.
+        let unchanged = matches!(
+            self.entries.get(&url),
+            Some(CachedResource::Bytes { bytes: cached, .. })
+                if Arc::ptr_eq(cached, &bytes) || **cached == *bytes
+        ) && !self.changed.iter().any(|known| known == &url);
         self.remove(&url);
-        self.insert_bytes(url, bytes);
+        self.insert_bytes(url.clone(), bytes);
+        if unchanged {
+            self.changed.retain(|known| known != &url);
+        }
     }
 
     /// Keep a canceled request stopped until this document's cache is replaced.
@@ -365,6 +403,7 @@ impl RenderResourceCache {
             return;
         }
         self.remove(&key);
+        self.note_changed(&key);
         self.stopped.insert(key);
     }
 
@@ -646,6 +685,7 @@ impl RenderResourceCache {
             self.remove_entry(&oldest);
         }
         self.retained_bytes = self.retained_bytes.saturating_add(bytes.len());
+        self.note_changed(&url);
         self.order.push_back(url.clone());
         self.entries.insert(
             url,
@@ -668,6 +708,7 @@ impl RenderResourceCache {
             self.remove_entry(&oldest);
         }
         self.order.push_back(url.clone());
+        self.note_changed(&url);
         self.entries
             .insert(url, CachedResource::Missing(std::time::Instant::now()));
     }
@@ -680,6 +721,7 @@ impl RenderResourceCache {
     }
 
     fn remove_entry(&mut self, url: &str) {
+        self.note_changed(url);
         if let Some(CachedResource::Bytes { bytes, .. }) = self.entries.remove(url) {
             self.retained_bytes = self.retained_bytes.saturating_sub(bytes.len());
         }
@@ -1087,6 +1129,14 @@ pub struct PreparedRender {
     // Owned by the same document preparation as the final layout; replaced on
     // every rebuild and dropped with it on navigation or full invalidation.
     query_seed: Option<RetainedStyleMaps>,
+    /// Changes whenever layout, styles or selected images change, so paint
+    /// damage can reuse what it measured of an unchanged frame.
+    paint_epoch: u64,
+}
+
+fn next_paint_epoch() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl PreparedRender {
@@ -1186,6 +1236,7 @@ impl PreparedRender {
         self.animation_sample = sample;
         self.has_active_waapi_animations = timeline.has_active_waapi(sample.time);
         self.active_animation_impact = timeline.active_waapi_effect_impact(sample.time);
+        self.paint_epoch = next_paint_epoch();
         true
     }
 
@@ -3090,6 +3141,7 @@ pub fn prepare_dom_with_retained_styles_with_animation_state(
                         }
                         previous.selected_images.insert(id, selected);
                     }
+                    previous.paint_epoch = next_paint_epoch();
                     return Some(previous);
                 }
             }
@@ -3331,6 +3383,7 @@ fn prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
         svg_fonts,
         layout: laid,
         query_seed,
+        paint_epoch: next_paint_epoch(),
     })
 }
 
@@ -8270,7 +8323,7 @@ fn http_get_bytes(url: &str) -> Option<Vec<u8>> {
     let mut backoff = std::time::Duration::from_millis(200);
     for attempt in 0..3 {
         // Advertise only formats that this build can decode. Content-negotiating
-        // CDNs otherwise commonly choose AVIF and leave the image blank.
+        // CDNs otherwise may choose a format we cannot paint and leave it blank.
         let res = image_agent().get(url).set("Accept", IMAGE_ACCEPT).call();
         match res {
             Ok(resp) => {
@@ -8313,6 +8366,15 @@ fn http_get_bytes(url: &str) -> Option<Vec<u8>> {
 /// old per-call `ureq::get`) reads as a burst and gets 429'd, whereas reusing
 /// one pooled connection to the same host (as a browser does) both avoids most
 /// throttling and is much faster on an image-heavy page.
+/// Current stable Chrome on this OS, the same identity the engine's page
+/// transport presents (obscura-net `identity`).
+#[cfg(target_os = "macos")]
+const RESOURCE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
+#[cfg(target_os = "windows")]
+const RESOURCE_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const RESOURCE_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
+
 fn image_agent() -> &'static ureq::Agent {
     static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
     AGENT.get_or_init(|| {
@@ -8323,7 +8385,7 @@ fn image_agent() -> &'static ureq::Agent {
             // that gate on User-Agent (Akamai/Cloudflare image endpoints on
             // cnbc, techcrunch, arstechnica), so the images Chrome loads came
             // back blank; a real browser UA loads the same bytes Chrome does.
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+            .user_agent(RESOURCE_USER_AGENT)
             .resolver(SsrfGuardResolver)
             .build()
     })
@@ -8419,6 +8481,8 @@ fn bounded_raster_size(w: u32, h: u32) -> (u32, u32) {
 fn static_raster_cacheable(bytes: &[u8]) -> bool {
     match image::guess_format(bytes) {
         Ok(image::ImageFormat::Jpeg | image::ImageFormat::Bmp | image::ImageFormat::Ico) => true,
+        // Only the primary (first) frame of an AVIF is painted, so it never changes.
+        _ if is_avif(bytes) => true,
         Ok(image::ImageFormat::Png) => {
             image::codecs::png::PngDecoder::new(std::io::Cursor::new(bytes))
                 .ok()
@@ -8434,10 +8498,114 @@ fn static_raster_cacheable(bytes: &[u8]) -> bool {
     }
 }
 
-/// Decode raster image bytes (GIF/JPEG/PNG/WebP) to a premultiplied-alpha pixmap
-/// resized to `w`x`h`.
+/// AVIF is an ISO BMFF file whose `ftyp` box names an `avif` (still) or
+/// `avis` (sequence) brand, as the major brand or a compatible one.
+fn is_avif(bytes: &[u8]) -> bool {
+    if bytes.get(4..8) != Some(b"ftyp") {
+        return false;
+    }
+    let size = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    let end = size.min(bytes.len()).min(256);
+    // Major brand at 8, minor version at 12, compatible brands from 16.
+    std::iter::once(8)
+        .chain((16..end).step_by(4))
+        .any(|at| matches!(bytes.get(at..at + 4), Some(b"avif" | b"avis")))
+}
+
+/// avif-parse reads the still primary item and refuses an `avis` major brand.
+/// Animated AVIF from libavif and ffmpeg also stores its first frame as that
+/// primary item, so relabel the brand and paint the first frame.
+fn avif_still(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    if bytes.get(8..12) == Some(b"avis") {
+        let mut owned = bytes.to_vec();
+        owned[8..12].copy_from_slice(b"avif");
+        std::borrow::Cow::Owned(owned)
+    } else {
+        std::borrow::Cow::Borrowed(bytes)
+    }
+}
+
+/// Size from the AV1 sequence header, without decoding any pixels.
+fn avif_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    let data = avif_parse::read_avif(&mut &*avif_still(bytes)).ok()?;
+    let meta = data.primary_item_metadata().ok()?;
+    Some((meta.max_frame_width.get(), meta.max_frame_height.get()))
+}
+
+/// Decode AVIF (8/10/12-bit, any chroma layout, optional alpha) to RGBA8.
+fn decode_avif(bytes: &[u8]) -> Option<image::RgbaImage> {
+    let image = avif_decode::Decoder::from_avif(&avif_still(bytes))
+        .ok()?
+        .to_image()
+        .ok()?;
+    let (width, height, raw): (usize, usize, Vec<u8>) = match image {
+        avif_decode::Image::Rgb8(img) => (
+            img.width(),
+            img.height(),
+            img.pixels().flat_map(|p| [p.r, p.g, p.b, 255]).collect(),
+        ),
+        avif_decode::Image::Rgba8(img) => (
+            img.width(),
+            img.height(),
+            img.pixels().flat_map(|p| [p.r, p.g, p.b, p.a]).collect(),
+        ),
+        avif_decode::Image::Rgb16(img) => (
+            img.width(),
+            img.height(),
+            img.pixels()
+                .flat_map(|p| [(p.r >> 8) as u8, (p.g >> 8) as u8, (p.b >> 8) as u8, 255])
+                .collect(),
+        ),
+        avif_decode::Image::Rgba16(img) => (
+            img.width(),
+            img.height(),
+            img.pixels()
+                .flat_map(|p| {
+                    [
+                        (p.r >> 8) as u8,
+                        (p.g >> 8) as u8,
+                        (p.b >> 8) as u8,
+                        (p.a >> 8) as u8,
+                    ]
+                })
+                .collect(),
+        ),
+        avif_decode::Image::Gray8(img) => (
+            img.width(),
+            img.height(),
+            img.pixels()
+                .flat_map(|p| {
+                    let v = p.value();
+                    [v, v, v, 255]
+                })
+                .collect(),
+        ),
+        avif_decode::Image::Gray16(img) => (
+            img.width(),
+            img.height(),
+            img.pixels()
+                .flat_map(|p| {
+                    let v = (p.value() >> 8) as u8;
+                    [v, v, v, 255]
+                })
+                .collect(),
+        ),
+    };
+    image::RgbaImage::from_raw(u32::try_from(width).ok()?, u32::try_from(height).ok()?, raw)
+}
+
+/// Decode any supported raster (AVIF/BMP/GIF/ICO/JPEG/PNG/WebP) to RGBA8.
+fn decode_rgba8(bytes: &[u8]) -> Option<image::RgbaImage> {
+    if is_avif(bytes) {
+        return decode_avif(bytes);
+    }
+    Some(image::load_from_memory(bytes).ok()?.to_rgba8())
+}
+
+/// Decode raster image bytes (AVIF/GIF/JPEG/PNG/WebP) to a premultiplied-alpha
+/// pixmap resized to `w`x`h`.
 fn raster_to_pixmap(bytes: &[u8], w: u32, h: u32) -> Option<Pixmap> {
-    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let img = decode_rgba8(bytes)?;
     let resized = image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle);
     let mut raw = resized.into_raw();
     for pixel in raw.as_chunks_mut::<4>().0 {
@@ -9361,6 +9529,9 @@ fn premultiplied(color: [u8; 4]) -> tiny_skia::PremultipliedColorU8 {
 }
 
 fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    if is_avif(bytes) {
+        return avif_dimensions(bytes);
+    }
     image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .ok()?
@@ -11413,6 +11584,39 @@ fn serialize_svg_node(
     suppress_opacity_for: Option<obscura_dom::tree::NodeId>,
     buf: &mut String,
 ) {
+    serialize_svg_node_impl(
+        tree,
+        nid,
+        is_root,
+        styles,
+        custom_properties,
+        suppress_opacity_for,
+        false,
+        buf,
+    );
+}
+
+/// `use_clone` serializes an element referenced by a same-document `<use>`.
+/// The `<use>` instance inherits from the `<use>` element, not from where the
+/// referenced symbol sits in the page (often a hidden sprite `<svg>` with the
+/// body's color), so `color` and inherited `fill`/`stroke` values are left for
+/// the instance to inherit; only values set on the element itself are kept.
+#[allow(clippy::too_many_arguments)]
+fn serialize_svg_node_impl(
+    tree: &DomTree,
+    nid: obscura_dom::tree::NodeId,
+    is_root: bool,
+    styles: Option<&std::collections::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    custom_properties: Option<
+        &std::collections::HashMap<
+            obscura_dom::tree::NodeId,
+            std::rc::Rc<std::collections::HashMap<String, String>>,
+        >,
+    >,
+    suppress_opacity_for: Option<obscura_dom::tree::NodeId>,
+    use_clone: bool,
+    buf: &mut String,
+) {
     let node = match tree.get_node(nid) {
         Some(n) => n,
         None => return,
@@ -11426,13 +11630,14 @@ fn serialize_svg_node(
         // Document/comment/PI: no tag of its own, emit only element children.
         None => {
             for child in tree.children(nid) {
-                serialize_svg_node(
+                serialize_svg_node_impl(
                     tree,
                     child,
                     false,
                     styles,
                     custom_properties,
                     suppress_opacity_for,
+                    use_clone,
                     buf,
                 );
             }
@@ -11514,7 +11719,21 @@ fn serialize_svg_node(
             let properties = custom_properties
                 .and_then(|all| all.get(&nid))
                 .map_or(&empty, std::rc::Rc::as_ref);
-            if let Some(value) = computed.svg_fill.as_deref() {
+            let parent_style = if use_clone {
+                node.parent
+                    .and_then(|parent| styles.and_then(|all| all.get(&parent)))
+            } else {
+                None
+            };
+            let inherited =
+                |own: &Option<String>, pick: fn(&crate::LayoutStyle) -> &Option<String>| {
+                    use_clone && parent_style.is_none_or(|parent| pick(parent) == own)
+                };
+            let skip_fill = inherited(&computed.svg_fill, |style| &style.svg_fill);
+            let skip_stroke = inherited(&computed.svg_stroke, |style| &style.svg_stroke);
+            let skip_stroke_width =
+                inherited(&computed.svg_stroke_width, |style| &style.svg_stroke_width);
+            if let Some(value) = computed.svg_fill.as_deref().filter(|_| !skip_fill) {
                 if let Some(value) = resolve_svg_presentation_value("fill", value, properties) {
                     append(
                         "fill",
@@ -11526,7 +11745,7 @@ fn serialize_svg_node(
                     );
                 }
             }
-            if let Some(value) = computed.svg_stroke.as_deref() {
+            if let Some(value) = computed.svg_stroke.as_deref().filter(|_| !skip_stroke) {
                 if let Some(value) = resolve_svg_presentation_value("stroke", value, properties) {
                     append(
                         "stroke",
@@ -11538,7 +11757,11 @@ fn serialize_svg_node(
                     );
                 }
             }
-            if let Some(value) = computed.svg_stroke_width.as_deref() {
+            if let Some(value) = computed
+                .svg_stroke_width
+                .as_deref()
+                .filter(|_| !skip_stroke_width)
+            {
                 if let Some(value) =
                     resolve_svg_presentation_value("stroke-width", value, properties)
                 {
@@ -11559,7 +11782,7 @@ fn serialize_svg_node(
                     append("font-style", "italic");
                 }
             }
-            if let Some(color) = computed.color {
+            if let Some(color) = computed.color.filter(|_| !use_clone) {
                 append(
                     "color",
                     &format!("#{:02x}{:02x}{:02x}", color[0], color[1], color[2]),
@@ -11587,13 +11810,14 @@ fn serialize_svg_node(
     }
     buf.push('>');
     for child in tree.children(nid) {
-        serialize_svg_node(
+        serialize_svg_node_impl(
             tree,
             child,
             false,
             styles,
             custom_properties,
             suppress_opacity_for,
+            use_clone,
             buf,
         );
     }
@@ -11861,13 +12085,14 @@ fn inject_external_sprites(
         if symbol_id == root || root_descendants.contains(&symbol_id) {
             continue;
         }
-        serialize_svg_node(
+        serialize_svg_node_impl(
             tree,
             symbol_id,
             false,
             styles,
             custom_properties,
             None,
+            true,
             &mut defs,
         );
     }
@@ -14758,7 +14983,7 @@ mod tests {
     #[test]
     fn image_accept_advertises_exactly_decodable_mime_types() {
         assert!(!IMAGE_ACCEPT.contains('*'));
-        assert!(!IMAGE_ACCEPT.to_ascii_lowercase().contains("avif"));
+        assert!(!IMAGE_ACCEPT.to_ascii_lowercase().contains("jxl"));
         for mime in IMAGE_ACCEPT.split(',') {
             assert!(
                 crate::source_type_supported(mime),
@@ -14766,6 +14991,7 @@ mod tests {
             );
         }
         for required in [
+            "image/avif",
             "image/webp",
             "image/apng",
             "image/svg+xml",
@@ -14784,10 +15010,10 @@ mod tests {
     }
 
     #[test]
-    fn picture_type_filter_skips_avif_and_accepts_parameterized_mime_essence() {
+    fn picture_type_filter_skips_jxl_and_accepts_parameterized_mime_essence() {
         let tree = parse_html(
             r#"<picture>
-                 <source type="IMAGE/AVIF; codecs=av01" srcset="unsupported.avif">
+                 <source type="IMAGE/JXL; codecs=jxl" srcset="unsupported.jxl">
                  <source type=" Image/WebP ; codecs=lossless " srcset="supported.webp">
                  <img id="hero" src="fallback.png">
                </picture>"#,

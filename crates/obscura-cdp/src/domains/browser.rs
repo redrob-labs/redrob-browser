@@ -4,9 +4,9 @@ pub async fn handle(method: &str, _params: &Value) -> Result<Value, String> {
     match method {
         "getVersion" => Ok(json!({
             "protocolVersion": "1.3",
-            "product": "Chrome/145.0.0.0",
+            "product": obscura_net::identity::DEFAULT_PRODUCT,
             "revision": "@0000000000000000000000000000000000000000",
-            "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+            "userAgent": obscura_net::identity::DEFAULT_USER_AGENT,
             "jsVersion": "14.5.0.0",
         })),
         "close" => Ok(json!({})),

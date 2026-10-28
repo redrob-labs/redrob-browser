@@ -46,7 +46,7 @@ person's window.
 
 ## The address bar
 
-Text starting with `>` goes to Redrob Code instead of a search: the window opens a session on
+Text starting with `/` (or `>`) goes to Redrob Code instead of a search: the window opens a session on
 the Redrob Code server (setting `agent_server`, default `http://127.0.0.1:4096`, loopback only)
 and posts the prompt with `prompt_async`, together with the tab's title and URL and how to drive
 the browser.

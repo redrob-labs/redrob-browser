@@ -1326,6 +1326,7 @@ impl ObscuraJsRuntime {
             gs.stylesheet_cache = obscura_render::StylesheetCache::default();
             gs.dynamic_fonts.clear();
             gs.canvas_surfaces.clear();
+            gs.damage_snapshot = obscura_render::DamageSnapshot::default();
             gs.scroll_offset = (0.0, 0.0);
             gs.element_scroll_offsets.clear();
             gs.scroll_generation = 0;
@@ -1945,6 +1946,61 @@ impl ObscuraJsRuntime {
         })
     }
 
+    /// Document-space rects whose pixels may differ from the previous call
+    /// (Redrob screencast damage). Prepares the live render exactly as a
+    /// capture would. `None` means the whole document: the first call for a
+    /// document, a page that cannot be prepared, or a change damage cannot
+    /// attribute to boxes (viewport, resources, fonts, surface color).
+    #[cfg(feature = "render")]
+    pub fn take_paint_damage(&self, surface_color: [u8; 4]) -> Option<Vec<obscura_render::Rect>> {
+        let mut state = self.state.borrow_mut();
+        with_sync_render_loading_disabled(&mut state, |state| {
+            if ensure_resolved_scroll(state).is_none() {
+                state.damage_snapshot = obscura_render::DamageSnapshot::default();
+                return None;
+            }
+            let ObscuraState {
+                dom,
+                prepared_render,
+                render_resources,
+                resolved_scroll,
+                canvas_surfaces,
+                dynamic_fonts,
+                damage_snapshot,
+                activity_generation,
+                ..
+            } = state;
+            let (Some(dom), Some(prepared), Some((_, scroll))) = (
+                dom.as_ref(),
+                prepared_render.as_ref(),
+                resolved_scroll.as_ref(),
+            ) else {
+                *damage_snapshot = obscura_render::DamageSnapshot::default();
+                return None;
+            };
+            let extra = (dynamic_fonts.len() as u64).rotate_left(32)
+                ^ u64::from(u32::from_le_bytes(surface_color));
+            let changed_resources = render_resources.take_changed_resources();
+            damage_snapshot.update(
+                dom,
+                prepared,
+                scroll,
+                extra,
+                *activity_generation,
+                changed_resources.as_deref(),
+                &|node| {
+                    use std::hash::Hasher as _;
+                    let surface = canvas_surfaces.get(&node)?;
+                    let mut hash = std::hash::DefaultHasher::new();
+                    hash.write_u32(surface.width);
+                    hash.write_u32(surface.height);
+                    hash.write(surface.pixels.as_ref());
+                    Some(hash.finish())
+                },
+            )
+        })
+    }
+
     /// The display list of a document-space rectangle, painted the same way
     /// as [`Self::screenshot_prepared_region_with_surface_color`]
     /// (docs/GPU-PAINT.md, phase B).
@@ -2351,6 +2407,61 @@ impl ObscuraJsRuntime {
     /// backlog and started at the next event-loop turn. Returns the number
     /// of requests started now.
     #[cfg(feature = "render")]
+    /// Start fetching parser-discovered entry modules now, through the page
+    /// transport and with the request profile the module loader uses for an
+    /// entry, so their downloads overlap instead of running one after another
+    /// as each module script is reached. Returns how many were started.
+    pub fn prefetch_entry_modules(&self, urls: Vec<String>) -> usize {
+        if tokio::runtime::Handle::try_current().is_err() {
+            return 0;
+        }
+        let mut state = self.state.borrow_mut();
+        let Some(document_url) = url::Url::parse(&state.url).ok() else {
+            return 0;
+        };
+        let http_client = state.http_client.clone();
+        #[cfg(feature = "stealth")]
+        let stealth_client = state.stealth_client.clone();
+        let callbacks = state.callbacks.clone();
+        let mut started = 0;
+        for raw in urls {
+            if state.module_prefetch.contains_key(&raw) {
+                continue;
+            }
+            let Ok(target) = url::Url::parse(&raw) else {
+                continue;
+            };
+            if !matches!(target.scheme(), "http" | "https") {
+                continue;
+            }
+            let http_client = http_client.clone();
+            #[cfg(feature = "stealth")]
+            let stealth_client = stealth_client.clone();
+            let callbacks = callbacks.clone();
+            let document_url = document_url.clone();
+            let task = tokio::spawn(async move {
+                let request = ResourceRequest::module_script(&document_url, &document_url);
+                #[cfg(feature = "stealth")]
+                if let Some(stealth) = stealth_client {
+                    return stealth
+                        .fetch_resource_with_callbacks(&target, request, callbacks.as_deref())
+                        .await
+                        .map_err(|e| e.to_string());
+                }
+                let Some(client) = http_client else {
+                    return Err("no page transport".to_string());
+                };
+                client
+                    .fetch_resource_with_callbacks(&target, request, callbacks.as_deref())
+                    .await
+                    .map_err(|e| e.to_string())
+            });
+            state.module_prefetch.insert(raw, task);
+            started += 1;
+        }
+        started
+    }
+
     pub fn start_render_resource_loads(
         &self,
         requests: Vec<(String, Option<crate::ops::ImageRequestProfile>, bool)>,
@@ -9094,7 +9205,7 @@ mod tests {
                 "SVGElement",
                 "SVGElement",
                 "SVGElement",
-                "Element"
+                "HTMLUnknownElement"
             ])
         );
     }
@@ -9912,7 +10023,12 @@ mod tests {
                      target.element === element]"
             )
             .unwrap(),
-            serde_json::json!(["[object HTMLElement]", "[object SVGElement]", false, true])
+            serde_json::json!([
+                "[object HTMLDivElement]",
+                "[object SVGElement]",
+                false,
+                true
+            ])
         );
     }
 
@@ -19085,7 +19201,7 @@ mod tests {
         let mut rt = parser_image_runtime(
             r#"
                 <picture>
-                    <source type="image/avif" srcset="unsupported.avif">
+                    <source type="image/jxl" srcset="unsupported.jxl">
                     <source id="wide-source" media="(min-width: 800px)"
                             srcset="wide.png 2x">
                     <source media="(max-width: 799px)" srcset="narrow.png">
@@ -27292,15 +27408,15 @@ mod tests {
                         age.labels.length,
                         age.labels[0] === l2,
                         hid.labels.length,
-                        plain.labels.length,
-                        plain.control === null,
+                        String(plain.labels),
+                        plain.control === undefined,
                     ].join(',');
                 })()"#,
             )
             .unwrap();
         assert_eq!(
             result,
-            serde_json::json!("true,true,1,true,1,true,0,0,true"),
+            serde_json::json!("true,true,1,true,1,true,0,undefined,true"),
             "label association must follow the HTML labelable-element rules"
         );
     }
