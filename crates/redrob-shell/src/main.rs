@@ -10,6 +10,7 @@ mod cdp;
 mod devtools;
 mod engine;
 mod import_chrome;
+mod i18n;
 mod input;
 mod media;
 mod media_view;
@@ -24,6 +25,7 @@ use std::sync::mpsc;
 use cdp::{Command, Event, Op, Update};
 use egui::{Color32, Key, Modifiers, Sense};
 use model::{Model, SuggestionKind, Tab, TabId};
+use i18n::{t, tf};
 use tiles::TileCache;
 
 const NEW_TAB: &str = "about:blank";
@@ -36,6 +38,7 @@ fn main() -> anyhow::Result<()> {
             None
         }
     };
+    i18n::set(i18n::detect(profile.as_ref().and_then(|p| p.setting("language")).as_deref()));
     let storage = profile
         .as_ref()
         .map(|p| p.engine_dir())
@@ -59,6 +62,7 @@ fn main() -> anyhow::Result<()> {
         options,
         Box::new(move |cc| {
             let ctx = cc.egui_ctx.clone();
+            add_korean_font(&ctx);
             let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
             let (upd_tx, upd_rx) = mpsc::channel();
             std::thread::spawn(move || {
@@ -118,6 +122,28 @@ fn main() -> anyhow::Result<()> {
     let _ = std::fs::remove_file(&endpoint_file);
     drop(engine);
     result.map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// egui's built-in fonts have no Hangul. Use the system's Korean font as a
+/// fallback for every family, so Korean UI text and page titles render.
+fn add_korean_font(ctx: &egui::Context) {
+    const CANDIDATES: &[&str] = &[
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+        "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
+        "C:\\Windows\\Fonts\\malgun.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/nanum/NanumGothic.ttf",
+    ];
+    let Some(bytes) = CANDIDATES.iter().find_map(|p| std::fs::read(p).ok()) else { return };
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert("korean".to_string(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts.families.entry(family).or_default().push("korean".to_string());
+    }
+    ctx.set_fonts(fonts);
 }
 
 /// Write a file only its owner can read: the CDP address is a key to every tab.
@@ -188,7 +214,7 @@ impl Window {
     fn save_bookmarks(&mut self) {
         if let Some(p) = &mut self.profile {
             if let Err(e) = p.save_bookmarks(&self.model.bookmarks) {
-                self.error = Some(format!("Could not save bookmarks: {e}"));
+                self.error = Some(tf("Could not save bookmarks: {0}", &[&e]));
             }
         }
     }
@@ -325,7 +351,7 @@ impl Window {
                 }
                 Event::Filled(outcome) => {
                     if outcome != "filled" {
-                        self.notice = Some("No sign-in form on this page.".to_string());
+                        self.notice = Some(t("No sign-in form on this page.").to_string());
                     }
                 }
                 Event::Opened { .. }
@@ -352,8 +378,8 @@ impl Window {
             }
         }
         let title = match self.model.active_tab().map(|t| t.label().to_string()) {
-            Some(l) if !l.is_empty() => format!("{l} - Redrob Browser"),
-            _ => "Redrob Browser".to_string(),
+            Some(l) if !l.is_empty() => format!("{l} - {}", t("Redrob Browser")),
+            _ => t("Redrob Browser").to_string(),
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }
@@ -451,17 +477,17 @@ impl Window {
 
     fn downloads_panel(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.strong("Downloads");
-            if ui.small_button("Close").clicked() {
+            ui.strong(t("Downloads"));
+            if ui.small_button(t("Close")).clicked() {
                 self.show_downloads = false;
             }
         });
         for d in self.model.downloads.iter().rev().take(6) {
             ui.horizontal(|ui| {
                 let state = match d.state.as_str() {
-                    "completed" => "Done",
-                    "canceled" => "Failed",
-                    _ => "Downloading",
+                    "completed" => t("Done"),
+                    "canceled" => t("Failed"),
+                    _ => t("Downloading"),
                 };
                 ui.label(format!("{}  {}  {} KB", d.filename, state, d.bytes / 1024));
                 if !d.path.is_empty() {
@@ -473,7 +499,7 @@ impl Window {
 
     fn import_from(&mut self, source: &import_chrome::Source) {
         let Some(profile) = &mut self.profile else {
-            self.notice = Some("Import needs a profile, and none could be opened.".to_string());
+            self.notice = Some(t("Import needs a profile, and none could be opened.").to_string());
             return;
         };
         let scratch = profile.dir.join("import-tmp");
@@ -482,7 +508,7 @@ impl Window {
         let imported = match result {
             Ok(i) => i,
             Err(e) => {
-                self.notice = Some(format!("Could not import from {}: {e}", source.name));
+                self.notice = Some(tf("Could not import from {0}: {1}", &[&source.name, &e]));
                 return;
             }
         };
@@ -496,11 +522,11 @@ impl Window {
         let history = imported.history.len();
         let saved = profile.save_bookmarks(&self.model.bookmarks).and_then(|_| profile.import_history(&imported.history));
         if let Err(e) = saved {
-            self.notice = Some(format!("Could not save the import: {e}"));
+            self.notice = Some(tf("Could not save the import: {0}", &[&e]));
             return;
         }
         let _ = profile.load(&mut self.model);
-        self.notice = Some(format!("Imported {added} bookmarks and {history} history entries from {}.", source.name));
+        self.notice = Some(tf("Imported {0} bookmarks and {1} history entries from {2}.", &[&added, &history, &source.name]));
     }
 
     /// The key button: saved logins for this site, filled by the person's click.
@@ -511,9 +537,9 @@ impl Window {
             return;
         }
         let mut fill = None;
-        ui.menu_button("Key", |ui| {
+        ui.menu_button(t("Key"), |ui| {
             for l in &logins {
-                if ui.button(format!("Sign in as {}", l.username)).clicked() {
+                if ui.button(tf("Sign in as {0}", &[&l.username])).clicked() {
                     fill = Some(l.id);
                     ui.close();
                 }
@@ -527,7 +553,7 @@ impl Window {
             v.unlock();
             match v.secret_for_fill(id, &origin, vault::Actor::Person) {
                 Ok((username, password)) => self.op(tab, Op::FillLogin { username, password }),
-                Err(e) => self.notice = Some(format!("Could not use the saved login: {e}")),
+                Err(e) => self.notice = Some(tf("Could not use the saved login: {0}", &[&e])),
             }
         }
     }
@@ -546,22 +572,22 @@ impl Window {
     fn save_bar(&mut self, ui: &mut egui::Ui) {
         let Some((origin, username, _)) = &self.pending_save else { return };
         let exists = self.vault.as_ref().is_some_and(|v| v.has_login(origin, username));
-        let who = if username.is_empty() { String::new() } else { format!(" for {username}") };
-        let question = if exists {
-            format!("Update the saved password{who} on {origin}?")
-        } else {
-            format!("Save the password{who} on {origin}?")
+        let question = match (exists, username.is_empty()) {
+            (true, true) => tf("Update the saved password on {0}?", &[origin]),
+            (true, false) => tf("Update the saved password for {0} on {1}?", &[username, origin]),
+            (false, true) => tf("Save the password on {0}?", &[origin]),
+            (false, false) => tf("Save the password for {0} on {1}?", &[username, origin]),
         };
         let mut choice = 0;
         ui.horizontal(|ui| {
             ui.label(question);
-            if ui.button(if exists { "Update" } else { "Save" }).clicked() {
+            if ui.button(if exists { t("Update") } else { t("Save") }).clicked() {
                 choice = 1;
             }
-            if ui.button("Not now").clicked() {
+            if ui.button(t("Not now")).clicked() {
                 choice = 2;
             }
-            if ui.button("Never for this site").clicked() {
+            if ui.button(t("Never for this site")).clicked() {
                 choice = 3;
             }
         });
@@ -576,13 +602,13 @@ impl Window {
             _ => Ok(()),
         };
         if let Err(e) = result {
-            self.notice = Some(format!("Could not save the password: {e}"));
+            self.notice = Some(tf("Could not save the password: {0}", &[&e]));
         }
     }
 
     fn import_passwords(&mut self, logins: anyhow::Result<Vec<import_chrome::ImportedLogin>>, skipped: usize, from: &str) {
         let Some(v) = &self.vault else {
-            self.notice = Some("The password vault is not available on this system.".to_string());
+            self.notice = Some(t("The password vault is not available on this system.").to_string());
             return;
         };
         match logins {
@@ -593,10 +619,10 @@ impl Window {
                         saved += 1;
                     }
                 }
-                let extra = if skipped > 0 { format!(" {skipped} could not be opened; import a CSV export for those.") } else { String::new() };
-                self.notice = Some(format!("Imported {saved} passwords from {from}.{extra}"));
+                let extra = if skipped > 0 { tf(" {0} could not be opened; import a CSV export for those.", &[&skipped]) } else { String::new() };
+                self.notice = Some(format!("{}{extra}", tf("Imported {0} passwords from {1}.", &[&saved, &from])));
             }
-            Err(e) => self.notice = Some(format!("Could not import passwords: {e}")),
+            Err(e) => self.notice = Some(tf("Could not import passwords: {0}", &[&e])),
         }
     }
 
@@ -616,12 +642,12 @@ impl Window {
         let tx = self.agent_tx.clone();
         std::thread::spawn(move || {
             let msg = match agent_bridge::send_prompt(&server, &prompt, &url, &title) {
-                Ok(_) => "Sent to Redrob Code.".to_string(),
-                Err(e) => format!("Could not reach the agent: {e}"),
+                Ok(_) => t("Sent to Redrob Code.").to_string(),
+                Err(e) => tf("Could not reach the agent: {0}", &[&e]),
             };
             let _ = tx.send(msg);
         });
-        self.notice = Some("Sending to Redrob Code...".to_string());
+        self.notice = Some(t("Sending to Redrob Code...").to_string());
     }
 
     fn toggle_devtools(&mut self) {
@@ -657,30 +683,42 @@ impl Window {
     }
 
     fn menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Menu", |ui| {
-            if ui.button("New tab").clicked() {
+        ui.menu_button(t("Menu"), |ui| {
+            if ui.button(t("New tab")).clicked() {
                 self.open_tab(NEW_TAB, true);
                 ui.close();
             }
-            if ui.button("Downloads").clicked() {
+            if ui.button(t("Downloads")).clicked() {
                 self.show_downloads = true;
                 ui.close();
             }
-            if ui.button("Developer tools").clicked() {
+            if ui.button(t("Developer tools")).clicked() {
                 self.toggle_devtools();
                 ui.close();
             }
+            ui.menu_button(t("Language"), |ui| {
+                let now = i18n::current();
+                for (lang, name) in [(i18n::Lang::En, "English"), (i18n::Lang::Ko, "한국어")] {
+                    if ui.selectable_label(now == lang, name).clicked() {
+                        i18n::set(lang);
+                        if let Some(p) = &self.profile {
+                            let _ = p.set_setting("language", i18n::code(lang));
+                        }
+                        ui.close();
+                    }
+                }
+            });
             ui.separator();
             let sources = import_chrome::sources();
             if sources.is_empty() {
-                ui.weak("No Chrome, Chromium, Edge or Brave profile found");
+                ui.weak(t("No Chrome, Chromium, Edge or Brave profile found"));
             }
             for s in &sources {
-                if ui.button(format!("Import from {}", s.name)).clicked() {
+                if ui.button(tf("Import from {0}", &[&s.name])).clicked() {
                     self.import_from(s);
                     ui.close();
                 }
-                if s.profile.join("Login Data").exists() && ui.button(format!("Import passwords from {}", s.name)).clicked() {
+                if s.profile.join("Login Data").exists() && ui.button(tf("Import passwords from {0}", &[&s.name])).clicked() {
                     let scratch = self.profile.as_ref().map(|p| p.dir.join("import-tmp")).unwrap_or_else(std::env::temp_dir);
                     let (logins, skipped) = match import_chrome::import_passwords(s, &scratch) {
                         Ok((l, n)) => (Ok(l), n),
@@ -692,9 +730,9 @@ impl Window {
             }
             // Chrome's "Export passwords" writes this file to the Downloads folder.
             let csv = profile::downloads_dir().join("Chrome Passwords.csv");
-            if csv.exists() && ui.button("Import passwords from Chrome Passwords.csv").clicked() {
+            if csv.exists() && ui.button(t("Import passwords from Chrome Passwords.csv")).clicked() {
                 let logins = import_chrome::import_passwords_csv(&csv);
-                self.import_passwords(logins, 0, "the CSV file");
+                self.import_passwords(logins, 0, t("the CSV file"));
                 ui.close();
             }
         });
@@ -717,7 +755,7 @@ impl Window {
                     for (i, t) in self.model.tabs.iter().enumerate() {
                         let mut label: String = t.label().chars().take(24).collect();
                         if label.is_empty() {
-                            label = "New tab".to_string();
+                            label = t("New tab").to_string();
                         }
                         if t.loading {
                             label = format!("... {label}");
@@ -732,11 +770,11 @@ impl Window {
                         if r.middle_clicked() {
                             close = Some(i);
                         }
-                        if ui.small_button("x").on_hover_text("Close tab").clicked() {
+                        if ui.small_button("x").on_hover_text(t("Close tab")).clicked() {
                             close = Some(i);
                         }
                     }
-                    if ui.small_button("+").on_hover_text("New tab").clicked() {
+                    if ui.small_button("+").on_hover_text(t("New tab")).clicked() {
                         new_tab = true;
                     }
                 });
@@ -757,17 +795,17 @@ impl Window {
         let url = self.model.active_tab().map(|t| t.url.clone()).unwrap_or_default();
         let mut go: Option<String> = None;
         ui.horizontal(|ui| {
-            if ui.button("<").on_hover_text("Back").clicked() {
+            if ui.button("<").on_hover_text(t("Back")).clicked() {
                 if let Some(id) = id {
                     self.op(id, Op::Back);
                 }
             }
-            if ui.button(">").on_hover_text("Forward").clicked() {
+            if ui.button(">").on_hover_text(t("Forward")).clicked() {
                 if let Some(id) = id {
                     self.op(id, Op::Forward);
                 }
             }
-            let (glyph, tip) = if loading { ("X", "Stop") } else { ("R", "Reload") };
+            let (glyph, tip) = if loading { ("X", t("Stop")) } else { ("R", t("Reload")) };
             if ui.button(glyph).on_hover_text(tip).clicked() {
                 if let Some(id) = id {
                     self.op(id, if loading { Op::Stop } else { Op::Reload });
@@ -779,7 +817,7 @@ impl Window {
                 egui::TextEdit::singleline(&mut self.address)
                     .id(self.address_id)
                     .desired_width(field_width)
-                    .hint_text("Search or enter address"),
+                    .hint_text(t("Search or enter address")),
             );
             if self.focus_address {
                 self.focus_address = false;
@@ -800,7 +838,7 @@ impl Window {
                 self.editing = false;
                 self.address = if url == NEW_TAB { String::new() } else { url.clone() };
             }
-            if ui.button(star).on_hover_text("Bookmark this page").clicked() {
+            if ui.button(star).on_hover_text(t("Bookmark this page")).clicked() {
                 self.toggle_bookmark();
             }
             self.key_button(ui, &url);
@@ -811,9 +849,9 @@ impl Window {
         if self.editing && ui.memory(|m| m.has_focus(self.address_id)) {
             for s in self.model.suggest(&self.address, 8) {
                 let tag = match s.kind {
-                    SuggestionKind::Bookmark => "Bookmark",
-                    SuggestionKind::History => "History",
-                    SuggestionKind::Search => "Search",
+                    SuggestionKind::Bookmark => t("Bookmark"),
+                    SuggestionKind::History => t("History"),
+                    SuggestionKind::Search => t("Search"),
                     SuggestionKind::Typed => "",
                 };
                 let text = if s.title.is_empty() { s.url.clone() } else { format!("{}  -  {}", s.title, s.url) };
@@ -846,11 +884,11 @@ impl Window {
                     go_new_tab = Some(b.url.clone());
                 }
                 r.context_menu(|ui| {
-                    if ui.button("Open in new tab").clicked() {
+                    if ui.button(t("Open in new tab")).clicked() {
                         go_new_tab = Some(b.url.clone());
                         ui.close();
                     }
-                    if ui.button("Remove").clicked() {
+                    if ui.button(t("Remove")).clicked() {
                         remove = Some(i);
                         ui.close();
                     }
@@ -898,7 +936,7 @@ impl eframe::App for Window {
             if let Some(n) = self.notice.clone() {
                 ui.horizontal(|ui| {
                     ui.label(n);
-                    if ui.small_button("OK").clicked() {
+                    if ui.small_button(t("OK")).clicked() {
                         self.notice = None;
                     }
                 });

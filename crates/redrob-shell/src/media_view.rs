@@ -177,7 +177,7 @@ fn controls(ui: &mut egui::Ui, area: Rect, item: &mut Item, status: media::Statu
     let painter = ui.painter().with_clip_rect(area);
     painter.rect_filled(bar, 0.0, Color32::from_black_alpha(160));
     let button = Rect::from_min_size(bar.min, vec2(36.0, bar.height()));
-    let label = if status.paused { "Play" } else { "Pause" };
+    let label = if status.paused { crate::i18n::t("Play") } else { crate::i18n::t("Pause") };
     painter.text(button.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(12.0), Color32::WHITE);
     if ui.interact(button, ui.id().with(("media-play", &item.src)), Sense::click()).clicked() {
         if status.paused {

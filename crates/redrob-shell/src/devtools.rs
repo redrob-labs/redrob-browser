@@ -4,6 +4,8 @@
 
 use serde_json::Value;
 
+use crate::i18n::{t, tf};
+
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum Panel {
     #[default]
@@ -74,13 +76,13 @@ pub struct Actions {
 pub fn ui(ui: &mut egui::Ui, s: &mut State) -> Actions {
     let mut act = Actions::default();
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut s.panel, Panel::Console, "Console");
-        if ui.selectable_value(&mut s.panel, Panel::Elements, "Elements").clicked() && s.dom.is_none() {
+        ui.selectable_value(&mut s.panel, Panel::Console, t("Console"));
+        if ui.selectable_value(&mut s.panel, Panel::Elements, t("Elements")).clicked() && s.dom.is_none() {
             act.refresh_dom = true;
         }
-        ui.selectable_value(&mut s.panel, Panel::Network, "Network");
+        ui.selectable_value(&mut s.panel, Panel::Network, t("Network"));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.small_button("Close").clicked() {
+            if ui.small_button(t("Close")).clicked() {
                 act.close = true;
             }
         });
@@ -129,13 +131,13 @@ fn console(ui: &mut egui::Ui, s: &mut State, act: &mut Actions) {
 }
 
 fn elements(ui: &mut egui::Ui, s: &mut State, act: &mut Actions) {
-    if ui.small_button("Refresh").clicked() {
+    if ui.small_button(t("Refresh")).clicked() {
         act.refresh_dom = true;
     }
     egui::ScrollArea::both().id_salt("elements").auto_shrink([false, false]).show(ui, |ui| match &s.dom {
         Some(root) => node(ui, root, 0),
         None => {
-            ui.weak("Loading the document tree...");
+            ui.weak(t("Loading the document tree..."));
         }
     });
 }
@@ -194,12 +196,12 @@ fn open_tag(n: &Value) -> String {
 }
 
 fn network(ui: &mut egui::Ui, s: &State) {
-    ui.weak(format!("{} requests", s.net.len()));
+    ui.weak(tf("{0} requests", &[&s.net.len()]));
     egui::ScrollArea::both().id_salt("network").auto_shrink([false, false]).show(ui, |ui| {
         egui::Grid::new("net").striped(true).num_columns(4).show(ui, |ui| {
-            ui.strong("Status");
-            ui.strong("Method");
-            ui.strong("Type");
+            ui.strong(t("Status"));
+            ui.strong(t("Method"));
+            ui.strong(t("Type"));
             ui.strong("URL");
             ui.end_row();
             for r in &s.net {
