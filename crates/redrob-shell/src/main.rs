@@ -5,6 +5,7 @@
 //! drawn as cached tiles the engine paints; input inside the page area goes
 //! to the engine as CDP input events.
 
+mod account;
 mod agent_bridge;
 mod cdp;
 mod devtools;
@@ -75,6 +76,7 @@ fn main() -> anyhow::Result<()> {
                 });
             });
             let (agent_tx, agent_rx) = mpsc::channel();
+            let (account_tx, account_rx) = mpsc::channel();
             let mut model = Model::default();
             let mut restore = (Vec::new(), 0);
             if let Some(p) = &profile {
@@ -96,6 +98,8 @@ fn main() -> anyhow::Result<()> {
                 pending_save: None,
                 agent_tx,
                 agent_rx,
+                account_tx,
+                account_rx,
                 notice: None,
                 address: String::new(),
                 editing: false,
@@ -175,6 +179,8 @@ struct Window {
     pending_save: Option<(String, String, zeroize::Zeroizing<String>)>,
     agent_tx: mpsc::Sender<String>,
     agent_rx: mpsc::Receiver<String>,
+    account_tx: mpsc::Sender<account::Msg>,
+    account_rx: mpsc::Receiver<account::Msg>,
     /// A one-line result shown under the toolbar, such as an import summary.
     notice: Option<String>,
     /// Address field text; follows the active tab's URL unless the person is typing.
@@ -696,6 +702,26 @@ impl Window {
                 self.toggle_devtools();
                 ui.close();
             }
+            let signed_in = self.profile.as_ref().and_then(|p| p.setting("account_email")).filter(|e| !e.is_empty());
+            match signed_in {
+                Some(email) => {
+                    ui.weak(tf("Signed in as {0}", &[&email]));
+                    if ui.button(t("Sign out")).clicked() {
+                        account::sign_out();
+                        if let Some(p) = &self.profile {
+                            let _ = p.set_setting("account_name", "");
+                            let _ = p.set_setting("account_email", "");
+                        }
+                        ui.close();
+                    }
+                }
+                None => {
+                    if ui.button(t("Sign in to Redrob")).clicked() {
+                        account::sign_in(self.account_tx.clone());
+                        ui.close();
+                    }
+                }
+            }
             ui.menu_button(t("Language"), |ui| {
                 let now = i18n::current();
                 for (lang, name) in [(i18n::Lang::En, "English"), (i18n::Lang::Ko, "한국어")] {
@@ -918,6 +944,23 @@ impl eframe::App for Window {
         self.drain_updates(&ctx);
         while let Ok(msg) = self.agent_rx.try_recv() {
             self.notice = Some(msg);
+        }
+        while let Ok(msg) = self.account_rx.try_recv() {
+            match msg {
+                account::Msg::Open(url) => {
+                    self.open_tab(&url, true);
+                    self.notice = Some(t("Signing in. Finish in the page that opened.").to_string());
+                }
+                account::Msg::SignedIn { name, email } => {
+                    if let Some(p) = &self.profile {
+                        let _ = p.set_setting("account_name", &name);
+                        let _ = p.set_setting("account_email", &email);
+                    }
+                    let who = if email.is_empty() { name } else { email };
+                    self.notice = Some(tf("Signed in as {0}", &[&who]));
+                }
+                account::Msg::Failed(e) => self.notice = Some(tf("Could not sign in: {0}", &[&e])),
+            }
         }
         self.shortcuts(&ctx);
         // A crash must not lose the open tabs.
