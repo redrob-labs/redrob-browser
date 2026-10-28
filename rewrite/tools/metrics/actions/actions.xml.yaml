@@ -1,9 +1,0 @@
-# Metrics metadata: summaries only. Variant names are identifiers and stay.
-
-substitutions:
-  - description: |
-      Toast variant summary.
-    regex:
-      pattern: "summary=\"BrowserOS extension toast\""
-      replace: "summary=\"Redrob extension toast\""
-      count: 1

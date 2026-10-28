@@ -1,0 +1,14 @@
+# Tests that also fail on upstream Obscura v0.2.5 (commit bd952941). CI skips them; remove a
+# line once that test passes. Each line is a name fragment, as `cargo test -- --skip` takes it.
+#
+# Child frame loading over HTTP: the child page never starts, so its script never runs.
+a_shadow_dom_child_frame_stays_alive_and_runs_its_script
+a_static_child_frame_runs_its_own_script
+navigating_blank_releases_child_realms
+# A private CA from SSL_CERT_FILE / SSL_CERT_DIR is not trusted by the TLS client.
+configured_roots_trust_a_private_ca_via_ssl_cert_dir
+configured_roots_trust_a_private_ca_via_ssl_cert_file
+# The font-directory switch is a process-wide OnceLock another test sets first.
+configured_font_directory_loads_nested_fonts_and_skips_symlinks
+# A timing budget; passes alone, misses it when every test binary runs at once.
+queued_module_does_not_spend_its_budget_waiting_for_deferred_script

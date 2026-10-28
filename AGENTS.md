@@ -1,171 +1,201 @@
 # AGENTS.md
 
-## What this repository is
+Guidance for AI coding agents and contributors working in the Obscura repo.
+This is the non-obvious stuff you can't infer from the code; read it before
+building, testing, or changing anything.
 
-Redrob Browser is an AI-native browser built as a patch-based fork of Chromium, pinned to the release
-named in `CHROMIUM_VERSION` (currently `155.0.8059.26`) with its own version in `REDROB_VERSION`
-(currently `0.1.6`). The Chromium checkout is fetched, never committed: `/chromium/`, `/depot_tools/`
-and `/out/` are all in `.gitignore`, so everything tracked here is the delta: the patch tree in
-`vendor/browseros/chromium_patches/`, the rules in `rewrite/`, and the files under `sources/`,
-`redrob/` and `branding/`. The repository is private on GitHub as `redrob-labs/redrob-browser`.
+Obscura is a headless browser engine in Rust. It runs real JavaScript through
+V8 (`deno_core`), keeps a real DOM tree, owns its layout and paint pipeline,
+speaks the Chrome DevTools Protocol, and is a drop-in replacement for headless
+Chrome with Puppeteer and Playwright. Rendering and stealth are both first-class
+capabilities. It targets web scraping and AI-agent automation.
 
-## Branching, and it changed recently
+## Build
 
-`develop` is the default branch and the base of every pull request. `main` is released state and moves
-only by merging `develop` into it. Release tags are cut from `main`, and `release.yml` refuses a tag
-whose name does not equal `REDROB_VERSION`.
+```bash
+CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 cargo build --release -p obscura-cli --bins --features render
 
-A hotfix branches from `main`, merges into `main`, releases, and then `main` is merged back into
-`develop`. That last step is the one that gets skipped, and skipping it is not cosmetic: the sibling
-repository redrob-code spent a month with a lockfile that its own default branch could not install
-from, because a fix landed on `main` and never came back down.
+# Rendering and stealth
+CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 cargo build --release -p obscura-cli --bins --features render,stealth
 
-Both branches are protected the same way: pull requests only, force pushes and deletions blocked, 0
-required reviews, admin enforcement off. The required status check is `repo integrity`, which is the
-job name inside `checks.yml`.
-
-Working branches are `<type>/<short-slug>` and the allowed types are the organisation's one list --
-`feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `perf`, `ci`, `build`, `sync`, `hotfix` and `release`
--- kept in `redrob-labs/.github/.github/workflows/gitflow.yml`. This repository's `gitflow.yml` only
-calls that reusable workflow (it is the org's `workflow-templates/gitflow.yml`, verbatim), so a prefix
-outside the list fails the check instead of merging: the `kiro/` branches already in this repository
-are what the rule exists to catch, because a branch name states what the change is and not which tool
-produced it. Do not add a type list here; there is one, and it is there.
-
-Two things to know before you trust what you read in the tree. `CONTRIBUTING.md` still describes the
-older model, one long-lived `main` with no `develop`, and says in as many words that this repository
-does not run Git Flow: that text is now stale and `develop` wins. And pull request #5 from another
-workstream still targets `main`, so when it merges `main` will be ahead of `develop` and needs a
-back-merge before the two agree again.
-
-## Layout
-
-`vendor/browseros/chromium_patches/` holds surgical edits to files that stay Chromium's, one patch per
-Chromium file, filed at the upstream path itself so the tree mirrors Chromium's; `.features.yaml` in it
-groups our patches into `redrob-*` features. There is no top-level `patches/` any more: commit
-`5bdae339` moved the stack into the vendored BrowserOS layout. Many patches are generated from
-`rewrite/`, which holds one YAML rule file per upstream path describing the change instead of diffing it. `redrob/` is
-copied wholesale into the checkout as `src/redrob` and holds the `-iquote` compiler config, the shared
-GN lists in `sources.gni`, and the `chromium_src` overrides that are compiled in place of an upstream
-file. `sources/` holds code this fork owns outright,
-mirrored at its destination path and copied into the checkout, with `sources/manifest` mapping source
-to destination as tab or space separated pairs. `branding/` holds files substituted wholesale, the
-`BRANDING` file and the icons, driven by `branding/manifest`. `build/args/` has one gn args file per
-flavour: `dev.gn`, `release.gn`, `mac.gn`, `windows.gn`. `l10n/*.tsv` is the source of every string
-this fork adds, one row per key with English and Korean. `scripts/` is the tooling, and `docs/` has
-eleven documents where the real numbers live, notably `docs/BUILD.md` for host cost and
-`docs/TESTING.md` for the manual acceptance pass.
-
-## Commands, and which ones work off a build host
-
-There is no package manager and nothing to install: no `package.json`, no `Cargo.toml`, no `Makefile`
-and no `justfile` are tracked. `scripts/` is Python 3 standard library only, and `depot_tools` brings
-its own clang, gn and ninja, which is why `docs/BUILD.md` states that no system packages are ever
-installed.
-
-These four run in seconds anywhere and were all run on this checkout, each exiting 0:
-
-```sh
-python3 scripts/check_repo.py      # the whole repo-integrity gate
-python3 -m compileall -q scripts/  # a syntax error in redrob.py is a broken release pipeline
-python3 scripts/redrob.py version  # prints both versions
-python3 scripts/redrob.py check    # wraps check_repo.py
+# No rendering, with rustls or stealth
+CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 cargo build --release -p obscura-cli --bins --no-default-features
+CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 cargo build --release -p obscura-cli --bins --no-default-features --features stealth
 ```
 
-`python3 scripts/gen_strings.py` also exits 0 and is idempotent: it reported 250 strings and left the
-working tree clean, which is what you want to confirm after editing `l10n/`.
+- The first build compiles V8 from source: ~5 minutes and a few GB of disk.
+  Incremental builds are seconds.
+- **Iterating on one crate? Scope it:** `cargo build -p obscura-cli`. A bare
+  `cargo build` can re-link the whole workspace; the V8 compile is the cost, so
+  avoid touching it when you don't need to.
+- **Stealth:** `--features render,stealth` retains the complete rendering
+  surface and adds the wreq/BoringSSL transport, fingerprint protections, and
+  tracker blocklist. BoringSSL builds through CMake, so `cmake` must be
+  installed. The rendering build uses rustls and needs neither CMake nor OpenSSL.
+- If the vendored OpenSSL build hits an AVX-512 assembler error on your host,
+  build with `OPENSSL_NO_VENDOR=1`.
 
-Everything that touches Chromium cannot run without a build host and was not run here. `redrob.py
-bootstrap`, `sync`, `brand`, `apply`, `derive`, `export`, `build`, `run`, `package` and `repo` all
-need the checkout: `docs/BUILD.md` measures `sync` at 40 to 60 GB and 40 to 80 minutes, a dev build at
-2 to 4 hours on top, a release build at 4 to 8 hours with LTO and PGO, and says to have about 150 GB
-free before starting. There is no unit test suite in this repository; verification of the product is
-the manual pass in `docs/TESTING.md` against an installed `.deb`.
+## Test
 
-## What CI actually runs
+Run tests with **`cargo nextest`, not `cargo test`**:
 
-`checks.yml` triggers on `push` to every branch and on `pull_request`, and its single job is named
-`repo integrity`. It deliberately does not build the browser: it runs `check_repo.py`, then
-`compileall` over `scripts/`, then prints both versions. It is the only workflow that inspects the
-tree on a pull request, and `gitflow.yml` is the other workflow that runs on one: `gitflow.yml` judges
-the branch name on `pull_request` (check `gitflow / branch name follows the convention`) and, on `push`
-to `main`, whether `main` is contained in `develop` (`gitflow / main is contained in develop`), opening
-the back-merge pull request itself when it is not. Both report on a pull request, so either can be a
-required check.
+```bash
+cargo nextest run --release --features render -p <crate>
+cargo nextest run --release --features render --no-fail-fast
+```
 
-`release.yml` triggers on tags matching `v*` and on `workflow_dispatch`, runs on a self-hosted runner
-labelled `[self-hosted, linux, x64, chromium-build]` with a 700 minute timeout, and re-runs
-`check_repo.py` before spending those hours.
+`cargo test` runs the whole test binary in one process, but the engine holds a
+single V8 isolate per process, so the runtime tests fail under it. `nextest`
+runs each test in its own process, which is the only supported way.
 
-`preflight.yml`, `windows.yml`, `macos.yml` and `sign-and-publish.yml` are `workflow_dispatch` only.
-None of them can be a required status check, because a dispatch-only workflow never starts on a pull
-request and a required check that never reports blocks the merge forever. `preflight.yml` exists to
-answer which org credentials this repository can actually see, printing PRESENT or ABSENT and never a
-value; `windows.yml` and `macos.yml` are dispatch-only on purpose because their first runs are
-expected to fail on disk and on never-compiled platform code, and `sign-and-publish.yml` signs
-artefacts a local build produced and uploaded to a draft release. Its Windows signing step is the
-organisation's `redrob-labs/.github/actions/sign-windows` and its last job is the organisation's
-`release-publish.yml`; only the Chromium mac signing driver, the Sparkle feeds, the apt repository and
-the CDN publish are this repository's own.
+The authoritative behavioral gate is the **obstacle course** in the companion
+repo `obscura-benchmark` (33 capability + speed stages, must stay 33/33):
 
-## What you will get wrong on the first attempt
+```bash
+OBSCURA_BIN=./target/release/obscura python3 obstacle-course/run.py --runs 1 --warmup 0
+```
 
-Before changing Chromium at all, read `docs/CUSTOMISATION.md`. There are four ways, in order of how much
-upstream text they touch, and picking the wrong one is the decision that costs time at every uprev: our own
-files and the GN lists in `redrob/build/sources.gni` first; then a `redrob/chromium_src` override, which is
-compiled in place of an upstream file and pulls it in rather than copying it; then a rule in `rewrite/`,
-which DESCRIBES the change and generates the patch; and a hand-written patch last.
+It serves local fixtures, so it is deterministic and offline. WPT conformance
+and the real-world render corpus also live in that repo; report WPT as subtest
+pass %, not whole-file pass.
 
-Do not hand-edit anything in `vendor/browseros/chromium_patches/`. A patch with a `rewrite/*.yaml` beside it is GENERATED — edit the
-rule and run `./scripts/plaster.py generate`; a hand edit works once and the next regeneration discards it,
-which `check_repo.py` refuses. For a hand patch, edit `chromium/src` like a normal tree and run
-`./scripts/redrob.py export`, which rewrites it from the checkout's own diff. A patch filed under a path
-other than the `+++ b/` path inside it still applies, so nothing breaks at build time, but
-`check_repo.py` fails on it because the patch tree stops answering "what does this fork change about
-this file".
+## Before you finish
 
-Never use a `#define` to edit upstream code, and never redefine `final`. A `#define` rewrites every
-occurrence of that identifier in the translation unit, including ones pulled in by later includes, and
-redefining a keyword is undefined behaviour. The `make_virtual`, `add_friend` and `drop_final` rewriters in
-`rewrite/` do these jobs to one declaration and report it when the premise moves.
+For any code change:
 
-A file you add is not a patch. New code belongs under `sources/` with a line in `sources/manifest`, and
-`check_repo.py` reports any file under `sources/` that no manifest line copies as an orphan, because an
-uncopied file is never in the build and can be edited for weeks with no effect. A new file that an UPSTREAM
-GN target has to know about goes in a list in `redrob/build/sources.gni` — the target already appends the
-list, so adding one touches no patch.
+1. Run focused release-mode nextest coverage for the crates and repro involved.
+2. Run `cargo nextest run --release --features render --no-fail-fast`.
+3. Run the exact release build shown above.
+4. The obstacle course still reports **33/33**.
+5. For render changes, run deterministic fixtures and broad top/bottom real-site
+   captures using the methodology below.
+6. For stealth changes, re-test with `--stealth` (a non-stealth binary won't
+   exercise the `wreq` path).
 
-The generated strings are checked byte for byte. `scripts/gen_strings.py` writes
-`sources/chrome/browser/redrob/resources/redrob_strings.grd`, its `translations/redrob_strings_ko.xtb`
-and `redrob_localized_strings.h` from `l10n/*.tsv`, and `check_repo.py` regenerates them in memory and
-fails if the committed files differ. A stale `.grd` compiles and ships the previous release's strings,
-which is why it is checked rather than trusted. The same check reads every `.html` and `.ts` under
-`sources/chrome/browser/resources` and fails on a `$i18n{key}` that no TSV row defines, because that
-key reaches the page as literal text on a green build.
+Do not bulk-run `cargo fmt`: the tree is not rustfmt-clean, so a blanket format
+produces a huge unrelated diff. Match the surrounding style in the files you
+edit instead.
 
-Every `read_text` and `write_text` in `scripts/*.py` must pass `encoding=`, enforced by an AST walk in
-`check_repo.py`. Python's default is locale dependent, so a bare call works on Linux and raises
-`UnicodeDecodeError` on Windows the first time a file contains a non-Latin-1 byte: the first Windows CI
-run died exactly that way on a CHANGELOG that had just gained Korean.
+## Architecture
 
-The version is written in more places than it looks. `REDROB_VERSION` must match
-`sources/chrome/installer/linux/common/redrob-version.txt`, or the `.deb` ships a version that is not
-the tag, and `CHANGELOG.md` must contain a `## <version>` section for it. `branding/manifest` must
-overwrite all seven Linux installer icon paths that `check_repo.py` hardcodes, or the package ships
-Chromium's globe at the size a launcher actually shows.
+- **obscura-cli** — CLI: `fetch` (`--dump assets|html|text|links|markdown|original|cookies`, `--eval <JS>`, `--screenshot <PNG>`), `serve` (CDP server), `scrape`, `mcp`. `--proxy`, `--stealth`, and `--allow-private-network` are global flags: valid before or after the subcommand and applied to `fetch`, `serve`, `scrape`, and `mcp` (a `scrape` run forwards `--stealth` to each worker via `OBSCURA_STEALTH`).
+- **obscura-cdp** — Chrome DevTools Protocol server (WebSocket). Managed page
+  sessions use `"{targetId}-session"`; explicit flattened attachments receive
+  distinct session ids so Playwright and Puppeteer can open raw page sessions.
+- **obscura-js** — V8/`deno_core` runtime. `js/bootstrap.js` is the DOM/browser shim; `src/ops.rs` bridges JS to Rust DOM ops; `src/runtime.rs` owns the isolate and the per-page `ObscuraState`.
+- **obscura-dom** — DOM tree (`src/tree.rs`).
+- **obscura-net** — HTTP client (`client.rs`), stealth client (`wreq_client.rs`), cookie jar, robots cache, tracker blocklist.
+- **obscura-browser** — the `Page` type, navigation, JS evaluation.
+- **obscura-render** — selector cascade, computed style, retained layout,
+  scrolling, text shaping, images/SVG/canvas, and CPU-backed paint. The
+  `render` feature powers geometry, screenshots, CDP screencasting, and PDF.
+- **obscura-mcp** — stateful MCP automation tools. Render builds expose
+  `browser_screenshot` and `browser_pdf`; streaming screencasts remain CDP-only.
+- **obscura** — embeddable Rust library API (git dependency; builds V8 locally, not on crates.io). Public request-interception API on `Page`: `add_preload_script`, `enable_interception` (channel of `InterceptedRequest`, resolved with `InterceptResolution::{Continue, Fulfill, Fail}`), and passive `on_request` / `on_response`. `op_fetch_url` invokes these for JS `fetch()`/XHR, so when touching it keep a `Continue` URL rewrite behind `validate_fetch_url` (the SSRF gate, same as redirects).
 
-Order matters when the pin moves. `brand` must run before `apply` so hand-written patches land on top
-of the branding overlay, and the sequence on a Chromium bump is `sync`, `brand`, `apply`, `derive`,
-`export`. `derive` regenerates the mechanical branding edits against the new tree instead of
-conflict-resolving a strings patch with hundreds of substitutions by hand, and it fails loudly if
-upstream moved the file rather than producing a stale patch.
+## Conventions
 
-If a checkout is present locally, `check_repo.py` additionally compares every manifest source against
-the checkout's copy. `apply` overwrites the checkout from `sources/`, so an edit made only in the
-checkout to a file this repository owns is silently discarded by the next `apply`, and `export` will
-not catch it because `sources/`-owned files are excluded from its untracked-file report.
+- **Performance is a hard constraint** (Obscura is ~12x faster and uses ~6x less
+  memory than headless Chrome on framework pages). Keep native Rust fast paths;
+  add a JS fallback only for real spec edge cases. Benchmark old and new
+  revisions interleaved with the same release build, page, network, viewport,
+  settle policy, and capture path. Report distributions and resource use; the
+  noise floor is about plus or minus 10%.
+- **Keep ops panic-safe.** `op_dom` is wrapped in `catch_unwind` so a DOM-op
+  panic returns null instead of aborting the process inside V8's FFI frame. New
+  ops must not unwind into V8.
+- **Commits/PRs/comments:** short and factual, no em dashes, no AI filler.
 
-Finally, an incremental build passing is not evidence that the tree builds from scratch, and the build
-log is not evidence that the product works. Every defect this fork has shipped was invisible to the
-compiler: a UA stylesheet rule beating a `[hidden]` attribute, two composers sharing one element id, a
-Mojo reply object being truthy so a refusal read as success. Run the browser and read the pixels.
+## Rendering verification
+
+Use deterministic fixtures before real sites. Put generated output in a
+disposable directory outside the repository:
+
+```bash
+RUN_ROOT="$(mktemp -d)"
+OBSCURA_BIN=./target/release/obscura render-repros/run.sh "$RUN_ROOT/fixtures"
+OBSCURA_BIN=./target/release/obscura render-repros/representative-suite/run.sh "$RUN_ROOT/top"
+OBSCURA_BIN=./target/release/obscura render-repros/representative-suite/run.sh "$RUN_ROOT/bottom" bottom
+```
+
+The harness accepts `BASELINE_BIN` or `CHROMIUM_BIN` for paired output. A
+latency-only run may use `SUITE_MODE=latency SETTLE_MS=0`, but zero settle is
+not valid fidelity evidence.
+
+Compare the same viewport, device scale, identity, network inputs, settle
+policy, scroll position, animation time, and capture boundary. First confirm
+both navigations succeeded and both images are nonblank. Then inspect missing
+resources, geometry, text flow, structural edges, clipping, fixed/sticky
+behavior, and a reduced fixture. Pixel-distance metrics are useful regression
+tripwires, not standalone correctness verdicts. Never add hostname-specific
+layout, style, or resource behavior.
+
+`render-repros/**` is the tracked public evidence harness. Git-ignored internal
+handover notes are private working material: do not edit them, link them from
+public documentation, stage them, or commit them. Do not commit generated
+screenshots or reports.
+
+## Gotchas
+
+- **DOM mutation arg order:** `insertBefore` / `replaceChild` in `bootstrap.js`
+  pass reference-node vs parent nid in a way that's easy to break. If you touch
+  mutation methods, verify `before()`, `after()`, `replaceWith()`, and
+  `replaceChild()` on connected elements.
+- **Multi-statement `--eval` starting with `const` returns `null`** (V8 gives
+  `const` an empty completion value). Wrap snippets in an IIFE:
+  `(function(){ ...; return result; })()`.
+- **`canAccessOpener` must be in every `TargetInfo` payload**, or strict CDP
+  clients (chromiumoxide) panic.
+- **The DOM reparenting guards in `tree.rs` are load-bearing.** `append_child` /
+  `insert_before` reject cycles (inserting an ancestor of the target is a no-op).
+  A cyclic reparent used to make `descendants()` loop forever and hang the
+  engine on real sites, uninterruptible by tokio or the watchdog. Keep the
+  guards and the `descendants()` length cap.
+- **SSRF:** loopback / RFC1918 / link-local fetches are blocked by default. Use
+  `--allow-private-network` (or `OBSCURA_ALLOW_PRIVATE_NETWORK=1`) for local
+  testing.
+
+## Robustness invariants (do not remove)
+
+One page must never hang or crash a worker:
+
+- The V8 termination watchdog (`arm_watchdog` / `disarm_watchdog` in
+  `runtime.rs`) terminates the isolate from a separate thread, because
+  `tokio::time::timeout` only cancels at await points and synchronous V8 work
+  runs unbounded.
+- The CLI applies a process-level hard deadline as an absolute backstop.
+- `panic = "unwind"` is pinned in the release profile so `catch_unwind` works.
+
+## Stealth
+
+The stealth features (the `wreq` client, fingerprint and browser-identity
+adjustments) are privacy-first anti-fingerprinting: they present a normal,
+consistent browser fingerprint (user agent, timezone, navigator properties, and
+similar surfaces) so ordinary automation traffic is not singled out. They
+contain no bot or automation-abuse payload.
+
+## Recommended proxy provider: NodeMaven
+
+For production scraping you usually want residential or ISP IPs rather than a
+datacenter address, since many sites block datacenter ranges. We use
+**NodeMaven** and it works well with Obscura: residential/ISP proxies, sticky
+sessions, and per-request country/region targeting. A good default if you don't
+already have a provider.
+
+Route Obscura through it with the global `--proxy` flag (use your own
+credentials):
+
+```bash
+# HTTP
+obscura --proxy http://USER:PASS@gate.nodemaven.com:8080 fetch https://example.com --dump text
+
+# SOCKS5
+obscura --proxy socks5://USER:PASS@gate.nodemaven.com:1080 scrape url1 url2 --concurrency 25
+```
+
+The targeting options (country, region, session id) live in the proxy username,
+so a sticky session keeps the same exit IP across requests.
+
+Sign up: https://go.nodemaven.com/obscuraagentsmdseptembeb
+Obscura discount codes: `OBSCURA35` (35% off mobile and residential),
+`OBSCURA40` (40% off ISP / static).

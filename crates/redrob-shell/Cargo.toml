@@ -1,0 +1,61 @@
+[package]
+name = "redrob-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The Redrob Browser window: draws pages from the engine and sends it the user's input"
+
+[[bin]]
+name = "redrob-browser-window"
+path = "src/main.rs"
+
+# A page in the system web view, for DRM video (docs/DRM.md).
+[[bin]]
+name = "redrob-browser-protected"
+path = "src/bin/protected.rs"
+
+[dependencies]
+eframe = "0.36"
+egui = "0.36"
+egui_extras = { version = "0.36", default-features = false, features = ["svg"] }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = "0.3"
+serde_json = { workspace = true }
+base64 = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+anyhow = { workspace = true }
+rusqlite = { version = "0.37", features = ["bundled"] }
+aes-gcm = "0.10"
+keyring = "4"
+zeroize = "1"
+getrandom = "0.3"
+pbkdf2 = "0.12"
+sha1 = "0.10"
+cbc = "0.1"
+aes = "0.8"
+sha2 = "0.10"
+ureq = { version = "2.9", features = ["json"] }
+url = { workspace = true }
+gstreamer = { version = "0.25", optional = true }
+vello = { version = "0.11", optional = true }
+serde = { workspace = true, optional = true }
+gstreamer-app = { version = "0.25", optional = true }
+gstreamer-video = { version = "0.25", optional = true }
+open = "5"
+
+# The protected tab: WebView2 on Windows, WKWebView on macOS. Linux does not offer it.
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+wry = "0.57"
+tao = "0.37"
+
+[features]
+default = []
+# Video and audio playback through GStreamer (docs/MEDIA.md). Needs the
+# GStreamer development files at build time and its runtime when running.
+media = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
+# Raster page tiles on the GPU with vello from the engine's display lists
+# (docs/GPU-PAINT.md, phase B). Needs an engine built with
+# obscura-cli/display-list; without one, tiles stay PNG captures.
+gpu = ["dep:vello", "dep:serde"]

@@ -1,15 +1,50 @@
-# Agent sign-in: the credential boundary
+# Passwords and agent sign-in
 
-The agent signs in with logins saved in the profile's own password manager. There is no second vault.
+Code: `crates/redrob-shell/src/vault.rs`.
 
-1. **What the model can see:** the site the agent tab is showing, the saved usernames for it, and an outcome (filled, no saved login, refused, locked, several logins, no sign-in form, needs verification, failed).
-2. **What it cannot see:** a password, its length, or any hint of it. The browser's agent-login service fills the form through the password manager driver; the secret goes store → password manager → form field and never enters the tool result or the engine.
-3. **Which site:** the agent tab's committed origin. The model never names a URL to match, so a phishing page cannot borrow a bank's login.
-4. **Default policy: while unlocked.** The agent fills only within 15 minutes (adjustable) of an OS re-authentication (Touch ID, Windows Hello; on Linux, which has no device authenticator, the user's own click in Settings). Other options: always, never. The password manager's own "ask before filling" setting still applies.
-5. **Per site:** block refuses a site under every policy; allow skips the unlock for it. Never overrides both.
-6. **Locked, or a code / passkey / security key / CAPTCHA:** the agent does not try. The task waits in `kBlockedOnPolicy` until the user unlocks or says they finished, from Settings → Passwords and the agent. A locked wait also raises a "Task needs you" notification whose Unlock button runs the same OS re-authentication over the task's tab and, on success, retries the fill.
-7. **Never:** in a private (off-the-record) profile, in a read-only task, or when the policy is never; the tool is not even offered.
-8. **Audit:** every sign-in attempt is a `kUsedCredential` step in the task trace and a record (time, site, username, task, outcome) in the AI sign-in history, the last 500 kept. No quality log is uploaded.
-9. **App bridge:** the engine's app-bridge `login` tool (`browser-bridge.ts`) calls the CDP command `Browser.redrobLogin`, which runs `TaskStore::LoginFromBridge` in the browser process: same gate, same fill path, audit records under task `app-bridge`. Only the agent server the browser itself launched may call it: the browser makes a per-run secret, hands it to that child in its environment (`REDROB_APP_BRIDGE_TOKEN`, never argv), and refuses `Browser.redrobLogin` without it, so another local program on the debugging port cannot trigger a sign-in. A locked store answers "ask the user to unlock" instead of parking, because there is no task to park.
-10. **Not built:** passkeys, TOTP, cards, notes, SSH keys and API credentials as agent-usable types.
-11. **Code:** `sources/chrome/browser/redrob/credential_tools.{h,cc}`, the `login` / `ask_user_to_verify` dispatch in `task_store.cc`, prefs `redrob.agent_credentials.*`, the settings page `agent/apps/app/screens/agent-passwords/`.
+## Where passwords live
+
+- One random 256-bit key in the OS credential store: Keychain on macOS, Credential Manager on
+  Windows, Secret Service on Linux. Service `Redrob Browser`, account `vault-key`.
+- Each password is sealed with AES-256-GCM under that key, with its own random nonce, in
+  `vault.sqlite` in the profile folder. Usernames and sites are stored in the clear so the
+  window can list them without unsealing anything.
+- If the OS store is unavailable the vault does not open. There is no plaintext fallback.
+
+## What the agent can and cannot see
+
+1. **It can see:** the site the tab is showing, the saved usernames for it, and an outcome
+   (filled, no saved login, several logins, no sign-in form, locked, blocked, refused).
+2. **It cannot see:** a password, its length, or any hint of it. The secret goes vault, then the
+   window, then the page's field as a CDP call argument. It is never part of a script's text,
+   never logged, and never returned through CDP or MCP.
+3. **Which site:** the tab's committed origin (`scheme://host:port`). The model never names a
+   site to match, so a lookalike page cannot borrow another site's login. A login is unsealed
+   only for the origin it was saved for.
+
+## Policy
+
+| Setting | Meaning |
+|---|---|
+| While unlocked (default) | The agent fills only within 15 minutes (adjustable) of the person unlocking the vault |
+| Always | The agent fills on every site that is not blocked |
+| Never | The agent never fills; the sign-in tool is not offered |
+
+- Per site: **block** refuses under every policy; **allow** skips the unlock for that site.
+- Unlock: an OS re-authentication on macOS and Windows; on Linux, which has no device
+  authenticator, the person's own click in the window.
+- Codes, passkeys, security keys and CAPTCHAs: the agent does not try. It asks the person to take
+  over the tab.
+
+## Audit
+
+Every fill, by the person or the agent, is recorded with time, site, username, who and the
+outcome. The last 500 are kept, and the agent's history is shown in the window. Nothing is
+uploaded.
+
+## Importing from Chrome
+
+Chrome encrypts `Login Data` with a key it keeps in the OS store: "Chrome Safe Storage" in the
+macOS Keychain, the Secret Service or the fixed `peanuts` key on Linux (`v10`/`v11`), DPAPI on
+Windows. Windows Chrome 127 and later use app-bound encryption (`v20`), which another program
+cannot open; there the import asks the person to export a CSV from Chrome's password settings.
