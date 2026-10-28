@@ -94,6 +94,12 @@ mod image_capability_tests {
 }
 
 #[cfg(feature = "paint")]
+pub mod canvas;
+#[cfg(feature = "display-list")]
+pub mod display_list;
+#[cfg(feature = "display-list")]
+pub use paint::record_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces;
+#[cfg(feature = "paint")]
 mod paint;
 #[cfg(feature = "paint")]
 pub use tiny_skia::Pixmap;

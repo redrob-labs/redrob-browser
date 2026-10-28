@@ -124,6 +124,9 @@ pub enum Command {
 
 pub enum Event {
     Tile { key: TileKey, generation: u64, image: egui::ColorImage },
+    /// A tile as a display list, for the GPU painter.
+    #[cfg(feature = "gpu")]
+    TileList { key: TileKey, generation: u64, list: crate::gpu_paint::DisplayList },
     /// Pixels may have changed: repaint tiles.
     Invalidate,
     /// A different document: drop every tile.
@@ -541,6 +544,26 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
                     "x": key.tx as f32 * TILE, "y": key.ty as f32 * TILE,
                     "width": TILE, "height": TILE, "scale": 1,
                 });
+                #[cfg(feature = "gpu")]
+                if crate::gpu_paint::lists_wanted() {
+                    match st.c.call(s, "Page.redrobDisplayList", json!({ "clip": clip.clone() })).await {
+                        Ok(value) => match crate::gpu_paint::parse(value) {
+                            Some(list) => {
+                                st.emit(tab, Event::TileList { key, generation, list });
+                                continue;
+                            }
+                            None => crate::gpu_paint::lists_unsupported(),
+                        },
+                        // An engine without display lists says so; other errors
+                        // fall back to a PNG for this tile only.
+                        Err(e) => {
+                            let text = e.to_string();
+                            if text.contains("display-list feature") || text.contains("Unknown Page method") {
+                                crate::gpu_paint::lists_unsupported();
+                            }
+                        }
+                    }
+                }
                 let shot = st
                     .c
                     .call(s, "Page.captureScreenshot", json!({ "format": "png", "clip": clip, "captureBeyondViewport": true }))

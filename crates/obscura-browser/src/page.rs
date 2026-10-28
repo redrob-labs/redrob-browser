@@ -4228,6 +4228,23 @@ impl Page {
         js.screenshot_prepared_region_with_surface_color(region, self.capture_surface_color())
     }
 
+    /// A document-space rectangle as a display list (docs/GPU-PAINT.md).
+    #[cfg(feature = "display-list")]
+    pub fn display_list_region_with_animation_sample(
+        &self,
+        region: obscura_js::CaptureRegion,
+        animation_sample: obscura_js::AnimationSample,
+    ) -> Result<obscura_js::DisplayList, obscura_js::CaptureError> {
+        let js = self
+            .js
+            .as_ref()
+            .ok_or(obscura_js::CaptureError::PaintFailed)?;
+        if !js.set_animation_sample(animation_sample) {
+            return Err(obscura_js::CaptureError::PaintFailed);
+        }
+        js.display_list_prepared_region_with_surface_color(region, self.capture_surface_color())
+    }
+
     #[cfg(feature = "render")]
     pub fn screenshot_region_raster_with_animation_sample(
         &self,

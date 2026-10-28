@@ -2088,6 +2088,31 @@ pub async fn handle(
             #[cfg(not(feature = "render"))]
             Err("Page.captureScreenshot requires a build with the render feature".to_string())
         }
+        "redrobDisplayList" => {
+            // A Redrob extension: the region `clip` (same shape and units as
+            // captureScreenshot's) as a display list for GPU raster
+            // (docs/GPU-PAINT.md, phase B).
+            #[cfg(feature = "display-list")]
+            {
+                let options = parse_screenshot_options(params)?;
+                let clip = options
+                    .clip
+                    .ok_or_else(|| "Page.redrobDisplayList requires a clip".to_string())?;
+                let page = ctx
+                    .get_session_page_mut(session_id)
+                    .ok_or("No page for session")?;
+                prepare_capture_resources_if_requested(page).await;
+                let animation_sample = page.live_animation_sample();
+                let region = chromium_clip_region(clip, f64::from(page.device_scale_factor))?;
+                let list = page
+                    .display_list_region_with_animation_sample(region, animation_sample)
+                    .map_err(capture_error_message)?;
+                serde_json::to_value(&list)
+                    .map_err(|error| format!("Page.redrobDisplayList encoding failed: {error}"))
+            }
+            #[cfg(not(feature = "display-list"))]
+            Err("Page.redrobDisplayList requires a build with the display-list feature".to_string())
+        }
         "captureSnapshot" => {
             // A DOM/layer-tree snapshot (not a raster image). Distinct from
             // captureScreenshot; keep the clear error so clients fail fast.

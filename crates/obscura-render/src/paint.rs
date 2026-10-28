@@ -9,9 +9,10 @@ use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use obscura_dom::tree::DomTree;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use crate::canvas::{Canvas, ClipMask, PixmapCanvas};
 use tiny_skia::{
-    Color, FillRule, FilterQuality, GradientStop, LinearGradient, Paint, PathBuilder, Pattern,
-    Pixmap, Point, RadialGradient, Rect, SpreadMode, Transform,
+    Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, Point, Rect, SpreadMode,
+    Transform,
 };
 
 static FONT_BYTES: &[u8] = include_bytes!("../assets/liberation-sans.ttf");
@@ -3404,6 +3405,38 @@ pub fn paint_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces(
     )
 }
 
+/// Paint a document-space rectangle exactly like
+/// [`paint_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces`]
+/// and return what was drawn as a display list (docs/GPU-PAINT.md, phase B).
+/// List coordinates are the painted surface's pixels; when the region's scale
+/// is resampled after paint rather than painted natively, the list is at
+/// scale 1 and the client scales it.
+#[cfg(feature = "display-list")]
+pub fn record_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces(
+    tree: &DomTree,
+    prepared: &mut PreparedRender,
+    resources: &mut RenderResourceCache,
+    scroll: &ResolvedScrollState,
+    region: CaptureRegion,
+    surface_color: [u8; 4],
+    canvas_surfaces: &dyn CanvasSurfaceSource,
+) -> Result<crate::display_list::DisplayList, CaptureError> {
+    let (painted, list) = crate::display_list::record(|| {
+        paint_prepared_region_with_scroll_policy(
+            tree,
+            prepared,
+            resources,
+            scroll,
+            region,
+            false,
+            surface_color,
+            canvas_surfaces,
+        )
+    });
+    painted?;
+    list.ok_or(CaptureError::PaintFailed)
+}
+
 fn paint_prepared_region_with_scroll_with_print_economy(
     tree: &DomTree,
     prepared: &mut PreparedRender,
@@ -3459,6 +3492,7 @@ fn paint_prepared_region_with_scroll_policy(
         surface_color[2],
         surface_color[3],
     ));
+    crate::canvas::begin_root(&pixmap, surface_color);
 
     // Resolved node movement already contains `-root_scroll` for ordinary
     // document content and zero root movement for fixed content. Adding the
@@ -3792,7 +3826,7 @@ fn paint_canvas_background(
     if let Some(color) = style.background_color {
         let mut paint = Paint::default();
         paint.set_color(Color::from_rgba8(color[0], color[1], color[2], color[3]));
-        pixmap.fill_path(
+        pixmap.canvas().fill_path(
             &path,
             &paint,
             FillRule::Winding,
@@ -4389,6 +4423,7 @@ fn paint_laid_dom_scrolled(
             let Some(layer) = Pixmap::new(layer_width, layer_height) else {
                 continue;
             };
+            crate::canvas::begin_layer(&layer);
             let layer = paint_laid_dom_scrolled(
                 tree,
                 viewport,
@@ -4439,7 +4474,7 @@ fn paint_laid_dom_scrolled(
                     scroll_state.surface_extent.unwrap_or(viewport),
                 )
             });
-            pixmap.draw_pixmap(
+            pixmap.canvas().draw_image(
                 0,
                 0,
                 layer.as_ref(),
@@ -4466,6 +4501,7 @@ fn paint_laid_dom_scrolled(
             // each primitive. Otherwise two opaque overlapping children at
             // opacity:.5 incorrectly become .75 alpha in their overlap.
             let layer = Pixmap::new(pixmap.width(), pixmap.height())?;
+            crate::canvas::begin_layer(&layer);
             let layer = paint_laid_dom_scrolled(
                 tree,
                 viewport,
@@ -4498,7 +4534,7 @@ fn paint_laid_dom_scrolled(
                 opacity: own_opacity,
                 ..tiny_skia::PixmapPaint::default()
             };
-            pixmap.draw_pixmap(
+            pixmap.canvas().draw_image(
                 0,
                 0,
                 layer.as_ref(),
@@ -4660,7 +4696,7 @@ fn paint_laid_dom_scrolled(
         let background = background_geometry(&rect, style);
         let background_path = background_clip_path(background);
         let combined_clip_mask = clip_path_mask.as_ref().and_then(|polygon| {
-            intersect_clip_masks(ancestor_clip_mask.as_deref().cloned(), Some(polygon))
+            intersect_clip_masks(ancestor_clip_mask.as_deref().map(crate::canvas::clone_mask), Some(polygon))
         });
         let element_clip_mask = combined_clip_mask
             .as_ref()
@@ -4681,7 +4717,7 @@ fn paint_laid_dom_scrolled(
                     let mut paint = Paint::default();
                     paint.set_color(Color::from_rgba8(bg[0], bg[1], bg[2], bg[3]));
                     paint.anti_alias = !background.clip_radii.is_zero();
-                    pixmap.fill_path(
+                    pixmap.canvas().fill_path(
                         path,
                         &paint,
                         FillRule::Winding,
@@ -4967,7 +5003,7 @@ fn paint_laid_dom_scrolled(
                             if visible_rect.width >= 4.0 && visible_rect.height >= 4.0 {
                                 let mut ph = Paint::default();
                                 ph.set_color(Color::from_rgba8(0xE9, 0xEA, 0xEC, 0xFF));
-                                pixmap.fill_rect(
+                                pixmap.canvas().fill_rect(
                                     box_rect,
                                     &ph,
                                     raster_transform(raster_scale),
@@ -5029,7 +5065,7 @@ fn paint_laid_dom_scrolled(
                     rect.height as u32,
                     &svg_fonts,
                 ) {
-                    let mut mask = element_clip_mask.cloned();
+                    let mut mask = element_clip_mask.map(crate::canvas::clone_mask);
                     if has_radius {
                         let own = rounded_box_clip_mask_radii(
                             pixmap.width(),
@@ -5039,7 +5075,7 @@ fn paint_laid_dom_scrolled(
                         );
                         mask = intersect_clip_masks(mask, own.as_ref());
                     }
-                    pixmap.draw_pixmap(
+                    pixmap.canvas().draw_image(
                         rect.x as i32,
                         rect.y as i32,
                         content.as_ref(),
@@ -5176,7 +5212,7 @@ fn paint_laid_dom_scrolled(
                     let color = style.color.unwrap_or([0, 0, 0, 255]);
                     arrow_paint
                         .set_color(Color::from_rgba8(color[0], color[1], color[2], color[3]));
-                    pixmap.fill_path(
+                    pixmap.canvas().fill_path(
                         &arrow,
                         &arrow_paint,
                         FillRule::Winding,
@@ -5234,7 +5270,7 @@ fn paint_laid_dom_scrolled(
                     ..Default::default()
                 };
                 if !is_radio && selected {
-                    pixmap.fill_path(
+                    pixmap.canvas().fill_path(
                         &shape,
                         &control_paint,
                         FillRule::Winding,
@@ -5242,7 +5278,7 @@ fn paint_laid_dom_scrolled(
                         element_clip_mask,
                     );
                 } else {
-                    pixmap.stroke_path(
+                    pixmap.canvas().stroke_path(
                         &shape,
                         &control_paint,
                         &stroke,
@@ -5255,7 +5291,7 @@ fn paint_laid_dom_scrolled(
                         if let Some(dot) =
                             PathBuilder::from_circle(x + size / 2.0, y + size / 2.0, size * 0.25)
                         {
-                            pixmap.fill_path(
+                            pixmap.canvas().fill_path(
                                 &dot,
                                 &control_paint,
                                 FillRule::Winding,
@@ -5278,7 +5314,7 @@ fn paint_laid_dom_scrolled(
                                 width: (size * 0.14).max(1.0),
                                 ..Default::default()
                             };
-                            pixmap.stroke_path(
+                            pixmap.canvas().stroke_path(
                                 &mark,
                                 &control_paint,
                                 &stroke,
@@ -5629,7 +5665,7 @@ fn paint_inline_fragment_decorations(
                 let mut paint = Paint::default();
                 paint.set_color(Color::from_rgba8(color[0], color[1], color[2], color[3]));
                 paint.anti_alias = !background.clip_radii.is_zero();
-                pixmap.fill_path(
+                pixmap.canvas().fill_path(
                     path,
                     &paint,
                     FillRule::Winding,
@@ -6465,7 +6501,7 @@ fn stroke_rounded_border_path(
         }
         _ => {}
     }
-    pixmap.stroke_path(&path, &paint, &stroke, raster_transform(raster_scale), mask);
+    pixmap.canvas().stroke_path(&path, &paint, &stroke, raster_transform(raster_scale), mask);
 }
 
 fn fill_solid_border_side(
@@ -6484,7 +6520,7 @@ fn fill_solid_border_side(
     let mut paint = Paint::default();
     paint.set_color(Color::from_rgba8(color[0], color[1], color[2], color[3]));
     paint.anti_alias = !radii.is_zero();
-    pixmap.fill_path(
+    pixmap.canvas().fill_path(
         &path,
         &paint,
         FillRule::Winding,
@@ -6653,7 +6689,7 @@ fn paint_straight_border_side(
         stroke.dash = tiny_skia::StrokeDash::new(vec![0.0, stroke_width * 2.0], 0.0);
         stroke.line_cap = tiny_skia::LineCap::Round;
     }
-    pixmap.stroke_path(&path, &paint, &stroke, raster_transform(raster_scale), mask);
+    pixmap.canvas().stroke_path(&path, &paint, &stroke, raster_transform(raster_scale), mask);
 }
 
 fn shade_border_color(color: [u8; 4], amount: f32) -> [u8; 4] {
@@ -6740,7 +6776,7 @@ fn paint_box_shadow(
     ) else {
         return;
     };
-    shadow_mask.invert();
+    shadow_mask.clip_invert();
     let color = shadow.color;
     if blur < 0.5 {
         // No blur: a single crisp, offset (and spread) rounded rect.
@@ -6781,7 +6817,7 @@ fn paint_box_shadow(
         }
     }
     // Ancestor overflow clip is already the complete rect/rounded chain.
-    pixmap.draw_pixmap(
+    pixmap.canvas().draw_image(
         left,
         top,
         shadow_pixmap.as_ref(),
@@ -6827,7 +6863,7 @@ fn fill_shadow_rect(
     let mut paint = Paint::default();
     paint.set_color(Color::from_rgba8(color[0], color[1], color[2], color[3]));
     paint.anti_alias = true;
-    pixmap.fill_path(
+    pixmap.canvas().fill_path(
         &path,
         &paint,
         FillRule::Winding,
@@ -7401,7 +7437,44 @@ pub fn measure_text(text: &str, size: f32, is_bold: bool, family: Option<&str>) 
     width
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_text(
+    pixmap: &mut Pixmap,
+    text: &str,
+    x: f32,
+    y: f32,
+    color: [u8; 4],
+    size: f32,
+    is_bold: bool,
+    family: Option<&str>,
+    letter_spacing: f32,
+    word_spacing: f32,
+    clip: Option<crate::Rect>,
+    clip_mask: Option<&tiny_skia::Mask>,
+    raster_scale: f32,
+) {
+    // Glyphs are blitted pixel by pixel; the canvas sees the result as one image.
+    crate::canvas::direct_pixels(pixmap, |pixmap| {
+        draw_text_pixels(
+            pixmap,
+            text,
+            x,
+            y,
+            color,
+            size,
+            is_bold,
+            family,
+            letter_spacing,
+            word_spacing,
+            clip,
+            clip_mask,
+            raster_scale,
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_text_pixels(
     pixmap: &mut Pixmap,
     text: &str,
     x: f32,
@@ -8212,7 +8285,7 @@ fn paint_linear_gradient(
     let start = Point::from_xy(cx - dx * half, cy - dy * half);
     let end = Point::from_xy(cx + dx * half, cy + dy * half);
     let n = stops.len();
-    let mut gs: Vec<GradientStop> = Vec::with_capacity(n);
+    let mut gs: Vec<(f32, [u8; 4])> = Vec::with_capacity(n);
     let mut last = 0.0f32;
     for (i, (_, pos)) in stops.iter().enumerate() {
         let c = gradient_stop_color(stops, i);
@@ -8221,25 +8294,22 @@ fn paint_linear_gradient(
             .clamp(0.0, 1.0)
             .max(last);
         last = p;
-        gs.push(GradientStop::new(
-            p,
-            Color::from_rgba8(c[0], c[1], c[2], c[3]),
-        ));
+        gs.push((p, c));
     }
-    if let Some(shader) =
-        LinearGradient::new(start, end, gs, SpreadMode::Pad, Transform::identity())
-    {
-        let mut paint = Paint::default();
-        paint.shader = shader;
-        paint.anti_alias = true;
-        pixmap.fill_path(
-            path,
-            &paint,
-            FillRule::Winding,
-            raster_transform(raster_scale),
-            clip,
-        );
-    }
+    let gradient = crate::canvas::Gradient {
+        shape: crate::canvas::GradientShape::Linear { start, end },
+        stops: gs,
+        spread: SpreadMode::Pad,
+        transform: Transform::identity(),
+    };
+    pixmap.canvas().fill_gradient(
+        path,
+        &gradient,
+        true,
+        FillRule::Winding,
+        raster_transform(raster_scale),
+        clip,
+    );
 }
 
 fn paint_linear_gradient_layer(
@@ -8320,7 +8390,7 @@ fn paint_linear_gradient_layer(
         let color = gradient_stop_color(stops, last_index);
         let mut paint = Paint::default();
         paint.set_color(Color::from_rgba8(color[0], color[1], color[2], color[3]));
-        pixmap.fill_path(
+        pixmap.canvas().fill_path(
             path,
             &paint,
             FillRule::Winding,
@@ -8357,25 +8427,22 @@ fn paint_linear_gradient_layer(
         }
         .max(monotonic);
         monotonic = position;
-        gradient_stops.push(GradientStop::new(
-            position,
-            Color::from_rgba8(color[0], color[1], color[2], color[3]),
-        ));
+        gradient_stops.push((position, color));
     }
-    if let Some(shader) =
-        LinearGradient::new(start, end, gradient_stops, spread, Transform::identity())
-    {
-        let mut paint = Paint::default();
-        paint.shader = shader;
-        paint.anti_alias = true;
-        pixmap.fill_path(
-            path,
-            &paint,
-            FillRule::Winding,
-            raster_transform(raster_scale),
-            clip,
-        );
-    }
+    let gradient = crate::canvas::Gradient {
+        shape: crate::canvas::GradientShape::Linear { start, end },
+        stops: gradient_stops,
+        spread,
+        transform: Transform::identity(),
+    };
+    pixmap.canvas().fill_gradient(
+        path,
+        &gradient,
+        true,
+        FillRule::Winding,
+        raster_transform(raster_scale),
+        clip,
+    );
 }
 
 #[derive(Clone, Copy)]
@@ -8465,7 +8532,7 @@ fn background_extra_clip(
     ancestor_clip: Option<&tiny_skia::Mask>,
     polygon_clip: Option<&tiny_skia::Mask>,
 ) -> Option<tiny_skia::Mask> {
-    intersect_clip_masks(ancestor_clip.cloned(), polygon_clip)
+    intersect_clip_masks(ancestor_clip.map(crate::canvas::clone_mask), polygon_clip)
 }
 
 fn paint_radial_gradient(
@@ -8494,15 +8561,7 @@ fn paint_radial_gradient(
         return;
     };
     let normalized = normalized_stops(stops);
-    let gradient_stops = normalized
-        .into_iter()
-        .map(|(position, color)| {
-            GradientStop::new(
-                position,
-                Color::from_rgba8(color[0], color[1], color[2], color[3]),
-            )
-        })
-        .collect();
+    let gradient_stops: Vec<(f32, [u8; 4])> = normalized;
     // tiny-skia's native radial shader is circular. Keep the established CSS
     // coordinate-space shader and transform that circle around its center into
     // the authored ellipse. The paint transform later handles device scale.
@@ -8515,26 +8574,25 @@ fn paint_radial_gradient(
         0.0,
         center.y * (1.0 - ellipse_scale),
     );
-    if let Some(shader) = RadialGradient::new(
-        center,
-        0.0,
-        center,
-        radius_x,
-        gradient_stops,
-        SpreadMode::Pad,
-        gradient_transform,
-    ) {
-        let mut paint = Paint::default();
-        paint.shader = shader;
-        paint.anti_alias = true;
-        pixmap.fill_path(
-            path,
-            &paint,
-            FillRule::Winding,
-            raster_transform(raster_scale),
-            clip,
-        );
-    }
+    let gradient = crate::canvas::Gradient {
+        shape: crate::canvas::GradientShape::Radial {
+            start: center,
+            start_radius: 0.0,
+            end: center,
+            end_radius: radius_x,
+        },
+        stops: gradient_stops,
+        spread: SpreadMode::Pad,
+        transform: gradient_transform,
+    };
+    pixmap.canvas().fill_gradient(
+        path,
+        &gradient,
+        true,
+        FillRule::Winding,
+        raster_transform(raster_scale),
+        clip,
+    );
 }
 
 fn resolve_radial_gradient_radii(
@@ -8690,18 +8748,18 @@ fn paint_background_gradient_layers(
                         1.0,
                         Transform::from_translate(tile_x, tile_y),
                     );
-                    pixmap.fill_path(path, &paint, FillRule::Winding, Transform::identity(), clip);
+                    pixmap.canvas().fill_path(path, &paint, FillRule::Winding, Transform::identity(), clip);
                     return;
                 }
 
-                let mut owner_clip = clip.cloned().or_else(|| {
-                    let mut mask = tiny_skia::Mask::new(pixmap.width(), pixmap.height())?;
-                    mask.fill_path(path, FillRule::Winding, true, Transform::identity());
+                let mut owner_clip = clip.map(crate::canvas::clone_mask).or_else(|| {
+                    let mut mask = crate::canvas::new_mask(pixmap.width(), pixmap.height())?;
+                    mask.clip_fill_path(path, FillRule::Winding, true, Transform::identity());
                     Some(mask)
                 });
                 if clip.is_some() {
                     if let Some(mask) = owner_clip.as_mut() {
-                        mask.intersect_path(path, FillRule::Winding, true, Transform::identity());
+                        mask.clip_intersect_path(path, FillRule::Winding, true, Transform::identity());
                     }
                 }
                 let start_x = if repeats.0 {
@@ -8728,7 +8786,7 @@ fn paint_background_gradient_layers(
                 while y < end_y {
                     let mut x = start_x;
                     while x < end_x {
-                        pixmap.draw_pixmap(
+                        pixmap.canvas().draw_image(
                             x.floor() as i32,
                             y.floor() as i32,
                             tile.as_ref(),
@@ -8915,12 +8973,12 @@ fn paint_conic_gradient_sampled(
             layer.pixels_mut()[(y * width + x) as usize] = premultiplied(color);
         }
     }
-    let mut clip = extra_clip.cloned();
+    let mut clip = extra_clip.map(crate::canvas::clone_mask);
     if !border_radius.is_zero() {
         let path = rounded_rect_path_radii(rect.x, rect.y, rect.width, rect.height, border_radius);
         match (clip.as_mut(), path) {
             (Some(mask), Some(path)) => {
-                mask.intersect_path(&path, FillRule::Winding, true, Transform::identity());
+                mask.clip_intersect_path(&path, FillRule::Winding, true, Transform::identity());
             }
             (None, _) => {
                 clip = rounded_box_clip_mask_radii(
@@ -8933,7 +8991,7 @@ fn paint_conic_gradient_sampled(
             _ => {}
         }
     }
-    pixmap.draw_pixmap(
+    pixmap.canvas().draw_image(
         rect.x.floor() as i32,
         rect.y.floor() as i32,
         layer.as_ref(),
@@ -9325,7 +9383,7 @@ fn paint_in_flow_generated_box(
             let mut paint = Paint::default();
             paint.set_color(Color::from_rgba8(color[0], color[1], color[2], color[3]));
             paint.anti_alias = !background.clip_radii.is_zero();
-            pixmap.fill_path(
+            pixmap.canvas().fill_path(
                 path,
                 &paint,
                 FillRule::Winding,
@@ -9566,7 +9624,7 @@ fn paint_positioned_pseudo(
         if let (Some(color), Some(path)) = (style.background_color, background_path.as_ref()) {
             let mut paint = Paint::default();
             paint.set_color(Color::from_rgba8(color[0], color[1], color[2], color[3]));
-            pixmap.fill_path(
+            pixmap.canvas().fill_path(
                 path,
                 &paint,
                 FillRule::Winding,
@@ -10202,7 +10260,7 @@ fn paint_canvas_surface(
         || dest.height > visible_rect.height + 0.5
         || dest.x < visible_rect.x - 0.5
         || dest.y < visible_rect.y - 0.5;
-    let mut clip = extra_clip.cloned();
+    let mut clip = extra_clip.map(crate::canvas::clone_mask);
     if needs_box_clip {
         let path = if has_radius {
             rounded_rect_path_radii(
@@ -10227,7 +10285,7 @@ fn paint_canvas_surface(
         };
         match (clip.as_mut(), path) {
             (Some(mask), Some(path)) => {
-                mask.intersect_path(&path, FillRule::Winding, true, Transform::identity())
+                mask.clip_intersect_path(&path, FillRule::Winding, true, Transform::identity())
             }
             (None, _) => {
                 clip = rounded_box_clip_mask_radii(
@@ -10249,7 +10307,7 @@ fn paint_canvas_surface(
         dest.x,
         dest.y,
     );
-    pixmap.draw_pixmap(
+    pixmap.canvas().draw_image(
         0,
         0,
         content,
@@ -10357,7 +10415,7 @@ fn paint_image(
         || dest.height > visible_rect.height + 0.5
         || dest.x < visible_rect.x - 0.5
         || dest.y < visible_rect.y - 0.5;
-    let mut clip = extra_clip.cloned();
+    let mut clip = extra_clip.map(crate::canvas::clone_mask);
     if needs_box_clip {
         let path = if has_radius {
             rounded_rect_path_radii(
@@ -10382,7 +10440,7 @@ fn paint_image(
         };
         match (clip.as_mut(), path) {
             (Some(mask), Some(path)) => {
-                mask.intersect_path(&path, FillRule::Winding, true, Transform::identity())
+                mask.clip_intersect_path(&path, FillRule::Winding, true, Transform::identity())
             }
             (None, _) => {
                 clip = rounded_box_clip_mask_radii(
@@ -10408,7 +10466,7 @@ fn paint_image(
         })
         .unwrap_or_else(Transform::identity);
     if (rw, rh) == (dw, dh) {
-        pixmap.draw_pixmap(
+        pixmap.canvas().draw_image(
             dest.x as i32,
             dest.y as i32,
             content.as_ref().as_ref(),
@@ -10424,7 +10482,7 @@ fn paint_image(
         let scaled = base
             .pre_translate(dest.x as i32 as f32, dest.y as i32 as f32)
             .pre_scale(dw as f32 / rw as f32, dh as f32 / rh as f32);
-        pixmap.draw_pixmap(0, 0, content.as_ref().as_ref(), &paint, scaled, clip.as_ref());
+        pixmap.canvas().draw_image(0, 0, content.as_ref().as_ref(), &paint, scaled, clip.as_ref());
     }
     true
 }
@@ -10663,12 +10721,12 @@ fn svg_image_intrinsic_metadata(bytes: &[u8]) -> Option<crate::ReplacedIntrinsic
 /// A full-pixmap clip mask admitting only the pixels inside `rect`, used to
 /// crop an `object-fit: cover|none` image to its element box.
 fn box_clip_mask(pw: u32, ph: u32, rect: &crate::Rect) -> Option<tiny_skia::Mask> {
-    let mut mask = tiny_skia::Mask::new(pw, ph)?;
+    let mut mask = crate::canvas::new_mask(pw, ph)?;
     let r = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height)?;
     let mut pb = PathBuilder::new();
     pb.push_rect(r);
     let path = pb.finish()?;
-    mask.fill_path(&path, FillRule::Winding, true, Transform::identity());
+    mask.clip_fill_path(&path, FillRule::Winding, true, Transform::identity());
     Some(mask)
 }
 
@@ -10695,7 +10753,7 @@ fn overflow_clip_mask(
         if let Some(path) =
             rounded_rect_path_radii(rect.x, rect.y, rect.width, rect.height, node.clip.radii)
         {
-            mask.intersect_path(&path, FillRule::Winding, true, Transform::identity());
+            mask.clip_intersect_path(&path, FillRule::Winding, true, Transform::identity());
         }
         current = node.parent.as_deref();
     }
@@ -10771,12 +10829,10 @@ fn intersect_clip_masks(
 ) -> Option<tiny_skia::Mask> {
     match (first.as_mut(), second) {
         (Some(first_mask), Some(second)) => {
-            for (a, b) in first_mask.data_mut().iter_mut().zip(second.data()) {
-                *a = ((*a as u16 * *b as u16 + 127) / 255) as u8;
-            }
+            crate::canvas::intersect_mask_into(first_mask, second);
             first
         }
-        (None, Some(second)) => Some(second.clone()),
+        (None, Some(second)) => Some(crate::canvas::clone_mask(second)),
         _ => first,
     }
 }
@@ -10790,9 +10846,9 @@ fn rounded_box_clip_mask_radii(
     if radii.is_zero() {
         return box_clip_mask(pw, ph, rect);
     }
-    let mut mask = tiny_skia::Mask::new(pw, ph)?;
+    let mut mask = crate::canvas::new_mask(pw, ph)?;
     let path = rounded_rect_path_radii(rect.x, rect.y, rect.width, rect.height, radii)?;
-    mask.fill_path(&path, FillRule::Winding, true, Transform::identity());
+    mask.clip_fill_path(&path, FillRule::Winding, true, Transform::identity());
     Some(mask)
 }
 
@@ -10835,12 +10891,12 @@ fn polygon_clip_mask(
         crate::ClipPathFillRule::Nonzero => FillRule::Winding,
         crate::ClipPathFillRule::Evenodd => FillRule::EvenOdd,
     };
-    let mut mask = tiny_skia::Mask::new(pw, ph)?;
+    let mut mask = crate::canvas::new_mask(pw, ph)?;
     // Degenerate polygons are valid CSS basic shapes but have no enclosed
     // area. Keep the newly zeroed mask in that case: treating it as "no mask"
     // would incorrectly reveal the whole element.
     if let Some(path) = path {
-        mask.fill_path(&path, fill_rule, true, Transform::identity());
+        mask.clip_fill_path(&path, fill_rule, true, Transform::identity());
     }
     Some(mask)
 }
@@ -12067,12 +12123,12 @@ fn paint_mask(
                 premultiplied(color);
         }
     }
-    let mut clip = extra_clip.cloned();
+    let mut clip = extra_clip.map(crate::canvas::clone_mask);
     if !border_radius.is_zero() {
         let path = rounded_rect_path_radii(rect.x, rect.y, rect.width, rect.height, border_radius);
         match (clip.as_mut(), path) {
             (Some(mask), Some(path)) => {
-                mask.intersect_path(&path, FillRule::Winding, true, Transform::identity())
+                mask.clip_intersect_path(&path, FillRule::Winding, true, Transform::identity())
             }
             (None, _) => {
                 clip = rounded_box_clip_mask_radii(
@@ -12085,7 +12141,7 @@ fn paint_mask(
             _ => {}
         }
     }
-    pixmap.draw_pixmap(
+    pixmap.canvas().draw_image(
         (origin_x + x0 as i64) as i32,
         (origin_y + y0 as i64) as i32,
         recolored.as_ref(),

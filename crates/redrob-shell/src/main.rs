@@ -11,6 +11,8 @@ mod cdp;
 mod devtools;
 mod drm_tab;
 mod engine;
+#[cfg(feature = "gpu")]
+mod gpu_paint;
 mod import_chrome;
 mod i18n;
 mod input;
@@ -138,6 +140,8 @@ fn main() -> anyhow::Result<()> {
                 error: None,
                 last_size: (0, 0, 0.0),
                 address_id: egui::Id::new("address"),
+                #[cfg(feature = "gpu")]
+                gpu: cc.wgpu_render_state.as_ref().and_then(gpu_paint::GpuPainter::new),
             };
             if let Some(p) = &window.profile {
                 match vault::Vault::open(&p.dir) {
@@ -231,6 +235,9 @@ struct Window {
     error: Option<String>,
     last_size: (u32, u32, f32),
     address_id: egui::Id,
+    /// Renders tile display lists when the GPU path is available.
+    #[cfg(feature = "gpu")]
+    gpu: Option<gpu_paint::GpuPainter>,
 }
 
 impl Window {
@@ -387,6 +394,19 @@ impl Window {
             };
             match event {
                 Event::Tile { key, generation, image } => t.tiles.insert(ctx, key, generation, image),
+                #[cfg(feature = "gpu")]
+                Event::TileList { key, generation, list } => {
+                    if let Some(gpu) = self.gpu.as_mut() {
+                        for id in t.tiles.take_released() {
+                            gpu.release(id);
+                        }
+                        if let Some(reuse) = t.tiles.native_slot(key, generation) {
+                            if let Some(id) = gpu.render(&list, reuse) {
+                                t.tiles.insert_native(key, generation, id);
+                            }
+                        }
+                    }
+                }
                 Event::Invalidate => t.tiles.invalidate(),
                 Event::Console { level, text } => t.devtools.log(&level, text),
                 Event::NetRequest { id, method, url } => t.devtools.request(id, method, url),

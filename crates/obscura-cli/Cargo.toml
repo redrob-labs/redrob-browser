@@ -17,6 +17,7 @@ path = "src/worker.rs"
 default = []
 stealth = ["obscura-browser/stealth", "obscura-net/stealth", "obscura-mcp/stealth"]
 render = ["obscura-browser/render", "obscura-cdp/render", "obscura-mcp/render"]
+display-list = ["render", "obscura-cdp/display-list"]
 
 [dependencies]
 obscura-browser = { workspace = true }
