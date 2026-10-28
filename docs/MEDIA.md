@@ -28,6 +28,56 @@ page JS: <video>.play()
 - Headless use (`redrob-browser serve`, `fetch`) has no window and no binding: `play()` rejects
   with `NotSupportedError` and `canPlayType` answers `""`, as before.
 
+## Autoplay
+
+After a page's `load` event the window starts every `video[autoplay][muted]` and
+`audio[autoplay][muted]` element. Autoplay with sound stays blocked: the page has to call
+`play()` itself.
+
+## Full screen
+
+`Element.requestFullscreen()` (and the `webkit` names) on a video, or on a player's container,
+which picks the first `<video>` inside it, is reported through the `redrobMedia` binding. The
+window switches to full-screen mode (`egui::ViewportCommand::Fullscreen`) and draws that video
+with its controls over the whole window. `document.exitFullscreen()`, Escape, or switching tabs
+leaves; the page sees `document.fullscreenElement` change and a `fullscreenchange` event either
+way. Other elements cannot go full screen.
+
+## Subtitles
+
+With `play` and `load` the element sends its `<track>` list. The window picks the first
+`kind="subtitles"` or `kind="captions"` track marked `default` (or set to `showing`), fetches it
+(http, https or `data:`, see `redrob-shell/src/webvtt.rs`) and draws the active cue at the bottom
+of the video. Cue timing and text are used; cue settings (position, line, alignment), regions and
+styling are ignored, and inline tags are stripped.
+
+## Media Source Extensions
+
+```text
+page JS: new MediaSource(); video.src = URL.createObjectURL(ms)
+  -> mse-open (redrobMedia)        window: one MSE player for the element
+  ms.addSourceBuffer(type)
+  -> mse-add {sb, mime}            window: appsrc ! decodebin, added to its pipeline
+  sb.appendBuffer(bytes)
+  -> redrobMse binding: mse-append {sb, data: base64}
+                                   window: pushed into that appsrc; decodebin sends
+                                   video to the RGBA appsink and audio to the speakers
+```
+
+- `obscura-js/js/media.js` (spliced into `bootstrap.js` at build time) implements
+  `MediaSource`, `SourceBuffer`, `SourceBufferList`, `TimeRanges` and
+  `MediaSource.isTypeSupported` (MP4 and WebM with H.264, AAC, VP8, VP9, Opus, Vorbis or FLAC).
+  The MediaSource attaches through `src`, `setAttribute('src', ...)` or `srcObject`.
+- `SourceBuffer.buffered` is read in the page from the appended bytes: `tfdt` and `trun` in
+  fragmented MP4, Cluster and block timecodes in WebM. `updateend` fires on the next task.
+- Seeking (`currentTime = t`) rebuilds the window's pipeline, which flushes every appsrc, and
+  replays each SourceBuffer's last initialization segment. The page then appends the segments for
+  the new position, as MSE players do on `seeking`. Sinks render from the first decoded buffer, so
+  playback starts at whatever time those segments carry.
+- `remove()` and `abort()` change only the page's view of what is buffered; bytes already handed
+  to GStreamer still play.
+- The window code is `redrob-shell/src/mse.rs`, built with the `media` feature.
+
 ## Build
 
 `cargo build -p redrob-shell --features media`. Building needs the GStreamer development files
@@ -37,9 +87,9 @@ macOS and Windows.
 
 ## Not yet
 
-- Media Source Extensions (`MediaSource`, `SourceBuffer`). YouTube and most streaming sites
-  use them; they play nothing until MSE exists.
 - Encrypted media (EME, Widevine).
-- `autoplay` (the page has to call `play()`), `<track>` subtitles drawn over video, picture in
-  picture, fullscreen video.
-- Media requests go out from GStreamer, not the engine, so they carry no page cookies.
+- Picture in picture.
+- `appendWindowStart`/`appendWindowEnd`, and `SourceBuffer.remove()` evicting bytes GStreamer
+  already has.
+- Media requests go out from GStreamer, not the engine, so they carry no page cookies. Subtitle
+  files are fetched the same way.

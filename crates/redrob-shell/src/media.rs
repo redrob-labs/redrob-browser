@@ -38,6 +38,24 @@ pub trait Player: Send {
     fn set_volume(&mut self, volume: f64, muted: bool);
     fn status(&mut self) -> Status;
     fn frame(&self) -> Arc<Mutex<Frame>>;
+    /// Media Source Extensions: the page added a SourceBuffer of this type.
+    fn mse_add(&mut self, _sb: u64, _mime: &str) {}
+    /// Bytes the page appended to SourceBuffer `sb`.
+    fn mse_append(&mut self, _sb: u64, _bytes: Vec<u8>) {}
+    /// MediaSource.endOfStream().
+    fn mse_end(&mut self) {}
+}
+
+/// A player fed by a page's MediaSource, or None without a media backend.
+pub fn open_mse() -> Option<Box<dyn Player>> {
+    #[cfg(feature = "media")]
+    {
+        match mse_backend::MsePlayer::new() {
+            Ok(p) => return Some(Box::new(p)),
+            Err(e) => eprintln!("redrob-browser: cannot start MediaSource playback: {e}"),
+        }
+    }
+    None
 }
 
 /// Open `url` for playback, or None when this build has no media backend.
@@ -108,58 +126,66 @@ mod gst_backend {
 
     impl GstPlayer {
         pub fn open(url: &str) -> anyhow::Result<Self> {
-            static INIT: std::sync::Once = std::sync::Once::new();
-            let mut init_err = None;
-            INIT.call_once(|| {
-                use_bundled_runtime();
-                if let Err(e) = gst::init() {
-                    init_err = Some(e.to_string());
-                }
-            });
-            if let Some(e) = init_err {
-                anyhow::bail!("GStreamer: {e}");
-            }
+            init()?;
             let scheme = url.split(':').next().unwrap_or("");
             if !matches!(scheme, "http" | "https") {
                 anyhow::bail!("only http and https media are played");
             }
-            let caps = gst_video::VideoCapsBuilder::new().format(gst_video::VideoFormat::Rgba).build();
-            let sink = gst_app::AppSink::builder().caps(&caps).max_buffers(2).drop(true).build();
             let frame: Arc<Mutex<Frame>> = Default::default();
-            let target = frame.clone();
-            sink.set_callbacks(
-                gst_app::AppSinkCallbacks::builder()
-                    .new_sample(move |s| {
-                        let sample = s.pull_sample().map_err(|_| gst::FlowError::Eos)?;
-                        let buffer = sample.buffer().ok_or(gst::FlowError::Error)?;
-                        let caps = sample.caps().ok_or(gst::FlowError::Error)?;
-                        let info = gst_video::VideoInfo::from_caps(caps).map_err(|_| gst::FlowError::Error)?;
-                        let map = buffer.map_readable().map_err(|_| gst::FlowError::Error)?;
-                        let (w, h) = (info.width(), info.height());
-                        let stride = info.stride()[0] as usize;
-                        let row = w as usize * 4;
-                        let mut rgba = Vec::with_capacity(row * h as usize);
-                        for y in 0..h as usize {
-                            let start = y * stride;
-                            if let Some(line) = map.get(start..start + row) {
-                                rgba.extend_from_slice(line);
-                            }
-                        }
-                        if let Ok(mut f) = target.lock() {
-                            f.width = w;
-                            f.height = h;
-                            f.rgba = rgba;
-                            f.serial += 1;
-                        }
-                        Ok(gst::FlowSuccess::Ok)
-                    })
-                    .build(),
-            );
+            let sink = video_sink(frame.clone());
             let playbin = gst::ElementFactory::make("playbin").property("uri", url).build()?;
             playbin.set_property("video-sink", &sink);
             playbin.set_state(gst::State::Paused)?;
             Ok(Self { playbin, frame, ended: false, error: false })
         }
+    }
+
+    /// Start GStreamer once per process.
+    pub(super) fn init() -> anyhow::Result<()> {
+        static INIT: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+        INIT.get_or_init(|| {
+            // A packaged app carries its own GStreamer (release.yml); point GStreamer at it first.
+            use_bundled_runtime();
+            gst::init().map_err(|e| e.to_string())
+        })
+            .clone()
+            .map_err(|e| anyhow::anyhow!("GStreamer: {e}"))
+    }
+
+    /// An appsink that copies each RGBA frame into `frame`.
+    pub(super) fn video_sink(frame: Arc<Mutex<Frame>>) -> gst_app::AppSink {
+        let caps = gst_video::VideoCapsBuilder::new().format(gst_video::VideoFormat::Rgba).build();
+        let sink = gst_app::AppSink::builder().caps(&caps).max_buffers(2).drop(true).build();
+        let target = frame;
+        sink.set_callbacks(
+            gst_app::AppSinkCallbacks::builder()
+                .new_sample(move |s| {
+                    let sample = s.pull_sample().map_err(|_| gst::FlowError::Eos)?;
+                    let buffer = sample.buffer().ok_or(gst::FlowError::Error)?;
+                    let caps = sample.caps().ok_or(gst::FlowError::Error)?;
+                    let info = gst_video::VideoInfo::from_caps(caps).map_err(|_| gst::FlowError::Error)?;
+                    let map = buffer.map_readable().map_err(|_| gst::FlowError::Error)?;
+                    let (w, h) = (info.width(), info.height());
+                    let stride = info.stride()[0] as usize;
+                    let row = w as usize * 4;
+                    let mut rgba = Vec::with_capacity(row * h as usize);
+                    for y in 0..h as usize {
+                        let start = y * stride;
+                        if let Some(line) = map.get(start..start + row) {
+                            rgba.extend_from_slice(line);
+                        }
+                    }
+                    if let Ok(mut f) = target.lock() {
+                        f.width = w;
+                        f.height = h;
+                        f.rgba = rgba;
+                        f.serial += 1;
+                    }
+                    Ok(gst::FlowSuccess::Ok)
+                })
+                .build(),
+        );
+        sink
     }
 
     impl Player for GstPlayer {
@@ -223,3 +249,8 @@ mod gst_backend {
         }
     }
 }
+
+/// Media Source Extensions playback: one appsrc per SourceBuffer.
+#[cfg(feature = "media")]
+#[path = "mse.rs"]
+mod mse_backend;
