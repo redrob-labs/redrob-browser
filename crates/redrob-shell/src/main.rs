@@ -1,16 +1,18 @@
 //! Redrob Browser window.
 //!
 //! First cut: one tab, a toolbar with back, forward, reload and an address
-//! field, and the page drawn from frames the engine paints. Input inside the
+//! field, and the page drawn as cached tiles the engine paints. Input inside the
 //! page area goes to the engine as CDP input events.
 
 mod cdp;
 mod engine;
+mod tiles;
 
 use std::sync::mpsc;
 
 use cdp::{Command, Update};
-use egui::{pos2, Color32, Key, Rect, Sense, TextureHandle, TextureOptions};
+use egui::{Color32, Key, Rect, Sense};
+use tiles::TileCache;
 
 fn main() -> anyhow::Result<()> {
     let engine = engine::Engine::start()?;
@@ -45,7 +47,9 @@ fn main() -> anyhow::Result<()> {
             Ok(Box::new(Window {
                 commands: cmd_tx,
                 updates: upd_rx,
-                page: None,
+                tiles: TileCache::default(),
+                scroll: (0.0, 0.0),
+                content: (0.0, 0.0),
                 address: start_url,
                 title: String::new(),
                 error: None,
@@ -60,7 +64,10 @@ fn main() -> anyhow::Result<()> {
 struct Window {
     commands: tokio::sync::mpsc::UnboundedSender<Command>,
     updates: mpsc::Receiver<Update>,
-    page: Option<TextureHandle>,
+    tiles: TileCache,
+    /// Document scroll position and size in CSS pixels, as the page last reported them.
+    scroll: (f32, f32),
+    content: (f32, f32),
     address: String,
     title: String,
     error: Option<String>,
@@ -75,14 +82,18 @@ impl Window {
     fn drain_updates(&mut self, ctx: &egui::Context) {
         while let Ok(u) = self.updates.try_recv() {
             match u {
-                Update::Frame { width, height, rgba } => {
-                    let image = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba);
-                    match &mut self.page {
-                        Some(t) => t.set(image, TextureOptions::LINEAR),
-                        None => self.page = Some(ctx.load_texture("page", image, TextureOptions::LINEAR)),
-                    }
+                Update::Tile { key, generation, image } => self.tiles.insert(ctx, key, generation, image),
+                Update::Invalidate => self.tiles.invalidate(),
+                Update::Navigated(url) => {
+                    self.address = url;
+                    self.error = None;
+                    self.tiles.clear();
+                    self.scroll = (0.0, 0.0);
                 }
-                Update::Url(url) => self.address = url,
+                Update::Scroll { x, y, width, height } => {
+                    self.scroll = (x, y);
+                    self.content = (width, height);
+                }
                 Update::Title(t) => {
                     self.title = t;
                     let title = if self.title.is_empty() {
@@ -136,9 +147,13 @@ impl eframe::App for Window {
                 self.last_size = size;
                 self.send(Command::Resize { width: size.0, height: size.1, scale });
             }
-            if let Some(tex) = &self.page {
-                let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
-                ui.painter().image(tex.id(), rect, uv, Color32::WHITE);
+            ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
+            self.tiles.paint(ui.painter(), rect, self.scroll);
+            let view = (rect.width(), rect.height());
+            let keys = TileCache::visible(self.scroll, view, self.content);
+            let wanted = self.tiles.wanted(&keys);
+            if !wanted.is_empty() {
+                self.send(Command::Tiles { keys: wanted, generation: self.tiles.generation });
             }
             if response.hovered() || response.has_focus() || response.is_pointer_button_down_on() {
                 if response.clicked() || response.drag_started() {
@@ -151,7 +166,7 @@ impl eframe::App for Window {
 }
 
 impl Window {
-    fn forward_input(&self, ui: &egui::Ui, rect: Rect, focused: bool) {
+    fn forward_input(&mut self, ui: &egui::Ui, rect: Rect, focused: bool) {
         let events = ui.input(|i| i.events.clone());
         for ev in events {
             match ev {
@@ -183,7 +198,13 @@ impl Window {
                         egui::MouseWheelUnit::Page => rect.height(),
                     };
                     // egui reports wheel-up as positive; CDP scrolls down on positive deltaY.
-                    self.send(Command::Wheel { x, y, dx: -delta.x * step, dy: -delta.y * step, modifiers: mods(modifiers) });
+                    let (dx, dy) = (-delta.x * step, -delta.y * step);
+                    // Move the tiles now; the page's reply corrects this if an
+                    // inner box took the scroll instead of the document.
+                    let max_x = (self.content.0 - rect.width()).max(0.0);
+                    let max_y = (self.content.1 - rect.height()).max(0.0);
+                    self.scroll = ((self.scroll.0 + dx).clamp(0.0, max_x), (self.scroll.1 + dy).clamp(0.0, max_y));
+                    self.send(Command::Wheel { x, y, dx, dy, modifiers: mods(modifiers) });
                 }
                 egui::Event::Text(t) if focused => self.send(Command::Text(t)),
                 egui::Event::Key { key, pressed, modifiers, .. } if focused => {

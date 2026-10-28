@@ -1,7 +1,7 @@
 //! The window's CDP connection to the engine: one tab for now.
 //!
 //! The UI thread sends [`Command`]s; this task turns them into CDP calls and
-//! sends decoded page frames and URL/title changes back as [`Update`]s.
+//! sends painted tiles, scroll state and URL/title changes back as [`Update`]s.
 
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
@@ -12,6 +12,8 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
+
+use crate::tiles::{TileKey, TILE};
 
 pub enum Command {
     Navigate(String),
@@ -24,11 +26,18 @@ pub enum Command {
     Wheel { x: f32, y: f32, dx: f32, dy: f32, modifiers: u32 },
     Key { down: bool, key: String, code: String, vk: u32, modifiers: u32 },
     Text(String),
+    /// Paint these document tiles for this paint generation.
+    Tiles { keys: Vec<TileKey>, generation: u64 },
 }
 
 pub enum Update {
-    Frame { width: u32, height: u32, rgba: Vec<u8> },
-    Url(String),
+    Tile { key: TileKey, generation: u64, image: egui::ColorImage },
+    /// Pixels may have changed: repaint tiles.
+    Invalidate,
+    /// A different document: drop every tile.
+    Navigated(String),
+    /// The page's own scroll position and document size, in CSS pixels.
+    Scroll { x: f32, y: f32, width: f32, height: f32 },
     Title(String),
     Error(String),
 }
@@ -114,51 +123,49 @@ pub async fn run(
     c.session = attached["sessionId"].as_str().map(str::to_string);
     c.call("Page.enable", json!({})).await?;
     c.call("Runtime.enable", json!({})).await?;
-    c.call(
-        "Page.startScreencast",
-        json!({ "format": "jpeg", "quality": 85, "everyNthFrame": 1 }),
-    )
-    .await?;
+    // Frames are only a signal here: the engine paints when the page changes.
+    c.call("Page.startScreencast", json!({ "format": "jpeg", "quality": 1, "everyNthFrame": 1 }))
+        .await?;
 
     let mut size = (1280u32, 800u32, 1.0f32);
     loop {
         tokio::select! {
             cmd = commands.recv() => {
                 let Some(cmd) = cmd else { break };
-                let needs_capture = handle(&mut c, cmd, &mut size, &updates).await;
-                if needs_capture {
-                    capture(&mut c, size, &updates).await;
-                    repaint();
-                }
+                handle(&mut c, cmd, &mut size, &updates).await;
+                repaint();
             }
             ev = event_rx.recv() => {
                 let Some(ev) = ev else { break };
                 match ev["method"].as_str() {
                     Some("Page.screencastFrame") => {
-                        let p = &ev["params"];
-                        if let Some(id) = p["sessionId"].as_u64() {
+                        if let Some(id) = ev["params"]["sessionId"].as_u64() {
                             c.send("Page.screencastFrameAck", json!({ "sessionId": id }));
                         }
-                        if let Some(data) = p["data"].as_str() {
-                            push_frame(data, &updates);
-                            repaint();
-                        }
+                        let _ = updates.send(Update::Invalidate);
+                        repaint();
                     }
                     Some("Page.frameNavigated") => {
                         let frame = &ev["params"]["frame"];
                         if frame.get("parentId").is_none() {
-                            if let Some(url) = frame["url"].as_str() {
-                                let _ = updates.send(Update::Url(url.to_string()));
-                            }
+                            let url = frame["url"].as_str().unwrap_or_default().to_string();
+                            let _ = updates.send(Update::Navigated(url));
+                            repaint();
                         }
                     }
-                    Some("Page.loadEventFired") => {
+                    Some("Page.navigatedWithinDocument") => {
+                        if let Some(url) = ev["params"]["url"].as_str() {
+                            let _ = updates.send(Update::Navigated(url.to_string()));
+                        }
+                    }
+                    Some("Page.loadEventFired") | Some("Page.domContentEventFired") => {
                         if let Ok(v) = c.call("Runtime.evaluate", json!({ "expression": "document.title", "returnByValue": true })).await {
                             if let Some(t) = v["result"]["value"].as_str() {
                                 let _ = updates.send(Update::Title(t.to_string()));
                             }
                         }
-                        capture(&mut c, size, &updates).await;
+                        report_scroll(&mut c, &updates).await;
+                        let _ = updates.send(Update::Invalidate);
                         repaint();
                     }
                     _ => {}
@@ -169,51 +176,47 @@ pub async fn run(
     Ok(())
 }
 
-/// Returns true when the page should be captured again afterwards.
-async fn handle(c: &mut Conn, cmd: Command, size: &mut (u32, u32, f32), updates: &Sender<Update>) -> bool {
-    let result: anyhow::Result<bool> = async {
+async fn handle(c: &mut Conn, cmd: Command, size: &mut (u32, u32, f32), updates: &Sender<Update>) {
+    let result: anyhow::Result<()> = async {
         match cmd {
             Command::Navigate(url) => {
                 c.call("Page.navigate", json!({ "url": url })).await?;
-                Ok(true)
             }
-            Command::Back => {
-                step_history(c, -1).await?;
-                Ok(true)
-            }
-            Command::Forward => {
-                step_history(c, 1).await?;
-                Ok(true)
-            }
+            Command::Back => step_history(c, -1).await?,
+            Command::Forward => step_history(c, 1).await?,
             Command::Reload => {
                 c.call("Page.reload", json!({})).await?;
-                Ok(true)
             }
             Command::Resize { width, height, scale } => {
-                if (width, height, scale) == *size {
-                    return Ok(false);
+                if (width, height, scale) != *size {
+                    *size = (width, height, scale);
+                    c.call(
+                        "Emulation.setDeviceMetricsOverride",
+                        json!({ "width": width, "height": height, "deviceScaleFactor": scale, "mobile": false }),
+                    )
+                    .await?;
+                    report_scroll(c, updates).await;
+                    let _ = updates.send(Update::Invalidate);
                 }
-                *size = (width, height, scale);
-                c.call(
-                    "Emulation.setDeviceMetricsOverride",
-                    json!({ "width": width, "height": height, "deviceScaleFactor": scale, "mobile": false }),
-                )
-                .await?;
-                Ok(true)
             }
             Command::Mouse { kind, x, y, button, clicks, modifiers } => {
                 c.send(
                     "Input.dispatchMouseEvent",
                     json!({ "type": kind, "x": x, "y": y, "button": button, "clickCount": clicks, "modifiers": modifiers }),
                 );
-                Ok(kind != "mouseMoved")
+                if kind == "mouseReleased" {
+                    let _ = updates.send(Update::Invalidate);
+                }
             }
             Command::Wheel { x, y, dx, dy, modifiers } => {
-                c.send(
+                // The page decides what scrolls (the document or an inner box);
+                // the window then follows the document's real position.
+                c.call(
                     "Input.dispatchMouseEvent",
                     json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": dx, "deltaY": dy, "modifiers": modifiers }),
-                );
-                Ok(true)
+                )
+                .await?;
+                report_scroll(c, updates).await;
             }
             Command::Key { down, key, code, vk, modifiers } => {
                 let kind = if down { "keyDown" } else { "keyUp" };
@@ -221,23 +224,48 @@ async fn handle(c: &mut Conn, cmd: Command, size: &mut (u32, u32, f32), updates:
                 if down && key == "Enter" {
                     p["text"] = json!("\r");
                 }
-                c.send("Input.dispatchKeyEvent", p);
-                Ok(down)
+                c.call("Input.dispatchKeyEvent", p).await?;
+                if down {
+                    report_scroll(c, updates).await;
+                    let _ = updates.send(Update::Invalidate);
+                }
             }
             Command::Text(text) => {
                 c.send("Input.insertText", json!({ "text": text }));
-                Ok(true)
+                let _ = updates.send(Update::Invalidate);
+            }
+            Command::Tiles { keys, generation } => {
+                for key in keys {
+                    let clip = json!({
+                        "x": key.tx as f32 * TILE, "y": key.ty as f32 * TILE,
+                        "width": TILE, "height": TILE, "scale": 1,
+                    });
+                    let shot = c
+                        .call(
+                            "Page.captureScreenshot",
+                            json!({ "format": "png", "clip": clip, "captureBeyondViewport": true }),
+                        )
+                        .await?;
+                    if let Some(image) = shot["data"].as_str().and_then(decode) {
+                        let _ = updates.send(Update::Tile { key, generation, image });
+                    }
+                }
             }
         }
+        Ok(())
     }
     .await;
-    match result {
-        Ok(again) => again,
-        Err(e) => {
-            let _ = updates.send(Update::Error(e.to_string()));
-            false
-        }
+    if let Err(e) = result {
+        let _ = updates.send(Update::Error(e.to_string()));
     }
+}
+
+async fn report_scroll(c: &mut Conn, updates: &Sender<Update>) {
+    let expr = "JSON.stringify([scrollX, scrollY, document.documentElement.scrollWidth, document.documentElement.scrollHeight])";
+    let Ok(v) = c.call("Runtime.evaluate", json!({ "expression": expr, "returnByValue": true })).await else { return };
+    let Some(s) = v["result"]["value"].as_str() else { return };
+    let Ok(a) = serde_json::from_str::<[f32; 4]>(s) else { return };
+    let _ = updates.send(Update::Scroll { x: a[0], y: a[1], width: a[2], height: a[3] });
 }
 
 async fn step_history(c: &mut Conn, delta: i64) -> anyhow::Result<()> {
@@ -252,19 +280,9 @@ async fn step_history(c: &mut Conn, delta: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Screencast frames are activity driven, so after input we ask for one.
-async fn capture(c: &mut Conn, size: (u32, u32, f32), updates: &Sender<Update>) {
-    let clip = json!({ "x": 0, "y": 0, "width": size.0, "height": size.1, "scale": 1 });
-    if let Ok(shot) = c.call("Page.captureScreenshot", json!({ "format": "jpeg", "quality": 85, "clip": clip })).await {
-        if let Some(data) = shot["data"].as_str() {
-            push_frame(data, updates);
-        }
-    }
-}
-
-fn push_frame(data: &str, updates: &Sender<Update>) {
-    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) else { return };
-    let Ok(img) = image::load_from_memory(&bytes) else { return };
-    let img = img.to_rgba8();
-    let _ = updates.send(Update::Frame { width: img.width(), height: img.height(), rgba: img.into_raw() });
+fn decode(data: &str) -> Option<egui::ColorImage> {
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data).ok()?;
+    let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
+    let size = [img.width() as usize, img.height() as usize];
+    Some(egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()))
 }
