@@ -244,7 +244,7 @@ pub fn now() -> u64 {
 /// Address field text to a URL: a URL as typed, a bare host gets https, anything else is a search.
 pub fn to_url(input: &str) -> String {
     let s = input.trim();
-    if s.contains("://") || s.starts_with("about:") {
+    if s.contains("://") || s.starts_with("about:") || s.starts_with("redrob:") {
         return s.to_string();
     }
     let host = s.split('/').next().unwrap_or("");
@@ -254,7 +254,26 @@ pub fn to_url(input: &str) -> String {
     search_url(s)
 }
 
+/// (id, name, URL with {q}) the person can choose in settings.
+pub const SEARCH_ENGINES: &[(&str, &str, &str)] = &[
+    ("duckduckgo", "DuckDuckGo", "https://duckduckgo.com/html/?q={q}"),
+    ("google", "Google", "https://www.google.com/search?q={q}"),
+    ("naver", "Naver", "https://search.naver.com/search.naver?query={q}"),
+    ("bing", "Bing", "https://www.bing.com/search?q={q}"),
+];
+
+static SEARCH: std::sync::RwLock<&str> = std::sync::RwLock::new("https://duckduckgo.com/html/?q={q}");
+
+pub fn set_search_engine(id: &str) {
+    if let Some((_, _, url)) = SEARCH_ENGINES.iter().find(|(i, _, _)| *i == id) {
+        if let Ok(mut s) = SEARCH.write() {
+            *s = url;
+        }
+    }
+}
+
 pub fn search_url(q: &str) -> String {
+    let template = SEARCH.read().map(|s| *s).unwrap_or(SEARCH_ENGINES[0].2);
     let q: String = q
         .trim()
         .bytes()
@@ -264,5 +283,5 @@ pub fn search_url(q: &str) -> String {
             _ => format!("%{b:02X}"),
         })
         .collect();
-    format!("https://duckduckgo.com/html/?q={q}")
+    template.replace("{q}", &q)
 }

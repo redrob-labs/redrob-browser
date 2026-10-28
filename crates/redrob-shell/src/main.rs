@@ -13,6 +13,7 @@ mod engine;
 mod import_chrome;
 mod i18n;
 mod input;
+mod internal;
 mod media;
 mod media_view;
 mod model;
@@ -41,6 +42,9 @@ fn main() -> anyhow::Result<()> {
         }
     };
     i18n::set(i18n::detect(profile.as_ref().and_then(|p| p.setting("language")).as_deref()));
+    if let Some(engine) = profile.as_ref().and_then(|p| p.setting("search_engine")) {
+        model::set_search_engine(&engine);
+    }
     let storage = profile
         .as_ref()
         .map(|p| p.engine_dir())
@@ -110,6 +114,7 @@ fn main() -> anyhow::Result<()> {
                 last_session_save: std::time::Instant::now(),
                 show_downloads: false,
                 show_devtools: false,
+                internal: Default::default(),
                 media: Default::default(),
                 vault: None,
                 pending_save: None,
@@ -194,6 +199,7 @@ struct Window {
     last_session_save: std::time::Instant,
     show_downloads: bool,
     show_devtools: bool,
+    internal: internal::State,
     media: media_view::Media,
     vault: Option<vault::Vault>,
     /// A sign-in the person just made, waiting for "save this password?".
@@ -260,8 +266,17 @@ impl Window {
 
     fn open_tab(&mut self, url: &str, activate: bool) {
         let id = self.model.alloc_id();
-        self.model.insert_tab(Tab::new(id, url), activate);
-        self.op(id, Op::Open(url.to_string()));
+        let mut tab = Tab::new(id, url);
+        // Our own pages are drawn by the window; the engine tab waits on about:blank.
+        let engine_url = if internal::is_internal(url) {
+            tab.loading = false;
+            tab.title = internal::title(url).to_string();
+            NEW_TAB.to_string()
+        } else {
+            url.to_string()
+        };
+        self.model.insert_tab(tab, activate);
+        self.op(id, Op::Open(engine_url));
         if activate {
             self.activated();
             if url == NEW_TAB {
@@ -305,6 +320,14 @@ impl Window {
         self.editing = false;
         if let Some(id) = self.active_id() {
             self.address = url.clone();
+            if internal::is_internal(&url) {
+                if let Some(t) = self.model.active_tab_mut() {
+                    t.title = internal::title(&url).to_string();
+                    t.url = url;
+                    t.loading = false;
+                }
+                return;
+            }
             self.op(id, Op::Navigate(url));
         }
     }
@@ -470,6 +493,10 @@ impl Window {
             if let Some(id) = self.active_id() {
                 self.op(id, if back { Op::Back } else { Op::Forward });
             }
+        }
+        // Ctrl+H: history.
+        if ctx.input_mut(|i| i.consume_key(cmd, Key::H)) {
+            self.open_tab(internal::HISTORY, true);
         }
         // F12 or Ctrl+Shift+I: developer tools.
         let tools = ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F12) || i.consume_key(shift, Key::I));
@@ -779,6 +806,12 @@ impl Window {
             if ui.button(t("Developer tools")).clicked() {
                 self.toggle_devtools();
                 ui.close();
+            }
+            for (page, label) in [(internal::HISTORY, "History"), (internal::PASSWORDS, "Passwords"), (internal::SETTINGS, "Settings")] {
+                if ui.button(t(label)).clicked() {
+                    self.open_tab(page, true);
+                    ui.close();
+                }
             }
             let signed_in = self.profile.as_ref().and_then(|p| p.setting("account_email")).filter(|e| !e.is_empty());
             match signed_in {
@@ -1103,6 +1136,25 @@ impl eframe::App for Window {
                 return;
             }
             let tab_index = self.model.active;
+            let page_url = self.model.tabs[tab_index].url.clone();
+            if internal::is_internal(&page_url) {
+                ui.painter().rect_filled(rect, 0.0, ui.visuals().panel_fill);
+                let mut page_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink(16.0)));
+                let act = internal::ui(&mut page_ui, &page_url, &mut self.internal, self.profile.as_ref(), self.vault.as_mut());
+                if let Some(id) = act.search_engine {
+                    model::set_search_engine(&id);
+                    if let Some(p) = &self.profile {
+                        let _ = p.set_setting("search_engine", &id);
+                    }
+                }
+                if let Some(u) = act.open_new_tab {
+                    self.open_tab(&u, false);
+                }
+                if let Some(u) = act.open {
+                    self.navigate(u);
+                }
+                return;
+            }
             let wanted = {
                 let t = &mut self.model.tabs[tab_index];
                 t.tiles.paint(ui.painter(), rect, t.scroll);
