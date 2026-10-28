@@ -7,6 +7,7 @@
 
 mod cdp;
 mod engine;
+mod import_chrome;
 mod input;
 mod model;
 mod profile;
@@ -74,6 +75,7 @@ fn main() -> anyhow::Result<()> {
                 profile,
                 last_session_save: std::time::Instant::now(),
                 show_downloads: false,
+                notice: None,
                 address: String::new(),
                 editing: false,
                 focus_address: false,
@@ -101,6 +103,8 @@ struct Window {
     profile: Option<profile::Profile>,
     last_session_save: std::time::Instant,
     show_downloads: bool,
+    /// A one-line result shown under the toolbar, such as an import summary.
+    notice: Option<String>,
     /// Address field text; follows the active tab's URL unless the person is typing.
     address: String,
     editing: bool,
@@ -383,6 +387,62 @@ impl Window {
         }
     }
 
+    fn import_from(&mut self, source: &import_chrome::Source) {
+        let Some(profile) = &mut self.profile else {
+            self.notice = Some("Import needs a profile, and none could be opened.".to_string());
+            return;
+        };
+        let scratch = profile.dir.join("import-tmp");
+        let result = import_chrome::import(source, &scratch);
+        let _ = std::fs::remove_dir(&scratch);
+        let imported = match result {
+            Ok(i) => i,
+            Err(e) => {
+                self.notice = Some(format!("Could not import from {}: {e}", source.name));
+                return;
+            }
+        };
+        let mut added = 0;
+        for b in imported.bookmarks {
+            if !self.model.bookmarks.iter().any(|x| x.url == b.url) {
+                self.model.bookmarks.push(b);
+                added += 1;
+            }
+        }
+        let history = imported.history.len();
+        let saved = profile.save_bookmarks(&self.model.bookmarks).and_then(|_| profile.import_history(&imported.history));
+        if let Err(e) = saved {
+            self.notice = Some(format!("Could not save the import: {e}"));
+            return;
+        }
+        let _ = profile.load(&mut self.model);
+        self.notice = Some(format!("Imported {added} bookmarks and {history} history entries from {}.", source.name));
+    }
+
+    fn menu(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("Menu", |ui| {
+            if ui.button("New tab").clicked() {
+                self.open_tab(NEW_TAB, true);
+                ui.close();
+            }
+            if ui.button("Downloads").clicked() {
+                self.show_downloads = true;
+                ui.close();
+            }
+            ui.separator();
+            let sources = import_chrome::sources();
+            if sources.is_empty() {
+                ui.weak("No Chrome, Chromium, Edge or Brave profile found");
+            }
+            for s in &sources {
+                if ui.button(format!("Import from {}", s.name)).clicked() {
+                    self.import_from(s);
+                    ui.close();
+                }
+            }
+        });
+    }
+
     fn toggle_bookmark(&mut self) {
         if let Some((url, title)) = self.model.active_tab().map(|t| (t.url.clone(), t.title.clone())) {
             self.model.toggle_bookmark(&url, &title);
@@ -457,7 +517,7 @@ impl Window {
                 }
             }
             let star = if self.model.is_bookmarked(&url) { "★" } else { "☆" };
-            let field_width = ui.available_width() - 40.0;
+            let field_width = ui.available_width() - 100.0;
             let field = ui.add(
                 egui::TextEdit::singleline(&mut self.address)
                     .id(self.address_id)
@@ -482,6 +542,7 @@ impl Window {
             if ui.button(star).on_hover_text("Bookmark this page").clicked() {
                 self.toggle_bookmark();
             }
+            self.menu(ui);
         });
 
         // Suggestions under the address field while the person types.
@@ -567,6 +628,14 @@ impl eframe::App for Window {
             self.bookmarks_bar(ui);
             if let Some(e) = &self.error {
                 ui.colored_label(Color32::RED, e);
+            }
+            if let Some(n) = self.notice.clone() {
+                ui.horizontal(|ui| {
+                    ui.label(n);
+                    if ui.small_button("OK").clicked() {
+                        self.notice = None;
+                    }
+                });
             }
         });
 

@@ -124,6 +124,24 @@ impl Profile {
         Ok(())
     }
 
+    /// Merge history from another browser: keep the higher visit count and the later visit.
+    pub fn import_history(&mut self, entries: &[HistoryEntry]) -> anyhow::Result<()> {
+        let tx = self.db.transaction()?;
+        {
+            let mut q = tx.prepare(
+                "INSERT INTO history (url, title, visits, last_visit) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(url) DO UPDATE SET visits = max(visits, excluded.visits),
+                     last_visit = max(last_visit, excluded.last_visit),
+                     title = CASE WHEN title = '' THEN excluded.title ELSE title END",
+            )?;
+            for h in entries {
+                q.execute(params![h.url, h.title, h.visits, h.last_visit as i64])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn set_history_title(&self, url: &str, title: &str) -> anyhow::Result<()> {
         self.db.execute("UPDATE history SET title = ?2 WHERE url = ?1", params![url, title])?;
         Ok(())
