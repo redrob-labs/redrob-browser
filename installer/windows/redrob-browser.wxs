@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Redrob Browser for Windows: a per-user MSI (WiX v4). No administrator rights; it installs to
+  %LOCALAPPDATA%\Programs\Redrob Browser and adds a Start menu shortcut to the window.
+
+  The files come from installer/windows/payload.ps1, which lists the signed programs, the
+  GStreamer runtime and the license files into a fragment with the ComponentGroup "Payload":
+
+    wix build -arch x64 -d Version=0.2.0 -o redrob-browser-windows-x64-0.2.0.msi \
+      installer/windows/redrob-browser.wxs dist/payload.wxs
+
+  UpgradeCode is fixed for the life of the product: a newer MSI replaces the installed one.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Redrob Browser"
+      Manufacturer="Redrob"
+      Version="$(var.Version)"
+      UpgradeCode="3E1D3581-4920-4530-BD81-BA7B0926E403"
+      Scope="perUser"
+      Language="1033"
+      InstallerVersion="500">
+    <SummaryInformation Description="Redrob Browser" Manufacturer="Redrob" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Redrob Browser is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/redrob-labs/redrob-browser" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsDir" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="Redrob Browser" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="9D1A30FB-D3EC-41CD-95E4-3C50DD222415">
+        <Shortcut
+            Id="RedrobBrowserShortcut"
+            Name="Redrob Browser"
+            Description="Redrob Browser"
+            Target="[INSTALLFOLDER]redrob-browser-window.exe"
+            WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveProgramsDir" Directory="ProgramsDir" On="uninstall" />
+        <RegistryValue
+            Root="HKCU"
+            Key="Software\Redrob\Redrob Browser"
+            Name="StartMenuShortcut"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Redrob Browser" AllowAbsent="no">
+      <ComponentGroupRef Id="Payload" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>
