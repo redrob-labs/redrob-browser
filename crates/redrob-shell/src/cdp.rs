@@ -123,6 +123,8 @@ pub enum Event {
     Opened { url: String, opener: Option<TabId> },
     /// The person signed in on a page; the window may offer to save it.
     LoginSubmitted { origin: String, username: String, password: zeroize::Zeroizing<String> },
+    /// The tab's CDP target id, once it is attached.
+    Target(String),
     Console { level: String, text: String },
     NetRequest { id: String, method: String, url: String },
     NetResponse { id: String, status: u16, mime: String },
@@ -227,6 +229,7 @@ impl State {
             )
             .await?;
         self.by_session.insert(session.clone(), tab);
+        self.emit(tab, Event::Target(target.clone()));
         self.tabs.insert(tab, TabConn { session, target });
         Ok(())
     }
@@ -235,6 +238,7 @@ impl State {
 pub async fn run(
     ws_url: String,
     endpoint_file: std::path::PathBuf,
+    window: crate::relay::Window,
     mut commands: mpsc::UnboundedReceiver<Command>,
     updates: Sender<Update>,
     repaint: impl Fn() + Send + 'static,
@@ -271,7 +275,7 @@ pub async fn run(
     });
 
     // Agents and `redrob-browser tab` reach the person's tabs through this relay.
-    let relay_url = crate::relay::start(out_tx.clone(), pending.clone(), broadcast_tx).await?;
+    let relay_url = crate::relay::start(out_tx.clone(), pending.clone(), broadcast_tx, window).await?;
     crate::write_private(&endpoint_file, &relay_url);
 
     let mut st = State {

@@ -43,6 +43,14 @@ pub enum TabCmd {
     Shot { id: String, path: PathBuf },
     /// Print the page as Markdown.
     Markdown { id: String },
+    /// Sign in with a login saved in the browser. The password is typed by
+    /// the browser; this prints only the outcome and the username.
+    Login {
+        id: String,
+        /// Which saved username, when the site has several.
+        #[arg(long)]
+        user: Option<String>,
+    },
     /// Close a tab.
     Close { id: String },
 }
@@ -114,6 +122,14 @@ pub async fn run(cmd: TabCmd) -> anyhow::Result<()> {
             let expr = obscura_browser::HTML_TO_MARKDOWN_JS;
             let v = c.call(Some(&s), "Runtime.evaluate", json!({ "expression": expr, "returnByValue": true })).await?;
             println!("{}", v["result"]["value"].as_str().unwrap_or(""));
+        }
+        TabCmd::Login { id, user } => {
+            let mut p = json!({ "targetId": id });
+            if let Some(u) = user {
+                p["username"] = json!(u);
+            }
+            let r = c.call(None, "Redrob.login", p).await?;
+            println!("{}", serde_json::to_string(&r)?);
         }
         TabCmd::Close { id } => {
             c.call(None, "Target.closeTarget", json!({ "targetId": id })).await?;

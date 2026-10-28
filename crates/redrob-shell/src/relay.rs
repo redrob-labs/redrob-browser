@@ -22,8 +22,28 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1 << 48);
 
 pub type Pending = Arc<Mutex<std::collections::HashMap<u64, oneshot::Sender<Value>>>>;
 
+/// An agent's `Redrob.login`: answered by the window, which alone holds the
+/// vault, with a username and an outcome, never a password.
+pub struct LoginRequest {
+    pub target_id: String,
+    pub username: Option<String>,
+    pub reply: oneshot::Sender<Value>,
+}
+
+/// How relay requests reach the window's UI thread.
+#[derive(Clone)]
+pub struct Window {
+    pub login: std::sync::mpsc::Sender<LoginRequest>,
+    pub wake: Arc<dyn Fn() + Send + Sync>,
+}
+
 /// Bind on loopback and serve clients. Returns the ws:// address.
-pub async fn start(out: mpsc::UnboundedSender<String>, pending: Pending, events: broadcast::Sender<Value>) -> anyhow::Result<String> {
+pub async fn start(
+    out: mpsc::UnboundedSender<String>,
+    pending: Pending,
+    events: broadcast::Sender<Value>,
+    window: Window,
+) -> anyhow::Result<String> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
     tokio::spawn(async move {
@@ -34,6 +54,7 @@ pub async fn start(out: mpsc::UnboundedSender<String>, pending: Pending, events:
             let out = out.clone();
             let pending = pending.clone();
             let events = events.subscribe();
+            let window = window.clone();
             tokio::spawn(async move {
                 let mut path = String::new();
                 let callback = |req: &tokio_tungstenite::tungstenite::handshake::server::Request,
@@ -45,7 +66,7 @@ pub async fn start(out: mpsc::UnboundedSender<String>, pending: Pending, events:
                     // /devtools/page/<targetId>: a client that speaks to one tab
                     // without sessions, as the DevTools front end does.
                     let page = path.strip_prefix("/devtools/page/").map(str::to_string);
-                    serve(ws, out, pending, events, page).await;
+                    serve(ws, out, pending, events, page, window).await;
                 }
             });
         }
@@ -59,6 +80,7 @@ async fn serve(
     pending: Pending,
     mut events: broadcast::Receiver<Value>,
     page: Option<String>,
+    window: Window,
 ) {
     let (mut sink, mut stream) = ws.split();
     let (reply_tx, mut reply_rx) = mpsc::unbounded_channel::<String>();
@@ -120,6 +142,21 @@ async fn serve(
         let Ok(mut req) = serde_json::from_str::<Value>(text.as_str()) else { continue };
         let original = req.get("id").cloned().unwrap_or(Value::Null);
         let method = req["method"].as_str().unwrap_or_default().to_string();
+        if method == "Redrob.login" {
+            // Never forwarded to the engine: the window signs in and reports back.
+            let target_id = req["params"]["targetId"].as_str().map(str::to_string).or_else(|| page.clone()).unwrap_or_default();
+            let username = req["params"]["username"].as_str().map(str::to_string);
+            let (tx, rx) = oneshot::channel();
+            let sent = window.login.send(LoginRequest { target_id, username, reply: tx }).is_ok();
+            (window.wake)();
+            let reply_tx = reply_tx.clone();
+            let original = req.get("id").cloned().unwrap_or(Value::Null);
+            tokio::spawn(async move {
+                let result = if sent { rx.await.unwrap_or_else(|_| json!({ "outcome": "failed" })) } else { json!({ "outcome": "failed" }) };
+                let _ = reply_tx.send(json!({ "id": original, "result": result }).to_string());
+            });
+            continue;
+        }
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         req["id"] = json!(id);
         if let (Some(s), None) = (&page_session, req.get("sessionId")) {

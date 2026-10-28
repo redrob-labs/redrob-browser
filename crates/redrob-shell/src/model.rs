@@ -19,6 +19,8 @@ pub struct Tab {
     /// Opened by the agent rather than the person; shown with a marker.
     pub agent: bool,
     pub devtools: crate::devtools::State,
+    /// CDP target id, known once the window attached to the tab.
+    pub target_id: String,
 }
 
 impl Tab {
@@ -33,6 +35,7 @@ impl Tab {
             content: (0.0, 0.0),
             agent: false,
             devtools: Default::default(),
+            target_id: String::new(),
         }
     }
 

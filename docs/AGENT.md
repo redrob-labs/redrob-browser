@@ -53,7 +53,24 @@ the browser.
 
 ## Signing in
 
-The agent never sees a password (`docs/CREDENTIALS.md`). Its sign-in request has to reach the
-window, which alone holds the vault key, so it will be a relay-handled method (`Redrob.login`)
-answered by the window with a username and an outcome. It is not built yet; until then the agent
-asks the person to sign in.
+The agent never sees a password (`docs/CREDENTIALS.md`). It sends `Redrob.login` through the relay:
+
+```json
+{ "method": "Redrob.login", "params": { "targetId": "<tab>", "username": "optional" } }
+```
+
+The relay never forwards this method to the engine. The window checks the vault policy for the
+tab's committed origin, types the saved login into the page itself, and answers with an outcome
+and a username only:
+
+| outcome | meaning |
+|---|---|
+| `filled` | the browser typed the saved login into the sign-in form |
+| `no-form` | no sign-in form on the page, or not an http(s) page |
+| `no-login` | nothing saved for this site |
+| `several-logins` | more than one saved; `usernames` lists them, ask again with one |
+| `locked` | the vault is locked; the person has to unlock it |
+| `blocked` / `never` | this site, or every site, is closed to the agent |
+
+From the command line: `redrob-browser tab login <id> [--user name]`. Every attempt is in the
+agent sign-in history.

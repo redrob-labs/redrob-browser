@@ -67,11 +67,14 @@ fn main() -> anyhow::Result<()> {
             add_korean_font(&ctx);
             let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
             let (upd_tx, upd_rx) = mpsc::channel();
+            let (login_tx, login_rx) = mpsc::channel();
+            let wake_ctx = ctx.clone();
+            let relay_window = relay::Window { login: login_tx, wake: std::sync::Arc::new(move || wake_ctx.request_repaint()) };
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio runtime");
                 let errors = upd_tx.clone();
                 rt.block_on(async move {
-                    if let Err(e) = cdp::run(ws_url, relay_file, cmd_rx, upd_tx, move || ctx.request_repaint()).await {
+                    if let Err(e) = cdp::run(ws_url, relay_file, relay_window, cmd_rx, upd_tx, move || ctx.request_repaint()).await {
                         let _ = errors.send(Update { tab: 0, event: Event::Error(e.to_string()) });
                     }
                 });
@@ -116,6 +119,8 @@ fn main() -> anyhow::Result<()> {
                 account_rx,
                 update_rx,
                 update: None,
+                login_rx,
+                agent_logins: Default::default(),
                 notice: None,
                 address: String::new(),
                 editing: false,
@@ -198,6 +203,9 @@ struct Window {
     account_tx: mpsc::Sender<account::Msg>,
     account_rx: mpsc::Receiver<account::Msg>,
     update_rx: mpsc::Receiver<updater::Available>,
+    login_rx: mpsc::Receiver<relay::LoginRequest>,
+    /// Agent sign-ins waiting for the page's fill result, by tab.
+    agent_logins: std::collections::HashMap<TabId, (String, tokio::sync::oneshot::Sender<serde_json::Value>)>,
     update: Option<updater::Available>,
     /// A one-line result shown under the toolbar, such as an import summary.
     notice: Option<String>,
@@ -373,8 +381,11 @@ impl Window {
                     t.loading = false;
                     self.error = Some(e);
                 }
+                Event::Target(id) => t.target_id = id,
                 Event::Filled(outcome) => {
-                    if outcome != "filled" {
+                    if let Some((username, reply)) = self.agent_logins.remove(&tab) {
+                        let _ = reply.send(serde_json::json!({ "outcome": outcome, "username": username }));
+                    } else if outcome != "filled" {
                         self.notice = Some(t("No sign-in form on this page.").to_string());
                     }
                 }
@@ -591,6 +602,55 @@ impl Window {
             return;
         }
         self.pending_save = Some((origin, username, password));
+    }
+
+    /// An agent's sign-in request. The vault decides; the agent hears only the
+    /// outcome and a username (docs/CREDENTIALS.md).
+    fn agent_login(&mut self, req: relay::LoginRequest) {
+        use serde_json::json;
+        let Some(tab) = self.model.tabs.iter().find(|t| t.target_id == req.target_id && !t.target_id.is_empty()) else {
+            let _ = req.reply.send(json!({ "outcome": "no-tab" }));
+            return;
+        };
+        let (tab_id, url) = (tab.id, tab.url.clone());
+        let Some(origin) = vault::origin_of(&url) else {
+            let _ = req.reply.send(json!({ "outcome": "no-form" }));
+            return;
+        };
+        let Some(v) = &self.vault else {
+            let _ = req.reply.send(json!({ "outcome": "unavailable" }));
+            return;
+        };
+        let login = match v.agent_login(&origin, req.username.as_deref()) {
+            Ok(l) => l,
+            Err(refusal) => {
+                let outcome = match refusal {
+                    vault::Refusal::Locked => "locked",
+                    vault::Refusal::Blocked => "blocked",
+                    vault::Refusal::Never => "never",
+                    vault::Refusal::NoLogin => "no-login",
+                    vault::Refusal::SeveralLogins => "several-logins",
+                };
+                v.audit(&origin, req.username.as_deref().unwrap_or(""), vault::Actor::Agent, outcome);
+                // Usernames are not secret: listing them lets the agent pick one.
+                let usernames: Vec<String> = if refusal == vault::Refusal::SeveralLogins {
+                    v.logins_for(&origin).into_iter().map(|l| l.username).collect()
+                } else {
+                    Vec::new()
+                };
+                let _ = req.reply.send(json!({ "outcome": outcome, "usernames": usernames }));
+                return;
+            }
+        };
+        match v.secret_for_fill(login.id, &origin, vault::Actor::Agent) {
+            Ok((username, password)) => {
+                self.agent_logins.insert(tab_id, (username.clone(), req.reply));
+                self.op(tab_id, Op::FillLogin { username, password });
+            }
+            Err(_) => {
+                let _ = req.reply.send(json!({ "outcome": "failed" }));
+            }
+        }
     }
 
     fn save_bar(&mut self, ui: &mut egui::Ui) {
@@ -962,6 +1022,9 @@ impl eframe::App for Window {
         self.drain_updates(&ctx);
         while let Ok(msg) = self.agent_rx.try_recv() {
             self.notice = Some(msg);
+        }
+        while let Ok(req) = self.login_rx.try_recv() {
+            self.agent_login(req);
         }
         if let Ok(a) = self.update_rx.try_recv() {
             self.update = Some(a);
