@@ -3405,6 +3405,38 @@ pub fn paint_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces(
     )
 }
 
+/// Paint a document-space rectangle exactly like
+/// [`paint_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces`]
+/// and return what was drawn as a display list (docs/GPU-PAINT.md, phase B).
+/// List coordinates are the painted surface's pixels; when the region's scale
+/// is resampled after paint rather than painted natively, the list is at
+/// scale 1 and the client scales it.
+#[cfg(feature = "display-list")]
+pub fn record_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces(
+    tree: &DomTree,
+    prepared: &mut PreparedRender,
+    resources: &mut RenderResourceCache,
+    scroll: &ResolvedScrollState,
+    region: CaptureRegion,
+    surface_color: [u8; 4],
+    canvas_surfaces: &dyn CanvasSurfaceSource,
+) -> Result<crate::display_list::DisplayList, CaptureError> {
+    let (painted, list) = crate::display_list::record(|| {
+        paint_prepared_region_with_scroll_policy(
+            tree,
+            prepared,
+            resources,
+            scroll,
+            region,
+            false,
+            surface_color,
+            canvas_surfaces,
+        )
+    });
+    painted?;
+    list.ok_or(CaptureError::PaintFailed)
+}
+
 fn paint_prepared_region_with_scroll_with_print_economy(
     tree: &DomTree,
     prepared: &mut PreparedRender,

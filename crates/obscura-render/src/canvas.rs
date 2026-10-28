@@ -223,6 +223,10 @@ impl Canvas for TinySkiaCanvas<'_> {
         self.with_mask(mask, |surface, mask| {
             surface.fill_path(path, paint, fill_rule, transform, mask)
         });
+        #[cfg(feature = "display-list")]
+        crate::display_list::tee(&*self.target, |recorder| {
+            recorder.fill_path(path, paint, fill_rule, transform, mask)
+        });
     }
 
     fn fill_gradient(
@@ -240,11 +244,19 @@ impl Canvas for TinySkiaCanvas<'_> {
         self.with_mask(mask, |surface, mask| {
             surface.fill_path(path, &paint, fill_rule, transform, mask)
         });
+        #[cfg(feature = "display-list")]
+        crate::display_list::tee(&*self.target, |recorder| {
+            recorder.fill_gradient(path, gradient, anti_alias, fill_rule, transform, mask)
+        });
     }
 
     fn fill_rect(&mut self, rect: Rect, paint: &Paint, transform: Transform, mask: Option<&Mask>) {
         // tiny-skia has its own rect fast path; keep it.
         self.with_mask(mask, |surface, mask| surface.fill_rect(rect, paint, transform, mask));
+        #[cfg(feature = "display-list")]
+        crate::display_list::tee(&*self.target, |recorder| {
+            recorder.fill_rect(rect, paint, transform, mask)
+        });
     }
 
     fn stroke_path(
@@ -257,6 +269,10 @@ impl Canvas for TinySkiaCanvas<'_> {
     ) {
         self.with_mask(mask, |surface, mask| {
             surface.stroke_path(path, paint, stroke, transform, mask)
+        });
+        #[cfg(feature = "display-list")]
+        crate::display_list::tee(&*self.target, |recorder| {
+            recorder.stroke_path(path, paint, stroke, transform, mask)
         });
     }
 
@@ -272,6 +288,8 @@ impl Canvas for TinySkiaCanvas<'_> {
         self.with_mask(mask, |surface, mask| {
             surface.draw_pixmap(x, y, image, paint, transform, mask)
         });
+        #[cfg(feature = "display-list")]
+        crate::display_list::tee_draw_image(&*self.target, x, y, image, paint, transform, mask);
     }
 
     fn push_clip(&mut self, paths: &[ClipPath]) {
@@ -298,10 +316,14 @@ impl Canvas for TinySkiaCanvas<'_> {
             (None, previous) => previous.cloned(),
         };
         self.clips.push(next);
+        #[cfg(feature = "display-list")]
+        crate::display_list::tee(&*self.target, |recorder| recorder.push_clip(paths));
     }
 
     fn pop_clip(&mut self) {
         self.clips.pop();
+        #[cfg(feature = "display-list")]
+        crate::display_list::tee(&*self.target, |recorder| recorder.pop_clip());
     }
 
     fn push_layer(&mut self, opacity: f32, blend: BlendMode) {
@@ -311,12 +333,16 @@ impl Canvas for TinySkiaCanvas<'_> {
             opacity,
             blend,
         });
+        #[cfg(feature = "display-list")]
+        crate::display_list::tee(&*self.target, |recorder| recorder.push_layer(opacity, blend));
     }
 
     fn pop_layer(&mut self) {
         let Some(layer) = self.layers.pop() else {
             return;
         };
+        #[cfg(feature = "display-list")]
+        crate::display_list::tee(&*self.target, |recorder| recorder.pop_layer());
         let Some(pixmap) = layer.pixmap else {
             return;
         };
@@ -345,18 +371,44 @@ impl PixmapCanvas for Pixmap {
 
 /// A new, empty (fully clipping) mask.
 pub fn new_mask(width: u32, height: u32) -> Option<Mask> {
-    Mask::new(width, height)
+    let mask = Mask::new(width, height)?;
+    #[cfg(feature = "display-list")]
+    crate::display_list::set_mask_shapes(&mask, crate::display_list::MaskShapes::Empty);
+    Some(mask)
 }
 
 /// A copy of `mask` that keeps what it was built from.
 pub fn clone_mask(mask: &Mask) -> Mask {
-    mask.clone()
+    let copy = mask.clone();
+    #[cfg(feature = "display-list")]
+    if let Some(shapes) = crate::display_list::mask_shapes(mask) {
+        crate::display_list::set_mask_shapes(&copy, shapes);
+    }
+    copy
 }
 
 /// `first` becomes the intersection of `first` and `second`.
 pub fn intersect_mask_into(first: &mut Mask, second: &Mask) {
+    #[cfg(feature = "display-list")]
+    let shapes = crate::display_list::mask_shapes(first)
+        .zip(crate::display_list::mask_shapes(second))
+        .map(|pair| {
+            use crate::display_list::MaskShapes;
+            match pair {
+                (MaskShapes::Empty, _) | (_, MaskShapes::Empty) => MaskShapes::Empty,
+                (MaskShapes::Paths(mut a), MaskShapes::Paths(b)) => {
+                    a.extend(b);
+                    MaskShapes::Paths(a)
+                }
+                _ => MaskShapes::Unknown,
+            }
+        });
     for (a, b) in first.data_mut().iter_mut().zip(second.data()) {
         *a = ((*a as u16 * *b as u16 + 127) / 255) as u8;
+    }
+    #[cfg(feature = "display-list")]
+    if let Some(shapes) = shapes {
+        crate::display_list::set_mask_shapes(first, shapes);
     }
 }
 
@@ -376,7 +428,22 @@ pub trait ClipMask {
 
 impl ClipMask for Mask {
     fn clip_fill_path(&mut self, path: &Path, fill_rule: FillRule, anti_alias: bool, transform: Transform) {
+        #[cfg(feature = "display-list")]
+        let before = crate::display_list::mask_shapes(self);
         self.fill_path(path, fill_rule, anti_alias, transform);
+        #[cfg(feature = "display-list")]
+        if let Some(before) = before {
+            use crate::display_list::MaskShapes;
+            // tiny-skia draws the path over what the mask holds: on an empty
+            // mask that is the path, otherwise a union the list cannot express.
+            let after = match before {
+                MaskShapes::Empty => MaskShapes::Paths(vec![crate::display_list::clip_shape_of(
+                    path, fill_rule, transform,
+                )]),
+                _ => MaskShapes::Unknown,
+            };
+            crate::display_list::set_mask_shapes(self, after);
+        }
     }
 
     fn clip_intersect_path(
@@ -386,23 +453,56 @@ impl ClipMask for Mask {
         anti_alias: bool,
         transform: Transform,
     ) {
+        #[cfg(feature = "display-list")]
+        let before = crate::display_list::mask_shapes(self);
         self.intersect_path(path, fill_rule, anti_alias, transform);
+        #[cfg(feature = "display-list")]
+        if let Some(before) = before {
+            use crate::display_list::MaskShapes;
+            let after = match before {
+                MaskShapes::Paths(mut shapes) => {
+                    shapes.push(crate::display_list::clip_shape_of(path, fill_rule, transform));
+                    MaskShapes::Paths(shapes)
+                }
+                other => other,
+            };
+            crate::display_list::set_mask_shapes(self, after);
+        }
     }
 
     fn clip_invert(&mut self) {
         self.invert();
+        #[cfg(feature = "display-list")]
+        crate::display_list::set_mask_shapes(self, crate::display_list::MaskShapes::Unknown);
     }
 }
 
-/// Code that writes pixels itself (glyph blits) runs inside this, so a
-/// recording can capture what it wrote as an image.
+/// Code that writes pixels itself (glyph blits) runs inside this. While a
+/// recording listens to `pixmap`, the writer draws into a transparent
+/// surface instead; what it wrote is recorded as one image and composited.
 pub fn direct_pixels<R>(pixmap: &mut Pixmap, draw: impl FnOnce(&mut Pixmap) -> R) -> R {
+    #[cfg(feature = "display-list")]
+    if let Some(mut scratch) = crate::display_list::direct_scratch(pixmap) {
+        let result = draw(&mut scratch);
+        crate::display_list::direct_finish(pixmap, scratch);
+        return result;
+    }
     draw(pixmap)
 }
 
 /// `layer` is an offscreen group (opacity or transform) that paint will
 /// composite into its parent with `draw_image`.
-pub fn begin_layer(_layer: &Pixmap) {}
+pub fn begin_layer(layer: &Pixmap) {
+    #[cfg(feature = "display-list")]
+    crate::display_list::begin_layer(layer);
+    #[cfg(not(feature = "display-list"))]
+    let _ = layer;
+}
 
 /// `root` is the surface of a whole paint, already cleared to `color`.
-pub fn begin_root(_root: &Pixmap, _color: [u8; 4]) {}
+pub fn begin_root(root: &Pixmap, color: [u8; 4]) {
+    #[cfg(feature = "display-list")]
+    crate::display_list::begin_root(root, color);
+    #[cfg(not(feature = "display-list"))]
+    let _ = (root, color);
+}
