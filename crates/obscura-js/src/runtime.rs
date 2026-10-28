@@ -19201,7 +19201,7 @@ mod tests {
         let mut rt = parser_image_runtime(
             r#"
                 <picture>
-                    <source type="image/avif" srcset="unsupported.avif">
+                    <source type="image/jxl" srcset="unsupported.jxl">
                     <source id="wide-source" media="(min-width: 800px)"
                             srcset="wide.png 2x">
                     <source media="(max-width: 799px)" srcset="narrow.png">

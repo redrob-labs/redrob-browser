@@ -47,6 +47,7 @@ pub(crate) fn source_type_supported(value: &str) -> bool {
         .trim();
     [
         "image/apng",
+        "image/avif",
         "image/bmp",
         "image/gif",
         "image/jpeg",
@@ -78,6 +79,7 @@ mod image_capability_tests {
             "image/vnd.microsoft.icon",
             "image/webp",
             "image/x-icon",
+            "Image/AVIF; codecs=av01",
             " IMAGE/WEBP ; codecs=lossless ",
             "Image/Svg+Xml;charset=utf-8",
         ] {
@@ -85,7 +87,6 @@ mod image_capability_tests {
         }
         for unsupported in [
             "",
-            "image/avif",
             "image/jxl",
             "image/png,image/webp",
             "text/html",

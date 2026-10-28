@@ -42,9 +42,9 @@ const MAX_CHANGED_RESOURCES: usize = 256;
 const DEFAULT_CONTENT_IMAGE_INTRINSIC_ENTRIES: usize = 256;
 const MISSING_RESOURCE_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
 /// Exact formats the renderer can decode. Do not use `image/*` or `*/*` here:
-/// either wildcard permits a content-negotiating server to choose AVIF,
-/// JPEG-XL, or another format that this build cannot rasterize.
-const IMAGE_ACCEPT: &str = "image/webp,image/apng,image/svg+xml,image/png,image/jpeg,image/gif,image/bmp,image/x-icon,image/vnd.microsoft.icon";
+/// either wildcard permits a content-negotiating server to choose JPEG-XL or
+/// another format that this build cannot rasterize.
+const IMAGE_ACCEPT: &str = "image/avif,image/webp,image/apng,image/svg+xml,image/png,image/jpeg,image/gif,image/bmp,image/x-icon,image/vnd.microsoft.icon";
 
 /// Synchronous byte loader used by [`RenderResourceCache`]. The default
 /// implementation uses Obscura's pooled image agent; tests and embedding
@@ -8323,7 +8323,7 @@ fn http_get_bytes(url: &str) -> Option<Vec<u8>> {
     let mut backoff = std::time::Duration::from_millis(200);
     for attempt in 0..3 {
         // Advertise only formats that this build can decode. Content-negotiating
-        // CDNs otherwise commonly choose AVIF and leave the image blank.
+        // CDNs otherwise may choose a format we cannot paint and leave it blank.
         let res = image_agent().get(url).set("Accept", IMAGE_ACCEPT).call();
         match res {
             Ok(resp) => {
@@ -8481,6 +8481,8 @@ fn bounded_raster_size(w: u32, h: u32) -> (u32, u32) {
 fn static_raster_cacheable(bytes: &[u8]) -> bool {
     match image::guess_format(bytes) {
         Ok(image::ImageFormat::Jpeg | image::ImageFormat::Bmp | image::ImageFormat::Ico) => true,
+        // Only the primary (first) frame of an AVIF is painted, so it never changes.
+        _ if is_avif(bytes) => true,
         Ok(image::ImageFormat::Png) => {
             image::codecs::png::PngDecoder::new(std::io::Cursor::new(bytes))
                 .ok()
@@ -8496,10 +8498,114 @@ fn static_raster_cacheable(bytes: &[u8]) -> bool {
     }
 }
 
-/// Decode raster image bytes (GIF/JPEG/PNG/WebP) to a premultiplied-alpha pixmap
-/// resized to `w`x`h`.
+/// AVIF is an ISO BMFF file whose `ftyp` box names an `avif` (still) or
+/// `avis` (sequence) brand, as the major brand or a compatible one.
+fn is_avif(bytes: &[u8]) -> bool {
+    if bytes.get(4..8) != Some(b"ftyp") {
+        return false;
+    }
+    let size = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    let end = size.min(bytes.len()).min(256);
+    // Major brand at 8, minor version at 12, compatible brands from 16.
+    std::iter::once(8)
+        .chain((16..end).step_by(4))
+        .any(|at| matches!(bytes.get(at..at + 4), Some(b"avif" | b"avis")))
+}
+
+/// avif-parse reads the still primary item and refuses an `avis` major brand.
+/// Animated AVIF from libavif and ffmpeg also stores its first frame as that
+/// primary item, so relabel the brand and paint the first frame.
+fn avif_still(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    if bytes.get(8..12) == Some(b"avis") {
+        let mut owned = bytes.to_vec();
+        owned[8..12].copy_from_slice(b"avif");
+        std::borrow::Cow::Owned(owned)
+    } else {
+        std::borrow::Cow::Borrowed(bytes)
+    }
+}
+
+/// Size from the AV1 sequence header, without decoding any pixels.
+fn avif_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    let data = avif_parse::read_avif(&mut &*avif_still(bytes)).ok()?;
+    let meta = data.primary_item_metadata().ok()?;
+    Some((meta.max_frame_width.get(), meta.max_frame_height.get()))
+}
+
+/// Decode AVIF (8/10/12-bit, any chroma layout, optional alpha) to RGBA8.
+fn decode_avif(bytes: &[u8]) -> Option<image::RgbaImage> {
+    let image = avif_decode::Decoder::from_avif(&avif_still(bytes))
+        .ok()?
+        .to_image()
+        .ok()?;
+    let (width, height, raw): (usize, usize, Vec<u8>) = match image {
+        avif_decode::Image::Rgb8(img) => (
+            img.width(),
+            img.height(),
+            img.pixels().flat_map(|p| [p.r, p.g, p.b, 255]).collect(),
+        ),
+        avif_decode::Image::Rgba8(img) => (
+            img.width(),
+            img.height(),
+            img.pixels().flat_map(|p| [p.r, p.g, p.b, p.a]).collect(),
+        ),
+        avif_decode::Image::Rgb16(img) => (
+            img.width(),
+            img.height(),
+            img.pixels()
+                .flat_map(|p| [(p.r >> 8) as u8, (p.g >> 8) as u8, (p.b >> 8) as u8, 255])
+                .collect(),
+        ),
+        avif_decode::Image::Rgba16(img) => (
+            img.width(),
+            img.height(),
+            img.pixels()
+                .flat_map(|p| {
+                    [
+                        (p.r >> 8) as u8,
+                        (p.g >> 8) as u8,
+                        (p.b >> 8) as u8,
+                        (p.a >> 8) as u8,
+                    ]
+                })
+                .collect(),
+        ),
+        avif_decode::Image::Gray8(img) => (
+            img.width(),
+            img.height(),
+            img.pixels()
+                .flat_map(|p| {
+                    let v = p.value();
+                    [v, v, v, 255]
+                })
+                .collect(),
+        ),
+        avif_decode::Image::Gray16(img) => (
+            img.width(),
+            img.height(),
+            img.pixels()
+                .flat_map(|p| {
+                    let v = (p.value() >> 8) as u8;
+                    [v, v, v, 255]
+                })
+                .collect(),
+        ),
+    };
+    image::RgbaImage::from_raw(u32::try_from(width).ok()?, u32::try_from(height).ok()?, raw)
+}
+
+/// Decode any supported raster (AVIF/BMP/GIF/ICO/JPEG/PNG/WebP) to RGBA8.
+fn decode_rgba8(bytes: &[u8]) -> Option<image::RgbaImage> {
+    if is_avif(bytes) {
+        return decode_avif(bytes);
+    }
+    Some(image::load_from_memory(bytes).ok()?.to_rgba8())
+}
+
+/// Decode raster image bytes (AVIF/GIF/JPEG/PNG/WebP) to a premultiplied-alpha
+/// pixmap resized to `w`x`h`.
 fn raster_to_pixmap(bytes: &[u8], w: u32, h: u32) -> Option<Pixmap> {
-    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let img = decode_rgba8(bytes)?;
     let resized = image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle);
     let mut raw = resized.into_raw();
     for pixel in raw.as_chunks_mut::<4>().0 {
@@ -9423,6 +9529,9 @@ fn premultiplied(color: [u8; 4]) -> tiny_skia::PremultipliedColorU8 {
 }
 
 fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    if is_avif(bytes) {
+        return avif_dimensions(bytes);
+    }
     image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .ok()?
@@ -14874,7 +14983,7 @@ mod tests {
     #[test]
     fn image_accept_advertises_exactly_decodable_mime_types() {
         assert!(!IMAGE_ACCEPT.contains('*'));
-        assert!(!IMAGE_ACCEPT.to_ascii_lowercase().contains("avif"));
+        assert!(!IMAGE_ACCEPT.to_ascii_lowercase().contains("jxl"));
         for mime in IMAGE_ACCEPT.split(',') {
             assert!(
                 crate::source_type_supported(mime),
@@ -14882,6 +14991,7 @@ mod tests {
             );
         }
         for required in [
+            "image/avif",
             "image/webp",
             "image/apng",
             "image/svg+xml",
@@ -14900,10 +15010,10 @@ mod tests {
     }
 
     #[test]
-    fn picture_type_filter_skips_avif_and_accepts_parameterized_mime_essence() {
+    fn picture_type_filter_skips_jxl_and_accepts_parameterized_mime_essence() {
         let tree = parse_html(
             r#"<picture>
-                 <source type="IMAGE/AVIF; codecs=av01" srcset="unsupported.avif">
+                 <source type="IMAGE/JXL; codecs=jxl" srcset="unsupported.jxl">
                  <source type=" Image/WebP ; codecs=lossless " srcset="supported.webp">
                  <img id="hero" src="fallback.png">
                </picture>"#,

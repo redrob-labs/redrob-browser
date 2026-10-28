@@ -3560,9 +3560,9 @@ fn selected_picture_source_dimensions_override_fallback_image_ratio() {
         </style>
         <picture>
           <source
-            type="image/AVIF; codecs=av01"
+            type="image/JXL"
             media="(min-width:800px)"
-            srcset="unsupported.avif"
+            srcset="unsupported.jxl"
             width="2000"
             height="100">
           <source
