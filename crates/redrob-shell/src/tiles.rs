@@ -139,6 +139,18 @@ impl TileCache {
                 out.push(k);
             }
         }
+        // Only a few requests run at once, and a loading page damages its
+        // top tiles on every frame. In viewport order the first tile won
+        // every free slot, so the tiles right of and below it were never
+        // painted (YouTube showed only its top-left 512 px). Ask first for
+        // tiles with no request running, then missing tiles, then the
+        // longest-stale ones.
+        out.sort_by_key(|k| {
+            let painted = self.tiles.get(k).map(|(g, _)| *g);
+            #[cfg(feature = "gpu")]
+            let painted = painted.or_else(|| self.native.get(k).map(|(g, _)| *g));
+            (self.pending.contains_key(k), painted.is_some(), painted)
+        });
         if self
             .last_request
             .is_some_and(|t| t.elapsed() > IN_FLIGHT_TIMEOUT)
