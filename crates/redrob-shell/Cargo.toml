@@ -30,3 +30,12 @@ sha1 = "0.10"
 cbc = "0.1"
 aes = "0.8"
 url = { workspace = true }
+gstreamer = { version = "0.25", optional = true }
+gstreamer-app = { version = "0.25", optional = true }
+gstreamer-video = { version = "0.25", optional = true }
+
+[features]
+default = []
+# Video and audio playback through GStreamer (docs/MEDIA.md). Needs the
+# GStreamer development files at build time and its runtime when running.
+media = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]

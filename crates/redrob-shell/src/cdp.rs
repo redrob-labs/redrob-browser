@@ -65,6 +65,8 @@ const LOGIN_SUBMIT_JS: &str = r#"(() => {
 })();"#;
 
 const LOGIN_BINDING: &str = "redrobLoginSubmit";
+/// `<video>`/`<audio>` ask the window to play through this binding.
+const MEDIA_BINDING: &str = "redrobMedia";
 
 /// Tab ids the engine side hands out for pages a page opened itself.
 const POPUP_ID_BASE: TabId = 1 << 40;
@@ -91,6 +93,10 @@ pub enum Op {
     Evaluate(String),
     /// Send the whole document tree for the Elements panel.
     GetDom,
+    /// Tell the page's media element `id` how playback is going.
+    MediaReport { id: u64, status: crate::media::Status },
+    /// Ask where these media elements are on screen.
+    MediaRects(Vec<u64>),
     /// Type a saved login into the page's sign-in form.
     FillLogin { username: String, password: zeroize::Zeroizing<String> },
 }
@@ -121,6 +127,10 @@ pub enum Event {
     NetRequest { id: String, method: String, url: String },
     NetResponse { id: String, status: u16, mime: String },
     Dom(Value),
+    /// A media element asked for something: {op, id, src, currentTime, volume, muted, controls, loop, video}.
+    Media(Value),
+    /// Viewport rectangles (CSS pixels) of media elements; None when not rendered.
+    MediaRects(Vec<(u64, Option<[f32; 4]>)>),
     /// Result of FillLogin: "filled" or "no-form".
     Filled(String),
     /// A file download began or changed state. Sent with tab 0.
@@ -206,6 +216,7 @@ impl State {
         self.c.call(s, "Page.enable", json!({})).await?;
         self.c.call(s, "Runtime.enable", json!({})).await?;
         self.c.call(s, "Runtime.addBinding", json!({ "name": LOGIN_BINDING })).await?;
+        self.c.call(s, "Runtime.addBinding", json!({ "name": MEDIA_BINDING })).await?;
         self.c.call(s, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": LOGIN_SUBMIT_JS })).await?;
         let (w, h, scale) = self.size;
         self.c
@@ -432,6 +443,30 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
             let d = st.c.call(s, "DOM.getDocument", json!({ "depth": -1, "pierce": false })).await?;
             st.emit(tab, Event::Dom(d["root"].clone()));
         }
+        Op::MediaReport { id, status } => {
+            let s_json = json!({
+                "currentTime": status.current_time,
+                "duration": if status.duration.is_finite() { json!(status.duration) } else { json!(null) },
+                "paused": status.paused, "ended": status.ended,
+                "width": status.width, "height": status.height,
+                "readyState": status.ready_state, "error": status.error,
+            });
+            // duration null means unknown: the page sees NaN.
+            let expr = format!(
+                "(() => {{ const s = {s_json}; if (s.duration === null) s.duration = NaN; globalThis.__redrobMediaUpdate && __redrobMediaUpdate({id}, s); }})()"
+            );
+            st.c.send(s, "Runtime.evaluate", json!({ "expression": expr }));
+        }
+        Op::MediaRects(ids) => {
+            let list = serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string());
+            let expr = format!(
+                "JSON.stringify({list}.map((id) => {{ const e = globalThis.__redrobMediaElements && __redrobMediaElements.get(id); if (!e || !e.isConnected) return [id, null]; const r = e.getBoundingClientRect(); return [id, r.width > 0 ? [r.left, r.top, r.width, r.height] : null]; }}))"
+            );
+            let r = st.c.call(s, "Runtime.evaluate", json!({ "expression": expr, "returnByValue": true })).await?;
+            let rects: Vec<(u64, Option<[f32; 4]>)> =
+                r["result"]["value"].as_str().and_then(|v| serde_json::from_str(v).ok()).unwrap_or_default();
+            st.emit(tab, Event::MediaRects(rects));
+        }
         Op::FillLogin { username, password } => {
             let doc = st.c.call(s, "Runtime.evaluate", json!({ "expression": "document" })).await?;
             let object_id = doc["result"]["objectId"].as_str().unwrap_or_default().to_string();
@@ -518,6 +553,11 @@ async fn on_event(st: &mut State, ev: Value) {
             let frame = &p["frame"];
             if frame.get("parentId").is_none() {
                 st.emit(tab, Event::Navigated(frame["url"].as_str().unwrap_or_default().to_string()));
+            }
+        }
+        "Runtime.bindingCalled" if p["name"] == MEDIA_BINDING => {
+            if let Ok(v) = serde_json::from_str::<Value>(p["payload"].as_str().unwrap_or_default()) {
+                st.emit(tab, Event::Media(v));
             }
         }
         "Runtime.bindingCalled" if p["name"] == LOGIN_BINDING => {

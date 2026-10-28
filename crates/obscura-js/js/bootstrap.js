@@ -7458,15 +7458,63 @@ class HTMLMediaElement extends Element {
   static HAVE_CURRENT_DATA = 2;
   static HAVE_FUTURE_DATA = 3;
   static HAVE_ENOUGH_DATA = 4;
-  canPlayType(_type) { return ''; }
-  load() {}
-  play() {
-    return Promise.reject(new DOMException(
-      "The element has no supported sources.",
-      "NotSupportedError",
-    ));
+  // Playback lives in the Redrob Browser window (docs/MEDIA.md). The element
+  // asks it through the `redrobMedia` binding and the window reports back
+  // through globalThis.__redrobMediaUpdate. Without a window (headless
+  // `serve`, `fetch`) there is no binding and play() rejects as before.
+  get __media() {
+    if (!this.__redrobMediaState) {
+      const reg = (globalThis.__redrobMediaElements ||= new Map());
+      const id = (globalThis.__redrobMediaNextId = (globalThis.__redrobMediaNextId || 0) + 1);
+      reg.set(id, this);
+      this.__redrobMediaState = {
+        id, paused: true, ended: false, currentTime: 0, duration: NaN, readyState: 0,
+        networkState: 0, volume: 1, muted: this.hasAttribute('muted'), seeking: false,
+        videoWidth: 0, videoHeight: 0, error: null, src: '',
+      };
+    }
+    return this.__redrobMediaState;
   }
-  pause() {}
+  __send(op, extra) {
+    if (typeof globalThis.redrobMedia !== 'function') return false;
+    const m = this.__media;
+    globalThis.redrobMedia(JSON.stringify(Object.assign({
+      op, id: m.id, src: this.currentSrc, currentTime: m.currentTime, volume: m.volume, muted: m.muted,
+      controls: this.hasAttribute('controls'), loop: this.hasAttribute('loop'),
+      video: this.localName === 'video',
+    }, extra || {})));
+    return true;
+  }
+  __fire(name) {
+    try { this.dispatchEvent(new Event(name)); } catch (_e) {}
+  }
+  canPlayType(type) {
+    if (typeof globalThis.redrobMedia !== 'function') return '';
+    const t = String(type).toLowerCase();
+    if (/^(video|audio)\/(mp4|webm|ogg|mpeg|x-m4a|aac|wav)/.test(t)) return 'maybe';
+    return '';
+  }
+  load() {
+    const m = this.__media;
+    m.currentTime = 0; m.ended = false; m.paused = true; m.readyState = 0;
+    if (this.__send('load')) { m.networkState = 2; this.__fire('loadstart'); }
+  }
+  play() {
+    const m = this.__media;
+    if (!this.currentSrc || !this.__send('play')) {
+      return Promise.reject(new DOMException(
+        "The element has no supported sources.",
+        "NotSupportedError",
+      ));
+    }
+    if (m.paused) { m.paused = false; this.__fire('play'); }
+    return Promise.resolve();
+  }
+  pause() {
+    const m = this.__media;
+    this.__send('pause');
+    if (!m.paused) { m.paused = true; this.__fire('pause'); }
+  }
   get NETWORK_EMPTY() { return HTMLMediaElement.NETWORK_EMPTY; }
   get NETWORK_IDLE() { return HTMLMediaElement.NETWORK_IDLE; }
   get NETWORK_LOADING() { return HTMLMediaElement.NETWORK_LOADING; }
@@ -7476,19 +7524,37 @@ class HTMLMediaElement extends Element {
   get HAVE_CURRENT_DATA() { return HTMLMediaElement.HAVE_CURRENT_DATA; }
   get HAVE_FUTURE_DATA() { return HTMLMediaElement.HAVE_FUTURE_DATA; }
   get HAVE_ENOUGH_DATA() { return HTMLMediaElement.HAVE_ENOUGH_DATA; }
-  get paused() { return true; }
-  get ended() { return false; }
-  get networkState() { return HTMLMediaElement.NETWORK_EMPTY; }
-  get readyState() { return HTMLMediaElement.HAVE_NOTHING; }
-  get error() { return null; }
-  get seeking() { return false; }
-  get currentTime() { return 0; }
-  set currentTime(v) {}
-  get duration() { return NaN; }
-  get volume() { return 1; }
-  set volume(v) {}
-  get muted() { return false; }
-  set muted(v) {}
+  get paused() { return this.__media.paused; }
+  get ended() { return this.__media.ended; }
+  get networkState() { return this.__media.networkState; }
+  get readyState() { return this.__media.readyState; }
+  get error() { return this.__media.error; }
+  get seeking() { return this.__media.seeking; }
+  get currentTime() { return this.__media.currentTime; }
+  set currentTime(v) {
+    const m = this.__media;
+    const t = Number(v);
+    if (!Number.isFinite(t)) return;
+    m.currentTime = Math.max(0, t);
+    m.seeking = true;
+    this.__fire('seeking');
+    this.__send('seek', { currentTime: m.currentTime });
+  }
+  get duration() { return this.__media.duration; }
+  get volume() { return this.__media.volume; }
+  set volume(v) {
+    const n = Number(v);
+    if (!(n >= 0 && n <= 1)) throw new DOMException('The volume must be between 0 and 1.', 'IndexSizeError');
+    this.__media.volume = n;
+    this.__send('volume');
+    this.__fire('volumechange');
+  }
+  get muted() { return this.__media.muted; }
+  set muted(v) {
+    this.__media.muted = !!v;
+    this.__send('volume');
+    this.__fire('volumechange');
+  }
   get src() {
     const raw = this.getAttribute("src");
     if (!raw) return "";
@@ -7496,7 +7562,13 @@ class HTMLMediaElement extends Element {
     catch (_error) { return raw; }
   }
   set src(v) { this.setAttribute('src', v); }
-  get currentSrc() { return ""; }
+  get currentSrc() {
+    if (this.src) return this.src;
+    const source = this.querySelector('source[src]');
+    if (!source) return "";
+    try { return new URL(source.getAttribute('src'), this.baseURI || globalThis.location?.href || "about:blank").href; }
+    catch (_error) { return ""; }
+  }
   get textTracks() {
     return TextTrackList.from(
       Array.from(this.querySelectorAll("track")).map((element) => element.track)
@@ -7510,6 +7582,36 @@ _markNative(HTMLMediaElement.prototype.canPlayType);
 _markNative(HTMLMediaElement.prototype.play);
 _markNative(HTMLMediaElement.prototype.load);
 _markNative(HTMLMediaElement.prototype.pause);
+// The window's playback report for element `id`; fires the media events a
+// page listens for when the state they describe changes.
+globalThis.__redrobMediaUpdate = function (id, s) {
+  const el = globalThis.__redrobMediaElements && globalThis.__redrobMediaElements.get(id);
+  if (!el) return;
+  const m = el.__media;
+  const before = Object.assign({}, m);
+  if (s.error) {
+    m.error = { code: 4, message: 'The media could not be played.' };
+    m.networkState = 3;
+    el.__fire('error');
+    return;
+  }
+  m.currentTime = s.currentTime;
+  if (!(Number.isNaN(s.duration) && Number.isNaN(m.duration)) && s.duration !== m.duration) {
+    m.duration = s.duration;
+    el.__fire('durationchange');
+  }
+  m.videoWidth = s.width; m.videoHeight = s.height;
+  m.readyState = s.readyState;
+  m.networkState = 1;
+  if (before.readyState < 1 && m.readyState >= 1) el.__fire('loadedmetadata');
+  if (before.readyState < 2 && m.readyState >= 2) { el.__fire('loadeddata'); el.__fire('canplay'); }
+  if (before.readyState < 4 && m.readyState >= 4) el.__fire('canplaythrough');
+  if (m.seeking) { m.seeking = false; el.__fire('seeked'); }
+  if (before.paused && !s.paused) { m.paused = false; el.__fire('playing'); }
+  if (!before.paused && s.paused && !s.ended) { m.paused = true; el.__fire('pause'); }
+  if (s.currentTime !== before.currentTime) el.__fire('timeupdate');
+  if (s.ended && !before.ended) { m.ended = true; m.paused = true; el.__fire('ended'); }
+};
 class HTMLVideoElement extends HTMLMediaElement {
   get poster() {
     const raw = this.getAttribute("poster");
@@ -7518,8 +7620,8 @@ class HTMLVideoElement extends HTMLMediaElement {
     catch (_error) { return raw; }
   }
   set poster(value) { this.setAttribute("poster", value); }
-  get videoWidth() { return 0; }
-  get videoHeight() { return 0; }
+  get videoWidth() { return this.__media.videoWidth; }
+  get videoHeight() { return this.__media.videoHeight; }
 }
 class HTMLAudioElement extends HTMLMediaElement {}
 class HTMLTrackElement extends Element {

@@ -1,0 +1,186 @@
+//! Video and audio playback for `<video>` and `<audio>`. Design: docs/MEDIA.md.
+//!
+//! The page keeps the element's state; the window plays the media with
+//! GStreamer and draws the current frame over the page at the element's
+//! position, the way a compositor places a video layer. Built with the
+//! `media` feature; without it the element stays at its poster.
+
+use std::sync::{Arc, Mutex};
+
+/// What the window reports back to the page after each poll.
+#[derive(Clone, Copy, Default, Debug)]
+pub struct Status {
+    pub current_time: f64,
+    pub duration: f64,
+    pub paused: bool,
+    pub ended: bool,
+    pub width: u32,
+    pub height: u32,
+    /// HAVE_NOTHING (0) to HAVE_ENOUGH_DATA (4).
+    pub ready_state: u8,
+    pub error: bool,
+}
+
+/// The newest decoded frame, RGBA, tightly packed.
+#[derive(Default)]
+pub struct Frame {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+    /// Bumped per frame so the window uploads only new ones.
+    pub serial: u64,
+}
+
+pub trait Player: Send {
+    fn play(&mut self);
+    fn pause(&mut self);
+    fn seek(&mut self, seconds: f64);
+    fn set_volume(&mut self, volume: f64, muted: bool);
+    fn status(&mut self) -> Status;
+    fn frame(&self) -> Arc<Mutex<Frame>>;
+}
+
+/// Open `url` for playback, or None when this build has no media backend.
+pub fn open(url: &str) -> Option<Box<dyn Player>> {
+    #[cfg(feature = "media")]
+    {
+        match gst_backend::GstPlayer::open(url) {
+            Ok(p) => return Some(Box::new(p)),
+            Err(e) => eprintln!("redrob-browser: cannot play {url}: {e}"),
+        }
+    }
+    let _ = url;
+    None
+}
+
+#[cfg(feature = "media")]
+mod gst_backend {
+    use super::*;
+    use gstreamer as gst;
+    use gstreamer::prelude::*;
+    use gstreamer_app as gst_app;
+    use gstreamer_video as gst_video;
+
+    pub struct GstPlayer {
+        playbin: gst::Element,
+        frame: Arc<Mutex<Frame>>,
+        ended: bool,
+        error: bool,
+    }
+
+    impl GstPlayer {
+        pub fn open(url: &str) -> anyhow::Result<Self> {
+            static INIT: std::sync::Once = std::sync::Once::new();
+            let mut init_err = None;
+            INIT.call_once(|| {
+                if let Err(e) = gst::init() {
+                    init_err = Some(e.to_string());
+                }
+            });
+            if let Some(e) = init_err {
+                anyhow::bail!("GStreamer: {e}");
+            }
+            let scheme = url.split(':').next().unwrap_or("");
+            if !matches!(scheme, "http" | "https") {
+                anyhow::bail!("only http and https media are played");
+            }
+            let caps = gst_video::VideoCapsBuilder::new().format(gst_video::VideoFormat::Rgba).build();
+            let sink = gst_app::AppSink::builder().caps(&caps).max_buffers(2).drop(true).build();
+            let frame: Arc<Mutex<Frame>> = Default::default();
+            let target = frame.clone();
+            sink.set_callbacks(
+                gst_app::AppSinkCallbacks::builder()
+                    .new_sample(move |s| {
+                        let sample = s.pull_sample().map_err(|_| gst::FlowError::Eos)?;
+                        let buffer = sample.buffer().ok_or(gst::FlowError::Error)?;
+                        let caps = sample.caps().ok_or(gst::FlowError::Error)?;
+                        let info = gst_video::VideoInfo::from_caps(caps).map_err(|_| gst::FlowError::Error)?;
+                        let map = buffer.map_readable().map_err(|_| gst::FlowError::Error)?;
+                        let (w, h) = (info.width(), info.height());
+                        let stride = info.stride()[0] as usize;
+                        let row = w as usize * 4;
+                        let mut rgba = Vec::with_capacity(row * h as usize);
+                        for y in 0..h as usize {
+                            let start = y * stride;
+                            if let Some(line) = map.get(start..start + row) {
+                                rgba.extend_from_slice(line);
+                            }
+                        }
+                        if let Ok(mut f) = target.lock() {
+                            f.width = w;
+                            f.height = h;
+                            f.rgba = rgba;
+                            f.serial += 1;
+                        }
+                        Ok(gst::FlowSuccess::Ok)
+                    })
+                    .build(),
+            );
+            let playbin = gst::ElementFactory::make("playbin").property("uri", url).build()?;
+            playbin.set_property("video-sink", &sink);
+            playbin.set_state(gst::State::Paused)?;
+            Ok(Self { playbin, frame, ended: false, error: false })
+        }
+    }
+
+    impl Player for GstPlayer {
+        fn play(&mut self) {
+            if self.ended {
+                self.seek(0.0);
+                self.ended = false;
+            }
+            let _ = self.playbin.set_state(gst::State::Playing);
+        }
+
+        fn pause(&mut self) {
+            let _ = self.playbin.set_state(gst::State::Paused);
+        }
+
+        fn seek(&mut self, seconds: f64) {
+            let t = gst::ClockTime::from_mseconds((seconds.max(0.0) * 1000.0) as u64);
+            let _ = self.playbin.seek_simple(gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT, t);
+            self.ended = false;
+        }
+
+        fn set_volume(&mut self, volume: f64, muted: bool) {
+            self.playbin.set_property("volume", volume.clamp(0.0, 1.0));
+            self.playbin.set_property("mute", muted);
+        }
+
+        fn status(&mut self) -> Status {
+            if let Some(bus) = self.playbin.bus() {
+                while let Some(msg) = bus.pop_filtered(&[gst::MessageType::Eos, gst::MessageType::Error]) {
+                    match msg.view() {
+                        gst::MessageView::Eos(_) => self.ended = true,
+                        gst::MessageView::Error(_) => self.error = true,
+                        _ => {}
+                    }
+                }
+            }
+            let pos = self.playbin.query_position::<gst::ClockTime>().map(|t| t.mseconds() as f64 / 1000.0);
+            let dur = self.playbin.query_duration::<gst::ClockTime>().map(|t| t.mseconds() as f64 / 1000.0);
+            let (_, state, _) = self.playbin.state(gst::ClockTime::ZERO);
+            let (width, height) = self.frame.lock().map(|f| (f.width, f.height)).unwrap_or((0, 0));
+            Status {
+                current_time: pos.unwrap_or(0.0),
+                duration: dur.unwrap_or(f64::NAN),
+                paused: state != gst::State::Playing,
+                ended: self.ended,
+                width,
+                height,
+                ready_state: if self.error { 0 } else if width > 0 { 4 } else if dur.is_some() { 1 } else { 0 },
+                error: self.error,
+            }
+        }
+
+        fn frame(&self) -> Arc<Mutex<Frame>> {
+            self.frame.clone()
+        }
+    }
+
+    impl Drop for GstPlayer {
+        fn drop(&mut self) {
+            let _ = self.playbin.set_state(gst::State::Null);
+        }
+    }
+}

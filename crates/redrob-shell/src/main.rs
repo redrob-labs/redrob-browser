@@ -11,6 +11,8 @@ mod devtools;
 mod engine;
 mod import_chrome;
 mod input;
+mod media;
+mod media_view;
 mod model;
 mod profile;
 mod relay;
@@ -85,6 +87,7 @@ fn main() -> anyhow::Result<()> {
                 last_session_save: std::time::Instant::now(),
                 show_downloads: false,
                 show_devtools: false,
+                media: Default::default(),
                 vault: None,
                 pending_save: None,
                 agent_tx,
@@ -140,6 +143,7 @@ struct Window {
     last_session_save: std::time::Instant,
     show_downloads: bool,
     show_devtools: bool,
+    media: media_view::Media,
     vault: Option<vault::Vault>,
     /// A sign-in the person just made, waiting for "save this password?".
     pending_save: Option<(String, String, zeroize::Zeroizing<String>)>,
@@ -210,6 +214,7 @@ impl Window {
 
     fn close_tab(&mut self, index: usize) {
         if let Some(id) = self.model.close_tab(index) {
+            self.media.drop_tab(id);
             self.op(id, Op::Close);
         }
         if self.model.tabs.is_empty() {
@@ -252,6 +257,14 @@ impl Window {
                 self.on_download(model::DownloadItem { guid, url, filename, state, path, bytes });
                 continue;
             }
+            if let Event::Media(v) = &event {
+                self.media.request(tab, v);
+                continue;
+            }
+            if let Event::MediaRects(r) = event {
+                self.media.set_rects(tab, r);
+                continue;
+            }
             if let Event::LoginSubmitted { origin, username, password } = event {
                 self.offer_save(tab, origin, username, password);
                 continue;
@@ -285,6 +298,7 @@ impl Window {
                 Event::NetResponse { id, status, mime } => t.devtools.response(&id, status, mime),
                 Event::Dom(root) => t.devtools.dom = Some(root),
                 Event::Navigated(url) => {
+                    self.media.drop_tab(tab);
                     t.devtools.navigated();
                     t.url = url.clone();
                     t.title.clear();
@@ -314,7 +328,11 @@ impl Window {
                         self.notice = Some("No sign-in form on this page.".to_string());
                     }
                 }
-                Event::Opened { .. } | Event::Download { .. } | Event::LoginSubmitted { .. } => {}
+                Event::Opened { .. }
+                | Event::Download { .. }
+                | Event::LoginSubmitted { .. }
+                | Event::Media(_)
+                | Event::MediaRects(_) => {}
             }
             let url_now = t.url.clone();
             if let Some((url, title)) = visited {
@@ -916,6 +934,18 @@ impl eframe::App for Window {
             };
             if !wanted.1.is_empty() {
                 self.op(wanted.0, Op::Tiles { keys: wanted.1, generation: wanted.2 });
+            }
+            // Video layers go over the page tiles.
+            if !self.media.is_empty() {
+                let commands = self.commands.clone();
+                self.media.poll(Some(wanted.0), |t, op| {
+                    let _ = commands.send(Command::Tab(t, op));
+                });
+                if self.media.paint(ui, rect, wanted.0) {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(16));
+                } else {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(250));
+                }
             }
 
             if response.clicked() || response.drag_started() {
