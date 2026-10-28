@@ -1901,6 +1901,45 @@ impl ObscuraJsRuntime {
         })
     }
 
+    /// The display list of a document-space rectangle, painted the same way
+    /// as [`Self::screenshot_prepared_region_with_surface_color`]
+    /// (docs/GPU-PAINT.md, phase B).
+    #[cfg(feature = "display-list")]
+    pub fn display_list_prepared_region_with_surface_color(
+        &self,
+        region: obscura_render::CaptureRegion,
+        surface_color: [u8; 4],
+    ) -> Result<obscura_render::display_list::DisplayList, obscura_render::CaptureError> {
+        let mut state = self.state.borrow_mut();
+        with_sync_render_loading_disabled(&mut state, |state| {
+            ensure_resolved_scroll(state).ok_or(obscura_render::CaptureError::PaintFailed)?;
+            let ObscuraState {
+                dom,
+                prepared_render,
+                render_resources,
+                resolved_scroll,
+                canvas_surfaces,
+                ..
+            } = state;
+            let (_, scroll) = resolved_scroll
+                .as_ref()
+                .ok_or(obscura_render::CaptureError::PaintFailed)?;
+            let canvas_surfaces = RuntimeCanvasSurfaceSource(canvas_surfaces);
+            obscura_render::record_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces(
+                dom.as_ref()
+                    .ok_or(obscura_render::CaptureError::PaintFailed)?,
+                prepared_render
+                    .as_mut()
+                    .ok_or(obscura_render::CaptureError::PaintFailed)?,
+                render_resources,
+                scroll,
+                region,
+                surface_color,
+                &canvas_surfaces,
+            )
+        })
+    }
+
     /// Capture a document-space rectangle with the PDF print-background
     /// policy without mutating the page DOM or retained geometry.
     #[cfg(feature = "render")]

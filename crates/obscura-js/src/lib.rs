@@ -27,3 +27,5 @@ pub use obscura_render::{
     CaptureError, CaptureRegion, CssMediaType, ImageRequestProfile, RenderResourceCache,
     MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS,
 };
+#[cfg(feature = "display-list")]
+pub use obscura_render::display_list::DisplayList;

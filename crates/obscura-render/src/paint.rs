@@ -7437,6 +7437,7 @@ pub fn measure_text(text: &str, size: f32, is_bold: bool, family: Option<&str>) 
     width
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_text(
     pixmap: &mut Pixmap,
     text: &str,
@@ -7472,6 +7473,7 @@ fn draw_text(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_text_pixels(
     pixmap: &mut Pixmap,
     text: &str,

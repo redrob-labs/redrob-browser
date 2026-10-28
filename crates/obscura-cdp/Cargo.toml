@@ -15,6 +15,8 @@ stealth = ["obscura-browser/stealth"]
 # Enable Page.captureScreenshot via obscura-render. Propagates render to
 # obscura-browser so Page::screenshot is available.
 render = ["obscura-browser/render", "dep:image", "dep:jpeg-encoder", "dep:png", "dep:fast_image_resize"]
+# Page.redrobDisplayList: a page region as a display list (docs/GPU-PAINT.md).
+display-list = ["render", "obscura-browser/display-list"]
 
 [dependencies]
 obscura-dom = { workspace = true }

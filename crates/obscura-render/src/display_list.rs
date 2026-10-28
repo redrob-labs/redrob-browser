@@ -666,6 +666,7 @@ impl RecordingCanvas {
         index
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn composite_layer(
         &mut self,
         mut layer: Frame,

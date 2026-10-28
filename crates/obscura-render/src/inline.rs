@@ -3702,6 +3702,7 @@ impl TextEngine {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn paint_item_pixels(
         &mut self,
         idx: usize,
