@@ -15,7 +15,7 @@ run). There are no other triggers.
 | Linux x64 (`ubuntu-22.04`) | `redrob-browser-linux-x64-<v>.tar.gz` | none |
 | Linux arm64 (`ubuntu-22.04-arm`) | `redrob-browser-linux-arm64-<v>.tar.gz` | none |
 | macOS arm64 | `redrob-browser-macos-arm64-<v>.zip` and `.dmg`, each holding `Redrob Browser.app` | Developer ID, notarized and stapled, the app and the dmg (`scripts/package-macos.sh`) |
-| Windows x64 | `redrob-browser-windows-x64-<v>.zip` and `.msi` | Authenticode through Azure Artifact Signing (org action): the programs before packaging, the MSI after |
+| Windows x64 | `redrob-browser-windows-x64-<v>.zip` and `redrob-browser-windows-x64-<v>-setup.exe` | Authenticode through Azure Artifact Signing (org action): the programs before packaging, then the setup's uninstaller, then the setup |
 | publish | GitHub release, checksums, launcher manifest | org `release-publish.yml` |
 
 Every package plays video (the `media` feature, `docs/MEDIA.md`).
@@ -35,7 +35,12 @@ Every package plays video (the `media` feature, `docs/MEDIA.md`).
 - **Windows:** the job installs the official MSVC runtime and development MSIs (`ADDLOCAL=ALL`,
   pinned by SHA-256). The package folder holds the programs with GStreamer's DLLs beside them,
   the plugins in `lib\gstreamer-1.0`, GIO's TLS module in `lib\gio\modules` and the plugin
-  scanner in `libexec\gstreamer-1.0`.
+  scanner in `libexec\gstreamer-1.0`. The Visual C++ runtime DLLs (`vcruntime140.dll`,
+  `msvcp140.dll` and the rest of Visual Studio's `Microsoft.VC14*.CRT` folder) sit beside the
+  programs too: GStreamer and the programs link them, and a Windows without the VC++
+  redistributable has none. The job stops when any program or top-level DLL imports a DLL that is
+  neither in the folder nor part of Windows, and when the window or `redrob-browser-protected.exe`
+  is not a GUI program (PE subsystem 2).
 - At run time the window points GStreamer at a bundled runtime when the package carries one
   (`use_bundled_runtime` in `crates/redrob-shell/src/media.rs`); variables already set in the
   environment win.
@@ -43,16 +48,20 @@ Every package plays video (the `media` feature, `docs/MEDIA.md`).
 To move to a newer GStreamer, change `GSTREAMER_VERSION` and the four SHA-256 values in
 `release.yml` (each file has a `.sha256sum` beside it on gstreamer.freedesktop.org).
 
-## Windows installer
+## Windows setup
 
-`installer/windows/redrob-browser.wxs` (WiX v4, `wix` 4.0.6 installed as a dotnet tool in the job)
-is a per-user MSI: it needs no administrator rights, installs to
-`%LOCALAPPDATA%\Programs\Redrob Browser`, and adds a **Redrob Browser** Start menu shortcut to
-`redrob-browser-window.exe`. `installer/windows/payload.ps1` lists the package folder into the
-`Payload` component group, one component per folder, with ids and GUIDs derived from the path.
-The `UpgradeCode` (`3E1D3581-4920-4530-BD81-BA7B0926E403`) never changes, so a newer MSI replaces
-the installed one. MSI versions are numbers only: a `-rc.1` suffix is dropped from the MSI's own
-version but kept in the file name.
+`redrob-browser-windows-x64-<v>-setup.exe` is the branded per-user setup every Redrob app ships
+(`installer/windows/`, ported from Redrob Launcher's): a language page (English or 한국어), then
+install with an optional desktop shortcut; no administrator rights. It installs to
+`%LOCALAPPDATA%\Programs\Redrob Browser`, adds the Start menu shortcut to
+`redrob-browser-window.exe`, a Settings > Apps entry and an uninstaller, and opens the browser. Over
+a 0.1.x install it first removes that version's MSI. The browser starts in the language the setup
+asked until the person picks another (`HKCU\Software\Redrob\Redrob Browser\Language`,
+`crates/redrob-shell/src/i18n.rs`). Details: `installer/windows/README.md`.
+
+The window is a GUI program, so it has no console. On Windows its standard error, its panics and
+the engine's standard error go to `%LOCALAPPDATA%\redrob-browser\logs\window.log`, and when it
+cannot start it says why in a message box (`crates/redrob-shell/src/startup.rs`).
 
 ## Secrets
 

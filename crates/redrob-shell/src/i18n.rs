@@ -59,6 +59,19 @@ pub fn detect(saved: Option<&str>) -> Lang {
             };
         }
     }
+    #[cfg(windows)]
+    {
+        // The language the setup asked (HKCU\Software\Redrob\Redrob Browser,
+        // installer/windows), else Windows' own display language.
+        if let Some(l) = windows_setup_language().as_deref().and_then(from_code) {
+            return l;
+        }
+        // LANG_KOREAN is 0x12; the primary language is the low 10 bits.
+        let ui = unsafe { windows_sys::Win32::Globalization::GetUserDefaultUILanguage() };
+        if ui & 0x3ff == 0x12 {
+            return Lang::Ko;
+        }
+    }
     #[cfg(target_os = "macos")]
     {
         // GUI apps on macOS often start without LANG; ask the user defaults.
@@ -77,6 +90,33 @@ pub fn detect(saved: Option<&str>) -> Lang {
         }
     }
     Lang::En
+}
+
+/// `Language` (en or ko) under HKCU\Software\Redrob\Redrob Browser, written by
+/// the Windows setup.
+#[cfg(windows)]
+fn windows_setup_language() -> Option<String> {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
+    let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let (key, name) = (wide("Software\\Redrob\\Redrob Browser"), wide("Language"));
+    let mut buf = [0u16; 16];
+    let mut size = std::mem::size_of_val(&buf) as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            buf.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if status != 0 {
+        return None;
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    Some(String::from_utf16_lossy(&buf[..len]))
 }
 
 pub fn t(en: &'static str) -> &'static str {
@@ -98,6 +138,9 @@ fn ko(en: &str) -> Option<&'static str> {
     Some(match en {
         // Window
         "Redrob Browser" => "Redrob Browser",
+        "Redrob Browser could not start.\n\n{0}\n\nDetails are in {1}" => {
+            "Redrob Browser를 시작하지 못했어요.\n\n{0}\n\n자세한 내용은 {1}에 있어요."
+        }
         "New tab" => "새 탭",
         "Close" => "닫기",
         "Close tab" => "탭 닫기",

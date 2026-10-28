@@ -22,7 +22,9 @@ impl Engine {
             std::env::temp_dir().join(format!("redrob-browser-ready-{}.json", std::process::id()));
         let _ = std::fs::remove_file(&ready);
 
-        let child = Command::new(&exe)
+        // Its standard error is the window's: a terminal, or on Windows the
+        // window's log file (startup.rs). No console window of its own.
+        let mut child = crate::startup::no_console(&mut Command::new(&exe))
             .args([
                 "serve",
                 "--host",
@@ -45,13 +47,27 @@ impl Engine {
             .spawn()
             .map_err(|e| anyhow::anyhow!("start engine {}: {e}", exe.display()))?;
 
-        let deadline = Instant::now() + Duration::from_secs(20);
+        // The first start after an install can be slow (an antivirus scans the
+        // new program), so wait up to a minute, but stop at once when the
+        // engine has already exited.
+        let deadline = Instant::now() + Duration::from_secs(60);
         let record = loop {
             if let Ok(bytes) = std::fs::read(&ready) {
                 break bytes;
             }
+            if let Ok(Some(status)) = child.try_wait() {
+                anyhow::bail!(
+                    "the engine {} exited before it was ready ({status})",
+                    exe.display()
+                );
+            }
             if Instant::now() > deadline {
-                anyhow::bail!("engine did not report ready within 20s");
+                let _ = child.kill();
+                let _ = child.wait();
+                anyhow::bail!(
+                    "the engine {} did not report ready within 60 s",
+                    exe.display()
+                );
             }
             std::thread::sleep(Duration::from_millis(50));
         };

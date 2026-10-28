@@ -5827,6 +5827,7 @@ dependencies = [
  "ureq",
  "url",
  "vello",
+ "windows-sys 0.61.2",
  "winresource",
  "wry",
  "zeroize",
