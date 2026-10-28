@@ -1,227 +1,313 @@
-# The release pipeline: tag -> official build -> .deb -> GitHub release.
+# Release -- the redrob-labs shape (redrob-labs/.github/workflow-templates/release.yml), with
+# Redrob Browser's build steps.
 #
-# SELF-HOSTED, and not by preference. The official build measured 40-60 GB of output and hours of CPU, and the
-# packaging step needs debchange from devscripts on the host. Neither fits a GitHub-hosted runner, so this
-# workflow declares the runner it actually needs rather than pretending.
+#   tag v<version> on main  ->  version  ->  macos / windows / linux x64 + arm64 (build, then sign)  ->  publish
 #
-# The runner must have: ~150 GB free disk, the depot_tools prerequisites, and devscripts installed. That is a
-# machine-provisioning requirement, not something a workflow step can fix -- this build installs no system
-# packages by design (docs/BUILD.md), so a step that apt-installed devscripts would be violating the same
-# constraint the build is built around.
+# Each package holds three programs: redrob-browser (CLI and engine), redrob-browser-worker and
+# redrob-browser-window (the window). Every platform builds with video (the `media` feature,
+# GStreamer, docs/MEDIA.md). Linux uses the distribution's GStreamer; macOS and Windows install the
+# official GStreamer runtime in the job and carry it inside the package, so nothing else has to be
+# installed to play video.
 #
-# DISPATCH ONLY, and it used to also fire on a `v*` tag. That trigger was removed because no runner carrying
-# these labels is registered, so what it actually did was queue: all four release runs to date -- v0.1.0 through
-# v0.1.3 -- sat unclaimed and were cancelled by GitHub at exactly 24h. Every one of those tags shipped a release
-# whose .deb was built on a workstation and uploaded by hand, because that is the only thing that worked. A
-# trigger that cannot be served is worse than no trigger: it puts a pending run on the tag that looks like a
-# release in progress for a day, and then a red one, neither of which says "no machine to build this".
-#
-# So the tag no longer starts anything, and the documented path is the one that already works:
-#
-#   local:  redrob.py build --flavour release && redrob.py package
-#           gh release create vX.Y.Z --draft <artefacts>
-#   here:   sign-and-publish.yml, workflow_dispatch with tag=vX.Y.Z
-#
-# This workflow stays for the day a runner with ~150 GB and devscripts exists, and dispatch is how you would
-# reach it then. Until that day it is a declaration of what such a machine would have to be, not a live path.
+# Asset names are redrob-browser-<platform>-<version>.<ext>; the window's updater matches the
+# prefix redrob-browser-<platform>- (crates/redrob-shell/src/updater.rs).
+
 name: release
 
 on:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
-      ref:
-        description: "Ref to build (defaults to the triggering ref)"
-        required: false
+      version:
+        description: Version for a dry run, e.g. 0.2.0-rc.1 (builds and signs, publishes nothing)
+        type: string
+        default: ""
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  PRODUCT: Redrob Browser
+  PRODUCT_URL: https://github.com/${{ github.repository }}
+  CARGO_TERM_COLOR: always
+  # Build caches: Swatinem/rust-cache keeps the registry and target/ per platform, and sccache
+  # keeps each compiled crate in the Actions cache, so a cache miss of one does not rebuild all.
+  # A tag run can read caches saved on the default branch (develop): a release dry run there
+  # before tagging leaves the tag build warm.
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+  # The official GStreamer packages the macOS and Windows jobs install and bundle, pinned with the
+  # SHA-256 sums gstreamer.freedesktop.org publishes beside them.
+  GSTREAMER_VERSION: 1.26.11
+  GSTREAMER_MACOS_PKG_SHA256: bd6f3ad26126a6db726608f15622efaec383d672daa0a309775785d42c326f9c
+  GSTREAMER_MACOS_DEVEL_PKG_SHA256: 5135a7bc87a75a512f0017aa52e9774d47a5d3eca380210b815d5dc0648bb7bf
+  GSTREAMER_WINDOWS_MSI_SHA256: 31cbc21fa0950b5c1e79c80959b2799805cb05a7a35953a13a9f790776137605
+  GSTREAMER_WINDOWS_DEVEL_MSI_SHA256: af0a0720692052aaf5fb0cf2847ef34a87016ef0f914328d516f049e6c86f587
 
 jobs:
-  build:
-    name: official build and package
-    runs-on: [self-hosted, linux, x64, chromium-build]
-    # Eight hours: docs/BUILD.md budgets 4-8h for the release flavour with LTO and PGO, and a cold checkout adds
-    # the sync on top. A timeout under that turns a slow build into a red pipeline.
-    timeout-minutes: 700
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref || github.ref }}
-          fetch-depth: 0
-
-      - name: repo integrity first
-        # The same checks as checks.yml, run again here on purpose: a tag can point at a commit that never went
-        # through a pull request, and eight hours is a long time to spend finding out the manifest was broken.
-        run: python3 scripts/check_repo.py
-
-      - name: the ref and REDROB_VERSION must agree, when a tag was asked for
-        # Only meaningful when the dispatch names a tag. There is no `github.ref` tag to read any more -- under
-        # workflow_dispatch that is the branch the workflow file came from -- so this reads the input instead,
-        # and says nothing when the input is a branch or a sha.
-        if: startsWith(inputs.ref, 'v')
-        run: |
-          set -euo pipefail
-          tag="${REF#v}"
-          file="$(cat REDROB_VERSION)"
-          if [ "$tag" != "$file" ]; then
-            echo "ref $REF does not match REDROB_VERSION $file" >&2
-            exit 1
-          fi
-        env:
-          REF: ${{ inputs.ref }}
-
-      - name: bootstrap depot_tools
-        run: python3 scripts/redrob.py bootstrap
-
-      - name: sync Chromium at the pinned tag
-        # Also what sets checkout_pgo_profiles, without which gn gen on an official build dies inside
-        # update_pgo_profiles.py. See docs/RELEASE.md.
-        run: python3 scripts/redrob.py sync
-
-      - name: apply the patch set
-        run: |
-          python3 scripts/redrob.py apply
-          python3 scripts/redrob.py brand
-
-      # The build stages agent/'s server for this target, which needs bun (agent/package.json pins it).
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-
-      - name: official build
-        run: python3 scripts/redrob.py build --flavour release
-
-      - name: package
-        run: python3 scripts/redrob.py package --flavour release
-
-      - name: launch it once
-        # A binary that links is not a binary that starts. Xvfb because the runner is headless; the flags are the
-        # ones the probe scripts use. It runs from the UNPACKED .deb, not out/release: the build directory has
-        # every file, so launching from there cannot tell when the package left one out.
-        run: |
-          set -euo pipefail
-          unpacked="$(mktemp -d)"
-          dpkg-deb -x "$(ls out/artifacts/*.deb | head -1)" "$unpacked"
-          Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
-          sleep 3
-          DISPLAY=:99 timeout 60 "$unpacked"/opt/redrob/redrob-browser/redrob-browser \
-            --no-sandbox --test-type --no-first-run --no-default-browser-check \
-            --enable-unsafe-swiftshader --user-data-dir="$(mktemp -d)" >launch.log 2>&1 &
-          sleep 30
-          if grep -qiE "SIGSEGV|Check failed|FATAL" launch.log; then
-            echo "the release binary did not start cleanly:" >&2
-            tail -30 launch.log >&2
-            exit 1
-          fi
-          # A browser that starts without its agent server is not a release: the side panel and new tab both
-          # depend on it. The .deb once shipped without BrowserOSServer/ and still passed the check above.
-          if grep -qE "Bundled server unavailable|Bundled binary also not found" launch.log; then
-            echo "the release binary started without its agent server:" >&2
-            grep -E "browseros:" launch.log | tail -10 >&2
-            exit 1
-          fi
-          pkill -f "$unpacked/opt/redrob" || true
-          pkill -f "Xvfb :99" || true
-
-      - name: the names Redrob Launcher installs from
-        # `redrob.py package` writes the .deb three times: out/artifacts carries only
-        # redrob-browser-<version>-linux-x86_64.deb, the one shape Redrob Launcher reads and the only name the
-        # release gets (redrob-launcher crates/core/src/platform.rs); out/deb keeps the Debian name for the apt
-        # pool/ and out/cdn the CDN's. This is the gate that the release copy is there and parses, so a renamed
-        # or mis-tokened asset fails here rather than shipping; the live sign-and-publish path runs the same
-        # check over the signed set before the shared publish job uploads it.
-        run: python3 scripts/check_asset_names.py --dir out/artifacts --stage build
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: redrob-browser-deb
-          path: out/artifacts/*
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: redrob-browser-cdn
-          path: out/cdn/*
-          if-no-files-found: error
-
-      - name: signed apt repository
-        # Only when a signing key exists. A step that fell back to an UNSIGNED repository when the secret was
-        # missing would publish an update channel whose every future update is whatever the network hands the
-        # user -- and it would look green while doing it. Skipping is the safe failure; `redrob.py repo` also
-        # refuses to build signed with no key rather than guessing.
-        if: ${{ env.REDROB_SIGNING_KEY != '' }}
-        env:
-          REDROB_SIGNING_KEY: ${{ secrets.REDROB_SIGNING_KEY }}
-        run: python3 scripts/redrob.py repo
-
-      - uses: actions/upload-artifact@v4
-        if: ${{ hashFiles('out/repo/dists/stable/InRelease') != '' }}
-        with:
-          name: redrob-apt-repo
-          path: out/repo/**
-          if-no-files-found: error
-
-      - name: draft the GitHub release
-        # Keyed on REDROB_VERSION, not on a tag ref: there is no tag trigger any more, and the version this
-        # build actually produced is the one in the file it was built from.
-        # A DRAFT, not a publish. Everything above is machine-checkable; whether a version is fit to hand to
-        # people is not, and the gaps in CHANGELOG.md -- Linux only, no other platform's update channel -- are
-        # exactly the kind of thing a human should have to look at before this goes out.
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          version="$(cat REDROB_VERSION)"
-          gh release create "v$version" out/artifacts/* \
-            --draft \
-            --title "Redrob Browser $version" \
-            --notes "Chromium $(cat CHROMIUM_VERSION). See CHANGELOG.md for what is in this version and what is missing from it."
-
-  # A separate job on a hosted runner, for the reason redrob-design gives for the same split: a failed upload can
-  # be retried without repeating the build it publishes -- and here that build is measured in HOURS, so the
-  # argument is stronger than it is for a twenty-minute one.
-  publish-cdn:
-    name: publish to cdn.redrob.ai
-    needs: build
-    # Pinned to the repository id, not its name. A name can move to another repository (this one was created as a
-    # second repository and renamed into place), and a fork or a later repository taking the name would then
-    # publish to the CDN with the organisation's credentials. The id belongs to this repository alone.
-    if: github.repository_id == '1407030105'
+  version:
+    name: Resolve the version
     runs-on: ubuntu-latest
-    env:
-      # The same variable names as every other product in this organisation. They are the convention rather than
-      # a choice being made here -- see .github/scripts/cdn-publish.sh.
-      REDROB_CDN_BUCKET: ${{ vars.REDROB_CDN_BUCKET }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.REDROB_CDN_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.REDROB_CDN_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: us-east-1
-      CDN_PUBLIC_HOST: cdn.redrob.ai
-      CDN_PREFIX: browser
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-
-      - id: version
-        run: echo "version=$(cat REDROB_VERSION)" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: redrob-browser-cdn
-          path: staging
-
-      - name: Publish the .deb to cdn.redrob.ai
+      - id: v
         env:
-          APP_VERSION: ${{ steps.version.outputs.version }}
-        run: bash .github/scripts/cdn-publish.sh staging
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE:-}" = tag ]; then
+            v="${GITHUB_REF_NAME#v}"
+          elif [ -n "$INPUT_VERSION" ]; then
+            v="$INPUT_VERSION"
+          else
+            echo "::error::not a tag push and no version input"; exit 1
+          fi
+          declared=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [ "${v%%-*}" != "$declared" ]; then
+            echo "::error::tag $v does not match Cargo.toml version $declared"; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/download-artifact@v4
-        # The repository only exists when the signing key does, and the build job skips it otherwise, so this
-        # download must not be fatal: an unprovisioned key should leave the .deb published and the update channel
-        # absent, not redden a release that built correctly.
-        continue-on-error: true
+  windows:
+    name: Windows x64
+    needs: version
+    runs-on: windows-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
         with:
-          name: redrob-apt-repo
-          path: repo
+          shared-key: release-windows-x64
+          cache-on-failure: true
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/gst
+          key: gstreamer-windows-${{ env.GSTREAMER_VERSION }}
+      - name: Install GStreamer (runtime and development files)
+        shell: pwsh
+        run: |
+          $v = $env:GSTREAMER_VERSION
+          $msis = @(
+            @{ Name = "gstreamer-1.0-msvc-x86_64-$v.msi"; Sha = $env:GSTREAMER_WINDOWS_MSI_SHA256 },
+            @{ Name = "gstreamer-1.0-devel-msvc-x86_64-$v.msi"; Sha = $env:GSTREAMER_WINDOWS_DEVEL_MSI_SHA256 }
+          )
+          foreach ($m in $msis) {
+            New-Item -ItemType Directory -Force (Join-Path $env:RUNNER_TEMP gst) | Out-Null
+            $file = Join-Path (Join-Path $env:RUNNER_TEMP gst) $m.Name
+            if (-not (Test-Path $file)) { Invoke-WebRequest -Uri "https://gstreamer.freedesktop.org/data/pkg/windows/$v/msvc/$($m.Name)" -OutFile $file }
+            $got = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant()
+            if ($got -ne $m.Sha) { throw "$($m.Name): SHA-256 $got, expected $($m.Sha)" }
+            # ADDLOCAL=ALL: every plugin set (good, bad, ugly, libav), not only the typical ones.
+            $p = Start-Process msiexec.exe -ArgumentList '/i', "`"$file`"", '/qn', '/norestart', 'ADDLOCAL=ALL' -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "$($m.Name): msiexec exit code $($p.ExitCode)" }
+          }
+          $root = [Environment]::GetEnvironmentVariable('GSTREAMER_1_0_ROOT_MSVC_X86_64', 'Machine')
+          if (-not $root) {
+            $root = @("$env:ProgramFiles\gstreamer\1.0\msvc_x86_64", 'C:\gstreamer\1.0\msvc_x86_64') |
+              Where-Object { Test-Path "$_\bin\gstreamer-1.0-0.dll" } | Select-Object -First 1
+          }
+          if (-not $root) { throw 'GStreamer installed, but its folder was not found' }
+          $root = $root.TrimEnd('\')
+          Write-Host "GStreamer at $root"
+          "GSTREAMER_ROOT=$root" >> $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=$root\lib\pkgconfig" >> $env:GITHUB_ENV
+          "$root\bin" >> $env:GITHUB_PATH
+      - name: Build (unsigned)
+        shell: pwsh
+        run: |
+          cargo build --release -p obscura-cli -p redrob-shell --features obscura-cli/render,redrob-shell/media
+          if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
+          # dist/app is the installed folder: the programs and GStreamer's DLLs side by side, the
+          # plugins in lib\gstreamer-1.0. GStreamer finds its plugins relative to its own DLL,
+          # and the window also points it there (crates/redrob-shell/src/media.rs).
+          $app = 'dist/app'
+          New-Item -ItemType Directory -Force $app | Out-Null
+          Copy-Item target/release/redrob-browser.exe, target/release/redrob-browser-worker.exe, target/release/redrob-browser-window.exe, target/release/redrob-browser-protected.exe, LICENSE, NOTICE $app
+          $gst = $env:GSTREAMER_ROOT
+          Copy-Item "$gst\bin\*.dll" $app
+          New-Item -ItemType Directory -Force "$app\lib\gstreamer-1.0" | Out-Null
+          Get-ChildItem "$gst\lib\gstreamer-1.0\*.dll" | Where-Object { $_.Name -notlike 'gstpython*' } |
+            Copy-Item -Destination "$app\lib\gstreamer-1.0"
+          if (Test-Path "$gst\lib\gio\modules") {
+            New-Item -ItemType Directory -Force "$app\lib\gio\modules" | Out-Null
+            Copy-Item "$gst\lib\gio\modules\*.dll" "$app\lib\gio\modules"
+          }
+          if (Test-Path "$gst\libexec\gstreamer-1.0") {
+            New-Item -ItemType Directory -Force "$app\libexec\gstreamer-1.0" | Out-Null
+            Copy-Item "$gst\libexec\gstreamer-1.0\*.exe" "$app\libexec\gstreamer-1.0"
+          }
+          if (Test-Path "$gst\etc\ssl") {
+            New-Item -ItemType Directory -Force "$app\etc" | Out-Null
+            Copy-Item -Recurse "$gst\etc\ssl" "$app\etc\ssl"
+          }
+          foreach ($need in 'gstreamer-1.0-0.dll', 'lib\gstreamer-1.0\gstplayback.dll', 'lib\gstreamer-1.0\gstcoreelements.dll') {
+            if (-not (Test-Path "$app\$need")) { throw "missing from the package: $need" }
+          }
+      - name: Log in to Azure (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign the executables
+        uses: redrob-labs/.github/actions/sign-windows@main
+        with:
+          files: dist/app/*.exe
+          description: ${{ env.PRODUCT }}
+          url: ${{ env.PRODUCT_URL }}
+          endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          account: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          cert-profile: ${{ secrets.ARTIFACT_SIGNING_CERT_PROFILE }}
+      - name: Package the zip and the installer
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Force dist/release | Out-Null
+          Compress-Archive -Path dist/app/* -DestinationPath "dist/release/redrob-browser-windows-x64-$env:VERSION.zip"
 
-      - name: Publish the apt repository to cdn.redrob.ai
-        if: ${{ hashFiles('repo/dists/stable/InRelease') != '' }}
-        run: bash .github/scripts/cdn-publish-apt.sh repo
+          dotnet tool install --global wix --version 4.0.6
+          if ($LASTEXITCODE -ne 0) { throw "wix install failed" }
+          ./installer/windows/payload.ps1 -Source dist/app -Output dist/payload.wxs
+          # MSI versions are numbers only: 0.2.0-rc.1 installs as 0.2.0.
+          $msiVersion = $env:VERSION.Split('-')[0]
+          wix build -arch x64 -d "Version=$msiVersion" `
+            -o "dist/release/redrob-browser-windows-x64-$env:VERSION.msi" `
+            installer/windows/redrob-browser.wxs dist/payload.wxs
+          if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
+          Remove-Item dist/release/*.wixpdb -ErrorAction SilentlyContinue
+      - name: Sign the installer
+        uses: redrob-labs/.github/actions/sign-windows@main
+        with:
+          files: dist/release/*.msi
+          description: ${{ env.PRODUCT }}
+          url: ${{ env.PRODUCT_URL }}
+          endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          account: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          cert-profile: ${{ secrets.ARTIFACT_SIGNING_CERT_PROFILE }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x64
+          path: dist/release/*
+          if-no-files-found: error
+
+  macos:
+    name: macOS arm64
+    needs: version
+    runs-on: macos-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-macos-arm64
+          cache-on-failure: true
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/gst
+          key: gstreamer-macos-${{ env.GSTREAMER_VERSION }}
+      - name: Install GStreamer (runtime and development files)
+        run: |
+          set -euo pipefail
+          v="$GSTREAMER_VERSION"
+          mkdir -p "$RUNNER_TEMP/gst" && cd "$RUNNER_TEMP/gst"
+          for f in "gstreamer-1.0-$v-universal.pkg" "gstreamer-1.0-devel-$v-universal.pkg"; do
+            [ -f "$f" ] || curl -fsSLO "https://gstreamer.freedesktop.org/data/pkg/osx/$v/$f"
+          done
+          printf '%s  %s\n' \
+            "$GSTREAMER_MACOS_PKG_SHA256" "gstreamer-1.0-$v-universal.pkg" \
+            "$GSTREAMER_MACOS_DEVEL_PKG_SHA256" "gstreamer-1.0-devel-$v-universal.pkg" | shasum -a 256 -c -
+          sudo installer -pkg "gstreamer-1.0-$v-universal.pkg" -target /
+          sudo installer -pkg "gstreamer-1.0-devel-$v-universal.pkg" -target /
+          gst=/Library/Frameworks/GStreamer.framework/Versions/1.0
+          echo "$gst/bin" >> "$GITHUB_PATH"
+          echo "PKG_CONFIG_PATH=$gst/lib/pkgconfig" >> "$GITHUB_ENV"
+      - name: Build
+        env:
+          # Room in the load commands for the bundle-relative paths package-macos.sh writes.
+          RUSTFLAGS: -C link-arg=-Wl,-headerpad_max_install_names
+        run: cargo build --release -p obscura-cli -p redrob-shell --features obscura-cli/render,redrob-shell/media
+      - name: Bundle, sign, notarize
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          APPLE_CODESIGN_CERT_P12_BASE64: ${{ secrets.APPLE_CODESIGN_CERT_P12_BASE64 }}
+          APPLE_CODESIGN_CERT_PASSWORD: ${{ secrets.APPLE_CODESIGN_CERT_PASSWORD }}
+          APPLE_NOTARY_API_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY_P8_BASE64 }}
+          APPLE_NOTARY_API_KEY_ID: ${{ secrets.APPLE_NOTARY_API_KEY_ID }}
+          APPLE_NOTARY_API_ISSUER_ID: ${{ secrets.APPLE_NOTARY_API_ISSUER_ID }}
+        run: bash scripts/package-macos.sh "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-arm64
+          path: dist/release/*
+          if-no-files-found: error
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-linux-${{ matrix.arch }}
+          cache-on-failure: true
+      # mold links the three large programs in a fraction of the time ld takes.
+      - uses: rui314/setup-mold@v1
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          # The 22.04 image ships LLVM's libunwind-14-dev, which conflicts with the
+          # libunwind-dev that libgstreamer1.0-dev needs.
+          sudo apt-get purge -y libunwind-14-dev || true
+          sudo apt-get install -y --no-install-recommends libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libxkbcommon-dev libwayland-dev libx11-dev libdbus-1-dev pkg-config
+      - name: Build and package
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          PLATFORM: linux-${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          cargo build --release -p obscura-cli -p redrob-shell --features obscura-cli/render,redrob-shell/media
+          name="redrob-browser-$PLATFORM-$VERSION"
+          mkdir -p "dist/$name" dist/release
+          cp target/release/redrob-browser target/release/redrob-browser-worker target/release/redrob-browser-window LICENSE NOTICE "dist/$name/"
+          tar -C dist -czf "dist/release/$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  publish:
+    needs: [version, windows, macos, linux]
+    if: always() && github.ref_type == 'tag' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped')
+    uses: redrob-labs/.github/.github/workflows/release-publish.yml@main
+    permissions:
+      contents: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+      title: Redrob Browser
+      launcher_manifest: true
+      publish: true

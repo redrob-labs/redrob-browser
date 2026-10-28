@@ -1,132 +1,92 @@
 {
-  "_comment": [
-    "Which release of the Redrob Group Design System this browser is built against.",
-    "",
-    "The browser cannot import the package: its window chrome is C++ and its WebUI is built by",
-    "build_webui from files in the source tree, so there is no node_modules at build time and no",
-    "resolver to ask. The values therefore have to be COPIED in -- and a copy with no pin is how two",
-    "products end up claiming the same brand while painting different colours.",
-    "",
-    "integrity is pinned as well as version because it is the only part a registry cannot restate. A",
-    "published npm version is immutable, so a tarball whose hash stops matching is a tampered or",
-    "corrupted fetch rather than a new release, and scripts/vendor_design_system.py refuses it.",
-    "",
-    "gitHead is the commit in redrob-labs/redrob-ui that produced this release. It is recorded so a",
-    "colour can be traced to the source that decided it, not just to a version number.",
-    "",
-    "To move to a new release: edit version, clear integrity, run",
-    "  python3 scripts/vendor_design_system.py --update --accept-new-integrity",
-    "and commit the pin together with the regenerated files. Never edit the vendored files by hand.",
-    "",
-    "The font files are here for the same reason as the values. design_tokens.css declares sixteen",
-    "@font-face rules pointing at fonts/, and a rule whose file is missing does not fail a build -- the",
-    "browser requests it, gets nothing, and silently renders in a different typeface. Listed are exactly",
-    "the families --font-sans and --font-mono can select: Pretendard's six weights, then Wanted Sans and",
-    "Noto Sans Devanagari, which the sans stack falls through to for a glyph Pretendard does not carry.",
-    "The serif and display cuts are deliberately NOT vendored: no stylesheet in this browser names",
-    "--font-serif, --font-serif-display or their Korean pairs, so shipping them would be 1.2 MB of",
-    "typeface in three bundles that nothing can reach. scripts/check_design_tokens.py holds that line.",
-    "",
-    "design_system.css is the COMPONENT layer -- 166 `.rr-*` class roots at 1.3.1. It is vendored for the same",
-    "reason as the tokens and with one extra constraint: it must be linked AFTER design_tokens.css,",
-    "because it is not only components. It corrects three roles the token sheet declares first",
-    "(--ink-muted on both themes, --surface-sunken on dark) and adds six more (--series-*, --tex-*,",
-    "--rake-*, --dia-rake). In the design system's own order the correction wins; linked the other way",
-    "round the browser would paint the superseded values and nothing would report it. Gate check 7",
-    "holds that order.",
-    "",
-    "It also carries rules that are NOT namespaced: ::selection, ::backdrop, li::marker, the",
-    "-webkit-autofill group, caret-color and accent-color on :root, and word-break for :lang(ko) and",
-    "hi. Those are intended -- they are the part of a page a class cannot reach -- but they are why",
-    "this file is a decision rather than an inert copy, and why the WebUI screens are captured after",
-    "adding it.",
-    "",
-    "preflight.css is deliberately NOT vendored. It is the design system's optional page-owner sheet",
-    "(html background, color-scheme, body font, a focus ring), and chrome_base.css is already this",
-    "browser's own version of exactly that, written against Chromium's constraints. Two sheets both",
-    "claiming `html` is the shadowing defect check 3 exists to catch."
-  ],
-  "_brand_assets_comment": [
-    "brand_assets is a SEPARATE pin from the npm package above, because the artwork has a different",
-    "source. @redrob-labs/ui deliberately ships no logo file: its Mark component takes src and darkSrc",
-    "as props, so the host supplies the files. The files come from the design system delivery, which is",
-    "not a registry -- there is nothing to fetch and no version to resolve, so these are recorded by",
-    "sha256 and by their path in the delivery instead.",
-    "",
-    "What the hash is FOR: 10-logo.md says the artwork is 'Never redrawn, restretched, recolored or",
-    "otherwise modified', and lists recoloring, substituting the gradient and adding an effect (shadow,",
-    "outline, blur) under Incorrect usage. A brand file is the one asset in this tree that a well-meaning",
-    "edit ruins silently -- nudge the blue, flatten the gradient, re-export at a smaller size, and every",
-    "gate still passes because nothing in a build reads a PNG's pixels. The hash is what fails.",
-    "",
-    "Why TWO files and not one recolored one: assets/Symbol/README.md assigns each variant a ground.",
-    "redrob-symbol.png is the brand gradient and belongs on white and light grounds; solid-white is flat",
-    "white and belongs on redrob-black and dark surfaces. A single file cannot serve both -- the",
-    "gradient symbol on the dark page measured 1.00:1 against its own ground -- and painting one file",
-    "through a CSS mask in a token colour is the recolor the spec forbids. So the page ships both and",
-    "swaps them on data-theme, which is exactly what the design system's own .rr-mark rules do.",
-    "",
-    "To move to new artwork: replace the files from the delivery and update the hashes here in the same",
-    "commit. Never edit a file under brand/."
-  ],
-  "brand_assets": {
-    "source": "redrob-design-system/assets/Symbol",
-    "spec": "10-logo.md, assets/Symbol/README.md",
-    "files": {
-      "sources/chrome/browser/resources/redrob/brand/redrob-symbol.png": {
-        "delivery_path": "assets/Symbol/redrob-symbol.png",
-        "sha256": "6069834a96076b2dee6d26f189f0e8b09513f15012cfad49498ac4e0a049e09e",
-        "ground": "light"
-      },
-      "sources/chrome/browser/resources/redrob/brand/redrob-symbol-solid-white.png": {
-        "delivery_path": "assets/Symbol/redrob-symbol-solid-white.png",
-        "sha256": "78a8224f61f44a6bc91a2f3479b4082e63b30e1dc898d55a4c6118d15191daba",
-        "ground": "dark"
-      }
-    }
-  },
+  "_why": "egui has no CSS, so the window reads @redrob-labs/ui's tokens.json (every token resolved per theme) and its icons, vendored here and pinned by sha256. Update by copying from the package's dist/ and refreshing these hashes.",
   "package": "@redrob-labs/ui",
   "version": "1.8.0",
-  "integrity": "sha512-3RwrHRytDMbKNpevn5Ydn8a/kF1i5QseimlkQkhrTvRIqOmQG/BENcm3EztX0+C6FHxvo9heSDkml/fGHQZuJw==",
-  "gitHead": "865233123cbdc88724f0eb65c3c9d554ad953841",
-  "_derived_comment": [
-    "`files` below are byte copies of the release. `derived` is the one artifact this script TRANSFORMS,",
-    "and it is kept separate so nobody mistakes a generated file for a copy.",
-    "",
-    "The design system ships its 260 glyphs as a React module. This browser's WebUI is TypeScript under",
-    "Trusted Types with no React, no bundler and no node_modules at build time, and assigning innerHTML",
-    "there throws -- so a glyph cannot be imported, and its geometry has to arrive as DATA in the source",
-    "tree before the build, exactly as the stylesheets and the fonts do.",
-    "",
-    "What was there before: 16 glyphs drawn by hand at 16x16 with ROUND caps at stroke 1.3 to 1.6.",
-    "45-icons.md specifies a 24x24 box on a 20px live area, stroke 2 unscaled, butt caps ('Never round'),",
-    "miter joins at limit 3 and every diagonal at 40 degrees, and the delivery ships 260 glyphs (252 before 1.1.0) on exactly",
-    "that geometry. Nothing enforced it, so the hand-drawn set had been drifting from the brand since it",
-    "was written -- and two glyphs were recorded as having no design-system equivalent which, on a re-read",
-    "of the spec's own group table, they do. Gate check 9 now fails on any hand-drawn glyph.",
-    "",
-    "The transform is deliberately narrow: it copies every attribute verbatim, never reformatting a",
-    "coordinate, and it REFUSES rather than emit a glyph whose element count does not match the source --",
-    "a dropped path is a glyph that still draws, which is the failure nobody would see."
-  ],
-  "derived": {
-    "icons": {
-      "source": "dist/icons/index.js",
-      "destination": "sources/chrome/browser/resources/redrob/design_icons.ts"
+  "files": [
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/tokens.json",
+      "sha256": "aabe1df4aca6e07bf45c3eee7156dedb194bb01402ef84ad0db2873874bb252f"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/redrob-browser-icon.svg",
+      "sha256": "017841c0c856d6b6e7eab34c8db6f6f48d53ce20d915732c7eeafbecf43d2c29"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/back.svg",
+      "sha256": "3f6e2291a724a3081a78e1f03fd45d05634a6c986b9551883230c5ad3631723b"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/close.svg",
+      "sha256": "cf4923c7e774a70df92be15643d7ffd3d186f9824865c300c48e2194ec070a91"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/code.svg",
+      "sha256": "2ffaee668bb0f39023a64061500894ac8681b79ee80a9f047f3529ce7f46b6d6"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/download.svg",
+      "sha256": "50b5af027ddd6fc45785ff21eab22d129947b6db950a9fdd257c0a889b59e0d5"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/forward.svg",
+      "sha256": "ea48f0469c2f41c185446573e8d30e3ce99412e1792e00afe2cf5a1024c9c6fb"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/globe.svg",
+      "sha256": "1a3b9ab71743d75947a6781a19732f2b3f96d50c075c2865a7fd7bd12ecc87cc"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/history.svg",
+      "sha256": "fec746ba12fe6251b1c484e4a8114d32fb75b9f7791c0689b6baf6c2c76e4264"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/key.svg",
+      "sha256": "946bb4e8fbbb8081bb1a9e63534a7bb58c10946e9422ea4e6ba4a8d8f6c26db2"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/lock.svg",
+      "sha256": "7773a9ead1d4a80dc1766ee66f4fc847dce5b05cc76dbb6907b0bc6f21baa07e"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/more.svg",
+      "sha256": "c30cb9a8ae72135dc2c267e2c31a97b40f589958eedf2654d1b724879ff97ca0"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/plus.svg",
+      "sha256": "ed2d32192dd4b94e714822ad4c9d7fe386c804d82694550c504684b1e7b5eb9d"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/refresh.svg",
+      "sha256": "3495c1eca44825e698f09b48f079b3ec65e63bc5286cfd7c591cb6d2e8fbb3b0"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/search.svg",
+      "sha256": "cdfc1a252961b3ff24fe8fcf0421e55fda76a4cb4d6c4388f4823bce00374bb6"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/settings.svg",
+      "sha256": "b703f542c89e59c088ee9a5b5550cdbf0d58efa7795c0b2a1cf45a2bfe436be5"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/signIn.svg",
+      "sha256": "e720125f89baa50560b2ffa0d7d3dee381b228e7fae37e4577e4258006a396fc"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/sparkle.svg",
+      "sha256": "3b2db1931c413f754f510ce21b18e3da98b97e132b90e21eba05c5f0cc33e938"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/star.svg",
+      "sha256": "8f19c324a51c6ceb5284ebd6abd49e488a380673e6a007b9386928ad429d4e65"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/user.svg",
+      "sha256": "a067a8658f47178fbf2e127720433b0ed8e8f731012ab9f7552c5c86fc0efbc3"
     }
-  },
-  "files": {
-    "dist/native/redrob_tokens.h": "sources/chrome/browser/ui/color/redrob_design_tokens.h",
-    "dist/styles/tokens.css": "sources/chrome/browser/resources/redrob/design_tokens.css",
-    "dist/styles/system.css": "sources/chrome/browser/resources/redrob/design_system.css",
-    "dist/styles/tokens.json": "redrob/design_tokens.json",
-    "dist/fonts/Pretendard-Light.woff2": "sources/chrome/browser/resources/redrob/fonts/Pretendard-Light.woff2",
-    "dist/fonts/Pretendard-Regular.woff2": "sources/chrome/browser/resources/redrob/fonts/Pretendard-Regular.woff2",
-    "dist/fonts/Pretendard-Medium.woff2": "sources/chrome/browser/resources/redrob/fonts/Pretendard-Medium.woff2",
-    "dist/fonts/Pretendard-SemiBold.woff2": "sources/chrome/browser/resources/redrob/fonts/Pretendard-SemiBold.woff2",
-    "dist/fonts/Pretendard-Bold.woff2": "sources/chrome/browser/resources/redrob/fonts/Pretendard-Bold.woff2",
-    "dist/fonts/Pretendard-ExtraBold.woff2": "sources/chrome/browser/resources/redrob/fonts/Pretendard-ExtraBold.woff2",
-    "dist/fonts/WantedSans-Variable.woff2": "sources/chrome/browser/resources/redrob/fonts/WantedSans-Variable.woff2",
-    "dist/fonts/NotoSansDevanagari-Variable.woff2": "sources/chrome/browser/resources/redrob/fonts/NotoSansDevanagari-Variable.woff2"
+  ],
+  "font": {
+    "file": "crates/redrob-shell/assets/fonts/WantedSans-Regular.ttf",
+    "license": "SIL OFL 1.1",
+    "sha256": "849b51938f5779e7526fcf09b3c737e9d401261d111f626280af16423bf19f40"
   }
 }

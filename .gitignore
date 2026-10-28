@@ -1,14 +1,2 @@
-# The Chromium checkout and the toolchain are fetched, never committed. They are tens of gigabytes,
-# and a vendored copy is what makes a fork impossible to move forward: the version we build is
-# CHROMIUM_VERSION and the delta we own is patches/.
-/chromium/
-/depot_tools/
-/out/
-
-# Build and run scratch.
-*.log
-__pycache__/
-.env
-
-# uv builds the vendored bos_build package in place
-vendor/browseros/browseros.egg-info/
+target/
+.DS_Store

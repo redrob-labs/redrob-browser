@@ -1,9 +1,0 @@
-# Network traffic annotation for the agent-server manager.
-
-substitutions:
-  - description: |
-      Annotation text.
-    regex:
-      pattern: "sender: \"BrowserOS Server Manager\""
-      replace: "sender: \"Redrob Agent Server Manager\""
-      count: 1

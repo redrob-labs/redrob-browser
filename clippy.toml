@@ -1,0 +1,4 @@
+# The engine passes layout and paint state as explicit arguments and keeps
+# nested map types inline; these two thresholds match that style.
+too-many-arguments-threshold = 32
+type-complexity-threshold = 2000
