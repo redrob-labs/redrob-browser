@@ -183,6 +183,8 @@ pub enum Event {
     },
     /// Pixels may have changed: repaint tiles.
     Invalidate,
+    /// Only these document rects (CSS px: x, y, width, height) changed.
+    Damage(Vec<[f32; 4]>),
     /// A different document: drop every tile.
     Navigated(String),
     /// Same document, new URL (fragment or history API).
@@ -638,9 +640,7 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
                 "Input.dispatchMouseEvent",
                 json!({ "type": kind, "x": x, "y": y, "button": button, "clickCount": clicks, "modifiers": modifiers }),
             );
-            if kind == "mouseReleased" {
-                st.emit(tab, Event::Invalidate);
-            }
+            // What a click changes comes back as screencast damage.
         }
         Op::Wheel {
             x,
@@ -674,12 +674,10 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
             st.c.call(s, "Input.dispatchKeyEvent", p).await?;
             if down {
                 report_scroll(st, tab).await;
-                st.emit(tab, Event::Invalidate);
             }
         }
         Op::Text(text) => {
             st.c.send(s, "Input.insertText", json!({ "text": text }));
-            st.emit(tab, Event::Invalidate);
         }
         Op::DevtoolsOpen => {
             st.c.call(s, "Network.enable", json!({})).await?;
@@ -724,7 +722,6 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
                     text,
                 },
             );
-            st.emit(tab, Event::Invalidate);
         }
         Op::GetDom => {
             let d =
@@ -968,7 +965,7 @@ async fn on_event(st: &mut State, ev: Value) {
                     json!({ "sessionId": id }),
                 );
             }
-            st.emit(tab, Event::Invalidate);
+            st.emit(tab, frame_event(&p["damage"]));
         }
         "Page.frameNavigated" => {
             let frame = &p["frame"];
@@ -1107,6 +1104,23 @@ async fn on_event(st: &mut State, ev: Value) {
         }
         _ => {}
     }
+}
+
+/// A signal frame's `damage` (Redrob extension) names the document rects
+/// that changed; without it the whole page may have.
+fn frame_event(damage: &Value) -> Event {
+    let Some(rects) = damage.as_array() else {
+        return Event::Invalidate;
+    };
+    let mut out = Vec::with_capacity(rects.len());
+    for r in rects {
+        let field = |name: &str| r[name].as_f64().map(|v| v as f32);
+        match (field("x"), field("y"), field("width"), field("height")) {
+            (Some(x), Some(y), Some(w), Some(h)) => out.push([x, y, w, h]),
+            _ => return Event::Invalidate,
+        }
+    }
+    Event::Damage(out)
 }
 
 async fn report_scroll(st: &mut State, tab: TabId) {

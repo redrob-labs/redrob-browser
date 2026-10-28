@@ -10,6 +10,9 @@ use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use obscura_dom::tree::DomTree;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+
+mod damage;
+pub use damage::DamageSnapshot;
 use tiny_skia::{
     Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, Point, Rect, SpreadMode,
     Transform,
@@ -31,6 +34,8 @@ use crate::dom::{
 
 const DEFAULT_RESOURCE_CACHE_ENTRIES: usize = 512;
 const DEFAULT_RESOURCE_CACHE_BYTES: usize = 64 * 1024 * 1024;
+/// Changed resource keys remembered between two paint-damage frames.
+const MAX_CHANGED_RESOURCES: usize = 256;
 /// CSS `content:url(...)` is only discoverable after cascade. Remember a
 /// bounded set of successful selections so repeated prepares can seed their
 /// intrinsic geometry before that cascade instead of always laying out twice.
@@ -190,6 +195,11 @@ pub struct RenderResourceCache {
     sync_misses: Vec<(String, Option<ImageRequestProfile>, bool)>,
     sync_miss_keys: HashSet<String>,
     loader: Box<dyn RenderResourceLoader>,
+    /// Keys whose bytes, miss or cancellation changed since the last
+    /// [`Self::take_changed_resources`], for paint damage. Bounded: past
+    /// [`MAX_CHANGED_RESOURCES`] it only records that too much changed.
+    changed: Vec<String>,
+    changed_overflow: bool,
 }
 
 impl Default for RenderResourceCache {
@@ -234,6 +244,24 @@ impl RenderResourceCache {
             sync_misses: Vec::new(),
             sync_miss_keys: HashSet::new(),
             loader: Box::new(loader),
+            changed: Vec::new(),
+            changed_overflow: false,
+        }
+    }
+
+    /// Resource keys that appeared, failed, were cancelled or were evicted
+    /// since the previous call. `None`: more than can be listed changed.
+    pub fn take_changed_resources(&mut self) -> Option<Vec<String>> {
+        let overflow = std::mem::take(&mut self.changed_overflow);
+        let changed = std::mem::take(&mut self.changed);
+        (!overflow).then_some(changed)
+    }
+
+    fn note_changed(&mut self, key: &str) {
+        if self.changed.len() >= MAX_CHANGED_RESOURCES {
+            self.changed_overflow = true;
+        } else if !self.changed.iter().any(|known| known == key) {
+            self.changed.push(key.to_string());
         }
     }
 
@@ -351,8 +379,18 @@ impl RenderResourceCache {
     pub fn seed_shared(&mut self, url: String, bytes: Arc<[u8]>) {
         let url = network_resource_url(&url);
         self.stopped.remove(&url);
+        // The page layer seeds the same response again on later loads; the
+        // same bytes paint the same pixels, so that is not paint damage.
+        let unchanged = matches!(
+            self.entries.get(&url),
+            Some(CachedResource::Bytes { bytes: cached, .. })
+                if Arc::ptr_eq(cached, &bytes) || **cached == *bytes
+        ) && !self.changed.iter().any(|known| known == &url);
         self.remove(&url);
-        self.insert_bytes(url, bytes);
+        self.insert_bytes(url.clone(), bytes);
+        if unchanged {
+            self.changed.retain(|known| known != &url);
+        }
     }
 
     /// Keep a canceled request stopped until this document's cache is replaced.
@@ -365,6 +403,7 @@ impl RenderResourceCache {
             return;
         }
         self.remove(&key);
+        self.note_changed(&key);
         self.stopped.insert(key);
     }
 
@@ -646,6 +685,7 @@ impl RenderResourceCache {
             self.remove_entry(&oldest);
         }
         self.retained_bytes = self.retained_bytes.saturating_add(bytes.len());
+        self.note_changed(&url);
         self.order.push_back(url.clone());
         self.entries.insert(
             url,
@@ -668,6 +708,7 @@ impl RenderResourceCache {
             self.remove_entry(&oldest);
         }
         self.order.push_back(url.clone());
+        self.note_changed(&url);
         self.entries
             .insert(url, CachedResource::Missing(std::time::Instant::now()));
     }
@@ -680,6 +721,7 @@ impl RenderResourceCache {
     }
 
     fn remove_entry(&mut self, url: &str) {
+        self.note_changed(url);
         if let Some(CachedResource::Bytes { bytes, .. }) = self.entries.remove(url) {
             self.retained_bytes = self.retained_bytes.saturating_sub(bytes.len());
         }
@@ -1087,6 +1129,14 @@ pub struct PreparedRender {
     // Owned by the same document preparation as the final layout; replaced on
     // every rebuild and dropped with it on navigation or full invalidation.
     query_seed: Option<RetainedStyleMaps>,
+    /// Changes whenever layout, styles or selected images change, so paint
+    /// damage can reuse what it measured of an unchanged frame.
+    paint_epoch: u64,
+}
+
+fn next_paint_epoch() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl PreparedRender {
@@ -1186,6 +1236,7 @@ impl PreparedRender {
         self.animation_sample = sample;
         self.has_active_waapi_animations = timeline.has_active_waapi(sample.time);
         self.active_animation_impact = timeline.active_waapi_effect_impact(sample.time);
+        self.paint_epoch = next_paint_epoch();
         true
     }
 
@@ -3090,6 +3141,7 @@ pub fn prepare_dom_with_retained_styles_with_animation_state(
                         }
                         previous.selected_images.insert(id, selected);
                     }
+                    previous.paint_epoch = next_paint_epoch();
                     return Some(previous);
                 }
             }
@@ -3331,6 +3383,7 @@ fn prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
         svg_fonts,
         layout: laid,
         query_seed,
+        paint_epoch: next_paint_epoch(),
     })
 }
 

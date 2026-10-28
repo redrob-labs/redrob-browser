@@ -1326,6 +1326,7 @@ impl ObscuraJsRuntime {
             gs.stylesheet_cache = obscura_render::StylesheetCache::default();
             gs.dynamic_fonts.clear();
             gs.canvas_surfaces.clear();
+            gs.damage_snapshot = obscura_render::DamageSnapshot::default();
             gs.scroll_offset = (0.0, 0.0);
             gs.element_scroll_offsets.clear();
             gs.scroll_generation = 0;
@@ -1941,6 +1942,61 @@ impl ObscuraJsRuntime {
                 region,
                 surface_color,
                 &canvas_surfaces,
+            )
+        })
+    }
+
+    /// Document-space rects whose pixels may differ from the previous call
+    /// (Redrob screencast damage). Prepares the live render exactly as a
+    /// capture would. `None` means the whole document: the first call for a
+    /// document, a page that cannot be prepared, or a change damage cannot
+    /// attribute to boxes (viewport, resources, fonts, surface color).
+    #[cfg(feature = "render")]
+    pub fn take_paint_damage(&self, surface_color: [u8; 4]) -> Option<Vec<obscura_render::Rect>> {
+        let mut state = self.state.borrow_mut();
+        with_sync_render_loading_disabled(&mut state, |state| {
+            if ensure_resolved_scroll(state).is_none() {
+                state.damage_snapshot = obscura_render::DamageSnapshot::default();
+                return None;
+            }
+            let ObscuraState {
+                dom,
+                prepared_render,
+                render_resources,
+                resolved_scroll,
+                canvas_surfaces,
+                dynamic_fonts,
+                damage_snapshot,
+                activity_generation,
+                ..
+            } = state;
+            let (Some(dom), Some(prepared), Some((_, scroll))) = (
+                dom.as_ref(),
+                prepared_render.as_ref(),
+                resolved_scroll.as_ref(),
+            ) else {
+                *damage_snapshot = obscura_render::DamageSnapshot::default();
+                return None;
+            };
+            let extra = (dynamic_fonts.len() as u64).rotate_left(32)
+                ^ u64::from(u32::from_le_bytes(surface_color));
+            let changed_resources = render_resources.take_changed_resources();
+            damage_snapshot.update(
+                dom,
+                prepared,
+                scroll,
+                extra,
+                *activity_generation,
+                changed_resources.as_deref(),
+                &|node| {
+                    use std::hash::Hasher as _;
+                    let surface = canvas_surfaces.get(&node)?;
+                    let mut hash = std::hash::DefaultHasher::new();
+                    hash.write_u32(surface.width);
+                    hash.write_u32(surface.height);
+                    hash.write(surface.pixels.as_ref());
+                    Some(hash.finish())
+                },
             )
         })
     }

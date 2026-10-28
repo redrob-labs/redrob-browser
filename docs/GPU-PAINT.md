@@ -24,9 +24,21 @@ on the GPU.
 - Missing tiles are requested with `Page.captureScreenshot` and a `clip` in document coordinates
   plus `captureBeyondViewport`, so no tile depends on the current scroll position.
 - Scrolling moves tiles. It paints nothing new until an uncovered tile is needed.
-- Any event that can change pixels (navigation, load, input other than the wheel, a screencast
-  frame) bumps the generation. Old tiles stay on screen until their replacement arrives, so the
-  page never flashes blank.
+- Only what changed is repainted. The window listens to a signal-only screencast
+  (`Page.startScreencast` with `redrobSignalOnly`), whose frames carry no pixels. Each frame's
+  `damage` lists the document rects (CSS px `{x, y, width, height}`) that may paint differently
+  since the previous frame, and only tiles touching them are asked for again. A frame without
+  `damage`, navigation, load, resize and a scale change repaint every tile. Input does not: what a
+  click or key changes comes back as damage. Old tiles stay on screen until their replacement
+  arrives, so the page never flashes blank.
+- The engine finds damage like Chromium's paint invalidation, by comparing what two prepared
+  frames paint (`obscura-render/src/paint/damage.rs`): each box's visual rect in document
+  coordinates (border box, fragments, pseudo boxes, transforms, scroll movement, outline, shadow,
+  clipped by its ancestors' overflow) with its computed style and paint inputs (clips, scroll
+  offset, selected image, canvas pixels, text, attributes, form state, paint order), and each line
+  of shaped text by its glyphs. A box or line that changed damages its old and new rects. A
+  changed image damages the boxes that name it. A changed viewport, font set or canvas
+  background, or a resource nothing on the page names, damages everything.
 
 Known gap: `position: fixed` and `sticky` content is baked into tiles and scrolls with them. After
 scrolling settles the window repaints the viewport tile row so fixed content lands where it belongs.

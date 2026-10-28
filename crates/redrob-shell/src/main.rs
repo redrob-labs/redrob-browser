@@ -573,6 +573,7 @@ impl Window {
                     }
                 }
                 Event::Invalidate => t.tiles.invalidate(),
+                Event::Damage(rects) => t.tiles.invalidate_rects(&rects),
                 Event::Console { level, text } => t.devtools.log(&level, text),
                 Event::NetRequest { id, method, url } => t.devtools.request(id, method, url),
                 Event::NetResponse { id, status, mime } => t.devtools.response(&id, status, mime),
