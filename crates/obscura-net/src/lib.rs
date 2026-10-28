@@ -5,6 +5,7 @@ pub mod blocklist;
 pub mod client;
 pub mod cookies;
 pub mod encoding;
+pub mod identity;
 pub mod interceptor;
 pub mod robots;
 #[cfg(feature = "stealth")]

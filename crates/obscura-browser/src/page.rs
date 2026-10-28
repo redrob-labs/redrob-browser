@@ -300,6 +300,12 @@ pub struct Page {
     /// latency does not incorrectly advance newly-created animations.
     document_timeline_origin: std::time::Instant,
     navigation_timing: NavigationTiming,
+    /// Set once the current navigation's document is parsed and installed.
+    /// A navigation deadline that passes after this keeps the page instead
+    /// of failing it.
+    document_committed: bool,
+    /// Second half of a [`Page::commit_navigation`] still to run.
+    pending_finish: Option<(crate::lifecycle::WaitUntil, tokio::time::Instant, String)>,
     /// Optional page-scoped ceiling for an end-to-end navigation. Automation
     /// frontends set this from their request timeout so a caller asking for a
     /// 50-second navigation is not silently cut off by the process default.
@@ -1135,6 +1141,8 @@ impl Page {
             pending_download: None,
             document_timeline_origin: std::time::Instant::now(),
             navigation_timing: NavigationTiming::default(),
+            document_committed: false,
+            pending_finish: None,
             navigation_timeout: None,
             navigation_chain_limit: None,
             history: Vec::new(),
@@ -2404,6 +2412,28 @@ impl Page {
             None => return,
         };
 
+        // Module scripts are fetched by the module loader when each one is
+        // reached, in document order, after the previous script ran. Start
+        // every parser-discovered entry module now so the downloads overlap;
+        // the loader picks up the in-flight response. (Drive has 30+ entry
+        // modules: one round trip each was several seconds on a slow link.)
+        let module_entries: Vec<String> = all_scripts
+            .iter()
+            .filter(|script| matches!(script.kind, ScriptKind::Module))
+            .filter_map(|script| {
+                let src = script.src.as_deref()?;
+                url::Url::parse(&script.base_url)
+                    .ok()
+                    .and_then(|base| base.join(src).ok())
+                    .map(|url| url.to_string())
+            })
+            .collect();
+        if !module_entries.is_empty() {
+            if let Some(js) = &self.js {
+                js.prefetch_entry_modules(module_entries);
+            }
+        }
+
         // HTML scripts have an "already started" flag. Mark every
         // parser-discovered script before running page code so React/Next
         // hydration can move or hoist those nodes without appendChild
@@ -2522,7 +2552,7 @@ impl Page {
         // 16 is well above the per-host pool ceiling most browsers use
         // and matches what real Chrome does for a given origin.
         use futures::StreamExt as _;
-        let fetch_stream = futures::stream::iter(fetch_futures).buffer_unordered(16);
+        let fetch_stream = futures::stream::iter(fetch_futures).buffer_unordered(32);
         let fetch_results = match tokio::time::timeout_at(
             script_deadline,
             fetch_stream.collect::<Vec<_>>(),
@@ -3077,12 +3107,98 @@ impl Page {
         .await
         {
             Ok(r) => r,
-            Err(_) => {
-                self.lifecycle = crate::lifecycle::LifecycleState::Failed;
-                Err(PageError::NetworkError(format!(
-                    "navigation exceeded {nav_timeout_ms}ms deadline"
-                )))
+            Err(_) => self.navigation_deadline_reached(nav_timeout_ms),
+        };
+        if result.is_ok() {
+            self.push_history(self.url_string());
+        }
+        result
+    }
+
+    /// The end-to-end navigation deadline expired. A document that already
+    /// committed is the page now, still running scripts and loading
+    /// subresources: a browser keeps it and stops waiting, so it counts as
+    /// loaded. Only a navigation that never got its document fails.
+    fn navigation_deadline_reached(&mut self, nav_timeout_ms: u64) -> Result<(), PageError> {
+        if self.document_committed {
+            tracing::warn!(
+                "navigation passed its {nav_timeout_ms}ms deadline after the document committed; \
+                 keeping the page as loaded"
+            );
+            if matches!(
+                self.lifecycle,
+                LifecycleState::Loading | LifecycleState::DomContentLoaded
+            ) {
+                self.lifecycle = LifecycleState::Loaded;
             }
+            return Ok(());
+        }
+        self.lifecycle = crate::lifecycle::LifecycleState::Failed;
+        Err(PageError::NetworkError(format!(
+            "navigation exceeded {nav_timeout_ms}ms deadline"
+        )))
+    }
+
+    /// First half of a two-phase navigation: fetch and parse the document,
+    /// install its stylesheets and create its realm, then stop before page
+    /// scripts run. Returns `true` when a document committed and
+    /// [`Page::finish_navigation`] must run next; `false` when the navigation
+    /// is already complete (about:, a download). Between the two calls the
+    /// page can be painted and inspected like any parsed document, which is
+    /// how a viewer shows a page before its scripts and images are done.
+    pub async fn commit_navigation(
+        &mut self,
+        url_str: &str,
+        wait_until: crate::lifecycle::WaitUntil,
+    ) -> Result<bool, PageError> {
+        if url_is_file_scheme(url_str) && !self.context.allow_file_access {
+            return Err(PageError::NetworkError(format!(
+                "file:// navigation is disabled for this browser context: {url_str}"
+            )));
+        }
+        let nav_timeout = self.navigation_timeout();
+        let nav_timeout_ms = duration_millis_u64(nav_timeout);
+        let deadline = tokio::time::Instant::now() + nav_timeout;
+        self.pending_finish = None;
+        let committed = match tokio::time::timeout_at(
+            deadline,
+            self.navigate_single_commit(url_str, "GET", "", ""),
+        )
+        .await
+        {
+            Ok(result) => result?,
+            Err(_) => {
+                self.navigation_deadline_reached(nav_timeout_ms)?;
+                false
+            }
+        };
+        if committed {
+            self.pending_finish = Some((wait_until, deadline, url_str.to_string()));
+        } else {
+            self.follow_navigation_chain(url_str.to_string(), "GET".to_string(), wait_until)
+                .await?;
+            self.push_history(self.url_string());
+        }
+        Ok(committed)
+    }
+
+    /// Second half of a navigation started by [`Page::commit_navigation`]:
+    /// run the document's scripts, reach DOMContentLoaded/load and follow
+    /// any script-driven navigation chain, under the same deadline.
+    pub async fn finish_navigation(&mut self) -> Result<(), PageError> {
+        let Some((wait_until, deadline, url)) = self.pending_finish.take() else {
+            return Ok(());
+        };
+        let nav_timeout_ms = duration_millis_u64(self.navigation_timeout());
+        let result = match tokio::time::timeout_at(deadline, async {
+            self.navigate_single_finish(wait_until).await?;
+            self.follow_navigation_chain(url, "GET".to_string(), wait_until)
+                .await
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => self.navigation_deadline_reached(nav_timeout_ms),
         };
         if result.is_ok() {
             self.push_history(self.url_string());
@@ -3367,63 +3483,73 @@ impl Page {
                 "file:// navigation is disabled for this browser context: {url_str}"
             )));
         }
-        let mut current_url = url_str.to_string();
-        let mut current_method = method.to_string();
-        let mut current_body = body.to_string();
-        let mut document_referrer = initial_referrer.to_string();
+        let current_url = url_str.to_string();
+        let current_method = method.to_string();
+        self.navigate_single(&current_url, wait_until, method, body, initial_referrer)
+            .await?;
+        self.follow_navigation_chain(current_url, current_method, wait_until)
+            .await
+    }
+
+    /// Follow navigations the loaded document started on its own
+    /// (`location.href = ...` in a script or handler), up to the chain limit.
+    async fn follow_navigation_chain(
+        &mut self,
+        mut current_url: String,
+        mut current_method: String,
+        wait_until: crate::lifecycle::WaitUntil,
+    ) -> Result<(), PageError> {
         let chain_limit = self.navigation_chain_limit();
         for chain in 0..chain_limit {
+            let Some((next_url, next_method, next_body)) = self.take_pending_navigation() else {
+                break;
+            };
+            if cross_scheme_to_file(&current_url, &next_url) {
+                // SOP gate. A web page must not be able to drive
+                // a navigation to file:// and then read the loaded
+                // document. Without this an http(s) page sets
+                // window.onload, calls location.href = "file:..."
+                // and harvests document.body from a local file
+                // once the new document loads.
+                tracing::warn!(
+                    "blocking JS-initiated cross-scheme navigation to file: {} -> {}",
+                    current_url,
+                    next_url,
+                );
+                break;
+            }
+            tracing::info!(
+                "JS-triggered navigation chain: {} {} -> {}",
+                current_method,
+                current_url,
+                next_url
+            );
+            let document_referrer = self
+                .url
+                .as_ref()
+                .and_then(|source| {
+                    Url::parse(&next_url)
+                        .ok()
+                        .map(|target| navigation_referrer(source, &target))
+                })
+                .unwrap_or_default();
+            if chain + 1 == chain_limit {
+                // Hit the cap and the page still wants to keep
+                // chaining. Surface that as an error instead of
+                // returning Ok(()) so callers can distinguish a
+                // successful load from a navigation storm.
+                return Err(PageError::TooManyClientNavigations(chain_limit));
+            }
             self.navigate_single(
-                &current_url,
+                &next_url,
                 wait_until,
-                &current_method,
-                &current_body,
+                &next_method,
+                &next_body,
                 &document_referrer,
             )
             .await?;
-            if let Some((next_url, next_method, next_body)) = self.take_pending_navigation() {
-                if cross_scheme_to_file(&current_url, &next_url) {
-                    // SOP gate. A web page must not be able to drive
-                    // a navigation to file:// and then read the loaded
-                    // document. Without this an http(s) page sets
-                    // window.onload, calls location.href = "file:..."
-                    // and harvests document.body from a local file
-                    // once the new document loads.
-                    tracing::warn!(
-                        "blocking JS-initiated cross-scheme navigation to file: {} -> {}",
-                        current_url,
-                        next_url,
-                    );
-                    break;
-                }
-                tracing::info!(
-                    "JS-triggered navigation chain: {} {} -> {}",
-                    current_method,
-                    current_url,
-                    next_url
-                );
-                document_referrer = self
-                    .url
-                    .as_ref()
-                    .and_then(|source| {
-                        Url::parse(&next_url)
-                            .ok()
-                            .map(|target| navigation_referrer(source, &target))
-                    })
-                    .unwrap_or_default();
-                current_url = next_url;
-                current_method = next_method;
-                current_body = next_body;
-                if chain + 1 == chain_limit {
-                    // Hit the cap and the page still wants to keep
-                    // chaining. Surface that as an error instead of
-                    // returning Ok(()) so callers can distinguish a
-                    // successful load from a navigation storm.
-                    return Err(PageError::TooManyClientNavigations(chain_limit));
-                }
-                continue;
-            }
-            break;
+            current_url = next_url;
+            current_method = next_method;
         }
         Ok(())
     }
@@ -3436,8 +3562,27 @@ impl Page {
         body: &str,
         referrer: &str,
     ) -> Result<(), PageError> {
+        if self
+            .navigate_single_commit(url_str, method, body, referrer)
+            .await?
+        {
+            self.navigate_single_finish(wait_until).await?;
+        }
+        Ok(())
+    }
+
+    /// Fetch, parse and commit one document. Returns `true` when a document
+    /// committed and its scripts still have to run.
+    async fn navigate_single_commit(
+        &mut self,
+        url_str: &str,
+        method: &str,
+        body: &str,
+        referrer: &str,
+    ) -> Result<bool, PageError> {
         let url = Url::parse(url_str).map_err(|e| PageError::InvalidUrl(e.to_string()))?;
         self.navigation_timing = NavigationTiming::default();
+        self.document_committed = false;
 
         let previous_url = self.url.clone();
         let previous_lifecycle = self.lifecycle;
@@ -3494,9 +3639,10 @@ impl Page {
                     }
                 }
             }
-            return Ok(());
+            return Ok(false);
         }
 
+        let phase_started = std::time::Instant::now();
         self.navigation_timing.record("fetchStart");
         let response = if url.scheme() == "data" {
             let content_type = url_str
@@ -3529,6 +3675,7 @@ impl Page {
             PageError::NetworkError(e.to_string())
         })?;
         self.navigation_timing.record("responseEnd");
+        tracing::debug!(target: "obscura_browser::timing", "document fetched in {}ms", phase_started.elapsed().as_millis());
 
         if let Some(name) = download_filename(&response) {
             // A file, not a document: the current page stays where it was.
@@ -3543,7 +3690,7 @@ impl Page {
                 LifecycleState::Loading => LifecycleState::Loaded,
                 other => other,
             };
-            return Ok(());
+            return Ok(false);
         }
 
         // Store binary main resources (images, PDFs, octet-stream) base64 so
@@ -3596,6 +3743,7 @@ impl Page {
         self.dom = Some(dom);
         self.init_js();
         let author_stylesheets = self.fetch_stylesheets().await;
+        tracing::debug!(target: "obscura_browser::timing", "stylesheets at {}ms", phase_started.elapsed().as_millis());
 
         // Install fetched CSS in native DOM state. Cross-origin bytes must not
         // become observable through a synthetic style element or page global.
@@ -3640,6 +3788,18 @@ impl Page {
                 "delete globalThis.__obscura_registerLinkedStylesheet",
             );
         }
+        self.document_committed = true;
+        tracing::debug!(target: "obscura_browser::timing", "document committed at {}ms", phase_started.elapsed().as_millis());
+        Ok(true)
+    }
+
+    /// Run the committed document's scripts and reach DOMContentLoaded and
+    /// load. Second half of [`Page::navigate_single_commit`].
+    async fn navigate_single_finish(
+        &mut self,
+        wait_until: crate::lifecycle::WaitUntil,
+    ) -> Result<(), PageError> {
+        let phase_started = std::time::Instant::now();
         self.document_timeline_origin = std::time::Instant::now();
         #[cfg(feature = "render")]
         if let Some(js) = &self.js {
@@ -3673,10 +3833,12 @@ impl Page {
         // listeners never registered, frameworks never bootstrapped,
         // page.click() handlers were no-ops. Now scripts run regardless
         // of waitUntil and DCL means "DOM parsed AND scripts executed".
+        tracing::debug!(target: "obscura_browser::timing", "parser warmup done at {}ms", phase_started.elapsed().as_millis());
         self.execute_scripts().await;
         // The document's own scripts are the common source of storage writes,
         // so the profile is flushed once they have run, not before.
         self.context.save_local_storage();
+        tracing::debug!(target: "obscura_browser::timing", "scripts done at {}ms", phase_started.elapsed().as_millis());
 
         #[cfg(feature = "render")]
         {
@@ -3694,6 +3856,7 @@ impl Page {
         }
 
         self.lifecycle = LifecycleState::DomContentLoaded;
+        tracing::debug!(target: "obscura_browser::timing", "DOMContentLoaded at {}ms", phase_started.elapsed().as_millis());
 
         // Before any `wait_until` can return, because the frames belong to the
         // document rather than to one readiness level. Puppeteer and Playwright
@@ -3714,6 +3877,7 @@ impl Page {
             }
         }
 
+        tracing::debug!(target: "obscura_browser::timing", "load at {}ms", phase_started.elapsed().as_millis());
         self.lifecycle = LifecycleState::Loaded;
 
         if matches!(
@@ -5127,7 +5291,7 @@ impl Page {
             .unwrap_or_default();
         let nav_timeout = self.navigation_timeout();
         let nav_timeout_ms = duration_millis_u64(nav_timeout);
-        tokio::time::timeout(
+        match tokio::time::timeout(
             nav_timeout,
             self.navigate_with_wait_post_inner(
                 url,
@@ -5138,10 +5302,10 @@ impl Page {
             ),
         )
         .await
-        .map_err(|_| {
-            self.lifecycle = crate::lifecycle::LifecycleState::Failed;
-            PageError::NetworkError(format!("navigation exceeded {nav_timeout_ms}ms deadline"))
-        })??;
+        {
+            Ok(result) => result?,
+            Err(_) => self.navigation_deadline_reached(nav_timeout_ms)?,
+        }
         self.push_history(self.url_string());
         Ok(())
     }

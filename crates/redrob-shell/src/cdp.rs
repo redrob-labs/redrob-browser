@@ -289,6 +289,41 @@ impl Conn {
         Ok(reply.get("result").cloned().unwrap_or(Value::Null))
     }
 
+    /// Send a command whose reply comes much later (a navigation replies at
+    /// load) without holding up this loop, so frames and tiles of the
+    /// loading page are handled meanwhile. `on_error` gets an error reply.
+    fn call_in_background(
+        &mut self,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+        on_error: impl FnOnce(String) + Send + 'static,
+    ) {
+        self.next += 1;
+        let id = self.next;
+        let mut msg = json!({ "id": id, "method": method, "params": params });
+        if let Some(s) = session {
+            msg["sessionId"] = json!(s);
+        }
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().unwrap().insert(id, tx);
+        if let Err(e) = self.out.send(msg.to_string()) {
+            on_error(e.to_string());
+            return;
+        }
+        let method = method.to_string();
+        tokio::spawn(async move {
+            let error = match tokio::time::timeout(Duration::from_secs(60), rx).await {
+                Ok(Ok(reply)) => reply.get("error").map(|err| format!("{method}: {err}")),
+                Ok(Err(_)) => None,
+                Err(_) => Some(format!("{method}: timed out")),
+            };
+            if let Some(error) = error {
+                on_error(error);
+            }
+        });
+    }
+
     /// Fire and forget: input events do not need their reply awaited.
     fn send(&mut self, session: Option<&str>, method: &str, params: Value) {
         self.next += 1;
@@ -320,6 +355,24 @@ struct State {
 impl State {
     fn emit(&self, tab: TabId, event: Event) {
         let _ = self.updates.send(Update { tab, event });
+    }
+
+    /// Navigate a tab without waiting for its load inside this loop.
+    fn navigate_in_background(
+        &mut self,
+        tab: TabId,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+    ) {
+        let updates = self.updates.clone();
+        self.c
+            .call_in_background(session, method, params, move |error| {
+                let _ = updates.send(Update {
+                    tab,
+                    event: Event::Error(error),
+                });
+            });
     }
 
     fn session(&self, tab: TabId) -> Option<String> {
@@ -509,8 +562,12 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
         if url != "about:blank" {
             let session = st.session(tab);
             st.emit(tab, Event::Loading(true));
-            st.c.call(session.as_deref(), "Page.navigate", json!({ "url": url }))
-                .await?;
+            st.navigate_in_background(
+                tab,
+                session.as_deref(),
+                "Page.navigate",
+                json!({ "url": url }),
+            );
         }
         return Ok(());
     }
@@ -556,13 +613,13 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
         }
         Op::Navigate(url) => {
             st.emit(tab, Event::Loading(true));
-            st.c.call(s, "Page.navigate", json!({ "url": url })).await?;
+            st.navigate_in_background(tab, s, "Page.navigate", json!({ "url": url }));
         }
         Op::Back => step_history(st, &session, -1).await?,
         Op::Forward => step_history(st, &session, 1).await?,
         Op::Reload => {
             st.emit(tab, Event::Loading(true));
-            st.c.call(s, "Page.reload", json!({})).await?;
+            st.navigate_in_background(tab, s, "Page.reload", json!({}));
         }
         Op::Stop => {
             st.c.call(s, "Page.stopLoading", json!({})).await?;

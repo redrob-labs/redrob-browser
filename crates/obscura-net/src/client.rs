@@ -615,10 +615,9 @@ impl Resolve for SsrfGuardResolver {
         let allow = self.allow_private || env_allows_private_network();
         let host = name.as_str().to_string();
         Box::pin(async move {
-            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+            let addrs = lookup_host_cached(&host)
                 .await
-                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?
-                .collect();
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
             if !allow {
                 if let Some(bad) = addrs.iter().find(|sa| is_forbidden_ip(sa.ip())) {
                     return Err(format!(
@@ -633,6 +632,43 @@ impl Resolve for SsrfGuardResolver {
             Ok(iter)
         })
     }
+}
+
+/// How long a successful name lookup is reused. The system resolver has no
+/// cache on most Linux hosts, so every new connection paid a full DNS round
+/// trip (250ms for en.wikipedia.org from this host). Chrome keeps host-cache
+/// entries for about a minute; this matches it.
+const DNS_CACHE_TTL: Duration = Duration::from_secs(60);
+const DNS_CACHE_CAPACITY: usize = 512;
+
+fn dns_cache() -> &'static std::sync::Mutex<HashMap<String, (Instant, Vec<SocketAddr>)>> {
+    static CACHE: OnceLock<std::sync::Mutex<HashMap<String, (Instant, Vec<SocketAddr>)>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Resolve `host` through the system resolver, reusing an answer younger than
+/// [`DNS_CACHE_TTL`]. Callers apply the SSRF deny-set to the returned
+/// addresses every time, cached or not.
+pub(crate) async fn lookup_host_cached(host: &str) -> std::io::Result<Vec<SocketAddr>> {
+    let key = host.to_ascii_lowercase();
+    if let Some((stored, addrs)) = dns_cache().lock().unwrap().get(&key) {
+        if stored.elapsed() < DNS_CACHE_TTL {
+            return Ok(addrs.clone());
+        }
+    }
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, 0)).await?.collect();
+    if !addrs.is_empty() {
+        let mut cache = dns_cache().lock().unwrap();
+        if cache.len() >= DNS_CACHE_CAPACITY {
+            cache.retain(|_, (stored, _)| stored.elapsed() < DNS_CACHE_TTL);
+            if cache.len() >= DNS_CACHE_CAPACITY {
+                cache.clear();
+            }
+        }
+        cache.insert(key, (Instant::now(), addrs.clone()));
+    }
+    Ok(addrs)
 }
 
 pub(crate) fn validate_url(url: &Url, allow_private_network: bool) -> Result<(), ObscuraNetError> {
@@ -988,7 +1024,7 @@ fn chrome_client_hints(ua: &str) -> (String, String) {
         .nth(1)
         .and_then(|s| s.split('.').next())
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(145);
+        .unwrap_or(crate::identity::CHROME_MAJOR as usize);
     const GREASE_CHARS: [char; 11] = [' ', '(', ':', '-', '.', '/', ')', ';', '=', '?', '_'];
     const GREASE_VER: [&str; 3] = ["8", "99", "24"];
     const PERMS: [[usize; 3]; 6] = [
@@ -1047,9 +1083,7 @@ impl ObscuraHttpClient {
             client: tokio::sync::OnceCell::new(),
             proxy_url: proxy_url.map(|s| s.to_string()),
             cookie_jar,
-            user_agent: RwLock::new(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36".to_string(),
-            ),
+            user_agent: RwLock::new(crate::identity::DEFAULT_USER_AGENT.to_string()),
             accept_language: RwLock::new("en-US,en;q=0.9".to_string()),
             extra_headers: RwLock::new(HashMap::new()),
             interceptor: RwLock::new(None),
@@ -1071,6 +1105,11 @@ impl ObscuraHttpClient {
                     // Read a folded header line (obs-fold) as browsers do instead of
                     // failing the response.
                     .http1_allow_obsolete_multiline_headers_in_responses(true)
+                    // HTTP/2 is negotiated over ALPN; let the receive window
+                    // grow with the link so large images and downloads are not
+                    // capped at the 64 KiB initial window per round trip.
+                    .http2_adaptive_window(true)
+                    .pool_idle_timeout(Duration::from_secs(90))
                     // SSRF guard: reject hostnames that resolve to a private/loopback IP.
                     .dns_resolver(Arc::new(SsrfGuardResolver::new(self.allow_private_network)));
 
@@ -1471,9 +1510,12 @@ impl ObscuraHttpClient {
                     HeaderValue::from_static("1"),
                 );
             }
-            headers.insert(USER_AGENT, HeaderValue::from_str(&ua).unwrap_or_else(|_| {
-                HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
-            }));
+            headers.insert(
+                USER_AGENT,
+                HeaderValue::from_str(&ua).unwrap_or_else(|_| {
+                    HeaderValue::from_static(crate::identity::DEFAULT_USER_AGENT)
+                }),
+            );
             headers.insert(
                 reqwest::header::ACCEPT,
                 HeaderValue::from_static(request.accept()),
@@ -1587,11 +1629,14 @@ impl ObscuraHttpClient {
             }
 
             let in_flight = InFlightGuard::new(&self.in_flight);
+            let sent_at = Instant::now();
             let resp = req_builder.send().await.map_err(|e| {
                 ObscuraNetError::Network(format!("{}: {}", current_url, error_chain(&e)))
             })?;
+            let headers_ms = sent_at.elapsed().as_millis();
 
             let status = resp.status();
+            let version = resp.version();
             validate_reqwest_cors_response(
                 &request,
                 &current_url,
@@ -1643,6 +1688,17 @@ impl ObscuraHttpClient {
             let body_bytes =
                 read_reqwest_body_limited(resp, &current_url, request.max_response_bytes).await?;
             drop(in_flight);
+            tracing::debug!(
+                target: "obscura_net::timing",
+                "{} {} {:?} {}B headers={}ms total={}ms in_flight={}",
+                status.as_u16(),
+                current_url,
+                version,
+                body_bytes.len(),
+                headers_ms,
+                sent_at.elapsed().as_millis(),
+                self.in_flight.load(Ordering::Relaxed),
+            );
 
             let response = Response {
                 url: current_url,

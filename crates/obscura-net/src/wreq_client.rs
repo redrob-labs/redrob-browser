@@ -37,10 +37,9 @@ impl wreq::dns::Resolve for SsrfGuardResolver {
         let allow = self.allow_private || env_allows_private_network();
         let host = name.as_str().to_string();
         Box::pin(async move {
-            let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+            let addrs = crate::client::lookup_host_cached(&host)
                 .await
-                .map_err(|e| -> Box<dyn Error + Send + Sync> { Box::new(e) })?
-                .collect();
+                .map_err(|e| -> Box<dyn Error + Send + Sync> { Box::new(e) })?;
             if !allow {
                 if let Some(bad) = addrs.iter().find(|sa| is_forbidden_ip(sa.ip())) {
                     return Err(format!(

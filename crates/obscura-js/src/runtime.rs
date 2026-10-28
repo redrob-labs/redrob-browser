@@ -2351,6 +2351,61 @@ impl ObscuraJsRuntime {
     /// backlog and started at the next event-loop turn. Returns the number
     /// of requests started now.
     #[cfg(feature = "render")]
+    /// Start fetching parser-discovered entry modules now, through the page
+    /// transport and with the request profile the module loader uses for an
+    /// entry, so their downloads overlap instead of running one after another
+    /// as each module script is reached. Returns how many were started.
+    pub fn prefetch_entry_modules(&self, urls: Vec<String>) -> usize {
+        if tokio::runtime::Handle::try_current().is_err() {
+            return 0;
+        }
+        let mut state = self.state.borrow_mut();
+        let Some(document_url) = url::Url::parse(&state.url).ok() else {
+            return 0;
+        };
+        let http_client = state.http_client.clone();
+        #[cfg(feature = "stealth")]
+        let stealth_client = state.stealth_client.clone();
+        let callbacks = state.callbacks.clone();
+        let mut started = 0;
+        for raw in urls {
+            if state.module_prefetch.contains_key(&raw) {
+                continue;
+            }
+            let Ok(target) = url::Url::parse(&raw) else {
+                continue;
+            };
+            if !matches!(target.scheme(), "http" | "https") {
+                continue;
+            }
+            let http_client = http_client.clone();
+            #[cfg(feature = "stealth")]
+            let stealth_client = stealth_client.clone();
+            let callbacks = callbacks.clone();
+            let document_url = document_url.clone();
+            let task = tokio::spawn(async move {
+                let request = ResourceRequest::module_script(&document_url, &document_url);
+                #[cfg(feature = "stealth")]
+                if let Some(stealth) = stealth_client {
+                    return stealth
+                        .fetch_resource_with_callbacks(&target, request, callbacks.as_deref())
+                        .await
+                        .map_err(|e| e.to_string());
+                }
+                let Some(client) = http_client else {
+                    return Err("no page transport".to_string());
+                };
+                client
+                    .fetch_resource_with_callbacks(&target, request, callbacks.as_deref())
+                    .await
+                    .map_err(|e| e.to_string())
+            });
+            state.module_prefetch.insert(raw, task);
+            started += 1;
+        }
+        started
+    }
+
     pub fn start_render_resource_loads(
         &self,
         requests: Vec<(String, Option<crate::ops::ImageRequestProfile>, bool)>,
