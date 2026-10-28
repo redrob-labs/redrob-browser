@@ -18,6 +18,12 @@ pub struct TileKey {
 pub struct TileCache {
     tiles: HashMap<TileKey, (u64, TextureHandle)>,
     pending: HashSet<(TileKey, u64)>,
+    /// Tiles rendered on the GPU (`gpu` feature), as egui native textures.
+    #[cfg(feature = "gpu")]
+    native: HashMap<TileKey, (u64, egui::TextureId)>,
+    /// Native textures no longer shown, for the GPU painter to free.
+    #[cfg(feature = "gpu")]
+    released: Vec<egui::TextureId>,
     /// Bumped whenever page pixels may have changed. A tile painted at an
     /// older generation stays on screen until its replacement arrives.
     pub generation: u64,
@@ -32,6 +38,8 @@ impl TileCache {
     /// A new document: nothing from the old one may stay on screen.
     pub fn clear(&mut self) {
         self.tiles.clear();
+        #[cfg(feature = "gpu")]
+        self.released.extend(self.native.drain().map(|(_, (_, id))| id));
         self.invalidate();
     }
 
@@ -58,6 +66,8 @@ impl TileCache {
         let mut out = Vec::new();
         for &k in keys {
             let fresh = self.tiles.get(&k).is_some_and(|(g, _)| *g == generation);
+            #[cfg(feature = "gpu")]
+            let fresh = fresh || self.native.get(&k).is_some_and(|(g, _)| *g == generation);
             if !fresh && self.pending.insert((k, generation)) {
                 out.push(k);
             }
@@ -67,6 +77,14 @@ impl TileCache {
 
     pub fn insert(&mut self, ctx: &egui::Context, key: TileKey, generation: u64, image: egui::ColorImage) {
         self.pending.remove(&(key, generation));
+        #[cfg(feature = "gpu")]
+        if let Some((g, id)) = self.native.get(&key).copied() {
+            if g > generation {
+                return;
+            }
+            self.native.remove(&key);
+            self.released.push(id);
+        }
         match self.tiles.get_mut(&key) {
             Some((g, _)) if *g > generation => {}
             Some((g, tex)) => {
@@ -80,6 +98,37 @@ impl TileCache {
         }
     }
 
+    /// For a GPU-rendered tile at `generation`: `None` when a newer tile is
+    /// already shown, else the tile's current native texture to draw into again.
+    #[cfg(feature = "gpu")]
+    pub fn native_slot(&mut self, key: TileKey, generation: u64) -> Option<Option<egui::TextureId>> {
+        self.pending.remove(&(key, generation));
+        if self.tiles.get(&key).is_some_and(|(g, _)| *g > generation) {
+            return None;
+        }
+        match self.native.get(&key) {
+            Some((g, _)) if *g > generation => None,
+            Some((_, id)) => Some(Some(*id)),
+            None => Some(None),
+        }
+    }
+
+    /// Show a GPU-rendered tile. It replaces any PNG tile at `key`.
+    #[cfg(feature = "gpu")]
+    pub fn insert_native(&mut self, key: TileKey, generation: u64, id: egui::TextureId) {
+        self.tiles.remove(&key);
+        if let Some((_, old)) = self.native.insert(key, (generation, id)) {
+            if old != id {
+                self.released.push(old);
+            }
+        }
+    }
+
+    #[cfg(feature = "gpu")]
+    pub fn take_released(&mut self) -> Vec<egui::TextureId> {
+        std::mem::take(&mut self.released)
+    }
+
     /// Draw every cached tile that overlaps `rect`, offset by the scroll position.
     pub fn paint(&self, painter: &egui::Painter, rect: Rect, scroll: (f32, f32)) {
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
@@ -89,6 +138,14 @@ impl TileCache {
             let tile = Rect::from_min_size(min, vec2(TILE, TILE));
             if tile.intersects(rect) {
                 painter.image(tex.id(), tile, uv, Color32::WHITE);
+            }
+        }
+        #[cfg(feature = "gpu")]
+        for (key, (_, id)) in &self.native {
+            let min = rect.min + vec2(key.tx as f32 * TILE - scroll.0, key.ty as f32 * TILE - scroll.1);
+            let tile = Rect::from_min_size(min, vec2(TILE, TILE));
+            if tile.intersects(rect) {
+                painter.image(*id, tile, uv, Color32::WHITE);
             }
         }
     }
