@@ -10976,7 +10976,7 @@ fn download_filename(response: &obscura_net::Response) -> Option<String> {
         .path_segments()
         .and_then(|mut s| s.next_back().map(str::to_string))
         .filter(|s| !s.is_empty())
-        .map(|s| percent_decode(&s));
+        .map(|s| percent_decode_filename(&s));
     let name = from_header.or(from_url).unwrap_or_else(|| "download".to_string());
     Some(sanitize_filename(&name))
 }
@@ -10989,7 +10989,7 @@ fn disposition_filename(value: &str) -> Option<String> {
         if let Some(rest) = lower.strip_prefix("filename*=") {
             let raw = &part[part.len() - rest.len()..];
             let encoded = raw.splitn(3, '\'').nth(2).unwrap_or(raw);
-            return Some(percent_decode(encoded.trim_matches('"')));
+            return Some(percent_decode_filename(encoded.trim_matches('"')));
         }
         if lower.starts_with("filename=") {
             plain = Some(part["filename=".len()..].trim().trim_matches('"').to_string());
@@ -10998,7 +10998,7 @@ fn disposition_filename(value: &str) -> Option<String> {
     plain.filter(|s| !s.is_empty())
 }
 
-fn percent_decode(s: &str) -> String {
+fn percent_decode_filename(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

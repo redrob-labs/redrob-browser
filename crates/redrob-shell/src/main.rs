@@ -447,7 +447,7 @@ impl Window {
                     if let Some((username, reply)) = self.agent_logins.remove(&tab) {
                         let _ = reply.send(serde_json::json!({ "outcome": outcome, "username": username }));
                     } else if outcome != "filled" {
-                        self.notice = Some(t("No sign-in form on this page.").to_string());
+                        self.notice = Some(i18n::t("No sign-in form on this page.").to_string());
                     }
                 }
                 Event::Opened { .. }
@@ -938,7 +938,7 @@ impl Window {
                     for (i, t) in self.model.tabs.iter().enumerate() {
                         let mut label: String = t.label().chars().take(24).collect();
                         if label.is_empty() {
-                            label = t("New tab").to_string();
+                            label = i18n::t("New tab").to_string();
                         }
                         if t.loading {
                             label = format!("... {label}");
@@ -953,7 +953,7 @@ impl Window {
                         if r.middle_clicked() {
                             close = Some(i);
                         }
-                        if ui.small_button("x").on_hover_text(t("Close tab")).clicked() {
+                        if ui.small_button("x").on_hover_text(i18n::t("Close tab")).clicked() {
                             close = Some(i);
                         }
                     }
