@@ -1,11 +1,16 @@
 # Release -- the redrob-labs shape (redrob-labs/.github/workflow-templates/release.yml), with
 # Redrob Browser's build steps.
 #
-#   tag v<version> on main  ->  version  ->  macos / windows / linux (build, then sign)  ->  publish
+#   tag v<version> on main  ->  version  ->  macos / windows / linux x64 + arm64 (build, then sign)  ->  publish
 #
 # Each package holds three programs: redrob-browser (CLI and engine), redrob-browser-worker and
-# redrob-browser-window (the window). Video uses GStreamer: Linux builds with it; macOS and
-# Windows build without the `media` feature until the GStreamer runtime is bundled (docs/MEDIA.md).
+# redrob-browser-window (the window). Every platform builds with video (the `media` feature,
+# GStreamer, docs/MEDIA.md). Linux uses the distribution's GStreamer; macOS and Windows install the
+# official GStreamer runtime in the job and carry it inside the package, so nothing else has to be
+# installed to play video.
+#
+# Asset names are redrob-browser-<platform>-<version>.<ext>; the window's updater matches the
+# prefix redrob-browser-<platform>- (crates/redrob-shell/src/updater.rs).
 
 name: release
 
@@ -26,6 +31,13 @@ env:
   PRODUCT: Redrob Browser
   PRODUCT_URL: https://github.com/${{ github.repository }}
   CARGO_TERM_COLOR: always
+  # The official GStreamer packages the macOS and Windows jobs install and bundle, pinned with the
+  # SHA-256 sums gstreamer.freedesktop.org publishes beside them.
+  GSTREAMER_VERSION: 1.26.11
+  GSTREAMER_MACOS_PKG_SHA256: bd6f3ad26126a6db726608f15622efaec383d672daa0a309775785d42c326f9c
+  GSTREAMER_MACOS_DEVEL_PKG_SHA256: 5135a7bc87a75a512f0017aa52e9774d47a5d3eca380210b815d5dc0648bb7bf
+  GSTREAMER_WINDOWS_MSI_SHA256: 31cbc21fa0950b5c1e79c80959b2799805cb05a7a35953a13a9f790776137605
+  GSTREAMER_WINDOWS_DEVEL_MSI_SHA256: af0a0720692052aaf5fb0cf2847ef34a87016ef0f914328d516f049e6c86f587
 
 jobs:
   version:
@@ -64,12 +76,65 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install GStreamer (runtime and development files)
+        shell: pwsh
+        run: |
+          $v = $env:GSTREAMER_VERSION
+          $msis = @(
+            @{ Name = "gstreamer-1.0-msvc-x86_64-$v.msi"; Sha = $env:GSTREAMER_WINDOWS_MSI_SHA256 },
+            @{ Name = "gstreamer-1.0-devel-msvc-x86_64-$v.msi"; Sha = $env:GSTREAMER_WINDOWS_DEVEL_MSI_SHA256 }
+          )
+          foreach ($m in $msis) {
+            $file = Join-Path $env:RUNNER_TEMP $m.Name
+            Invoke-WebRequest -Uri "https://gstreamer.freedesktop.org/data/pkg/windows/$v/msvc/$($m.Name)" -OutFile $file
+            $got = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant()
+            if ($got -ne $m.Sha) { throw "$($m.Name): SHA-256 $got, expected $($m.Sha)" }
+            # ADDLOCAL=ALL: every plugin set (good, bad, ugly, libav), not only the typical ones.
+            $p = Start-Process msiexec.exe -ArgumentList '/i', "`"$file`"", '/qn', '/norestart', 'ADDLOCAL=ALL' -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "$($m.Name): msiexec exit code $($p.ExitCode)" }
+          }
+          $root = [Environment]::GetEnvironmentVariable('GSTREAMER_1_0_ROOT_MSVC_X86_64', 'Machine')
+          if (-not $root) {
+            $root = @("$env:ProgramFiles\gstreamer\1.0\msvc_x86_64", 'C:\gstreamer\1.0\msvc_x86_64') |
+              Where-Object { Test-Path "$_\bin\gstreamer-1.0-0.dll" } | Select-Object -First 1
+          }
+          if (-not $root) { throw 'GStreamer installed, but its folder was not found' }
+          $root = $root.TrimEnd('\')
+          Write-Host "GStreamer at $root"
+          "GSTREAMER_ROOT=$root" >> $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=$root\lib\pkgconfig" >> $env:GITHUB_ENV
+          "$root\bin" >> $env:GITHUB_PATH
       - name: Build (unsigned)
         shell: pwsh
         run: |
-          cargo build --release -p obscura-cli -p redrob-shell --features obscura-cli/render
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item target/release/redrob-browser.exe, target/release/redrob-browser-worker.exe, target/release/redrob-browser-window.exe dist/
+          cargo build --release -p obscura-cli -p redrob-shell --features obscura-cli/render,redrob-shell/media
+          if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
+          # dist/app is the installed folder: the programs and GStreamer's DLLs side by side, the
+          # plugins in lib\gstreamer-1.0. GStreamer finds its plugins relative to its own DLL,
+          # and the window also points it there (crates/redrob-shell/src/media.rs).
+          $app = 'dist/app'
+          New-Item -ItemType Directory -Force $app | Out-Null
+          Copy-Item target/release/redrob-browser.exe, target/release/redrob-browser-worker.exe, target/release/redrob-browser-window.exe, LICENSE, NOTICE $app
+          $gst = $env:GSTREAMER_ROOT
+          Copy-Item "$gst\bin\*.dll" $app
+          New-Item -ItemType Directory -Force "$app\lib\gstreamer-1.0" | Out-Null
+          Get-ChildItem "$gst\lib\gstreamer-1.0\*.dll" | Where-Object { $_.Name -notlike 'gstpython*' } |
+            Copy-Item -Destination "$app\lib\gstreamer-1.0"
+          if (Test-Path "$gst\lib\gio\modules") {
+            New-Item -ItemType Directory -Force "$app\lib\gio\modules" | Out-Null
+            Copy-Item "$gst\lib\gio\modules\*.dll" "$app\lib\gio\modules"
+          }
+          if (Test-Path "$gst\libexec\gstreamer-1.0") {
+            New-Item -ItemType Directory -Force "$app\libexec\gstreamer-1.0" | Out-Null
+            Copy-Item "$gst\libexec\gstreamer-1.0\*.exe" "$app\libexec\gstreamer-1.0"
+          }
+          if (Test-Path "$gst\etc\ssl") {
+            New-Item -ItemType Directory -Force "$app\etc" | Out-Null
+            Copy-Item -Recurse "$gst\etc\ssl" "$app\etc\ssl"
+          }
+          foreach ($need in 'gstreamer-1.0-0.dll', 'lib\gstreamer-1.0\gstplayback.dll', 'lib\gstreamer-1.0\gstcoreelements.dll') {
+            if (-not (Test-Path "$app\$need")) { throw "missing from the package: $need" }
+          }
       - name: Log in to Azure (OIDC)
         uses: azure/login@v3
         with:
@@ -79,19 +144,39 @@ jobs:
       - name: Sign the executables
         uses: redrob-labs/.github/actions/sign-windows@main
         with:
-          files: dist/*.exe
+          files: dist/app/*.exe
           description: ${{ env.PRODUCT }}
           url: ${{ env.PRODUCT_URL }}
           endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
           account: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
           cert-profile: ${{ secrets.ARTIFACT_SIGNING_CERT_PROFILE }}
-      - name: Package
+      - name: Package the zip and the installer
         shell: pwsh
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           New-Item -ItemType Directory -Force dist/release | Out-Null
-          Compress-Archive -Path dist/*.exe, LICENSE, NOTICE -DestinationPath "dist/release/redrob-browser-windows-x64-$env:VERSION.zip"
+          Compress-Archive -Path dist/app/* -DestinationPath "dist/release/redrob-browser-windows-x64-$env:VERSION.zip"
+
+          dotnet tool install --global wix --version 4.0.6
+          if ($LASTEXITCODE -ne 0) { throw "wix install failed" }
+          ./installer/windows/payload.ps1 -Source dist/app -Output dist/payload.wxs
+          # MSI versions are numbers only: 0.2.0-rc.1 installs as 0.2.0.
+          $msiVersion = $env:VERSION.Split('-')[0]
+          wix build -arch x64 -d "Version=$msiVersion" `
+            -o "dist/release/redrob-browser-windows-x64-$env:VERSION.msi" `
+            installer/windows/redrob-browser.wxs dist/payload.wxs
+          if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
+          Remove-Item dist/release/*.wixpdb -ErrorAction SilentlyContinue
+      - name: Sign the installer
+        uses: redrob-labs/.github/actions/sign-windows@main
+        with:
+          files: dist/release/*.msi
+          description: ${{ env.PRODUCT }}
+          url: ${{ env.PRODUCT_URL }}
+          endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          account: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          cert-profile: ${{ secrets.ARTIFACT_SIGNING_CERT_PROFILE }}
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows-x64
@@ -106,8 +191,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install GStreamer (runtime and development files)
+        run: |
+          set -euo pipefail
+          v="$GSTREAMER_VERSION"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "https://gstreamer.freedesktop.org/data/pkg/osx/$v/gstreamer-1.0-$v-universal.pkg"
+          curl -fsSLO "https://gstreamer.freedesktop.org/data/pkg/osx/$v/gstreamer-1.0-devel-$v-universal.pkg"
+          printf '%s  %s\n' \
+            "$GSTREAMER_MACOS_PKG_SHA256" "gstreamer-1.0-$v-universal.pkg" \
+            "$GSTREAMER_MACOS_DEVEL_PKG_SHA256" "gstreamer-1.0-devel-$v-universal.pkg" | shasum -a 256 -c -
+          sudo installer -pkg "gstreamer-1.0-$v-universal.pkg" -target /
+          sudo installer -pkg "gstreamer-1.0-devel-$v-universal.pkg" -target /
+          gst=/Library/Frameworks/GStreamer.framework/Versions/1.0
+          echo "$gst/bin" >> "$GITHUB_PATH"
+          echo "PKG_CONFIG_PATH=$gst/lib/pkgconfig" >> "$GITHUB_ENV"
       - name: Build
-        run: cargo build --release -p obscura-cli -p redrob-shell --features obscura-cli/render
+        env:
+          # Room in the load commands for the bundle-relative paths package-macos.sh writes.
+          RUSTFLAGS: -C link-arg=-Wl,-headerpad_max_install_names
+        run: cargo build --release -p obscura-cli -p redrob-shell --features obscura-cli/render,redrob-shell/media
       - name: Bundle, sign, notarize
         env:
           VERSION: ${{ needs.version.outputs.version }}
@@ -124,9 +227,16 @@ jobs:
           if-no-files-found: error
 
   linux:
-    name: Linux x64
+    name: Linux ${{ matrix.arch }}
     needs: version
-    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -138,16 +248,17 @@ jobs:
       - name: Build and package
         env:
           VERSION: ${{ needs.version.outputs.version }}
+          PLATFORM: linux-${{ matrix.arch }}
         run: |
           set -euo pipefail
           cargo build --release -p obscura-cli -p redrob-shell --features obscura-cli/render,redrob-shell/media
-          name="redrob-browser-linux-x64-$VERSION"
+          name="redrob-browser-$PLATFORM-$VERSION"
           mkdir -p "dist/$name" dist/release
           cp target/release/redrob-browser target/release/redrob-browser-worker target/release/redrob-browser-window LICENSE NOTICE "dist/$name/"
           tar -C dist -czf "dist/release/$name.tar.gz" "$name"
       - uses: actions/upload-artifact@v4
         with:
-          name: release-linux-x64
+          name: release-linux-${{ matrix.arch }}
           path: dist/release/*
           if-no-files-found: error
 
