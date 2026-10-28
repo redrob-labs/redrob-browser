@@ -288,6 +288,32 @@ impl OverflowClip {
         self.rounded_offset.1 += dy;
     }
 
+    /// This clip moved by (`dx`, `dy`), rounded corner rects included, for
+    /// comparing clips across root scroll positions (paint damage).
+    pub(crate) fn shifted_with_corners(&self, dx: f32, dy: f32) -> Self {
+        fn shift(
+            chain: &RoundedOverflowClipChain,
+            dx: f32,
+            dy: f32,
+        ) -> Arc<RoundedOverflowClipChain> {
+            let mut clip = chain.clip;
+            clip.rect.x += dx;
+            clip.rect.y += dy;
+            Arc::new(RoundedOverflowClipChain {
+                clip,
+                parent: chain.parent.as_deref().map(|parent| shift(parent, dx, dy)),
+            })
+        }
+        let mut out = self.clone();
+        out.translate(dx, dy);
+        out.rounded = self.rounded.as_deref().map(|chain| shift(chain, dx, dy));
+        if out.rounded.is_none() {
+            // The offset only places rounded corners.
+            out.rounded_offset = (0.0, 0.0);
+        }
+        out
+    }
+
     pub(crate) fn rounded_chain(&self) -> Option<&Arc<RoundedOverflowClipChain>> {
         self.rounded.as_ref()
     }

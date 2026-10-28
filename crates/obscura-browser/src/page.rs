@@ -4293,6 +4293,17 @@ impl Page {
             .ok_or(obscura_js::CaptureError::PaintFailed)
     }
 
+    /// Document-space rects repainted since the previous call, sampled at the
+    /// live animation time (Redrob screencast damage). `None`: everything.
+    #[cfg(feature = "render")]
+    pub fn take_paint_damage(&self) -> Option<Vec<obscura_js::Rect>> {
+        let js = self.js.as_ref()?;
+        if !js.set_animation_sample(self.live_animation_sample()) {
+            return None;
+        }
+        js.take_paint_damage(self.capture_surface_color())
+    }
+
     /// Scrollable document dimensions from the retained render layout. Unlike
     /// DOM properties evaluated in page JavaScript, this cannot be shadowed or
     /// monkey-patched by the document being captured.

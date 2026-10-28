@@ -131,10 +131,10 @@ pub use paint::{
     screenshot_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces,
     screenshot_prepared_with_scroll, screenshot_prepared_with_scroll_and_surface_color,
     screenshot_prepared_with_scroll_and_surface_color_and_canvas_surfaces, validate_capture_region,
-    CanvasSurface, CanvasSurfaceSource, CaptureError, CaptureRegion, DynamicFontFace,
-    ElementScrollMetrics, ImageRequestProfile, PreparedRender, RenderResourceCache,
-    RenderResourceLoader, ResolvedScrollState, SelectedImage, MAX_CAPTURE_DIMENSION,
-    MAX_CAPTURE_PIXELS,
+    CanvasSurface, CanvasSurfaceSource, CaptureError, CaptureRegion, DamageSnapshot,
+    DynamicFontFace, ElementScrollMetrics, ImageRequestProfile, PreparedRender,
+    RenderResourceCache, RenderResourceLoader, ResolvedScrollState, SelectedImage,
+    MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS,
 };
 #[cfg(feature = "paint")]
 pub use tiny_skia::Pixmap;
@@ -601,7 +601,7 @@ impl Affine2 {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TransformLength {
     pub value: Dimension,
     pub expression: Option<String>,
@@ -619,7 +619,7 @@ impl TransformLength {
 /// One authored operation in a `transform` function list. Source order is
 /// significant and is intentionally retained until the final reference box
 /// resolves percentage translations.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TransformOp {
     Translate(TransformLength, TransformLength),
     Scale(f32, f32),
@@ -1003,7 +1003,7 @@ pub enum GeneratedContentItem {
 /// Sparse retained provenance for direct transform-only WAAPI sampling.
 /// Kept behind one pointer so ordinary, non-animated elements do not pay for
 /// another `Vec` in every `LayoutStyle`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WaapiSampleState {
     pub underlying_transform_ops: Vec<TransformOp>,
     pub underlying_opacity: Option<f32>,
@@ -1012,7 +1012,8 @@ pub(crate) struct WaapiSampleState {
 }
 
 /// The subset of CSS that influences box layout. Expanded in later phases.
-#[derive(Debug, Clone, Default)]
+/// `PartialEq` lets paint damage tell an unchanged style from a changed one.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct LayoutStyle {
     pub display: Display,
     /// Computed inline base direction. `None` is the inherited specified
@@ -1687,7 +1688,7 @@ pub(crate) enum BorderCascadeSide {
     All,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct BorderCascadeOp {
     pub side: BorderCascadeSide,
     pub width: Option<f32>,
