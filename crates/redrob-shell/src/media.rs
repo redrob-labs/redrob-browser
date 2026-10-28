@@ -61,6 +61,44 @@ mod gst_backend {
     use gstreamer_app as gst_app;
     use gstreamer_video as gst_video;
 
+    /// Point GStreamer at the runtime a release package carries, unless the
+    /// environment already names one. macOS: `Contents/Frameworks/
+    /// GStreamer.framework` (scripts/package-macos.sh). Windows: the DLLs next
+    /// to the program and the plugins in `lib\gstreamer-1.0` (release.yml).
+    /// Without a bundled runtime (Linux, a source build) nothing is set and the
+    /// system GStreamer is used.
+    fn use_bundled_runtime() {
+        let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) else {
+            return;
+        };
+        let root = if cfg!(target_os = "macos") {
+            dir.join("../Frameworks/GStreamer.framework/Versions/1.0")
+        } else {
+            dir
+        };
+        let plugins = root.join("lib").join("gstreamer-1.0");
+        if !plugins.is_dir() {
+            return;
+        }
+        let set = |key: &str, value: std::path::PathBuf| {
+            if std::env::var_os(key).is_none() {
+                std::env::set_var(key, value);
+            }
+        };
+        set("GST_PLUGIN_SYSTEM_PATH_1_0", plugins);
+        let scanner = root
+            .join("libexec")
+            .join("gstreamer-1.0")
+            .join(if cfg!(windows) { "gst-plugin-scanner.exe" } else { "gst-plugin-scanner" });
+        if scanner.is_file() {
+            set("GST_PLUGIN_SCANNER_1_0", scanner);
+        }
+        let gio = root.join("lib").join("gio").join("modules");
+        if gio.is_dir() {
+            set("GIO_EXTRA_MODULES", gio);
+        }
+    }
+
     pub struct GstPlayer {
         playbin: gst::Element,
         frame: Arc<Mutex<Frame>>,
@@ -73,6 +111,7 @@ mod gst_backend {
             static INIT: std::sync::Once = std::sync::Once::new();
             let mut init_err = None;
             INIT.call_once(|| {
+                use_bundled_runtime();
                 if let Err(e) = gst::init() {
                     init_err = Some(e.to_string());
                 }
