@@ -1,7 +1,7 @@
 # Release -- the redrob-labs shape (redrob-labs/.github/workflow-templates/release.yml), with
 # Redrob Browser's build steps.
 #
-#   tag v<version> on main  ->  version  ->  macos / windows / linux (build, then sign)  ->  publish  ->  updates
+#   tag v<version> on main  ->  version  ->  macos / windows / linux (build, then sign)  ->  publish
 #
 # Each package holds three programs: redrob-browser (CLI and engine), redrob-browser-worker and
 # redrob-browser-window (the window). Video uses GStreamer: Linux builds with it; macOS and
@@ -162,39 +162,3 @@ jobs:
       title: Redrob Browser
       launcher_manifest: true
       publish: true
-
-  updates:
-    name: Signed update manifest
-    needs: [version, publish]
-    if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
-    environment: release
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: release-*
-          path: dist
-          merge-multiple: true
-      - name: Write and sign latest.json
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
-        run: |
-          pip install --quiet cryptography
-          python3 scripts/write_update_manifest.py --version "$VERSION" --dir dist --out dist/latest.json
-      - name: Upload to the CDN
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.REDROB_CDN_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.REDROB_CDN_SECRET_ACCESS_KEY }}
-          BUCKET: ${{ vars.REDROB_CDN_BUCKET }}
-          DISTRIBUTION: ${{ vars.REDROB_CDN_DISTRIBUTION_ID }}
-        run: |
-          set -euo pipefail
-          for f in dist/redrob-browser-*; do
-            aws s3 cp "$f" "s3://$BUCKET/browser/$VERSION/$(basename "$f")"
-          done
-          aws s3 cp dist/latest.json "s3://$BUCKET/browser/latest.json" --cache-control max-age=300
-          aws s3 cp dist/latest.json.sig "s3://$BUCKET/browser/latest.json.sig" --cache-control max-age=300
-          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION" --paths "/browser/latest.json" "/browser/latest.json.sig"

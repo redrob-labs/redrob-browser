@@ -1,18 +1,17 @@
-//! Update check. Once a day the window reads a signed manifest from the CDN
-//! and, when a newer version exists, offers its download for this platform.
+//! Update check. Once a day the window asks GitHub for the latest release of
+//! redrob-labs/redrob-browser and, when it is newer, offers the package for
+//! this platform.
 //!
-//! The manifest is signed with the same Ed25519 key the Chromium-based
-//! browser used for its Sparkle feed (repository secret
-//! SPARKLE_ED_PRIVATE_KEY); only the public half is here. A manifest whose
-//! signature does not verify is ignored.
+//! There is no separate update signature: the download comes from GitHub
+//! over HTTPS, and the packages themselves are signed for the OS (Developer
+//! ID and notarization on macOS, Authenticode on Windows), which the OS checks
+//! when the person opens them. Only asset URLs under this repository's
+//! releases are offered.
 
 use std::time::Duration;
 
-use base64::Engine as _;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-
-const MANIFEST: &str = "https://cdn.redrob.ai/browser/latest.json";
-const PUBLIC_KEY_B64: &str = "5lWrkUbHu7MqrCIW4bmFzx1KUoIqx8ugydJSAcAZXlQ=";
+const LATEST: &str = "https://api.github.com/repos/redrob-labs/redrob-browser/releases/latest";
+const DOWNLOAD_PREFIX: &str = "https://github.com/redrob-labs/redrob-browser/releases/download/";
 pub const CHECK_EVERY_SECS: u64 = 24 * 60 * 60;
 
 pub struct Available {
@@ -20,7 +19,7 @@ pub struct Available {
     pub url: String,
 }
 
-/// The platform key the manifest lists files under.
+/// The part of the asset name that names this platform.
 pub fn platform() -> &'static str {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => "macos-arm64",
@@ -32,30 +31,29 @@ pub fn platform() -> &'static str {
 
 /// Blocking: call from a background thread.
 pub fn check() -> anyhow::Result<Option<Available>> {
-    let body = ureq::get(MANIFEST).timeout(Duration::from_secs(20)).call()?.into_string()?;
-    let sig_b64 = ureq::get(&format!("{MANIFEST}.sig")).timeout(Duration::from_secs(20)).call()?.into_string()?;
-    let key_bytes: [u8; 32] = base64::engine::general_purpose::STANDARD
-        .decode(PUBLIC_KEY_B64)?
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("bad public key"))?;
-    let key = VerifyingKey::from_bytes(&key_bytes)?;
-    let sig_bytes: [u8; 64] = base64::engine::general_purpose::STANDARD
-        .decode(sig_b64.trim())?
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("bad signature"))?;
-    key.verify(body.as_bytes(), &Signature::from_bytes(&sig_bytes))
-        .map_err(|_| anyhow::anyhow!("the update manifest is not signed by Redrob"))?;
-
-    let m: serde_json::Value = serde_json::from_str(&body)?;
-    let version = m["version"].as_str().unwrap_or_default().to_string();
+    let release: serde_json::Value = ureq::get(LATEST)
+        .set("Accept", "application/vnd.github+json")
+        .set("User-Agent", concat!("redrob-browser/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(20))
+        .call()?
+        .into_json()?;
+    if release["draft"].as_bool() == Some(true) || release["prerelease"].as_bool() == Some(true) {
+        return Ok(None);
+    }
+    let version = release["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
     if !newer(&version, env!("CARGO_PKG_VERSION")) {
         return Ok(None);
     }
-    let url = m["files"][platform()]["url"].as_str().unwrap_or_default().to_string();
-    if !url.starts_with("https://cdn.redrob.ai/browser/") {
-        return Ok(None);
-    }
-    Ok(Some(Available { version, url }))
+    let wanted = format!("redrob-browser-{}-", platform());
+    let url = release["assets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|a| a["name"].as_str().is_some_and(|n| n.starts_with(&wanted)))
+        .filter_map(|a| a["browser_download_url"].as_str())
+        .find(|u| u.starts_with(DOWNLOAD_PREFIX))
+        .map(str::to_string);
+    Ok(url.map(|url| Available { version, url }))
 }
 
 /// Dotted-number comparison; a pre-release suffix (`-rc.1`) is never newer
