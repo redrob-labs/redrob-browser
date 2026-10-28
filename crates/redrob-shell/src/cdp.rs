@@ -40,6 +40,32 @@ const FILL_LOGIN_JS: &str = r#"function (username, password) {
   return 'filled';
 }"#;
 
+/// Runs in every document: when a form with a filled password field is
+/// submitted, or a button next to one is clicked, report the sign-in to the
+/// window so it can offer to save it. The binding is the only channel.
+const LOGIN_SUBMIT_JS: &str = r#"(() => {
+  if (typeof redrobLoginSubmit !== 'function') return;
+  let last = '';
+  const report = (scope) => {
+    const pw = [...(scope || document).querySelectorAll('input[type=password]')].find((e) => e.value);
+    if (!pw) return;
+    const fields = [...(pw.form || document).querySelectorAll('input')];
+    const before = fields.slice(0, fields.indexOf(pw)).reverse();
+    const user = before.find((e) => e.value && (/^(text|email|tel|)$/i.test(e.type) || e.autocomplete === 'username'));
+    const key = (user ? user.value : '') + '\u0000' + pw.value;
+    if (key === last) return;
+    last = key;
+    redrobLoginSubmit(JSON.stringify({ origin: location.origin, username: user ? user.value : '', password: pw.value }));
+  };
+  addEventListener('submit', (e) => report(e.target), true);
+  addEventListener('click', (e) => {
+    const b = e.target && e.target.closest && e.target.closest('button, input[type=submit]');
+    if (b) report(b.form || document);
+  }, true);
+})();"#;
+
+const LOGIN_BINDING: &str = "redrobLoginSubmit";
+
 /// Tab ids the engine side hands out for pages a page opened itself.
 const POPUP_ID_BASE: TabId = 1 << 40;
 
@@ -83,6 +109,8 @@ pub enum Event {
     Loading(bool),
     /// The page opened a new window; show it as a new tab next to its opener.
     Opened { url: String, opener: Option<TabId> },
+    /// The person signed in on a page; the window may offer to save it.
+    LoginSubmitted { origin: String, username: String, password: zeroize::Zeroizing<String> },
     /// Result of FillLogin: "filled" or "no-form".
     Filled(String),
     /// A file download began or changed state. Sent with tab 0.
@@ -167,6 +195,8 @@ impl State {
         let s = Some(session.as_str());
         self.c.call(s, "Page.enable", json!({})).await?;
         self.c.call(s, "Runtime.enable", json!({})).await?;
+        self.c.call(s, "Runtime.addBinding", json!({ "name": LOGIN_BINDING })).await?;
+        self.c.call(s, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": LOGIN_SUBMIT_JS })).await?;
         let (w, h, scale) = self.size;
         self.c
             .call(
@@ -450,6 +480,23 @@ async fn on_event(st: &mut State, ev: Value) {
             let frame = &p["frame"];
             if frame.get("parentId").is_none() {
                 st.emit(tab, Event::Navigated(frame["url"].as_str().unwrap_or_default().to_string()));
+            }
+        }
+        "Runtime.bindingCalled" if p["name"] == LOGIN_BINDING => {
+            // The payload carries a password: parse it here and never log it.
+            let payload = zeroize::Zeroizing::new(p["payload"].as_str().unwrap_or_default().to_string());
+            if let Ok(v) = serde_json::from_str::<Value>(&payload) {
+                let password = zeroize::Zeroizing::new(v["password"].as_str().unwrap_or_default().to_string());
+                if !password.is_empty() {
+                    st.emit(
+                        tab,
+                        Event::LoginSubmitted {
+                            origin: v["origin"].as_str().unwrap_or_default().to_string(),
+                            username: v["username"].as_str().unwrap_or_default().to_string(),
+                            password,
+                        },
+                    );
+                }
             }
         }
         "Page.navigatedWithinDocument" => {

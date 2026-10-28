@@ -279,6 +279,15 @@ impl Vault {
             .unwrap_or_default()
     }
 
+    /// The person said never to offer saving on this site.
+    pub fn never_save(&self, origin: &str) -> bool {
+        self.setting(&format!("never_save:{origin}")).is_some()
+    }
+
+    pub fn set_never_save(&self, origin: &str) -> anyhow::Result<()> {
+        self.set_setting(&format!("never_save:{origin}"), "1")
+    }
+
     fn setting(&self, key: &str) -> Option<String> {
         self.db
             .query_row("SELECT value FROM vault_settings WHERE key = ?1", params![key], |r| r.get(0))

@@ -77,6 +77,7 @@ fn main() -> anyhow::Result<()> {
                 last_session_save: std::time::Instant::now(),
                 show_downloads: false,
                 vault: None,
+                pending_save: None,
                 notice: None,
                 address: String::new(),
                 editing: false,
@@ -112,6 +113,8 @@ struct Window {
     last_session_save: std::time::Instant,
     show_downloads: bool,
     vault: Option<vault::Vault>,
+    /// A sign-in the person just made, waiting for "save this password?".
+    pending_save: Option<(String, String, zeroize::Zeroizing<String>)>,
     /// A one-line result shown under the toolbar, such as an import summary.
     notice: Option<String>,
     /// Address field text; follows the active tab's URL unless the person is typing.
@@ -216,6 +219,10 @@ impl Window {
                 self.on_download(model::DownloadItem { guid, url, filename, state, path, bytes });
                 continue;
             }
+            if let Event::LoginSubmitted { origin, username, password } = event {
+                self.offer_save(tab, origin, username, password);
+                continue;
+            }
             if let Event::Opened { url, opener } = &event {
                 let mut t = Tab::new(tab, url);
                 t.loading = true;
@@ -267,7 +274,7 @@ impl Window {
                         self.notice = Some("No sign-in form on this page.".to_string());
                     }
                 }
-                Event::Opened { .. } | Event::Download { .. } => {}
+                Event::Opened { .. } | Event::Download { .. } | Event::LoginSubmitted { .. } => {}
             }
             let url_now = t.url.clone();
             if let Some((url, title)) = visited {
@@ -462,6 +469,74 @@ impl Window {
         }
     }
 
+    /// Offer to save a sign-in, but only for the tab's own committed site: a
+    /// page cannot plant a login for another origin.
+    fn offer_save(&mut self, tab: TabId, origin: String, username: String, password: zeroize::Zeroizing<String>) {
+        let Some(v) = &self.vault else { return };
+        let Some(t) = self.model.tabs.iter().find(|t| t.id == tab) else { return };
+        if t.agent || vault::origin_of(&t.url).as_deref() != Some(origin.as_str()) || v.never_save(&origin) {
+            return;
+        }
+        self.pending_save = Some((origin, username, password));
+    }
+
+    fn save_bar(&mut self, ui: &mut egui::Ui) {
+        let Some((origin, username, _)) = &self.pending_save else { return };
+        let exists = self.vault.as_ref().is_some_and(|v| v.has_login(origin, username));
+        let who = if username.is_empty() { String::new() } else { format!(" for {username}") };
+        let question = if exists {
+            format!("Update the saved password{who} on {origin}?")
+        } else {
+            format!("Save the password{who} on {origin}?")
+        };
+        let mut choice = 0;
+        ui.horizontal(|ui| {
+            ui.label(question);
+            if ui.button(if exists { "Update" } else { "Save" }).clicked() {
+                choice = 1;
+            }
+            if ui.button("Not now").clicked() {
+                choice = 2;
+            }
+            if ui.button("Never for this site").clicked() {
+                choice = 3;
+            }
+        });
+        if choice == 0 {
+            return;
+        }
+        let Some((origin, username, password)) = self.pending_save.take() else { return };
+        let Some(v) = &self.vault else { return };
+        let result = match choice {
+            1 => v.save(&origin, &username, &password),
+            3 => v.set_never_save(&origin),
+            _ => Ok(()),
+        };
+        if let Err(e) = result {
+            self.notice = Some(format!("Could not save the password: {e}"));
+        }
+    }
+
+    fn import_passwords(&mut self, logins: anyhow::Result<Vec<import_chrome::ImportedLogin>>, skipped: usize, from: &str) {
+        let Some(v) = &self.vault else {
+            self.notice = Some("The password vault is not available on this system.".to_string());
+            return;
+        };
+        match logins {
+            Ok(list) => {
+                let mut saved = 0;
+                for (origin, username, password) in &list {
+                    if v.save(origin, username, password).is_ok() {
+                        saved += 1;
+                    }
+                }
+                let extra = if skipped > 0 { format!(" {skipped} could not be opened; import a CSV export for those.") } else { String::new() };
+                self.notice = Some(format!("Imported {saved} passwords from {from}.{extra}"));
+            }
+            Err(e) => self.notice = Some(format!("Could not import passwords: {e}")),
+        }
+    }
+
     fn menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Menu", |ui| {
             if ui.button("New tab").clicked() {
@@ -482,6 +557,22 @@ impl Window {
                     self.import_from(s);
                     ui.close();
                 }
+                if s.profile.join("Login Data").exists() && ui.button(format!("Import passwords from {}", s.name)).clicked() {
+                    let scratch = self.profile.as_ref().map(|p| p.dir.join("import-tmp")).unwrap_or_else(std::env::temp_dir);
+                    let (logins, skipped) = match import_chrome::import_passwords(s, &scratch) {
+                        Ok((l, n)) => (Ok(l), n),
+                        Err(e) => (Err(e), 0),
+                    };
+                    self.import_passwords(logins, skipped, s.name);
+                    ui.close();
+                }
+            }
+            // Chrome's "Export passwords" writes this file to the Downloads folder.
+            let csv = profile::downloads_dir().join("Chrome Passwords.csv");
+            if csv.exists() && ui.button("Import passwords from Chrome Passwords.csv").clicked() {
+                let logins = import_chrome::import_passwords_csv(&csv);
+                self.import_passwords(logins, 0, "the CSV file");
+                ui.close();
             }
         });
     }
@@ -670,6 +761,7 @@ impl eframe::App for Window {
             self.tab_bar(ui);
             self.toolbar(ui);
             self.bookmarks_bar(ui);
+            self.save_bar(ui);
             if let Some(e) = &self.error {
                 ui.colored_label(Color32::RED, e);
             }
