@@ -16602,6 +16602,7 @@ URL.createObjectURL = function(blob) {
 URL.revokeObjectURL = function(url) {
   delete globalThis.__blobStore[url];
 };
+/* MEDIA_EXTRAS */
 
 // Window-level scrolling (issue #468). #431 gave elements functional
 // scrollTop/scrollLeft plus scroll methods, but left these three as no-ops, so
