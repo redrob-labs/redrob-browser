@@ -111,6 +111,15 @@ fn ko(en: &str) -> Option<&'static str> {
         "Remove" => "삭제",
         "OK" => "확인",
         "Menu" => "메뉴",
+        "New incognito window" => "새 시크릿 창",
+        "Incognito" => "시크릿",
+        "Incognito: this window keeps no history, cookies or passwords." => {
+            "시크릿 창은 기록, 쿠키, 비밀번호를 남기지 않아요."
+        }
+        "Could not open an incognito window: {0}" => "시크릿 창을 열지 못했어요: {0}",
+        "Minimize" => "최소화",
+        "Maximize" => "최대화",
+        "Restore" => "이전 크기로",
         "Theme" => "테마",
         "Same as the system" => "시스템과 같게",
         "Light" => "밝게",

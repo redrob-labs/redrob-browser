@@ -12,6 +12,10 @@
       "sha256": "017841c0c856d6b6e7eab34c8db6f6f48d53ce20d915732c7eeafbecf43d2c29"
     },
     {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/anonymous.svg",
+      "sha256": "080fa259b3892e71ee34ac2777a9ef6b783a97403e6c2821a6e0a9d0cdc95627"
+    },
+    {
       "file": "crates/redrob-shell/assets/redrob-ui/icons/back.svg",
       "sha256": "3f6e2291a724a3081a78e1f03fd45d05634a6c986b9551883230c5ad3631723b"
     },

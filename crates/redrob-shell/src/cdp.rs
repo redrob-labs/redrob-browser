@@ -159,6 +159,11 @@ pub enum Command {
 }
 
 pub enum Event {
+    /// The engine could not paint this tile.
+    TileFailed {
+        key: TileKey,
+        generation: u64,
+    },
     Tile {
         key: TileKey,
         generation: u64,
@@ -536,7 +541,7 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
             st.c.call(
                 s,
                 "Page.startScreencast",
-                json!({ "format": "jpeg", "quality": 1, "everyNthFrame": 1 }),
+                json!({ "format": "jpeg", "quality": 1, "everyNthFrame": 1, "redrobSignalOnly": true }),
             )
             .await?;
             report_scroll(st, tab).await;
@@ -793,8 +798,14 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
                         "Page.captureScreenshot",
                         json!({ "format": "png", "clip": clip, "captureBeyondViewport": true }),
                     )
-                    .await?;
-                if let Some(image) = shot["data"].as_str().and_then(decode) {
+                    .await;
+                let image = shot
+                    .ok()
+                    .and_then(|shot| shot["data"].as_str().and_then(decode));
+                if image.is_none() {
+                    st.emit(tab, Event::TileFailed { key, generation });
+                }
+                if let Some(image) = image {
                     st.emit(
                         tab,
                         Event::Tile {

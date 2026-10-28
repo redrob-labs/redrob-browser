@@ -305,6 +305,7 @@ pub enum Icon {
     Sparkle,
     User,
     SignIn,
+    Incognito,
 }
 
 impl Icon {
@@ -336,6 +337,7 @@ impl Icon {
             Icon::Sparkle => svg!("sparkle"),
             Icon::User => svg!("user"),
             Icon::SignIn => svg!("signIn"),
+            Icon::Incognito => svg!("anonymous"),
         }
     }
 

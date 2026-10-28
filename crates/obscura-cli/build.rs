@@ -77,4 +77,14 @@ fn main() {
         .unwrap_or_else(local_version);
 
     println!("cargo:rustc-env=OBSCURA_BUILD_VERSION={version}");
+
+    // Redrob Browser: the app icon in redrob-browser.exe.
+    println!("cargo:rerun-if-changed=../../assets/redrob-browser.ico");
+    #[cfg(windows)]
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon("../../assets/redrob-browser.ico");
+        res.set("ProductName", "Redrob Browser");
+        res.compile().expect("embed the Windows icon");
+    }
 }

@@ -40,14 +40,37 @@ use tiles::TileCache;
 
 const NEW_TAB: &str = "about:blank";
 
+/// `--incognito`: a window whose profile and engine storage live in a
+/// temporary folder that is deleted when the window closes.
+const INCOGNITO_FLAG: &str = "--incognito";
+
 fn main() -> anyhow::Result<()> {
-    let profile = match profile::Profile::open_default() {
+    let incognito = std::env::args().any(|a| a == INCOGNITO_FLAG);
+    let mut profile = match profile::Profile::open_default() {
         Ok(p) => Some(p),
         Err(e) => {
             eprintln!("redrob-browser: profile unavailable, nothing will be saved: {e}");
             None
         }
     };
+    // Incognito keeps the person's language, search engine and theme, and
+    // nothing else: no history, cookies, session, bookmarks or passwords.
+    let incognito_dir = incognito.then(|| {
+        std::env::temp_dir().join(format!("redrob-browser-incognito-{}", std::process::id()))
+    });
+    if let Some(dir) = &incognito_dir {
+        let keep: Vec<(&str, String)> = ["language", "search_engine", "theme"]
+            .into_iter()
+            .filter_map(|k| profile.as_ref().and_then(|p| p.setting(k)).map(|v| (k, v)))
+            .collect();
+        profile = profile::Profile::open(dir).ok();
+        if let Some(p) = &profile {
+            for (k, v) in keep {
+                let _ = p.set_setting(k, &v);
+            }
+            let _ = p.set_setting("update_checked", &model::now().to_string());
+        }
+    }
     i18n::set(i18n::detect(
         profile
             .as_ref()
@@ -66,13 +89,25 @@ fn main() -> anyhow::Result<()> {
     // cdp::run writes it once the relay is listening.
     let endpoint_file = storage.join("ws-endpoint");
     let relay_file = endpoint_file.clone();
-    let start_url = std::env::args().nth(1);
+    let start_url = std::env::args().skip(1).find(|a| !a.starts_with("--"));
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Redrob Browser")
+            .with_title(if incognito {
+                "Redrob Browser (Incognito)"
+            } else {
+                "Redrob Browser"
+            })
             .with_inner_size([1280.0, 860.0])
-            .with_min_inner_size([480.0, 360.0]),
+            .with_min_inner_size([480.0, 360.0])
+            // The tab strip is the title bar, as in Chrome: macOS keeps its
+            // traffic lights over it; Windows and Linux get the window's own
+            // minimize, maximize and close buttons at its right end.
+            .with_decorations(cfg!(target_os = "macos"))
+            .with_fullsize_content_view(cfg!(target_os = "macos"))
+            .with_titlebar_shown(!cfg!(target_os = "macos"))
+            .with_title_shown(!cfg!(target_os = "macos"))
+            .with_icon(std::sync::Arc::new(app_icon())),
         ..Default::default()
     };
     let ws_url = engine.ws_url.clone();
@@ -177,6 +212,7 @@ fn main() -> anyhow::Result<()> {
                 error: None,
                 last_size: (0, 0, 0.0),
                 address_id: egui::Id::new("address"),
+                incognito: false,
                 top_sites: None,
                 new_tab_query: String::new(),
                 #[cfg(feature = "gpu")]
@@ -185,7 +221,11 @@ fn main() -> anyhow::Result<()> {
                     .as_ref()
                     .and_then(gpu_paint::GpuPainter::new),
             };
-            if let Some(p) = &window.profile {
+            window.incognito = incognito;
+            if incognito {
+                cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
+            }
+            if let Some(p) = window.profile.as_ref().filter(|_| !incognito) {
                 match vault::Vault::open(&p.dir) {
                     Ok(v) => window.vault = Some(v),
                     Err(e) => eprintln!("redrob-browser: password vault unavailable: {e}"),
@@ -202,8 +242,31 @@ fn main() -> anyhow::Result<()> {
     );
     let _ = std::fs::remove_file(&endpoint_file);
     drop(engine);
+    if let Some(dir) = incognito_dir {
+        // The engine has exited; nothing of this window may stay on disk.
+        let _ = std::fs::remove_dir_all(dir);
+    }
     self_update::restart_if_requested();
     result.map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// The window and taskbar icon, from the design system's app icon.
+fn app_icon() -> egui::IconData {
+    let png = include_bytes!("../assets/redrob-browser-256.png");
+    match image::load_from_memory_with_format(png, image::ImageFormat::Png) {
+        Ok(img) => {
+            let rgba = img.to_rgba8();
+            egui::IconData {
+                width: rgba.width(),
+                height: rgba.height(),
+                rgba: rgba.into_raw(),
+            }
+        }
+        Err(e) => {
+            eprintln!("redrob-browser: app icon: {e}");
+            egui::IconData::default()
+        }
+    }
 }
 
 /// Write a file only its owner can read: the CDP address is a key to every tab.
@@ -256,6 +319,8 @@ struct Window {
     error: Option<String>,
     last_size: (u32, u32, f32),
     address_id: egui::Id,
+    /// A private window (`--incognito`).
+    incognito: bool,
     /// Most visited sites for the new tab page, read once per new tab.
     top_sites: Option<Vec<(String, String)>>,
     new_tab_query: String,
@@ -279,9 +344,21 @@ impl Window {
             let id = self.model.alloc_id();
             let mut tab = Tab::new(id, &saved.url);
             tab.title = saved.title;
-            tab.loading = true;
+            // Our own pages are drawn here; their engine tab waits on about:blank.
+            let internal = internal::is_internal(&saved.url);
+            tab.loading = !internal && saved.url != NEW_TAB;
+            if internal {
+                tab.title = internal::title(&saved.url).to_string();
+            }
             self.model.tabs.push(tab);
-            self.op(id, Op::Open(saved.url));
+            self.op(
+                id,
+                Op::Open(if internal {
+                    NEW_TAB.to_string()
+                } else {
+                    saved.url
+                }),
+            );
         }
         if !self.model.tabs.is_empty() {
             self.model.active = active.min(self.model.tabs.len() - 1);
@@ -449,12 +526,14 @@ impl Window {
                     generation,
                     image,
                 } => t.tiles.insert(ctx, key, generation, image),
+                Event::TileFailed { key, generation } => t.tiles.failed(key, generation),
                 #[cfg(feature = "gpu")]
                 Event::TileList {
                     key,
                     generation,
                     list,
                 } => {
+                    let mut drawn = false;
                     if let Some(gpu) = self.gpu.as_mut() {
                         for id in t.tiles.take_released() {
                             gpu.release(id);
@@ -462,8 +541,12 @@ impl Window {
                         if let Some(reuse) = t.tiles.native_slot(key, generation) {
                             if let Some(id) = gpu.render(&list, reuse) {
                                 t.tiles.insert_native(key, generation, id);
+                                drawn = true;
                             }
                         }
+                    }
+                    if !drawn {
+                        t.tiles.failed(key, generation);
                     }
                 }
                 Event::Invalidate => t.tiles.invalidate(),
@@ -552,6 +635,11 @@ impl Window {
             Some(l) if !l.is_empty() => format!("{l} - {}", t("Redrob Browser")),
             _ => t("Redrob Browser").to_string(),
         };
+        let title = if self.incognito {
+            format!("{title} ({})", t("Incognito"))
+        } else {
+            title
+        };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }
 
@@ -608,6 +696,10 @@ impl Window {
             if let Some(id) = self.active_id() {
                 self.op(id, if back { Op::Back } else { Op::Forward });
             }
+        }
+        // Ctrl+Shift+N: a new incognito window.
+        if ctx.input_mut(|i| i.consume_key(shift, Key::N)) {
+            self.open_incognito();
         }
         // Ctrl+H: history.
         if ctx.input_mut(|i| i.consume_key(cmd, Key::H)) {
@@ -1033,6 +1125,10 @@ impl Window {
                     self.open_tab(NEW_TAB, true);
                     ui.close();
                 }
+                if item(ui, Icon::Incognito, t("New incognito window")).clicked() {
+                    self.open_incognito();
+                    ui.close();
+                }
                 ui.separator();
                 if item(ui, Icon::History, t("History")).clicked() {
                     self.open_tab(internal::HISTORY, true);
@@ -1137,6 +1233,19 @@ impl Window {
             });
     }
 
+    /// A private window is its own process with a throwaway profile.
+    fn open_incognito(&mut self) {
+        let started = std::env::current_exe()
+            .and_then(|exe| std::process::Command::new(exe).arg(INCOGNITO_FLAG).spawn());
+        match started {
+            // Reap it when it closes, so it does not linger as a zombie.
+            Ok(mut child) => {
+                std::thread::spawn(move || child.wait());
+            }
+            Err(e) => self.notice = Some(tf("Could not open an incognito window: {0}", &[&e])),
+        }
+    }
+
     fn toggle_bookmark(&mut self) {
         if let Some((url, title)) = self
             .model
@@ -1153,14 +1262,50 @@ impl Window {
     fn tab_bar(&mut self, ui: &mut egui::Ui) {
         let p = *theme::palette(ui);
         let height = 40.0;
-        let (strip, _) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
-        ui.painter().rect_filled(strip, 0.0, p.surface_sunken);
+        // The strip is the title bar: drag it to move the window, double-click to maximize.
+        let (strip, drag) = ui.allocate_exact_size(
+            Vec2::new(ui.available_width(), height),
+            Sense::click_and_drag(),
+        );
+        let strip_fill = if self.incognito {
+            p.surface_raised
+        } else {
+            p.surface_sunken
+        };
+        ui.painter().rect_filled(strip, 0.0, strip_fill);
+        if drag.drag_started_by(egui::PointerButton::Primary) {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+        let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+        if drag.double_clicked() {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+        }
         let mut select = None;
         let mut close = None;
         let plus_side = 28.0;
-        let left = strip.left() + size::SPACE_2;
-        let room = (strip.width() - size::SPACE_2 * 2.0 - plus_side - size::SPACE_1).max(0.0);
+        // macOS draws its traffic lights over the strip's left end.
+        let left_pad = if cfg!(target_os = "macos") {
+            76.0
+        } else {
+            size::SPACE_2
+        };
+        let captions = if cfg!(target_os = "macos") {
+            0.0
+        } else {
+            self.caption_buttons(ui, strip, maximized)
+        };
+        let badge = if self.incognito {
+            self.incognito_badge(ui, strip, captions)
+        } else {
+            0.0
+        };
+        let strip = Rect::from_min_max(
+            strip.min,
+            egui::pos2(strip.right() - captions - badge, strip.bottom()),
+        );
+        let left = strip.left() + left_pad;
+        let room = (strip.width() - left_pad - size::SPACE_2 - plus_side - size::SPACE_1).max(0.0);
         let n = self.model.tabs.len().max(1) as f32;
         let width = (room / n).clamp(48.0, 220.0);
         let top = strip.top() + 6.0;
@@ -1318,6 +1463,124 @@ impl Window {
             self.close_tab(i);
         } else if let Some(i) = select {
             self.select_tab(i);
+        }
+    }
+
+    /// Minimize, maximize or restore, and close, drawn at the strip's right
+    /// end the way Windows draws them. Returns the width they take.
+    fn caption_buttons(&mut self, ui: &mut egui::Ui, strip: Rect, maximized: bool) -> f32 {
+        let p = *theme::palette(ui);
+        let w = 46.0;
+        for kind in 0..3usize {
+            let x = strip.right() - w * (3 - kind) as f32;
+            let rect =
+                Rect::from_min_size(egui::pos2(x, strip.top()), Vec2::new(w, strip.height()));
+            let r = ui.interact(rect, ui.id().with(("caption", kind)), Sense::click());
+            let (fill, ink) = match (kind, r.hovered()) {
+                (2, true) => (Color32::from_rgb(0xc4, 0x2b, 0x1c), Color32::WHITE),
+                (_, true) => (p.border_subtle, p.ink_primary),
+                _ => (Color32::TRANSPARENT, p.ink_secondary),
+            };
+            let painter = ui.painter();
+            painter.rect_filled(rect, 0.0, fill);
+            let c = rect.center();
+            let stroke = Stroke::new(1.0, ink);
+            let v = Vec2::new;
+            match kind {
+                0 => {
+                    painter.hline((c.x - 5.0)..=(c.x + 5.0), c.y, stroke);
+                }
+                1 if maximized => {
+                    let back = Rect::from_center_size(c + v(-1.5, 1.5), Vec2::splat(8.0));
+                    painter.rect_stroke(back, 0.0, stroke, egui::StrokeKind::Inside);
+                    painter.line_segment([c + v(-2.5, -4.5), c + v(4.5, -4.5)], stroke);
+                    painter.line_segment([c + v(4.5, -4.5), c + v(4.5, 2.5)], stroke);
+                }
+                1 => {
+                    let frame = Rect::from_center_size(c, Vec2::splat(10.0));
+                    painter.rect_stroke(frame, 0.0, stroke, egui::StrokeKind::Inside);
+                }
+                _ => {
+                    painter.line_segment([c + v(-5.0, -5.0), c + v(5.0, 5.0)], stroke);
+                    painter.line_segment([c + v(5.0, -5.0), c + v(-5.0, 5.0)], stroke);
+                }
+            }
+            let tip = match kind {
+                0 => t("Minimize"),
+                1 if maximized => t("Restore"),
+                1 => t("Maximize"),
+                _ => t("Close"),
+            };
+            if r.on_hover_text(tip).clicked() {
+                let cmd = match kind {
+                    0 => egui::ViewportCommand::Minimized(true),
+                    1 => egui::ViewportCommand::Maximized(!maximized),
+                    _ => egui::ViewportCommand::Close,
+                };
+                ui.ctx().send_viewport_cmd(cmd);
+            }
+        }
+        w * 3.0
+    }
+
+    /// The "Incognito" marker before the caption buttons. Returns its width.
+    fn incognito_badge(&self, ui: &mut egui::Ui, strip: Rect, captions: f32) -> f32 {
+        let p = *theme::palette(ui);
+        let font = egui::FontId::proportional(12.0);
+        let g = ui
+            .painter()
+            .layout_no_wrap(t("Incognito").to_string(), font, p.ink_primary);
+        let w = g.size().x + 40.0;
+        let center = egui::pos2(
+            strip.right() - captions - w / 2.0 - 4.0,
+            strip.center().y + 2.0,
+        );
+        let rect = Rect::from_center_size(center, Vec2::new(w, 26.0));
+        ui.painter().rect_filled(
+            rect,
+            CornerRadius::same(size::RADIUS_FULL),
+            p.surface_sunken,
+        );
+        let icon = Rect::from_center_size(
+            egui::pos2(rect.left() + 16.0, rect.center().y),
+            Vec2::splat(15.0),
+        );
+        Icon::Incognito.paint(ui, icon, p.ink_primary);
+        let at = egui::pos2(rect.left() + 30.0, rect.center().y - g.size().y / 2.0);
+        ui.painter().galley(at, g, p.ink_primary);
+        w + 12.0
+    }
+
+    /// Without the system frame, the window's edges still resize it.
+    fn resize_edges(&self, ui: &egui::Ui) {
+        let ctx = ui.ctx();
+        if cfg!(target_os = "macos") || ctx.input(|i| i.viewport().maximized.unwrap_or(false)) {
+            return;
+        }
+        let rect = ui.max_rect();
+        let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) else {
+            return;
+        };
+        let edge = 5.0;
+        let w = pos.x - rect.left() < edge;
+        let e = rect.right() - pos.x < edge;
+        let n = pos.y - rect.top() < edge;
+        let s = rect.bottom() - pos.y < edge;
+        use egui::{CursorIcon as C, ResizeDirection as D};
+        let (dir, cursor) = match (n, s, w, e) {
+            (true, _, true, _) => (D::NorthWest, C::ResizeNorthWest),
+            (true, _, _, true) => (D::NorthEast, C::ResizeNorthEast),
+            (_, true, true, _) => (D::SouthWest, C::ResizeSouthWest),
+            (_, true, _, true) => (D::SouthEast, C::ResizeSouthEast),
+            (true, ..) => (D::North, C::ResizeNorth),
+            (_, true, ..) => (D::South, C::ResizeSouth),
+            (_, _, true, _) => (D::West, C::ResizeWest),
+            (_, _, _, true) => (D::East, C::ResizeEast),
+            _ => return,
+        };
+        ctx.set_cursor_icon(cursor);
+        if ctx.input(|i| i.pointer.primary_pressed()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(dir));
         }
     }
 
@@ -1805,6 +2068,15 @@ impl Window {
             }
         }
         ui.add_space(size::SPACE_2);
+        if self.incognito {
+            ui.label(
+                egui::RichText::new(t(
+                    "Incognito: this window keeps no history, cookies or passwords.",
+                ))
+                .size(12.0)
+                .color(p.ink_secondary),
+            );
+        }
         ui.label(
             egui::RichText::new(t("Start with > to ask Redrob Code"))
                 .size(12.0)
@@ -1913,6 +2185,7 @@ impl eframe::App for Window {
             }
         }
         self.shortcuts(&ctx);
+        self.resize_edges(ui);
         // A crash must not lose the open tabs.
         if self.last_session_save.elapsed() > std::time::Duration::from_secs(30) {
             self.save_session();

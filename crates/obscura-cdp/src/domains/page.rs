@@ -609,6 +609,10 @@ fn parse_screencast_state(params: &Value, session_id: i64) -> Result<ScreencastS
         max_width: dimension("maxWidth")?,
         max_height: dimension("maxHeight")?,
         every_nth_frame: every_nth_frame as u32,
+        signal_only: params
+            .get("redrobSignalOnly")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         command_frame_counter: 0,
         session_id,
         frames_in_flight: 0,
@@ -731,6 +735,27 @@ pub(crate) fn queue_screencast_frame(
         state.clone()
     };
     let attached_session = Some(cdp_session_id.to_string());
+    if state.signal_only {
+        let page = ctx
+            .get_session_page_mut(&attached_session)
+            .ok_or("No page for session")?;
+        let viewport = page.viewport;
+        let scroll = page.screenshot_scroll_offset();
+        let activity_generation = page
+            .js
+            .as_ref()
+            .map(|js| js.activity_generation())
+            .unwrap_or(0);
+        return Ok(push_screencast_frame(
+            ctx,
+            cdp_session_id,
+            &state,
+            String::new(),
+            viewport,
+            scroll,
+            activity_generation,
+        ));
+    }
     let (viewport, scroll, raster, activity_generation) = {
         let page = ctx
             .get_session_page_mut(&attached_session)
@@ -757,11 +782,32 @@ pub(crate) fn queue_screencast_frame(
     let encoded = encode_screencast_frame(&raster, &state)?;
     use base64::Engine as _;
     let data = base64::engine::general_purpose::STANDARD.encode(encoded);
+    Ok(push_screencast_frame(
+        ctx,
+        cdp_session_id,
+        &state,
+        data,
+        viewport,
+        scroll,
+        activity_generation,
+    ))
+}
+
+#[cfg(feature = "render")]
+fn push_screencast_frame(
+    ctx: &mut CdpContext,
+    cdp_session_id: &str,
+    state: &ScreencastState,
+    data: String,
+    viewport: (f32, f32),
+    scroll: (f32, f32),
+    activity_generation: u64,
+) -> bool {
     let Some(live) = ctx.screencasts.get_mut(cdp_session_id) else {
-        return Ok(false);
+        return false;
     };
     if live.session_id != state.session_id {
-        return Ok(false);
+        return false;
     }
     live.frames_in_flight = live.frames_in_flight.saturating_add(1);
     live.observed_activity_generation = activity_generation;
@@ -780,7 +826,7 @@ pub(crate) fn queue_screencast_frame(
         }),
         session_id: Some(cdp_session_id.to_string()),
     });
-    Ok(true)
+    true
 }
 
 /// Advance active page task queues for one bounded compositor slice and emit
