@@ -9,6 +9,7 @@ mod account;
 mod agent_bridge;
 mod cdp;
 mod devtools;
+mod drm_tab;
 mod engine;
 mod import_chrome;
 mod i18n;
@@ -117,6 +118,7 @@ fn main() -> anyhow::Result<()> {
                 show_devtools: false,
                 internal: Default::default(),
                 media: Default::default(),
+                drm: Default::default(),
                 vault: None,
                 pending_save: None,
                 agent_tx,
@@ -204,6 +206,8 @@ struct Window {
     show_devtools: bool,
     internal: internal::State,
     media: media_view::Media,
+    /// Tabs whose page asked for DRM video the engine cannot play.
+    drm: drm_tab::Offers,
     vault: Option<vault::Vault>,
     /// A sign-in the person just made, waiting for "save this password?".
     pending_save: Option<(String, String, zeroize::Zeroizing<String>)>,
@@ -292,6 +296,7 @@ impl Window {
     fn close_tab(&mut self, index: usize) {
         if let Some(id) = self.model.close_tab(index) {
             self.media.drop_tab(id);
+            self.drm.clear(id);
             self.op(id, Op::Close);
         }
         if self.model.tabs.is_empty() {
@@ -350,6 +355,10 @@ impl Window {
                 self.media.set_rects(tab, r);
                 continue;
             }
+            if let Event::DrmRequested { key_system } = event {
+                self.drm.requested(tab, key_system);
+                continue;
+            }
             if let Event::LoginSubmitted { origin, username, password } = event {
                 self.offer_save(tab, origin, username, password);
                 continue;
@@ -384,6 +393,7 @@ impl Window {
                 Event::Dom(root) => t.devtools.dom = Some(root),
                 Event::Navigated(url) => {
                     self.media.drop_tab(tab);
+                    self.drm.clear(tab);
                     t.devtools.navigated();
                     t.url = url.clone();
                     t.title.clear();
@@ -419,6 +429,7 @@ impl Window {
                 Event::Opened { .. }
                 | Event::Download { .. }
                 | Event::LoginSubmitted { .. }
+                | Event::DrmRequested { .. }
                 | Event::Media(_)
                 | Event::MediaRects(_) => {}
             }
@@ -1098,6 +1109,10 @@ impl eframe::App for Window {
             self.toolbar(ui);
             self.bookmarks_bar(ui);
             self.save_bar(ui);
+            let page = self.model.active_tab().map(|t| t.url.clone()).unwrap_or_default();
+            if let drm_tab::Choice::Notice(n) = self.drm.bar(ui, self.active_id(), &page) {
+                self.notice = Some(n);
+            }
             if let Some(e) = &self.error {
                 ui.colored_label(Color32::RED, e);
             }

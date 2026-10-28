@@ -198,6 +198,13 @@ fn ko(en: &str) -> Option<&'static str> {
         // Media
         "Play" => "재생",
         "Pause" => "일시정지",
+        // Protected video
+        "This video is protected. Open it where it can play?" => "보호된 동영상이에요. 재생할 수 있는 곳에서 열까요?",
+        "Open in a protected tab" => "보호 탭에서 열기",
+        "Open in your default browser" => "기본 브라우저에서 열기",
+        "Could not open a protected tab: {0}" => "보호 탭을 열지 못했어요: {0}",
+        "Could not open your default browser: {0}" => "기본 브라우저를 열지 못했어요: {0}",
+        "Protected tab" => "보호 탭",
         // Developer tools
         "Console" => "콘솔",
         "Elements" => "요소",
