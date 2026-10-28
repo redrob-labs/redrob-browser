@@ -38,6 +38,11 @@ impl Offers {
     }
 
     /// Draw the bar for the tab on screen, if its page asked for DRM.
+    /// Whether [`Offers::bar`] has something to show for this tab.
+    pub fn wants_bar(&self, tab: Option<TabId>, _url: &str) -> bool {
+        tab.is_some_and(|t| self.by_tab.contains_key(&t))
+    }
+
     pub fn bar(&mut self, ui: &mut egui::Ui, tab: Option<TabId>, url: &str) -> Choice {
         let Some(tab) = tab else { return Choice::None };
         if !self.by_tab.contains_key(&tab) {

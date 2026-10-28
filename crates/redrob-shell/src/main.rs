@@ -23,6 +23,7 @@ mod model;
 mod profile;
 mod relay;
 mod self_update;
+mod theme;
 mod tiles;
 mod updater;
 mod vault;
@@ -31,7 +32,8 @@ mod webvtt;
 use std::sync::mpsc;
 
 use cdp::{Command, Event, Op, Update};
-use egui::{Color32, Key, Modifiers, Sense};
+use egui::{Color32, CornerRadius, Key, Modifiers, Rect, Sense, Stroke, Vec2};
+use theme::{Bar, Icon, size};
 use model::{Model, SuggestionKind, Tab, TabId};
 use i18n::{t, tf};
 use tiles::TileCache;
@@ -64,7 +66,8 @@ fn main() -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Redrob Browser")
-            .with_inner_size([1280.0, 860.0]),
+            .with_inner_size([1280.0, 860.0])
+            .with_min_inner_size([480.0, 360.0]),
         ..Default::default()
     };
     let ws_url = engine.ws_url.clone();
@@ -73,7 +76,7 @@ fn main() -> anyhow::Result<()> {
         options,
         Box::new(move |cc| {
             let ctx = cc.egui_ctx.clone();
-            add_korean_font(&ctx);
+            theme::install(&ctx);
             let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
             let (upd_tx, upd_rx) = mpsc::channel();
             let (login_tx, login_rx) = mpsc::channel();
@@ -140,6 +143,8 @@ fn main() -> anyhow::Result<()> {
                 error: None,
                 last_size: (0, 0, 0.0),
                 address_id: egui::Id::new("address"),
+                top_sites: None,
+                new_tab_query: String::new(),
                 #[cfg(feature = "gpu")]
                 gpu: cc.wgpu_render_state.as_ref().and_then(gpu_paint::GpuPainter::new),
             };
@@ -162,28 +167,6 @@ fn main() -> anyhow::Result<()> {
     drop(engine);
     self_update::restart_if_requested();
     result.map_err(|e| anyhow::anyhow!("{e}"))
-}
-
-/// egui's built-in fonts have no Hangul. Use the system's Korean font as a
-/// fallback for every family, so Korean UI text and page titles render.
-fn add_korean_font(ctx: &egui::Context) {
-    const CANDIDATES: &[&str] = &[
-        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-        "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
-        "C:\\Windows\\Fonts\\malgun.ttf",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-        "/usr/share/fonts/nanum/NanumGothic.ttf",
-    ];
-    let Some(bytes) = CANDIDATES.iter().find_map(|p| std::fs::read(p).ok()) else { return };
-    let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert("korean".to_string(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
-    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-        fonts.families.entry(family).or_default().push("korean".to_string());
-    }
-    ctx.set_fonts(fonts);
 }
 
 /// Write a file only its owner can read: the CDP address is a key to every tab.
@@ -235,6 +218,9 @@ struct Window {
     error: Option<String>,
     last_size: (u32, u32, f32),
     address_id: egui::Id,
+    /// Most visited sites for the new tab page, read once per new tab.
+    top_sites: Option<Vec<(String, String)>>,
+    new_tab_query: String,
     /// Renders tile display lists when the GPU path is available.
     #[cfg(feature = "gpu")]
     gpu: Option<gpu_paint::GpuPainter>,
@@ -293,6 +279,9 @@ impl Window {
         };
         self.model.insert_tab(tab, activate);
         self.op(id, Op::Open(engine_url));
+        if url == NEW_TAB {
+            self.top_sites = None;
+        }
         if activate {
             self.activated();
             if url == NEW_TAB {
@@ -638,7 +627,8 @@ impl Window {
             return;
         }
         let mut fill = None;
-        ui.menu_button(t("Key"), |ui| {
+        let r = theme::icon_button(ui, Icon::Key, t("Key"));
+        egui::Popup::menu(&r).align(egui::RectAlign::BOTTOM_END).show(|ui| {
             for l in &logins {
                 if ui.button(tf("Sign in as {0}", &[&l.username])).clicked() {
                     fill = Some(l.id);
@@ -729,15 +719,17 @@ impl Window {
             (false, false) => tf("Save the password for {0} on {1}?", &[username, origin]),
         };
         let mut choice = 0;
-        ui.horizontal(|ui| {
+        theme::bar(ui, Bar::Brand, |ui| {
+            Icon::Key.paint(ui, Rect::from_center_size(ui.cursor().left_center() + Vec2::new(8.0, 0.0), Vec2::splat(16.0)), theme::palette(ui).ink_brand);
+            ui.add_space(20.0);
             ui.label(question);
-            if ui.button(if exists { t("Update") } else { t("Save") }).clicked() {
+            if theme::button(ui, if exists { t("Update") } else { t("Save") }, true).clicked() {
                 choice = 1;
             }
-            if ui.button(t("Not now")).clicked() {
+            if theme::button(ui, t("Not now"), false).clicked() {
                 choice = 2;
             }
-            if ui.button(t("Never for this site")).clicked() {
+            if theme::button(ui, t("Never for this site"), false).clicked() {
                 choice = 3;
             }
         });
@@ -839,31 +831,46 @@ impl Window {
         }
     }
 
+    /// The ⋯ menu at the end of the toolbar.
     fn menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button(t("Menu"), |ui| {
-            if ui.button(t("New tab")).clicked() {
+        let r = theme::icon_button(ui, Icon::More, t("Menu"));
+        let item = |ui: &mut egui::Ui, icon: Icon, text: &str| {
+            let p = theme::palette(ui);
+            ui.add(egui::Button::image_and_text(icon.image(16.0, p.ink_secondary), text).frame(false).min_size(Vec2::new(220.0, 30.0)))
+        };
+        egui::Popup::menu(&r).align(egui::RectAlign::BOTTOM_END).width(248.0).show(|ui| {
+            if item(ui, Icon::Plus, t("New tab")).clicked() {
                 self.open_tab(NEW_TAB, true);
                 ui.close();
             }
-            if ui.button(t("Downloads")).clicked() {
+            ui.separator();
+            if item(ui, Icon::History, t("History")).clicked() {
+                self.open_tab(internal::HISTORY, true);
+                ui.close();
+            }
+            if item(ui, Icon::Download, t("Downloads")).clicked() {
                 self.show_downloads = true;
                 ui.close();
             }
-            if ui.button(t("Developer tools")).clicked() {
+            if item(ui, Icon::Key, t("Passwords")).clicked() {
+                self.open_tab(internal::PASSWORDS, true);
+                ui.close();
+            }
+            if item(ui, Icon::Code, t("Developer tools")).clicked() {
                 self.toggle_devtools();
                 ui.close();
             }
-            for (page, label) in [(internal::HISTORY, "History"), (internal::PASSWORDS, "Passwords"), (internal::SETTINGS, "Settings")] {
-                if ui.button(t(label)).clicked() {
-                    self.open_tab(page, true);
-                    ui.close();
-                }
+            if item(ui, Icon::Settings, t("Settings")).clicked() {
+                self.open_tab(internal::SETTINGS, true);
+                ui.close();
             }
+            ui.separator();
             let signed_in = self.profile.as_ref().and_then(|p| p.setting("account_email")).filter(|e| !e.is_empty());
             match signed_in {
                 Some(email) => {
+                    ui.add_space(2.0);
                     ui.weak(tf("Signed in as {0}", &[&email]));
-                    if ui.button(t("Sign out")).clicked() {
+                    if item(ui, Icon::User, t("Sign out")).clicked() {
                         account::sign_out();
                         if let Some(p) = &self.profile {
                             let _ = p.set_setting("account_name", "");
@@ -873,7 +880,7 @@ impl Window {
                     }
                 }
                 None => {
-                    if ui.button(t("Sign in to Redrob")).clicked() {
+                    if item(ui, Icon::SignIn, t("Sign in to Redrob")).clicked() {
                         account::sign_in(self.account_tx.clone());
                         ui.close();
                     }
@@ -891,33 +898,34 @@ impl Window {
                     }
                 }
             });
-            ui.separator();
-            let sources = import_chrome::sources();
-            if sources.is_empty() {
-                ui.weak(t("No Chrome, Chromium, Edge or Brave profile found"));
-            }
-            for s in &sources {
-                if ui.button(tf("Import from {0}", &[&s.name])).clicked() {
-                    self.import_from(s);
+            ui.menu_button(t("Import"), |ui| {
+                let sources = import_chrome::sources();
+                if sources.is_empty() {
+                    ui.weak(t("No Chrome, Chromium, Edge or Brave profile found"));
+                }
+                for s in &sources {
+                    if ui.button(tf("Import from {0}", &[&s.name])).clicked() {
+                        self.import_from(s);
+                        ui.close();
+                    }
+                    if s.profile.join("Login Data").exists() && ui.button(tf("Import passwords from {0}", &[&s.name])).clicked() {
+                        let scratch = self.profile.as_ref().map(|p| p.dir.join("import-tmp")).unwrap_or_else(std::env::temp_dir);
+                        let (logins, skipped) = match import_chrome::import_passwords(s, &scratch) {
+                            Ok((l, n)) => (Ok(l), n),
+                            Err(e) => (Err(e), 0),
+                        };
+                        self.import_passwords(logins, skipped, s.name);
+                        ui.close();
+                    }
+                }
+                // Chrome's "Export passwords" writes this file to the Downloads folder.
+                let csv = profile::downloads_dir().join("Chrome Passwords.csv");
+                if csv.exists() && ui.button(t("Import passwords from Chrome Passwords.csv")).clicked() {
+                    let logins = import_chrome::import_passwords_csv(&csv);
+                    self.import_passwords(logins, 0, t("the CSV file"));
                     ui.close();
                 }
-                if s.profile.join("Login Data").exists() && ui.button(tf("Import passwords from {0}", &[&s.name])).clicked() {
-                    let scratch = self.profile.as_ref().map(|p| p.dir.join("import-tmp")).unwrap_or_else(std::env::temp_dir);
-                    let (logins, skipped) = match import_chrome::import_passwords(s, &scratch) {
-                        Ok((l, n)) => (Ok(l), n),
-                        Err(e) => (Err(e), 0),
-                    };
-                    self.import_passwords(logins, skipped, s.name);
-                    ui.close();
-                }
-            }
-            // Chrome's "Export passwords" writes this file to the Downloads folder.
-            let csv = profile::downloads_dir().join("Chrome Passwords.csv");
-            if csv.exists() && ui.button(t("Import passwords from Chrome Passwords.csv")).clicked() {
-                let logins = import_chrome::import_passwords_csv(&csv);
-                self.import_passwords(logins, 0, t("the CSV file"));
-                ui.close();
-            }
+            });
         });
     }
 
@@ -928,41 +936,100 @@ impl Window {
         }
     }
 
+    /// The tab strip: tabs share the width up to 220pt each; the active one
+    /// joins the toolbar below it.
     fn tab_bar(&mut self, ui: &mut egui::Ui) {
+        let p = *theme::palette(ui);
+        let height = 40.0;
+        let (strip, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+        ui.painter().rect_filled(strip, 0.0, p.surface_sunken);
         let mut select = None;
         let mut close = None;
-        let mut new_tab = false;
-        ui.horizontal(|ui| {
-            egui::ScrollArea::horizontal().id_salt("tabs").show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    for (i, t) in self.model.tabs.iter().enumerate() {
-                        let mut label: String = t.label().chars().take(24).collect();
-                        if label.is_empty() {
-                            label = i18n::t("New tab").to_string();
-                        }
-                        if t.loading {
-                            label = format!("... {label}");
-                        }
-                        if t.agent {
-                            label = format!("[AI] {label}");
-                        }
-                        let r = ui.selectable_label(i == self.model.active, label).on_hover_text(&t.url);
-                        if r.clicked() {
-                            select = Some(i);
-                        }
-                        if r.middle_clicked() {
-                            close = Some(i);
-                        }
-                        if ui.small_button("x").on_hover_text(i18n::t("Close tab")).clicked() {
-                            close = Some(i);
-                        }
-                    }
-                    if ui.small_button("+").on_hover_text(t("New tab")).clicked() {
-                        new_tab = true;
-                    }
-                });
-            });
-        });
+        let plus_side = 28.0;
+        let left = strip.left() + size::SPACE_2;
+        let room = (strip.width() - size::SPACE_2 * 2.0 - plus_side - size::SPACE_1).max(0.0);
+        let n = self.model.tabs.len().max(1) as f32;
+        let width = (room / n).clamp(48.0, 220.0);
+        let top = strip.top() + 6.0;
+        for (i, tab) in self.model.tabs.iter().enumerate() {
+            let rect = Rect::from_min_size(egui::pos2(left + i as f32 * width, top), Vec2::new(width, strip.bottom() - top));
+            if rect.left() > strip.right() - plus_side {
+                break;
+            }
+            let id = ui.id().with(("tab", tab.id));
+            let r = ui.interact(rect, id, Sense::click());
+            let active = i == self.model.active;
+            let painter = ui.painter_at(rect.expand2(Vec2::new(8.0, 0.0)));
+            let top_round = CornerRadius { nw: size::RADIUS_MD, ne: size::RADIUS_MD, sw: 0, se: 0 };
+            if active {
+                painter.rect_filled(rect, top_round, p.surface_base);
+            } else if r.hovered() {
+                painter.rect_filled(rect.shrink2(Vec2::new(2.0, 3.0)), CornerRadius::same(size::RADIUS_SM), p.surface_raised);
+            } else if i + 1 != self.model.active && i + 1 < self.model.tabs.len() {
+                painter.vline(rect.right(), rect.y_range().shrink(9.0), Stroke::new(1.0, p.border_subtle));
+            }
+            // Icon: a spinner while loading, the sparkle for agent tabs, else a globe.
+            let icon_rect = Rect::from_center_size(egui::pos2(rect.left() + 18.0, rect.center().y), Vec2::splat(16.0));
+            if tab.loading {
+                egui::Spinner::new().size(14.0).color(p.ink_brand).paint_at(ui, icon_rect);
+            } else if tab.agent {
+                Icon::Sparkle.paint(ui, icon_rect, p.ink_brand);
+            } else if internal::is_internal(&tab.url) || tab.url == NEW_TAB {
+                Icon::Sparkle.paint(ui, icon_rect, p.ink_secondary);
+            } else {
+                Icon::Globe.paint(ui, icon_rect, p.ink_muted);
+            }
+            let show_close = active || r.hovered();
+            let close_rect = Rect::from_center_size(egui::pos2(rect.right() - 16.0, rect.center().y), Vec2::splat(20.0));
+            let mut label = tab.label().to_string();
+            if label.is_empty() {
+                label = t("New tab").to_string();
+            }
+            let text_left = icon_rect.right() + 8.0;
+            let text_right = if show_close { close_rect.left() - 4.0 } else { rect.right() - 10.0 };
+            if text_right - text_left > 12.0 {
+                let ink = if active { p.ink_primary } else { p.ink_secondary };
+                let galley = ui.painter().layout(label, egui::FontId::proportional(12.5), ink, f32::INFINITY);
+                let clip = Rect::from_x_y_ranges(text_left..=text_right, rect.y_range());
+                let tp = ui.painter_at(clip);
+                tp.galley(egui::pos2(text_left, rect.center().y - galley.size().y / 2.0), galley.clone(), ink);
+                if galley.size().x > clip.width() {
+                    // Fade the cut end into the tab instead of an ellipsis.
+                    let bg = if active { p.surface_base } else if r.hovered() { p.surface_raised } else { p.surface_sunken };
+                    let fade = Rect::from_x_y_ranges((text_right - 18.0)..=text_right, rect.y_range().shrink(6.0));
+                    let mut mesh = egui::Mesh::default();
+                    mesh.colored_vertex(fade.left_top(), bg.gamma_multiply(0.0));
+                    mesh.colored_vertex(fade.right_top(), bg);
+                    mesh.colored_vertex(fade.right_bottom(), bg);
+                    mesh.colored_vertex(fade.left_bottom(), bg.gamma_multiply(0.0));
+                    mesh.add_triangle(0, 1, 2);
+                    mesh.add_triangle(0, 2, 3);
+                    tp.add(mesh);
+                }
+            }
+            if show_close {
+                let cr = ui.interact(close_rect, id.with("close"), Sense::click());
+                if cr.hovered() {
+                    painter.rect_filled(close_rect, CornerRadius::same(size::RADIUS_XS), p.border_subtle);
+                }
+                Icon::Close.paint(ui, close_rect.shrink(4.0), if cr.hovered() { p.ink_primary } else { p.ink_secondary });
+                if cr.on_hover_text(t("Close tab")).clicked() {
+                    close = Some(i);
+                }
+            }
+            let r = r.on_hover_text(&tab.url);
+            if r.clicked() {
+                select = Some(i);
+            }
+            if r.middle_clicked() {
+                close = Some(i);
+            }
+        }
+        let shown = self.model.tabs.len() as f32;
+        let plus_x = (left + shown * width + size::SPACE_1).min(strip.right() - plus_side - size::SPACE_1);
+        let plus_rect = Rect::from_min_size(egui::pos2(plus_x, strip.center().y - plus_side / 2.0 + 3.0), Vec2::splat(plus_side));
+        let mut plus_ui = ui.new_child(egui::UiBuilder::new().max_rect(plus_rect));
+        let new_tab = theme::icon_button_sized(&mut plus_ui, Icon::Plus, t("New tab"), plus_side, true).clicked();
         if new_tab {
             self.open_tab(NEW_TAB, true);
         } else if let Some(i) = close {
@@ -972,112 +1039,220 @@ impl Window {
         }
     }
 
+    /// Back, forward, reload, the address field and the page's buttons.
     fn toolbar(&mut self, ui: &mut egui::Ui) {
+        let p = *theme::palette(ui);
         let id = self.active_id();
         let loading = self.model.active_tab().is_some_and(|t| t.loading);
         let url = self.model.active_tab().map(|t| t.url.clone()).unwrap_or_default();
         let mut go: Option<String> = None;
-        ui.horizontal(|ui| {
-            if ui.button("<").on_hover_text(t("Back")).clicked() {
-                if let Some(id) = id {
-                    self.op(id, Op::Back);
+        let mut field_rect = Rect::NOTHING;
+        egui::Frame::new().fill(p.surface_base).inner_margin(egui::Margin { left: 8, right: 8, top: 6, bottom: 6 }).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                if theme::icon_button(ui, Icon::Back, t("Back")).clicked() {
+                    if let Some(id) = id {
+                        self.op(id, Op::Back);
+                    }
                 }
-            }
-            if ui.button(">").on_hover_text(t("Forward")).clicked() {
-                if let Some(id) = id {
-                    self.op(id, Op::Forward);
+                if theme::icon_button(ui, Icon::Forward, t("Forward")).clicked() {
+                    if let Some(id) = id {
+                        self.op(id, Op::Forward);
+                    }
                 }
-            }
-            let (glyph, tip) = if loading { ("X", t("Stop")) } else { ("R", t("Reload")) };
-            if ui.button(glyph).on_hover_text(tip).clicked() {
-                if let Some(id) = id {
-                    self.op(id, if loading { Op::Stop } else { Op::Reload });
+                let (icon, tip) = if loading { (Icon::Close, t("Stop")) } else { (Icon::Refresh, t("Reload")) };
+                if theme::icon_button(ui, icon, tip).clicked() {
+                    if let Some(id) = id {
+                        self.op(id, if loading { Op::Stop } else { Op::Reload });
+                    }
                 }
-            }
-            let star = if self.model.is_bookmarked(&url) { "★" } else { "☆" };
-            let field_width = ui.available_width() - 140.0;
-            let field = ui.add(
-                egui::TextEdit::singleline(&mut self.address)
-                    .id(self.address_id)
-                    .desired_width(field_width)
-                    .hint_text(t("Search or enter address")),
-            );
-            if self.focus_address {
-                self.focus_address = false;
-                field.request_focus();
-                self.editing = true;
-            }
-            if field.changed() {
-                self.editing = true;
-            }
-            if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                if let Some(prompt) = self.address.trim().strip_prefix('>') {
-                    self.ask_agent(prompt.trim().to_string());
+                ui.add_space(6.0);
+                // Room for the buttons after the field: star, key, menu.
+                let after = 2.0 * (size::CONTROL_SM + 2.0) + if self.has_logins(&url) { size::CONTROL_SM + 2.0 } else { 0.0 } + 4.0;
+                let width = (ui.available_width() - after).max(120.0);
+                let (pill, _) = ui.allocate_exact_size(Vec2::new(width, 36.0), Sense::hover());
+                field_rect = pill;
+                let focused = ui.memory(|m| m.has_focus(self.address_id));
+                let pill_fill = if focused { p.surface_base } else { p.surface_sunken };
+                ui.painter().rect_filled(pill, CornerRadius::same(size::RADIUS_FULL), pill_fill);
+                if focused {
+                    ui.painter().rect_stroke(pill, CornerRadius::same(size::RADIUS_FULL), Stroke::new(2.0, p.focus_ring), egui::StrokeKind::Inside);
+                }
+                let site_icon = if focused || url == NEW_TAB {
+                    Icon::Search
+                } else if url.starts_with("https://") {
+                    Icon::Lock
+                } else if internal::is_internal(&url) {
+                    Icon::Sparkle
                 } else {
-                    go = Some(model::to_url(&self.address));
+                    Icon::Globe
+                };
+                let icon_rect = Rect::from_center_size(egui::pos2(pill.left() + 20.0, pill.center().y), Vec2::splat(16.0));
+                site_icon.paint(ui, icon_rect, p.ink_muted);
+                let star_rect = Rect::from_center_size(egui::pos2(pill.right() - 20.0, pill.center().y), Vec2::splat(28.0));
+                let text_rect = Rect::from_x_y_ranges((icon_rect.right() + 10.0)..=(star_rect.left() - 4.0), pill.y_range().shrink(6.0));
+                let mut field_ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                let field = field_ui.add(
+                    egui::TextEdit::singleline(&mut self.address)
+                        .id(self.address_id)
+                        .frame(egui::Frame::NONE)
+                        .font(egui::FontId::proportional(14.0))
+                        .text_color(p.ink_primary)
+                        .vertical_align(egui::Align::Center)
+                        .desired_width(text_rect.width())
+                        .hint_text(egui::RichText::new(t("Search or enter address")).color(p.ink_muted)),
+                );
+                if self.focus_address {
+                    self.focus_address = false;
+                    field.request_focus();
+                    self.editing = true;
                 }
-            }
-            if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Escape)) {
-                self.editing = false;
-                self.address = if url == NEW_TAB { String::new() } else { url.clone() };
-            }
-            if ui.button(star).on_hover_text(t("Bookmark this page")).clicked() {
-                self.toggle_bookmark();
-            }
-            self.key_button(ui, &url);
-            self.menu(ui);
+                if field.gained_focus() {
+                    // Select all, like every browser, so typing replaces the address.
+                    if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), self.address_id) {
+                        let all = egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(self.address.chars().count()));
+                        state.cursor.set_char_range(Some(all));
+                        state.store(ui.ctx(), self.address_id);
+                    }
+                }
+                if field.changed() {
+                    self.editing = true;
+                }
+                if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                    if let Some(prompt) = self.address.trim().strip_prefix('>') {
+                        self.ask_agent(prompt.trim().to_string());
+                    } else if !self.address.trim().is_empty() {
+                        go = Some(model::to_url(&self.address));
+                    }
+                }
+                if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Escape)) {
+                    self.editing = false;
+                    self.address = if url == NEW_TAB { String::new() } else { url.clone() };
+                }
+                if url != NEW_TAB && !internal::is_internal(&url) {
+                    let marked = self.model.is_bookmarked(&url);
+                    let mut star_ui = ui.new_child(egui::UiBuilder::new().max_rect(star_rect));
+                    let r = theme::icon_button_sized(&mut star_ui, if marked { Icon::StarFilled } else { Icon::Star }, t("Bookmark this page"), 28.0, true);
+                    if marked {
+                        Icon::StarFilled.paint(ui, Rect::from_center_size(star_rect.center(), Vec2::splat(16.0)), p.ink_brand);
+                    }
+                    if r.clicked() {
+                        self.toggle_bookmark();
+                    }
+                }
+                ui.add_space(4.0);
+                self.key_button(ui, &url);
+                self.menu(ui);
+            });
         });
 
-        // Suggestions under the address field while the person types.
+        // Suggestions float under the address field while the person types.
         if self.editing && ui.memory(|m| m.has_focus(self.address_id)) {
-            for s in self.model.suggest(&self.address, 8) {
-                let tag = match s.kind {
-                    SuggestionKind::Bookmark => t("Bookmark"),
-                    SuggestionKind::History => t("History"),
-                    SuggestionKind::Search => t("Search"),
-                    SuggestionKind::Typed => "",
-                };
-                let text = if s.title.is_empty() { s.url.clone() } else { format!("{}  -  {}", s.title, s.url) };
-                if ui.selectable_label(false, format!("{tag}: {text}")).clicked() {
-                    go = Some(s.url);
-                }
+            let list = self.model.suggest(&self.address, 8);
+            if !list.is_empty() {
+                egui::Area::new(egui::Id::new("suggestions"))
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(egui::pos2(field_rect.left(), field_rect.bottom() + 4.0))
+                    .show(ui.ctx(), |ui| {
+                        egui::Frame::popup(ui.style()).inner_margin(egui::Margin::same(6)).corner_radius(CornerRadius::same(size::RADIUS_LG)).show(ui, |ui| {
+                            ui.set_width(field_rect.width() - 12.0);
+                            for s in list {
+                                let icon = match s.kind {
+                                    SuggestionKind::Bookmark => Icon::Star,
+                                    SuggestionKind::History => Icon::History,
+                                    SuggestionKind::Search | SuggestionKind::Typed => Icon::Search,
+                                };
+                                let (row, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::click());
+                                if r.hovered() {
+                                    ui.painter().rect_filled(row, CornerRadius::same(size::RADIUS_MD), p.surface_sunken);
+                                }
+                                icon.paint(ui, Rect::from_center_size(egui::pos2(row.left() + 18.0, row.center().y), Vec2::splat(16.0)), p.ink_muted);
+                                let title = if s.title.is_empty() { s.url.clone() } else { s.title.clone() };
+                                let painter = ui.painter_at(row.shrink2(Vec2::new(4.0, 0.0)));
+                                let g = painter.layout_no_wrap(theme::elide(&title, 60), egui::FontId::proportional(13.0), p.ink_primary);
+                                let tw = g.size().x;
+                                painter.galley(egui::pos2(row.left() + 38.0, row.center().y - g.size().y / 2.0), g, p.ink_primary);
+                                if !s.title.is_empty() {
+                                    painter.text(
+                                        egui::pos2(row.left() + 38.0 + tw + 10.0, row.center().y),
+                                        egui::Align2::LEFT_CENTER,
+                                        theme::elide(&s.url, 70),
+                                        egui::FontId::proportional(12.0),
+                                        p.ink_muted,
+                                    );
+                                }
+                                if r.clicked() {
+                                    go = Some(s.url.clone());
+                                }
+                            }
+                        });
+                    });
             }
         }
         if let Some(url) = go {
+            self.editing = false;
+            ui.memory_mut(|m| m.surrender_focus(self.address_id));
             self.navigate(url);
         }
     }
 
-    fn bookmarks_bar(&mut self, ui: &mut egui::Ui) {
-        if self.model.bookmarks.is_empty() {
-            return;
+    fn has_logins(&self, url: &str) -> bool {
+        match (&self.vault, vault::origin_of(url)) {
+            (Some(v), Some(origin)) => !v.logins_for(&origin).is_empty(),
+            _ => false,
         }
+    }
+
+    fn bookmarks_bar(&mut self, ui: &mut egui::Ui) {
+        let p = *theme::palette(ui);
+        let top_level: Vec<(usize, model::Bookmark)> =
+            self.model.bookmarks.iter().cloned().enumerate().filter(|(_, b)| b.folder.is_empty()).collect();
         let mut go = None;
         let mut go_new_tab = None;
         let mut remove = None;
-        ui.horizontal_wrapped(|ui| {
-            for (i, b) in self.model.bookmarks.iter().enumerate().filter(|(_, b)| b.folder.is_empty()) {
-                let label: String = if b.title.is_empty() { b.url.clone() } else { b.title.clone() };
-                let label: String = label.chars().take(20).collect();
-                let r = ui.small_button(label).on_hover_text(&b.url);
-                if r.clicked() {
-                    go = Some(b.url.clone());
-                }
-                if r.middle_clicked() {
-                    go_new_tab = Some(b.url.clone());
-                }
-                r.context_menu(|ui| {
-                    if ui.button(t("Open in new tab")).clicked() {
-                        go_new_tab = Some(b.url.clone());
-                        ui.close();
-                    }
-                    if ui.button(t("Remove")).clicked() {
-                        remove = Some(i);
-                        ui.close();
-                    }
-                });
+        let r = egui::Frame::new().fill(p.surface_base).inner_margin(egui::Margin { left: 10, right: 10, top: 0, bottom: 4 }).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if top_level.is_empty() {
+                return;
             }
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                for (i, b) in &top_level {
+                    let label = theme::elide(if b.title.is_empty() { &b.url } else { &b.title }, 22);
+                    let g = ui.painter().layout_no_wrap(label, egui::FontId::proportional(12.0), p.ink_secondary);
+                    let w = g.size().x + 34.0;
+                    if ui.available_width() < w {
+                        break;
+                    }
+                    let (rect, r) = ui.allocate_exact_size(Vec2::new(w, 26.0), Sense::click());
+                    if r.hovered() {
+                        ui.painter().rect_filled(rect, CornerRadius::same(size::RADIUS_SM), p.surface_sunken);
+                    }
+                    Icon::Globe.paint(ui, Rect::from_center_size(egui::pos2(rect.left() + 14.0, rect.center().y), Vec2::splat(13.0)), p.ink_muted);
+                    ui.painter().galley(egui::pos2(rect.left() + 26.0, rect.center().y - g.size().y / 2.0), g, p.ink_secondary);
+                    let r = r.on_hover_text(&b.url);
+                    if r.clicked() {
+                        go = Some(b.url.clone());
+                    }
+                    if r.middle_clicked() {
+                        go_new_tab = Some(b.url.clone());
+                    }
+                    r.context_menu(|ui| {
+                        if ui.button(t("Open in new tab")).clicked() {
+                            go_new_tab = Some(b.url.clone());
+                            ui.close();
+                        }
+                        if ui.button(t("Remove")).clicked() {
+                            remove = Some(*i);
+                            ui.close();
+                        }
+                    });
+                }
+            });
         });
+        let rect = r.response.rect;
+        ui.painter().hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, p.border_subtle));
         if let Some(i) = remove {
             self.model.bookmarks.remove(i);
             self.save_bookmarks();
@@ -1087,6 +1262,110 @@ impl Window {
         }
         if let Some(url) = go {
             self.navigate(url);
+        }
+    }
+
+    /// The first screen of a new tab: the mark, a search field and the
+    /// person's most visited sites.
+    fn new_tab_page(&mut self, ui: &mut egui::Ui, rect: Rect) {
+        let p = *theme::palette(ui);
+        ui.painter().rect_filled(rect, 0.0, p.surface_base);
+        if self.top_sites.is_none() {
+            let mut sites: Vec<(String, String)> = Vec::new();
+            if let Some(prof) = &self.profile {
+                let mut h = prof.history_page("", 200, 0).unwrap_or_default();
+                h.sort_by(|a, b| b.visits.cmp(&a.visits).then(b.last_visit.cmp(&a.last_visit)));
+                let mut hosts = std::collections::HashSet::new();
+                for e in h {
+                    let Some(host) = url::Url::parse(&e.url).ok().and_then(|u| u.host_str().map(str::to_string)) else { continue };
+                    if hosts.insert(host.clone()) {
+                        sites.push((e.url, if e.title.is_empty() { host } else { e.title }));
+                    }
+                    if sites.len() == 8 {
+                        break;
+                    }
+                }
+            }
+            self.top_sites = Some(sites);
+        }
+        let column = 560.0f32.min(rect.width() - 48.0);
+        let top = rect.top() + (rect.height() * 0.2).clamp(32.0, 180.0);
+        let area = Rect::from_min_size(egui::pos2(rect.center().x - column / 2.0, top), Vec2::new(column, rect.bottom() - top));
+        let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(egui::Layout::top_down(egui::Align::Center)));
+        ui.add(egui::Image::from_bytes("bytes://redrob-ui/redrob-browser-icon.svg", theme::BRAND_ICON).fit_to_exact_size(Vec2::splat(64.0)).corner_radius(14));
+        ui.add_space(size::SPACE_3);
+        ui.label(egui::RichText::new("Redrob Browser").size(22.0).color(p.ink_primary).strong());
+        ui.add_space(size::SPACE_6);
+
+        // The search field, the same as the address bar.
+        let (pill, _) = ui.allocate_exact_size(Vec2::new(column, size::CONTROL_LG), Sense::hover());
+        let id = egui::Id::new("newtab-search");
+        let focused = ui.memory(|m| m.has_focus(id));
+        ui.painter().rect_filled(pill, CornerRadius::same(size::RADIUS_FULL), p.surface_raised);
+        let stroke = if focused { Stroke::new(2.0, p.focus_ring) } else { Stroke::new(1.0, p.border_subtle) };
+        ui.painter().rect_stroke(pill, CornerRadius::same(size::RADIUS_FULL), stroke, egui::StrokeKind::Inside);
+        Icon::Search.paint(&ui, Rect::from_center_size(egui::pos2(pill.left() + 24.0, pill.center().y), Vec2::splat(18.0)), p.ink_muted);
+        let text_rect = Rect::from_x_y_ranges((pill.left() + 46.0)..=(pill.right() - 20.0), pill.y_range().shrink(8.0));
+        let mut field_ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let field = field_ui.add(
+            egui::TextEdit::singleline(&mut self.new_tab_query)
+                .id(id)
+                .frame(egui::Frame::NONE)
+                .font(egui::FontId::proportional(15.0))
+                .text_color(p.ink_primary)
+                .desired_width(text_rect.width())
+                .hint_text(egui::RichText::new(t("Search or enter address")).color(p.ink_muted)),
+        );
+        if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+            let q = std::mem::take(&mut self.new_tab_query);
+            if let Some(prompt) = q.trim().strip_prefix('>') {
+                self.ask_agent(prompt.trim().to_string());
+            } else if !q.trim().is_empty() {
+                self.navigate(model::to_url(&q));
+            }
+        }
+        ui.add_space(size::SPACE_2);
+        ui.label(egui::RichText::new(t("Start with > to ask Redrob Code")).size(12.0).color(p.ink_muted));
+        ui.add_space(size::SPACE_6 + size::SPACE_2);
+
+        // Most visited sites as tiles, four to a row.
+        let sites = self.top_sites.clone().unwrap_or_default();
+        if sites.is_empty() {
+            return;
+        }
+        let tile = Vec2::new(112.0, 92.0);
+        let per_row = ((column / (tile.x + 8.0)).floor() as usize).clamp(1, 4);
+        let mut open = None;
+        for row in sites.chunks(per_row) {
+            let w = row.len() as f32 * (tile.x + 8.0) - 8.0;
+            let (line, _) = ui.allocate_exact_size(Vec2::new(column, tile.y), Sense::hover());
+            let mut x = line.center().x - w / 2.0;
+            for (url, title) in row {
+                let r_rect = Rect::from_min_size(egui::pos2(x, line.top()), tile);
+                let r = ui.interact(r_rect, egui::Id::new(("site", url.as_str())), Sense::click());
+                if r.hovered() {
+                    ui.painter().rect_filled(r_rect, CornerRadius::same(size::RADIUS_LG), p.surface_raised);
+                }
+                let c = egui::pos2(r_rect.center().x, r_rect.top() + 32.0);
+                ui.painter().circle_filled(c, 22.0, p.surface_sunken);
+                let letter = title.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+                ui.painter().text(c, egui::Align2::CENTER_CENTER, letter, egui::FontId::proportional(18.0), p.ink_brand);
+                ui.painter().text(
+                    egui::pos2(r_rect.center().x, r_rect.top() + 72.0),
+                    egui::Align2::CENTER_CENTER,
+                    theme::elide(title, 14),
+                    egui::FontId::proportional(12.0),
+                    p.ink_secondary,
+                );
+                if r.on_hover_text(url).clicked() {
+                    open = Some(url.clone());
+                }
+                x += tile.x + 8.0;
+            }
+            ui.add_space(8.0);
+        }
+        if let Some(u) = open {
+            self.navigate(u);
         }
     }
 }
@@ -1135,23 +1414,36 @@ impl eframe::App for Window {
             self.save_session();
         }
 
-        egui::Panel::top("chrome").show_inside(ui, |ui| {
+        let p = *theme::palette(ui);
+        egui::Panel::top("chrome").frame(egui::Frame::new().fill(p.surface_base)).show_separator_line(false).show_inside(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             self.tab_bar(ui);
             self.toolbar(ui);
             self.bookmarks_bar(ui);
             self.save_bar(ui);
             let page = self.model.active_tab().map(|t| t.url.clone()).unwrap_or_default();
-            if let drm_tab::Choice::Notice(n) = self.drm.bar(ui, self.active_id(), &page) {
+            let mut drm_notice = None;
+            let active = self.active_id();
+            if self.drm.wants_bar(active, &page) {
+                theme::bar(ui, Bar::Info, |ui| {
+                    if let drm_tab::Choice::Notice(n) = self.drm.bar(ui, active, &page) {
+                        drm_notice = Some(n);
+                    }
+                });
+            }
+            if let Some(n) = drm_notice {
                 self.notice = Some(n);
             }
-            if let Some(e) = &self.error {
-                ui.colored_label(Color32::RED, e);
+            if let Some(e) = self.error.clone() {
+                theme::bar(ui, Bar::Danger, |ui| {
+                    ui.label(egui::RichText::new(e).color(p.danger));
+                });
             }
             if let Some((version, url)) = self.update.as_ref().map(|u| (u.version.clone(), u.url.clone())) {
-                ui.horizontal(|ui| {
+                theme::bar(ui, Bar::Brand, |ui| {
                     if self.self_update.ready() {
                         ui.label(tf("Redrob Browser {0} is ready.", &[&version]));
-                        if ui.small_button(t("Restart to update")).clicked() {
+                        if theme::button(ui, t("Restart to update"), true).clicked() {
                             self.save_session();
                             self.self_update.restart();
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1160,40 +1452,49 @@ impl eframe::App for Window {
                     }
                     ui.label(tf("Redrob Browser {0} is available.", &[&version]));
                     if self.self_update.busy() {
+                        ui.spinner();
                         return;
                     }
                     if self.self_update.can_start() {
-                        if ui.small_button(t("Update now")).clicked() {
+                        if theme::button(ui, t("Update now"), true).clicked() {
                             self.self_update.start(ctx.clone());
                         }
-                    } else if ui.small_button(t("Download")).clicked() {
+                    } else if theme::button(ui, t("Download"), true).clicked() {
                         self.open_tab(&url, true);
                         self.update = None;
                     }
-                    if ui.small_button(t("Not now")).clicked() {
+                    if theme::button(ui, t("Not now"), false).clicked() {
                         self.update = None;
                     }
                 });
             }
             if let Some(n) = self.notice.clone() {
-                ui.horizontal(|ui| {
+                theme::bar(ui, Bar::Info, |ui| {
                     ui.label(n);
-                    if ui.small_button(t("OK")).clicked() {
-                        self.notice = None;
-                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if theme::icon_button_sized(ui, Icon::Close, t("OK"), 24.0, true).clicked() {
+                            self.notice = None;
+                        }
+                    });
                 });
             }
         });
 
         if self.show_devtools {
-            egui::Panel::right("devtools").resizable(true).default_size(440.0).show_inside(ui, |ui| self.devtools_panel(ui));
+            egui::Panel::right("devtools")
+                .resizable(true)
+                .default_size(440.0)
+                .frame(egui::Frame::new().fill(p.surface_raised).inner_margin(egui::Margin::same(8)).stroke(Stroke::new(1.0, p.border_subtle)))
+                .show_inside(ui, |ui| self.devtools_panel(ui));
         }
 
         if self.show_downloads && !self.model.downloads.is_empty() {
-            egui::Panel::bottom("downloads").show_inside(ui, |ui| self.downloads_panel(ui));
+            egui::Panel::bottom("downloads")
+                .frame(egui::Frame::new().fill(p.surface_raised).inner_margin(egui::Margin::symmetric(16, 8)).stroke(Stroke::new(1.0, p.border_subtle)))
+                .show_inside(ui, |ui| self.downloads_panel(ui));
         }
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(p.surface_base)).show_inside(ui, |ui| {
             let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
             let scale = ctx.pixels_per_point();
             let size = (rect.width().round() as u32, rect.height().round() as u32, scale);
@@ -1201,15 +1502,20 @@ impl eframe::App for Window {
                 self.last_size = size;
                 let _ = self.commands.send(Command::Resize { width: size.0, height: size.1, scale });
             }
-            ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
             if self.model.tabs.is_empty() {
                 return;
             }
             let tab_index = self.model.active;
             let page_url = self.model.tabs[tab_index].url.clone();
+            if page_url == NEW_TAB {
+                self.new_tab_page(ui, rect);
+                return;
+            }
             if internal::is_internal(&page_url) {
-                ui.painter().rect_filled(rect, 0.0, ui.visuals().panel_fill);
-                let mut page_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink(16.0)));
+                ui.painter().rect_filled(rect, 0.0, p.surface_base);
+                let column = 760.0f32.min(rect.width() - 48.0);
+                let inner = Rect::from_min_max(egui::pos2(rect.center().x - column / 2.0, rect.top() + 24.0), egui::pos2(rect.center().x + column / 2.0, rect.bottom() - 16.0));
+                let mut page_ui = ui.new_child(egui::UiBuilder::new().max_rect(inner));
                 let act = internal::ui(&mut page_ui, &page_url, &mut self.internal, self.profile.as_ref(), self.vault.as_mut());
                 if let Some(id) = act.search_engine {
                     model::set_search_engine(&id);
@@ -1225,6 +1531,8 @@ impl eframe::App for Window {
                 }
                 return;
             }
+            // Web pages are white until they paint, as in every browser.
+            ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
             let wanted = {
                 let t = &mut self.model.tabs[tab_index];
                 t.tiles.paint(ui.painter(), rect, t.scroll);

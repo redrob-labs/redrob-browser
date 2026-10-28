@@ -100,6 +100,8 @@ fn ko(en: &str) -> Option<&'static str> {
         "Remove" => "삭제",
         "OK" => "확인",
         "Menu" => "메뉴",
+        "Import" => "가져오기",
+        "Start with > to ask Redrob Code" => "> 로 시작하면 Redrob Code에 물어봐요",
         "Downloads" => "다운로드",
         "Developer tools" => "개발자 도구",
         "Language" => "언어",

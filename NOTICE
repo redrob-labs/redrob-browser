@@ -6,3 +6,10 @@ licensed under the Apache License, Version 2.0.
 Copyright the Obscura contributors.
 
 See UPSTREAM.md for the exact upstream release this tree is based on.
+
+Redrob design system (@redrob-labs/ui 1.8.0): design tokens, icons and the
+Redrob Browser app icon under crates/redrob-shell/assets/redrob-ui/.
+MIT License, Copyright (c) 2026 Janghoon Lee (Redrob) and contributors.
+
+Wanted Sans (crates/redrob-shell/assets/fonts/WantedSans-Regular.ttf),
+SIL Open Font License 1.1; the licence text is beside the font file.

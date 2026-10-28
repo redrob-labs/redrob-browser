@@ -59,7 +59,7 @@ pub struct Vault {
 
 impl Vault {
     pub fn open(profile_dir: &Path) -> anyhow::Result<Self> {
-        let key = master_key()?;
+        let key = master_key(profile_dir)?;
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key[..]));
         let db = Connection::open(profile_dir.join("vault.sqlite"))?;
         db.execute_batch(
@@ -306,19 +306,68 @@ impl Vault {
 }
 
 /// The vault key from the OS credential store, created on first use.
-fn master_key() -> anyhow::Result<Zeroizing<Vec<u8>>> {
-    let entry = keyring::Entry::new(SERVICE, KEY_ACCOUNT).map_err(|e| anyhow::anyhow!("OS credential store: {e}"))?;
+///
+/// On Linux without a Secret Service (no GNOME Keyring or KWallet running) the
+/// key lives in `<profile>/vault.key`, mode 0600, the way Chrome's "basic"
+/// store does. Once that file exists it is used, so the key never moves.
+fn master_key(profile_dir: &Path) -> anyhow::Result<Zeroizing<Vec<u8>>> {
+    let file = profile_dir.join("vault.key");
+    if cfg!(target_os = "linux") && file.exists() {
+        return file_key(&file);
+    }
+    let entry = match keyring::Entry::new(SERVICE, KEY_ACCOUNT) {
+        Ok(e) => e,
+        Err(e) if cfg!(target_os = "linux") => {
+            eprintln!("redrob-browser: no OS credential store ({e}); keeping the vault key in {}", file.display());
+            return file_key(&file);
+        }
+        Err(e) => anyhow::bail!("OS credential store: {e}"),
+    };
     match entry.get_secret() {
         Ok(k) if k.len() == 32 => Ok(Zeroizing::new(k)),
         Ok(_) => anyhow::bail!("the vault key in the OS credential store is damaged"),
         Err(keyring::Error::NoEntry) => {
-            let mut k = Zeroizing::new(vec![0u8; 32]);
-            getrandom::fill(&mut k[..]).map_err(|e| anyhow::anyhow!("random: {e}"))?;
-            entry.set_secret(&k).map_err(|e| anyhow::anyhow!("OS credential store: {e}"))?;
-            Ok(k)
+            let k = new_key()?;
+            match entry.set_secret(&k) {
+                Ok(()) => Ok(k),
+                Err(e) if cfg!(target_os = "linux") => {
+                    eprintln!("redrob-browser: OS credential store refused the key ({e}); using {}", file.display());
+                    file_key(&file)
+                }
+                Err(e) => anyhow::bail!("OS credential store: {e}"),
+            }
+        }
+        Err(e) if cfg!(target_os = "linux") => {
+            eprintln!("redrob-browser: OS credential store unavailable ({e}); using {}", file.display());
+            file_key(&file)
         }
         Err(e) => anyhow::bail!("OS credential store: {e}"),
     }
+}
+
+fn new_key() -> anyhow::Result<Zeroizing<Vec<u8>>> {
+    let mut k = Zeroizing::new(vec![0u8; 32]);
+    getrandom::fill(&mut k[..]).map_err(|e| anyhow::anyhow!("random: {e}"))?;
+    Ok(k)
+}
+
+/// Read the 32-byte key file, or create it with mode 0600.
+fn file_key(file: &Path) -> anyhow::Result<Zeroizing<Vec<u8>>> {
+    if let Ok(k) = std::fs::read(file) {
+        anyhow::ensure!(k.len() == 32, "the vault key file {} is damaged", file.display());
+        return Ok(Zeroizing::new(k));
+    }
+    let k = new_key()?;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    use std::io::Write;
+    opts.open(file)?.write_all(&k)?;
+    Ok(k)
 }
 
 /// `scheme://host[:port]` of a URL; the key logins are matched by.
