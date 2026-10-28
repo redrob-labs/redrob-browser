@@ -21,6 +21,7 @@ mod relay;
 mod tiles;
 mod updater;
 mod vault;
+mod webvtt;
 
 use std::sync::mpsc;
 

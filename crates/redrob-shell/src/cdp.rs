@@ -67,6 +67,10 @@ const LOGIN_SUBMIT_JS: &str = r#"(() => {
 const LOGIN_BINDING: &str = "redrobLoginSubmit";
 /// `<video>`/`<audio>` ask the window to play through this binding.
 const MEDIA_BINDING: &str = "redrobMedia";
+/// MediaSource/SourceBuffer bytes and calls, delivered like media requests.
+const MSE_BINDING: &str = "redrobMse";
+/// After load the window starts muted `autoplay` media; autoplay with sound stays blocked.
+const AUTOPLAY_JS: &str = "document.querySelectorAll('video[autoplay][muted], audio[autoplay][muted]').forEach((e) => { if (e.paused && e.muted) e.play().catch(() => {}); })";
 
 /// Tab ids the engine side hands out for pages a page opened itself.
 const POPUP_ID_BASE: TabId = 1 << 40;
@@ -97,6 +101,8 @@ pub enum Op {
     MediaReport { id: u64, status: crate::media::Status },
     /// Ask where these media elements are on screen.
     MediaRects(Vec<u64>),
+    /// Run a media script in the page without reporting its result.
+    MediaEval(String),
     /// Type a saved login into the page's sign-in form.
     FillLogin { username: String, password: zeroize::Zeroizing<String> },
 }
@@ -219,6 +225,7 @@ impl State {
         self.c.call(s, "Runtime.enable", json!({})).await?;
         self.c.call(s, "Runtime.addBinding", json!({ "name": LOGIN_BINDING })).await?;
         self.c.call(s, "Runtime.addBinding", json!({ "name": MEDIA_BINDING })).await?;
+        self.c.call(s, "Runtime.addBinding", json!({ "name": MSE_BINDING })).await?;
         self.c.call(s, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": LOGIN_SUBMIT_JS })).await?;
         let (w, h, scale) = self.size;
         self.c
@@ -471,6 +478,9 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
                 r["result"]["value"].as_str().and_then(|v| serde_json::from_str(v).ok()).unwrap_or_default();
             st.emit(tab, Event::MediaRects(rects));
         }
+        Op::MediaEval(expr) => {
+            st.c.send(s, "Runtime.evaluate", json!({ "expression": expr }));
+        }
         Op::FillLogin { username, password } => {
             let doc = st.c.call(s, "Runtime.evaluate", json!({ "expression": "document" })).await?;
             let object_id = doc["result"]["objectId"].as_str().unwrap_or_default().to_string();
@@ -559,7 +569,7 @@ async fn on_event(st: &mut State, ev: Value) {
                 st.emit(tab, Event::Navigated(frame["url"].as_str().unwrap_or_default().to_string()));
             }
         }
-        "Runtime.bindingCalled" if p["name"] == MEDIA_BINDING => {
+        "Runtime.bindingCalled" if p["name"] == MEDIA_BINDING || p["name"] == MSE_BINDING => {
             if let Ok(v) = serde_json::from_str::<Value>(p["payload"].as_str().unwrap_or_default()) {
                 st.emit(tab, Event::Media(v));
             }
@@ -635,6 +645,7 @@ async fn on_event(st: &mut State, ev: Value) {
             }
             if method == "Page.loadEventFired" {
                 st.emit(tab, Event::Loading(false));
+                st.c.send(session.as_deref(), "Runtime.evaluate", json!({ "expression": AUTOPLAY_JS }));
             }
             report_scroll(st, tab).await;
             st.emit(tab, Event::Invalidate);
