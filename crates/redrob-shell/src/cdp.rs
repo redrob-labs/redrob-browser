@@ -1,9 +1,10 @@
-//! The window's CDP connection to the engine: one tab for now.
+//! The window's CDP connection to the engine.
 //!
-//! The UI thread sends [`Command`]s; this task turns them into CDP calls and
-//! sends painted tiles, scroll state and URL/title changes back as [`Update`]s.
+//! One WebSocket, one flattened session per tab. The UI thread sends
+//! [`Command`]s; this task turns them into CDP calls and sends painted tiles,
+//! scroll state and page changes back as [`Update`]s tagged with the tab.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
@@ -13,15 +14,22 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::model::TabId;
 use crate::tiles::{TileKey, TILE};
 
-pub enum Command {
+/// Tab ids the engine side hands out for pages a page opened itself.
+const POPUP_ID_BASE: TabId = 1 << 40;
+
+pub enum Op {
+    Open(String),
+    Close,
+    /// This tab is now the one on screen.
+    Activate,
     Navigate(String),
     Back,
     Forward,
     Reload,
-    /// Viewport in CSS pixels and the device scale factor.
-    Resize { width: u32, height: u32, scale: f32 },
+    Stop,
     Mouse { kind: &'static str, x: f32, y: f32, button: &'static str, clicks: u32, modifiers: u32 },
     Wheel { x: f32, y: f32, dx: f32, dy: f32, modifiers: u32 },
     Key { down: bool, key: String, code: String, vk: u32, modifiers: u32 },
@@ -30,16 +38,32 @@ pub enum Command {
     Tiles { keys: Vec<TileKey>, generation: u64 },
 }
 
-pub enum Update {
+pub enum Command {
+    Tab(TabId, Op),
+    /// Viewport in CSS pixels and the device scale factor, for every tab.
+    Resize { width: u32, height: u32, scale: f32 },
+}
+
+pub enum Event {
     Tile { key: TileKey, generation: u64, image: egui::ColorImage },
     /// Pixels may have changed: repaint tiles.
     Invalidate,
     /// A different document: drop every tile.
     Navigated(String),
+    /// Same document, new URL (fragment or history API).
+    UrlChanged(String),
     /// The page's own scroll position and document size, in CSS pixels.
     Scroll { x: f32, y: f32, width: f32, height: f32 },
     Title(String),
+    Loading(bool),
+    /// The page opened a new window; show it as a new tab next to its opener.
+    Opened { url: String, opener: Option<TabId> },
     Error(String),
+}
+
+pub struct Update {
+    pub tab: TabId,
+    pub event: Event,
 }
 
 type Pending = HashMap<u64, oneshot::Sender<Value>>;
@@ -48,15 +72,14 @@ struct Conn {
     out: mpsc::UnboundedSender<String>,
     pending: std::sync::Arc<std::sync::Mutex<Pending>>,
     next: u64,
-    session: Option<String>,
 }
 
 impl Conn {
-    async fn call(&mut self, method: &str, params: Value) -> anyhow::Result<Value> {
+    async fn call(&mut self, session: Option<&str>, method: &str, params: Value) -> anyhow::Result<Value> {
         self.next += 1;
         let id = self.next;
         let mut msg = json!({ "id": id, "method": method, "params": params });
-        if let Some(s) = &self.session {
+        if let Some(s) = session {
             msg["sessionId"] = json!(s);
         }
         let (tx, rx) = oneshot::channel();
@@ -70,13 +93,62 @@ impl Conn {
     }
 
     /// Fire and forget: input events do not need their reply awaited.
-    fn send(&mut self, method: &str, params: Value) {
+    fn send(&mut self, session: Option<&str>, method: &str, params: Value) {
         self.next += 1;
         let mut msg = json!({ "id": self.next, "method": method, "params": params });
-        if let Some(s) = &self.session {
+        if let Some(s) = session {
             msg["sessionId"] = json!(s);
         }
         let _ = self.out.send(msg.to_string());
+    }
+}
+
+struct TabConn {
+    session: String,
+    target: String,
+}
+
+struct State {
+    c: Conn,
+    tabs: HashMap<TabId, TabConn>,
+    by_session: HashMap<String, TabId>,
+    /// Targets this window created, so their targetCreated is not taken for a popup.
+    own_targets: HashSet<String>,
+    active: Option<TabId>,
+    size: (u32, u32, f32),
+    next_popup: TabId,
+    updates: Sender<Update>,
+}
+
+impl State {
+    fn emit(&self, tab: TabId, event: Event) {
+        let _ = self.updates.send(Update { tab, event });
+    }
+
+    fn session(&self, tab: TabId) -> Option<String> {
+        self.tabs.get(&tab).map(|t| t.session.clone())
+    }
+
+    async fn attach(&mut self, tab: TabId, target: String) -> anyhow::Result<()> {
+        let attached = self
+            .c
+            .call(None, "Target.attachToTarget", json!({ "targetId": target, "flatten": true }))
+            .await?;
+        let session = attached["sessionId"].as_str().unwrap_or_default().to_string();
+        let s = Some(session.as_str());
+        self.c.call(s, "Page.enable", json!({})).await?;
+        self.c.call(s, "Runtime.enable", json!({})).await?;
+        let (w, h, scale) = self.size;
+        self.c
+            .call(
+                s,
+                "Emulation.setDeviceMetricsOverride",
+                json!({ "width": w, "height": h, "deviceScaleFactor": scale, "mobile": false }),
+            )
+            .await?;
+        self.by_session.insert(session.clone(), tab);
+        self.tabs.insert(tab, TabConn { session, target });
+        Ok(())
     }
 }
 
@@ -114,61 +186,160 @@ pub async fn run(
         }
     });
 
-    let mut c = Conn { out: out_tx, pending, next: 0, session: None };
-    let target = c.call("Target.createTarget", json!({ "url": "about:blank" })).await?;
-    let target_id = target["targetId"].as_str().unwrap_or_default().to_string();
-    let attached = c
-        .call("Target.attachToTarget", json!({ "targetId": target_id, "flatten": true }))
-        .await?;
-    c.session = attached["sessionId"].as_str().map(str::to_string);
-    c.call("Page.enable", json!({})).await?;
-    c.call("Runtime.enable", json!({})).await?;
-    // Frames are only a signal here: the engine paints when the page changes.
-    c.call("Page.startScreencast", json!({ "format": "jpeg", "quality": 1, "everyNthFrame": 1 }))
-        .await?;
+    let mut st = State {
+        c: Conn { out: out_tx, pending, next: 0 },
+        tabs: HashMap::new(),
+        by_session: HashMap::new(),
+        own_targets: HashSet::new(),
+        active: None,
+        size: (1280, 800, 1.0),
+        next_popup: POPUP_ID_BASE,
+        updates,
+    };
+    st.c.call(None, "Target.setDiscoverTargets", json!({ "discover": true })).await?;
 
-    let mut size = (1280u32, 800u32, 1.0f32);
     loop {
         tokio::select! {
             cmd = commands.recv() => {
                 let Some(cmd) = cmd else { break };
-                handle(&mut c, cmd, &mut size, &updates).await;
+                match cmd {
+                    Command::Resize { width, height, scale } => resize(&mut st, (width, height, scale)).await,
+                    Command::Tab(tab, op) => {
+                        if let Err(e) = handle(&mut st, tab, op).await {
+                            st.emit(tab, Event::Error(e.to_string()));
+                        }
+                    }
+                }
                 repaint();
             }
             ev = event_rx.recv() => {
                 let Some(ev) = ev else { break };
-                match ev["method"].as_str() {
-                    Some("Page.screencastFrame") => {
-                        if let Some(id) = ev["params"]["sessionId"].as_u64() {
-                            c.send("Page.screencastFrameAck", json!({ "sessionId": id }));
-                        }
-                        let _ = updates.send(Update::Invalidate);
-                        repaint();
-                    }
-                    Some("Page.frameNavigated") => {
-                        let frame = &ev["params"]["frame"];
-                        if frame.get("parentId").is_none() {
-                            let url = frame["url"].as_str().unwrap_or_default().to_string();
-                            let _ = updates.send(Update::Navigated(url));
-                            repaint();
-                        }
-                    }
-                    Some("Page.navigatedWithinDocument") => {
-                        if let Some(url) = ev["params"]["url"].as_str() {
-                            let _ = updates.send(Update::Navigated(url.to_string()));
-                        }
-                    }
-                    Some("Page.loadEventFired") | Some("Page.domContentEventFired") => {
-                        if let Ok(v) = c.call("Runtime.evaluate", json!({ "expression": "document.title", "returnByValue": true })).await {
-                            if let Some(t) = v["result"]["value"].as_str() {
-                                let _ = updates.send(Update::Title(t.to_string()));
-                            }
-                        }
-                        report_scroll(&mut c, &updates).await;
-                        let _ = updates.send(Update::Invalidate);
-                        repaint();
-                    }
-                    _ => {}
+                on_event(&mut st, ev).await;
+                repaint();
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn resize(st: &mut State, size: (u32, u32, f32)) {
+    if size == st.size {
+        return;
+    }
+    st.size = size;
+    let sessions: Vec<(TabId, String)> = st.tabs.iter().map(|(id, t)| (*id, t.session.clone())).collect();
+    for (tab, session) in sessions {
+        let params = json!({ "width": size.0, "height": size.1, "deviceScaleFactor": size.2, "mobile": false });
+        if st.c.call(Some(&session), "Emulation.setDeviceMetricsOverride", params).await.is_ok() {
+            report_scroll(st, tab).await;
+            st.emit(tab, Event::Invalidate);
+        }
+    }
+}
+
+async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
+    if let Op::Open(url) = &op {
+        let created = st.c.call(None, "Target.createTarget", json!({ "url": "about:blank" })).await?;
+        let target = created["targetId"].as_str().unwrap_or_default().to_string();
+        st.own_targets.insert(target.clone());
+        st.attach(tab, target).await?;
+        if url != "about:blank" {
+            let session = st.session(tab);
+            st.emit(tab, Event::Loading(true));
+            st.c.call(session.as_deref(), "Page.navigate", json!({ "url": url })).await?;
+        }
+        return Ok(());
+    }
+    let Some(session) = st.session(tab) else { return Ok(()) };
+    let s = Some(session.as_str());
+    match op {
+        Op::Open(_) => {}
+        Op::Close => {
+            if let Some(t) = st.tabs.remove(&tab) {
+                st.by_session.remove(&t.session);
+                st.own_targets.remove(&t.target);
+                st.c.call(None, "Target.closeTarget", json!({ "targetId": t.target })).await?;
+            }
+            if st.active == Some(tab) {
+                st.active = None;
+            }
+        }
+        Op::Activate => {
+            if let Some(prev) = st.active.and_then(|p| st.session(p)) {
+                if prev != session {
+                    st.c.send(Some(&prev), "Page.stopScreencast", json!({}));
+                }
+            }
+            st.active = Some(tab);
+            st.c.call(None, "Target.activateTarget", json!({ "targetId": st.tabs[&tab].target })).await?;
+            // Frames are only a change signal; tiles carry the pixels.
+            st.c.call(s, "Page.startScreencast", json!({ "format": "jpeg", "quality": 1, "everyNthFrame": 1 })).await?;
+            report_scroll(st, tab).await;
+            st.emit(tab, Event::Invalidate);
+        }
+        Op::Navigate(url) => {
+            st.emit(tab, Event::Loading(true));
+            st.c.call(s, "Page.navigate", json!({ "url": url })).await?;
+        }
+        Op::Back => step_history(st, &session, -1).await?,
+        Op::Forward => step_history(st, &session, 1).await?,
+        Op::Reload => {
+            st.emit(tab, Event::Loading(true));
+            st.c.call(s, "Page.reload", json!({})).await?;
+        }
+        Op::Stop => {
+            st.c.call(s, "Page.stopLoading", json!({})).await?;
+            st.emit(tab, Event::Loading(false));
+        }
+        Op::Mouse { kind, x, y, button, clicks, modifiers } => {
+            st.c.send(
+                s,
+                "Input.dispatchMouseEvent",
+                json!({ "type": kind, "x": x, "y": y, "button": button, "clickCount": clicks, "modifiers": modifiers }),
+            );
+            if kind == "mouseReleased" {
+                st.emit(tab, Event::Invalidate);
+            }
+        }
+        Op::Wheel { x, y, dx, dy, modifiers } => {
+            // The page decides what scrolls (the document or an inner box);
+            // the window then follows the document's real position.
+            st.c.call(
+                s,
+                "Input.dispatchMouseEvent",
+                json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": dx, "deltaY": dy, "modifiers": modifiers }),
+            )
+            .await?;
+            report_scroll(st, tab).await;
+        }
+        Op::Key { down, key, code, vk, modifiers } => {
+            let kind = if down { "keyDown" } else { "keyUp" };
+            let mut p = json!({ "type": kind, "key": key, "code": code, "windowsVirtualKeyCode": vk, "modifiers": modifiers });
+            if down && key == "Enter" {
+                p["text"] = json!("\r");
+            }
+            st.c.call(s, "Input.dispatchKeyEvent", p).await?;
+            if down {
+                report_scroll(st, tab).await;
+                st.emit(tab, Event::Invalidate);
+            }
+        }
+        Op::Text(text) => {
+            st.c.send(s, "Input.insertText", json!({ "text": text }));
+            st.emit(tab, Event::Invalidate);
+        }
+        Op::Tiles { keys, generation } => {
+            for key in keys {
+                let clip = json!({
+                    "x": key.tx as f32 * TILE, "y": key.ty as f32 * TILE,
+                    "width": TILE, "height": TILE, "scale": 1,
+                });
+                let shot = st
+                    .c
+                    .call(s, "Page.captureScreenshot", json!({ "format": "png", "clip": clip, "captureBeyondViewport": true }))
+                    .await?;
+                if let Some(image) = shot["data"].as_str().and_then(decode) {
+                    st.emit(tab, Event::Tile { key, generation, image });
                 }
             }
         }
@@ -176,106 +347,88 @@ pub async fn run(
     Ok(())
 }
 
-async fn handle(c: &mut Conn, cmd: Command, size: &mut (u32, u32, f32), updates: &Sender<Update>) {
-    let result: anyhow::Result<()> = async {
-        match cmd {
-            Command::Navigate(url) => {
-                c.call("Page.navigate", json!({ "url": url })).await?;
+async fn on_event(st: &mut State, ev: Value) {
+    let method = ev["method"].as_str().unwrap_or_default();
+    let p = &ev["params"];
+
+    if method == "Target.targetCreated" {
+        let info = &p["targetInfo"];
+        let target = info["targetId"].as_str().unwrap_or_default().to_string();
+        if info["type"] != "page" || st.own_targets.contains(&target) || st.tabs.values().any(|t| t.target == target) {
+            return;
+        }
+        let opener = info["openerId"]
+            .as_str()
+            .and_then(|o| st.tabs.iter().find(|(_, t)| t.target == o).map(|(id, _)| *id));
+        st.next_popup += 1;
+        let tab = st.next_popup;
+        if st.attach(tab, target).await.is_ok() {
+            let url = info["url"].as_str().unwrap_or("about:blank").to_string();
+            st.emit(tab, Event::Opened { url, opener });
+        }
+        return;
+    }
+
+    let Some(tab) = ev["sessionId"].as_str().and_then(|s| st.by_session.get(s).copied()) else { return };
+    match method {
+        "Page.screencastFrame" => {
+            if let Some(id) = p["sessionId"].as_u64() {
+                let session = st.session(tab);
+                st.c.send(session.as_deref(), "Page.screencastFrameAck", json!({ "sessionId": id }));
             }
-            Command::Back => step_history(c, -1).await?,
-            Command::Forward => step_history(c, 1).await?,
-            Command::Reload => {
-                c.call("Page.reload", json!({})).await?;
-            }
-            Command::Resize { width, height, scale } => {
-                if (width, height, scale) != *size {
-                    *size = (width, height, scale);
-                    c.call(
-                        "Emulation.setDeviceMetricsOverride",
-                        json!({ "width": width, "height": height, "deviceScaleFactor": scale, "mobile": false }),
-                    )
-                    .await?;
-                    report_scroll(c, updates).await;
-                    let _ = updates.send(Update::Invalidate);
-                }
-            }
-            Command::Mouse { kind, x, y, button, clicks, modifiers } => {
-                c.send(
-                    "Input.dispatchMouseEvent",
-                    json!({ "type": kind, "x": x, "y": y, "button": button, "clickCount": clicks, "modifiers": modifiers }),
-                );
-                if kind == "mouseReleased" {
-                    let _ = updates.send(Update::Invalidate);
-                }
-            }
-            Command::Wheel { x, y, dx, dy, modifiers } => {
-                // The page decides what scrolls (the document or an inner box);
-                // the window then follows the document's real position.
-                c.call(
-                    "Input.dispatchMouseEvent",
-                    json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": dx, "deltaY": dy, "modifiers": modifiers }),
-                )
-                .await?;
-                report_scroll(c, updates).await;
-            }
-            Command::Key { down, key, code, vk, modifiers } => {
-                let kind = if down { "keyDown" } else { "keyUp" };
-                let mut p = json!({ "type": kind, "key": key, "code": code, "windowsVirtualKeyCode": vk, "modifiers": modifiers });
-                if down && key == "Enter" {
-                    p["text"] = json!("\r");
-                }
-                c.call("Input.dispatchKeyEvent", p).await?;
-                if down {
-                    report_scroll(c, updates).await;
-                    let _ = updates.send(Update::Invalidate);
-                }
-            }
-            Command::Text(text) => {
-                c.send("Input.insertText", json!({ "text": text }));
-                let _ = updates.send(Update::Invalidate);
-            }
-            Command::Tiles { keys, generation } => {
-                for key in keys {
-                    let clip = json!({
-                        "x": key.tx as f32 * TILE, "y": key.ty as f32 * TILE,
-                        "width": TILE, "height": TILE, "scale": 1,
-                    });
-                    let shot = c
-                        .call(
-                            "Page.captureScreenshot",
-                            json!({ "format": "png", "clip": clip, "captureBeyondViewport": true }),
-                        )
-                        .await?;
-                    if let Some(image) = shot["data"].as_str().and_then(decode) {
-                        let _ = updates.send(Update::Tile { key, generation, image });
-                    }
-                }
+            st.emit(tab, Event::Invalidate);
+        }
+        "Page.frameNavigated" => {
+            let frame = &p["frame"];
+            if frame.get("parentId").is_none() {
+                st.emit(tab, Event::Navigated(frame["url"].as_str().unwrap_or_default().to_string()));
             }
         }
-        Ok(())
-    }
-    .await;
-    if let Err(e) = result {
-        let _ = updates.send(Update::Error(e.to_string()));
+        "Page.navigatedWithinDocument" => {
+            if let Some(url) = p["url"].as_str() {
+                st.emit(tab, Event::UrlChanged(url.to_string()));
+            }
+        }
+        "Page.domContentEventFired" | "Page.loadEventFired" => {
+            let session = st.session(tab);
+            let title = st
+                .c
+                .call(session.as_deref(), "Runtime.evaluate", json!({ "expression": "document.title", "returnByValue": true }))
+                .await;
+            if let Ok(v) = title {
+                if let Some(t) = v["result"]["value"].as_str() {
+                    st.emit(tab, Event::Title(t.to_string()));
+                }
+            }
+            if method == "Page.loadEventFired" {
+                st.emit(tab, Event::Loading(false));
+            }
+            report_scroll(st, tab).await;
+            st.emit(tab, Event::Invalidate);
+        }
+        _ => {}
     }
 }
 
-async fn report_scroll(c: &mut Conn, updates: &Sender<Update>) {
+async fn report_scroll(st: &mut State, tab: TabId) {
+    let Some(session) = st.session(tab) else { return };
     let expr = "JSON.stringify([scrollX, scrollY, document.documentElement.scrollWidth, document.documentElement.scrollHeight])";
-    let Ok(v) = c.call("Runtime.evaluate", json!({ "expression": expr, "returnByValue": true })).await else { return };
+    let Ok(v) = st.c.call(Some(&session), "Runtime.evaluate", json!({ "expression": expr, "returnByValue": true })).await else {
+        return;
+    };
     let Some(s) = v["result"]["value"].as_str() else { return };
     let Ok(a) = serde_json::from_str::<[f32; 4]>(s) else { return };
-    let _ = updates.send(Update::Scroll { x: a[0], y: a[1], width: a[2], height: a[3] });
+    st.emit(tab, Event::Scroll { x: a[0], y: a[1], width: a[2], height: a[3] });
 }
 
-async fn step_history(c: &mut Conn, delta: i64) -> anyhow::Result<()> {
-    let h = c.call("Page.getNavigationHistory", json!({})).await?;
+async fn step_history(st: &mut State, session: &str, delta: i64) -> anyhow::Result<()> {
+    let h = st.c.call(Some(session), "Page.getNavigationHistory", json!({})).await?;
     let index = h["currentIndex"].as_i64().unwrap_or(0) + delta;
     if index < 0 {
         return Ok(());
     }
     if let Some(entry) = h["entries"].get(index as usize) {
-        c.call("Page.navigateToHistoryEntry", json!({ "entryId": entry["id"] })).await?;
+        st.c.call(Some(session), "Page.navigateToHistoryEntry", json!({ "entryId": entry["id"] })).await?;
     }
     Ok(())
 }
