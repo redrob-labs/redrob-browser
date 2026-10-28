@@ -11422,6 +11422,39 @@ fn serialize_svg_node(
     suppress_opacity_for: Option<obscura_dom::tree::NodeId>,
     buf: &mut String,
 ) {
+    serialize_svg_node_impl(
+        tree,
+        nid,
+        is_root,
+        styles,
+        custom_properties,
+        suppress_opacity_for,
+        false,
+        buf,
+    );
+}
+
+/// `use_clone` serializes an element referenced by a same-document `<use>`.
+/// The `<use>` instance inherits from the `<use>` element, not from where the
+/// referenced symbol sits in the page (often a hidden sprite `<svg>` with the
+/// body's color), so `color` and inherited `fill`/`stroke` values are left for
+/// the instance to inherit; only values set on the element itself are kept.
+#[allow(clippy::too_many_arguments)]
+fn serialize_svg_node_impl(
+    tree: &DomTree,
+    nid: obscura_dom::tree::NodeId,
+    is_root: bool,
+    styles: Option<&std::collections::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    custom_properties: Option<
+        &std::collections::HashMap<
+            obscura_dom::tree::NodeId,
+            std::rc::Rc<std::collections::HashMap<String, String>>,
+        >,
+    >,
+    suppress_opacity_for: Option<obscura_dom::tree::NodeId>,
+    use_clone: bool,
+    buf: &mut String,
+) {
     let node = match tree.get_node(nid) {
         Some(n) => n,
         None => return,
@@ -11435,13 +11468,14 @@ fn serialize_svg_node(
         // Document/comment/PI: no tag of its own, emit only element children.
         None => {
             for child in tree.children(nid) {
-                serialize_svg_node(
+                serialize_svg_node_impl(
                     tree,
                     child,
                     false,
                     styles,
                     custom_properties,
                     suppress_opacity_for,
+                    use_clone,
                     buf,
                 );
             }
@@ -11523,7 +11557,21 @@ fn serialize_svg_node(
             let properties = custom_properties
                 .and_then(|all| all.get(&nid))
                 .map_or(&empty, std::rc::Rc::as_ref);
-            if let Some(value) = computed.svg_fill.as_deref() {
+            let parent_style = if use_clone {
+                node.parent
+                    .and_then(|parent| styles.and_then(|all| all.get(&parent)))
+            } else {
+                None
+            };
+            let inherited =
+                |own: &Option<String>, pick: fn(&crate::LayoutStyle) -> &Option<String>| {
+                    use_clone && parent_style.is_none_or(|parent| pick(parent) == own)
+                };
+            let skip_fill = inherited(&computed.svg_fill, |style| &style.svg_fill);
+            let skip_stroke = inherited(&computed.svg_stroke, |style| &style.svg_stroke);
+            let skip_stroke_width =
+                inherited(&computed.svg_stroke_width, |style| &style.svg_stroke_width);
+            if let Some(value) = computed.svg_fill.as_deref().filter(|_| !skip_fill) {
                 if let Some(value) = resolve_svg_presentation_value("fill", value, properties) {
                     append(
                         "fill",
@@ -11535,7 +11583,7 @@ fn serialize_svg_node(
                     );
                 }
             }
-            if let Some(value) = computed.svg_stroke.as_deref() {
+            if let Some(value) = computed.svg_stroke.as_deref().filter(|_| !skip_stroke) {
                 if let Some(value) = resolve_svg_presentation_value("stroke", value, properties) {
                     append(
                         "stroke",
@@ -11547,7 +11595,11 @@ fn serialize_svg_node(
                     );
                 }
             }
-            if let Some(value) = computed.svg_stroke_width.as_deref() {
+            if let Some(value) = computed
+                .svg_stroke_width
+                .as_deref()
+                .filter(|_| !skip_stroke_width)
+            {
                 if let Some(value) =
                     resolve_svg_presentation_value("stroke-width", value, properties)
                 {
@@ -11568,7 +11620,7 @@ fn serialize_svg_node(
                     append("font-style", "italic");
                 }
             }
-            if let Some(color) = computed.color {
+            if let Some(color) = computed.color.filter(|_| !use_clone) {
                 append(
                     "color",
                     &format!("#{:02x}{:02x}{:02x}", color[0], color[1], color[2]),
@@ -11596,13 +11648,14 @@ fn serialize_svg_node(
     }
     buf.push('>');
     for child in tree.children(nid) {
-        serialize_svg_node(
+        serialize_svg_node_impl(
             tree,
             child,
             false,
             styles,
             custom_properties,
             suppress_opacity_for,
+            use_clone,
             buf,
         );
     }
@@ -11870,13 +11923,14 @@ fn inject_external_sprites(
         if symbol_id == root || root_descendants.contains(&symbol_id) {
             continue;
         }
-        serialize_svg_node(
+        serialize_svg_node_impl(
             tree,
             symbol_id,
             false,
             styles,
             custom_properties,
             None,
+            true,
             &mut defs,
         );
     }

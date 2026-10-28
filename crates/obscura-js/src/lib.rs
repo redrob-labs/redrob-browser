@@ -2,6 +2,7 @@
 // so merges from upstream stay small. Correctness and suspicious lints still fail.
 #![allow(clippy::style, clippy::complexity, clippy::perf, dead_code)]
 pub mod cdp_watchdog;
+mod custom_elements;
 pub mod frame;
 mod import_map;
 pub mod indexed_db;

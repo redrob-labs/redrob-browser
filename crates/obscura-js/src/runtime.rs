@@ -9149,7 +9149,7 @@ mod tests {
                 "SVGElement",
                 "SVGElement",
                 "SVGElement",
-                "Element"
+                "HTMLUnknownElement"
             ])
         );
     }
@@ -9967,7 +9967,12 @@ mod tests {
                      target.element === element]"
             )
             .unwrap(),
-            serde_json::json!(["[object HTMLElement]", "[object SVGElement]", false, true])
+            serde_json::json!([
+                "[object HTMLDivElement]",
+                "[object SVGElement]",
+                false,
+                true
+            ])
         );
     }
 
@@ -27347,15 +27352,15 @@ mod tests {
                         age.labels.length,
                         age.labels[0] === l2,
                         hid.labels.length,
-                        plain.labels.length,
-                        plain.control === null,
+                        String(plain.labels),
+                        plain.control === undefined,
                     ].join(',');
                 })()"#,
             )
             .unwrap();
         assert_eq!(
             result,
-            serde_json::json!("true,true,1,true,1,true,0,0,true"),
+            serde_json::json!("true,true,1,true,1,true,0,undefined,true"),
             "label association must follow the HTML labelable-element rules"
         );
     }
