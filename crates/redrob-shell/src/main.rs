@@ -5,6 +5,10 @@
 //! drawn as cached tiles the engine paints; input inside the page area goes
 //! to the engine as CDP input events.
 
+// A GUI program on Windows: no console window behind the browser. Its errors
+// go to a log file and a message box instead (startup.rs).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod account;
 mod agent_bridge;
 mod cdp;
@@ -23,6 +27,7 @@ mod model;
 mod profile;
 mod relay;
 mod self_update;
+mod startup;
 mod theme;
 mod tiles;
 mod updater;
@@ -45,6 +50,11 @@ const NEW_TAB: &str = "about:blank";
 const INCOGNITO_FLAG: &str = "--incognito";
 
 fn main() -> anyhow::Result<()> {
+    startup::init();
+    run().inspect_err(|e| startup::fail(e))
+}
+
+fn run() -> anyhow::Result<()> {
     let incognito = std::env::args().any(|a| a == INCOGNITO_FLAG);
     let mut profile = match profile::Profile::open_default() {
         Ok(p) => Some(p),
@@ -1235,8 +1245,9 @@ impl Window {
 
     /// A private window is its own process with a throwaway profile.
     fn open_incognito(&mut self) {
-        let started = std::env::current_exe()
-            .and_then(|exe| std::process::Command::new(exe).arg(INCOGNITO_FLAG).spawn());
+        let started = std::env::current_exe().and_then(|exe| {
+            startup::no_console(std::process::Command::new(exe).arg(INCOGNITO_FLAG)).spawn()
+        });
         match started {
             // Reap it when it closes, so it does not linger as a zombie.
             Ok(mut child) => {

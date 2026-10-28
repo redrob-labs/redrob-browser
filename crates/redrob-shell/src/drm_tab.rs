@@ -96,7 +96,7 @@ fn open_protected(url: &str) -> anyhow::Result<()> {
         .ok()
         .and_then(|p| p.parent().map(|d| d.join(name)))
         .unwrap_or_else(|| std::path::PathBuf::from(name));
-    std::process::Command::new(&exe)
+    crate::startup::no_console(&mut std::process::Command::new(&exe))
         .arg(url)
         .arg(crate::i18n::code(crate::i18n::current()))
         .stdin(std::process::Stdio::null())

@@ -4,7 +4,8 @@
 #   tag v<version> on main  ->  version  ->  macos / windows / linux x64 + arm64 (build, then sign)  ->  publish
 #
 # Each package holds three programs: redrob-browser (CLI and engine), redrob-browser-worker and
-# redrob-browser-window (the window). Every platform builds with video (the `media` feature,
+# redrob-browser-window (the window); Windows adds redrob-browser-protected (DRM pages) and ships a
+# branded setup (installer/windows) beside the zip. Every platform builds with video (the `media` feature,
 # GStreamer, docs/MEDIA.md). Linux uses the distribution's GStreamer; macOS and Windows install the
 # official GStreamer runtime in the job and carry it inside the package, so nothing else has to be
 # installed to play video.
@@ -153,6 +154,41 @@ jobs:
           foreach ($need in 'gstreamer-1.0-0.dll', 'lib\gstreamer-1.0\gstplayback.dll', 'lib\gstreamer-1.0\gstcoreelements.dll') {
             if (-not (Test-Path "$app\$need")) { throw "missing from the package: $need" }
           }
+          # The Visual C++ runtime, app-local: GStreamer's DLLs and our programs link it, and a Windows
+          # without the VC++ redistributable has none (0.1.1 did not start there).
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC14*.CRT" -Directory | Sort-Object FullName | Select-Object -Last 1
+          if (-not $crt) { throw "no Visual C++ runtime under $vs\VC\Redist\MSVC" }
+          Write-Host "Visual C++ runtime from $($crt.FullName)"
+          Copy-Item "$($crt.FullName)\*.dll" $app
+          # Every DLL a program or a top-level DLL imports is in the folder or is part of Windows (a
+          # plugin in lib\ that needs a part of Windows this runner lacks only stays unloaded); the
+          # C++ runtime must be in the folder for every file, since only the redistributable puts it
+          # in System32. The window and the protected-page program are GUI programs (PE subsystem 2):
+          # no console.
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -Last 1
+          $root = (Resolve-Path $app).Path
+          $here = @{}; Get-ChildItem $root -File | ForEach-Object { $here[$_.Name.ToLowerInvariant()] = $true }
+          $sys = "$env:SystemRoot\System32"
+          $bad = @()
+          foreach ($pe in Get-ChildItem $root -Recurse -File -Include *.exe, *.dll) {
+            $top = $pe.DirectoryName -eq $root
+            foreach ($line in & $dumpbin.FullName /nologo /dependents $pe.FullName) {
+              $dll = $line.Trim()
+              if ($dll -notmatch '^[\w.+-]+\.dll$') { continue }
+              $name = $dll.ToLowerInvariant()
+              if ($here.ContainsKey($name) -or $name -like 'api-ms-*' -or $name -like 'ext-ms-*') { continue }
+              if ($name -match '^(vcruntime|msvcp|concrt|vccorlib|vcomp)' -or ($top -and -not (Test-Path "$sys\$dll"))) {
+                $bad += "$($pe.FullName.Substring($root.Length + 1)) needs $dll"
+              }
+            }
+          }
+          if ($bad) { $bad | Select-Object -First 40 | ForEach-Object { Write-Host "::error::$_" }; throw "$($bad.Count) unresolved DLL imports" }
+          foreach ($gui in 'redrob-browser-window.exe', 'redrob-browser-protected.exe') {
+            $bytes = [IO.File]::ReadAllBytes("$root\$gui")
+            $subsystem = [BitConverter]::ToUInt16($bytes, [BitConverter]::ToInt32($bytes, 0x3C) + 0x5C)
+            if ($subsystem -ne 2) { throw "$gui has PE subsystem $subsystem, expected 2 (Windows GUI)" }
+          }
       - name: Log in to Azure (OIDC)
         uses: azure/login@v3
         with:
@@ -168,29 +204,47 @@ jobs:
           endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
           account: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
           cert-profile: ${{ secrets.ARTIFACT_SIGNING_CERT_PROFILE }}
-      - name: Package the zip and the installer
+      # The setup (installer/windows) embeds the zip and its uninstaller, so each is signed before it
+      # goes in: zip -> uninstaller -> sign it -> setup -> sign the setup.
+      - name: Package the zip and the setup's uninstaller
         shell: pwsh
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           New-Item -ItemType Directory -Force dist/release | Out-Null
           Compress-Archive -Path dist/app/* -DestinationPath "dist/release/redrob-browser-windows-x64-$env:VERSION.zip"
-
-          dotnet tool install --global wix --version 4.0.6
-          if ($LASTEXITCODE -ne 0) { throw "wix install failed" }
-          ./installer/windows/payload.ps1 -Source dist/app -Output dist/payload.wxs
-          # MSI versions are numbers only: 0.2.0-rc.1 installs as 0.2.0.
-          $msiVersion = $env:VERSION.Split('-')[0]
-          wix build -arch x64 -d "Version=$msiVersion" `
-            -o "dist/release/redrob-browser-windows-x64-$env:VERSION.msi" `
-            installer/windows/redrob-browser.wxs dist/payload.wxs
-          if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
-          Remove-Item dist/release/*.wixpdb -ErrorAction SilentlyContinue
-      - name: Sign the installer
+          python -m pip install --quiet fonttools==4.67.0
+          if ($LASTEXITCODE -ne 0) { throw "pip install fonttools failed" }
+          # The setup's VERSIONINFO is numeric: 0.2.0-rc.1 is 0.2.0 there.
+          $plain = $env:VERSION.Split('-')[0]
+          python -u installer/windows/build.py --out dist/setup --arch x64 --version $plain --uninstaller-only
+          if ($LASTEXITCODE -ne 0) { throw "setup: uninstaller build failed" }
+      - name: Sign the uninstaller
         uses: redrob-labs/.github/actions/sign-windows@main
         with:
-          files: dist/release/*.msi
+          files: dist/setup/uninstall/*.exe
           description: ${{ env.PRODUCT }}
+          url: ${{ env.PRODUCT_URL }}
+          endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          account: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          cert-profile: ${{ secrets.ARTIFACT_SIGNING_CERT_PROFILE }}
+      - name: Build the setup
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $name = "redrob-browser-windows-x64-$env:VERSION-setup.exe"
+          $plain = $env:VERSION.Split('-')[0]
+          python -u installer/windows/build.py --out dist/setup --arch x64 --version $plain `
+            --payload "dist/release/redrob-browser-windows-x64-$env:VERSION.zip" `
+            --uninstaller "dist/setup/uninstall/Uninstall Redrob Browser.exe" --name $name
+          if ($LASTEXITCODE -ne 0) { throw "setup build failed" }
+          Move-Item "dist/setup/$name" dist/release/
+      - name: Sign the setup
+        uses: redrob-labs/.github/actions/sign-windows@main
+        with:
+          files: dist/release/*-setup.exe
+          description: ${{ env.PRODUCT }} Setup
           url: ${{ env.PRODUCT_URL }}
           endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
           account: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
