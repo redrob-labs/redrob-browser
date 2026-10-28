@@ -5,12 +5,14 @@
 //! drawn as cached tiles the engine paints; input inside the page area goes
 //! to the engine as CDP input events.
 
+mod agent_bridge;
 mod cdp;
 mod engine;
 mod import_chrome;
 mod input;
 mod model;
 mod profile;
+mod relay;
 mod tiles;
 mod vault;
 
@@ -36,6 +38,10 @@ fn main() -> anyhow::Result<()> {
         .map(|p| p.engine_dir())
         .unwrap_or_else(|| std::env::temp_dir().join("redrob-browser-engine"));
     let engine = engine::Engine::start(&storage)?;
+    // `redrob-browser tab ...` and agents find this window's CDP relay here;
+    // cdp::run writes it once the relay is listening.
+    let endpoint_file = storage.join("ws-endpoint");
+    let relay_file = endpoint_file.clone();
     let start_url = std::env::args().nth(1);
 
     let options = eframe::NativeOptions {
@@ -56,11 +62,12 @@ fn main() -> anyhow::Result<()> {
                 let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio runtime");
                 let errors = upd_tx.clone();
                 rt.block_on(async move {
-                    if let Err(e) = cdp::run(ws_url, cmd_rx, upd_tx, move || ctx.request_repaint()).await {
+                    if let Err(e) = cdp::run(ws_url, relay_file, cmd_rx, upd_tx, move || ctx.request_repaint()).await {
                         let _ = errors.send(Update { tab: 0, event: Event::Error(e.to_string()) });
                     }
                 });
             });
+            let (agent_tx, agent_rx) = mpsc::channel();
             let mut model = Model::default();
             let mut restore = (Vec::new(), 0);
             if let Some(p) = &profile {
@@ -78,6 +85,8 @@ fn main() -> anyhow::Result<()> {
                 show_downloads: false,
                 vault: None,
                 pending_save: None,
+                agent_tx,
+                agent_rx,
                 notice: None,
                 address: String::new(),
                 editing: false,
@@ -101,8 +110,24 @@ fn main() -> anyhow::Result<()> {
             Ok(Box::new(window))
         }),
     );
+    let _ = std::fs::remove_file(&endpoint_file);
     drop(engine);
     result.map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// Write a file only its owner can read: the CDP address is a key to every tab.
+fn write_private(path: &std::path::Path, text: &str) {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    if let Ok(mut f) = options.open(path) {
+        use std::io::Write;
+        let _ = f.write_all(text.as_bytes());
+    }
 }
 
 struct Window {
@@ -115,6 +140,8 @@ struct Window {
     vault: Option<vault::Vault>,
     /// A sign-in the person just made, waiting for "save this password?".
     pending_save: Option<(String, String, zeroize::Zeroizing<String>)>,
+    agent_tx: mpsc::Sender<String>,
+    agent_rx: mpsc::Receiver<String>,
     /// A one-line result shown under the toolbar, such as an import summary.
     notice: Option<String>,
     /// Address field text; follows the active tab's URL unless the person is typing.
@@ -226,6 +253,8 @@ impl Window {
             if let Event::Opened { url, opener } = &event {
                 let mut t = Tab::new(tab, url);
                 t.loading = true;
+                // A tab no page opened came from outside the window: an agent.
+                t.agent = opener.is_none();
                 if let Some(i) = opener.and_then(|o| self.model.index_of(o)) {
                     self.model.active = i;
                 }
@@ -537,6 +566,30 @@ impl Window {
         }
     }
 
+    /// `> ...` in the address bar: hand the prompt to Redrob Code.
+    fn ask_agent(&mut self, prompt: String) {
+        self.editing = false;
+        if prompt.is_empty() {
+            return;
+        }
+        let (url, title) = self.model.active_tab().map(|t| (t.url.clone(), t.title.clone())).unwrap_or_default();
+        self.address = if url == NEW_TAB { String::new() } else { url.clone() };
+        let server = self
+            .profile
+            .as_ref()
+            .and_then(|p| p.setting("agent_server"))
+            .unwrap_or_else(|| agent_bridge::DEFAULT_SERVER.to_string());
+        let tx = self.agent_tx.clone();
+        std::thread::spawn(move || {
+            let msg = match agent_bridge::send_prompt(&server, &prompt, &url, &title) {
+                Ok(_) => "Sent to Redrob Code.".to_string(),
+                Err(e) => format!("Could not reach the agent: {e}"),
+            };
+            let _ = tx.send(msg);
+        });
+        self.notice = Some("Sending to Redrob Code...".to_string());
+    }
+
     fn menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Menu", |ui| {
             if ui.button("New tab").clicked() {
@@ -667,7 +720,11 @@ impl Window {
                 self.editing = true;
             }
             if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                go = Some(model::to_url(&self.address));
+                if let Some(prompt) = self.address.trim().strip_prefix('>') {
+                    self.ask_agent(prompt.trim().to_string());
+                } else {
+                    go = Some(model::to_url(&self.address));
+                }
             }
             if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Escape)) {
                 self.editing = false;
@@ -751,6 +808,9 @@ impl eframe::App for Window {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.drain_updates(&ctx);
+        while let Ok(msg) = self.agent_rx.try_recv() {
+            self.notice = Some(msg);
+        }
         self.shortcuts(&ctx);
         // A crash must not lose the open tabs.
         if self.last_session_save.elapsed() > std::time::Duration::from_secs(30) {

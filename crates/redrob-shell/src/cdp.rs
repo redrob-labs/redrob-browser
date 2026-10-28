@@ -213,6 +213,7 @@ impl State {
 
 pub async fn run(
     ws_url: String,
+    endpoint_file: std::path::PathBuf,
     mut commands: mpsc::UnboundedReceiver<Command>,
     updates: Sender<Update>,
     repaint: impl Fn() + Send + 'static,
@@ -222,6 +223,7 @@ pub async fn run(
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<Value>();
     let pending: std::sync::Arc<std::sync::Mutex<Pending>> = Default::default();
+    let (broadcast_tx, _) = tokio::sync::broadcast::channel::<Value>(1024);
 
     tokio::spawn(async move {
         while let Some(text) = out_rx.recv().await {
@@ -231,6 +233,7 @@ pub async fn run(
         }
     });
     let pending_reader = pending.clone();
+    let relay_events = broadcast_tx.clone();
     tokio::spawn(async move {
         while let Some(Ok(msg)) = stream.next().await {
             let Message::Text(text) = msg else { continue };
@@ -240,10 +243,15 @@ pub async fn run(
                     let _ = tx.send(v);
                 }
             } else {
+                let _ = relay_events.send(v.clone());
                 let _ = event_tx.send(v);
             }
         }
     });
+
+    // Agents and `redrob-browser tab` reach the person's tabs through this relay.
+    let relay_url = crate::relay::start(out_tx.clone(), pending.clone(), broadcast_tx).await?;
+    crate::write_private(&endpoint_file, &relay_url);
 
     let mut st = State {
         c: Conn { out: out_tx, pending, next: 0 },

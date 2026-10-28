@@ -3,6 +3,7 @@ mod batch;
 use std::sync::Arc;
 use std::time::Instant;
 
+mod agent;
 mod pool;
 
 use clap::{Parser, Subcommand};
@@ -215,6 +216,18 @@ enum Command {
 
         #[arg(long, short)]
         quiet: bool,
+    },
+
+    /// Open the Redrob Browser window (the default when no command is given).
+    Open {
+        /// Address or search to open in a new tab.
+        url: Option<String>,
+    },
+
+    /// Drive the running window's tabs, the way an agent does.
+    Tab {
+        #[command(subcommand)]
+        cmd: agent::TabCmd,
     },
 
     Mcp {
@@ -657,15 +670,30 @@ async fn run_cli() -> anyhow::Result<()> {
                 obscura_mcp::run(mcp_proxy, user_agent, stealth).await?;
             }
         }
-        None => {
-            print_banner(args.port);
-            if let Some(ref proxy) = args.proxy {
-                tracing::info!("Using proxy: {}", proxy);
-            }
-            obscura_cdp::start_with_options(args.port, args.proxy, stealth).await?;
-        }
+        Some(Command::Open { url }) => open_window(url)?,
+        Some(Command::Tab { cmd }) => agent::run(cmd).await?,
+        // A bare `redrob-browser` opens the window; the headless CDP server
+        // that upstream starts here is `redrob-browser serve`.
+        None => open_window(None)?,
     }
 
+    Ok(())
+}
+
+/// Start the window binary installed next to this one and return.
+fn open_window(url: Option<String>) -> anyhow::Result<()> {
+    let name = if cfg!(windows) { "redrob-browser-window.exe" } else { "redrob-browser-window" };
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join(name)))
+        .unwrap_or_else(|| std::path::PathBuf::from(name));
+    let mut cmd = std::process::Command::new(&exe);
+    if let Some(u) = url {
+        cmd.arg(u);
+    }
+    cmd.stdin(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("could not start {}: {e}", exe.display()))?;
     Ok(())
 }
 
