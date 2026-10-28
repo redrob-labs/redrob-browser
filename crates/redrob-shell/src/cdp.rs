@@ -17,6 +17,29 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::model::TabId;
 use crate::tiles::{TileKey, TILE};
 
+/// Finds the sign-in form on the page and types into it. The values arrive
+/// as call arguments, never inside the script text.
+const FILL_LOGIN_JS: &str = r#"function (username, password) {
+  const visible = (e) => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const pw = [...document.querySelectorAll('input[type=password]')].find(visible);
+  if (!pw) return 'no-form';
+  const scope = pw.form || document;
+  const fields = [...scope.querySelectorAll('input')].filter(visible);
+  const before = fields.slice(0, fields.indexOf(pw)).reverse();
+  const user = before.find((e) => /^(text|email|tel|)$/i.test(e.type) || e.autocomplete === 'username');
+  const set = (el, v) => {
+    const proto = Object.getPrototypeOf(el);
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (setter && setter.set) setter.set.call(el, v); else el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  if (user && username) set(user, username);
+  set(pw, password);
+  pw.focus();
+  return 'filled';
+}"#;
+
 /// Tab ids the engine side hands out for pages a page opened itself.
 const POPUP_ID_BASE: TabId = 1 << 40;
 
@@ -36,6 +59,8 @@ pub enum Op {
     Text(String),
     /// Paint these document tiles for this paint generation.
     Tiles { keys: Vec<TileKey>, generation: u64 },
+    /// Type a saved login into the page's sign-in form.
+    FillLogin { username: String, password: zeroize::Zeroizing<String> },
 }
 
 pub enum Command {
@@ -58,6 +83,8 @@ pub enum Event {
     Loading(bool),
     /// The page opened a new window; show it as a new tab next to its opener.
     Opened { url: String, opener: Option<TabId> },
+    /// Result of FillLogin: "filled" or "no-form".
+    Filled(String),
     /// A file download began or changed state. Sent with tab 0.
     Download { guid: String, url: String, filename: String, state: String, path: String, bytes: u64 },
     Error(String),
@@ -335,6 +362,22 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
         }
         Op::Text(text) => {
             st.c.send(s, "Input.insertText", json!({ "text": text }));
+            st.emit(tab, Event::Invalidate);
+        }
+        Op::FillLogin { username, password } => {
+            let doc = st.c.call(s, "Runtime.evaluate", json!({ "expression": "document" })).await?;
+            let object_id = doc["result"]["objectId"].as_str().unwrap_or_default().to_string();
+            let args = json!([{ "value": username }, { "value": password.as_str() }]);
+            let r = st
+                .c
+                .call(
+                    s,
+                    "Runtime.callFunctionOn",
+                    json!({ "objectId": object_id, "functionDeclaration": FILL_LOGIN_JS, "arguments": args, "returnByValue": true }),
+                )
+                .await?;
+            let outcome = r["result"]["value"].as_str().unwrap_or("no-form").to_string();
+            st.emit(tab, Event::Filled(outcome));
             st.emit(tab, Event::Invalidate);
         }
         Op::Tiles { keys, generation } => {

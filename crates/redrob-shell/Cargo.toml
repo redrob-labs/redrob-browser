@@ -21,3 +21,8 @@ base64 = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 anyhow = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
+aes-gcm = "0.10"
+keyring = "4"
+zeroize = "1"
+getrandom = "0.3"
+url = { workspace = true }

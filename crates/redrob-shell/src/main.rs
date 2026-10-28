@@ -12,6 +12,7 @@ mod input;
 mod model;
 mod profile;
 mod tiles;
+mod vault;
 
 use std::sync::mpsc;
 
@@ -75,6 +76,7 @@ fn main() -> anyhow::Result<()> {
                 profile,
                 last_session_save: std::time::Instant::now(),
                 show_downloads: false,
+                vault: None,
                 notice: None,
                 address: String::new(),
                 editing: false,
@@ -83,6 +85,12 @@ fn main() -> anyhow::Result<()> {
                 last_size: (0, 0, 0.0),
                 address_id: egui::Id::new("address"),
             };
+            if let Some(p) = &window.profile {
+                match vault::Vault::open(&p.dir) {
+                    Ok(v) => window.vault = Some(v),
+                    Err(e) => eprintln!("redrob-browser: password vault unavailable: {e}"),
+                }
+            }
             window.restore(restore.0, restore.1);
             match start_url {
                 Some(url) => window.open_tab(&model::to_url(&url), true),
@@ -103,6 +111,7 @@ struct Window {
     profile: Option<profile::Profile>,
     last_session_save: std::time::Instant,
     show_downloads: bool,
+    vault: Option<vault::Vault>,
     /// A one-line result shown under the toolbar, such as an import summary.
     notice: Option<String>,
     /// Address field text; follows the active tab's URL unless the person is typing.
@@ -252,6 +261,11 @@ impl Window {
                 Event::Error(e) => {
                     t.loading = false;
                     self.error = Some(e);
+                }
+                Event::Filled(outcome) => {
+                    if outcome != "filled" {
+                        self.notice = Some("No sign-in form on this page.".to_string());
+                    }
                 }
                 Event::Opened { .. } | Event::Download { .. } => {}
             }
@@ -419,6 +433,35 @@ impl Window {
         self.notice = Some(format!("Imported {added} bookmarks and {history} history entries from {}.", source.name));
     }
 
+    /// The key button: saved logins for this site, filled by the person's click.
+    fn key_button(&mut self, ui: &mut egui::Ui, url: &str) {
+        let (Some(v), Some(origin)) = (&self.vault, vault::origin_of(url)) else { return };
+        let logins = v.logins_for(&origin);
+        if logins.is_empty() {
+            return;
+        }
+        let mut fill = None;
+        ui.menu_button("Key", |ui| {
+            for l in &logins {
+                if ui.button(format!("Sign in as {}", l.username)).clicked() {
+                    fill = Some(l.id);
+                    ui.close();
+                }
+            }
+        });
+        let Some(id) = fill else { return };
+        let Some(tab) = self.active_id() else { return };
+        // The person's own click is also the vault unlock on platforms
+        // without a device authenticator.
+        if let Some(v) = &mut self.vault {
+            v.unlock();
+            match v.secret_for_fill(id, &origin, vault::Actor::Person) {
+                Ok((username, password)) => self.op(tab, Op::FillLogin { username, password }),
+                Err(e) => self.notice = Some(format!("Could not use the saved login: {e}")),
+            }
+        }
+    }
+
     fn menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Menu", |ui| {
             if ui.button("New tab").clicked() {
@@ -517,7 +560,7 @@ impl Window {
                 }
             }
             let star = if self.model.is_bookmarked(&url) { "★" } else { "☆" };
-            let field_width = ui.available_width() - 100.0;
+            let field_width = ui.available_width() - 140.0;
             let field = ui.add(
                 egui::TextEdit::singleline(&mut self.address)
                     .id(self.address_id)
@@ -542,6 +585,7 @@ impl Window {
             if ui.button(star).on_hover_text("Bookmark this page").clicked() {
                 self.toggle_bookmark();
             }
+            self.key_button(ui, &url);
             self.menu(ui);
         });
 
