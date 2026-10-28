@@ -298,10 +298,8 @@ impl ResourceRequest {
         match self.resource_type {
             ResourceType::Document => "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
             ResourceType::Stylesheet => "text/css,*/*;q=0.1",
-            // AVIF is intentionally omitted until obscura's decoder can paint
-            // it. Advertising a format and then discarding the selected body
-            // is less faithful than negotiating the best format we can use.
-            ResourceType::Image => "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            // Chrome's image Accept. obscura-render decodes AVIF (rav1d).
+            ResourceType::Image => "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
             ResourceType::Script
             | ResourceType::Font
             | ResourceType::Xhr
@@ -2027,7 +2025,7 @@ mod ssrf_tests {
         assert_eq!(image.mode, RequestMode::NoCors);
         assert_eq!(image.credentials, RequestCredentials::Include);
         assert_eq!(image.destination(), "image");
-        assert!(image.accept().starts_with("image/webp"));
+        assert!(image.accept().starts_with("image/avif,image/webp"));
 
         let stylesheet = ResourceRequest::subresource(ResourceType::Stylesheet, &document);
         assert_eq!(stylesheet.destination(), "style");
