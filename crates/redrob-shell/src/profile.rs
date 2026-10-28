@@ -189,6 +189,14 @@ impl Profile {
         Ok((tabs, active))
     }
 
+    pub fn record_download(&self, d: &crate::model::DownloadItem) -> anyhow::Result<()> {
+        self.db.execute(
+            "INSERT INTO downloads (url, path, bytes, state, started) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![d.url, d.path, d.bytes as i64, d.state, crate::model::now() as i64],
+        )?;
+        Ok(())
+    }
+
     pub fn setting(&self, key: &str) -> Option<String> {
         self.db
             .query_row("SELECT value FROM settings WHERE key = ?1", params![key], |r| r.get(0))

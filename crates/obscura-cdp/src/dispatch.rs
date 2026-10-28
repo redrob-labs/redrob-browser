@@ -64,6 +64,11 @@ pub struct CdpContext {
     /// is announced once and a frame that goes away can be retracted.
     pub announced_frames: HashMap<String, Vec<String>>,
     pub pending_events: Vec<CdpEvent>,
+    /// Where navigations that turn out to be files are saved
+    /// (Browser/Page.setDownloadBehavior). None means the OS downloads folder.
+    pub download_dir: Option<std::path::PathBuf>,
+    /// `behavior: "deny"`: downloads are dropped and reported as canceled.
+    pub downloads_denied: bool,
     pub(crate) pending_beforeunload_close: HashMap<String, Option<String>>,
     #[cfg(feature = "render")]
     pub(crate) screencasts: HashMap<String, ScreencastState>,
@@ -179,6 +184,8 @@ impl CdpContext {
             nav_events_emitted: std::collections::HashSet::new(),
             announced_frames: HashMap::new(),
             pending_events: Vec::new(),
+            download_dir: None,
+            downloads_denied: false,
             pending_beforeunload_close: HashMap::new(),
             #[cfg(feature = "render")]
             screencasts: HashMap::new(),
@@ -800,6 +807,9 @@ pub async fn dispatch(req: &CdpRequest, ctx: &mut CdpContext) -> CdpResponse {
 
     let result = match domain {
         "Target" => domains::target::handle(method, &req.params, ctx, &req.session_id).await,
+        "Browser" if method == "setDownloadBehavior" => {
+            domains::page::set_download_behavior(&req.params, ctx)
+        }
         "Browser" => domains::browser::handle(method, &req.params).await,
         "Page" => domains::page::handle(method, &req.params, ctx, &req.session_id).await,
         "DOM" => domains::dom::handle(method, &req.params, ctx, &req.session_id).await,

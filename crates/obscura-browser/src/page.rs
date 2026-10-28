@@ -289,6 +289,10 @@ pub struct Page {
     /// without parameters, or empty when no type was supplied.
     /// Exposed to JS as `document.contentType`.
     pub content_type: String,
+    /// A navigation whose response is a file to save, not a document to show.
+    /// The page keeps its previous document; the CDP layer takes this, writes
+    /// the file and reports the download.
+    pub pending_download: Option<Download>,
     /// Monotonic origin for the current document's CSS animation timeline.
     /// It is reset once author styles are installed, so stylesheet download
     /// latency does not incorrectly advance newly-created animations.
@@ -1126,6 +1130,7 @@ impl Page {
             default_background_color_override: None,
             encoding: "UTF-8".to_string(),
             content_type: String::new(),
+            pending_download: None,
             document_timeline_origin: std::time::Instant::now(),
             navigation_timing: NavigationTiming::default(),
             navigation_timeout: None,
@@ -3408,6 +3413,8 @@ impl Page {
         let url = Url::parse(url_str).map_err(|e| PageError::InvalidUrl(e.to_string()))?;
         self.navigation_timing = NavigationTiming::default();
 
+        let previous_url = self.url.clone();
+        let previous_lifecycle = self.lifecycle;
         // The previous document's background loads end with the document.
         self.retire_render_resources();
         self.lifecycle = LifecycleState::Loading;
@@ -3500,6 +3507,22 @@ impl Page {
             PageError::NetworkError(e.to_string())
         })?;
         self.navigation_timing.record("responseEnd");
+
+        if let Some(name) = download_filename(&response) {
+            // A file, not a document: the current page stays where it was.
+            self.pending_download = Some(Download {
+                url: response.url.to_string(),
+                suggested_filename: name,
+                mime: base_content_type(response.content_type()).unwrap_or_default(),
+                body: response.body,
+            });
+            self.url = previous_url;
+            self.lifecycle = match previous_lifecycle {
+                LifecycleState::Loading => LifecycleState::Loaded,
+                other => other,
+            };
+            return Ok(());
+        }
 
         // Store binary main resources (images, PDFs, octet-stream) base64 so
         // Network.getResponseBody returns intact bytes. A UTF-8-lossy text store
@@ -10907,6 +10930,87 @@ impl From<ObscuraNetError> for PageError {
 /// Whether a Content-Type is text-like and can be stored/returned as a UTF-8
 /// string. Everything else (images, PDF, fonts, octet-stream) is binary and must
 /// be base64-encoded so Network.getResponseBody returns intact bytes.
+/// A navigation response saved to disk instead of shown.
+#[derive(Debug, Clone)]
+pub struct Download {
+    pub url: String,
+    pub suggested_filename: String,
+    pub mime: String,
+    pub body: Vec<u8>,
+}
+
+/// The file name to save `response` under, when it is a download: the server
+/// said `Content-Disposition: attachment`, or the type is not one this engine
+/// shows (text, HTML, XML, JSON, images, SVG).
+fn download_filename(response: &obscura_net::Response) -> Option<String> {
+    let disposition = response.header("content-disposition").unwrap_or("");
+    let attachment = disposition.trim_start().to_ascii_lowercase().starts_with("attachment");
+    let ct = response.content_type().map(|c| c.split(';').next().unwrap_or(c).trim().to_ascii_lowercase());
+    let shown = match ct.as_deref() {
+        None | Some("") => true,
+        Some(t) => is_text_like_content_type(Some(t)) || t.starts_with("image/"),
+    };
+    if !attachment && shown {
+        return None;
+    }
+    let from_header = disposition_filename(disposition);
+    let from_url = response
+        .url
+        .path_segments()
+        .and_then(|mut s| s.next_back().map(str::to_string))
+        .filter(|s| !s.is_empty())
+        .map(|s| percent_decode(&s));
+    let name = from_header.or(from_url).unwrap_or_else(|| "download".to_string());
+    Some(sanitize_filename(&name))
+}
+
+/// `filename*=UTF-8''...` wins over `filename="..."` (RFC 6266).
+fn disposition_filename(value: &str) -> Option<String> {
+    let mut plain = None;
+    for part in value.split(';').map(str::trim) {
+        let lower = part.to_ascii_lowercase();
+        if let Some(rest) = lower.strip_prefix("filename*=") {
+            let raw = &part[part.len() - rest.len()..];
+            let encoded = raw.splitn(3, '\'').nth(2).unwrap_or(raw);
+            return Some(percent_decode(encoded.trim_matches('"')));
+        }
+        if lower.starts_with("filename=") {
+            plain = Some(part["filename=".len()..].trim().trim_matches('"').to_string());
+        }
+    }
+    plain.filter(|s| !s.is_empty())
+}
+
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok();
+            if let Some(b) = hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// A server must not choose where the file lands: no directories, no dot files.
+fn sanitize_filename(name: &str) -> String {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let cleaned: String = base
+        .chars()
+        .map(|c| if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*') { '_' } else { c })
+        .collect();
+    let cleaned = cleaned.trim().trim_start_matches('.').to_string();
+    if cleaned.is_empty() { "download".to_string() } else { cleaned }
+}
+
 fn is_text_like_content_type(content_type: Option<&str>) -> bool {
     let ct = match content_type {
         Some(c) => c.split(';').next().unwrap_or(c).trim().to_ascii_lowercase(),

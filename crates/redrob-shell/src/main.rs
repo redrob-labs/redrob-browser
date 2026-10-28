@@ -73,6 +73,7 @@ fn main() -> anyhow::Result<()> {
                 model,
                 profile,
                 last_session_save: std::time::Instant::now(),
+                show_downloads: false,
                 address: String::new(),
                 editing: false,
                 focus_address: false,
@@ -99,6 +100,7 @@ struct Window {
     model: Model,
     profile: Option<profile::Profile>,
     last_session_save: std::time::Instant,
+    show_downloads: bool,
     /// Address field text; follows the active tab's URL unless the person is typing.
     address: String,
     editing: bool,
@@ -197,6 +199,10 @@ impl Window {
 
     fn drain_updates(&mut self, ctx: &egui::Context) {
         while let Ok(Update { tab, event }) = self.updates.try_recv() {
+            if let Event::Download { guid, url, filename, state, path, bytes } = event {
+                self.on_download(model::DownloadItem { guid, url, filename, state, path, bytes });
+                continue;
+            }
             if let Event::Opened { url, opener } = &event {
                 let mut t = Tab::new(tab, url);
                 t.loading = true;
@@ -243,7 +249,7 @@ impl Window {
                     t.loading = false;
                     self.error = Some(e);
                 }
-                Event::Opened { .. } => {}
+                Event::Opened { .. } | Event::Download { .. } => {}
             }
             let url_now = t.url.clone();
             if let Some((url, title)) = visited {
@@ -329,6 +335,51 @@ impl Window {
         }
         if right && a + 1 < n {
             self.model.move_tab(a, a + 1);
+        }
+    }
+
+    fn on_download(&mut self, item: model::DownloadItem) {
+        let finished = item.state != "inProgress";
+        match self.model.downloads.iter_mut().find(|d| d.guid == item.guid) {
+            Some(d) => {
+                d.state = item.state.clone();
+                d.bytes = item.bytes;
+                if !item.path.is_empty() {
+                    d.path = item.path.clone();
+                }
+                if !item.url.is_empty() {
+                    d.url = item.url.clone();
+                }
+            }
+            None => self.model.downloads.push(item.clone()),
+        }
+        self.show_downloads = true;
+        if finished {
+            if let (Some(p), Some(d)) = (&self.profile, self.model.downloads.iter().find(|d| d.guid == item.guid)) {
+                let _ = p.record_download(d);
+            }
+        }
+    }
+
+    fn downloads_panel(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.strong("Downloads");
+            if ui.small_button("Close").clicked() {
+                self.show_downloads = false;
+            }
+        });
+        for d in self.model.downloads.iter().rev().take(6) {
+            ui.horizontal(|ui| {
+                let state = match d.state.as_str() {
+                    "completed" => "Done",
+                    "canceled" => "Failed",
+                    _ => "Downloading",
+                };
+                ui.label(format!("{}  {}  {} KB", d.filename, state, d.bytes / 1024));
+                if !d.path.is_empty() {
+                    ui.weak(&d.path);
+                }
+            });
         }
     }
 
@@ -518,6 +569,10 @@ impl eframe::App for Window {
                 ui.colored_label(Color32::RED, e);
             }
         });
+
+        if self.show_downloads && !self.model.downloads.is_empty() {
+            egui::Panel::bottom("downloads").show_inside(ui, |ui| self.downloads_panel(ui));
+        }
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
             let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());

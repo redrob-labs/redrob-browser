@@ -1333,6 +1333,76 @@ pub fn parse_wait_until(params: &Value) -> WaitUntil {
         .unwrap_or(WaitUntil::DomContentLoaded)
 }
 
+/// Browser.setDownloadBehavior and the older Page.setDownloadBehavior.
+pub fn set_download_behavior(params: &Value, ctx: &mut CdpContext) -> Result<Value, String> {
+    let behavior = params.get("behavior").and_then(|v| v.as_str()).unwrap_or("default");
+    ctx.downloads_denied = behavior == "deny";
+    ctx.download_dir = params
+        .get("downloadPath")
+        .and_then(|v| v.as_str())
+        .filter(|p| !p.is_empty())
+        .map(std::path::PathBuf::from);
+    Ok(json!({}))
+}
+
+/// Save a navigation that turned out to be a file and report it the way
+/// Chrome does: Browser.downloadWillBegin, then Browser.downloadProgress.
+/// The whole body is already in memory, so progress arrives as one step.
+fn finish_download(ctx: &mut CdpContext, d: obscura_browser::Download, frame_id: &str, loader_id: &str) -> Value {
+    let guid = uuid::Uuid::new_v4().to_string();
+    let total = d.body.len() as u64;
+    ctx.pending_events.push(CdpEvent::new(
+        "Browser.downloadWillBegin",
+        json!({ "frameId": frame_id, "guid": guid, "url": d.url, "suggestedFilename": d.suggested_filename }),
+    ));
+    let (state, path) = if ctx.downloads_denied {
+        ("canceled", None)
+    } else {
+        let dir = ctx.download_dir.clone().unwrap_or_else(default_download_dir);
+        match save_unique(&dir, &d.suggested_filename, &d.body) {
+            Ok(path) => ("completed", Some(path)),
+            Err(_) => ("canceled", None),
+        }
+    };
+    let mut progress = json!({ "guid": guid, "totalBytes": total, "receivedBytes": total, "state": state });
+    if let Some(p) = &path {
+        progress["filePath"] = json!(p.to_string_lossy());
+    }
+    ctx.pending_events.push(CdpEvent::new("Browser.downloadProgress", progress));
+    json!({ "frameId": frame_id, "loaderId": loader_id, "isDownload": true })
+}
+
+fn default_download_dir() -> std::path::PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(|h| std::path::PathBuf::from(h).join("Downloads"))
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// Write `body` to `dir/name`, adding " (1)", " (2)" before the extension
+/// when the name is taken. Never overwrites an existing file.
+fn save_unique(dir: &std::path::Path, name: &str, body: &[u8]) -> std::io::Result<std::path::PathBuf> {
+    use std::io::Write;
+    std::fs::create_dir_all(dir)?;
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    for n in 0..1000 {
+        let file = if n == 0 { name.to_string() } else { format!("{stem} ({n}){ext}") };
+        let path = dir.join(file);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut f) => {
+                f.write_all(body)?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::other("no free file name"))
+}
+
 async fn do_navigate(
     url: &str,
     params: &Value,
@@ -1384,6 +1454,11 @@ async fn do_navigate(
             page.navigate_with_wait(url, wait_until)
                 .await
                 .map_err(|e| e.to_string())?;
+        }
+
+        if let Some(download) = page.pending_download.take() {
+            let frame_id = page.frame_id.clone();
+            return Ok(finish_download(ctx, download, &frame_id, &loader_id));
         }
 
         let reached_network_idle = page.lifecycle.is_network_idle();
@@ -1645,9 +1720,7 @@ pub async fn handle(
             Ok(json!({}))
         }
         "setInterceptFileChooserDialog" => Ok(json!({})),
-        // Obscura does not download files to disk, so there is no behavior to
-        // configure; ack it so clients that set it do not warn (issue #340).
-        "setDownloadBehavior" => Ok(json!({})),
+        "setDownloadBehavior" => set_download_behavior(params, ctx),
         // Obscura never enforces Content-Security-Policy: it reports no
         // securitypolicyviolation and blocks no resource, so a document's CSP
         // already has no effect on fetches or script execution. There is

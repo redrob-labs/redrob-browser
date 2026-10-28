@@ -76,8 +76,21 @@ pub enum SuggestionKind {
     Search,
 }
 
+#[derive(Clone)]
+pub struct DownloadItem {
+    pub guid: String,
+    pub url: String,
+    pub filename: String,
+    /// inProgress, completed or canceled.
+    pub state: String,
+    pub path: String,
+    pub bytes: u64,
+}
+
 #[derive(Default)]
 pub struct Model {
+    /// Newest last.
+    pub downloads: Vec<DownloadItem>,
     pub tabs: Vec<Tab>,
     pub active: usize,
     /// Most recently closed last: (url, title).

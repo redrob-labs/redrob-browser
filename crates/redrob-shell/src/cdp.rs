@@ -58,6 +58,8 @@ pub enum Event {
     Loading(bool),
     /// The page opened a new window; show it as a new tab next to its opener.
     Opened { url: String, opener: Option<TabId> },
+    /// A file download began or changed state. Sent with tab 0.
+    Download { guid: String, url: String, filename: String, state: String, path: String, bytes: u64 },
     Error(String),
 }
 
@@ -197,6 +199,13 @@ pub async fn run(
         updates,
     };
     st.c.call(None, "Target.setDiscoverTargets", json!({ "discover": true })).await?;
+    let downloads = crate::profile::downloads_dir();
+    st.c.call(
+        None,
+        "Browser.setDownloadBehavior",
+        json!({ "behavior": "allow", "downloadPath": downloads.to_string_lossy(), "eventsEnabled": true }),
+    )
+    .await?;
 
     loop {
         tokio::select! {
@@ -366,6 +375,22 @@ async fn on_event(st: &mut State, ev: Value) {
             let url = info["url"].as_str().unwrap_or("about:blank").to_string();
             st.emit(tab, Event::Opened { url, opener });
         }
+        return;
+    }
+
+    if method == "Browser.downloadWillBegin" || method == "Browser.downloadProgress" {
+        let begin = method == "Browser.downloadWillBegin";
+        st.emit(
+            0,
+            Event::Download {
+                guid: p["guid"].as_str().unwrap_or_default().to_string(),
+                url: p["url"].as_str().unwrap_or_default().to_string(),
+                filename: p["suggestedFilename"].as_str().unwrap_or_default().to_string(),
+                state: if begin { "inProgress".to_string() } else { p["state"].as_str().unwrap_or_default().to_string() },
+                path: p["filePath"].as_str().unwrap_or_default().to_string(),
+                bytes: p["receivedBytes"].as_u64().unwrap_or(0),
+            },
+        );
         return;
     }
 
