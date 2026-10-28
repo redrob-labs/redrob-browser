@@ -1,9 +1,0 @@
-# Build-time product selection.
-
-substitutions:
-  - description: |
-      Compiler message.
-    regex:
-      pattern: "\"Exactly one BrowserOS product must be selected\""
-      replace: "\"Exactly one product must be selected\""
-      count: 1

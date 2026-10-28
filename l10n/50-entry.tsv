@@ -1,8 +1,0 @@
-# The two native entrances to the agent: the address bar's agent mode (CAP-3) and the quick window
-# (CAP-5). English and Korean.
-#
-# key <TAB> English <TAB> Korean [<TAB> description]
-#
-# Terminology follows l10n/10-sidebar.tsv. Product names are NOT translated: Redrob.
-entryAgentChipTooltip	Enter hands this to the agent instead of searching. Delete the > to leave agent mode.	Enter를 누르면 검색 대신 에이전트에게 맡깁니다. >를 지우면 에이전트 모드를 나갑니다.	Tooltip and accessible name on the address bar's agent-mode chip
-entryQuickWindowTitle	Ask Redrob	Redrob에게 묻기	Accessible title of the quick window opened by the global shortcut

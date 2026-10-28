@@ -1,9 +1,0 @@
-# Metrics metadata: labels only. Values are persisted and stay.
-
-substitutions:
-  - description: |
-      Toast enum label.
-    regex:
-      pattern: "label=\"BrowserOS extension toast\""
-      replace: "label=\"Redrob extension toast\""
-      count: 1
