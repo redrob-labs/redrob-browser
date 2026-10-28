@@ -151,9 +151,12 @@ struct RememberedContentImageIntrinsic {
     intrinsic: crate::ReplacedIntrinsic,
 }
 
-const RASTER_PAINT_CACHE_BYTES: usize = 8 * 1024 * 1024;
-const RASTER_PAINT_CACHE_ENTRIES: usize = 64;
-const RASTER_PAINT_CACHE_ENTRY_BYTES: usize = 2 * 1024 * 1024;
+// Decoded, sized images kept between paints. Every tile repaint draws every image it
+// touches, so a hero image too big for this cache was decoded and resized again for
+// each 512px tile on every repaint.
+const RASTER_PAINT_CACHE_BYTES: usize = 256 * 1024 * 1024;
+const RASTER_PAINT_CACHE_ENTRIES: usize = 512;
+const RASTER_PAINT_CACHE_ENTRY_BYTES: usize = 64 * 1024 * 1024;
 
 struct CachedRasterPaint {
     resource_key: String,
@@ -3697,11 +3700,13 @@ fn paint_prepared_region_with_scroll_policy(
     // still take the direct raster path whenever scale is 1.
     let source = image::RgbaImage::from_raw(native_width, native_height, pixmap.take())
         .ok_or(CaptureError::PaintFailed)?;
+    // Catmull-Rom: close to Lanczos3 for the 1.25x-2x scales screens use, at
+    // about half the taps; this resample runs on every repainted tile.
     let scaled = image::imageops::resize(
         &source,
         output_width,
         output_height,
-        image::imageops::FilterType::Lanczos3,
+        image::imageops::FilterType::CatmullRom,
     );
     let size = tiny_skia::IntSize::from_wh(output_width, output_height)
         .ok_or(CaptureError::AllocationLimitExceeded)?;
@@ -8419,6 +8424,11 @@ fn static_raster_cacheable(bytes: &[u8]) -> bool {
                 .ok()
                 .and_then(|decoder| decoder.is_apng().ok())
                 == Some(false)
+        }
+        // Most sites now serve still WebP; only an animated one must be re-decoded.
+        Ok(image::ImageFormat::WebP) => {
+            image::codecs::webp::WebPDecoder::new(std::io::Cursor::new(bytes))
+                .is_ok_and(|decoder| !decoder.has_animation())
         }
         _ => false,
     }
@@ -15137,7 +15147,8 @@ mod tests {
         }
         let before = cache.raster_paint_bytes;
         cache
-            .raster_paint(url, Arc::clone(&bytes), 1024, 1024)
+            // Larger than RASTER_PAINT_CACHE_ENTRY_BYTES: painted, not kept.
+            .raster_paint(url, Arc::clone(&bytes), 4200, 4100)
             .unwrap();
         assert_eq!(cache.raster_paint_bytes, before);
         assert!(!static_raster_cacheable(b"GIF89a"));
@@ -20035,7 +20046,7 @@ mod tests {
         .unwrap();
         let source = image::RgbaImage::from_raw(30, 30, one_x.data().to_vec()).unwrap();
         let expected =
-            image::imageops::resize(&source, 60, 60, image::imageops::FilterType::Lanczos3);
+            image::imageops::resize(&source, 60, 60, image::imageops::FilterType::CatmullRom);
         assert_eq!(two_x.data(), expected.as_raw());
     }
 

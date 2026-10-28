@@ -24,6 +24,8 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Redrob Browser is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
+    <Icon Id="RedrobBrowserIcon" SourceFile="assets/redrob-browser.ico" />
+    <Property Id="ARPPRODUCTICON" Value="RedrobBrowserIcon" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/redrob-labs/redrob-browser" />
     <Property Id="ARPNOMODIFY" Value="1" />
 
@@ -40,6 +42,7 @@
             Name="Redrob Browser"
             Description="Redrob Browser"
             Target="[INSTALLFOLDER]redrob-browser-window.exe"
+            Icon="RedrobBrowserIcon"
             WorkingDirectory="INSTALLFOLDER" />
         <RemoveFolder Id="RemoveProgramsDir" Directory="ProgramsDir" On="uninstall" />
         <RegistryValue

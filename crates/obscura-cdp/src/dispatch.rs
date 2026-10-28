@@ -24,6 +24,9 @@ pub(crate) struct ScreencastState {
     pub max_width: Option<u32>,
     pub max_height: Option<u32>,
     pub every_nth_frame: u32,
+    /// Redrob extension (`redrobSignalOnly`): frames carry no pixels, only the
+    /// "the page changed" signal, so no viewport is rasterized for them.
+    pub signal_only: bool,
     pub command_frame_counter: u64,
     pub session_id: i64,
     pub frames_in_flight: u8,
