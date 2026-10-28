@@ -19,6 +19,7 @@ mod model;
 mod profile;
 mod relay;
 mod tiles;
+mod updater;
 mod vault;
 
 use std::sync::mpsc;
@@ -77,6 +78,19 @@ fn main() -> anyhow::Result<()> {
             });
             let (agent_tx, agent_rx) = mpsc::channel();
             let (account_tx, account_rx) = mpsc::channel();
+            let (update_tx, update_rx) = mpsc::channel();
+            // Check for a newer release at most once a day, off the UI thread.
+            let last = profile.as_ref().and_then(|p| p.setting("update_checked")).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+            if model::now().saturating_sub(last) > updater::CHECK_EVERY_SECS {
+                if let Some(p) = &profile {
+                    let _ = p.set_setting("update_checked", &model::now().to_string());
+                }
+                std::thread::spawn(move || {
+                    if let Ok(Some(a)) = updater::check() {
+                        let _ = update_tx.send(a);
+                    }
+                });
+            }
             let mut model = Model::default();
             let mut restore = (Vec::new(), 0);
             if let Some(p) = &profile {
@@ -100,6 +114,8 @@ fn main() -> anyhow::Result<()> {
                 agent_rx,
                 account_tx,
                 account_rx,
+                update_rx,
+                update: None,
                 notice: None,
                 address: String::new(),
                 editing: false,
@@ -181,6 +197,8 @@ struct Window {
     agent_rx: mpsc::Receiver<String>,
     account_tx: mpsc::Sender<account::Msg>,
     account_rx: mpsc::Receiver<account::Msg>,
+    update_rx: mpsc::Receiver<updater::Available>,
+    update: Option<updater::Available>,
     /// A one-line result shown under the toolbar, such as an import summary.
     notice: Option<String>,
     /// Address field text; follows the active tab's URL unless the person is typing.
@@ -945,6 +963,9 @@ impl eframe::App for Window {
         while let Ok(msg) = self.agent_rx.try_recv() {
             self.notice = Some(msg);
         }
+        if let Ok(a) = self.update_rx.try_recv() {
+            self.update = Some(a);
+        }
         while let Ok(msg) = self.account_rx.try_recv() {
             match msg {
                 account::Msg::Open(url) => {
@@ -975,6 +996,18 @@ impl eframe::App for Window {
             self.save_bar(ui);
             if let Some(e) = &self.error {
                 ui.colored_label(Color32::RED, e);
+            }
+            if let Some((version, url)) = self.update.as_ref().map(|u| (u.version.clone(), u.url.clone())) {
+                ui.horizontal(|ui| {
+                    ui.label(tf("Redrob Browser {0} is available.", &[&version]));
+                    if ui.small_button(t("Download")).clicked() {
+                        self.open_tab(&url, true);
+                        self.update = None;
+                    }
+                    if ui.small_button(t("Not now")).clicked() {
+                        self.update = None;
+                    }
+                });
             }
             if let Some(n) = self.notice.clone() {
                 ui.horizontal(|ui| {

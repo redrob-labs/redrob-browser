@@ -148,6 +148,9 @@ fn ko(en: &str) -> Option<&'static str> {
         "Signed in as {0}" => "{0} 계정으로 로그인했어요",
         "Signing in. Finish in the page that opened." => "로그인하고 있어요. 열린 페이지에서 마저 진행하세요.",
         "Could not sign in: {0}" => "로그인하지 못했어요: {0}",
+        // Updates
+        "Redrob Browser {0} is available." => "Redrob Browser {0}이 나왔어요.",
+        "Download" => "내려받기",
         // Media
         "Play" => "재생",
         "Pause" => "일시정지",
