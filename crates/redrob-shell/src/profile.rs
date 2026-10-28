@@ -74,7 +74,10 @@ impl Profile {
                  started INTEGER NOT NULL
              );",
         )?;
-        Ok(Self { dir: dir.to_path_buf(), db })
+        Ok(Self {
+            dir: dir.to_path_buf(),
+            db,
+        })
     }
 
     /// Where the engine keeps cookies and localStorage for this profile.
@@ -84,9 +87,17 @@ impl Profile {
 
     /// Bookmarks and the most recent history, into the model.
     pub fn load(&self, model: &mut Model) -> anyhow::Result<()> {
-        let mut q = self.db.prepare("SELECT url, title, folder FROM bookmarks ORDER BY folder, position")?;
+        let mut q = self
+            .db
+            .prepare("SELECT url, title, folder FROM bookmarks ORDER BY folder, position")?;
         model.bookmarks = q
-            .query_map([], |r| Ok(Bookmark { url: r.get(0)?, title: r.get(1)?, folder: r.get(2)? }))?
+            .query_map([], |r| {
+                Ok(Bookmark {
+                    url: r.get(0)?,
+                    title: r.get(1)?,
+                    folder: r.get(2)?,
+                })
+            })?
             .collect::<Result<_, _>>()?;
         // Suggestions only need recent and frequent pages; the history page reads the table itself.
         let mut q = self
@@ -94,7 +105,12 @@ impl Profile {
             .prepare("SELECT url, title, visits, last_visit FROM history ORDER BY last_visit DESC LIMIT 5000")?;
         model.history = q
             .query_map([], |r| {
-                Ok(HistoryEntry { url: r.get(0)?, title: r.get(1)?, visits: r.get(2)?, last_visit: r.get::<_, i64>(3)? as u64 })
+                Ok(HistoryEntry {
+                    url: r.get(0)?,
+                    title: r.get(1)?,
+                    visits: r.get(2)?,
+                    last_visit: r.get::<_, i64>(3)? as u64,
+                })
             })?
             .collect::<Result<_, _>>()?;
         Ok(())
@@ -143,12 +159,20 @@ impl Profile {
     }
 
     pub fn set_history_title(&self, url: &str, title: &str) -> anyhow::Result<()> {
-        self.db.execute("UPDATE history SET title = ?2 WHERE url = ?1", params![url, title])?;
+        self.db.execute(
+            "UPDATE history SET title = ?2 WHERE url = ?1",
+            params![url, title],
+        )?;
         Ok(())
     }
 
     /// History newest first, for the history page. `query` filters by URL or title.
-    pub fn history_page(&self, query: &str, limit: u32, offset: u32) -> anyhow::Result<Vec<HistoryEntry>> {
+    pub fn history_page(
+        &self,
+        query: &str,
+        limit: u32,
+        offset: u32,
+    ) -> anyhow::Result<Vec<HistoryEntry>> {
         let like = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
         let mut q = self.db.prepare(
             "SELECT url, title, visits, last_visit FROM history
@@ -157,20 +181,29 @@ impl Profile {
         )?;
         let rows = q
             .query_map(params![like, limit, offset], |r| {
-                Ok(HistoryEntry { url: r.get(0)?, title: r.get(1)?, visits: r.get(2)?, last_visit: r.get::<_, i64>(3)? as u64 })
+                Ok(HistoryEntry {
+                    url: r.get(0)?,
+                    title: r.get(1)?,
+                    visits: r.get(2)?,
+                    last_visit: r.get::<_, i64>(3)? as u64,
+                })
             })?
             .collect::<Result<_, _>>()?;
         Ok(rows)
     }
 
     pub fn delete_history(&self, url: &str) -> anyhow::Result<()> {
-        self.db.execute("DELETE FROM history WHERE url = ?1", params![url])?;
+        self.db
+            .execute("DELETE FROM history WHERE url = ?1", params![url])?;
         Ok(())
     }
 
     /// Clear history newer than `since` (seconds since the epoch); 0 clears all.
     pub fn clear_history_since(&self, since: u64) -> anyhow::Result<()> {
-        self.db.execute("DELETE FROM history WHERE last_visit >= ?1", params![since as i64])?;
+        self.db.execute(
+            "DELETE FROM history WHERE last_visit >= ?1",
+            params![since as i64],
+        )?;
         Ok(())
     }
 
@@ -193,10 +226,18 @@ impl Profile {
 
     /// The tabs open when the browser last closed, and which was active.
     pub fn load_session(&self) -> anyhow::Result<(Vec<SavedTab>, usize)> {
-        let mut q = self.db.prepare("SELECT url, title, active FROM session ORDER BY position")?;
+        let mut q = self
+            .db
+            .prepare("SELECT url, title, active FROM session ORDER BY position")?;
         let mut active = 0;
         let mut tabs = Vec::new();
-        let rows = q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?;
+        let rows = q.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })?;
         for row in rows {
             let (url, title, is_active) = row?;
             if is_active != 0 {
@@ -210,14 +251,24 @@ impl Profile {
     pub fn record_download(&self, d: &crate::model::DownloadItem) -> anyhow::Result<()> {
         self.db.execute(
             "INSERT INTO downloads (url, path, bytes, state, started) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![d.url, d.path, d.bytes as i64, d.state, crate::model::now() as i64],
+            params![
+                d.url,
+                d.path,
+                d.bytes as i64,
+                d.state,
+                crate::model::now() as i64
+            ],
         )?;
         Ok(())
     }
 
     pub fn setting(&self, key: &str) -> Option<String> {
         self.db
-            .query_row("SELECT value FROM settings WHERE key = ?1", params![key], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
             .ok()
     }
 
@@ -232,11 +283,16 @@ impl Profile {
 
 /// The OS per-user data folder.
 pub fn data_dir() -> PathBuf {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
     if cfg!(target_os = "macos") {
         home.join("Library").join("Application Support")
     } else if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("APPDATA")).map(PathBuf::from).unwrap_or(home)
+        std::env::var_os("LOCALAPPDATA")
+            .or_else(|| std::env::var_os("APPDATA"))
+            .map(PathBuf::from)
+            .unwrap_or(home)
     } else {
         std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
@@ -251,7 +307,10 @@ pub fn downloads_dir() -> PathBuf {
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    if let Some(dir) = std::env::var_os("XDG_DOWNLOAD_DIR").map(PathBuf::from).filter(|p| p.is_absolute()) {
+    if let Some(dir) = std::env::var_os("XDG_DOWNLOAD_DIR")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+    {
         return dir;
     }
     home.join("Downloads")

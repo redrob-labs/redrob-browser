@@ -52,7 +52,9 @@ impl Item {
 
     /// Load the first `default` (or showing) subtitles or captions track.
     fn pick_track(&mut self, v: &Value) {
-        let Some(tracks) = v["tracks"].as_array() else { return };
+        let Some(tracks) = v["tracks"].as_array() else {
+            return;
+        };
         let chosen = tracks.iter().find(|t| {
             matches!(t["kind"].as_str(), Some("subtitles" | "captions"))
                 && (t["default"].as_bool() == Some(true) || t["mode"] == "showing")
@@ -92,14 +94,19 @@ impl Media {
                 if stale {
                     self.items.remove(&key);
                 }
-                if !self.items.contains_key(&key) {
-                    let Some(player) = media::open(&src) else { return };
-                    self.items.insert(key, Item::new(player, v, src));
+                if let std::collections::hash_map::Entry::Vacant(e) = self.items.entry(key) {
+                    let Some(player) = media::open(&src) else {
+                        return;
+                    };
+                    e.insert(Item::new(player, v, src));
                 }
                 let item = self.items.get_mut(&key).expect("just inserted");
                 item.controls = v["controls"].as_bool().unwrap_or(item.controls);
                 item.pick_track(v);
-                item.player.set_volume(v["volume"].as_f64().unwrap_or(1.0), v["muted"].as_bool().unwrap_or(false));
+                item.player.set_volume(
+                    v["volume"].as_f64().unwrap_or(1.0),
+                    v["muted"].as_bool().unwrap_or(false),
+                );
                 if v["op"] == "play" {
                     item.player.play();
                 }
@@ -116,7 +123,10 @@ impl Media {
             }
             "volume" => {
                 if let Some(i) = self.items.get_mut(&key) {
-                    i.player.set_volume(v["volume"].as_f64().unwrap_or(1.0), v["muted"].as_bool().unwrap_or(false));
+                    i.player.set_volume(
+                        v["volume"].as_f64().unwrap_or(1.0),
+                        v["muted"].as_bool().unwrap_or(false),
+                    );
                 }
             }
             // Media Source Extensions: the element's MediaSource was attached.
@@ -125,21 +135,27 @@ impl Media {
                 if stale {
                     self.items.remove(&key);
                 }
-                if !self.items.contains_key(&key) {
-                    let Some(player) = media::open_mse() else { return };
-                    self.items.insert(key, Item::new(player, v, src));
+                if let std::collections::hash_map::Entry::Vacant(e) = self.items.entry(key) {
+                    let Some(player) = media::open_mse() else {
+                        return;
+                    };
+                    e.insert(Item::new(player, v, src));
                 }
             }
             "mse-add" => {
                 if let Some(i) = self.items.get_mut(&key) {
-                    i.player.mse_add(v["sb"].as_u64().unwrap_or(0), v["mime"].as_str().unwrap_or_default());
+                    i.player.mse_add(
+                        v["sb"].as_u64().unwrap_or(0),
+                        v["mime"].as_str().unwrap_or_default(),
+                    );
                 }
             }
             "mse-append" => {
                 let data = v["data"].as_str().unwrap_or_default();
-                let (Some(i), Ok(bytes)) =
-                    (self.items.get_mut(&key), base64::engine::general_purpose::STANDARD.decode(data))
-                else {
+                let (Some(i), Ok(bytes)) = (
+                    self.items.get_mut(&key),
+                    base64::engine::general_purpose::STANDARD.decode(data),
+                ) else {
                     return;
                 };
                 i.player.mse_append(v["sb"].as_u64().unwrap_or(0), bytes);
@@ -178,7 +194,10 @@ impl Media {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty() && self.fullscreen.is_none() && !self.window_fullscreen && self.pending.is_empty()
+        self.items.is_empty()
+            && self.fullscreen.is_none()
+            && !self.window_fullscreen
+            && self.pending.is_empty()
     }
 
     /// Report state to pages and ask where active-tab elements are, a few times a second.
@@ -224,7 +243,9 @@ impl Media {
             }
             let status = item.player.status();
             playing |= !status.paused;
-            let Some([x, y, w, h]) = item.rect else { continue };
+            let Some([x, y, w, h]) = item.rect else {
+                continue;
+            };
             let area = Rect::from_min_size(page.min + vec2(x, y), vec2(w, h)).intersect(page);
             if area.width() <= 0.0 || area.height() <= 0.0 {
                 continue;
@@ -296,7 +317,10 @@ fn upload(ctx: &egui::Context, item: &mut Item) {
     let Ok(f) = frame.lock() else { return };
     if f.serial != item.serial && f.width > 0 && f.rgba.len() == (f.width * f.height * 4) as usize {
         item.serial = f.serial;
-        let img = egui::ColorImage::from_rgba_unmultiplied([f.width as usize, f.height as usize], &f.rgba);
+        let img = egui::ColorImage::from_rgba_unmultiplied(
+            [f.width as usize, f.height as usize],
+            &f.rgba,
+        );
         match &mut item.texture {
             Some(t) => t.set(img, TextureOptions::LINEAR),
             None => item.texture = Some(ctx.load_texture("video", img, TextureOptions::LINEAR)),
@@ -318,11 +342,21 @@ fn draw_frame(painter: &egui::Painter, item: &Item, full: Rect) {
 
 /// The subtitle cue showing now, centred near the bottom of the video.
 fn draw_cue(painter: &egui::Painter, item: &Item, full: Rect, time: f64) {
-    let Some(text) = item.cues.as_ref().and_then(|c| webvtt::active(c, time)) else { return };
+    let Some(text) = item.cues.as_ref().and_then(|c| webvtt::active(c, time)) else {
+        return;
+    };
     let size = (full.height() * 0.045).clamp(12.0, 36.0);
-    let galley = painter.layout(text, egui::FontId::proportional(size), Color32::WHITE, full.width() * 0.9);
+    let galley = painter.layout(
+        text,
+        egui::FontId::proportional(size),
+        Color32::WHITE,
+        full.width() * 0.9,
+    );
     let margin = if item.controls { 36.0 } else { 12.0 };
-    let pos = pos2(full.center().x - galley.size().x / 2.0, full.bottom() - margin - galley.size().y);
+    let pos = pos2(
+        full.center().x - galley.size().x / 2.0,
+        full.bottom() - margin - galley.size().y,
+    );
     let back = Rect::from_min_size(pos, galley.size()).expand(4.0);
     painter.rect_filled(back, 4.0, Color32::from_black_alpha(170));
     painter.galley(pos, galley, Color32::WHITE);
@@ -333,27 +367,65 @@ fn controls(ui: &mut egui::Ui, area: Rect, item: &mut Item, status: media::Statu
     let painter = ui.painter().with_clip_rect(area);
     painter.rect_filled(bar, 0.0, Color32::from_black_alpha(160));
     let button = Rect::from_min_size(bar.min, vec2(36.0, bar.height()));
-    let label = if status.paused { crate::i18n::t("Play") } else { crate::i18n::t("Pause") };
-    painter.text(button.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(12.0), Color32::WHITE);
-    if ui.interact(button, ui.id().with(("media-play", &item.src)), Sense::click()).clicked() {
+    let label = if status.paused {
+        crate::i18n::t("Play")
+    } else {
+        crate::i18n::t("Pause")
+    };
+    painter.text(
+        button.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::FontId::proportional(12.0),
+        Color32::WHITE,
+    );
+    if ui
+        .interact(
+            button,
+            ui.id().with(("media-play", &item.src)),
+            Sense::click(),
+        )
+        .clicked()
+    {
         if status.paused {
             item.player.play();
         } else {
             item.player.pause();
         }
     }
-    let track = Rect::from_min_max(pos2(button.right() + 8.0, bar.center().y - 3.0), pos2(bar.right() - 70.0, bar.center().y + 3.0));
+    let track = Rect::from_min_max(
+        pos2(button.right() + 8.0, bar.center().y - 3.0),
+        pos2(bar.right() - 70.0, bar.center().y + 3.0),
+    );
     painter.rect_filled(track, 3.0, Color32::from_white_alpha(70));
     if status.duration.is_finite() && status.duration > 0.0 {
         let done = (status.current_time / status.duration).clamp(0.0, 1.0) as f32;
-        painter.rect_filled(Rect::from_min_size(track.min, vec2(track.width() * done, track.height())), 3.0, Color32::WHITE);
-        let r = ui.interact(track.expand2(vec2(0.0, 8.0)), ui.id().with(("media-seek", &item.src)), Sense::click());
+        painter.rect_filled(
+            Rect::from_min_size(track.min, vec2(track.width() * done, track.height())),
+            3.0,
+            Color32::WHITE,
+        );
+        let r = ui.interact(
+            track.expand2(vec2(0.0, 8.0)),
+            ui.id().with(("media-seek", &item.src)),
+            Sense::click(),
+        );
         if let Some(p) = r.interact_pointer_pos().filter(|_| r.clicked()) {
             let frac = ((p.x - track.left()) / track.width()).clamp(0.0, 1.0) as f64;
             item.player.seek(frac * status.duration);
         }
-        let time = format!("{} / {}", clock(status.current_time), clock(status.duration));
-        painter.text(pos2(bar.right() - 6.0, bar.center().y), egui::Align2::RIGHT_CENTER, time, egui::FontId::proportional(11.0), Color32::WHITE);
+        let time = format!(
+            "{} / {}",
+            clock(status.current_time),
+            clock(status.duration)
+        );
+        painter.text(
+            pos2(bar.right() - 6.0, bar.center().y),
+            egui::Align2::RIGHT_CENTER,
+            time,
+            egui::FontId::proportional(11.0),
+            Color32::WHITE,
+        );
     }
 }
 

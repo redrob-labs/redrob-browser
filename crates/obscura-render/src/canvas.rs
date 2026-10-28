@@ -61,7 +61,9 @@ impl Gradient {
         let stops: Vec<GradientStop> = self
             .stops
             .iter()
-            .map(|&(offset, c)| GradientStop::new(offset, Color::from_rgba8(c[0], c[1], c[2], c[3])))
+            .map(|&(offset, c)| {
+                GradientStop::new(offset, Color::from_rgba8(c[0], c[1], c[2], c[3]))
+            })
             .collect();
         let shader = match self.shape {
             GradientShape::Linear { start, end } => {
@@ -183,10 +185,11 @@ impl<'a> TinySkiaCanvas<'a> {
         mask: Option<&Mask>,
         draw: impl FnOnce(&mut Pixmap, Option<&Mask>) -> R,
     ) -> R {
-        let surface: &mut Pixmap = match self.layers.iter_mut().rev().find_map(|l| l.pixmap.as_mut()) {
-            Some(layer) => layer,
-            None => &mut *self.target,
-        };
+        let surface: &mut Pixmap =
+            match self.layers.iter_mut().rev().find_map(|l| l.pixmap.as_mut()) {
+                Some(layer) => layer,
+                None => &mut *self.target,
+            };
         let pushed = self.clips.last().and_then(Option::as_ref);
         match (mask, pushed) {
             (Some(mask), Some(pushed)) => {
@@ -252,7 +255,9 @@ impl Canvas for TinySkiaCanvas<'_> {
 
     fn fill_rect(&mut self, rect: Rect, paint: &Paint, transform: Transform, mask: Option<&Mask>) {
         // tiny-skia has its own rect fast path; keep it.
-        self.with_mask(mask, |surface, mask| surface.fill_rect(rect, paint, transform, mask));
+        self.with_mask(mask, |surface, mask| {
+            surface.fill_rect(rect, paint, transform, mask)
+        });
         #[cfg(feature = "display-list")]
         crate::display_list::tee(&*self.target, |recorder| {
             recorder.fill_rect(rect, paint, transform, mask)
@@ -334,7 +339,9 @@ impl Canvas for TinySkiaCanvas<'_> {
             blend,
         });
         #[cfg(feature = "display-list")]
-        crate::display_list::tee(&*self.target, |recorder| recorder.push_layer(opacity, blend));
+        crate::display_list::tee(&*self.target, |recorder| {
+            recorder.push_layer(opacity, blend)
+        });
     }
 
     fn pop_layer(&mut self) {
@@ -415,7 +422,13 @@ pub fn intersect_mask_into(first: &mut Mask, second: &Mask) {
 /// Mask building that a recording can follow. Each method does what the
 /// tiny-skia method of the same name without `clip_` does.
 pub trait ClipMask {
-    fn clip_fill_path(&mut self, path: &Path, fill_rule: FillRule, anti_alias: bool, transform: Transform);
+    fn clip_fill_path(
+        &mut self,
+        path: &Path,
+        fill_rule: FillRule,
+        anti_alias: bool,
+        transform: Transform,
+    );
     fn clip_intersect_path(
         &mut self,
         path: &Path,
@@ -427,7 +440,13 @@ pub trait ClipMask {
 }
 
 impl ClipMask for Mask {
-    fn clip_fill_path(&mut self, path: &Path, fill_rule: FillRule, anti_alias: bool, transform: Transform) {
+    fn clip_fill_path(
+        &mut self,
+        path: &Path,
+        fill_rule: FillRule,
+        anti_alias: bool,
+        transform: Transform,
+    ) {
         #[cfg(feature = "display-list")]
         let before = crate::display_list::mask_shapes(self);
         self.fill_path(path, fill_rule, anti_alias, transform);
@@ -461,7 +480,9 @@ impl ClipMask for Mask {
             use crate::display_list::MaskShapes;
             let after = match before {
                 MaskShapes::Paths(mut shapes) => {
-                    shapes.push(crate::display_list::clip_shape_of(path, fill_rule, transform));
+                    shapes.push(crate::display_list::clip_shape_of(
+                        path, fill_rule, transform,
+                    ));
                     MaskShapes::Paths(shapes)
                 }
                 other => other,

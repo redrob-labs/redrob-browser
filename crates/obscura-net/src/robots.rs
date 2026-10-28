@@ -126,8 +126,7 @@ fn parse_robots_txt(body: &str, our_agent: &str) -> RobotsRules {
             match key.as_str() {
                 "user-agent" => {
                     let agent = value.to_lowercase();
-                    in_matching_section =
-                        agent == "*" || our_tokens.iter().any(|token| *token == agent);
+                    in_matching_section = agent == "*" || our_tokens.contains(&agent);
                     if agent != "*" && in_matching_section {
                         found_specific = true;
                     }
@@ -150,7 +149,9 @@ fn parse_robots_txt(body: &str, our_agent: &str) -> RobotsRules {
 
         for line in body.lines() {
             let line = line.trim();
-            if line.is_empty() || line.starts_with('#') { continue; }
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
             if let Some((key, value)) = line.split_once(':') {
                 let key = key.trim().to_lowercase();
                 let value = value.trim();
@@ -170,7 +171,10 @@ fn parse_robots_txt(body: &str, our_agent: &str) -> RobotsRules {
         }
     }
 
-    RobotsRules { disallowed, allowed }
+    RobotsRules {
+        disallowed,
+        allowed,
+    }
 }
 
 fn path_matches(path: &str, pattern: &str) -> bool {
@@ -207,13 +211,29 @@ mod tests {
         let chrome = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36";
         let cache = RobotsCache::new();
         cache.parse_and_store("a.test", "User-agent: Moz\nDisallow: /\n", chrome);
-        assert!(cache.is_allowed("a.test", "/page"), "a token prefix is not a match");
+        assert!(
+            cache.is_allowed("a.test", "/page"),
+            "a token prefix is not a match"
+        );
         cache.parse_and_store("b.test", "User-agent: chrome\nDisallow: /\n", chrome);
-        assert!(!cache.is_allowed("b.test", "/page"), "an exact token still matches, case-insensitively");
+        assert!(
+            !cache.is_allowed("b.test", "/page"),
+            "an exact token still matches, case-insensitively"
+        );
         cache.parse_and_store("c.test", "User-agent: ObscuraBot\nDisallow: /\n", "Obscura");
-        assert!(cache.is_allowed("c.test", "/page"), "our token being a substring of theirs is not a match");
-        cache.parse_and_store("d.test", "User-agent: Obscura\nDisallow: /\n", "Obscura/1.0 (+https://example.test)");
-        assert!(!cache.is_allowed("d.test", "/page"), "a product token followed by a version matches");
+        assert!(
+            cache.is_allowed("c.test", "/page"),
+            "our token being a substring of theirs is not a match"
+        );
+        cache.parse_and_store(
+            "d.test",
+            "User-agent: Obscura\nDisallow: /\n",
+            "Obscura/1.0 (+https://example.test)",
+        );
+        assert!(
+            !cache.is_allowed("d.test", "/page"),
+            "a product token followed by a version matches"
+        );
     }
 
     #[test]

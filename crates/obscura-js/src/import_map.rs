@@ -232,6 +232,8 @@ impl SpecifierMap {
             return Ok(None);
         }
 
+        // The longest matching prefix decides; the loop returns on its first pass.
+        #[allow(clippy::never_loop)]
         for key in self
             .prefixes
             .iter()

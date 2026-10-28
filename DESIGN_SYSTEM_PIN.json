@@ -16,10 +16,6 @@
       "sha256": "3f6e2291a724a3081a78e1f03fd45d05634a6c986b9551883230c5ad3631723b"
     },
     {
-      "file": "crates/redrob-shell/assets/redrob-ui/icons/bookmark.svg",
-      "sha256": "a9fa3cba428fd307a47c91ddcad8c8782cc9db49f4f068c2bfb86b126da948a7"
-    },
-    {
       "file": "crates/redrob-shell/assets/redrob-ui/icons/close.svg",
       "sha256": "cf4923c7e774a70df92be15643d7ffd3d186f9824865c300c48e2194ec070a91"
     },

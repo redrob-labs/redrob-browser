@@ -44,21 +44,29 @@ pub struct Actions {
     pub theme: Option<String>,
 }
 
-pub fn ui(ui: &mut egui::Ui, url: &str, s: &mut State, profile: Option<&Profile>, vault: Option<&mut Vault>) -> Actions {
+pub fn ui(
+    ui: &mut egui::Ui,
+    url: &str,
+    s: &mut State,
+    profile: Option<&Profile>,
+    vault: Option<&mut Vault>,
+) -> Actions {
     let mut act = Actions::default();
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.add_space(12.0);
-        ui.heading(title(url));
-        ui.add_space(8.0);
-        match url {
-            HISTORY => history(ui, s, profile, &mut act),
-            PASSWORDS => passwords(ui, s, vault),
-            SETTINGS => settings(ui, s, profile, &mut act),
-            _ => {
-                ui.label(t("This page does not exist."));
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.add_space(12.0);
+            ui.heading(title(url));
+            ui.add_space(8.0);
+            match url {
+                HISTORY => history(ui, s, profile, &mut act),
+                PASSWORDS => passwords(ui, s, vault),
+                SETTINGS => settings(ui, s, profile, &mut act),
+                _ => {
+                    ui.label(t("This page does not exist."));
+                }
             }
-        }
-    });
+        });
     act
 }
 
@@ -72,7 +80,11 @@ fn history(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &mu
     }
     let mut reload = false;
     ui.horizontal(|ui| {
-        let r = ui.add(egui::TextEdit::singleline(&mut s.history_query).hint_text(t("Search history")).desired_width(320.0));
+        let r = ui.add(
+            egui::TextEdit::singleline(&mut s.history_query)
+                .hint_text(t("Search history"))
+                .desired_width(320.0),
+        );
         if r.changed() {
             reload = true;
         }
@@ -92,28 +104,37 @@ fn history(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &mu
         }
     });
     if reload || s.history_loaded_for.as_deref() != Some(s.history_query.as_str()) {
-        s.history = p.history_page(&s.history_query, s.history_limit, 0).unwrap_or_default();
+        s.history = p
+            .history_page(&s.history_query, s.history_limit, 0)
+            .unwrap_or_default();
         s.history_loaded_for = Some(s.history_query.clone());
     }
     ui.add_space(8.0);
     let mut delete = None;
-    egui::Grid::new("history").striped(true).num_columns(3).show(ui, |ui| {
-        for h in &s.history {
-            ui.weak(day_time(h.last_visit));
-            let label = if h.title.is_empty() { h.url.clone() } else { h.title.clone() };
-            let r = ui.link(label).on_hover_text(&h.url);
-            if r.clicked() {
-                act.open = Some(h.url.clone());
+    egui::Grid::new("history")
+        .striped(true)
+        .num_columns(3)
+        .show(ui, |ui| {
+            for h in &s.history {
+                ui.weak(day_time(h.last_visit));
+                let label = if h.title.is_empty() {
+                    h.url.clone()
+                } else {
+                    h.title.clone()
+                };
+                let r = ui.link(label).on_hover_text(&h.url);
+                if r.clicked() {
+                    act.open = Some(h.url.clone());
+                }
+                if r.middle_clicked() {
+                    act.open_new_tab = Some(h.url.clone());
+                }
+                if ui.small_button(t("Remove")).clicked() {
+                    delete = Some(h.url.clone());
+                }
+                ui.end_row();
             }
-            if r.middle_clicked() {
-                act.open_new_tab = Some(h.url.clone());
-            }
-            if ui.small_button(t("Remove")).clicked() {
-                delete = Some(h.url.clone());
-            }
-            ui.end_row();
-        }
-    });
+        });
     if let Some(u) = delete {
         let _ = p.delete_history(&u);
         s.history_loaded_for = None;
@@ -132,8 +153,16 @@ fn passwords(ui: &mut egui::Ui, s: &mut State, vault: Option<&mut Vault>) {
     ui.strong(t("Agent sign-in"));
     let mut policy = v.agent_policy();
     let before = policy;
-    ui.radio_value(&mut policy, AgentPolicy::WhileUnlocked, t("Only while the vault is unlocked"));
-    ui.radio_value(&mut policy, AgentPolicy::Always, t("On every site that is not blocked"));
+    ui.radio_value(
+        &mut policy,
+        AgentPolicy::WhileUnlocked,
+        t("Only while the vault is unlocked"),
+    );
+    ui.radio_value(
+        &mut policy,
+        AgentPolicy::Always,
+        t("On every site that is not blocked"),
+    );
     ui.radio_value(&mut policy, AgentPolicy::Never, t("Never"));
     if policy != before {
         let _ = v.set_agent_policy(policy);
@@ -176,13 +205,22 @@ fn passwords(ui: &mut egui::Ui, s: &mut State, vault: Option<&mut Vault>) {
                 let rule = v.site_rule(origin);
                 ui.horizontal(|ui| {
                     ui.label(t("Agent on this site:"));
-                    if ui.selectable_label(rule.is_none(), t("Follow the setting above")).clicked() {
+                    if ui
+                        .selectable_label(rule.is_none(), t("Follow the setting above"))
+                        .clicked()
+                    {
                         let _ = v.set_site_rule(origin, None);
                     }
-                    if ui.selectable_label(rule.as_deref() == Some("allow"), t("Allow")).clicked() {
+                    if ui
+                        .selectable_label(rule.as_deref() == Some("allow"), t("Allow"))
+                        .clicked()
+                    {
                         let _ = v.set_site_rule(origin, Some("allow"));
                     }
-                    if ui.selectable_label(rule.as_deref() == Some("block"), t("Block")).clicked() {
+                    if ui
+                        .selectable_label(rule.as_deref() == Some("block"), t("Block"))
+                        .clicked()
+                    {
                         let _ = v.set_site_rule(origin, Some("block"));
                     }
                 });
@@ -195,15 +233,18 @@ fn passwords(ui: &mut egui::Ui, s: &mut State, vault: Option<&mut Vault>) {
     if hist.is_empty() {
         ui.weak(t("The agent has not signed in anywhere."));
     }
-    egui::Grid::new("agent-history").striped(true).num_columns(4).show(ui, |ui| {
-        for (time, origin, username, outcome) in hist {
-            ui.weak(day_time(time));
-            ui.label(origin);
-            ui.label(username);
-            ui.label(outcome);
-            ui.end_row();
-        }
-    });
+    egui::Grid::new("agent-history")
+        .striped(true)
+        .num_columns(4)
+        .show(ui, |ui| {
+            for (time, origin, username, outcome) in hist {
+                ui.weak(day_time(time));
+                ui.label(origin);
+                ui.label(username);
+                ui.label(outcome);
+                ui.end_row();
+            }
+        });
 }
 
 fn settings(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &mut Actions) {
@@ -221,9 +262,15 @@ fn settings(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &m
     });
     ui.add_space(12.0);
     ui.strong(t("Theme"));
-    let theme = profile.and_then(|p| p.setting("theme")).unwrap_or_else(|| "system".to_string());
+    let theme = profile
+        .and_then(|p| p.setting("theme"))
+        .unwrap_or_else(|| "system".to_string());
     ui.horizontal(|ui| {
-        for (id, name) in [("system", t("Same as the system")), ("light", t("Light")), ("dark", t("Dark"))] {
+        for (id, name) in [
+            ("system", t("Same as the system")),
+            ("light", t("Light")),
+            ("dark", t("Dark")),
+        ] {
             if ui.selectable_label(theme == id, name).clicked() {
                 act.theme = Some(id.to_string());
             }
@@ -231,9 +278,14 @@ fn settings(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &m
     });
     ui.add_space(12.0);
     ui.strong(t("Search engine"));
-    let current = profile.and_then(|p| p.setting("search_engine")).unwrap_or_else(|| "duckduckgo".to_string());
+    let current = profile
+        .and_then(|p| p.setting("search_engine"))
+        .unwrap_or_else(|| "duckduckgo".to_string());
     ui.horizontal(|ui| {
-        for (id, name) in crate::model::SEARCH_ENGINES.iter().map(|(id, name, _)| (*id, *name)) {
+        for (id, name) in crate::model::SEARCH_ENGINES
+            .iter()
+            .map(|(id, name, _)| (*id, *name))
+        {
             if ui.selectable_label(current == id, name).clicked() {
                 act.search_engine = Some(id.to_string());
             }
@@ -241,7 +293,10 @@ fn settings(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &m
     });
     ui.add_space(12.0);
     ui.strong(t("Downloads"));
-    ui.label(tf("Files are saved to {0}", &[&crate::profile::downloads_dir().display()]));
+    ui.label(tf(
+        "Files are saved to {0}",
+        &[&crate::profile::downloads_dir().display()],
+    ));
     ui.add_space(12.0);
     ui.strong(t("Redrob Code"));
     let saved = profile
@@ -257,7 +312,9 @@ fn settings(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &m
             }
         }
     });
-    ui.weak(t("Prompts typed after > in the address bar go here. Only this computer is allowed."));
+    ui.weak(t(
+        "Prompts typed after > in the address bar go here. Only this computer is allowed.",
+    ));
     if let Some(p) = profile {
         ui.add_space(12.0);
         ui.strong(t("Profile folder"));
@@ -270,7 +327,11 @@ fn day_time(secs: u64) -> String {
     let days = secs / 86_400;
     let rem = secs % 86_400;
     let (y, m, d) = civil(days as i64);
-    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}", rem / 3600, (rem % 3600) / 60)
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}",
+        rem / 3600,
+        (rem % 3600) / 60
+    )
 }
 
 /// Days since 1970-01-01 to a calendar date (Howard Hinnant's algorithm).

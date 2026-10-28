@@ -6,21 +6,54 @@ use crate::cdp::Op;
 
 /// Page-area input as CDP operations, plus the wheel delta the window
 /// applies to its own scroll at once.
-pub fn page_ops(events: &[egui::Event], hover: Option<egui::Pos2>, rect: Rect, focused: bool) -> (Vec<Op>, (f32, f32)) {
+pub fn page_ops(
+    events: &[egui::Event],
+    hover: Option<egui::Pos2>,
+    rect: Rect,
+    focused: bool,
+) -> (Vec<Op>, (f32, f32)) {
     let mut ops = Vec::new();
     let mut wheel = (0.0, 0.0);
     for ev in events {
         match ev {
             egui::Event::PointerMoved(p) if rect.contains(*p) => {
                 let (x, y) = local(rect, *p);
-                ops.push(Op::Mouse { kind: "mouseMoved", x, y, button: "none", clicks: 0, modifiers: 0 });
+                ops.push(Op::Mouse {
+                    kind: "mouseMoved",
+                    x,
+                    y,
+                    button: "none",
+                    clicks: 0,
+                    modifiers: 0,
+                });
             }
-            egui::Event::PointerButton { pos, button, pressed, modifiers } if rect.contains(*pos) => {
+            egui::Event::PointerButton {
+                pos,
+                button,
+                pressed,
+                modifiers,
+            } if rect.contains(*pos) => {
                 let (x, y) = local(rect, *pos);
-                let kind = if *pressed { "mousePressed" } else { "mouseReleased" };
-                ops.push(Op::Mouse { kind, x, y, button: button_name(*button), clicks: 1, modifiers: mods(*modifiers) });
+                let kind = if *pressed {
+                    "mousePressed"
+                } else {
+                    "mouseReleased"
+                };
+                ops.push(Op::Mouse {
+                    kind,
+                    x,
+                    y,
+                    button: button_name(*button),
+                    clicks: 1,
+                    modifiers: mods(*modifiers),
+                });
             }
-            egui::Event::MouseWheel { delta, modifiers, unit, .. } => {
+            egui::Event::MouseWheel {
+                delta,
+                modifiers,
+                unit,
+                ..
+            } => {
                 let Some(p) = hover else { continue };
                 if !rect.contains(p) || modifiers.command {
                     continue;
@@ -35,11 +68,22 @@ pub fn page_ops(events: &[egui::Event], hover: Option<egui::Pos2>, rect: Rect, f
                 let (dx, dy) = (-delta.x * step, -delta.y * step);
                 wheel.0 += dx;
                 wheel.1 += dy;
-                ops.push(Op::Wheel { x, y, dx, dy, modifiers: mods(*modifiers) });
+                ops.push(Op::Wheel {
+                    x,
+                    y,
+                    dx,
+                    dy,
+                    modifiers: mods(*modifiers),
+                });
             }
             egui::Event::Text(t) if focused => ops.push(Op::Text(t.clone())),
             egui::Event::Paste(t) if focused => ops.push(Op::Text(t.clone())),
-            egui::Event::Key { key, pressed, modifiers, .. } if focused => {
+            egui::Event::Key {
+                key,
+                pressed,
+                modifiers,
+                ..
+            } if focused => {
                 if let Some((name, code, vk)) = key_info(*key) {
                     ops.push(Op::Key {
                         down: *pressed,

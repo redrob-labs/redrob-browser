@@ -81,13 +81,16 @@ impl MsePlayer {
             .max_bytes(0)
             .build();
         let decodebin = gst::ElementFactory::make("decodebin").build()?;
-        self.pipeline.add_many([appsrc.upcast_ref::<gst::Element>(), &decodebin])?;
+        self.pipeline
+            .add_many([appsrc.upcast_ref::<gst::Element>(), &decodebin])?;
         appsrc.link(&decodebin)?;
         let weak = self.pipeline.downgrade();
         let shared = self.shared.clone();
         let frame = self.frame.clone();
         decodebin.connect_pad_added(move |_, pad| {
-            let Some(pipeline) = weak.upgrade() else { return };
+            let Some(pipeline) = weak.upgrade() else {
+                return;
+            };
             link_decoded(&pipeline, pad, &shared, &frame);
         });
         decodebin.sync_state_with_parent()?;
@@ -99,7 +102,11 @@ impl MsePlayer {
     /// SourceBuffers, their initialization segments queued again.
     fn rebuild(&mut self) {
         let _ = self.pipeline.set_state(gst::State::Null);
-        let (volume, muted) = self.shared.lock().map(|s| (s.volume, s.muted)).unwrap_or((1.0, false));
+        let (volume, muted) = self
+            .shared
+            .lock()
+            .map(|s| (s.volume, s.muted))
+            .unwrap_or((1.0, false));
         self.shared = Arc::new(Mutex::new(Shared {
             origin: None,
             sinks: Vec::new(),
@@ -118,7 +125,11 @@ impl MsePlayer {
                     if !s.init.is_empty() {
                         let _ = appsrc.push_buffer(gst::Buffer::from_slice(s.init.clone()));
                     }
-                    self.sources.push(Source { id: s.id, appsrc, init: s.init });
+                    self.sources.push(Source {
+                        id: s.id,
+                        appsrc,
+                        init: s.init,
+                    });
                 }
                 Err(e) => {
                     eprintln!("redrob-browser: MediaSource: {e}");
@@ -134,19 +145,31 @@ impl MsePlayer {
 
 /// decodebin found a stream: send video to the RGBA appsink and audio to
 /// the speakers, once each.
-fn link_decoded(pipeline: &gst::Pipeline, pad: &gst::Pad, shared: &Arc<Mutex<Shared>>, frame: &Arc<Mutex<Frame>>) {
+fn link_decoded(
+    pipeline: &gst::Pipeline,
+    pad: &gst::Pad,
+    shared: &Arc<Mutex<Shared>>,
+    frame: &Arc<Mutex<Frame>>,
+) {
     let caps = pad.current_caps().unwrap_or_else(|| pad.query_caps(None));
-    let Some(name) = caps.structure(0).map(|s| s.name().as_str().to_string()) else { return };
+    let Some(name) = caps.structure(0).map(|s| s.name().as_str().to_string()) else {
+        return;
+    };
     let Ok(mut sh) = shared.lock() else { return };
     let make = |f: &str| gst::ElementFactory::make(f).build().ok();
     let chain: Vec<gst::Element> = if name.starts_with("video/") && !sh.video_linked {
-        let Some(convert) = make("videoconvert") else { return };
+        let Some(convert) = make("videoconvert") else {
+            return;
+        };
         sh.video_linked = true;
         vec![convert, video_sink(frame.clone()).upcast()]
     } else if name.starts_with("audio/") && !sh.audio_linked {
-        let (Some(convert), Some(resample), Some(volume), Some(out)) =
-            (make("audioconvert"), make("audioresample"), make("volume"), make("autoaudiosink"))
-        else {
+        let (Some(convert), Some(resample), Some(volume), Some(out)) = (
+            make("audioconvert"),
+            make("audioresample"),
+            make("volume"),
+            make("autoaudiosink"),
+        ) else {
             return;
         };
         volume.set_property("volume", sh.volume);
@@ -174,10 +197,16 @@ fn link_decoded(pipeline: &gst::Pipeline, pad: &gst::Pad, shared: &Arc<Mutex<Sha
     }
     let shared = shared.clone();
     let _ = pad.add_probe(gst::PadProbeType::BUFFER, move |pad, info| {
-        let Some(pts) = info.buffer().and_then(|b| b.pts()) else { return gst::PadProbeReturn::Ok };
+        let Some(pts) = info.buffer().and_then(|b| b.pts()) else {
+            return gst::PadProbeReturn::Ok;
+        };
         let running = pad
             .sticky_event::<gst::event::Segment>(0)
-            .and_then(|ev| ev.segment().downcast_ref::<gst::ClockTime>().and_then(|s| s.to_running_time(pts)))
+            .and_then(|ev| {
+                ev.segment()
+                    .downcast_ref::<gst::ClockTime>()
+                    .and_then(|s| s.to_running_time(pts))
+            })
             .unwrap_or(pts);
         if let Ok(mut sh) = shared.lock() {
             if sh.origin.is_none() {
@@ -266,7 +295,9 @@ impl Player for MsePlayer {
 
     fn status(&mut self) -> Status {
         if let Some(bus) = self.pipeline.bus() {
-            while let Some(msg) = bus.pop_filtered(&[gst::MessageType::Eos, gst::MessageType::Error]) {
+            while let Some(msg) =
+                bus.pop_filtered(&[gst::MessageType::Eos, gst::MessageType::Error])
+            {
                 match msg.view() {
                     gst::MessageView::Eos(_) => self.ended = true,
                     gst::MessageView::Error(e) => {
@@ -277,8 +308,15 @@ impl Player for MsePlayer {
                 }
             }
         }
-        let started = self.shared.lock().map(|s| s.origin.is_some()).unwrap_or(false);
-        let pos = self.pipeline.query_position::<gst::ClockTime>().map(|t| t.mseconds() as f64 / 1000.0);
+        let started = self
+            .shared
+            .lock()
+            .map(|s| s.origin.is_some())
+            .unwrap_or(false);
+        let pos = self
+            .pipeline
+            .query_position::<gst::ClockTime>()
+            .map(|t| t.mseconds() as f64 / 1000.0);
         let current_time = match (self.seek_to, started, pos) {
             (Some(t), false, _) | (Some(t), true, None) => t,
             (_, _, Some(p)) => {
@@ -287,7 +325,11 @@ impl Player for MsePlayer {
             }
             (None, _, None) => 0.0,
         };
-        let (width, height) = self.frame.lock().map(|f| (f.width, f.height)).unwrap_or((0, 0));
+        let (width, height) = self
+            .frame
+            .lock()
+            .map(|f| (f.width, f.height))
+            .unwrap_or((0, 0));
         let (_, state, _) = self.pipeline.state(gst::ClockTime::ZERO);
         Status {
             current_time,
@@ -321,7 +363,11 @@ impl Player for MsePlayer {
         // decodebin finds the container and codecs itself, so the MIME type
         // is not needed to build the branch.
         match self.branch() {
-            Ok(appsrc) => self.sources.push(Source { id: sb, appsrc, init: Vec::new() }),
+            Ok(appsrc) => self.sources.push(Source {
+                id: sb,
+                appsrc,
+                init: Vec::new(),
+            }),
             Err(e) => {
                 eprintln!("redrob-browser: MediaSource: {e}");
                 self.error = true;
@@ -330,7 +376,9 @@ impl Player for MsePlayer {
     }
 
     fn mse_append(&mut self, sb: u64, bytes: Vec<u8>) {
-        let Some(s) = self.sources.iter_mut().find(|s| s.id == sb) else { return };
+        let Some(s) = self.sources.iter_mut().find(|s| s.id == sb) else {
+            return;
+        };
         if let Some(n) = init_len(&bytes) {
             s.init = bytes[..n].to_vec();
         }

@@ -21,7 +21,11 @@ pub async fn handle(
     match method {
         "highlightNode" => {
             let boxes = crate::domains::dom::handle("getBoxModel", params, ctx, session_id).await?;
-            emit(ctx, session_id, boxes.get("model").cloned().unwrap_or(Value::Null));
+            emit(
+                ctx,
+                session_id,
+                boxes.get("model").cloned().unwrap_or(Value::Null),
+            );
             Ok(json!({}))
         }
         "highlightRect" => {
@@ -55,11 +59,25 @@ fn quad_model(quad: Value, w: f64, h: f64) -> Value {
 /// Send the highlight to every session attached to the caller's page, so the
 /// window hears a highlight that a separate DevTools client asked for.
 fn emit(ctx: &mut CdpContext, session_id: &Option<String>, model: Value) {
-    let Some(page_id) = session_id.as_ref().and_then(|s| ctx.sessions.get(s)).cloned() else { return };
-    let mut sessions: Vec<String> =
-        ctx.sessions.iter().filter(|(_, p)| **p == page_id).map(|(s, _)| s.clone()).collect();
+    let Some(page_id) = session_id
+        .as_ref()
+        .and_then(|s| ctx.sessions.get(s))
+        .cloned()
+    else {
+        return;
+    };
+    let mut sessions: Vec<String> = ctx
+        .sessions
+        .iter()
+        .filter(|(_, p)| **p == page_id)
+        .map(|(s, _)| s.clone())
+        .collect();
     sessions.sort_unstable();
     for s in sessions {
-        ctx.pending_events.push(CdpEvent::with_session(HIGHLIGHT_EVENT, json!({ "model": model }), s));
+        ctx.pending_events.push(CdpEvent::with_session(
+            HIGHLIGHT_EVENT,
+            json!({ "model": model }),
+            s,
+        ));
     }
 }

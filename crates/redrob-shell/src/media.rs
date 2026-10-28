@@ -86,7 +86,10 @@ mod gst_backend {
     /// Without a bundled runtime (Linux, a source build) nothing is set and the
     /// system GStreamer is used.
     fn use_bundled_runtime() {
-        let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) else {
+        let Some(dir) = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        else {
             return;
         };
         let root = if cfg!(target_os = "macos") {
@@ -107,7 +110,11 @@ mod gst_backend {
         let scanner = root
             .join("libexec")
             .join("gstreamer-1.0")
-            .join(if cfg!(windows) { "gst-plugin-scanner.exe" } else { "gst-plugin-scanner" });
+            .join(if cfg!(windows) {
+                "gst-plugin-scanner.exe"
+            } else {
+                "gst-plugin-scanner"
+            });
         if scanner.is_file() {
             set("GST_PLUGIN_SCANNER_1_0", scanner);
         }
@@ -133,10 +140,17 @@ mod gst_backend {
             }
             let frame: Arc<Mutex<Frame>> = Default::default();
             let sink = video_sink(frame.clone());
-            let playbin = gst::ElementFactory::make("playbin").property("uri", url).build()?;
+            let playbin = gst::ElementFactory::make("playbin")
+                .property("uri", url)
+                .build()?;
             playbin.set_property("video-sink", &sink);
             playbin.set_state(gst::State::Paused)?;
-            Ok(Self { playbin, frame, ended: false, error: false })
+            Ok(Self {
+                playbin,
+                frame,
+                ended: false,
+                error: false,
+            })
         }
     }
 
@@ -148,14 +162,20 @@ mod gst_backend {
             use_bundled_runtime();
             gst::init().map_err(|e| e.to_string())
         })
-            .clone()
-            .map_err(|e| anyhow::anyhow!("GStreamer: {e}"))
+        .clone()
+        .map_err(|e| anyhow::anyhow!("GStreamer: {e}"))
     }
 
     /// An appsink that copies each RGBA frame into `frame`.
     pub(super) fn video_sink(frame: Arc<Mutex<Frame>>) -> gst_app::AppSink {
-        let caps = gst_video::VideoCapsBuilder::new().format(gst_video::VideoFormat::Rgba).build();
-        let sink = gst_app::AppSink::builder().caps(&caps).max_buffers(2).drop(true).build();
+        let caps = gst_video::VideoCapsBuilder::new()
+            .format(gst_video::VideoFormat::Rgba)
+            .build();
+        let sink = gst_app::AppSink::builder()
+            .caps(&caps)
+            .max_buffers(2)
+            .drop(true)
+            .build();
         let target = frame;
         sink.set_callbacks(
             gst_app::AppSinkCallbacks::builder()
@@ -163,7 +183,8 @@ mod gst_backend {
                     let sample = s.pull_sample().map_err(|_| gst::FlowError::Eos)?;
                     let buffer = sample.buffer().ok_or(gst::FlowError::Error)?;
                     let caps = sample.caps().ok_or(gst::FlowError::Error)?;
-                    let info = gst_video::VideoInfo::from_caps(caps).map_err(|_| gst::FlowError::Error)?;
+                    let info =
+                        gst_video::VideoInfo::from_caps(caps).map_err(|_| gst::FlowError::Error)?;
                     let map = buffer.map_readable().map_err(|_| gst::FlowError::Error)?;
                     let (w, h) = (info.width(), info.height());
                     let stride = info.stride()[0] as usize;
@@ -203,7 +224,9 @@ mod gst_backend {
 
         fn seek(&mut self, seconds: f64) {
             let t = gst::ClockTime::from_mseconds((seconds.max(0.0) * 1000.0) as u64);
-            let _ = self.playbin.seek_simple(gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT, t);
+            let _ = self
+                .playbin
+                .seek_simple(gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT, t);
             self.ended = false;
         }
 
@@ -214,7 +237,9 @@ mod gst_backend {
 
         fn status(&mut self) -> Status {
             if let Some(bus) = self.playbin.bus() {
-                while let Some(msg) = bus.pop_filtered(&[gst::MessageType::Eos, gst::MessageType::Error]) {
+                while let Some(msg) =
+                    bus.pop_filtered(&[gst::MessageType::Eos, gst::MessageType::Error])
+                {
                     match msg.view() {
                         gst::MessageView::Eos(_) => self.ended = true,
                         gst::MessageView::Error(_) => self.error = true,
@@ -222,10 +247,20 @@ mod gst_backend {
                     }
                 }
             }
-            let pos = self.playbin.query_position::<gst::ClockTime>().map(|t| t.mseconds() as f64 / 1000.0);
-            let dur = self.playbin.query_duration::<gst::ClockTime>().map(|t| t.mseconds() as f64 / 1000.0);
+            let pos = self
+                .playbin
+                .query_position::<gst::ClockTime>()
+                .map(|t| t.mseconds() as f64 / 1000.0);
+            let dur = self
+                .playbin
+                .query_duration::<gst::ClockTime>()
+                .map(|t| t.mseconds() as f64 / 1000.0);
             let (_, state, _) = self.playbin.state(gst::ClockTime::ZERO);
-            let (width, height) = self.frame.lock().map(|f| (f.width, f.height)).unwrap_or((0, 0));
+            let (width, height) = self
+                .frame
+                .lock()
+                .map(|f| (f.width, f.height))
+                .unwrap_or((0, 0));
             Status {
                 current_time: pos.unwrap_or(0.0),
                 duration: dur.unwrap_or(f64::NAN),
@@ -233,7 +268,15 @@ mod gst_backend {
                 ended: self.ended,
                 width,
                 height,
-                ready_state: if self.error { 0 } else if width > 0 { 4 } else if dur.is_some() { 1 } else { 0 },
+                ready_state: if self.error {
+                    0
+                } else if width > 0 {
+                    4
+                } else if dur.is_some() {
+                    1
+                } else {
+                    0
+                },
                 error: self.error,
             }
         }

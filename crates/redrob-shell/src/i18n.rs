@@ -52,16 +52,27 @@ pub fn detect(saved: Option<&str>) -> Lang {
             if v.is_empty() {
                 continue;
             }
-            return if v.to_ascii_lowercase().starts_with("ko") { Lang::Ko } else { Lang::En };
+            return if v.to_ascii_lowercase().starts_with("ko") {
+                Lang::Ko
+            } else {
+                Lang::En
+            };
         }
     }
     #[cfg(target_os = "macos")]
     {
         // GUI apps on macOS often start without LANG; ask the user defaults.
-        if let Ok(out) = std::process::Command::new("defaults").args(["read", "-g", "AppleLanguages"]).output() {
+        if let Ok(out) = std::process::Command::new("defaults")
+            .args(["read", "-g", "AppleLanguages"])
+            .output()
+        {
             let s = String::from_utf8_lossy(&out.stdout);
             if let Some(first) = s.split('"').nth(1) {
-                return if first.starts_with("ko") { Lang::Ko } else { Lang::En };
+                return if first.starts_with("ko") {
+                    Lang::Ko
+                } else {
+                    Lang::En
+                };
             }
         }
     }
@@ -116,14 +127,22 @@ fn ko(en: &str) -> Option<&'static str> {
         "Done" => "완료",
         "Failed" => "실패",
         // Import
-        "No Chrome, Chromium, Edge or Brave profile found" => "Chrome, Chromium, Edge, Brave 프로필을 찾지 못했어요",
+        "No Chrome, Chromium, Edge or Brave profile found" => {
+            "Chrome, Chromium, Edge, Brave 프로필을 찾지 못했어요"
+        }
         "Import from {0}" => "{0}에서 가져오기",
         "Import passwords from {0}" => "{0}에서 비밀번호 가져오기",
-        "Import passwords from Chrome Passwords.csv" => "Chrome Passwords.csv에서 비밀번호 가져오기",
-        "Import needs a profile, and none could be opened." => "가져오려면 프로필이 필요한데 열지 못했어요.",
+        "Import passwords from Chrome Passwords.csv" => {
+            "Chrome Passwords.csv에서 비밀번호 가져오기"
+        }
+        "Import needs a profile, and none could be opened." => {
+            "가져오려면 프로필이 필요한데 열지 못했어요."
+        }
         "Could not import from {0}: {1}" => "{0}에서 가져오지 못했어요: {1}",
         "Could not save the import: {0}" => "가져온 내용을 저장하지 못했어요: {0}",
-        "Imported {0} bookmarks and {1} history entries from {2}." => "{2}에서 북마크 {0}개와 방문 기록 {1}개를 가져왔어요.",
+        "Imported {0} bookmarks and {1} history entries from {2}." => {
+            "{2}에서 북마크 {0}개와 방문 기록 {1}개를 가져왔어요."
+        }
         "Could not save bookmarks: {0}" => "북마크를 저장하지 못했어요: {0}",
         // Passwords
         "Key" => "로그인",
@@ -139,9 +158,13 @@ fn ko(en: &str) -> Option<&'static str> {
         "Not now" => "나중에",
         "Never for this site" => "이 사이트에서는 묻지 않기",
         "Could not save the password: {0}" => "비밀번호를 저장하지 못했어요: {0}",
-        "The password vault is not available on this system." => "이 컴퓨터에서는 비밀번호 금고를 쓸 수 없어요.",
+        "The password vault is not available on this system." => {
+            "이 컴퓨터에서는 비밀번호 금고를 쓸 수 없어요."
+        }
         "Imported {0} passwords from {1}." => "{1}에서 비밀번호 {0}개를 가져왔어요.",
-        " {0} could not be opened; import a CSV export for those." => " {0}개는 열지 못했어요. 그 비밀번호는 CSV로 내보내서 가져오세요.",
+        " {0} could not be opened; import a CSV export for those." => {
+            " {0}개는 열지 못했어요. 그 비밀번호는 CSV로 내보내서 가져오세요."
+        }
         "the CSV file" => "CSV 파일",
         "Could not import passwords: {0}" => "비밀번호를 가져오지 못했어요: {0}",
         // Agent
@@ -152,7 +175,9 @@ fn ko(en: &str) -> Option<&'static str> {
         "Sign in to Redrob" => "레드롭 로그인",
         "Sign out" => "로그아웃",
         "Signed in as {0}" => "{0} 계정으로 로그인했어요",
-        "Signing in. Finish in the page that opened." => "로그인하고 있어요. 열린 페이지에서 마저 진행하세요.",
+        "Signing in. Finish in the page that opened." => {
+            "로그인하고 있어요. 열린 페이지에서 마저 진행하세요."
+        }
         "Could not sign in: {0}" => "로그인하지 못했어요: {0}",
         // Updates
         "Redrob Browser {0} is available." => "Redrob Browser {0}이 나왔어요.",
@@ -161,7 +186,9 @@ fn ko(en: &str) -> Option<&'static str> {
         "Passwords" => "비밀번호",
         "Settings" => "설정",
         "This page does not exist." => "없는 페이지예요.",
-        "History is not saved: no profile could be opened." => "프로필을 열지 못해서 기록을 저장하지 않아요.",
+        "History is not saved: no profile could be opened." => {
+            "프로필을 열지 못해서 기록을 저장하지 않아요."
+        }
         "Search history" => "기록 검색",
         "Clear the last hour" => "지난 1시간 삭제",
         "Clear today" => "오늘 기록 삭제",
@@ -187,7 +214,9 @@ fn ko(en: &str) -> Option<&'static str> {
         "Files are saved to {0}" => "파일은 {0}에 저장해요",
         "Redrob Code" => "Redrob Code",
         "Server address" => "서버 주소",
-        "Prompts typed after > in the address bar go here. Only this computer is allowed." => "주소창에 > 다음에 쓴 요청이 여기로 가요. 이 컴퓨터 안의 주소만 쓸 수 있어요.",
+        "Prompts typed after > in the address bar go here. Only this computer is allowed." => {
+            "주소창에 > 다음에 쓴 요청이 여기로 가요. 이 컴퓨터 안의 주소만 쓸 수 있어요."
+        }
         "Profile folder" => "프로필 폴더",
         "Update now" => "지금 업데이트",
         "Restart to update" => "다시 시작해서 업데이트",
@@ -196,16 +225,22 @@ fn ko(en: &str) -> Option<&'static str> {
         "Downloading the update: {0}%" => "업데이트를 내려받고 있어요: {0}%",
         "Downloading the update: {0} MB" => "업데이트를 내려받고 있어요: {0}MB",
         "Installing the update..." => "업데이트를 설치하고 있어요.",
-        "The update is installed. Restart to use it." => "업데이트를 설치했어요. 다시 시작하면 적용돼요.",
+        "The update is installed. Restart to use it." => {
+            "업데이트를 설치했어요. 다시 시작하면 적용돼요."
+        }
         "Could not update: {0}" => "업데이트하지 못했어요: {0}",
         "this copy cannot be updated in place" => "이 설치본은 그 자리에서 업데이트할 수 없어요",
-        "the download does not match the release checksum" => "내려받은 파일이 릴리즈 체크섬과 맞지 않아요",
+        "the download does not match the release checksum" => {
+            "내려받은 파일이 릴리즈 체크섬과 맞지 않아요"
+        }
         "the new app's signature did not verify" => "새 앱의 서명을 확인하지 못했어요",
         // Media
         "Play" => "재생",
         "Pause" => "일시정지",
         // Protected video
-        "This video is protected. Open it where it can play?" => "보호된 동영상이에요. 재생할 수 있는 곳에서 열까요?",
+        "This video is protected. Open it where it can play?" => {
+            "보호된 동영상이에요. 재생할 수 있는 곳에서 열까요?"
+        }
         "Open in a protected tab" => "보호 탭에서 열기",
         "Open in your default browser" => "기본 브라우저에서 열기",
         "Could not open a protected tab: {0}" => "보호 탭을 열지 못했어요: {0}",

@@ -10,7 +10,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use egui::{Color32, CornerRadius, FontFamily, FontId, Rect, Response, Sense, Stroke, TextStyle, Ui, Vec2};
+use egui::{
+    Color32, CornerRadius, FontFamily, FontId, Rect, Response, Sense, Stroke, TextStyle, Ui, Vec2,
+};
 
 const TOKENS: &str = include_str!("../assets/redrob-ui/tokens.json");
 const WANTED_SANS: &[u8] = include_bytes!("../assets/fonts/WantedSans-Regular.ttf");
@@ -35,13 +37,7 @@ pub struct Palette {
     pub action_primary_hover: Color32,
     pub focus_ring: Color32,
     pub danger: Color32,
-    pub success: Color32,
     pub warning: Color32,
-    pub info: Color32,
-    /// The browser's product colours (`product-browser-*`).
-    pub product_fill: Color32,
-    pub product_line: Color32,
-    pub product_wash: Color32,
 }
 
 /// Lengths from the design system, in points.
@@ -57,7 +53,6 @@ pub mod size {
     pub const RADIUS_LG: u8 = 12;
     pub const RADIUS_FULL: u8 = 255;
     pub const CONTROL_SM: f32 = 32.0;
-    pub const CONTROL_MD: f32 = 40.0;
     pub const CONTROL_LG: f32 = 48.0;
 }
 
@@ -72,7 +67,10 @@ fn tokens() -> &'static HashMap<String, (String, String)> {
             .filter_map(|t| {
                 let name = t["name"].as_str()?.to_string();
                 let light = t["light"].as_str().or(t["value"].as_str())?.to_string();
-                let dark = t["dark"].as_str().map(str::to_string).unwrap_or_else(|| light.clone());
+                let dark = t["dark"]
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| light.clone());
                 Some((name, (light, dark)))
             })
             .collect()
@@ -86,14 +84,30 @@ fn parse_color(s: &str) -> Option<Color32> {
         let n = u32::from_str_radix(hex, 16).ok()?;
         return match hex.len() {
             6 => Some(Color32::from_rgb((n >> 16) as u8, (n >> 8) as u8, n as u8)),
-            8 => Some(Color32::from_rgba_unmultiplied((n >> 24) as u8, (n >> 16) as u8, (n >> 8) as u8, n as u8)),
+            8 => Some(Color32::from_rgba_unmultiplied(
+                (n >> 24) as u8,
+                (n >> 16) as u8,
+                (n >> 8) as u8,
+                n as u8,
+            )),
             _ => None,
         };
     }
-    let inner = s.strip_prefix("rgba(").or_else(|| s.strip_prefix("rgb("))?.strip_suffix(')')?;
-    let parts: Vec<f32> = inner.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+    let inner = s
+        .strip_prefix("rgba(")
+        .or_else(|| s.strip_prefix("rgb("))?
+        .strip_suffix(')')?;
+    let parts: Vec<f32> = inner
+        .split(',')
+        .filter_map(|p| p.trim().parse().ok())
+        .collect();
     let a = parts.get(3).copied().unwrap_or(1.0);
-    Some(Color32::from_rgba_unmultiplied(*parts.first()? as u8, *parts.get(1)? as u8, *parts.get(2)? as u8, (a * 255.0).round() as u8))
+    Some(Color32::from_rgba_unmultiplied(
+        *parts.first()? as u8,
+        *parts.get(1)? as u8,
+        *parts.get(2)? as u8,
+        (a * 255.0).round() as u8,
+    ))
 }
 
 fn color(name: &str, dark: bool) -> Color32 {
@@ -124,19 +138,18 @@ impl Palette {
             action_primary_hover: c("action-primary-hover"),
             focus_ring: c("focus-ring"),
             danger: c("status-danger"),
-            success: c("status-success"),
             warning: c("status-warning"),
-            info: c("status-info"),
-            product_fill: c("product-browser-fill"),
-            product_line: c("product-browser-line"),
-            product_wash: c("product-browser-wash"),
         }
     }
 
     pub fn of(dark: bool) -> &'static Palette {
         static LIGHT: OnceLock<Palette> = OnceLock::new();
         static DARK: OnceLock<Palette> = OnceLock::new();
-        if dark { DARK.get_or_init(|| Palette::load(true)) } else { LIGHT.get_or_init(|| Palette::load(false)) }
+        if dark {
+            DARK.get_or_init(|| Palette::load(true))
+        } else {
+            LIGHT.get_or_init(|| Palette::load(false))
+        }
     }
 }
 
@@ -151,10 +164,17 @@ pub fn install(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     // Wanted Sans is the system's Korean face and carries Latin too; egui's
     // own fonts stay behind it for symbols it lacks.
-    fonts.font_data.insert("wanted-sans".into(), Arc::new(egui::FontData::from_static(WANTED_SANS)));
+    fonts.font_data.insert(
+        "wanted-sans".into(),
+        Arc::new(egui::FontData::from_static(WANTED_SANS)),
+    );
     for family in [FontFamily::Proportional, FontFamily::Monospace] {
         if let Some(f) = fonts.families.get_mut(&family) {
-            let at = if family == FontFamily::Proportional { 0 } else { 1.min(f.len()) };
+            let at = if family == FontFamily::Proportional {
+                0
+            } else {
+                1.min(f.len())
+            };
             f.insert(at, "wanted-sans".into());
         }
     }
@@ -169,7 +189,9 @@ pub fn install(ctx: &egui::Context) {
         "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
     ];
     if let Some(bytes) = CJK.iter().find_map(|p| std::fs::read(p).ok()) {
-        fonts.font_data.insert("cjk".into(), Arc::new(egui::FontData::from_owned(bytes)));
+        fonts
+            .font_data
+            .insert("cjk".into(), Arc::new(egui::FontData::from_owned(bytes)));
         for family in [FontFamily::Proportional, FontFamily::Monospace] {
             fonts.families.entry(family).or_default().push("cjk".into());
         }
@@ -182,17 +204,26 @@ pub fn install(ctx: &egui::Context) {
             s.spacing.button_padding = Vec2::new(10.0, 5.0);
             s.spacing.interact_size.y = 28.0;
             s.spacing.menu_margin = egui::Margin::same(6);
-            s.text_styles.insert(TextStyle::Small, FontId::proportional(11.0));
-            s.text_styles.insert(TextStyle::Body, FontId::proportional(13.0));
-            s.text_styles.insert(TextStyle::Button, FontId::proportional(13.0));
-            s.text_styles.insert(TextStyle::Heading, FontId::proportional(21.0));
-            s.text_styles.insert(TextStyle::Monospace, FontId::monospace(12.0));
+            s.text_styles
+                .insert(TextStyle::Small, FontId::proportional(11.0));
+            s.text_styles
+                .insert(TextStyle::Body, FontId::proportional(13.0));
+            s.text_styles
+                .insert(TextStyle::Button, FontId::proportional(13.0));
+            s.text_styles
+                .insert(TextStyle::Heading, FontId::proportional(21.0));
+            s.text_styles
+                .insert(TextStyle::Monospace, FontId::monospace(12.0));
         });
     }
 }
 
 fn visuals(p: &Palette) -> egui::Visuals {
-    let mut v = if p.dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+    let mut v = if p.dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
     v.panel_fill = p.surface_base;
     v.window_fill = p.surface_base;
     v.extreme_bg_color = p.surface_sunken;
@@ -204,9 +235,19 @@ fn visuals(p: &Palette) -> egui::Visuals {
     v.window_stroke = Stroke::new(1.0, p.border_subtle);
     v.window_corner_radius = CornerRadius::same(size::RADIUS_LG);
     v.menu_corner_radius = CornerRadius::same(size::RADIUS_MD);
-    let shadow = egui::epaint::Shadow { offset: [0, 4], blur: 12, spread: 0, color: Color32::from_black_alpha(if p.dark { 110 } else { 26 }) };
+    let shadow = egui::epaint::Shadow {
+        offset: [0, 4],
+        blur: 12,
+        spread: 0,
+        color: Color32::from_black_alpha(if p.dark { 110 } else { 26 }),
+    };
     v.popup_shadow = shadow;
-    v.window_shadow = egui::epaint::Shadow { offset: [0, 16], blur: 40, spread: 0, color: Color32::from_black_alpha(if p.dark { 140 } else { 36 }) };
+    v.window_shadow = egui::epaint::Shadow {
+        offset: [0, 16],
+        blur: 40,
+        spread: 0,
+        color: Color32::from_black_alpha(if p.dark { 140 } else { 36 }),
+    };
     v.selection.bg_fill = p.action_primary.gamma_multiply(0.28);
     v.selection.stroke = Stroke::new(1.0, p.action_primary);
     v.text_cursor.stroke = Stroke::new(2.0, p.action_primary);
@@ -264,14 +305,16 @@ pub enum Icon {
     Sparkle,
     User,
     SignIn,
-    Bookmark,
 }
 
 impl Icon {
     fn file(self) -> (&'static str, &'static str) {
         macro_rules! svg {
             ($n:literal) => {
-                ($n, include_str!(concat!("../assets/redrob-ui/icons/", $n, ".svg")))
+                (
+                    $n,
+                    include_str!(concat!("../assets/redrob-ui/icons/", $n, ".svg")),
+                )
             };
         }
         match self {
@@ -293,7 +336,6 @@ impl Icon {
             Icon::Sparkle => svg!("sparkle"),
             Icon::User => svg!("user"),
             Icon::SignIn => svg!("signIn"),
-            Icon::Bookmark => svg!("bookmark"),
         }
     }
 
@@ -301,8 +343,15 @@ impl Icon {
     fn bytes(self) -> (String, &'static [u8]) {
         static CACHE: OnceLock<std::sync::Mutex<HashMap<String, &'static [u8]>>> = OnceLock::new();
         let (name, svg) = self.file();
-        let key = if self == Icon::StarFilled { format!("{name}-filled") } else { name.to_string() };
-        let mut cache = CACHE.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+        let key = if self == Icon::StarFilled {
+            format!("{name}-filled")
+        } else {
+            name.to_string()
+        };
+        let mut cache = CACHE
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let bytes = *cache.entry(key.clone()).or_insert_with(|| {
             let mut s = svg.replace("currentColor", "#ffffff");
             if self == Icon::StarFilled {
@@ -315,7 +364,9 @@ impl Icon {
 
     pub fn image(self, size: f32, tint: Color32) -> egui::Image<'static> {
         let (uri, bytes) = self.bytes();
-        egui::Image::from_bytes(uri, bytes).fit_to_exact_size(Vec2::splat(size)).tint(tint)
+        egui::Image::from_bytes(uri, bytes)
+            .fit_to_exact_size(Vec2::splat(size))
+            .tint(tint)
     }
 
     pub fn paint(self, ui: &Ui, rect: Rect, tint: Color32) {
@@ -330,7 +381,11 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, tip: &str) -> Response {
 
 pub fn icon_button_sized(ui: &mut Ui, icon: Icon, tip: &str, side: f32, enabled: bool) -> Response {
     let p = palette(ui);
-    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
     let (rect, r) = ui.allocate_exact_size(Vec2::splat(side), sense);
     if ui.is_rect_visible(rect) {
         let fill = if !enabled {
@@ -342,7 +397,8 @@ pub fn icon_button_sized(ui: &mut Ui, icon: Icon, tip: &str, side: f32, enabled:
         } else {
             Color32::TRANSPARENT
         };
-        ui.painter().rect_filled(rect, CornerRadius::same(size::RADIUS_MD), fill);
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(size::RADIUS_MD), fill);
         let tint = if !enabled {
             p.ink_muted.gamma_multiply(0.5)
         } else if r.hovered() {
@@ -351,9 +407,17 @@ pub fn icon_button_sized(ui: &mut Ui, icon: Icon, tip: &str, side: f32, enabled:
             p.ink_secondary
         };
         let s = (side * 0.56).round();
-        icon.paint(ui, Rect::from_center_size(rect.center(), Vec2::splat(s)), tint);
+        icon.paint(
+            ui,
+            Rect::from_center_size(rect.center(), Vec2::splat(s)),
+            tint,
+        );
     }
-    if tip.is_empty() { r } else { r.on_hover_text(tip) }
+    if tip.is_empty() {
+        r
+    } else {
+        r.on_hover_text(tip)
+    }
 }
 
 /// A primary (filled, brand) or secondary (outlined) text button.
@@ -362,7 +426,11 @@ pub fn button(ui: &mut Ui, text: &str, primary: bool) -> Response {
     let (fill, ink, stroke) = if primary {
         (p.action_primary, p.ink_on_brand, Stroke::NONE)
     } else {
-        (p.surface_base, p.ink_primary, Stroke::new(1.0, p.border_subtle))
+        (
+            p.surface_base,
+            p.ink_primary,
+            Stroke::new(1.0, p.border_subtle),
+        )
     };
     let b = egui::Button::new(egui::RichText::new(text).color(ink))
         .fill(fill)
@@ -371,8 +439,18 @@ pub fn button(ui: &mut Ui, text: &str, primary: bool) -> Response {
         .min_size(Vec2::new(0.0, 28.0));
     let r = ui.add(b);
     if primary && r.hovered() {
-        ui.painter().rect_filled(r.rect, CornerRadius::same(size::RADIUS_MD), p.action_primary_hover);
-        ui.painter().text(r.rect.center(), egui::Align2::CENTER_CENTER, text, FontId::proportional(13.0), ink);
+        ui.painter().rect_filled(
+            r.rect,
+            CornerRadius::same(size::RADIUS_MD),
+            p.action_primary_hover,
+        );
+        ui.painter().text(
+            r.rect.center(),
+            egui::Align2::CENTER_CENTER,
+            text,
+            FontId::proportional(13.0),
+            ink,
+        );
     }
     r
 }
@@ -407,7 +485,11 @@ pub fn bar<R>(ui: &mut Ui, kind: Bar, add: impl FnOnce(&mut Ui) -> R) -> R {
             .inner
         });
     let rect = r.response.rect;
-    ui.painter().hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, p.border_subtle));
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, p.border_subtle),
+    );
     r.inner
 }
 

@@ -37,7 +37,9 @@ fn fetch(url: &str) -> Option<String> {
     if let Some(rest) = url.strip_prefix("data:") {
         let (meta, body) = rest.split_once(',')?;
         return if meta.ends_with(";base64") {
-            let bytes = base64::engine::general_purpose::STANDARD.decode(body.trim()).ok()?;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(body.trim())
+                .ok()?;
             String::from_utf8(bytes).ok()
         } else {
             Some(percent_decode(body))
@@ -46,7 +48,10 @@ fn fetch(url: &str) -> Option<String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return None;
     }
-    match ureq::get(url).timeout(std::time::Duration::from_secs(15)).call() {
+    match ureq::get(url)
+        .timeout(std::time::Duration::from_secs(15))
+        .call()
+    {
         Ok(r) => r.into_string().ok(),
         Err(e) => {
             eprintln!("redrob-browser: cannot load subtitles {url}: {e}");
@@ -61,7 +66,10 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%' && i + 2 < b.len() {
-            if let Some(v) = s.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok()) {
+            if let Some(v) = s
+                .get(i + 1..i + 3)
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
+            {
                 out.push(v);
                 i += 3;
                 continue;
@@ -75,7 +83,10 @@ fn percent_decode(s: &str) -> String {
 
 /// Parse a WebVTT file into cues sorted by start time.
 pub fn parse(text: &str) -> Vec<Cue> {
-    let text = text.trim_start_matches('\u{feff}').replace("\r\n", "\n").replace('\r', "\n");
+    let text = text
+        .trim_start_matches('\u{feff}')
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
     let mut lines = text.lines().peekable();
     // The "WEBVTT" header line and anything up to the first blank line.
     match lines.peek() {
@@ -112,9 +123,13 @@ pub fn parse(text: &str) -> Vec<Cue> {
                 _ => continue,
             }
         };
-        let Some((a, rest)) = timing.split_once("-->") else { continue };
+        let Some((a, rest)) = timing.split_once("-->") else {
+            continue;
+        };
         let b = rest.split_whitespace().next().unwrap_or("");
-        let (Some(start), Some(end)) = (timestamp(a.trim()), timestamp(b)) else { continue };
+        let (Some(start), Some(end)) = (timestamp(a.trim()), timestamp(b)) else {
+            continue;
+        };
         let mut body = Vec::new();
         for l in lines.by_ref() {
             if l.trim().is_empty() {
@@ -123,7 +138,11 @@ pub fn parse(text: &str) -> Vec<Cue> {
             body.push(strip_tags(l));
         }
         if end > start {
-            cues.push(Cue { start, end, text: body.join("\n") });
+            cues.push(Cue {
+                start,
+                end,
+                text: body.join("\n"),
+            });
         }
     }
     cues.sort_by(|x, y| x.start.total_cmp(&y.start));
@@ -165,7 +184,11 @@ fn strip_tags(line: &str) -> String {
 /// The text of every cue showing at `time`, one cue per line.
 pub fn active(cues: &Cues, time: f64) -> Option<String> {
     let c = cues.lock().ok()?;
-    let shown: Vec<&str> = c.iter().filter(|q| q.start <= time && time < q.end).map(|q| q.text.as_str()).collect();
+    let shown: Vec<&str> = c
+        .iter()
+        .filter(|q| q.start <= time && time < q.end)
+        .map(|q| q.text.as_str())
+        .collect();
     if shown.is_empty() {
         None
     } else {

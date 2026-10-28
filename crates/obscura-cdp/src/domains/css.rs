@@ -14,13 +14,41 @@ use crate::domains::dom::resolve_node_id;
 /// Properties shown when the engine has no native computed-style snapshot
 /// (no-render builds report an empty `length`), read one by one instead.
 const FALLBACK_PROPERTIES: &[&str] = &[
-    "display", "position", "box-sizing", "width", "height", "top", "right", "bottom", "left",
-    "margin-top", "margin-right", "margin-bottom", "margin-left",
-    "padding-top", "padding-right", "padding-bottom", "padding-left",
-    "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
-    "color", "background-color", "font-family", "font-size", "font-weight", "line-height",
-    "text-align", "visibility", "opacity", "overflow", "z-index", "flex-direction",
-    "justify-content", "align-items",
+    "display",
+    "position",
+    "box-sizing",
+    "width",
+    "height",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "margin-top",
+    "margin-right",
+    "margin-bottom",
+    "margin-left",
+    "padding-top",
+    "padding-right",
+    "padding-bottom",
+    "padding-left",
+    "border-top-width",
+    "border-right-width",
+    "border-bottom-width",
+    "border-left-width",
+    "color",
+    "background-color",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "line-height",
+    "text-align",
+    "visibility",
+    "opacity",
+    "overflow",
+    "z-index",
+    "flex-direction",
+    "justify-content",
+    "align-items",
 ];
 
 pub async fn handle(
@@ -34,7 +62,8 @@ pub async fn handle(
         "getComputedStyleForNode" => {
             let page = ctx.get_session_page_mut(session_id).ok_or("No page")?;
             let node_id = resolve_node_id(page, params)?;
-            let fallback = serde_json::to_string(FALLBACK_PROPERTIES).unwrap_or_else(|_| "[]".into());
+            let fallback =
+                serde_json::to_string(FALLBACK_PROPERTIES).unwrap_or_else(|_| "[]".into());
             let code = format!(
                 "(function() {{\
                     var el = globalThis._wrap && globalThis._wrap({node_id});\
@@ -54,10 +83,14 @@ pub async fn handle(
                 }})()"
             );
             let raw = page.evaluate(&code);
-            let pairs: Vec<(String, String)> =
-                raw.as_str().and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
-            let computed: Vec<Value> =
-                pairs.into_iter().map(|(name, value)| json!({ "name": name, "value": value })).collect();
+            let pairs: Vec<(String, String)> = raw
+                .as_str()
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or_default();
+            let computed: Vec<Value> = pairs
+                .into_iter()
+                .map(|(name, value)| json!({ "name": name, "value": value }))
+                .collect();
             Ok(json!({ "computedStyle": computed }))
         }
         "getInlineStylesForNode" => {
@@ -82,7 +115,11 @@ pub async fn handle(
 }
 
 /// The node's `style` attribute as a CDP `CSSStyle`.
-fn inline_style(ctx: &mut CdpContext, params: &Value, session_id: &Option<String>) -> Result<Value, String> {
+fn inline_style(
+    ctx: &mut CdpContext,
+    params: &Value,
+    session_id: &Option<String>,
+) -> Result<Value, String> {
     let page = ctx.get_session_page_mut(session_id).ok_or("No page")?;
     let node_id = resolve_node_id(page, params)?;
     let code = format!(
@@ -149,12 +186,18 @@ fn declarations(text: &str) -> Vec<(String, String, bool, String)> {
     let mut out = Vec::new();
     for part in parts {
         let raw = part.trim();
-        let Some((name, value)) = raw.split_once(':') else { continue };
+        let Some((name, value)) = raw.split_once(':') else {
+            continue;
+        };
         let name = name.trim();
         if name.is_empty() {
             continue;
         }
-        let name = if name.starts_with("--") { name.to_string() } else { name.to_ascii_lowercase() };
+        let name = if name.starts_with("--") {
+            name.to_string()
+        } else {
+            name.to_ascii_lowercase()
+        };
         let mut value = value.trim().to_string();
         let mut important = false;
         let lower = value.to_ascii_lowercase();

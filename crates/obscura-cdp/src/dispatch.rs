@@ -238,14 +238,21 @@ impl CdpContext {
     /// Claim the next isolated-world execution context id and register it as
     /// valid for `Runtime.evaluate`/`callFunctionOn`. Issue #192.
     pub fn next_isolated_context(&mut self) -> i64 {
-        while self.valid_context_ids.contains(&self.next_isolated_context_id)
-            || self.execution_contexts.contains_key(&self.next_isolated_context_id)
+        while self
+            .valid_context_ids
+            .contains(&self.next_isolated_context_id)
+            || self
+                .execution_contexts
+                .contains_key(&self.next_isolated_context_id)
         {
-            self.next_isolated_context_id = self.next_isolated_context_id.checked_add(1)
+            self.next_isolated_context_id = self
+                .next_isolated_context_id
+                .checked_add(1)
                 .expect("execution context id space exhausted");
         }
         let id = self.next_isolated_context_id;
-        self.next_isolated_context_id = id.checked_add(1)
+        self.next_isolated_context_id = id
+            .checked_add(1)
             .expect("execution context id space exhausted");
         self.valid_context_ids.insert(id);
         id
@@ -383,14 +390,21 @@ impl CdpContext {
         world_name: &str,
         is_default: bool,
     ) -> ExecutionContextRecord {
-        while self.valid_context_ids.contains(&self.next_default_context_id)
-            || self.execution_contexts.contains_key(&self.next_default_context_id)
+        while self
+            .valid_context_ids
+            .contains(&self.next_default_context_id)
+            || self
+                .execution_contexts
+                .contains_key(&self.next_default_context_id)
         {
-            self.next_default_context_id = self.next_default_context_id.checked_add(1)
+            self.next_default_context_id = self
+                .next_default_context_id
+                .checked_add(1)
                 .expect("execution context id space exhausted");
         }
         let id = self.next_default_context_id;
-        self.next_default_context_id = id.checked_add(1)
+        self.next_default_context_id = id
+            .checked_add(1)
             .expect("execution context id space exhausted");
         let context = ExecutionContextRecord {
             id,
@@ -403,12 +417,22 @@ impl CdpContext {
         };
         self.valid_context_ids.insert(id);
         self.execution_contexts.insert(id, context.clone());
-        self.page_contexts.entry(page_id.to_string()).or_default().push(id);
+        self.page_contexts
+            .entry(page_id.to_string())
+            .or_default()
+            .push(id);
         context
     }
 
-    pub(crate) fn ensure_default_context(&mut self, page_id: &str) -> Option<ExecutionContextRecord> {
-        if let Some(context) = self.contexts_for_page(page_id).into_iter().find(|context| context.is_default) {
+    pub(crate) fn ensure_default_context(
+        &mut self,
+        page_id: &str,
+    ) -> Option<ExecutionContextRecord> {
+        if let Some(context) = self
+            .contexts_for_page(page_id)
+            .into_iter()
+            .find(|context| context.is_default)
+        {
             return Some(context.clone());
         }
         let page = self.get_page(page_id)?;
@@ -453,14 +477,19 @@ impl CdpContext {
     }
 
     pub(crate) fn context_by_unique_id(&self, unique_id: &str) -> Option<&ExecutionContextRecord> {
-        self.execution_contexts.values().find(|context| context.unique_id == unique_id)
+        self.execution_contexts
+            .values()
+            .find(|context| context.unique_id == unique_id)
     }
 
     pub(crate) fn contexts_for_page(
         &self,
         page_id: &str,
     ) -> impl Iterator<Item = &ExecutionContextRecord> {
-        self.page_contexts.get(page_id).into_iter().flatten()
+        self.page_contexts
+            .get(page_id)
+            .into_iter()
+            .flatten()
             .filter_map(|id| self.execution_contexts.get(id))
     }
 
@@ -474,23 +503,32 @@ impl CdpContext {
     ) -> (ExecutionContextRecord, bool) {
         if !world_name.is_empty() {
             if let Some(existing) = self.contexts_for_page(page_id).find(|context| {
-                !context.is_default && context.frame_id == frame_id && context.world_name == world_name
+                !context.is_default
+                    && context.frame_id == frame_id
+                    && context.world_name == world_name
             }) {
                 return (existing.clone(), false);
             }
             if persist_across_navigation {
-                let worlds = self.page_isolated_worlds.entry(page_id.to_string()).or_default();
+                let worlds = self
+                    .page_isolated_worlds
+                    .entry(page_id.to_string())
+                    .or_default();
                 if !worlds.iter().any(|world| world == world_name) {
                     worlds.push(world_name.to_string());
                 }
             }
         }
-        (self.allocate_context(page_id, frame_id, origin, world_name, false), true)
+        (
+            self.allocate_context(page_id, frame_id, origin, world_name, false),
+            true,
+        )
     }
 
     pub(crate) fn default_context_id(&self, page_id: &str) -> Option<i64> {
         self.contexts_for_page(page_id)
-            .find(|context| context.is_default).map(|context| context.id)
+            .find(|context| context.is_default)
+            .map(|context| context.id)
     }
 
     fn remove_frame_contexts(
@@ -498,23 +536,39 @@ impl CdpContext {
         page_id: &str,
         frame_id: &str,
     ) -> Vec<ExecutionContextRecord> {
-        let removed = self.page_contexts.get(page_id).into_iter().flatten()
+        let removed = self
+            .page_contexts
+            .get(page_id)
+            .into_iter()
+            .flatten()
             .copied()
-            .filter(|id| self.execution_contexts.get(id)
-                .is_some_and(|context| context.frame_id == frame_id))
+            .filter(|id| {
+                self.execution_contexts
+                    .get(id)
+                    .is_some_and(|context| context.frame_id == frame_id)
+            })
             .collect::<Vec<_>>();
         if let Some(contexts) = self.page_contexts.get_mut(page_id) {
             contexts.retain(|id| !removed.contains(id));
         }
-        removed.into_iter().filter_map(|id| {
-            self.valid_context_ids.remove(&id);
-            self.execution_contexts.remove(&id)
-        }).collect()
+        removed
+            .into_iter()
+            .filter_map(|id| {
+                self.valid_context_ids.remove(&id);
+                self.execution_contexts.remove(&id)
+            })
+            .collect()
     }
 
     pub(crate) fn runtime_sessions_for_page(&self, page_id: &str) -> Vec<String> {
-        let mut sessions = self.runtime_enabled_sessions.iter()
-            .filter(|session| self.sessions.get(*session).is_some_and(|owner| owner == page_id))
+        let mut sessions = self
+            .runtime_enabled_sessions
+            .iter()
+            .filter(|session| {
+                self.sessions
+                    .get(*session)
+                    .is_some_and(|owner| owner == page_id)
+            })
             .cloned()
             .collect::<Vec<_>>();
         sessions.sort_unstable();
@@ -551,6 +605,12 @@ impl CdpContext {
             }
         }
         self.get_page_mut(&page_id)
+    }
+}
+
+impl Default for CdpContext {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -599,7 +659,8 @@ mod context_ownership_tests {
         let mut ids = HashSet::new();
         for index in 0..1_200 {
             let id = if index % 2 == 0 {
-                ctx.allocate_context("page", "frame", "about:blank", "", true).id
+                ctx.allocate_context("page", "frame", "about:blank", "", true)
+                    .id
             } else {
                 ctx.next_isolated_context()
             };
@@ -634,29 +695,35 @@ mod context_ownership_tests {
         let mut ctx = CdpContext::new();
         let page = ctx.create_page();
         let main = ctx.ensure_default_context(&page).unwrap();
-        let child = ctx.create_isolated_context(
-            &page,
-            "child-frame",
-            "https://example.test/child",
-            "utility",
-            false,
-        ).0;
-        let sibling = ctx.create_isolated_context(
-            &page,
-            "sibling-frame",
-            "https://example.test/sibling",
-            "utility",
-            false,
-        ).0;
+        let child = ctx
+            .create_isolated_context(
+                &page,
+                "child-frame",
+                "https://example.test/child",
+                "utility",
+                false,
+            )
+            .0;
+        let sibling = ctx
+            .create_isolated_context(
+                &page,
+                "sibling-frame",
+                "https://example.test/sibling",
+                "utility",
+                false,
+            )
+            .0;
 
         let removed = ctx.remove_frame_contexts(&page, "child-frame");
 
-        assert_eq!(removed.iter().map(|context| context.id).collect::<Vec<_>>(), vec![child.id]);
+        assert_eq!(
+            removed.iter().map(|context| context.id).collect::<Vec<_>>(),
+            vec![child.id]
+        );
         assert!(ctx.context_by_id(child.id).is_none());
         assert!(ctx.context_by_id(main.id).is_some());
         assert!(ctx.context_by_id(sibling.id).is_some());
     }
-
 }
 
 /// Whether a CDP method can be served WITHOUT acquiring the per-connection V8 lock.
@@ -828,7 +895,10 @@ pub async fn dispatch(req: &CdpRequest, ctx: &mut CdpContext) -> CdpResponse {
             domains::accessibility::handle(method, &req.params, ctx, &req.session_id).await
         }
         "HeapProfiler" if method == "collectGarbage" => {
-            match ctx.get_session_page_mut(&req.session_id).and_then(|page| page.js.as_mut()) {
+            match ctx
+                .get_session_page_mut(&req.session_id)
+                .and_then(|page| page.js.as_mut())
+            {
                 Some(js) => {
                     js.collect_garbage();
                     Ok(json!({}))
@@ -847,9 +917,7 @@ pub async fn dispatch(req: &CdpRequest, ctx: &mut CdpContext) -> CdpResponse {
     };
 
     #[cfg(feature = "render")]
-    if result.is_ok()
-        && domains::page::command_can_change_screencast_frame(&req.method)
-    {
+    if result.is_ok() && domains::page::command_can_change_screencast_frame(&req.method) {
         domains::page::schedule_screencast_frame(ctx, &req.session_id);
     }
 
@@ -895,7 +963,10 @@ pub(crate) fn drain_runtime_events(ctx: &mut CdpContext) {
     }
 
     let mut page_to_sessions: HashMap<&str, Vec<&str>> = HashMap::new();
-    for session_id in ctx.runtime_enabled_sessions.union(&ctx.lifecycle_enabled_sessions) {
+    for session_id in ctx
+        .runtime_enabled_sessions
+        .union(&ctx.lifecycle_enabled_sessions)
+    {
         if let Some(page_id) = ctx.sessions.get(session_id) {
             page_to_sessions
                 .entry(page_id.as_str())
@@ -913,7 +984,10 @@ pub(crate) fn drain_runtime_events(ctx: &mut CdpContext) {
         };
         let execution_context_id = ctx.default_context_id(&page_id).unwrap_or(1);
         for runtime_event in runtime_events {
-            let subscribers = if matches!(&runtime_event, obscura_js::ops::RuntimeEvent::DocumentLifecycle { .. }) {
+            let subscribers = if matches!(
+                &runtime_event,
+                obscura_js::ops::RuntimeEvent::DocumentLifecycle { .. }
+            ) {
                 &ctx.lifecycle_enabled_sessions
             } else {
                 &ctx.runtime_enabled_sessions
@@ -1235,8 +1309,10 @@ mod tests {
         let page_id = ctx.create_page();
         ctx.sessions.insert("s1".into(), page_id.clone());
         ctx.nav_events_emitted.insert(page_id.clone());
-        ctx.binding_sessions.insert("only".into(), vec!["s1".into()]);
-        ctx.binding_sessions.insert("shared".into(), vec!["s1".into(), "other".into()]);
+        ctx.binding_sessions
+            .insert("only".into(), vec!["s1".into()]);
+        ctx.binding_sessions
+            .insert("shared".into(), vec!["s1".into(), "other".into()]);
         ctx.remove_page(&page_id);
         assert!(ctx.nav_events_emitted.is_empty());
         assert!(!ctx.binding_sessions.contains_key("only"));
@@ -1249,21 +1325,46 @@ mod tests {
         let page_id = ctx.create_page();
         let session = Some("heap-gc".to_string());
         ctx.sessions.insert(session.clone().unwrap(), page_id);
-        ctx.get_session_page_mut(&session).unwrap().js.as_mut().unwrap().execute_script("gc-allocations",
-            "globalThis.garbage = Array.from({length: 200000}, (_, i) => ({i}));",
-        ).unwrap();
+        ctx.get_session_page_mut(&session)
+            .unwrap()
+            .js
+            .as_mut()
+            .unwrap()
+            .execute_script(
+                "gc-allocations",
+                "globalThis.garbage = Array.from({length: 200000}, (_, i) => ({i}));",
+            )
+            .unwrap();
         let before = domains::runtime::handle("getHeapUsage", &json!({}), &mut ctx, &session)
-            .await.unwrap()["usedSize"].as_u64().unwrap();
-        ctx.get_session_page_mut(&session).unwrap().evaluate("globalThis.garbage = null");
-        let response = dispatch(&CdpRequest {
-            session_id: session.clone(),
-            ..req("HeapProfiler.collectGarbage")
-        }, &mut ctx).await;
-        assert!(response.error.is_none(), "GC request failed: {:?}", response.error);
+            .await
+            .unwrap()["usedSize"]
+            .as_u64()
+            .unwrap();
+        ctx.get_session_page_mut(&session)
+            .unwrap()
+            .evaluate("globalThis.garbage = null");
+        let response = dispatch(
+            &CdpRequest {
+                session_id: session.clone(),
+                ..req("HeapProfiler.collectGarbage")
+            },
+            &mut ctx,
+        )
+        .await;
+        assert!(
+            response.error.is_none(),
+            "GC request failed: {:?}",
+            response.error
+        );
         let after = domains::runtime::handle("getHeapUsage", &json!({}), &mut ctx, &session)
-            .await.unwrap()["usedSize"].as_u64().unwrap();
-        assert!(after + 2 * 1024 * 1024 < before,
-            "explicit GC must reclaim discarded objects: {before} -> {after}");
+            .await
+            .unwrap()["usedSize"]
+            .as_u64()
+            .unwrap();
+        assert!(
+            after + 2 * 1024 * 1024 < before,
+            "explicit GC must reclaim discarded objects: {before} -> {after}"
+        );
     }
 
     #[tokio::test]
@@ -1328,7 +1429,11 @@ mod tests {
             session_id: Some(session_id.clone()),
         };
         let response = dispatch(&start, &mut ctx).await;
-        assert!(response.error.is_none(), "start failed: {:?}", response.error);
+        assert!(
+            response.error.is_none(),
+            "start failed: {:?}",
+            response.error
+        );
         ctx.pending_events.clear();
 
         let evaluate = CdpRequest {
@@ -1338,7 +1443,11 @@ mod tests {
             session_id: Some(session_id),
         };
         let response = dispatch(&evaluate, &mut ctx).await;
-        assert!(response.error.is_none(), "evaluate failed: {:?}", response.error);
+        assert!(
+            response.error.is_none(),
+            "evaluate failed: {:?}",
+            response.error
+        );
         assert!(
             ctx.pending_events
                 .iter()
@@ -1366,7 +1475,11 @@ mod tests {
             &mut ctx,
         )
         .await;
-        assert!(response.error.is_none(), "start failed: {:?}", response.error);
+        assert!(
+            response.error.is_none(),
+            "start failed: {:?}",
+            response.error
+        );
         ctx.pending_events.clear();
 
         let response = dispatch(
@@ -1379,8 +1492,15 @@ mod tests {
             &mut ctx,
         )
         .await;
-        assert!(response.error.is_none(), "override failed: {:?}", response.error);
-        assert!(ctx.pending_events.is_empty(), "frame must not delay the command response");
+        assert!(
+            response.error.is_none(),
+            "override failed: {:?}",
+            response.error
+        );
+        assert!(
+            ctx.pending_events.is_empty(),
+            "frame must not delay the command response"
+        );
         assert!(ctx.screencasts[&session_id].autonomous_frame_pending);
 
         crate::domains::page::pump_screencast_frames(&mut ctx).await;
@@ -1455,5 +1575,4 @@ mod tests {
         let err = resp.error.expect("malformed inner messages must error");
         assert_eq!(err.code, -32700);
     }
-
 }

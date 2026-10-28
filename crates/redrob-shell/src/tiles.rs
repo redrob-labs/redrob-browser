@@ -39,7 +39,8 @@ impl TileCache {
     pub fn clear(&mut self) {
         self.tiles.clear();
         #[cfg(feature = "gpu")]
-        self.released.extend(self.native.drain().map(|(_, (_, id))| id));
+        self.released
+            .extend(self.native.drain().map(|(_, (_, id))| id));
         self.invalidate();
     }
 
@@ -75,7 +76,13 @@ impl TileCache {
         out
     }
 
-    pub fn insert(&mut self, ctx: &egui::Context, key: TileKey, generation: u64, image: egui::ColorImage) {
+    pub fn insert(
+        &mut self,
+        ctx: &egui::Context,
+        key: TileKey,
+        generation: u64,
+        image: egui::ColorImage,
+    ) {
         self.pending.remove(&(key, generation));
         #[cfg(feature = "gpu")]
         if let Some((g, id)) = self.native.get(&key).copied() {
@@ -92,7 +99,11 @@ impl TileCache {
                 tex.set(image, TextureOptions::LINEAR);
             }
             None => {
-                let tex = ctx.load_texture(format!("tile-{}-{}", key.tx, key.ty), image, TextureOptions::LINEAR);
+                let tex = ctx.load_texture(
+                    format!("tile-{}-{}", key.tx, key.ty),
+                    image,
+                    TextureOptions::LINEAR,
+                );
                 self.tiles.insert(key, (generation, tex));
             }
         }
@@ -101,7 +112,11 @@ impl TileCache {
     /// For a GPU-rendered tile at `generation`: `None` when a newer tile is
     /// already shown, else the tile's current native texture to draw into again.
     #[cfg(feature = "gpu")]
-    pub fn native_slot(&mut self, key: TileKey, generation: u64) -> Option<Option<egui::TextureId>> {
+    pub fn native_slot(
+        &mut self,
+        key: TileKey,
+        generation: u64,
+    ) -> Option<Option<egui::TextureId>> {
         self.pending.remove(&(key, generation));
         if self.tiles.get(&key).is_some_and(|(g, _)| *g > generation) {
             return None;
@@ -134,7 +149,11 @@ impl TileCache {
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
         let painter = painter.with_clip_rect(rect);
         for (key, (_, tex)) in &self.tiles {
-            let min = rect.min + vec2(key.tx as f32 * TILE - scroll.0, key.ty as f32 * TILE - scroll.1);
+            let min = rect.min
+                + vec2(
+                    key.tx as f32 * TILE - scroll.0,
+                    key.ty as f32 * TILE - scroll.1,
+                );
             let tile = Rect::from_min_size(min, vec2(TILE, TILE));
             if tile.intersects(rect) {
                 painter.image(tex.id(), tile, uv, Color32::WHITE);
@@ -142,7 +161,11 @@ impl TileCache {
         }
         #[cfg(feature = "gpu")]
         for (key, (_, id)) in &self.native {
-            let min = rect.min + vec2(key.tx as f32 * TILE - scroll.0, key.ty as f32 * TILE - scroll.1);
+            let min = rect.min
+                + vec2(
+                    key.tx as f32 * TILE - scroll.0,
+                    key.ty as f32 * TILE - scroll.1,
+                );
             let tile = Rect::from_min_size(min, vec2(TILE, TILE));
             if tile.intersects(rect) {
                 painter.image(*id, tile, uv, Color32::WHITE);

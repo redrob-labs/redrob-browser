@@ -50,7 +50,10 @@ enum Kind {
     /// Linux and Windows: three binaries in one folder.
     Folder { dir: PathBuf },
     /// macOS: the `.app` bundle the window runs from.
-    Bundle { app: PathBuf, exe_name: std::ffi::OsString },
+    Bundle {
+        app: PathBuf,
+        exe_name: std::ffi::OsString,
+    },
 }
 
 #[derive(Default)]
@@ -67,7 +70,12 @@ impl SelfUpdate {
     pub fn offered(&mut self, a: &Available, profile_dir: Option<PathBuf>) {
         self.offer = None;
         let Some(dir) = profile_dir else { return };
-        if !a.sums.as_deref().is_some_and(|s| s.starts_with(DOWNLOAD_PREFIX)) || !a.url.starts_with(DOWNLOAD_PREFIX) {
+        if !a
+            .sums
+            .as_deref()
+            .is_some_and(|s| s.starts_with(DOWNLOAD_PREFIX))
+            || !a.url.starts_with(DOWNLOAD_PREFIX)
+        {
             return;
         }
         if locate().is_none() {
@@ -90,7 +98,9 @@ impl SelfUpdate {
     }
 
     pub fn start(&mut self, ctx: egui::Context) {
-        let Some((available, dir)) = self.offer.clone() else { return };
+        let Some((available, dir)) = self.offer.clone() else {
+            return;
+        };
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
         std::thread::spawn(move || {
@@ -141,20 +151,30 @@ impl SelfUpdate {
 pub fn restart_if_requested() {
     let exe = RESTART.lock().unwrap_or_else(|e| e.into_inner()).take();
     if let Some(exe) = exe {
-        if let Err(e) = Command::new(&exe).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+        if let Err(e) = Command::new(&exe)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
             eprintln!("redrob-browser: could not start {}: {e}", exe.display());
         }
     }
 }
 
 fn run(a: &Available, dir: &Path, send: &dyn Fn(Msg)) -> anyhow::Result<PathBuf> {
-    let install = locate().ok_or_else(|| anyhow::anyhow!("{}", t("this copy cannot be updated in place")))?;
+    let install =
+        locate().ok_or_else(|| anyhow::anyhow!("{}", t("this copy cannot be updated in place")))?;
     let name = asset_name(&a.url)?;
-    let sums_url = a.sums.as_deref().ok_or_else(|| anyhow::anyhow!("the release has no checksums"))?;
+    let sums_url = a
+        .sums
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("the release has no checksums"))?;
 
     send(Msg::Progress(t("Checking the update...").to_string()));
     let sums = get(sums_url)?.into_string()?;
-    let want = expected_sum(&sums, &name).ok_or_else(|| anyhow::anyhow!("{name} is not in the release checksums"))?;
+    let want = expected_sum(&sums, &name)
+        .ok_or_else(|| anyhow::anyhow!("{name} is not in the release checksums"))?;
 
     // Keep only the download in progress in the updates folder.
     let _ = fs::remove_dir_all(dir);
@@ -176,7 +196,10 @@ fn get(url: &str) -> anyhow::Result<ureq::Response> {
     if !url.starts_with(DOWNLOAD_PREFIX) {
         anyhow::bail!("refusing to download from {url}");
     }
-    Ok(ureq::get(url).set("User-Agent", USER_AGENT).timeout(Duration::from_secs(30 * 60)).call()?)
+    Ok(ureq::get(url)
+        .set("User-Agent", USER_AGENT)
+        .timeout(Duration::from_secs(30 * 60))
+        .call()?)
 }
 
 /// Stream `url` into `to`, reporting progress; returns the SHA-256 in hex.
@@ -212,7 +235,11 @@ fn download(url: &str, to: &Path, send: &dyn Fn(Msg)) -> anyhow::Result<String> 
     }
     file.flush()?;
     file.sync_all()?;
-    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// The file name the checksums list uses: the last part of the download URL.
@@ -229,38 +256,55 @@ fn expected_sum(sums: &str, name: &str) -> Option<String> {
     sums.lines().find_map(|line| {
         let (hex, file) = line.trim_end().split_once(char::is_whitespace)?;
         let file = file.trim_start().trim_start_matches('*');
-        (file == name && hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).then(|| hex.to_ascii_lowercase())
+        (file == name && hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| hex.to_ascii_lowercase())
     })
 }
 
 /// The three programs a package carries, as named on this platform.
 fn binaries() -> [String; 3] {
     let ext = if cfg!(windows) { ".exe" } else { "" };
-    ["redrob-browser", "redrob-browser-worker", "redrob-browser-window"].map(|b| format!("{b}{ext}"))
+    [
+        "redrob-browser",
+        "redrob-browser-worker",
+        "redrob-browser-window",
+    ]
+    .map(|b| format!("{b}{ext}"))
 }
 
 /// Find the running install and check it can be replaced.
 fn locate() -> Option<Install> {
     let exe = std::env::current_exe().ok()?;
     if cfg!(target_os = "macos") {
-        let app = exe.ancestors().find(|p| p.extension().is_some_and(|e| e == "app"))?.to_path_buf();
+        let app = exe
+            .ancestors()
+            .find(|p| p.extension().is_some_and(|e| e == "app"))?
+            .to_path_buf();
         let exe_name = exe.file_name()?.to_os_string();
         let parent = app.parent()?;
         if !writable(parent) || !writable(&app.join("Contents")) {
             return None;
         }
-        return Some(Install { kind: Kind::Bundle { app, exe_name } });
+        return Some(Install {
+            kind: Kind::Bundle { app, exe_name },
+        });
     }
     let dir = exe.parent()?.to_path_buf();
     if !binaries().iter().all(|b| dir.join(b).is_file()) || !writable(&dir) {
         return None;
     }
-    Some(Install { kind: Kind::Folder { dir } })
+    Some(Install {
+        kind: Kind::Folder { dir },
+    })
 }
 
 fn writable(dir: &Path) -> bool {
     let probe = dir.join(format!(".redrob-write-test-{}", std::process::id()));
-    let ok = fs::OpenOptions::new().write(true).create_new(true).open(&probe).is_ok();
+    let ok = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .is_ok();
     let _ = fs::remove_file(&probe);
     ok
 }
@@ -276,8 +320,12 @@ impl Install {
                 let result = (|| -> anyhow::Result<PathBuf> {
                     unpack(archive, &staging)?;
                     let window = binaries()[2].clone();
-                    let from = find_dir_with(&staging, &window).ok_or_else(|| anyhow::anyhow!("the package has no {window}"))?;
-                    let pairs: Vec<(PathBuf, PathBuf)> = binaries().iter().map(|b| (from.join(b), dir.join(b))).collect();
+                    let from = find_dir_with(&staging, &window)
+                        .ok_or_else(|| anyhow::anyhow!("the package has no {window}"))?;
+                    let pairs: Vec<(PathBuf, PathBuf)> = binaries()
+                        .iter()
+                        .map(|b| (from.join(b), dir.join(b)))
+                        .collect();
                     for (new, _) in &pairs {
                         if !new.is_file() {
                             anyhow::bail!("the package has no {}", new.display());
@@ -291,7 +339,9 @@ impl Install {
                 result
             }
             Kind::Bundle { app, exe_name } => {
-                let parent = app.parent().ok_or_else(|| anyhow::anyhow!("the app has no folder"))?;
+                let parent = app
+                    .parent()
+                    .ok_or_else(|| anyhow::anyhow!("the app has no folder"))?;
                 let staging = parent.join(format!(".redrob-update-{}", std::process::id()));
                 let _ = fs::remove_dir_all(&staging);
                 fs::create_dir_all(&staging)?;
@@ -355,7 +405,10 @@ fn unpack(archive: &Path, into: &Path) -> anyhow::Result<()> {
     };
     let out = cmd.stdin(Stdio::null()).output()?;
     if !out.status.success() {
-        anyhow::bail!("could not unpack the update: {}", String::from_utf8_lossy(&out.stderr).trim());
+        anyhow::bail!(
+            "could not unpack the update: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
     }
     Ok(())
 }
@@ -365,7 +418,11 @@ fn find_dir_with(root: &Path, file: &str) -> Option<PathBuf> {
     if root.join(file).is_file() {
         return Some(root.to_path_buf());
     }
-    fs::read_dir(root).ok()?.filter_map(Result::ok).map(|e| e.path()).find(|p| p.is_dir() && p.join(file).is_file())
+    fs::read_dir(root)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| p.is_dir() && p.join(file).is_file())
 }
 
 fn make_executable(path: &Path) -> std::io::Result<()> {
@@ -416,7 +473,10 @@ fn swap_files(pairs: &[(PathBuf, PathBuf)]) -> anyhow::Result<()> {
                 }
                 let _ = fs::rename(&b, t);
             }
-            return Err(anyhow::anyhow!("could not replace {}: {e}", target.display()));
+            return Err(anyhow::anyhow!(
+                "could not replace {}: {e}",
+                target.display()
+            ));
         }
         done.push(target);
     }

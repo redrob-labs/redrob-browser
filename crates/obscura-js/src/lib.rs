@@ -1,3 +1,6 @@
+// Upstream Obscura code: style, complexity and perf lints stay as upstream wrote it,
+// so merges from upstream stay small. Correctness and suspicious lints still fail.
+#![allow(clippy::style, clippy::complexity, clippy::perf, dead_code)]
 pub mod cdp_watchdog;
 pub mod frame;
 mod import_map;
@@ -17,6 +20,8 @@ pub use v8_flags::set_v8_flags;
 
 // Screenshot rasterization (PNG bytes) from the render layer. Available when the
 // render feature (which enables obscura-render/paint) is compiled in.
+#[cfg(feature = "display-list")]
+pub use obscura_render::display_list::DisplayList;
 #[cfg(feature = "render")]
 pub use obscura_render::{
     configure_font_directories, screenshot_png, screenshot_png_scrolled,
@@ -27,5 +32,3 @@ pub use obscura_render::{
     CaptureError, CaptureRegion, CssMediaType, ImageRequestProfile, RenderResourceCache,
     MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS,
 };
-#[cfg(feature = "display-list")]
-pub use obscura_render::display_list::DisplayList;

@@ -60,21 +60,36 @@ pub async fn run(cmd: TabCmd) -> anyhow::Result<()> {
     match cmd {
         TabCmd::List => {
             let t = c.call(None, "Target.getTargets", json!({})).await?;
-            for i in t["targetInfos"].as_array().into_iter().flatten().filter(|i| i["type"] == "page") {
-                println!("{}\t{}\t{}", i["targetId"].as_str().unwrap_or(""), i["url"].as_str().unwrap_or(""), i["title"].as_str().unwrap_or(""));
+            for i in t["targetInfos"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|i| i["type"] == "page")
+            {
+                println!(
+                    "{}\t{}\t{}",
+                    i["targetId"].as_str().unwrap_or(""),
+                    i["url"].as_str().unwrap_or(""),
+                    i["title"].as_str().unwrap_or("")
+                );
             }
         }
         TabCmd::Open { url } => {
-            let t = c.call(None, "Target.createTarget", json!({ "url": url })).await?;
+            let t = c
+                .call(None, "Target.createTarget", json!({ "url": url }))
+                .await?;
             println!("{}", t["targetId"].as_str().unwrap_or(""));
         }
         TabCmd::Go { id, url } => {
             let s = c.attach(&id).await?;
-            c.call(Some(&s), "Page.navigate", json!({ "url": url })).await?;
+            c.call(Some(&s), "Page.navigate", json!({ "url": url }))
+                .await?;
         }
         TabCmd::Read { id } => {
             let s = c.attach(&id).await?;
-            let tree = c.call(Some(&s), "Accessibility.getFullAXTree", json!({})).await?;
+            let tree = c
+                .call(Some(&s), "Accessibility.getFullAXTree", json!({}))
+                .await?;
             print!("{}", outline(&tree));
         }
         TabCmd::Click { id, r#ref } => {
@@ -89,10 +104,17 @@ pub async fn run(cmd: TabCmd) -> anyhow::Result<()> {
                 .await?;
             }
         }
-        TabCmd::Type { id, r#ref, text, submit } => {
+        TabCmd::Type {
+            id,
+            r#ref,
+            text,
+            submit,
+        } => {
             let s = c.attach(&id).await?;
-            c.call(Some(&s), "DOM.focus", json!({ "backendNodeId": r#ref })).await?;
-            c.call(Some(&s), "Input.insertText", json!({ "text": text })).await?;
+            c.call(Some(&s), "DOM.focus", json!({ "backendNodeId": r#ref }))
+                .await?;
+            c.call(Some(&s), "Input.insertText", json!({ "text": text }))
+                .await?;
             if submit {
                 press(&mut c, &s, "Enter").await?;
             }
@@ -112,15 +134,28 @@ pub async fn run(cmd: TabCmd) -> anyhow::Result<()> {
         }
         TabCmd::Shot { id, path } => {
             let s = c.attach(&id).await?;
-            let shot = c.call(Some(&s), "Page.captureScreenshot", json!({ "format": "png" })).await?;
-            let bytes = base64::engine::general_purpose::STANDARD.decode(shot["data"].as_str().unwrap_or(""))?;
+            let shot = c
+                .call(
+                    Some(&s),
+                    "Page.captureScreenshot",
+                    json!({ "format": "png" }),
+                )
+                .await?;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(shot["data"].as_str().unwrap_or(""))?;
             std::fs::write(&path, bytes)?;
             println!("{}", path.display());
         }
         TabCmd::Markdown { id } => {
             let s = c.attach(&id).await?;
             let expr = obscura_browser::HTML_TO_MARKDOWN_JS;
-            let v = c.call(Some(&s), "Runtime.evaluate", json!({ "expression": expr, "returnByValue": true })).await?;
+            let v = c
+                .call(
+                    Some(&s),
+                    "Runtime.evaluate",
+                    json!({ "expression": expr, "returnByValue": true }),
+                )
+                .await?;
             println!("{}", v["result"]["value"].as_str().unwrap_or(""));
         }
         TabCmd::Login { id, user } => {
@@ -132,7 +167,8 @@ pub async fn run(cmd: TabCmd) -> anyhow::Result<()> {
             println!("{}", serde_json::to_string(&r)?);
         }
         TabCmd::Close { id } => {
-            c.call(None, "Target.closeTarget", json!({ "targetId": id })).await?;
+            c.call(None, "Target.closeTarget", json!({ "targetId": id }))
+                .await?;
         }
     }
     Ok(())
@@ -143,18 +179,31 @@ fn endpoint() -> anyhow::Result<String> {
     if let Ok(v) = std::env::var("REDROB_BROWSER_CDP") {
         return Ok(v);
     }
-    let file = data_dir().join("redrob-browser").join("Default").join("engine").join("ws-endpoint");
-    let text = std::fs::read_to_string(&file)
-        .map_err(|_| anyhow::anyhow!("Redrob Browser is not running (no {}). Start it with `redrob-browser`.", file.display()))?;
+    let file = data_dir()
+        .join("redrob-browser")
+        .join("Default")
+        .join("engine")
+        .join("ws-endpoint");
+    let text = std::fs::read_to_string(&file).map_err(|_| {
+        anyhow::anyhow!(
+            "Redrob Browser is not running (no {}). Start it with `redrob-browser`.",
+            file.display()
+        )
+    })?;
     Ok(text.trim().to_string())
 }
 
 fn data_dir() -> PathBuf {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
     if cfg!(target_os = "macos") {
         home.join("Library").join("Application Support")
     } else if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("APPDATA")).map(PathBuf::from).unwrap_or(home)
+        std::env::var_os("LOCALAPPDATA")
+            .or_else(|| std::env::var_os("APPDATA"))
+            .map(PathBuf::from)
+            .unwrap_or(home)
     } else {
         std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
@@ -175,13 +224,18 @@ async fn press(c: &mut Cdp, s: &str, key: &str) -> anyhow::Result<()> {
         "ArrowDown" => 40,
         _ => 0,
     };
-    let mut down = json!({ "type": "keyDown", "key": key, "code": key, "windowsVirtualKeyCode": vk });
+    let mut down =
+        json!({ "type": "keyDown", "key": key, "code": key, "windowsVirtualKeyCode": vk });
     if key == "Enter" {
         down["text"] = json!("\r");
     }
     c.call(Some(s), "Input.dispatchKeyEvent", down).await?;
-    c.call(Some(s), "Input.dispatchKeyEvent", json!({ "type": "keyUp", "key": key, "code": key, "windowsVirtualKeyCode": vk }))
-        .await?;
+    c.call(
+        Some(s),
+        "Input.dispatchKeyEvent",
+        json!({ "type": "keyUp", "key": key, "code": key, "windowsVirtualKeyCode": vk }),
+    )
+    .await?;
     Ok(())
 }
 
@@ -189,21 +243,37 @@ async fn press(c: &mut Cdp, s: &str, key: &str) -> anyhow::Result<()> {
 /// its backend DOM node id as `[ref=N]`, which click and type accept.
 fn outline(tree: &Value) -> String {
     let nodes = tree["nodes"].as_array().cloned().unwrap_or_default();
-    let by_id: std::collections::HashMap<&str, &Value> =
-        nodes.iter().filter_map(|n| n["nodeId"].as_str().map(|id| (id, n))).collect();
+    let by_id: std::collections::HashMap<&str, &Value> = nodes
+        .iter()
+        .filter_map(|n| n["nodeId"].as_str().map(|id| (id, n)))
+        .collect();
     let mut out = String::new();
-    let Some(root) = nodes.first() else { return out };
+    let Some(root) = nodes.first() else {
+        return out;
+    };
     walk(root, &by_id, 0, &mut out);
     out
 }
 
-fn walk(n: &Value, by_id: &std::collections::HashMap<&str, &Value>, depth: usize, out: &mut String) {
+fn walk(
+    n: &Value,
+    by_id: &std::collections::HashMap<&str, &Value>,
+    depth: usize,
+    out: &mut String,
+) {
     let role = n["role"]["value"].as_str().unwrap_or("");
     let name = n["name"]["value"].as_str().unwrap_or("").trim();
-    let skip = n["ignored"].as_bool() == Some(true) || matches!(role, "generic" | "none" | "StaticText" | "InlineTextBox" | "");
+    let skip = n["ignored"].as_bool() == Some(true)
+        || matches!(
+            role,
+            "generic" | "none" | "StaticText" | "InlineTextBox" | ""
+        );
     let next_depth = if skip { depth } else { depth + 1 };
     if !skip {
-        let r = n["backendDOMNodeId"].as_i64().map(|id| format!(" [ref={id}]")).unwrap_or_default();
+        let r = n["backendDOMNodeId"]
+            .as_i64()
+            .map(|id| format!(" [ref={id}]"))
+            .unwrap_or_default();
         let shown: String = name.chars().take(120).collect();
         out.push_str(&format!("{}- {role} \"{shown}\"{r}\n", "  ".repeat(depth)));
     } else if role == "StaticText" && !name.is_empty() {
@@ -218,7 +288,9 @@ fn walk(n: &Value, by_id: &std::collections::HashMap<&str, &Value>, depth: usize
 }
 
 struct Cdp {
-    ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    ws: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
     next: u64,
 }
 
@@ -228,7 +300,12 @@ impl Cdp {
         Ok(Self { ws, next: 0 })
     }
 
-    async fn call(&mut self, session: Option<&str>, method: &str, params: Value) -> anyhow::Result<Value> {
+    async fn call(
+        &mut self,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+    ) -> anyhow::Result<Value> {
         self.next += 1;
         let id = self.next;
         let mut msg = json!({ "id": id, "method": method, "params": params });
@@ -253,14 +330,35 @@ impl Cdp {
     }
 
     async fn attach(&mut self, target: &str) -> anyhow::Result<String> {
-        let a = self.call(None, "Target.attachToTarget", json!({ "targetId": target, "flatten": true })).await?;
+        let a = self
+            .call(
+                None,
+                "Target.attachToTarget",
+                json!({ "targetId": target, "flatten": true }),
+            )
+            .await?;
         Ok(a["sessionId"].as_str().unwrap_or_default().to_string())
     }
 
     async fn center(&mut self, s: &str, backend: i64) -> anyhow::Result<(f64, f64)> {
-        let _ = self.call(Some(s), "DOM.scrollIntoViewIfNeeded", json!({ "backendNodeId": backend })).await;
-        let b = self.call(Some(s), "DOM.getBoxModel", json!({ "backendNodeId": backend })).await?;
-        let q = b["model"]["content"].as_array().cloned().unwrap_or_default();
+        let _ = self
+            .call(
+                Some(s),
+                "DOM.scrollIntoViewIfNeeded",
+                json!({ "backendNodeId": backend }),
+            )
+            .await;
+        let b = self
+            .call(
+                Some(s),
+                "DOM.getBoxModel",
+                json!({ "backendNodeId": backend }),
+            )
+            .await?;
+        let q = b["model"]["content"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         let f = |i: usize| q.get(i).and_then(Value::as_f64).unwrap_or(0.0);
         Ok(((f(0) + f(2)) / 2.0, (f(1) + f(5)) / 2.0))
     }

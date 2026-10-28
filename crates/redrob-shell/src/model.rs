@@ -75,7 +75,6 @@ pub struct Suggestion {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SuggestionKind {
-    Typed,
     Bookmark,
     History,
     Search,
@@ -129,7 +128,11 @@ impl Model {
 
     /// Insert after the active tab, the way people expect a new tab to land.
     pub fn insert_tab(&mut self, tab: Tab, activate: bool) {
-        let at = if self.tabs.is_empty() { 0 } else { self.active + 1 };
+        let at = if self.tabs.is_empty() {
+            0
+        } else {
+            self.active + 1
+        };
         self.tabs.insert(at, tab);
         if activate || self.tabs.len() == 1 {
             self.active = at;
@@ -176,7 +179,11 @@ impl Model {
         if let Some(i) = self.bookmarks.iter().position(|b| b.url == url) {
             self.bookmarks.remove(i);
         } else if url != "about:blank" {
-            self.bookmarks.push(Bookmark { url: url.to_string(), title: title.to_string(), folder: String::new() });
+            self.bookmarks.push(Bookmark {
+                url: url.to_string(),
+                title: title.to_string(),
+                folder: String::new(),
+            });
         }
     }
 
@@ -192,7 +199,12 @@ impl Model {
                 h.title = title.to_string();
             }
         } else {
-            self.history.push(HistoryEntry { url: url.to_string(), title: title.to_string(), visits: 1, last_visit: now });
+            self.history.push(HistoryEntry {
+                url: url.to_string(),
+                title: title.to_string(),
+                visits: 1,
+                last_visit: now,
+            });
         }
     }
 
@@ -212,12 +224,19 @@ impl Model {
         }
         let matches = |url: &str, title: &str| {
             let u = url.to_lowercase();
-            let u = u.trim_start_matches("https://").trim_start_matches("http://").trim_start_matches("www.");
+            let u = u
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .trim_start_matches("www.");
             u.starts_with(&q) || u.contains(&q) || title.to_lowercase().contains(&q)
         };
         for b in &self.bookmarks {
             if out.len() < limit && matches(&b.url, &b.title) {
-                out.push(Suggestion { url: b.url.clone(), title: b.title.clone(), kind: SuggestionKind::Bookmark });
+                out.push(Suggestion {
+                    url: b.url.clone(),
+                    title: b.title.clone(),
+                    kind: SuggestionKind::Bookmark,
+                });
             }
         }
         let mut hist: Vec<&HistoryEntry> = self
@@ -225,20 +244,35 @@ impl Model {
             .iter()
             .filter(|h| matches(&h.url, &h.title) && !out.iter().any(|s| s.url == h.url))
             .collect();
-        hist.sort_by(|a, b| b.visits.cmp(&a.visits).then(b.last_visit.cmp(&a.last_visit)));
+        hist.sort_by(|a, b| {
+            b.visits
+                .cmp(&a.visits)
+                .then(b.last_visit.cmp(&a.last_visit))
+        });
         for h in hist {
             if out.len() + 1 >= limit {
                 break;
             }
-            out.push(Suggestion { url: h.url.clone(), title: h.title.clone(), kind: SuggestionKind::History });
+            out.push(Suggestion {
+                url: h.url.clone(),
+                title: h.title.clone(),
+                kind: SuggestionKind::History,
+            });
         }
-        out.push(Suggestion { url: search_url(input), title: input.trim().to_string(), kind: SuggestionKind::Search });
+        out.push(Suggestion {
+            url: search_url(input),
+            title: input.trim().to_string(),
+            kind: SuggestionKind::Search,
+        });
         out
     }
 }
 
 pub fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Address field text to a URL: a URL as typed, a bare host gets https, anything else is a search.
@@ -256,13 +290,22 @@ pub fn to_url(input: &str) -> String {
 
 /// (id, name, URL with {q}) the person can choose in settings.
 pub const SEARCH_ENGINES: &[(&str, &str, &str)] = &[
-    ("duckduckgo", "DuckDuckGo", "https://duckduckgo.com/html/?q={q}"),
+    (
+        "duckduckgo",
+        "DuckDuckGo",
+        "https://duckduckgo.com/html/?q={q}",
+    ),
     ("google", "Google", "https://www.google.com/search?q={q}"),
-    ("naver", "Naver", "https://search.naver.com/search.naver?query={q}"),
+    (
+        "naver",
+        "Naver",
+        "https://search.naver.com/search.naver?query={q}",
+    ),
     ("bing", "Bing", "https://www.bing.com/search?q={q}"),
 ];
 
-static SEARCH: std::sync::RwLock<&str> = std::sync::RwLock::new("https://duckduckgo.com/html/?q={q}");
+static SEARCH: std::sync::RwLock<&str> =
+    std::sync::RwLock::new("https://duckduckgo.com/html/?q={q}");
 
 pub fn set_search_engine(id: &str) {
     if let Some((_, _, url)) = SEARCH_ENGINES.iter().find(|(i, _, _)| *i == id) {
@@ -278,7 +321,9 @@ pub fn search_url(q: &str) -> String {
         .trim()
         .bytes()
         .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
             b' ' => "+".to_string(),
             _ => format!("%{b:02X}"),
         })

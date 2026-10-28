@@ -70,7 +70,10 @@ fn main() {
                     window.set_title(&format!("{title} - {app}"));
                 }
             }
-            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => *control_flow = ControlFlow::Exit,
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => *control_flow = ControlFlow::Exit,
             _ => {}
         }
     });

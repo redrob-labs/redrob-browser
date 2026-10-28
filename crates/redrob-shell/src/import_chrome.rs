@@ -41,7 +41,9 @@ pub fn sources() -> Vec<Source> {
             ("Brave", base.join("BraveSoftware/Brave-Browser")),
         ]
     } else if cfg!(windows) {
-        let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|| home.join("AppData/Local"));
+        let local = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("AppData/Local"));
         vec![
             ("Chrome", local.join("Google/Chrome/User Data")),
             ("Chromium", local.join("Chromium/User Data")),
@@ -62,7 +64,10 @@ pub fn sources() -> Vec<Source> {
     };
     candidates
         .into_iter()
-        .map(|(name, dir)| Source { name, profile: dir.join("Default") })
+        .map(|(name, dir)| Source {
+            name,
+            profile: dir.join("Default"),
+        })
         .filter(|s| s.profile.join("Bookmarks").exists() || s.profile.join("History").exists())
         .collect()
 }
@@ -80,7 +85,11 @@ pub fn import(source: &Source, scratch: &Path) -> anyhow::Result<Imported> {
         // The bookmarks bar stays the bookmarks bar; everything else goes in a folder.
         walk(&roots["bookmark_bar"], "", &mut out.bookmarks);
         walk(&roots["other"], &folder, &mut out.bookmarks);
-        walk(&roots["synced"], &format!("{folder}/Mobile"), &mut out.bookmarks);
+        walk(
+            &roots["synced"],
+            &format!("{folder}/Mobile"),
+            &mut out.bookmarks,
+        );
     }
     let history = source.profile.join("History");
     if history.exists() {
@@ -100,7 +109,10 @@ pub type ImportedLogin = (String, String, zeroize::Zeroizing<String>);
 /// schema, which this build does not read yet. Windows: DPAPI and, since
 /// Chrome 127, app-bound encryption that no other program can open. Where a
 /// value cannot be opened the caller is told to use a CSV export instead.
-pub fn import_passwords(source: &Source, scratch: &Path) -> anyhow::Result<(Vec<ImportedLogin>, usize)> {
+pub fn import_passwords(
+    source: &Source,
+    scratch: &Path,
+) -> anyhow::Result<(Vec<ImportedLogin>, usize)> {
     if cfg!(windows) {
         anyhow::bail!("{} encrypts passwords so only it can read them. Export them from its password settings as a CSV file, then import that file.", source.name);
     }
@@ -113,15 +125,18 @@ pub fn import_passwords(source: &Source, scratch: &Path) -> anyhow::Result<(Vec<
     let mut q = db.prepare(
         "SELECT origin_url, username_value, password_value FROM logins WHERE blacklisted_by_user = 0",
     )?;
-    let rows: Vec<(String, String, Vec<u8>)> =
-        q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
+    let rows: Vec<(String, String, Vec<u8>)> = q
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<Result<_, _>>()?;
     drop(q);
     drop(db);
     let _ = std::fs::remove_file(&copy);
     let mut out = Vec::new();
     let mut skipped = 0;
     for (url, username, blob) in rows {
-        let Some(origin) = crate::vault::origin_of(&url) else { continue };
+        let Some(origin) = crate::vault::origin_of(&url) else {
+            continue;
+        };
         match decrypt_v10(&key, &blob) {
             Some(p) => out.push((origin, username, p)),
             None => skipped += 1,
@@ -139,8 +154,11 @@ fn chrome_key(source: &Source) -> anyhow::Result<zeroize::Zeroizing<[u8; 16]>> {
             "Brave" => ("Brave Safe Storage", "Brave"),
             _ => ("Chrome Safe Storage", "Chrome"),
         };
-        let entry = keyring::Entry::new(service, account).map_err(|e| anyhow::anyhow!("Keychain: {e}"))?;
-        let pw = entry.get_password().map_err(|e| anyhow::anyhow!("Keychain: {e}"))?;
+        let entry =
+            keyring::Entry::new(service, account).map_err(|e| anyhow::anyhow!("Keychain: {e}"))?;
+        let pw = entry
+            .get_password()
+            .map_err(|e| anyhow::anyhow!("Keychain: {e}"))?;
         (zeroize::Zeroizing::new(pw.into_bytes()), 1003)
     } else {
         (zeroize::Zeroizing::new(b"peanuts".to_vec()), 1)
@@ -156,22 +174,33 @@ fn decrypt_v10(key: &[u8; 16], blob: &[u8]) -> Option<zeroize::Zeroizing<String>
     let body = blob.strip_prefix(b"v10")?;
     let mut buf = zeroize::Zeroizing::new(body.to_vec());
     let iv = [b' '; 16];
-    let plain = cbc::Decryptor::<aes::Aes128>::new(key.into(), &iv.into()).decrypt_padded_mut::<Pkcs7>(&mut buf).ok()?;
-    String::from_utf8(plain.to_vec()).ok().map(zeroize::Zeroizing::new)
+    let plain = cbc::Decryptor::<aes::Aes128>::new(key.into(), &iv.into())
+        .decrypt_padded_mut::<Pkcs7>(&mut buf)
+        .ok()?;
+    String::from_utf8(plain.to_vec())
+        .ok()
+        .map(zeroize::Zeroizing::new)
 }
 
 /// Chrome's password export: `name,url,username,password[,note]` with a header row.
 pub fn import_passwords_csv(path: &Path) -> anyhow::Result<Vec<ImportedLogin>> {
     let text = zeroize::Zeroizing::new(std::fs::read_to_string(path)?);
     let mut rows = parse_csv(&text).into_iter();
-    let header: Vec<String> = rows.next().unwrap_or_default().into_iter().map(|h| h.to_ascii_lowercase()).collect();
+    let header: Vec<String> = rows
+        .next()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|h| h.to_ascii_lowercase())
+        .collect();
     let col = |n: &str| header.iter().position(|h| h == n);
     let (Some(url), Some(user), Some(pass)) = (col("url"), col("username"), col("password")) else {
         anyhow::bail!("not a password export: it needs url, username and password columns");
     };
     let mut out = Vec::new();
     for row in rows {
-        let (Some(u), Some(name), Some(p)) = (row.get(url), row.get(user), row.get(pass)) else { continue };
+        let (Some(u), Some(name), Some(p)) = (row.get(url), row.get(user), row.get(pass)) else {
+            continue;
+        };
         if let Some(origin) = crate::vault::origin_of(u) {
             if !p.is_empty() {
                 out.push((origin, name.clone(), zeroize::Zeroizing::new(p.clone())));
@@ -213,17 +242,27 @@ fn parse_csv(text: &str) -> Vec<Vec<String>> {
 }
 
 fn walk(node: &Value, folder: &str, out: &mut Vec<Bookmark>) {
-    let Some(children) = node["children"].as_array() else { return };
+    let Some(children) = node["children"].as_array() else {
+        return;
+    };
     for child in children {
         let name = child["name"].as_str().unwrap_or_default();
         match child["type"].as_str() {
             Some("url") => {
                 if let Some(url) = child["url"].as_str() {
-                    out.push(Bookmark { url: url.to_string(), title: name.to_string(), folder: folder.to_string() });
+                    out.push(Bookmark {
+                        url: url.to_string(),
+                        title: name.to_string(),
+                        folder: folder.to_string(),
+                    });
                 }
             }
             Some("folder") => {
-                let path = if folder.is_empty() { name.to_string() } else { format!("{folder}/{name}") };
+                let path = if folder.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{folder}/{name}")
+                };
                 walk(child, &path, out);
             }
             _ => {}

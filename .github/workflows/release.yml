@@ -31,6 +31,14 @@ env:
   PRODUCT: Redrob Browser
   PRODUCT_URL: https://github.com/${{ github.repository }}
   CARGO_TERM_COLOR: always
+  # Build caches: Swatinem/rust-cache keeps the registry and target/ per platform, and sccache
+  # keeps each compiled crate in the Actions cache, so a cache miss of one does not rebuild all.
+  # A tag run can read caches saved on the default branch (develop): a release dry run there
+  # before tagging leaves the tag build warm.
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
   # The official GStreamer packages the macOS and Windows jobs install and bundle, pinned with the
   # SHA-256 sums gstreamer.freedesktop.org publishes beside them.
   GSTREAMER_VERSION: 1.26.11
@@ -76,6 +84,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-windows-x64
+          cache-on-failure: true
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/gst
+          key: gstreamer-windows-${{ env.GSTREAMER_VERSION }}
       - name: Install GStreamer (runtime and development files)
         shell: pwsh
         run: |
@@ -85,8 +102,9 @@ jobs:
             @{ Name = "gstreamer-1.0-devel-msvc-x86_64-$v.msi"; Sha = $env:GSTREAMER_WINDOWS_DEVEL_MSI_SHA256 }
           )
           foreach ($m in $msis) {
-            $file = Join-Path $env:RUNNER_TEMP $m.Name
-            Invoke-WebRequest -Uri "https://gstreamer.freedesktop.org/data/pkg/windows/$v/msvc/$($m.Name)" -OutFile $file
+            New-Item -ItemType Directory -Force (Join-Path $env:RUNNER_TEMP gst) | Out-Null
+            $file = Join-Path (Join-Path $env:RUNNER_TEMP gst) $m.Name
+            if (-not (Test-Path $file)) { Invoke-WebRequest -Uri "https://gstreamer.freedesktop.org/data/pkg/windows/$v/msvc/$($m.Name)" -OutFile $file }
             $got = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant()
             if ($got -ne $m.Sha) { throw "$($m.Name): SHA-256 $got, expected $($m.Sha)" }
             # ADDLOCAL=ALL: every plugin set (good, bad, ugly, libav), not only the typical ones.
@@ -191,13 +209,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-macos-arm64
+          cache-on-failure: true
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/gst
+          key: gstreamer-macos-${{ env.GSTREAMER_VERSION }}
       - name: Install GStreamer (runtime and development files)
         run: |
           set -euo pipefail
           v="$GSTREAMER_VERSION"
-          cd "$RUNNER_TEMP"
-          curl -fsSLO "https://gstreamer.freedesktop.org/data/pkg/osx/$v/gstreamer-1.0-$v-universal.pkg"
-          curl -fsSLO "https://gstreamer.freedesktop.org/data/pkg/osx/$v/gstreamer-1.0-devel-$v-universal.pkg"
+          mkdir -p "$RUNNER_TEMP/gst" && cd "$RUNNER_TEMP/gst"
+          for f in "gstreamer-1.0-$v-universal.pkg" "gstreamer-1.0-devel-$v-universal.pkg"; do
+            [ -f "$f" ] || curl -fsSLO "https://gstreamer.freedesktop.org/data/pkg/osx/$v/$f"
+          done
           printf '%s  %s\n' \
             "$GSTREAMER_MACOS_PKG_SHA256" "gstreamer-1.0-$v-universal.pkg" \
             "$GSTREAMER_MACOS_DEVEL_PKG_SHA256" "gstreamer-1.0-devel-$v-universal.pkg" | shasum -a 256 -c -
@@ -240,6 +268,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-linux-${{ matrix.arch }}
+          cache-on-failure: true
+      # mold links the three large programs in a fraction of the time ld takes.
+      - uses: rui314/setup-mold@v1
       - name: Build dependencies
         run: |
           sudo apt-get update

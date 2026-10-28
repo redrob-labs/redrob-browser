@@ -87,7 +87,11 @@ fn web_url(url: &str) -> anyhow::Result<String> {
 /// Start `redrob-browser-protected <url> <lang>` from next to this program.
 fn open_protected(url: &str) -> anyhow::Result<()> {
     let url = web_url(url)?;
-    let name = if cfg!(windows) { "redrob-browser-protected.exe" } else { "redrob-browser-protected" };
+    let name = if cfg!(windows) {
+        "redrob-browser-protected.exe"
+    } else {
+        "redrob-browser-protected"
+    };
     let exe = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join(name)))

@@ -66,10 +66,15 @@ pub enum Op {
         smooth: bool,
     },
     /// Clip to the intersection of `clips` until the matching `PopClip`.
-    PushClip { clips: Vec<ClipShape> },
+    PushClip {
+        clips: Vec<ClipShape>,
+    },
     PopClip,
     /// Group until the matching `PopLayer`, then composite it.
-    PushLayer { opacity: f32, blend: Blend },
+    PushLayer {
+        opacity: f32,
+        blend: Blend,
+    },
     PopLayer,
 }
 
@@ -213,7 +218,9 @@ mod base64_bytes {
         serializer.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
     }
 
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<u8>, D::Error> {
         let text = <String as serde::Deserialize>::deserialize(deserializer)?;
         base64::engine::general_purpose::STANDARD
             .decode(text)
@@ -543,7 +550,9 @@ impl RecordingCanvas {
         };
         match self.lookup_mask(mask) {
             (MaskShapes::Empty, _) => ClipState::Empty,
-            (MaskShapes::Paths(shapes), version) => ClipState::Shapes((mask_id(mask), version), shapes),
+            (MaskShapes::Paths(shapes), version) => {
+                ClipState::Shapes((mask_id(mask), version), shapes)
+            }
             (MaskShapes::Unknown, _) => ClipState::Unknown,
         }
     }
@@ -587,7 +596,9 @@ impl RecordingCanvas {
 
     fn take_scratch(&mut self, width: u32, height: u32) -> Option<Pixmap> {
         match self.scratch.take() {
-            Some(scratch) if scratch.width() == width && scratch.height() == height => Some(scratch),
+            Some(scratch) if scratch.width() == width && scratch.height() == height => {
+                Some(scratch)
+            }
             _ => Pixmap::new(width, height),
         }
     }
@@ -783,9 +794,8 @@ impl Canvas for RecordingCanvas {
         };
         // Hairlines (width 0) are one device pixel whatever the transform;
         // keep tiny-skia's exact look.
-        let brush = solid(paint).filter(|_| {
-            paint.blend_mode == BlendMode::SourceOver && stroke.width > 0.0
-        });
+        let brush = solid(paint)
+            .filter(|_| paint.blend_mode == BlendMode::SourceOver && stroke.width > 0.0);
         let Some(brush) = brush else {
             self.rasterize(mask, raster);
             return;
@@ -953,7 +963,10 @@ pub(crate) fn tee_draw_image(
             }
             return;
         };
-        match recorder.frame_index(source_id).filter(|&index| index > parent) {
+        match recorder
+            .frame_index(source_id)
+            .filter(|&index| index > parent)
+        {
             Some(index) => {
                 let layer = recorder.frames.remove(index);
                 recorder.frames.truncate(parent + 1);
@@ -977,7 +990,13 @@ pub(crate) fn begin_root(root: &Pixmap, color: [u8; 4]) {
         if color[3] != 0 {
             let (w, h) = (width as f32, height as f32);
             ops.push(Op::Fill {
-                path: vec![Verb::M(0.0, 0.0), Verb::L(w, 0.0), Verb::L(w, h), Verb::L(0.0, h), Verb::Z],
+                path: vec![
+                    Verb::M(0.0, 0.0),
+                    Verb::L(w, 0.0),
+                    Verb::L(w, h),
+                    Verb::L(0.0, h),
+                    Verb::Z,
+                ],
                 brush: Brush::Solid {
                     color: color.map(|c| c as f32 / 255.0),
                 },
@@ -1074,11 +1093,7 @@ pub(crate) fn set_mask_shapes(mask: &Mask, shapes: MaskShapes) {
     with_recorder(|recorder| recorder.store_mask(mask, shapes));
 }
 
-pub(crate) fn clip_shape_of(
-    path: &Path,
-    fill_rule: FillRule,
-    transform: Transform,
-) -> ClipShape {
+pub(crate) fn clip_shape_of(path: &Path, fill_rule: FillRule, transform: Transform) -> ClipShape {
     ClipShape {
         path: verbs(path),
         rule: rule(fill_rule),

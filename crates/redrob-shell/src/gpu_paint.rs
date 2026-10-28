@@ -50,12 +50,32 @@ pub struct DisplayList {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum Op {
-    Fill { path: Vec<Verb>, brush: ListBrush, rule: Rule, transform: [f32; 6] },
-    Stroke { path: Vec<Verb>, brush: ListBrush, style: StrokeStyle, transform: [f32; 6] },
-    Image { image: usize, transform: [f32; 6], opacity: f32, smooth: bool },
-    PushClip { clips: Vec<ClipShape> },
+    Fill {
+        path: Vec<Verb>,
+        brush: ListBrush,
+        rule: Rule,
+        transform: [f32; 6],
+    },
+    Stroke {
+        path: Vec<Verb>,
+        brush: ListBrush,
+        style: StrokeStyle,
+        transform: [f32; 6],
+    },
+    Image {
+        image: usize,
+        transform: [f32; 6],
+        opacity: f32,
+        smooth: bool,
+    },
+    PushClip {
+        clips: Vec<ClipShape>,
+    },
     PopClip,
-    PushLayer { opacity: f32, blend: Blend },
+    PushLayer {
+        opacity: f32,
+        blend: Blend,
+    },
     PopLayer,
 }
 
@@ -78,8 +98,16 @@ enum Rule {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum ListBrush {
-    Solid { color: [f32; 4] },
-    Linear { start: [f32; 2], end: [f32; 2], stops: Vec<Stop>, extend: Extend, transform: [f32; 6] },
+    Solid {
+        color: [f32; 4],
+    },
+    Linear {
+        start: [f32; 2],
+        end: [f32; 2],
+        stops: Vec<Stop>,
+        extend: Extend,
+        transform: [f32; 6],
+    },
     Radial {
         start: [f32; 2],
         start_radius: f32,
@@ -182,7 +210,9 @@ struct ListImage {
 fn base64_bytes<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
     use base64::Engine as _;
     let text = String::deserialize(deserializer)?;
-    base64::engine::general_purpose::STANDARD.decode(text).map_err(serde::de::Error::custom)
+    base64::engine::general_purpose::STANDARD
+        .decode(text)
+        .map_err(serde::de::Error::custom)
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +255,12 @@ fn extend(extend: Extend) -> PExtend {
 fn stops(stops: &[Stop]) -> Vec<(f32, Color)> {
     stops
         .iter()
-        .map(|s| (s.offset, Color::from_rgba8(s.color[0], s.color[1], s.color[2], s.color[3])))
+        .map(|s| {
+            (
+                s.offset,
+                Color::from_rgba8(s.color[0], s.color[1], s.color[2], s.color[3]),
+            )
+        })
         .collect()
 }
 
@@ -233,7 +268,13 @@ fn stops(stops: &[Stop]) -> Vec<(f32, Color)> {
 fn brush(brush: &ListBrush) -> (Brush, Option<Affine>) {
     match brush {
         ListBrush::Solid { color } => (Brush::Solid(Color::new(*color)), None),
-        ListBrush::Linear { start, end, stops: s, extend: e, transform } => {
+        ListBrush::Linear {
+            start,
+            end,
+            stops: s,
+            extend: e,
+            transform,
+        } => {
             let gradient = Gradient::new_linear(
                 (f64::from(start[0]), f64::from(start[1])),
                 (f64::from(end[0]), f64::from(end[1])),
@@ -242,7 +283,15 @@ fn brush(brush: &ListBrush) -> (Brush, Option<Affine>) {
             .with_extend(extend(*e));
             (Brush::Gradient(gradient), Some(affine(transform)))
         }
-        ListBrush::Radial { start, start_radius, end, end_radius, stops: s, extend: e, transform } => {
+        ListBrush::Radial {
+            start,
+            start_radius,
+            end,
+            end_radius,
+            stops: s,
+            extend: e,
+            transform,
+        } => {
             let gradient = Gradient::new_two_point_radial(
                 (f64::from(start[0]), f64::from(start[1])),
                 *start_radius,
@@ -343,29 +392,73 @@ fn replay(scene: &mut vello::Scene, list: &DisplayList) {
     }
     for op in &list.ops {
         match op {
-            Op::Fill { path, brush: b, rule, transform } => {
+            Op::Fill {
+                path,
+                brush: b,
+                rule,
+                transform,
+            } => {
                 let (b, brush_transform) = brush(b);
-                scene.fill(fill_rule(*rule), affine(transform), &b, brush_transform, &bez_path(path));
+                scene.fill(
+                    fill_rule(*rule),
+                    affine(transform),
+                    &b,
+                    brush_transform,
+                    &bez_path(path),
+                );
             }
-            Op::Stroke { path, brush: b, style, transform } => {
+            Op::Stroke {
+                path,
+                brush: b,
+                style,
+                transform,
+            } => {
                 let (b, brush_transform) = brush(b);
-                scene.stroke(&stroke(style), affine(transform), &b, brush_transform, &bez_path(path));
+                scene.stroke(
+                    &stroke(style),
+                    affine(transform),
+                    &b,
+                    brush_transform,
+                    &bez_path(path),
+                );
             }
-            Op::Image { image, transform, opacity, smooth } => {
+            Op::Image {
+                image,
+                transform,
+                opacity,
+                smooth,
+            } => {
                 if let Some(Some(image)) = images.get(*image) {
-                    let quality = if *smooth { ImageQuality::Medium } else { ImageQuality::Low };
-                    let image = image.clone().with_alpha(opacity.clamp(0.0, 1.0)).with_quality(quality);
+                    let quality = if *smooth {
+                        ImageQuality::Medium
+                    } else {
+                        ImageQuality::Low
+                    };
+                    let image = image
+                        .clone()
+                        .with_alpha(opacity.clamp(0.0, 1.0))
+                        .with_quality(quality);
                     scene.draw_image(&image, affine(transform));
                 }
             }
             Op::PushClip { clips } => {
                 for clip in clips {
-                    scene.push_clip_layer(fill_rule(clip.rule), affine(&clip.transform), &bez_path(&clip.path));
+                    scene.push_clip_layer(
+                        fill_rule(clip.rule),
+                        affine(&clip.transform),
+                        &bez_path(&clip.path),
+                    );
                 }
                 open.push(clips.len());
             }
             Op::PushLayer { opacity, blend } => {
-                scene.push_layer(Fill::NonZero, blend_mode(*blend), *opacity, Affine::IDENTITY, &bounds);
+                scene.push_layer(
+                    Fill::NonZero,
+                    blend_mode(*blend),
+                    *opacity,
+                    Affine::IDENTITY,
+                    &bounds,
+                );
                 open.push(1);
             }
             Op::PopClip | Op::PopLayer => close(scene, &mut open),
@@ -414,13 +507,22 @@ impl GpuPainter {
             }
         };
         ENABLED.store(true, Ordering::Relaxed);
-        Some(Self { state: state.clone(), renderer, scene: vello::Scene::new(), textures: HashMap::new() })
+        Some(Self {
+            state: state.clone(),
+            renderer,
+            scene: vello::Scene::new(),
+            textures: HashMap::new(),
+        })
     }
 
     fn create(&mut self, width: u32, height: u32) -> egui::TextureId {
         let texture = self.state.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("redrob-tile"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -430,19 +532,31 @@ impl GpuPainter {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let id = self
-            .state
-            .renderer
-            .write()
-            .register_native_texture(&self.state.device, &view, wgpu::FilterMode::Linear);
-        self.textures.insert(id, TileTexture { _texture: texture, view, width, height });
+        let id = self.state.renderer.write().register_native_texture(
+            &self.state.device,
+            &view,
+            wgpu::FilterMode::Linear,
+        );
+        self.textures.insert(
+            id,
+            TileTexture {
+                _texture: texture,
+                view,
+                width,
+                height,
+            },
+        );
         id
     }
 
     /// Render `list` and return the texture holding it. `reuse` is the tile's
     /// previous texture: drawn into again when the size matches, freed once a
     /// replacement has rendered otherwise.
-    pub fn render(&mut self, list: &DisplayList, reuse: Option<egui::TextureId>) -> Option<egui::TextureId> {
+    pub fn render(
+        &mut self,
+        list: &DisplayList,
+        reuse: Option<egui::TextureId>,
+    ) -> Option<egui::TextureId> {
         let (width, height) = (list.width, list.height);
         let limit = self.state.device.limits().max_texture_dimension_2d;
         if width == 0 || height == 0 || width > limit || height > limit {
@@ -451,7 +565,9 @@ impl GpuPainter {
         self.scene.reset();
         replay(&mut self.scene, list);
         let reused = reuse.filter(|id| {
-            self.textures.get(id).is_some_and(|t| t.width == width && t.height == height)
+            self.textures
+                .get(id)
+                .is_some_and(|t| t.width == width && t.height == height)
         });
         let id = match reused {
             Some(id) => id,
@@ -464,8 +580,13 @@ impl GpuPainter {
             height,
             antialiasing_method: vello::AaConfig::Area,
         };
-        let rendered =
-            self.renderer.render_to_texture(&self.state.device, &self.state.queue, &self.scene, view, &params);
+        let rendered = self.renderer.render_to_texture(
+            &self.state.device,
+            &self.state.queue,
+            &self.scene,
+            view,
+            &params,
+        );
         if let Err(e) = rendered {
             eprintln!("redrob-browser: GPU tile raster failed: {e}");
             if reused.is_none() {

@@ -35,7 +35,11 @@ impl Styles {
     pub fn from_cdp(node: i64, computed: &Value, matched: &Value) -> Self {
         let computed: Vec<(String, String)> = computed["computedStyle"]
             .as_array()
-            .map(|a| a.iter().map(|p| (str_of(&p["name"]), str_of(&p["value"]))).collect())
+            .map(|a| {
+                a.iter()
+                    .map(|p| (str_of(&p["name"]), str_of(&p["value"])))
+                    .collect()
+            })
             .unwrap_or_default();
         let inline: Vec<(String, String)> = matched["inlineStyle"]["cssProperties"]
             .as_array()
@@ -51,7 +55,11 @@ impl Styles {
                     .collect()
             })
             .unwrap_or_default();
-        Styles { node, computed, inline }
+        Styles {
+            node,
+            computed,
+            inline,
+        }
     }
 }
 
@@ -98,7 +106,13 @@ impl State {
     }
 
     pub fn request(&mut self, id: String, method: String, url: String) {
-        self.net.push(NetRow { id, method, url, status: None, mime: String::new() });
+        self.net.push(NetRow {
+            id,
+            method,
+            url,
+            status: None,
+            mime: String::new(),
+        });
         if self.net.len() > KEEP {
             self.net.drain(..self.net.len() - KEEP);
         }
@@ -128,7 +142,10 @@ impl State {
         self.panel = Panel::Elements;
         self.select(node);
         self.reveal = true;
-        let known = self.dom.as_ref().is_some_and(|d| path_to(d, node, &mut Vec::new()));
+        let known = self
+            .dom
+            .as_ref()
+            .is_some_and(|d| path_to(d, node, &mut Vec::new()));
         if !known {
             // The element is newer than the tree on screen.
             self.dom = None;
@@ -175,7 +192,11 @@ pub fn ui(ui: &mut egui::Ui, s: &mut State) -> Actions {
     }
     ui.horizontal(|ui| {
         ui.selectable_value(&mut s.panel, Panel::Console, t("Console"));
-        if ui.selectable_value(&mut s.panel, Panel::Elements, t("Elements")).clicked() && s.dom.is_none() {
+        if ui
+            .selectable_value(&mut s.panel, Panel::Elements, t("Elements"))
+            .clicked()
+            && s.dom.is_none()
+        {
             act.refresh_dom = true;
         }
         ui.selectable_value(&mut s.panel, Panel::Network, t("Network"));
@@ -220,12 +241,22 @@ fn console(ui: &mut egui::Ui, s: &mut State, act: &mut Actions) {
                     "result" => "< ",
                     _ => "",
                 };
-                ui.colored_label(color, egui::RichText::new(format!("{prefix}{text}")).monospace());
+                ui.colored_label(
+                    color,
+                    egui::RichText::new(format!("{prefix}{text}")).monospace(),
+                );
             }
         });
     ui.horizontal(|ui| {
-        let r = ui.add(egui::TextEdit::singleline(&mut s.input).desired_width(f32::INFINITY).hint_text("JavaScript"));
-        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !s.input.trim().is_empty() {
+        let r = ui.add(
+            egui::TextEdit::singleline(&mut s.input)
+                .desired_width(f32::INFINITY)
+                .hint_text("JavaScript"),
+        );
+        if r.lost_focus()
+            && ui.input(|i| i.key_pressed(egui::Key::Enter))
+            && !s.input.trim().is_empty()
+        {
             let expr = std::mem::take(&mut s.input);
             s.log("input", expr.clone());
             act.evaluate = Some(expr);
@@ -260,14 +291,24 @@ fn elements(ui: &mut egui::Ui, s: &mut State, act: &mut Actions) -> Option<i64> 
             }
         }
     });
-    let mut tree = Tree { selected: s.selected, open: Vec::new(), reveal: false, clicked: None, hovered: None };
+    let mut tree = Tree {
+        selected: s.selected,
+        open: Vec::new(),
+        reveal: false,
+        clicked: None,
+        hovered: None,
+    };
     if s.reveal {
         if let (Some(root), Some(node)) = (&s.dom, s.selected) {
             tree.reveal = path_to(root, node, &mut tree.open);
             s.reveal = false;
         }
     }
-    let tree_height = if s.selected.is_some() { (ui.available_height() * 0.55).max(80.0) } else { ui.available_height() };
+    let tree_height = if s.selected.is_some() {
+        (ui.available_height() * 0.55).max(80.0)
+    } else {
+        ui.available_height()
+    };
     egui::ScrollArea::both()
         .id_salt("elements")
         .max_height(tree_height)
@@ -309,7 +350,10 @@ fn path_to(n: &Value, target: i64, out: &mut Vec<i64>) -> bool {
 
 fn node(ui: &mut egui::Ui, n: &Value, depth: usize, tree: &mut Tree) {
     let kind = n["nodeType"].as_u64().unwrap_or(0);
-    let children: Vec<&Value> = n["children"].as_array().map(|c| c.iter().collect()).unwrap_or_default();
+    let children: Vec<&Value> = n["children"]
+        .as_array()
+        .map(|c| c.iter().collect())
+        .unwrap_or_default();
     match kind {
         // Text: show non-blank text inline.
         3 => {
@@ -321,7 +365,10 @@ fn node(ui: &mut egui::Ui, n: &Value, depth: usize, tree: &mut Tree) {
         }
         // Comment.
         8 => {
-            ui.weak(egui::RichText::new(format!("<!--{}-->", n["nodeValue"].as_str().unwrap_or(""))).monospace());
+            ui.weak(
+                egui::RichText::new(format!("<!--{}-->", n["nodeValue"].as_str().unwrap_or("")))
+                    .monospace(),
+            );
         }
         _ => {
             let label = open_tag(n);
@@ -330,7 +377,11 @@ fn node(ui: &mut egui::Ui, n: &Value, depth: usize, tree: &mut Tree) {
                 row(ui, label, id, tree);
             } else {
                 let uid = ui.make_persistent_id(("dom", id));
-                let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), uid, depth < 3);
+                let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+                    ui.ctx(),
+                    uid,
+                    depth < 3,
+                );
                 if tree.reveal && tree.open.contains(&id) {
                     state.set_open(true);
                 }
@@ -347,7 +398,10 @@ fn node(ui: &mut egui::Ui, n: &Value, depth: usize, tree: &mut Tree) {
 
 /// One selectable element row: click selects it, hover highlights it on the page.
 fn row(ui: &mut egui::Ui, label: String, id: i64, tree: &mut Tree) {
-    let r = ui.selectable_label(tree.selected == Some(id), egui::RichText::new(label).monospace());
+    let r = ui.selectable_label(
+        tree.selected == Some(id),
+        egui::RichText::new(label).monospace(),
+    );
     if r.clicked() {
         tree.clicked = Some(id);
     }
@@ -360,43 +414,67 @@ fn row(ui: &mut egui::Ui, label: String, id: i64, tree: &mut Tree) {
 }
 
 fn styles(ui: &mut egui::Ui, s: &mut State) {
-    ui.add(egui::TextEdit::singleline(&mut s.style_filter).desired_width(f32::INFINITY).hint_text(t("Filter")));
+    ui.add(
+        egui::TextEdit::singleline(&mut s.style_filter)
+            .desired_width(f32::INFINITY)
+            .hint_text(t("Filter")),
+    );
     let Some(st) = &s.styles else {
         ui.weak(t("Loading styles..."));
         return;
     };
     let filter = s.style_filter.trim().to_lowercase();
-    let keep = |(k, v): &&(String, String)| filter.is_empty() || k.to_lowercase().contains(&filter) || v.to_lowercase().contains(&filter);
-    egui::ScrollArea::vertical().id_salt("styles").auto_shrink([false, false]).show(ui, |ui| {
-        ui.strong(t("Inline style"));
-        let inline: Vec<&(String, String)> = st.inline.iter().filter(keep).collect();
-        if inline.is_empty() {
-            ui.weak(t("No inline style"));
-        } else {
-            property_grid(ui, "inline-style", &inline);
-        }
-        ui.add_space(6.0);
-        ui.strong(t("Computed"));
-        let computed: Vec<&(String, String)> = st.computed.iter().filter(keep).collect();
-        property_grid(ui, "computed-style", &computed);
-    });
+    let keep = |(k, v): &&(String, String)| {
+        filter.is_empty()
+            || k.to_lowercase().contains(&filter)
+            || v.to_lowercase().contains(&filter)
+    };
+    egui::ScrollArea::vertical()
+        .id_salt("styles")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.strong(t("Inline style"));
+            let inline: Vec<&(String, String)> = st.inline.iter().filter(keep).collect();
+            if inline.is_empty() {
+                ui.weak(t("No inline style"));
+            } else {
+                property_grid(ui, "inline-style", &inline);
+            }
+            ui.add_space(6.0);
+            ui.strong(t("Computed"));
+            let computed: Vec<&(String, String)> = st.computed.iter().filter(keep).collect();
+            property_grid(ui, "computed-style", &computed);
+        });
 }
 
 fn property_grid(ui: &mut egui::Ui, id: &str, props: &[&(String, String)]) {
-    egui::Grid::new(id).striped(true).num_columns(2).show(ui, |ui| {
-        for (k, v) in props {
-            ui.label(egui::RichText::new(k.as_str()).monospace().color(ui.visuals().weak_text_color()));
-            let shown: String = v.chars().take(160).collect();
-            ui.label(egui::RichText::new(shown).monospace()).on_hover_text(v.as_str());
-            ui.end_row();
-        }
-    });
+    egui::Grid::new(id)
+        .striped(true)
+        .num_columns(2)
+        .show(ui, |ui| {
+            for (k, v) in props {
+                ui.label(
+                    egui::RichText::new(k.as_str())
+                        .monospace()
+                        .color(ui.visuals().weak_text_color()),
+                );
+                let shown: String = v.chars().take(160).collect();
+                ui.label(egui::RichText::new(shown).monospace())
+                    .on_hover_text(v.as_str());
+                ui.end_row();
+            }
+        });
 }
 
 /// Page input while picking: the pointer highlights what it is over and the
 /// first left click selects that element; none of it reaches the page.
 /// Escape cancels. `active` is false when the tools are closed.
-pub fn pick_input(s: &mut State, events: &mut Vec<egui::Event>, rect: egui::Rect, active: bool) -> Vec<Op> {
+pub fn pick_input(
+    s: &mut State,
+    events: &mut Vec<egui::Event>,
+    rect: egui::Rect,
+    active: bool,
+) -> Vec<Op> {
     if !active {
         s.picking = false;
     }
@@ -408,23 +486,38 @@ pub fn pick_input(s: &mut State, events: &mut Vec<egui::Event>, rect: egui::Rect
     events.retain(|ev| match ev {
         egui::Event::PointerMoved(p) if s.picking && rect.contains(*p) => {
             let (x, y) = local(*p);
-            ops.push(Op::PickAt { x, y, commit: false });
+            ops.push(Op::PickAt {
+                x,
+                y,
+                commit: false,
+            });
             false
         }
-        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, .. }
-            if s.picking && rect.contains(*pos) =>
-        {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            ..
+        } if s.picking && rect.contains(*pos) => {
             let (x, y) = local(*pos);
             ops.push(Op::PickAt { x, y, commit: true });
             s.picking = false;
             s.swallow_release = true;
             false
         }
-        egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: false, .. } if s.swallow_release => {
+        egui::Event::PointerButton {
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            ..
+        } if s.swallow_release => {
             s.swallow_release = false;
             false
         }
-        egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } if s.picking => {
+        egui::Event::Key {
+            key: egui::Key::Escape,
+            pressed: true,
+            ..
+        } if s.picking => {
             s.picking = false;
             ops.push(Op::Highlight(None));
             false
@@ -439,19 +532,32 @@ pub fn pick_input(s: &mut State, events: &mut Vec<egui::Event>, rect: egui::Rect
 /// viewport CSS pixels, which are points in this window.
 pub fn paint_highlight(painter: &egui::Painter, rect: egui::Rect, model: &Value) {
     let quad = |k: &str| -> Option<egui::Rect> {
-        let q: Vec<f32> = model[k].as_array()?.iter().filter_map(|v| v.as_f64().map(|n| n as f32)).collect();
+        let q: Vec<f32> = model[k]
+            .as_array()?
+            .iter()
+            .filter_map(|v| v.as_f64().map(|n| n as f32))
+            .collect();
         if q.len() < 8 {
             return None;
         }
         let xs = [q[0], q[2], q[4], q[6]];
         let ys = [q[1], q[3], q[5], q[7]];
-        let min = egui::pos2(xs.iter().cloned().fold(f32::INFINITY, f32::min), ys.iter().cloned().fold(f32::INFINITY, f32::min));
-        let max = egui::pos2(xs.iter().cloned().fold(f32::NEG_INFINITY, f32::max), ys.iter().cloned().fold(f32::NEG_INFINITY, f32::max));
+        let min = egui::pos2(
+            xs.iter().cloned().fold(f32::INFINITY, f32::min),
+            ys.iter().cloned().fold(f32::INFINITY, f32::min),
+        );
+        let max = egui::pos2(
+            xs.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+            ys.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+        );
         Some(egui::Rect::from_min_max(min, max).translate(rect.min.to_vec2()))
     };
-    let (Some(content), Some(padding), Some(border), Some(margin)) =
-        (quad("content"), quad("padding"), quad("border"), quad("margin"))
-    else {
+    let (Some(content), Some(padding), Some(border), Some(margin)) = (
+        quad("content"),
+        quad("padding"),
+        quad("border"),
+        quad("margin"),
+    ) else {
         return;
     };
     let painter = painter.with_clip_rect(rect);
@@ -468,8 +574,14 @@ fn ring(painter: &egui::Painter, outer: egui::Rect, inner: egui::Rect, color: eg
     let bands = [
         egui::Rect::from_min_max(outer.min, egui::pos2(outer.max.x, inner.min.y)),
         egui::Rect::from_min_max(egui::pos2(outer.min.x, inner.max.y), outer.max),
-        egui::Rect::from_min_max(egui::pos2(outer.min.x, inner.min.y), egui::pos2(inner.min.x, inner.max.y)),
-        egui::Rect::from_min_max(egui::pos2(inner.max.x, inner.min.y), egui::pos2(outer.max.x, inner.max.y)),
+        egui::Rect::from_min_max(
+            egui::pos2(outer.min.x, inner.min.y),
+            egui::pos2(inner.min.x, inner.max.y),
+        ),
+        egui::Rect::from_min_max(
+            egui::pos2(inner.max.x, inner.min.y),
+            egui::pos2(outer.max.x, inner.max.y),
+        ),
     ];
     for b in bands {
         if b.width() > 0.0 && b.height() > 0.0 {
@@ -498,26 +610,35 @@ fn open_tag(n: &Value) -> String {
 
 fn network(ui: &mut egui::Ui, s: &State) {
     ui.weak(tf("{0} requests", &[&s.net.len()]));
-    egui::ScrollArea::both().id_salt("network").auto_shrink([false, false]).show(ui, |ui| {
-        egui::Grid::new("net").striped(true).num_columns(4).show(ui, |ui| {
-            ui.strong(t("Status"));
-            ui.strong(t("Method"));
-            ui.strong(t("Type"));
-            ui.strong("URL");
-            ui.end_row();
-            for r in &s.net {
-                let status = r.status.map(|c| c.to_string()).unwrap_or_else(|| "...".to_string());
-                let color = match r.status {
-                    Some(c) if c >= 400 => egui::Color32::from_rgb(0xd9, 0x30, 0x25),
-                    _ => ui.visuals().text_color(),
-                };
-                ui.colored_label(color, status);
-                ui.label(&r.method);
-                ui.label(&r.mime);
-                let url: String = r.url.chars().take(160).collect();
-                ui.label(url).on_hover_text(&r.url);
-                ui.end_row();
-            }
+    egui::ScrollArea::both()
+        .id_salt("network")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            egui::Grid::new("net")
+                .striped(true)
+                .num_columns(4)
+                .show(ui, |ui| {
+                    ui.strong(t("Status"));
+                    ui.strong(t("Method"));
+                    ui.strong(t("Type"));
+                    ui.strong("URL");
+                    ui.end_row();
+                    for r in &s.net {
+                        let status = r
+                            .status
+                            .map(|c| c.to_string())
+                            .unwrap_or_else(|| "...".to_string());
+                        let color = match r.status {
+                            Some(c) if c >= 400 => egui::Color32::from_rgb(0xd9, 0x30, 0x25),
+                            _ => ui.visuals().text_color(),
+                        };
+                        ui.colored_label(color, status);
+                        ui.label(&r.method);
+                        ui.label(&r.mime);
+                        let url: String = r.url.chars().take(160).collect();
+                        ui.label(url).on_hover_text(&r.url);
+                        ui.end_row();
+                    }
+                });
         });
-    });
 }

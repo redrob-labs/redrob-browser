@@ -35,7 +35,7 @@ pub(crate) fn resolve_node_id(page: &mut Page, params: &Value) -> Result<u64, St
 /// DOM.setFileInputFiles without pulling in a dependency.
 fn encode_base64(input: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = *chunk.get(1).unwrap_or(&0) as u32;
@@ -43,8 +43,16 @@ fn encode_base64(input: &[u8]) -> String {
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(T[((n >> 18) & 63) as usize] as char);
         out.push(T[((n >> 12) & 63) as usize] as char);
-        out.push(if chunk.len() > 1 { T[((n >> 6) & 63) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { T[(n & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            T[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[(n & 63) as usize] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -101,24 +109,40 @@ pub async fn handle(
             page.with_dom(|dom| {
                 let node = serialize_node(dom, dom.document(), depth as u32, 0);
                 json!({ "root": node })
-            }).ok_or_else(|| "No DOM loaded".to_string())
+            })
+            .ok_or_else(|| "No DOM loaded".to_string())
         }
         "querySelector" => {
             let page = ctx.get_session_page(session_id).ok_or("No page")?;
-            let selector = params.get("selector").and_then(|v| v.as_str()).ok_or("selector required")?;
-            let result = page.with_dom(|dom| {
-                dom.query_selector(selector).ok().flatten().map(|id| id.index()).unwrap_or(0)
-            }).unwrap_or(0);
+            let selector = params
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .ok_or("selector required")?;
+            let result = page
+                .with_dom(|dom| {
+                    dom.query_selector(selector)
+                        .ok()
+                        .flatten()
+                        .map(|id| id.index())
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0);
             Ok(json!({ "nodeId": result }))
         }
         "querySelectorAll" => {
             let page = ctx.get_session_page(session_id).ok_or("No page")?;
-            let selector = params.get("selector").and_then(|v| v.as_str()).ok_or("selector required")?;
-            let ids = page.with_dom(|dom| {
-                dom.query_selector_all(selector).ok()
-                    .map(|ids| ids.iter().map(|id| id.index() as u64).collect::<Vec<_>>())
-                    .unwrap_or_default()
-            }).unwrap_or_default();
+            let selector = params
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .ok_or("selector required")?;
+            let ids = page
+                .with_dom(|dom| {
+                    dom.query_selector_all(selector)
+                        .ok()
+                        .map(|ids| ids.iter().map(|id| id.index() as u64).collect::<Vec<_>>())
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
             Ok(json!({ "nodeIds": ids }))
         }
         "getOuterHTML" => {
@@ -128,16 +152,18 @@ pub async fn handle(
             // every rod page.HTML() fail with "nodeId required".
             let page = ctx.get_session_page_mut(session_id).ok_or("No page")?;
             let node_id = resolve_node_id(page, params)?;
-            let html = page.with_dom(|dom| {
-                dom.outer_html(NodeId::new(node_id as u32))
-            }).unwrap_or_default();
+            let html = page
+                .with_dom(|dom| dom.outer_html(NodeId::new(node_id as u32)))
+                .unwrap_or_default();
             Ok(json!({ "outerHTML": html }))
         }
         "describeNode" => {
             let page = ctx.get_session_page_mut(session_id).ok_or("No page")?;
             let depth = params.get("depth").and_then(|v| v.as_i64()).unwrap_or(0);
 
-            let node_id = if let Some(nid) = params.get("nodeId").and_then(|v| v.as_u64())
+            let node_id = if let Some(nid) = params
+                .get("nodeId")
+                .and_then(|v| v.as_u64())
                 .or_else(|| params.get("backendNodeId").and_then(|v| v.as_u64()))
             {
                 nid
@@ -158,14 +184,16 @@ pub async fn handle(
                 return Err("nodeId or objectId required".to_string());
             };
 
-            let node = page.with_dom(|dom| {
-                serialize_node(dom, NodeId::new(node_id as u32), depth as u32, 0)
-            }).unwrap_or(json!(null));
+            let node = page
+                .with_dom(|dom| serialize_node(dom, NodeId::new(node_id as u32), depth as u32, 0))
+                .unwrap_or(json!(null));
             Ok(json!({ "node": node }))
         }
         "resolveNode" => {
             let page = ctx.get_session_page_mut(session_id).ok_or("No page")?;
-            let node_id = if let Some(nid) = params.get("nodeId").and_then(|v| v.as_u64())
+            let node_id = if let Some(nid) = params
+                .get("nodeId")
+                .and_then(|v| v.as_u64())
                 .or_else(|| params.get("backendNodeId").and_then(|v| v.as_u64()))
             {
                 nid
@@ -271,7 +299,11 @@ pub async fn handle(
             let paths: Vec<String> = params
                 .get("files")
                 .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
 
             let mut specs = Vec::with_capacity(paths.len());
@@ -283,7 +315,9 @@ pub async fn handle(
                     .and_then(|n| n.to_str())
                     .unwrap_or("file")
                     .to_string();
-                specs.push(json!({ "name": name, "type": guess_mime(p), "b64": encode_base64(&bytes) }));
+                specs.push(
+                    json!({ "name": name, "type": guess_mime(p), "b64": encode_base64(&bytes) }),
+                );
             }
 
             let specs_json = serde_json::to_string(&specs).unwrap_or_else(|_| "[]".to_string());
@@ -324,7 +358,16 @@ pub async fn handle(
                 .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
                 .unwrap_or_default();
             if nums.len() < 18 {
-                let quad = vec![json!(8),json!(8),json!(108),json!(8),json!(108),json!(28),json!(8),json!(28)];
+                let quad = vec![
+                    json!(8),
+                    json!(8),
+                    json!(108),
+                    json!(8),
+                    json!(108),
+                    json!(28),
+                    json!(8),
+                    json!(28),
+                ];
                 return Ok(json!({
                     "model": {
                         "content": quad.clone(), "padding": quad.clone(), "border": quad.clone(), "margin": quad,
@@ -349,14 +392,24 @@ pub async fn handle(
         "getNodeForLocation" => {
             // Hit test at viewport CSS pixels, as the page's own
             // document.elementFromPoint sees it.
-            let x = params.get("x").and_then(|v| v.as_f64()).ok_or("x required")?;
-            let y = params.get("y").and_then(|v| v.as_f64()).ok_or("y required")?;
+            let x = params
+                .get("x")
+                .and_then(|v| v.as_f64())
+                .ok_or("x required")?;
+            let y = params
+                .get("y")
+                .and_then(|v| v.as_f64())
+                .ok_or("y required")?;
             let page = ctx.get_session_page_mut(session_id).ok_or("No page")?;
             let code = format!(
                 "(function() {{ var e = document.elementFromPoint({x}, {y}); \
                  return (e && typeof e._nid === 'number') ? e._nid : -1; }})()"
             );
-            let nid = page.evaluate(&code).as_f64().map(|n| n as i64).unwrap_or(-1);
+            let nid = page
+                .evaluate(&code)
+                .as_f64()
+                .map(|n| n as i64)
+                .unwrap_or(-1);
             if nid < 0 {
                 return Err("No node found at given location".to_string());
             }
@@ -380,10 +433,31 @@ pub async fn handle(
             let val = page.evaluate(&code);
             let quad = if let Some(arr) = val.as_array() {
                 let nums: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
-                if nums.len() == 8 { nums.iter().map(|n| coord_value(*n)).collect::<Vec<_>>() }
-                else { vec![json!(8),json!(8),json!(108),json!(8),json!(108),json!(28),json!(8),json!(28)] }
+                if nums.len() == 8 {
+                    nums.iter().map(|n| coord_value(*n)).collect::<Vec<_>>()
+                } else {
+                    vec![
+                        json!(8),
+                        json!(8),
+                        json!(108),
+                        json!(8),
+                        json!(108),
+                        json!(28),
+                        json!(8),
+                        json!(28),
+                    ]
+                }
             } else {
-                vec![json!(8),json!(8),json!(108),json!(8),json!(108),json!(28),json!(8),json!(28)]
+                vec![
+                    json!(8),
+                    json!(8),
+                    json!(108),
+                    json!(8),
+                    json!(108),
+                    json!(28),
+                    json!(8),
+                    json!(28),
+                ]
             };
             Ok(json!({ "quads": [quad] }))
         }
@@ -403,7 +477,10 @@ fn inset(b: [f64; 4], w: [f64; 4]) -> [f64; 4] {
 
 /// A [left, top, right, bottom] box as a CDP quad, clockwise from top-left.
 fn rect_quad(b: [f64; 4]) -> Vec<Value> {
-    [b[0], b[1], b[2], b[1], b[2], b[3], b[0], b[3]].iter().map(|n| coord_value(*n)).collect()
+    [b[0], b[1], b[2], b[1], b[2], b[3], b[0], b[3]]
+        .iter()
+        .map(|n| coord_value(*n))
+        .collect()
 }
 
 /// Serialize a CDP box-model coordinate the way Chrome does: an integral double
@@ -453,35 +530,54 @@ fn node_value(dom: &DomTree, node_id: NodeId) -> Option<(Value, Vec<NodeId>)> {
 
     match &node.data {
         NodeData::Document => {
-            result["nodeType"] = json!(9); result["nodeName"] = json!("#document");
-            result["localName"] = json!(""); result["nodeValue"] = json!("");
-            result["documentURL"] = json!(""); result["baseURL"] = json!(""); result["xmlVersion"] = json!("");
+            result["nodeType"] = json!(9);
+            result["nodeName"] = json!("#document");
+            result["localName"] = json!("");
+            result["nodeValue"] = json!("");
+            result["documentURL"] = json!("");
+            result["baseURL"] = json!("");
+            result["xmlVersion"] = json!("");
         }
-        NodeData::Doctype { name, public_id, system_id } => {
-            result["nodeType"] = json!(10); result["nodeName"] = json!(name);
-            result["localName"] = json!(""); result["nodeValue"] = json!("");
-            result["publicId"] = json!(public_id); result["systemId"] = json!(system_id);
+        NodeData::Doctype {
+            name,
+            public_id,
+            system_id,
+        } => {
+            result["nodeType"] = json!(10);
+            result["nodeName"] = json!(name);
+            result["localName"] = json!("");
+            result["nodeValue"] = json!("");
+            result["publicId"] = json!(public_id);
+            result["systemId"] = json!(system_id);
         }
         NodeData::Element { name, attrs, .. } => {
             result["nodeType"] = json!(1);
             result["nodeName"] = json!(name.local.as_ref().to_ascii_uppercase());
             result["localName"] = json!(name.local.as_ref());
             result["nodeValue"] = json!("");
-            let cdp_attrs: Vec<String> = attrs.iter()
-                .flat_map(|a| vec![a.name.local.to_string(), a.value.clone()]).collect();
+            let cdp_attrs: Vec<String> = attrs
+                .iter()
+                .flat_map(|a| vec![a.name.local.to_string(), a.value.clone()])
+                .collect();
             result["attributes"] = json!(cdp_attrs);
         }
         NodeData::Text { contents } => {
-            result["nodeType"] = json!(3); result["nodeName"] = json!("#text");
-            result["localName"] = json!(""); result["nodeValue"] = json!(contents);
+            result["nodeType"] = json!(3);
+            result["nodeName"] = json!("#text");
+            result["localName"] = json!("");
+            result["nodeValue"] = json!(contents);
         }
         NodeData::Comment { contents } => {
-            result["nodeType"] = json!(8); result["nodeName"] = json!("#comment");
-            result["localName"] = json!(""); result["nodeValue"] = json!(contents);
+            result["nodeType"] = json!(8);
+            result["nodeName"] = json!("#comment");
+            result["localName"] = json!("");
+            result["nodeValue"] = json!(contents);
         }
         NodeData::ProcessingInstruction { target, data } => {
-            result["nodeType"] = json!(7); result["nodeName"] = json!(target);
-            result["localName"] = json!(""); result["nodeValue"] = json!(data);
+            result["nodeType"] = json!(7);
+            result["nodeName"] = json!(target);
+            result["localName"] = json!("");
+            result["nodeValue"] = json!(data);
         }
     }
 
@@ -584,7 +680,8 @@ mod tests {
         let mut ctx = CdpContext::new();
         let page_id = ctx.create_page();
         let session = Some(format!("{page_id}-session"));
-        ctx.sessions.insert(session.clone().unwrap(), page_id.clone());
+        ctx.sessions
+            .insert(session.clone().unwrap(), page_id.clone());
 
         crate::domains::page::handle(
             "navigate",
@@ -613,7 +710,8 @@ mod tests {
         let mut ctx = CdpContext::new();
         let page_id = ctx.create_page();
         let session = Some(format!("{page_id}-session"));
-        ctx.sessions.insert(session.clone().unwrap(), page_id.clone());
+        ctx.sessions
+            .insert(session.clone().unwrap(), page_id.clone());
 
         crate::domains::page::handle(
             "navigate",
@@ -645,7 +743,8 @@ mod tests {
         let mut ctx = CdpContext::new();
         let page_id = ctx.create_page();
         let session = Some(format!("{page_id}-session"));
-        ctx.sessions.insert(session.clone().unwrap(), page_id.clone());
+        ctx.sessions
+            .insert(session.clone().unwrap(), page_id.clone());
 
         crate::domains::page::handle(
             "navigate",
@@ -656,9 +755,14 @@ mod tests {
         .await
         .expect("navigate should succeed");
 
-        let qs = handle("querySelector", &json!({ "selector": "input" }), &mut ctx, &session)
-            .await
-            .expect("querySelector should succeed");
+        let qs = handle(
+            "querySelector",
+            &json!({ "selector": "input" }),
+            &mut ctx,
+            &session,
+        )
+        .await
+        .expect("querySelector should succeed");
         let nid = qs["nodeId"].as_u64().expect("input nodeId");
         assert!(nid > 0, "the input element should be found");
 
@@ -666,10 +770,9 @@ mod tests {
             .await
             .expect("DOM.focus should succeed");
 
-        let active = ctx
-            .get_session_page_mut(&session)
-            .unwrap()
-            .evaluate("(function(){return document.activeElement?document.activeElement.tagName:'NONE';})()");
+        let active = ctx.get_session_page_mut(&session).unwrap().evaluate(
+            "(function(){return document.activeElement?document.activeElement.tagName:'NONE';})()",
+        );
         assert_eq!(
             active,
             json!("INPUT"),
@@ -801,10 +904,9 @@ mod tests {
                 .await
                 .expect("scrollIntoViewIfNeeded should succeed");
 
-            let target_id = ctx
-                .get_session_page_mut(&session)
-                .unwrap()
-                .evaluate("globalThis.__obscura_click_target && globalThis.__obscura_click_target.id");
+            let target_id = ctx.get_session_page_mut(&session).unwrap().evaluate(
+                "globalThis.__obscura_click_target && globalThis.__obscura_click_target.id",
+            );
             assert_eq!(target_id, json!("target"));
         }
     }
@@ -820,9 +922,25 @@ mod tests {
             "url": "data:text/html,<body style='margin:0;height:1800px'><div style='height:200px'></div><button id=target style='height:40px'>Go</button></body>",
             "waitUntil": "load"
         }), &mut ctx, &session).await.unwrap();
-        let node = handle("querySelector", &json!({"selector":"#target"}), &mut ctx, &session).await.unwrap();
-        handle("scrollIntoViewIfNeeded", &json!({"nodeId":node["nodeId"]}), &mut ctx, &session).await.unwrap();
-        let position = ctx.get_session_page_mut(&session).unwrap()
+        let node = handle(
+            "querySelector",
+            &json!({"selector":"#target"}),
+            &mut ctx,
+            &session,
+        )
+        .await
+        .unwrap();
+        handle(
+            "scrollIntoViewIfNeeded",
+            &json!({"nodeId":node["nodeId"]}),
+            &mut ctx,
+            &session,
+        )
+        .await
+        .unwrap();
+        let position = ctx
+            .get_session_page_mut(&session)
+            .unwrap()
             .evaluate("[scrollY, document.getElementById('target').getBoundingClientRect().top]");
         assert_eq!(position, json!([0, 200]));
     }
@@ -834,14 +952,9 @@ mod tests {
         let session = Some(format!("{page_id}-session"));
         ctx.sessions.insert(session.clone().unwrap(), page_id);
 
-        let error = handle(
-            "scrollIntoViewIfNeeded",
-            &json!({}),
-            &mut ctx,
-            &session,
-        )
-        .await
-        .expect_err("missing node identifier should fail");
+        let error = handle("scrollIntoViewIfNeeded", &json!({}), &mut ctx, &session)
+            .await
+            .expect_err("missing node identifier should fail");
 
         assert_eq!(error, "nodeId, backendNodeId, or objectId required");
 
@@ -879,7 +992,9 @@ mod tests {
         let mut parent = dom.document();
         let depth = 50_000usize;
         for _ in 0..depth {
-            let n = dom.new_node(NodeData::Text { contents: String::new() });
+            let n = dom.new_node(NodeData::Text {
+                contents: String::new(),
+            });
             dom.append_child(parent, n);
             parent = n;
         }
@@ -902,7 +1017,10 @@ mod tests {
             cur = first;
             levels += 1;
         }
-        assert!(levels >= 100, "should serialize a deep prefix, got {levels}");
+        assert!(
+            levels >= 100,
+            "should serialize a deep prefix, got {levels}"
+        );
         assert!(
             levels < depth,
             "nesting must be bounded below the tree's true depth, got {levels}"
@@ -930,9 +1048,14 @@ mod tests {
         .await
         .expect("navigate should succeed");
 
-        let qs = handle("querySelector", &json!({ "selector": "input" }), &mut ctx, &session)
-            .await
-            .expect("querySelector should succeed");
+        let qs = handle(
+            "querySelector",
+            &json!({ "selector": "input" }),
+            &mut ctx,
+            &session,
+        )
+        .await
+        .expect("querySelector should succeed");
         let nid = qs["nodeId"].as_u64().expect("input nodeId");
 
         // A real, readable file. Without the gate the handler slurps it and
@@ -962,10 +1085,20 @@ mod tests {
         assert_eq!(serde_json::to_string(&coord_value(256.0)).unwrap(), "256");
         assert_eq!(serde_json::to_string(&coord_value(0.0)).unwrap(), "0");
         // fractional coordinates stay floats
-        assert_eq!(serde_json::to_string(&coord_value(206.0390625)).unwrap(), "206.0390625");
+        assert_eq!(
+            serde_json::to_string(&coord_value(206.0390625)).unwrap(),
+            "206.0390625"
+        );
         // a full quad mixes both, exactly as DOM.getBoxModel returns it
         let quad: Vec<Value> = [
-            256.0, 206.0390625, 347.25, 206.0390625, 347.25, 225.0390625, 256.0, 225.0390625,
+            256.0,
+            206.0390625,
+            347.25,
+            206.0390625,
+            347.25,
+            225.0390625,
+            256.0,
+            225.0390625,
         ]
         .iter()
         .map(|n| coord_value(*n))

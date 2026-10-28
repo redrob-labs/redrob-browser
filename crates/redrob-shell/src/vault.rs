@@ -91,7 +91,11 @@ impl Vault {
                  value TEXT NOT NULL
              );",
         )?;
-        Ok(Self { db, cipher, unlocked_until: None })
+        Ok(Self {
+            db,
+            cipher,
+            unlocked_until: None,
+        })
     }
 
     /// Save or replace the password for `username` on `origin`.
@@ -112,7 +116,11 @@ impl Vault {
 
     pub fn has_login(&self, origin: &str, username: &str) -> bool {
         self.db
-            .query_row("SELECT 1 FROM logins WHERE origin = ?1 AND username = ?2", params![origin, username], |_| Ok(()))
+            .query_row(
+                "SELECT 1 FROM logins WHERE origin = ?1 AND username = ?2",
+                params![origin, username],
+                |_| Ok(()),
+            )
             .optional()
             .ok()
             .flatten()
@@ -121,17 +129,26 @@ impl Vault {
 
     /// Usernames saved for exactly this origin. Never a password.
     pub fn logins_for(&self, origin: &str) -> Vec<LoginSummary> {
-        let Ok(mut q) = self.db.prepare("SELECT id, username FROM logins WHERE origin = ?1 ORDER BY last_used DESC, username")
-        else {
+        let Ok(mut q) = self.db.prepare(
+            "SELECT id, username FROM logins WHERE origin = ?1 ORDER BY last_used DESC, username",
+        ) else {
             return Vec::new();
         };
-        q.query_map(params![origin], |r| Ok(LoginSummary { id: r.get(0)?, username: r.get(1)? }))
-            .map(|rows| rows.filter_map(Result::ok).collect())
-            .unwrap_or_default()
+        q.query_map(params![origin], |r| {
+            Ok(LoginSummary {
+                id: r.get(0)?,
+                username: r.get(1)?,
+            })
+        })
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
     }
 
     pub fn all_origins(&self) -> Vec<(String, i64)> {
-        let Ok(mut q) = self.db.prepare("SELECT origin, count(*) FROM logins GROUP BY origin ORDER BY origin") else {
+        let Ok(mut q) = self
+            .db
+            .prepare("SELECT origin, count(*) FROM logins GROUP BY origin ORDER BY origin")
+        else {
             return Vec::new();
         };
         q.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -140,7 +157,8 @@ impl Vault {
     }
 
     pub fn delete(&self, id: i64) -> anyhow::Result<()> {
-        self.db.execute("DELETE FROM logins WHERE id = ?1", params![id])?;
+        self.db
+            .execute("DELETE FROM logins WHERE id = ?1", params![id])?;
         Ok(())
     }
 
@@ -148,7 +166,8 @@ impl Vault {
     /// re-authentication; on Linux, which has no device authenticator, the
     /// person's own click in the window is the unlock.
     pub fn unlock(&mut self) {
-        self.unlocked_until = Some(Instant::now() + Duration::from_secs(60 * self.unlock_minutes()));
+        self.unlocked_until =
+            Some(Instant::now() + Duration::from_secs(60 * self.unlock_minutes()));
     }
 
     pub fn lock(&mut self) {
@@ -177,12 +196,19 @@ impl Vault {
     }
 
     pub fn unlock_minutes(&self) -> u64 {
-        self.setting("unlock_minutes").and_then(|v| v.parse().ok()).filter(|m| *m > 0).unwrap_or(15)
+        self.setting("unlock_minutes")
+            .and_then(|v| v.parse().ok())
+            .filter(|m| *m > 0)
+            .unwrap_or(15)
     }
 
     pub fn site_rule(&self, origin: &str) -> Option<String> {
         self.db
-            .query_row("SELECT rule FROM site_rules WHERE origin = ?1", params![origin], |r| r.get(0))
+            .query_row(
+                "SELECT rule FROM site_rules WHERE origin = ?1",
+                params![origin],
+                |r| r.get(0),
+            )
             .optional()
             .ok()
             .flatten()
@@ -210,7 +236,11 @@ impl Vault {
         match self.agent_policy() {
             AgentPolicy::Never => Err(Refusal::Never),
             AgentPolicy::Always => Ok(()),
-            AgentPolicy::WhileUnlocked if rule.as_deref() == Some("allow") || self.is_unlocked() => Ok(()),
+            AgentPolicy::WhileUnlocked
+                if rule.as_deref() == Some("allow") || self.is_unlocked() =>
+            {
+                Ok(())
+            }
             AgentPolicy::WhileUnlocked => Err(Refusal::Locked),
         }
     }
@@ -231,12 +261,18 @@ impl Vault {
 
     /// Unseal a password to type it into the page. Only for the origin it was
     /// saved for; every use is audited.
-    pub fn secret_for_fill(&self, id: i64, origin: &str, actor: Actor) -> anyhow::Result<(String, Zeroizing<String>)> {
-        let (saved_origin, username, nonce, sealed): (String, String, Vec<u8>, Vec<u8>) = self.db.query_row(
-            "SELECT origin, username, nonce, secret FROM logins WHERE id = ?1",
-            params![id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-        )?;
+    pub fn secret_for_fill(
+        &self,
+        id: i64,
+        origin: &str,
+        actor: Actor,
+    ) -> anyhow::Result<(String, Zeroizing<String>)> {
+        let (saved_origin, username, nonce, sealed): (String, String, Vec<u8>, Vec<u8>) =
+            self.db.query_row(
+                "SELECT origin, username, nonce, secret FROM logins WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )?;
         if saved_origin != origin {
             self.audit(origin, &username, actor, "refused: different site");
             anyhow::bail!("this login belongs to a different site");
@@ -245,8 +281,13 @@ impl Vault {
             .cipher
             .decrypt(Nonce::from_slice(&nonce), sealed.as_ref())
             .map_err(|_| anyhow::anyhow!("the saved password could not be opened"))?;
-        let password = Zeroizing::new(String::from_utf8(plain).map_err(|_| anyhow::anyhow!("bad password data"))?);
-        self.db.execute("UPDATE logins SET last_used = ?2 WHERE id = ?1", params![id, crate::model::now() as i64])?;
+        let password = Zeroizing::new(
+            String::from_utf8(plain).map_err(|_| anyhow::anyhow!("bad password data"))?,
+        );
+        self.db.execute(
+            "UPDATE logins SET last_used = ?2 WHERE id = ?1",
+            params![id, crate::model::now() as i64],
+        )?;
         self.audit(origin, &username, actor, "filled");
         Ok((username, password))
     }
@@ -274,9 +315,11 @@ impl Vault {
         else {
             return Vec::new();
         };
-        q.query_map(params![limit], |r| Ok((r.get::<_, i64>(0)? as u64, r.get(1)?, r.get(2)?, r.get(3)?)))
-            .map(|rows| rows.filter_map(Result::ok).collect())
-            .unwrap_or_default()
+        q.query_map(params![limit], |r| {
+            Ok((r.get::<_, i64>(0)? as u64, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
     }
 
     /// The person said never to offer saving on this site.
@@ -290,7 +333,11 @@ impl Vault {
 
     fn setting(&self, key: &str) -> Option<String> {
         self.db
-            .query_row("SELECT value FROM vault_settings WHERE key = ?1", params![key], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM vault_settings WHERE key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
             .optional()
             .ok()
             .flatten()
@@ -318,7 +365,10 @@ fn master_key(profile_dir: &Path) -> anyhow::Result<Zeroizing<Vec<u8>>> {
     let entry = match keyring::Entry::new(SERVICE, KEY_ACCOUNT) {
         Ok(e) => e,
         Err(e) if cfg!(target_os = "linux") => {
-            eprintln!("redrob-browser: no OS credential store ({e}); keeping the vault key in {}", file.display());
+            eprintln!(
+                "redrob-browser: no OS credential store ({e}); keeping the vault key in {}",
+                file.display()
+            );
             return file_key(&file);
         }
         Err(e) => anyhow::bail!("OS credential store: {e}"),
@@ -331,14 +381,20 @@ fn master_key(profile_dir: &Path) -> anyhow::Result<Zeroizing<Vec<u8>>> {
             match entry.set_secret(&k) {
                 Ok(()) => Ok(k),
                 Err(e) if cfg!(target_os = "linux") => {
-                    eprintln!("redrob-browser: OS credential store refused the key ({e}); using {}", file.display());
+                    eprintln!(
+                        "redrob-browser: OS credential store refused the key ({e}); using {}",
+                        file.display()
+                    );
                     file_key(&file)
                 }
                 Err(e) => anyhow::bail!("OS credential store: {e}"),
             }
         }
         Err(e) if cfg!(target_os = "linux") => {
-            eprintln!("redrob-browser: OS credential store unavailable ({e}); using {}", file.display());
+            eprintln!(
+                "redrob-browser: OS credential store unavailable ({e}); using {}",
+                file.display()
+            );
             file_key(&file)
         }
         Err(e) => anyhow::bail!("OS credential store: {e}"),
@@ -354,7 +410,11 @@ fn new_key() -> anyhow::Result<Zeroizing<Vec<u8>>> {
 /// Read the 32-byte key file, or create it with mode 0600.
 fn file_key(file: &Path) -> anyhow::Result<Zeroizing<Vec<u8>>> {
     if let Ok(k) = std::fs::read(file) {
-        anyhow::ensure!(k.len() == 32, "the vault key file {} is damaged", file.display());
+        anyhow::ensure!(
+            k.len() == 32,
+            "the vault key file {} is damaged",
+            file.display()
+        );
         return Ok(Zeroizing::new(k));
     }
     let k = new_key()?;

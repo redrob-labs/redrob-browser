@@ -38,6 +38,8 @@ pub struct Window {
 }
 
 /// Bind on loopback and serve clients. Returns the ws:// address.
+// tungstenite fixes the handshake callback's error type.
+#[allow(clippy::result_large_err)]
 pub async fn start(
     out: mpsc::UnboundedSender<String>,
     pending: Pending,
@@ -97,7 +99,9 @@ async fn serve(
             return;
         }
         let Ok(reply) = rx.await else { return };
-        let Some(s) = reply["result"]["sessionId"].as_str() else { return };
+        let Some(s) = reply["result"]["sessionId"].as_str() else {
+            return;
+        };
         sessions.lock().unwrap().insert(s.to_string());
         page_session = Some(s.to_string());
     }
@@ -139,20 +143,37 @@ async fn serve(
 
     while let Some(Ok(msg)) = stream.next().await {
         let Message::Text(text) = msg else { continue };
-        let Ok(mut req) = serde_json::from_str::<Value>(text.as_str()) else { continue };
+        let Ok(mut req) = serde_json::from_str::<Value>(text.as_str()) else {
+            continue;
+        };
         let original = req.get("id").cloned().unwrap_or(Value::Null);
         let method = req["method"].as_str().unwrap_or_default().to_string();
         if method == "Redrob.login" {
             // Never forwarded to the engine: the window signs in and reports back.
-            let target_id = req["params"]["targetId"].as_str().map(str::to_string).or_else(|| page.clone()).unwrap_or_default();
+            let target_id = req["params"]["targetId"]
+                .as_str()
+                .map(str::to_string)
+                .or_else(|| page.clone())
+                .unwrap_or_default();
             let username = req["params"]["username"].as_str().map(str::to_string);
             let (tx, rx) = oneshot::channel();
-            let sent = window.login.send(LoginRequest { target_id, username, reply: tx }).is_ok();
+            let sent = window
+                .login
+                .send(LoginRequest {
+                    target_id,
+                    username,
+                    reply: tx,
+                })
+                .is_ok();
             (window.wake)();
             let reply_tx = reply_tx.clone();
             let original = req.get("id").cloned().unwrap_or(Value::Null);
             tokio::spawn(async move {
-                let result = if sent { rx.await.unwrap_or_else(|_| json!({ "outcome": "failed" })) } else { json!({ "outcome": "failed" }) };
+                let result = if sent {
+                    rx.await.unwrap_or_else(|_| json!({ "outcome": "failed" }))
+                } else {
+                    json!({ "outcome": "failed" })
+                };
                 let _ = reply_tx.send(json!({ "id": original, "result": result }).to_string());
             });
             continue;

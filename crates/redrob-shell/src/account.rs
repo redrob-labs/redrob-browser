@@ -24,7 +24,10 @@ const REFRESH_ACCOUNT: &str = "account-refresh";
 pub enum Msg {
     /// Open this page in a tab so the person can sign in.
     Open(String),
-    SignedIn { name: String, email: String },
+    SignedIn {
+        name: String,
+        email: String,
+    },
     Failed(String),
 }
 
@@ -68,7 +71,9 @@ fn flow(tx: &Sender<Msg>) -> anyhow::Result<()> {
         ])
         .map_err(|e| anyhow::anyhow!("token request: {e}"))?
         .into_json()?;
-    let access = token["access_token"].as_str().ok_or_else(|| anyhow::anyhow!("no access token in the reply"))?;
+    let access = token["access_token"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("no access token in the reply"))?;
     if let Some(refresh) = token["refresh_token"].as_str() {
         keyring::Entry::new(SERVICE, REFRESH_ACCOUNT)
             .and_then(|e| e.set_password(refresh))
@@ -100,9 +105,13 @@ fn wait_for_code(listener: &TcpListener, state: &str) -> anyhow::Result<String> 
         let mut line = String::new();
         BufReader::new(&stream).read_line(&mut line)?;
         let target = line.split_whitespace().nth(1).unwrap_or("");
-        let Ok(u) = url::Url::parse(&format!("http://127.0.0.1{target}")) else { continue };
+        let Ok(u) = url::Url::parse(&format!("http://127.0.0.1{target}")) else {
+            continue;
+        };
         if u.path() != "/oauth2/callback" {
-            let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            let _ = stream.write_all(
+                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
             continue;
         }
         let q: std::collections::HashMap<String, String> = u.query_pairs().into_owned().collect();
@@ -113,7 +122,9 @@ fn wait_for_code(listener: &TcpListener, state: &str) -> anyhow::Result<String> 
             )
         };
         if q.get("state").map(String::as_str) != Some(state) {
-            let _ = stream.write_all(page("<p>This sign-in link does not belong to this browser.</p>").as_bytes());
+            let _ = stream.write_all(
+                page("<p>This sign-in link does not belong to this browser.</p>").as_bytes(),
+            );
             continue;
         }
         if let Some(err) = q.get("error") {

@@ -64,7 +64,11 @@ impl FrameRealm {
         let existing = realms.borrow().context(frame_id);
         if let Some(context) = existing {
             let state = realms.borrow().by_frame_id(frame_id)?;
-            let origin = state.borrow().inherited_origin.clone().unwrap_or_else(|| origin_of(url));
+            let origin = state
+                .borrow()
+                .inherited_origin
+                .clone()
+                .unwrap_or_else(|| origin_of(url));
             return Some(Self {
                 context,
                 realms,
@@ -91,12 +95,19 @@ impl FrameRealm {
         // keeps its own security token, so V8 answers `undefined` for any
         // property the page tries to read out of it, and nothing about it is
         // published below.
-        let (scripting_enabled, sandbox_opaque_origin) = realms.borrow().by_frame_id(parent_frame_id)
+        let (scripting_enabled, sandbox_opaque_origin) = realms
+            .borrow()
+            .by_frame_id(parent_frame_id)
             .map(|creator| {
                 let creator = creator.borrow();
                 (creator.scripting_enabled, creator.sandbox_opaque_origin)
-            }).unwrap_or((true, false));
-        let origin = if sandbox_opaque_origin { "null".to_string() } else { origin_of(url) };
+            })
+            .unwrap_or((true, false));
+        let origin = if sandbox_opaque_origin {
+            "null".to_string()
+        } else {
+            origin_of(url)
+        };
         let same_origin = origin != "null" && origin == parent.page_origin();
         if same_origin {
             parent.share_security_token_with_realm(&context);
@@ -109,7 +120,9 @@ impl FrameRealm {
         state.frame_id = frame_id;
         state.scripting_enabled = scripting_enabled;
         state.sandbox_opaque_origin = sandbox_opaque_origin;
-        if sandbox_opaque_origin { state.inherited_origin = Some("null".to_string()); }
+        if sandbox_opaque_origin {
+            state.inherited_origin = Some("null".to_string());
+        }
         parent.share_resources_with(&mut state);
 
         let realms = parent.realm_states();
@@ -156,7 +169,10 @@ impl FrameRealm {
     /// can talk to its parent perfectly and still never build its interface,
     /// which looks like a rendering problem and is a lifecycle one.
     pub fn dispatch_load_events(&self, parent: &mut ObscuraJsRuntime) -> Result<(), String> {
-        let state = self.realms.borrow().by_frame_id(self.frame_id)
+        let state = self
+            .realms
+            .borrow()
+            .by_frame_id(self.frame_id)
             .ok_or_else(|| "Frame no longer exists".to_string())?;
         {
             let mut state = state.borrow_mut();
@@ -235,7 +251,10 @@ impl FrameRealm {
         };
         #[cfg(feature = "render")]
         {
-            let state = self.realms.borrow().by_frame_id(self.frame_id)
+            let state = self
+                .realms
+                .borrow()
+                .by_frame_id(self.frame_id)
                 .ok_or_else(|| "could not resize frame: missing realm".to_string())?;
             state.borrow_mut().set_viewport(width, height);
         }
@@ -321,7 +340,9 @@ impl FrameRealm {
         for (index, script) in scripts.iter().enumerate() {
             if !script.is_classic() {
                 if script.type_attribute == "module" {
-                    problems.push(format!("frame module script {index} skipped: not supported"));
+                    problems.push(format!(
+                        "frame module script {index} skipped: not supported"
+                    ));
                 }
                 continue;
             }
@@ -365,11 +386,16 @@ impl FrameRealm {
     /// parent's. A relative `src` in a frame is relative to the frame.
     fn resolve(&self, src: &str) -> String {
         if self.url == "about:srcdoc" {
-            if let Some(base) = self.realms.borrow().by_frame_id(self.frame_id)
+            if let Some(base) = self
+                .realms
+                .borrow()
+                .by_frame_id(self.frame_id)
                 .and_then(|state| crate::ops::document_base_url(&state.borrow()))
             {
-                return url::Url::parse(&base).and_then(|base| base.join(src))
-                    .map(|url| url.to_string()).unwrap_or_else(|_| src.to_string());
+                return url::Url::parse(&base)
+                    .and_then(|base| base.join(src))
+                    .map(|url| url.to_string())
+                    .unwrap_or_else(|_| src.to_string());
             }
         }
         url::Url::parse(&self.url)
@@ -380,21 +406,31 @@ impl FrameRealm {
 
     fn list_scripts(&self) -> Result<Vec<DocumentScript>, String> {
         // Browser-owned discovery must not execute script-overridden DOM APIs.
-        let state = self.realms.borrow().by_frame_id(self.frame_id)
+        let state = self
+            .realms
+            .borrow()
+            .by_frame_id(self.frame_id)
             .ok_or_else(|| "could not list frame scripts: missing realm".to_string())?;
         let state = state.borrow();
-        if !state.scripting_enabled { return Ok(Vec::new()); }
-        let dom = state.dom.as_ref()
+        if !state.scripting_enabled {
+            return Ok(Vec::new());
+        }
+        let dom = state
+            .dom
+            .as_ref()
             .ok_or_else(|| "could not list frame scripts: missing document".to_string())?;
         let nodes = dom.query_selector_all("script")?;
-        Ok(nodes.into_iter().filter_map(|id| {
-            let text = dom.text_content(id);
-            dom.with_node(id, |node| DocumentScript {
-                src: node.get_attribute("src").unwrap_or("").to_string(),
-                type_attribute: node.get_attribute("type").unwrap_or("").to_lowercase(),
-                text,
+        Ok(nodes
+            .into_iter()
+            .filter_map(|id| {
+                let text = dom.text_content(id);
+                dom.with_node(id, |node| DocumentScript {
+                    src: node.get_attribute("src").unwrap_or("").to_string(),
+                    type_attribute: node.get_attribute("type").unwrap_or("").to_lowercase(),
+                    text,
+                })
             })
-        }).collect())
+            .collect())
     }
 }
 
@@ -458,25 +494,50 @@ mod tests {
         parent.set_url("https://parent.example/page");
         parent.set_content_type("text/plain");
         parent.run_page_init();
-        let _frame = FrameRealm::new(&mut parent, 1, 0,
-            "https://parent.example/frame", "<html><body>Child</body></html>")
-            .expect("frame realm");
-        assert_eq!(parent.evaluate(r#"(function(){
+        let _frame = FrameRealm::new(
+            &mut parent,
+            1,
+            0,
+            "https://parent.example/frame",
+            "<html><body>Child</body></html>",
+        )
+        .expect("frame realm");
+        assert_eq!(
+            parent
+                .evaluate(
+                    r#"(function(){
             const child = globalThis.__obscura_frameObjects[1].document;
             const get = Object.getOwnPropertyDescriptor(Document.prototype, 'contentType').get;
             return [get.call(child), child.contentType, document.contentType];
-        })()"#).unwrap(), serde_json::json!(["text/html", "text/html", "text/plain"]));
+        })()"#
+                )
+                .unwrap(),
+            serde_json::json!(["text/html", "text/html", "text/plain"])
+        );
     }
 
     #[test]
     fn fetched_frame_contexts_survive_runtime_teardown_under_gc_stress() {
         crate::set_v8_flags("--stress-compaction --stress-marking=1");
         for _ in 0..10 {
-            let mut parent = page("https://parent.example/page", "<html><body>Parent</body></html>");
-            let frame = FrameRealm::new(&mut parent, 1, 0, "https://parent.example/frame",
-                "<html><body>Child</body></html>").expect("frame realm");
-            assert_eq!(frame.evaluate(&mut parent, "document.body.textContent").unwrap(),
-                serde_json::json!("Child"));
+            let mut parent = page(
+                "https://parent.example/page",
+                "<html><body>Parent</body></html>",
+            );
+            let frame = FrameRealm::new(
+                &mut parent,
+                1,
+                0,
+                "https://parent.example/frame",
+                "<html><body>Child</body></html>",
+            )
+            .expect("frame realm");
+            assert_eq!(
+                frame
+                    .evaluate(&mut parent, "document.body.textContent")
+                    .unwrap(),
+                serde_json::json!("Child")
+            );
             drop(frame);
             drop(parent);
         }
@@ -541,20 +602,48 @@ mod tests {
 
     #[test]
     fn initial_frame_adoption_preserves_the_realm_and_inherited_base() {
-        let mut parent = page("https://parent.example/pages/index.html", "<html><body></body></html>");
-        parent.execute_script("initial-frame", r#"
+        let mut parent = page(
+            "https://parent.example/pages/index.html",
+            "<html><body></body></html>",
+        );
+        parent
+            .execute_script(
+                "initial-frame",
+                r#"
             globalThis.frameElementProbe = document.createElement('iframe');
             document.body.appendChild(frameElementProbe);
             globalThis.initialWindowProbe = frameElementProbe.contentWindow;
             initialWindowProbe.eval('globalThis.marker = 42; document.body.textContent = "child"');
-        "#).unwrap();
-        let pending = parent.take_pending_frames().pop().expect("initial frame queued");
-        let frame = FrameRealm::new(&mut parent, pending.frame_id, pending.parent_frame_id,
-            &pending.url, &pending.html).expect("adopt initial realm");
+        "#,
+            )
+            .unwrap();
+        let pending = parent
+            .take_pending_frames()
+            .pop()
+            .expect("initial frame queued");
+        let frame = FrameRealm::new(
+            &mut parent,
+            pending.frame_id,
+            pending.parent_frame_id,
+            &pending.url,
+            &pending.html,
+        )
+        .expect("adopt initial realm");
         assert_eq!(frame.origin(), "https://parent.example");
-        assert_eq!(frame.evaluate(&mut parent,
-            "[marker, document.body.textContent, document.URL, document.baseURI]").unwrap(),
-            serde_json::json!([42, "child", "about:blank", "https://parent.example/pages/index.html"]));
+        assert_eq!(
+            frame
+                .evaluate(
+                    &mut parent,
+                    "[marker, document.body.textContent, document.URL, document.baseURI]"
+                )
+                .unwrap(),
+            serde_json::json!([
+                42,
+                "child",
+                "about:blank",
+                "https://parent.example/pages/index.html"
+            ])
+        );
         assert_eq!(parent.evaluate(
             "[initialWindowProbe === frameElementProbe.contentWindow, initialWindowProbe.parent === window, typeof marker, document.body.textContent]").unwrap(),
             serde_json::json!([true, true, "undefined", ""]));
@@ -563,38 +652,66 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn initial_frame_messages_keep_the_calling_realm_as_sender() {
         let mut parent = page("https://parent.example/", "<html><body></body></html>");
-        parent.execute_script("initial-frame", r#"
+        parent
+            .execute_script(
+                "initial-frame",
+                r#"
             globalThis.frameElementProbe = document.createElement('iframe');
             document.body.appendChild(frameElementProbe);
             globalThis.initialWindowProbe = frameElementProbe.contentWindow;
             initialWindowProbe.postMessage('from-parent', '*');
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         let pending = parent.take_pending_frames().pop().unwrap();
-        let frame = FrameRealm::new(&mut parent, pending.frame_id, 0,
-            &pending.url, &pending.html).unwrap();
-        frame.execute_script(&mut parent,
-            "parent.postMessage('from-child', '*'); postMessage('to-self', '*');").unwrap();
+        let frame = FrameRealm::new(
+            &mut parent,
+            pending.frame_id,
+            0,
+            &pending.url,
+            &pending.html,
+        )
+        .unwrap();
+        frame
+            .execute_script(
+                &mut parent,
+                "parent.postMessage('from-child', '*'); postMessage('to-self', '*');",
+            )
+            .unwrap();
         let messages = parent.take_pending_frame_messages();
-        assert_eq!(messages.iter().map(|message| (
-            message.target_frame_id, message.source_frame_id, message.origin.as_str()
-        )).collect::<Vec<_>>(), vec![
-            (frame.frame_id(), 0, "https://parent.example"),
-            (0, frame.frame_id(), "https://parent.example"),
-            (frame.frame_id(), frame.frame_id(), "https://parent.example"),
-        ]);
+        assert_eq!(
+            messages
+                .iter()
+                .map(|message| (
+                    message.target_frame_id,
+                    message.source_frame_id,
+                    message.origin.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (frame.frame_id(), 0, "https://parent.example"),
+                (0, frame.frame_id(), "https://parent.example"),
+                (frame.frame_id(), frame.frame_id(), "https://parent.example"),
+            ]
+        );
     }
 
     #[test]
     fn nested_initial_frame_uses_its_owner_document_not_the_entered_page() {
         let mut parent = page("https://parent.example/", "<html><body></body></html>");
-        parent.execute_script("nested-initial-frame", r#"
+        parent
+            .execute_script(
+                "nested-initial-frame",
+                r#"
             const iframe = document.createElement('iframe');
             document.body.appendChild(iframe);
             const child = iframe.contentWindow;
             const nested = child.document.createElement('iframe');
             child.document.body.appendChild(nested);
             globalThis.nestedWindowProbe = nested.contentWindow;
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         let pending = parent.take_pending_frames();
         assert_eq!(pending.len(), 2);
         assert_eq!(pending[0].parent_frame_id, 0);
@@ -603,37 +720,67 @@ mod tests {
 
     #[test]
     fn initial_frame_script_discovery_does_not_read_the_parent_after_prototype_remap() {
-        let mut parent = page("https://parent.example/",
-            "<html><body><script src='/parent.js'></script></body></html>");
-        parent.execute_script("initial-frame", r#"
+        let mut parent = page(
+            "https://parent.example/",
+            "<html><body><script src='/parent.js'></script></body></html>",
+        );
+        parent
+            .execute_script(
+                "initial-frame",
+                r#"
             const iframe = document.createElement('iframe');
             document.body.appendChild(iframe);
             const child = iframe.contentWindow;
             Object.setPrototypeOf(child.document, Document.prototype);
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         let pending = parent.take_pending_frames().pop().unwrap();
-        let frame = FrameRealm::new(&mut parent, pending.frame_id, 0,
-            &pending.url, &pending.html).unwrap();
-        assert!(frame.external_script_urls(&mut parent).is_empty(),
-            "initial frame must not replay its parent's author scripts");
+        let frame = FrameRealm::new(
+            &mut parent,
+            pending.frame_id,
+            0,
+            &pending.url,
+            &pending.html,
+        )
+        .unwrap();
+        assert!(
+            frame.external_script_urls(&mut parent).is_empty(),
+            "initial frame must not replay its parent's author scripts"
+        );
     }
 
     #[test]
     fn initial_frame_script_discovery_ignores_overridden_dom_methods() {
-        let mut parent = page("https://parent.example/",
-            "<html><body><script src='/parent.js'></script></body></html>");
-        parent.execute_script("initial-frame", r#"
+        let mut parent = page(
+            "https://parent.example/",
+            "<html><body><script src='/parent.js'></script></body></html>",
+        );
+        parent
+            .execute_script(
+                "initial-frame",
+                r#"
             const iframe = document.createElement('iframe');
             document.body.appendChild(iframe);
             const child = iframe.contentWindow;
             const parentScripts = document.querySelectorAll('script');
             child.document.querySelectorAll = () => parentScripts;
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         let pending = parent.take_pending_frames().pop().unwrap();
-        let frame = FrameRealm::new(&mut parent, pending.frame_id, 0,
-            &pending.url, &pending.html).unwrap();
-        assert!(frame.external_script_urls(&mut parent).is_empty(),
-            "author script discovery must use the actual frame DOM");
+        let frame = FrameRealm::new(
+            &mut parent,
+            pending.frame_id,
+            0,
+            &pending.url,
+            &pending.html,
+        )
+        .unwrap();
+        assert!(
+            frame.external_script_urls(&mut parent).is_empty(),
+            "author script discovery must use the actual frame DOM"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -671,22 +818,45 @@ mod tests {
         let frame = FrameRealm::new(&mut parent, 1, 0, "https://child.example/",
             "<html><head><style>body{margin:0}div{width:50vw;height:25vh}</style></head><body><div id='box'></div></body></html>").unwrap();
         frame.set_viewport(&mut parent, 300.0, 80.0).unwrap();
-        assert_eq!(frame.evaluate(&mut parent, r#"(() => {
+        assert_eq!(
+            frame
+                .evaluate(
+                    &mut parent,
+                    r#"(() => {
             const r = document.getElementById('box').getBoundingClientRect();
             globalThis.savedStyle = getComputedStyle(document.getElementById('box'));
             return [r.width, r.height, savedStyle.width, savedStyle.height];
-        })()"#).unwrap(), serde_json::json!([150, 20, "150px", "20px"]));
+        })()"#
+                )
+                .unwrap(),
+            serde_json::json!([150, 20, "150px", "20px"])
+        );
         frame.set_viewport(&mut parent, 200.0, 120.0).unwrap();
-        assert_eq!(frame.evaluate(&mut parent, r#"(() => {
+        assert_eq!(
+            frame
+                .evaluate(
+                    &mut parent,
+                    r#"(() => {
             const r = document.getElementById('box').getBoundingClientRect();
             const fresh = getComputedStyle(document.getElementById('box'));
             return [r.width, r.height, savedStyle.width, savedStyle.height,
                 fresh.width, fresh.height];
-        })()"#).unwrap(), serde_json::json!([100, 30, "100px", "30px", "100px", "30px"]));
-        assert_eq!(parent.evaluate(r#"(() => {
+        })()"#
+                )
+                .unwrap(),
+            serde_json::json!([100, 30, "100px", "30px", "100px", "30px"])
+        );
+        assert_eq!(
+            parent
+                .evaluate(
+                    r#"(() => {
             const r = document.getElementById('page').getBoundingClientRect();
             return [r.width, r.height];
-        })()"#).unwrap(), serde_json::json!([1280, 720]));
+        })()"#
+                )
+                .unwrap(),
+            serde_json::json!([1280, 720])
+        );
     }
 
     /// A frame must not look like a different browser than its parent. Anti-bot
@@ -805,10 +975,7 @@ mod tests {
 
         assert_eq!(
             frame
-                .evaluate(
-                    &mut parent,
-                    "document.getElementById('result').textContent",
-                )
+                .evaluate(&mut parent, "document.getElementById('result').textContent",)
                 .unwrap(),
             serde_json::json!("https://child.example"),
         );
@@ -861,7 +1028,9 @@ mod tests {
         );
 
         assert_eq!(
-            parent.evaluate("document.body.getAttribute('data-owner')").unwrap(),
+            parent
+                .evaluate("document.body.getAttribute('data-owner')")
+                .unwrap(),
             serde_json::json!("parent"),
         );
         assert_eq!(
@@ -901,9 +1070,18 @@ mod tests {
     #[test]
     fn frame_navigation_timing_records_its_own_event_boundaries() {
         let mut parent = page("https://parent.example/", "<html><body></body></html>");
-        let frame = FrameRealm::new(&mut parent, 1, 0, "https://parent.example/frame",
-            "<html><body></body></html>").unwrap();
-        frame.execute_script(&mut parent, r#"
+        let frame = FrameRealm::new(
+            &mut parent,
+            1,
+            0,
+            "https://parent.example/frame",
+            "<html><body></body></html>",
+        )
+        .unwrap();
+        frame
+            .execute_script(
+                &mut parent,
+                r#"
             globalThis.samples = [];
             function sample() {
                 samples.push([performance.timing.domContentLoadedEventStart,
@@ -913,30 +1091,70 @@ mod tests {
             document.addEventListener('DOMContentLoaded', sample);
             window.addEventListener('load', sample);
             Date.now = () => 0;
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         frame.dispatch_load_events(&mut parent).unwrap();
-        assert_eq!(frame.evaluate(&mut parent, r#"(() => {
+        assert_eq!(
+            frame
+                .evaluate(
+                    &mut parent,
+                    r#"(() => {
             const [dom, load] = samples;
             return [dom[0] > 0 && dom[1] === 0, load[2] > 0 && load[3] === 0,
                 performance.timing.domContentLoadedEventEnd >= dom[0],
                 performance.timing.loadEventEnd >= load[2]];
-        })()"#).unwrap(), serde_json::json!([true, true, true, true]));
-        assert_eq!(parent.evaluate("performance.timing.loadEventEnd").unwrap().as_f64(), Some(0.0));
+        })()"#
+                )
+                .unwrap(),
+            serde_json::json!([true, true, true, true])
+        );
+        assert_eq!(
+            parent
+                .evaluate("performance.timing.loadEventEnd")
+                .unwrap()
+                .as_f64(),
+            Some(0.0)
+        );
     }
 
     #[test]
     fn frame_navigation_timing_terminated_load_does_not_record_completion() {
         let mut parent = page("https://parent.example/", "<html><body></body></html>");
-        let frame = FrameRealm::new(&mut parent, 1, 0, "https://parent.example/frame",
-            "<html><body></body></html>").unwrap();
-        frame.execute_script(&mut parent,
-            "window.addEventListener('load',()=>{globalThis.entered=true;while(true){}});").unwrap();
+        let frame = FrameRealm::new(
+            &mut parent,
+            1,
+            0,
+            "https://parent.example/frame",
+            "<html><body></body></html>",
+        )
+        .unwrap();
+        frame
+            .execute_script(
+                &mut parent,
+                "window.addEventListener('load',()=>{globalThis.entered=true;while(true){}});",
+            )
+            .unwrap();
         let token = parent.arm_watchdog(std::time::Duration::from_millis(250));
         let result = frame.dispatch_load_events(&mut parent);
         let fired = parent.disarm_watchdog(token);
-        assert!(fired && result.is_err(), "the infinite load handler must be terminated");
-        assert_eq!(frame.evaluate(&mut parent, "globalThis.entered === true").unwrap(), serde_json::json!(true));
-        assert_eq!(frame.evaluate(&mut parent, "performance.timing.loadEventEnd").unwrap().as_f64(), Some(0.0));
+        assert!(
+            fired && result.is_err(),
+            "the infinite load handler must be terminated"
+        );
+        assert_eq!(
+            frame
+                .evaluate(&mut parent, "globalThis.entered === true")
+                .unwrap(),
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            frame
+                .evaluate(&mut parent, "performance.timing.loadEventEnd")
+                .unwrap()
+                .as_f64(),
+            Some(0.0)
+        );
     }
 
     #[test]
@@ -958,9 +1176,7 @@ mod tests {
         )
         .expect("frame realm");
 
-        assert!(frame
-            .run_document_scripts(&mut parent, |_| None)
-            .is_empty());
+        assert!(frame.run_document_scripts(&mut parent, |_| None).is_empty());
         frame
             .dispatch_load_events(&mut parent)
             .expect("frame load events");
@@ -1006,7 +1222,10 @@ mod tests {
             problems.iter().any(|p| p.contains("missing.js")),
             "{problems:?}"
         );
-        assert!(problems.iter().any(|p| p.contains("module")), "{problems:?}");
+        assert!(
+            problems.iter().any(|p| p.contains("module")),
+            "{problems:?}"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1035,7 +1254,10 @@ mod tests {
         // Out-of-order access must be safe: each frame carries its own state.
         for (index, frame) in frames.iter().enumerate().rev() {
             assert_eq!(
-                frame.evaluate(&mut parent, "globalThis.n").unwrap().as_f64(),
+                frame
+                    .evaluate(&mut parent, "globalThis.n")
+                    .unwrap()
+                    .as_f64(),
                 Some(index as f64)
             );
             assert_eq!(
@@ -1106,11 +1328,16 @@ mod tests {
         )
         .expect("frame realm");
         frame
-            .execute_script(&mut parent, "setTimeout(() => { globalThis.fired = 1; }, 50);")
+            .execute_script(
+                &mut parent,
+                "setTimeout(() => { globalThis.fired = 1; }, 50);",
+            )
             .unwrap();
         parent.run_event_loop_bounded(300).await.unwrap();
         assert_eq!(
-            frame.evaluate(&mut parent, "globalThis.fired || 0").unwrap(),
+            frame
+                .evaluate(&mut parent, "globalThis.fired || 0")
+                .unwrap(),
             serde_json::json!(1),
             "the frame's timer callback never ran"
         );
@@ -1357,15 +1584,33 @@ mod tests {
 
         // Explicit matching origin -> delivered (the case that must not break).
         child
-            .deliver_message(&mut parent, "{\"v\":\"m1\"}", "https://parent.example", 0, "https://parent.example")
+            .deliver_message(
+                &mut parent,
+                "{\"v\":\"m1\"}",
+                "https://parent.example",
+                0,
+                "https://parent.example",
+            )
             .unwrap();
         // Wildcard -> always delivered.
         child
-            .deliver_message(&mut parent, "{\"v\":\"m2\"}", "https://parent.example", 0, "*")
+            .deliver_message(
+                &mut parent,
+                "{\"v\":\"m2\"}",
+                "https://parent.example",
+                0,
+                "*",
+            )
             .unwrap();
         // Explicit non-matching origin -> dropped.
         child
-            .deliver_message(&mut parent, "{\"v\":\"m3\"}", "https://parent.example", 0, "https://evil.example")
+            .deliver_message(
+                &mut parent,
+                "{\"v\":\"m3\"}",
+                "https://parent.example",
+                0,
+                "https://evil.example",
+            )
             .unwrap();
 
         assert_eq!(
@@ -1392,7 +1637,13 @@ mod tests {
             )
             .unwrap();
         blank
-            .deliver_message(&mut parent, "{\"v\":\"w\"}", "https://parent.example", 0, "*")
+            .deliver_message(
+                &mut parent,
+                "{\"v\":\"w\"}",
+                "https://parent.example",
+                0,
+                "*",
+            )
             .unwrap();
         assert_eq!(
             blank.evaluate(&mut parent, "globalThis.got").unwrap(),
@@ -1422,7 +1673,9 @@ mod tests {
         );
         // The page itself really is the top and must still say so.
         assert_eq!(
-            parent.evaluate("[parent === window, top === window]").unwrap(),
+            parent
+                .evaluate("[parent === window, top === window]")
+                .unwrap(),
             serde_json::json!([true, true]),
         );
     }
@@ -1548,7 +1801,9 @@ mod tests {
         );
         assert_eq!(
             parent
-                .evaluate("globalThis.__obscura_frameObjects[1].document.querySelector('p').textContent")
+                .evaluate(
+                    "globalThis.__obscura_frameObjects[1].document.querySelector('p').textContent"
+                )
                 .unwrap(),
             serde_json::json!("child"),
         );
@@ -1630,7 +1885,8 @@ mod tests {
             serde_json::json!(true)
         );
         assert_eq!(
-            rt.evaluate("document.getElementById('f').files.length").unwrap(),
+            rt.evaluate("document.getElementById('f').files.length")
+                .unwrap(),
             serde_json::json!(0.0)
         );
         assert_eq!(
@@ -1645,7 +1901,9 @@ mod tests {
             "https://example.com/",
             "<html><body><input type=file id=f multiple></body></html>",
         );
-        let result = rt.evaluate(r#"(() => {
+        let result = rt
+            .evaluate(
+                r#"(() => {
             const input = document.getElementById('f');
             const empty = [...input.files].length;
             __obscura_setInputFiles(input, [
@@ -1663,13 +1921,18 @@ mod tests {
                 sameFile: [...files][0] === files.item(0),
                 iterableIterator: iterator[Symbol.iterator]() === iterator
             };
-        })()"#).unwrap();
-        assert_eq!(result, serde_json::json!({
-            "empty": 0,
-            "spread": ["first.txt", "second.txt"],
-            "names": ["first.txt", "second.txt"],
-            "sameFile": true,
-            "iterableIterator": true
-        }));
+        })()"#,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!({
+                "empty": 0,
+                "spread": ["first.txt", "second.txt"],
+                "names": ["first.txt", "second.txt"],
+                "sameFile": true,
+                "iterableIterator": true
+            })
+        );
     }
 }

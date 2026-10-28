@@ -1,3 +1,6 @@
+// Upstream Obscura code: style, complexity and perf lints stay as upstream wrote it,
+// so merges from upstream stay small. Correctness and suspicious lints still fail.
+#![allow(clippy::style, clippy::complexity, clippy::perf, dead_code)]
 use std::env;
 
 fn env_value(name: &str) -> Option<String> {
