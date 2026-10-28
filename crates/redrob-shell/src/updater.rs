@@ -50,9 +50,12 @@ pub fn check() -> anyhow::Result<Option<Available>> {
         return Ok(None);
     }
     let wanted = format!("redrob-browser-{}-", platform());
+    // A platform ships an archive and an installer (.dmg, .msi); updating
+    // in place needs the archive, so pick it by extension, not by order.
+    let archive = if cfg!(target_os = "linux") { ".tar.gz" } else { ".zip" };
     let assets = || release["assets"].as_array().into_iter().flatten();
     let url = assets()
-        .filter(|a| a["name"].as_str().is_some_and(|n| n.starts_with(&wanted)))
+        .filter(|a| a["name"].as_str().is_some_and(|n| n.starts_with(&wanted) && n.ends_with(archive)))
         .filter_map(|a| a["browser_download_url"].as_str())
         .find(|u| u.starts_with(DOWNLOAD_PREFIX))
         .map(str::to_string);
