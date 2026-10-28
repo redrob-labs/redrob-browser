@@ -836,11 +836,13 @@ pub async fn dispatch(req: &CdpRequest, ctx: &mut CdpContext) -> CdpResponse {
                 None => Err("No JavaScript runtime".to_string()),
             }
         }
+        "CSS" => domains::css::handle(method, &req.params, ctx, &req.session_id).await,
+        "Overlay" => domains::overlay::handle(method, &req.params, ctx, &req.session_id).await,
         // Accepted but no-op. Puppeteer's FrameManager.initialize calls
         // Audits.enable on connect — refusing it breaks puppeteer.connect()
         // before any user code runs.
-        "Log" | "Performance" | "Security" | "CSS" | "ServiceWorker" | "Inspector" | "Debugger"
-        | "Profiler" | "HeapProfiler" | "Overlay" | "Audits" => Ok(json!({})),
+        "Log" | "Performance" | "Security" | "ServiceWorker" | "Inspector" | "Debugger"
+        | "Profiler" | "HeapProfiler" | "Audits" => Ok(json!({})),
         _ => Err(format!("Unknown domain: {}", domain)),
     };
 

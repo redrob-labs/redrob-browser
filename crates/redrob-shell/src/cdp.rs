@@ -95,6 +95,13 @@ pub enum Op {
     Evaluate(String),
     /// Send the whole document tree for the Elements panel.
     GetDom,
+    /// Computed and inline style of a node, for the Elements panel.
+    NodeStyles(i64),
+    /// Highlight a node on the page (Overlay.highlightNode), or clear it.
+    Highlight(Option<i64>),
+    /// Pick mode: the element at this page point; `commit` selects it,
+    /// otherwise it is only highlighted.
+    PickAt { x: f32, y: f32, commit: bool },
     /// Tell the page's media element `id` how playback is going.
     MediaReport { id: u64, status: crate::media::Status },
     /// Ask where these media elements are on screen.
@@ -131,6 +138,11 @@ pub enum Event {
     NetRequest { id: String, method: String, url: String },
     NetResponse { id: String, status: u16, mime: String },
     Dom(Value),
+    Styles(crate::devtools::Styles),
+    /// Overlay.redrobHighlight: a box model to draw over the page, or null.
+    Highlight(Value),
+    /// The element a pick click landed on.
+    Picked(i64),
     /// A media element asked for something: {op, id, src, currentTime, volume, muted, controls, loop, video}.
     Media(Value),
     /// Viewport rectangles (CSS pixels) of media elements; None when not rendered.
@@ -452,6 +464,27 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
             let d = st.c.call(s, "DOM.getDocument", json!({ "depth": -1, "pierce": false })).await?;
             st.emit(tab, Event::Dom(d["root"].clone()));
         }
+        Op::NodeStyles(node) => {
+            let computed = st.c.call(s, "CSS.getComputedStyleForNode", json!({ "nodeId": node })).await?;
+            let matched = st.c.call(s, "CSS.getMatchedStylesForNode", json!({ "nodeId": node })).await?;
+            st.emit(tab, Event::Styles(crate::devtools::Styles::from_cdp(node, &computed, &matched)));
+        }
+        Op::Highlight(Some(node)) => st.c.send(s, "Overlay.highlightNode", json!({ "nodeId": node, "highlightConfig": {} })),
+        Op::Highlight(None) => st.c.send(s, "Overlay.hideHighlight", json!({})),
+        Op::PickAt { x, y, commit } => {
+            let hit = st.c.call(s, "DOM.getNodeForLocation", json!({ "x": x, "y": y })).await;
+            let node = hit.ok().and_then(|h| h["backendNodeId"].as_i64());
+            match (commit, node) {
+                (false, Some(n)) => st.c.send(s, "Overlay.highlightNode", json!({ "nodeId": n, "highlightConfig": {} })),
+                (false, None) => st.c.send(s, "Overlay.hideHighlight", json!({})),
+                (true, _) => {
+                    st.c.send(s, "Overlay.hideHighlight", json!({}));
+                    if let Some(n) = node {
+                        st.emit(tab, Event::Picked(n));
+                    }
+                }
+            }
+        }
         Op::MediaReport { id, status } => {
             let s_json = json!({
                 "currentTime": status.current_time,
@@ -628,6 +661,7 @@ async fn on_event(st: &mut State, ev: Value) {
                 },
             );
         }
+        "Overlay.redrobHighlight" => st.emit(tab, Event::Highlight(p["model"].clone())),
         "Page.navigatedWithinDocument" => {
             if let Some(url) = p["url"].as_str() {
                 st.emit(tab, Event::UrlChanged(url.to_string()));

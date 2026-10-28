@@ -8,7 +8,7 @@ use crate::dispatch::CdpContext;
 /// and `objectId` in that order. Playwright commonly passes only `objectId`
 /// (returned by a prior `DOM.resolveNode`); without this fallback those
 /// requests silently default to node 0 and click the wrong element.
-fn resolve_node_id(page: &mut Page, params: &Value) -> Result<u64, String> {
+pub(crate) fn resolve_node_id(page: &mut Page, params: &Value) -> Result<u64, String> {
     if let Some(nid) = params.get("nodeId").and_then(|v| v.as_u64()) {
         return Ok(nid);
     }
@@ -301,37 +301,66 @@ pub async fn handle(
                 Ok(nid) => nid,
                 Err(_) => return Ok(json!(null)),
             };
+            // The border box from getBoundingClientRect, then the border,
+            // padding and margin widths from the computed style, so the four
+            // boxes differ the way Chrome's do.
             let code = format!(
                 "(function() {{\
                     var el = globalThis._wrap && globalThis._wrap({0});\
                     if (!el || typeof el.getBoundingClientRect !== 'function') return null;\
                     var r = el.getBoundingClientRect();\
-                    return [r.left, r.top, r.right, r.top, r.right, r.bottom, r.left, r.bottom,\
-                            r.width, r.height];\
+                    var s = null; try {{ s = getComputedStyle(el); }} catch (e) {{}}\
+                    var f = function(p) {{ if (!s) return 0; var v = parseFloat(s.getPropertyValue(p)); return isFinite(v) ? v : 0; }};\
+                    return [r.left, r.top, r.right, r.bottom, r.width, r.height,\
+                            f('border-top-width'), f('border-right-width'), f('border-bottom-width'), f('border-left-width'),\
+                            f('padding-top'), f('padding-right'), f('padding-bottom'), f('padding-left'),\
+                            f('margin-top'), f('margin-right'), f('margin-bottom'), f('margin-left')];\
                 }})()",
                 node_id
             );
             let val = page.evaluate(&code);
-            let (quad, w, h) = if let Some(arr) = val.as_array() {
-                let nums: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
-                if nums.len() >= 10 {
-                    let q: Vec<Value> = nums[..8].iter().map(|n| coord_value(*n)).collect();
-                    (q, nums[8], nums[9])
-                } else {
-                    (vec![json!(8),json!(8),json!(108),json!(8),json!(108),json!(28),json!(8),json!(28)], 100.0, 20.0)
-                }
-            } else {
-                (vec![json!(8),json!(8),json!(108),json!(8),json!(108),json!(28),json!(8),json!(28)], 100.0, 20.0)
-            };
+            let nums: Vec<f64> = val
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+                .unwrap_or_default();
+            if nums.len() < 18 {
+                let quad = vec![json!(8),json!(8),json!(108),json!(8),json!(108),json!(28),json!(8),json!(28)];
+                return Ok(json!({
+                    "model": {
+                        "content": quad.clone(), "padding": quad.clone(), "border": quad.clone(), "margin": quad,
+                        "width": 100, "height": 20,
+                    }
+                }));
+            }
+            let border = [nums[0], nums[1], nums[2], nums[3]];
+            let padding = inset(border, [nums[6], nums[7], nums[8], nums[9]]);
+            let content = inset(padding, [nums[10], nums[11], nums[12], nums[13]]);
+            let margin = inset(border, [-nums[14], -nums[15], -nums[16], -nums[17]]);
             Ok(json!({
                 "model": {
-                    "content": quad.clone(),
-                    "padding": quad.clone(),
-                    "border": quad.clone(),
-                    "margin": quad,
-                    "width": coord_value(w), "height": coord_value(h),
+                    "content": rect_quad(content),
+                    "padding": rect_quad(padding),
+                    "border": rect_quad(border),
+                    "margin": rect_quad(margin),
+                    "width": coord_value(nums[4]), "height": coord_value(nums[5]),
                 }
             }))
+        }
+        "getNodeForLocation" => {
+            // Hit test at viewport CSS pixels, as the page's own
+            // document.elementFromPoint sees it.
+            let x = params.get("x").and_then(|v| v.as_f64()).ok_or("x required")?;
+            let y = params.get("y").and_then(|v| v.as_f64()).ok_or("y required")?;
+            let page = ctx.get_session_page_mut(session_id).ok_or("No page")?;
+            let code = format!(
+                "(function() {{ var e = document.elementFromPoint({x}, {y}); \
+                 return (e && typeof e._nid === 'number') ? e._nid : -1; }})()"
+            );
+            let nid = page.evaluate(&code).as_f64().map(|n| n as i64).unwrap_or(-1);
+            if nid < 0 {
+                return Err("No node found at given location".to_string());
+            }
+            Ok(json!({ "backendNodeId": nid, "nodeId": nid, "frameId": page.frame_id }))
         }
         "getContentQuads" => {
             let page = ctx.get_session_page_mut(session_id).ok_or("No page")?;
@@ -360,6 +389,21 @@ pub async fn handle(
         }
         _ => Err(format!("Unknown DOM method: {}", method)),
     }
+}
+
+/// Shrink a [left, top, right, bottom] box by [top, right, bottom, left]
+/// widths (negative widths grow it). A box never turns inside out.
+fn inset(b: [f64; 4], w: [f64; 4]) -> [f64; 4] {
+    let left = b[0] + w[3];
+    let top = b[1] + w[0];
+    let right = (b[2] - w[1]).max(left);
+    let bottom = (b[3] - w[2]).max(top);
+    [left, top, right, bottom]
+}
+
+/// A [left, top, right, bottom] box as a CDP quad, clockwise from top-left.
+fn rect_quad(b: [f64; 4]) -> Vec<Value> {
+    [b[0], b[1], b[2], b[1], b[2], b[3], b[0], b[3]].iter().map(|n| coord_value(*n)).collect()
 }
 
 /// Serialize a CDP box-model coordinate the way Chrome does: an integral double

@@ -391,6 +391,9 @@ impl Window {
                 Event::NetRequest { id, method, url } => t.devtools.request(id, method, url),
                 Event::NetResponse { id, status, mime } => t.devtools.response(&id, status, mime),
                 Event::Dom(root) => t.devtools.dom = Some(root),
+                Event::Styles(styles) => t.devtools.set_styles(styles),
+                Event::Highlight(model) => t.devtools.set_highlight(model),
+                Event::Picked(node) => t.devtools.picked(node),
                 Event::Navigated(url) => {
                     self.media.drop_tab(tab);
                     self.drm.clear(tab);
@@ -803,8 +806,15 @@ impl Window {
         if act.refresh_dom {
             self.op(id, Op::GetDom);
         }
+        if let Some(node) = act.styles_for {
+            self.op(id, Op::NodeStyles(node));
+        }
+        if let Some(node) = act.highlight {
+            self.op(id, Op::Highlight(node));
+        }
         if act.close {
             self.show_devtools = false;
+            self.op(id, Op::Highlight(None));
         }
     }
 
@@ -1216,16 +1226,22 @@ impl eframe::App for Window {
                 }
             }
 
+            if let Some(model) = &self.model.tabs[tab_index].devtools.highlight {
+                devtools::paint_highlight(ui.painter(), rect, model);
+            }
+
             if response.clicked() || response.drag_started() {
                 response.request_focus();
                 self.editing = false;
             }
             let focused = response.has_focus();
             if response.hovered() || focused || response.is_pointer_button_down_on() {
-                let events = ui.input(|i| i.events.clone());
+                let mut events = ui.input(|i| i.events.clone());
                 let hover = ui.input(|i| i.pointer.hover_pos());
-                let (ops, wheel) = input::page_ops(&events, hover, rect, focused);
                 let t = &mut self.model.tabs[tab_index];
+                let mut ops = devtools::pick_input(&mut t.devtools, &mut events, rect, self.show_devtools);
+                let (page, wheel) = input::page_ops(&events, hover, rect, focused);
+                ops.extend(page);
                 if wheel != (0.0, 0.0) {
                     // Move the tiles now; the page's reply corrects this if an
                     // inner box took the scroll instead of the document.
