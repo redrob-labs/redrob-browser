@@ -19,6 +19,7 @@ mod media_view;
 mod model;
 mod profile;
 mod relay;
+mod self_update;
 mod tiles;
 mod updater;
 mod vault;
@@ -124,6 +125,7 @@ fn main() -> anyhow::Result<()> {
                 account_rx,
                 update_rx,
                 update: None,
+                self_update: Default::default(),
                 login_rx,
                 agent_logins: Default::default(),
                 notice: None,
@@ -151,6 +153,7 @@ fn main() -> anyhow::Result<()> {
     );
     let _ = std::fs::remove_file(&endpoint_file);
     drop(engine);
+    self_update::restart_if_requested();
     result.map_err(|e| anyhow::anyhow!("{e}"))
 }
 
@@ -213,6 +216,7 @@ struct Window {
     /// Agent sign-ins waiting for the page's fill result, by tab.
     agent_logins: std::collections::HashMap<TabId, (String, tokio::sync::oneshot::Sender<serde_json::Value>)>,
     update: Option<updater::Available>,
+    self_update: self_update::SelfUpdate,
     /// A one-line result shown under the toolbar, such as an import summary.
     notice: Option<String>,
     /// Address field text; follows the active tab's URL unless the person is typing.
@@ -1060,7 +1064,11 @@ impl eframe::App for Window {
             self.agent_login(req);
         }
         if let Ok(a) = self.update_rx.try_recv() {
+            self.self_update.offered(&a, self.profile.as_ref().map(|p| p.dir.clone()));
             self.update = Some(a);
+        }
+        if let Some(n) = self.self_update.poll() {
+            self.notice = Some(n);
         }
         while let Ok(msg) = self.account_rx.try_recv() {
             match msg {
@@ -1095,8 +1103,24 @@ impl eframe::App for Window {
             }
             if let Some((version, url)) = self.update.as_ref().map(|u| (u.version.clone(), u.url.clone())) {
                 ui.horizontal(|ui| {
+                    if self.self_update.ready() {
+                        ui.label(tf("Redrob Browser {0} is ready.", &[&version]));
+                        if ui.small_button(t("Restart to update")).clicked() {
+                            self.save_session();
+                            self.self_update.restart();
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        return;
+                    }
                     ui.label(tf("Redrob Browser {0} is available.", &[&version]));
-                    if ui.small_button(t("Download")).clicked() {
+                    if self.self_update.busy() {
+                        return;
+                    }
+                    if self.self_update.can_start() {
+                        if ui.small_button(t("Update now")).clicked() {
+                            self.self_update.start(ctx.clone());
+                        }
+                    } else if ui.small_button(t("Download")).clicked() {
                         self.open_tab(&url, true);
                         self.update = None;
                     }

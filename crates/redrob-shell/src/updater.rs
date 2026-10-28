@@ -4,19 +4,24 @@
 //!
 //! There is no separate update signature: the download comes from GitHub
 //! over HTTPS, and the packages themselves are signed for the OS (Developer
-//! ID and notarization on macOS, Authenticode on Windows), which the OS checks
-//! when the person opens them. Only asset URLs under this repository's
-//! releases are offered.
+//! ID and notarization on macOS, Authenticode on Windows). Only asset URLs
+//! under this repository's releases are offered. `self_update` installs the
+//! package in place after checking it against the release's `SHA256SUMS.txt`.
 
 use std::time::Duration;
 
 const LATEST: &str = "https://api.github.com/repos/redrob-labs/redrob-browser/releases/latest";
-const DOWNLOAD_PREFIX: &str = "https://github.com/redrob-labs/redrob-browser/releases/download/";
+pub const DOWNLOAD_PREFIX: &str = "https://github.com/redrob-labs/redrob-browser/releases/download/";
+/// Written over every asset by the org `release-publish.yml` workflow.
+const SUMS_NAME: &str = "SHA256SUMS.txt";
 pub const CHECK_EVERY_SECS: u64 = 24 * 60 * 60;
 
+#[derive(Clone)]
 pub struct Available {
     pub version: String,
     pub url: String,
+    /// The release's `SHA256SUMS.txt`, when it has one.
+    pub sums: Option<String>,
 }
 
 /// The part of the asset name that names this platform.
@@ -45,15 +50,18 @@ pub fn check() -> anyhow::Result<Option<Available>> {
         return Ok(None);
     }
     let wanted = format!("redrob-browser-{}-", platform());
-    let url = release["assets"]
-        .as_array()
-        .into_iter()
-        .flatten()
+    let assets = || release["assets"].as_array().into_iter().flatten();
+    let url = assets()
         .filter(|a| a["name"].as_str().is_some_and(|n| n.starts_with(&wanted)))
         .filter_map(|a| a["browser_download_url"].as_str())
         .find(|u| u.starts_with(DOWNLOAD_PREFIX))
         .map(str::to_string);
-    Ok(url.map(|url| Available { version, url }))
+    let sums = assets()
+        .filter(|a| a["name"].as_str() == Some(SUMS_NAME))
+        .filter_map(|a| a["browser_download_url"].as_str())
+        .find(|u| u.starts_with(DOWNLOAD_PREFIX))
+        .map(str::to_string);
+    Ok(url.map(|url| Available { version, url, sums }))
 }
 
 /// Dotted-number comparison; a pre-release suffix (`-rc.1`) is never newer
