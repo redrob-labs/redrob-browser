@@ -1093,6 +1093,16 @@ fn determine_container_main_size(
                                 pref.min(max).max(min) + item.margin.main_axis_sum(constants.dir)
                             }
                             (min, _, max) if max <= min => min + item.margin.main_axis_sum(constants.dir),
+                            // A definite preferred size is the item's min- and max-content
+                            // contribution (css-sizing-3 §5.1); its content does not enlarge it.
+                            // Chrome and Firefox size a max-content flex container around a
+                            // `flex:1; flex-basis:0; width:40px` item at 40px, not at its content
+                            // (YouTube's 40px icon buttons inside inline-block renderers).
+                            (min, Some(pref), max) => {
+                                let edges = item.padding.main_axis_sum(constants.dir)
+                                    + item.border.main_axis_sum(constants.dir);
+                                pref.min(max).max(min).max(edges) + item.margin.main_axis_sum(constants.dir)
+                            }
 
                             // Else compute the min- or -max content size and apply the full formula for computing the
                             // min- or max- content contribution
