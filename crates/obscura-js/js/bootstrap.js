@@ -75,6 +75,8 @@ const __obscuraCore = globalThis.Deno.core;
     'Scheduler',
     'XMLHttpRequestEventTarget', 'HTMLMediaElement', 'HTMLVideoElement',
     'HTMLAudioElement', 'WebGL2RenderingContext',
+    'MediaKeys', 'MediaKeySession', 'MediaKeySystemAccess', 'MediaKeyStatusMap',
+    'MediaKeyMessageEvent', 'MediaEncryptedEvent',
     'SVGElement', 'SVGGraphicsElement', 'SVGGeometryElement', 'SVGPathElement',
     'MutationRecord', 'CSSConditionRule', 'CSSMediaRule', 'CSSSupportsRule',
     'IntersectionObserverEntry', 'XMLDocument',
@@ -19010,6 +19012,414 @@ if (typeof Response !== 'undefined' && Response.prototype && !Response.prototype
       } catch (e) {}
     }
   }
+})();
+
+// Encrypted Media Extensions (docs/DRM.md). Only the W3C Clear Key system
+// is offered: its licence is a JSON key set the page hands to
+// session.update(), so the API can be real without a vendor CDM. Nothing is
+// decrypted here yet; each session records its keys for the media pipeline.
+// Any other key system (Widevine, PlayReady, FairPlay) rejects with
+// NotSupportedError and tells the window once per page through the
+// `redrobDrm` binding, so it can offer a window whose web view has that CDM.
+(function _installEme() {
+  const CLEAR_KEY = 'org.w3.clearkey';
+  const INIT_DATA_TYPES = ['cenc', 'keyids', 'webm'];
+  // Common PSSH system id (W3C "cenc" format), the one Clear Key reads.
+  const COMMON_PSSH = '1077efecc0b24d02ace33c1e52e2fb4b';
+  let drmReported = false;
+
+  const reportDrm = (keySystem) => {
+    if (drmReported || typeof globalThis.redrobDrm !== 'function') return;
+    drmReported = true;
+    try {
+      globalThis.redrobDrm(JSON.stringify({ keySystem, url: String(globalThis.location && globalThis.location.href || '') }));
+    } catch (_e) {}
+  };
+
+  const isProtectedSystem = (ks) =>
+    ks === 'com.widevine.alpha' || ks.startsWith('com.microsoft.playready') || ks.startsWith('com.apple.fps')
+    || ks === 'com.youtube.playready' || ks === 'com.chromecast.playready';
+
+  const bytesOf = (src) => {
+    if (src instanceof ArrayBuffer) return new Uint8Array(src.slice(0));
+    if (ArrayBuffer.isView(src)) return new Uint8Array(src.buffer.slice(src.byteOffset, src.byteOffset + src.byteLength));
+    return null;
+  };
+  const hex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  const toB64url = (b) => {
+    let s = '';
+    for (let i = 0; i < b.length; i += 3) {
+      const n = (b[i] << 16) | ((b[i + 1] || 0) << 8) | (b[i + 2] || 0);
+      s += B64[(n >> 18) & 63] + B64[(n >> 12) & 63];
+      if (i + 1 < b.length) s += B64[(n >> 6) & 63];
+      if (i + 2 < b.length) s += B64[n & 63];
+    }
+    return s;
+  };
+  const fromB64url = (s) => {
+    if (typeof s !== 'string' || !/^[A-Za-z0-9_\-+/]*=*$/.test(s)) return null;
+    s = s.replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+    if (s.length % 4 === 1) return null;
+    const out = [];
+    let bits = 0, acc = 0;
+    for (const ch of s) {
+      acc = (acc << 6) | B64.indexOf(ch);
+      bits += 6;
+      if (bits >= 8) { bits -= 8; out.push((acc >> bits) & 255); }
+    }
+    return new Uint8Array(out);
+  };
+  const utf8 = (s) => new TextEncoder().encode(s);
+  const fromUtf8 = (b) => { try { return new TextDecoder('utf-8', { fatal: true }).decode(b); } catch (_e) { return null; } };
+  const later = (fn) => setTimeout(fn, 0);
+
+  // Key ids from Clear Key init data, or null when it cannot be read.
+  const keyIdsFrom = (type, data) => {
+    if (type === 'keyids') {
+      const text = fromUtf8(data);
+      let j;
+      try { j = JSON.parse(text); } catch (_e) { return null; }
+      if (!j || !Array.isArray(j.kids) || !j.kids.length) return null;
+      const ids = j.kids.map(fromB64url);
+      return ids.every((k) => k && k.length > 0 && k.length <= 512) ? ids : null;
+    }
+    if (type === 'webm') return data.length > 0 && data.length <= 512 ? [data] : null;
+    if (type === 'cenc') {
+      const ids = [];
+      const v = new DataView(data.buffer, data.byteOffset, data.byteLength);
+      let off = 0;
+      while (off + 32 <= data.length) {
+        const size = v.getUint32(off);
+        if (size < 32 || off + size > data.length) return null;
+        const type4 = String.fromCharCode(data[off + 4], data[off + 5], data[off + 6], data[off + 7]);
+        const version = data[off + 8];
+        const system = hex(data.subarray(off + 12, off + 28));
+        if (type4 === 'pssh' && version >= 1 && system === COMMON_PSSH && off + 32 <= off + size) {
+          const count = v.getUint32(off + 28);
+          if (off + 32 + count * 16 > off + size) return null;
+          for (let i = 0; i < count; i++) ids.push(data.slice(off + 32 + i * 16, off + 48 + i * 16));
+        }
+        off += size;
+      }
+      return off === data.length && ids.length ? ids : null;
+    }
+    return null;
+  };
+
+  class MediaKeyMessageEvent extends Event {
+    constructor(type, init) {
+      super(type, init);
+      if (!init || !(init.message instanceof ArrayBuffer)) {
+        throw new TypeError("Failed to construct 'MediaKeyMessageEvent': required member message is undefined.");
+      }
+      Object.defineProperties(this, {
+        messageType: { value: String(init.messageType || 'license-request'), enumerable: true },
+        message: { value: init.message, enumerable: true },
+      });
+    }
+  }
+
+  class MediaEncryptedEvent extends Event {
+    constructor(type, init = {}) {
+      super(type, init);
+      Object.defineProperties(this, {
+        initDataType: { value: String(init.initDataType || ''), enumerable: true },
+        initData: { value: init.initData instanceof ArrayBuffer ? init.initData : null, enumerable: true },
+      });
+    }
+  }
+
+  const statusState = new WeakMap();
+  class MediaKeyStatusMap {
+    constructor() { throw new TypeError('Illegal constructor'); }
+    get size() { return statusState.get(this).length; }
+    has(keyId) { return this.get(keyId) !== undefined; }
+    get(keyId) {
+      const b = bytesOf(keyId);
+      if (!b) throw new TypeError("Failed to execute 'get' on 'MediaKeyStatusMap': parameter 1 is not of type 'ArrayBuffer' or 'ArrayBufferView'.");
+      const h = hex(b);
+      const e = statusState.get(this).find((x) => x[2] === h);
+      return e ? e[1] : undefined;
+    }
+    forEach(cb, thisArg) {
+      for (const [id, status] of statusState.get(this)) cb.call(thisArg, status, id.buffer.slice(0), this);
+    }
+    *entries() { for (const [id, status] of statusState.get(this)) yield [id.buffer.slice(0), status]; }
+    *keys() { for (const [id] of statusState.get(this)) yield id.buffer.slice(0); }
+    *values() { for (const [, status] of statusState.get(this)) yield status; }
+    [Symbol.iterator]() { return this.entries(); }
+    get [Symbol.toStringTag]() { return 'MediaKeyStatusMap'; }
+  }
+  const newStatusMap = () => {
+    const m = Object.create(MediaKeyStatusMap.prototype);
+    statusState.set(m, []);
+    return m;
+  };
+
+  // Per-session state. `keys` maps key id (hex) to the 16-byte content key.
+  const sessionState = new WeakMap();
+  let nextSessionId = Math.floor(Math.random() * 1e6);
+
+  class MediaKeySession {
+    constructor() { throw new TypeError('Illegal constructor'); }
+    get sessionId() { return sessionState.get(this).id; }
+    get expiration() { return NaN; }
+    get closed() { return sessionState.get(this).closedPromise; }
+    get keyStatuses() { return sessionState.get(this).statuses; }
+    _fire(event) {
+      _eventTargetDispatch(this, event);
+      const handler = this['on' + event.type];
+      if (typeof handler === 'function') { try { handler.call(this, event); } catch (e) { console.error(e); } }
+    }
+    _setStatuses(status) {
+      const s = sessionState.get(this);
+      statusState.set(s.statuses, Array.from(s.keys, ([h]) => [s.keyIdBytes.get(h), status, h]));
+      later(() => this._fire(new Event('keystatuseschange')));
+    }
+    generateRequest(initDataType, initData) {
+      const s = sessionState.get(this);
+      if (s.closing) return Promise.reject(new DOMException('The session is already closed.', 'InvalidStateError'));
+      if (s.id) return Promise.reject(new DOMException('The session is already initialized.', 'InvalidStateError'));
+      initDataType = String(initDataType);
+      const data = bytesOf(initData);
+      if (!initDataType || !data || !data.length) {
+        return Promise.reject(new TypeError("Failed to execute 'generateRequest' on 'MediaKeySession': The initData provided is empty."));
+      }
+      if (!INIT_DATA_TYPES.includes(initDataType)) {
+        return Promise.reject(new DOMException('The initialization data type ' + initDataType + ' is not supported.', 'NotSupportedError'));
+      }
+      const ids = keyIdsFrom(initDataType, data);
+      if (!ids) return Promise.reject(new TypeError("Failed to execute 'generateRequest' on 'MediaKeySession': Initialization data is not valid."));
+      s.id = String(++nextSessionId);
+      const request = utf8(JSON.stringify({ kids: ids.map(toB64url), type: s.type }));
+      later(() => this._fire(new MediaKeyMessageEvent('message', { messageType: 'license-request', message: request.buffer })));
+      return Promise.resolve();
+    }
+    load(_sessionId) {
+      const s = sessionState.get(this);
+      if (s.closing) return Promise.reject(new DOMException('The session is already closed.', 'InvalidStateError'));
+      if (s.id) return Promise.reject(new DOMException('The session is already initialized.', 'InvalidStateError'));
+      return Promise.reject(new TypeError("Failed to execute 'load' on 'MediaKeySession': The session type is not persistent."));
+    }
+    update(response) {
+      const s = sessionState.get(this);
+      if (s.closing) return Promise.reject(new DOMException('The session is already closed.', 'InvalidStateError'));
+      if (!s.id) return Promise.reject(new DOMException('The session is not yet initialized.', 'InvalidStateError'));
+      const data = bytesOf(response);
+      if (!data || !data.length) return Promise.reject(new TypeError("Failed to execute 'update' on 'MediaKeySession': The response provided is empty."));
+      let set;
+      try { set = JSON.parse(fromUtf8(data)); } catch (_e) { set = null; }
+      const keys = set && Array.isArray(set.keys) ? set.keys : null;
+      const parsed = keys && keys.length ? keys.map((k) => {
+        if (!k || k.kty !== 'oct') return null;
+        const kid = fromB64url(k.kid), key = fromB64url(k.k);
+        return kid && kid.length && key && key.length === 16 ? [kid, key] : null;
+      }) : null;
+      if (!parsed || parsed.some((p) => !p)) {
+        return Promise.reject(new TypeError("Failed to execute 'update' on 'MediaKeySession': The response is not a valid JSON Web Key Set."));
+      }
+      for (const [kid, key] of parsed) {
+        const h = hex(kid);
+        s.keys.set(h, key);
+        s.keyIdBytes.set(h, kid);
+      }
+      this._setStatuses('usable');
+      return Promise.resolve();
+    }
+    close() {
+      const s = sessionState.get(this);
+      if (s.closing) return s.closedPromise.then(() => undefined);
+      s.closing = true;
+      s.keys.clear();
+      statusState.set(s.statuses, []);
+      s.resolveClosed('closed-by-application');
+      return Promise.resolve();
+    }
+    remove() {
+      const s = sessionState.get(this);
+      if (s.closing) return Promise.reject(new DOMException('The session is already closed.', 'InvalidStateError'));
+      if (!s.id) return Promise.reject(new DOMException('The session is not yet initialized.', 'InvalidStateError'));
+      const released = Array.from(s.keys.keys());
+      s.keys.clear();
+      statusState.set(s.statuses, released.map((h) => [s.keyIdBytes.get(h), 'released', h]));
+      later(() => this._fire(new Event('keystatuseschange')));
+      return Promise.resolve();
+    }
+    addEventListener(type, callback, options) { _eventTargetAdd(this, type, callback, options); }
+    removeEventListener(type, callback, options) { _eventTargetRemove(this, type, callback, options); }
+    dispatchEvent(event) { return _eventTargetDispatch(this, event); }
+    get [Symbol.toStringTag]() { return 'MediaKeySession'; }
+  }
+
+  const keysState = new WeakMap();
+  class MediaKeys {
+    constructor() { throw new TypeError('Illegal constructor'); }
+    createSession(sessionType = 'temporary') {
+      sessionType = String(sessionType);
+      if (sessionType === 'persistent-license') {
+        throw new DOMException('The session type persistent-license is not supported.', 'NotSupportedError');
+      }
+      if (sessionType !== 'temporary') {
+        throw new TypeError("Failed to execute 'createSession' on 'MediaKeys': The provided value '" + sessionType + "' is not a valid enum value of type MediaKeySessionType.");
+      }
+      const session = Object.create(MediaKeySession.prototype);
+      let resolveClosed;
+      const closedPromise = new Promise((r) => { resolveClosed = r; });
+      session.onmessage = null;
+      session.onkeystatuseschange = null;
+      sessionState.set(session, {
+        id: '', type: sessionType, closing: false, closedPromise, resolveClosed,
+        statuses: newStatusMap(), keys: new Map(), keyIdBytes: new Map(), mediaKeys: this,
+      });
+      keysState.get(this).sessions.add(session);
+      return session;
+    }
+    setServerCertificate(cert) {
+      const b = bytesOf(cert);
+      if (!b || !b.length) return Promise.reject(new TypeError("Failed to execute 'setServerCertificate' on 'MediaKeys': The serverCertificate provided is empty."));
+      return Promise.resolve(false);
+    }
+    getStatusForPolicy(_policy) { return Promise.resolve('usable'); }
+    get [Symbol.toStringTag]() { return 'MediaKeys'; }
+  }
+
+  const accessState = new WeakMap();
+  class MediaKeySystemAccess {
+    constructor() { throw new TypeError('Illegal constructor'); }
+    get keySystem() { return accessState.get(this).keySystem; }
+    getConfiguration() { return JSON.parse(JSON.stringify(accessState.get(this).config)); }
+    createMediaKeys() {
+      const mk = Object.create(MediaKeys.prototype);
+      keysState.set(mk, { keySystem: accessState.get(this).keySystem, sessions: new Set(), element: null });
+      return Promise.resolve(mk);
+    }
+    get [Symbol.toStringTag]() { return 'MediaKeySystemAccess'; }
+  }
+
+  const PLAYABLE = /^(video|audio)\/(mp4|webm)\s*(;|$)/i;
+  // The first configuration Clear Key can satisfy, trimmed to what is
+  // supported, or null (EME "Get Supported Configuration").
+  const supportedConfig = (c) => {
+    c = c || {};
+    const initDataTypes = c.initDataTypes === undefined ? [] : Array.from(c.initDataTypes, String);
+    const okInit = initDataTypes.filter((t) => INIT_DATA_TYPES.includes(t));
+    if (initDataTypes.length && !okInit.length) return null;
+    if (c.distinctiveIdentifier === 'required') return null;
+    const sessionTypes = c.sessionTypes === undefined ? ['temporary'] : Array.from(c.sessionTypes, String);
+    if (sessionTypes.some((t) => t !== 'temporary')) return null;
+    const caps = (list) => {
+      if (list === undefined) return { ok: true, value: [] };
+      const arr = Array.from(list);
+      const value = arr.filter((x) => x && PLAYABLE.test(String(x.contentType || ''))).map((x) => ({
+        contentType: String(x.contentType), encryptionScheme: x.encryptionScheme ?? null, robustness: String(x.robustness || ''),
+      }));
+      return { ok: !arr.length || value.length > 0, value };
+    };
+    const video = caps(c.videoCapabilities), audio = caps(c.audioCapabilities);
+    if (!video.ok || !audio.ok) return null;
+    if (!video.value.length && !audio.value.length) return null;
+    return {
+      label: String(c.label || ''),
+      initDataTypes: okInit,
+      audioCapabilities: audio.value,
+      videoCapabilities: video.value,
+      distinctiveIdentifier: 'not-allowed',
+      persistentState: c.persistentState === 'required' ? 'required' : 'optional',
+      sessionTypes: ['temporary'],
+    };
+  };
+
+  function requestMediaKeySystemAccess(keySystem, supportedConfigurations) {
+    if (arguments.length < 2) {
+      return Promise.reject(new TypeError("Failed to execute 'requestMediaKeySystemAccess' on 'Navigator': 2 arguments required, but only " + arguments.length + ' present.'));
+    }
+    keySystem = String(keySystem);
+    if (!keySystem) return Promise.reject(new TypeError("Failed to execute 'requestMediaKeySystemAccess' on 'Navigator': The keySystem parameter is empty."));
+    const configs = supportedConfigurations == null ? [] : Array.from(supportedConfigurations);
+    if (!configs.length) return Promise.reject(new TypeError("Failed to execute 'requestMediaKeySystemAccess' on 'Navigator': The supportedConfigurations parameter is empty."));
+    const unsupported = () => new DOMException('Unsupported keySystem or supportedConfigurations.', 'NotSupportedError');
+    if (keySystem !== CLEAR_KEY) {
+      if (isProtectedSystem(keySystem)) reportDrm(keySystem);
+      return Promise.reject(unsupported());
+    }
+    for (const c of configs) {
+      const config = supportedConfig(c);
+      if (config) {
+        const access = Object.create(MediaKeySystemAccess.prototype);
+        accessState.set(access, { keySystem, config });
+        return Promise.resolve(access);
+      }
+    }
+    return Promise.reject(unsupported());
+  }
+  _markNative(requestMediaKeySystemAccess);
+  Object.defineProperty(Navigator.prototype, 'requestMediaKeySystemAccess', {
+    value: requestMediaKeySystemAccess, writable: true, enumerable: true, configurable: true,
+  });
+
+  // HTMLMediaElement.mediaKeys / setMediaKeys, plus the `encrypted` and
+  // `waitingforkey` handler attributes.
+  const elementKeys = new WeakMap();
+  Object.defineProperty(HTMLMediaElement.prototype, 'mediaKeys', {
+    get() { return elementKeys.get(this) || null; }, enumerable: true, configurable: true,
+  });
+  function setMediaKeys(mediaKeys) {
+    if (mediaKeys !== null && !(mediaKeys instanceof MediaKeys)) {
+      return Promise.reject(new TypeError("Failed to execute 'setMediaKeys' on 'HTMLMediaElement': parameter 1 is not of type 'MediaKeys'."));
+    }
+    const current = elementKeys.get(this) || null;
+    if (current === mediaKeys) return Promise.resolve();
+    if (mediaKeys && keysState.get(mediaKeys).element && keysState.get(mediaKeys).element !== this) {
+      return Promise.reject(new DOMException('The MediaKeys object is already in use by another media element.', 'QuotaExceededError'));
+    }
+    if (current) keysState.get(current).element = null;
+    if (mediaKeys) {
+      keysState.get(mediaKeys).element = this;
+      elementKeys.set(this, mediaKeys);
+    } else {
+      elementKeys.delete(this);
+    }
+    return Promise.resolve();
+  }
+  _markNative(setMediaKeys);
+  Object.defineProperty(HTMLMediaElement.prototype, 'setMediaKeys', {
+    value: setMediaKeys, writable: true, enumerable: true, configurable: true,
+  });
+  for (const name of ['onencrypted', 'onwaitingforkey']) {
+    const slot = new WeakMap();
+    Object.defineProperty(HTMLMediaElement.prototype, name, {
+      get() { return slot.get(this) ?? null; },
+      set(v) { slot.set(this, typeof v === 'function' ? v : null); },
+      enumerable: true, configurable: true,
+    });
+  }
+
+  // The media pipeline calls this when it finds protection init data in a
+  // stream: element `id` (see __redrobMediaElements), the init data type and
+  // the init data in base64. Fires `encrypted` on the element.
+  globalThis.__redrobMediaEncrypted = function (id, initDataType, base64) {
+    const el = globalThis.__redrobMediaElements && globalThis.__redrobMediaElements.get(id);
+    if (!el) return;
+    const bytes = fromB64url(String(base64 || ''));
+    el.dispatchEvent(new MediaEncryptedEvent('encrypted', {
+      initDataType: String(initDataType || ''), initData: bytes ? bytes.buffer : null,
+    }));
+  };
+
+  // Keys a session holds, for the media pipeline once it decrypts:
+  // [{ kid, key }] in hex.
+  globalThis.__redrobClearKeys = function (session) {
+    const s = sessionState.get(session);
+    return s ? Array.from(s.keys, ([kid, key]) => ({ kid, key: hex(key) })) : [];
+  };
+
+  globalThis.MediaKeys = MediaKeys;
+  globalThis.MediaKeySession = MediaKeySession;
+  globalThis.MediaKeySystemAccess = MediaKeySystemAccess;
+  globalThis.MediaKeyStatusMap = MediaKeyStatusMap;
+  globalThis.MediaKeyMessageEvent = MediaKeyMessageEvent;
+  globalThis.MediaEncryptedEvent = MediaEncryptedEvent;
 })();
 
 (function _markBuiltinsNative() {
