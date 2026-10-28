@@ -41,7 +41,10 @@ impl Engine {
                     .into_iter()
                     .flat_map(|d| [std::ffi::OsString::from("--font-dir"), d.into_os_string()]),
             )
-            .stdin(Stdio::null())
+            // The engine exits when this pipe closes, which the OS does when
+            // this process ends for any reason (crash, kill, logout).
+            .arg("--exit-with-stdin")
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .spawn()

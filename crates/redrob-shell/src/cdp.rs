@@ -505,18 +505,18 @@ pub async fn run(
     )
     .await?;
 
+    // Commands taken from the channel early while coalescing pointer moves.
+    let mut backlog: std::collections::VecDeque<Command> = std::collections::VecDeque::new();
     loop {
+        if let Some(cmd) = backlog.pop_front() {
+            run_command(&mut st, cmd, &mut commands, &mut backlog).await;
+            repaint();
+            continue;
+        }
         tokio::select! {
             cmd = commands.recv() => {
                 let Some(cmd) = cmd else { break };
-                match cmd {
-                    Command::Resize { width, height, scale } => resize(&mut st, (width, height, scale)).await,
-                    Command::Tab(tab, op) => {
-                        if let Err(e) = handle(&mut st, tab, op).await {
-                            st.emit(tab, Event::Error(e.to_string()));
-                        }
-                    }
-                }
+                run_command(&mut st, cmd, &mut commands, &mut backlog).await;
                 repaint();
             }
             ev = event_rx.recv() => {
@@ -527,6 +527,59 @@ pub async fn run(
         }
     }
     Ok(())
+}
+
+fn is_move(cmd: &Command, tab: TabId) -> bool {
+    matches!(cmd, Command::Tab(t, Op::Mouse { kind: "mouseMoved", .. }) if *t == tab)
+}
+
+/// Run one command. A pointer move first absorbs the moves queued behind it
+/// for the same tab, so the engine handles only the newest one: a page that
+/// takes hundreds of milliseconds per move otherwise fell seconds behind the
+/// pointer, and clicks waited behind the queue.
+async fn run_command(
+    st: &mut State,
+    mut cmd: Command,
+    commands: &mut tokio::sync::mpsc::UnboundedReceiver<Command>,
+    backlog: &mut std::collections::VecDeque<Command>,
+) {
+    if let Command::Tab(
+        tab,
+        Op::Mouse {
+            kind: "mouseMoved", ..
+        },
+    ) = &cmd
+    {
+        let tab = *tab;
+        while let Some(next) = backlog.front() {
+            if !is_move(next, tab) {
+                break;
+            }
+            cmd = backlog.pop_front().expect("front exists");
+        }
+        if backlog.is_empty() {
+            while let Ok(next) = commands.try_recv() {
+                if is_move(&next, tab) {
+                    cmd = next;
+                } else {
+                    backlog.push_back(next);
+                    break;
+                }
+            }
+        }
+    }
+    match cmd {
+        Command::Resize {
+            width,
+            height,
+            scale,
+        } => resize(st, (width, height, scale)).await,
+        Command::Tab(tab, op) => {
+            if let Err(e) = handle(st, tab, op).await {
+                st.emit(tab, Event::Error(e.to_string()));
+            }
+        }
+    }
 }
 
 async fn resize(st: &mut State, size: (u32, u32, f32)) {
@@ -635,11 +688,13 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
             clicks,
             modifiers,
         } => {
-            st.c.send(
-                s,
-                "Input.dispatchMouseEvent",
-                json!({ "type": kind, "x": x, "y": y, "button": button, "clickCount": clicks, "modifiers": modifiers }),
-            );
+            let params = json!({ "type": kind, "x": x, "y": y, "button": button, "clickCount": clicks, "modifiers": modifiers });
+            if kind == "mouseMoved" {
+                // Wait for the engine, so the next move is coalesced (run_command).
+                st.c.call(s, "Input.dispatchMouseEvent", params).await?;
+            } else {
+                st.c.send(s, "Input.dispatchMouseEvent", params);
+            }
             // What a click changes comes back as screencast damage.
         }
         Op::Wheel {

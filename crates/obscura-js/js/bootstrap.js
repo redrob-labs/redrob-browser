@@ -11722,16 +11722,15 @@ globalThis.IntersectionObserver = class IntersectionObserver {
     // element does not clip its descendants itself. YouTube's body is
     // `overflow-y: scroll` with a zero-height box; clipping by it hid every
     // lazily loaded thumbnail from the observer.
+    // Read lazily: most roots stop the walk before <body>.
     const docElement = target.ownerDocument && target.ownerDocument.documentElement;
-    let viewportOverflowElement = docElement;
-    if (docElement) {
+    const bodyOwnsViewportOverflow = (element) => {
+      if (!docElement || element !== target.ownerDocument.body) return false;
       const rootStyle = _ioElementStyle(docElement, measurements);
-      if (!_ioClipsOverflow(rootStyle.overflowX) && !_ioClipsOverflow(rootStyle.overflowY)) {
-        viewportOverflowElement = target.ownerDocument.body || docElement;
-      }
-    }
+      return !_ioClipsOverflow(rootStyle.overflowX) && !_ioClipsOverflow(rootStyle.overflowY);
+    };
     while (inRootTree && ancestor && ancestor !== this._root && ancestor.nodeType !== 9) {
-      if (ancestor instanceof Element && ancestor !== viewportOverflowElement && ancestor !== docElement) {
+      if (ancestor instanceof Element && ancestor !== docElement && !bodyOwnsViewportOverflow(ancestor)) {
         const style = _ioElementStyle(ancestor, measurements);
         const clipX = _ioClipsOverflow(style.overflowX);
         const clipY = _ioClipsOverflow(style.overflowY);

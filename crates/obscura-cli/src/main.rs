@@ -121,6 +121,12 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         ready_file: Option<std::path::PathBuf>,
 
+        /// Exit when standard input closes. Redrob Browser's window holds the
+        /// other end, so the engine never outlives a window that crashed or
+        /// was killed.
+        #[arg(long, hide = true)]
+        exit_with_stdin: bool,
+
         /// Allow CDP clients to navigate to file:// URLs. Off by
         /// default so a CDP connection cannot read arbitrary local
         /// files. Enable only when serving local HTML for testing
@@ -478,6 +484,7 @@ async fn run_cli() -> anyhow::Result<()> {
             worker_max_age,
             worker_drain_timeout,
             ready_file,
+            exit_with_stdin,
             allow_file_access,
             storage_dir,
             font_dirs,
@@ -503,6 +510,15 @@ async fn run_cli() -> anyhow::Result<()> {
                     .filter(|s| !s.is_empty())
             });
             configure_font_directories(&font_dirs)?;
+            if exit_with_stdin {
+                std::thread::spawn(|| {
+                    use std::io::Read;
+                    let mut sink = [0u8; 64];
+                    let mut stdin = std::io::stdin();
+                    while matches!(stdin.read(&mut sink), Ok(n) if n > 0) {}
+                    std::process::exit(0);
+                });
+            }
             if ready_file.is_some() && workers != 1 {
                 anyhow::bail!("--ready-file requires --workers 1");
             }
