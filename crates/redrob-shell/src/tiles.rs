@@ -3,10 +3,18 @@
 //! See docs/GPU-PAINT.md, phase A.
 
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use egui::{pos2, vec2, Color32, Rect, TextureHandle, TextureOptions};
 
 pub const TILE: f32 = 512.0;
+
+/// Tiles asked of the engine at once. The engine works one CDP call at a time,
+/// so a whole screen of queued tiles made clicks, keys and scrolls wait behind
+/// a second or more of painting; two keeps it busy and input next in line.
+const IN_FLIGHT: usize = 2;
+/// A tile the engine never answered stops holding a slot after this long.
+const IN_FLIGHT_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct TileKey {
@@ -27,6 +35,8 @@ pub struct TileCache {
     /// Bumped whenever page pixels may have changed. A tile painted at an
     /// older generation stays on screen until its replacement arrives.
     pub generation: u64,
+    in_flight: usize,
+    last_request: Option<Instant>,
 }
 
 impl TileCache {
@@ -69,11 +79,36 @@ impl TileCache {
             let fresh = self.tiles.get(&k).is_some_and(|(g, _)| *g == generation);
             #[cfg(feature = "gpu")]
             let fresh = fresh || self.native.get(&k).is_some_and(|(g, _)| *g == generation);
-            if !fresh && self.pending.insert((k, generation)) {
+            if !fresh && !self.pending.contains(&(k, generation)) {
                 out.push(k);
             }
         }
+        if self
+            .last_request
+            .is_some_and(|t| t.elapsed() > IN_FLIGHT_TIMEOUT)
+        {
+            self.in_flight = 0;
+        }
+        out.truncate(IN_FLIGHT.saturating_sub(self.in_flight));
+        for &k in &out {
+            self.pending.insert((k, generation));
+        }
+        if !out.is_empty() {
+            self.in_flight += out.len();
+            self.last_request = Some(Instant::now());
+        }
         out
+    }
+
+    /// The engine answered a request, with pixels or without.
+    fn answered(&mut self) {
+        self.in_flight = self.in_flight.saturating_sub(1);
+    }
+
+    /// The engine could not paint `key`; it is asked for again later.
+    pub fn failed(&mut self, key: TileKey, generation: u64) {
+        self.pending.remove(&(key, generation));
+        self.answered();
     }
 
     pub fn insert(
@@ -84,6 +119,7 @@ impl TileCache {
         image: egui::ColorImage,
     ) {
         self.pending.remove(&(key, generation));
+        self.answered();
         #[cfg(feature = "gpu")]
         if let Some((g, id)) = self.native.get(&key).copied() {
             if g > generation {
@@ -131,6 +167,8 @@ impl TileCache {
     /// Show a GPU-rendered tile. It replaces any PNG tile at `key`.
     #[cfg(feature = "gpu")]
     pub fn insert_native(&mut self, key: TileKey, generation: u64, id: egui::TextureId) {
+        self.pending.remove(&(key, generation));
+        self.answered();
         self.tiles.remove(&key);
         if let Some((_, old)) = self.native.insert(key, (generation, id)) {
             if old != id {
