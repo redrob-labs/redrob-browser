@@ -15,7 +15,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" dist/release
 
 cp target/release/redrob-browser-window "$app/Contents/MacOS/Redrob Browser"
-cp target/release/redrob-browser target/release/redrob-browser-worker "$app/Contents/MacOS/"
+cp target/release/redrob-browser target/release/redrob-browser-worker target/release/redrob-browser-protected "$app/Contents/MacOS/"
 cp LICENSE NOTICE "$app/Contents/Resources/"
 if [ -f assets/redrob-browser.icns ]; then
   cp assets/redrob-browser.icns "$app/Contents/Resources/AppIcon.icns"
@@ -67,7 +67,7 @@ if [ -z "$identity" ]; then
 fi
 
 # Inner programs first, then the bundle: a bundle signature covers what is inside it.
-for bin in "$app/Contents/MacOS/redrob-browser" "$app/Contents/MacOS/redrob-browser-worker" "$app/Contents/MacOS/Redrob Browser"; do
+for bin in "$app/Contents/MacOS/redrob-browser" "$app/Contents/MacOS/redrob-browser-worker" "$app/Contents/MacOS/redrob-browser-protected" "$app/Contents/MacOS/Redrob Browser"; do
   codesign --force --timestamp --options runtime --sign "$identity" "$bin"
 done
 codesign --force --timestamp --options runtime --sign "$identity" "$app"

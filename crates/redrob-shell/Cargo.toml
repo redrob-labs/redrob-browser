@@ -10,6 +10,11 @@ description = "The Redrob Browser window: draws pages from the engine and sends 
 name = "redrob-browser-window"
 path = "src/main.rs"
 
+# A page in the system web view, for DRM video (docs/DRM.md).
+[[bin]]
+name = "redrob-browser-protected"
+path = "src/bin/protected.rs"
+
 [dependencies]
 eframe = "0.36"
 egui = "0.36"
@@ -35,6 +40,12 @@ url = { workspace = true }
 gstreamer = { version = "0.25", optional = true }
 gstreamer-app = { version = "0.25", optional = true }
 gstreamer-video = { version = "0.25", optional = true }
+open = "5"
+
+# The protected tab: WebView2 on Windows, WKWebView on macOS. Linux does not offer it.
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+wry = "0.57"
+tao = "0.37"
 
 [features]
 default = []

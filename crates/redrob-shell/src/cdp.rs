@@ -67,6 +67,8 @@ const LOGIN_SUBMIT_JS: &str = r#"(() => {
 const LOGIN_BINDING: &str = "redrobLoginSubmit";
 /// `<video>`/`<audio>` ask the window to play through this binding.
 const MEDIA_BINDING: &str = "redrobMedia";
+/// A page asked for a DRM key system the engine does not have (docs/DRM.md).
+const DRM_BINDING: &str = "redrobDrm";
 
 /// Tab ids the engine side hands out for pages a page opened itself.
 const POPUP_ID_BASE: TabId = 1 << 40;
@@ -133,6 +135,8 @@ pub enum Event {
     Media(Value),
     /// Viewport rectangles (CSS pixels) of media elements; None when not rendered.
     MediaRects(Vec<(u64, Option<[f32; 4]>)>),
+    /// The page wants a DRM key system (Widevine, PlayReady, FairPlay) the engine lacks.
+    DrmRequested { key_system: String },
     /// Result of FillLogin: "filled" or "no-form".
     Filled(String),
     /// A file download began or changed state. Sent with tab 0.
@@ -219,6 +223,7 @@ impl State {
         self.c.call(s, "Runtime.enable", json!({})).await?;
         self.c.call(s, "Runtime.addBinding", json!({ "name": LOGIN_BINDING })).await?;
         self.c.call(s, "Runtime.addBinding", json!({ "name": MEDIA_BINDING })).await?;
+        self.c.call(s, "Runtime.addBinding", json!({ "name": DRM_BINDING })).await?;
         self.c.call(s, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": LOGIN_SUBMIT_JS })).await?;
         let (w, h, scale) = self.size;
         self.c
@@ -562,6 +567,12 @@ async fn on_event(st: &mut State, ev: Value) {
         "Runtime.bindingCalled" if p["name"] == MEDIA_BINDING => {
             if let Ok(v) = serde_json::from_str::<Value>(p["payload"].as_str().unwrap_or_default()) {
                 st.emit(tab, Event::Media(v));
+            }
+        }
+        "Runtime.bindingCalled" if p["name"] == DRM_BINDING => {
+            if let Ok(v) = serde_json::from_str::<Value>(p["payload"].as_str().unwrap_or_default()) {
+                let key_system = v["keySystem"].as_str().unwrap_or_default().to_string();
+                st.emit(tab, Event::DrmRequested { key_system });
             }
         }
         "Runtime.bindingCalled" if p["name"] == LOGIN_BINDING => {
