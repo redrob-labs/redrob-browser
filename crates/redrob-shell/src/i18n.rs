@@ -164,6 +164,13 @@ fn ko(en: &str) -> Option<&'static str> {
         "Method" => "메서드",
         "Type" => "종류",
         "{0} requests" => "요청 {0}개",
+        "Pick an element" => "요소 고르기",
+        "Click an element in the page to select it" => "페이지에서 요소를 누르면 여기서 골라져요",
+        "Filter" => "필터",
+        "Loading styles..." => "스타일을 불러오고 있어요",
+        "Inline style" => "인라인 스타일",
+        "No inline style" => "인라인 스타일이 없어요",
+        "Computed" => "계산된 스타일",
         _ => return None,
     })
 }

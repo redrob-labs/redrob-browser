@@ -4,6 +4,7 @@
 
 use serde_json::Value;
 
+use crate::cdp::Op;
 use crate::i18n::{t, tf};
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -22,6 +23,42 @@ pub struct NetRow {
     pub mime: String,
 }
 
+/// Computed and inline style of one node, for the Elements panel.
+pub struct Styles {
+    pub node: i64,
+    pub computed: Vec<(String, String)>,
+    pub inline: Vec<(String, String)>,
+}
+
+impl Styles {
+    /// From CSS.getComputedStyleForNode and CSS.getMatchedStylesForNode replies.
+    pub fn from_cdp(node: i64, computed: &Value, matched: &Value) -> Self {
+        let computed: Vec<(String, String)> = computed["computedStyle"]
+            .as_array()
+            .map(|a| a.iter().map(|p| (str_of(&p["name"]), str_of(&p["value"]))).collect())
+            .unwrap_or_default();
+        let inline: Vec<(String, String)> = matched["inlineStyle"]["cssProperties"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|p| {
+                        let mut v = str_of(&p["value"]);
+                        if p["important"].as_bool() == Some(true) {
+                            v.push_str(" !important");
+                        }
+                        (str_of(&p["name"]), v)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Styles { node, computed, inline }
+    }
+}
+
+fn str_of(v: &Value) -> String {
+    v.as_str().unwrap_or_default().to_string()
+}
+
 #[derive(Default)]
 pub struct State {
     pub panel: Panel,
@@ -32,6 +69,22 @@ pub struct State {
     pub dom: Option<Value>,
     /// Network is enabled for this tab only while the tools have been opened.
     pub network_on: bool,
+    /// The node chosen in the Elements panel and its styles once they arrive.
+    pub selected: Option<i64>,
+    pub styles: Option<Styles>,
+    pub style_filter: String,
+    /// A DOM.getBoxModel model drawn over the page; set by Overlay.redrobHighlight.
+    pub highlight: Option<Value>,
+    /// The next click in the page selects an element instead of reaching it.
+    pub picking: bool,
+    /// The node under the pointer in the tree, last sent as a highlight.
+    hover: Option<i64>,
+    want_styles: Option<i64>,
+    want_dom: bool,
+    /// Open the tree down to the selected node and scroll to it.
+    reveal: bool,
+    /// The release that follows a pick press must not reach the page either.
+    swallow_release: bool,
 }
 
 const KEEP: usize = 2000;
@@ -62,6 +115,41 @@ impl State {
     pub fn navigated(&mut self) {
         self.net.clear();
         self.dom = None;
+        self.selected = None;
+        self.styles = None;
+        self.highlight = None;
+        self.picking = false;
+        self.hover = None;
+        self.reveal = false;
+    }
+
+    /// The page reported an element under the pick click.
+    pub fn picked(&mut self, node: i64) {
+        self.panel = Panel::Elements;
+        self.select(node);
+        self.reveal = true;
+        let known = self.dom.as_ref().is_some_and(|d| path_to(d, node, &mut Vec::new()));
+        if !known {
+            // The element is newer than the tree on screen.
+            self.dom = None;
+            self.want_dom = true;
+        }
+    }
+
+    fn select(&mut self, node: i64) {
+        self.selected = Some(node);
+        self.styles = None;
+        self.want_styles = Some(node);
+    }
+
+    pub fn set_styles(&mut self, styles: Styles) {
+        if self.selected == Some(styles.node) {
+            self.styles = Some(styles);
+        }
+    }
+
+    pub fn set_highlight(&mut self, model: Value) {
+        self.highlight = if model.is_null() { None } else { Some(model) };
     }
 }
 
@@ -71,10 +159,20 @@ pub struct Actions {
     pub evaluate: Option<String>,
     pub refresh_dom: bool,
     pub close: bool,
+    /// Ask for this node's computed and inline style.
+    pub styles_for: Option<i64>,
+    /// Highlight this node on the page, or clear the highlight.
+    pub highlight: Option<Option<i64>>,
 }
 
 pub fn ui(ui: &mut egui::Ui, s: &mut State) -> Actions {
     let mut act = Actions::default();
+    if let Some(node) = s.want_styles.take() {
+        act.styles_for = Some(node);
+    }
+    if std::mem::take(&mut s.want_dom) {
+        act.refresh_dom = true;
+    }
     ui.horizontal(|ui| {
         ui.selectable_value(&mut s.panel, Panel::Console, t("Console"));
         if ui.selectable_value(&mut s.panel, Panel::Elements, t("Elements")).clicked() && s.dom.is_none() {
@@ -88,10 +186,16 @@ pub fn ui(ui: &mut egui::Ui, s: &mut State) -> Actions {
         });
     });
     ui.separator();
+    let mut hovered = None;
     match s.panel {
         Panel::Console => console(ui, s, &mut act),
-        Panel::Elements => elements(ui, s, &mut act),
+        Panel::Elements => hovered = elements(ui, s, &mut act),
         Panel::Network => network(ui, s),
+    }
+    // While picking, the pointer over the page drives the highlight instead.
+    if !s.picking && hovered != s.hover {
+        s.hover = hovered;
+        act.highlight = Some(hovered);
     }
     act
 }
@@ -130,19 +234,80 @@ fn console(ui: &mut egui::Ui, s: &mut State, act: &mut Actions) {
     });
 }
 
-fn elements(ui: &mut egui::Ui, s: &mut State, act: &mut Actions) {
-    if ui.small_button(t("Refresh")).clicked() {
-        act.refresh_dom = true;
-    }
-    egui::ScrollArea::both().id_salt("elements").auto_shrink([false, false]).show(ui, |ui| match &s.dom {
-        Some(root) => node(ui, root, 0),
-        None => {
-            ui.weak(t("Loading the document tree..."));
-        }
-    });
+/// Per-frame bookkeeping while the tree is drawn.
+struct Tree {
+    selected: Option<i64>,
+    /// Ancestors to force open, when revealing the selected node.
+    open: Vec<i64>,
+    reveal: bool,
+    clicked: Option<i64>,
+    hovered: Option<i64>,
 }
 
-fn node(ui: &mut egui::Ui, n: &Value, depth: usize) {
+/// Returns the node under the pointer in the tree.
+fn elements(ui: &mut egui::Ui, s: &mut State, act: &mut Actions) -> Option<i64> {
+    ui.horizontal(|ui| {
+        if ui.small_button(t("Refresh")).clicked() {
+            act.refresh_dom = true;
+        }
+        let pick = ui
+            .selectable_label(s.picking, t("Pick an element"))
+            .on_hover_text(t("Click an element in the page to select it"));
+        if pick.clicked() {
+            s.picking = !s.picking;
+            if !s.picking {
+                act.highlight = Some(None);
+            }
+        }
+    });
+    let mut tree = Tree { selected: s.selected, open: Vec::new(), reveal: false, clicked: None, hovered: None };
+    if s.reveal {
+        if let (Some(root), Some(node)) = (&s.dom, s.selected) {
+            tree.reveal = path_to(root, node, &mut tree.open);
+            s.reveal = false;
+        }
+    }
+    let tree_height = if s.selected.is_some() { (ui.available_height() * 0.55).max(80.0) } else { ui.available_height() };
+    egui::ScrollArea::both()
+        .id_salt("elements")
+        .max_height(tree_height)
+        .auto_shrink([false, false])
+        .show(ui, |ui| match &s.dom {
+            Some(root) => node(ui, root, 0, &mut tree),
+            None => {
+                ui.weak(t("Loading the document tree..."));
+            }
+        });
+    if let Some(id) = tree.clicked {
+        s.select(id);
+        act.styles_for = s.want_styles.take();
+    }
+    if s.selected.is_some() {
+        ui.separator();
+        styles(ui, s);
+    }
+    tree.hovered
+}
+
+/// Ancestors of `target` (and `target` itself) in a DOM.getDocument tree.
+fn path_to(n: &Value, target: i64, out: &mut Vec<i64>) -> bool {
+    let id = n["nodeId"].as_i64().unwrap_or(-1);
+    if id == target {
+        out.push(id);
+        return true;
+    }
+    if let Some(children) = n["children"].as_array() {
+        for c in children {
+            if path_to(c, target, out) {
+                out.push(id);
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn node(ui: &mut egui::Ui, n: &Value, depth: usize, tree: &mut Tree) {
     let kind = n["nodeType"].as_u64().unwrap_or(0);
     let children: Vec<&Value> = n["children"].as_array().map(|c| c.iter().collect()).unwrap_or_default();
     match kind {
@@ -160,19 +325,155 @@ fn node(ui: &mut egui::Ui, n: &Value, depth: usize) {
         }
         _ => {
             let label = open_tag(n);
+            let id = n["nodeId"].as_i64().unwrap_or(0);
             if children.is_empty() {
-                ui.label(egui::RichText::new(label).monospace());
+                row(ui, label, id, tree);
             } else {
-                let id = n["nodeId"].as_i64().unwrap_or(0);
-                egui::CollapsingHeader::new(egui::RichText::new(label).monospace())
-                    .id_salt(("dom", id))
-                    .default_open(depth < 3)
-                    .show(ui, |ui| {
-                        for c in children {
-                            node(ui, c, depth + 1);
-                        }
-                    });
+                let uid = ui.make_persistent_id(("dom", id));
+                let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), uid, depth < 3);
+                if tree.reveal && tree.open.contains(&id) {
+                    state.set_open(true);
+                }
+                let header = state.show_header(ui, |ui| row(ui, label, id, tree));
+                header.body(|ui| {
+                    for c in children {
+                        node(ui, c, depth + 1, tree);
+                    }
+                });
             }
+        }
+    }
+}
+
+/// One selectable element row: click selects it, hover highlights it on the page.
+fn row(ui: &mut egui::Ui, label: String, id: i64, tree: &mut Tree) {
+    let r = ui.selectable_label(tree.selected == Some(id), egui::RichText::new(label).monospace());
+    if r.clicked() {
+        tree.clicked = Some(id);
+    }
+    if r.hovered() {
+        tree.hovered = Some(id);
+    }
+    if tree.reveal && tree.selected == Some(id) {
+        r.scroll_to_me(Some(egui::Align::Center));
+    }
+}
+
+fn styles(ui: &mut egui::Ui, s: &mut State) {
+    ui.add(egui::TextEdit::singleline(&mut s.style_filter).desired_width(f32::INFINITY).hint_text(t("Filter")));
+    let Some(st) = &s.styles else {
+        ui.weak(t("Loading styles..."));
+        return;
+    };
+    let filter = s.style_filter.trim().to_lowercase();
+    let keep = |(k, v): &&(String, String)| filter.is_empty() || k.to_lowercase().contains(&filter) || v.to_lowercase().contains(&filter);
+    egui::ScrollArea::vertical().id_salt("styles").auto_shrink([false, false]).show(ui, |ui| {
+        ui.strong(t("Inline style"));
+        let inline: Vec<&(String, String)> = st.inline.iter().filter(keep).collect();
+        if inline.is_empty() {
+            ui.weak(t("No inline style"));
+        } else {
+            property_grid(ui, "inline-style", &inline);
+        }
+        ui.add_space(6.0);
+        ui.strong(t("Computed"));
+        let computed: Vec<&(String, String)> = st.computed.iter().filter(keep).collect();
+        property_grid(ui, "computed-style", &computed);
+    });
+}
+
+fn property_grid(ui: &mut egui::Ui, id: &str, props: &[&(String, String)]) {
+    egui::Grid::new(id).striped(true).num_columns(2).show(ui, |ui| {
+        for (k, v) in props {
+            ui.label(egui::RichText::new(k.as_str()).monospace().color(ui.visuals().weak_text_color()));
+            let shown: String = v.chars().take(160).collect();
+            ui.label(egui::RichText::new(shown).monospace()).on_hover_text(v.as_str());
+            ui.end_row();
+        }
+    });
+}
+
+/// Page input while picking: the pointer highlights what it is over and the
+/// first left click selects that element; none of it reaches the page.
+/// Escape cancels. `active` is false when the tools are closed.
+pub fn pick_input(s: &mut State, events: &mut Vec<egui::Event>, rect: egui::Rect, active: bool) -> Vec<Op> {
+    if !active {
+        s.picking = false;
+    }
+    let mut ops = Vec::new();
+    if !s.picking && !s.swallow_release {
+        return ops;
+    }
+    let local = |p: egui::Pos2| (p.x - rect.left(), p.y - rect.top());
+    events.retain(|ev| match ev {
+        egui::Event::PointerMoved(p) if s.picking && rect.contains(*p) => {
+            let (x, y) = local(*p);
+            ops.push(Op::PickAt { x, y, commit: false });
+            false
+        }
+        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, .. }
+            if s.picking && rect.contains(*pos) =>
+        {
+            let (x, y) = local(*pos);
+            ops.push(Op::PickAt { x, y, commit: true });
+            s.picking = false;
+            s.swallow_release = true;
+            false
+        }
+        egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: false, .. } if s.swallow_release => {
+            s.swallow_release = false;
+            false
+        }
+        egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } if s.picking => {
+            s.picking = false;
+            ops.push(Op::Highlight(None));
+            false
+        }
+        _ => true,
+    });
+    ops
+}
+
+/// Draw a DOM.getBoxModel model over the page area the way Chrome colours it:
+/// margin orange, border yellow, padding green, content blue. Quads are in
+/// viewport CSS pixels, which are points in this window.
+pub fn paint_highlight(painter: &egui::Painter, rect: egui::Rect, model: &Value) {
+    let quad = |k: &str| -> Option<egui::Rect> {
+        let q: Vec<f32> = model[k].as_array()?.iter().filter_map(|v| v.as_f64().map(|n| n as f32)).collect();
+        if q.len() < 8 {
+            return None;
+        }
+        let xs = [q[0], q[2], q[4], q[6]];
+        let ys = [q[1], q[3], q[5], q[7]];
+        let min = egui::pos2(xs.iter().cloned().fold(f32::INFINITY, f32::min), ys.iter().cloned().fold(f32::INFINITY, f32::min));
+        let max = egui::pos2(xs.iter().cloned().fold(f32::NEG_INFINITY, f32::max), ys.iter().cloned().fold(f32::NEG_INFINITY, f32::max));
+        Some(egui::Rect::from_min_max(min, max).translate(rect.min.to_vec2()))
+    };
+    let (Some(content), Some(padding), Some(border), Some(margin)) =
+        (quad("content"), quad("padding"), quad("border"), quad("margin"))
+    else {
+        return;
+    };
+    let painter = painter.with_clip_rect(rect);
+    let c = egui::Color32::from_rgba_unmultiplied;
+    ring(&painter, margin, border, c(246, 178, 107, 102));
+    ring(&painter, border, padding, c(255, 229, 153, 102));
+    ring(&painter, padding, content, c(147, 196, 125, 102));
+    painter.rect_filled(content, 0.0, c(111, 168, 220, 110));
+}
+
+/// Fill the band between an outer box and the inner box it contains.
+fn ring(painter: &egui::Painter, outer: egui::Rect, inner: egui::Rect, color: egui::Color32) {
+    let inner = inner.intersect(outer);
+    let bands = [
+        egui::Rect::from_min_max(outer.min, egui::pos2(outer.max.x, inner.min.y)),
+        egui::Rect::from_min_max(egui::pos2(outer.min.x, inner.max.y), outer.max),
+        egui::Rect::from_min_max(egui::pos2(outer.min.x, inner.min.y), egui::pos2(inner.min.x, inner.max.y)),
+        egui::Rect::from_min_max(egui::pos2(inner.max.x, inner.min.y), egui::pos2(outer.max.x, inner.max.y)),
+    ];
+    for b in bands {
+        if b.width() > 0.0 && b.height() > 0.0 {
+            painter.rect_filled(b, 0.0, color);
         }
     }
 }
