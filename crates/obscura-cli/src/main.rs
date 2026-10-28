@@ -13,9 +13,9 @@ use tokio::time::{timeout, Duration};
 
 #[derive(Parser)]
 #[command(
-    name = "obscura",
+    name = "redrob-browser",
     version = env!("OBSCURA_BUILD_VERSION"),
-    about = "Obscura - A lightweight headless browser for web scraping and automation",
+    about = "Redrob Browser - an agentic web browser you can drive from the command line",
 )]
 struct Args {
     #[arg(short, long, global = true)]
@@ -2038,9 +2038,9 @@ async fn run_parallel_scrape(
     }
 
     let worker_name = if cfg!(windows) {
-        "obscura-worker.exe"
+        "redrob-browser-worker.exe"
     } else {
-        "obscura-worker"
+        "redrob-browser-worker"
     };
     let worker_path = std::env::current_exe()
         .ok()

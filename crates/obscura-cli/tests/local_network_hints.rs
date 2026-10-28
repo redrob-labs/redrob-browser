@@ -3,7 +3,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 fn cli() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_obscura"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_redrob-browser"));
     for name in [
         "OBSCURA_ALLOW_PRIVATE_NETWORK",
         "OBSCURA_PROXY",

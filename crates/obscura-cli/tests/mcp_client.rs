@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-const OBSCURA: &str = env!("CARGO_BIN_EXE_obscura");
+const OBSCURA: &str = env!("CARGO_BIN_EXE_redrob-browser");
 
 #[test]
 fn mcp_font_directory_is_validated_before_either_transport_starts() {

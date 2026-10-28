@@ -26,7 +26,7 @@ impl Server {
     fn spawn() -> Self {
         let dir = temp_dir();
         std::fs::create_dir(&dir).unwrap();
-        let child = Command::new(env!("CARGO_BIN_EXE_obscura"))
+        let child = Command::new(env!("CARGO_BIN_EXE_redrob-browser"))
             .args([
                 "serve",
                 "--host",
@@ -130,7 +130,7 @@ fn ephemeral_servers_publish_distinct_usable_ports() {
 #[test]
 fn unwritable_ready_path_fails_startup() {
     let missing_parent = temp_dir().join("missing").join("ready.json");
-    let status = Command::new(env!("CARGO_BIN_EXE_obscura"))
+    let status = Command::new(env!("CARGO_BIN_EXE_redrob-browser"))
         .args(["serve", "--port", "0", "--ready-file"])
         .arg(&missing_parent)
         .stdout(Stdio::null())
@@ -144,7 +144,7 @@ fn unwritable_ready_path_fails_startup() {
 #[test]
 fn ready_file_rejects_multiple_workers() {
     let ready_file = temp_dir().join("ready.json");
-    let output = Command::new(env!("CARGO_BIN_EXE_obscura"))
+    let output = Command::new(env!("CARGO_BIN_EXE_redrob-browser"))
         .args(["serve", "--port", "0", "--workers", "2", "--ready-file"])
         .arg(&ready_file)
         .output()

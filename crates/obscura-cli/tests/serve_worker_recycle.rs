@@ -18,7 +18,7 @@ struct Server(Child, u16);
 impl Server {
     fn start(extra: &[&str]) -> Server {
         let port = TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
-        let child = Command::new(env!("CARGO_BIN_EXE_obscura"))
+        let child = Command::new(env!("CARGO_BIN_EXE_redrob-browser"))
             .args(["serve", "--host", "127.0.0.1", "--port", &port.to_string(), "--workers", "2"])
             .args(extra)
             .process_group(0)

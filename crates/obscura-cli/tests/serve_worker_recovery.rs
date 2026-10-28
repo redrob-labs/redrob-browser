@@ -43,7 +43,7 @@ fn killed_workers_are_reaped_and_replaced_without_poisoning_discovery() {
     let reservation = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = reservation.local_addr().unwrap().port();
     drop(reservation);
-    let mut server = Server(Command::new(env!("CARGO_BIN_EXE_obscura"))
+    let mut server = Server(Command::new(env!("CARGO_BIN_EXE_redrob-browser"))
         .args(["serve", "--host", "127.0.0.1", "--port", &port.to_string(), "--workers", "2"])
         .process_group(0).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
     let deadline = Instant::now() + Duration::from_secs(10);

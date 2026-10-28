@@ -44,7 +44,7 @@ fn balancer_signal_stops_workers_and_workers_get_max_connections() {
         let reservation = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = reservation.local_addr().unwrap().port();
         drop(reservation);
-        let mut server = Server(Command::new(env!("CARGO_BIN_EXE_obscura"))
+        let mut server = Server(Command::new(env!("CARGO_BIN_EXE_redrob-browser"))
             .args(["serve", "--host", "127.0.0.1", "--port", &port.to_string(),
                 "--workers", "2", "--max-connections", "7"])
             .process_group(0).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
