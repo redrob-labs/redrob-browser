@@ -277,12 +277,25 @@ fn page_bench(ctx: &mut Ctx, html: &str) {
         .filter(|id| tree.with_node(*id, |node| node.is_element()).unwrap_or(false))
         .collect();
     let mut churn = Vec::new();
-    let step = (elements.len() / 12).max(1);
-    for (round, target) in elements.iter().copied().step_by(step).skip(2).take(10).enumerate() {
-        let (name, value) = match round % 4 {
+    let step = std::env::var("BENCH_CHURN_STEP").ok().and_then(|v| v.parse().ok()).unwrap_or((elements.len() / 12).max(1));
+    let rounds = std::env::var("BENCH_CHURN_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
+    for (round, target) in elements.iter().copied().step_by(step).skip(2).take(rounds).enumerate() {
+        let (name, value) = match round % 5 {
+            4 => ("role", Some("dialog".to_string())),
             0 => ("hidden", Some(String::new())),
             1 => ("aria-hidden", Some("true".to_string())),
-            2 => ("class", Some(format!("bench-churn-{round}"))),
+            2 => (
+                "class",
+                Some(
+                    std::env::var("BENCH_CHURN_CLASSES")
+                        .ok()
+                        .and_then(|classes| {
+                            let list = classes.split(',').map(str::to_owned).collect::<Vec<_>>();
+                            list.get(round / 4 % list.len().max(1)).cloned()
+                        })
+                        .unwrap_or_else(|| format!("bench-churn-{round}")),
+                ),
+            ),
             _ => ("style", Some("color: red".to_string())),
         };
         for apply in [true, false] {

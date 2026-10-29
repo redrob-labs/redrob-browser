@@ -1109,6 +1109,11 @@ pub struct CompiledSelector {
 }
 
 impl CompiledSelector {
+    /// The selector serialized back to CSS, for diagnostics.
+    pub fn to_css_text(&self) -> String {
+        self.sel.to_css_string()
+    }
+
     /// Whether this selector is eligible to match a featureless shadow host.
     /// Shadow-tree stylesheets use this to retain only `:host` selectors when
     /// matching against the host in their own tree scope.

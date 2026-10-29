@@ -160,6 +160,126 @@ pub(crate) struct RelationalInvalidation {
     pub structural_side_effect: bool,
     pub text_side_effect: bool,
     pub unrepresentable_outer_path: bool,
+    /// Every alternative is a chain of child combinators (`:has(> a > b)`):
+    /// an element of the chain is at most this many levels below the anchor,
+    /// so only that many ancestors of a changed element can be anchors.
+    /// `None` when any alternative uses a descendant or sibling combinator.
+    pub child_chain_depth: Option<usize>,
+    /// Keys of the subject compound of every alternative, when each
+    /// alternative relates its compounds only through child and descendant
+    /// combinators and its subject is a plain compound. Every element of such
+    /// a chain is an ancestor-or-self of the subject, so a change to a subtree
+    /// that holds no possible subject cannot change the match. `None` when
+    /// that does not hold; callers then use `relative_keys`.
+    subject_keys: Option<Vec<RelationalSelectorKey>>,
+}
+
+/// Subject keys of a `:has()` argument for `RelationalInvalidation::subject_keys`.
+fn descendant_chain_subject_keys(selector: &str) -> Option<Vec<RelationalSelectorKey>> {
+    let selector = selector.trim();
+    let mut quote: Option<char> = None;
+    let mut bracket = 0usize;
+    let mut escaped = false;
+    for ch in selector.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '"' | '\'' => quote = Some(ch),
+            '[' => bracket += 1,
+            ']' => bracket = bracket.saturating_sub(1),
+            // Sibling combinators anywhere (also inside :is()) relate elements
+            // that need not be ancestors of the subject.
+            '+' | '~' if bracket == 0 => return None,
+            _ => {}
+        }
+    }
+    let selector = selector.strip_prefix('>').unwrap_or(selector).trim_start();
+    let (compounds, malformed) = invalidation_compounds(selector);
+    if malformed {
+        return None;
+    }
+    let (subject, _) = compounds.last()?;
+    if subject.contains('(') {
+        return None;
+    }
+    let mut keys = Vec::new();
+    collect_relational_compound_keys(subject, &mut keys);
+    (!keys.is_empty()).then_some(keys)
+}
+
+/// Number of compounds when `selector` (a `:has()` argument) is a pure chain
+/// of child combinators starting with `>`; `None` for any other combinator.
+fn child_combinator_chain_depth(selector: &str) -> Option<usize> {
+    let selector = selector.trim();
+    let rest = selector.strip_prefix('>')?;
+    let mut depth = 1usize;
+    let mut paren = 0usize;
+    let mut bracket = 0usize;
+    let mut quote: Option<char> = None;
+    let mut pending_space = false;
+    let mut after_combinator = true;
+    let mut chars = rest.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if let Some(q) = quote {
+            if ch == '\\' {
+                chars.next();
+            } else if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '"' | '\'' => quote = Some(ch),
+            '\\' => {
+                chars.next();
+            }
+            '(' => paren += 1,
+            ')' => paren = paren.saturating_sub(1),
+            '[' => bracket += 1,
+            ']' => bracket = bracket.saturating_sub(1),
+            _ => {}
+        }
+        if paren > 0 || bracket > 0 || matches!(ch, '(' | ')' | '[' | ']' | '"' | '\'') {
+            if !ch.is_whitespace() {
+                if pending_space && !after_combinator {
+                    return None;
+                }
+                pending_space = false;
+                after_combinator = false;
+            }
+            continue;
+        }
+        match ch {
+            '>' => {
+                depth += 1;
+                pending_space = false;
+                after_combinator = true;
+            }
+            '+' | '~' | ',' => return None,
+            c if c.is_whitespace() => pending_space = true,
+            _ => {
+                if pending_space && !after_combinator {
+                    // Whitespace between two compounds is a descendant combinator.
+                    return None;
+                }
+                pending_space = false;
+                after_combinator = false;
+            }
+        }
+    }
+    Some(depth)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -215,6 +335,46 @@ fn relational_key_may_match(
 impl RelationalInvalidation {
     pub(crate) fn anchor_may_match(&self, tree: &DomTree, node: NodeId) -> bool {
         relational_key_may_match(self.anchor_key.as_ref(), tree, node)
+    }
+
+    /// Whether `node` may be the subject of this `:has()` argument. Falls back
+    /// to `relative_path_may_match` when the argument has no subject keys.
+    pub(crate) fn subject_may_match(&self, tree: &DomTree, node: NodeId) -> bool {
+        match &self.subject_keys {
+            Some(keys) => keys
+                .iter()
+                .any(|key| relational_key_may_match(Some(key), tree, node)),
+            None => self.relative_path_may_match(tree, node),
+        }
+    }
+
+    /// Whether an attribute change (`name` from `old` to `new`) adds or removes
+    /// a key this invalidation filters candidate elements by, so the changed
+    /// element's own match against the argument may have flipped.
+    pub(crate) fn key_touched_by_attribute(
+        &self,
+        name: &str,
+        old: Option<&str>,
+        new: Option<&str>,
+    ) -> bool {
+        let keys = self.subject_keys.as_ref().unwrap_or(&self.relative_keys);
+        let values = || old.into_iter().chain(new);
+        keys.iter().any(|key| match key {
+            RelationalSelectorKey::Class(class) => {
+                name.eq_ignore_ascii_case("class")
+                    && values().any(|value| {
+                        value
+                            .split_ascii_whitespace()
+                            .any(|candidate| candidate.eq_ignore_ascii_case(class))
+                    })
+            }
+            RelationalSelectorKey::Id(id) => {
+                name.eq_ignore_ascii_case("id")
+                    && values().any(|value| value.eq_ignore_ascii_case(id))
+            }
+            RelationalSelectorKey::Attribute(attribute) => attribute.eq_ignore_ascii_case(name),
+            RelationalSelectorKey::LocalName(_) => false,
+        })
     }
 
     pub(crate) fn relative_path_may_match(&self, tree: &DomTree, node: NodeId) -> bool {
@@ -1326,6 +1486,19 @@ fn note_compound_dependencies(
                             structural_side_effect,
                             text_side_effect,
                             unrepresentable_outer_path: nested,
+                            child_chain_depth: alternatives
+                                .iter()
+                                .map(|alternative| child_combinator_chain_depth(alternative))
+                                .try_fold(0usize, |deepest, depth| Some(deepest.max(depth?))),
+                            subject_keys: alternatives.iter().try_fold(
+                                Vec::new(),
+                                |mut keys, alternative| {
+                                    for key in descendant_chain_subject_keys(alternative)? {
+                                        push_relational_selector_key(&mut keys, key);
+                                    }
+                                    Some(keys)
+                                },
+                            ),
                         });
                         for alternative in alternatives {
                             note_selector_dependencies(
@@ -2507,6 +2680,14 @@ impl StylesheetCache {
 }
 
 impl Stylesheet {
+    /// Selector text of the rule with source order `order`, for diagnostics.
+    pub(crate) fn rule_selector_text(&self, order: usize) -> Option<String> {
+        self.rules
+            .iter()
+            .find(|rule| rule.order == order)
+            .map(|rule| rule.sel.to_css_text())
+    }
+
     /// Dependency metadata for conservative incremental-style invalidation.
     /// Building this map does not itself enable incremental cascade skipping.
     pub fn invalidation_map(&self) -> &InvalidationMap {

@@ -3961,7 +3961,7 @@ fn subtree_may_match_relational_path(
 ) -> bool {
     std::iter::once(root)
         .chain(tree.descendants(root))
-        .any(|id| invalidation.relative_path_may_match(tree, id))
+        .any(|id| invalidation.subject_may_match(tree, id))
 }
 
 /// Candidate anchors after an insertion. Relative selectors search from the
@@ -4006,6 +4006,20 @@ fn add_removed_relational_anchor_candidates(
             candidates.extend(tree.children(parent));
         }
         current = parent;
+    }
+}
+
+thread_local! {
+    /// Rule orders whose `:has()` anchor scope reached the root element, for
+    /// `OBSCURA_RENDER_TIMING` diagnostics.
+    static ROOT_ANCHOR_RULES: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn note_root_anchor(tree: &DomTree, anchor: NodeId, rule_order: usize) {
+    if crate::prof::enabled()
+        && element_local_name(tree, anchor).is_some_and(|name| name == "html" || name == "body")
+    {
+        ROOT_ANCHOR_RULES.with(|rules| rules.borrow_mut().push(rule_order));
     }
 }
 
@@ -4060,7 +4074,17 @@ fn add_relational_tree_invalidation(
 
     for invalidation in map.relational_invalidations() {
         let triggered = match mutation {
-            TreeStyleMutation::Remove { .. } => true,
+            // A detached subtree keeps its attributes, so it can be tested the
+            // same way an inserted one is: removal changes a `:has()` match
+            // only if the subtree held an element of the relative selector, or
+            // through the sibling and structural effects tested here.
+            TreeStyleMutation::Remove { node, .. } => {
+                subtree_may_match_relational_path(tree, invalidation, *node)
+                    || invalidation.unkeyed_subject
+                    || invalidation.sibling_side_effect
+                    || invalidation.structural_side_effect
+                    || invalidation.text_side_effect
+            }
             TreeStyleMutation::Insert { node, .. } => {
                 subtree_may_match_relational_path(tree, invalidation, *node)
                     || invalidation.unkeyed_subject
@@ -4072,7 +4096,32 @@ fn add_relational_tree_invalidation(
         if !triggered {
             continue;
         }
+        let near = invalidation.child_chain_depth.map(|depth| {
+            let contact = match *mutation {
+                TreeStyleMutation::Insert { node, .. } | TreeStyleMutation::Text { node, .. } => {
+                    tree.borrow_node(node).and_then(|node| node.parent)
+                }
+                TreeStyleMutation::Remove { old_parent, .. } => Some(old_parent),
+            };
+            let mut old_contact = None;
+            if let TreeStyleMutation::Insert {
+                old_parent: Some(old_parent),
+                ..
+            } = *mutation
+            {
+                old_contact = Some(old_parent);
+            }
+            // One extra level covers a text change, whose element is the
+            // text's parent rather than the mutated node.
+            nearest_ancestors(tree, contact, depth + 1)
+                .into_iter()
+                .chain(nearest_ancestors(tree, old_contact, depth + 1))
+                .collect::<HashSet<_>>()
+        });
         for anchor in candidates.iter().copied() {
+            if near.as_ref().is_some_and(|near| !near.contains(&anchor)) {
+                continue;
+            }
             if !invalidation.anchor_may_match(tree, anchor) {
                 continue;
             }
@@ -4086,10 +4135,25 @@ fn add_relational_tree_invalidation(
                 }
                 return false;
             }
+            note_root_anchor(tree, anchor, invalidation.rule_order);
             add_relational_anchor_scope(tree, anchor, invalidation.anchor_reaches, dirty);
         }
     }
     true
+}
+
+/// `first` and its ancestors, `depth` nodes in all (fewer at the root).
+fn nearest_ancestors(tree: &DomTree, first: Option<NodeId>, depth: usize) -> Vec<NodeId> {
+    let mut out = Vec::with_capacity(depth);
+    let mut current = first;
+    while let Some(node) = current {
+        if out.len() == depth {
+            break;
+        }
+        out.push(node);
+        current = tree.borrow_node(node).and_then(|node| node.parent);
+    }
+    out
 }
 
 fn add_style_context_chain(tree: &DomTree, node: NodeId, dirty: &mut HashSet<NodeId>) {
@@ -4455,7 +4519,31 @@ fn retained_style_plan(
         }
     }
     let mut has_animation_damage = false;
+    let report_damage = std::env::var_os("OBSCURA_RENDER_TIMING").is_some();
+    let mut previous_damage: Option<(usize, &RetainedStyleMutation)> = None;
+    let describe_damage = |before: usize, after: usize, mutation: &RetainedStyleMutation| {
+        if after.saturating_sub(before) >= 200 {
+            let node = match mutation {
+                RetainedStyleMutation::Attribute(attribute) => Some(attribute.node),
+                RetainedStyleMutation::Tree(TreeStyleMutation::Insert { node, .. })
+                | RetainedStyleMutation::Tree(TreeStyleMutation::Remove { node, .. })
+                | RetainedStyleMutation::Tree(TreeStyleMutation::Text { node, .. }) => Some(*node),
+                _ => None,
+            };
+            let name = node.and_then(|node| element_local_name(tree, node));
+            eprintln!(
+                "[timing] retained-style damage +{} node={name:?} mutation={mutation:?}",
+                after - before
+            );
+        }
+    };
     for mutation in mutations {
+        if report_damage {
+            if let Some((before, previous)) = previous_damage.take() {
+                describe_damage(before, dirty.len(), previous);
+            }
+            previous_damage = Some((dirty.len(), mutation));
+        }
         if matches!(mutation, RetainedStyleMutation::Resource) {
             continue;
         }
@@ -4689,7 +4777,28 @@ fn retained_style_plan(
                     .iter()
                     .filter(|invalidation| invalidation.rule_order == dependency.rule_order)
                 {
+                    // With descendant/child chains the subject lies in the
+                    // changed element's subtree; nothing else can rematch.
+                    if !invalidation.unkeyed_subject
+                        && !invalidation.sibling_side_effect
+                        && !invalidation.structural_side_effect
+                        && !invalidation.key_touched_by_attribute(
+                            &name,
+                            mutation.old_value.as_deref(),
+                            mutation.new_value.as_deref(),
+                        )
+                        && !subtree_may_match_relational_path(tree, invalidation, mutation.node)
+                    {
+                        continue;
+                    }
+                    let parent = tree.borrow_node(mutation.node).and_then(|node| node.parent);
+                    let near = invalidation
+                        .child_chain_depth
+                        .map(|depth| nearest_ancestors(tree, parent, depth));
                     for anchor in anchors.iter().copied() {
+                        if near.as_ref().is_some_and(|near| !near.contains(&anchor)) {
+                            continue;
+                        }
                         if !invalidation.anchor_may_match(tree, anchor) {
                             continue;
                         }
@@ -4701,6 +4810,7 @@ fn retained_style_plan(
                             }
                             return RetainedStylePlan::Full;
                         }
+                        note_root_anchor(tree, anchor, invalidation.rule_order);
                         add_relational_anchor_scope(tree, anchor, invalidation.anchor_reaches, &mut dirty);
                     }
                 }
@@ -4719,6 +4829,17 @@ fn retained_style_plan(
             if reaches.contains(crate::css::InvalidationReaches::SIBLINGS) {
                 add_following_sibling_subtrees(tree, mutation.node, &mut dirty);
             }
+        }
+    }
+    if let Some((before, previous)) = previous_damage.take() {
+        describe_damage(before, dirty.len(), previous);
+    }
+    if report_damage {
+        for order in ROOT_ANCHOR_RULES.with(|rules| std::mem::take(&mut *rules.borrow_mut())) {
+            eprintln!(
+                "[timing] retained-style root anchor rule={order} selector={:?}",
+                sheet.rule_selector_text(order)
+            );
         }
     }
     RetainedStylePlan::Reuse {
