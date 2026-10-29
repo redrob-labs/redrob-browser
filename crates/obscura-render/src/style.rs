@@ -1562,6 +1562,11 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
         "pointer-events" => {
             style.pointer_events_none = Some(value.eq_ignore_ascii_case("none"));
         }
+        "cursor" => match parse_cursor(value) {
+            Some(CursorValue::Keyword(cursor)) => style.cursor = Some(cursor),
+            Some(CursorValue::Inherit) => style.cursor = None,
+            None => {}
+        },
         "opacity" => style.opacity = value.trim().parse::<f32>().ok(),
         "animation" => apply_animation_shorthand(style, value),
         "animation-name" => {
@@ -2222,6 +2227,7 @@ pub fn supports_declaration(name: &str, value: &str) -> bool {
             | "scrollbar-gutter"
             | "visibility"
             | "pointer-events"
+            | "cursor"
             | "opacity"
             | "animation"
             | "animation-name"
@@ -2409,6 +2415,7 @@ pub fn supports_declaration(name: &str, value: &str) -> bool {
             "visible" | "hidden" | "collapse"
         ),
         "pointer-events" => matches!(value.to_ascii_lowercase().as_str(), "auto" | "none"),
+        "cursor" => parse_cursor(value).is_some(),
         "scrollbar-gutter" => matches!(
             value.to_ascii_lowercase().as_str(),
             "auto" | "stable" | "stable both-edges"
@@ -11184,4 +11191,83 @@ mod tests {
         let s = compute_style("div", Some("box-shadow: none"));
         assert!(s.box_shadow.is_none());
     }
+}
+
+/// A parsed `cursor` declaration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CursorValue {
+    Keyword(crate::Cursor),
+    /// `inherit`/`unset`: take the parent's computed cursor.
+    Inherit,
+}
+
+/// One CSS cursor keyword, case-insensitively, including the legacy
+/// `hand` alias browsers still accept for `pointer`.
+pub(crate) fn cursor_keyword(keyword: &str) -> Option<crate::Cursor> {
+    use crate::Cursor as C;
+    Some(match keyword.trim().to_ascii_lowercase().as_str() {
+        "auto" => C::Auto,
+        "default" => C::Default,
+        "pointer" | "hand" => C::Pointer,
+        "text" => C::Text,
+        "vertical-text" => C::VerticalText,
+        "wait" => C::Wait,
+        "progress" => C::Progress,
+        "help" => C::Help,
+        "crosshair" => C::Crosshair,
+        "move" => C::Move,
+        "grab" | "-webkit-grab" | "-moz-grab" => C::Grab,
+        "grabbing" | "-webkit-grabbing" | "-moz-grabbing" => C::Grabbing,
+        "not-allowed" => C::NotAllowed,
+        "no-drop" => C::NoDrop,
+        "context-menu" => C::ContextMenu,
+        "cell" => C::Cell,
+        "copy" => C::Copy,
+        "alias" => C::Alias,
+        "zoom-in" | "-webkit-zoom-in" | "-moz-zoom-in" => C::ZoomIn,
+        "zoom-out" | "-webkit-zoom-out" | "-moz-zoom-out" => C::ZoomOut,
+        "col-resize" => C::ColResize,
+        "row-resize" => C::RowResize,
+        "e-resize" => C::EResize,
+        "n-resize" => C::NResize,
+        "ne-resize" => C::NeResize,
+        "nw-resize" => C::NwResize,
+        "s-resize" => C::SResize,
+        "se-resize" => C::SeResize,
+        "sw-resize" => C::SwResize,
+        "w-resize" => C::WResize,
+        "ew-resize" => C::EwResize,
+        "ns-resize" => C::NsResize,
+        "nesw-resize" => C::NeswResize,
+        "nwse-resize" => C::NwseResize,
+        "all-scroll" => C::AllScroll,
+        "none" => C::None,
+        _ => return None,
+    })
+}
+
+/// `cursor: [<url> [<x> <y>]?,]* <keyword>`. Custom images are not drawn
+/// by the compositor, so every `url()`/`image-set()` entry falls back to the
+/// mandatory trailing keyword, exactly what a browser shows when the image
+/// cannot load. `None` means the declaration is invalid.
+pub(crate) fn parse_cursor(value: &str) -> Option<CursorValue> {
+    let value = value.trim();
+    let lower = value.to_ascii_lowercase();
+    match lower.as_str() {
+        "inherit" | "unset" | "revert" | "revert-layer" => return Some(CursorValue::Inherit),
+        "initial" => return Some(CursorValue::Keyword(crate::Cursor::Auto)),
+        _ => {}
+    }
+    let parts = split_top_level(value, ',');
+    let (last, images) = parts.split_last()?;
+    for image in images {
+        let image = image.trim().to_ascii_lowercase();
+        let is_image = image.starts_with("url(")
+            || image.starts_with("image-set(")
+            || image.starts_with("-webkit-image-set(");
+        if !is_image {
+            return None;
+        }
+    }
+    cursor_keyword(last).map(CursorValue::Keyword)
 }

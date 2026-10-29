@@ -4718,6 +4718,7 @@ impl NonGeometricStyleCache {
                 | "z-index"
                 | "visibility"
                 | "pointer-events"
+                | "cursor"
                 | "opacity"
                 | "background-color"
                 | "background-origin"
@@ -4808,6 +4809,7 @@ impl NonGeometricStyleCache {
         let mut dark = false;
         let mut color = None;
         let mut pointer_events = false;
+        let mut cursor = crate::Cursor::Auto;
         let mut visibility_hidden = false;
         let shadow_sheets = HashMap::new();
         let mut timeline = crate::AnimationTimelineState::default();
@@ -4828,6 +4830,7 @@ impl NonGeometricStyleCache {
                 let style = self.styles.get(&node)?;
                 color = style.color;
                 pointer_events = style.pointer_events_none.unwrap_or(false);
+                cursor = style.cursor.unwrap_or_default();
                 visibility_hidden = style.computed_visibility_hidden;
                 root = false;
                 matcher.push_ancestor(tree, node);
@@ -4894,6 +4897,8 @@ impl NonGeometricStyleCache {
             style.color = color;
             pointer_events = style.pointer_events_none.unwrap_or(pointer_events);
             style.pointer_events_none = Some(pointer_events);
+            cursor = style.cursor.unwrap_or(cursor);
+            style.cursor = Some(cursor);
             visibility_hidden = style.visibility_hidden.unwrap_or(visibility_hidden);
             style.computed_visibility_hidden = visibility_hidden;
             // Normalize before retaining an ancestor for its next descendant.
@@ -5629,6 +5634,7 @@ fn layout_dom_once(
             legacy_center: bool,
             visibility_hidden: bool,
             pointer_events_none: bool,
+            cursor: crate::Cursor,
             has_zero_opacity: bool,
             list_style: crate::ListStyle,
             line_height: crate::LineHeight,
@@ -5696,6 +5702,7 @@ fn layout_dom_once(
                     legacy_center: false,
                     visibility_hidden: false,
                     pointer_events_none: false,
+                    cursor: crate::Cursor::Auto,
                     has_zero_opacity: false,
                     // CSS initial value of list-style-type.
                     list_style: crate::ListStyle::Disc,
@@ -5844,6 +5851,7 @@ fn layout_dom_once(
                         style.visibility_hidden.unwrap_or(inh.visibility_hidden);
                     inh.pointer_events_none =
                         style.pointer_events_none.unwrap_or(inh.pointer_events_none);
+                    inh.cursor = style.cursor.unwrap_or(inh.cursor);
                     inh.has_zero_opacity |= style.opacity.is_some_and(|value| value <= 0.0);
                     if let Some(value) = style.list_style {
                         inh.list_style = value;
@@ -6349,6 +6357,10 @@ fn layout_dom_once(
                 match style.pointer_events_none {
                     Some(value) => inh.pointer_events_none = value,
                     None => style.pointer_events_none = Some(inh.pointer_events_none),
+                }
+                match style.cursor {
+                    Some(value) => inh.cursor = value,
+                    None => style.cursor = Some(inh.cursor),
                 }
                 inh.has_zero_opacity |= style.opacity.is_some_and(|value| value <= 0.0);
                 style.effectively_invisible = inh.visibility_hidden || inh.has_zero_opacity;

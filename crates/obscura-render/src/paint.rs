@@ -2469,6 +2469,7 @@ pub(crate) fn non_geometric_computed_style(
         }
         .to_string(),
     );
+    out.insert("cursor", cursor_css(style.cursor.unwrap_or_default()).to_string());
     out.insert("opacity", css_number(style.opacity.unwrap_or(1.0)));
     out.insert(
         "background-color",
@@ -2495,6 +2496,48 @@ pub(crate) fn non_geometric_computed_style(
     );
     out.insert("color", css_color(style.color.unwrap_or([0, 0, 0, 255])));
     out
+}
+
+fn cursor_css(cursor: crate::Cursor) -> &'static str {
+    use crate::Cursor as C;
+    match cursor {
+        C::Auto => "auto",
+        C::Default => "default",
+        C::Pointer => "pointer",
+        C::Text => "text",
+        C::VerticalText => "vertical-text",
+        C::Wait => "wait",
+        C::Progress => "progress",
+        C::Help => "help",
+        C::Crosshair => "crosshair",
+        C::Move => "move",
+        C::Grab => "grab",
+        C::Grabbing => "grabbing",
+        C::NotAllowed => "not-allowed",
+        C::NoDrop => "no-drop",
+        C::ContextMenu => "context-menu",
+        C::Cell => "cell",
+        C::Copy => "copy",
+        C::Alias => "alias",
+        C::ZoomIn => "zoom-in",
+        C::ZoomOut => "zoom-out",
+        C::ColResize => "col-resize",
+        C::RowResize => "row-resize",
+        C::EResize => "e-resize",
+        C::NResize => "n-resize",
+        C::NeResize => "ne-resize",
+        C::NwResize => "nw-resize",
+        C::SResize => "s-resize",
+        C::SeResize => "se-resize",
+        C::SwResize => "sw-resize",
+        C::WResize => "w-resize",
+        C::EwResize => "ew-resize",
+        C::NsResize => "ns-resize",
+        C::NeswResize => "nesw-resize",
+        C::NwseResize => "nwse-resize",
+        C::AllScroll => "all-scroll",
+        C::None => "none",
+    }
 }
 
 fn computed_display(style: &crate::LayoutStyle) -> &'static str {
