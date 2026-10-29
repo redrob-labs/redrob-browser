@@ -39,7 +39,7 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         "span" | "a" | "b" | "i" | "strong" | "em" | "font" | "code" | "small" | "sub" | "sup"
         | "mark" | "abbr" | "cite" | "var" | "dfn" | "kbd" | "samp" | "q" | "time" | "s" | "u"
         | "del" | "ins" | "tt" | "big" | "bdi" | "bdo" | "br" | "wbr" | "data" | "output"
-        | "label" | "ruby" | "rt" | "rp" | "picture" => Display::Inline,
+        | "label" | "ruby" | "rt" | "rp" | "picture" | "source" => Display::Inline,
         // Replaced elements are inline-level in the HTML UA sheet. Defaulting
         // them to block stacked two adjacent icons or canvases vertically
         // and broke "text <svg> text" lines into three.
@@ -93,7 +93,6 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         || tag == "metadata"
         || tag == "option"
         || tag == "optgroup"
-        || tag == "source"
         || tag == "track"
         || tag == "param"
         || tag == "area"
@@ -106,10 +105,11 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         // <svg> we cannot rasterize would otherwise leak its `<desc>` text).
         // `option`/`optgroup` render only inside the native select popup, so a
         // closed <select> must not paint every option label stacked.
-        // `source`/`track`/`param`/`area` are metadata-only children of
-        // picture/video/object/map; a `<picture><source width= height=>` must
-        // not lay out as a real box (news CDNs put dimensions on `<source>`,
-        // which otherwise paints an empty box the size of the image).
+        // `track`/`param`/`area` are metadata-only children of
+        // video/object/map. (`<source>` stays an empty inline, as in
+        // Chromium: getBoundingClientRect gives it a 0 x line-height box; its
+        // width/height attributes only hint the picture's <img>, and an
+        // inline ignores width and height.)
         style.display = crate::Display::None;
     } else if tag == "pre" || tag == "listing" || tag == "xmp" {
         // HTML's UA sheet preserves source whitespace in preformatted blocks.

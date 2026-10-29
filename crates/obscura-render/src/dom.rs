@@ -6998,8 +6998,15 @@ fn layout_dom_once(
                     }
                 }
                 {
+                    // Font properties inherit later in this pass: read the
+                    // inherited family when the element sets none (a span
+                    // in <code> measures "0" in monospace, not the default
+                    // serif: 10ch at 17px is 102.016, not 85).
                     let bold = crate::style::used_font_weight(style) >= 600;
-                    let family = style.font_family.clone();
+                    let family = style
+                        .font_family
+                        .clone()
+                        .or_else(|| inh.font_family.clone());
                     let ch = |d: crate::Dimension| d.resolve_ch(em_px, bold, family.as_deref());
                     style.width = ch(style.width);
                     style.height = ch(style.height);
@@ -7680,6 +7687,10 @@ fn layout_dom_once(
                     })
                     .map(|option_id| tree.text_content(option_id).trim().to_string())
                     .collect();
+                // Chromium lays a menu list out at `line-height: normal`
+                // whatever the cascade says (computed "normal" even under
+                // `font: inherit` from a 24px line-height parent: 21px tall).
+                style.line_height = Some(crate::LineHeight::Normal);
                 let font_size = style.font_size.unwrap_or(13.333_333).max(1.0);
                 let bold = crate::style::used_font_weight(style) >= 600;
                 let label_width = option_labels
@@ -7776,6 +7787,12 @@ fn layout_dom_once(
                 .unwrap_or("text")
                 .trim()
                 .to_ascii_lowercase();
+            // Chromium's push-button inputs use `line-height: normal` (an
+            // inherited 24px line-height leaves a 16px Arial button 24 tall,
+            // where text inputs and <button> follow the cascade).
+            if matches!(input_type.as_str(), "submit" | "reset" | "button") {
+                style.line_height = Some(crate::LineHeight::Normal);
+            }
             if input_type == "hidden" {
                 style.display = crate::Display::None;
                 continue;
@@ -8380,7 +8397,7 @@ fn layout_dom_once(
                                 },
                                 &mut measure,
                             );
-                            if let Ok(layout) = taffy_tree.layout(*caption) {
+                            if let Some(layout) = Some(taffy_tree.unrounded_layout(*caption)) {
                                 caption_min = caption_min.max(layout.size.width);
                             }
                             if let Ok(current) = taffy_tree.style(*caption) {
@@ -8399,10 +8416,7 @@ fn layout_dom_once(
                                 },
                                 &mut measure,
                             );
-                            taffy_tree
-                                .layout(tnode)
-                                .map(|l| l.size.width)
-                                .unwrap_or(0.0)
+                            taffy_tree.unrounded_layout(tnode).size.width
                         };
                         // A table can never be narrower than an unshrinkable
                         // fixed-width descendant. A Wikipedia infobox holds a
@@ -8426,10 +8440,7 @@ fn layout_dom_once(
                                 },
                                 &mut measure,
                             );
-                            taffy_tree
-                                .layout(tnode)
-                                .map(|l| l.size.width)
-                                .unwrap_or(0.0)
+                            taffy_tree.unrounded_layout(tnode).size.width
                         };
                         for (caption, display) in caption_displays {
                             if let Ok(current) = taffy_tree.style(caption) {
@@ -9027,10 +9038,52 @@ fn layout_dom_once(
             }
             // Spliced block-in-inline wrappers span their children; the
             // innermost first so an outer wrapper includes the inner ones.
+            // A block inside an inline sits in an anonymous block box as wide
+            // as the containing block's content box, and the inline's rect
+            // includes that box (Chrome: an <a> around a centered
+            // max-width:720px block in a 778px content box is 778 wide).
+            let wrapper_set: HashSet<NodeId> =
+                ifc_items.transparent_wrappers.iter().copied().collect();
             for &wrapper in ifc_items.transparent_wrappers.iter().rev() {
-                let union = rendered_children(tree, wrapper)
+                let mut container = rendered_parent(tree, wrapper);
+                while let Some(id) = container.filter(|id| wrapper_set.contains(id)) {
+                    container = rendered_parent(tree, id);
+                }
+                let content = container.and_then(|id| {
+                    let rect = rects.get(&id)?;
+                    let style = styles.get(&id)?;
+                    let left = style.padding.left + style.border.left;
+                    let right = style.padding.right + style.border.right;
+                    Some((rect.x + left, (rect.width - left - right).max(0.0)))
+                });
+                let in_flow_block = |child: NodeId| {
+                    !wrapper_set.contains(&child)
+                        && styles.get(&child).is_some_and(|style| {
+                            style.display != crate::Display::None
+                                && !crate::is_inline_level_box(style)
+                                && style.float.is_none()
+                                && !matches!(style.position, Some(taffy::Position::Absolute))
+                                && !style.position_fixed
+                        })
+                };
+                // A decorated wrapper also has its own inline fragments.
+                let union = rects
+                    .get(&wrapper)
+                    .copied()
                     .into_iter()
-                    .filter_map(|child| rects.get(&child).copied())
+                    .chain(
+                        rendered_children(tree, wrapper)
+                            .into_iter()
+                            .filter_map(|child| {
+                                let rect = rects.get(&child).copied()?;
+                                Some(match content {
+                                    Some((x, width)) if in_flow_block(child) => {
+                                        Rect { x, width, ..rect }
+                                    }
+                                    _ => rect,
+                                })
+                            }),
+                    )
                     .reduce(|a, b| a.union(&b));
                 if let Some(rect) = union {
                     rects.insert(wrapper, rect);
@@ -10867,7 +10920,10 @@ fn apply_table_cell_block_alignment(
             // path, where their actual line box height is available.
             continue;
         }
-        let (Ok(current), Ok(layout)) = (taffy_tree.style(node), taffy_tree.layout(node)) else {
+        let (Ok(current), Ok(layout)) = (
+            taffy_tree.style(node),
+            Ok::<_, ()>(taffy_tree.unrounded_layout(node)),
+        ) else {
             continue;
         };
         let is_middle = style.vertical_align == Some(crate::VerticalAlign::Middle);
@@ -10878,9 +10934,10 @@ fn apply_table_cell_block_alignment(
             let content_top = layout.border.top + layout.padding.top;
             let mut content_bottom = content_top;
             for child in taffy_tree.children(node).unwrap_or_default() {
-                let (Ok(child_style), Ok(child_layout)) =
-                    (taffy_tree.style(child), taffy_tree.layout(child))
-                else {
+                let (Ok(child_style), Ok(child_layout)) = (
+                    taffy_tree.style(child),
+                    Ok::<_, ()>(taffy_tree.unrounded_layout(child)),
+                ) else {
                     continue;
                 };
                 if child_style.display == taffy::style::Display::None
@@ -14618,9 +14675,32 @@ where
                 .iter()
                 .filter(|entry| entry.flex_item == flex_item && entry.slot == 0)
                 .filter_map(|entry| styles.get(&entry.node))
-                .filter_map(|style| style.replaced_intrinsic)
-                .filter_map(|metadata| metadata.natural_size())
-                .map(|(width, _)| width)
+                .filter_map(|style| {
+                    let metadata = style.replaced_intrinsic?;
+                    let (width, height) = metadata.natural_size()?;
+                    // With the percentage width treated as auto, a definite
+                    // height transfers through the natural ratio (Chrome: a
+                    // 433x273 image at width:95%; height:220px contributes
+                    // 348.94).
+                    let ratio = metadata
+                        .ratio
+                        .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
+                        .or_else(|| (height > 0.0).then(|| width / height));
+                    Some(match (style.height, ratio) {
+                        (crate::Dimension::Px(used), Some(ratio)) => {
+                            let edges = if style.box_sizing == crate::BoxSizing::BorderBox {
+                                style.padding.top
+                                    + style.padding.bottom
+                                    + style.border.top
+                                    + style.border.bottom
+                            } else {
+                                0.0
+                            };
+                            (used - edges).max(0.0) * ratio
+                        }
+                        _ => width,
+                    })
+                })
                 .filter(|width| width.is_finite() && *width > 0.0)
                 .fold(0.0_f32, f32::max);
             used_declaration = used_declaration.max(natural_floor);
