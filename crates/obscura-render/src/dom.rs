@@ -16056,7 +16056,6 @@ fn can_use_native_float_band(
             if saw_clear_after_floats
                 || saw_flow_after_floats
                 || style.display_contents
-                || style.is_table_box
                 || matches!(style.position, Some(taffy::Position::Absolute))
                 || !matches!(
                     style.width,
