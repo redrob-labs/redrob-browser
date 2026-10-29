@@ -7,6 +7,8 @@ use slotmap::{DefaultKey, SlotMap};
 
 #[cfg(feature = "block_layout")]
 use crate::block::BlockContext;
+#[cfg(all(feature = "block_layout", feature = "float_layout"))]
+use crate::compute::FloatBand;
 use crate::geometry::Size;
 use crate::style::{AvailableSpace, Display, Style};
 use crate::sys::DefaultCheapStr;
@@ -125,6 +127,10 @@ struct NodeData {
     /// The computation result from layout algorithm
     #[cfg(feature = "detailed_layout_info")]
     pub(crate) detailed_layout_info: DetailedLayoutInfo,
+
+    /// Float exclusions that shortened this leaf's line boxes during its latest final layout
+    #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+    pub(crate) float_bands: Vec<FloatBand>,
 }
 
 impl NodeData {
@@ -139,6 +145,8 @@ impl NodeData {
             has_context: false,
             #[cfg(feature = "detailed_layout_info")]
             detailed_layout_info: DetailedLayoutInfo::None,
+            #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+            float_bands: Vec::new(),
         }
     }
 
@@ -310,8 +318,35 @@ where
         //   - Return that entry if exists
         //   - Else call the passed closure (below) to compute the result
         //
-        // If there was no cache match and a new result needs to be computed then that result will be added to the cache
-        compute_cached_layout(self, node_id, inputs, |tree, node_id, inputs| {
+        // A leaf with measured content (an inline formatting context) laid out in a block formatting
+        // context that holds floats has its line boxes shortened by those floats. The bands depend on
+        // the float context rather than on `inputs`, so such a layout bypasses the cache.
+        #[cfg(all(feature = "block_layout", feature = "float_layout", feature = "std"))]
+        let float_bands = {
+            let node = &self.taffy.nodes[node_id.into()];
+            let is_measured_leaf =
+                node.has_context && node.style.display != Display::None && self.child_count(node_id) == 0;
+            match block_ctx.as_ref() {
+                Some(ctx) if is_measured_leaf && ctx.has_floats() => {
+                    use crate::util::ResolveOrZero;
+                    let style = &self.taffy.nodes[node_id.into()].style;
+                    let calc = |val: *const (), basis: f32| (self.taffy.config.calc_resolver)(val, basis);
+                    let padding = style.padding.resolve_or_zero(inputs.parent_size.width, calc);
+                    let border = style.border.resolve_or_zero(inputs.parent_size.width, calc);
+                    ctx.leaf_float_bands(
+                        padding.top + border.top,
+                        [padding.left + border.left, padding.right + border.right],
+                    )
+                }
+                _ => Vec::new(),
+            }
+        };
+        #[cfg(all(feature = "block_layout", feature = "float_layout", feature = "std"))]
+        if inputs.run_mode == RunMode::PerformLayout && self.taffy.nodes[node_id.into()].has_context {
+            self.taffy.nodes[node_id.into()].float_bands.clone_from(&float_bands);
+        }
+
+        let compute = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
             let display_mode = tree.taffy.nodes[node_id.into()].style.display;
             let has_children = tree.child_count(node_id) > 0;
 
@@ -344,8 +379,31 @@ where
                     compute_leaf_layout(inputs, style, |_, _| 0.0, measure_function)
                 }
             }
-        })
+        };
+
+        #[cfg(all(feature = "block_layout", feature = "float_layout", feature = "std"))]
+        if !float_bands.is_empty() {
+            let previous = LEAF_FLOAT_BANDS.with(|bands| bands.replace(float_bands));
+            let output = compute(self, node_id, inputs);
+            LEAF_FLOAT_BANDS.with(|bands| bands.replace(previous));
+            return output;
+        }
+
+        // If there was no cache match and a new result needs to be computed then that result will be added to the cache
+        compute_cached_layout(self, node_id, inputs, compute)
     }
+}
+
+#[cfg(all(feature = "block_layout", feature = "float_layout", feature = "std"))]
+std::thread_local! {
+    static LEAF_FLOAT_BANDS: core::cell::RefCell<Vec<FloatBand>> = const { core::cell::RefCell::new(Vec::new()) };
+}
+
+/// The float exclusion bands that apply to the leaf currently being measured, relative to its
+/// content box. Empty when no float intrudes. Only meaningful inside a measure function.
+#[cfg(all(feature = "block_layout", feature = "float_layout", feature = "std"))]
+pub fn current_leaf_float_bands() -> Vec<FloatBand> {
+    LEAF_FLOAT_BANDS.with(|bands| bands.borrow().clone())
 }
 
 // TraversePartialTree impl for TaffyView
@@ -927,6 +985,14 @@ impl<NodeContext> TaffyTree<NodeContext> {
     #[inline]
     pub fn detailed_layout_info(&self, node_id: NodeId) -> &DetailedLayoutInfo {
         &self.nodes[node_id.into()].detailed_layout_info
+    }
+
+    /// Float exclusion bands that shortened the line boxes of a measured leaf during its latest
+    /// final layout, relative to its content box. Empty when no float intruded.
+    #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+    #[inline]
+    pub fn leaf_float_bands(&self, node_id: NodeId) -> &[FloatBand] {
+        &self.nodes[node_id.into()].float_bands
     }
 
     /// Marks the layout of this node and its ancestors as outdated

@@ -2665,6 +2665,18 @@ fn read_node(tree: &TaffyTree, id: NodeId) -> NodeRect {
 pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
     let mut s = Style::DEFAULT;
     s.direction = style.direction.unwrap_or(taffy::Direction::Ltr);
+    // Clearance of an in-flow block applies to every native float of its
+    // block formatting context, including floats that overhang from an
+    // earlier sibling's subtree. Floats themselves are made native only by
+    // the float-band builder, which sets their own `clear` with `float`.
+    if style.float.is_none() {
+        s.clear = match style.clear {
+            Some(crate::Clear::Left) => taffy::style::Clear::Left,
+            Some(crate::Clear::Right) => taffy::style::Clear::Right,
+            Some(crate::Clear::Both) => taffy::style::Clear::Both,
+            None => taffy::style::Clear::None,
+        };
+    }
     s.item_is_replaced = style.has_replaced_sizing;
     s.item_aspect_ratio_is_intrinsic = style.aspect_ratio_is_intrinsic;
     s.box_sizing = match style.box_sizing {

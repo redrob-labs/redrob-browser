@@ -800,7 +800,20 @@ pub struct InlineItem {
     /// Width bits and wrap `buffer` is currently laid out for by
     /// `shape_with_text_indent`; `None` when unknown.
     shaped_at: Option<(Option<u32>, Wrap)>,
+    /// Float exclusions `buffer` is currently laid out beside (with
+    /// `shaped_at`).
+    shaped_bands: Vec<FloatBand>,
+    /// Float exclusions of this item's final layout, recorded by the layout
+    /// pass and used by `finalize` and `measure`.
+    float_bands: Vec<FloatBand>,
+    /// `source_buffer` exists only so float-narrowed shaping can restore the
+    /// unsplit lines; ordinary shaping then uses it as a plain copy.
+    source_for_floats: bool,
 }
+
+/// A horizontal band in which floats shorten an inline formatting context's
+/// line boxes, relative to its content box.
+pub type FloatBand = taffy::FloatBand;
 
 /// The complete input of `TextEngine::push_shaped_item`. Shaping and
 /// measurement are pure functions of these values and of the font database,
@@ -2201,6 +2214,9 @@ impl TextEngine {
             finalized: false,
             word_measure: None,
             shaped_at: None,
+            shaped_bands: Vec::new(),
+            float_bands: Vec::new(),
+            source_for_floats: false,
         });
         Some(idx)
     }
@@ -2217,15 +2233,43 @@ impl TextEngine {
             return (size.width, size.height);
         }
         let wrap = self.items[idx].layout_wrap;
-        self.measure_text_with_wrap(idx, width, wrap)
+        let bands = self.items[idx].float_bands.clone();
+        self.measure_text_with_wrap(idx, width, wrap, &bands)
     }
 
-    fn measure_text_with_wrap(&mut self, idx: usize, width: Option<f32>, wrap: Wrap) -> (f32, f32) {
+    /// Record the float exclusions of item `idx`'s final layout.
+    pub fn set_float_bands(&mut self, idx: usize, bands: &[FloatBand]) {
+        if idx & REPLACED_CONTEXT_BIT != 0 {
+            return;
+        }
+        if let Some(item) = self.items.get_mut(idx) {
+            if item.float_bands != bands {
+                item.float_bands = bands.to_vec();
+            }
+        }
+    }
+
+    fn measure_text_with_wrap(
+        &mut self,
+        idx: usize,
+        width: Option<f32>,
+        wrap: Wrap,
+        bands: &[FloatBand],
+    ) -> (f32, f32) {
+        let bands = if width.is_some() { bands } else { &[] };
         let key = width.map(f32::to_bits);
-        if let Some((_, _, size)) = self.items[idx]
-            .measured
-            .iter()
-            .find(|(cached_width, cached_wrap, _)| *cached_width == key && *cached_wrap == wrap)
+        if let Some((_, _, size)) =
+            bands
+                .is_empty()
+                .then_some(())
+                .and(
+                    self.items[idx]
+                        .measured
+                        .iter()
+                        .find(|(cached_width, cached_wrap, _)| {
+                            *cached_width == key && *cached_wrap == wrap
+                        }),
+                )
         {
             crate::prof::count(crate::prof::MEASURE_HIT);
             return *size;
@@ -2235,7 +2279,7 @@ impl TextEngine {
             font_system, items, ..
         } = self;
         let item = &mut items[idx];
-        shape_with_text_indent(font_system, item, width, wrap);
+        shape_with_text_indent(font_system, item, width, wrap, bands);
         crate::prof::stop(crate::prof::MEASURE_MISS, _prof);
         let (width, height, clamped) = buffer_size(item);
         let size = (
@@ -2246,6 +2290,9 @@ impl TextEngine {
                 height.max(item.forced_min_height)
             },
         );
+        if !bands.is_empty() {
+            return size;
+        }
         if item.measured.len() == 16 {
             item.measured.remove(0);
         }
@@ -2268,7 +2315,7 @@ impl TextEngine {
             return size;
         }
         let wrap = item.layout_wrap;
-        shape_with_text_indent(font_system, item, None, wrap);
+        shape_with_text_indent(font_system, item, None, wrap, &[]);
         let mut width = 0.0f32;
         let mut height = 0.0f32;
         let starts = item
@@ -2372,7 +2419,12 @@ impl TextEngine {
         } else {
             self.items[idx].layout_wrap
         };
-        let (width, height) = self.measure_text_with_wrap(idx, width, wrap);
+        let bands = if min_content_query {
+            Vec::new()
+        } else {
+            taffy::current_leaf_float_bands()
+        };
+        let (width, height) = self.measure_text_with_wrap(idx, width, wrap, &bands);
         taffy::Size { width, height }
     }
 
@@ -2396,7 +2448,10 @@ impl TextEngine {
         let miss = item.buffer.size().0 != Some(content_width) || item.buffer.wrap() != wrap;
 
         item.finalized = true;
-        shape_with_text_indent(font_system, item, Some(content_width), wrap);
+        let bands = std::mem::take(&mut item.float_bands);
+        shape_with_text_indent(font_system, item, Some(content_width), wrap, &bands);
+        let beside_floats = !bands.is_empty();
+        item.float_bands = bands;
         crate::prof::stop(
             if miss {
                 crate::prof::ENGINE_NEW
@@ -2408,8 +2463,7 @@ impl TextEngine {
         if item.balance_wrap {
             item.shaped_at = None;
         }
-        let balanced_width = item
-            .balance_wrap
+        let balanced_width = (item.balance_wrap && !beside_floats)
             .then(|| balance_wrap_width(font_system, &mut item.buffer, content_width))
             .flatten()
             .unwrap_or(content_width);
@@ -3621,13 +3675,18 @@ fn shape_with_text_indent(
     item: &mut InlineItem,
     width: Option<f32>,
     wrap: Wrap,
+    bands: &[FloatBand],
 ) {
+    let bands = if width.is_some() { bands } else { &[] };
     let state = (width.map(f32::to_bits), wrap);
-    if item.shaped_at == Some(state) {
+    if item.shaped_at == Some(state) && item.shaped_bands == bands {
         return;
     }
-    shape_with_text_indent_uncached(font_system, item, width, wrap);
+    shape_with_text_indent_uncached(font_system, item, width, wrap, bands);
     item.shaped_at = Some(state);
+    if item.shaped_bands != bands {
+        item.shaped_bands = bands.to_vec();
+    }
 }
 
 fn shape_with_text_indent_uncached(
@@ -3635,6 +3694,7 @@ fn shape_with_text_indent_uncached(
     item: &mut InlineItem,
     width: Option<f32>,
     wrap: Wrap,
+    bands: &[FloatBand],
 ) {
     let indent = used_text_indent(item.text_indent, width);
     item.first_line_offset = indent
@@ -3643,6 +3703,22 @@ fn shape_with_text_indent_uncached(
             Some(Align::End | Align::Right) => 0.0,
             _ => 1.0,
         };
+
+    if let (Some(full_width), false) = (width, bands.is_empty()) {
+        shape_beside_floats(font_system, item, full_width, wrap, indent, bands);
+        return;
+    }
+
+    if item.source_for_floats {
+        if let Some(source) = item.source_buffer.as_ref() {
+            item.buffer = source.clone();
+        }
+        item.buffer.set_wrap(font_system, wrap);
+        item.buffer
+            .set_size(font_system, width.map(|value| value.max(0.0)), None);
+        item.buffer.shape_until_scroll(font_system, false);
+        return;
+    }
 
     let Some(source) = item.source_buffer.as_ref() else {
         item.buffer.set_wrap(font_system, wrap);
@@ -3760,6 +3836,177 @@ fn shape_with_text_indent_uncached(
     }
     item.buffer
         .set_size(font_system, width.map(|value| value.max(0.0)), None);
+    item.buffer.shape_until_scroll(font_system, false);
+}
+
+/// Float intrusion over the line box `[top, top + height)`: the left and right
+/// insets of the narrowest band it overlaps, and the bottom of the first band
+/// that ends below `top` (where the available width can next change).
+fn float_intrusion(bands: &[FloatBand], top: f32, height: f32) -> (f32, f32, Option<f32>) {
+    let bottom = top + height.max(0.0);
+    let mut left = 0.0f32;
+    let mut right = 0.0f32;
+    let mut next = None::<f32>;
+    for band in bands {
+        let overlaps = band.top < bottom.max(top + 0.01) && band.bottom > top;
+        if !overlaps {
+            continue;
+        }
+        left = left.max(band.left);
+        right = right.max(band.right);
+        next = Some(next.map_or(band.bottom, |current| current.min(band.bottom)));
+    }
+    (left, right, next)
+}
+
+/// Lay `item` out at content width `full_width` with every line box shortened
+/// by the floats it overlaps (CSS 2.2 §9.5): left floats move the line start,
+/// right floats pull in its end, and a line whose first unbreakable piece does
+/// not fit beside a float moves down to the next band. Each visual line
+/// becomes its own buffer line carrying its float slot and its downward gap,
+/// so the final shape at `full_width` keeps these breaks and every glyph
+/// carries its real x.
+fn shape_beside_floats(
+    font_system: &mut FontSystem,
+    item: &mut InlineItem,
+    full_width: f32,
+    wrap: Wrap,
+    indent: f32,
+    bands: &[FloatBand],
+) {
+    if item.source_buffer.is_none() {
+        let mut source = item.buffer.clone();
+        for line in source.lines.iter_mut() {
+            line.set_float_slot(None);
+            line.set_top_gap(0.0);
+        }
+        item.source_buffer = Some(source);
+        item.source_for_floats = true;
+    }
+    let Some(source) = item.source_buffer.as_ref() else {
+        return;
+    };
+    item.buffer = source.clone();
+    item.buffer.set_wrap(font_system, wrap);
+    let full_width = full_width.max(0.0);
+    let metrics = item.buffer.metrics();
+    let mono = item.buffer.monospace_width();
+    let tab_width = item.buffer.tab_width();
+    let source_text = item.owner_text.clone();
+
+    let mut y = 0.0f32;
+    let mut line_index = 0usize;
+    while line_index < item.buffer.lines.len() {
+        let global_start = source_text.as_deref().map_or(0, |text| {
+            source_line_starts(&item.buffer, text)
+                .get(line_index)
+                .copied()
+                .unwrap_or(0)
+        });
+        let first_indent = if line_index == 0 { indent } else { 0.0 };
+        let line_source_end = global_start + item.buffer.lines[line_index].text().len();
+        let negative_edges = item
+            .boundary_events
+            .iter()
+            .filter(|event| event.position >= global_start && event.position <= line_source_end)
+            .map(|event| event.edge.advance().min(0.0))
+            .sum::<f32>();
+
+        let mut gap = 0.0f32;
+        let mut line_height = metrics.line_height;
+        let mut placed = (0.0f32, 0.0f32, None::<usize>);
+        // Each attempt either settles the line or moves it to a lower band;
+        // the band list is finite, so this terminates.
+        for _ in 0..=(bands.len() * 2 + 2) {
+            let (left, right, next_band) = float_intrusion(bands, y + gap, line_height);
+            let line_box = (full_width - left - right).max(0.0);
+            let base_available = (line_box - first_indent).max(0.0);
+            let mut available = (base_available - negative_edges).max(0.0);
+            let mut split = None;
+            let mut fits = true;
+            let mut measured_height = line_height;
+            item.buffer.lines[line_index].set_float_slot(None);
+            for _ in 0..=item.boundary_events.len() {
+                let (candidate, line_width, height) = {
+                    let line = &mut item.buffer.lines[line_index];
+                    line.reset_layout();
+                    let layouts = line.layout(
+                        font_system,
+                        metrics.font_size,
+                        Some(available),
+                        wrap,
+                        mono,
+                        tab_width,
+                    );
+                    let Some(first) = layouts.first() else {
+                        break;
+                    };
+                    (
+                        first.glyphs.iter().map(|glyph| glyph.end).max(),
+                        first.w,
+                        first.line_height_opt.unwrap_or(metrics.line_height),
+                    )
+                };
+                measured_height = height;
+                let Some(candidate) = candidate else {
+                    break;
+                };
+                let candidate_end = global_start.saturating_add(candidate);
+                let edges = line_edge_advance(item, global_start, candidate_end);
+                let required_available = (base_available - edges).max(0.0);
+                split = Some(candidate);
+                fits = line_width + edges <= base_available + 0.01;
+                if fits || required_available + 0.01 >= available {
+                    break;
+                }
+                available = required_available;
+            }
+            // The line's own height can differ from the default (mixed font
+            // sizes); re-check the bands it really overlaps.
+            if (measured_height - line_height).abs() > 0.01 {
+                line_height = measured_height;
+                continue;
+            }
+            match next_band {
+                Some(band_bottom) if !fits && band_bottom > y + gap => {
+                    gap = band_bottom - y;
+                }
+                _ => {
+                    placed = (left, line_box, split);
+                    break;
+                }
+            }
+        }
+
+        let (left, line_box, split) = placed;
+        if let Some(mut split) = split {
+            let text = item.buffer.lines[line_index].text();
+            while split < text.len() {
+                let Some(ch) = text[split..].chars().next() else {
+                    break;
+                };
+                if !ch.is_whitespace() {
+                    break;
+                }
+                split += ch.len_utf8();
+            }
+            if split > 0 && split < text.len() {
+                let tail = item.buffer.lines[line_index].split_off(split);
+                item.buffer.lines.insert(line_index + 1, tail);
+            }
+        }
+        let line = &mut item.buffer.lines[line_index];
+        let narrowed = left > 0.0 || line_box + 0.01 < full_width;
+        line.set_float_slot(narrowed.then_some((left, line_box)));
+        line.set_top_gap(gap);
+        y += gap + line_height;
+        line_index += 1;
+    }
+    // Probing laid lines out at trial widths; final layout uses each slot.
+    for line in item.buffer.lines.iter_mut() {
+        line.reset_layout();
+    }
+    item.buffer.set_size(font_system, Some(full_width), None);
     item.buffer.shape_until_scroll(font_system, false);
 }
 

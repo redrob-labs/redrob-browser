@@ -119,6 +119,10 @@ impl<'b> Iterator for LayoutRunIter<'b> {
             let shape = line.shape_opt()?;
             let layout = line.layout_opt()?;
             while let Some(layout_line) = layout.get(self.layout_i) {
+                if self.layout_i == 0 {
+                    self.line_top += line.top_gap();
+                    self.total_height += line.top_gap();
+                }
                 self.layout_i += 1;
 
                 let line_height = layout_line

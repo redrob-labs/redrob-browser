@@ -2762,12 +2762,6 @@ struct IfcRegistry {
     /// nodes real geometry; `apply_float_continuations` uses it to narrow the
     /// later intersecting bands before the final layout.
     float_continuations: Vec<FloatContinuation>,
-    /// Ordinary blocks participating in a native float band must keep a
-    /// distinct inner line box. Collapsing the block and all of its text into
-    /// one measured leaf gives Taffy no descendant at which the shared BFC
-    /// float context can shorten the line while retaining the block's full
-    /// border-box width.
-    float_aware_blocks: HashSet<NodeId>,
     /// CSS multi-column containers built as a row of anonymous block
     /// fragmentainers. All in-flow boxes start in the first fragmentainer so
     /// the preliminary layout measures them at the final column width; the
@@ -8824,6 +8818,8 @@ fn layout_dom_once(
                 &generated_nodes,
                 &mut generated_rects,
             );
+            #[cfg(feature = "paint")]
+            record_leaf_float_bands(&taffy_tree, taffy_root, &mut engine);
             inline_fragments = synthesize_ordinary_inline_fragments(&mut rects, &styles, &engine);
             synthesize_row_rects(tree, &mut rects);
             retain_taffy_tree(
@@ -10151,6 +10147,24 @@ fn compute_absolute_rects(
                     generated_rects,
                 );
             }
+        }
+    }
+}
+
+/// Hand each shaped inline context the float exclusions its final layout was
+/// line-broken beside, so finalize and paint reproduce the same lines.
+#[cfg(feature = "paint")]
+fn record_leaf_float_bands(
+    taffy_tree: &TaffyTree<usize>,
+    taffy_id: taffy::NodeId,
+    engine: &mut crate::inline::TextEngine,
+) {
+    if let Some(&item) = taffy_tree.get_node_context(taffy_id) {
+        engine.set_float_bands(item, taffy_tree.leaf_float_bands(taffy_id));
+    }
+    if let Ok(children) = taffy_tree.children(taffy_id) {
+        for child_id in children {
+            record_leaf_float_bands(taffy_tree, child_id, engine);
         }
     }
 }
@@ -14589,7 +14603,7 @@ fn build(
     let is_closed_html_details = _name.ns.as_ref() == "http://www.w3.org/1999/xhtml"
         && _name.local.as_ref() == "details"
         && !is_open;
-    if !is_closed_html_details && !ifc_items.float_aware_blocks.contains(&id) {
+    if !is_closed_html_details {
         if let Some(item) = engine.try_build(tree, id, styles) {
             if style.display == crate::Display::Block && style.width == crate::Dimension::Auto {
                 // A pure-text block is still a fill-available block. Its shaped
@@ -16065,8 +16079,7 @@ fn can_use_native_float_band(
                 has_left,
                 has_right,
             );
-        } else if saw_float
-            && style.display == crate::Display::Block
+        } else if style.display == crate::Display::Block
             && !style.display_contents
             && !style.is_inline_block
             && !style.is_table_box
@@ -16079,8 +16092,9 @@ fn can_use_native_float_band(
             // as one float-avoiding box. Taffy's native block float context
             // implements both branches; the old synthetic flex row could
             // represent neither distinction because it shrank every sibling's
-            // outer box beside the float.
-            saw_flow_after_floats = true;
+            // outer box beside the float. Blocks before the first float are
+            // plain flow boxes above it.
+            saw_flow_after_floats |= saw_float;
         } else {
             return false;
         }
@@ -16164,12 +16178,6 @@ fn build_children_with_native_float_band(
                 let Some(style) = styles.get(&id) else {
                     continue;
                 };
-                if style.float.is_none()
-                    && style.display == crate::Display::Block
-                    && !establishes_block_formatting_context(style)
-                {
-                    ifc_items.float_aware_blocks.insert(id);
-                }
                 for node in build_any(
                     tree, id, taffy_tree, id_map, words, engine, ifc_items, styles,
                 ) {

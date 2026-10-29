@@ -17,6 +17,11 @@ pub struct BufferLine {
     layout_opt: Cached<Vec<LayoutLine>>,
     shaping: Shaping,
     metadata: Option<usize>,
+    /// A line box narrowed by floats: (start offset, width). Layout uses this width instead of the
+    /// buffer's, and every glyph is moved right by the offset.
+    float_slot: Option<(f32, f32)>,
+    /// Extra space above this line, used when floats push it down to a lower band.
+    top_gap: f32,
 }
 
 impl BufferLine {
@@ -38,6 +43,8 @@ impl BufferLine {
             layout_opt: Cached::Empty,
             shaping,
             metadata: None,
+            float_slot: None,
+            top_gap: 0.0,
         }
     }
 
@@ -58,6 +65,8 @@ impl BufferLine {
         self.shape_opt.set_unused();
         self.layout_opt.set_unused();
         self.shaping = shaping;
+        self.float_slot = None;
+        self.top_gap = 0.0;
         self.metadata = None;
     }
 
@@ -152,6 +161,33 @@ impl BufferLine {
         }
     }
 
+    /// Narrow this line's box to `(offset, width)` (for floats), or restore the buffer width with
+    /// `None`. Returns true if the slot changed, which resets the layout cache.
+    pub fn set_float_slot(&mut self, slot: Option<(f32, f32)>) -> bool {
+        if slot != self.float_slot {
+            self.float_slot = slot;
+            self.reset_layout();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// The float-narrowed line box, if any
+    pub fn float_slot(&self) -> Option<(f32, f32)> {
+        self.float_slot
+    }
+
+    /// Set the extra space above this line
+    pub fn set_top_gap(&mut self, gap: f32) {
+        self.top_gap = gap.max(0.0);
+    }
+
+    /// Extra space above this line
+    pub fn top_gap(&self) -> f32 {
+        self.top_gap
+    }
+
     /// Append line at end of this line
     ///
     /// The wrap setting of the appended line will be lost
@@ -241,6 +277,8 @@ impl BufferLine {
     ) -> &[LayoutLine] {
         if self.layout_opt.is_unused() {
             let align = self.align;
+            let float_slot = self.float_slot;
+            let width_opt = float_slot.map_or(width_opt, |(_, width)| Some(width));
             let mut layout = self
                 .layout_opt
                 .take_unused()
@@ -255,6 +293,13 @@ impl BufferLine {
                 &mut layout,
                 match_mono_width,
             );
+            if let Some((offset, _)) = float_slot.filter(|(offset, _)| *offset != 0.0) {
+                for line in layout.iter_mut() {
+                    for glyph in line.glyphs.iter_mut() {
+                        glyph.x += offset;
+                    }
+                }
+            }
             self.layout_opt.set_used(layout);
         }
         self.layout_opt.get().expect("layout not found")
@@ -289,6 +334,8 @@ impl BufferLine {
             layout_opt: Cached::Empty,
             shaping: Shaping::Advanced,
             metadata: None,
+            float_slot: None,
+            top_gap: 0.0,
         }
     }
 
