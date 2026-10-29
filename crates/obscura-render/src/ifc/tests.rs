@@ -878,3 +878,254 @@ fn float_containing_boxes_keep_bottom_padding_below_floats() {
     assert_eq!(height(&tree, &laid, "a"), 178.0);
     assert_eq!(height(&tree, &laid, "b"), 112.0);
 }
+
+#[test]
+fn percentage_images_in_shrink_to_fit_boxes_resolve_against_the_used_width() {
+    // Chrome, a 433x273 image: in a content-sized flex item at width:95%;
+    // height:220px the item is 348.94 (height x ratio) and the image
+    // 331.48; in a float at width:95% the float is 433 and the image 411.34.
+    let tree = obscura_dom::parse_html(
+        "<!doctype html><body style='margin:0'>\
+         <div style='display:flex;width:810px'><div id=a><img id=ia src=a.png style='width:95%;height:220px'></div></div>\
+         <div id=f style='float:left'><img id=ie src=a.png style='width:95%'></div>",
+    );
+    let mut intrinsic = HashMap::new();
+    for id in ["ia", "ie"] {
+        intrinsic.insert(
+            element(&tree, id),
+            crate::ReplacedIntrinsic::from_dimensions(433.0, 273.0),
+        );
+    }
+    let laid = crate::dom::layout_dom_with_web_fonts(&tree, (1280.0, 800.0), &intrinsic, &[]);
+    let w = |id: &str| {
+        let node = element(&tree, id);
+        laid.fractional_rects
+            .get(&node)
+            .copied()
+            .unwrap_or(laid.rects[&node])
+            .width
+    };
+    assert!((w("a") - 348.94).abs() < 0.02, "{}", w("a"));
+    assert!((w("ia") - 331.48).abs() < 0.02, "{}", w("ia"));
+    assert_eq!(w("f"), 433.0);
+    assert!((w("ie") - 411.34).abs() < 0.02, "{}", w("ie"));
+}
+
+#[test]
+fn span_rects_exclude_whitespace_removed_at_line_ends() {
+    // Chrome: <span style=padding-left:1px> x </span> is 9 wide (16px
+    // Arial); an empty padded span after "x " at the end of a right-aligned
+    // 300px line starts at 299.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'>\
+         <div><span id=a style='padding-left:1px'> x </span></div>\
+         <div style='text-align:right;width:300px'>x <span id=d style='padding-left:1px'></span></div>",
+        &[],
+    );
+    let rect = |id: &str| {
+        let node = element(&tree, id);
+        laid.fractional_rects
+            .get(&node)
+            .copied()
+            .unwrap_or(laid.rects[&node])
+    };
+    assert!((rect("a").width - 9.0).abs() < 0.02, "{:?}", rect("a"));
+    assert!((rect("d").x - 299.0).abs() < 0.05, "{:?}", rect("d"));
+}
+
+#[test]
+fn characters_missing_from_bundled_liberation_use_the_host_copy() {
+    // Chrome: 16px Arial "עברית" is 42.328125 wide (host Liberation Sans 2,
+    // fractional advances; the bundled copy has no Hebrew).
+    if !super::fonts::tests_host_has_family("liberation sans") {
+        return;
+    }
+    let (tree, laid) = layout(
+        "<!doctype html><meta charset=utf-8><body style='margin:0;font:16px Arial'>\
+         <div><span id=he>עברית</span></div>",
+        &[],
+    );
+    let node = element(&tree, "he");
+    let w = laid
+        .fractional_rects
+        .get(&node)
+        .copied()
+        .unwrap_or(laid.rects[&node])
+        .width;
+    assert!((w - 42.328).abs() < 0.02, "{w}");
+}
+
+#[test]
+fn push_button_inputs_ignore_inherited_line_height() {
+    // Chrome: under `font: inherit` from a 1.5 line-height parent, a 16px
+    // Arial <input type=button> is 24 tall; a text input stays 30.
+    let (tree, laid) = layout(
+        "<!doctype html><style>input{font:inherit}</style>\
+         <body style='margin:0;font:16px Arial;line-height:1.5'>\
+         <input id=a type=button value='Go Back'><br><input id=b>",
+        &[],
+    );
+    assert_eq!(height(&tree, &laid, "a"), 24.0);
+    assert_eq!(height(&tree, &laid, "b"), 30.0);
+}
+
+#[test]
+fn web_font_kerning_rounds_separately_from_the_advance() {
+    // Chrome, Liberation Sans served as a 17px web font: "T" 10, "y" 9,
+    // "Ty" 18 (the kerning rounds on its own), "AV" 21, "To" 17.
+    let fonts = [web_font(super::fonts::SANS_R, "W", None)];
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:17px W'>\
+         <div><span id=a>Ty</span></div><div><span id=d>AV</span></div><div><span id=e>To</span></div>",
+        &fonts,
+    );
+    assert_eq!(width(&tree, &laid, "a"), 18.0);
+    assert_eq!(width(&tree, &laid, "d"), 21.0);
+    assert_eq!(width(&tree, &laid, "e"), 17.0);
+}
+
+#[test]
+fn block_level_images_apply_their_ratio_to_the_content_box() {
+    // Chrome: a display:block 120px border-box image with a 6px border and
+    // width/height attributes 420x868 is 235.19 tall (108 x 868/420 + 12).
+    let tree = obscura_dom::parse_html(
+        "<!doctype html><body style='margin:0'><div>\
+         <img id=i src=a.png width=420 height=868 \
+         style='display:block;width:120px;height:auto;box-sizing:border-box;border:6px solid'></div>",
+    );
+    let mut intrinsic = HashMap::new();
+    intrinsic.insert(
+        element(&tree, "i"),
+        crate::ReplacedIntrinsic::from_dimensions(420.0, 868.0),
+    );
+    let laid = crate::dom::layout_dom_with_web_fonts(&tree, (1280.0, 800.0), &intrinsic, &[]);
+    let node = element(&tree, "i");
+    let h = laid
+        .fractional_rects
+        .get(&node)
+        .copied()
+        .unwrap_or(laid.rects[&node])
+        .height;
+    assert!((h - 235.19).abs() < 0.02, "{h}");
+}
+
+#[test]
+fn decorated_inlines_split_around_blocks() {
+    // Chrome: the block inside a padded/bordered span spans the container
+    // (400) and the span's first fragment keeps only its start edge
+    // (24.8 = 2 + 5 + "bb"); a padding-left-only span before a block makes
+    // a 17px line. 512 nested padded spans leave the block 1280 wide.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'>\
+         <div style='width:400px'>aa <span id=s style='padding:0 5px;border:2px solid'>bb\
+         <div id=d style='height:20px'>blk</div>cc</span> dd</div>\
+         <div style='width:400px'><span style='padding-left:3px'><div id=d2>x</div></span></div>",
+        &[],
+    );
+    let r = |id: &str| laid.rects[&element(&tree, id)];
+    assert_eq!((r("d").x, r("d").y, r("d").width), (0.0, 18.0, 400.0));
+    assert_eq!((r("d2").y, r("d2").width), (74.0, 400.0));
+    let first = laid.inline_fragments[&element(&tree, "s")][0];
+    assert!((first.width - 24.797).abs() < 0.02, "{first:?}");
+    let n = 512;
+    let html = format!(
+        "<!doctype html><body style='margin:0'>{}<div id=deep>x</div>{}",
+        "<span style='padding-left:1px'>".repeat(n),
+        "</span>".repeat(n)
+    );
+    let (tree, laid) = layout(&html, &[]);
+    assert_eq!(laid.rects[&element(&tree, "deep")].width, 1280.0);
+}
+
+#[test]
+fn table_caption_min_content_keeps_its_fraction() {
+    // Chrome: a table whose caption's longest word ("caption", 16px
+    // sans-serif) is wider than its two cells is 51.6 wide, not 52.
+    let (tree, laid) = layout(
+        "<!doctype html><style>body{margin:8px;font:16px/20px sans-serif} td{border:1px solid}</style>\
+         <table id=a><caption>Top caption that is longer than the table</caption>\
+         <tr><td>a</td><td>b</td></tr></table>",
+        &[],
+    );
+    let node = element(&tree, "a");
+    let w = laid
+        .fractional_rects
+        .get(&node)
+        .copied()
+        .unwrap_or(laid.rects[&node])
+        .width;
+    assert!((w - 51.6).abs() < 0.05, "{w}");
+}
+
+#[test]
+fn inline_around_a_block_spans_the_anonymous_block() {
+    // Chrome: an <a> around a centered max-width:300px block in a 500px
+    // container is 500 wide (the anonymous block box), not 300.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><div style='width:500px'>\
+         <a id=a href=#><div style='max-width:300px;margin:auto;position:relative;height:10px'></div></a></div>",
+        &[],
+    );
+    let r = laid.rects[&element(&tree, "a")];
+    assert_eq!((r.x, r.width), (0.0, 500.0));
+}
+
+#[test]
+fn table_cells_keep_fractional_heights_after_block_alignment() {
+    // Chrome: 15px/1.5 Verdana cells with 4px padding are 30.5 tall and
+    // the second starts at 34.5 (2px border-spacing); we pinned 31 and 30.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:15px/1.5 Verdana,sans-serif'>\
+         <table><tr><td id=e style='padding:4px'>a</td></tr><tr><td id=f style='padding:4px'>a</td></tr></table>",
+        &[],
+    );
+    for id in ["e", "f"] {
+        let node = element(&tree, id);
+        let rect = laid
+            .fractional_rects
+            .get(&node)
+            .copied()
+            .unwrap_or(laid.rects[&node]);
+        assert_eq!(rect.height, 30.5, "{id}");
+    }
+}
+
+#[test]
+fn picture_sources_are_empty_inlines() {
+    // Chrome: <source> is an empty inline: 0 wide, one line box tall, at
+    // its position in the line ("a " in 16px Arial: x 13.34).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'><div>a <source id=s width=500 height=500> b</div>",
+        &[],
+    );
+    let r = laid
+        .fractional_rects
+        .get(&element(&tree, "s"))
+        .copied()
+        .or_else(|| {
+            laid.inline_fragments
+                .get(&element(&tree, "s"))
+                .and_then(|f| f.first().copied())
+        })
+        .unwrap_or(laid.rects[&element(&tree, "s")]);
+    assert!(
+        (r.x - 13.34).abs() < 0.02 && r.width == 0.0 && r.height == 17.0,
+        "{r:?}"
+    );
+}
+
+#[test]
+fn ch_lengths_use_the_inherited_font() {
+    // Chrome: an inline-block span in 17px <code> with width:10ch is
+    // 102.016 wide (inherited monospace "0"), not 85 (default serif).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><code style='font-size:17px'>\
+         <span id=s style='display:inline-block;width:10ch'></span></code>",
+        &[],
+    );
+    assert!(
+        (width(&tree, &laid, "s") - 102.0).abs() < 0.5,
+        "{}",
+        width(&tree, &laid, "s")
+    );
+}

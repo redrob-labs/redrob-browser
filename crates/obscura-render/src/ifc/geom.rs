@@ -308,7 +308,8 @@ impl Ifc {
             // Whitespace that hangs at the end of the line belongs to no
             // fragment.
             let mut hanging = metrics.hanging_advance;
-            for piece in pieces.iter_mut().rev() {
+            let mut trims = vec![0.0f32; pieces.len()];
+            for (index, piece) in pieces.iter_mut().enumerate().rev() {
                 if hanging <= 0.0 {
                     break;
                 }
@@ -320,7 +321,22 @@ impl Ifc {
                 }
                 let trim = hanging.min(piece.x1 - piece.x0);
                 piece.x1 -= trim;
+                trims[index] = trim;
                 hanging -= trim;
+            }
+            // Chromium removes that whitespace instead of hanging it, so the
+            // inline edges after it close up against the content (an empty
+            // span after "x " at the end of a right-aligned line sits at the
+            // x's end; a span around "x " is as wide as the x).
+            if layout.is_rtl() == false {
+                let mut shift = 0.0f32;
+                for (index, piece) in pieces.iter_mut().enumerate() {
+                    if trims[index] == 0.0 {
+                        piece.x0 -= shift;
+                        piece.x1 -= shift;
+                    }
+                    shift += trims[index];
+                }
             }
 
             // Spans on this line, each with its ancestors, in first-seen order.

@@ -46,6 +46,27 @@ pub(crate) const SYSTEM_FAMILY: &str = "DejaVu Sans";
 /// The glyph-fallback registration of DejaVu Sans (see `build_collection`).
 const FALLBACK_FAMILY: &str = "Obscura Fallback DejaVu Sans";
 pub(crate) const EMOJI_FAMILY: &str = "Noto Color Emoji";
+const HOST_SANS_FAMILY: &str = "Obscura Host Liberation Sans";
+const HOST_SERIF_FAMILY: &str = "Obscura Host Liberation Serif";
+const HOST_MONO_FAMILY: &str = "Obscura Host Liberation Mono";
+
+/// The host copy registered for a bundled Liberation family.
+fn host_liberation_name(family: &str) -> Option<&'static str> {
+    match family {
+        SANS_FAMILY => Some(HOST_SANS_FAMILY),
+        SERIF_FAMILY => Some(HOST_SERIF_FAMILY),
+        MONO_FAMILY => Some(HOST_MONO_FAMILY),
+        _ => None,
+    }
+    .filter(|_| {
+        static PRESENT: OnceLock<bool> = OnceLock::new();
+        *PRESENT.get_or_init(|| {
+            [SANS_FAMILY, SERIF_FAMILY, MONO_FAMILY]
+                .iter()
+                .all(|family| host_font_index().contains_key(&family.to_ascii_lowercase()))
+        })
+    })
+}
 
 /// A font supplied by the document (`@font-face`, FontFace).
 #[derive(Clone, Eq, PartialEq)]
@@ -269,6 +290,32 @@ fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
         }
     }
 
+    // The host's Liberation 2 files, under their own names (see
+    // `Fonts::families`).
+    for (family, host) in [
+        (SANS_FAMILY, HOST_SANS_FAMILY),
+        (SERIF_FAMILY, HOST_SERIF_FAMILY),
+        (MONO_FAMILY, HOST_MONO_FAMILY),
+    ] {
+        let Some((_, paths)) = host_font_index().get(&family.to_ascii_lowercase()) else {
+            continue;
+        };
+        for path in paths {
+            let Some(data) = host_font_bytes(path) else {
+                continue;
+            };
+            let info = FontInfoOverride {
+                family_name: Some(host),
+                width: None,
+                style: None,
+                weight: None,
+                axes: None,
+            };
+            let blob = Blob::new(data as Arc<dyn AsRef<[u8]> + Send + Sync>);
+            collection.register_fonts(blob, Some(info));
+        }
+    }
+
     // Glyph fallback after the authored families, the way Chromium asks
     // fontconfig on this host (`fc-match sans-serif:charset=...` starts at
     // DejaVu Sans). Chromium shapes fallback runs with whole-pixel advances
@@ -465,7 +512,22 @@ impl Fonts {
             &mut names,
             FontFamilyName::Named(Cow::Borrowed(DEFAULT_FAMILY)),
         );
-        FontFamily::List(Cow::Owned(names))
+        // Each bundled Liberation face is followed by the host's own copy
+        // of that family, for characters the bundled (older, smaller)
+        // files lack: Chromium uses the host file, so Hebrew in Arial comes
+        // from Liberation Sans 2 with its fractional advances.
+        let mut with_host = Vec::with_capacity(names.len());
+        for name in names {
+            let host = match &name {
+                FontFamilyName::Named(family) => host_liberation_name(family),
+                _ => None,
+            };
+            with_host.push(name);
+            if let Some(host) = host {
+                with_host.push(FontFamilyName::Named(Cow::Borrowed(host)));
+            }
+        }
+        FontFamily::List(Cow::Owned(with_host))
     }
 }
 

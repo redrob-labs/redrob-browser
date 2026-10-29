@@ -321,6 +321,35 @@ impl ShapedText {
         let glyph_positions = glyph_buffer.glyph_positions();
         let scale_factor = options.font_size / units_per_em;
         let whole_pixel = crate::whole_pixel::is_whole_pixel(font.font.data.id());
+        // Whole-pixel fonts round the glyph's own advance and the shaper's
+        // positioning adjustment (kerning) separately, as Chromium's Linux
+        // shaping does: its HarfBuzz font funcs return hinted whole-pixel
+        // advances and GPOS kerning is rounded on its own ("Tr" in 17px
+        // Source Sans Pro is 9 + 6 - 1 = 14; rounding the kerned advance
+        // gave 15).
+        let unkerned_advances: Vec<f32> = if whole_pixel {
+            let font = &self.fonts[font_index];
+            match skrifa::FontRef::from_index(font.font.data.as_ref(), font.font.index) {
+                Ok(font_ref) => {
+                    use skrifa::MetadataProvider as _;
+                    let metrics = font_ref.glyph_metrics(
+                        skrifa::prelude::Size::unscaled(),
+                        normalized_coords,
+                    );
+                    glyph_infos
+                        .iter()
+                        .map(|info| {
+                            metrics
+                                .advance_width(skrifa::GlyphId::new(info.glyph_id))
+                                .unwrap_or(f32::NAN)
+                        })
+                        .collect()
+                }
+                Err(_) => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
         let shaped_clusters_start = self.shaped_clusters.len();
 
         // Push all characters.
@@ -356,6 +385,7 @@ impl ShapedText {
                 whole_pixel,
                 glyph_infos.iter(),
                 glyph_positions.iter(),
+                unkerned_advances.iter().copied(),
                 &self.characters,
                 characters_start,
             );
@@ -367,6 +397,7 @@ impl ShapedText {
                 whole_pixel,
                 glyph_infos.iter().rev(),
                 glyph_positions.iter().rev(),
+                unkerned_advances.iter().rev().copied(),
                 &self.characters,
                 characters_start,
             );
@@ -455,9 +486,11 @@ fn process_shaped_clusters<'a>(
     whole_pixel: bool,
     glyph_infos: impl Iterator<Item = &'a harfrust::GlyphInfo>,
     glyph_positions: impl Iterator<Item = &'a harfrust::GlyphPosition>,
+    unkerned_advances: impl Iterator<Item = f32>,
     characters: &[Character],
     characters_start: usize,
 ) {
+    let mut unkerned_advances = unkerned_advances;
     struct Cluster {
         id: u32,
         characters_start: usize,
@@ -538,7 +571,14 @@ fn process_shaped_clusters<'a>(
             // Convert from font space (Y-up) to layout space (Y-down)
             y: -(glyph_pos.y_offset as f32) * scale_factor,
             advance: if whole_pixel {
-                ((glyph_pos.x_advance as f32) * scale_factor).round()
+                let advance = (glyph_pos.x_advance as f32) * scale_factor;
+                match unkerned_advances.next() {
+                    Some(base) if base.is_finite() => {
+                        let base = base * scale_factor;
+                        base.round() + (advance - base).round()
+                    }
+                    _ => advance.round(),
+                }
             } else {
                 (glyph_pos.x_advance as f32) * scale_factor
             },

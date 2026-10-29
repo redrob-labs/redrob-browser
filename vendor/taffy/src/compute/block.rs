@@ -666,6 +666,20 @@ fn generate_item_list(
             let pb_sum = (padding + border).sum_axes();
             let box_sizing_adjustment =
                 if child_style.box_sizing() == BoxSizing::ContentBox { pb_sum } else { Size::ZERO };
+            // Applies the ratio in the box it relates; the result is still in
+            // the box `box-sizing` names.
+            let uses_content_box = child_style.aspect_ratio_uses_content_box();
+            let ratio_size = |size: Size<Option<f32>>| -> Size<Option<f32>> {
+                if uses_content_box {
+                    size.maybe_add(box_sizing_adjustment)
+                        .maybe_sub(pb_sum)
+                        .maybe_apply_aspect_ratio(aspect_ratio)
+                        .maybe_add(pb_sum)
+                        .maybe_sub(box_sizing_adjustment)
+                } else {
+                    size.maybe_apply_aspect_ratio(aspect_ratio)
+                }
+            };
 
             let position = child_style.position();
             let overflow = child_style.overflow();
@@ -699,16 +713,17 @@ fn generate_item_list(
                 float,
                 #[cfg(feature = "float_layout")]
                 clear: child_style.clear(),
-                size: child_style
-                    .size()
-                    .maybe_resolve(node_inner_size, |val, basis| tree.calc(val, basis))
-                    .maybe_apply_aspect_ratio(aspect_ratio)
+                // A replaced element's natural ratio relates its content box
+                // whatever `box-sizing` says (Chrome: a 120px border-box
+                // image with a 6px border and a 420/868 ratio is 235.19 tall).
+                size: ratio_size(
+                    child_style.size().maybe_resolve(node_inner_size, |val, basis| tree.calc(val, basis)),
+                )
                     .maybe_add(box_sizing_adjustment),
-                min_size: child_style
-                    .min_size()
-                    .maybe_resolve(node_inner_size, |val, basis| tree.calc(val, basis))
-                    .maybe_apply_aspect_ratio(aspect_ratio)
-                    .maybe_add(box_sizing_adjustment),
+                min_size: ratio_size(
+                    child_style.min_size().maybe_resolve(node_inner_size, |val, basis| tree.calc(val, basis)),
+                )
+                .maybe_add(box_sizing_adjustment),
                 max_size: child_style
                     .max_size()
                     .maybe_resolve(node_inner_size, |val, basis| tree.calc(val, basis))
@@ -869,6 +884,18 @@ fn perform_final_layout_on_in_flow_children(
                     Size::NONE,
                     parent_size,
                     // available_space,
+                    Size::MAX_CONTENT,
+                    SizingMode::InherentSize,
+                    Line::FALSE,
+                );
+                // Lay the float out again at its used width: percentages
+                // inside it resolve against that width (Chrome: a float
+                // around a width:95% image of natural width 433 is 433 wide
+                // and the image 411.34).
+                let item_layout = tree.perform_child_layout(
+                    item.node_id,
+                    Size { width: Some(item_layout.size.width), height: None },
+                    parent_size,
                     Size::MAX_CONTENT,
                     SizingMode::InherentSize,
                     Line::FALSE,

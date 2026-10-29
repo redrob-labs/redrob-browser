@@ -14598,6 +14598,37 @@ globalThis.HTMLBaseElement = _defineHTMLElementClass("HTMLBaseElement", ["base"]
 globalThis.HTMLQuoteElement = _defineHTMLElementClass("HTMLQuoteElement", ["blockquote", "q"]);
 globalThis.HTMLPictureElement = _defineHTMLElementClass("HTMLPictureElement", ["picture"]);
 globalThis.HTMLSourceElement = _defineHTMLElementClass("HTMLSourceElement", ["source"]);
+// Reflected attributes (HTML: HTMLSourceElement). Without them a script's
+// `source.srcset = ...` made an expando and the picture kept its old source.
+(() => {
+  const proto = HTMLSourceElement.prototype;
+  const reflect = (name, get, set) => {
+    const descriptor = { get, set, enumerable: true, configurable: true };
+    Object.defineProperty(proto, name, descriptor);
+    _markNative(descriptor.get);
+    _markNative(descriptor.set);
+  };
+  for (const name of ["srcset", "sizes", "media", "type"]) {
+    reflect(name,
+      function() { return this.getAttribute(name) ?? ""; },
+      function(value) { this.setAttribute(name, String(value)); });
+  }
+  reflect("src",
+    function() {
+      const raw = this.getAttribute("src");
+      if (raw == null) return "";
+      try { return new URL(raw, document.baseURI).href; } catch (_e) { return raw; }
+    },
+    function(value) { this.setAttribute("src", String(value)); });
+  for (const name of ["width", "height"]) {
+    reflect(name,
+      function() {
+        const value = Number.parseInt(this.getAttribute(name) || "", 10);
+        return Number.isFinite(value) && value >= 0 && value <= 2147483647 ? value : 0;
+      },
+      function(value) { this.setAttribute(name, String(Math.max(0, Number(value) >>> 0))); });
+  }
+})();
 globalThis.HTMLObjectElement = _defineHTMLElementClass("HTMLObjectElement", ["object"]);
 globalThis.HTMLEmbedElement = _defineHTMLElementClass("HTMLEmbedElement", ["embed"]);
 globalThis.HTMLMapElement = _defineHTMLElementClass("HTMLMapElement", ["map"]);
