@@ -153,9 +153,29 @@ pub enum Op {
     },
 }
 
+/// The browser window a command came from. Every window of the process
+/// shares this one engine connection; a tab belongs to the window that last
+/// opened or activated it, so a tab moved to another window keeps its target.
+pub type WindowId = u64;
+
+/// A window's way to the engine connection: every command it sends carries
+/// its window id.
+#[derive(Clone)]
+pub struct Commands {
+    pub window: WindowId,
+    pub tx: mpsc::UnboundedSender<(WindowId, Command)>,
+}
+
+impl Commands {
+    pub fn send(&self, cmd: Command) -> Result<(), mpsc::error::SendError<(WindowId, Command)>> {
+        self.tx.send((self.window, cmd))
+    }
+}
+
 pub enum Command {
     Tab(TabId, Op),
-    /// Viewport in CSS pixels and the device scale factor, for every tab.
+    /// Viewport in CSS pixels and the device scale factor, for every tab of
+    /// the window that sent it.
     Resize {
         width: u32,
         height: u32,
@@ -348,8 +368,12 @@ struct State {
     by_session: HashMap<String, TabId>,
     /// Targets this window created, so their targetCreated is not taken for a popup.
     own_targets: HashSet<String>,
-    active: Option<TabId>,
-    size: (u32, u32, f32),
+    /// The tab on screen in each window.
+    active: HashMap<WindowId, TabId>,
+    /// Each window's page area.
+    sizes: HashMap<WindowId, (u32, u32, f32)>,
+    /// Which window shows each tab.
+    tab_window: HashMap<TabId, WindowId>,
     next_popup: TabId,
     updates: Sender<Update>,
 }
@@ -379,6 +403,17 @@ impl State {
 
     fn session(&self, tab: TabId) -> Option<String> {
         self.tabs.get(&tab).map(|t| t.session.clone())
+    }
+
+    /// The page area of the tab's window, or of any window for a tab no
+    /// window has shown yet (an agent's).
+    fn size_of(&self, tab: TabId) -> (u32, u32, f32) {
+        self.tab_window
+            .get(&tab)
+            .and_then(|w| self.sizes.get(w))
+            .or_else(|| self.sizes.values().next())
+            .copied()
+            .unwrap_or((1280, 800, 1.0))
     }
 
     async fn attach(&mut self, tab: TabId, target: String) -> anyhow::Result<()> {
@@ -416,7 +451,7 @@ impl State {
                 json!({ "source": LOGIN_SUBMIT_JS }),
             )
             .await?;
-        let (w, h, scale) = self.size;
+        let (w, h, scale) = self.size_of(tab);
         self.c
             .call(
                 s,
@@ -435,7 +470,7 @@ pub async fn run(
     ws_url: String,
     endpoint_file: std::path::PathBuf,
     window: crate::relay::Window,
-    mut commands: mpsc::UnboundedReceiver<Command>,
+    mut commands: mpsc::UnboundedReceiver<(WindowId, Command)>,
     updates: Sender<Update>,
     repaint: impl Fn() + Send + 'static,
 ) -> anyhow::Result<()> {
@@ -486,8 +521,9 @@ pub async fn run(
         tabs: HashMap::new(),
         by_session: HashMap::new(),
         own_targets: HashSet::new(),
-        active: None,
-        size: (1280, 800, 1.0),
+        active: HashMap::new(),
+        sizes: HashMap::new(),
+        tab_window: HashMap::new(),
         next_popup: POPUP_ID_BASE,
         updates,
     };
@@ -506,7 +542,8 @@ pub async fn run(
     .await?;
 
     // Commands taken from the channel early while coalescing pointer moves.
-    let mut backlog: std::collections::VecDeque<Command> = std::collections::VecDeque::new();
+    let mut backlog: std::collections::VecDeque<(WindowId, Command)> =
+        std::collections::VecDeque::new();
     loop {
         if let Some(cmd) = backlog.pop_front() {
             run_command(&mut st, cmd, &mut commands, &mut backlog).await;
@@ -529,8 +566,8 @@ pub async fn run(
     Ok(())
 }
 
-fn is_move(cmd: &Command, tab: TabId) -> bool {
-    matches!(cmd, Command::Tab(t, Op::Mouse { kind: "mouseMoved", .. }) if *t == tab)
+fn is_move(cmd: &(WindowId, Command), tab: TabId) -> bool {
+    matches!(cmd, (_, Command::Tab(t, Op::Mouse { kind: "mouseMoved", .. })) if *t == tab)
 }
 
 /// Run one command. A pointer move first absorbs the moves queued behind it
@@ -539,15 +576,18 @@ fn is_move(cmd: &Command, tab: TabId) -> bool {
 /// pointer, and clicks waited behind the queue.
 async fn run_command(
     st: &mut State,
-    mut cmd: Command,
-    commands: &mut tokio::sync::mpsc::UnboundedReceiver<Command>,
-    backlog: &mut std::collections::VecDeque<Command>,
+    mut cmd: (WindowId, Command),
+    commands: &mut tokio::sync::mpsc::UnboundedReceiver<(WindowId, Command)>,
+    backlog: &mut std::collections::VecDeque<(WindowId, Command)>,
 ) {
-    if let Command::Tab(
-        tab,
-        Op::Mouse {
-            kind: "mouseMoved", ..
-        },
+    if let (
+        _,
+        Command::Tab(
+            tab,
+            Op::Mouse {
+                kind: "mouseMoved", ..
+            },
+        ),
     ) = &cmd
     {
         let tab = *tab;
@@ -568,28 +608,30 @@ async fn run_command(
             }
         }
     }
+    let (window, cmd) = cmd;
     match cmd {
         Command::Resize {
             width,
             height,
             scale,
-        } => resize(st, (width, height, scale)).await,
+        } => resize(st, window, (width, height, scale)).await,
         Command::Tab(tab, op) => {
-            if let Err(e) = handle(st, tab, op).await {
+            if let Err(e) = handle(st, window, tab, op).await {
                 st.emit(tab, Event::Error(e.to_string()));
             }
         }
     }
 }
 
-async fn resize(st: &mut State, size: (u32, u32, f32)) {
-    if size == st.size {
+async fn resize(st: &mut State, window: WindowId, size: (u32, u32, f32)) {
+    if st.sizes.get(&window) == Some(&size) {
         return;
     }
-    st.size = size;
+    st.sizes.insert(window, size);
     let sessions: Vec<(TabId, String)> = st
         .tabs
         .iter()
+        .filter(|(id, _)| st.tab_window.get(id) == Some(&window))
         .map(|(id, t)| (*id, t.session.clone()))
         .collect();
     for (tab, session) in sessions {
@@ -606,8 +648,9 @@ async fn resize(st: &mut State, size: (u32, u32, f32)) {
     }
 }
 
-async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
+async fn handle(st: &mut State, window: WindowId, tab: TabId, op: Op) -> anyhow::Result<()> {
     if let Op::Open(url) = &op {
+        st.tab_window.insert(tab, window);
         let created =
             st.c.call(None, "Target.createTarget", json!({ "url": "about:blank" }))
                 .await?;
@@ -639,17 +682,34 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
                 st.c.call(None, "Target.closeTarget", json!({ "targetId": t.target }))
                     .await?;
             }
-            if st.active == Some(tab) {
-                st.active = None;
-            }
+            st.tab_window.remove(&tab);
+            st.active.retain(|_, t| *t != tab);
         }
         Op::Activate => {
-            if let Some(prev) = st.active.and_then(|p| st.session(p)) {
-                if prev != session {
-                    st.c.send(Some(&prev), "Page.stopScreencast", json!({}));
-                }
+            // A tab handed to another window: same target and session, the
+            // new window's page size.
+            let before = st.size_of(tab);
+            st.tab_window.insert(tab, window);
+            let (w, h, scale) = st.size_of(tab);
+            if before != (w, h, scale) {
+                let params =
+                    json!({ "width": w, "height": h, "deviceScaleFactor": scale, "mobile": false });
+                st.c.call(s, "Emulation.setDeviceMetricsOverride", params)
+                    .await?;
             }
-            st.active = Some(tab);
+            // Only this window's previous tab goes off screen; one that moved
+            // to another window is on screen there.
+            let prev = st
+                .active
+                .get(&window)
+                .copied()
+                .filter(|p| *p != tab && st.tab_window.get(p) == Some(&window))
+                .and_then(|p| st.session(p));
+            if let Some(prev) = prev {
+                st.c.send(Some(&prev), "Page.stopScreencast", json!({}));
+            }
+            st.active.retain(|_, t| *t != tab);
+            st.active.insert(window, tab);
             st.c.call(
                 None,
                 "Target.activateTarget",
@@ -974,6 +1034,10 @@ async fn on_event(st: &mut State, ev: Value) {
         });
         st.next_popup += 1;
         let tab = st.next_popup;
+        // A popup opens in its opener's window.
+        if let Some(w) = opener.and_then(|o| st.tab_window.get(&o).copied()) {
+            st.tab_window.insert(tab, w);
+        }
         if st.attach(tab, target).await.is_ok() {
             let url = info["url"].as_str().unwrap_or("about:blank").to_string();
             st.emit(tab, Event::Opened { url, opener });

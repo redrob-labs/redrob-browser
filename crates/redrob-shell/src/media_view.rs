@@ -70,6 +70,12 @@ impl Item {
     }
 }
 
+/// One tab's players, on their way to another window.
+pub struct TabMedia {
+    items: Vec<((TabId, u64), Item)>,
+    pending: Vec<(TabId, Op)>,
+}
+
 #[derive(Default)]
 pub struct Media {
     items: HashMap<(TabId, u64), Item>,
@@ -182,6 +188,39 @@ impl Media {
                 i.rect = r;
             }
         }
+    }
+
+    /// A tab moves to another window: its players go with it, still playing.
+    pub fn take_tab(&mut self, tab: TabId) -> TabMedia {
+        let keys: Vec<_> = self.items.keys().filter(|(t, _)| *t == tab).copied().collect();
+        let items = keys
+            .into_iter()
+            .filter_map(|k| self.items.remove(&k).map(|i| (k, i)))
+            .collect();
+        if self.fullscreen.is_some_and(|(t, _)| t == tab) {
+            self.fullscreen = None;
+        }
+        let pending = self.pending.iter().filter(|(t, _)| *t == tab).count();
+        let mut taken = Vec::with_capacity(pending);
+        let mut kept = Vec::with_capacity(self.pending.len() - pending);
+        for (t, op) in self.pending.drain(..) {
+            if t == tab {
+                taken.push((t, op));
+            } else {
+                kept.push((t, op));
+            }
+        }
+        self.pending = kept;
+        TabMedia {
+            items,
+            pending: taken,
+        }
+    }
+
+    /// The other half of [`Media::take_tab`], in the window the tab moved to.
+    pub fn put_tab(&mut self, media: TabMedia) {
+        self.items.extend(media.items);
+        self.pending.extend(media.pending);
     }
 
     /// A tab navigated or closed: its media stops.
