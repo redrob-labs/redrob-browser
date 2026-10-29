@@ -8206,7 +8206,48 @@ fn layout_dom_once(
                                 style.width == crate::Dimension::Auto
                                     || matches!(style.width, crate::Dimension::Percent(_))
                             }) {
-                                if let Ok(layout) = taffy_tree.layout(tnode) {
+                                // A floated or inline-level table shrinks to fit:
+                                // its own snapshot width is already the result
+                                // (max-content), so the space it may take is the
+                                // content box of the box it sits in.
+                                let shrink_to_fit = styles.get(&dom).is_some_and(|style| {
+                                    style.width == crate::Dimension::Auto
+                                        && (style.float.is_some() || style.is_inline_block)
+                                });
+                                let container = shrink_to_fit
+                                    .then(|| {
+                                        let mut parent = rendered_parent(tree, dom);
+                                        while let Some(parent_id) = parent.filter(|parent_id| {
+                                            styles.get(parent_id).is_some_and(|style| {
+                                                style.display_contents
+                                                    || crate::is_inline_level_box(style)
+                                            })
+                                        }) {
+                                            parent = rendered_parent(tree, parent_id);
+                                        }
+                                        let parent = parent?;
+                                        id_map
+                                            .iter()
+                                            .find(|(_, dom_id)| **dom_id == parent)
+                                            .map(|(node, _)| *node)
+                                    })
+                                    .flatten()
+                                    .and_then(|parent| taffy_tree.layout(parent).ok())
+                                    .map(|parent| {
+                                        let margins = styles.get(&dom).map_or(0.0, |style| {
+                                            style.margin.left + style.margin.right
+                                        });
+                                        (parent.size.width
+                                            - parent.padding.left
+                                            - parent.padding.right
+                                            - parent.border.left
+                                            - parent.border.right
+                                            - margins)
+                                            .max(0.0)
+                                    });
+                                if let Some(width) = container {
+                                    available_widths.insert(tnode, width);
+                                } else if let Ok(layout) = taffy_tree.layout(tnode) {
                                     available_widths.insert(tnode, layout.size.width.max(0.0));
                                 }
                             }
@@ -11031,6 +11072,48 @@ fn apply_table_cell_block_alignment(
         let (Ok(current), Ok(layout)) = (taffy_tree.style(node), taffy_tree.layout(node)) else {
             continue;
         };
+        let is_middle = style.vertical_align == Some(crate::VerticalAlign::Middle);
+        if current.display == taffy::style::Display::Block {
+            // A block cell has no alignment property in Taffy: shift its
+            // content by growing the top padding inside a fixed border box.
+            let layout = *layout;
+            let content_top = layout.border.top + layout.padding.top;
+            let mut content_bottom = content_top;
+            for child in taffy_tree.children(node).unwrap_or_default() {
+                let (Ok(child_style), Ok(child_layout)) =
+                    (taffy_tree.style(child), taffy_tree.layout(child))
+                else {
+                    continue;
+                };
+                if child_style.display == taffy::style::Display::None
+                    || child_style.position == taffy::Position::Absolute
+                {
+                    continue;
+                }
+                content_bottom = content_bottom.max(
+                    child_layout.location.y
+                        + child_layout.size.height
+                        + child_layout.margin.bottom.max(0.0),
+                );
+            }
+            let inner = layout.size.height
+                - content_top
+                - layout.padding.bottom
+                - layout.border.bottom;
+            let free = inner - (content_bottom - content_top);
+            if free <= 0.5 {
+                continue;
+            }
+            let offset = if is_middle { free / 2.0 } else { free };
+            let mut aligned = current.clone();
+            aligned.box_sizing = taffy::BoxSizing::BorderBox;
+            aligned.size.height = length(layout.size.height);
+            aligned.padding.top = length(layout.padding.top + offset);
+            if taffy_tree.set_style_if_changed(node, aligned).is_ok() {
+                changed = true;
+            }
+            continue;
+        }
         if current.display != taffy::style::Display::Flex {
             continue;
         }
@@ -11043,7 +11126,6 @@ fn apply_table_cell_block_alignment(
             layout.size.height
         };
         aligned.size.height = length(declared_height);
-        let is_middle = style.vertical_align == Some(crate::VerticalAlign::Middle);
         if aligned.flex_direction == taffy::FlexDirection::Column {
             aligned.justify_content = Some(if is_middle {
                 taffy::JustifyContent::CENTER
@@ -12898,6 +12980,45 @@ fn collect_table_rows(
     }
 }
 
+/// Whether every box a cell generates is block-level (no inline content to
+/// emulate with the flex row stand-in).
+fn cell_has_only_block_children(
+    tree: &DomTree,
+    cell: NodeId,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+) -> bool {
+    let children = rendered_children(tree, cell);
+    let mut flattened = Vec::new();
+    flatten_contents_children(tree, &children, styles, &mut flattened);
+    let mut any_block = false;
+    for child in flattened {
+        let Some(node) = tree.borrow_node(child) else {
+            continue;
+        };
+        if !node.is_element() {
+            if matches!(node.data, obscura_dom::tree::NodeData::Text { .. })
+                && !tree.text_content(child).trim_matches([' ', '\t', '\n', '\r', '\x0c']).is_empty()
+            {
+                return false;
+            }
+            continue;
+        }
+        let Some(style) = styles.get(&child) else {
+            continue;
+        };
+        if style.display == crate::Display::None
+            || matches!(style.position, Some(taffy::Position::Absolute))
+        {
+            continue;
+        }
+        if style.float.is_some() || !is_in_flow_block_level(style) {
+            return false;
+        }
+        any_block = true;
+    }
+    any_block
+}
+
 /// Rows, cells and captions of a CSS table (`display: table` on a non-table
 /// element, or a lone `display: table-row`, which stands in for its own
 /// anonymous table).
@@ -13766,6 +13887,34 @@ fn build_table(
             // Grid does the sizing; a leftover flex_grow from the flex-table
             // heuristic would be ignored anyway, but clear it to be explicit.
             cstyle.flex_grow = 0.0;
+            // A cell is a block container. The column-flex stand-in is only
+            // needed for inline content; with block children alone it gave
+            // them fit-content widths and kept their margins from behaving
+            // like block margins (a `margin:10px` div came out 32px wider
+            // than its cell). Vertical alignment of block cells is applied
+            // by `apply_table_cell_block_alignment`.
+            if cstyle.display == Display::Flex
+                && cstyle.flex_direction == taffy::FlexDirection::Column
+                && cell_has_only_block_children(tree, *cid, styles)
+            {
+                cstyle.display = Display::Block;
+                // The stand-in pinned auto-width block children to 100%,
+                // which ignores their margins; a block container stretches
+                // them itself.
+                for child in taffy_tree.children(cell_node).unwrap_or_default() {
+                    let auto_width = id_map
+                        .get(&child)
+                        .and_then(|dom| styles.get(dom))
+                        .is_some_and(|child_style| child_style.width == crate::Dimension::Auto);
+                    if let (true, Ok(current)) = (auto_width, taffy_tree.style(child)) {
+                        if current.size.width == Dimension::percent(1.0) {
+                            let mut stretched = current.clone();
+                            stretched.size.width = Dimension::auto();
+                            let _ = taffy_tree.set_style_if_changed(child, stretched);
+                        }
+                    }
+                }
+            }
             if let Some(edges) = collapsed.as_ref().and_then(|c| c.cells.get(cid)) {
                 cstyle.border = taffy::Rect {
                     left: length(edges.left),
