@@ -11,8 +11,7 @@ use obscura_dom::tree::{DomTree, NodeData, NodeId};
 use obscura_dom::tree_sink::parse_html;
 use obscura_render::{
     prepare_dom_with_dynamic_fonts_and_stylesheet_cache, prepare_dom_with_retained_styles,
-    PreparedRender, RenderResourceCache, RetainedStyleMutation, StylesheetCache,
-    TreeStyleMutation,
+    PreparedRender, RenderResourceCache, RetainedStyleMutation, StylesheetCache, TreeStyleMutation,
 };
 use std::time::Instant;
 
@@ -233,7 +232,9 @@ fn page_bench(ctx: &mut Ctx, html: &str) {
     if let Some(target) = target {
         for round in 0..5 {
             let old = tree
-                .with_node(target, |node| node.get_attribute("class").map(str::to_owned))
+                .with_node(target, |node| {
+                    node.get_attribute("class").map(str::to_owned)
+                })
                 .flatten();
             let new = format!("bench-{round}");
             tree.with_node_mut(target, |node| node.set_attribute("class", new.clone()));
@@ -274,12 +275,28 @@ fn page_bench(ctx: &mut Ctx, html: &str) {
     let elements: Vec<NodeId> = tree
         .descendants(tree.document())
         .into_iter()
-        .filter(|id| tree.with_node(*id, |node| node.is_element()).unwrap_or(false))
+        .filter(|id| {
+            tree.with_node(*id, |node| node.is_element())
+                .unwrap_or(false)
+        })
         .collect();
     let mut churn = Vec::new();
-    let step = std::env::var("BENCH_CHURN_STEP").ok().and_then(|v| v.parse().ok()).unwrap_or((elements.len() / 12).max(1));
-    let rounds = std::env::var("BENCH_CHURN_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
-    for (round, target) in elements.iter().copied().step_by(step).skip(2).take(rounds).enumerate() {
+    let step = std::env::var("BENCH_CHURN_STEP")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or((elements.len() / 12).max(1));
+    let rounds = std::env::var("BENCH_CHURN_ROUNDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
+    for (round, target) in elements
+        .iter()
+        .copied()
+        .step_by(step)
+        .skip(2)
+        .take(rounds)
+        .enumerate()
+    {
         let (name, value) = match round % 5 {
             4 => ("role", Some("dialog".to_string())),
             0 => ("hidden", Some(String::new())),
@@ -323,7 +340,11 @@ fn page_bench(ctx: &mut Ctx, html: &str) {
         }
     }
     if !churn.is_empty() {
-        println!("attribute_churn n={} median={:.1}ms", churn.len(), median(churn));
+        println!(
+            "attribute_churn n={} median={:.1}ms",
+            churn.len(),
+            median(churn)
+        );
     }
     // Re-insert the detached paragraph.
     let mut insert = None;

@@ -2488,7 +2488,10 @@ pub(crate) fn non_geometric_computed_style(
         }
         .to_string(),
     );
-    out.insert("cursor", cursor_css(style.cursor.unwrap_or_default()).to_string());
+    out.insert(
+        "cursor",
+        cursor_css(style.cursor.unwrap_or_default()).to_string(),
+    );
     out.insert("opacity", css_number(style.opacity.unwrap_or(1.0)));
     out.insert(
         "background-color",
@@ -3169,14 +3172,15 @@ fn verify_against_scratch(
         difference = crate::dom::sticky_layout_difference(&prepared.sticky, &scratch.sticky);
     }
     if difference.is_none() {
-        difference = crate::dom::scroll_tree_difference(&prepared.scroll_tree, &scratch.scroll_tree);
+        difference =
+            crate::dom::scroll_tree_difference(&prepared.scroll_tree, &scratch.scroll_tree);
     }
     // The compositor frame built from the incremental layout must equal the
     // frame built from scratch: no stale boxes, glyph runs or clips.
     #[cfg(feature = "scene")]
     if difference.is_none() {
         let no_scroll = HashMap::new();
-        let mut frame = |render: &mut PreparedRender, resources: &mut RenderResourceCache| {
+        let frame = |render: &mut PreparedRender, resources: &mut RenderResourceCache| {
             scene::build_scene_prepared(
                 tree,
                 render,
@@ -3201,7 +3205,9 @@ fn verify_against_scratch(
         }
     }
     if let Some(difference) = difference {
-        panic!("OBSCURA_LAYOUT_VERIFY ({path}): incremental layout differs from scratch: {difference}");
+        panic!(
+            "OBSCURA_LAYOUT_VERIFY ({path}): incremental layout differs from scratch: {difference}"
+        );
     }
     if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
         eprintln!(

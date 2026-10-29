@@ -762,7 +762,12 @@ impl RecordingCanvas {
     /// Record a scene-only op under `mask` (and an extra rectangular clip).
     /// Returns false when the clip is not expressible, so the caller paints
     /// pixels instead.
-    pub(crate) fn emit_scene(&mut self, mask: Option<&Mask>, clip_rect: Option<[f32; 4]>, op: Op) -> bool {
+    pub(crate) fn emit_scene(
+        &mut self,
+        mask: Option<&Mask>,
+        clip_rect: Option<[f32; 4]>,
+        op: Op,
+    ) -> bool {
         let extra = clip_rect.map(|[x, y, w, h]| ClipShape {
             path: vec![
                 Verb::M(x, y),
@@ -905,7 +910,12 @@ impl RecordingCanvas {
         let key = if (width as usize) * (height as usize) <= SMALL_IMAGE_PIXELS {
             None
         } else {
-            Some((data.as_ptr() as usize, width, height, sparse_fingerprint(data)))
+            Some((
+                data.as_ptr() as usize,
+                width,
+                height,
+                sparse_fingerprint(data),
+            ))
         };
         let generation = SCENE_GENERATION.with(Cell::get);
         let (id, rgba) = scene_image_cache(|cache| {
@@ -1504,7 +1514,11 @@ pub(crate) fn record_scene<R>(paint: impl FnOnce() -> R) -> (R, Option<DisplayLi
 /// Device pixels per CSS pixel for what a scene recording must rasterize
 /// itself (SVG images): the window's scale, so they stay sharp there.
 pub(crate) fn set_scene_raster_scale(scale: f32) {
-    let scale = if scale.is_finite() { scale.clamp(1.0, 4.0) } else { 1.0 };
+    let scale = if scale.is_finite() {
+        scale.clamp(1.0, 4.0)
+    } else {
+        1.0
+    };
     SCENE_RASTER_SCALE.with(|cell| cell.set(scale));
 }
 
@@ -1623,9 +1637,9 @@ pub(crate) fn mask_is_lazy(mask: &Mask) -> bool {
 /// Rasterize a lazy mask in place before something reads or unions its
 /// pixels. No-op for ordinary masks.
 pub(crate) fn materialize_mask(mask: &mut Mask) {
-    let Some((shapes, true)) = with_recorder(|recorder| {
-        (recorder.lookup_mask(mask).0, recorder.mask_is_lazy(mask))
-    }) else {
+    let Some((shapes, true)) =
+        with_recorder(|recorder| (recorder.lookup_mask(mask).0, recorder.mask_is_lazy(mask)))
+    else {
         return;
     };
     let size = with_recorder(|recorder| recorder.logical_size(mask));

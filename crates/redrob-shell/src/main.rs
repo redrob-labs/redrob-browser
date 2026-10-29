@@ -2502,7 +2502,9 @@ impl Window {
                                 t.scene.scroll_at(&res, w.at, w.delta, w.smooth);
                                 true
                             }
-                            compositor::WheelPlan::Deferred | compositor::WheelPlan::Cancelled => false,
+                            compositor::WheelPlan::Deferred | compositor::WheelPlan::Cancelled => {
+                                false
+                            }
                         };
                         ops.push(Op::Wheel {
                             x: w.at.0,

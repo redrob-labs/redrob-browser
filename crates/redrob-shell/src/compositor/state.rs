@@ -72,7 +72,10 @@ impl TabScene {
 
     /// Decide how to scroll a wheel event at `node` (the front hit region).
     pub fn wheel_plan(&self, node: Option<u64>) -> WheelPlan {
-        if self.wheel_cancelled_until.is_some_and(|t| Instant::now() < t) {
+        if self
+            .wheel_cancelled_until
+            .is_some_and(|t| Instant::now() < t)
+        {
             return WheelPlan::Cancelled;
         }
         match node {

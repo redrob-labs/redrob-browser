@@ -40,7 +40,10 @@ fn pixmap(width: u32, height: u32, rgba: Vec<u8>) -> Option<Arc<Pixmap>> {
     if w == 0 || h == 0 || rgba.len() != w as usize * h as usize * 4 {
         return None;
     }
-    let meta = PixelMetadata { may_have_transparency: true, alpha_type: ImageAlphaType::AlphaPremultiplied };
+    let meta = PixelMetadata {
+        may_have_transparency: true,
+        alpha_type: ImageAlphaType::AlphaPremultiplied,
+    };
     Some(Arc::new(Pixmap::from_parts(rgba, w, h, meta)))
 }
 
@@ -59,7 +62,12 @@ impl ResourceStore {
     /// side over 65535 px) are ignored, so items that use them draw nothing.
     pub fn apply(&mut self, res: Resource) {
         match res {
-            Resource::Image { id, width, height, rgba } => match pixmap(width, height, rgba) {
+            Resource::Image {
+                id,
+                width,
+                height,
+                rgba,
+            } => match pixmap(width, height, rgba) {
                 Some(p) => {
                     self.images.insert(id, p);
                 }
@@ -74,7 +82,10 @@ impl ResourceStore {
                     .and_then(|f| f.head().ok().map(|h| h.units_per_em()))
                     .filter(|u| *u > 0)
                     .unwrap_or(1000);
-                self.fonts.insert(id, (FontData::new(Blob::new(Arc::new(data)), index), upem as f32));
+                self.fonts.insert(
+                    id,
+                    (FontData::new(Blob::new(Arc::new(data)), index), upem as f32),
+                );
             }
             Resource::FontInstance { id, font, axes } => {
                 let Some((data, _)) = self.fonts.get(&font) else {
@@ -84,7 +95,10 @@ impl ResourceStore {
                     .map(|face| {
                         use skrifa::MetadataProvider;
                         face.axes()
-                            .location(axes.iter().map(|(tag, value)| (skrifa::Tag::new(tag), *value)))
+                            .location(
+                                axes.iter()
+                                    .map(|(tag, value)| (skrifa::Tag::new(tag), *value)),
+                            )
                             .coords()
                             .iter()
                             .map(|coord| coord.to_bits())

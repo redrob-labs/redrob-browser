@@ -79,14 +79,27 @@ pub struct FontId(pub u64);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Resource {
     /// Premultiplied RGBA8, row-major.
-    Image { id: ImageId, width: u32, height: u32, rgba: Vec<u8> },
+    Image {
+        id: ImageId,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+    },
     /// A font file (TTF/OTF/TTC bytes) and the face index inside it.
-    Font { id: FontId, data: Vec<u8>, index: u32 },
+    Font {
+        id: FontId,
+        data: Vec<u8>,
+        index: u32,
+    },
     /// A variable font at fixed axis values (added, additive): Text items
     /// may name `id`; draw with `font`'s file at these `axes`
     /// (OpenType tag, user-space value). A client that ignores it can draw
     /// with `font` at its default instance.
-    FontInstance { id: FontId, font: FontId, axes: Vec<([u8; 4], f32)> },
+    FontInstance {
+        id: FontId,
+        font: FontId,
+        axes: Vec<([u8; 4], f32)>,
+    },
     /// The client may drop it.
     DropImage(ImageId),
     DropFont(FontId),
@@ -144,23 +157,83 @@ pub enum BlendMode {
 /// sorted by the engine in CSS stacking order).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Item {
-    Rect { rect: Rect, color: [f32; 4] },
-    RoundedRect { rect: Rect, radii: [f32; 4], color: [f32; 4] }, // tl,tr,br,bl
-    Path { verbs: Vec<Verb>, brush: Brush, even_odd: bool, transform: Affine },
-    Stroke { verbs: Vec<Verb>, color: [f32; 4], width: f32, transform: Affine },
-    LinearGradient { rect: Rect, start: (f32, f32), end: (f32, f32), stops: Vec<GradientStop> },
-    RadialGradient { rect: Rect, center: (f32, f32), radius: (f32, f32), stops: Vec<GradientStop> },
-    BoxShadow { rect: Rect, radii: [f32; 4], color: [f32; 4], blur: f32, offset: (f32, f32), spread: f32, inset: bool },
+    Rect {
+        rect: Rect,
+        color: [f32; 4],
+    },
+    RoundedRect {
+        rect: Rect,
+        radii: [f32; 4],
+        color: [f32; 4],
+    }, // tl,tr,br,bl
+    Path {
+        verbs: Vec<Verb>,
+        brush: Brush,
+        even_odd: bool,
+        transform: Affine,
+    },
+    Stroke {
+        verbs: Vec<Verb>,
+        color: [f32; 4],
+        width: f32,
+        transform: Affine,
+    },
+    LinearGradient {
+        rect: Rect,
+        start: (f32, f32),
+        end: (f32, f32),
+        stops: Vec<GradientStop>,
+    },
+    RadialGradient {
+        rect: Rect,
+        center: (f32, f32),
+        radius: (f32, f32),
+        stops: Vec<GradientStop>,
+    },
+    BoxShadow {
+        rect: Rect,
+        radii: [f32; 4],
+        color: [f32; 4],
+        blur: f32,
+        offset: (f32, f32),
+        spread: f32,
+        inset: bool,
+    },
     /// Draw `image` into `dest`, sampling `src` (in image pixels).
-    Image { image: ImageId, dest: Rect, src: Rect, smooth: bool },
+    Image {
+        image: ImageId,
+        dest: Rect,
+        src: Rect,
+        smooth: bool,
+    },
     /// Glyph run: `font` at `size` CSS px, glyph origins in local space.
-    Text { font: FontId, size: f32, color: [f32; 4], glyphs: Vec<Glyph>, synthetic_bold: bool, skew: f32 },
+    Text {
+        font: FontId,
+        size: f32,
+        color: [f32; 4],
+        glyphs: Vec<Glyph>,
+        synthetic_bold: bool,
+        skew: f32,
+    },
     /// A region the window fills itself (video frame, canvas texture).
-    External { key: u64, rect: Rect },
-    PushClip { rect: Rect, radii: [f32; 4] },
-    PushClipPath { verbs: Vec<Verb>, even_odd: bool },
+    External {
+        key: u64,
+        rect: Rect,
+    },
+    PushClip {
+        rect: Rect,
+        radii: [f32; 4],
+    },
+    PushClipPath {
+        verbs: Vec<Verb>,
+        even_odd: bool,
+    },
     PopClip,
-    PushLayer { opacity: f32, blend: BlendMode, transform: Affine },
+    PushLayer {
+        opacity: f32,
+        blend: BlendMode,
+        transform: Affine,
+    },
     PopLayer,
 }
 

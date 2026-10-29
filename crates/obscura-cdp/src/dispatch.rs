@@ -613,7 +613,10 @@ impl CdpContext {
         }
         let mut by_page: HashMap<&str, Vec<&str>> = HashMap::new();
         for (session, page) in &self.sessions {
-            by_page.entry(page.as_str()).or_default().push(session.as_str());
+            by_page
+                .entry(page.as_str())
+                .or_default()
+                .push(session.as_str());
         }
         if by_page.values().all(|sessions| sessions.len() < 2) {
             return;

@@ -20,7 +20,9 @@
 
 use std::collections::HashMap;
 
-use redrob_scene::{sticky_offset, Frame, HitRegion, Rect, SpatialId, SpatialKind, SpatialNode, ROOT_SPATIAL};
+use redrob_scene::{
+    sticky_offset, Frame, HitRegion, Rect, SpatialId, SpatialKind, SpatialNode, ROOT_SPATIAL,
+};
 use vello_cpu::kurbo::{self, Affine, Point, RoundedRect, RoundedRectRadii, Shape};
 
 /// One scroll frame's clip: `rect` in the space given by `transform`
@@ -40,7 +42,10 @@ struct Resolved {
     scroll: Option<SpatialId>,
 }
 
-const IDENTITY: Resolved = Resolved { world: Affine::IDENTITY, scroll: None };
+const IDENTITY: Resolved = Resolved {
+    world: Affine::IDENTITY,
+    scroll: None,
+};
 
 /// Resolved spatial tree for one frame and one set of scroll offsets.
 #[derive(Clone, Debug)]
@@ -56,17 +61,30 @@ pub fn to_kurbo_affine(a: [f32; 6]) -> Affine {
 }
 
 pub fn to_kurbo_rect(r: Rect) -> kurbo::Rect {
-    kurbo::Rect::new(r.x as f64, r.y as f64, (r.x + r.w) as f64, (r.y + r.h) as f64)
+    kurbo::Rect::new(
+        r.x as f64,
+        r.y as f64,
+        (r.x + r.w) as f64,
+        (r.y + r.h) as f64,
+    )
 }
 
 fn from_kurbo_rect(r: kurbo::Rect) -> Rect {
-    Rect { x: r.x0 as f32, y: r.y0 as f32, w: (r.x1 - r.x0) as f32, h: (r.y1 - r.y0) as f32 }
+    Rect {
+        x: r.x0 as f32,
+        y: r.y0 as f32,
+        w: (r.x1 - r.x0) as f32,
+        h: (r.y1 - r.y0) as f32,
+    }
 }
 
 /// Rounded rect shape with CSS corner order (tl, tr, br, bl).
 pub fn rounded(rect: Rect, radii: [f32; 4]) -> RoundedRect {
     let r = radii.map(|v| v.max(0.0) as f64);
-    RoundedRect::from_rect(to_kurbo_rect(rect), RoundedRectRadii::new(r[0], r[1], r[2], r[3]))
+    RoundedRect::from_rect(
+        to_kurbo_rect(rect),
+        RoundedRectRadii::new(r[0], r[1], r[2], r[3]),
+    )
 }
 
 fn invertible(a: &Affine) -> bool {
@@ -75,12 +93,18 @@ fn invertible(a: &Affine) -> bool {
 
 impl SpatialMap {
     pub fn new(frame: &Frame, scroll: &HashMap<u64, (f32, f32)>) -> Self {
-        let nodes: HashMap<SpatialId, &SpatialNode> = frame.spatial.iter().map(|n| (n.id, n)).collect();
+        let nodes: HashMap<SpatialId, &SpatialNode> =
+            frame.spatial.iter().map(|n| (n.id, n)).collect();
         let mut map = SpatialMap {
             resolved: HashMap::with_capacity(nodes.len()),
             clips: HashMap::new(),
             offsets: HashMap::new(),
-            viewport: Rect { x: 0.0, y: 0.0, w: frame.viewport.0, h: frame.viewport.1 },
+            viewport: Rect {
+                x: 0.0,
+                y: 0.0,
+                w: frame.viewport.0,
+                h: frame.viewport.1,
+            },
         };
         let mut visiting = Vec::new();
         for id in nodes.keys() {
@@ -99,7 +123,9 @@ impl SpatialMap {
         if let Some(r) = self.resolved.get(&id) {
             return *r;
         }
-        let Some(node) = nodes.get(&id) else { return IDENTITY };
+        let Some(node) = nodes.get(&id) else {
+            return IDENTITY;
+        };
         if visiting.contains(&id) {
             // A cycle in the tree: break it at identity.
             return IDENTITY;
@@ -116,36 +142,93 @@ impl SpatialMap {
         };
         let pw = parent.world;
         let out = match &node.kind {
-            SpatialKind::Reference { transform } => Resolved { world: pw * to_kurbo_affine(*transform), scroll: parent.scroll },
-            SpatialKind::Scroll { frame, content, offset, offset_changed_by_page, node: dom } => {
-                let raw = if *offset_changed_by_page { *offset } else { scroll.get(dom).copied().unwrap_or(*offset) };
+            SpatialKind::Reference { transform } => Resolved {
+                world: pw * to_kurbo_affine(*transform),
+                scroll: parent.scroll,
+            },
+            SpatialKind::Scroll {
+                frame,
+                content,
+                offset,
+                offset_changed_by_page,
+                node: dom,
+            } => {
+                let raw = if *offset_changed_by_page {
+                    *offset
+                } else {
+                    scroll.get(dom).copied().unwrap_or(*offset)
+                };
                 let max_x = (content.0 - frame.w).max(0.0);
                 let max_y = (content.1 - frame.h).max(0.0);
-                let ox = if raw.0.is_finite() { raw.0.clamp(0.0, max_x) } else { 0.0 };
-                let oy = if raw.1.is_finite() { raw.1.clamp(0.0, max_y) } else { 0.0 };
+                let ox = if raw.0.is_finite() {
+                    raw.0.clamp(0.0, max_x)
+                } else {
+                    0.0
+                };
+                let oy = if raw.1.is_finite() {
+                    raw.1.clamp(0.0, max_y)
+                } else {
+                    0.0
+                };
                 self.offsets.insert(id, (ox, oy));
-                self.clips.insert(id, ScrollClip { transform: pw, rect: *frame, outer: parent.scroll });
-                Resolved { world: pw * Affine::translate((-ox as f64, -oy as f64)), scroll: Some(id) }
+                self.clips.insert(
+                    id,
+                    ScrollClip {
+                        transform: pw,
+                        rect: *frame,
+                        outer: parent.scroll,
+                    },
+                );
+                Resolved {
+                    world: pw * Affine::translate((-ox as f64, -oy as f64)),
+                    scroll: Some(id),
+                }
             }
-            SpatialKind::Sticky { frame, margins, vertical_range, horizontal_range } => {
+            SpatialKind::Sticky {
+                frame,
+                margins,
+                vertical_range,
+                horizontal_range,
+            } => {
                 // The scroll frame's visible rect, in the scroller's content space.
                 let (vp, vp_world) = match parent.scroll {
                     Some(s) => {
                         let clip = self.clips[&s];
                         let (ox, oy) = self.offsets[&s];
-                        let world = self.resolved.get(&s).map(|r| r.world).unwrap_or(Affine::IDENTITY);
-                        (Rect { x: clip.rect.x + ox, y: clip.rect.y + oy, ..clip.rect }, world)
+                        let world = self
+                            .resolved
+                            .get(&s)
+                            .map(|r| r.world)
+                            .unwrap_or(Affine::IDENTITY);
+                        (
+                            Rect {
+                                x: clip.rect.x + ox,
+                                y: clip.rect.y + oy,
+                                ..clip.rect
+                            },
+                            world,
+                        )
                     }
                     None => (self.viewport, Affine::IDENTITY),
                 };
                 let (dx, dy) = if invertible(&pw) {
                     let to_parent = pw.inverse() * vp_world;
-                    let vp_parent = from_kurbo_rect(to_parent.transform_rect_bbox(to_kurbo_rect(vp)));
-                    sticky_offset(*frame, *margins, *vertical_range, *horizontal_range, vp_parent)
+                    let vp_parent =
+                        from_kurbo_rect(to_parent.transform_rect_bbox(to_kurbo_rect(vp)));
+                    sticky_offset(
+                        *frame,
+                        *margins,
+                        *vertical_range,
+                        *horizontal_range,
+                        vp_parent,
+                    )
                 } else {
                     (0.0, 0.0)
                 };
-                Resolved { world: pw * Affine::translate((dx as f64, dy as f64)), scroll: parent.scroll }
+                Resolved {
+                    world: pw * Affine::translate((dx as f64, dy as f64)),
+                    scroll: parent.scroll,
+                }
             }
         };
         visiting.pop();
@@ -155,7 +238,10 @@ impl SpatialMap {
 
     /// Local-to-viewport transform of a spatial node (CSS px).
     pub fn transform(&self, id: SpatialId) -> Affine {
-        self.resolved.get(&id).map(|r| r.world).unwrap_or(Affine::IDENTITY)
+        self.resolved
+            .get(&id)
+            .map(|r| r.world)
+            .unwrap_or(Affine::IDENTITY)
     }
 
     /// Same as [`Self::transform`], as `[sx, ky, kx, sy, tx, ty]`.
@@ -190,7 +276,8 @@ impl SpatialMap {
     /// Whether a viewport point is inside every scroll clip of `id`.
     pub fn visible(&self, id: SpatialId, point: Point) -> bool {
         self.clip_chain(id).all(|c| {
-            invertible(&c.transform) && to_kurbo_rect(c.rect).contains(c.transform.inverse() * point)
+            invertible(&c.transform)
+                && to_kurbo_rect(c.rect).contains(c.transform.inverse() * point)
         })
     }
 
@@ -222,6 +309,10 @@ impl SpatialMap {
 
 /// Front-most hit region under `point` (viewport CSS px) for the given
 /// scroll offsets. Same mapping as [`crate::rasterize`].
-pub fn hit_test<'a>(frame: &'a Frame, scroll: &HashMap<u64, (f32, f32)>, point: (f32, f32)) -> Option<&'a HitRegion> {
+pub fn hit_test<'a>(
+    frame: &'a Frame,
+    scroll: &HashMap<u64, (f32, f32)>,
+    point: (f32, f32),
+) -> Option<&'a HitRegion> {
     SpatialMap::new(frame, scroll).hit_test(frame, point)
 }

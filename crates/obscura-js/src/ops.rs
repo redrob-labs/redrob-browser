@@ -8206,6 +8206,8 @@ fn op_canvas_paint_damage(state: &OpState, nid: u32) -> bool {
 }
 
 pub fn build_extension() -> Extension {
+    // Render-only ops are pushed below behind cfg(feature = "render").
+    #[cfg_attr(not(feature = "render"), allow(unused_mut))]
     let mut ops = vec![
         op_dom(),
         op_script_mark_started(),

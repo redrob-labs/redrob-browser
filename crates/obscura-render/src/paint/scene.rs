@@ -392,7 +392,12 @@ impl PreparedRender {
             .sticky
             .scene_frames(viewport, &self.scroll_tree)
             .into_iter()
-            .filter(|frame| compositor.get(frame.scroll_owner.index()).copied().unwrap_or(false))
+            .filter(|frame| {
+                compositor
+                    .get(frame.scroll_owner.index())
+                    .copied()
+                    .unwrap_or(false)
+            })
             .map(|frame| (frame.id, frame))
             .collect();
         for (id, offset) in
@@ -764,9 +769,18 @@ impl<'a> Builder<'a> {
     }
 
     /// Nearest scroll container the compositor scrolls, from `sid` up.
-    fn effective_owner(&self, mut sid: Option<crate::dom::ScrollId>) -> Option<crate::dom::ScrollId> {
+    fn effective_owner(
+        &self,
+        mut sid: Option<crate::dom::ScrollId>,
+    ) -> Option<crate::dom::ScrollId> {
         while let Some(id) = sid {
-            if self.scroll.compositor.get(id.index()).copied().unwrap_or(false) {
+            if self
+                .scroll
+                .compositor
+                .get(id.index())
+                .copied()
+                .unwrap_or(false)
+            {
                 return Some(id);
             }
             sid = self.prepared.scroll_tree.containers[id.index()].parent;
@@ -998,11 +1012,12 @@ impl<'a> Builder<'a> {
                 ..frame.containing
             }
         };
-        let range = |start: f32, size: f32, margin_start: f32, margin_end: f32, pos: f32, len: f32| {
-            let min = start + margin_start - pos;
-            let max = start + size - margin_end - len - pos;
-            (min.min(0.0), max.max(0.0))
-        };
+        let range =
+            |start: f32, size: f32, margin_start: f32, margin_end: f32, pos: f32, len: f32| {
+                let min = start + margin_start - pos;
+                let max = start + size - margin_end - len - pos;
+                (min.min(0.0), max.max(0.0))
+            };
         let vertical_range = range(
             containing.y,
             containing.height,
@@ -1098,7 +1113,11 @@ impl<'a> Builder<'a> {
 
     /// A child reference frame of `spatial` for an op whose transform the
     /// item cannot carry.
-    fn local_frame(&mut self, spatial: rs::SpatialId, transform: &display_list::Affine) -> rs::SpatialId {
+    fn local_frame(
+        &mut self,
+        spatial: rs::SpatialId,
+        transform: &display_list::Affine,
+    ) -> rs::SpatialId {
         let id = self.push_spatial(
             spatial,
             rs::SpatialKind::Reference {
@@ -1215,11 +1234,7 @@ impl<'a> Builder<'a> {
         let mut id = NodeId::new(((node & !SCENE_CONTENT_FLAG) - 1) as u32);
         // Text hits name their text node or their container; cursor and
         // link come from the element.
-        if !self
-            .tree
-            .get_node(id)
-            .is_some_and(|node| node.is_element())
-        {
+        if !self.tree.get_node(id).is_some_and(|node| node.is_element()) {
             match crate::dom::rendered_parent(self.tree, id) {
                 Some(parent) => id = parent,
                 None => return,
@@ -1450,11 +1465,12 @@ impl<'a> Builder<'a> {
         opacity: f32,
         smooth: bool,
     ) {
-        let (spatial, transform) = if is_axis_aligned(transform) && transform[0] > 0.0 && transform[3] > 0.0 {
-            (spatial, *transform)
-        } else {
-            (self.local_frame(spatial, transform), IDENTITY)
-        };
+        let (spatial, transform) =
+            if is_axis_aligned(transform) && transform[0] > 0.0 && transform[3] > 0.0 {
+                (spatial, *transform)
+            } else {
+                (self.local_frame(spatial, transform), IDENTITY)
+            };
         let (w, h) = (size.0 as f32, size.1 as f32);
         let dest = map_rect(&transform, &[0.0, 0.0, w, h]);
         let group = opacity < 1.0;
@@ -1473,7 +1489,12 @@ impl<'a> Builder<'a> {
             rs::Item::Image {
                 image: id,
                 dest,
-                src: rs::Rect { x: 0.0, y: 0.0, w, h },
+                src: rs::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w,
+                    h,
+                },
                 smooth,
             },
         );
@@ -1496,7 +1517,13 @@ impl<'a> Builder<'a> {
                 if is_translation(transform) {
                     let verbs = transform_verbs(path, transform);
                     if let Some(rect) = axis_rect(&verbs) {
-                        self.push_item(spatial, rs::Item::Rect { rect, color: *color });
+                        self.push_item(
+                            spatial,
+                            rs::Item::Rect {
+                                rect,
+                                color: *color,
+                            },
+                        );
                         return;
                     }
                 }
@@ -1835,9 +1862,15 @@ fn map_rect(t: &display_list::Affine, rect: &[f32; 4]) -> rs::Rect {
         apply(t, x + w, y + h),
     ];
     let min_x = corners.iter().map(|p| p.0).fold(f32::INFINITY, f32::min);
-    let max_x = corners.iter().map(|p| p.0).fold(f32::NEG_INFINITY, f32::max);
+    let max_x = corners
+        .iter()
+        .map(|p| p.0)
+        .fold(f32::NEG_INFINITY, f32::max);
     let min_y = corners.iter().map(|p| p.1).fold(f32::INFINITY, f32::min);
-    let max_y = corners.iter().map(|p| p.1).fold(f32::NEG_INFINITY, f32::max);
+    let max_y = corners
+        .iter()
+        .map(|p| p.1)
+        .fold(f32::NEG_INFINITY, f32::max);
     rs::Rect {
         x: min_x,
         y: min_y,
@@ -1971,7 +2004,10 @@ fn verbs_bounds(verbs: &[Verb]) -> Option<rs::Rect> {
 }
 
 /// The clip items of an overflow clip chain, in `spatial`.
-fn overflow_clip_items(clip: &crate::dom::OverflowClip, spatial: rs::SpatialId) -> Vec<BoundaryClip> {
+fn overflow_clip_items(
+    clip: &crate::dom::OverflowClip,
+    spatial: rs::SpatialId,
+) -> Vec<BoundaryClip> {
     let bounds = clip.scene_bounds();
     let mut out = vec![BoundaryClip {
         spatial,

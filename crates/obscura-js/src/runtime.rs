@@ -2099,7 +2099,10 @@ impl ObscuraJsRuntime {
             state.activity_generation,
             state.scroll_generation,
             dirty,
-            state.prepared_render.as_ref().map(|render| render.paint_epoch()),
+            state
+                .prepared_render
+                .as_ref()
+                .map(|render| render.paint_epoch()),
         )
     }
 

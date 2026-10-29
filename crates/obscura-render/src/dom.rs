@@ -499,9 +499,12 @@ pub fn layout_difference(incremental: &DomLayout, scratch: &DomLayout) -> Option
             )
         })
         .or_else(|| {
-            first_map_difference("text_runs", &incremental.text_runs, &scratch.text_runs, |a, b| {
-                a == b
-            })
+            first_map_difference(
+                "text_runs",
+                &incremental.text_runs,
+                &scratch.text_runs,
+                |a, b| a == b,
+            )
         })
         .or_else(|| {
             first_map_difference("styles", &incremental.styles, &scratch.styles, |a, b| {
@@ -517,30 +520,46 @@ pub fn layout_difference(incremental: &DomLayout, scratch: &DomLayout) -> Option
             )
         })
         .or_else(|| {
-            first_map_difference("clip_rects", &incremental.clip_rects, &scratch.clip_rects, |a, b| {
-                a == b
-            })
+            first_map_difference(
+                "clip_rects",
+                &incremental.clip_rects,
+                &scratch.clip_rects,
+                |a, b| a == b,
+            )
         })
         .or_else(|| {
-            first_map_difference("translates", &incremental.translates, &scratch.translates, |a, b| {
-                a == b
-            })
+            first_map_difference(
+                "translates",
+                &incremental.translates,
+                &scratch.translates,
+                |a, b| a == b,
+            )
         })
         .or_else(|| {
-            first_map_difference("transforms", &incremental.transforms, &scratch.transforms, |a, b| {
-                a == b
-            })
+            first_map_difference(
+                "transforms",
+                &incremental.transforms,
+                &scratch.transforms,
+                |a, b| a == b,
+            )
         })
         .or_else(|| {
             let boxes = |layout: &DomLayout| {
                 layout
                     .generated_boxes
                     .iter()
-                    .map(|generated| format!("{:?} {:?} {:?}", generated.host, generated.kind, generated.rect))
+                    .map(|generated| {
+                        format!(
+                            "{:?} {:?} {:?}",
+                            generated.host, generated.kind, generated.rect
+                        )
+                    })
                     .collect::<Vec<_>>()
             };
             let (a, b) = (boxes(incremental), boxes(scratch));
-            (a != b).then(|| format!("generated_boxes differ\n  incremental: {a:?}\n  scratch:     {b:?}"))
+            (a != b).then(|| {
+                format!("generated_boxes differ\n  incremental: {a:?}\n  scratch:     {b:?}")
+            })
         })
         .or_else(|| text_item_difference(incremental, scratch))
 }
@@ -553,12 +572,23 @@ pub fn layout_difference(incremental: &DomLayout, scratch: &DomLayout) -> Option
 /// whole paths. Styles with `calc()` handles still dirty: the handle compares
 /// equal while the expression context behind it can change.
 trait SetStyleIfChanged {
-    fn set_style_if_changed(&mut self, node: taffy::NodeId, style: taffy::Style) -> taffy::TaffyResult<()>;
+    fn set_style_if_changed(
+        &mut self,
+        node: taffy::NodeId,
+        style: taffy::Style,
+    ) -> taffy::TaffyResult<()>;
 }
 
 impl<C> SetStyleIfChanged for TaffyTree<C> {
-    fn set_style_if_changed(&mut self, node: taffy::NodeId, style: taffy::Style) -> taffy::TaffyResult<()> {
-        if self.style(node).is_ok_and(|current| *current == style && !taffy_style_uses_calc(&style)) {
+    fn set_style_if_changed(
+        &mut self,
+        node: taffy::NodeId,
+        style: taffy::Style,
+    ) -> taffy::TaffyResult<()> {
+        if self
+            .style(node)
+            .is_ok_and(|current| *current == style && !taffy_style_uses_calc(&style))
+        {
             return Ok(());
         }
         self.set_style(node, style)
@@ -626,25 +656,61 @@ fn taffy_style_uses_calc(style: &taffy::Style) -> bool {
     let track = |track: &taffy::TrackSizingFunction| {
         track.min.into_raw().is_calc() || track.max.into_raw().is_calc()
     };
-    style.grid_template_rows.iter().chain(&style.grid_template_columns).any(|component| {
-        match component {
+    style
+        .grid_template_rows
+        .iter()
+        .chain(&style.grid_template_columns)
+        .any(|component| match component {
             taffy::GridTemplateComponent::Single(single) => track(single),
             taffy::GridTemplateComponent::Repeat(repeat) => repeat.tracks.iter().any(track),
-        }
-    }) || style.grid_auto_rows.iter().chain(&style.grid_auto_columns).any(track)
-        || [style.size.width, style.size.height, style.min_size.width, style.min_size.height]
-            .into_iter()
-            .chain([style.max_size.width, style.max_size.height, style.flex_basis])
-            .any(|value| value.into_raw().is_calc())
-        || [style.margin.left, style.margin.right, style.margin.top, style.margin.bottom]
-            .into_iter()
-            .chain([style.inset.left, style.inset.right, style.inset.top, style.inset.bottom])
-            .any(|value| value.into_raw().is_calc())
-        || [style.padding.left, style.padding.right, style.padding.top, style.padding.bottom]
-            .into_iter()
-            .chain([style.border.left, style.border.right, style.border.top, style.border.bottom])
-            .chain([style.gap.width, style.gap.height])
-            .any(|value| value.into_raw().is_calc())
+        })
+        || style
+            .grid_auto_rows
+            .iter()
+            .chain(&style.grid_auto_columns)
+            .any(track)
+        || [
+            style.size.width,
+            style.size.height,
+            style.min_size.width,
+            style.min_size.height,
+        ]
+        .into_iter()
+        .chain([
+            style.max_size.width,
+            style.max_size.height,
+            style.flex_basis,
+        ])
+        .any(|value| value.into_raw().is_calc())
+        || [
+            style.margin.left,
+            style.margin.right,
+            style.margin.top,
+            style.margin.bottom,
+        ]
+        .into_iter()
+        .chain([
+            style.inset.left,
+            style.inset.right,
+            style.inset.top,
+            style.inset.bottom,
+        ])
+        .any(|value| value.into_raw().is_calc())
+        || [
+            style.padding.left,
+            style.padding.right,
+            style.padding.top,
+            style.padding.bottom,
+        ]
+        .into_iter()
+        .chain([
+            style.border.left,
+            style.border.right,
+            style.border.top,
+            style.border.bottom,
+        ])
+        .chain([style.gap.width, style.gap.height])
+        .any(|value| value.into_raw().is_calc())
 }
 
 /// Pair `new` with `old` and record, bottom-up, every node whose whole subtree
@@ -664,7 +730,10 @@ fn match_retained_subtree(
         _ => false,
     };
     if same {
-        same = match (tree.get_node_context(new), old.tree.get_node_context(old_node)) {
+        same = match (
+            tree.get_node_context(new),
+            old.tree.get_node_context(old_node),
+        ) {
             (None, None) => true,
             (Some(&a), Some(&b)) => match (engine.measure_signature(a), old.measures.get(&b)) {
                 (Some(a), Some(b)) => a.same_measure(b),
@@ -748,7 +817,8 @@ pub(crate) fn sticky_layout_difference(a: &StickyLayout, b: &StickyLayout) -> Op
         return Some("sticky clip owners differ".into());
     }
     let (fa, fb) = (sorted_debug(&a.frames), sorted_debug(&b.frames));
-    (fa != fb).then(|| format!("sticky frames differ\n  incremental: {fa:?}\n  scratch:     {fb:?}"))
+    (fa != fb)
+        .then(|| format!("sticky frames differ\n  incremental: {fa:?}\n  scratch:     {fb:?}"))
 }
 
 /// Order-insensitive equality of two scroll trees: every node's scroll
@@ -772,12 +842,17 @@ pub(crate) fn scroll_tree_difference(a: &ScrollTree, b: &ScrollTree) -> Option<S
     };
     let owner = |tree: &ScrollTree, ids: &[Option<ScrollId>]| {
         ids.iter()
-            .map(|id| id.and_then(|id| tree.containers.get(id.0 as usize)).map(|c| c.node))
+            .map(|id| {
+                id.and_then(|id| tree.containers.get(id.0 as usize))
+                    .map(|c| c.node)
+            })
             .collect::<Vec<_>>()
     };
     let (ca, cb) = (describe(a), describe(b));
     if ca != cb {
-        return Some(format!("scroll containers differ\n  incremental: {ca:?}\n  scratch:     {cb:?}"));
+        return Some(format!(
+            "scroll containers differ\n  incremental: {ca:?}\n  scratch:     {cb:?}"
+        ));
     }
     if a.node_content_size != b.node_content_size {
         return Some("scroll content sizes differ".into());
@@ -812,23 +887,25 @@ fn text_item_difference(incremental: &DomLayout, scratch: &DomLayout) -> Option<
             })
             .collect::<HashMap<_, _>>()
     };
-    first_map_difference("ifc_items", &whole(incremental), &whole(scratch), |a, b| a == b)
-        .or_else(|| {
-            first_map_difference(
-                "run_ifc_items",
-                &lists(incremental, &incremental.run_ifc_items),
-                &lists(scratch, &scratch.run_ifc_items),
-                |a, b| a == b,
-            )
-        })
-        .or_else(|| {
-            first_map_difference(
-                "word_ifc_items",
-                &lists(incremental, &incremental.word_ifc_items),
-                &lists(scratch, &scratch.word_ifc_items),
-                |a, b| a == b,
-            )
-        })
+    first_map_difference("ifc_items", &whole(incremental), &whole(scratch), |a, b| {
+        a == b
+    })
+    .or_else(|| {
+        first_map_difference(
+            "run_ifc_items",
+            &lists(incremental, &incremental.run_ifc_items),
+            &lists(scratch, &scratch.run_ifc_items),
+            |a, b| a == b,
+        )
+    })
+    .or_else(|| {
+        first_map_difference(
+            "word_ifc_items",
+            &lists(incremental, &incremental.word_ifc_items),
+            &lists(scratch, &scratch.word_ifc_items),
+            |a, b| a == b,
+        )
+    })
 }
 
 #[cfg(not(feature = "paint"))]
@@ -4886,13 +4963,20 @@ fn retained_style_plan(
                             return RetainedStylePlan::Full;
                         }
                         note_root_anchor(tree, anchor, invalidation.rule_order);
-                        add_relational_anchor_scope(tree, anchor, invalidation.anchor_reaches, &mut dirty);
+                        add_relational_anchor_scope(
+                            tree,
+                            anchor,
+                            invalidation.anchor_reaches,
+                            &mut dirty,
+                        );
                     }
                 }
             }
             if reaches.contains(crate::css::InvalidationReaches::CONSERVATIVE) {
                 if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
-                    eprintln!("[timing] retained-style fallback reason=conservative-selector name={name}");
+                    eprintln!(
+                        "[timing] retained-style fallback reason=conservative-selector name={name}"
+                    );
                 }
                 return RetainedStylePlan::Full;
             }
@@ -6253,8 +6337,7 @@ fn layout_dom_once(
     let mut taffy_tree: TaffyTree<usize> = crate::new_taffy_tree();
     let mut id_map: HashMap<taffy::NodeId, NodeId> = HashMap::new();
     let mut words: HashMap<taffy::NodeId, (NodeId, String)> = HashMap::new();
-    let mut engine =
-        crate::inline::TextEngine::for_document_layout(fonts, needs_emoji_font);
+    let mut engine = crate::inline::TextEngine::for_document_layout(fonts, needs_emoji_font);
     let mut ifc_items = IfcRegistry::default();
 
     // The document node itself is not an element; lay out from the first
@@ -10959,7 +11042,10 @@ fn resolve_static_positions_and_reparent(
             let _ = taffy_tree.add_child(current, candidate.child);
             continue;
         }
-        if taffy_tree.set_style_if_changed(candidate.child, style).is_err() {
+        if taffy_tree
+            .set_style_if_changed(candidate.child, style)
+            .is_err()
+        {
             let _ = taffy_tree.remove_child(candidate.target, candidate.child);
             let _ = taffy_tree.add_child(current, candidate.child);
         }
@@ -12458,7 +12544,10 @@ where
         };
         let mut resolved = current.clone();
         resolved.size.width = taffy::Dimension::length(declaration);
-        if taffy_tree.set_style_if_changed(candidate.node, resolved).is_ok() {
+        if taffy_tree
+            .set_style_if_changed(candidate.node, resolved)
+            .is_ok()
+        {
             changed = true;
         }
     }
@@ -14616,9 +14705,7 @@ fn build(
     let has_no_rendered_child = dom_children.iter().all(|cid| {
         let kind = tree.borrow_node(*cid).map(|node| match &node.data {
             obscura_dom::tree::NodeData::Element { .. } => Some(true),
-            obscura_dom::tree::NodeData::Text { contents } => {
-                Some(!contents.trim().is_empty())
-            }
+            obscura_dom::tree::NodeData::Text { contents } => Some(!contents.trim().is_empty()),
             _ => None,
         });
         match kind.flatten() {
@@ -20059,7 +20146,7 @@ mod tests {
                 target: "subject",
                 attribute: "data-state",
                 new_value: "on",
-                expectation: ConservativeFallback,
+                expectation: Incremental,
             },
             RetainedDifferentialCase {
                 name: "nth of selector structural traversal",
@@ -20134,12 +20221,12 @@ mod tests {
                 expectation: Incremental,
             },
             RetainedDifferentialCase {
-                name: "image source relational selector retains full fallback",
+                name: "image source relational selector",
                 css: "body:has(img[src='replacement.png']){color:#123456}",
                 target: "image",
                 attribute: "src",
                 new_value: "replacement.png",
-                expectation: ConservativeFallback,
+                expectation: Incremental,
             },
             RetainedDifferentialCase {
                 name: "inherited language semantic mutation",

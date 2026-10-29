@@ -109,11 +109,7 @@ impl SceneStream {
         }
     }
 
-    fn new(
-        listener: Listener,
-        address: String,
-        #[cfg(unix)] path: std::path::PathBuf,
-    ) -> Self {
+    fn new(listener: Listener, address: String, #[cfg(unix)] path: std::path::PathBuf) -> Self {
         Self {
             listener,
             address,
@@ -331,7 +327,10 @@ impl SceneStream {
             } = &mut node.kind
             {
                 match self.window_offsets.get(dom) {
-                    Some(window) if (window.0 - offset.0).abs() < 0.5 && (window.1 - offset.1).abs() < 0.5 => {
+                    Some(window)
+                        if (window.0 - offset.0).abs() < 0.5
+                            && (window.1 - offset.1).abs() < 0.5 =>
+                    {
                         *offset_changed_by_page = false;
                     }
                     Some(_) => {
@@ -409,8 +408,9 @@ pub(crate) fn attach(
         .cloned()
         .ok_or("Page.redrobSceneAttach needs a page session")?;
     if !ctx.scenes.contains_key(&page_id) {
-        let stream = SceneStream::bind(&page_id)
-            .map_err(|error| format!("Page.redrobSceneAttach could not open the scene socket: {error}"))?;
+        let stream = SceneStream::bind(&page_id).map_err(|error| {
+            format!("Page.redrobSceneAttach could not open the scene socket: {error}")
+        })?;
         ctx.scenes.insert(page_id.clone(), stream);
     }
     let raster_scale = params

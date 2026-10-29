@@ -72,7 +72,11 @@ pub async fn run(cmd: TabCmd) -> anyhow::Result<()> {
                     .as_u64()
                     .map(|w| format!("window {w}"))
                     .unwrap_or_default();
-                let agent = if i["redrobAgent"] == true { "agent" } else { "" };
+                let agent = if i["redrobAgent"] == true {
+                    "agent"
+                } else {
+                    ""
+                };
                 println!(
                     "{}\t{}\t{}\t{}\t{}",
                     i["targetId"].as_str().unwrap_or(""),

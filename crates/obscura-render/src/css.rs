@@ -7785,13 +7785,15 @@ mod tests {
         assert!(map.requires_conservative_invalidation());
         assert!(map.conservative_rule_orders().len() >= 3);
         assert!(!map.has_unkeyed_relational_rules());
+        // Keys inside a :has() argument are handled relationally, not by a
+        // whole-document fallback.
         assert!(dependencies_reach(
             map.class_dependencies("badge"),
-            InvalidationReaches::CONSERVATIVE,
+            InvalidationReaches::RELATIONAL,
         ));
         assert!(dependencies_reach(
             map.class_dependencies("notice"),
-            InvalidationReaches::CONSERVATIVE,
+            InvalidationReaches::RELATIONAL,
         ));
         assert!(dependencies_reach(
             map.class_dependencies("eligible"),

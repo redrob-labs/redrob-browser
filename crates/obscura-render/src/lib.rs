@@ -81,8 +81,8 @@ pub mod prof {
 pub use css::{CssMediaType, Stylesheet, StylesheetCache};
 
 pub mod style;
-pub use style::compute_style;
 pub use redrob_scene::Cursor;
+pub use style::compute_style;
 
 pub mod border;
 pub use border::{
@@ -167,6 +167,11 @@ pub mod display_list;
 pub use paint::record_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces;
 #[cfg(feature = "paint")]
 mod paint;
+#[cfg(feature = "scene")]
+pub use paint::scene::{
+    build_scene_prepared, SceneFontData, SceneFontInstance, SceneFontResource, SceneFrame,
+    SceneImageResource, SceneStats,
+};
 #[cfg(feature = "paint")]
 pub use paint::{
     image_intrinsic_dimensions, paint_dom, paint_dom_scrolled,
@@ -198,11 +203,6 @@ pub use paint::{
     DynamicFontFace, ElementScrollMetrics, ImageRequestProfile, PreparedRender,
     RenderResourceCache, RenderResourceLoader, ResolvedScrollState, SelectedImage,
     MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS,
-};
-#[cfg(feature = "scene")]
-pub use paint::scene::{
-    build_scene_prepared, SceneFontData, SceneFontInstance, SceneFontResource, SceneFrame,
-    SceneImageResource, SceneStats,
 };
 #[cfg(feature = "scene")]
 pub use redrob_scene;

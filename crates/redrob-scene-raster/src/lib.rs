@@ -29,14 +29,16 @@ mod spatial;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use redrob_scene::{BlendMode, Brush, DisplayItem, Frame, GradientStop, Item, Rect, SpatialId, Verb};
+use glifo::FontEmbolden;
+use redrob_scene::{
+    BlendMode, Brush, DisplayItem, Frame, GradientStop, Item, Rect, SpatialId, Verb,
+};
 use vello_cpu::color::{AlphaColor, Srgb};
 use vello_cpu::kurbo::{self, Affine, BezPath, Diagonal2, Point, Shape};
 use vello_cpu::peniko::{
-    self, ColorStop, ColorStops, Compose, Extend, Fill, Gradient, ImageAlphaType, ImageQuality, ImageSampler,
-    LinearGradientPosition, Mix, RadialGradientPosition,
+    self, ColorStop, ColorStops, Compose, Extend, Fill, Gradient, ImageAlphaType, ImageQuality,
+    ImageSampler, LinearGradientPosition, Mix, RadialGradientPosition,
 };
-use glifo::FontEmbolden;
 use vello_cpu::{Image, ImageSource, PixelMetadata, Pixmap, RenderContext, Resources};
 
 pub use resources::ResourceStore;
@@ -53,13 +55,21 @@ pub struct RgbaImage {
 impl RgbaImage {
     pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
         let i = (y as usize * self.width as usize + x as usize) * 4;
-        [self.data[i], self.data[i + 1], self.data[i + 2], self.data[i + 3]]
+        [
+            self.data[i],
+            self.data[i + 1],
+            self.data[i + 2],
+            self.data[i + 3],
+        ]
     }
 }
 
 /// Encode as PNG (8-bit RGBA).
 pub fn to_png(img: &RgbaImage) -> Vec<u8> {
-    let meta = PixelMetadata { may_have_transparency: true, alpha_type: ImageAlphaType::Alpha };
+    let meta = PixelMetadata {
+        may_have_transparency: true,
+        alpha_type: ImageAlphaType::Alpha,
+    };
     let pm = Pixmap::from_parts(img.data.clone(), img.width as u16, img.height as u16, meta);
     pm.into_png().expect("png encoding into memory")
 }
@@ -76,7 +86,11 @@ pub fn synthetic_bold_amount(size: f32) -> f32 {
 pub fn output_size(clip: Rect, scale: f32) -> (u16, u16) {
     let side = |v: f32| {
         let px = (v * scale).ceil();
-        if px.is_finite() { px.clamp(1.0, u16::MAX as f32) as u16 } else { 1 }
+        if px.is_finite() {
+            px.clamp(1.0, u16::MAX as f32) as u16
+        } else {
+            1
+        }
     };
     (side(clip.w), side(clip.h))
 }
@@ -93,7 +107,11 @@ pub fn rasterize(
 ) -> RgbaImage {
     let map = SpatialMap::new(frame, scroll);
     let (w, h) = output_size(clip, scale);
-    let scale = if scale.is_finite() && scale > 0.0 { scale as f64 } else { 1.0 };
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale as f64
+    } else {
+        1.0
+    };
     let root = Affine::scale(scale) * Affine::translate((-clip.x as f64, -clip.y as f64));
     let mut ctx = RenderContext::new(w, h);
     let mut glyphs = resources.glyphs.lock().unwrap_or_else(|e| e.into_inner());
@@ -119,11 +137,21 @@ pub fn rasterize(
     ctx.flush();
     let mut pm = Pixmap::new(w, h);
     ctx.render(&mut pm, &mut glyphs);
-    RgbaImage { width: w as u32, height: h as u32, data: pm.take_rgba8(ImageAlphaType::Alpha) }
+    RgbaImage {
+        width: w as u32,
+        height: h as u32,
+        data: pm.take_rgba8(ImageAlphaType::Alpha),
+    }
 }
 
 fn color(c: [f32; 4]) -> AlphaColor<Srgb> {
-    let f = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
+    let f = |v: f32| {
+        if v.is_finite() {
+            v.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    };
     AlphaColor::new([f(c[0]), f(c[1]), f(c[2]), f(c[3])])
 }
 
@@ -183,11 +211,20 @@ fn blend(b: BlendMode) -> peniko::BlendMode {
 }
 
 fn inflate(r: Rect, by: f32) -> Rect {
-    Rect { x: r.x - by, y: r.y - by, w: r.w + 2.0 * by, h: r.h + 2.0 * by }
+    Rect {
+        x: r.x - by,
+        y: r.y - by,
+        w: r.w + 2.0 * by,
+        h: r.h + 2.0 * by,
+    }
 }
 
 fn offset(r: Rect, d: (f32, f32)) -> Rect {
-    Rect { x: r.x + d.0, y: r.y + d.1, ..r }
+    Rect {
+        x: r.x + d.0,
+        y: r.y + d.1,
+        ..r
+    }
 }
 
 fn is_axis_aligned(a: &Affine) -> bool {
@@ -276,7 +313,11 @@ impl Painter<'_> {
                     return false;
                 }
                 // Fully inside: no clip needed for this item.
-                if inter == bbox { None } else { Some(s) }
+                if inter == bbox {
+                    None
+                } else {
+                    Some(s)
+                }
             }
             (Err(()), Some(s)) => Some(s),
         };
@@ -293,9 +334,11 @@ impl Painter<'_> {
                     }
                     _ => {
                         let mut n = 0;
-                        let clips: Vec<ScrollClip> = self.map.clip_chain(spatial).copied().collect();
+                        let clips: Vec<ScrollClip> =
+                            self.map.clip_chain(spatial).copied().collect();
                         for c in clips {
-                            self.ctx.set_transform(self.root * self.layer_xf * c.transform);
+                            self.ctx
+                                .set_transform(self.root * self.layer_xf * c.transform);
                             self.ctx.push_clip_rect(&to_kurbo_rect(c.rect));
                             n += 1;
                         }
@@ -321,32 +364,59 @@ impl Painter<'_> {
                 self.ctx.set_paint(color(*c));
                 self.ctx.fill_rect(&r);
             }
-            Item::RoundedRect { rect, radii, color: c } => {
-                if c[3] <= 0.0 || !self.enter(di.spatial, xf.transform_rect_bbox(to_kurbo_rect(*rect))) {
+            Item::RoundedRect {
+                rect,
+                radii,
+                color: c,
+            } => {
+                if c[3] <= 0.0
+                    || !self.enter(di.spatial, xf.transform_rect_bbox(to_kurbo_rect(*rect)))
+                {
                     return;
                 }
                 self.ctx.set_transform(xf);
                 self.ctx.set_paint(color(*c));
                 self.ctx.fill_path(&rounded(*rect, *radii).to_path(0.1));
             }
-            Item::Path { verbs, brush, even_odd, transform } => {
+            Item::Path {
+                verbs,
+                brush,
+                even_odd,
+                transform,
+            } => {
                 let p = path(verbs);
                 let xf = xf * to_kurbo_affine(*transform);
                 let Brush::Solid(c) = brush;
-                if c[3] <= 0.0 || p.is_empty() || !self.enter(di.spatial, xf.transform_rect_bbox(p.bounding_box())) {
+                if c[3] <= 0.0
+                    || p.is_empty()
+                    || !self.enter(di.spatial, xf.transform_rect_bbox(p.bounding_box()))
+                {
                     return;
                 }
                 self.ctx.set_transform(xf);
                 self.ctx.set_paint(color(*c));
-                self.ctx.set_fill_rule(if *even_odd { Fill::EvenOdd } else { Fill::NonZero });
+                self.ctx.set_fill_rule(if *even_odd {
+                    Fill::EvenOdd
+                } else {
+                    Fill::NonZero
+                });
                 self.ctx.fill_path(&p);
                 self.ctx.set_fill_rule(Fill::NonZero);
             }
-            Item::Stroke { verbs, color: c, width, transform } => {
+            Item::Stroke {
+                verbs,
+                color: c,
+                width,
+                transform,
+            } => {
                 let p = path(verbs);
                 let xf = xf * to_kurbo_affine(*transform);
                 let bbox = p.bounding_box().inflate(*width as f64, *width as f64);
-                if c[3] <= 0.0 || *width <= 0.0 || p.is_empty() || !self.enter(di.spatial, xf.transform_rect_bbox(bbox)) {
+                if c[3] <= 0.0
+                    || *width <= 0.0
+                    || p.is_empty()
+                    || !self.enter(di.spatial, xf.transform_rect_bbox(bbox))
+                {
                     return;
                 }
                 self.ctx.set_transform(xf);
@@ -354,7 +424,12 @@ impl Painter<'_> {
                 self.ctx.set_stroke(kurbo::Stroke::new(*width as f64));
                 self.ctx.stroke_path(&p);
             }
-            Item::LinearGradient { rect, start, end, stops: s } => {
+            Item::LinearGradient {
+                rect,
+                start,
+                end,
+                stops: s,
+            } => {
                 let r = to_kurbo_rect(*rect);
                 if s.is_empty() || !self.enter(di.spatial, xf.transform_rect_bbox(r)) {
                     return;
@@ -376,7 +451,12 @@ impl Painter<'_> {
                 }
                 self.ctx.fill_rect(&r);
             }
-            Item::RadialGradient { rect, center, radius, stops: s } => {
+            Item::RadialGradient {
+                rect,
+                center,
+                radius,
+                stops: s,
+            } => {
                 let r = to_kurbo_rect(*rect);
                 if s.is_empty() || !self.enter(di.spatial, xf.transform_rect_bbox(r)) {
                     return;
@@ -401,26 +481,61 @@ impl Painter<'_> {
                     });
                     let sy = (radius.1 / radius.0) as f64;
                     self.ctx.set_paint_transform(
-                        Affine::translate(c.to_vec2()) * Affine::scale_non_uniform(1.0, sy) * Affine::translate(-c.to_vec2()),
+                        Affine::translate(c.to_vec2())
+                            * Affine::scale_non_uniform(1.0, sy)
+                            * Affine::translate(-c.to_vec2()),
                     );
                     self.ctx.fill_rect(&r);
                     self.ctx.reset_paint_transform();
                 }
             }
-            Item::BoxShadow { rect, radii, color: c, blur, offset: off, spread, inset } => {
-                self.box_shadow(di.spatial, xf, *rect, *radii, *c, *blur, *off, *spread, *inset)
-            }
-            Item::Image { image, dest, src, smooth } => {
-                let Some(pm) = self.res.image(*image).cloned() else { return };
+            Item::BoxShadow {
+                rect,
+                radii,
+                color: c,
+                blur,
+                offset: off,
+                spread,
+                inset,
+            } => self.box_shadow(
+                di.spatial, xf, *rect, *radii, *c, *blur, *off, *spread, *inset,
+            ),
+            Item::Image {
+                image,
+                dest,
+                src,
+                smooth,
+            } => {
+                let Some(pm) = self.res.image(*image).cloned() else {
+                    return;
+                };
                 self.image(di.spatial, xf, pm, *dest, *src, *smooth);
             }
             Item::External { key, rect } => {
-                let Some(pm) = self.res.external(*key).cloned() else { return };
-                let src = Rect { x: 0.0, y: 0.0, w: pm.width() as f32, h: pm.height() as f32 };
+                let Some(pm) = self.res.external(*key).cloned() else {
+                    return;
+                };
+                let src = Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: pm.width() as f32,
+                    h: pm.height() as f32,
+                };
                 self.image(di.spatial, xf, pm, *rect, src, true);
             }
-            Item::Text { font, size, color: c, glyphs, synthetic_bold, skew } => {
-                let Some(((fd, upem), coords)) = self.res.font_with_coords(*font).map(|(f, c)| (f.clone(), c.to_vec())) else {
+            Item::Text {
+                font,
+                size,
+                color: c,
+                glyphs,
+                synthetic_bold,
+                skew,
+            } => {
+                let Some(((fd, upem), coords)) = self
+                    .res
+                    .font_with_coords(*font)
+                    .map(|(f, c)| (f.clone(), c.to_vec()))
+                else {
                     return;
                 };
                 if glyphs.is_empty() || *size <= 0.0 || c[3] <= 0.0 {
@@ -436,13 +551,22 @@ impl Painter<'_> {
                 // Glyph extents are unknown here; two ems around the origins
                 // covers ascent, descent, advance and skew.
                 let m = 2.0 * size + skew.abs() * size;
-                let bbox = kurbo::Rect::new((x0 - m) as f64, (y0 - m) as f64, (x1 + m) as f64, (y1 + m) as f64);
+                let bbox = kurbo::Rect::new(
+                    (x0 - m) as f64,
+                    (y0 - m) as f64,
+                    (x1 + m) as f64,
+                    (y1 + m) as f64,
+                );
                 if !self.enter(di.spatial, xf.transform_rect_bbox(bbox)) {
                     return;
                 }
                 self.ctx.set_transform(xf);
                 self.ctx.set_paint(color(*c));
-                let mut run = self.ctx.glyph_run(self.glyphs, &fd).font_size(*size).hint(false);
+                let mut run = self
+                    .ctx
+                    .glyph_run(self.glyphs, &fd)
+                    .font_size(*size)
+                    .hint(false);
                 if !coords.is_empty() {
                     run = run.normalized_coords(&coords);
                 }
@@ -454,7 +578,11 @@ impl Painter<'_> {
                     let a = (synthetic_bold_amount(*size) / *size * upem) as f64;
                     run = run.font_embolden(FontEmbolden::new(Diagonal2 { xx: a, yy: a }));
                 }
-                let _ = run.fill_glyphs(glyphs.iter().map(|g| vello_cpu::Glyph { id: g.id, x: g.x, y: g.y }));
+                let _ = run.fill_glyphs(glyphs.iter().map(|g| vello_cpu::Glyph {
+                    id: g.id,
+                    x: g.x,
+                    y: g.y,
+                }));
             }
             Item::PushClip { rect, radii } => {
                 self.pop_scroll_clip();
@@ -462,14 +590,19 @@ impl Painter<'_> {
                 if radii.iter().all(|r| *r <= 0.0) {
                     self.ctx.push_clip_rect(&to_kurbo_rect(*rect));
                 } else {
-                    self.ctx.push_clip_path(&rounded(*rect, *radii).to_path(0.1));
+                    self.ctx
+                        .push_clip_path(&rounded(*rect, *radii).to_path(0.1));
                 }
                 self.user_clips += 1;
             }
             Item::PushClipPath { verbs, even_odd } => {
                 self.pop_scroll_clip();
                 self.ctx.set_transform(xf);
-                self.ctx.set_fill_rule(if *even_odd { Fill::EvenOdd } else { Fill::NonZero });
+                self.ctx.set_fill_rule(if *even_odd {
+                    Fill::EvenOdd
+                } else {
+                    Fill::NonZero
+                });
                 self.ctx.push_clip_path(&path(verbs));
                 self.ctx.set_fill_rule(Fill::NonZero);
                 self.user_clips += 1;
@@ -481,11 +614,20 @@ impl Painter<'_> {
                     self.user_clips -= 1;
                 }
             }
-            Item::PushLayer { opacity, blend: b, transform } => {
+            Item::PushLayer {
+                opacity,
+                blend: b,
+                transform,
+            } => {
                 self.pop_scroll_clip();
                 self.ctx.set_transform(Affine::IDENTITY);
-                let op = if opacity.is_finite() { opacity.clamp(0.0, 1.0) } else { 1.0 };
-                self.ctx.push_layer(None, Some(blend(*b)), Some(op), None, None);
+                let op = if opacity.is_finite() {
+                    opacity.clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                self.ctx
+                    .push_layer(None, Some(blend(*b)), Some(op), None, None);
                 self.layers.push(self.layer_xf);
                 let t = to_kurbo_affine(*transform);
                 if t != Affine::IDENTITY {
@@ -505,7 +647,15 @@ impl Painter<'_> {
         }
     }
 
-    fn image(&mut self, spatial: SpatialId, xf: Affine, pm: Arc<Pixmap>, dest: Rect, src: Rect, smooth: bool) {
+    fn image(
+        &mut self,
+        spatial: SpatialId,
+        xf: Affine,
+        pm: Arc<Pixmap>,
+        dest: Rect,
+        src: Rect,
+        smooth: bool,
+    ) {
         if dest.w <= 0.0 || dest.h <= 0.0 || src.w <= 0.0 || src.h <= 0.0 {
             return;
         }
@@ -519,7 +669,11 @@ impl Painter<'_> {
             sampler: ImageSampler {
                 x_extend: Extend::Pad,
                 y_extend: Extend::Pad,
-                quality: if smooth { ImageQuality::Medium } else { ImageQuality::Low },
+                quality: if smooth {
+                    ImageQuality::Medium
+                } else {
+                    ImageQuality::Low
+                },
                 alpha: 1.0,
             },
         });
@@ -565,7 +719,10 @@ impl Painter<'_> {
             }
             self.ctx.set_transform(xf);
             // Clip out the box itself: (everything) minus (box).
-            let mut clip = to_kurbo_rect(reach_rect).union(to_kurbo_rect(rect)).inflate(1.0, 1.0).to_path(0.1);
+            let mut clip = to_kurbo_rect(reach_rect)
+                .union(to_kurbo_rect(rect))
+                .inflate(1.0, 1.0)
+                .to_path(0.1);
             clip.extend(box_path.iter());
             self.ctx.set_fill_rule(Fill::EvenOdd);
             self.ctx.push_clip_path(&clip);
@@ -575,7 +732,8 @@ impl Painter<'_> {
             if sigma <= 0.0 {
                 self.ctx.fill_path(&rounded(shadow, sr).to_path(0.1));
             } else {
-                self.ctx.fill_blurred_rounded_rect(&to_kurbo_rect(shadow), max_r(sr), sigma, false);
+                self.ctx
+                    .fill_blurred_rounded_rect(&to_kurbo_rect(shadow), max_r(sr), sigma, false);
             }
             self.ctx.pop_clip();
         } else {
@@ -592,7 +750,9 @@ impl Painter<'_> {
             } else {
                 let ir = grow(radii, -spread);
                 // Area outside the inner shape (or outside its blur reach).
-                let mut ring = outer.union(to_kurbo_rect(inflate(inner, reach))).to_path(0.1);
+                let mut ring = outer
+                    .union(to_kurbo_rect(inflate(inner, reach)))
+                    .to_path(0.1);
                 if sigma <= 0.0 {
                     ring.extend(rounded(inner, ir).to_path(0.1).iter());
                 } else {
@@ -602,7 +762,12 @@ impl Painter<'_> {
                 self.ctx.fill_path(&ring);
                 self.ctx.set_fill_rule(Fill::NonZero);
                 if sigma > 0.0 {
-                    self.ctx.fill_blurred_rounded_rect(&to_kurbo_rect(inner), max_r(ir), sigma, true);
+                    self.ctx.fill_blurred_rounded_rect(
+                        &to_kurbo_rect(inner),
+                        max_r(ir),
+                        sigma,
+                        true,
+                    );
                 }
             }
             self.ctx.pop_clip();
