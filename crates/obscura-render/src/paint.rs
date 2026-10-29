@@ -21806,3 +21806,42 @@ mod tests {
         assert!(!at_end.has_active_css_animations());
     }
 }
+
+#[cfg(all(test, feature = "scene"))]
+mod scene_text_tests {
+    use super::*;
+
+    /// The compositor scene (what redrob-shell draws) carries the IFC's text
+    /// as glyph runs with font resources.
+    #[test]
+    fn scene_frame_paints_ifc_text_as_glyph_runs() {
+        let tree = obscura_dom::parse_html(
+            "<!doctype html><body style='margin:8px;font:16px sans-serif'><p>Hello <b>scene</b> text</p></body>",
+        );
+        let mut resources = RenderResourceCache::default();
+        let mut prepared = prepare_dom(&tree, (400.0, 200.0), None, &mut resources).unwrap();
+        let frame = scene::build_scene_prepared(
+            &tree,
+            &mut prepared,
+            &mut resources,
+            (0.0, 0.0),
+            &HashMap::new(),
+            [255, 255, 255, 255],
+            &EMPTY_CANVAS_SURFACES,
+            1.0,
+        )
+        .unwrap();
+        let glyphs: usize = frame
+            .frame
+            .items
+            .iter()
+            .filter_map(|item| match &item.item {
+                redrob_scene::Item::Text { glyphs, .. } => Some(glyphs.len()),
+                _ => None,
+            })
+            .sum();
+        // "Hello scene text" without the spaces.
+        assert!(glyphs >= 14, "{glyphs} glyphs");
+        assert!(!frame.fonts.is_empty());
+    }
+}
