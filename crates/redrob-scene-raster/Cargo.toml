@@ -11,3 +11,5 @@ redrob-scene = { workspace = true }
 vello_cpu = { version = "0.3", default-features = false, features = ["std", "png", "text", "u8_pipeline"] }
 # Same version vello_cpu uses; only for FontEmbolden (synthetic bold).
 glifo = { version = "0.4", default-features = false }
+# Same version glifo uses; reads unitsPerEm for the embolden amount.
+skrifa = { version = "0.44", default-features = false, features = ["std"] }

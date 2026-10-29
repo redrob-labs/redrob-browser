@@ -14,8 +14,9 @@
 //!   An outer shadow is not painted under its own box; an inset one is
 //!   painted only inside it. Blurred corners use the largest radius.
 //! - `Text.skew` is the horizontal shear factor of `Affine::skew(skew, 0)`
-//!   applied to each glyph; `synthetic_bold` expands outlines by
-//!   [`synthetic_bold_amount`]. Glyphs are not hinted.
+//!   applied to each glyph in y-down space, as Skia: -0.25 is fake italic
+//!   (tops lean right). `synthetic_bold` grows outlines by
+//!   [`synthetic_bold_amount`] on each side. Glyphs are not hinted.
 //! - `PushLayer.transform` is expressed in the layer item's local space and
 //!   applies to everything inside the layer, including scroll clips.
 //! - Scroll frame clips apply to every item of the scroller and its
@@ -409,7 +410,7 @@ impl Painter<'_> {
                 self.image(di.spatial, xf, pm, *rect, src, true);
             }
             Item::Text { font, size, color: c, glyphs, synthetic_bold, skew } => {
-                let Some(fd) = self.res.font(*font).cloned() else { return };
+                let Some((fd, upem)) = self.res.font(*font).cloned() else { return };
                 if glyphs.is_empty() || *size <= 0.0 || c[3] <= 0.0 {
                     return;
                 }
@@ -434,7 +435,8 @@ impl Painter<'_> {
                     run = run.glyph_transform(Affine::skew(*skew as f64, 0.0));
                 }
                 if *synthetic_bold {
-                    let a = synthetic_bold_amount(*size) as f64;
+                    // Unhinted outlines are expanded in font units.
+                    let a = (synthetic_bold_amount(*size) / *size * upem) as f64;
                     run = run.font_embolden(FontEmbolden::new(Diagonal2 { xx: a, yy: a }));
                 }
                 let _ = run.fill_glyphs(glyphs.iter().map(|g| vello_cpu::Glyph { id: g.id, x: g.x, y: g.y }));

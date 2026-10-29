@@ -10,7 +10,7 @@ use vello_cpu::{PixelMetadata, Pixmap};
 /// Client-side cache of scene resources, as the window keeps on the GPU.
 pub struct ResourceStore {
     images: HashMap<ImageId, Arc<Pixmap>>,
-    fonts: HashMap<FontId, FontData>,
+    fonts: HashMap<FontId, (FontData, f32)>,
     externals: HashMap<u64, Arc<Pixmap>>,
     /// vello_cpu's glyph caches, reused across rasterizations.
     pub(crate) glyphs: Mutex<vello_cpu::Resources>,
@@ -65,7 +65,13 @@ impl ResourceStore {
                 }
             },
             Resource::Font { id, data, index } => {
-                self.fonts.insert(id, FontData::new(Blob::new(Arc::new(data)), index));
+                use skrifa::raw::TableProvider;
+                let upem = skrifa::FontRef::from_index(&data, index)
+                    .ok()
+                    .and_then(|f| f.head().ok().map(|h| h.units_per_em()))
+                    .filter(|u| *u > 0)
+                    .unwrap_or(1000);
+                self.fonts.insert(id, (FontData::new(Blob::new(Arc::new(data)), index), upem as f32));
             }
             Resource::DropImage(id) => {
                 self.images.remove(&id);
@@ -116,7 +122,8 @@ impl ResourceStore {
         self.externals.get(&key)
     }
 
-    pub(crate) fn font(&self, id: FontId) -> Option<&FontData> {
+    /// The font and its units per em.
+    pub(crate) fn font(&self, id: FontId) -> Option<&(FontData, f32)> {
         self.fonts.get(&id)
     }
 }

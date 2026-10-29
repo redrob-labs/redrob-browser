@@ -20,7 +20,8 @@ engine updates scrollTop/Left, fires scroll events
 ```
 
 Agents keep CDP. `Page.captureScreenshot` rasterizes the same frame on the
-CPU (vello_cpu), so an agent sees what the person sees.
+CPU (vello_cpu, `crates/redrob-scene-raster`), so an agent sees what the
+person sees.
 
 ## Rules
 
@@ -31,6 +32,12 @@ CPU (vello_cpu), so an agent sees what the person sees.
 - Scrolling sends no new items. Only content changes do.
 - Text is glyph runs with font ids; the window draws glyphs with vello.
 - `sticky_offset` in redrob-scene is the one sticky formula; both sides use it.
+- Spatial mapping is WebRender's: scroll and sticky children stay in the
+  parent's space, moved by `-offset` or the sticky offset; a scroll `frame`
+  clips the scroller's subtree. `redrob_scene_raster::SpatialMap` implements
+  it (and `hit_test`); the window reuses it rather than re-deriving it.
+  Item details (gradient space, shadow blur, text skew, layer transform) are
+  in the crate docs of `crates/redrob-scene-raster`.
 - Flow control: at most two unpresented frames.
 
 ## Channel

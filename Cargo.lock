@@ -5964,6 +5964,7 @@ version = "0.1.0"
 dependencies = [
  "glifo 0.4.0",
  "redrob-scene",
+ "skrifa 0.44.0",
  "vello_cpu 0.3.0",
 ]
 
