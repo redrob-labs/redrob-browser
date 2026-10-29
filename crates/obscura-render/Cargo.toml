@@ -57,3 +57,8 @@ path = "src/lib.rs"
 name = "paint_file"
 path = "src/bin/paint_file.rs"
 required-features = ["paint"]
+
+[[bin]]
+name = "layout_bench"
+path = "src/bin/layout_bench.rs"
+required-features = ["paint"]

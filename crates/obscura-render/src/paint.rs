@@ -3013,7 +3013,117 @@ pub fn prepare_dom_with_retained_styles_with_animation_state(
     resources: &mut RenderResourceCache,
     dynamic_fonts: &[DynamicFontFace],
     stylesheet_cache: &mut crate::css::StylesheetCache,
+    previous: PreparedRender,
+    mutations: &[crate::dom::RetainedStyleMutation],
+    animation_sample: crate::AnimationSample,
+    animation_timeline: &mut crate::AnimationTimelineState,
+) -> Option<PreparedRender> {
+    let verify = crate::dom::layout_verify_enabled() && !VERIFYING.with(std::cell::Cell::get);
+    let timeline_before = verify.then(|| animation_timeline.clone());
+    let prepared = prepare_dom_with_retained_styles_with_animation_state_inner(
+        tree,
+        viewport,
+        base_url,
+        resources,
+        dynamic_fonts,
+        previous,
+        stylesheet_cache,
+        mutations,
+        animation_sample,
+        animation_timeline,
+    );
+    if let (Some(prepared), Some(timeline)) = (prepared.as_ref(), timeline_before) {
+        verify_against_scratch(
+            "retained",
+            prepared,
+            tree,
+            viewport,
+            base_url,
+            resources,
+            dynamic_fonts,
+            animation_sample,
+            timeline,
+        );
+    }
+    prepared
+}
+
+thread_local! {
+    static VERIFYING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// `OBSCURA_LAYOUT_VERIFY`: lay the document out again from scratch (fresh
+/// stylesheet cache, no retained styles, no reused text shaping) and panic
+/// with the first difference if the incremental result is not identical.
+#[allow(clippy::too_many_arguments)]
+fn verify_against_scratch(
+    path: &str,
+    prepared: &PreparedRender,
+    tree: &DomTree,
+    viewport: (f32, f32),
+    base_url: Option<&str>,
+    resources: &mut RenderResourceCache,
+    dynamic_fonts: &[DynamicFontFace],
+    animation_sample: crate::AnimationSample,
+    mut timeline: crate::AnimationTimelineState,
+) {
+    VERIFYING.with(|flag| flag.set(true));
+    let mut fresh_sheets = crate::css::StylesheetCache::default();
+    let scratch = crate::inline::without_shaped_item_reuse(|| {
+        prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
+            tree,
+            viewport,
+            base_url,
+            resources,
+            dynamic_fonts,
+            &mut fresh_sheets,
+            None,
+            None,
+            crate::CssMediaType::Screen,
+            animation_sample,
+            &mut timeline,
+        )
+    });
+    VERIFYING.with(|flag| flag.set(false));
+    let Some(scratch) = scratch else {
+        panic!("OBSCURA_LAYOUT_VERIFY ({path}): scratch layout failed");
+    };
+    let mut difference = crate::dom::layout_difference(&prepared.layout, &scratch.layout);
+    if difference.is_none() && prepared.content_size != scratch.content_size {
+        difference = Some(format!(
+            "content_size {:?} vs {:?}",
+            prepared.content_size, scratch.content_size
+        ));
+    }
+    if difference.is_none() && prepared.viewport_fixed != scratch.viewport_fixed {
+        difference = Some("viewport_fixed differs".into());
+    }
+    if difference.is_none() {
+        difference = crate::dom::sticky_layout_difference(&prepared.sticky, &scratch.sticky);
+    }
+    if difference.is_none() {
+        difference = crate::dom::scroll_tree_difference(&prepared.scroll_tree, &scratch.scroll_tree);
+    }
+    if let Some(difference) = difference {
+        panic!("OBSCURA_LAYOUT_VERIFY ({path}): incremental layout differs from scratch: {difference}");
+    }
+    if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+        eprintln!(
+            "[timing] layout-verify path={path} ok boxes={}",
+            prepared.layout.rects.len()
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_dom_with_retained_styles_with_animation_state_inner(
+    tree: &DomTree,
+    viewport: (f32, f32),
+    base_url: Option<&str>,
+    resources: &mut RenderResourceCache,
+    dynamic_fonts: &[DynamicFontFace],
     mut previous: PreparedRender,
+    stylesheet_cache: &mut crate::css::StylesheetCache,
     mutations: &[crate::dom::RetainedStyleMutation],
     animation_sample: crate::AnimationSample,
     animation_timeline: &mut crate::AnimationTimelineState,
@@ -3248,7 +3358,59 @@ fn retained_animation_restyle_mutations(
     mutations
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
+    tree: &DomTree,
+    viewport: (f32, f32),
+    base_url: Option<&str>,
+    resources: &mut RenderResourceCache,
+    dynamic_fonts: &[DynamicFontFace],
+    stylesheet_cache: &mut crate::css::StylesheetCache,
+    retained: Option<(RetainedStyleMaps, &[crate::dom::RetainedStyleMutation])>,
+    query_seed: Option<RetainedStyleMaps>,
+    media_type: crate::CssMediaType,
+    animation_sample: crate::AnimationSample,
+    animation_timeline: &mut crate::AnimationTimelineState,
+) -> Option<PreparedRender> {
+    // Retained calls are verified by their public entry point, which also
+    // covers its early returns. Screen layouts without retained styles still
+    // reuse shaped text from the previous layout, so check them here.
+    let verify = crate::dom::layout_verify_enabled()
+        && retained.is_none()
+        && media_type == crate::CssMediaType::Screen
+        && !VERIFYING.with(std::cell::Cell::get);
+    let timeline_before = verify.then(|| animation_timeline.clone());
+    let prepared = prepare_dom_internal_unverified(
+        tree,
+        viewport,
+        base_url,
+        resources,
+        dynamic_fonts,
+        stylesheet_cache,
+        retained,
+        query_seed,
+        media_type,
+        animation_sample,
+        animation_timeline,
+    );
+    if let (Some(prepared), Some(timeline)) = (prepared.as_ref(), timeline_before) {
+        verify_against_scratch(
+            "full",
+            prepared,
+            tree,
+            viewport,
+            base_url,
+            resources,
+            dynamic_fonts,
+            animation_sample,
+            timeline,
+        );
+    }
+    prepared
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_dom_internal_unverified(
     tree: &DomTree,
     viewport: (f32, f32),
     base_url: Option<&str>,
@@ -3265,6 +3427,7 @@ fn prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
     {
         return None;
     }
+    let prepare_started = std::time::Instant::now();
     // Fetch <img> bytes up front to learn intrinsic sizes for layout (a
     // CSS-sized image with no width/height attribute would otherwise be 0x0
     // and never paint). This seeds the same cache the paint pass reads, so
@@ -3303,6 +3466,7 @@ fn prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
     let (retained, mutations) = retained.map_or((None, &[][..]), |(styles, mutations)| {
         (Some(styles), mutations)
     });
+    let resources_done = std::time::Instant::now();
     let mut laid = layout_dom_with_query_seed(
         tree,
         viewport,
@@ -3350,7 +3514,16 @@ fn prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
             animation_timeline,
         );
     }
+    let layout_done = std::time::Instant::now();
     let derived = laid.derived_layout_state(tree, viewport);
+    if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+        eprintln!(
+            "[timing] prepare resources={:?} layout={:?} derived={:?}",
+            resources_done.duration_since(prepare_started),
+            layout_done.duration_since(resources_done),
+            layout_done.elapsed(),
+        );
+    }
     let root_font_size = tree
         .query_selector("html")
         .ok()

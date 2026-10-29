@@ -418,6 +418,226 @@ pub struct DomLayout {
     pub(crate) generated_boxes: Vec<GeneratedBox>,
 }
 
+/// Whether `OBSCURA_LAYOUT_VERIFY` asks every incremental layout to be checked
+/// against a layout from scratch.
+pub fn layout_verify_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("OBSCURA_LAYOUT_VERIFY").is_some())
+}
+
+fn first_map_difference<K, V>(
+    name: &str,
+    incremental: &HashMap<K, V>,
+    scratch: &HashMap<K, V>,
+    same: impl Fn(&V, &V) -> bool,
+) -> Option<String>
+where
+    K: std::hash::Hash + Eq + std::fmt::Debug,
+    V: std::fmt::Debug,
+{
+    for (key, value) in incremental {
+        match scratch.get(key) {
+            None => return Some(format!("{name}: {key:?} only in incremental: {value:?}")),
+            Some(other) if !same(value, other) => {
+                let (a, b) = (format!("{value:?}"), format!("{other:?}"));
+                let fields = a
+                    .split(", ")
+                    .zip(b.split(", "))
+                    .filter(|(x, y)| x != y)
+                    .take(6)
+                    .map(|(x, y)| format!("{x} | {y}"))
+                    .collect::<Vec<_>>();
+                return Some(format!(
+                    "{name}: {key:?} differs: {fields:?}\n  incremental: {}\n  scratch:     {}",
+                    &a[..a.len().min(400)],
+                    &b[..b.len().min(400)]
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    scratch
+        .iter()
+        .find(|(key, _)| !incremental.contains_key(key))
+        .map(|(key, value)| format!("{name}: {key:?} only in scratch: {value:?}"))
+}
+
+/// First observable difference between an incremental layout and a layout of
+/// the same document from scratch, or `None` when they are equal: boxes,
+/// fragments, text runs, computed styles, clips, transforms, generated boxes
+/// and the placement and line geometry of every shaped text item.
+pub fn layout_difference(incremental: &DomLayout, scratch: &DomLayout) -> Option<String> {
+    first_map_difference("rects", &incremental.rects, &scratch.rects, |a, b| a == b)
+        .or_else(|| {
+            first_map_difference(
+                "grid_overflow",
+                &incremental.grid_overflow,
+                &scratch.grid_overflow,
+                |a, b| a == b,
+            )
+        })
+        .or_else(|| {
+            first_map_difference(
+                "inline_fragments",
+                &incremental.inline_fragments,
+                &scratch.inline_fragments,
+                |a, b| a == b,
+            )
+        })
+        .or_else(|| {
+            first_map_difference("text_runs", &incremental.text_runs, &scratch.text_runs, |a, b| {
+                a == b
+            })
+        })
+        .or_else(|| {
+            first_map_difference("styles", &incremental.styles, &scratch.styles, |a, b| {
+                a == b || format!("{a:?}") == format!("{b:?}")
+            })
+        })
+        .or_else(|| {
+            first_map_difference(
+                "custom_properties",
+                &incremental.custom_properties,
+                &scratch.custom_properties,
+                |a, b| a == b,
+            )
+        })
+        .or_else(|| {
+            first_map_difference("clip_rects", &incremental.clip_rects, &scratch.clip_rects, |a, b| {
+                a == b
+            })
+        })
+        .or_else(|| {
+            first_map_difference("translates", &incremental.translates, &scratch.translates, |a, b| {
+                a == b
+            })
+        })
+        .or_else(|| {
+            first_map_difference("transforms", &incremental.transforms, &scratch.transforms, |a, b| {
+                a == b
+            })
+        })
+        .or_else(|| {
+            let boxes = |layout: &DomLayout| {
+                layout
+                    .generated_boxes
+                    .iter()
+                    .map(|generated| format!("{:?} {:?} {:?}", generated.host, generated.kind, generated.rect))
+                    .collect::<Vec<_>>()
+            };
+            let (a, b) = (boxes(incremental), boxes(scratch));
+            (a != b).then(|| format!("generated_boxes differ\n  incremental: {a:?}\n  scratch:     {b:?}"))
+        })
+        .or_else(|| text_item_difference(incremental, scratch))
+}
+
+fn sorted_debug<T: std::fmt::Debug>(items: impl IntoIterator<Item = T>) -> Vec<String> {
+    let mut out = items
+        .into_iter()
+        .map(|item| format!("{item:?}"))
+        .collect::<Vec<_>>();
+    out.sort();
+    out
+}
+
+/// Order-insensitive equality of two sticky layouts (frames are collected
+/// from hash maps, so their order is not meaningful).
+pub(crate) fn sticky_layout_difference(a: &StickyLayout, b: &StickyLayout) -> Option<String> {
+    if a.owners != b.owners {
+        return Some("sticky owners differ".into());
+    }
+    if a.clip_owners != b.clip_owners {
+        return Some("sticky clip owners differ".into());
+    }
+    let (fa, fb) = (sorted_debug(&a.frames), sorted_debug(&b.frames));
+    (fa != fb).then(|| format!("sticky frames differ\n  incremental: {fa:?}\n  scratch:     {fb:?}"))
+}
+
+/// Order-insensitive equality of two scroll trees: every node's scroll
+/// container, content size and movement owner, compared through the
+/// container's own node and geometry rather than its `ScrollId` number.
+pub(crate) fn scroll_tree_difference(a: &ScrollTree, b: &ScrollTree) -> Option<String> {
+    let describe = |tree: &ScrollTree| {
+        sorted_debug(tree.containers.iter().map(|container| {
+            let parent = container
+                .parent
+                .and_then(|id| tree.containers.get(id.0 as usize))
+                .map(|parent| parent.node);
+            (
+                container.node,
+                parent,
+                container.client_size,
+                container.content_size,
+                container.max_offset,
+            )
+        }))
+    };
+    let owner = |tree: &ScrollTree, ids: &[Option<ScrollId>]| {
+        ids.iter()
+            .map(|id| id.and_then(|id| tree.containers.get(id.0 as usize)).map(|c| c.node))
+            .collect::<Vec<_>>()
+    };
+    let (ca, cb) = (describe(a), describe(b));
+    if ca != cb {
+        return Some(format!("scroll containers differ\n  incremental: {ca:?}\n  scratch:     {cb:?}"));
+    }
+    if a.node_content_size != b.node_content_size {
+        return Some("scroll content sizes differ".into());
+    }
+    if owner(a, &a.node_container) != owner(b, &b.node_container) {
+        return Some("scroll container ownership differs".into());
+    }
+    (owner(a, &a.movement_owner) != owner(b, &b.movement_owner))
+        .then(|| "scroll movement owners differ".into())
+}
+
+#[cfg(feature = "paint")]
+fn text_item_difference(incremental: &DomLayout, scratch: &DomLayout) -> Option<String> {
+    let whole = |layout: &DomLayout| {
+        layout
+            .ifc_items
+            .iter()
+            .map(|(node, idx)| (*node, layout.text_engine.item_signature(*idx)))
+            .collect::<HashMap<_, _>>()
+    };
+    let lists = |layout: &DomLayout, items: &HashMap<NodeId, Vec<usize>>| {
+        items
+            .iter()
+            .map(|(node, indices)| {
+                (
+                    *node,
+                    indices
+                        .iter()
+                        .map(|idx| layout.text_engine.item_signature(*idx))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<HashMap<_, _>>()
+    };
+    first_map_difference("ifc_items", &whole(incremental), &whole(scratch), |a, b| a == b)
+        .or_else(|| {
+            first_map_difference(
+                "run_ifc_items",
+                &lists(incremental, &incremental.run_ifc_items),
+                &lists(scratch, &scratch.run_ifc_items),
+                |a, b| a == b,
+            )
+        })
+        .or_else(|| {
+            first_map_difference(
+                "word_ifc_items",
+                &lists(incremental, &incremental.word_ifc_items),
+                &lists(scratch, &scratch.word_ifc_items),
+                |a, b| a == b,
+            )
+        })
+}
+
+#[cfg(not(feature = "paint"))]
+fn text_item_difference(_incremental: &DomLayout, _scratch: &DomLayout) -> Option<String> {
+    None
+}
+
 /// One connected element attribute mutation eligible for conservative
 /// retained-style invalidation. The planner distinguishes ordinary selector
 /// attributes from mapped presentation hints and attributes which can change
@@ -5532,6 +5752,8 @@ fn layout_dom_once(
     );
     resolve_css_counters(tree, &mut styles);
     let cascade_time = t1.elapsed();
+    let mut phase_marks: Vec<(&'static str, std::time::Instant)> =
+        vec![("cascade", std::time::Instant::now())];
     let (signature, query_stats) = evaluator.map_or_else(
         || (None, crate::css::ContainerQueryStats::default()),
         |evaluator| {
@@ -5567,7 +5789,7 @@ fn layout_dom_once(
     let mut id_map: HashMap<taffy::NodeId, NodeId> = HashMap::new();
     let mut words: HashMap<taffy::NodeId, (NodeId, String)> = HashMap::new();
     let mut engine =
-        crate::inline::TextEngine::new_with_web_fonts_and_emoji(fonts, needs_emoji_font);
+        crate::inline::TextEngine::for_document_layout(fonts, needs_emoji_font);
     let mut ifc_items = IfcRegistry::default();
 
     // The document node itself is not an element; lay out from the first
@@ -7226,7 +7448,8 @@ fn layout_dom_once(
         let deferred_cyclic_inline_sizes =
             defer_cyclic_flex_inline_sizes(tree, &mut styles, root_fs, vw, vh);
 
-        if let Some(taffy_root) = build(
+        phase_marks.push(("resolve", std::time::Instant::now()));
+        let built_root = build(
             tree,
             root_id,
             &mut taffy_tree,
@@ -7235,7 +7458,9 @@ fn layout_dom_once(
             &mut engine,
             &mut ifc_items,
             &styles,
-        ) {
+        );
+        phase_marks.push(("build", std::time::Instant::now()));
+        if let Some(taffy_root) = built_root {
             // Taffy has no outer display type and only gives an auto-width
             // Block root the initial-containing-block width. CSS blockifies
             // Flex/Grid roots too, so supply the equivalent used width while
@@ -8003,6 +8228,7 @@ fn layout_dom_once(
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
             }
+            phase_marks.push(("compute", std::time::Instant::now()));
             sync_resolved_percentage_padding(
                 &taffy_tree,
                 taffy_root,
@@ -8212,6 +8438,17 @@ fn layout_dom_once(
         }
     }
 
+    phase_marks.push(("post", std::time::Instant::now()));
+    if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+        let mut line = format!("[timing] layout-phases nodes={}", styles.len());
+        line.push_str(&crate::prof::take());
+        let mut last = t1;
+        for (name, at) in &phase_marks {
+            line.push_str(&format!(" {name}={:?}", at.duration_since(last)));
+            last = *at;
+        }
+        eprintln!("{line}");
+    }
     let generated_boxes = ifc_items
         .generated
         .iter()
@@ -8559,6 +8796,16 @@ fn grow_trailing_auto_cells(tree: &DomTree, styles: &mut HashMap<NodeId, crate::
         if !is_tag(tr, &["tr"]) {
             continue;
         }
+        // A retained style still carries the previous layout's choice. Undo it
+        // so the choice below depends only on the cascaded styles.
+        for cell in tree.children(tr) {
+            if let Some(style) = styles.get_mut(&cell) {
+                if style.flex_grow_from_table_cell {
+                    style.flex_grow = None;
+                    style.flex_grow_from_table_cell = false;
+                }
+            }
+        }
         let last_auto_cell = tree.children(tr).into_iter().rev().find(|&cid| {
             is_tag(cid, &["td", "th"])
                 && styles
@@ -8569,6 +8816,7 @@ fn grow_trailing_auto_cells(tree: &DomTree, styles: &mut HashMap<NodeId, crate::
         if let Some(cid) = last_auto_cell {
             if let Some(style) = styles.get_mut(&cid) {
                 style.flex_grow = Some(1.0);
+                style.flex_grow_from_table_cell = true;
             }
         }
     }

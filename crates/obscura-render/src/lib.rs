@@ -17,6 +17,55 @@
 use taffy::prelude::*;
 
 pub mod css;
+
+/// Opt-in layout profiling counters, printed with `OBSCURA_RENDER_TIMING`.
+#[doc(hidden)]
+pub mod prof {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::OnceLock;
+
+    pub const ENGINE_NEW: usize = 0;
+    pub const PUSH_ITEM: usize = 1;
+    pub const MEASURE_MISS: usize = 2;
+    pub const MEASURE_HIT: usize = 3;
+    pub const ITEM_REUSE: usize = 4;
+    const NAMES: [&str; 5] = ["engine_new", "push_item", "measure_miss", "measure_hit", "item_reuse"];
+    static NANOS: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
+    static COUNTS: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
+
+    pub fn enabled() -> bool {
+        static ON: OnceLock<bool> = OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("OBSCURA_RENDER_TIMING").is_some())
+    }
+
+    pub fn start() -> Option<std::time::Instant> {
+        enabled().then(std::time::Instant::now)
+    }
+
+    pub fn stop(slot: usize, started: Option<std::time::Instant>) {
+        if let Some(started) = started {
+            NANOS[slot].fetch_add(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            COUNTS[slot].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub fn count(slot: usize) {
+        if enabled() {
+            COUNTS[slot].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Format and reset every counter.
+    pub fn take() -> String {
+        let mut out = String::new();
+        for (index, name) in NAMES.iter().enumerate() {
+            let nanos = NANOS[index].swap(0, Ordering::Relaxed);
+            let count = COUNTS[index].swap(0, Ordering::Relaxed);
+            out.push_str(&format!(" {name}={:.1}ms/{count}", nanos as f64 / 1e6));
+        }
+        out
+    }
+}
 pub use css::{CssMediaType, Stylesheet, StylesheetCache};
 
 pub mod style;
@@ -170,6 +219,10 @@ pub mod inline {
         false
     }
 
+    pub(crate) fn without_shaped_item_reuse<R>(f: impl FnOnce() -> R) -> R {
+        f()
+    }
+
     impl TextEngine {
         pub fn new() -> Self {
             Self::default()
@@ -181,6 +234,14 @@ pub mod inline {
 
         pub(crate) fn new_with_web_fonts_and_emoji(_fonts: &[WebFont], _load_emoji: bool) -> Self {
             Self::default()
+        }
+
+        pub(crate) fn for_document_layout(_fonts: &[WebFont], _load_emoji: bool) -> Self {
+            Self::default()
+        }
+
+        pub(crate) fn item_signature(&self, idx: usize) -> String {
+            format!("{idx}")
         }
 
         pub(crate) fn register_native_control(
@@ -1336,6 +1397,10 @@ pub struct LayoutStyle {
     pub flex_wrap: Option<taffy::FlexWrap>,
     pub justify_content: Option<taffy::JustifyContent>,
     pub flex_grow: Option<f32>,
+    /// `flex_grow` was synthesized by the table auto-layout approximation
+    /// (`grow_trailing_auto_cells`), not cascaded. Retained styles carry it so
+    /// the next layout can undo it before choosing the trailing cell again.
+    pub(crate) flex_grow_from_table_cell: bool,
     pub flex_shrink: Option<f32>,
     /// Flex/grid item order. The formatting algorithm consumes children in
     /// order-modified document order, with source order breaking ties.
