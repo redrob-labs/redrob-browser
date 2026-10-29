@@ -14609,7 +14609,33 @@ fn build(
     //
     // Keep the legacy `<center>` behavior: unlike CSS text-align, that element
     // historically centers block descendants as well.
-    if style.display == crate::Display::Block && has_in_flow_block_child && !style.legacy_center {
+    // An empty centered block has no inline content to align either. As a
+    // flex stand-in it would establish a formatting context, so its own top
+    // and bottom margins would stop collapsing through it (Wikipedia's empty
+    // `#siteNotice`, `margin: 24px 0; text-align: center`, grew to 48px).
+    let has_no_rendered_child = dom_children.iter().all(|cid| {
+        let kind = tree.borrow_node(*cid).map(|node| match &node.data {
+            obscura_dom::tree::NodeData::Element { .. } => Some(true),
+            obscura_dom::tree::NodeData::Text { contents } => {
+                Some(!contents.trim().is_empty())
+            }
+            _ => None,
+        });
+        match kind.flatten() {
+            // An element child counts unless it generates no box.
+            Some(true) if tree.borrow_node(*cid).is_some_and(|node| node.is_element()) => styles
+                .get(cid)
+                .is_none_or(|child| child.display == crate::Display::None),
+            // Visible text.
+            Some(true) => false,
+            // Whitespace-only text, comments and processing instructions.
+            _ => true,
+        }
+    });
+    if style.display == crate::Display::Block
+        && (has_in_flow_block_child || (has_no_rendered_child && !has_inline_ish_content))
+        && !style.legacy_center
+    {
         taffy_style.display = taffy::style::Display::Block;
     }
 
