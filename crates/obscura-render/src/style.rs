@@ -2494,6 +2494,13 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
         "grid-row-end" => set_grid_placement_side(style, value, false, false),
         "transform" => parse_transform(style, value),
         "transform-origin" => style.transform_origin = parse_transform_origin(value),
+        "perspective-origin" => style.perspective_origin = parse_transform_origin(value),
+        "transform-style" => {
+            style.preserve_3d = value.trim().eq_ignore_ascii_case("preserve-3d");
+        }
+        "backface-visibility" => {
+            style.backface_hidden = value.trim().eq_ignore_ascii_case("hidden");
+        }
         "translate" => parse_individual_translate(style, value),
         "rotate" => parse_individual_rotate(style, value),
         "scale" => parse_individual_scale(style, value),
@@ -2505,11 +2512,18 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
             crate::CB_TRIGGER_BACKDROP_FILTER,
             non_none_value(value),
         ),
-        "perspective" => set_containing_block_trigger(
-            style,
-            crate::CB_TRIGGER_PERSPECTIVE,
-            non_none_value(value),
-        ),
+        "perspective" => {
+            style.perspective = if value.trim().eq_ignore_ascii_case("none") {
+                None
+            } else {
+                px(value).filter(|length| length.is_finite() && *length >= 0.0)
+            };
+            set_containing_block_trigger(
+                style,
+                crate::CB_TRIGGER_PERSPECTIVE,
+                non_none_value(value),
+            )
+        }
         "contain" => {
             if let Some(flags) = parse_containment(value) {
                 style.containment = flags;
@@ -4260,20 +4274,16 @@ fn parse_transform_ops(value: &str) -> Option<Vec<crate::TransformOp>> {
                 crate::TransformLength::px(0.0),
                 parse_transform_length(values[0])?,
             ),
-            "translate3d" if values.len() == 3 => {
-                // Without perspective, translation along Z does not change the
-                // projection of the element's plane. Keep accepting it so the
-                // useful X/Y part of common compositor transforms is retained.
-                parse_transform_z_length(values[2])?;
-                crate::TransformOp::Translate(
-                    parse_transform_length(values[0])?,
-                    parse_transform_length(values[1])?,
-                )
-            }
-            "translatez" if values.len() == 1 => {
-                parse_transform_z_length(values[0])?;
-                crate::TransformOp::Matrix(crate::Affine2::IDENTITY)
-            }
+            "translate3d" if values.len() == 3 => crate::TransformOp::Translate3d(
+                parse_transform_length(values[0])?,
+                parse_transform_length(values[1])?,
+                parse_transform_z_length(values[2])?,
+            ),
+            "translatez" if values.len() == 1 => crate::TransformOp::Translate3d(
+                crate::TransformLength::px(0.0),
+                crate::TransformLength::px(0.0),
+                parse_transform_z_length(values[0])?,
+            ),
             "scale" if (1..=2).contains(&values.len()) => {
                 let x = scale_number(values[0])?;
                 crate::TransformOp::Scale(
@@ -4290,44 +4300,45 @@ fn parse_transform_ops(value: &str) -> Option<Vec<crate::TransformOp>> {
             "scaley" if values.len() == 1 => {
                 crate::TransformOp::Scale(1.0, scale_number(values[0])?)
             }
-            "scale3d" if values.len() == 3 => {
-                let x = scale_number(values[0])?;
-                let y = scale_number(values[1])?;
-                scale_number(values[2])?;
-                crate::TransformOp::Scale(x, y)
-            }
-            "scalez" if values.len() == 1 && scale_number(values[0]).is_some() => {
-                crate::TransformOp::Matrix(crate::Affine2::IDENTITY)
+            "scale3d" if values.len() == 3 => crate::TransformOp::Scale3d(
+                scale_number(values[0])?,
+                scale_number(values[1])?,
+                scale_number(values[2])?,
+            ),
+            "scalez" if values.len() == 1 => {
+                crate::TransformOp::Scale3d(1.0, 1.0, scale_number(values[0])?)
             }
             "rotate" | "rotatez" if values.len() == 1 => {
                 crate::TransformOp::Rotate(angle_degrees(values[0])?)
             }
             "rotatex" if values.len() == 1 => {
-                let radians = angle_degrees(values[0])?.to_radians();
-                crate::TransformOp::Scale(1.0, radians.cos())
+                crate::TransformOp::Rotate3d(1.0, 0.0, 0.0, angle_degrees(values[0])?)
             }
             "rotatey" if values.len() == 1 => {
-                let radians = angle_degrees(values[0])?.to_radians();
-                crate::TransformOp::Scale(radians.cos(), 1.0)
+                crate::TransformOp::Rotate3d(0.0, 1.0, 0.0, angle_degrees(values[0])?)
             }
             "rotate3d" if values.len() == 4 => {
-                let x = values[0].parse::<f32>().ok()?;
-                let y = values[1].parse::<f32>().ok()?;
-                let z = values[2].parse::<f32>().ok()?;
-                if !x.is_finite() || !y.is_finite() || !z.is_finite() {
-                    return None;
-                }
+                let x = parse_number_value(values[0])?;
+                let y = parse_number_value(values[1])?;
+                let z = parse_number_value(values[2])?;
                 let angle = angle_degrees(values[3])?;
-                if x != 0.0 && y == 0.0 && z == 0.0 {
-                    crate::TransformOp::Scale(1.0, (angle * x.signum()).to_radians().cos())
-                } else if x == 0.0 && y != 0.0 && z == 0.0 {
-                    crate::TransformOp::Scale((angle * y.signum()).to_radians().cos(), 1.0)
-                } else if x == 0.0 && y == 0.0 && z != 0.0 {
-                    crate::TransformOp::Rotate(angle * z.signum())
+                if x == 0.0 && y == 0.0 {
+                    // A Z axis is a 2D rotation (keeps 2D serialization).
+                    crate::TransformOp::Rotate(if z < 0.0 { -angle } else { angle })
                 } else {
-                    // A mixed 3D rotation axis cannot be represented by the
-                    // affine renderer without tracking Z between operations.
-                    return None;
+                    crate::TransformOp::Rotate3d(x, y, z, angle)
+                }
+            }
+            "perspective" if values.len() == 1 => {
+                if values[0].eq_ignore_ascii_case("none") {
+                    crate::TransformOp::Perspective(None)
+                } else {
+                    let length = parse_transform_z_length(values[0])?;
+                    let distance = match length.value {
+                        crate::Dimension::Px(px) if px >= 0.0 => px,
+                        _ => return None,
+                    };
+                    crate::TransformOp::Perspective(Some(distance))
                 }
             }
             "skew" if (1..=2).contains(&values.len()) => crate::TransformOp::Skew(
@@ -4363,30 +4374,15 @@ fn parse_transform_ops(value: &str) -> Option<Vec<crate::TransformOp>> {
             "matrix3d" if values.len() == 16 => {
                 let numbers = values
                     .iter()
-                    .map(|value| value.parse::<f32>().ok())
+                    .map(|value| parse_number_value(value))
                     .collect::<Option<Vec<_>>>()?;
-                if numbers.iter().any(|value| !value.is_finite())
-                    || numbers[2] != 0.0
-                    || numbers[3] != 0.0
-                    || numbers[6] != 0.0
-                    || numbers[7] != 0.0
-                    || numbers[8] != 0.0
-                    || numbers[9] != 0.0
-                    || numbers[10] != 1.0
-                    || numbers[11] != 0.0
-                    || numbers[14] != 0.0
-                    || numbers[15] != 1.0
-                {
-                    return None;
+                let numbers: [f32; 16] = numbers.try_into().ok()?;
+                let matrix = crate::Mat4::from_css(&numbers);
+                if matrix.is_2d() {
+                    crate::TransformOp::Matrix(matrix.to_affine())
+                } else {
+                    crate::TransformOp::Matrix3d(matrix)
                 }
-                crate::TransformOp::Matrix(crate::Affine2 {
-                    a: numbers[0],
-                    b: numbers[1],
-                    c: numbers[4],
-                    d: numbers[5],
-                    e: numbers[12],
-                    f: numbers[13],
-                })
             }
             _ => return None,
         };
@@ -4395,42 +4391,161 @@ fn parse_transform_ops(value: &str) -> Option<Vec<crate::TransformOp>> {
     Some(operations)
 }
 
+/// A CSS `<number>` (a plain finite number or a unitless `calc()`).
+fn parse_number_value(value: &str) -> Option<f32> {
+    let value = value.trim();
+    if let Ok(number) = value.parse::<f32>() {
+        return number.is_finite().then_some(number);
+    }
+    match eval_angle_calc(value)? {
+        (number, false) => Some(number),
+        _ => None,
+    }
+}
+
+/// A CSS `<angle>` in degrees: a dimension, unitless 0, or a `calc()`
+/// (nested, with + - * / and parentheses) whose result is an angle.
 fn angle_degrees(value: &str) -> Option<f32> {
-    fn primitive(value: &str) -> Option<f32> {
-        let value = value.trim().to_ascii_lowercase();
-        if let Some(number) = value.strip_suffix("deg") {
-            number.trim().parse().ok()
-        } else if let Some(number) = value.strip_suffix("grad") {
-            number.trim().parse::<f32>().ok().map(|value| value * 0.9)
-        } else if let Some(number) = value.strip_suffix("rad") {
-            number.trim().parse::<f32>().ok().map(f32::to_degrees)
-        } else if let Some(number) = value.strip_suffix("turn") {
-            number.trim().parse::<f32>().ok().map(|value| value * 360.0)
-        } else if value == "0" {
-            Some(0.0)
-        } else {
-            None
+    match eval_angle_calc(value.trim())? {
+        (degrees, true) => Some(degrees),
+        (number, false) if number == 0.0 => Some(0.0),
+        _ => None,
+    }
+}
+
+/// Evaluate an angle/number math expression: (value, is_angle) with angles
+/// in degrees. Type rules follow CSS Values: an angle may be multiplied by
+/// a number or divided by one; sums need matching types.
+fn eval_angle_calc(input: &str) -> Option<(f32, bool)> {
+    struct Parser<'a> {
+        s: &'a [u8],
+        i: usize,
+    }
+    impl Parser<'_> {
+        fn ws(&mut self) {
+            while self.i < self.s.len() && self.s[self.i].is_ascii_whitespace() {
+                self.i += 1;
+            }
+        }
+        fn expr(&mut self) -> Option<(f64, bool)> {
+            let mut left = self.term()?;
+            loop {
+                self.ws();
+                let op = match self.s.get(self.i) {
+                    Some(&op) if op == b'+' || op == b'-' => op,
+                    _ => return Some(left),
+                };
+                self.i += 1;
+                let right = self.term()?;
+                if right.1 != left.1 && !(right.0 == 0.0 || left.0 == 0.0) {
+                    return None;
+                }
+                let angle = left.1 || right.1;
+                left = (
+                    if op == b'+' {
+                        left.0 + right.0
+                    } else {
+                        left.0 - right.0
+                    },
+                    angle,
+                );
+            }
+        }
+        fn term(&mut self) -> Option<(f64, bool)> {
+            let mut left = self.factor()?;
+            loop {
+                self.ws();
+                match self.s.get(self.i) {
+                    Some(b'*') => {
+                        self.i += 1;
+                        let right = self.factor()?;
+                        if left.1 && right.1 {
+                            return None;
+                        }
+                        left = (left.0 * right.0, left.1 || right.1);
+                    }
+                    Some(b'/') => {
+                        self.i += 1;
+                        let right = self.factor()?;
+                        if right.1 || right.0 == 0.0 {
+                            return None;
+                        }
+                        left = (left.0 / right.0, left.1);
+                    }
+                    _ => return Some(left),
+                }
+            }
+        }
+        fn factor(&mut self) -> Option<(f64, bool)> {
+            self.ws();
+            let rest = &self.s[self.i..];
+            if rest.first() == Some(&b'(') {
+                self.i += 1;
+                let value = self.expr()?;
+                self.ws();
+                if self.s.get(self.i) != Some(&b')') {
+                    return None;
+                }
+                self.i += 1;
+                return Some(value);
+            }
+            let lower = String::from_utf8_lossy(rest).to_ascii_lowercase();
+            if lower.starts_with("calc(") {
+                self.i += 4;
+                return self.factor();
+            }
+            // A number with an optional unit.
+            let start = self.i;
+            let mut end = self.i;
+            if matches!(self.s.get(end), Some(b'+' | b'-')) {
+                end += 1;
+            }
+            while end < self.s.len() && (self.s[end].is_ascii_digit() || self.s[end] == b'.') {
+                end += 1;
+            }
+            if matches!(self.s.get(end), Some(b'e' | b'E'))
+                && self
+                    .s
+                    .get(end + 1)
+                    .is_some_and(|c| c.is_ascii_digit() || *c == b'-' || *c == b'+')
+            {
+                end += 2;
+                while end < self.s.len() && self.s[end].is_ascii_digit() {
+                    end += 1;
+                }
+            }
+            let number: f64 = std::str::from_utf8(&self.s[start..end])
+                .ok()?
+                .parse()
+                .ok()?;
+            let mut unit_end = end;
+            while unit_end < self.s.len() && self.s[unit_end].is_ascii_alphabetic() {
+                unit_end += 1;
+            }
+            let unit = std::str::from_utf8(&self.s[end..unit_end])
+                .ok()?
+                .to_ascii_lowercase();
+            self.i = unit_end;
+            match unit.as_str() {
+                "" => Some((number, false)),
+                "deg" => Some((number, true)),
+                "grad" => Some((number * 0.9, true)),
+                "rad" => Some((number.to_degrees(), true)),
+                "turn" => Some((number * 360.0, true)),
+                _ => None,
+            }
         }
     }
-
-    let value = value.trim();
-    let Some(inner) = value
-        .strip_prefix("calc(")
-        .and_then(|value| value.strip_suffix(')'))
-    else {
-        return primitive(value).filter(|value| value.is_finite());
+    let mut parser = Parser {
+        s: input.as_bytes(),
+        i: 0,
     };
-    let result = if let Some((angle, factor)) = inner.split_once('*') {
-        Some(primitive(angle)? * factor.trim().parse::<f32>().ok()?)
-    } else if let Some((angle, divisor)) = inner.split_once('/') {
-        let divisor = divisor.trim().parse::<f32>().ok()?;
-        (divisor != 0.0)
-            .then(|| primitive(angle).map(|angle| angle / divisor))
-            .flatten()
-    } else {
-        primitive(inner)
-    };
-    result.filter(|value| value.is_finite())
+    let (value, angle) = parser.expr()?;
+    parser.ws();
+    if parser.i != parser.s.len() || !value.is_finite() {
+        return None;
+    }
+    Some((value as f32, angle))
 }
 
 fn parse_transform_origin(value: &str) -> Option<(crate::Dimension, crate::Dimension)> {

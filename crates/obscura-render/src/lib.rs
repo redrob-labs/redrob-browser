@@ -249,6 +249,335 @@ impl Default for Affine2 {
     }
 }
 
+/// A 4x4 CSS transform in CSS pixel document coordinates, applied to
+/// column vectors: `m[row][col]`, `p' = M * (x, y, z, 1)`. CSS
+/// `matrix3d(a1, b1, c1, d1, a2, ...)` lists it column by column.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mat4 {
+    pub m: [[f32; 4]; 4],
+}
+
+impl Default for Mat4 {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
+impl Mat4 {
+    pub const IDENTITY: Self = Self {
+        m: [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    };
+
+    /// `self(other(point))`.
+    pub fn then(self, other: Self) -> Self {
+        let mut m = [[0.0f32; 4]; 4];
+        for (row, out) in m.iter_mut().enumerate() {
+            for (col, cell) in out.iter_mut().enumerate() {
+                *cell = (0..4).map(|k| self.m[row][k] * other.m[k][col]).sum();
+            }
+        }
+        Self { m }
+    }
+
+    pub fn translate(x: f32, y: f32, z: f32) -> Self {
+        let mut out = Self::IDENTITY;
+        out.m[0][3] = x;
+        out.m[1][3] = y;
+        out.m[2][3] = z;
+        out
+    }
+
+    pub fn scale(x: f32, y: f32, z: f32) -> Self {
+        let mut out = Self::IDENTITY;
+        out.m[0][0] = x;
+        out.m[1][1] = y;
+        out.m[2][2] = z;
+        out
+    }
+
+    /// CSS Transforms 2 `rotate3d()`: the axis is normalized; a zero axis
+    /// is no rotation.
+    pub fn rotate3d(x: f32, y: f32, z: f32, degrees: f32) -> Self {
+        let length = (x * x + y * y + z * z).sqrt();
+        if !length.is_finite() || length == 0.0 {
+            return Self::IDENTITY;
+        }
+        let (x, y, z) = (x / length, y / length, z / length);
+        // Exact at multiples of 90deg, as Chromium's SinCosDegrees.
+        let (sin, cos) = {
+            let turns = (degrees as f64) / 90.0;
+            if turns.fract() == 0.0 {
+                match (turns as i64).rem_euclid(4) {
+                    0 => (0.0, 1.0),
+                    1 => (1.0, 0.0),
+                    2 => (0.0, -1.0),
+                    _ => (-1.0, 0.0),
+                }
+            } else {
+                let (sin, cos) = (degrees as f64).to_radians().sin_cos();
+                (sin as f32, cos as f32)
+            }
+        };
+        let t = 1.0 - cos;
+        Self {
+            m: [
+                [
+                    cos + x * x * t,
+                    x * y * t - z * sin,
+                    x * z * t + y * sin,
+                    0.0,
+                ],
+                [
+                    y * x * t + z * sin,
+                    cos + y * y * t,
+                    y * z * t - x * sin,
+                    0.0,
+                ],
+                [
+                    z * x * t - y * sin,
+                    z * y * t + x * sin,
+                    cos + z * z * t,
+                    0.0,
+                ],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        }
+    }
+
+    /// `perspective(d)`; `d` below 1px is clamped to 1px (CSS Transforms 2).
+    pub fn perspective(distance: f32) -> Self {
+        let mut out = Self::IDENTITY;
+        out.m[3][2] = -1.0 / distance.max(1.0);
+        out
+    }
+
+    pub fn from_affine(a: Affine2) -> Self {
+        Self {
+            m: [
+                [a.a, a.c, 0.0, a.e],
+                [a.b, a.d, 0.0, a.f],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        }
+    }
+
+    /// From CSS `matrix3d()` arguments (column-major).
+    pub fn from_css(values: &[f32; 16]) -> Self {
+        let mut m = [[0.0f32; 4]; 4];
+        for col in 0..4 {
+            for row in 0..4 {
+                m[row][col] = values[col * 4 + row];
+            }
+        }
+        Self { m }
+    }
+
+    /// CSS `matrix3d()` arguments (column-major).
+    pub fn to_css(self) -> [f32; 16] {
+        let mut out = [0.0f32; 16];
+        for col in 0..4 {
+            for row in 0..4 {
+                out[col * 4 + row] = self.m[row][col];
+            }
+        }
+        out
+    }
+
+    pub fn around(self, x: f32, y: f32, z: f32) -> Self {
+        Self::translate(x, y, z)
+            .then(self)
+            .then(Self::translate(-x, -y, -z))
+    }
+
+    /// Whether this is a 2D affine transform (CSS "is 2D").
+    pub fn is_2d(&self) -> bool {
+        let m = &self.m;
+        m[0][2] == 0.0
+            && m[1][2] == 0.0
+            && m[2][0] == 0.0
+            && m[2][1] == 0.0
+            && m[2][2] == 1.0
+            && m[2][3] == 0.0
+            && m[3][0] == 0.0
+            && m[3][1] == 0.0
+            && m[3][2] == 0.0
+            && m[3][3] == 1.0
+    }
+
+    pub fn is_identity(&self) -> bool {
+        *self == Self::IDENTITY
+    }
+
+    /// The 2D part (`a b c d e f`), exact for a 2D matrix.
+    pub fn to_affine(self) -> Affine2 {
+        Affine2 {
+            a: self.m[0][0],
+            b: self.m[1][0],
+            c: self.m[0][1],
+            d: self.m[1][1],
+            e: self.m[0][3],
+            f: self.m[1][3],
+        }
+    }
+
+    /// Flatten into the plane z = 0, as a box that does not preserve 3D
+    /// does for its content (CSS Transforms 2 "flatten"). The result maps a
+    /// plane point straight to its projection.
+    pub fn flatten(self) -> Self {
+        let mut out = self;
+        for row in 0..4 {
+            out.m[row][2] = if row == 2 { 1.0 } else { 0.0 };
+        }
+        for col in 0..4 {
+            out.m[2][col] = if col == 2 { 1.0 } else { 0.0 };
+        }
+        out
+    }
+
+    /// Project the plane point `(x, y, 0)`: the viewport point and its
+    /// depth, or `None` behind the viewer.
+    pub fn project(self, x: f32, y: f32) -> Option<(f32, f32, f32)> {
+        let m = &self.m;
+        let w = m[3][0] * x + m[3][1] * y + m[3][3];
+        if !w.is_finite() || w <= 1.0e-6 {
+            return None;
+        }
+        Some((
+            (m[0][0] * x + m[0][1] * y + m[0][3]) / w,
+            (m[1][0] * x + m[1][1] * y + m[1][3]) / w,
+            (m[2][0] * x + m[2][1] * y + m[2][3]) / w,
+        ))
+    }
+
+    /// Bounds of `rect`'s projected corners (`None` when part of it lies
+    /// behind the viewer).
+    pub fn map_rect(self, rect: Rect) -> Option<Rect> {
+        let corners = [
+            self.project(rect.x, rect.y)?,
+            self.project(rect.x + rect.width, rect.y)?,
+            self.project(rect.x, rect.y + rect.height)?,
+            self.project(rect.x + rect.width, rect.y + rect.height)?,
+        ];
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for (x, y, _) in corners {
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x);
+            y1 = y1.max(y);
+        }
+        Some(Rect {
+            x: x0,
+            y: y0,
+            width: x1 - x0,
+            height: y1 - y0,
+        })
+    }
+
+    /// The plane point that projects to viewport point `(x, y)`: inverts
+    /// the homography of the flattened matrix.
+    pub fn unproject(self, x: f32, y: f32) -> Option<(f32, f32)> {
+        let m = &self.m;
+        // h maps (px, py, 1) -> (X w, Y w, w).
+        let h = [
+            [m[0][0] as f64, m[0][1] as f64, m[0][3] as f64],
+            [m[1][0] as f64, m[1][1] as f64, m[1][3] as f64],
+            [m[3][0] as f64, m[3][1] as f64, m[3][3] as f64],
+        ];
+        let det = h[0][0] * (h[1][1] * h[2][2] - h[1][2] * h[2][1])
+            - h[0][1] * (h[1][0] * h[2][2] - h[1][2] * h[2][0])
+            + h[0][2] * (h[1][0] * h[2][1] - h[1][1] * h[2][0]);
+        if !det.is_finite() || det.abs() < 1.0e-12 {
+            return None;
+        }
+        let inv = [
+            [
+                (h[1][1] * h[2][2] - h[1][2] * h[2][1]) / det,
+                (h[0][2] * h[2][1] - h[0][1] * h[2][2]) / det,
+                (h[0][1] * h[1][2] - h[0][2] * h[1][1]) / det,
+            ],
+            [
+                (h[1][2] * h[2][0] - h[1][0] * h[2][2]) / det,
+                (h[0][0] * h[2][2] - h[0][2] * h[2][0]) / det,
+                (h[0][2] * h[1][0] - h[0][0] * h[1][2]) / det,
+            ],
+            [
+                (h[1][0] * h[2][1] - h[1][1] * h[2][0]) / det,
+                (h[0][1] * h[2][0] - h[0][0] * h[2][1]) / det,
+                (h[0][0] * h[1][1] - h[0][1] * h[1][0]) / det,
+            ],
+        ];
+        let (x, y) = (x as f64, y as f64);
+        let w = inv[2][0] * x + inv[2][1] * y + inv[2][2];
+        if w.abs() < 1.0e-12 {
+            return None;
+        }
+        Some((
+            ((inv[0][0] * x + inv[0][1] * y + inv[0][2]) / w) as f32,
+            ((inv[1][0] * x + inv[1][1] * y + inv[1][2]) / w) as f32,
+        ))
+    }
+
+    /// Whether the plane's back faces the viewer (CSS `backface-visibility`):
+    /// the z component of the transformed normal, through the inverse's
+    /// (3, 3) cofactor sign as Chromium does, is negative.
+    pub fn is_back_face_visible(&self) -> bool {
+        let m = &self.m;
+        // Cofactor of m[2][2] over the full 4x4 (z row/column removed).
+        let a = [
+            [m[0][0], m[0][1], m[0][3]],
+            [m[1][0], m[1][1], m[1][3]],
+            [m[3][0], m[3][1], m[3][3]],
+        ];
+        let cofactor = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
+            - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+            + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+        let det = self.determinant();
+        det != 0.0 && cofactor / det < 0.0
+    }
+
+    pub fn determinant(&self) -> f32 {
+        let m = self.m.map(|row| row.map(f64::from));
+        let minor = |r: [usize; 3], c: [usize; 3]| {
+            m[r[0]][c[0]] * (m[r[1]][c[1]] * m[r[2]][c[2]] - m[r[1]][c[2]] * m[r[2]][c[1]])
+                - m[r[0]][c[1]] * (m[r[1]][c[0]] * m[r[2]][c[2]] - m[r[1]][c[2]] * m[r[2]][c[0]])
+                + m[r[0]][c[2]] * (m[r[1]][c[0]] * m[r[2]][c[1]] - m[r[1]][c[1]] * m[r[2]][c[0]])
+        };
+        let rows = [1, 2, 3];
+        (m[0][0] * minor(rows, [1, 2, 3]) - m[0][1] * minor(rows, [0, 2, 3])
+            + m[0][2] * minor(rows, [0, 1, 3])
+            - m[0][3] * minor(rows, [0, 1, 2])) as f32
+    }
+
+    /// The affine map through three projected corners of `rect`: the best
+    /// 2D stand-in a 2D painter can use for a projective transform.
+    pub fn affine_fit(self, rect: Rect) -> Option<Affine2> {
+        if rect.width <= 0.0 || rect.height <= 0.0 {
+            return Some(self.flatten().to_affine());
+        }
+        let (x0, y0, _) = self.project(rect.x, rect.y)?;
+        let (x1, y1, _) = self.project(rect.x + rect.width, rect.y)?;
+        let (x2, y2, _) = self.project(rect.x, rect.y + rect.height)?;
+        let a = (x1 - x0) / rect.width;
+        let b = (y1 - y0) / rect.width;
+        let c = (x2 - x0) / rect.height;
+        let d = (y2 - y0) / rect.height;
+        Some(Affine2 {
+            a,
+            b,
+            c,
+            d,
+            e: x0 - a * rect.x - c * rect.y,
+            f: y0 - b * rect.x - d * rect.y,
+        })
+    }
+}
+
 impl Affine2 {
     pub const IDENTITY: Self = Self {
         a: 1.0,
@@ -412,6 +741,15 @@ pub enum TransformOp {
     Rotate(f32),
     Skew(f32, f32),
     Matrix(Affine2),
+    /// `translate3d()` / `translateZ()`: the Z part is a length (no %).
+    Translate3d(TransformLength, TransformLength, TransformLength),
+    /// `scale3d()` / `scaleZ()`.
+    Scale3d(f32, f32, f32),
+    /// `rotate3d(x, y, z, angle)`, also `rotateX/Y()` (angle in degrees).
+    Rotate3d(f32, f32, f32, f32),
+    /// `perspective(<length> | none)`.
+    Perspective(Option<f32>),
+    Matrix3d(Mat4),
 }
 
 impl Rect {
@@ -1695,6 +2033,14 @@ pub struct LayoutStyle {
     /// Authored `transform-origin`, unresolved so percentages use the final
     /// border-box dimensions. `None` is the CSS initial value, 50% 50%.
     pub transform_origin: Option<(Dimension, Dimension)>,
+    /// `perspective` in px (`None` is `none`). Applies to the children.
+    pub perspective: Option<f32>,
+    /// `perspective-origin`; `None` is 50% 50%.
+    pub perspective_origin: Option<(Dimension, Dimension)>,
+    /// `transform-style: preserve-3d`.
+    pub preserve_3d: bool,
+    /// `backface-visibility: hidden`.
+    pub backface_hidden: bool,
     /// `box-shadow` (first layer only). Painted behind the element's own
     /// background/border box: cards, buttons, menus, and modals across the
     /// modern web rely on it for depth, and without it those elements paint

@@ -1129,3 +1129,55 @@ fn ch_lengths_use_the_inherited_font() {
         width(&tree, &laid, "s")
     );
 }
+
+#[test]
+fn three_d_transforms_project_through_perspective_and_preserve_3d() {
+    // Chrome (w3schools carousel at rotateY(90deg), perspective 1000px):
+    // card 0 (translateZ(173px)) 34.95 x 222.22 at 257.27, 68.89 here;
+    // card 1 (rotateY(60deg)) 157.48 x 181.85 at 99.91, 89.08; the
+    // preserve-3d carousel itself 0 x 222.22. calc() angles resolve.
+    let (tree, laid) = layout(
+        "<!doctype html><style>:root{--n:6;--r:173px}body{margin:0}\
+         .c{width:200px;height:200px;margin:80px auto 0 0;perspective:1000px}\
+         .k{position:absolute;width:200px;height:200px;\
+         transform:rotateY(calc(var(--i) * (360deg / var(--n)))) translateZ(var(--r))}</style>\
+         <div class=c style='margin-left:0'><div id=car style='position:relative;width:100%;height:100%;\
+         transform-style:preserve-3d;transform:rotateY(90deg)'>\
+         <div class=k id=k0 style='--i:0'></div><div class=k id=k1 style='--i:1'></div></div></div>",
+        &[],
+    );
+    let r = |id: &str| {
+        let node = element(&tree, id);
+        laid.transformed_rect(node, laid.rects[&node])
+    };
+    let close = |a: f32, b: f32| (a - b).abs() < 0.05;
+    let (k0, k1, car) = (r("k0"), r("k1"), r("car"));
+    assert!(
+        close(k0.width, 34.95) && close(k0.height, 222.22) && close(k0.x, 257.27),
+        "{k0:?}"
+    );
+    assert!(
+        close(k1.width, 157.48) && close(k1.height, 181.85) && close(k1.y, 89.08),
+        "{k1:?}"
+    );
+    assert!(
+        close(car.width, 0.0) && close(car.height, 222.22),
+        "{car:?}"
+    );
+}
+
+#[test]
+fn angle_calc_and_matrix3d_parse() {
+    let (tree, laid) = layout(
+        "<!doctype html><div id=a style='width:10px;height:10px;transform:rotate(calc(0.5turn - 90deg))'></div>\
+         <div id=b style='width:10px;height:10px;transform:matrix3d(1,0,0,0,0,1,0,0,0,0,1,0,5,6,7,1)'></div>",
+        &[],
+    );
+    let a = laid.transforms[&element(&tree, "a")];
+    assert!(
+        (a.a - 0.0).abs() < 1e-5 && (a.b - 1.0).abs() < 1e-5,
+        "{a:?}"
+    );
+    let b = laid.projective_transforms[&element(&tree, "b")];
+    assert_eq!(b.m[2][3], 7.0);
+}

@@ -1599,14 +1599,7 @@ impl PreparedRender {
     /// space, excluding root-scroll and sticky movement.
     pub fn document_rect(&self, id: obscura_dom::tree::NodeId) -> Option<crate::Rect> {
         let rect = *self.layout.rects.get(&id)?;
-        Some(
-            self.layout
-                .transforms
-                .get(&id)
-                .copied()
-                .map(|transform| transform.map_rect(rect))
-                .unwrap_or(rect),
-        )
+        Some(self.layout.transformed_rect(id, rect))
     }
 
     /// Unscaled padding-box size used by CSSOM View's `clientWidth` and
@@ -1724,6 +1717,7 @@ impl PreparedRender {
             height: 0.001,
         };
         let mut best: Option<(Vec<i32>, bool, usize, usize, obscura_dom::tree::NodeId)> = None;
+        let mut best_depth_3d: Option<f32> = None;
         for (order, id) in crate::dom::rendered_descendants(tree, tree.document())
             .into_iter()
             .enumerate()
@@ -1744,6 +1738,34 @@ impl PreparedRender {
             if x < rect.x || x >= rect.x + rect.width || y < rect.y || y >= rect.y + rect.height {
                 continue;
             }
+            // A transformed box is hit inside its transformed shape, not
+            // its bounding box; a hidden back face is not hit at all.
+            let mut depth_3d = None;
+            if self.layout.transforms.contains_key(&id) {
+                let Some(local) = self.fractional_rect(id) else {
+                    continue;
+                };
+                let movement = scroll.movement_for(id);
+                let Some((local_x, local_y)) =
+                    self.layout
+                        .untransformed_point(id, x - movement.0, y - movement.1)
+                else {
+                    continue;
+                };
+                if local_x < local.x
+                    || local_x >= local.x + local.width
+                    || local_y < local.y
+                    || local_y >= local.y + local.height
+                {
+                    continue;
+                }
+                if let Some(matrix) = self.layout.projective_transforms.get(&id) {
+                    if style.backface_hidden && matrix.is_back_face_visible() {
+                        continue;
+                    }
+                    depth_3d = matrix.project(local_x, local_y).map(|(_, _, z)| z);
+                }
+            }
             if scroll
                 .inherited_clip_for(id)
                 .is_some_and(|clip| clip.intersect_rect(&point).is_none())
@@ -1756,6 +1778,16 @@ impl PreparedRender {
             let depth = tree.ancestors(id).len();
             let replace = best.as_ref().is_none_or(
                 |(best_path, best_positioned, best_depth, best_order, best_id)| {
+                    // Two boxes in 3D space: the nearer one at this point
+                    // (Chromium sorts a 3D rendering context by depth).
+                    if let (Some(z), Some(best_z)) = (depth_3d, best_depth_3d) {
+                        if (z - best_z).abs() > 1.0e-3
+                            && !tree.ancestors(id).contains(best_id)
+                            && !tree.ancestors(*best_id).contains(&id)
+                        {
+                            return z > best_z;
+                        }
+                    }
                     let stacking = compare_stacking_paths(&path, best_path);
                     if stacking != std::cmp::Ordering::Equal {
                         return stacking.is_gt();
@@ -1775,6 +1807,7 @@ impl PreparedRender {
             );
             if replace {
                 best = Some((path, positioned, depth, order, id));
+                best_depth_3d = depth_3d;
             }
         }
         best.map(|(_, _, _, _, id)| id)
@@ -1794,16 +1827,12 @@ impl PreparedRender {
             .take(tree.len() + 1)
         {
             let movement = scroll.movement_for(parent);
-            let transform = self
-                .layout
-                .transforms
-                .get(&parent)
-                .copied()
-                .unwrap_or_default();
-            let Some(inverse) = transform.inverse() else {
+            let Some((local_x, local_y)) =
+                self.layout
+                    .untransformed_point(parent, x - movement.0, y - movement.1)
+            else {
                 continue;
             };
-            let (local_x, local_y) = inverse.map_point(x - movement.0, y - movement.1);
             let best: Option<(obscura_dom::tree::NodeId, usize, f32)> = None;
             let best = best.or_else(|| {
                 self.layout
@@ -1855,13 +1884,7 @@ impl PreparedRender {
                 })
             });
             if let Some(rect) = ifc_rect {
-                let mut rect = self
-                    .layout
-                    .transforms
-                    .get(&parent)
-                    .copied()
-                    .unwrap_or_default()
-                    .map_rect(rect);
+                let mut rect = self.layout.transformed_rect(parent, rect);
                 let movement = scroll.movement_for(parent);
                 rect.x += movement.0;
                 rect.y += movement.1;
@@ -2477,13 +2500,7 @@ impl PreparedRender {
         scroll: &ResolvedScrollState,
     ) -> Option<crate::Rect> {
         let rect = self.fractional_rect(id)?;
-        let mut rect = self
-            .layout
-            .transforms
-            .get(&id)
-            .copied()
-            .map(|transform| transform.map_rect(rect))
-            .unwrap_or(rect);
+        let mut rect = self.layout.transformed_rect(id, rect);
         let movement = scroll.movement_for(id);
         rect.x += movement.0;
         rect.y += movement.1;
@@ -2510,13 +2527,7 @@ impl PreparedRender {
             source
                 .into_iter()
                 .map(|rect| {
-                    let rect = self
-                        .layout
-                        .transforms
-                        .get(&id)
-                        .copied()
-                        .map(|transform| transform.map_rect(rect))
-                        .unwrap_or(rect);
+                    let rect = self.layout.transformed_rect(id, rect);
                     crate::Rect {
                         x: rect.x + movement.0,
                         y: rect.y + movement.1,
@@ -2553,7 +2564,6 @@ impl PreparedRender {
                     continue;
                 }
                 let movement = scroll.movement_for(parent);
-                let transform = self.layout.transforms.get(&parent).copied();
                 return Some(
                     ifc.text_range_rects(text, start, end)
                         .into_iter()
@@ -2563,7 +2573,7 @@ impl PreparedRender {
                                 y: rect.y + ifc.origin.1,
                                 ..rect
                             };
-                            let rect = transform.map(|t| t.map_rect(rect)).unwrap_or(rect);
+                            let rect = self.layout.transformed_rect(parent, rect);
                             crate::Rect {
                                 x: rect.x + movement.0,
                                 y: rect.y + movement.1,
@@ -2609,13 +2619,7 @@ impl PreparedRender {
             source
                 .into_iter()
                 .map(|rect| {
-                    let rect = self
-                        .layout
-                        .transforms
-                        .get(&id)
-                        .copied()
-                        .map(|transform| transform.map_rect(rect))
-                        .unwrap_or(rect);
+                    let rect = self.layout.transformed_rect(id, rect);
                     crate::Rect {
                         x: rect.x + movement.0,
                         y: rect.y + movement.1,
@@ -3061,12 +3065,17 @@ fn transform_css(
         width: 0.0,
         height: 0.0,
     };
-    let matrix = crate::dom::resolved_transform_property_matrix(
+    let matrix3d = crate::dom::resolved_transform_property_matrix3d(
         style,
         rect.unwrap_or(&fallback),
         root_font_size,
         viewport,
     );
+    if !matrix3d.is_2d() {
+        let values: Vec<String> = matrix3d.to_css().iter().map(|v| css_number(*v)).collect();
+        return format!("matrix3d({})", values.join(", "));
+    }
+    let matrix = matrix3d.to_affine();
     format!(
         "matrix({}, {}, {}, {}, {}, {})",
         css_number(matrix.a),
