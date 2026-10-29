@@ -171,6 +171,8 @@ fn ko(en: &str) -> Option<&'static str> {
             "주소창에서 / 뒤에 입력한 요청을 이 주소로 보내요. 이 컴퓨터만 쓸 수 있어요."
         }
         "New incognito window" => "새 시크릿 창",
+        "Move to new window" => "새 창으로 옮기기",
+        "Could not open a new window: {0}" => "새 창을 열지 못했어요: {0}",
         "Incognito" => "시크릿",
         "Incognito: this window keeps no history, cookies or passwords." => {
             "시크릿 창은 기록, 쿠키, 비밀번호를 남기지 않아요."
