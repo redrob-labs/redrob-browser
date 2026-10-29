@@ -3074,6 +3074,63 @@ fn legacy_font_size_hint(value: &str) -> Option<&'static str> {
 
 /// Apply HTML presentational attributes at their cascade origin: above the UA
 /// defaults, but below every author stylesheet and style attribute.
+/// HTML's `table[border]` rules: the table gets `border: <N>px outset`
+/// (N defaults to 1), and its cells `border: 1px inset`.
+fn apply_table_border_hints(
+    tree: &DomTree,
+    node: &obscura_dom::tree::Node,
+    style: &mut crate::LayoutStyle,
+) {
+    let Some(name) = node.as_element() else {
+        return;
+    };
+    if name.ns.as_ref() != "http://www.w3.org/1999/xhtml" {
+        return;
+    }
+    let border_width = |table: &obscura_dom::tree::Node| {
+        let value = table.get_attribute("border")?.trim();
+        let digits: String = value.chars().take_while(char::is_ascii_digit).collect();
+        Some(if digits.is_empty() {
+            1.0
+        } else {
+            digits.parse::<f32>().ok()?
+        })
+    };
+    let (width, line) = match name.local.as_ref() {
+        "table" => match border_width(node) {
+            Some(width) if width > 0.0 => (width, crate::BorderStyle::Outset),
+            _ => return,
+        },
+        "td" | "th" => {
+            // The cell's table: through an optional row group and its row.
+            let mut ancestor = node.parent;
+            let mut table = None;
+            for _ in 0..3 {
+                let Some(id) = ancestor else { break };
+                let Some(parent) = tree.borrow_node(id) else { break };
+                if parent.as_element().is_some_and(|el| el.local.as_ref() == "table") {
+                    table = border_width(&parent);
+                    break;
+                }
+                ancestor = parent.parent;
+            }
+            match table {
+                Some(width) if width > 0.0 => (1.0, crate::BorderStyle::Inset),
+                _ => return,
+            }
+        }
+        _ => return,
+    };
+    style.border = crate::Edges {
+        top: width,
+        right: width,
+        bottom: width,
+        left: width,
+    };
+    style.border_model.specified_widths = crate::Sides::all(width);
+    style.border_model.styles = crate::Sides::all(line);
+}
+
 fn apply_presentational_hints(node: &obscura_dom::tree::Node, style: &mut crate::LayoutStyle) {
     if node.as_element().is_some_and(|name| {
         name.local.as_ref() == "font" && name.ns.as_ref() == "http://www.w3.org/1999/xhtml"
@@ -3478,6 +3535,7 @@ fn cascade_node_style(
             }
         }
         apply_presentational_hints(&node, &mut style);
+        apply_table_border_hints(tree, &node, &mut style);
         apply_picture_source_hints(tree, id, viewport, &mut style);
         let node_id = node.get_attribute("id");
         let classes: Vec<String> = node

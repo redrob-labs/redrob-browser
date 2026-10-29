@@ -422,6 +422,7 @@ fn apply_ua_sheet_extras(tag: &str, style: &mut LayoutStyle) {
                 ]);
             } else if tag == "textarea" {
                 style.cssom.ua_overrides.extend([
+                    ("box-sizing", "content-box"),
                     ("overflow", "auto"),
                     ("overflow-x", "auto"),
                     ("overflow-y", "auto"),

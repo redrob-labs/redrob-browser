@@ -2024,12 +2024,20 @@ impl PreparedRender {
                     (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0
                 })
                 .unwrap_or((rect.width, rect.height));
-            let (width, height) = match style.box_sizing {
-                crate::BoxSizing::BorderBox => (border_width, border_height),
-                _ => (
+            // A UA override reports the CSS box-sizing where the engine sizes
+            // a native control as a border box.
+            let reported_border_box = style.box_sizing == crate::BoxSizing::BorderBox
+                && !style
+                    .cssom
+                    .ua_overrides
+                    .contains(&("box-sizing", "content-box"));
+            let (width, height) = if reported_border_box {
+                (border_width, border_height)
+            } else {
+                (
                     (border_width - horizontal_non_content).max(0.0),
                     (border_height - vertical_non_content).max(0.0),
-                ),
+                )
             };
             out.insert("width", css_px(width));
             out.insert("height", css_px(height));
@@ -2265,6 +2273,37 @@ impl PreparedRender {
             };
             out.insert("grid-template-columns", tracks(columns));
             out.insert("grid-template-rows", tracks(rows));
+        } else if let Some(rect) = rect.filter(|_| {
+            style.display == crate::Display::Grid
+                && style.css_display == crate::CssDisplay::Layout
+                && !style.display_contents
+                && style.grid_template_columns.is_empty()
+                && style.grid_template_rows.is_empty()
+        }) {
+            // A grid whose only content is text is laid out as one text
+            // leaf rather than a Taffy grid: its anonymous item fills the
+            // single implicit track.
+            let (width, height) = self
+                .layout
+                .fractional_sizes
+                .get(&id)
+                .copied()
+                .filter(|&(width, height)| {
+                    (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0
+                })
+                .unwrap_or((rect.width, rect.height));
+            let content_width = width
+                - style.border.left
+                - style.border.right
+                - style.padding.left
+                - style.padding.right;
+            let content_height = height
+                - style.border.top
+                - style.border.bottom
+                - style.padding.top
+                - style.padding.bottom;
+            out.insert("grid-template-columns", css_px(content_width.max(0.0)));
+            out.insert("grid-template-rows", css_px(content_height.max(0.0)));
         }
         out.insert(
             "transform",
@@ -2871,6 +2910,11 @@ fn transform_css(
     viewport: (f32, f32),
 ) -> String {
     if style.transform_ops.is_empty() {
+        return "none".to_string();
+    }
+    // Transforms do not apply to non-replaced inline boxes; the resolved
+    // value of a rendered one is `none` (Blink: no transformable box).
+    if rect.is_some() && style.ignores_used_box_sizes() {
         return "none".to_string();
     }
     let fallback = crate::Rect {
