@@ -3,8 +3,6 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::tiles::TileCache;
-
 pub type TabId = u64;
 
 pub struct Tab {
@@ -12,10 +10,8 @@ pub struct Tab {
     pub url: String,
     pub title: String,
     pub loading: bool,
-    pub tiles: TileCache,
-    /// Document scroll position and size in CSS pixels, as the page last reported them.
-    pub scroll: (f32, f32),
-    pub content: (f32, f32),
+    /// The page as the engine last sent it, with the window's scroll offsets.
+    pub scene: crate::compositor::TabScene,
     /// Opened by the agent rather than the person; shown with a marker.
     pub agent: bool,
     pub devtools: crate::devtools::State,
@@ -30,9 +26,7 @@ impl Tab {
             url: url.to_string(),
             title: String::new(),
             loading: url != "about:blank",
-            tiles: TileCache::default(),
-            scroll: (0.0, 0.0),
-            content: (0.0, 0.0),
+            scene: crate::compositor::TabScene::new(),
             agent: false,
             devtools: Default::default(),
             target_id: String::new(),

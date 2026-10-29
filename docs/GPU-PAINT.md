@@ -1,5 +1,8 @@
 # Painting on the GPU
 
+> Superseded by [COMPOSITOR.md](COMPOSITOR.md): the window no longer draws tiles; it composites the
+> engine's display list itself.
+
 How Redrob Browser gets pages on screen fast enough for a person to browse.
 
 ## Where we start

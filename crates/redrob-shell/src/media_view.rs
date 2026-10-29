@@ -32,6 +32,11 @@ struct Item {
     cues: Option<webvtt::Cues>,
     /// The URL `cues` came from.
     track: String,
+    /// The compositor draws this element's frames (an `External` item):
+    /// only its controls and subtitles are drawn here.
+    composited: bool,
+    /// The newest frame as the compositor takes it.
+    external: Option<crate::compositor::External>,
 }
 
 impl Item {
@@ -47,6 +52,8 @@ impl Item {
             src,
             cues: None,
             track: String::new(),
+            composited: false,
+            external: None,
         }
     }
 
@@ -184,15 +191,58 @@ impl Media {
 
     pub fn set_rects(&mut self, tab: TabId, rects: Vec<(u64, Option<[f32; 4]>)>) {
         for (id, r) in rects {
-            if let Some(i) = self.items.get_mut(&(tab, id)) {
+            if let Some(i) = self.items.get_mut(&(tab, id)).filter(|i| !i.composited) {
                 i.rect = r;
+            }
+        }
+    }
+
+    /// The newest frame of element `key` in `tab`, for the compositor.
+    pub fn external_frame(&mut self, tab: TabId, key: u64) -> Option<crate::compositor::External> {
+        let item = self.items.get_mut(&(tab, key)).filter(|i| i.video)?;
+        let frame = item.player.frame();
+        if let Ok(f) = frame.lock() {
+            let fresh = item.external.as_ref().is_none_or(|e| e.serial != f.serial);
+            if fresh && f.width > 0 && f.rgba.len() == (f.width * f.height * 4) as usize {
+                use vello::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
+                item.external = Some(crate::compositor::External {
+                    image: ImageData {
+                        data: Blob::from(f.rgba.clone()),
+                        format: ImageFormat::Rgba8,
+                        alpha_type: ImageAlphaType::Alpha,
+                        width: f.width,
+                        height: f.height,
+                    },
+                    serial: f.serial,
+                });
+            }
+        }
+        item.external.clone()
+    }
+
+    /// Where the compositor drew `tab`'s `External` items this frame (page
+    /// CSS px); those elements are not drawn again here.
+    pub fn set_composited(&mut self, tab: TabId, rects: &[(u64, [f32; 4])]) {
+        for ((t, id), item) in &mut self.items {
+            if *t != tab {
+                continue;
+            }
+            let r = rects.iter().find(|(k, _)| k == id).map(|(_, r)| *r);
+            item.composited = r.is_some();
+            if r.is_some() {
+                item.rect = r;
             }
         }
     }
 
     /// A tab moves to another window: its players go with it, still playing.
     pub fn take_tab(&mut self, tab: TabId) -> TabMedia {
-        let keys: Vec<_> = self.items.keys().filter(|(t, _)| *t == tab).copied().collect();
+        let keys: Vec<_> = self
+            .items
+            .keys()
+            .filter(|(t, _)| *t == tab)
+            .copied()
+            .collect();
         let items = keys
             .into_iter()
             .filter_map(|k| self.items.remove(&k).map(|i| (k, i)))
@@ -292,8 +342,10 @@ impl Media {
             let full = Rect::from_min_size(page.min + vec2(x, y), vec2(w, h));
             if item.video {
                 let painter = ui.painter().with_clip_rect(page);
-                upload(ui.ctx(), item);
-                draw_frame(&painter, item, full);
+                if !item.composited {
+                    upload(ui.ctx(), item);
+                    draw_frame(&painter, item, full);
+                }
                 draw_cue(&painter, item, full, status.current_time);
             }
             if item.controls {

@@ -306,6 +306,7 @@ fn ko(en: &str) -> Option<&'static str> {
         }
         "the new app's signature did not verify" => "새 앱의 서명을 확인하지 못했어요",
         // Media
+        "This page cannot be drawn: {0}" => "이 페이지를 그릴 수 없어요: {0}",
         "Play" => "재생",
         "Pause" => "일시정지",
         // Protected video
