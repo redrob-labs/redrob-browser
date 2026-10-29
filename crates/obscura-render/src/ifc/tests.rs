@@ -863,3 +863,18 @@ fn floats_keep_their_first_childs_top_margin() {
     let top = |id: &str| laid.rects[&element(&tree, id)].y;
     assert_eq!(top("t") - top("w"), 20.0);
 }
+
+#[test]
+fn float_containing_boxes_keep_bottom_padding_below_floats() {
+    // Chrome: 178 and 112 tall (the last float, then padding-bottom 32px).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'>\
+         <div id=a style='float:left;width:300px;padding:16px 0 32px'><p>x</p>\
+         <div style='float:left;clear:both;width:100%;height:80px'></div></div>\
+         <div id=b style='display:flow-root;width:300px;padding-bottom:32px;clear:both'>\
+         <div style='float:left;height:80px;width:10px'></div></div>",
+        &[],
+    );
+    assert_eq!(height(&tree, &laid, "a"), 178.0);
+    assert_eq!(height(&tree, &laid, "b"), 112.0);
+}

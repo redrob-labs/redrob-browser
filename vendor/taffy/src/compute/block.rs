@@ -497,7 +497,12 @@ fn compute_inner(
     // Root BFCs contain floats
     #[cfg(feature = "float_layout")]
     if block_ctx.is_bfc_root() || is_scroll_container {
-        intrinsic_outer_height = intrinsic_outer_height.max(block_ctx.floated_content_height_contribution());
+        // The float contribution is a border-box y; the container's bottom
+        // padding and border still follow the lowest float (Chrome: a
+        // float-containing box with padding-bottom:32px ends 32px below
+        // its last float).
+        intrinsic_outer_height = intrinsic_outer_height
+            .max(block_ctx.floated_content_height_contribution() + padding.bottom + border.bottom);
     }
 
     let container_outer_height = known_dimensions
