@@ -1,9 +1,9 @@
 //! Redrob Browser window.
 //!
 //! Tabs, a toolbar with back, forward, reload, an address field with
-//! suggestions and a bookmark star, and a bookmarks bar. Each tab's page is
-//! drawn as cached tiles the engine paints; input inside the page area goes
-//! to the engine as CDP input events.
+//! suggestions and a bookmarks bar. Each tab's page is drawn on the GPU
+//! from the display list the engine sends (compositor/); input inside the
+//! page area goes to the engine as CDP input events.
 
 // A GUI program on Windows: no console window behind the browser. Its errors
 // go to a log file and a message box instead (startup.rs).
@@ -14,11 +14,10 @@ mod agent_bridge;
 mod autoscroll;
 mod browser;
 mod cdp;
+mod compositor;
 mod devtools;
 mod drm_tab;
 mod engine;
-#[cfg(feature = "gpu")]
-mod gpu_paint;
 mod i18n;
 mod import_chrome;
 mod input;
@@ -32,7 +31,6 @@ mod relay;
 mod self_update;
 mod startup;
 mod theme;
-mod tiles;
 mod updater;
 mod vault;
 mod webvtt;
@@ -44,7 +42,6 @@ use egui::{Color32, CornerRadius, Key, Modifiers, Rect, Sense, Stroke, Vec2};
 use i18n::{t, tf};
 use model::{Model, SuggestionKind, Tab, TabId};
 use theme::{size, Bar, Icon};
-use tiles::TileCache;
 
 const NEW_TAB: &str = "about:blank";
 
@@ -138,7 +135,7 @@ fn run() -> anyhow::Result<()> {
     let result = eframe::run_native(
         "Redrob Browser",
         options,
-        Box::new(move |cc| Ok(Box::new(browser::Browser::start(cc, start)))),
+        Box::new(move |cc| Ok(Box::new(browser::App::start(cc, start)))),
     );
     let _ = std::fs::remove_file(&endpoint_file);
     drop(engine);
@@ -227,6 +224,7 @@ struct Window {
     focus_address: bool,
     error: Option<String>,
     last_size: (u32, u32, f32),
+    last_title: String,
     address_id: egui::Id,
     autoscroll: autoscroll::Autoscroll,
     /// A private window (`--incognito`).
@@ -253,9 +251,8 @@ struct Window {
     /// Most visited sites for the new tab page, read once per new tab.
     top_sites: Option<Vec<(String, String)>>,
     new_tab_query: String,
-    /// Renders tile display lists when the GPU path is available.
-    #[cfg(feature = "gpu")]
-    gpu: Option<gpu_paint::GpuPainter>,
+    /// Draws pages; the reason when the GPU cannot.
+    gpu: Result<compositor::Gpu, String>,
 }
 
 impl Window {
@@ -450,36 +447,13 @@ impl Window {
                 continue;
             };
             match event {
-                Event::Tile {
-                    key,
-                    generation,
-                    image,
-                } => t.tiles.insert(ctx, key, generation, image),
-                Event::TileFailed { key, generation } => t.tiles.failed(key, generation),
-                #[cfg(feature = "gpu")]
-                Event::TileList {
-                    key,
-                    generation,
-                    list,
-                } => {
-                    let mut drawn = false;
-                    if let Some(gpu) = self.gpu.as_mut() {
-                        for id in t.tiles.take_released() {
-                            gpu.release(id);
-                        }
-                        if let Some(reuse) = t.tiles.native_slot(key, generation) {
-                            if let Some(id) = gpu.render(&list, reuse) {
-                                t.tiles.insert_native(key, generation, id);
-                                drawn = true;
-                            }
-                        }
-                    }
-                    if !drawn {
-                        t.tiles.failed(key, generation);
-                    }
+                Event::Scene(msg) => t.scene.apply(msg),
+                Event::SceneLink(link) => t.scene.set_link(link),
+                Event::SceneUnavailable(e) => t.scene.error = Some(e),
+                Event::ScrollKey(key) => {
+                    t.scene.scroll_key(key);
+                    t.scene.flush();
                 }
-                Event::Invalidate => t.tiles.invalidate(),
-                Event::Damage(rects) => t.tiles.invalidate_rects(&rects),
                 Event::Console { level, text } => t.devtools.log(&level, text),
                 Event::NetRequest { id, method, url } => t.devtools.request(id, method, url),
                 Event::NetResponse { id, status, mime } => t.devtools.response(&id, status, mime),
@@ -498,22 +472,12 @@ impl Window {
                     t.devtools.navigated();
                     t.url = url.clone();
                     t.title.clear();
-                    t.tiles.clear();
-                    t.scroll = (0.0, 0.0);
+                    t.scene.navigated();
                     visited = Some((url, String::new()));
                 }
                 Event::UrlChanged(url) => {
                     t.url = url.clone();
                     visited = Some((url, t.title.clone()));
-                }
-                Event::Scroll {
-                    x,
-                    y,
-                    width,
-                    height,
-                } => {
-                    t.scroll = (x, y);
-                    t.content = (width, height);
                 }
                 Event::Title(title) => {
                     t.title = title.clone();
@@ -582,7 +546,11 @@ impl Window {
         } else {
             title
         };
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        // Setting the title wakes the window on X11: only when it changed.
+        if title != self.last_title {
+            self.last_title = title.clone();
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        }
     }
 
     /// Browser shortcuts, taken before the page sees the keys.
@@ -1347,9 +1315,8 @@ impl Window {
                             .ctx()
                             .input(|i| i.viewport().inner_rect.map(|r| r.min))
                             .unwrap_or_default();
-                        drop_at = Some(
-                            origin + pos.to_vec2() - Vec2::new(grab + left_pad, 6.0 + 12.0),
-                        );
+                        drop_at =
+                            Some(origin + pos.to_vec2() - Vec2::new(grab + left_pad, 6.0 + 12.0));
                     }
                 } else if !out(pos.y) {
                     let to = ((pos.x - grab - left) / width + 0.5).floor();
@@ -2438,72 +2405,52 @@ impl Window {
                 }
                 // Web pages are white until they paint, as in every browser.
                 ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
-                let wanted = {
-                    let t = &mut self.model.tabs[tab_index];
-                    t.tiles.paint(ui.painter(), rect, t.scroll);
-                    let keys =
-                        TileCache::visible(t.scroll, (rect.width(), rect.height()), t.content);
-                    (t.id, t.tiles.wanted(&keys), t.tiles.generation)
-                };
-                if !wanted.1.is_empty() {
-                    self.op(
-                        wanted.0,
-                        Op::Tiles {
-                            keys: wanted.1,
-                            generation: wanted.2,
-                        },
-                    );
-                }
-                // Video layers go over the page tiles.
-                if !self.media.is_empty() {
-                    let commands = self.commands.clone();
-                    self.media.poll(Some(wanted.0), |t, op| {
-                        let _ = commands.send(Command::Tab(t, op));
-                    });
-                    if self.media.paint(ui, rect, wanted.0) {
-                        ctx.request_repaint_after(std::time::Duration::from_millis(16));
-                    } else {
-                        ctx.request_repaint_after(std::time::Duration::from_millis(250));
-                    }
-                }
-
-                if let Some(model) = &self.model.tabs[tab_index].devtools.highlight {
-                    devtools::paint_highlight(ui.painter(), rect, model);
-                }
+                let page_slot = ui.painter().add(egui::Shape::Noop);
+                let page_id = self.model.tabs[tab_index].id;
+                let view = (rect.width(), rect.height());
+                let local = |p: egui::Pos2| (p.x - rect.left(), p.y - rect.top());
+                let mut animating = self.model.tabs[tab_index].scene.tick();
+                let res = self.model.tabs[tab_index].scene.resolve(view);
+                // Scrollbars take their own pointer input before the page.
+                let bars =
+                    compositor::scrollbars(ui, rect, &mut self.model.tabs[tab_index].scene, &res);
+                let over_bar = |p: &egui::Pos2| bars.iter().any(|b| b.contains(*p));
 
                 if response.clicked() || response.drag_started() {
                     response.request_focus();
                     self.editing = false;
                 }
                 let focused = response.has_focus();
-                // Middle-click autoscroll takes its clicks before the page sees them.
                 let mut events = ui.input(|i| i.events.clone());
+                events.retain(|e| match e {
+                    egui::Event::PointerButton { pos, .. } => !over_bar(pos),
+                    _ => true,
+                });
                 let pointer = ui.input(|i| i.pointer.hover_pos());
+                // Middle-click autoscroll takes its clicks before the page sees them.
                 let ask = self.autoscroll.filter(&mut events, rect);
-                let page_id = self.model.tabs[tab_index].id;
                 if let Some((x, y)) = ask.ask_link_at {
-                    self.op(page_id, Op::LinkAt { x, y });
+                    let scene = &self.model.tabs[tab_index].scene;
+                    if scene.has_frame() {
+                        // The hit regions know the link: no round trip.
+                        let link = scene.hover(&res, (x, y)).and_then(|h| h.link);
+                        if let Some(url) = self.autoscroll.link_answer(link) {
+                            self.open_tab(&url, false);
+                        }
+                    } else {
+                        self.op(page_id, Op::LinkAt { x, y });
+                    }
                 }
+                let tab_index = self.model.active;
                 if self.autoscroll.active() {
                     let step = self.autoscroll.tick(pointer, rect);
-                    let t = &mut self.model.tabs[tab_index];
-                    let max_x = (t.content.0 - rect.width()).max(0.0);
-                    let max_y = (t.content.1 - rect.height()).max(0.0);
-                    t.scroll = (
-                        (t.scroll.0 + step.scroll.x).clamp(0.0, max_x),
-                        (t.scroll.1 + step.scroll.y).clamp(0.0, max_y),
-                    );
-                    if let Some((x, y)) = step.wheel_at {
-                        let (dx, dy) = (step.wheel.x, step.wheel.y);
-                        self.op(
-                            page_id,
-                            Op::Wheel {
-                                x,
-                                y,
-                                dx,
-                                dy,
-                                modifiers: 0,
-                            },
+                    if let Some(anchor) = self.autoscroll.anchor() {
+                        let t = &mut self.model.tabs[tab_index];
+                        t.scene.scroll_at(
+                            &res,
+                            local(anchor),
+                            (step.scroll.x, step.scroll.y),
+                            false,
                         );
                     }
                     let p = *theme::palette(ui);
@@ -2516,7 +2463,7 @@ impl Window {
                     ui.ctx().request_repaint();
                 }
                 if response.hovered() || focused || response.is_pointer_button_down_on() {
-                    let hover = pointer;
+                    let hover = pointer.filter(|p| !over_bar(p));
                     let t = &mut self.model.tabs[tab_index];
                     let mut ops = devtools::pick_input(
                         &mut t.devtools,
@@ -2524,22 +2471,102 @@ impl Window {
                         rect,
                         self.show_devtools,
                     );
-                    let (page, wheel) = input::page_ops(&events, hover, rect, focused);
-                    ops.extend(page);
-                    if wheel != (0.0, 0.0) {
-                        // Move the tiles now; the page's reply corrects this if an
-                        // inner box took the scroll instead of the document.
-                        let max_x = (t.content.0 - rect.width()).max(0.0);
-                        let max_y = (t.content.1 - rect.height()).max(0.0);
-                        t.scroll = (
-                            (t.scroll.0 + wheel.0).clamp(0.0, max_x),
-                            (t.scroll.1 + wheel.1).clamp(0.0, max_y),
-                        );
+                    let input = input::page_ops(&events, hover, rect, focused);
+                    ops.extend(input.ops);
+                    if let Some(at) = input.pressed_at {
+                        t.scene.pointer_down(&res, at);
+                    }
+                    for w in input.wheel {
+                        t.scene.scroll_at(&res, w.at, w.delta, w.smooth);
                     }
                     let id = t.id;
                     for op in ops {
                         self.op(id, op);
                     }
+                }
+                let t = &mut self.model.tabs[tab_index];
+                t.scene.flush();
+                animating |= t.scene.tick();
+                // Offsets may have moved this frame: draw with the new ones.
+                let res = t.scene.resolve(view);
+                let scale = ctx.pixels_per_point();
+                match &mut self.gpu {
+                    Ok(gpu) => {
+                        let media = &mut self.media;
+                        let texture = gpu.draw(
+                            self.wid,
+                            page_id,
+                            &mut t.scene,
+                            &res,
+                            view,
+                            scale,
+                            &mut |key| media.external_frame(page_id, key),
+                        );
+                        if let (Some(id), true) = (texture, t.scene.has_frame()) {
+                            // Whole physical pixels, so the texture maps 1:1.
+                            let min = (rect.min.to_vec2() * scale).round() / scale;
+                            let shown = Rect::from_min_size(min.to_pos2(), rect.size());
+                            let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                            ui.painter().set(
+                                page_slot,
+                                egui::Shape::image(id, shown.intersect(rect), uv, Color32::WHITE),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            tf("This page cannot be drawn: {0}", &[e]),
+                            egui::FontId::proportional(14.0),
+                            Color32::from_gray(90),
+                        );
+                    }
+                }
+                if !t.scene.has_frame() {
+                    if let Some(e) = &t.scene.error {
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            tf("This page cannot be drawn: {0}", &[e]),
+                            egui::FontId::proportional(14.0),
+                            Color32::from_gray(90),
+                        );
+                    }
+                }
+                let composited = t.scene.external_rects(&res);
+                self.media.set_composited(page_id, &composited);
+                // The cursor and the hovered link come from the hit regions.
+                let t = &self.model.tabs[tab_index];
+                let hovered = pointer
+                    .filter(|p| rect.contains(*p) && !over_bar(p) && response.hovered())
+                    .and_then(|p| t.scene.hover(&res, local(p)));
+                let in_page = pointer.is_some_and(|p| rect.contains(p));
+                if !self.autoscroll.active() && in_page && response.hovered() {
+                    ui.ctx()
+                        .set_cursor_icon(compositor::cursor_icon(hovered.as_ref()));
+                }
+                if let Some(link) = hovered.as_ref().and_then(|h| h.link.as_deref()) {
+                    compositor::status_bubble(ui, rect, link, pointer);
+                }
+                if animating {
+                    ctx.request_repaint();
+                }
+                // Video layers go over the page.
+                if !self.media.is_empty() {
+                    let commands = self.commands.clone();
+                    self.media.poll(Some(page_id), |t, op| {
+                        let _ = commands.send(Command::Tab(t, op));
+                    });
+                    if self.media.paint(ui, rect, page_id) {
+                        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+                    } else {
+                        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+                    }
+                }
+
+                if let Some(model) = &self.model.tabs[tab_index].devtools.highlight {
+                    devtools::paint_highlight(ui.painter(), rect, model);
                 }
             });
     }

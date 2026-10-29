@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use egui::ViewportId;
@@ -62,19 +62,17 @@ struct Shared {
     history: Vec<HistoryEntry>,
     downloads: Vec<DownloadItem>,
     closed: Vec<(String, String)>,
-    /// One GPU painter for all windows: a moved tab's GPU tiles stay valid.
-    #[cfg(feature = "gpu")]
-    gpu: Option<crate::gpu_paint::GpuPainter>,
+    /// One GPU compositor for all windows, with a page texture per window;
+    /// the reason when there is none.
+    gpu: Option<crate::compositor::Gpu>,
+    gpu_error: String,
 }
 
 impl Shared {
     fn lend(&mut self, w: &mut Window) {
         w.profile = self.profile.take();
         w.vault = self.vault.take();
-        #[cfg(feature = "gpu")]
-        {
-            w.gpu = self.gpu.take();
-        }
+        w.gpu = self.gpu.take().ok_or_else(|| self.gpu_error.clone());
         std::mem::swap(&mut w.model.bookmarks, &mut self.bookmarks);
         std::mem::swap(&mut w.model.history, &mut self.history);
         std::mem::swap(&mut w.model.downloads, &mut self.downloads);
@@ -84,10 +82,7 @@ impl Shared {
     fn reclaim(&mut self, w: &mut Window) {
         self.profile = w.profile.take();
         self.vault = w.vault.take();
-        #[cfg(feature = "gpu")]
-        {
-            self.gpu = w.gpu.take();
-        }
+        self.gpu = std::mem::replace(&mut w.gpu, Err(String::new())).ok();
         std::mem::swap(&mut w.model.bookmarks, &mut self.bookmarks);
         std::mem::swap(&mut w.model.history, &mut self.history);
         std::mem::swap(&mut w.model.downloads, &mut self.downloads);
@@ -109,6 +104,9 @@ pub struct Browser {
     open_rx: mpsc::Receiver<Option<String>>,
     login_rx: mpsc::Receiver<relay::LoginRequest>,
     places: relay::Places,
+    /// The viewport showing each tab, so an engine update for a tab wakes
+    /// only the window it is in.
+    placement: Arc<Mutex<HashMap<TabId, ViewportId>>>,
     last_places: HashMap<String, relay::TabPlace>,
     orphans: Vec<Update>,
     next_wid: WindowId,
@@ -189,6 +187,8 @@ impl Browser {
         };
         let (ws_url, endpoint_file) = (start.ws_url, start.endpoint_file);
         let repaint_ctx = ctx.clone();
+        let placement: Arc<Mutex<HashMap<TabId, ViewportId>>> = Default::default();
+        let wake_of = placement.clone();
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -202,7 +202,12 @@ impl Browser {
                     relay_window,
                     cmd_rx,
                     upd_tx,
-                    move || repaint_ctx.request_repaint_of(ViewportId::ROOT),
+                    move |tab: Option<TabId>| {
+                        let viewport = tab
+                            .and_then(|t| wake_of.lock().ok()?.get(&t).copied())
+                            .unwrap_or(ViewportId::ROOT);
+                        repaint_ctx.request_repaint_of(viewport);
+                    },
                 )
                 .await
                 {
@@ -248,6 +253,13 @@ impl Browser {
             },
             None => None,
         };
+        let (gpu, gpu_error) = match cc.wgpu_render_state.as_ref() {
+            Some(state) => match crate::compositor::Gpu::new(state) {
+                Ok(g) => (Some(g), String::new()),
+                Err(e) => (None, e),
+            },
+            None => (None, "no wgpu device".to_string()),
+        };
         let mut browser = Self {
             windows: Vec::new(),
             shared: Shared {
@@ -257,11 +269,8 @@ impl Browser {
                 history: loaded.history,
                 downloads: Vec::new(),
                 closed: Vec::new(),
-                #[cfg(feature = "gpu")]
-                gpu: cc
-                    .wgpu_render_state
-                    .as_ref()
-                    .and_then(crate::gpu_paint::GpuPainter::new),
+                gpu,
+                gpu_error,
             },
             updates: upd_rx,
             commands: cmd_tx,
@@ -269,6 +278,7 @@ impl Browser {
             login_rx,
             places,
             last_places: HashMap::new(),
+            placement,
             orphans: Vec::new(),
             next_wid: 1,
             focused: 1,
@@ -366,8 +376,8 @@ impl Browser {
             top_sites: None,
             new_tab_query: String::new(),
             // Lent from `Shared` while the window draws.
-            #[cfg(feature = "gpu")]
-            gpu: None,
+            gpu: Err(String::new()),
+            last_title: String::new(),
         }
     }
 
@@ -420,7 +430,16 @@ impl Browser {
     }
 
     /// Send engine updates, relay requests and sign-ins to their windows.
-    fn route(&mut self) {
+    /// Hand `u` to window `i`, waking it if it is not the one drawing now.
+    fn deliver(&self, ctx: &egui::Context, i: usize, u: Update) {
+        let w = &self.windows[i];
+        let _ = w.inbox.send(u);
+        if w.viewport != ctx.viewport_id() {
+            ctx.request_repaint_of(w.viewport);
+        }
+    }
+
+    fn route(&mut self, ctx: &egui::Context) {
         while let Ok(u) = self.updates.try_recv() {
             if let Event::Opened { opener, .. } = &u.event {
                 let to = opener
@@ -428,24 +447,22 @@ impl Browser {
                     .or_else(|| self.focused_index());
                 let tab = u.tab;
                 if let Some(i) = to {
-                    let _ = self.windows[i].inbox.send(u);
+                    self.deliver(ctx, i, u);
                     let (mine, rest): (Vec<_>, Vec<_>) =
                         self.orphans.drain(..).partition(|o| o.tab == tab);
                     self.orphans = rest;
                     for o in mine {
-                        let _ = self.windows[i].inbox.send(o);
+                        self.deliver(ctx, i, o);
                     }
                 }
                 continue;
             }
             match self.owner(u.tab) {
-                Some(i) => {
-                    let _ = self.windows[i].inbox.send(u);
-                }
+                Some(i) => self.deliver(ctx, i, u),
                 // Downloads and connection errors: the window in front.
                 None if u.tab == 0 || matches!(u.event, Event::Error(_)) => {
                     if let Some(i) = self.focused_index() {
-                        let _ = self.windows[i].inbox.send(u);
+                        self.deliver(ctx, i, u);
                     }
                 }
                 None => {
@@ -464,6 +481,7 @@ impl Browser {
                 .or_else(|| self.focused_index());
             if let Some(i) = to {
                 let _ = self.windows[i].login_tx.send(req);
+                ctx.request_repaint_of(self.windows[i].viewport);
             }
         }
         while let Ok(url) = self.open_rx.try_recv() {
@@ -496,6 +514,9 @@ impl Browser {
         if focused {
             self.focused = w.wid;
         }
+        if crate::compositor::tracing() {
+            eprintln!("redrob-browser: pass window={}", w.wid);
+        }
         self.shared.lend(w);
         w.frame(ui);
         self.shared.reclaim(w);
@@ -504,6 +525,9 @@ impl Browser {
     /// A window closed. The last one stays in the saved session, as in
     /// Chrome; any other leaves it, and its tabs close in the engine.
     fn close_window(&mut self, i: usize) {
+        if let Some(gpu) = &mut self.shared.gpu {
+            gpu.release(self.windows[i].wid);
+        }
         if self.windows.len() == 1 {
             self.save_session();
             self.final_saved = true;
@@ -580,6 +604,16 @@ impl Browser {
             *self.places.lock().unwrap() = now.clone();
             self.last_places = now;
         }
+        let placement: HashMap<TabId, ViewportId> = self
+            .windows
+            .iter()
+            .flat_map(|w| w.model.tabs.iter().map(|t| (t.id, w.viewport)))
+            .collect();
+        if let Ok(mut p) = self.placement.lock() {
+            if *p != placement {
+                *p = placement;
+            }
+        }
     }
 
     /// What the saved session holds, as one number.
@@ -648,14 +682,67 @@ impl Browser {
     }
 }
 
-impl eframe::App for Browser {
+/// The eframe app: the browser behind a lock, so each window's viewport can
+/// draw on its own schedule (deferred viewports). A window repaints only for
+/// its own input, its own tabs' engine updates and its own animations.
+pub struct App(Arc<Mutex<Browser>>);
+
+impl App {
+    pub fn start(cc: &eframe::CreationContext<'_>, start: Start) -> Self {
+        Self(Arc::new(Mutex::new(Browser::start(cc, start))))
+    }
+}
+
+fn lock(b: &Mutex<Browser>) -> MutexGuard<'_, Browser> {
+    b.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl eframe::App for App {
     fn on_exit(&mut self) {
-        self.save_session();
+        lock(&self.0).save_session();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let me = self.0.clone();
+        lock(&self.0).root_pass(ui, &me);
+    }
+}
+
+impl Browser {
+    /// What every pass does after drawing its window.
+    fn after(&mut self, ctx: &egui::Context) {
+        let windows = self.windows.len();
+        self.handle_requests(ctx);
+        if self.windows.is_empty() {
+            ctx.send_viewport_cmd_to(ViewportId::ROOT, egui::ViewportCommand::Close);
+            return;
+        }
+        // A window opened or closed: the root pass registers viewports.
+        if self.windows.len() != windows && ctx.viewport_id() != ViewportId::ROOT {
+            ctx.request_repaint_of(ViewportId::ROOT);
+        }
+        self.publish_places();
+        self.save_if_changed(ctx);
+    }
+
+    /// A pass of a window's own viewport.
+    fn child_pass(&mut self, viewport: ViewportId, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        self.route();
+        self.route(&ctx);
+        let Some(i) = self.windows.iter().position(|w| w.viewport == viewport) else {
+            return;
+        };
+        self.show(i, ui);
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.close_window(i);
+            ctx.request_repaint_of(ViewportId::ROOT);
+        }
+        self.after(&ctx);
+    }
+
+    fn root_pass(&mut self, ui: &mut egui::Ui, me: &Arc<Mutex<Browser>>) {
+        let ctx = ui.ctx().clone();
+        self.route(&ctx);
 
         if let Some(i) = self
             .windows
@@ -676,25 +763,29 @@ impl eframe::App for Browser {
             .map(|w| w.viewport)
             .filter(|v| *v != ViewportId::ROOT)
             .collect();
+        // Where the platform cannot open more OS windows, viewports are drawn
+        // inside the root pass, which holds the lock: draw them immediately.
+        let embedded = ctx.embed_viewports();
         for viewport in children {
             let Some(i) = self.windows.iter().position(|w| w.viewport == viewport) else {
                 continue;
             };
             let builder = self.windows[i].builder.clone();
-            let closing = ctx.show_viewport_immediate(viewport, builder, |ui, _| {
-                self.show(i, ui);
-                ui.ctx().input(|i| i.viewport().close_requested())
-            });
-            if closing {
-                self.close_window(i);
+            if embedded {
+                let closing = ctx.show_viewport_immediate(viewport, builder, |ui, _| {
+                    self.show(i, ui);
+                    ui.ctx().input(|i| i.viewport().close_requested())
+                });
+                if closing {
+                    self.close_window(i);
+                }
+            } else {
+                let me = me.clone();
+                ctx.show_viewport_deferred(viewport, builder, move |ui, _| {
+                    lock(&me).child_pass(viewport, ui);
+                });
             }
         }
-        self.handle_requests(&ctx);
-        if self.windows.is_empty() {
-            ctx.send_viewport_cmd_to(ViewportId::ROOT, egui::ViewportCommand::Close);
-            return;
-        }
-        self.publish_places();
-        self.save_if_changed(&ctx);
+        self.after(&ctx);
     }
 }
