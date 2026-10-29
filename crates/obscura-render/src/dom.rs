@@ -8164,8 +8164,7 @@ fn layout_dom_once(
                                         initial_cb_width,
                                     )
                                     .is_none()))
-                                || (style.table_layout_fixed
-                                    && matches!(style.width, crate::Dimension::Percent(_)))
+                                || matches!(style.width, crate::Dimension::Percent(_))
                         })
                     });
                     if needs_layout_snapshot {
@@ -8181,8 +8180,7 @@ fn layout_dom_once(
                         for &(tnode, dom, _) in group {
                             if styles.get(&dom).is_some_and(|style| {
                                 style.width == crate::Dimension::Auto
-                                    || (style.table_layout_fixed
-                                        && matches!(style.width, crate::Dimension::Percent(_)))
+                                    || matches!(style.width, crate::Dimension::Percent(_))
                             }) {
                                 if let Ok(layout) = taffy_tree.layout(tnode) {
                                     available_widths.insert(tnode, layout.size.width.max(0.0));
@@ -8199,7 +8197,8 @@ fn layout_dom_once(
                             if ncols == 0 {
                                 continue;
                             }
-                            let inline_outer_edges = table_inline_outer_edges(table_style);
+                            let inline_outer_edges =
+                                table_node_inline_outer_edges(&taffy_tree, tnode, table_style);
                             let (horizontal_spacing, _) = table_spacing(table_style);
                             let mut used_outer = match table_style.width {
                                 crate::Dimension::Px(width)
@@ -8256,12 +8255,22 @@ fn layout_dom_once(
                             }
                             continue;
                         }
-                        // A percentage-width table resolves against its container, so
-                        // leave taffy's percentage handling in place.
+                        // A percentage width resolves against the containing
+                        // block; the layout snapshot above holds Taffy's
+                        // resolution of it. The columns still follow the auto
+                        // table algorithm inside that width (equal grid shares
+                        // gave a 100% w3schools table 342/245/189 columns where
+                        // Chrome has 401/235/141).
                         let width_style = table_style.width;
-                        if matches!(width_style, crate::Dimension::Percent(_)) {
-                            continue;
-                        }
+                        let percent_outer = if matches!(width_style, crate::Dimension::Percent(_))
+                        {
+                            match available_widths.get(&tnode) {
+                                Some(width) => Some(*width),
+                                None => continue,
+                            }
+                        } else {
+                            None
+                        };
                         let min_c = {
                             let _ = taffy_tree.compute_layout_with_measure(
                                 tnode,
@@ -8303,7 +8312,8 @@ fn layout_dom_once(
                                 .map(|l| l.size.width)
                                 .unwrap_or(0.0)
                         };
-                        let inline_outer_edges = table_inline_outer_edges(table_style);
+                        let inline_outer_edges =
+                                table_node_inline_outer_edges(&taffy_tree, tnode, table_style);
                         let preferred_outer = match width_style {
                             crate::Dimension::Px(w)
                                 if table_style.box_sizing == crate::BoxSizing::ContentBox =>
@@ -8311,7 +8321,7 @@ fn layout_dom_once(
                                 w + inline_outer_edges
                             }
                             crate::Dimension::Px(w) => w,
-                            _ => max_c,
+                            _ => percent_outer.unwrap_or(max_c),
                         };
                         let available_outer = available_widths
                             .get(&tnode)
@@ -8324,7 +8334,9 @@ fn layout_dom_once(
                             // A definite table width is not clamped to its
                             // containing block. Like other fixed boxes it may
                             // overflow, while min-content can still make it wider.
-                            crate::Dimension::Px(_) => preferred_outer.max(min_c),
+                            crate::Dimension::Px(_) | crate::Dimension::Percent(_) => {
+                                preferred_outer.max(min_c)
+                            }
                             _ => preferred_outer.max(min_c).min(available_outer.max(min_c)),
                         };
                         let mut used_declaration =
@@ -8469,7 +8481,7 @@ fn layout_dom_once(
                                     col_max[j] = width.max(col_min[j]);
                                 }
                             }
-                            if !matches!(width_style, crate::Dimension::Px(_)) {
+                            if width_style == crate::Dimension::Auto {
                                 let percentage_floor =
                                     auto_table_percentage_intrinsic_floor(&col_min, &percentages);
                                 let percentage_outer =
@@ -12944,6 +12956,136 @@ fn distribute_fixed_table_columns(target: f32, columns: &[FixedTableColumn]) -> 
     widths
 }
 
+/// Used border widths of a `border-collapse: collapse` table (CSS 2.1
+/// §17.6.2). Every grid edge segment takes the widest border among the cells,
+/// rows and table that meet there. A cell's border box then reaches the
+/// middle of each of its edges (half the collapsed width on every side), and
+/// the table keeps half of its outermost collapsed borders inside its own
+/// border box, which is the geometry Chrome reports.
+struct CollapsedTableBorders {
+    cells: HashMap<NodeId, crate::Edges>,
+    table: crate::Edges,
+}
+
+fn resolve_collapsed_table_borders(
+    table_style: &crate::LayoutStyle,
+    rows: &[(NodeId, usize)],
+    placed: &[(NodeId, usize, usize, usize, usize)],
+    nrows: usize,
+    ncols: usize,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    native_html_table: bool,
+) -> CollapsedTableBorders {
+    // horizontal[r][c]: the edge above row r in column c (r == nrows is the
+    // bottom edge). vertical[r][c]: the edge left of column c in row r.
+    let mut horizontal = vec![vec![0.0f32; ncols]; nrows + 1];
+    let mut vertical = vec![vec![0.0f32; ncols + 1]; nrows];
+    let tb = table_style.border;
+    for column in 0..ncols {
+        horizontal[0][column] = tb.top;
+        horizontal[nrows][column] = tb.bottom;
+    }
+    for row in vertical.iter_mut() {
+        row[0] = tb.left;
+        row[ncols] = tb.right;
+    }
+    if native_html_table {
+        for (index, (tr, _)) in rows.iter().enumerate() {
+            let Some(row_style) = styles.get(tr) else {
+                continue;
+            };
+            let b = row_style.border;
+            for column in 0..ncols {
+                horizontal[index][column] = horizontal[index][column].max(b.top);
+                horizontal[index + 1][column] = horizontal[index + 1][column].max(b.bottom);
+            }
+            vertical[index][0] = vertical[index][0].max(b.left);
+            vertical[index][ncols] = vertical[index][ncols].max(b.right);
+        }
+    }
+    let clip = |r: usize, c: usize, rs: usize, cs: usize| {
+        let r_end = (r + rs).min(nrows);
+        let c_end = (c + cs).min(ncols);
+        (r_end, c_end)
+    };
+    for &(cell, r, c, rs, cs) in placed {
+        let Some(cell_style) = styles.get(&cell) else {
+            continue;
+        };
+        let b = cell_style.border;
+        let (r_end, c_end) = clip(r, c, rs, cs);
+        for column in c..c_end {
+            horizontal[r][column] = horizontal[r][column].max(b.top);
+            horizontal[r_end][column] = horizontal[r_end][column].max(b.bottom);
+        }
+        for row in vertical.iter_mut().take(r_end).skip(r) {
+            row[c] = row[c].max(b.left);
+            row[c_end] = row[c_end].max(b.right);
+        }
+    }
+    let mut cells = HashMap::new();
+    for &(cell, r, c, rs, cs) in placed {
+        let (r_end, c_end) = clip(r, c, rs, cs);
+        let max_h = |row: usize| {
+            horizontal[row][c..c_end]
+                .iter()
+                .copied()
+                .fold(0.0f32, f32::max)
+        };
+        let max_v = |column: usize| {
+            vertical[r..r_end]
+                .iter()
+                .map(|row| row[column])
+                .fold(0.0f32, f32::max)
+        };
+        cells.insert(
+            cell,
+            crate::Edges {
+                top: max_h(r) / 2.0,
+                right: max_v(c_end) / 2.0,
+                bottom: max_h(r_end) / 2.0,
+                left: max_v(c) / 2.0,
+            },
+        );
+    }
+    let fold = |values: &mut dyn Iterator<Item = f32>| values.fold(0.0f32, f32::max) / 2.0;
+    let table = crate::Edges {
+        top: fold(&mut horizontal[0].iter().copied()),
+        bottom: fold(&mut horizontal[nrows].iter().copied()),
+        left: fold(&mut vertical.iter().map(|row| row[0])),
+        right: fold(&mut vertical.iter().map(|row| row[ncols])),
+    };
+    CollapsedTableBorders { cells, table }
+}
+
+/// Horizontal non-track area of a table's grid node as it was built: its
+/// border plus padding (which carries the outer border-spacing bands). Falls
+/// back to the style when the node's edges are not plain lengths.
+fn table_node_inline_outer_edges(
+    taffy_tree: &TaffyTree<usize>,
+    node: taffy::NodeId,
+    style: &crate::LayoutStyle,
+) -> f32 {
+    let Ok(node_style) = taffy_tree.style(node) else {
+        return table_inline_outer_edges(style);
+    };
+    let edges = [
+        node_style.border.left,
+        node_style.border.right,
+        node_style.padding.left,
+        node_style.padding.right,
+    ];
+    let mut total = 0.0;
+    for edge in edges {
+        let raw = edge.into_raw();
+        if raw.tag() != taffy::CompactLength::LENGTH_TAG {
+            return table_inline_outer_edges(style);
+        }
+        total += raw.value();
+    }
+    total
+}
+
 /// Build a `<table>` as a CSS grid. Modeling the table as a grid is what makes
 /// columns negotiate a shared width across every row (min-content/max-content
 /// track sizing), which the old flex-row-per-`<tr>` stack could not do: each
@@ -13104,6 +13246,17 @@ fn build_table(
     if placed.is_empty() || ncols == 0 {
         return None;
     }
+    let collapsed = style.border_collapse.unwrap_or(false).then(|| {
+        resolve_collapsed_table_borders(
+            style,
+            &rows,
+            &placed,
+            nrows,
+            ncols,
+            styles,
+            native_html_table,
+        )
+    });
 
     // Build each cell and pin it to its grid area.
     let mut children: Vec<taffy::NodeId> = Vec::new();
@@ -13126,6 +13279,14 @@ fn build_table(
             // Grid does the sizing; a leftover flex_grow from the flex-table
             // heuristic would be ignored anyway, but clear it to be explicit.
             cstyle.flex_grow = 0.0;
+            if let Some(edges) = collapsed.as_ref().and_then(|c| c.cells.get(cid)) {
+                cstyle.border = taffy::Rect {
+                    left: length(edges.left),
+                    right: length(edges.right),
+                    top: length(edges.top),
+                    bottom: length(edges.bottom),
+                };
+            }
             // A cell's specified width sizes its COLUMN (fed into the track
             // by the pre-pass above); the cell box itself always fills its
             // grid area. Left in place, a `width:50%` cell would shrink to
@@ -13261,7 +13422,12 @@ fn build_table(
         // receive a particular cell's box edges.
         if let (Some(w), Some(s)) = (px, styles.get(cid)) {
             if s.box_sizing == crate::BoxSizing::ContentBox {
-                px = Some(w + s.padding.left + s.padding.right + s.border.left + s.border.right);
+                let border = collapsed
+                    .as_ref()
+                    .and_then(|c| c.cells.get(cid))
+                    .copied()
+                    .unwrap_or(s.border);
+                px = Some(w + s.padding.left + s.padding.right + border.left + border.right);
             }
         }
         if let Some(w) = px {
@@ -13291,7 +13457,12 @@ fn build_table(
             let edges = cell_style
                 .filter(|cell| cell.box_sizing == crate::BoxSizing::ContentBox)
                 .map(|cell| {
-                    cell.padding.left + cell.padding.right + cell.border.left + cell.border.right
+                    let border = collapsed
+                        .as_ref()
+                        .and_then(|c| c.cells.get(cid))
+                        .copied()
+                        .unwrap_or(cell.border);
+                    cell.padding.left + cell.padding.right + border.left + border.right
                 })
                 .unwrap_or(0.0);
             let outer_length = px.unwrap_or(0.0) + edges;
@@ -13379,6 +13550,15 @@ fn build_table(
     // to auto here so that pass can measure content before choosing the width.
     if !matches!(style.width, crate::Dimension::Percent(_)) {
         tstyle.size.width = Dimension::auto();
+    }
+    if let Some(collapsed) = &collapsed {
+        let edges = collapsed.table;
+        tstyle.border = taffy::Rect {
+            left: length(edges.left),
+            right: length(edges.right),
+            top: length(edges.top),
+            bottom: length(edges.bottom),
+        };
     }
     tstyle.grid_template_columns = (0..ncols).map(col).collect();
     tstyle.grid_template_rows = (0..nrows).map(row_track).collect();
