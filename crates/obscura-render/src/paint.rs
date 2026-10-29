@@ -5952,6 +5952,13 @@ fn paint_laid_dom_scrolled(
                 }
             }
         }
+        // An inset shadow paints above the backgrounds, inside the padding
+        // box, below the border and content.
+        if let Some(shadow) = style.box_shadow.filter(|shadow| shadow.inset) {
+            if box_on_surface && !paints_inline_fragments && raster_scale == 1.0 {
+                paint_inset_box_shadow(&mut pixmap, &shadow, &rect, style, element_clip_mask);
+            }
+        }
         let has_positioned_pseudo = [
             style.before_pseudo.as_deref(),
             style.after_pseudo.as_deref(),
@@ -7750,6 +7757,35 @@ fn stroke_rounded_border_path(
     mask: Option<&tiny_skia::Mask>,
     raster_scale: f32,
 ) {
+    if radii.is_zero()
+        && matches!(
+            line_style,
+            crate::BorderStyle::Dashed | crate::BorderStyle::Dotted
+        )
+    {
+        // Square corners: each side is its own dash run over the full
+        // border-box edge, as Blink paints it.
+        let outer = crate::Rect {
+            x: center_rect.x - width / 2.0,
+            y: center_rect.y - width / 2.0,
+            width: center_rect.width + width,
+            height: center_rect.height + width,
+        };
+        for side in [Side::Top, Side::Right, Side::Bottom, Side::Left] {
+            paint_straight_border_side(
+                pixmap,
+                &outer,
+                side,
+                width,
+                width / 2.0,
+                color,
+                Some(line_style),
+                mask,
+                raster_scale,
+            );
+        }
+        return;
+    }
     let Some(path) = rounded_rect_path_radii(
         center_rect.x,
         center_rect.y,
@@ -7766,15 +7802,19 @@ fn stroke_rounded_border_path(
         width,
         ..Default::default()
     };
-    match line_style {
-        crate::BorderStyle::Dashed => {
-            stroke.dash = tiny_skia::StrokeDash::new(vec![width * 3.0, width * 3.0], 0.0);
-        }
-        crate::BorderStyle::Dotted => {
-            stroke.dash = tiny_skia::StrokeDash::new(vec![0.0, width * 2.0], 0.0);
+    if matches!(
+        line_style,
+        crate::BorderStyle::Dashed | crate::BorderStyle::Dotted
+    ) {
+        let r = (radii.top_left.0 + radii.top_right.0 + radii.bottom_right.0 + radii.bottom_left.0)
+            / 4.0;
+        let perimeter =
+            2.0 * (center_rect.width + center_rect.height) - (8.0 - 2.0 * std::f32::consts::PI) * r;
+        let (dash, round) = border_dash(line_style, width, perimeter, true);
+        stroke.dash = dash;
+        if round {
             stroke.line_cap = tiny_skia::LineCap::Round;
         }
-        _ => {}
     }
     pixmap
         .canvas()
@@ -7960,15 +8000,63 @@ fn paint_straight_border_side(
         width: stroke_width,
         ..Default::default()
     };
-    if pattern == Some(crate::BorderStyle::Dashed) {
-        stroke.dash = tiny_skia::StrokeDash::new(vec![stroke_width * 3.0, stroke_width * 3.0], 0.0);
-    } else if pattern == Some(crate::BorderStyle::Dotted) {
-        stroke.dash = tiny_skia::StrokeDash::new(vec![0.0, stroke_width * 2.0], 0.0);
-        stroke.line_cap = tiny_skia::LineCap::Round;
+    if let Some(pattern) = pattern {
+        let length = match side {
+            Side::Top | Side::Bottom => rect.width,
+            Side::Left | Side::Right => rect.height,
+        };
+        let (dash, round) = border_dash(pattern, stroke_width, length, false);
+        stroke.dash = dash;
+        if round {
+            stroke.line_cap = tiny_skia::LineCap::Round;
+        }
     }
     pixmap
         .canvas()
         .stroke_path(&path, &paint, &stroke, raster_transform(raster_scale), mask);
+}
+
+/// Blink's dash pattern for a dashed or dotted border side of `length`
+/// (StrokeData::SetupPaintDashPathEffect): dashes 3w long with 2w gaps
+/// below 3px, 2w with 1w gaps from 3px; the gap is stretched so whole
+/// dashes start and end the side. A side too
+/// short for two dashes is solid (`None`). Dots wider than 3px are round.
+/// Returns the dash and whether the
+/// caps are round.
+fn border_dash(
+    pattern: crate::BorderStyle,
+    width: f32,
+    length: f32,
+    closed: bool,
+) -> (Option<tiny_skia::StrokeDash>, bool) {
+    let (mut dash, mut gap) = (width, width);
+    if pattern == crate::BorderStyle::Dashed {
+        dash *= if width >= 3.0 { 2.0 } else { 3.0 };
+        gap *= if width >= 3.0 { 1.0 } else { 2.0 };
+    }
+    if length <= 2.0 * dash + gap {
+        return (None, false);
+    }
+    // SelectBestDashGap: the dash count whose gap is nearest the ideal.
+    let min_dashes = ((length + gap) / (dash + gap)).floor();
+    let max_dashes = min_dashes + 1.0;
+    let gaps = |dashes: f32| if closed { dashes } else { dashes - 1.0 };
+    let min_gap = (length - min_dashes * dash) / gaps(min_dashes).max(1.0);
+    let max_gap = (length - max_dashes * dash) / gaps(max_dashes).max(1.0);
+    let gap = if max_gap <= 0.0 || (min_gap - gap).abs() < (max_gap - gap).abs() {
+        min_gap
+    } else {
+        max_gap
+    };
+    let round = pattern == crate::BorderStyle::Dotted && width > 3.0;
+    let intervals = if round {
+        // A zero-length dash with round caps is a dot of diameter `width`.
+        vec![0.0, dash + gap]
+    } else {
+        vec![dash, gap]
+    };
+    let phase = if round { dash + gap - dash / 2.0 } else { 0.0 };
+    (tiny_skia::StrokeDash::new(intervals, phase), round)
 }
 
 fn shade_border_color(color: [u8; 4], amount: f32) -> [u8; 4] {
@@ -8138,6 +8226,112 @@ fn paint_box_shadow(
         &tiny_skia::PixmapPaint::default(),
         Transform::identity(),
         ancestor_clip,
+    );
+}
+
+/// An inset box shadow: the padding box minus a blurred copy of itself moved
+/// by the offset and shrunk by the spread (CSS Backgrounds 3, 7.1).
+fn paint_inset_box_shadow(
+    pixmap: &mut Pixmap,
+    shadow: &crate::BoxShadow,
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    clip: Option<&tiny_skia::Mask>,
+) {
+    if shadow.color[3] == 0 {
+        return;
+    }
+    let geometry = layer_geometry(
+        rect,
+        style,
+        crate::BackgroundOrigin::PaddingBox,
+        crate::BackgroundClip::PaddingBox,
+    );
+    let padding = geometry.clip_rect;
+    let x0 = padding.x.floor().max(0.0) as i32;
+    let y0 = padding.y.floor().max(0.0) as i32;
+    let x1 = ((padding.x + padding.width).ceil() as i32).min(pixmap.width() as i32);
+    let y1 = ((padding.y + padding.height).ceil() as i32).min(pixmap.height() as i32);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let (width, height) = ((x1 - x0) as u32, (y1 - y0) as u32);
+    let blur = shadow.blur.max(0.0);
+    let sigma = blur / 2.0;
+    // The hole is painted on a margin wide enough for the blur to read
+    // "outside the hole" (shadow) past the padding box edges.
+    let margin = (sigma * 3.0).ceil() as i32 + 1;
+    let (hw, hh) = (width + 2 * margin as u32, height + 2 * margin as u32);
+    let Some(mut hole) = Pixmap::new(hw, hh) else {
+        return;
+    };
+    let radii = geometry.clip_radii;
+    let hx = padding.x + shadow.offset_x + shadow.spread - (x0 - margin) as f32;
+    let hy = padding.y + shadow.offset_y + shadow.spread - (y0 - margin) as f32;
+    let hwid = padding.width - 2.0 * shadow.spread;
+    let hhei = padding.height - 2.0 * shadow.spread;
+    if hwid > 0.0 && hhei > 0.0 {
+        let r = radii.top_left;
+        fill_shadow_rect(
+            &mut hole,
+            hx,
+            hy,
+            hwid,
+            hhei,
+            (r.0 - shadow.spread).max(0.0),
+            (r.1 - shadow.spread).max(0.0),
+            [255, 255, 255, 255],
+            None,
+        );
+    }
+    let mut coverage: Vec<f32> = hole
+        .pixels()
+        .iter()
+        .map(|p| p.alpha() as f32 / 255.0)
+        .collect();
+    gaussian_blur(&mut coverage, hw as usize, hh as usize, sigma);
+    let Some(mut out) = Pixmap::new(width, height) else {
+        return;
+    };
+    let a = shadow.color[3] as f32 / 255.0;
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let c = coverage[(y + margin as usize) * hw as usize + x + margin as usize];
+            let alpha = ((1.0 - c) * a * 255.0).round().clamp(0.0, 255.0) as u8;
+            if alpha > 0 {
+                out.pixels_mut()[y * width as usize + x] = tiny_skia::ColorU8::from_rgba(
+                    shadow.color[0],
+                    shadow.color[1],
+                    shadow.color[2],
+                    alpha,
+                )
+                .premultiply();
+            }
+        }
+    }
+    // Only inside the (rounded) padding box.
+    let local = BackgroundGeometry {
+        origin_rect: padding,
+        clip_rect: crate::Rect {
+            x: padding.x - x0 as f32,
+            y: padding.y - y0 as f32,
+            ..padding
+        },
+        clip_radii: radii,
+    };
+    if let Some(path) = background_clip_path(local) {
+        if let Some(mut mask) = crate::canvas::new_mask(width, height) {
+            mask.clip_fill_path(&path, FillRule::Winding, true, Transform::identity());
+            out.apply_mask(&mask);
+        }
+    }
+    pixmap.canvas().draw_image(
+        x0,
+        y0,
+        out.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        Transform::identity(),
+        clip,
     );
 }
 
@@ -14442,6 +14636,28 @@ mod tests {
         assert!(blue.blue() > 240 && blue.red() < 20 && blue.green() < 20);
         assert!(red.red() > 240 && red.green() < 20 && red.blue() < 20);
         assert!(yellow.red() > 240 && yellow.green() > 240 && yellow.blue() < 20);
+    }
+
+    #[test]
+    fn inset_shadow_and_dashed_borders_follow_chrome() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:40px;
+                    box-shadow:inset 0 0 8px rgba(0,0,0,.5)"></div>
+                <div style="position:absolute;left:0;top:60px;width:200px;height:40px;
+                    border:10px dashed black"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (240.0, 130.0), None).expect("inset and dashes");
+        let gray = |x, y| pixmap.pixel(x, y).expect("pixel").red();
+        assert!(gray(50, 0) < 210, "the inset shadow darkens the inner edge");
+        assert!(gray(50, 4) > gray(50, 0), "and fades inward");
+        assert_eq!(gray(50, 20), 255, "the middle stays clear");
+        // Blink: 10px dashes are 20px long; gaps stretch so the side starts
+        // and ends with a dash (220px side: 8 dashes, gaps 160/7 px).
+        assert_eq!(gray(10, 65), 0, "the side starts with a dash");
+        assert_eq!(gray(24, 65), 255, "the first gap starts after 20px");
+        assert_eq!(gray(215, 65), 0, "and the side ends with a dash");
     }
 
     #[test]
