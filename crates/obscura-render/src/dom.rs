@@ -8546,10 +8546,10 @@ fn layout_dom_once(
                                     },
                                     &mut measure,
                                 );
-                                let cmin = taffy_tree
-                                    .layout(*cell)
-                                    .map(|l| l.size.width)
-                                    .unwrap_or(0.0);
+                                // Unrounded: per-column rounding accumulates
+                                // across wide tables (14 columns came out 5px
+                                // wider than Chrome).
+                                let cmin = taffy_tree.unrounded_layout(*cell).size.width;
                                 let _ = taffy_tree.compute_layout_with_measure(
                                     *cell,
                                     taffy::Size {
@@ -8558,10 +8558,10 @@ fn layout_dom_once(
                                     },
                                     &mut measure,
                                 );
-                                let cmax = taffy_tree
-                                    .layout(*cell)
-                                    .map(|l| l.size.width)
-                                    .unwrap_or(0.0);
+                                // Unrounded: per-column rounding accumulates
+                                // across wide tables (14 columns came out 5px
+                                // wider than Chrome).
+                                let cmax = taffy_tree.unrounded_layout(*cell).size.width;
                                 measured.push((*col, *span, cmin, cmax.max(cmin)));
                             }
                             let mut col_min = vec![0.0f32; ncols];
@@ -13036,6 +13036,44 @@ fn collect_table_rows(
     }
 }
 
+/// Build an anonymous table cell around a run of text and non-table boxes:
+/// a block container when they are all block-level, otherwise the engine's
+/// inline stand-in (a wrapping flex row).
+#[allow(clippy::too_many_arguments)]
+fn build_anonymous_table_cell(
+    tree: &DomTree,
+    members: &[NodeId],
+    taffy_tree: &mut TaffyTree<usize>,
+    id_map: &mut HashMap<taffy::NodeId, NodeId>,
+    words: &mut HashMap<taffy::NodeId, (NodeId, String)>,
+    engine: &mut crate::inline::TextEngine,
+    ifc_items: &mut IfcRegistry,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+) -> Option<taffy::NodeId> {
+    let all_blocks = members.iter().all(|member| {
+        styles
+            .get(member)
+            .is_some_and(|style| is_in_flow_block_level(style) && style.float.is_none())
+    });
+    let mut children = Vec::new();
+    for member in members {
+        children.extend(build_any(
+            tree, *member, taffy_tree, id_map, words, engine, ifc_items, styles,
+        ));
+    }
+    let mut cell = taffy::Style::default();
+    if all_blocks {
+        cell.display = taffy::style::Display::Block;
+    } else {
+        cell.display = taffy::style::Display::Flex;
+        cell.flex_direction = taffy::FlexDirection::Row;
+        cell.flex_wrap = taffy::FlexWrap::Wrap;
+        cell.align_items = Some(taffy::AlignItems::FLEX_START);
+        cell.align_content = Some(taffy::AlignContent::FLEX_START);
+    }
+    taffy_tree.new_with_children(cell, &children).ok()
+}
+
 /// Whether every box a cell generates is block-level (no inline content to
 /// emulate with the flex row stand-in).
 fn cell_has_only_block_children(
@@ -13085,13 +13123,33 @@ struct CssTable {
     captions: Vec<NodeId>,
     /// Row groups with the range of `rows` they hold.
     groups: Vec<(NodeId, std::ops::Range<usize>)>,
+    /// Anonymous cells (CSS 2.1 §17.2.1): a run of text and non-table boxes
+    /// keyed by its first node, which stands in for the cell in `cells`.
+    anonymous_cells: HashMap<NodeId, Vec<NodeId>>,
+}
+
+/// Append `child` to a row's cells, merging consecutive non-table boxes and
+/// text into one anonymous cell.
+fn push_table_cell(
+    cells: &mut Vec<NodeId>,
+    anonymous: &mut HashMap<NodeId, Vec<NodeId>>,
+    child: NodeId,
+    other: bool,
+) {
+    if other {
+        if let Some(run) = cells.last().and_then(|last| anonymous.get_mut(last)) {
+            run.push(child);
+            return;
+        }
+        anonymous.insert(child, vec![child]);
+    }
+    cells.push(child);
 }
 
 /// Classify the boxes a CSS table generates (CSS 2.1 §17.2.1, simple cases):
 /// row groups (header groups first, footer groups last), rows, and runs of
 /// cells directly inside the table or a row group, which get an anonymous
-/// row. Returns `None` when the table has direct text or a non-table box,
-/// whose anonymous cell this builder does not create.
+/// row. Text and other boxes outside cells get anonymous cells.
 fn collect_css_table(
     tree: &DomTree,
     id: NodeId,
@@ -13142,22 +13200,27 @@ fn collect_css_table(
         real: Vec::new(),
         captions: Vec::new(),
         groups: Vec::new(),
+        anonymous_cells: HashMap::new(),
     };
-    // A row's cells; any other box inside a row needs an anonymous cell.
-    let row_cells = |row: NodeId| -> Option<Vec<NodeId>> {
+    // A row's cells; any other box inside a row goes into an anonymous cell.
+    let row_cells = |table: &mut CssTable, row: NodeId| -> Option<Vec<NodeId>> {
         let mut cells = Vec::new();
         for child in flatten(row) {
             match kind(child) {
                 Kind::Skip => {}
                 Kind::Cell => cells.push(child),
-                _ => return None,
+                Kind::Other => {
+                    push_table_cell(&mut cells, &mut table.anonymous_cells, child, true)
+                }
+                Kind::Part(_) => return None,
             }
         }
         Some(cells)
     };
     if style.table_part == Some(TablePart::Row) {
         table.rows.push((id, 1));
-        table.cells.push(row_cells(id)?);
+        let cells = row_cells(&mut table, id)?;
+        table.cells.push(cells);
         table.real.push(false);
         return Some(table);
     }
@@ -13179,10 +13242,14 @@ fn collect_css_table(
             match kind(child) {
                 Kind::Skip => {}
                 Kind::Cell => anonymous.push(child),
+                Kind::Other => {
+                    push_table_cell(&mut anonymous, &mut table.anonymous_cells, child, true)
+                }
                 Kind::Part(TablePart::Row) => {
                     flush(table, &mut anonymous);
                     table.rows.push((child, 0));
-                    table.cells.push(row_cells(child)?);
+                    let cells = row_cells(table, child)?;
+                    table.cells.push(cells);
                     table.real.push(true);
                 }
                 _ => return None,
@@ -13218,14 +13285,13 @@ fn collect_css_table(
                         table.captions.push(child);
                     }
                 }
-                Kind::Cell | Kind::Part(TablePart::Row) => loose.push(child),
+                Kind::Cell | Kind::Part(TablePart::Row) | Kind::Other => loose.push(child),
                 Kind::Part(
                     TablePart::RowGroup | TablePart::HeaderGroup | TablePart::FooterGroup,
                 ) => {
                     push_group(&mut table, None, std::mem::take(&mut loose))?;
                     push_group(&mut table, Some(child), flatten(child))?;
                 }
-                Kind::Other => return None,
             }
         }
         push_group(&mut table, None, loose)?;
@@ -13789,6 +13855,7 @@ fn build_table_box(
     let mut row_real: Vec<bool> = Vec::new();
     let mut css_captions: Vec<NodeId> = Vec::new();
     let mut css_groups: Vec<(NodeId, std::ops::Range<usize>)> = Vec::new();
+    let mut anonymous_cells: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
     if native_html_table {
         collect_table_rows(tree, id, styles, &mut rows);
         if rows.is_empty() {
@@ -13818,6 +13885,7 @@ fn build_table_box(
         row_real = table.real;
         css_captions = table.captions;
         css_groups = table.groups;
+        anonymous_cells = table.anonymous_cells;
     }
     // Bounds so a crafted table cannot exhaust memory or time: `colspan`/
     // `rowspan` and the column count are page-controlled, and the occupancy
@@ -13976,9 +14044,15 @@ fn build_table_box(
     // Build each cell and pin it to its grid area.
     let mut children: Vec<taffy::NodeId> = Vec::new();
     for (cid, r, c, rs, cs) in &placed {
-        let Some(cell_node) = build(
-            tree, *cid, taffy_tree, id_map, words, engine, ifc_items, styles,
-        ) else {
+        let built = match anonymous_cells.get(cid) {
+            Some(members) => build_anonymous_table_cell(
+                tree, members, taffy_tree, id_map, words, engine, ifc_items, styles,
+            ),
+            None => build(
+                tree, *cid, taffy_tree, id_map, words, engine, ifc_items, styles,
+            ),
+        };
+        let Some(cell_node) = built else {
             continue;
         };
         if let Ok(cur) = taffy_tree.style(cell_node) {
@@ -14349,6 +14423,12 @@ fn build_table_box(
     // layout padding while leaving the computed CSS padding unchanged.
     let (horizontal_spacing, vertical_spacing) = table_spacing(style);
     let mut grid_style = style.clone();
+    // Padding does not apply to a table in the collapsing border model.
+    if collapsed.is_some() {
+        grid_style.padding = crate::Edges::default();
+        grid_style.padding_relative = [None; 4];
+        grid_style.padding_expressions = Default::default();
+    }
     grid_style.padding.left += horizontal_spacing;
     grid_style.padding.right += horizontal_spacing;
     grid_style.padding.top += vertical_spacing;
@@ -14429,13 +14509,13 @@ fn build_table_box(
             // border-spacing band.
             let (top, bottom_margin) = if *bottom {
                 (
-                    edge(table_border.bottom) + style.padding.bottom,
+                    edge(table_border.bottom) + edge(table_padding.bottom) - vertical_spacing,
                     -(edge(table_border.bottom) + edge(table_padding.bottom)),
                 )
             } else {
                 (
                     -(edge(table_border.top) + edge(table_padding.top)),
-                    edge(table_border.top) + style.padding.top,
+                    edge(table_border.top) + edge(table_padding.top) - vertical_spacing,
                 )
             };
             caption_style.margin = taffy::Rect {
