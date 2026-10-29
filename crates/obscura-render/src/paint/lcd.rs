@@ -3,9 +3,11 @@
 //! blend.
 //!
 //! - A glyph is rasterized at three times its horizontal resolution; each
-//!   pixel's red, green and blue channels take the left, middle and right
-//!   third. FreeType's default LCD filter (FT_LCD_FILTER_DEFAULT, taps
-//!   8 77 86 77 8 / 256) runs across the subpixels.
+//!   pixel's red, green and blue channels cover one whole pixel shifted by
+//!   a third to the left, none, and a third to the right (FreeType's
+//!   "Harmony" LCD rendering). FreeType's default LCD filter
+//!   (FT_LCD_FILTER_DEFAULT, taps 8 77 86 77 8 / 256) runs across the
+//!   channels.
 //! - Skia corrects the linear coverage per channel with a table picked by
 //!   that channel of the text color (SkMaskGamma, 3 luminance bits),
 //!   built from the contrast and gamma Chromium sets for Linux
@@ -43,12 +45,18 @@ impl LcdGlyph {
     /// `left3` is the mask's left edge in subpixels from the glyph origin
     /// (which sits on a pixel boundary), `top` its top row in pixels.
     pub(crate) fn from_subpixels(mask: &[u8], w3: usize, h: usize, left3: i32, top: i32) -> Self {
-        let s0 = left3 - 2;
-        let s1 = left3 + w3 as i32 + 2;
+        // Each channel covers a whole pixel shifted by a third (FreeType's
+        // "Harmony" LCD rendering, which Chromium's FreeType build uses):
+        // a 3-subpixel box over the 3x mask, then the LCD filter.
+        let s0 = left3 - 3;
+        let s1 = left3 + w3 as i32 + 3;
         let p0 = s0.div_euclid(3);
         let p1 = (s1 + 2).div_euclid(3);
         let width = (p1 - p0).max(0);
         let mut data = vec![[0u8; 3]; width as usize * h];
+        let span = (p1 - p0) as usize * 3;
+        let base = p0 * 3;
+        let mut boxed = vec![0u32; span];
         for row in 0..h {
             let line = &mask[row * w3..(row + 1) * w3];
             let at = |s: i32| -> u32 {
@@ -59,13 +67,25 @@ impl LcdGlyph {
                     line[i as usize] as u32
                 }
             };
+            for (i, value) in boxed.iter_mut().enumerate() {
+                let s = base + i as i32;
+                *value = (at(s - 1) + at(s) + at(s + 1) + 1) / 3;
+            }
+            let boxed_at = |s: i32| -> u32 {
+                let i = s - base;
+                if i < 0 || i as usize >= span {
+                    0
+                } else {
+                    boxed[i as usize]
+                }
+            };
             for p in p0..p1 {
                 let mut out = [0u8; 3];
                 for (c, value) in out.iter_mut().enumerate() {
                     let s = p * 3 + c as i32;
                     let mut v = 0;
                     for (k, w) in FIR.iter().enumerate() {
-                        v += w * at(s - 2 + k as i32);
+                        v += w * boxed_at(s - 2 + k as i32);
                     }
                     *value = (v >> 8).min(255) as u8;
                 }
