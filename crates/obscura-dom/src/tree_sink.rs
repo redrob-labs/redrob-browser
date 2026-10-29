@@ -183,9 +183,15 @@ impl TreeSink for DomTree {
             NodeOrText::AppendNode(node_id) => {
                 let parent = self.parser_depth_capped_parent(*parent, node_id);
                 self.append_child(parent, node_id);
+                self.record_parser_insertion(parent, node_id);
             }
             NodeOrText::AppendText(text) => {
+                let before = self.with_node(*parent, |n| n.last_child).flatten();
                 self.append_text(*parent, &text);
+                let after = self.with_node(*parent, |n| n.last_child).flatten();
+                if let Some(created) = after.filter(|after| Some(*after) != before) {
+                    self.record_parser_insertion(*parent, created);
+                }
             }
         }
     }
@@ -255,6 +261,9 @@ impl TreeSink for DomTree {
         match child {
             NodeOrText::AppendNode(node_id) => {
                 self.insert_before(*sibling, node_id);
+                if let Some(parent) = self.with_node(node_id, |n| n.parent).flatten() {
+                    self.record_parser_insertion(parent, node_id);
+                }
             }
             NodeOrText::AppendText(text) => {
                 let prev_text_id = {
@@ -278,6 +287,9 @@ impl TreeSink for DomTree {
                     contents: text.to_string(),
                 });
                 self.insert_before(*sibling, text_id);
+                if let Some(parent) = self.with_node(text_id, |n| n.parent).flatten() {
+                    self.record_parser_insertion(parent, text_id);
+                }
             }
         }
     }
