@@ -8632,9 +8632,15 @@ fn ensure_prepared_render_with_base_url(
     let incompatible = state.prepared_render.as_ref().is_some_and(|prepared| {
         prepared.viewport() != viewport || prepared.base_url() != base_url.as_deref()
     });
+    // Scrolling a deferred `loading=lazy` image within the lazy-load
+    // distance loads it, which changes layout.
+    let lazy_image_due = state
+        .render_resources
+        .note_viewport_bottom(state.scroll_offset.1 + viewport.1);
     let needs_rebuild = state.prepared_render.as_ref().map_or(true, |prepared| {
         incompatible || prepared.animation_sample() != animation_sample
-    }) || !state.pending_style_mutations.is_empty();
+    }) || !state.pending_style_mutations.is_empty()
+        || lazy_image_due;
     if needs_rebuild {
         if let Some(dom) = state.dom.as_ref() {
             state.animation_timeline.materialize_start_candidates(dom);

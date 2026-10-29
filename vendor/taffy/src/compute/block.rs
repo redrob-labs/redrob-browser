@@ -497,7 +497,12 @@ fn compute_inner(
     // Root BFCs contain floats
     #[cfg(feature = "float_layout")]
     if block_ctx.is_bfc_root() || is_scroll_container {
-        intrinsic_outer_height = intrinsic_outer_height.max(block_ctx.floated_content_height_contribution());
+        // The float contribution is a border-box y; the container's bottom
+        // padding and border still follow the lowest float (Chrome: a
+        // float-containing box with padding-bottom:32px ends 32px below
+        // its last float).
+        intrinsic_outer_height = intrinsic_outer_height
+            .max(block_ctx.floated_content_height_contribution() + padding.bottom + border.bottom);
     }
 
     let container_outer_height = known_dimensions
@@ -855,6 +860,10 @@ fn perform_final_layout_on_in_flow_children(
             if let Some(float_direction) = item.float.float_direction() {
                 has_active_floats = true;
 
+                // A float establishes a block formatting context: its
+                // children's margins never collapse through it (Chrome: a
+                // float whose first child has margin-top:20px is 20px
+                // taller than the child's border box).
                 let item_layout = tree.perform_child_layout(
                     item.node_id,
                     Size::NONE,
@@ -862,7 +871,7 @@ fn perform_final_layout_on_in_flow_children(
                     // available_space,
                     Size::MAX_CONTENT,
                     SizingMode::InherentSize,
-                    Line::TRUE,
+                    Line::FALSE,
                 );
                 let margin_box = item_layout.size + item_non_auto_margin.sum_axes();
 

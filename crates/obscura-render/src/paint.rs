@@ -202,7 +202,20 @@ pub struct RenderResourceCache {
     /// [`MAX_CHANGED_RESOURCES`] it only records that too much changed.
     changed: Vec<String>,
     changed_overflow: bool,
+    /// `loading=lazy` images that have come within the lazy-load distance
+    /// of the viewport and so are loaded for good (Chromium never unloads).
+    lazy_loaded: HashSet<obscura_dom::tree::NodeId>,
+    /// The lowest document y the viewport has reached (root scroll offset
+    /// plus viewport height), for lazy loading.
+    lazy_viewport_bottom: f32,
+    /// The top of the nearest still-deferred lazy image, if any.
+    lazy_deferred_top: Option<f32>,
 }
+
+/// Chromium's lazy-load distance from the viewport when the effective
+/// connection type is unknown (headless): 3000px (measured: with an 800px
+/// viewport, a lazy image at y=3700 loads, one at y=3800 does not).
+const LAZY_LOAD_DISTANCE: f32 = 3000.0;
 
 impl Default for RenderResourceCache {
     fn default() -> Self {
@@ -248,7 +261,22 @@ impl RenderResourceCache {
             loader: Box::new(loader),
             changed: Vec::new(),
             changed_overflow: false,
+            lazy_loaded: HashSet::new(),
+            lazy_viewport_bottom: 0.0,
+            lazy_deferred_top: None,
         }
+    }
+
+    /// Record that the viewport's bottom edge has reached document y
+    /// `bottom` (root scroll offset plus viewport height). Returns true when
+    /// a deferred lazy image is now within the lazy-load distance, so the
+    /// prepared layout must be rebuilt to load it.
+    pub fn note_viewport_bottom(&mut self, bottom: f32) -> bool {
+        if bottom.is_finite() && bottom > self.lazy_viewport_bottom {
+            self.lazy_viewport_bottom = bottom;
+        }
+        self.lazy_deferred_top
+            .is_some_and(|top| top < self.lazy_viewport_bottom + LAZY_LOAD_DISTANCE)
     }
 
     /// Resource keys that appeared, failed, were cancelled or were evicted
@@ -1837,6 +1865,9 @@ impl PreparedRender {
                 let movement = scroll.movement_for(parent);
                 rect.x += movement.0;
                 rect.y += movement.1;
+                // A caret position's client rect has no width (Chrome:
+                // 0 x 23 at the start of 20px/24px monospace text).
+                rect.width = 0.0;
                 return Some(rect);
             }
         }
@@ -3889,6 +3920,25 @@ fn prepare_dom_internal_unverified(
         .collect::<HashMap<_, _>>();
     let seeded_content_images =
         resources.seed_content_image_intrinsics(tree, &mut intrinsic, &mut selected_images);
+    // `loading=lazy` images load only once they come within
+    // LAZY_LOAD_DISTANCE of the viewport (Chromium: an IntersectionObserver
+    // with that root margin on the not-yet-loaded, box-less image). Until
+    // then they have no natural size and paint nothing.
+    let lazy_images: Vec<obscura_dom::tree::NodeId> = intrinsic
+        .keys()
+        .copied()
+        .filter(|nid| !resources.lazy_loaded.contains(nid) && image_is_lazy(tree, *nid))
+        .collect();
+    let mut deferred_images: HashMap<
+        obscura_dom::tree::NodeId,
+        (crate::ReplacedIntrinsic, Option<SelectedImage>),
+    > = HashMap::new();
+    for nid in lazy_images {
+        if let Some(value) = intrinsic.remove(&nid) {
+            deferred_images.insert(nid, (value, selected_images.remove(&nid)));
+        }
+    }
+    resources.lazy_viewport_bottom = resources.lazy_viewport_bottom.max(viewport.1);
     let fonts = collect_web_fonts(tree, base_url, resources, dynamic_fonts);
     // Most framework pages use web fonts and many decorative SVG icons, but
     // only SVG text needs the page font faces. Avoid cloning/loading the page
@@ -3949,6 +3999,52 @@ fn prepare_dom_internal_unverified(
             animation_timeline,
         );
     }
+    // Load the deferred lazy images the layout places within the lazy-load
+    // distance; loading them moves the rest, so repeat (bounded).
+    for _ in 0..4 {
+        if deferred_images.is_empty() {
+            break;
+        }
+        let reach = resources.lazy_viewport_bottom + LAZY_LOAD_DISTANCE;
+        let near: Vec<obscura_dom::tree::NodeId> = deferred_images
+            .keys()
+            .copied()
+            .filter(|nid| {
+                laid.rects.get(nid).is_some_and(|rect| {
+                    rect.y < reach && rect.y + rect.height > -LAZY_LOAD_DISTANCE
+                })
+            })
+            .collect();
+        if near.is_empty() {
+            break;
+        }
+        for nid in near {
+            if let Some((value, selected)) = deferred_images.remove(&nid) {
+                intrinsic.insert(nid, value);
+                if let Some(selected) = selected {
+                    selected_images.insert(nid, selected);
+                }
+                resources.lazy_loaded.insert(nid);
+            }
+        }
+        query_seed = None;
+        laid = layout_dom_with_web_fonts_and_stylesheet_cache_for_media_with_animation_state(
+            tree,
+            viewport,
+            &intrinsic,
+            &fonts,
+            stylesheet_cache,
+            media_type,
+            animation_sample,
+            animation_timeline,
+        );
+    }
+    resources.lazy_deferred_top = deferred_images
+        .keys()
+        .filter_map(|nid| laid.rects.get(nid).map(|rect| rect.y))
+        .fold(None, |top: Option<f32>, y| {
+            Some(top.map_or(y, |top| top.min(y)))
+        });
     let layout_done = std::time::Instant::now();
     let derived = laid.derived_layout_state(tree, viewport);
     if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
@@ -11122,6 +11218,18 @@ fn paint_positioned_pseudo(
     }
 }
 
+/// Whether `<img>` `nid` has `loading=lazy` (ASCII case-insensitive).
+fn image_is_lazy(tree: &DomTree, nid: obscura_dom::tree::NodeId) -> bool {
+    tree.with_node(nid, |node| {
+        node.as_element()
+            .is_some_and(|element| element.local.as_ref() == "img")
+            && node
+                .get_attribute("loading")
+                .is_some_and(|value| value.trim().eq_ignore_ascii_case("lazy"))
+    })
+    .unwrap_or(false)
+}
+
 /// Fetch every `<img>` once (seeding `cache` for the paint pass) and record its
 /// intrinsic (width, height) so layout can size replaced elements that have no
 /// explicit dimensions. Video posters are image resources too: before a
@@ -14685,6 +14793,32 @@ mod tests {
                 assert_eq!((rect.width, rect.height), expected, "{display} {sizing}");
             }
         }
+    }
+
+    // Chrome (headless, unknown connection type): with an 800px viewport a
+    // loading=lazy image at y=3700 loads and one at y=3800 stays box-less
+    // until the viewport scrolls within 3000px of it.
+    #[test]
+    fn lazy_images_load_within_the_lazy_load_distance() {
+        let tree = parse_html(
+            r#"<body style="margin:0">
+            <img id=near loading=lazy src=https://assets.test/i.svg style="position:absolute;top:3700px">
+            <img id=far loading=LAZY src=https://assets.test/i.svg style="position:absolute;top:3800px">
+            <img id=eager src=https://assets.test/i.svg style="position:absolute;top:9000px">"#,
+        );
+        let id = |name: &str| tree.get_element_by_id(name).unwrap();
+        let mut resources = RenderResourceCache::with_loader(|_: &str| {
+            Some(br#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30"/>"#.to_vec())
+        });
+        let prepared = prepare_dom(&tree, (800.0, 800.0), None, &mut resources).unwrap();
+        let width = |prepared: &PreparedRender, name: &str| prepared.layout.rects[&id(name)].width;
+        assert_eq!(width(&prepared, "near"), 40.0);
+        assert_eq!(width(&prepared, "far"), 0.0);
+        assert_eq!(width(&prepared, "eager"), 40.0);
+        assert!(!resources.note_viewport_bottom(800.0));
+        assert!(resources.note_viewport_bottom(900.0));
+        let prepared = prepare_dom(&tree, (800.0, 800.0), None, &mut resources).unwrap();
+        assert_eq!(width(&prepared, "far"), 40.0);
     }
 
     #[test]

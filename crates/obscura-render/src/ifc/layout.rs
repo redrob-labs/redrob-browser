@@ -145,6 +145,105 @@ fn last_baseline(
     }
 }
 
+/// Size the atomic inline boxes of `ifc` for `child_inputs` and store the
+/// sizes on the Parley inline boxes.
+fn size_atomic_boxes(
+    host: &mut Host<'_>,
+    ifc: &mut Ifc,
+    child_inputs: LayoutInput,
+    children: &[NodeId],
+) {
+    let calc_fn = host.calc_resolver();
+    let has_box = |box_node: Option<NodeId>| box_node.is_some_and(|n| children.contains(&n));
+    let box_count = ifc.boxes.len();
+    for index in 0..box_count {
+        let ibox = ifc.boxes[index];
+        let (width, height, baseline) = match ibox.kind {
+            BoxKind::Atomic { baseline } if has_box(ibox.node) => {
+                let child = ibox.node.expect("atomic box node");
+                let child_style = host.style(child).clone();
+                let margin = child_style
+                    .margin
+                    .resolve_or_zero(child_inputs.parent_size.width, calc_fn);
+                // Laid out in full (not just measured) so that flex and grid
+                // boxes report their baselines.
+                let box_inputs = subtract_margins(child_inputs, margin);
+                let output = layout_shrink_to_fit(
+                    host,
+                    child,
+                    box_inputs,
+                    box_inputs.available_space.width.into_option(),
+                );
+                let child_padding = child_style
+                    .padding
+                    .resolve_or_zero(child_inputs.parent_size.width, calc_fn);
+                let child_border = child_style
+                    .border
+                    .resolve_or_zero(child_inputs.parent_size.width, calc_fn);
+                let baseline =
+                    last_baseline(&output, baseline, child_padding, child_border).map(|b| {
+                        let b = if child_style.overflow.y != Overflow::Visible {
+                            b.clamp(0.0, output.size.height)
+                        } else {
+                            b
+                        };
+                        margin.top + b
+                    });
+                let margin_box_height = margin.top + margin.bottom + output.size.height;
+                (
+                    margin.left + margin.right + output.size.width,
+                    if baseline.is_some() {
+                        margin_box_height.min(f32::MAX)
+                    } else {
+                        margin_box_height.max(0.0).min(f32::MAX)
+                    },
+                    baseline,
+                )
+            }
+            BoxKind::Edge { span, start } => {
+                let span = &ifc.spans[span as usize];
+                let edge = if start { span.start } else { span.end };
+                (edge.advance(), 0.0, None)
+            }
+            _ => (0.0, 0.0, None),
+        };
+        if let Some(parley_box) = ifc.layout.inline_boxes_mut().nth(index) {
+            parley_box.width = width;
+            parley_box.height = height;
+            parley_box.baseline = baseline;
+        }
+    }
+}
+
+/// The atomic inline boxes of `ifc` with a percentage width, min-width or
+/// max-width, by box index. In a shrink-to-fit width such a box's
+/// max-content contribution treats the percentage as auto and its
+/// min-content contribution is zero (CSS Sizing 3 §5.2.1, compressible
+/// replaced elements); the percentage then resolves against the width
+/// that comes out.
+fn percentage_sized_atomics(host: &Host<'_>, ifc: &Ifc, children: &[NodeId]) -> Vec<usize> {
+    let mut out = Vec::new();
+    for (index, ibox) in ifc.boxes.iter().enumerate() {
+        let BoxKind::Atomic { .. } = ibox.kind else {
+            continue;
+        };
+        let Some(child) = ibox.node.filter(|node| children.contains(node)) else {
+            continue;
+        };
+        let style = host.style(child);
+        if [style.size.width, style.min_size.width, style.max_size.width]
+            .iter()
+            .any(|dimension| {
+                let raw = dimension.into_raw();
+                raw.tag() == taffy::CompactLength::PERCENT_TAG || raw.is_calc()
+            })
+        {
+            out.push(index);
+        }
+    }
+    out
+}
+
 #[allow(clippy::too_many_lines)]
 fn layout_ifc(
     host: &mut Host<'_>,
@@ -317,64 +416,30 @@ fn layout_ifc(
         axis: RequestedAxis::Both,
     };
 
-    // Size the atomic inline boxes.
-    let box_count = ifc.boxes.len();
-    for index in 0..box_count {
-        let ibox = ifc.boxes[index];
-        let (width, height, baseline) = match ibox.kind {
-            BoxKind::Atomic { baseline } if has_box(ibox.node) => {
-                let child = ibox.node.expect("atomic box node");
-                let child_style = host.style(child).clone();
-                let margin = child_style
-                    .margin
-                    .resolve_or_zero(child_inputs.parent_size.width, calc_fn);
-                // Laid out in full (not just measured) so that flex and grid
-                // boxes report their baselines.
-                let box_inputs = subtract_margins(child_inputs, margin);
-                let output = layout_shrink_to_fit(
-                    host,
-                    child,
-                    box_inputs,
-                    box_inputs.available_space.width.into_option(),
-                );
-                let child_padding = child_style
-                    .padding
-                    .resolve_or_zero(child_inputs.parent_size.width, calc_fn);
-                let child_border = child_style
-                    .border
-                    .resolve_or_zero(child_inputs.parent_size.width, calc_fn);
-                let baseline =
-                    last_baseline(&output, baseline, child_padding, child_border).map(|b| {
-                        let b = if child_style.overflow.y != Overflow::Visible {
-                            b.clamp(0.0, output.size.height)
-                        } else {
-                            b
-                        };
-                        margin.top + b
-                    });
-                let margin_box_height = margin.top + margin.bottom + output.size.height;
-                (
-                    margin.left + margin.right + output.size.width,
-                    if baseline.is_some() {
-                        margin_box_height.min(f32::MAX)
-                    } else {
-                        margin_box_height.max(0.0).min(f32::MAX)
-                    },
-                    baseline,
-                )
-            }
-            BoxKind::Edge { span, start } => {
-                let span = &ifc.spans[span as usize];
-                let edge = if start { span.start } else { span.end };
-                (edge.advance(), 0.0, None)
-            }
-            _ => (0.0, 0.0, None),
+    // Size the atomic inline boxes. A shrink-to-fit width measures boxes
+    // with percentage widths as auto first, then sizes them against it.
+    let percentage_atomics = if known_dimensions.width.is_none()
+        && matches!(available_space.width, AvailableSpace::Definite(_))
+    {
+        percentage_sized_atomics(host, ifc, &children)
+    } else {
+        Vec::new()
+    };
+    if !percentage_atomics.is_empty() {
+        let intrinsic_inputs = LayoutInput {
+            available_space: Size {
+                width: AvailableSpace::MaxContent,
+                ..child_inputs.available_space
+            },
+            parent_size: Size {
+                width: None,
+                ..child_inputs.parent_size
+            },
+            ..child_inputs
         };
-        if let Some(parley_box) = ifc.layout.inline_boxes_mut().nth(index) {
-            parley_box.width = width;
-            parley_box.height = height;
-            parley_box.baseline = baseline;
-        }
+        size_atomic_boxes(host, ifc, intrinsic_inputs, &children);
+    } else {
+        size_atomic_boxes(host, ifc, child_inputs, &children);
     }
 
     // Percentage text indents do not contribute to intrinsic widths.
@@ -397,7 +462,22 @@ fn layout_ifc(
         (child_style.float, child_style.clear, margin)
     };
     let width = known_dimensions.width.map(|w| w - pbw).unwrap_or_else(|| {
-        let content_sizes = ifc.layout.calculate_content_widths();
+        let mut content_sizes = ifc.layout.calculate_content_widths();
+        if !percentage_atomics.is_empty() {
+            let mut saved = Vec::new();
+            for (index, parley_box) in ifc.layout.inline_boxes_mut().enumerate() {
+                if percentage_atomics.contains(&index) {
+                    saved.push((index, parley_box.width));
+                    parley_box.width = 0.0;
+                }
+            }
+            content_sizes.min = ifc.layout.calculate_content_widths().min;
+            for (index, parley_box) in ifc.layout.inline_boxes_mut().enumerate() {
+                if let Some(&(_, width)) = saved.iter().find(|(saved, _)| *saved == index) {
+                    parley_box.width = width;
+                }
+            }
+        }
         let float_width = match available_space.width {
             AvailableSpace::Definite(_) => 0.0,
             AvailableSpace::MinContent => {
@@ -475,6 +555,21 @@ fn layout_ifc(
             .maybe_clamp(node_min_size.width, node_max_size.width)
             - pbw
     });
+
+    if !percentage_atomics.is_empty() {
+        let final_inputs = LayoutInput {
+            available_space: Size {
+                width: AvailableSpace::Definite(width),
+                ..child_inputs.available_space
+            },
+            parent_size: Size {
+                width: Some(width),
+                ..child_inputs.parent_size
+            },
+            ..child_inputs
+        };
+        size_atomic_boxes(host, ifc, final_inputs, &children);
+    }
 
     let is_bfc_root = block_ctx.is_bfc_root();
     if is_bfc_root {

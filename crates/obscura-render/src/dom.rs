@@ -7751,7 +7751,8 @@ fn layout_dom_once(
                     + style.border.bottom;
                 // Chrome: `cols` fixed-pitch advances plus the 15px
                 // scrollbar gutter (cols=20 -> 175px content box at 13.33px).
-                let intrinsic_width = cols * font_size * 0.6 + 15.0 + horizontal_edges;
+                let intrinsic_width =
+                    textarea_content_width(style, font_size, cols) + 15.0 + horizontal_edges;
                 let intrinsic_height =
                     crate::inline::used_line_height(style).max(1.0) * rows + vertical_edges;
                 assign_native_control_size(
@@ -7831,11 +7832,8 @@ fn layout_dom_once(
                         .and_then(|value| value.parse::<u32>().ok())
                         .filter(|&value| value > 0)
                         .unwrap_or(20) as f32;
-                    // Chrome: `size` average advances plus a fixed caret and
-                    // decoration allowance (size=20 -> 177px, size=1 -> 25px
-                    // content box at 13.33px).
                     (
-                        size * font_size * 0.6 + font_size * 1.275 + horizontal_edges,
+                        text_field_content_width(style, font_size, size) + horizontal_edges,
                         default_height,
                     )
                 }
@@ -9006,7 +9004,27 @@ fn layout_dom_once(
                 &mut text_runs,
                 &mut generated_rects,
             );
+            // CSSOM rows and sections are the same unions over the cells'
+            // fractional rects.
+            let mut fractional_cells = rects.clone();
+            fractional_cells.extend(fractional_rects.iter().map(|(&id, &rect)| (id, rect)));
+            let unsynthesized: HashSet<NodeId> = fractional_cells.keys().copied().collect();
+            synthesize_row_rects(tree, &styles, &mut fractional_cells);
             synthesize_row_rects(tree, &styles, &mut rects);
+            for (id, rect) in fractional_cells {
+                if unsynthesized.contains(&id) {
+                    continue;
+                }
+                if let Some(rounded) = rects.get(&id) {
+                    let close = (rect.x - rounded.x).abs() < 1.0
+                        && (rect.y - rounded.y).abs() < 1.0
+                        && (rect.width - rounded.width).abs() < 1.0
+                        && (rect.height - rounded.height).abs() < 1.0;
+                    if close && rect != *rounded {
+                        fractional_rects.insert(id, rect);
+                    }
+                }
+            }
             // Spliced block-in-inline wrappers span their children; the
             // innermost first so an outer wrapper includes the inner ones.
             for &wrapper in ifc_items.transparent_wrappers.iter().rev() {
@@ -10180,6 +10198,74 @@ fn collect_used_auto_margins(
             Some((dom_id, (layout.margin.left, layout.margin.right)))
         })
         .collect()
+}
+
+/// The average character width text controls use, in px: the OS/2 value
+/// at the font size truncated to 26.6 fixed point (FreeType's char size),
+/// raised to the nearest whole pixel when that is larger (fitted to Chrome
+/// on this host: 13.33px Liberation Mono is 8, 10px is 6.0009).
+#[cfg(feature = "paint")]
+fn text_control_avg_char_width(avg_em: f32, font_size: f32) -> f32 {
+    let avg = avg_em * (font_size * 64.0 + 1e-3).floor() / 64.0;
+    avg.max(avg.round())
+}
+
+/// Blink's textarea width before its scrollbar gutter: `cols` average
+/// character widths ceiled to a pixel (Chrome: cols=20 is 160px in the
+/// default 13.33px monospace, 186px in 16px Arial).
+fn textarea_content_width(style: &crate::LayoutStyle, font_size: f32, cols: f32) -> f32 {
+    let bold = crate::style::used_font_weight(style) >= 600;
+    #[cfg(feature = "paint")]
+    {
+        let avg = match crate::ifc::fonts::text_control_metrics(style.font_family.as_deref(), bold)
+        {
+            Some((avg, _)) => text_control_avg_char_width(avg, font_size),
+            None => {
+                crate::paint::measure_text_em("0", font_size, bold, style.font_family.as_deref())
+            }
+        };
+        (avg * cols - 1e-3).ceil()
+    }
+    #[cfg(not(feature = "paint"))]
+    {
+        let _ = bold;
+        cols * font_size * 0.6
+    }
+}
+
+/// Blink's text field width (`TextFieldIntrinsicInlineSize`): `size`
+/// average character widths, with the last one widened to the face's
+/// bounding-box width, ceiled to a pixel. The average is the OS/2 value,
+/// raised to the nearest whole pixel when that is larger (fitted to
+/// Chrome on this host: 156 sizes and fonts, all exact: 16px Arial
+/// size=20 is 207, 13.33px is 177). Families Blink does not trust use the
+/// advance of "0" with no widening (Helvetica 16px size=20: 178).
+fn text_field_content_width(style: &crate::LayoutStyle, font_size: f32, size: f32) -> f32 {
+    let bold = crate::style::used_font_weight(style) >= 600;
+    #[cfg(feature = "paint")]
+    {
+        match crate::ifc::fonts::text_control_metrics(style.font_family.as_deref(), bold) {
+            Some((avg, range)) => {
+                let avg = text_control_avg_char_width(avg, font_size);
+                let max = (range * font_size).round();
+                (avg * (size - 1.0) + max - 1e-3).ceil()
+            }
+            None => {
+                let zero = crate::paint::measure_text_em(
+                    "0",
+                    font_size,
+                    bold,
+                    style.font_family.as_deref(),
+                );
+                (zero * size - 1e-3).ceil()
+            }
+        }
+    }
+    #[cfg(not(feature = "paint"))]
+    {
+        let _ = bold;
+        size * font_size * 0.6 + font_size * 1.275
+    }
 }
 
 fn compute_absolute_rects(
@@ -21811,6 +21897,26 @@ mod tests {
     // Chrome getBoundingClientRect: 13.9px and 15.9px flex items are
     // 13.890625 and 15.890625 wide (LayoutUnit truncation) and the second
     // starts at 13.890625; paint keeps whole-pixel rects.
+    // A CSSOM row rect is the union of its cells' fractional rects (Chrome:
+    // a row of 13.9px and 15.9px cells is 29.78125 wide).
+    #[test]
+    fn cssom_row_rects_union_fractional_cells() {
+        let tree = parse_html(
+            r#"<!doctype html><body style="margin:0"><table style="border-spacing:0"><tr id=r><td id=a style="padding:0;width:13.9px;height:10px"></td><td id=b style="padding:0;width:15.9px;height:10px"></td></tr></table>"#,
+        );
+        let laid = layout_dom(&tree, (400.0, 200.0));
+        let frac = |id: &str| {
+            let node = tree.get_element_by_id(id).unwrap();
+            laid.fractional_rects
+                .get(&node)
+                .copied()
+                .unwrap_or(laid.rects[&node])
+        };
+        let (row, a, b) = (frac("r"), frac("a"), frac("b"));
+        assert_ne!(row.width, row.width.round());
+        assert_eq!((row.x, row.width), (a.x, b.x + b.width - a.x));
+    }
+
     #[test]
     fn cssom_rects_keep_layout_unit_fractions() {
         let tree = parse_html(
