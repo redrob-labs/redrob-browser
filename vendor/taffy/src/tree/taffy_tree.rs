@@ -688,6 +688,38 @@ impl<NodeContext> TaffyTree<NodeContext> {
         self.node_context_data.get(node.into())
     }
 
+    /// The children of `parent`, without allocating. Empty for an unknown node.
+    #[inline]
+    pub fn child_slice(&self, parent: NodeId) -> &[NodeId] {
+        self.children.get(parent.into()).map_or(&[], |children| children.as_slice())
+    }
+
+    /// Copy the layout cache and the computed layouts of `source_node` in
+    /// `source` onto `node` in this tree.
+    ///
+    /// This lets a rebuilt tree skip layout of a subtree that has not changed
+    /// since `source` was laid out. It is only sound when the two subtrees are
+    /// equal: same styles, same structure, and leaves whose measure functions
+    /// return the same sizes. The caller copies every node of the subtree.
+    pub fn copy_layout_state<SourceContext>(
+        &mut self,
+        node: NodeId,
+        source: &TaffyTree<SourceContext>,
+        source_node: NodeId,
+    ) -> TaffyResult<()> {
+        let source_data =
+            source.nodes.get(source_node.into()).ok_or(TaffyError::InvalidInputNode(source_node))?;
+        let data = self.nodes.get_mut(node.into()).ok_or(TaffyError::InvalidInputNode(node))?;
+        data.cache = source_data.cache.clone();
+        data.unrounded_layout = source_data.unrounded_layout;
+        data.final_layout = source_data.final_layout;
+        #[cfg(feature = "detailed_layout_info")]
+        {
+            data.detailed_layout_info = source_data.detailed_layout_info.clone();
+        }
+        Ok(())
+    }
+
     /// Gets a mutable reference to the the context data associated with the node
     #[inline]
     pub fn get_node_context_mut(&mut self, node: NodeId) -> Option<&mut NodeContext> {

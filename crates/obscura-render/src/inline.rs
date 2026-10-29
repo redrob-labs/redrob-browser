@@ -67,6 +67,11 @@ const SYSTEM_FAMILY: &str = "DejaVu Sans";
 /// large, and loading it for every page would spend RSS and startup time even
 /// when no emoji can be shaped.
 pub(crate) fn text_may_need_emoji_font(text: &str) -> bool {
+    // Every candidate below is outside ASCII; style sheets and most page text
+    // are ASCII and skip the per-character match.
+    if text.is_ascii() {
+        return false;
+    }
     text.chars().any(|ch| {
         matches!(
             ch,
@@ -782,16 +787,199 @@ pub struct InlineItem {
     caret_run: Option<(NodeId, NodeId)>,
     /// Exact measurement results retained across repeated Taffy probes.
     measured: Vec<(Option<u32>, Wrap, (f32, f32))>,
+    /// Every input that produced this shaped item. A later layout with an
+    /// equal key reuses the shaped buffer and its measurements instead of
+    /// shaping the same text again (see `ShapedItemCache`).
+    cache_key: Option<Arc<ItemKey>>,
+    /// `finalize` pinned this item at its used width. Reuse prefers such an
+    /// item: its buffer is already laid out at the width the next layout
+    /// most likely asks for.
+    finalized: bool,
+    /// `measure_word` result, a pure function of the shaping input.
+    word_measure: Option<(f32, f32)>,
+    /// Width bits and wrap `buffer` is currently laid out for by
+    /// `shape_with_text_indent`; `None` when unknown.
+    shaped_at: Option<(Option<u32>, Wrap)>,
 }
 
-#[derive(Clone, Copy, Debug)]
+/// The complete input of `TextEngine::push_shaped_item`. Shaping and
+/// measurement are pure functions of these values and of the font database,
+/// so two items with equal keys in the same database have equal buffers.
+#[derive(Clone, PartialEq)]
+pub(crate) struct ItemKey {
+    hash: u64,
+    spans: Vec<(String, SpanAttrs)>,
+    line_height_bits: u32,
+    font_size: Option<f32>,
+    white_space: Option<crate::WhiteSpace>,
+    webkit_box_display: bool,
+    webkit_box_orient_vertical: bool,
+    webkit_line_clamp: Option<u32>,
+    text_overflow: crate::TextOverflow,
+    clips_overflow_x: bool,
+    text_align: Option<taffy::AlignItems>,
+    text_indent: Option<Dimension>,
+    text_wrap_style: Option<crate::TextWrapStyle>,
+    clip_fills: Vec<ClipTextFill>,
+    owner_ranges: Vec<OwnerTextRange>,
+    owner_boxes: Vec<InlineOwnerBox>,
+    boundary_events: Vec<InlineBoundaryEvent>,
+}
+
+impl ItemKey {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        base: &LayoutStyle,
+        line_h: f32,
+        spans: &[(String, SpanAttrs)],
+        clip_fills: &[ClipTextFill],
+        owner_ranges: &[OwnerTextRange],
+        owner_boxes: &[InlineOwnerBox],
+        boundary_events: &[InlineBoundaryEvent],
+    ) -> Self {
+        let mut hasher = DefaultHasher::new();
+        line_h.to_bits().hash(&mut hasher);
+        for (text, attrs) in spans {
+            text.hash(&mut hasher);
+            attrs.font_size.to_bits().hash(&mut hasher);
+            attrs.line_height.to_bits().hash(&mut hasher);
+            attrs.weight.hash(&mut hasher);
+            attrs.color.hash(&mut hasher);
+            attrs.family.hash(&mut hasher);
+        }
+        owner_boxes.len().hash(&mut hasher);
+        Self {
+            hash: hasher.finish(),
+            spans: spans.to_vec(),
+            line_height_bits: line_h.to_bits(),
+            font_size: base.font_size,
+            white_space: base.white_space,
+            webkit_box_display: base.webkit_box_display.is_some(),
+            webkit_box_orient_vertical: base.webkit_box_orient_vertical,
+            webkit_line_clamp: base.webkit_line_clamp,
+            text_overflow: base.text_overflow,
+            clips_overflow_x: base.clips_overflow_x(),
+            text_align: base.text_align,
+            text_indent: base.text_indent,
+            text_wrap_style: base.text_wrap_style,
+            clip_fills: clip_fills.to_vec(),
+            owner_ranges: owner_ranges.to_vec(),
+            owner_boxes: owner_boxes.to_vec(),
+            boundary_events: boundary_events.to_vec(),
+        }
+    }
+}
+
+impl InlineItem {
+    /// A previous layout's item as `push_shaped_item` would have produced it:
+    /// the shaped buffers and pure measurements carry over; placement state
+    /// is reset.
+    fn into_reused(mut self) -> Self {
+        self.origin = (0.0, 0.0);
+        self.clip = None;
+        self.marker = None;
+        self.relative_owner_ranges = Vec::new();
+        self.caret_run = None;
+        self.finalized = false;
+        self
+    }
+}
+
+/// What a taffy leaf's measure function depends on, so a later layout can
+/// tell that a leaf measures exactly as it did before. Text items are equal
+/// when their complete shaping input is; replaced items when every sizing
+/// field is. Text without a recorded input never compares equal.
+#[derive(Clone)]
+pub(crate) enum MeasureSignature {
+    Text(Option<Arc<ItemKey>>),
+    Replaced(ReplacedItem),
+}
+
+impl MeasureSignature {
+    pub(crate) fn same_measure(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Text(Some(a)), Self::Text(Some(b))) => Arc::ptr_eq(a, b) || **a == **b,
+            (Self::Replaced(a), Self::Replaced(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+/// Shaped items of the most recently dropped layout on this thread, keyed by
+/// their complete shaping input. The next layout takes them, so unchanged
+/// text keeps its shaping and line measurements across relayouts. Items are
+/// only valid for the font set they were shaped with.
+struct ShapedItemCache {
+    fonts: Vec<WebFont>,
+    load_emoji: bool,
+    items: HashMap<u64, Vec<InlineItem>>,
+}
+
+thread_local! {
+    static RECYCLED_ITEMS: std::cell::RefCell<Option<ShapedItemCache>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+thread_local! {
+    static REUSE_SUSPENDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn shaped_item_reuse_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("OBSCURA_LAYOUT_NO_TEXT_CACHE").is_none())
+        && !REUSE_SUSPENDED.with(std::cell::Cell::get)
+}
+
+/// Run `f` with cross-layout shaped-item reuse switched off on this thread:
+/// layouts inside neither read nor replace the recycled items.
+/// Whether layouts on this thread may reuse work from earlier layouts.
+pub(crate) fn layout_reuse_enabled() -> bool {
+    shaped_item_reuse_enabled()
+}
+
+pub(crate) fn without_shaped_item_reuse<R>(f: impl FnOnce() -> R) -> R {
+    let previous = REUSE_SUSPENDED.with(|flag| flag.replace(true));
+    let result = f();
+    REUSE_SUSPENDED.with(|flag| flag.set(previous));
+    result
+}
+
+impl Drop for TextEngine {
+    fn drop(&mut self) {
+        if !self.recycle_items || !shaped_item_reuse_enabled() {
+            return;
+        }
+        let mut items: HashMap<u64, Vec<InlineItem>> = HashMap::new();
+        for item in std::mem::take(&mut self.items) {
+            if let Some(hash) = item.cache_key.as_ref().map(|key| key.hash) {
+                let bucket = items.entry(hash).or_default();
+                if item.finalized {
+                    bucket.insert(0, item);
+                } else {
+                    bucket.push(item);
+                }
+            }
+        }
+        if items.is_empty() {
+            return;
+        }
+        let cache = ShapedItemCache {
+            fonts: std::mem::take(&mut self.font_set),
+            load_emoji: self.load_emoji,
+            items,
+        };
+        let _ = RECYCLED_ITEMS.try_with(|slot| *slot.borrow_mut() = Some(cache));
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct OwnerTextRange {
     owner: NodeId,
     start: usize,
     end: usize,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct InlineEdge {
     margin: f32,
     border: f32,
@@ -808,7 +996,7 @@ impl InlineEdge {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct InlineOwnerBox {
     owner: NodeId,
     start: usize,
@@ -819,7 +1007,7 @@ struct InlineOwnerBox {
     end_event: usize,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct InlineBoundaryEvent {
     owner: NodeId,
     position: usize,
@@ -878,6 +1066,15 @@ pub struct TextEngine {
     shape_template_hits: usize,
     items: Vec<InlineItem>,
     replaced: Vec<ReplacedItem>,
+    /// Font set this engine was built with; identifies which shaped items of
+    /// an earlier layout are valid here.
+    font_set: Vec<WebFont>,
+    load_emoji: bool,
+    /// Items of an earlier layout with the same font set.
+    item_cache: HashMap<u64, Vec<InlineItem>>,
+    /// Hand this engine's items to the next layout when it is dropped. Only
+    /// document layouts opt in; ad hoc engines leave the thread cache alone.
+    recycle_items: bool,
 }
 
 // Repeated labels, table cells, and list/card rows are common, and building
@@ -1072,8 +1269,8 @@ impl VariableSwashCache {
 
 const REPLACED_CONTEXT_BIT: usize = 1usize << (usize::BITS - 1);
 
-#[derive(Clone, Copy)]
-struct ReplacedItem {
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct ReplacedItem {
     independent_axes: bool,
     intrinsic_width: Option<f32>,
     intrinsic_height: Option<f32>,
@@ -1302,6 +1499,13 @@ impl TextEngine {
     }
 
     pub(crate) fn new_with_web_fonts_and_emoji(fonts: &[WebFont], load_emoji: bool) -> Self {
+        let _prof = crate::prof::start();
+        let engine = Self::new_with_web_fonts_and_emoji_inner(fonts, load_emoji);
+        crate::prof::stop(crate::prof::ENGINE_NEW, _prof);
+        engine
+    }
+
+    fn new_with_web_fonts_and_emoji_inner(fonts: &[WebFont], load_emoji: bool) -> Self {
         let (db, loaded_families) = if fonts.is_empty() {
             (*base_font_database(load_emoji)).clone()
         } else if let Some(cached) = cached_web_font_database(fonts, load_emoji) {
@@ -1337,7 +1541,82 @@ impl TextEngine {
             shape_template_hits: 0,
             items: Vec::new(),
             replaced: Vec::new(),
+            font_set: fonts.to_vec(),
+            load_emoji,
+            item_cache: HashMap::new(),
+            recycle_items: false,
         }
+    }
+
+    /// The engine for a document layout: like `new_with_web_fonts_and_emoji`,
+    /// plus the shaped items of the previous layout on this thread when they
+    /// were shaped with the same fonts. This engine's own items are offered
+    /// to the next layout when it is dropped.
+    pub(crate) fn for_document_layout(fonts: &[WebFont], load_emoji: bool) -> Self {
+        let mut engine = Self::new_with_web_fonts_and_emoji(fonts, load_emoji);
+        engine.recycle_items = true;
+        if shaped_item_reuse_enabled() {
+            let cache = RECYCLED_ITEMS
+                .try_with(|slot| {
+                    let mut slot = slot.borrow_mut();
+                    match slot.as_ref() {
+                        Some(cache) if cache.load_emoji == load_emoji && cache.fonts == fonts => {
+                            slot.take()
+                        }
+                        _ => None,
+                    }
+                })
+                .ok()
+                .flatten();
+            if let Some(cache) = cache {
+                engine.item_cache = cache.items;
+            }
+        }
+        engine
+    }
+
+    /// The measure signature of taffy context `idx`.
+    pub(crate) fn measure_signature(&self, idx: usize) -> Option<MeasureSignature> {
+        if idx & REPLACED_CONTEXT_BIT != 0 {
+            return self
+                .replaced
+                .get(idx & !REPLACED_CONTEXT_BIT)
+                .map(|item| MeasureSignature::Replaced(*item));
+        }
+        self.items
+            .get(idx)
+            .map(|item| MeasureSignature::Text(item.cache_key.clone()))
+    }
+
+    /// Placement and line geometry of one item, for comparing two layouts.
+    pub(crate) fn item_signature(&self, idx: usize) -> String {
+        use std::fmt::Write as _;
+        let Some(item) = self.items.get(idx) else {
+            return format!("replaced {idx}");
+        };
+        let mut out = format!(
+            "origin={:?} clip={:?} first={} marker={} ",
+            item.origin,
+            item.clip,
+            item.first_line_offset,
+            item.marker.map_or(String::new(), |m| format!(
+                "{} {} {} {}",
+                m.line_index, m.x, m.y, m.content_end
+            ))
+        );
+        for run in item.buffer.layout_runs() {
+            let _ = write!(
+                out,
+                "[{} {} {} {} {} {}]",
+                run.line_i,
+                run.line_w,
+                run.line_top,
+                run.line_y,
+                run.glyphs.len(),
+                run.glyphs.first().map_or(0.0, |glyph| glyph.x)
+            );
+        }
+        out
     }
 
     /// Number of inline formatting contexts collected (for debug/stats).
@@ -1603,6 +1882,61 @@ impl TextEngine {
         &mut self,
         base: &LayoutStyle,
         line_h: f32,
+        spans: Vec<(String, SpanAttrs)>,
+        clip_fills: Vec<ClipTextFill>,
+        owner_ranges: Vec<OwnerTextRange>,
+        owner_boxes: Vec<InlineOwnerBox>,
+        boundary_events: Vec<InlineBoundaryEvent>,
+    ) -> Option<usize> {
+        let _prof = crate::prof::start();
+        let key = self.recycle_items.then(|| {
+            ItemKey::new(
+                base,
+                line_h,
+                &spans,
+                &clip_fills,
+                &owner_ranges,
+                &owner_boxes,
+                &boundary_events,
+            )
+        });
+        if let Some(key) = key.as_ref() {
+            // Each cached item is used at most once, so it moves instead of
+            // being cloned. A layout repeating the same text gets one copy per
+            // occurrence the previous layout had.
+            let reused = self.item_cache.get_mut(&key.hash).and_then(|candidates| {
+                let position = candidates
+                    .iter()
+                    .position(|item| item.cache_key.as_deref() == Some(key))?;
+                Some(candidates.remove(position).into_reused())
+            });
+            if let Some(item) = reused {
+                let index = self.items.len();
+                self.items.push(item);
+                crate::prof::stop(crate::prof::ITEM_REUSE, _prof);
+                return Some(index);
+            }
+        }
+        let result = self.push_shaped_item_inner(
+            base,
+            line_h,
+            spans,
+            clip_fills,
+            owner_ranges,
+            owner_boxes,
+            boundary_events,
+        );
+        if let (Some(index), Some(key)) = (result, key) {
+            self.items[index].cache_key = Some(Arc::new(key));
+        }
+        crate::prof::stop(crate::prof::PUSH_ITEM, _prof);
+        result
+    }
+
+    fn push_shaped_item_inner(
+        &mut self,
+        base: &LayoutStyle,
+        line_h: f32,
         mut spans: Vec<(String, SpanAttrs)>,
         clip_fills: Vec<ClipTextFill>,
         mut owner_ranges: Vec<OwnerTextRange>,
@@ -1863,6 +2197,10 @@ impl TextEngine {
             relative_owner_ranges: Vec::new(),
             caret_run: None,
             measured: Vec::new(),
+            cache_key: None,
+            finalized: false,
+            word_measure: None,
+            shaped_at: None,
         });
         Some(idx)
     }
@@ -1889,13 +2227,16 @@ impl TextEngine {
             .iter()
             .find(|(cached_width, cached_wrap, _)| *cached_width == key && *cached_wrap == wrap)
         {
+            crate::prof::count(crate::prof::MEASURE_HIT);
             return *size;
         }
+        let _prof = crate::prof::start();
         let TextEngine {
             font_system, items, ..
         } = self;
         let item = &mut items[idx];
         shape_with_text_indent(font_system, item, width, wrap);
+        crate::prof::stop(crate::prof::MEASURE_MISS, _prof);
         let (width, height, clamped) = buffer_size(item);
         let size = (
             width,
@@ -1923,6 +2264,9 @@ impl TextEngine {
         let Some(item) = items.get_mut(idx) else {
             return (0.0, 0.0);
         };
+        if let Some(size) = item.word_measure {
+            return size;
+        }
         let wrap = item.layout_wrap;
         shape_with_text_indent(font_system, item, None, wrap);
         let mut width = 0.0f32;
@@ -1945,7 +2289,9 @@ impl TextEngine {
             );
             height = height.max(run.line_top + run.line_height);
         }
-        (width, height.max(item.forced_min_height))
+        let size = (width, height.max(item.forced_min_height));
+        item.word_measure = Some(size);
+        size
     }
 
     /// Register a replaced element's intrinsic size as a taffy measure
@@ -2046,7 +2392,22 @@ impl TextEngine {
         let item = &mut items[idx];
         let content_width = content_width.max(0.0);
         let wrap = item.layout_wrap;
+        let _prof = crate::prof::start();
+        let miss = item.buffer.size().0 != Some(content_width) || item.buffer.wrap() != wrap;
+
+        item.finalized = true;
         shape_with_text_indent(font_system, item, Some(content_width), wrap);
+        crate::prof::stop(
+            if miss {
+                crate::prof::ENGINE_NEW
+            } else {
+                crate::prof::MEASURE_MISS
+            },
+            _prof,
+        );
+        if item.balance_wrap {
+            item.shaped_at = None;
+        }
         let balanced_width = item
             .balance_wrap
             .then(|| balance_wrap_width(font_system, &mut item.buffer, content_width))
@@ -2179,6 +2540,9 @@ impl TextEngine {
                     0.0
                 };
                 let alignment_shift = line_edge_alignment_shift(item, line_start, line_end);
+                // A fragment is keyed by (owner, item, line), so only fragments
+                // pushed for this line can merge with a new one.
+                let line_fragments = out.len();
                 for owner in &item.owner_boxes {
                     let empty = owner.start == owner.end;
                     let intersects = if empty {
@@ -2214,7 +2578,7 @@ impl TextEngine {
                     let x = item.origin.0 + first_line_offset + alignment_shift + raw_left;
                     let width = (raw_right - raw_left).max(0.0);
                     let baseline_y = item.origin.1 + run.line_y;
-                    if let Some(existing) = out.iter_mut().find(|fragment| {
+                    if let Some(existing) = out[line_fragments..].iter_mut().find(|fragment| {
                         fragment.owner == owner.owner
                             && fragment.item_index == item_index
                             && fragment.line_index == line_index
@@ -2457,7 +2821,7 @@ impl TextEngine {
 
 /// A run of same-styled inline text.
 #[derive(Clone, PartialEq)]
-struct SpanAttrs {
+pub(crate) struct SpanAttrs {
     font_size: f32,
     line_height: f32,
     letter_spacing: f32,
@@ -3249,7 +3613,24 @@ fn used_text_indent(value: Dimension, width: Option<f32>) -> f32 {
 /// and monotonically retry if those edges force an earlier break. Only final
 /// visual-line boundaries split BufferLines, so ligatures and kerning are not
 /// broken merely because an inline element starts or ends.
+/// Lay `item` out at `width`/`wrap`. A buffer still laid out for exactly
+/// these arguments is left untouched: reshaping it would produce the same
+/// lines, and items reused from an earlier layout usually are.
 fn shape_with_text_indent(
+    font_system: &mut FontSystem,
+    item: &mut InlineItem,
+    width: Option<f32>,
+    wrap: Wrap,
+) {
+    let state = (width.map(f32::to_bits), wrap);
+    if item.shaped_at == Some(state) {
+        return;
+    }
+    shape_with_text_indent_uncached(font_system, item, width, wrap);
+    item.shaped_at = Some(state);
+}
+
+fn shape_with_text_indent_uncached(
     font_system: &mut FontSystem,
     item: &mut InlineItem,
     width: Option<f32>,
