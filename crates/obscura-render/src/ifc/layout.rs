@@ -562,8 +562,9 @@ fn layout_ifc(
                             data.line_y_start, data.line_y_end
                         );
                     }
+                    // Floats placed on this line stay placed: re-breaking it
+                    // below them only skips their boxes (see InlineBoxBreak).
                     if has_active_floats
-                        && floats_this_line == 0
                         && slot.segment_id.is_some()
                         && used > slot.width + 0.01
                         && slot.height.is_finite()
@@ -613,6 +614,17 @@ fn layout_ifc(
                         continue;
                     };
                     if !children.contains(&child) {
+                        breaker.state_mut().append_inline_box_to_line(
+                            box_break.advance,
+                            f32::NEG_INFINITY,
+                            f32::NEG_INFINITY,
+                        );
+                        continue;
+                    }
+                    if placed_floats.iter().any(|(placed, _)| *placed == child) {
+                        // The line was reverted after this float was placed
+                        // (its content did not fit beside it): keep the float
+                        // where it is.
                         breaker.state_mut().append_inline_box_to_line(
                             box_break.advance,
                             f32::NEG_INFINITY,
