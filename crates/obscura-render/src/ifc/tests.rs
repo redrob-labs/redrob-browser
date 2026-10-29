@@ -804,3 +804,24 @@ fn text_controls_size_from_the_fonts_average_character_width() {
         assert_eq!(width(&tree, &laid, id), want, "{id}");
     }
 }
+
+#[test]
+fn shrink_to_fit_treats_percentage_atomic_widths_as_auto() {
+    // Chrome: an abspos shrink-to-fit box around a 30% wide 2400x538 image
+    // in a 720px containing block is 720 wide (the image contributes its
+    // natural width, clamped by the available width) and the image is 216.
+    let tree = obscura_dom::parse_html(
+        "<!doctype html><body style='margin:0'>\
+         <div style='width:720px;position:relative;height:100px'>\
+         <div id=d style='position:absolute;text-align:center'>\
+         <span id=s><img id=i src=a.png style='width:30%'></span></div></div>",
+    );
+    let mut intrinsic = HashMap::new();
+    intrinsic.insert(
+        element(&tree, "i"),
+        crate::ReplacedIntrinsic::from_dimensions(2400.0, 538.0),
+    );
+    let laid = crate::dom::layout_dom_with_web_fonts(&tree, (1280.0, 800.0), &intrinsic, &[]);
+    assert_eq!(width(&tree, &laid, "d"), 720.0);
+    assert_eq!(width(&tree, &laid, "i"), 216.0);
+}
