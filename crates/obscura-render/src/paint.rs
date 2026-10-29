@@ -4548,6 +4548,8 @@ fn native_raster_scale_supported(tree: &DomTree, laid: &crate::DomLayout) -> boo
             && style.clip_path.is_none()
             && style.background_image.is_none()
             && style.mask_image.is_none()
+            && style.mask_layers.images.is_empty()
+            && style.background_layers.images.len() <= 1
             && gradients_supported
             && !style.background_clip_text
             && style.box_shadow.is_none()
@@ -5042,11 +5044,12 @@ fn paint_laid_dom_scrolled(
             continue;
         }
         let is_opacity_root = suppress_opacity_for != Some(nid)
-            && laid
+            && (laid
                 .styles
                 .get(&nid)
                 .and_then(|style| style.opacity)
-                .is_some_and(|opacity| opacity.clamp(0.0, 1.0) < 1.0);
+                .is_some_and(|opacity| opacity.clamp(0.0, 1.0) < 1.0)
+                || layer_mask(tree, laid, nid).is_some());
         let is_transform_root = suppress_transform_for != Some(nid)
             && laid.styles.get(&nid).is_some_and(has_authored_transform);
         let z = (suppress_stacking_for != Some(nid))
@@ -5529,7 +5532,12 @@ fn paint_laid_dom_scrolled(
             .and_then(|style| style.opacity)
             .unwrap_or(1.0)
             .clamp(0.0, 1.0);
-        if suppress_opacity_for != Some(nid) && own_opacity < 1.0 {
+        // A mask (CSS Masking 1) is applied, like opacity, to the finished
+        // element: its layers' alpha multiplies the isolated surface.
+        let mask_layers = (suppress_opacity_for != Some(nid) && raster_scale == 1.0)
+            .then(|| layer_mask(tree, laid, nid))
+            .flatten();
+        if suppress_opacity_for != Some(nid) && (own_opacity < 1.0 || mask_layers.is_some()) {
             opacity_subtree_skip.insert(nid);
             opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
             if own_opacity <= 0.0 {
@@ -5543,7 +5551,7 @@ fn paint_laid_dom_scrolled(
             // opacity:.5 incorrectly become .75 alpha in their overlap.
             let layer = Pixmap::new(pixmap.width(), pixmap.height())?;
             crate::canvas::begin_layer(&layer);
-            let layer = paint_laid_dom_scrolled(
+            let mut layer = paint_laid_dom_scrolled(
                 tree,
                 viewport,
                 base_url,
@@ -5572,6 +5580,33 @@ fn paint_laid_dom_scrolled(
                 canvas_background,
             )?;
             scene_node(nid);
+            if let Some(layers) = mask_layers.as_deref() {
+                let (tx, ty) = scroll_state.translation_for(laid, nid);
+                let border_box = crate::Rect {
+                    x: rect.x + tx,
+                    y: rect.y + ty,
+                    ..rect
+                };
+                if let (Some(mut alpha), Some(style)) = (
+                    Pixmap::new(layer.width(), layer.height()),
+                    laid.styles.get(&nid),
+                ) {
+                    paint_resolved_layers(
+                        &mut alpha,
+                        (0, 0),
+                        &border_box,
+                        style,
+                        layers,
+                        base_url,
+                        root_font_size,
+                        viewport,
+                        image_cache,
+                    );
+                    let mask =
+                        tiny_skia::Mask::from_pixmap(alpha.as_ref(), tiny_skia::MaskType::Alpha);
+                    layer.apply_mask(&mask);
+                }
+            }
             let group_paint = tiny_skia::PixmapPaint {
                 opacity: own_opacity,
                 ..tiny_skia::PixmapPaint::default()
@@ -5749,6 +5784,15 @@ fn paint_laid_dom_scrolled(
             .as_ref()
             .or(ancestor_clip_mask.as_deref());
         let background_mask = element_clip_mask;
+        // Several layers or an image layer: painted per layer, each with its
+        // own size, position, repeat, origin and clip.
+        let layered = (raster_scale == 1.0)
+            .then(|| layered_background(style))
+            .flatten();
+        // Masked through its layers by the effect path above; the mask is
+        // not also a fill.
+        let layer_masked =
+            !style.mask_layers.images.is_empty() && layer_mask(tree, laid, nid).is_some();
         // A linear-gradient background (heavily used by modern hero sections);
         // without this it paints white. Takes precedence over a solid color.
         // `background-clip: text` clips the background to the glyphs, so it must
@@ -5756,7 +5800,7 @@ fn paint_laid_dom_scrolled(
         if box_on_surface
             && !paints_inline_fragments
             && !background_transfers_to_canvas
-            && style.mask_image.is_none()
+            && (style.mask_image.is_none() || layer_masked)
             && !style.background_clip_text
         {
             if let Some(bg) = style.background_color {
@@ -5773,7 +5817,19 @@ fn paint_laid_dom_scrolled(
                     );
                 }
             }
-            if !style.background_gradient_layers.is_empty() {
+            if let Some(layers) = layered.as_deref() {
+                paint_layered_background(
+                    &mut pixmap,
+                    &rect,
+                    style,
+                    layers,
+                    base_url,
+                    root_font_size,
+                    viewport,
+                    image_cache,
+                    background_mask,
+                );
+            } else if !style.background_gradient_layers.is_empty() {
                 if let Some(path) = background_path.as_ref() {
                     paint_background_gradient_layers(
                         &mut pixmap,
@@ -5835,7 +5891,7 @@ fn paint_laid_dom_scrolled(
         }
 
         if box_on_surface && !paints_inline_fragments && !background_transfers_to_canvas {
-            if let Some(mask_url) = &style.mask_image {
+            if let (false, Some(mask_url)) = (layer_masked, &style.mask_image) {
                 let fill = style
                     .background_color
                     .or(style.color)
@@ -5859,7 +5915,7 @@ fn paint_laid_dom_scrolled(
                     &mut pixmap,
                     image_cache,
                 );
-            } else if let Some(bg_url) = &style.background_image {
+            } else if let (None, Some(bg_url)) = (&layered, &style.background_image) {
                 if let Some(img_rect) = background_image_rect(
                     bg_url,
                     base_url,
@@ -8491,6 +8547,7 @@ struct PrintEconomyStyleSnapshot {
     background_conic_gradient: Option<(f32, (f32, f32), Vec<([u8; 4], Option<f32>)>)>,
     background_gradient_layers: Vec<crate::BackgroundGradientLayer>,
     background_image: Option<String>,
+    background_layers: crate::BackgroundLayerLists,
     color: Option<[u8; 4]>,
     before_pseudo: Option<Box<PrintEconomyStyleSnapshot>>,
     after_pseudo: Option<Box<PrintEconomyStyleSnapshot>>,
@@ -8504,6 +8561,7 @@ impl PrintEconomyStyleSnapshot {
         let background_conic_gradient = style.background_conic_gradient.take();
         let background_gradient_layers = std::mem::take(&mut style.background_gradient_layers);
         let background_image = style.background_image.take();
+        let background_layers = std::mem::take(&mut style.background_layers);
         let had_background = background_color.is_some_and(|color| color[3] != 0)
             || background_gradient.is_some()
             || background_radial_gradient.is_some()
@@ -8530,6 +8588,7 @@ impl PrintEconomyStyleSnapshot {
             background_conic_gradient,
             background_gradient_layers,
             background_image,
+            background_layers,
             color,
             before_pseudo,
             after_pseudo,
@@ -8543,6 +8602,7 @@ impl PrintEconomyStyleSnapshot {
         style.background_conic_gradient = self.background_conic_gradient;
         style.background_gradient_layers = self.background_gradient_layers;
         style.background_image = self.background_image;
+        style.background_layers = self.background_layers;
         style.color = self.color;
         if let (Some(snapshot), Some(pseudo)) =
             (self.before_pseudo, style.before_pseudo.as_deref_mut())
@@ -9972,6 +10032,357 @@ fn paint_linear_gradient_layer(
     );
 }
 
+/// Size of a gradient layer's image: `background-size` resolved against the
+/// positioning area; `auto` and cover/contain fill it.
+fn gradient_layer_size(
+    size: Option<&str>,
+    fit: Option<crate::ObjectFit>,
+    rect: &crate::Rect,
+    em: f32,
+    rem: f32,
+    viewport: (f32, f32),
+) -> (f32, f32) {
+    let Some(expression) = size else {
+        return (rect.width, rect.height);
+    };
+    if fit.is_some() {
+        return (rect.width, rect.height);
+    }
+    let components = split_background_size_components(expression);
+    let resolve = |value: &&str, basis: f32| {
+        (!value.eq_ignore_ascii_case("auto"))
+            .then(|| {
+                crate::style::resolve_contextual_length(
+                    value,
+                    em,
+                    rem,
+                    viewport.0 / 100.0,
+                    viewport.1 / 100.0,
+                    basis,
+                )
+            })
+            .flatten()
+    };
+    let width = components
+        .first()
+        .and_then(|value| resolve(value, rect.width))
+        .unwrap_or(rect.width);
+    let height = match components.get(1) {
+        Some(value) => resolve(value, rect.height).unwrap_or(rect.height),
+        // One value sets the width; a gradient has no ratio, so the height
+        // is `auto`: the positioning area's.
+        None => rect.height,
+    };
+    (width, height)
+}
+
+/// Paint background (or mask) layers bottom-up into `surface`, whose
+/// top-left pixel is page pixel `offset`. `rect` is the box's border box in
+/// page pixels. Each layer is tiled over its painting area per its own
+/// size, position, repeat, origin and clip (CSS Backgrounds 3).
+#[allow(clippy::too_many_arguments)]
+fn paint_resolved_layers(
+    surface: &mut Pixmap,
+    offset: (i32, i32),
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    layers: &[crate::style::ResolvedLayer],
+    base_url: Option<&str>,
+    root_font_size: f32,
+    viewport: (f32, f32),
+    cache: &mut RenderResourceCache,
+) {
+    let em = style.font_size.unwrap_or(16.0);
+    let (ox, oy) = (offset.0 as f32, offset.1 as f32);
+    for layer in layers.iter().rev() {
+        let geometry = layer_geometry(rect, style, layer.origin, layer.clip);
+        let origin = geometry.origin_rect;
+        let tile_rect = match &layer.image {
+            crate::style::LayerImage::Url(url) => background_image_rect(
+                url,
+                base_url,
+                &origin,
+                None,
+                layer.size.as_deref(),
+                layer.fit,
+                layer.position,
+                em,
+                root_font_size,
+                viewport,
+                cache,
+            ),
+            crate::style::LayerImage::Gradient(..) => {
+                let (width, height) = gradient_layer_size(
+                    layer.size.as_deref(),
+                    layer.fit,
+                    &origin,
+                    em,
+                    root_font_size,
+                    viewport,
+                );
+                Some(crate::Rect {
+                    x: origin.x + layer.position.x.resolve(origin.width - width),
+                    y: origin.y + layer.position.y.resolve(origin.height - height),
+                    width,
+                    height,
+                })
+            }
+        };
+        let Some(tile_rect) = tile_rect else {
+            continue;
+        };
+        if tile_rect.width <= 0.0 || tile_rect.height <= 0.0 {
+            continue;
+        }
+        let width = tile_rect.width.ceil().clamp(1.0, 4096.0) as u32;
+        let height = tile_rect.height.ceil().clamp(1.0, 4096.0) as u32;
+        let Some(mut tile) = Pixmap::new(width, height) else {
+            continue;
+        };
+        let local = crate::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: tile_rect.width,
+            height: tile_rect.height,
+        };
+        match &layer.image {
+            crate::style::LayerImage::Url(url)
+                if fetch_bytes(url, base_url, cache).is_some_and(|bytes| is_svg(&bytes)) =>
+            {
+                // An SVG image is scaled as a whole to its concrete size;
+                // one without a viewBox gets one from its intrinsic size.
+                let Some(bytes) = fetch_bytes(url, base_url, cache) else {
+                    continue;
+                };
+                let bytes = svg_with_intrinsic_viewbox(&bytes);
+                match render_svg(&bytes, width, height) {
+                    Some(rendered) => tile = rendered,
+                    None => continue,
+                }
+            }
+            crate::style::LayerImage::Url(url) => {
+                paint_image(
+                    url,
+                    base_url,
+                    &local,
+                    &local,
+                    crate::ObjectFit::Fill,
+                    crate::ObjectPosition::default(),
+                    &mut tile,
+                    cache,
+                    None,
+                    None,
+                    crate::ResolvedBorderRadii::default(),
+                    None,
+                );
+            }
+            crate::style::LayerImage::Gradient(gradient, geometry) => {
+                let Some(path) = Rect::from_xywh(0.0, 0.0, local.width, local.height)
+                    .map(PathBuilder::from_rect)
+                else {
+                    continue;
+                };
+                paint_gradient_layer_stack(
+                    &mut tile,
+                    &path,
+                    &local,
+                    &local,
+                    crate::ResolvedBorderRadii::default(),
+                    std::slice::from_ref(gradient),
+                    std::slice::from_ref(geometry),
+                    em,
+                    root_font_size,
+                    viewport,
+                    None,
+                    1.0,
+                );
+            }
+        }
+        // The painting area, cut to one tile along an axis that does not
+        // repeat.
+        let clip = geometry.clip_rect;
+        let (mut x0, mut x1) = (clip.x, clip.x + clip.width);
+        let (mut y0, mut y1) = (clip.y, clip.y + clip.height);
+        if !layer.repeat.0 {
+            x0 = x0.max(tile_rect.x);
+            x1 = x1.min(tile_rect.x + tile_rect.width);
+        }
+        if !layer.repeat.1 {
+            y0 = y0.max(tile_rect.y);
+            y1 = y1.min(tile_rect.y + tile_rect.height);
+        }
+        let Some(area) = Rect::from_ltrb(x0 - ox, y0 - oy, x1 - ox, y1 - oy) else {
+            continue;
+        };
+        let sx = tile_rect.width / width as f32;
+        let sy = tile_rect.height / height as f32;
+        let exact = (sx - 1.0).abs() < 1e-4
+            && (sy - 1.0).abs() < 1e-4
+            && (tile_rect.x - tile_rect.x.round()).abs() < 1e-3
+            && (tile_rect.y - tile_rect.y.round()).abs() < 1e-3;
+        let mut paint = Paint::default();
+        paint.shader = Pattern::new(
+            tile.as_ref(),
+            SpreadMode::Repeat,
+            if exact {
+                FilterQuality::Nearest
+            } else {
+                FilterQuality::Bilinear
+            },
+            1.0,
+            Transform::from_row(sx, 0.0, 0.0, sy, tile_rect.x - ox, tile_rect.y - oy),
+        );
+        let rounded_clip = (!geometry.clip_radii.is_zero())
+            .then(|| {
+                let local_geometry = BackgroundGeometry {
+                    origin_rect: geometry.origin_rect,
+                    clip_rect: crate::Rect {
+                        x: clip.x - ox,
+                        y: clip.y - oy,
+                        ..clip
+                    },
+                    clip_radii: geometry.clip_radii,
+                };
+                let path = background_clip_path(local_geometry)?;
+                let mut mask = crate::canvas::new_mask(surface.width(), surface.height())?;
+                mask.clip_fill_path(&path, FillRule::Winding, true, Transform::identity());
+                Some(mask)
+            })
+            .flatten();
+        surface.fill_rect(area, &paint, Transform::identity(), rounded_clip.as_ref());
+    }
+}
+
+/// `bytes` with a `viewBox` of its `width` x `height` on the root `<svg>`
+/// when it has none, so the image scales with its concrete size as CSS
+/// images do.
+fn svg_with_intrinsic_viewbox(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return bytes.into();
+    };
+    let Some(start) = text.find("<svg") else {
+        return bytes.into();
+    };
+    let Some(end) = text[start..].find('>').map(|end| start + end) else {
+        return bytes.into();
+    };
+    let tag = &text[start..end];
+    if tag.contains("viewBox") {
+        return bytes.into();
+    }
+    let attribute = |name: &str| -> Option<f32> {
+        let at = tag.find(&format!(" {name}="))? + name.len() + 2;
+        let rest = &tag[at..];
+        let quote = rest.chars().next()?;
+        let value = if quote == '"' || quote == '\'' {
+            rest[1..].split(quote).next()?
+        } else {
+            rest.split(|c: char| c.is_whitespace() || c == '/').next()?
+        };
+        value.trim().trim_end_matches("px").parse::<f32>().ok()
+    };
+    let (Some(width), Some(height)) = (attribute("width"), attribute("height")) else {
+        return bytes.into();
+    };
+    let mut out = String::with_capacity(text.len() + 32);
+    out.push_str(&text[..start + 4]);
+    out.push_str(&format!(" viewBox=\"0 0 {width} {height}\""));
+    out.push_str(&text[start + 4..]);
+    out.into_bytes().into()
+}
+
+/// Paint every background layer of a box with more than one layer or an
+/// image layer. Background color is painted by the caller.
+#[allow(clippy::too_many_arguments)]
+fn paint_layered_background(
+    pixmap: &mut Pixmap,
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    layers: &[crate::style::ResolvedLayer],
+    base_url: Option<&str>,
+    root_font_size: f32,
+    viewport: (f32, f32),
+    cache: &mut RenderResourceCache,
+    clip: Option<&tiny_skia::Mask>,
+) {
+    let x0 = rect.x.floor().max(0.0) as i32;
+    let y0 = rect.y.floor().max(0.0) as i32;
+    let x1 = ((rect.x + rect.width).ceil() as i32).min(pixmap.width() as i32);
+    let y1 = ((rect.y + rect.height).ceil() as i32).min(pixmap.height() as i32);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let Some(mut surface) = Pixmap::new((x1 - x0) as u32, (y1 - y0) as u32) else {
+        return;
+    };
+    paint_resolved_layers(
+        &mut surface,
+        (x0, y0),
+        rect,
+        style,
+        layers,
+        base_url,
+        root_font_size,
+        viewport,
+        cache,
+    );
+    pixmap.canvas().draw_image(
+        x0,
+        y0,
+        surface.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        Transform::identity(),
+        clip,
+    );
+}
+
+/// The mask layers of an element when they mask its rendering: any
+/// gradient layer, several layers, or a box with content (children or a
+/// replaced element). A single image mask on an empty box keeps the icon
+/// path (`paint_mask`), which fills the mask shape with the box's color.
+fn layer_mask(
+    tree: &DomTree,
+    laid: &crate::DomLayout,
+    nid: obscura_dom::tree::NodeId,
+) -> Option<Vec<crate::style::ResolvedLayer>> {
+    let style = laid.styles.get(&nid)?;
+    if style.mask_layers.images.is_empty() {
+        return None;
+    }
+    let layers = crate::style::resolve_layers(&style.mask_layers, style, true);
+    if layers.is_empty() {
+        return None;
+    }
+    let gradient = layers
+        .iter()
+        .any(|layer| matches!(layer.image, crate::style::LayerImage::Gradient(..)));
+    let replaced = tree
+        .get_node(nid)
+        .and_then(|node| node.as_element().map(|e| e.local.to_string()))
+        .is_some_and(|tag| {
+            matches!(
+                tag.as_str(),
+                "img" | "video" | "canvas" | "svg" | "picture" | "iframe" | "input" | "object"
+            )
+        });
+    let has_children = !crate::dom::rendered_descendants(tree, nid).is_empty();
+    (gradient || layers.len() > 1 || replaced || has_children).then_some(layers)
+}
+
+/// Background layers that take the layered paint path: more than one
+/// layer, or any image layer. A single gradient keeps the gradient path.
+fn layered_background(style: &crate::LayoutStyle) -> Option<Vec<crate::style::ResolvedLayer>> {
+    if style.background_layers.images.is_empty() {
+        return None;
+    }
+    let layers = crate::style::resolve_layers(&style.background_layers, style, false);
+    (layers.len() > 1
+        || layers
+            .iter()
+            .any(|layer| matches!(layer.image, crate::style::LayerImage::Url(_))))
+    .then_some(layers)
+}
+
 #[derive(Clone, Copy)]
 struct BackgroundGeometry {
     origin_rect: crate::Rect,
@@ -9998,6 +10409,16 @@ fn add_sides(a: crate::Sides<f32>, b: crate::Sides<f32>) -> crate::Sides<f32> {
 }
 
 fn background_geometry(rect: &crate::Rect, style: &crate::LayoutStyle) -> BackgroundGeometry {
+    layer_geometry(rect, style, style.background_origin, style.background_clip)
+}
+
+/// Positioning and painting areas of one background or mask layer.
+fn layer_geometry(
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    origin: crate::BackgroundOrigin,
+    clip: crate::BackgroundClip,
+) -> BackgroundGeometry {
     let border = crate::Sides {
         top: style.border.top,
         right: style.border.right,
@@ -10011,12 +10432,12 @@ fn background_geometry(rect: &crate::Rect, style: &crate::LayoutStyle) -> Backgr
         left: style.padding.left,
     };
     let content = add_sides(border, padding);
-    let origin_insets = match style.background_origin {
+    let origin_insets = match origin {
         crate::BackgroundOrigin::BorderBox => crate::Sides::all(0.0),
         crate::BackgroundOrigin::PaddingBox => border,
         crate::BackgroundOrigin::ContentBox => content,
     };
-    let clip_insets = match style.background_clip {
+    let clip_insets = match clip {
         crate::BackgroundClip::BorderBox | crate::BackgroundClip::Text => crate::Sides::all(0.0),
         crate::BackgroundClip::PaddingBox => border,
         crate::BackgroundClip::ContentBox => content,
@@ -14021,6 +14442,87 @@ mod tests {
         assert!(blue.blue() > 240 && blue.red() < 20 && blue.green() < 20);
         assert!(red.red() > 240 && red.green() < 20 && red.blue() < 20);
         assert!(yellow.red() > 240 && yellow.green() > 240 && yellow.blue() < 20);
+    }
+
+    #[test]
+    fn gradient_mask_layers_mask_the_element_and_its_content() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:100px;
+                    background:rgb(255,0,0);
+                    -webkit-mask-image:linear-gradient(black,transparent)">
+                  <div style="width:50px;height:100px;background:rgb(0,0,255)"></div>
+                </div>
+                <div style="position:absolute;left:110px;top:0;width:100px;height:100px;
+                    background:rgb(255,0,0);
+                    mask:linear-gradient(black,black) 0 0/50px 50px no-repeat,
+                         linear-gradient(black,black) right bottom/20px 20px no-repeat"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (220.0, 110.0), None).expect("mask");
+        let rgb = |x, y| {
+            let p = pixmap.pixel(x, y).expect("pixel");
+            (p.red(), p.green(), p.blue())
+        };
+        let top = rgb(75, 0);
+        assert!(
+            top.0 == 255 && top.1 < 8,
+            "the mask is opaque at the top: {top:?}"
+        );
+        assert!(rgb(25, 0).2 > 245, "the child is masked with its parent");
+        let bottom = rgb(75, 99);
+        assert!(
+            bottom.1 > 245,
+            "the mask is transparent at the bottom: {bottom:?}"
+        );
+        let middle = rgb(75, 50);
+        assert!(
+            middle.1 > 100 && middle.1 < 160,
+            "half way down, half of the red shows: {middle:?}"
+        );
+        assert_eq!(rgb(120, 10), (255, 0, 0), "first mask layer");
+        assert_eq!(rgb(170, 10), (255, 255, 255), "outside both mask layers");
+        assert_eq!(rgb(205, 95), (255, 0, 0), "second mask layer");
+    }
+
+    #[test]
+    fn background_layers_each_take_their_own_size_position_and_repeat() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:60px;
+                    background:linear-gradient(rgb(255,0,0),rgb(255,0,0)) 0 0/20px 20px no-repeat,
+                               linear-gradient(rgb(0,0,255),rgb(0,0,255)) right top/10px 10px repeat-y,
+                               rgb(0,255,0)"></div>
+                <div style="position:absolute;left:0;top:70px;width:100px;height:40px;
+                    padding:10px;background-image:linear-gradient(rgb(255,0,0),rgb(255,0,0)),
+                                                  linear-gradient(rgb(0,0,255),rgb(0,0,255));
+                    background-clip:content-box,border-box;background-repeat:no-repeat"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (140.0, 140.0), None).expect("layers");
+        let rgb = |x, y| {
+            let p = pixmap.pixel(x, y).expect("pixel");
+            (p.red(), p.green(), p.blue())
+        };
+        assert_eq!(rgb(5, 5), (255, 0, 0), "top layer at 0 0, 20px");
+        assert_eq!(rgb(25, 5), (0, 255, 0), "top layer does not repeat");
+        assert_eq!(rgb(95, 5), (0, 0, 255), "second layer at the right edge");
+        assert_eq!(rgb(95, 55), (0, 0, 255), "second layer repeats down");
+        assert_eq!(
+            rgb(85, 30),
+            (0, 255, 0),
+            "second layer does not repeat across"
+        );
+        assert_eq!(
+            rgb(60, 100),
+            (255, 0, 0),
+            "first layer fills the content box"
+        );
+        assert_eq!(
+            rgb(3, 100),
+            (0, 0, 255),
+            "second layer fills the padding of the border box"
+        );
     }
 
     #[test]

@@ -1703,12 +1703,23 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
             if !value.trim().is_empty() {
                 style.background_color = None;
                 set_background_gradients(style, value);
-                if style.background_gradient.is_none()
-                    && style.background_radial_gradient.is_none()
-                    && style.background_conic_gradient.is_none()
-                {
-                    style.background_color = parse_color_for_scheme(value, style.color_scheme_dark);
-                }
+                // The color belongs to the final layer, beside its image.
+                let last_layer = split_top_level(value, ',')
+                    .into_iter()
+                    .last()
+                    .unwrap_or(value);
+                let plain = !last_layer.contains("gradient(") && !last_layer.contains("url(");
+                style.background_color = plain
+                    .then(|| parse_color_for_scheme(last_layer, style.color_scheme_dark))
+                    .flatten()
+                    .or_else(|| {
+                        split_ws_paren(last_layer)
+                            .into_iter()
+                            .filter(|token| !token.contains("gradient(") && !token.contains("url("))
+                            .find_map(|token| {
+                                parse_color_for_scheme(token, style.color_scheme_dark)
+                            })
+                    });
                 style.background_image = parse_url(value);
                 style.background_size = None;
                 style.background_size_expression = background_size_expression(value);
@@ -1722,35 +1733,68 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
                     style.background_clip = clip;
                 }
                 style.background_clip_text = style.background_clip == crate::BackgroundClip::Text;
+                style.background_layers = shorthand_layer_lists(value);
             }
         }
         "background-image" => {
             set_background_gradients(style, value);
             style.background_image = parse_url(value);
+            style.background_layers.images = layer_list(value);
         }
         "background-size" => {
             style.background_size = parse_background_size(value);
             style.background_size_expression =
                 (!value.trim().is_empty()).then(|| value.trim().to_string());
             style.background_size_fit = parse_background_size_fit(value);
+            style.background_layers.sizes = layer_list(value);
         }
-        "background-position" => style.background_position = parse_background_position(value),
+        "background-position" => {
+            style.background_position = parse_background_position(value);
+            style.background_layers.positions = layer_list(value);
+        }
         "background-repeat" => {
             style.background_repeat = parse_image_repeat(value);
+            style.background_layers.repeats = layer_list(value);
         }
         "background-origin" => {
             style.background_origin = parse_background_origin(value).unwrap_or_default();
+            style.background_layers.origins = layer_list(value);
         }
         // On replaced elements, an image-valued `content` replaces the
         // ordinary source and participates in intrinsic sizing. String-valued
         // generated content is handled separately for pseudo-elements.
         "content" => style.content_image = parse_url(value),
-        "mask-image" | "-webkit-mask-image" => style.mask_image = parse_url(value),
-        "mask-size" | "-webkit-mask-size" => style.mask_size = parse_background_size(value),
+        "mask-image" | "-webkit-mask-image" => {
+            style.mask_image = parse_url(value);
+            style.mask_layers.images = layer_list(value);
+        }
+        "mask" | "-webkit-mask" => {
+            if !value.trim().is_empty() {
+                style.mask_image = parse_url(value);
+                style.mask_size = None;
+                style.mask_repeat = parse_image_repeat(value);
+                style.mask_layers = shorthand_layer_lists(value);
+            }
+        }
+        "mask-size" | "-webkit-mask-size" => {
+            style.mask_size = parse_background_size(value);
+            style.mask_layers.sizes = layer_list(value);
+        }
         "mask-repeat" | "-webkit-mask-repeat" => {
             style.mask_repeat = parse_image_repeat(value);
+            style.mask_layers.repeats = layer_list(value);
+        }
+        "mask-position" | "-webkit-mask-position" => {
+            style.mask_layers.positions = layer_list(value);
+        }
+        "mask-origin" | "-webkit-mask-origin" => {
+            style.mask_layers.origins = layer_list(value);
+        }
+        "mask-clip" | "-webkit-mask-clip" => {
+            style.mask_layers.clips = layer_list(value);
         }
         "background-clip" | "-webkit-background-clip" => {
+            style.background_layers.clips = layer_list(value);
             style.background_clip = parse_background_clip(value).unwrap_or_default();
             style.background_clip_text = style.background_clip == crate::BackgroundClip::Text;
         }
@@ -9188,6 +9232,170 @@ fn parse_background_box_shorthand(
         [(origin, _), (_, clip)] => Some((parse_background_origin(origin)?, *clip)),
         _ => None,
     }
+}
+
+/// The comma-separated layers of a list-valued property.
+fn layer_list(value: &str) -> Vec<String> {
+    if value.trim().is_empty() {
+        return Vec::new();
+    }
+    split_top_level(value, ',')
+        .into_iter()
+        .map(|layer| layer.trim().to_string())
+        .collect()
+}
+
+/// Per-layer lists of a `background`/`mask` shorthand. Every list holds
+/// the layer's own text except size and position, which are cut out of it.
+fn shorthand_layer_lists(value: &str) -> crate::BackgroundLayerLists {
+    let layers = layer_list(value);
+    crate::BackgroundLayerLists {
+        sizes: layers
+            .iter()
+            .map(|layer| background_size_expression(layer).unwrap_or_else(|| "auto".into()))
+            .collect(),
+        positions: layers
+            .iter()
+            .map(|layer| shorthand_position(layer))
+            .collect(),
+        repeats: layers.clone(),
+        origins: layers.clone(),
+        clips: layers.clone(),
+        images: layers,
+    }
+}
+
+/// The `<bg-position>` tokens of one shorthand layer (before its `/ size`).
+fn shorthand_position(layer: &str) -> String {
+    let mut depth = 0i32;
+    let mut cut = layer.len();
+    for (index, ch) in layer.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = (depth - 1).max(0),
+            '/' if depth == 0 => {
+                cut = index;
+                break;
+            }
+            _ => {}
+        }
+    }
+    split_ws_paren(&layer[..cut])
+        .into_iter()
+        .filter(|token| {
+            matches!(
+                token.to_ascii_lowercase().as_str(),
+                "left" | "right" | "top" | "bottom" | "center"
+            ) || token.ends_with('%')
+                || (px_value(token).is_some() && !token.contains('('))
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The image of one background or mask layer.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum LayerImage {
+    Url(String),
+    Gradient(
+        crate::BackgroundGradientLayer,
+        Option<crate::RadialGradientGeometry>,
+    ),
+}
+
+/// One background or mask layer with its longhands resolved.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ResolvedLayer {
+    pub image: LayerImage,
+    /// `background-size` text of this layer; `None` for `auto`.
+    pub size: Option<String>,
+    pub fit: Option<crate::ObjectFit>,
+    pub position: crate::BackgroundPosition,
+    pub repeat: (bool, bool),
+    pub origin: crate::BackgroundOrigin,
+    pub clip: crate::BackgroundClip,
+}
+
+/// Resolve per-layer lists into layers, topmost first. Layers whose image is
+/// `none` (or unparsable) are dropped. `fallback` supplies the single-value
+/// longhands for a list that was never set.
+pub(crate) fn resolve_layers(
+    lists: &crate::BackgroundLayerLists,
+    fallback: &crate::LayoutStyle,
+    mask: bool,
+) -> Vec<ResolvedLayer> {
+    let pick = |list: &[String], index: usize| -> Option<String> {
+        (!list.is_empty()).then(|| list[index % list.len()].clone())
+    };
+    let mut out = Vec::new();
+    for (index, image) in lists.images.iter().enumerate() {
+        let image = if image.contains("gradient(") && !image.trim_start().starts_with("url(") {
+            let (gradients, geometries) =
+                parse_background_gradient_layers(image, fallback.color_scheme_dark);
+            match gradients.into_iter().next() {
+                Some(gradient) => {
+                    LayerImage::Gradient(gradient, geometries.into_iter().next().flatten())
+                }
+                None => continue,
+            }
+        } else if let Some(url) = parse_url(image) {
+            LayerImage::Url(url)
+        } else {
+            continue;
+        };
+        let size = match pick(&lists.sizes, index) {
+            Some(size) => (!size.trim().eq_ignore_ascii_case("auto")
+                && !size.trim().eq_ignore_ascii_case("auto auto"))
+            .then(|| size.trim().to_string()),
+            None if mask => None,
+            None => fallback.background_size_expression.clone(),
+        };
+        let fit = size.as_deref().and_then(parse_background_size_fit);
+        let position = match pick(&lists.positions, index) {
+            Some(position) => parse_background_position(&position),
+            None if mask => crate::BackgroundPosition::default(),
+            None => fallback.background_position,
+        };
+        let repeat = match pick(&lists.repeats, index) {
+            Some(repeat) => parse_image_repeat(&repeat).unwrap_or((true, true)),
+            None if mask => fallback.mask_repeat.unwrap_or((true, true)),
+            None => fallback.background_repeat.unwrap_or((true, true)),
+        };
+        let boxes = |text: &str| {
+            parse_background_box_shorthand(text).or_else(|| {
+                parse_background_clip(text)
+                    .map(|clip| (parse_background_origin(text).unwrap_or_default(), clip))
+            })
+        };
+        let origin = match pick(&lists.origins, index) {
+            Some(text) => parse_background_origin(&text)
+                .or_else(|| boxes(&text).map(|(origin, _)| origin))
+                .unwrap_or(if mask {
+                    crate::BackgroundOrigin::BorderBox
+                } else {
+                    crate::BackgroundOrigin::PaddingBox
+                }),
+            None if mask => crate::BackgroundOrigin::BorderBox,
+            None => fallback.background_origin,
+        };
+        let clip = match pick(&lists.clips, index) {
+            Some(text) => parse_background_clip(&text)
+                .or_else(|| boxes(&text).map(|(_, clip)| clip))
+                .unwrap_or_default(),
+            None if mask => crate::BackgroundClip::BorderBox,
+            None => fallback.background_clip,
+        };
+        out.push(ResolvedLayer {
+            image,
+            size,
+            fit,
+            position,
+            repeat,
+            origin,
+            clip,
+        });
+    }
+    out
 }
 
 fn background_size_expression(value: &str) -> Option<String> {
