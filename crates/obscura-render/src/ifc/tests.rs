@@ -965,7 +965,11 @@ fn push_button_inputs_ignore_inherited_line_height() {
          <input id=a type=button value='Go Back'><br><input id=b>",
         &[],
     );
-    assert!(height(&tree, &laid, "a") < 30.0, "{}", height(&tree, &laid, "a"));
+    assert!(
+        height(&tree, &laid, "a") < 30.0,
+        "{}",
+        height(&tree, &laid, "a")
+    );
     assert_eq!(height(&tree, &laid, "b"), 30.0);
 }
 
@@ -1217,7 +1221,11 @@ fn overflowing_atomic_at_line_start_keeps_trailing_space_on_its_line() {
          <div style='width:100px'><img style='width:160px;height:20px'> word <span id=w>x</span></div>",
         &[],
     );
-    assert!(height(&tree, &laid, "a") < 30.0, "{}", height(&tree, &laid, "a"));
+    assert!(
+        height(&tree, &laid, "a") < 30.0,
+        "{}",
+        height(&tree, &laid, "a")
+    );
     let w = laid.rects[&element(&tree, "w")];
     // "word x" is on the second line, below the image line.
     assert!(w.x < 50.0 && w.y > height(&tree, &laid, "a"), "{w:?}");

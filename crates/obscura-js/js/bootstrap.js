@@ -18709,10 +18709,27 @@ if (typeof FontFace === 'undefined') {
     }
     return declarations;
   };
+  // CSS text of every author style sheet in order: <style> contents and
+  // the fetched text of linked sheets (Chrome lists their @font-face rules
+  // in document.fonts as CSS-connected faces).
+  const _authoredStyleSheetTexts = doc => {
+    const texts = [];
+    for (const owner of doc.querySelectorAll('style, link[rel~="stylesheet" i]')) {
+      if (owner.localName === 'style') {
+        texts.push(owner.textContent || '');
+        continue;
+      }
+      if (typeof __obscuraCore.ops.op_external_stylesheet_get !== 'function') continue;
+      try {
+        const sheet = JSON.parse(__obscuraCore.ops.op_external_stylesheet_get(owner._nid, _realmFrameId));
+        if (sheet && sheet.originClean && typeof sheet.css === 'string') texts.push(sheet.css);
+      } catch (_) {}
+    }
+    return texts;
+  };
   const _fontFaceAuthoredRules = doc => {
     const out = [];
-    for (const style of doc.querySelectorAll('style')) {
-      const css = style.textContent || '';
+    for (const css of _authoredStyleSheetTexts(doc)) {
       const pattern = /@font-face\s*\{([\s\S]*?)\}/gi;
       let match;
       while ((match = pattern.exec(css))) {
