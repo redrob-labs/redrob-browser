@@ -14618,9 +14618,32 @@ where
                 .iter()
                 .filter(|entry| entry.flex_item == flex_item && entry.slot == 0)
                 .filter_map(|entry| styles.get(&entry.node))
-                .filter_map(|style| style.replaced_intrinsic)
-                .filter_map(|metadata| metadata.natural_size())
-                .map(|(width, _)| width)
+                .filter_map(|style| {
+                    let metadata = style.replaced_intrinsic?;
+                    let (width, height) = metadata.natural_size()?;
+                    // With the percentage width treated as auto, a definite
+                    // height transfers through the natural ratio (Chrome: a
+                    // 433x273 image at width:95%; height:220px contributes
+                    // 348.94).
+                    let ratio = metadata
+                        .ratio
+                        .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
+                        .or_else(|| (height > 0.0).then(|| width / height));
+                    Some(match (style.height, ratio) {
+                        (crate::Dimension::Px(used), Some(ratio)) => {
+                            let edges = if style.box_sizing == crate::BoxSizing::BorderBox {
+                                style.padding.top
+                                    + style.padding.bottom
+                                    + style.border.top
+                                    + style.border.bottom
+                            } else {
+                                0.0
+                            };
+                            (used - edges).max(0.0) * ratio
+                        }
+                        _ => width,
+                    })
+                })
                 .filter(|width| width.is_finite() && *width > 0.0)
                 .fold(0.0_f32, f32::max);
             used_declaration = used_declaration.max(natural_floor);

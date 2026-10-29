@@ -878,3 +878,35 @@ fn float_containing_boxes_keep_bottom_padding_below_floats() {
     assert_eq!(height(&tree, &laid, "a"), 178.0);
     assert_eq!(height(&tree, &laid, "b"), 112.0);
 }
+
+#[test]
+fn percentage_images_in_shrink_to_fit_boxes_resolve_against_the_used_width() {
+    // Chrome, a 433x273 image: in a content-sized flex item at width:95%;
+    // height:220px the item is 348.94 (height x ratio) and the image
+    // 331.48; in a float at width:95% the float is 433 and the image 411.34.
+    let tree = obscura_dom::parse_html(
+        "<!doctype html><body style='margin:0'>\
+         <div style='display:flex;width:810px'><div id=a><img id=ia src=a.png style='width:95%;height:220px'></div></div>\
+         <div id=f style='float:left'><img id=ie src=a.png style='width:95%'></div>",
+    );
+    let mut intrinsic = HashMap::new();
+    for id in ["ia", "ie"] {
+        intrinsic.insert(
+            element(&tree, id),
+            crate::ReplacedIntrinsic::from_dimensions(433.0, 273.0),
+        );
+    }
+    let laid = crate::dom::layout_dom_with_web_fonts(&tree, (1280.0, 800.0), &intrinsic, &[]);
+    let w = |id: &str| {
+        let node = element(&tree, id);
+        laid.fractional_rects
+            .get(&node)
+            .copied()
+            .unwrap_or(laid.rects[&node])
+            .width
+    };
+    assert!((w("a") - 348.94).abs() < 0.02, "{}", w("a"));
+    assert!((w("ia") - 331.48).abs() < 0.02, "{}", w("ia"));
+    assert_eq!(w("f"), 433.0);
+    assert!((w("ie") - 411.34).abs() < 0.02, "{}", w("ie"));
+}

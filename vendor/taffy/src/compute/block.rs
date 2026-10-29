@@ -873,6 +873,18 @@ fn perform_final_layout_on_in_flow_children(
                     SizingMode::InherentSize,
                     Line::FALSE,
                 );
+                // Lay the float out again at its used width: percentages
+                // inside it resolve against that width (Chrome: a float
+                // around a width:95% image of natural width 433 is 433 wide
+                // and the image 411.34).
+                let item_layout = tree.perform_child_layout(
+                    item.node_id,
+                    Size { width: Some(item_layout.size.width), height: None },
+                    parent_size,
+                    Size::MAX_CONTENT,
+                    SizingMode::InherentSize,
+                    Line::FALSE,
+                );
                 let margin_box = item_layout.size + item_non_auto_margin.sum_axes();
 
                 // A float follows the margins collapsed so far (Chromium places it below
