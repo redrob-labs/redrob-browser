@@ -1089,3 +1089,27 @@ fn table_cells_keep_fractional_heights_after_block_alignment() {
         assert_eq!(rect.height, 30.5, "{id}");
     }
 }
+
+#[test]
+fn picture_sources_are_empty_inlines() {
+    // Chrome: <source> is an empty inline: 0 wide, one line box tall, at
+    // its position in the line ("a " in 16px Arial: x 13.34).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'><div>a <source id=s width=500 height=500> b</div>",
+        &[],
+    );
+    let r = laid
+        .fractional_rects
+        .get(&element(&tree, "s"))
+        .copied()
+        .or_else(|| {
+            laid.inline_fragments
+                .get(&element(&tree, "s"))
+                .and_then(|f| f.first().copied())
+        })
+        .unwrap_or(laid.rects[&element(&tree, "s")]);
+    assert!(
+        (r.x - 13.34).abs() < 0.02 && r.width == 0.0 && r.height == 17.0,
+        "{r:?}"
+    );
+}
