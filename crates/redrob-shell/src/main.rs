@@ -50,6 +50,11 @@ const NEW_TAB: &str = "about:blank";
 /// temporary folder that is deleted when the window closes.
 const INCOGNITO_FLAG: &str = "--incognito";
 
+/// `--new-window`: a further window, opened to hold a tab moved out of
+/// another one. It shares the profile but leaves the saved session and the
+/// agents' relay address to the first window.
+const NEW_WINDOW_FLAG: &str = "--new-window";
+
 fn main() -> anyhow::Result<()> {
     startup::init();
     run().inspect_err(|e| startup::fail(e))
@@ -57,6 +62,7 @@ fn main() -> anyhow::Result<()> {
 
 fn run() -> anyhow::Result<()> {
     let incognito = std::env::args().any(|a| a == INCOGNITO_FLAG);
+    let secondary = std::env::args().any(|a| a == NEW_WINDOW_FLAG);
     let mut profile = match profile::Profile::open_default() {
         Ok(p) => Some(p),
         Err(e) => {
@@ -98,7 +104,11 @@ fn run() -> anyhow::Result<()> {
     let engine = engine::Engine::start(&storage)?;
     // `redrob-browser tab ...` and agents find this window's CDP relay here;
     // cdp::run writes it once the relay is listening.
-    let endpoint_file = storage.join("ws-endpoint");
+    let endpoint_file = if secondary {
+        std::env::temp_dir().join(format!("redrob-browser-ws-{}", std::process::id()))
+    } else {
+        storage.join("ws-endpoint")
+    };
     let relay_file = endpoint_file.clone();
     let start_url = std::env::args().skip(1).find(|a| !a.starts_with("--"));
 
@@ -192,7 +202,9 @@ fn run() -> anyhow::Result<()> {
                 if let Err(e) = p.load(&mut model) {
                     eprintln!("redrob-browser: could not read bookmarks and history: {e}");
                 }
-                restore = p.load_session().unwrap_or_default();
+                if !secondary {
+                    restore = p.load_session().unwrap_or_default();
+                }
             }
             let mut window = Window {
                 commands: cmd_tx,
@@ -225,6 +237,8 @@ fn run() -> anyhow::Result<()> {
                 address_id: egui::Id::new("address"),
                 autoscroll: Default::default(),
                 incognito: false,
+                secondary,
+                tab_drag: None,
                 top_sites: None,
                 new_tab_query: String::new(),
                 #[cfg(feature = "gpu")]
@@ -245,6 +259,8 @@ fn run() -> anyhow::Result<()> {
             }
             window.restore(restore.0, restore.1);
             match start_url {
+                // A moved tab's address is already a URL, data: ones included.
+                Some(url) if secondary => window.open_tab(&url, true),
                 Some(url) => window.open_tab(&model::to_url(&url), true),
                 None if window.model.tabs.is_empty() => window.open_tab(NEW_TAB, true),
                 None => {}
@@ -343,6 +359,10 @@ struct Window {
     autoscroll: autoscroll::Autoscroll,
     /// A private window (`--incognito`).
     incognito: bool,
+    /// A window opened with `--new-window`: it does not save the session.
+    secondary: bool,
+    /// The tab being dragged in the strip, and where on it the pointer took hold.
+    tab_drag: Option<(TabId, f32)>,
     /// Most visited sites for the new tab page, read once per new tab.
     top_sites: Option<Vec<(String, String)>>,
     new_tab_query: String,
@@ -398,6 +418,9 @@ impl Window {
 
     fn save_session(&mut self) {
         self.last_session_save = std::time::Instant::now();
+        if self.secondary {
+            return;
+        }
         if let Some(p) = &mut self.profile {
             let _ = p.save_session(&self.model);
         }
@@ -1283,6 +1306,36 @@ impl Window {
         }
     }
 
+    /// Chrome's "Move to new window": a window is its own process with its
+    /// own engine, so the new window opens the tab's address and this one
+    /// closes the tab. Back and forward history stays behind.
+    fn move_to_new_window(&mut self, index: usize) {
+        let Some(tab) = self.model.tabs.get(index) else {
+            return;
+        };
+        // An agent drives its tab through this window's relay; it stays here.
+        if tab.agent || self.model.tabs.len() < 2 {
+            return;
+        }
+        let url = tab.url.clone();
+        let incognito = self.incognito;
+        let started = std::env::current_exe().and_then(|exe| {
+            let mut cmd = std::process::Command::new(exe);
+            cmd.arg(NEW_WINDOW_FLAG);
+            if incognito {
+                cmd.arg(INCOGNITO_FLAG);
+            }
+            startup::no_console(cmd.arg(&url)).spawn()
+        });
+        match started {
+            Ok(mut child) => {
+                std::thread::spawn(move || child.wait());
+                self.close_tab(index);
+            }
+            Err(e) => self.notice = Some(tf("Could not open a new window: {0}", &[&e])),
+        }
+    }
+
     fn toggle_bookmark(&mut self) {
         if let Some((url, title)) = self
             .model
@@ -1346,16 +1399,82 @@ impl Window {
         let n = self.model.tabs.len().max(1) as f32;
         let width = (room / n).clamp(48.0, 220.0);
         let top = strip.top() + 6.0;
-        for (i, tab) in self.model.tabs.iter().enumerate() {
-            let rect = Rect::from_min_size(
-                egui::pos2(left + i as f32 * width, top),
-                Vec2::new(width, strip.bottom() - top),
-            );
-            if rect.left() > strip.right() - plus_side {
-                break;
+        let count = self.model.tabs.len();
+        let pointer = ui.ctx().pointer_latest_pos();
+        let mut drag_state = self.tab_drag;
+        let mut reorder = None;
+        let mut move_out = None;
+        // Pulled this far above or below the strip, a tab leaves the window.
+        let detach_at = 40.0;
+        let detached = |y: f32| y > strip.bottom() + detach_at || y < strip.top() - detach_at;
+        // The dragged tab is painted last, over the tabs it slides across.
+        let mut order: Vec<usize> = (0..count).collect();
+        if let Some(d) = drag_state.and_then(|(id, _)| self.model.index_of(id)) {
+            order.retain(|&i| i != d);
+            order.push(d);
+        }
+        for i in order {
+            let tab = &self.model.tabs[i];
+            // An agent drives its tab through this window's relay, so it stays here.
+            let detachable = !tab.agent && count > 1;
+            let out = |y: f32| detachable && detached(y);
+            let slot = left + i as f32 * width;
+            if slot > strip.right() - plus_side {
+                continue;
             }
             let id = ui.id().with(("tab", tab.id));
-            let r = ui.interact(rect, id, Sense::click());
+            let dragging = drag_state.filter(|(d, _)| *d == tab.id);
+            // Other tabs slide to their new places; the dragged one follows the pointer.
+            let x = match (dragging, pointer) {
+                (Some((_, grab)), Some(pos)) if !out(pos.y) => {
+                    let max = left + count.saturating_sub(1) as f32 * width;
+                    let x = (pos.x - grab).clamp(left, max.max(left));
+                    ui.ctx().animate_value_with_time(id.with("x"), x, 0.0)
+                }
+                _ => ui.ctx().animate_value_with_time(id.with("x"), slot, 0.12),
+            };
+            let rect =
+                Rect::from_min_size(egui::pos2(x, top), Vec2::new(width, strip.bottom() - top));
+            let r = ui.interact(rect, id, Sense::click_and_drag());
+            if r.drag_started_by(egui::PointerButton::Primary) {
+                let grab = r.interact_pointer_pos().map_or(0.0, |p| p.x - x);
+                drag_state = Some((tab.id, grab));
+                select = Some(i);
+            }
+            if let (Some((_, grab)), Some(pos)) = (dragging, pointer) {
+                if r.drag_stopped() {
+                    drag_state = None;
+                    if out(pos.y) {
+                        move_out = Some(i);
+                    }
+                } else if !out(pos.y) {
+                    let to = ((pos.x - grab - left) / width + 0.5).floor();
+                    let to = (to.max(0.0) as usize).min(count.saturating_sub(1));
+                    if to != i {
+                        reorder = Some((i, to));
+                    }
+                } else {
+                    // Out of the strip: a copy of the tab rides under the pointer.
+                    let ghost = Rect::from_min_size(pos - Vec2::new(grab, 12.0), rect.size());
+                    let fg = ui
+                        .ctx()
+                        .layer_painter(egui::LayerId::new(egui::Order::Tooltip, id.with("ghost")));
+                    fg.rect_filled(ghost, CornerRadius::same(size::RADIUS_MD), p.surface_base);
+                    fg.rect_stroke(
+                        ghost,
+                        CornerRadius::same(size::RADIUS_MD),
+                        Stroke::new(1.0, p.border_subtle),
+                        egui::StrokeKind::Inside,
+                    );
+                    fg.text(
+                        egui::pos2(ghost.left() + 12.0, ghost.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        tab.label(),
+                        egui::FontId::proportional(12.5),
+                        p.ink_primary,
+                    );
+                }
+            }
             let active = i == self.model.active;
             let painter = ui.painter_at(rect.expand2(Vec2::new(8.0, 0.0)));
             let top_round = CornerRadius {
@@ -1482,7 +1601,21 @@ impl Window {
             if r.middle_clicked() {
                 close = Some(i);
             }
+            r.context_menu(|ui| {
+                if ui
+                    .add_enabled(detachable, egui::Button::new(t("Move to new window")))
+                    .clicked()
+                {
+                    move_out = Some(i);
+                    ui.close();
+                }
+            });
         }
+        if drag_state.is_some() && !ui.ctx().input(|i| i.pointer.primary_down()) {
+            // The press ended somewhere the tab never heard of it.
+            drag_state = None;
+        }
+        self.tab_drag = drag_state;
         let shown = self.model.tabs.len() as f32;
         let plus_x =
             (left + shown * width + size::SPACE_1).min(strip.right() - plus_side - size::SPACE_1);
@@ -1494,12 +1627,17 @@ impl Window {
         let new_tab =
             theme::icon_button_sized(&mut plus_ui, Icon::Plus, t("New tab"), plus_side, true)
                 .clicked();
-        if new_tab {
+        if let Some(i) = move_out {
+            self.move_to_new_window(i);
+        } else if new_tab {
             self.open_tab(NEW_TAB, true);
         } else if let Some(i) = close {
             self.close_tab(i);
         } else if let Some(i) = select {
             self.select_tab(i);
+        }
+        if let Some((from, to)) = reorder {
+            self.model.move_tab(from, to);
         }
     }
 
