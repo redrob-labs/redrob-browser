@@ -5370,6 +5370,28 @@ fn identity_transform_operation(operation: &crate::TransformOp) -> crate::Transf
         crate::TransformOp::Rotate(_) => crate::TransformOp::Rotate(0.0),
         crate::TransformOp::Skew(_, _) => crate::TransformOp::Skew(0.0, 0.0),
         crate::TransformOp::Matrix(_) => crate::TransformOp::Matrix(crate::Affine2::IDENTITY),
+        crate::TransformOp::Translate3d(x, y, z) => crate::TransformOp::Translate3d(
+            zero_transform_length(x),
+            zero_transform_length(y),
+            zero_transform_length(z),
+        ),
+        crate::TransformOp::Scale3d(..) => crate::TransformOp::Scale3d(1.0, 1.0, 1.0),
+        crate::TransformOp::Rotate3d(x, y, z, _) => crate::TransformOp::Rotate3d(*x, *y, *z, 0.0),
+        crate::TransformOp::Perspective(_) => crate::TransformOp::Perspective(None),
+        crate::TransformOp::Matrix3d(_) => crate::TransformOp::Matrix3d(crate::Mat4::IDENTITY),
+    }
+}
+
+fn same_axis(a: (f32, f32, f32), b: (f32, f32, f32)) -> bool {
+    let norm = |(x, y, z): (f32, f32, f32)| {
+        let length = (x * x + y * y + z * z).sqrt();
+        (length > 0.0).then(|| (x / length, y / length, z / length))
+    };
+    match (norm(a), norm(b)) {
+        (Some(a), Some(b)) => {
+            (a.0 - b.0).abs() < 1e-5 && (a.1 - b.1).abs() < 1e-5 && (a.2 - b.2).abs() < 1e-5
+        }
+        _ => false,
     }
 }
 
@@ -5412,6 +5434,44 @@ fn interpolate_transform_operation(
         }
         (crate::TransformOp::Skew(from_x, from_y), crate::TransformOp::Skew(to_x, to_y)) => {
             crate::TransformOp::Skew(lerp(*from_x, *to_x), lerp(*from_y, *to_y))
+        }
+        (
+            crate::TransformOp::Translate3d(from_x, from_y, from_z),
+            crate::TransformOp::Translate3d(to_x, to_y, to_z),
+        ) => crate::TransformOp::Translate3d(
+            interpolate_transform_length(from_x, to_x, position)?,
+            interpolate_transform_length(from_y, to_y, position)?,
+            interpolate_transform_length(from_z, to_z, position)?,
+        ),
+        (
+            crate::TransformOp::Scale3d(from_x, from_y, from_z),
+            crate::TransformOp::Scale3d(to_x, to_y, to_z),
+        ) => crate::TransformOp::Scale3d(
+            lerp(*from_x, *to_x),
+            lerp(*from_y, *to_y),
+            lerp(*from_z, *to_z),
+        ),
+        // Same axis (CSS Transforms 2: rotate3d with equal normalized axes
+        // interpolates the angle; rotateX/Y/Z primitives share an axis).
+        (
+            crate::TransformOp::Rotate3d(x, y, z, from),
+            crate::TransformOp::Rotate3d(to_x, to_y, to_z, to),
+        ) if same_axis((*x, *y, *z), (*to_x, *to_y, *to_z)) => {
+            crate::TransformOp::Rotate3d(*x, *y, *z, lerp(*from, *to))
+        }
+        (crate::TransformOp::Perspective(from), crate::TransformOp::Perspective(to)) => {
+            // `none` interpolates as infinity: through 1/d.
+            let inverse = |d: &Option<f32>| d.map_or(0.0, |d| 1.0 / d.max(1.0));
+            let value = lerp(inverse(from), inverse(to));
+            crate::TransformOp::Perspective((value > 0.0).then(|| 1.0 / value))
+        }
+        (crate::TransformOp::Matrix3d(from), crate::TransformOp::Matrix3d(to)) => {
+            let (from, to) = (from.to_css(), to.to_css());
+            let mut values = [0.0f32; 16];
+            for index in 0..16 {
+                values[index] = lerp(from[index], to[index]);
+            }
+            crate::TransformOp::Matrix3d(crate::Mat4::from_css(&values))
         }
         (crate::TransformOp::Matrix(from), crate::TransformOp::Matrix(to)) => {
             crate::TransformOp::Matrix(crate::Affine2 {

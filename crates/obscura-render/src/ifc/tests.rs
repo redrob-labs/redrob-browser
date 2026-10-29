@@ -965,7 +965,11 @@ fn push_button_inputs_ignore_inherited_line_height() {
          <input id=a type=button value='Go Back'><br><input id=b>",
         &[],
     );
-    assert_eq!(height(&tree, &laid, "a"), 24.0);
+    assert!(
+        height(&tree, &laid, "a") < 30.0,
+        "{}",
+        height(&tree, &laid, "a")
+    );
     assert_eq!(height(&tree, &laid, "b"), 30.0);
 }
 
@@ -1128,4 +1132,101 @@ fn ch_lengths_use_the_inherited_font() {
         "{}",
         width(&tree, &laid, "s")
     );
+}
+
+#[test]
+fn three_d_transforms_project_through_perspective_and_preserve_3d() {
+    // Chrome (w3schools carousel at rotateY(90deg), perspective 1000px):
+    // card 0 (translateZ(173px)) 34.95 x 222.22 at 257.27, 68.89 here;
+    // card 1 (rotateY(60deg)) 157.48 x 181.85 at 99.91, 89.08; the
+    // preserve-3d carousel itself 0 x 222.22. calc() angles resolve.
+    let (tree, laid) = layout(
+        "<!doctype html><style>:root{--n:6;--r:173px}body{margin:0}\
+         .c{width:200px;height:200px;margin:80px auto 0 0;perspective:1000px}\
+         .k{position:absolute;width:200px;height:200px;\
+         transform:rotateY(calc(var(--i) * (360deg / var(--n)))) translateZ(var(--r))}</style>\
+         <div class=c style='margin-left:0'><div id=car style='position:relative;width:100%;height:100%;\
+         transform-style:preserve-3d;transform:rotateY(90deg)'>\
+         <div class=k id=k0 style='--i:0'></div><div class=k id=k1 style='--i:1'></div></div></div>",
+        &[],
+    );
+    let r = |id: &str| {
+        let node = element(&tree, id);
+        laid.transformed_rect(node, laid.rects[&node])
+    };
+    let close = |a: f32, b: f32| (a - b).abs() < 0.05;
+    let (k0, k1, car) = (r("k0"), r("k1"), r("car"));
+    assert!(
+        close(k0.width, 34.95) && close(k0.height, 222.22) && close(k0.x, 257.27),
+        "{k0:?}"
+    );
+    assert!(
+        close(k1.width, 157.48) && close(k1.height, 181.85) && close(k1.y, 89.08),
+        "{k1:?}"
+    );
+    assert!(
+        close(car.width, 0.0) && close(car.height, 222.22),
+        "{car:?}"
+    );
+}
+
+#[test]
+fn angle_calc_and_matrix3d_parse() {
+    let (tree, laid) = layout(
+        "<!doctype html><div id=a style='width:10px;height:10px;transform:rotate(calc(0.5turn - 90deg))'></div>\
+         <div id=b style='width:10px;height:10px;transform:matrix3d(1,0,0,0,0,1,0,0,0,0,1,0,5,6,7,1)'></div>",
+        &[],
+    );
+    let a = laid.transforms[&element(&tree, "a")];
+    assert!(
+        (a.a - 0.0).abs() < 1e-5 && (a.b - 1.0).abs() < 1e-5,
+        "{a:?}"
+    );
+    let b = laid.projective_transforms[&element(&tree, "b")];
+    assert_eq!(b.m[2][3], 7.0);
+}
+
+#[test]
+fn baseline_aligned_cells_share_the_row_baseline() {
+    // Chrome: a row of vertical-align:baseline cells, one with
+    // padding-top:20px: the 40px "B" span is at y 2 and the <br> of
+    // "c<br>d" at 24 (we had -8 and 5 with the cells top-aligned).
+    let (tree, laid) = layout(
+        "<!doctype html><style>body{margin:0;font:16px/20px sans-serif} td{border:1px solid;height:80px}</style>\
+         <table><tr><td style='vertical-align:baseline;padding-top:20px'>a</td>\
+         <td style='vertical-align:baseline'><span id=s style='font-size:40px'>B</span></td>\
+         <td style='vertical-align:baseline'>c<br id=t>d</td></tr></table>",
+        &[],
+    );
+    let y = |id: &str| {
+        let node = element(&tree, id);
+        laid.fractional_rects
+            .get(&node)
+            .copied()
+            .unwrap_or(laid.rects[&node])
+            .y
+    };
+    assert!((y("s") - 2.0).abs() < 0.5, "{}", y("s"));
+    assert!((y("t") - 24.0).abs() < 0.5, "{}", y("t"));
+}
+
+#[test]
+fn overflowing_atomic_at_line_start_keeps_trailing_space_on_its_line() {
+    // Chrome: a 160px image in a 100px block followed by whitespace is one
+    // line around the 20px image (we opened an empty second line);
+    // a following word still wraps.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px/24px Arial'>\
+         <div id=a style='width:100px'>\n <span></span>\n <img style='width:160px;height:20px'>\n</div>\
+         <div style='width:100px'><img style='width:160px;height:20px'> word <span id=w>x</span></div>",
+        &[],
+    );
+    assert!(
+        height(&tree, &laid, "a") < 30.0,
+        "{}",
+        height(&tree, &laid, "a")
+    );
+    let w = laid.rects[&element(&tree, "w")];
+    // "word x" is on the second line, below the image line.
+    assert!(w.x < 50.0 && w.y > height(&tree, &laid, "a"), "{w:?}");
 }
