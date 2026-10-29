@@ -287,6 +287,11 @@ impl BuildCx<'_> {
             .as_deref()
             .filter(|text| !text.is_empty() && !(pseudo.is_table_box && text.trim().is_empty()))
             .map(str::to_string);
+        // A table shrinks to fit its content: an empty generated table is
+        // 0px wide (Chrome), not as wide as a block.
+        if pseudo.is_table_box && content.is_none() && pseudo.width == crate::Dimension::Auto {
+            taffy_style.size.width = taffy::Dimension::length(0.0);
+        }
         let node = self.taffy_tree.new_leaf(taffy_style).ok()?;
         if let Some(text) = content {
             let params = crate::ifc::build::root_params(&pseudo, false, false);

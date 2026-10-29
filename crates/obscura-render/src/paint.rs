@@ -1861,7 +1861,62 @@ impl PreparedRender {
         id: obscura_dom::tree::NodeId,
     ) -> Option<HashMap<&'static str, String>> {
         let style = self.layout.styles.get(&id)?;
-        let rect = self.layout.rects.get(&id);
+        let rect = self.layout.rects.get(&id).copied();
+        self.computed_style_with(Some(id), style, rect.as_ref())
+    }
+
+    /// The computed style of `::before` (`before`) or `::after` of `id`,
+    /// with its generated box's geometry, or `None` without such a pseudo.
+    pub fn computed_pseudo_style(
+        &self,
+        id: obscura_dom::tree::NodeId,
+        before: bool,
+    ) -> Option<HashMap<&'static str, String>> {
+        let host = self.layout.styles.get(&id)?;
+        let pseudo = if before {
+            host.before_pseudo.as_deref()
+        } else {
+            host.after_pseudo.as_deref()
+        }?;
+        let kind = if before {
+            crate::dom::GeneratedBoxKind::Before
+        } else {
+            crate::dom::GeneratedBoxKind::After
+        };
+        let rect = self
+            .layout
+            .generated_boxes
+            .iter()
+            .find(|generated| generated.host == id && generated.kind == kind)
+            .map(|generated| generated.rect);
+        let mut out = self.computed_style_with(None, pseudo, rect.as_ref())?;
+        // The element path takes insets from the cascade in script; the
+        // generated box has no element, so report its own.
+        for (name, value) in ["top", "right", "bottom", "left"]
+            .into_iter()
+            .zip(pseudo.inset)
+        {
+            out.insert(
+                name,
+                value.map_or_else(|| "auto".to_string(), |v| dimension_css(v, "auto")),
+            );
+        }
+        out.insert(
+            "content",
+            pseudo.before_content.as_deref().map_or_else(
+                || "none".to_string(),
+                |value| format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")),
+            ),
+        );
+        Some(out)
+    }
+
+    fn computed_style_with(
+        &self,
+        id: Option<obscura_dom::tree::NodeId>,
+        style: &crate::LayoutStyle,
+        rect: Option<&crate::Rect>,
+    ) -> Option<HashMap<&'static str, String>> {
         let mut out = non_geometric_computed_style(style);
         out.insert("font-size", css_px(style.font_size.unwrap_or(16.0)));
         out.insert(
@@ -1991,10 +2046,8 @@ impl PreparedRender {
                 style.border.left + style.border.right + style.padding.left + style.padding.right;
             let vertical_non_content =
                 style.border.top + style.border.bottom + style.padding.top + style.padding.bottom;
-            let (border_width, border_height) = self
-                .layout
-                .fractional_sizes
-                .get(&id)
+            let (border_width, border_height) = id
+                .and_then(|id| self.layout.fractional_sizes.get(&id))
                 .copied()
                 .filter(|&(width, height)| {
                     (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0
@@ -2069,7 +2122,9 @@ impl PreparedRender {
         out.insert("flex-basis", dimension_css(style.flex_basis, "auto"));
         out.insert("order", style.order.to_string());
 
-        let used_auto = self.layout.used_auto_margins.get(&id).copied();
+        let used_auto = id
+            .and_then(|id| self.layout.used_auto_margins.get(&id))
+            .copied();
         for (index, (name, value, auto)) in [
             ("margin-top", style.margin.top, style.margin_auto[0]),
             ("margin-right", style.margin.right, style.margin_auto[1]),
@@ -2230,9 +2285,13 @@ impl PreparedRender {
 
         // A grid container's resolved track lists are its used track sizes,
         // implicit tracks included (CSS Grid 1 §7.2.6).
-        if let Some((columns, rows)) = self.layout.grid_tracks.get(&id).filter(|_| {
-            style.display == crate::Display::Grid && style.css_display == crate::CssDisplay::Layout
-        }) {
+        if let Some((columns, rows)) =
+            id.and_then(|id| self.layout.grid_tracks.get(&id))
+                .filter(|_| {
+                    style.display == crate::Display::Grid
+                        && style.css_display == crate::CssDisplay::Layout
+                })
+        {
             let tracks = |sizes: &[f32]| {
                 if sizes.is_empty() {
                     "none".to_string()
@@ -2256,10 +2315,8 @@ impl PreparedRender {
             // A grid whose only content is text is laid out as one text
             // leaf rather than a Taffy grid: its anonymous item fills the
             // single implicit track.
-            let (width, height) = self
-                .layout
-                .fractional_sizes
-                .get(&id)
+            let (width, height) = id
+                .and_then(|id| self.layout.fractional_sizes.get(&id))
                 .copied()
                 .filter(|&(width, height)| {
                     (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0
@@ -8859,15 +8916,28 @@ fn collect_web_fonts(
         }
     }
 
+    // Bytes already fetched per source, so two @font-face rules sharing a
+    // `src` (one file under two families or weights) both register a face.
+    let mut fetched: HashMap<String, Arc<Vec<u8>>> = HashMap::new();
     for rule in rules {
         if fonts.len() >= 16 {
             break;
         }
         for (key, src) in rule.sources {
-            if !seen.insert(key) {
+            if let Some(decoded) = fetched.get(&key).cloned() {
+                fonts.push(crate::inline::WebFont {
+                    data: decoded,
+                    family: rule.family,
+                    weight: rule.weight,
+                    italic: rule.italic,
+                });
+                break;
+            }
+            if !seen.insert(key.clone()) {
                 continue;
             }
             if let Some(decoded) = fetch_and_decode_font(&src, base_url, cache) {
+                fetched.insert(key, Arc::clone(&decoded));
                 fonts.push(crate::inline::WebFont {
                     data: decoded,
                     family: rule.family,
@@ -21843,5 +21913,91 @@ mod scene_text_tests {
         // "Hello scene text" without the spaces.
         assert!(glyphs >= 14, "{glyphs} glyphs");
         assert!(!frame.fonts.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod pseudo_style_tests {
+    use super::*;
+
+    // Values from Chrome's getComputedStyle(el, '::before' / '::after') on
+    // the same markup.
+    #[test]
+    fn pseudo_element_computed_style_matches_chrome() {
+        let tree = obscura_dom::parse_html(
+            r#"<!doctype html><style>body{margin:0;font:16px/20px Arial}
+            .cf::after{content:"";display:table;clear:both}
+            #ab{position:relative;width:200px;height:50px}
+            #ab::before{content:"x";position:absolute;top:5px;left:10px;width:30px;height:12px;padding:2px;background:red}
+            #fl::before{content:"icon";float:left;margin-right:4px;font-weight:700;color:rgb(10,20,30)}
+            #ib::after{content:"->";display:inline-block;width:20px;vertical-align:middle;opacity:0.5}
+            </style><div id=cf class=cf><span>a</span></div><div id=ab></div><div id=fl>text</div><div id=ib>text</div>"#,
+        );
+        let mut resources = RenderResourceCache::default();
+        let prepared = prepare_dom(&tree, (800.0, 600.0), None, &mut resources).unwrap();
+        let style = |id: &str, before: bool| {
+            prepared
+                .computed_pseudo_style(tree.get_element_by_id(id).unwrap(), before)
+                .unwrap()
+        };
+        let check = |id: &str, before: bool, expected: &[(&str, &str)]| {
+            let style = style(id, before);
+            for (name, value) in expected {
+                assert_eq!(
+                    style.get(name).map(String::as_str),
+                    Some(*value),
+                    "{id} {name}"
+                );
+            }
+        };
+        check(
+            "cf",
+            false,
+            &[
+                ("content", "\"\""),
+                ("display", "table"),
+                ("clear", "both"),
+                ("position", "static"),
+                ("width", "0px"),
+                ("height", "0px"),
+            ],
+        );
+        check(
+            "ab",
+            true,
+            &[
+                ("content", "\"x\""),
+                ("display", "block"),
+                ("position", "absolute"),
+                ("width", "30px"),
+                ("height", "12px"),
+                ("top", "5px"),
+                ("left", "10px"),
+                ("padding-top", "2px"),
+                ("background-color", "rgb(255, 0, 0)"),
+            ],
+        );
+        check(
+            "fl",
+            true,
+            &[
+                ("display", "block"),
+                ("float", "left"),
+                ("margin-right", "4px"),
+                ("font-weight", "700"),
+                ("color", "rgb(10, 20, 30)"),
+                ("height", "20px"),
+            ],
+        );
+        check(
+            "ib",
+            false,
+            &[
+                ("display", "inline-block"),
+                ("width", "20px"),
+                ("opacity", "0.5"),
+                ("vertical-align", "middle"),
+            ],
+        );
     }
 }

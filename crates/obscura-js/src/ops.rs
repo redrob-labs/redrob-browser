@@ -9711,9 +9711,16 @@ fn op_computed_style(
         pseudo.as_str(),
         ":before" | "::before" | ":after" | "::after"
     ) {
-        let Some((content, display)) =
-            prepared.computed_pseudo_content(nid, pseudo.ends_with("before"))
-        else {
+        let before = pseudo.ends_with("before");
+        // A generated box: its full computed style, geometry included.
+        if let Some(snapshot) = prepared.computed_pseudo_style(nid, before) {
+            let object: serde_json::Map<String, serde_json::Value> = snapshot
+                .into_iter()
+                .map(|(name, value)| (name.to_string(), serde_json::Value::String(value)))
+                .collect();
+            return serde_json::json!([true, object]).to_string();
+        }
+        let Some((content, display)) = prepared.computed_pseudo_content(nid, before) else {
             return String::new();
         };
         let content = content.map_or_else(
