@@ -1069,3 +1069,23 @@ fn inline_around_a_block_spans_the_anonymous_block() {
     let r = laid.rects[&element(&tree, "a")];
     assert_eq!((r.x, r.width), (0.0, 500.0));
 }
+
+#[test]
+fn table_cells_keep_fractional_heights_after_block_alignment() {
+    // Chrome: 15px/1.5 Verdana cells with 4px padding are 30.5 tall and
+    // the second starts at 34.5 (2px border-spacing); we pinned 31 and 30.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:15px/1.5 Verdana,sans-serif'>\
+         <table><tr><td id=e style='padding:4px'>a</td></tr><tr><td id=f style='padding:4px'>a</td></tr></table>",
+        &[],
+    );
+    for id in ["e", "f"] {
+        let node = element(&tree, id);
+        let rect = laid
+            .fractional_rects
+            .get(&node)
+            .copied()
+            .unwrap_or(laid.rects[&node]);
+        assert_eq!(rect.height, 30.5, "{id}");
+    }
+}

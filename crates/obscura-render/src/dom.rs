@@ -10913,7 +10913,10 @@ fn apply_table_cell_block_alignment(
             // path, where their actual line box height is available.
             continue;
         }
-        let (Ok(current), Ok(layout)) = (taffy_tree.style(node), taffy_tree.layout(node)) else {
+        let (Ok(current), Ok(layout)) = (
+            taffy_tree.style(node),
+            Ok::<_, ()>(taffy_tree.unrounded_layout(node)),
+        ) else {
             continue;
         };
         let is_middle = style.vertical_align == Some(crate::VerticalAlign::Middle);
@@ -10924,9 +10927,10 @@ fn apply_table_cell_block_alignment(
             let content_top = layout.border.top + layout.padding.top;
             let mut content_bottom = content_top;
             for child in taffy_tree.children(node).unwrap_or_default() {
-                let (Ok(child_style), Ok(child_layout)) =
-                    (taffy_tree.style(child), taffy_tree.layout(child))
-                else {
+                let (Ok(child_style), Ok(child_layout)) = (
+                    taffy_tree.style(child),
+                    Ok::<_, ()>(taffy_tree.unrounded_layout(child)),
+                ) else {
                     continue;
                 };
                 if child_style.display == taffy::style::Display::None
