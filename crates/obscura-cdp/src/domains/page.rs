@@ -2286,6 +2286,21 @@ pub async fn handle(
             #[cfg(not(feature = "render"))]
             Err("Page.captureScreenshot requires a build with the render feature".to_string())
         }
+        "redrobSceneAttach" => {
+            // A Redrob extension: stream this tab's compositor frames
+            // (docs/COMPOSITOR.md) over a local socket; returns its address.
+            #[cfg(feature = "render")]
+            {
+                crate::scene_channel::attach(ctx, session_id)
+            }
+            #[cfg(not(feature = "render"))]
+            Err("Page.redrobSceneAttach requires a build with the render feature".to_string())
+        }
+        "redrobSceneDetach" => {
+            #[cfg(feature = "render")]
+            crate::scene_channel::detach(ctx, session_id);
+            Ok(json!({}))
+        }
         "redrobDisplayList" => {
             // A Redrob extension: the region `clip` (same shape and units as
             // captureScreenshot's) as a display list for GPU raster

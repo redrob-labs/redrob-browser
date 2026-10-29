@@ -1255,6 +1255,10 @@ async fn cdp_processor(
     // a bounded 30 Hz opportunity on this connection's owning LocalSet.
     let mut screencast_tick = tokio::time::interval(tokio::time::Duration::from_millis(33));
     screencast_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Scene channels (Page.redrobSceneAttach) get one opportunity per
+    // animation frame; frames coalesce to the newest page state.
+    let mut scene_tick = tokio::time::interval(tokio::time::Duration::from_millis(16));
+    scene_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut connection_reply_tx: Option<mpsc::UnboundedSender<String>> = None;
     // A real browser renderer continues servicing timers, networking, posted
     // tasks, and animation callbacks while its DevTools client is silent. Keep
@@ -1275,6 +1279,7 @@ async fn cdp_processor(
             Some(d)
         } else {
             let screencast_active = has_active_screencast(&ctx);
+            let scene_active = has_scene_channels(&ctx);
             let has_intercept_rx = intercept_rx.is_some();
             tokio::select! {
                 biased;
@@ -1359,6 +1364,13 @@ async fn cdp_processor(
                     }
                     None
                 },
+                _ = scene_tick.tick(), if scene_active => {
+                    pump_scene_channels(&mut ctx);
+                    forward_pending_events(&mut ctx, connection_reply_tx.as_ref());
+                    idle_pages.clear();
+                    runtime_pump_armed = ctx.pages.iter().any(|page| page.has_js());
+                    None
+                }
                 _ = screencast_tick.tick(), if screencast_active => {
                     pump_and_forward_screencast_frames(
                         &mut ctx,
@@ -1731,6 +1743,25 @@ fn forward_pending_events(ctx: &mut CdpContext, reply_tx: Option<&mpsc::Unbounde
             let _ = reply_tx.send(json);
         }
     }
+}
+
+fn has_scene_channels(ctx: &CdpContext) -> bool {
+    #[cfg(feature = "render")]
+    {
+        crate::scene_channel::has_scenes(ctx)
+    }
+    #[cfg(not(feature = "render"))]
+    {
+        let _ = ctx;
+        false
+    }
+}
+
+fn pump_scene_channels(ctx: &mut CdpContext) {
+    #[cfg(feature = "render")]
+    crate::scene_channel::pump(ctx);
+    #[cfg(not(feature = "render"))]
+    let _ = ctx;
 }
 
 fn has_active_screencast(ctx: &CdpContext) -> bool {
@@ -2370,6 +2401,7 @@ const EARLY_PAINT_METHODS: &[&str] = &[
     "Page.screencastFrameAck",
     "Page.getLayoutMetrics",
     "Page.redrobDisplayList",
+    "Page.redrobSceneAttach",
 ];
 
 /// Let a watching viewer paint a navigation's parsed document before its

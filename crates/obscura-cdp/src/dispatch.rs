@@ -77,6 +77,9 @@ pub struct CdpContext {
     pub(crate) screencasts: HashMap<String, ScreencastState>,
     #[cfg(feature = "render")]
     next_screencast_session_id: i64,
+    /// Scene channels by page id (`Page.redrobSceneAttach`).
+    #[cfg(feature = "render")]
+    pub(crate) scenes: HashMap<String, crate::scene_channel::SceneStream>,
     pub default_context: Arc<BrowserContext>,
     pub browser_contexts: HashMap<String, Arc<BrowserContext>>,
     page_counter: u32,
@@ -194,6 +197,8 @@ impl CdpContext {
             screencasts: HashMap::new(),
             #[cfg(feature = "render")]
             next_screencast_session_id: 0,
+            #[cfg(feature = "render")]
+            scenes: HashMap::new(),
             default_context,
             browser_contexts: HashMap::new(),
             page_counter: 0,
