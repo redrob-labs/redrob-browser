@@ -8076,9 +8076,36 @@ fn layout_dom_once(
                                avail: taffy::Size<taffy::AvailableSpace>,
                                _node,
                                ctx: Option<&mut usize>,
-                               _style: &taffy::Style| {
+                               style: &taffy::Style| {
                 match ctx {
                     Some(&mut idx) if idx & crate::ifc::IFC_CONTEXT_BIT == 0 => {
+                        // Taffy hands a leaf its border-box known sizes; a
+                        // replaced box measures (and applies its natural
+                        // ratio to) its content box.
+                        let known = if idx & crate::inline::REPLACED_CONTEXT_BIT != 0 {
+                            let edge = |value: taffy::LengthPercentage| {
+                                let raw = value.into_raw();
+                                if raw.tag() == taffy::CompactLength::LENGTH_TAG {
+                                    raw.value()
+                                } else {
+                                    0.0
+                                }
+                            };
+                            let horizontal = edge(style.padding.left)
+                                + edge(style.padding.right)
+                                + edge(style.border.left)
+                                + edge(style.border.right);
+                            let vertical = edge(style.padding.top)
+                                + edge(style.padding.bottom)
+                                + edge(style.border.top)
+                                + edge(style.border.bottom);
+                            taffy::Size {
+                                width: known.width.map(|w| (w - horizontal).max(0.0)),
+                                height: known.height.map(|h| (h - vertical).max(0.0)),
+                            }
+                        } else {
+                            known
+                        };
                         engine.measure_taffy(idx, known, avail)
                     }
                     _ => taffy::Size::ZERO,
@@ -14814,9 +14841,26 @@ fn build(
             {
                 let constrained =
                     crate::inline::constrained_auto_replaced_size(width, height, style);
-                taffy_style.size.width = taffy::Dimension::length(constrained.width);
+                // The seeded size is the content box; Taffy reads `size` in
+                // the box's own `box-sizing` box.
+                let (extra_w, extra_h) = if style.box_sizing == crate::BoxSizing::BorderBox {
+                    (
+                        style.padding.left
+                            + style.padding.right
+                            + style.border.left
+                            + style.border.right,
+                        style.padding.top
+                            + style.padding.bottom
+                            + style.border.top
+                            + style.border.bottom,
+                    )
+                } else {
+                    (0.0, 0.0)
+                };
+                taffy_style.size.width = taffy::Dimension::length(constrained.width + extra_w);
                 if has_definite_constraint {
-                    taffy_style.size.height = taffy::Dimension::length(constrained.height);
+                    taffy_style.size.height =
+                        taffy::Dimension::length(constrained.height + extra_h);
                 }
             }
 
@@ -21525,6 +21569,25 @@ mod tests {
             let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
             assert_eq!(rect("grid").height, grid_height, "{rows}");
             assert_eq!((rect("g4").y, rect("g4").height), (top, 18.0), "{rows}");
+        }
+    }
+
+    // w3schools check icons: a 13x14 image with padding-right:5px is 18x14
+    // in Chrome under both box-sizing values (the natural size and ratio
+    // belong to the content box). We had 18x19.4 (ratio on the border box)
+    // and, with border-box, 13x9 (the seeded size taken as the border box).
+    #[test]
+    fn padded_auto_image_keeps_its_natural_content_box() {
+        for box_sizing in ["content-box", "border-box"] {
+            let tree = parse_html(&format!(
+                "<!doctype html><style>*{{box-sizing:{box_sizing}}}</style><body style='margin:0'>\
+                 <p><img id=a style='padding-right:5px'> text</p>"
+            ));
+            let a = tree.get_element_by_id("a").unwrap();
+            let intrinsic = HashMap::from([(a, (13.0, 14.0))]);
+            let laid = layout_dom_with_images(&tree, (800.0, 600.0), &intrinsic);
+            let rect = laid.rects[&a];
+            assert_eq!((rect.width, rect.height), (18.0, 14.0), "{box_sizing}");
         }
     }
 

@@ -184,7 +184,7 @@ impl MeasureSignature {
     }
 }
 
-const REPLACED_CONTEXT_BIT: usize = 1usize << (usize::BITS - 1);
+pub(crate) const REPLACED_CONTEXT_BIT: usize = 1usize << (usize::BITS - 1);
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct ReplacedItem {
