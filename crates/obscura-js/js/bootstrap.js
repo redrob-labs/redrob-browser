@@ -14597,7 +14597,48 @@ globalThis.HTMLTitleElement = _defineHTMLElementClass("HTMLTitleElement", ["titl
 globalThis.HTMLBaseElement = _defineHTMLElementClass("HTMLBaseElement", ["base"]);
 globalThis.HTMLQuoteElement = _defineHTMLElementClass("HTMLQuoteElement", ["blockquote", "q"]);
 globalThis.HTMLPictureElement = _defineHTMLElementClass("HTMLPictureElement", ["picture"]);
-globalThis.HTMLSourceElement = _defineHTMLElementClass("HTMLSourceElement", ["source"]);
+// <source> reflects its attributes, and a change re-runs image selection
+// of the <picture>'s <img> (HTML "relevant mutations").
+globalThis.HTMLSourceElement = _registerHTMLElementClass(class HTMLSourceElement extends HTMLElement {
+  get src() {
+    const raw = this.getAttribute("src");
+    if (!raw) return "";
+    try { return new URL(raw, this.baseURI || globalThis.location?.href || "about:blank").href; }
+    catch (_error) { return raw; }
+  }
+  set src(value) { this.setAttribute("src", value); }
+  get srcset() { return this.getAttribute("srcset") || ""; }
+  set srcset(value) { this.setAttribute("srcset", value); }
+  get sizes() { return this.getAttribute("sizes") || ""; }
+  set sizes(value) { this.setAttribute("sizes", value); }
+  get media() { return this.getAttribute("media") || ""; }
+  set media(value) { this.setAttribute("media", value); }
+  get type() { return this.getAttribute("type") || ""; }
+  set type(value) { this.setAttribute("type", value); }
+  get width() { return Number.parseInt(this.getAttribute("width") || "", 10) || 0; }
+  set width(value) { this.setAttribute("width", Math.max(0, Number(value) || 0)); }
+  get height() { return Number.parseInt(this.getAttribute("height") || "", 10) || 0; }
+  set height(value) { this.setAttribute("height", Math.max(0, Number(value) || 0)); }
+  setAttribute(name, value) {
+    super.setAttribute(name, value);
+    this._sourceChanged(name);
+  }
+  removeAttribute(name) {
+    super.removeAttribute(name);
+    this._sourceChanged(name);
+  }
+  _sourceChanged(name) {
+    const normalized = String(name).toLowerCase();
+    if (!["src", "srcset", "sizes", "media", "type", "width", "height"].includes(normalized)) return;
+    const picture = this.parentElement;
+    if (!picture || picture.localName !== "picture") return;
+    for (const child of picture.children) {
+      if (child.localName === "img" && typeof child._imageSourceChanged === "function") {
+        child._imageSourceChanged();
+      }
+    }
+  }
+}, ["source"]);
 globalThis.HTMLObjectElement = _defineHTMLElementClass("HTMLObjectElement", ["object"]);
 globalThis.HTMLEmbedElement = _defineHTMLElementClass("HTMLEmbedElement", ["embed"]);
 globalThis.HTMLMapElement = _defineHTMLElementClass("HTMLMapElement", ["map"]);
@@ -19074,6 +19115,32 @@ if (typeof Document !== 'undefined' && !Document.prototype.elementFromPoint) {
     return best || this.body || this.documentElement || null;
   };
   Document.prototype.elementsFromPoint = function(x, y) {
+    const method = _documentRealmMember(this, 'elementsFromPoint');
+    if (method) return Reflect.apply(method, this, [x, y]);
+    if (typeof __obscuraCore.ops.op_layout_hit_test_all === 'function') {
+      if (typeof x !== 'number' || typeof y !== 'number' || !isFinite(x) || !isFinite(y)) {
+        return [];
+      }
+      var vw = (typeof window !== 'undefined' && window.innerWidth) || 1280;
+      var vh = (typeof window !== 'undefined' && window.innerHeight) || 720;
+      if (x < 0 || y < 0 || x > vw || y > vh) return [];
+      var ids = [];
+      try { ids = JSON.parse(__obscuraCore.ops.op_layout_hit_test_all(x, y, _realmFrameId)); }
+      catch (_e) { ids = []; }
+      var out = [];
+      for (var i = 0; i < ids.length; i++) {
+        var hit = _wrapEl(ids[i]);
+        if (hit && hit.nodeType === 1 && out.indexOf(hit) < 0) out.push(hit);
+      }
+      // The root boxes always stack at the bottom: body (when hit), then html.
+      var root = this.documentElement;
+      var body = this.body;
+      var bodyHit = out.indexOf(body) >= 0;
+      out = out.filter(function(e) { return e !== root && e !== body; });
+      if (body && bodyHit) out.push(body);
+      if (root) out.push(root);
+      return out;
+    }
     var el = this.elementFromPoint(x, y);
     return el ? [el] : [];
   };

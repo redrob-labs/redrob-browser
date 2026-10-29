@@ -8339,6 +8339,7 @@ pub fn build_extension() -> Extension {
         ops.push(op_layout_geometry());
         ops.push(op_layout_box_metrics());
         ops.push(op_layout_hit_test());
+        ops.push(op_layout_hit_test_all());
         ops.push(op_layout_caret());
         ops.push(op_layout_caret_rect());
         ops.push(op_layout_text_rects());
@@ -9501,6 +9502,33 @@ fn op_layout_hit_test(state: &OpState, x: f64, y: f64, frame_id: u32) -> i32 {
     prepared
         .hit_test(dom, scroll, x as f32, y as f32)
         .map_or(-1, |id| id.index() as i32)
+}
+
+/// Every rendered element containing the point, topmost first, as a JSON
+/// array of native node ids (`document.elementsFromPoint`).
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_layout_hit_test_all(state: &OpState, x: f64, y: f64, frame_id: u32) -> String {
+    let shared = frame_state(state, frame_id);
+    let mut gs = shared.borrow_mut();
+    sample_live_document_animations(&mut gs);
+    if ensure_resolved_scroll_for_geometry(&mut gs).is_none() {
+        return "[]".to_string();
+    }
+    let (Some((_, scroll)), Some(prepared), Some(dom)) = (
+        gs.resolved_scroll.as_ref(),
+        gs.prepared_render.as_ref(),
+        gs.dom.as_ref(),
+    ) else {
+        return "[]".to_string();
+    };
+    let ids: Vec<usize> = prepared
+        .hit_test_all(dom, scroll, x as f32, y as f32, usize::MAX)
+        .into_iter()
+        .map(|id| id.index())
+        .collect();
+    serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string())
 }
 
 #[cfg(feature = "render")]

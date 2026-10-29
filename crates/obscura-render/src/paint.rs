@@ -1658,6 +1658,19 @@ impl PreparedRender {
         x: f32,
         y: f32,
     ) -> Option<obscura_dom::tree::NodeId> {
+        self.hit_test_all(tree, scroll, x, y, 1).into_iter().next()
+    }
+
+    /// Every element whose box contains a viewport point, topmost first
+    /// (`document.elementsFromPoint`), at most `limit` of them.
+    pub fn hit_test_all(
+        &self,
+        tree: &DomTree,
+        scroll: &ResolvedScrollState,
+        x: f32,
+        y: f32,
+        limit: usize,
+    ) -> Vec<obscura_dom::tree::NodeId> {
         fn stacking_path(
             tree: &DomTree,
             laid: &crate::DomLayout,
@@ -1711,7 +1724,7 @@ impl PreparedRender {
             || x > self.viewport.0
             || y > self.viewport.1
         {
-            return None;
+            return Vec::new();
         }
         let point = crate::Rect {
             x,
@@ -1723,7 +1736,8 @@ impl PreparedRender {
             width: 0.001,
             height: 0.001,
         };
-        let mut best: Option<(Vec<i32>, bool, usize, usize, obscura_dom::tree::NodeId)> = None;
+        type Candidate = (Vec<i32>, bool, usize, usize, obscura_dom::tree::NodeId);
+        let mut candidates: Vec<Candidate> = Vec::new();
         for (order, id) in crate::dom::rendered_descendants(tree, tree.document())
             .into_iter()
             .enumerate()
@@ -1754,30 +1768,41 @@ impl PreparedRender {
             let positioned =
                 style.position.is_some() || style.position_fixed || style.position_sticky;
             let depth = tree.ancestors(id).len();
-            let replace = best.as_ref().is_none_or(
-                |(best_path, best_positioned, best_depth, best_order, best_id)| {
-                    let stacking = compare_stacking_paths(&path, best_path);
-                    if stacking != std::cmp::Ordering::Equal {
-                        return stacking.is_gt();
-                    }
-                    if tree.ancestors(id).contains(best_id) {
-                        return true;
-                    }
-                    if tree.ancestors(*best_id).contains(&id) {
-                        return false;
-                    }
-                    positioned
-                        .cmp(best_positioned)
-                        .then_with(|| depth.cmp(best_depth))
-                        .then_with(|| order.cmp(best_order))
-                        .is_gt()
-                },
-            );
-            if replace {
-                best = Some((path, positioned, depth, order, id));
-            }
+            candidates.push((path, positioned, depth, order, id));
         }
-        best.map(|(_, _, _, _, id)| id)
+        // Whether `a` paints above `b`.
+        let above = |a: &Candidate, b: &Candidate| {
+            let (path, positioned, depth, order, id) = a;
+            let (best_path, best_positioned, best_depth, best_order, best_id) = b;
+            let stacking = compare_stacking_paths(path, best_path);
+            if stacking != std::cmp::Ordering::Equal {
+                return stacking.is_gt();
+            }
+            if tree.ancestors(*id).contains(best_id) {
+                return true;
+            }
+            if tree.ancestors(*best_id).contains(id) {
+                return false;
+            }
+            positioned
+                .cmp(best_positioned)
+                .then_with(|| depth.cmp(best_depth))
+                .then_with(|| order.cmp(best_order))
+                .is_gt()
+        };
+        // Repeated selection, not a sort: `above` is not a total order
+        // across unrelated stacking branches.
+        let mut out = Vec::new();
+        while !candidates.is_empty() && out.len() < limit {
+            let mut top = 0;
+            for index in 1..candidates.len() {
+                if above(&candidates[index], &candidates[top]) {
+                    top = index;
+                }
+            }
+            out.push(candidates.swap_remove(top).4);
+        }
+        out
     }
 
     /// Shaped-text caret in the viewport. Hit testing selects the painted
