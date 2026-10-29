@@ -9115,7 +9115,11 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn ready_async_classic_script_runs_before_a_later_parser_import_map() {
+    async fn async_classic_script_sees_an_import_map_parsed_before_its_download() {
+        // An async script runs when its download completes. The parser reaches
+        // the import map right after it without waiting, so the map is in
+        // place first (Chrome: the import resolves to ./later.js). The old
+        // parse-then-run driver had the download done before the map.
         let (base, requests) = spawn_parser_import_map_server(2);
         let mut page = import_map_test_page(
             "async-classic-before-map",
@@ -9133,15 +9137,16 @@ mod tests {
                 .unwrap()
                 .evaluate("globalThis.__async_before_map")
                 .unwrap(),
-            serde_json::json!("rejected"),
+            serde_json::json!("later-map"),
         );
-        assert_eq!(
-            requests
-                .recv_timeout(std::time::Duration::from_secs(1))
-                .unwrap(),
-            "/app/async.js"
-        );
-        assert!(requests.try_recv().is_err());
+        let paths = (0..2)
+            .map(|_| {
+                requests
+                    .recv_timeout(std::time::Duration::from_secs(1))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(paths, ["/app/async.js", "/app/later.js"]);
     }
 
     #[tokio::test(flavor = "current_thread")]
