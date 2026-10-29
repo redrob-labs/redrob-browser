@@ -2760,6 +2760,12 @@ struct IfcRegistry {
     /// their own tracks before (`top` of them) and after the cell rows; they
     /// take no part in column sizing beyond flooring the table width.
     table_captions: HashMap<taffy::NodeId, TableCaptions>,
+    /// `<col>` / `<colgroup>` boxes per table grid node: (element, colgroup,
+    /// first column, span). They generate no layout box; their rects are
+    /// derived from the final column tracks.
+    table_columns: HashMap<taffy::NodeId, Vec<(NodeId, Option<NodeId>, usize, usize)>>,
+    /// CSS table rows and row groups with the cells whose rects they union.
+    table_part_boxes: Vec<(NodeId, Vec<NodeId>)>,
     /// Floats whose direct block parent does not establish a block formatting
     /// context and whose exclusion can therefore continue through later
     /// descendant blocks of the same BFC. The first layout pass gives these
@@ -8373,7 +8379,8 @@ fn layout_dom_once(
                             crate::Dimension::Px(w)
                                 if table_style.box_sizing == crate::BoxSizing::ContentBox =>
                             {
-                                w + inline_outer_edges
+                                // Border spacing lives inside the content box.
+                                w + inline_outer_edges - table_spacing(table_style).0 * 2.0
                             }
                             crate::Dimension::Px(w) => w,
                             _ => percent_outer.unwrap_or(max_c),
@@ -8465,6 +8472,9 @@ fn layout_dom_once(
                             }
                             let mut col_min = vec![0.0f32; ncols];
                             let mut col_max = vec![0.0f32; ncols];
+                            // A spanning cell also covers the spacing between the
+                            // columns it spans.
+                            let interior_gap = table_spacing(table_style).0;
                             // Pass 1: single-column cells set each column's floor.
                             for &(col, span, cmin, cmax) in &measured {
                                 if span == 1 && col < ncols {
@@ -8473,28 +8483,39 @@ fn layout_dom_once(
                                 }
                             }
                             // Pass 2: a spanning cell that needs more than its columns
-                            // currently give grows them, splitting the shortfall evenly
-                            // across the spanned columns (keeps colspan lining up).
-                            for &(col, span, cmin, cmax) in &measured {
-                                if span <= 1 || col >= ncols {
-                                    continue;
+                            // currently give grows them. Narrow spans go first, and
+                            // the shortfall is shared in proportion to the spanned
+                            // columns' max-content widths (evenly when those are all
+                            // zero), the way Blink and Gecko distribute it: a
+                            // colspan=3 heading over `a | bb | cccc` widens the wide
+                            // column most.
+                            let mut spanning: Vec<&(usize, usize, f32, f32)> = measured
+                                .iter()
+                                .filter(|(col, span, _, _)| *span > 1 && *col < ncols)
+                                .collect();
+                            spanning.sort_by_key(|(_, span, _, _)| *span);
+                            let grow = |widths: &mut [f32], weights: &[f32], wanted: f32| {
+                                let current: f32 = widths.iter().sum();
+                                if wanted <= current {
+                                    return;
                                 }
+                                let extra = wanted - current;
+                                let weight: f32 = weights.iter().sum();
+                                let count = widths.len() as f32;
+                                for (width, column_weight) in widths.iter_mut().zip(weights) {
+                                    *width += if weight > 0.0 {
+                                        extra * column_weight / weight
+                                    } else {
+                                        extra / count
+                                    };
+                                }
+                            };
+                            for &&(col, span, cmin, cmax) in &spanning {
                                 let end = (col + span).min(ncols);
-                                let n = (end - col) as f32;
-                                let cur_min: f32 = col_min[col..end].iter().sum();
-                                if cmin > cur_min {
-                                    let add = (cmin - cur_min) / n;
-                                    for w in &mut col_min[col..end] {
-                                        *w += add;
-                                    }
-                                }
-                                let cur_max: f32 = col_max[col..end].iter().sum();
-                                if cmax > cur_max {
-                                    let add = (cmax - cur_max) / n;
-                                    for w in &mut col_max[col..end] {
-                                        *w += add;
-                                    }
-                                }
+                                let inner = interior_gap * (end - col).saturating_sub(1) as f32;
+                                let weights: Vec<f32> = col_max[col..end].to_vec();
+                                grow(&mut col_min[col..end], &weights, cmin - inner);
+                                grow(&mut col_max[col..end], &weights, cmax - inner);
                             }
                             for j in 0..ncols {
                                 if col_max[j] < col_min[j] {
@@ -8537,6 +8558,28 @@ fn layout_dom_once(
                                     col_max[j] = width.max(col_min[j]);
                                 }
                             }
+                            // The grid's own intrinsic widths miss cells that are
+                            // out of the grid (cells of collapsed rows), so the
+                            // column sums also bound the table width.
+                            let columns_min_outer: f32 =
+                                col_min.iter().sum::<f32>() + inline_outer_edges + interior_spacing;
+                            let columns_max_outer: f32 =
+                                col_max.iter().sum::<f32>() + inline_outer_edges + interior_spacing;
+                            let floor = min_c.max(columns_min_outer);
+                            used_outer = if width_style == crate::Dimension::Auto {
+                                preferred_outer
+                                    .max(columns_max_outer)
+                                    .max(floor)
+                                    .min(available_outer.max(floor))
+                            } else {
+                                used_outer.max(floor)
+                            };
+                            used_declaration =
+                                if table_style.box_sizing == crate::BoxSizing::ContentBox {
+                                    (used_outer - inline_outer_edges).max(0.0)
+                                } else {
+                                    used_outer
+                                };
                             if width_style == crate::Dimension::Auto {
                                 let percentage_floor =
                                     auto_table_percentage_intrinsic_floor(&col_min, &percentages);
@@ -8891,6 +8934,7 @@ fn layout_dom_once(
             );
             inline_fragments = synthesize_ordinary_inline_fragments(&mut rects, &styles, &engine);
             synthesize_row_rects(tree, &mut rects);
+            synthesize_column_rects(&taffy_tree, &id_map, &ifc_items, &mut rects);
             retain_taffy_tree(
                 std::mem::replace(&mut taffy_tree, crate::new_taffy_tree()),
                 taffy_root,
@@ -10678,6 +10722,12 @@ fn apply_table_row_geometry(
             if captions.is_some_and(|captions| captions.nodes.contains(&cell)) {
                 continue;
             }
+            if taffy_tree
+                .style(cell)
+                .is_ok_and(|style| style.position == taffy::Position::Absolute)
+            {
+                continue;
+            }
             let (Ok(cell_style), Ok(layout)) = (taffy_tree.style(cell), taffy_tree.layout(cell))
             else {
                 continue;
@@ -12127,6 +12177,96 @@ fn tokenize_with_spaces(text: &str) -> Vec<String> {
 /// extent must ignore the portion of a `rowspan` that continues through later
 /// rows. Nested-table cells must not participate at all. Sections are then the
 /// union of their already-synthesized direct rows.
+/// Give `<col>` and `<colgroup>` elements the rect Chrome reports: the
+/// horizontal extent of their final column tracks and the vertical extent of
+/// the table's rows (border-spacing bands excluded).
+fn synthesize_column_rects(
+    taffy_tree: &TaffyTree<usize>,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    ifc_items: &IfcRegistry,
+    rects: &mut HashMap<NodeId, Rect>,
+) {
+    let length_of = |value: taffy::CompactLength| {
+        (value.tag() == taffy::CompactLength::LENGTH_TAG).then(|| value.value())
+    };
+    for (table_node, columns) in &ifc_items.table_columns {
+        let Some(table_rect) = id_map.get(table_node).and_then(|dom| rects.get(dom)).copied()
+        else {
+            continue;
+        };
+        let (Ok(style), Ok(layout)) = (taffy_tree.style(*table_node), taffy_tree.layout(*table_node))
+        else {
+            continue;
+        };
+        let widths: Option<Vec<f32>> = style
+            .grid_template_columns
+            .iter()
+            .map(|track| match track {
+                taffy::GridTemplateComponent::Single(minmax) => {
+                    length_of(minmax.min.into_raw())
+                }
+                _ => None,
+            })
+            .collect();
+        let (Some(widths), Some(gap)) = (widths, length_of(style.gap.width.into_raw())) else {
+            continue;
+        };
+        let captions = ifc_items.table_captions.get(table_node);
+        let mut rows: Option<(f32, f32)> = None;
+        for cell in taffy_tree.children(*table_node).unwrap_or_default() {
+            if captions.is_some_and(|captions| captions.nodes.contains(&cell)) {
+                continue;
+            }
+            let Some(rect) = id_map.get(&cell).and_then(|dom| rects.get(dom)) else {
+                continue;
+            };
+            let (top, bottom) = (rect.y, rect.y + rect.height);
+            rows = Some(rows.map_or((top, bottom), |(t, b)| (t.min(top), b.max(bottom))));
+        }
+        let Some((top, bottom)) = rows else {
+            continue;
+        };
+        let x0 = table_rect.x + layout.border.left + layout.padding.left;
+        let start_x = |index: usize| {
+            x0 + widths[..index.min(widths.len())].iter().sum::<f32>() + gap * index as f32
+        };
+        let mut groups: HashMap<NodeId, Rect> = HashMap::new();
+        for &(element, group, start, span) in columns {
+            if start >= widths.len() || span == 0 {
+                continue;
+            }
+            let end = (start + span).min(widths.len());
+            let x = start_x(start);
+            let width = start_x(end) - gap - x;
+            let rect = Rect {
+                x,
+                y: top,
+                width: width.max(0.0),
+                height: (bottom - top).max(0.0),
+            };
+            rects.insert(element, rect);
+            if let Some(group) = group.filter(|group| *group != element) {
+                groups
+                    .entry(group)
+                    .and_modify(|current| *current = current.union(&rect))
+                    .or_insert(rect);
+            }
+        }
+        rects.extend(groups);
+    }
+    for (part, cells) in &ifc_items.table_part_boxes {
+        let mut union: Option<Rect> = None;
+        for cell in cells {
+            if let Some(rect) = rects.get(cell) {
+                union = Some(union.map_or(*rect, |current| current.union(rect)));
+            }
+        }
+        if let Some(rect) = union {
+            rects.insert(*part, rect);
+        }
+    }
+}
+
 fn synthesize_row_rects(tree: &DomTree, rects: &mut HashMap<NodeId, Rect>) {
     let mut rows = Vec::new();
     let mut sections = Vec::new();
@@ -12700,8 +12840,20 @@ fn collect_table_rows(
             .get(&node)
             .is_some_and(|style| style.display == crate::Display::None)
     };
+    // A header group renders before every other row and a footer group
+    // after them, wherever they appear in the source.
+    let tag = |node: NodeId| {
+        tree.borrow_node(node)
+            .and_then(|n| n.as_element().map(|e| e.local.to_string()))
+    };
+    let mut ordered = tree.children(id);
+    ordered.sort_by_key(|node| match tag(*node).as_deref() {
+        Some("thead") => 0,
+        Some("tfoot") => 2,
+        _ => 1,
+    });
     let mut direct_start: Option<usize> = None;
-    for cid in tree.children(id) {
+    for cid in ordered {
         if hidden(cid) {
             continue;
         }
@@ -12744,6 +12896,167 @@ fn collect_table_rows(
             entry.1 = end;
         }
     }
+}
+
+/// Rows, cells and captions of a CSS table (`display: table` on a non-table
+/// element, or a lone `display: table-row`, which stands in for its own
+/// anonymous table).
+struct CssTable {
+    rows: Vec<(NodeId, usize)>,
+    cells: Vec<Vec<NodeId>>,
+    real: Vec<bool>,
+    captions: Vec<NodeId>,
+    /// Row groups with the range of `rows` they hold.
+    groups: Vec<(NodeId, std::ops::Range<usize>)>,
+}
+
+/// Classify the boxes a CSS table generates (CSS 2.1 §17.2.1, simple cases):
+/// row groups (header groups first, footer groups last), rows, and runs of
+/// cells directly inside the table or a row group, which get an anonymous
+/// row. Returns `None` when the table has direct text or a non-table box,
+/// whose anonymous cell this builder does not create.
+fn collect_css_table(
+    tree: &DomTree,
+    id: NodeId,
+    style: &crate::LayoutStyle,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+) -> Option<CssTable> {
+    use crate::TablePart;
+    let flatten = |node: NodeId| {
+        let children = rendered_children(tree, node);
+        let mut flattened = Vec::new();
+        flatten_contents_children(tree, &children, styles, &mut flattened);
+        flattened
+    };
+    #[derive(PartialEq)]
+    enum Kind {
+        Skip,
+        Cell,
+        Part(TablePart),
+        Other,
+    }
+    let kind = |node: NodeId| {
+        let is_element = tree.borrow_node(node).is_some_and(|n| n.is_element());
+        if !is_element {
+            return if tree.text_content(node).trim().is_empty() {
+                Kind::Skip
+            } else {
+                Kind::Other
+            };
+        }
+        let Some(child) = styles.get(&node) else {
+            return Kind::Skip;
+        };
+        if child.display == crate::Display::None {
+            Kind::Skip
+        } else if child.is_table_cell_box {
+            Kind::Cell
+        } else if let Some(part) = child.table_part {
+            Kind::Part(part)
+        } else if child.position.is_some_and(|p| p == taffy::Position::Absolute) {
+            Kind::Skip
+        } else {
+            Kind::Other
+        }
+    };
+    let mut table = CssTable {
+        rows: Vec::new(),
+        cells: Vec::new(),
+        real: Vec::new(),
+        captions: Vec::new(),
+        groups: Vec::new(),
+    };
+    // A row's cells; any other box inside a row needs an anonymous cell.
+    let row_cells = |row: NodeId| -> Option<Vec<NodeId>> {
+        let mut cells = Vec::new();
+        for child in flatten(row) {
+            match kind(child) {
+                Kind::Skip => {}
+                Kind::Cell => cells.push(child),
+                _ => return None,
+            }
+        }
+        Some(cells)
+    };
+    if style.table_part == Some(TablePart::Row) {
+        table.rows.push((id, 1));
+        table.cells.push(row_cells(id)?);
+        table.real.push(false);
+        return Some(table);
+    }
+    // Rows of one group (or of the table itself for `group == None`).
+    let push_group = |table: &mut CssTable,
+                      group: Option<NodeId>,
+                      members: Vec<NodeId>|
+     -> Option<()> {
+        let start = table.rows.len();
+        let mut anonymous: Vec<NodeId> = Vec::new();
+        let flush = |table: &mut CssTable, anonymous: &mut Vec<NodeId>| {
+            if !anonymous.is_empty() {
+                table.rows.push((id, 0));
+                table.cells.push(std::mem::take(anonymous));
+                table.real.push(false);
+            }
+        };
+        for child in members {
+            match kind(child) {
+                Kind::Skip => {}
+                Kind::Cell => anonymous.push(child),
+                Kind::Part(TablePart::Row) => {
+                    flush(table, &mut anonymous);
+                    table.rows.push((child, 0));
+                    table.cells.push(row_cells(child)?);
+                    table.real.push(true);
+                }
+                _ => return None,
+            }
+        }
+        flush(table, &mut anonymous);
+        let end = table.rows.len();
+        for row in &mut table.rows[start..end] {
+            row.1 = end;
+        }
+        if let Some(group) = group {
+            table.groups.push((group, start..end));
+        }
+        Some(())
+    };
+    let children = flatten(id);
+    let order = |node: NodeId| match kind(node) {
+        Kind::Part(TablePart::HeaderGroup) => 0,
+        Kind::Part(TablePart::FooterGroup) => 2,
+        _ => 1,
+    };
+    for pass in 0..3 {
+        // Consecutive rows and cells directly in the table form one group.
+        let mut loose: Vec<NodeId> = Vec::new();
+        for &child in &children {
+            if order(child) != pass {
+                continue;
+            }
+            match kind(child) {
+                Kind::Skip | Kind::Part(TablePart::Column | TablePart::ColumnGroup) => {}
+                Kind::Part(TablePart::Caption) => {
+                    if pass == 1 {
+                        table.captions.push(child);
+                    }
+                }
+                Kind::Cell | Kind::Part(TablePart::Row) => loose.push(child),
+                Kind::Part(
+                    TablePart::RowGroup | TablePart::HeaderGroup | TablePart::FooterGroup,
+                ) => {
+                    push_group(&mut table, None, std::mem::take(&mut loose))?;
+                    push_group(&mut table, Some(child), flatten(child))?;
+                }
+                Kind::Other => return None,
+            }
+        }
+        push_group(&mut table, None, loose)?;
+    }
+    if table.rows.is_empty() {
+        return None;
+    }
+    Some(table)
 }
 
 /// Effective separate-border spacing. Collapsed tables contribute no spacing
@@ -13061,7 +13374,7 @@ fn resolve_collapsed_table_borders(
     nrows: usize,
     ncols: usize,
     styles: &HashMap<NodeId, crate::LayoutStyle>,
-    native_html_table: bool,
+    table_id: NodeId,
 ) -> CollapsedTableBorders {
     // horizontal[r][c]: the edge above row r in column c (r == nrows is the
     // bottom edge). vertical[r][c]: the edge left of column c in row r.
@@ -13076,8 +13389,11 @@ fn resolve_collapsed_table_borders(
         row[0] = tb.left;
         row[ncols] = tb.right;
     }
-    if native_html_table {
+    {
         for (index, (tr, _)) in rows.iter().enumerate() {
+            if *tr == table_id {
+                continue;
+            }
             let Some(row_style) = styles.get(tr) else {
                 continue;
             };
@@ -13199,46 +13515,43 @@ fn build_table(
         node.as_element()
             .is_some_and(|element| element.local.as_ref() == "table")
     });
-    let authored_row_children = if native_html_table {
-        None
-    } else {
-        let children = rendered_children(tree, id);
-        let mut flattened = Vec::new();
-        flatten_contents_children(tree, &children, styles, &mut flattened);
-        // Full anonymous-table fixup is not represented yet. Falling back to
-        // ordinary box construction preserves every child; partially taking
-        // the dedicated path would silently discard direct text/non-cell
-        // boxes once one real table cell made the build succeed.
-        let all_rendered_children_are_cells = flattened.iter().all(|child| {
-            let hidden = styles
-                .get(child)
-                .is_some_and(|child_style| child_style.display == crate::Display::None);
-            let ignorable_whitespace = tree.borrow_node(*child).is_some_and(|node| {
-                !node.is_element() && tree.text_content(*child).trim().is_empty()
-            });
-            hidden
-                || ignorable_whitespace
-                || styles
-                    .get(child)
-                    .is_some_and(|child_style| child_style.is_table_cell_box)
-        });
-        if !all_rendered_children_are_cells {
-            return None;
-        }
-        Some(flattened)
-    };
+    // Rows as (row element, end of its row group) plus each row's cells. An
+    // anonymous row (cells directly inside a table or row group) uses the
+    // table's id and is marked not real so its style is not consulted.
     let mut rows: Vec<(NodeId, usize)> = Vec::new();
+    let mut row_cells: Vec<Vec<NodeId>> = Vec::new();
+    let mut row_real: Vec<bool> = Vec::new();
+    let mut css_captions: Vec<NodeId> = Vec::new();
+    let mut css_groups: Vec<(NodeId, std::ops::Range<usize>)> = Vec::new();
     if native_html_table {
         collect_table_rows(tree, id, styles, &mut rows);
         if rows.is_empty() {
             return None;
         }
+        for &(tr, _) in &rows {
+            row_cells.push(
+                tree.children(tr)
+                    .into_iter()
+                    .filter(|cid| {
+                        tree.borrow_node(*cid).is_some_and(|node| {
+                            node.as_element()
+                                .is_some_and(|element| matches!(element.local.as_ref(), "td" | "th"))
+                        })
+                    })
+                    .collect(),
+            );
+            row_real.push(true);
+        }
     } else {
-        // CSS table fixup inserts an anonymous row around table-cell children
-        // that are direct children of a table. The grid representation does
-        // not need a material row node, but retaining one logical row gives
-        // those cells the same shared-track negotiation as native cells.
-        rows.push((id, 1));
+        // CSS table: classify the boxes the table generates. Full anonymous
+        // fixup is not represented; a direct text or non-table box falls back
+        // to ordinary box construction, which preserves every child.
+        let table = collect_css_table(tree, id, style, styles)?;
+        rows = table.rows;
+        row_cells = table.cells;
+        row_real = table.real;
+        css_captions = table.captions;
+        css_groups = table.groups;
     }
     // Bounds so a crafted table cannot exhaust memory or time: `colspan`/
     // `rowspan` and the column count are page-controlled, and the occupancy
@@ -13251,6 +13564,8 @@ fn build_table(
     const MAX_ROWS: usize = 10000;
     if rows.len() > MAX_ROWS {
         rows.truncate(MAX_ROWS);
+        row_cells.truncate(MAX_ROWS);
+        row_real.truncate(MAX_ROWS);
     }
     let nrows = rows.len();
 
@@ -13267,25 +13582,9 @@ fn build_table(
     let mut occupied: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
     let mut placed: Vec<(NodeId, usize, usize, usize, usize)> = Vec::new();
     let mut ncols = 0usize;
-    for (r, &(tr, group_end)) in rows.iter().enumerate() {
+    for (r, &(_, group_end)) in rows.iter().enumerate() {
         let mut c = 0usize;
-        let row_children = if native_html_table {
-            tree.children(tr)
-        } else {
-            authored_row_children.clone().unwrap_or_default()
-        };
-        for cid in row_children {
-            let local = tree
-                .borrow_node(cid)
-                .and_then(|n| n.as_element().map(|e| e.local.to_string()));
-            let is_cell = if native_html_table {
-                matches!(local.as_deref(), Some("td") | Some("th"))
-            } else {
-                styles.get(&cid).is_some_and(|cell| cell.is_table_cell_box)
-            };
-            if !is_cell {
-                continue;
-            }
+        for &cid in &row_cells[r] {
             // A hidden cell is removed from the table model entirely (it must
             // not reserve a column slot, or the surviving cells shift right).
             if styles
@@ -13341,7 +13640,7 @@ fn build_table(
             nrows,
             ncols,
             styles,
-            native_html_table,
+            id,
         )
     });
 
@@ -13368,9 +13667,45 @@ fn build_table(
             })
             .collect()
     } else {
-        Vec::new()
+        css_captions
+            .iter()
+            .map(|cid| {
+                let bottom = styles
+                    .get(cid)
+                    .and_then(|caption| caption.caption_side_bottom)
+                    .or(style.caption_side_bottom)
+                    .unwrap_or(false);
+                (*cid, bottom)
+            })
+            .collect()
     };
     let top_captions = caption_ids.iter().filter(|(_, bottom)| !bottom).count();
+
+    // `visibility: collapse` on a row or row group removes the row's track
+    // (its height and one border-spacing) while its cells keep sizing the
+    // columns. `track_of[r]` is the grid track of source row `r`.
+    let row_collapsed: Vec<bool> = rows
+        .iter()
+        .zip(&row_real)
+        .map(|(&(tr, _), real)| {
+            *real
+                && (styles.get(&tr).is_some_and(|row| row.visibility_collapse)
+                    || tree.borrow_node(tr).and_then(|node| node.parent).is_some_and(|group| {
+                        group != id
+                            && styles.get(&group).is_some_and(|row| row.visibility_collapse)
+                    }))
+        })
+        .collect();
+    let mut track_of: Vec<Option<usize>> = Vec::with_capacity(nrows);
+    let mut ntracks = 0usize;
+    for collapsed_row in &row_collapsed {
+        if *collapsed_row {
+            track_of.push(None);
+        } else {
+            track_of.push(Some(ntracks));
+            ntracks += 1;
+        }
+    }
 
     // Build each cell and pin it to its grid area.
     let mut children: Vec<taffy::NodeId> = Vec::new();
@@ -13382,10 +13717,48 @@ fn build_table(
         };
         if let Ok(cur) = taffy_tree.style(cell_node) {
             let mut cstyle = cur.clone();
-            cstyle.grid_row = taffy::Line {
-                start: line((*r + top_captions) as i16 + 1),
-                end: span(*rs as u16),
-            };
+            let covered: Vec<usize> = (*r..(*r + *rs).min(nrows))
+                .filter_map(|row| track_of[row])
+                .collect();
+            if let (Some(first), Some(last)) = (covered.first(), covered.last()) {
+                cstyle.grid_row = taffy::Line {
+                    start: line((*first + top_captions) as i16 + 1),
+                    end: span((*last - *first + 1) as u16),
+                };
+            } else {
+                // Every row of this cell is collapsed: a zero-height box at
+                // the end of the previous visible row (or the start of the
+                // next one), out of the row sizing.
+                let previous = track_of[..*r].iter().rev().find_map(|track| *track);
+                let next = track_of[*r..].iter().find_map(|track| *track);
+                let (track, top) = match (previous, next) {
+                    (Some(track), _) => (track, taffy::LengthPercentageAuto::percent(1.0)),
+                    (None, Some(track)) => (track, taffy::LengthPercentageAuto::length(0.0)),
+                    (None, None) => (0, taffy::LengthPercentageAuto::length(0.0)),
+                };
+                cstyle.grid_row = taffy::Line {
+                    start: line((track + top_captions) as i16 + 1),
+                    end: span(1),
+                };
+                cstyle.position = taffy::Position::Absolute;
+                cstyle.inset = taffy::Rect {
+                    left: taffy::LengthPercentageAuto::length(0.0),
+                    right: taffy::LengthPercentageAuto::length(0.0),
+                    top,
+                    bottom: taffy::LengthPercentageAuto::auto(),
+                };
+                cstyle.size.height = Dimension::length(0.0);
+                cstyle.min_size.height = Dimension::length(0.0);
+                cstyle.max_size.height = Dimension::length(0.0);
+                cstyle.padding.top = length(0.0_f32);
+                cstyle.padding.bottom = length(0.0_f32);
+                cstyle.border.top = length(0.0_f32);
+                cstyle.border.bottom = length(0.0_f32);
+                cstyle.overflow = taffy::Point {
+                    x: taffy::Overflow::Hidden,
+                    y: taffy::Overflow::Hidden,
+                };
+            }
             cstyle.grid_column = taffy::Line {
                 start: line((*c as i16) + 1),
                 end: span(*cs as u16),
@@ -13474,29 +13847,46 @@ fn build_table(
     };
     // <col> elements (direct or under <colgroup>), each spanning `span` columns.
     let mut next_col = 0usize;
-    let mut col_elems: Vec<NodeId> = Vec::new();
+    // (column element, its colgroup). A `<colgroup>` without `<col>`
+    // children is itself one column element spanning `span` columns.
+    let mut col_elems: Vec<(NodeId, Option<NodeId>)> = Vec::new();
+    let is_hidden = |node: NodeId| {
+        styles
+            .get(&node)
+            .is_some_and(|column| column.display == crate::Display::None)
+    };
     for cid in tree.children(id) {
+        if is_hidden(cid) {
+            continue;
+        }
         match tree
             .borrow_node(cid)
             .and_then(|n| n.as_element().map(|e| e.local.to_string()))
             .as_deref()
         {
-            Some("col") => col_elems.push(cid),
+            Some("col") => col_elems.push((cid, None)),
             Some("colgroup") => {
+                let first = col_elems.len();
                 for gc in tree.children(cid) {
                     if tree
                         .borrow_node(gc)
                         .and_then(|n| n.as_element().map(|e| e.local.as_ref() == "col"))
                         .unwrap_or(false)
+                        && !is_hidden(gc)
                     {
-                        col_elems.push(gc);
+                        col_elems.push((gc, Some(cid)));
                     }
+                }
+                if col_elems.len() == first {
+                    col_elems.push((cid, Some(cid)));
                 }
             }
             _ => {}
         }
     }
-    for col_el in &col_elems {
+    let mut column_boxes: Vec<(NodeId, Option<NodeId>, usize, usize)> = Vec::new();
+    for &(col_el, group) in &col_elems {
+        let col_el = &col_el;
         let span = tree
             .borrow_node(*col_el)
             .and_then(|n| {
@@ -13505,6 +13895,9 @@ fn build_table(
             })
             .unwrap_or(1)
             .clamp(1, MAX_SPAN);
+        if next_col < ncols {
+            column_boxes.push((*col_el, group, next_col, span.min(ncols - next_col)));
+        }
         let (px, pct) = style_width(*col_el);
         let (fixed_px, fixed_pct) = fixed_style_width(*col_el);
         for _ in 0..span {
@@ -13598,8 +13991,11 @@ fn build_table(
     // Row sizing: a `height` on the row or a rowspan-1 cell is a MINIMUM
     // (content can always grow a row), matching how tables treat heights.
     let mut row_min: Vec<Option<f32>> = vec![None; nrows];
-    if native_html_table {
+    {
         for (r, &(tr, _)) in rows.iter().enumerate() {
+            if !row_real[r] {
+                continue;
+            }
             if let Some(crate::Dimension::Px(h)) = styles.get(&tr).map(|s| s.height) {
                 if h > 0.0 {
                     row_min[r] = Some(h);
@@ -13617,6 +14013,12 @@ fn build_table(
             }
         }
     }
+
+    let row_min: Vec<Option<f32>> = row_min
+        .into_iter()
+        .zip(&track_of)
+        .filter_map(|(minimum, track)| track.map(|_| minimum))
+        .collect();
 
     let col = |i: usize| {
         if fixed_layout {
@@ -13683,7 +14085,7 @@ fn build_table(
     };
     tstyle.grid_template_rows = (0..top_captions)
         .map(|_| caption_track())
-        .chain((0..nrows).map(row_track))
+        .chain((0..ntracks).map(row_track))
         .chain((top_captions..caption_ids.len()).map(|_| caption_track()))
         .collect();
     // A caption sits outside the table's border box in CSS but inside the
@@ -13712,7 +14114,7 @@ fn build_table(
             let mut caption_style = current.clone();
             let track = if *bottom {
                 bottom_index += 1;
-                top_captions + nrows + bottom_index
+                top_captions + ntracks + bottom_index
             } else {
                 top_index += 1;
                 top_index
@@ -13765,6 +14167,27 @@ fn build_table(
     let table_node = taffy_tree.new_with_children(tstyle, &children).ok()?;
     id_map.insert(table_node, id);
     ifc_items.table_rows.insert(table_node, row_min);
+    if !column_boxes.is_empty() {
+        ifc_items.table_columns.insert(table_node, column_boxes);
+    }
+    // CSS rows and row groups generate no layout box of their own; their
+    // rects are the union of their cells (native ones are synthesized from
+    // the DOM in `synthesize_row_rects`).
+    if !native_html_table {
+        for (r, &(row, _)) in rows.iter().enumerate() {
+            if row_real[r] && row != id {
+                ifc_items.table_part_boxes.push((row, row_cells[r].clone()));
+            }
+        }
+        for (group, range) in css_groups {
+            let cells: Vec<NodeId> = row_cells[range.start.min(nrows)..range.end.min(nrows)]
+                .iter()
+                .flatten()
+                .copied()
+                .collect();
+            ifc_items.table_part_boxes.push((group, cells));
+        }
+    }
     if !caption_nodes.is_empty() {
         ifc_items.table_captions.insert(
             table_node,
@@ -14640,7 +15063,7 @@ fn build(
     // across rows (the flex approximation could not) and colspan/rowspan map to
     // grid spans. Falls through to the generic path only if the table has no
     // usable rows/cells.
-    if style.is_table_box {
+    if style.is_table_box || style.table_part == Some(crate::TablePart::Row) {
         if let Some(node) = build_table(
             tree, id, taffy_tree, id_map, words, engine, ifc_items, styles,
         ) {
