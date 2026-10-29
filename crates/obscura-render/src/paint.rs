@@ -3018,6 +3018,7 @@ pub fn prepare_dom_with_retained_styles_with_animation_state(
     animation_sample: crate::AnimationSample,
     animation_timeline: &mut crate::AnimationTimelineState,
 ) -> Option<PreparedRender> {
+    let entered = std::time::Instant::now();
     let verify = crate::dom::layout_verify_enabled() && !VERIFYING.with(std::cell::Cell::get);
     let timeline_before = verify.then(|| animation_timeline.clone());
     let prepared = prepare_dom_with_retained_styles_with_animation_state_inner(
@@ -3044,6 +3045,9 @@ pub fn prepare_dom_with_retained_styles_with_animation_state(
             animation_sample,
             timeline,
         );
+    }
+    if crate::prof::enabled() {
+        eprintln!("[timing] retained-prepare total={:?}", entered.elapsed());
     }
     prepared
 }
@@ -3128,6 +3132,7 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
     animation_sample: crate::AnimationSample,
     animation_timeline: &mut crate::AnimationTimelineState,
 ) -> Option<PreparedRender> {
+    let _prof = crate::prof::start();
     let sample_changed = previous.animation_sample != animation_sample;
     let forward_document_sample = sample_changed
         && previous.animation_sample.mode == crate::AnimationSampleMode::DocumentTime
@@ -3308,6 +3313,7 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
             .collect::<Vec<_>>();
         animation_mutations.as_slice()
     };
+    crate::prof::stop(crate::prof::RETAIN_CHECKS, _prof);
     let retained = RetainedStyleMaps {
         styles: std::mem::take(&mut previous.layout.styles),
         custom_properties: std::mem::take(&mut previous.layout.custom_properties),

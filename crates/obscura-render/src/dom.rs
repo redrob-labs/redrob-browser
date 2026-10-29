@@ -4316,6 +4316,9 @@ fn retained_style_plan(
                         return RetainedStylePlan::Full;
                     }
                     if !add_relational_tree_invalidation(tree, map, mutation, &mut dirty) {
+                        if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+                            eprintln!("[timing] retained-style fallback reason=relational-tree");
+                        }
                         return RetainedStylePlan::Full;
                     }
                     add_style_subtree(tree, node, &mut dirty);
@@ -4368,6 +4371,9 @@ fn retained_style_plan(
                         return RetainedStylePlan::Full;
                     }
                     if !add_relational_tree_invalidation(tree, map, mutation, &mut dirty) {
+                        if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+                            eprintln!("[timing] retained-style fallback reason=relational-tree");
+                        }
                         return RetainedStylePlan::Full;
                     }
                     add_style_context_chain(tree, old_parent, &mut dirty);
@@ -4394,6 +4400,9 @@ fn retained_style_plan(
                         return RetainedStylePlan::Full;
                     }
                     if !add_relational_tree_invalidation(tree, map, mutation, &mut dirty) {
+                        if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+                            eprintln!("[timing] retained-style fallback reason=relational-tree");
+                        }
                         return RetainedStylePlan::Full;
                     }
                     if let Some(parent) = parent {
@@ -4424,7 +4433,12 @@ fn retained_style_plan(
         }
         let name = mutation.name.to_ascii_lowercase();
         match retained_attribute_mutation_kind(tree, mutation.node, &name) {
-            RetainedAttributeMutationKind::Full => return RetainedStylePlan::Full,
+            RetainedAttributeMutationKind::Full => {
+                if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+                    eprintln!("[timing] retained-style fallback reason=attribute-full name={name}");
+                }
+                return RetainedStylePlan::Full;
+            }
             RetainedAttributeMutationKind::Subtree => {
                 // Mapped hints and native-control sizing enter the mutable
                 // LayoutStyle graph. Re-cascade from specified values before
@@ -4475,9 +4489,42 @@ fn retained_style_plan(
             dependencies.extend_from_slice(map.state_dependencies(state));
         }
 
+        let mut relational_anchors: Option<HashSet<NodeId>> = None;
         for dependency in dependencies {
             let reaches = dependency.reaches;
+            if reaches.contains(crate::css::InvalidationReaches::RELATIONAL)
+                && !reaches.contains(crate::css::InvalidationReaches::CONSERVATIVE)
+            {
+                let anchors = relational_anchors.get_or_insert_with(|| {
+                    let mut anchors = HashSet::new();
+                    add_inserted_relational_anchor_candidates(tree, mutation.node, &mut anchors);
+                    anchors
+                });
+                for invalidation in map
+                    .relational_invalidations()
+                    .iter()
+                    .filter(|invalidation| invalidation.rule_order == dependency.rule_order)
+                {
+                    for anchor in anchors.iter().copied() {
+                        if !invalidation.anchor_may_match(tree, anchor) {
+                            continue;
+                        }
+                        if invalidation.unrepresentable_outer_path {
+                            if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+                                eprintln!(
+                                    "[timing] retained-style fallback reason=relational-unrepresentable name={name}"
+                                );
+                            }
+                            return RetainedStylePlan::Full;
+                        }
+                        add_relational_anchor_scope(tree, anchor, invalidation.anchor_reaches, &mut dirty);
+                    }
+                }
+            }
             if reaches.contains(crate::css::InvalidationReaches::CONSERVATIVE) {
+                if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+                    eprintln!("[timing] retained-style fallback reason=conservative-selector name={name}");
+                }
                 return RetainedStylePlan::Full;
             }
             if reaches.contains(crate::css::InvalidationReaches::SELF)
@@ -5194,6 +5241,17 @@ fn document_stylesheet_sources(
     viewport: (f32, f32),
     media_type: crate::CssMediaType,
 ) -> Vec<String> {
+    let _prof = crate::prof::start();
+    let sources = document_stylesheet_sources_uncounted(tree, viewport, media_type);
+    crate::prof::stop(crate::prof::SHEET_SOURCES, _prof);
+    sources
+}
+
+fn document_stylesheet_sources_uncounted(
+    tree: &DomTree,
+    viewport: (f32, f32),
+    media_type: crate::CssMediaType,
+) -> Vec<String> {
     // Collect inline and host-fetched author sheets in document order. Loaded
     // cross-origin bytes remain outside the page-visible DOM.
     let external = tree.external_stylesheets();
@@ -5354,9 +5412,18 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
                 .iter()
                 .all(|mutation| matches!(mutation, RetainedStyleMutation::Resource));
         if !shadow_sheets.is_empty() && !resource_only {
+            if timing {
+                eprintln!(
+                    "[timing] retained-style fallback reason=shadow-sheets count={}",
+                    shadow_sheets.len()
+                );
+            }
             return None;
         }
         if !stylesheet_cache_hit {
+            if timing {
+                eprintln!("[timing] retained-style fallback reason=stylesheet-changed");
+            }
             return None;
         }
         let active_containers = retained
@@ -5373,7 +5440,10 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
         retained
             .custom_properties
             .retain(|node, _| connected.contains(node));
-        match retained_style_plan(tree, &sheet, mutations) {
+        let _prof = crate::prof::start();
+        let plan = retained_style_plan(tree, &sheet, mutations);
+        crate::prof::stop(crate::prof::STYLE_PLAN, _prof);
+        match plan {
             RetainedStylePlan::Reuse {
                 mut dirty,
                 has_animation_damage,
@@ -5409,7 +5479,12 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
                 }
                 Some((retained, dirty))
             }
-            RetainedStylePlan::Full => None,
+            RetainedStylePlan::Full => {
+                if timing {
+                    eprintln!("[timing] retained-style fallback reason=plan-full");
+                }
+                None
+            }
         }
     });
     let retained_fresh = retained.as_ref().map_or(0, |(retained, fresh)| {
@@ -5764,10 +5839,15 @@ fn layout_dom_once(
     grow_trailing_auto_cells(tree, &mut styles);
 
     let descendants = tree.descendants(tree.document());
+    // Style and script text never renders, and is often megabytes of CSS.
     let needs_emoji_font = descendants.iter().any(|id| {
         tree.with_node(*id, |node| match &node.data {
             obscura_dom::tree::NodeData::Text { contents } => {
                 crate::inline::text_may_need_emoji_font(contents)
+                    && !node.parent.is_some_and(|parent| {
+                        element_local_name(tree, parent)
+                            .is_some_and(|name| name == "style" || name == "script")
+                    })
             }
             _ => false,
         })

@@ -16,6 +16,115 @@ use obscura_render::{
 };
 use std::time::Instant;
 
+/// `BENCH_PROFILE=<file>`: a SIGPROF sampler (1 kHz of CPU time) writing raw
+/// return addresses, one sample per line, plus the executable's load base, for
+/// offline symbolization with `nm`. No dependencies beyond glibc.
+#[allow(unsafe_code)]
+mod sampler {
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const DEPTH: usize = 64;
+    const MAX_SAMPLES: usize = 200_000;
+
+    #[repr(C)]
+    struct Timeval {
+        sec: i64,
+        usec: i64,
+    }
+    #[repr(C)]
+    struct Itimerval {
+        interval: Timeval,
+        value: Timeval,
+    }
+    #[repr(C)]
+    struct SigAction {
+        handler: usize,
+        mask: [u64; 16],
+        flags: i32,
+        restorer: usize,
+    }
+    extern "C" {
+        fn setitimer(which: i32, new: *const Itimerval, old: *mut Itimerval) -> i32;
+        fn sigaction(signal: i32, act: *const SigAction, old: *mut SigAction) -> i32;
+        fn backtrace(buffer: *mut *mut c_void, size: i32) -> i32;
+    }
+
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    static mut SAMPLES: Option<Box<[[usize; DEPTH]]>> = None;
+
+    extern "C" fn on_sample(_: i32) {
+        let index = NEXT.fetch_add(1, Ordering::Relaxed);
+        if index >= MAX_SAMPLES {
+            return;
+        }
+        let mut frames = [std::ptr::null_mut::<c_void>(); DEPTH];
+        let count = unsafe { backtrace(frames.as_mut_ptr(), DEPTH as i32) }.max(0) as usize;
+        unsafe {
+            if let Some(samples) = (*std::ptr::addr_of_mut!(SAMPLES)).as_mut() {
+                let slot = &mut samples[index];
+                for (target, frame) in slot.iter_mut().zip(frames.iter().take(count)) {
+                    *target = *frame as usize;
+                }
+            }
+        }
+    }
+
+    pub fn start() {
+        unsafe {
+            *std::ptr::addr_of_mut!(SAMPLES) =
+                Some(vec![[0usize; DEPTH]; MAX_SAMPLES].into_boxed_slice());
+            // Resolve glibc's unwinder before the first signal arrives.
+            let mut warm = [std::ptr::null_mut::<c_void>(); 4];
+            backtrace(warm.as_mut_ptr(), 4);
+            let action = SigAction {
+                handler: on_sample as usize,
+                mask: [0; 16],
+                flags: 0x1000_0000, // SA_RESTART
+                restorer: 0,
+            };
+            sigaction(27, &action, std::ptr::null_mut()); // SIGPROF
+            let period = Itimerval {
+                interval: Timeval { sec: 0, usec: 1000 },
+                value: Timeval { sec: 0, usec: 1000 },
+            };
+            setitimer(2, &period, std::ptr::null_mut()); // ITIMER_PROF
+        }
+    }
+
+    pub fn finish(path: &str) {
+        unsafe {
+            let off = Itimerval {
+                interval: Timeval { sec: 0, usec: 0 },
+                value: Timeval { sec: 0, usec: 0 },
+            };
+            setitimer(2, &off, std::ptr::null_mut());
+        }
+        let exe = std::fs::read_link("/proc/self/exe").unwrap_or_default();
+        let maps = std::fs::read_to_string("/proc/self/maps").unwrap_or_default();
+        let base = maps
+            .lines()
+            .find(|line| line.ends_with(exe.to_string_lossy().as_ref()))
+            .and_then(|line| line.split('-').next())
+            .and_then(|start| usize::from_str_radix(start, 16).ok())
+            .unwrap_or(0);
+        let count = NEXT.load(Ordering::Relaxed).min(MAX_SAMPLES);
+        let mut out = format!("base {base:x}\n");
+        unsafe {
+            if let Some(samples) = (*std::ptr::addr_of!(SAMPLES)).as_ref() {
+                for sample in samples.iter().take(count) {
+                    for frame in sample.iter().take_while(|frame| **frame != 0) {
+                        out.push_str(&format!("{frame:x} "));
+                    }
+                    out.push('\n');
+                }
+            }
+        }
+        let _ = std::fs::write(path, out);
+        eprintln!("profile: {count} samples -> {path}");
+    }
+}
+
 struct Ctx {
     viewport: (f32, f32),
     base: Option<String>,
@@ -113,6 +222,11 @@ fn page_bench(ctx: &mut Ctx, html: &str) {
         median(warm)
     );
 
+    if std::env::var_os("BENCH_PROFILE").is_some()
+        && std::env::var_os("BENCH_PROFILE_FULL").is_none()
+    {
+        sampler::start();
+    }
     // Attribute mutation on a mid-document paragraph.
     let target = paragraphs.get(paragraphs.len() / 3).copied();
     let mut attr = Vec::new();
@@ -152,6 +266,51 @@ fn page_bench(ctx: &mut Ctx, html: &str) {
             prepared = ctx.retained(&tree, prepared, &[mutation.into()]);
             text.push(ms(start));
         }
+    }
+    // Attribute churn across the document: the attributes framework pages
+    // toggle most (`hidden`, `aria-hidden`, `class`, `style`), on elements
+    // spread over the whole tree. With OBSCURA_LAYOUT_VERIFY this exercises
+    // every retained-style planner path the page's selectors reach.
+    let elements: Vec<NodeId> = tree
+        .descendants(tree.document())
+        .into_iter()
+        .filter(|id| tree.with_node(*id, |node| node.is_element()).unwrap_or(false))
+        .collect();
+    let mut churn = Vec::new();
+    let step = (elements.len() / 12).max(1);
+    for (round, target) in elements.iter().copied().step_by(step).skip(2).take(10).enumerate() {
+        let (name, value) = match round % 4 {
+            0 => ("hidden", Some(String::new())),
+            1 => ("aria-hidden", Some("true".to_string())),
+            2 => ("class", Some(format!("bench-churn-{round}"))),
+            _ => ("style", Some("color: red".to_string())),
+        };
+        for apply in [true, false] {
+            let old = tree
+                .with_node(target, |node| node.get_attribute(name).map(str::to_owned))
+                .flatten();
+            let new = if apply { value.clone() } else { None };
+            tree.with_node_mut(target, |node| match &new {
+                Some(value) => node.set_attribute(name, value.clone()),
+                None => {
+                    if let NodeData::Element { attrs, .. } = &mut node.data {
+                        attrs.retain(|attr| attr.name.local.as_ref() != name);
+                    }
+                }
+            });
+            let mutation = obscura_render::AttributeStyleMutation {
+                node: target,
+                name: name.into(),
+                old_value: old,
+                new_value: new,
+            };
+            let start = Instant::now();
+            prepared = ctx.retained(&tree, prepared, &[mutation.into()]);
+            churn.push(ms(start));
+        }
+    }
+    if !churn.is_empty() {
+        println!("attribute_churn n={} median={:.1}ms", churn.len(), median(churn));
     }
     // Re-insert the detached paragraph.
     let mut insert = None;
@@ -200,6 +359,11 @@ fn list_bench(ctx: &mut Ctx, count: usize) {
     let mut prepared = ctx.full(&tree);
     let first = ms(start);
     let mut per = Vec::with_capacity(count);
+    if std::env::var_os("BENCH_PROFILE").is_some()
+        && std::env::var_os("BENCH_PROFILE_FULL").is_none()
+    {
+        sampler::start();
+    }
     let total = Instant::now();
     for item in items {
         tree.append_child(list, item);
@@ -234,11 +398,18 @@ fn main() {
         resources,
         sheets: StylesheetCache::default(),
     };
+    let profile = std::env::var("BENCH_PROFILE").ok();
+    if profile.is_some() && std::env::var_os("BENCH_PROFILE_FULL").is_some() {
+        sampler::start();
+    }
     if args.get(4).map(String::as_str) == Some("list") {
         let count = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(1000);
         list_bench(&mut ctx, count);
-        return;
+    } else {
+        let html = std::fs::read_to_string(&input).expect("read input html");
+        page_bench(&mut ctx, &html);
     }
-    let html = std::fs::read_to_string(&input).expect("read input html");
-    page_bench(&mut ctx, &html);
+    if let Some(path) = profile {
+        sampler::finish(&path);
+    }
 }

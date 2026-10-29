@@ -67,6 +67,11 @@ const SYSTEM_FAMILY: &str = "DejaVu Sans";
 /// large, and loading it for every page would spend RSS and startup time even
 /// when no emoji can be shaped.
 pub(crate) fn text_may_need_emoji_font(text: &str) -> bool {
+    // Every candidate below is outside ASCII; style sheets and most page text
+    // are ASCII and skip the per-character match.
+    if text.is_ascii() {
+        return false;
+    }
     text.chars().any(|ch| {
         matches!(
             ch,
@@ -866,40 +871,17 @@ impl ItemKey {
 }
 
 impl InlineItem {
-    /// A copy of a previous layout's item as `push_shaped_item` would have
-    /// produced it: the shaped buffers and pure measurements carry over;
-    /// placement state is reset.
-    fn reuse(&self) -> Self {
-        InlineItem {
-            buffer: self.buffer.clone(),
-            layout_wrap: self.layout_wrap,
-            min_content_wrap: self.min_content_wrap,
-            source_buffer: self.source_buffer.clone(),
-            text_indent: self.text_indent,
-            first_line_offset: self.first_line_offset,
-            balance_wrap: self.balance_wrap,
-            align: self.align,
-            forced_min_height: self.forced_min_height,
-            origin: (0.0, 0.0),
-            clip: None,
-            clip_fills: self.clip_fills.clone(),
-            variation_sets: self.variation_sets.clone(),
-            line_clamp: self.line_clamp,
-            ellipsis_overflow: self.ellipsis_overflow,
-            marker_buffer: self.marker_buffer.clone(),
-            marker: None,
-            owner_text: self.owner_text.clone(),
-            owner_ranges: self.owner_ranges.clone(),
-            owner_boxes: self.owner_boxes.clone(),
-            boundary_events: self.boundary_events.clone(),
-            relative_owner_ranges: Vec::new(),
-            caret_run: None,
-            measured: self.measured.clone(),
-            cache_key: self.cache_key.clone(),
-            finalized: false,
-            word_measure: self.word_measure,
-            shaped_at: self.shaped_at,
-        }
+    /// A previous layout's item as `push_shaped_item` would have produced it:
+    /// the shaped buffers and pure measurements carry over; placement state
+    /// is reset.
+    fn into_reused(mut self) -> Self {
+        self.origin = (0.0, 0.0);
+        self.clip = None;
+        self.marker = None;
+        self.relative_owner_ranges = Vec::new();
+        self.caret_run = None;
+        self.finalized = false;
+        self
     }
 }
 
@@ -1881,11 +1863,14 @@ impl TextEngine {
             )
         });
         if let Some(key) = key.as_ref() {
-            let reused = self.item_cache.get(&key.hash).and_then(|candidates| {
-                candidates
+            // Each cached item is used at most once, so it moves instead of
+            // being cloned. A layout repeating the same text gets one copy per
+            // occurrence the previous layout had.
+            let reused = self.item_cache.get_mut(&key.hash).and_then(|candidates| {
+                let position = candidates
                     .iter()
-                    .find(|item| item.cache_key.as_deref() == Some(key))
-                    .map(InlineItem::reuse)
+                    .position(|item| item.cache_key.as_deref() == Some(key))?;
+                Some(candidates.remove(position).into_reused())
             });
             if let Some(item) = reused {
                 let index = self.items.len();
@@ -2517,6 +2502,9 @@ impl TextEngine {
                     0.0
                 };
                 let alignment_shift = line_edge_alignment_shift(item, line_start, line_end);
+                // A fragment is keyed by (owner, item, line), so only fragments
+                // pushed for this line can merge with a new one.
+                let line_fragments = out.len();
                 for owner in &item.owner_boxes {
                     let empty = owner.start == owner.end;
                     let intersects = if empty {
@@ -2552,7 +2540,7 @@ impl TextEngine {
                     let x = item.origin.0 + first_line_offset + alignment_shift + raw_left;
                     let width = (raw_right - raw_left).max(0.0);
                     let baseline_y = item.origin.1 + run.line_y;
-                    if let Some(existing) = out.iter_mut().find(|fragment| {
+                    if let Some(existing) = out[line_fragments..].iter_mut().find(|fragment| {
                         fragment.owner == owner.owner
                             && fragment.item_index == item_index
                             && fragment.line_index == line_index

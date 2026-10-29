@@ -29,9 +29,21 @@ pub mod prof {
     pub const MEASURE_MISS: usize = 2;
     pub const MEASURE_HIT: usize = 3;
     pub const ITEM_REUSE: usize = 4;
-    const NAMES: [&str; 5] = ["engine_new", "push_item", "measure_miss", "measure_hit", "item_reuse"];
-    static NANOS: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
-    static COUNTS: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
+    pub const SHEET_SOURCES: usize = 5;
+    pub const RETAIN_CHECKS: usize = 6;
+    pub const STYLE_PLAN: usize = 7;
+    const NAMES: [&str; 8] = [
+        "finalize_relayout",
+        "push_item",
+        "finalize",
+        "measure_hit",
+        "item_reuse",
+        "sheet_sources",
+        "retain_checks",
+        "style_plan",
+    ];
+    static NANOS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+    static COUNTS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
 
     pub fn enabled() -> bool {
         static ON: OnceLock<bool> = OnceLock::new();

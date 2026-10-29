@@ -106,6 +106,11 @@ impl InvalidationReaches {
     /// The selector needs a correctness-first fallback which phase 2 must not
     /// narrow to a local traversal.
     pub const CONSERVATIVE: Self = Self(1 << 3);
+    /// The key appears inside a `:has()` argument. A change can alter which
+    /// `:has()` anchors match; those anchors are ancestors of the changed
+    /// element or earlier siblings of it or of an ancestor, and the planner
+    /// restyles them through the rule's `RelationalInvalidation`.
+    pub const RELATIONAL: Self = Self(1 << 4);
 
     pub fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
@@ -481,6 +486,13 @@ fn compose_invalidation_reach(
     if outer == InvalidationReaches::SELF {
         inner
     } else if inner == InvalidationReaches::SELF || inner == outer {
+        outer
+    } else if outer == InvalidationReaches::RELATIONAL
+        && !inner.contains(InvalidationReaches::CONSERVATIVE)
+    {
+        // Inside a `:has()` argument the traversal between the changed key and
+        // the argument's subject stays below or after the anchor; the anchor
+        // search from the changed element covers every such path.
         outer
     } else {
         // A sibling traversal nested under an ancestor traversal (or vice
@@ -1254,6 +1266,18 @@ fn note_compound_dependencies(
                     "has" => {
                         // Relative selectors invalidate anchors upwards, which
                         // Self/Descendants/Siblings cannot express soundly.
+                        // Keys inside the argument are RELATIONAL: an attribute
+                        // change is answered by restyling matching anchors. A
+                        // `:has()` nested in another `:has()` argument styles an
+                        // outer anchor the inner search cannot find, so it
+                        // stays CONSERVATIVE.
+                        let nested = reaches.contains(InvalidationReaches::RELATIONAL)
+                            || reaches.contains(InvalidationReaches::CONSERVATIVE);
+                        let argument_reaches = if nested {
+                            InvalidationReaches::CONSERVATIVE
+                        } else {
+                            InvalidationReaches::RELATIONAL
+                        };
                         map.push_state(name.clone(), rule_order, InvalidationReaches::CONSERVATIVE);
                         map.mark_conservative(rule_order);
                         let alternatives = split_selector_list(&arguments);
@@ -1301,14 +1325,13 @@ fn note_compound_dependencies(
                             sibling_side_effect,
                             structural_side_effect,
                             text_side_effect,
-                            unrepresentable_outer_path: reaches
-                                .contains(InvalidationReaches::CONSERVATIVE),
+                            unrepresentable_outer_path: nested,
                         });
                         for alternative in alternatives {
                             note_selector_dependencies(
                                 map,
                                 alternative.trim(),
-                                InvalidationReaches::CONSERVATIVE,
+                                argument_reaches,
                                 rule_order,
                                 false,
                             );
