@@ -2580,6 +2580,10 @@ struct IfcRegistry {
     /// without changing the real box's percentage containing block.
     static_positions: HashMap<NodeId, taffy::NodeId>,
     generated: Vec<GeneratedBoxBuild>,
+    /// Block-in-inline wrappers spliced into their parent's flow (see
+    /// `flow::is_transparent_block_wrapper`), outermost first. Their rects
+    /// are the union of their descendants'.
+    pub(crate) transparent_wrappers: Vec<NodeId>,
     /// Specified column widths per table grid node, from `<col>` elements and
     /// colspan-1 cells: `(px, percent)` per column index. Consumed by the
     /// table column-balancing pass in `layout_dom_with_images`, which pins
@@ -8955,6 +8959,17 @@ fn layout_dom_once(
                 &mut generated_rects,
             );
             synthesize_row_rects(tree, &mut rects);
+            // Spliced block-in-inline wrappers span their children; the
+            // innermost first so an outer wrapper includes the inner ones.
+            for &wrapper in ifc_items.transparent_wrappers.iter().rev() {
+                let union = rendered_children(tree, wrapper)
+                    .into_iter()
+                    .filter_map(|child| rects.get(&child).copied())
+                    .reduce(|a, b| a.union(&b));
+                if let Some(rect) = union {
+                    rects.insert(wrapper, rect);
+                }
+            }
             synthesize_column_rects(&taffy_tree, &id_map, &ifc_items, &mut rects);
             retain_taffy_tree(
                 std::mem::replace(&mut taffy_tree, crate::new_taffy_tree()),

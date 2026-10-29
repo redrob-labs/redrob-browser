@@ -5135,3 +5135,29 @@ fn float_ending_at_rounded_segment_boundary_does_not_panic() {
         1859.0
     );
 }
+
+#[test]
+fn deeply_nested_inline_spans_and_decorated_wrappers_lay_out() {
+    // 400 nested inline spans around text (one inline formatting context),
+    // and 400 nested spans that each hold text and, innermost, a block
+    // (block-in-inline), on the default test-thread stack.
+    for (open_tag, inner) in [
+        ("<span>", "<b id=\"deep\">deep</b>"),
+        (
+            "<span>t ",
+            "<div id=\"deep\" style=\"width:50px\">deep</div>",
+        ),
+    ] {
+        let open = open_tag.repeat(400);
+        let close = "</span>".repeat(400);
+        let tree = parse_html(&format!(
+            "<style>html,body{{margin:0;font:16px/18px monospace}}</style><div>{open}{inner}{close}</div>"
+        ));
+        let layout = layout_dom(&tree, (400.0, 200.0));
+        let rect = layout.rects[&tree.get_element_by_id("deep").unwrap()];
+        assert!(
+            rect.width > 0.0 && rect.height > 0.0,
+            "{open_tag}: {rect:?}"
+        );
+    }
+}
