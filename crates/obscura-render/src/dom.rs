@@ -21354,6 +21354,22 @@ mod tests {
         assert_eq!(rect("w4").height, 43.0);
     }
 
+    // The w3schools clearfix: `::after{content:"";display:table;clear:both}`
+    // after a float placed by the inline formatting context. Chrome grows the
+    // host to the float's bottom (60px), not the 44px line.
+    #[cfg(feature = "paint")]
+    #[test]
+    fn table_clearfix_pseudo_clears_a_float_from_the_inline_run() {
+        let tree = parse_html(
+            r#"<!doctype html><style>body{margin:0;font:16px/24px sans-serif}.w3-clear:after,.w3-clear:before{content:"";display:table;clear:both}.l{float:left;height:60px;width:100px}.ib{display:inline-block;height:44px;width:50px;vertical-align:top}</style><div id=d class=w3-clear><a class=l></a><span class=ib></span></div>"#,
+        );
+        let laid = layout_dom(&tree, (1280.0, 800.0));
+        assert_eq!(
+            laid.rects[&tree.get_element_by_id("d").unwrap()].height,
+            60.0
+        );
+    }
+
     /// Each line of text node `node`: (x, text), in line order.
     #[cfg(feature = "paint")]
     fn text_lines(laid: &DomLayout, node: NodeId) -> Vec<(f32, String)> {
