@@ -9004,7 +9004,27 @@ fn layout_dom_once(
                 &mut text_runs,
                 &mut generated_rects,
             );
+            // CSSOM rows and sections are the same unions over the cells'
+            // fractional rects.
+            let mut fractional_cells = rects.clone();
+            fractional_cells.extend(fractional_rects.iter().map(|(&id, &rect)| (id, rect)));
+            let unsynthesized: HashSet<NodeId> = fractional_cells.keys().copied().collect();
+            synthesize_row_rects(tree, &styles, &mut fractional_cells);
             synthesize_row_rects(tree, &styles, &mut rects);
+            for (id, rect) in fractional_cells {
+                if unsynthesized.contains(&id) {
+                    continue;
+                }
+                if let Some(rounded) = rects.get(&id) {
+                    let close = (rect.x - rounded.x).abs() < 1.0
+                        && (rect.y - rounded.y).abs() < 1.0
+                        && (rect.width - rounded.width).abs() < 1.0
+                        && (rect.height - rounded.height).abs() < 1.0;
+                    if close && rect != *rounded {
+                        fractional_rects.insert(id, rect);
+                    }
+                }
+            }
             // Spliced block-in-inline wrappers span their children; the
             // innermost first so an outer wrapper includes the inner ones.
             for &wrapper in ifc_items.transparent_wrappers.iter().rev() {
@@ -21877,6 +21897,26 @@ mod tests {
     // Chrome getBoundingClientRect: 13.9px and 15.9px flex items are
     // 13.890625 and 15.890625 wide (LayoutUnit truncation) and the second
     // starts at 13.890625; paint keeps whole-pixel rects.
+    // A CSSOM row rect is the union of its cells' fractional rects (Chrome:
+    // a row of 13.9px and 15.9px cells is 29.78125 wide).
+    #[test]
+    fn cssom_row_rects_union_fractional_cells() {
+        let tree = parse_html(
+            r#"<!doctype html><body style="margin:0"><table style="border-spacing:0"><tr id=r><td id=a style="padding:0;width:13.9px;height:10px"></td><td id=b style="padding:0;width:15.9px;height:10px"></td></tr></table>"#,
+        );
+        let laid = layout_dom(&tree, (400.0, 200.0));
+        let frac = |id: &str| {
+            let node = tree.get_element_by_id(id).unwrap();
+            laid.fractional_rects
+                .get(&node)
+                .copied()
+                .unwrap_or(laid.rects[&node])
+        };
+        let (row, a, b) = (frac("r"), frac("a"), frac("b"));
+        assert_ne!(row.width, row.width.round());
+        assert_eq!((row.x, row.width), (a.x, b.x + b.width - a.x));
+    }
+
     #[test]
     fn cssom_rects_keep_layout_unit_fractions() {
         let tree = parse_html(
