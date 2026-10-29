@@ -21370,6 +21370,19 @@ mod tests {
         );
     }
 
+    // Chrome: an inline-grid sits on its first item's baseline, so its line
+    // is 18px like a text line (it was 22px: the grid reported no baseline
+    // unless two items in its first row were baseline-aligned).
+    #[cfg(feature = "paint")]
+    #[test]
+    fn inline_grid_aligns_on_its_first_item_baseline() {
+        let tree = parse_html(
+            r#"<!doctype html><body style="margin:8px;font:16px Arial"><div id=a style="display:inline-grid">igrid</div><div id=b>fr</div>"#,
+        );
+        let laid = layout_dom(&tree, (1280.0, 800.0));
+        assert_eq!(laid.rects[&tree.get_element_by_id("b").unwrap()].y, 26.0);
+    }
+
     /// Each line of text node `node`: (x, text), in line order.
     #[cfg(feature = "paint")]
     fn text_lines(laid: &DomLayout, node: NodeId) -> Vec<(f32, String)> {
