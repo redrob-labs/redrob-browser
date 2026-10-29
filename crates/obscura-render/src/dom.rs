@@ -14319,7 +14319,44 @@ fn build(
             let has_in_flow_block_child = rendered_children(tree, id)
                 .iter()
                 .any(|child| styles.get(child).is_some_and(is_in_flow_block_level));
-            if !has_in_flow_block_child {
+            // Between two atomic inlines there is always a break opportunity,
+            // and an inline-block whose content is only such boxes (a list of
+            // inline-block items: Wikipedia's infobox `ul.cslist`) must wrap
+            // them at the line width like Chrome. Keeping NoWrap there made
+            // its min-content the sum of every item, which widened the whole
+            // infobox table to 641px instead of its 22em. The two-word-button
+            // concern above is about direct text, which this does not touch.
+            let only_atomic_children = {
+                let children = rendered_children(tree, id);
+                let mut atoms = 0usize;
+                let all = children.iter().all(|child| {
+                    let Some(node) = tree.borrow_node(*child) else {
+                        return true;
+                    };
+                    if !node.is_element() {
+                        return tree.text_content(*child).trim().is_empty();
+                    }
+                    let Some(child_style) = styles.get(child) else {
+                        return true;
+                    };
+                    if child_style.display == crate::Display::None
+                        || matches!(child_style.position, Some(taffy::Position::Absolute))
+                    {
+                        return true;
+                    }
+                    let atomic = child_style.is_inline_block
+                        || node.as_element().is_some_and(|element| {
+                            crate::inline::is_replaced(element.local.as_ref())
+                        });
+                    atoms += usize::from(atomic);
+                    atomic
+                });
+                all && atoms > 1
+                    && style.white_space != Some(crate::WhiteSpace::NoWrap)
+                    && !has_in_flow_generated_pseudo(style.before_pseudo.as_deref())
+                    && !has_in_flow_generated_pseudo(style.after_pseudo.as_deref())
+            };
+            if !has_in_flow_block_child && !only_atomic_children {
                 taffy_style.flex_wrap = taffy::FlexWrap::NoWrap;
             }
         }
