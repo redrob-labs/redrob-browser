@@ -825,3 +825,25 @@ fn shrink_to_fit_treats_percentage_atomic_widths_as_auto() {
     assert_eq!(width(&tree, &laid, "d"), 720.0);
     assert_eq!(width(&tree, &laid, "i"), 216.0);
 }
+
+#[test]
+fn glyphs_missing_from_bundled_fonts_fall_back_to_host_fonts() {
+    // Chrome on the capture host (fontconfig's sans-serif order): 16px
+    // Arial "漢字テスト" 80 wide, "한국어" 48, "ภาษาไทย" 68.
+    if !super::fonts::tests_host_has_family("wenquanyi zen hei") {
+        return;
+    }
+    let (tree, laid) = layout(
+        "<!doctype html><meta charset=utf-8><body style='margin:0;font:16px Arial'>\
+         <div><span id=ja>漢字テスト</span></div><div><span id=ko>한국어</span></div>\
+         <div><span id=th>ภาษาไทย</span></div>",
+        &[],
+    );
+    for (id, want) in [("ja", 80.0), ("ko", 48.0), ("th", 68.0)] {
+        assert!(
+            (width(&tree, &laid, id) - want).abs() < 0.5,
+            "{id}: {}",
+            width(&tree, &laid, id)
+        );
+    }
+}

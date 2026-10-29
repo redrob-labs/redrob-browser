@@ -298,6 +298,27 @@ fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
             }
         }
     }
+    // Then the host's own fallback fonts in fontconfig's order for
+    // sans-serif (CJK, Thai, Devanagari, ...), whole-pixel like DejaVu.
+    // Registered under their own family names, so a page that names one
+    // of these families gets its own (fractional) registration.
+    for (index, data) in host_fallback_font_files().iter().enumerate() {
+        let blob = Blob::new(Arc::clone(data) as Arc<dyn AsRef<[u8]> + Send + Sync>);
+        parley::mark_whole_pixel_advances(blob.id());
+        let name = format!("Obscura Host Fallback {index}");
+        let info = FontInfoOverride {
+            family_name: Some(&name),
+            width: None,
+            style: None,
+            weight: None,
+            axes: None,
+        };
+        for (family, _) in collection.register_fonts(blob, Some(info)) {
+            if !fallback_faces.contains(&family) {
+                fallback_faces.push(family);
+            }
+        }
+    }
     // Then the bundled faces (DejaVu Sans covers most symbols), every other
     // loaded family in registration order, and emoji last.
     let mut fallback: Vec<FamilyId> = fallback_faces;
@@ -368,9 +389,18 @@ impl Fonts {
     fn register_host_family(&mut self, lower: &str) -> Option<String> {
         let (name, paths) = host_font_index().get(lower)?;
         for path in paths {
-            let Some(data) = host_font_bytes(path) else {
+            let Some(mut data) = host_font_bytes(path) else {
                 continue;
             };
+            // The shaper caches faces by their bytes: a family that is also
+            // a whole-pixel glyph fallback needs its own copy to keep
+            // fractional advances when the page names it.
+            if host_fallback_font_files()
+                .iter()
+                .any(|fallback| Arc::ptr_eq(fallback, &data))
+            {
+                data = Arc::new(data.as_ref().clone());
+            }
             self.context
                 .collection
                 .register_fonts(Blob::new(data as Arc<dyn AsRef<[u8]> + Send + Sync>), None);
@@ -454,6 +484,52 @@ fn host_font_directories() -> Vec<PathBuf> {
         out.push(home.join(".fonts"));
     }
     out
+}
+
+/// The host fonts Chromium falls back to for characters the page's fonts
+/// lack: fontconfig's sorted, coverage-trimmed list for sans-serif
+/// (`fc-match -s sans-serif`), without the faces bundled here (DejaVu,
+/// Liberation) and emoji, which have their own registrations. Read once;
+/// empty when fontconfig is unavailable or host fonts are disabled.
+fn host_fallback_font_files() -> &'static [Arc<Vec<u8>>] {
+    static FILES: OnceLock<Vec<Arc<Vec<u8>>>> = OnceLock::new();
+    FILES.get_or_init(|| {
+        if host_font_directories().is_empty() {
+            return Vec::new();
+        }
+        let Ok(output) = std::process::Command::new("fc-match")
+            .args(["-s", "-f", "%{file}\n", "sans-serif"])
+            .stderr(std::process::Stdio::null())
+            .output()
+        else {
+            return Vec::new();
+        };
+        if !output.status.success() {
+            return Vec::new();
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut files = Vec::new();
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let path = PathBuf::from(line.trim());
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if name.is_empty()
+                || name.starts_with("dejavu")
+                || name.starts_with("liberation")
+                || name.contains("emoji")
+                || !seen.insert(path.clone())
+            {
+                continue;
+            }
+            if let Some(data) = host_font_bytes(&path) {
+                files.push(data);
+            }
+        }
+        files
+    })
 }
 
 /// Every font file under `roots` (no symlinked directories).
