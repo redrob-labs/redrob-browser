@@ -983,3 +983,28 @@ fn web_font_kerning_rounds_separately_from_the_advance() {
     assert_eq!(width(&tree, &laid, "d"), 21.0);
     assert_eq!(width(&tree, &laid, "e"), 17.0);
 }
+
+#[test]
+fn block_level_images_apply_their_ratio_to_the_content_box() {
+    // Chrome: a display:block 120px border-box image with a 6px border and
+    // width/height attributes 420x868 is 235.19 tall (108 x 868/420 + 12).
+    let tree = obscura_dom::parse_html(
+        "<!doctype html><body style='margin:0'><div>\
+         <img id=i src=a.png width=420 height=868 \
+         style='display:block;width:120px;height:auto;box-sizing:border-box;border:6px solid'></div>",
+    );
+    let mut intrinsic = HashMap::new();
+    intrinsic.insert(
+        element(&tree, "i"),
+        crate::ReplacedIntrinsic::from_dimensions(420.0, 868.0),
+    );
+    let laid = crate::dom::layout_dom_with_web_fonts(&tree, (1280.0, 800.0), &intrinsic, &[]);
+    let node = element(&tree, "i");
+    let h = laid
+        .fractional_rects
+        .get(&node)
+        .copied()
+        .unwrap_or(laid.rects[&node])
+        .height;
+    assert!((h - 235.19).abs() < 0.02, "{h}");
+}
