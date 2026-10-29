@@ -1362,6 +1362,10 @@ pub struct LayoutStyle {
     /// `<td>`/`<th>` elements even though Taffy represents their cell-content
     /// wrapper as an internal column flexbox.
     pub(crate) is_table_cell_box: bool,
+    /// Authored internal table display other than `table-cell`
+    /// (`table-row`, `table-row-group`, `table-caption` ...). Native HTML
+    /// table parts are recognised by tag instead.
+    pub(crate) table_part: Option<TablePart>,
     /// The HTML UA sheet's vendor `text-align` behavior for `<center>`.
     /// Unlike ordinary `text-align:center`, it also centers fixed-width block
     /// descendants while leaving auto-width blocks fill-available.
@@ -1713,6 +1717,10 @@ pub struct LayoutStyle {
     /// is still approximate, but collapsed tables must at minimum contribute
     /// no border-spacing to their geometry.
     pub border_collapse: Option<bool>,
+    /// Inherited `caption-side`: `Some(true)` for `bottom`. `None` means no
+    /// value was specified on this node yet; resolved top-down like
+    /// `border_collapse`.
+    pub caption_side_bottom: Option<bool>,
 
     // Positioning. `position: absolute|fixed` takes the box out of normal flow.
     pub position: Option<taffy::Position>,
@@ -1773,6 +1781,10 @@ pub struct LayoutStyle {
     /// a real inherited CSS property). Resolved into `effectively_invisible`
     /// during `dom::layout_dom`'s inheritance pass.
     pub visibility_hidden: Option<bool>,
+    /// `visibility: collapse` declared on this element (not inherited; the
+    /// inherited part is `visibility_hidden`). A collapsed table row or row
+    /// group takes no block space, but its cells still size the columns.
+    pub visibility_collapse: bool,
     // Preserve the own value above for retained inheritance updates while
     // exposing the resolved inherited value through CSSOM snapshots.
     pub(crate) computed_visibility_hidden: bool,
@@ -2191,6 +2203,18 @@ impl Default for ObjectPosition {
 /// text-level values like sub/super, which do not apply to cells) map to
 /// `Top` as an approximation: real per-row baseline alignment needs shared
 /// ascent metrics across the row.
+/// Internal table display types besides `table-cell`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TablePart {
+    RowGroup,
+    HeaderGroup,
+    FooterGroup,
+    Row,
+    Column,
+    ColumnGroup,
+    Caption,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerticalAlign {
     Top,

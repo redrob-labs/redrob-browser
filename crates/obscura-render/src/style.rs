@@ -1321,6 +1321,13 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
                     | "table"
                     | "inline-table"
                     | "table-cell"
+                    | "table-row"
+                    | "table-row-group"
+                    | "table-header-group"
+                    | "table-footer-group"
+                    | "table-column"
+                    | "table-column-group"
+                    | "table-caption"
                     | "-webkit-box"
                     | "-webkit-inline-box"
                     | "contents"
@@ -1335,6 +1342,7 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
                 style.internal_flex_container = false;
                 style.is_table_box = false;
                 style.is_table_cell_box = false;
+                style.table_part = None;
                 style.is_inline_block = false;
                 style.flow_root = false;
                 style.display_contents = false;
@@ -1391,6 +1399,22 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
                     style.flex_direction = Some(taffy::FlexDirection::Column);
                     style.align_items = Some(taffy::AlignItems::FLEX_START);
                     style.is_table_cell_box = true;
+                }
+                // Internal table boxes other than cells. Outside a table
+                // box they lay out as blocks (the anonymous table wrapper is
+                // not generated); inside one, the table builder places them.
+                "table-row" | "table-row-group" | "table-header-group" | "table-footer-group"
+                | "table-column" | "table-column-group" | "table-caption" => {
+                    style.display = crate::Display::Block;
+                    style.table_part = Some(match value.as_str() {
+                        "table-row" => crate::TablePart::Row,
+                        "table-row-group" => crate::TablePart::RowGroup,
+                        "table-header-group" => crate::TablePart::HeaderGroup,
+                        "table-footer-group" => crate::TablePart::FooterGroup,
+                        "table-column" => crate::TablePart::Column,
+                        "table-column-group" => crate::TablePart::ColumnGroup,
+                        _ => crate::TablePart::Caption,
+                    });
                 }
                 "-webkit-box" => {
                     // The unclamped legacy display is an old flexbox. When it
@@ -2025,7 +2049,11 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
                 0
             };
         }
-        "visibility" => style.visibility_hidden = Some(value.eq_ignore_ascii_case("hidden")),
+        "visibility" => {
+            let collapse = value.trim().eq_ignore_ascii_case("collapse");
+            style.visibility_hidden = Some(collapse || value.trim().eq_ignore_ascii_case("hidden"));
+            style.visibility_collapse = collapse;
+        }
         "pointer-events" => {
             style.pointer_events_none = Some(value.eq_ignore_ascii_case("none"));
         }
@@ -2353,6 +2381,14 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
                 // an explicit inherit/unset are resolved in the top-down pass.
                 "inherit" | "unset" => None,
                 _ => style.border_collapse,
+            };
+        }
+        "caption-side" => {
+            style.caption_side_bottom = match value.trim().to_ascii_lowercase().as_str() {
+                "bottom" => Some(true),
+                "top" | "initial" | "revert" | "revert-layer" => Some(false),
+                "inherit" | "unset" => None,
+                _ => style.caption_side_bottom,
             };
         }
         "table-layout" => match value.trim().to_ascii_lowercase().as_str() {
