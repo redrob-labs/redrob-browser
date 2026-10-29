@@ -7751,7 +7751,8 @@ fn layout_dom_once(
                     + style.border.bottom;
                 // Chrome: `cols` fixed-pitch advances plus the 15px
                 // scrollbar gutter (cols=20 -> 175px content box at 13.33px).
-                let intrinsic_width = cols * font_size * 0.6 + 15.0 + horizontal_edges;
+                let intrinsic_width =
+                    textarea_content_width(style, font_size, cols) + 15.0 + horizontal_edges;
                 let intrinsic_height =
                     crate::inline::used_line_height(style).max(1.0) * rows + vertical_edges;
                 assign_native_control_size(
@@ -7831,11 +7832,8 @@ fn layout_dom_once(
                         .and_then(|value| value.parse::<u32>().ok())
                         .filter(|&value| value > 0)
                         .unwrap_or(20) as f32;
-                    // Chrome: `size` average advances plus a fixed caret and
-                    // decoration allowance (size=20 -> 177px, size=1 -> 25px
-                    // content box at 13.33px).
                     (
-                        size * font_size * 0.6 + font_size * 1.275 + horizontal_edges,
+                        text_field_content_width(style, font_size, size) + horizontal_edges,
                         default_height,
                     )
                 }
@@ -10180,6 +10178,74 @@ fn collect_used_auto_margins(
             Some((dom_id, (layout.margin.left, layout.margin.right)))
         })
         .collect()
+}
+
+/// The average character width text controls use, in px: the OS/2 value
+/// at the font size truncated to 26.6 fixed point (FreeType's char size),
+/// raised to the nearest whole pixel when that is larger (fitted to Chrome
+/// on this host: 13.33px Liberation Mono is 8, 10px is 6.0009).
+#[cfg(feature = "paint")]
+fn text_control_avg_char_width(avg_em: f32, font_size: f32) -> f32 {
+    let avg = avg_em * (font_size * 64.0 + 1e-3).floor() / 64.0;
+    avg.max(avg.round())
+}
+
+/// Blink's textarea width before its scrollbar gutter: `cols` average
+/// character widths ceiled to a pixel (Chrome: cols=20 is 160px in the
+/// default 13.33px monospace, 186px in 16px Arial).
+fn textarea_content_width(style: &crate::LayoutStyle, font_size: f32, cols: f32) -> f32 {
+    let bold = crate::style::used_font_weight(style) >= 600;
+    #[cfg(feature = "paint")]
+    {
+        let avg = match crate::ifc::fonts::text_control_metrics(style.font_family.as_deref(), bold)
+        {
+            Some((avg, _)) => text_control_avg_char_width(avg, font_size),
+            None => {
+                crate::paint::measure_text_em("0", font_size, bold, style.font_family.as_deref())
+            }
+        };
+        (avg * cols - 1e-3).ceil()
+    }
+    #[cfg(not(feature = "paint"))]
+    {
+        let _ = bold;
+        cols * font_size * 0.6
+    }
+}
+
+/// Blink's text field width (`TextFieldIntrinsicInlineSize`): `size`
+/// average character widths, with the last one widened to the face's
+/// bounding-box width, ceiled to a pixel. The average is the OS/2 value,
+/// raised to the nearest whole pixel when that is larger (fitted to
+/// Chrome on this host: 156 sizes and fonts, all exact: 16px Arial
+/// size=20 is 207, 13.33px is 177). Families Blink does not trust use the
+/// advance of "0" with no widening (Helvetica 16px size=20: 178).
+fn text_field_content_width(style: &crate::LayoutStyle, font_size: f32, size: f32) -> f32 {
+    let bold = crate::style::used_font_weight(style) >= 600;
+    #[cfg(feature = "paint")]
+    {
+        match crate::ifc::fonts::text_control_metrics(style.font_family.as_deref(), bold) {
+            Some((avg, range)) => {
+                let avg = text_control_avg_char_width(avg, font_size);
+                let max = (range * font_size).round();
+                (avg * (size - 1.0) + max - 1e-3).ceil()
+            }
+            None => {
+                let zero = crate::paint::measure_text_em(
+                    "0",
+                    font_size,
+                    bold,
+                    style.font_family.as_deref(),
+                );
+                (zero * size - 1e-3).ceil()
+            }
+        }
+    }
+    #[cfg(not(feature = "paint"))]
+    {
+        let _ = bold;
+        size * font_size * 0.6 + font_size * 1.275
+    }
 }
 
 fn compute_absolute_rects(

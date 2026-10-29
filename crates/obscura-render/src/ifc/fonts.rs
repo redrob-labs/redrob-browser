@@ -542,6 +542,158 @@ fn host_font_bytes(path: &PathBuf) -> Option<Arc<Vec<u8>>> {
     Some(data)
 }
 
+/// Chromium's text-control character metrics for a computed `font-family`:
+/// the primary face's OS/2 `xAvgCharWidth` and its `head` bounding-box
+/// width, both in em (Blink `SimpleFontData::AvgCharWidth` /
+/// `MaxCharWidth`). `None` when Blink does not trust the average for the
+/// first family (`LayoutTextControl::HasValidAvgCharWidth`: Helvetica,
+/// Times, Courier, ...); text controls then use the advance of "0".
+///
+/// The bundled faces stand in for the capture host's Liberation 2 and
+/// DejaVu files, whose OS/2 and head tables differ from the bundled
+/// copies (same advances), so their values are the host's.
+pub(crate) fn text_control_metrics(family: Option<&str>, bold: bool) -> Option<(f32, f32)> {
+    const INVALID: &[&str] = &[
+        "american typewriter",
+        "arial hebrew",
+        "chalkboard",
+        "cochin",
+        "corsiva hebrew",
+        "courier",
+        "euphemia ucas",
+        "geneva",
+        "gill sans",
+        "hei",
+        "helvetica",
+        "hoefler text",
+        "inaimathi",
+        "lucida grande",
+        "marker felt",
+        "monaco",
+        "mshtakan",
+        "new peninim mt",
+        "osaka",
+        "raanana",
+        "stheiti",
+        "symbol",
+        "times",
+        "apple braille",
+        "apple lisung",
+        "apple symbols",
+        "applegothic",
+        "applemyungjo",
+        "#gungseo",
+        "#headline",
+        "#pcmyungjo",
+        "#pilgi",
+    ];
+    let tokens: Vec<String> = family
+        .unwrap_or("")
+        .split(',')
+        .map(|token| {
+            token
+                .trim()
+                .trim_matches(|c| c == '"' || c == '\'')
+                .trim()
+                .to_ascii_lowercase()
+        })
+        .filter(|token| !token.is_empty())
+        .collect();
+    if tokens
+        .first()
+        .is_some_and(|first| INVALID.contains(&first.as_str()))
+    {
+        return None;
+    }
+    let bundled = |family: &str| -> (f32, f32) {
+        // (xAvgCharWidth, head xMax - xMin) / 2048 of the host files.
+        let (avg, range) = match (family, bold) {
+            (SANS_FAMILY, false) => (1187.0, 3780.0),
+            (SANS_FAMILY, true) => (1248.0, 3658.0),
+            (MONO_FAMILY, false) => (1229.0, 2508.0),
+            (MONO_FAMILY, true) => (1229.0, 2414.0),
+            (SYSTEM_FAMILY, false) => (1038.0, 5763.0),
+            (SYSTEM_FAMILY, true) => (1173.0, 6235.0),
+            (_, false) => (1124.0, 3732.0),
+            (_, true) => (1180.0, 3867.0),
+        };
+        (avg / 2048.0, range / 2048.0)
+    };
+    for token in &tokens {
+        if let Some(family) = bundled_family_for_css_token(token) {
+            return Some(bundled(family));
+        }
+        if let Some((_, paths)) = host_font_index().get(token) {
+            let mut best: Option<(i32, (f32, f32))> = None;
+            for path in paths {
+                let Some(data) = host_font_bytes(path) else {
+                    continue;
+                };
+                let Some((weight, italic, metrics)) = sfnt_text_control_metrics(&data) else {
+                    continue;
+                };
+                let want = if bold { 700 } else { 400 };
+                let score = (weight - want).abs() + if italic { 1000 } else { 0 };
+                if best.is_none_or(|(current, _)| score < current) {
+                    best = Some((score, metrics));
+                }
+            }
+            if let Some((_, metrics)) = best {
+                return Some(metrics);
+            }
+        }
+    }
+    Some(bundled(DEFAULT_FAMILY))
+}
+
+/// (usWeightClass, italic, (xAvgCharWidth, head bbox width) in em) of the
+/// first face in an sfnt or collection file.
+fn sfnt_text_control_metrics(data: &[u8]) -> Option<(i32, bool, (f32, f32))> {
+    let u16_at = |offset: usize| -> Option<u16> {
+        Some(u16::from_be_bytes(
+            data.get(offset..offset + 2)?.try_into().ok()?,
+        ))
+    };
+    let u32_at = |offset: usize| -> Option<u32> {
+        Some(u32::from_be_bytes(
+            data.get(offset..offset + 4)?.try_into().ok()?,
+        ))
+    };
+    let mut base = 0usize;
+    if data.get(0..4)? == b"ttcf" {
+        base = u32_at(12)? as usize;
+    }
+    let tables = u16_at(base + 4)? as usize;
+    let mut os2 = None;
+    let mut head = None;
+    for index in 0..tables {
+        let record = base + 12 + index * 16;
+        match data.get(record..record + 4)? {
+            b"OS/2" => os2 = Some(u32_at(record + 8)? as usize),
+            b"head" => head = Some(u32_at(record + 8)? as usize),
+            _ => {}
+        }
+    }
+    let (os2, head) = (os2?, head?);
+    let units_per_em = f32::from(u16_at(head + 18)?).max(1.0);
+    let x_min = u16_at(head + 36)? as i16;
+    let x_max = u16_at(head + 40)? as i16;
+    let avg = u16_at(os2 + 2)? as i16;
+    let weight = i32::from(u16_at(os2 + 4)?);
+    let italic = u16_at(os2 + 62)? & 1 != 0;
+    if avg <= 0 {
+        return None;
+    }
+    Some((
+        weight,
+        italic,
+        (
+            f32::from(avg) / units_per_em,
+            (f32::from(x_max) - f32::from(x_min)) / units_per_em,
+        ),
+    ))
+}
+
 /// Whether the host index has `lower` (for tests that use host fonts only
 /// where they are installed).
 #[cfg(test)]

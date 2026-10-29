@@ -779,3 +779,28 @@ fn canvas_font_shorthand_measures_with_the_bundled_faces() {
     );
     assert!((m("600 12px Helvetica, Arial, sans-serif") - 96.656).abs() < 0.01);
 }
+
+#[test]
+fn text_controls_size_from_the_fonts_average_character_width() {
+    // Chrome on the capture host: default input 185, 16px Arial 215,
+    // size=1 38, Helvetica (untrusted average: "0" advances) 186;
+    // textarea default 181, 16px Arial 207.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'>\
+         <input id=d><input id=a style='font:16px Arial'>\
+         <input id=one size=1 style='font:16px Arial'>\
+         <input id=h style='font:16px Helvetica, Arial'>\
+         <textarea id=t></textarea><textarea id=ta style='font:16px Arial'></textarea>",
+        &[],
+    );
+    for (id, want) in [
+        ("d", 185.0),
+        ("a", 215.0),
+        ("one", 38.0),
+        ("h", 186.0),
+        ("t", 181.0),
+        ("ta", 207.0),
+    ] {
+        assert_eq!(width(&tree, &laid, id), want, "{id}");
+    }
+}
