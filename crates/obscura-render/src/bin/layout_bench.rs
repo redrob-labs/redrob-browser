@@ -78,7 +78,7 @@ mod sampler {
             let mut warm = [std::ptr::null_mut::<c_void>(); 4];
             backtrace(warm.as_mut_ptr(), 4);
             let action = SigAction {
-                handler: on_sample as usize,
+                handler: on_sample as extern "C" fn(i32) as usize,
                 mask: [0; 16],
                 flags: 0x1000_0000, // SA_RESTART
                 restorer: 0,

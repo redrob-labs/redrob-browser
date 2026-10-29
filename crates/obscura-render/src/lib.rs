@@ -235,6 +235,19 @@ pub mod inline {
         f()
     }
 
+    pub(crate) fn layout_reuse_enabled() -> bool {
+        false
+    }
+
+    #[derive(Clone)]
+    pub(crate) struct MeasureSignature;
+
+    impl MeasureSignature {
+        pub(crate) fn same_measure(&self, _other: &Self) -> bool {
+            false
+        }
+    }
+
     impl TextEngine {
         pub fn new() -> Self {
             Self::default()
@@ -254,6 +267,10 @@ pub mod inline {
 
         pub(crate) fn item_signature(&self, idx: usize) -> String {
             format!("{idx}")
+        }
+
+        pub(crate) fn measure_signature(&self, _idx: usize) -> Option<MeasureSignature> {
+            None
         }
 
         pub(crate) fn register_native_control(

@@ -531,6 +531,190 @@ pub fn layout_difference(incremental: &DomLayout, scratch: &DomLayout) -> Option
         .or_else(|| text_item_difference(incremental, scratch))
 }
 
+/// `TaffyTree::set_style` that leaves the node clean when nothing changed.
+///
+/// Layout repair passes re-assign styles they already assigned (often to
+/// every candidate node on each pass). An equal style marks the node and all
+/// its ancestors dirty for nothing, so the next root layout recomputes their
+/// whole paths. Styles with `calc()` handles still dirty: the handle compares
+/// equal while the expression context behind it can change.
+trait SetStyleIfChanged {
+    fn set_style_if_changed(&mut self, node: taffy::NodeId, style: taffy::Style) -> taffy::TaffyResult<()>;
+}
+
+impl<C> SetStyleIfChanged for TaffyTree<C> {
+    fn set_style_if_changed(&mut self, node: taffy::NodeId, style: taffy::Style) -> taffy::TaffyResult<()> {
+        if self.style(node).is_ok_and(|current| *current == style && !taffy_style_uses_calc(&style)) {
+            return Ok(());
+        }
+        self.set_style(node, style)
+    }
+}
+
+/// The taffy tree of the most recent layout on this thread, kept so the next
+/// layout can copy the cached layout of every subtree that did not change.
+///
+/// Reuse never trusts node identity: a subtree is reused only when it is
+/// structurally equal to the old one (same taffy styles, same children, leaves
+/// that measure the same), which makes the copied cache valid by taffy's own
+/// contract. DOM ids only pair candidate nodes up.
+struct RetainedTaffy {
+    tree: TaffyTree<usize>,
+    root: taffy::NodeId,
+    dom_of: HashMap<taffy::NodeId, NodeId>,
+    by_dom: HashMap<NodeId, taffy::NodeId>,
+    measures: HashMap<usize, crate::inline::MeasureSignature>,
+}
+
+thread_local! {
+    static RETAINED_TAFFY: std::cell::RefCell<Option<RetainedTaffy>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn taffy_reuse_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("OBSCURA_LAYOUT_NO_TREE_CACHE").is_none())
+        && crate::inline::layout_reuse_enabled()
+}
+
+/// Keep this layout's finished taffy tree for the next layout on the thread.
+fn retain_taffy_tree(
+    tree: TaffyTree<usize>,
+    root: taffy::NodeId,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    engine: &crate::inline::TextEngine,
+) {
+    if !taffy_reuse_enabled() {
+        return;
+    }
+    let mut measures = HashMap::new();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if let Some(&ctx) = tree.get_node_context(node) {
+            if let Some(signature) = engine.measure_signature(ctx) {
+                measures.insert(ctx, signature);
+            }
+        }
+        stack.extend_from_slice(tree.child_slice(node));
+    }
+    let by_dom = id_map.iter().map(|(taffy, dom)| (*dom, *taffy)).collect();
+    let retained = RetainedTaffy {
+        tree,
+        root,
+        dom_of: id_map.clone(),
+        by_dom,
+        measures,
+    };
+    let _ = RETAINED_TAFFY.try_with(|slot| *slot.borrow_mut() = Some(retained));
+}
+
+fn taffy_style_uses_calc(style: &taffy::Style) -> bool {
+    let track = |track: &taffy::TrackSizingFunction| {
+        track.min.into_raw().is_calc() || track.max.into_raw().is_calc()
+    };
+    style.grid_template_rows.iter().chain(&style.grid_template_columns).any(|component| {
+        match component {
+            taffy::GridTemplateComponent::Single(single) => track(single),
+            taffy::GridTemplateComponent::Repeat(repeat) => repeat.tracks.iter().any(track),
+        }
+    }) || style.grid_auto_rows.iter().chain(&style.grid_auto_columns).any(track)
+        || [style.size.width, style.size.height, style.min_size.width, style.min_size.height]
+            .into_iter()
+            .chain([style.max_size.width, style.max_size.height, style.flex_basis])
+            .any(|value| value.into_raw().is_calc())
+        || [style.margin.left, style.margin.right, style.margin.top, style.margin.bottom]
+            .into_iter()
+            .chain([style.inset.left, style.inset.right, style.inset.top, style.inset.bottom])
+            .any(|value| value.into_raw().is_calc())
+        || [style.padding.left, style.padding.right, style.padding.top, style.padding.bottom]
+            .into_iter()
+            .chain([style.border.left, style.border.right, style.border.top, style.border.bottom])
+            .chain([style.gap.width, style.gap.height])
+            .any(|value| value.into_raw().is_calc())
+}
+
+/// Pair `new` with `old` and record, bottom-up, every node whose whole subtree
+/// equals its partner's. Returns whether `new`'s subtree equals `old`'s.
+#[allow(clippy::too_many_arguments)]
+fn match_retained_subtree(
+    tree: &TaffyTree<usize>,
+    new: taffy::NodeId,
+    old: &RetainedTaffy,
+    old_node: taffy::NodeId,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    engine: &crate::inline::TextEngine,
+    equal: &mut Vec<(taffy::NodeId, taffy::NodeId)>,
+) -> bool {
+    let mut same = match (tree.style(new), old.tree.style(old_node)) {
+        (Ok(a), Ok(b)) => a == b && !taffy_style_uses_calc(a),
+        _ => false,
+    };
+    if same {
+        same = match (tree.get_node_context(new), old.tree.get_node_context(old_node)) {
+            (None, None) => true,
+            (Some(&a), Some(&b)) => match (engine.measure_signature(a), old.measures.get(&b)) {
+                (Some(a), Some(b)) => a.same_measure(b),
+                _ => false,
+            },
+            _ => false,
+        };
+    }
+    let children = tree.child_slice(new);
+    let old_children = old.tree.child_slice(old_node);
+    same &= children.len() == old_children.len();
+    for (index, &child) in children.iter().enumerate() {
+        let partner = match id_map.get(&child) {
+            Some(dom) => old
+                .by_dom
+                .get(dom)
+                .copied()
+                .filter(|candidate| old.tree.parent(*candidate) == Some(old_node)),
+            None => old_children
+                .get(index)
+                .copied()
+                .filter(|candidate| !old.dom_of.contains_key(candidate)),
+        };
+        match partner {
+            Some(partner) => {
+                let child_same =
+                    match_retained_subtree(tree, child, old, partner, id_map, engine, equal);
+                same &= child_same && old_children.get(index) == Some(&partner);
+            }
+            None => same = false,
+        }
+    }
+    if same {
+        equal.push((new, old_node));
+    }
+    same
+}
+
+/// Copy the previous layout's cache into every unchanged subtree of the new
+/// taffy tree. Returns (nodes reused, nodes in the tree).
+fn seed_from_retained_taffy(
+    tree: &mut TaffyTree<usize>,
+    root: taffy::NodeId,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    engine: &crate::inline::TextEngine,
+) -> (usize, usize) {
+    if !taffy_reuse_enabled() {
+        return (0, 0);
+    }
+    let Some(old) = RETAINED_TAFFY
+        .try_with(|slot| slot.borrow_mut().take())
+        .ok()
+        .flatten()
+    else {
+        return (0, 0);
+    };
+    let mut equal = Vec::new();
+    match_retained_subtree(tree, root, &old, old.root, id_map, engine, &mut equal);
+    for &(new, old_node) in &equal {
+        let _ = tree.copy_layout_state(new, &old.tree, old_node);
+    }
+    (equal.len(), old.tree.total_node_count())
+}
+
 fn sorted_debug<T: std::fmt::Debug>(items: impl IntoIterator<Item = T>) -> Vec<String> {
     let mut out = items
         .into_iter()
@@ -2302,7 +2486,7 @@ fn resolve_inline_percentage_heights(
                         let mut resolved = current.clone();
                         resolved.size.height =
                             taffy::Dimension::length((percent * containing_block_height).max(0.0));
-                        if taffy_tree.set_style(node, resolved).is_ok() {
+                        if taffy_tree.set_style_if_changed(node, resolved).is_ok() {
                             *changed = true;
                         }
                     }
@@ -7568,7 +7752,7 @@ fn layout_dom_once(
                             outer
                         };
                         adjusted.size.width = taffy::Dimension::length(declared);
-                        let _ = taffy_tree.set_style(taffy_root, adjusted);
+                        let _ = taffy_tree.set_style_if_changed(taffy_root, adjusted);
                     }
                 }
             }
@@ -7629,6 +7813,14 @@ fn layout_dom_once(
                 &styles,
                 &ifc_items.static_positions,
             );
+            let (seeded, previous_nodes) =
+                seed_from_retained_taffy(&mut taffy_tree, taffy_root, &id_map, &engine);
+            if crate::prof::enabled() {
+                eprintln!(
+                    "[timing] taffy-reuse seeded={seeded} previous={previous_nodes} now={}",
+                    taffy_tree.total_node_count()
+                );
+            }
             let available = taffy::Size {
                 width: taffy::AvailableSpace::Definite(initial_cb_width),
                 height: taffy::AvailableSpace::Definite(viewport.1),
@@ -7769,7 +7961,7 @@ fn layout_dom_once(
                                         })
                                     })
                                     .collect();
-                                let _ = taffy_tree.set_style(tnode, fixed_style);
+                                let _ = taffy_tree.set_style_if_changed(tnode, fixed_style);
                             }
                             continue;
                         }
@@ -8022,12 +8214,12 @@ fn layout_dom_once(
                                         })
                                     })
                                     .collect();
-                                let _ = taffy_tree.set_style(tnode, s);
+                                let _ = taffy_tree.set_style_if_changed(tnode, s);
                             }
                         } else if let Ok(cur) = taffy_tree.style(tnode) {
                             let mut s = cur.clone();
                             s.size.width = length(used_declaration);
-                            let _ = taffy_tree.set_style(tnode, s);
+                            let _ = taffy_tree.set_style_if_changed(tnode, s);
                         }
                     }
                     table_index = group_end;
@@ -8340,6 +8532,12 @@ fn layout_dom_once(
             );
             inline_fragments = synthesize_ordinary_inline_fragments(&mut rects, &styles, &engine);
             synthesize_row_rects(tree, &mut rects);
+            retain_taffy_tree(
+                std::mem::replace(&mut taffy_tree, crate::new_taffy_tree()),
+                taffy_root,
+                &id_map,
+                &engine,
+            );
         }
     }
     sync_positioned_pseudo_percentage_padding(&rects, &mut styles);
@@ -9517,11 +9715,11 @@ where
 
         let mut parent_style = taffy_tree.style(plan.parent).unwrap().clone();
         parent_style.grid_template_columns = fixed_grid_tracks(&used);
-        let _ = taffy_tree.set_style(plan.parent, parent_style);
+        let _ = taffy_tree.set_style_if_changed(plan.parent, parent_style);
         for (node, copied) in copied_wrappers {
             let mut style = taffy_tree.style(node).unwrap().clone();
             style.grid_template_columns = fixed_grid_tracks(&copied);
-            let _ = taffy_tree.set_style(node, style);
+            let _ = taffy_tree.set_style_if_changed(node, style);
         }
         changed = true;
     }
@@ -9865,7 +10063,7 @@ fn narrow_node_to_float_band(
     if left_shift > 0.0 {
         narrowed.margin.left = taffy::LengthPercentageAuto::length(layout.margin.left + left_shift);
     }
-    taffy_tree.set_style(node, narrowed).is_ok()
+    taffy_tree.set_style_if_changed(node, narrowed).is_ok()
 }
 
 fn grow_bfc_to_float_bottom(
@@ -9899,7 +10097,7 @@ fn grow_bfc_to_float_bottom(
     };
     let mut grown = current.clone();
     grown.min_size.height = taffy::Dimension::length(specified);
-    taffy_tree.set_style(node, grown).is_ok()
+    taffy_tree.set_style_if_changed(node, grown).is_ok()
 }
 
 fn narrow_intersecting_descendants(
@@ -10216,7 +10414,7 @@ fn apply_table_row_geometry(
                     })
                 })
                 .collect();
-            if taffy_tree.set_style(table_node, fixed).is_ok() {
+            if taffy_tree.set_style_if_changed(table_node, fixed).is_ok() {
                 changed = true;
             }
         }
@@ -10227,7 +10425,7 @@ fn apply_table_row_geometry(
             if let Ok(current) = taffy_tree.style(cell) {
                 let mut stretched = current.clone();
                 stretched.size.height = taffy::Dimension::auto();
-                let _ = taffy_tree.set_style(cell, stretched);
+                let _ = taffy_tree.set_style_if_changed(cell, stretched);
             }
         }
     }
@@ -10388,7 +10586,7 @@ fn apply_table_cell_block_alignment(
                 taffy::AlignContent::FLEX_END
             });
         }
-        if taffy_tree.set_style(node, aligned).is_ok() {
+        if taffy_tree.set_style_if_changed(node, aligned).is_ok() {
             changed = true;
         }
     }
@@ -10488,7 +10686,7 @@ fn repair_intrinsic_column_flex_negative_margins(
         };
         let mut repaired = current.clone();
         repaired.size.height = taffy::Dimension::length(height);
-        changed |= taffy_tree.set_style(node, repaired).is_ok();
+        changed |= taffy_tree.set_style_if_changed(node, repaired).is_ok();
     }
     changed
 }
@@ -10553,7 +10751,7 @@ fn resolve_static_positions_and_reparent(
             let _ = taffy_tree.add_child(current, candidate.child);
             continue;
         }
-        if taffy_tree.set_style(candidate.child, style).is_err() {
+        if taffy_tree.set_style_if_changed(candidate.child, style).is_err() {
             let _ = taffy_tree.remove_child(candidate.target, candidate.child);
             let _ = taffy_tree.add_child(current, candidate.child);
         }
@@ -10939,7 +11137,7 @@ fn build_any(
             if let Ok(current) = taffy_tree.style(inner) {
                 let mut adjusted = current.clone();
                 adjusted.align_self = Some(align_self);
-                let _ = taffy_tree.set_style(inner, adjusted);
+                let _ = taffy_tree.set_style_if_changed(inner, adjusted);
             }
         }
         return vec![inner];
@@ -10970,7 +11168,7 @@ fn build_any(
             adjusted.size.width = taffy::Dimension::percent(1.0);
             adjusted.min_size.width = taffy::Dimension::auto();
             adjusted.max_size.width = taffy::Dimension::auto();
-            let _ = taffy_tree.set_style(inner, adjusted);
+            let _ = taffy_tree.set_style_if_changed(inner, adjusted);
         }
     }
     let outer_style = taffy::Style {
@@ -12052,7 +12250,7 @@ where
         };
         let mut resolved = current.clone();
         resolved.size.width = taffy::Dimension::length(declaration);
-        if taffy_tree.set_style(candidate.node, resolved).is_ok() {
+        if taffy_tree.set_style_if_changed(candidate.node, resolved).is_ok() {
             changed = true;
         }
     }
@@ -12601,7 +12799,7 @@ fn build_table(
             {
                 cstyle.min_size.width = taffy::Dimension::length(0.0);
             }
-            let _ = taffy_tree.set_style(cell_node, cstyle);
+            let _ = taffy_tree.set_style_if_changed(cell_node, cstyle);
         }
         children.push(cell_node);
     }
@@ -13479,7 +13677,7 @@ where
         if let Ok(current) = taffy_tree.style(taffy_id) {
             let mut fixed = current.clone();
             fixed.size.width = taffy::Dimension::length(used_declaration);
-            let _ = taffy_tree.set_style(taffy_id, fixed);
+            let _ = taffy_tree.set_style_if_changed(taffy_id, fixed);
         }
     }
 
@@ -13529,7 +13727,7 @@ where
             if let Some(maximum) = restore_maximum {
                 restored.max_size.width = maximum;
             }
-            let _ = taffy_tree.set_style(taffy_id, restored);
+            let _ = taffy_tree.set_style_if_changed(taffy_id, restored);
         }
     }
     relayout(taffy_tree, styles, DeferredFlexReflowPhase::Layout);
@@ -13646,7 +13844,7 @@ where
                     4 => resolved.max_size.width = taffy::Dimension::length(value),
                     _ => unreachable!(),
                 }
-                let _ = taffy_tree.set_style(taffy_id, resolved);
+                let _ = taffy_tree.set_style_if_changed(taffy_id, resolved);
             }
         }
         relayout(taffy_tree, styles, DeferredFlexReflowPhase::Layout);
@@ -14381,7 +14579,7 @@ fn build(
                 if fills_inline_axis {
                     block_item.size.width = taffy::style::Dimension::percent(1.0);
                 }
-                let _ = taffy_tree.set_style(*child, block_item);
+                let _ = taffy_tree.set_style_if_changed(*child, block_item);
             }
         }
     }
@@ -14666,7 +14864,7 @@ fn build_mixed_block(
                                 let mut centered = current.clone();
                                 centered.margin.left = taffy::style::LengthPercentageAuto::auto();
                                 centered.margin.right = taffy::style::LengthPercentageAuto::auto();
-                                let _ = taffy_tree.set_style(*child, centered);
+                                let _ = taffy_tree.set_style_if_changed(*child, centered);
                             }
                         }
                     }
@@ -15533,7 +15731,7 @@ fn set_native_float_clear(
         native.display = taffy::style::Display::Block;
         native.item_is_table = false;
     }
-    let _ = taffy_tree.set_style(node, native);
+    let _ = taffy_tree.set_style_if_changed(node, native);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -16060,7 +16258,7 @@ fn build_children_with_float_zone(
                 if let Ok(current) = taffy_tree.style(right) {
                     let mut pushed_right = current.clone();
                     pushed_right.margin.left = taffy::style::LengthPercentageAuto::auto();
-                    let _ = taffy_tree.set_style(right, pushed_right);
+                    let _ = taffy_tree.set_style_if_changed(right, pushed_right);
                 }
                 run_children.push(right);
                 let row_style = taffy::Style {
@@ -16201,7 +16399,7 @@ fn build_children_with_float_zone(
                     // A little slack for the figure's own border/padding so the
                     // image is not clipped; the caption still wraps to ~image width.
                     st.max_size.width = taffy::Dimension::length(w + 12.0);
-                    let _ = taffy_tree.set_style(float_id, st);
+                    let _ = taffy_tree.set_style_if_changed(float_id, st);
                 }
             }
         }

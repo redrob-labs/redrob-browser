@@ -790,7 +790,7 @@ pub struct InlineItem {
     /// Every input that produced this shaped item. A later layout with an
     /// equal key reuses the shaped buffer and its measurements instead of
     /// shaping the same text again (see `ShapedItemCache`).
-    cache_key: Option<Box<ItemKey>>,
+    cache_key: Option<Arc<ItemKey>>,
     /// `finalize` pinned this item at its used width. Reuse prefers such an
     /// item: its buffer is already laid out at the width the next layout
     /// most likely asks for.
@@ -806,7 +806,7 @@ pub struct InlineItem {
 /// measurement are pure functions of these values and of the font database,
 /// so two items with equal keys in the same database have equal buffers.
 #[derive(Clone, PartialEq)]
-struct ItemKey {
+pub(crate) struct ItemKey {
     hash: u64,
     spans: Vec<(String, SpanAttrs)>,
     line_height_bits: u32,
@@ -885,6 +885,26 @@ impl InlineItem {
     }
 }
 
+/// What a taffy leaf's measure function depends on, so a later layout can
+/// tell that a leaf measures exactly as it did before. Text items are equal
+/// when their complete shaping input is; replaced items when every sizing
+/// field is. Text without a recorded input never compares equal.
+#[derive(Clone)]
+pub(crate) enum MeasureSignature {
+    Text(Option<Arc<ItemKey>>),
+    Replaced(ReplacedItem),
+}
+
+impl MeasureSignature {
+    pub(crate) fn same_measure(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Text(Some(a)), Self::Text(Some(b))) => Arc::ptr_eq(a, b) || **a == **b,
+            (Self::Replaced(a), Self::Replaced(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// Shaped items of the most recently dropped layout on this thread, keyed by
 /// their complete shaping input. The next layout takes them, so unchanged
 /// text keeps its shaping and line measurements across relayouts. Items are
@@ -912,6 +932,11 @@ fn shaped_item_reuse_enabled() -> bool {
 
 /// Run `f` with cross-layout shaped-item reuse switched off on this thread:
 /// layouts inside neither read nor replace the recycled items.
+/// Whether layouts on this thread may reuse work from earlier layouts.
+pub(crate) fn layout_reuse_enabled() -> bool {
+    shaped_item_reuse_enabled()
+}
+
 pub(crate) fn without_shaped_item_reuse<R>(f: impl FnOnce() -> R) -> R {
     let previous = REUSE_SUSPENDED.with(|flag| flag.replace(true));
     let result = f();
@@ -1244,8 +1269,8 @@ impl VariableSwashCache {
 
 const REPLACED_CONTEXT_BIT: usize = 1usize << (usize::BITS - 1);
 
-#[derive(Clone, Copy)]
-struct ReplacedItem {
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct ReplacedItem {
     independent_axes: bool,
     intrinsic_width: Option<f32>,
     intrinsic_height: Option<f32>,
@@ -1550,6 +1575,19 @@ impl TextEngine {
         engine
     }
 
+    /// The measure signature of taffy context `idx`.
+    pub(crate) fn measure_signature(&self, idx: usize) -> Option<MeasureSignature> {
+        if idx & REPLACED_CONTEXT_BIT != 0 {
+            return self
+                .replaced
+                .get(idx & !REPLACED_CONTEXT_BIT)
+                .map(|item| MeasureSignature::Replaced(*item));
+        }
+        self.items
+            .get(idx)
+            .map(|item| MeasureSignature::Text(item.cache_key.clone()))
+    }
+
     /// Placement and line geometry of one item, for comparing two layouts.
     pub(crate) fn item_signature(&self, idx: usize) -> String {
         use std::fmt::Write as _;
@@ -1844,10 +1882,10 @@ impl TextEngine {
         &mut self,
         base: &LayoutStyle,
         line_h: f32,
-        mut spans: Vec<(String, SpanAttrs)>,
+        spans: Vec<(String, SpanAttrs)>,
         clip_fills: Vec<ClipTextFill>,
-        mut owner_ranges: Vec<OwnerTextRange>,
-        mut owner_boxes: Vec<InlineOwnerBox>,
+        owner_ranges: Vec<OwnerTextRange>,
+        owner_boxes: Vec<InlineOwnerBox>,
         boundary_events: Vec<InlineBoundaryEvent>,
     ) -> Option<usize> {
         let _prof = crate::prof::start();
@@ -1889,7 +1927,7 @@ impl TextEngine {
             boundary_events,
         );
         if let (Some(index), Some(key)) = (result, key) {
-            self.items[index].cache_key = Some(Box::new(key));
+            self.items[index].cache_key = Some(Arc::new(key));
         }
         crate::prof::stop(crate::prof::PUSH_ITEM, _prof);
         result
@@ -2783,7 +2821,7 @@ impl TextEngine {
 
 /// A run of same-styled inline text.
 #[derive(Clone, PartialEq)]
-struct SpanAttrs {
+pub(crate) struct SpanAttrs {
     font_size: f32,
     line_height: f32,
     letter_spacing: f32,
