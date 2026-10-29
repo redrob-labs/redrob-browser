@@ -648,7 +648,9 @@ fn layout_ifc(
                     } else {
                         line_width
                     });
-                    if (new_x - line_x).abs() > f32::EPSILON && box_break.advance == 0.0 {
+                    // A float that fits beside the line shifts the content
+                    // already on it, as in Chrome.
+                    if (new_x - line_x).abs() > f32::EPSILON && pos.y <= min_y + 0.01 {
                         state.set_line_x(new_x);
                     }
                     state.set_line_y(next.y.max(min_y) as f64);

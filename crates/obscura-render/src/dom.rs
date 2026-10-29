@@ -21383,6 +21383,21 @@ mod tests {
         assert_eq!(laid.rects[&tree.get_element_by_id("b").unwrap()].y, 26.0);
     }
 
+    // Chrome moves content already on a line to the right of a left float
+    // that fits beside it: "before" at x=77.39, the inline-table at 127.22.
+    #[cfg(feature = "paint")]
+    #[test]
+    fn mid_line_left_float_shifts_the_content_before_it() {
+        let tree = parse_html(
+            r#"<!doctype html><body style="margin:8px;font:16px Arial"><div><span id=a>before</span> <span id=it style="display:inline-table">it</span><span id=f style="float:left">float span</span> after</div>"#,
+        );
+        let laid = layout_dom(&tree, (1280.0, 800.0));
+        let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
+        assert_eq!(rect("f").x, 8.0);
+        assert!((rect("a").x - 77.39).abs() < 0.5, "{:?}", rect("a"));
+        assert!((rect("it").x - 127.22).abs() < 0.5, "{:?}", rect("it"));
+    }
+
     /// Each line of text node `node`: (x, text), in line order.
     #[cfg(feature = "paint")]
     fn text_lines(laid: &DomLayout, node: NodeId) -> Vec<(f32, String)> {
