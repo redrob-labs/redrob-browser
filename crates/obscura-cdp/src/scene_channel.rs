@@ -60,6 +60,8 @@ pub(crate) struct SceneStream {
     baked_scrollers: HashSet<u64>,
     /// Offsets of `baked_scrollers` the last frame was painted at.
     baked_offsets: HashMap<u64, (f32, f32)>,
+    /// Media element id per video node, for `External` keys.
+    media_ids: HashMap<u64, u64>,
     /// Offsets the window holds, per scroll node: what it reported or what
     /// the engine last told it to adopt.
     window_offsets: HashMap<u64, (f32, f32)>,
@@ -130,6 +132,7 @@ impl SceneStream {
             scroll_nodes: HashMap::new(),
             baked_scrollers: HashSet::new(),
             baked_offsets: HashMap::new(),
+            media_ids: HashMap::new(),
             window_offsets: HashMap::new(),
         }
     }
@@ -502,7 +505,8 @@ fn pump_stream(ctx: &mut CdpContext, page_id: &str, stream: &mut SceneStream) {
             return;
         }
         match page.scene_frame(stream.raster_scale) {
-            Ok(built) => {
+            Ok(mut built) => {
+                media_keys(page, &mut built.frame, &mut stream.media_ids);
                 let (activity, scroll_generation, _, paint_epoch) = page.scene_change_signals();
                 let (_, elements, _) = page.scroll_snapshot();
                 let elements: HashMap<u64, (f32, f32)> = elements.into_iter().collect();
@@ -538,5 +542,35 @@ fn pump_stream(ctx: &mut CdpContext, page_id: &str, stream: &mut SceneStream) {
         if !stream.send_scroll_delta(root, &elements) {
             stream.needs_frame = true;
         }
+    }
+}
+
+/// `External` items name their element by node; the window knows a video
+/// by its media id (`__redrobMediaElements`, docs/MEDIA.md). Rewrite keys.
+fn media_keys(
+    page: &mut obscura_browser::Page,
+    frame: &mut rs::Frame,
+    cache: &mut HashMap<u64, u64>,
+) {
+    for item in &mut frame.items {
+        let rs::Item::External { key, .. } = &mut item.item else {
+            continue;
+        };
+        let node = key.saturating_sub(1);
+        let id = match cache.get(&node) {
+            Some(id) => *id,
+            None => {
+                let code = format!(
+                    "(function(){{var e=globalThis._wrap&&globalThis._wrap({node});return e&&e.__media?e.__media.id:0}})()"
+                );
+                // Script numbers arrive as JSON floats.
+                let id = page.evaluate(&code).as_f64().map_or(0, |id| id as u64);
+                if id != 0 {
+                    cache.insert(node, id);
+                }
+                id
+            }
+        };
+        *key = id;
     }
 }

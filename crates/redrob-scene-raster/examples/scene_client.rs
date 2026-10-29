@@ -60,6 +60,17 @@ fn main() {
                         next.spatial.len(),
                         sticky
                     );
+                    let externals: Vec<u64> = next
+                        .items
+                        .iter()
+                        .filter_map(|item| match item.item {
+                            redrob_scene::Item::External { key, .. } => Some(key),
+                            _ => None,
+                        })
+                        .collect();
+                    if !externals.is_empty() {
+                        println!("           externals {externals:?}");
+                    }
                     let epoch = next.epoch;
                     frame = Some(next);
                     let ack = redrob_scene::encode(&ClientMsg::Presented { epoch });

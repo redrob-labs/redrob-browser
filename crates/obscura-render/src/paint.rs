@@ -5244,8 +5244,6 @@ fn paint_laid_dom_scrolled(
                     element_clip_mask,
                 );
             }
-            #[cfg(feature = "display-list")]
-            scene_external(&pixmap, nid, &rect, style, element_clip_mask, clip);
         }
 
         if !paints_inline_fragments {
