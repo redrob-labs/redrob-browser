@@ -2766,6 +2766,9 @@ struct IfcRegistry {
     table_columns: HashMap<taffy::NodeId, Vec<(NodeId, Option<NodeId>, usize, usize)>>,
     /// CSS table rows and row groups with the cells whose rects they union.
     table_part_boxes: Vec<(NodeId, Vec<NodeId>)>,
+    /// Anonymous table grid nodes: (the box whose children they wrap, the
+    /// anonymous table style). They generate no DOM rect.
+    anonymous_tables: HashMap<taffy::NodeId, (NodeId, crate::LayoutStyle)>,
     /// Floats whose direct block parent does not establish a block formatting
     /// context and whose exclusion can therefore continue through later
     /// descendant blocks of the same BFC. The first layout pass gives these
@@ -8162,8 +8165,24 @@ fn layout_dom_once(
                 let mut tables: Vec<(taffy::NodeId, NodeId, usize)> = id_map
                     .iter()
                     .filter(|(taffy, _)| ifc_items.table_rows.contains_key(taffy))
-                    .map(|(t, d)| (*t, *d, table_ancestor_depth(tree, *d, &styles)))
+                    .map(|(t, d)| (*t, *d))
+                    .chain(
+                        ifc_items
+                            .anonymous_tables
+                            .iter()
+                            .map(|(t, (parent, _))| (*t, *parent)),
+                    )
+                    .map(|(t, d)| (t, d, table_ancestor_depth(tree, d, &styles)))
                     .collect();
+                // An anonymous table has its own style; its `dom` is the box
+                // it sits in, which is also its containing block.
+                let anonymous_tables = &ifc_items.anonymous_tables;
+                let table_style_of = |tnode: taffy::NodeId, dom: NodeId| {
+                    anonymous_tables
+                        .get(&tnode)
+                        .map(|(_, style)| style)
+                        .or_else(|| styles.get(&dom))
+                };
                 // Outer tables consume their nested tables' intrinsic sizes.
                 // Only after an outer depth is fixed can a root layout expose
                 // the real cell width available to the next nested depth.
@@ -8177,8 +8196,9 @@ fn layout_dom_once(
                     }
                     let group = &tables[table_index..group_end];
                     let mut available_widths: HashMap<taffy::NodeId, f32> = HashMap::new();
-                    let needs_layout_snapshot = group.iter().any(|(_, dom, _)| {
-                        styles.get(dom).is_some_and(|style| {
+                    let needs_layout_snapshot = group.iter().any(|(tnode, dom, _)| {
+                        anonymous_tables.contains_key(tnode)
+                            || table_style_of(*tnode, *dom).is_some_and(|style| {
                             (style.width == crate::Dimension::Auto
                                 && (depth > 0
                                     || reliable_table_available_width(
@@ -8202,7 +8222,7 @@ fn layout_dom_once(
                             &mut measure,
                         );
                         for &(tnode, dom, _) in group {
-                            if styles.get(&dom).is_some_and(|style| {
+                            if table_style_of(tnode, dom).is_some_and(|style| {
                                 style.width == crate::Dimension::Auto
                                     || matches!(style.width, crate::Dimension::Percent(_))
                             }) {
@@ -8210,41 +8230,71 @@ fn layout_dom_once(
                                 // its own snapshot width is already the result
                                 // (max-content), so the space it may take is the
                                 // content box of the box it sits in.
-                                let shrink_to_fit = styles.get(&dom).is_some_and(|style| {
+                                let anonymous = anonymous_tables.contains_key(&tnode);
+                                let table_style = table_style_of(tnode, dom);
+                                let shrink_to_fit = table_style.is_some_and(|style| {
                                     style.width == crate::Dimension::Auto
                                         && (style.float.is_some() || style.is_inline_block)
                                 });
-                                let container = shrink_to_fit
-                                    .then(|| {
-                                        let mut parent = rendered_parent(tree, dom);
-                                        while let Some(parent_id) = parent.filter(|parent_id| {
-                                            styles.get(parent_id).is_some_and(|style| {
-                                                style.display_contents
-                                                    || crate::is_inline_level_box(style)
-                                            })
-                                        }) {
-                                            parent = rendered_parent(tree, parent_id);
-                                        }
-                                        let parent = parent?;
+                                let percentage = table_style.and_then(|style| match style.width {
+                                    crate::Dimension::Percent(p) => Some(p),
+                                    _ => None,
+                                });
+                                // The content box of the box the table sits in:
+                                // its containing block. The grid's own parent may
+                                // be an anonymous wrapper (a float-zone flex item
+                                // shrinks a 100% table to its max-content).
+                                let containing = if anonymous {
+                                    taffy_tree.parent(tnode)
+                                } else {
+                                    let mut parent = rendered_parent(tree, dom);
+                                    while let Some(parent_id) = parent.filter(|parent_id| {
+                                        styles.get(parent_id).is_some_and(|style| {
+                                            style.display_contents
+                                                || crate::is_inline_level_box(style)
+                                        })
+                                    }) {
+                                        parent = rendered_parent(tree, parent_id);
+                                    }
+                                    parent.and_then(|parent| {
                                         id_map
                                             .iter()
                                             .find(|(_, dom_id)| **dom_id == parent)
                                             .map(|(node, _)| *node)
                                     })
-                                    .flatten()
-                                    .and_then(|parent| taffy_tree.layout(parent).ok())
-                                    .map(|parent| {
-                                        let margins = styles.get(&dom).map_or(0.0, |style| {
-                                            style.margin.left + style.margin.right
-                                        });
-                                        (parent.size.width
-                                            - parent.padding.left
-                                            - parent.padding.right
-                                            - parent.border.left
-                                            - parent.border.right
-                                            - margins)
-                                            .max(0.0)
-                                    });
+                                }
+                                .and_then(|parent| taffy_tree.layout(parent).ok())
+                                .map(|parent| {
+                                    (parent.size.width
+                                        - parent.padding.left
+                                        - parent.padding.right
+                                        - parent.border.left
+                                        - parent.border.right)
+                                        .max(0.0)
+                                });
+                                let margins = table_style
+                                    .map_or(0.0, |style| style.margin.left + style.margin.right);
+                                let container = if let Some(percentage) =
+                                    percentage.filter(|_| !table_style.is_some_and(|style| style.table_layout_fixed))
+                                {
+                                    containing.map(|width| {
+                                        let edges = table_style
+                                            .filter(|style| {
+                                                style.box_sizing == crate::BoxSizing::ContentBox
+                                            })
+                                            .map_or(0.0, |style| {
+                                                style.border.left
+                                                    + style.border.right
+                                                    + style.padding.left
+                                                    + style.padding.right
+                                            });
+                                        width * percentage + edges
+                                    })
+                                } else if shrink_to_fit || anonymous {
+                                    containing.map(|width| (width - margins).max(0.0))
+                                } else {
+                                    None
+                                };
                                 if let Some(width) = container {
                                     available_widths.insert(tnode, width);
                                 } else if let Ok(layout) = taffy_tree.layout(tnode) {
@@ -8254,7 +8304,7 @@ fn layout_dom_once(
                         }
                     }
                     for &(tnode, dom, _) in group {
-                        let Some(table_style) = styles.get(&dom) else {
+                        let Some(table_style) = table_style_of(tnode, dom) else {
                             continue;
                         };
                         if let Some(columns) = ifc_items.fixed_table_cols.get(&tnode) {
@@ -8430,6 +8480,9 @@ fn layout_dom_once(
                             .get(&tnode)
                             .copied()
                             .or_else(|| {
+                                if anonymous_tables.contains_key(&tnode) {
+                                    return None;
+                                }
                                 reliable_table_available_width(tree, dom, &styles, initial_cb_width)
                             })
                             .unwrap_or(initial_cb_width);
@@ -10821,8 +10874,11 @@ fn apply_table_row_geometry(
         }
 
         let table_dom = id_map.get(&table_node).copied();
-        let (row_gap, table_has_height) = table_dom
-            .and_then(|dom_id| styles.get(&dom_id))
+        let (row_gap, table_has_height) = ifc_items
+            .anonymous_tables
+            .get(&table_node)
+            .map(|(_, style)| style)
+            .or_else(|| table_dom.and_then(|dom_id| styles.get(&dom_id)))
             .map(|style| {
                 (
                     table_spacing(style).1,
@@ -13631,11 +13687,100 @@ fn build_table(
     ifc_items: &mut IfcRegistry,
     styles: &HashMap<NodeId, crate::LayoutStyle>,
 ) -> Option<taffy::NodeId> {
-    let style = styles.get(&id)?;
-    let native_html_table = tree.borrow_node(id).is_some_and(|node| {
-        node.as_element()
-            .is_some_and(|element| element.local.as_ref() == "table")
-    });
+    build_table_box(
+        tree, id, None, taffy_tree, id_map, words, engine, ifc_items, styles,
+    )
+}
+
+/// Style of the anonymous table CSS 2.1 §17.2.1 wraps around table-internal
+/// children of a non-table box: an auto-width table with no box edges that
+/// inherits the parent's inherited table properties.
+fn anonymous_table_style(parent: &crate::LayoutStyle) -> crate::LayoutStyle {
+    let mut style = parent.clone();
+    style.display = crate::Display::Block;
+    style.is_table_box = true;
+    style.table_part = None;
+    style.is_table_cell_box = false;
+    style.internal_flex_container = false;
+    style.flow_root = true;
+    style.width = crate::Dimension::Auto;
+    style.height = crate::Dimension::Auto;
+    style.min_width = crate::Dimension::Auto;
+    style.max_width = crate::Dimension::Auto;
+    style.min_height = crate::Dimension::Auto;
+    style.max_height = crate::Dimension::Auto;
+    style.margin = crate::Edges::default();
+    style.margin_auto = [false; 4];
+    style.padding = crate::Edges::default();
+    style.border = crate::Edges::default();
+    style.box_sizing = crate::BoxSizing::BorderBox;
+    style.float = None;
+    style.position = None;
+    style.table_layout_fixed = false;
+    style
+}
+
+/// Whether every box `id` generates is a table cell or row (whitespace
+/// aside), so its content is one anonymous table.
+fn children_form_anonymous_table(
+    tree: &DomTree,
+    id: NodeId,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+) -> bool {
+    let children = rendered_children(tree, id);
+    let mut flattened = Vec::new();
+    flatten_contents_children(tree, &children, styles, &mut flattened);
+    let mut any = false;
+    for child in flattened {
+        let Some(node) = tree.borrow_node(child) else {
+            continue;
+        };
+        if !node.is_element() {
+            if matches!(node.data, obscura_dom::tree::NodeData::Text { .. })
+                && !tree
+                    .text_content(child)
+                    .trim_matches([' ', '\t', '\n', '\r', '\x0c'])
+                    .is_empty()
+            {
+                return false;
+            }
+            continue;
+        }
+        let Some(style) = styles.get(&child) else {
+            continue;
+        };
+        if style.display == crate::Display::None {
+            continue;
+        }
+        if !(style.is_table_cell_box || style.table_part == Some(crate::TablePart::Row)) {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_table_box(
+    tree: &DomTree,
+    id: NodeId,
+    anonymous: Option<crate::LayoutStyle>,
+    taffy_tree: &mut TaffyTree<usize>,
+    id_map: &mut HashMap<taffy::NodeId, NodeId>,
+    words: &mut HashMap<taffy::NodeId, (NodeId, String)>,
+    engine: &mut crate::inline::TextEngine,
+    ifc_items: &mut IfcRegistry,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+) -> Option<taffy::NodeId> {
+    let style = match &anonymous {
+        Some(style) => style,
+        None => styles.get(&id)?,
+    };
+    let native_html_table = anonymous.is_none()
+        && tree.borrow_node(id).is_some_and(|node| {
+            node.as_element()
+                .is_some_and(|element| element.local.as_ref() == "table")
+        });
     // Rows as (row element, end of its row group) plus each row's cells. An
     // anonymous row (cells directly inside a table or row group) uses the
     // table's id and is marked not real so its style is not consulted.
@@ -14314,7 +14459,13 @@ fn build_table(
         height: length(vertical_spacing),
     };
     let table_node = taffy_tree.new_with_children(tstyle, &children).ok()?;
-    id_map.insert(table_node, id);
+    if anonymous.is_some() {
+        ifc_items
+            .anonymous_tables
+            .insert(table_node, (id, style.clone()));
+    } else {
+        id_map.insert(table_node, id);
+    }
     ifc_items.table_rows.insert(table_node, row_min);
     if !column_boxes.is_empty() {
         ifc_items.table_columns.insert(table_node, column_boxes);
@@ -15212,6 +15363,34 @@ fn build(
     // across rows (the flex approximation could not) and colspan/rowspan map to
     // grid spans. Falls through to the generic path only if the table has no
     // usable rows/cells.
+    // A block whose children are all table cells or rows holds one
+    // anonymous table around them.
+    if style.display == crate::Display::Block
+        && !style.is_table_box
+        && style.table_part.is_none()
+        && !style.is_table_cell_box
+        && !style.display_contents
+        && children_form_anonymous_table(tree, id, styles)
+    {
+        if let Some(table) = build_table_box(
+            tree,
+            id,
+            Some(anonymous_table_style(style)),
+            taffy_tree,
+            id_map,
+            words,
+            engine,
+            ifc_items,
+            styles,
+        ) {
+            let mut block = to_taffy_style(style);
+            block.display = taffy::style::Display::Block;
+            if let Ok(node) = taffy_tree.new_with_children(block, &[table]) {
+                id_map.insert(node, id);
+                return Some(node);
+            }
+        }
+    }
     if style.is_table_box || style.table_part == Some(crate::TablePart::Row) {
         if let Some(node) = build_table(
             tree, id, taffy_tree, id_map, words, engine, ifc_items, styles,
