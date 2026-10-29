@@ -24,7 +24,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
-use std::hash::{Hash, Hasher};
+use std::hash::Hasher;
 
 use obscura_dom::tree::{DomTree, NodeData, NodeId};
 
@@ -376,25 +376,18 @@ fn measure_text(laid: &crate::DomLayout, walk: &Walk) -> Vec<(Key, NodeId, Rect,
             walk.owner_of.get(&id).copied()
         }
     };
-    let mut add_lines = |node: NodeId, slot: u32, idx: usize| {
-        let Some(owner) = box_of(node) else {
-            return;
+    for (node, list) in &laid.ifc.by_node {
+        let Some(owner) = box_of(*node) else {
+            continue;
         };
-        let placement = laid.text_engine.item_placement(idx).unwrap_or([0.0; 3]);
-        laid.text_engine.for_each_item_line(idx, |line, ink, run| {
-            let mut hash = Fnv::default();
-            write_f32s(&mut hash, &placement);
-            hash_line(&mut hash, run);
-            let sub = SUB_LINE | (slot.min(0x3fff) << 16) | (line.min(0xffff) as u32);
-            out.push(((node.raw(), sub), owner, ink, 0.0, hash.finish()));
-        });
-    };
-    for (node, idx) in &laid.ifc_items {
-        add_lines(*node, 0, *idx);
-    }
-    for (node, list) in laid.run_ifc_items.iter().chain(laid.word_ifc_items.iter()) {
-        for (slot, idx) in list.iter().enumerate() {
-            add_lines(*node, slot as u32 + 1, *idx);
+        for (slot, index) in list.iter().enumerate() {
+            let Some(ifc) = laid.ifc.get(*index) else {
+                continue;
+            };
+            for (line, (ink, fingerprint)) in ifc.line_fingerprints().into_iter().enumerate() {
+                let sub = SUB_LINE | ((slot as u32).min(0x3fff) << 16) | (line.min(0xffff) as u32);
+                out.push(((node.raw(), sub), owner, ink, 0.0, fingerprint));
+            }
         }
     }
     for (node, runs) in &laid.text_runs {
@@ -422,8 +415,7 @@ fn walk(tree: &DomTree, prepared: &PreparedRender, activity: u64) -> Walk {
     let laid = &prepared.layout;
     // Text painted as shaped lines or words is fingerprinted per line, so
     // its DOM text need not damage the whole box that owns it.
-    let has_lines =
-        |id: &NodeId| laid.ifc_items.contains_key(id) || laid.run_ifc_items.contains_key(id);
+    let has_lines = |id: &NodeId| laid.ifc.by_node.contains_key(id);
     let mut out = Walk {
         activity,
         ..Walk::default()
@@ -470,7 +462,6 @@ fn walk(tree: &DomTree, prepared: &PreparedRender, activity: u64) -> Walk {
         }
         if let Some(owner_id) = owner {
             let in_lines = laid.text_runs.contains_key(&id)
-                || laid.word_ifc_items.contains_key(&id)
                 || has_lines(&owner_id)
                 || block.as_ref().is_some_and(has_lines);
             if let Some(hash) = data.get_mut(&owner_id) {
@@ -564,39 +555,6 @@ fn hash_node_data(hash: &mut Fnv, tree: &DomTree, id: NodeId, text_in_lines: boo
         }
     }
     canvas
-}
-
-/// Everything a shaped line paints: geometry, glyphs, fonts and colors.
-fn hash_line(hash: &mut Fnv, run: &cosmic_text::LayoutRun<'_>) {
-    write_f32s(
-        hash,
-        &[run.line_y, run.line_top, run.line_height, run.line_w],
-    );
-    hash.write_u8(u8::from(run.rtl));
-    for g in run.glyphs {
-        hash.write_u64(((g.start as u64) << 32) | g.end as u64);
-        hash.write_u32(u32::from(g.glyph_id) | (u32::from(g.font_is_variable) << 16));
-        write_f32s(
-            hash,
-            &[
-                g.font_size,
-                g.x,
-                g.y,
-                g.w,
-                g.x_offset,
-                g.y_offset,
-                g.line_height_opt.unwrap_or(-1.0),
-                g.font_weight_axis_opt.unwrap_or(-1.0),
-                g.font_optical_size_opt.unwrap_or(-1.0),
-            ],
-        );
-        g.font_id.hash(hash);
-        hash.write_u32(g.color_opt.map_or(0, |c| c.0));
-        hash.write_u64(g.metadata as u64);
-        hash.write_u8(u8::from(g.font_italic_axis));
-        hash.write_u8(g.level.number());
-        hash.write_u32(g.cache_key_flags.bits());
-    }
 }
 
 /// Where `local` (layout coordinates of box `id`) is painted, in document

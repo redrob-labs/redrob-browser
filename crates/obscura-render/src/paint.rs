@@ -1776,33 +1776,19 @@ impl PreparedRender {
                 continue;
             };
             let (local_x, local_y) = inverse.map_point(x - movement.0, y - movement.1);
-            let indices = self
-                .layout
-                .ifc_items
-                .get(&parent)
-                .into_iter()
-                .copied()
-                .chain(
-                    self.layout
-                        .run_ifc_items
-                        .get(&parent)
-                        .into_iter()
-                        .flatten()
-                        .copied(),
-                );
-            let best = indices
-                .filter_map(|index| {
-                    self.layout.text_engine.caret_from_point(
-                        index,
-                        parent,
-                        tree,
-                        &self.layout.styles,
-                        local_x,
-                        local_y,
-                        hit,
-                    )
-                })
-                .min_by(|a, b| a.2.total_cmp(&b.2));
+            let best: Option<(obscura_dom::tree::NodeId, usize, f32)> = None;
+            let best = best.or_else(|| {
+                self.layout
+                    .ifc
+                    .by_node
+                    .get(&parent)?
+                    .iter()
+                    .filter_map(|&index| {
+                        let ifc = self.layout.ifc.get(index)?;
+                        ifc.caret_from_point(local_x - ifc.origin.0, local_y - ifc.origin.1)
+                    })
+                    .min_by(|a, b| a.2.total_cmp(&b.2))
+            });
             if let Some((node, offset, _)) = best {
                 return Some((node, offset));
             }
@@ -1826,31 +1812,21 @@ impl PreparedRender {
         })
         .take(tree.len() + 1)
         {
-            let indices = self
-                .layout
-                .ifc_items
-                .get(&parent)
-                .into_iter()
-                .copied()
-                .chain(
-                    self.layout
-                        .run_ifc_items
-                        .get(&parent)
-                        .into_iter()
-                        .flatten()
-                        .copied(),
-                );
-            for index in indices {
-                let Some(rect) = self.layout.text_engine.caret_rect(
-                    index,
-                    parent,
-                    tree,
-                    &self.layout.styles,
-                    node,
-                    offset,
-                ) else {
-                    continue;
-                };
+            let ifc_rect = self.layout.ifc.by_node.get(&parent).and_then(|list| {
+                list.iter().find_map(|&index| {
+                    let ifc = self.layout.ifc.get(index)?;
+                    if !ifc.contains_text(node) {
+                        return None;
+                    }
+                    let rect = ifc.caret_rect(node, offset)?;
+                    Some(crate::Rect {
+                        x: rect.x + ifc.origin.0,
+                        y: rect.y + ifc.origin.1,
+                        ..rect
+                    })
+                })
+            });
+            if let Some(rect) = ifc_rect {
                 let mut rect = self
                     .layout
                     .transforms
@@ -2412,7 +2388,14 @@ impl PreparedRender {
         id: obscura_dom::tree::NodeId,
         scroll: &ResolvedScrollState,
     ) -> Option<crate::Rect> {
-        let mut rect = self.document_rect(id)?;
+        let rect = self.fractional_rect(id)?;
+        let mut rect = self
+            .layout
+            .transforms
+            .get(&id)
+            .copied()
+            .map(|transform| transform.map_rect(rect))
+            .unwrap_or(rect);
         let movement = scroll.movement_for(id);
         rect.x += movement.0;
         rect.y += movement.1;
@@ -2433,7 +2416,7 @@ impl PreparedRender {
             .inline_fragments
             .get(&id)
             .cloned()
-            .or_else(|| self.layout.rects.get(&id).copied().map(|rect| vec![rect]))?;
+            .or_else(|| self.fractional_rect(id).map(|rect| vec![rect]))?;
         let movement = self.root_only_movement_for(id, requested_scroll);
         Some(
             source
@@ -2456,6 +2439,69 @@ impl PreparedRender {
         )
     }
 
+    /// Viewport client rects of the UTF-16 range `start..end` of text node
+    /// `text`, one per line box it occupies (`Range.getClientRects`).
+    pub fn text_range_client_rects_with_scroll(
+        &self,
+        tree: &DomTree,
+        text: obscura_dom::tree::NodeId,
+        start: usize,
+        end: usize,
+        scroll: &ResolvedScrollState,
+    ) -> Option<Vec<crate::Rect>> {
+        let parent = crate::dom::rendered_parent(tree, text)?;
+        for owner in
+            std::iter::successors(Some(parent), |id| crate::dom::rendered_parent(tree, *id))
+                .take(tree.len() + 1)
+        {
+            let Some(list) = self.layout.ifc.by_node.get(&owner) else {
+                continue;
+            };
+            for &index in list {
+                let Some(ifc) = self.layout.ifc.get(index) else {
+                    continue;
+                };
+                if !ifc.contains_text(text) {
+                    continue;
+                }
+                let movement = scroll.movement_for(parent);
+                let transform = self.layout.transforms.get(&parent).copied();
+                return Some(
+                    ifc.text_range_rects(text, start, end)
+                        .into_iter()
+                        .map(|rect| {
+                            let rect = crate::Rect {
+                                x: rect.x + ifc.origin.0,
+                                y: rect.y + ifc.origin.1,
+                                ..rect
+                            };
+                            let rect = transform.map(|t| t.map_rect(rect)).unwrap_or(rect);
+                            crate::Rect {
+                                x: rect.x + movement.0,
+                                y: rect.y + movement.1,
+                                ..rect
+                            }
+                        })
+                        .collect(),
+                );
+            }
+        }
+        None
+    }
+
+    /// The box's rect with its 1/64 px used size (Chrome's LayoutUnit)
+    /// instead of the whole-pixel size paint snaps to.
+    fn fractional_rect(&self, id: obscura_dom::tree::NodeId) -> Option<crate::Rect> {
+        let mut rect = self.layout.rects.get(&id).copied()?;
+        if let Some(&(width, height)) = self.layout.fractional_sizes.get(&id) {
+            if (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0 {
+                rect.width = width;
+                rect.height = height;
+            }
+        }
+        Some(rect)
+    }
+
     pub fn viewport_client_rects_with_scroll(
         &self,
         id: obscura_dom::tree::NodeId,
@@ -2466,7 +2512,7 @@ impl PreparedRender {
             .inline_fragments
             .get(&id)
             .cloned()
-            .or_else(|| self.layout.rects.get(&id).copied().map(|rect| vec![rect]))?;
+            .or_else(|| self.fractional_rect(id).map(|rect| vec![rect]))?;
         let movement = scroll.movement_for(id);
         Some(
             source
@@ -4982,35 +5028,7 @@ fn paint_laid_dom_scrolled(
         };
 
         if node.is_text() {
-            if let Some(items) = laid.word_ifc_items.get(&nid) {
-                let offset = scroll_state.translation_for(laid, nid);
-                let overflow_clip = scroll_state.shaped_text_overflow_clip_for(laid, nid);
-                let clip = overflow_clip.as_ref().map(|clip| {
-                    clip.viewport_rect(scroll_state.surface_extent.unwrap_or(viewport))
-                });
-                let clip_mask = overflow_clip.as_ref().and_then(|clip| {
-                    cached_overflow_clip_mask(
-                        &mut overflow_mask_cache,
-                        pixmap.width(),
-                        pixmap.height(),
-                        clip,
-                        scroll_state.surface_extent.unwrap_or(viewport),
-                    )
-                });
-                for &item in items {
-                    laid.text_engine.paint_item_with_clip_mask_scaled_for_print(
-                        item,
-                        &mut pixmap,
-                        offset,
-                        clip,
-                        clip_mask.as_deref(),
-                        raster_scale,
-                        print_economy,
-                    );
-                }
-            } else {
-                paint_text_node(tree, nid, laid, &scroll_state, &mut pixmap, raster_scale);
-            }
+            // Other text is painted with its inline formatting context.
             for generated in &generated_after_at[paint_index] {
                 paint_in_flow_generated_box(
                     &mut pixmap,
@@ -5636,7 +5654,10 @@ fn paint_laid_dom_scrolled(
             .flatten()
             {
                 paint_positioned_pseudo(
-                    &mut laid.text_engine,
+                    &mut laid.ifc,
+                    tree,
+                    &laid.styles,
+                    nid,
                     &mut pixmap,
                     pseudo,
                     &positioned_pseudo_containing_block,
@@ -5905,48 +5926,6 @@ fn paint_laid_dom_scrolled(
             }
         }
 
-        // `::before`/`::after` generated text has no DOM text node of its own.
-        // Its shaped word items are registered under the host element, so
-        // paint them here. The static path remains for layout-only builds and
-        // for a face that cosmic-text cannot decode.
-        if let Some(items) = laid.word_ifc_items.get(&nid) {
-            scene_content_node(&scroll_state, nid);
-            let offset = scroll_state.translation_for(laid, nid);
-            for &item in items {
-                laid.text_engine.paint_item_with_clip_mask_scaled_for_print(
-                    item,
-                    &mut pixmap,
-                    offset,
-                    clip,
-                    element_clip_mask,
-                    raster_scale,
-                    print_economy,
-                );
-            }
-            scene_node(nid);
-        } else if let Some(runs) = laid.text_runs.get(&nid) {
-            let color = style.color.unwrap_or([0, 0, 0, 255]);
-            let fsize = style.font_size.unwrap_or(16.0);
-            let is_bold = crate::style::used_font_weight(style) >= 600;
-            for (word_rect, word) in runs {
-                draw_text(
-                    &mut pixmap,
-                    word,
-                    word_rect.x + ox,
-                    word_rect.y + oy,
-                    color,
-                    fsize,
-                    is_bold,
-                    style.font_family.as_deref(),
-                    style.letter_spacing.unwrap_or(0.0),
-                    style.word_spacing.unwrap_or(0.0),
-                    clip,
-                    element_clip_mask,
-                    raster_scale,
-                );
-            }
-        }
-
         // A closed native `<select>` paints only its selected option. Options
         // themselves are popup content (`display:none` in the layout tree),
         // so the label and disclosure arrow belong to the atomic control.
@@ -5954,7 +5933,8 @@ fn paint_laid_dom_scrolled(
             if let Some(label) = selected_option_label(tree, nid) {
                 let fsize = style.font_size.unwrap_or(13.333_333);
                 let line_height = crate::inline::used_line_height(style);
-                let text_x = rect.x + style.border.left + style.padding.left;
+                let text_x =
+                    rect.x + style.border.left + style.padding.left + crate::SELECT_INLINE_START;
                 let text_y = rect.y + (rect.height - line_height) / 2.0;
                 draw_text(
                     &mut pixmap,
@@ -6215,11 +6195,9 @@ fn paint_laid_dom_scrolled(
         if svg_subtree_skip.contains(&nid) || opacity_subtree_skip.contains(&nid) {
             continue;
         }
-        let whole = laid.ifc_items.get(&nid).copied();
-        let run_items = laid.run_ifc_items.get(&nid).cloned();
-        if whole.is_none() && run_items.is_none() {
+        let Some(ifcs) = laid.ifc.by_node.get(&nid).cloned() else {
             continue;
-        }
+        };
         if laid
             .styles
             .get(&nid)
@@ -6248,26 +6226,19 @@ fn paint_laid_dom_scrolled(
                 scroll_state.surface_extent.unwrap_or(viewport),
             )
         });
-        if let Some(idx) = whole {
-            laid.text_engine.paint_item_with_clip_mask_scaled_for_print(
-                idx,
-                &mut pixmap,
-                off,
-                clip,
-                clip_mask.as_deref(),
-                raster_scale,
-                print_economy,
-            );
-        }
-        // Anonymous inline-run leaves of a mixed block (see
-        // `build_mixed_block`), pinned to their own boxes at finalize.
-        if let Some(items) = run_items {
-            for idx in items {
-                laid.text_engine.paint_item_with_clip_mask_scaled_for_print(
-                    idx,
+        {
+            let store = &mut laid.ifc;
+            for index in ifcs {
+                let Some(ifc) = store.ifcs.get(index).and_then(|ifc| ifc.as_deref()) else {
+                    continue;
+                };
+                ifc.paint(
+                    &mut store.raster,
+                    &laid.styles,
                     &mut pixmap,
+                    ifc.origin,
                     off,
-                    clip,
+                    clip.or(ifc.clip),
                     clip_mask.as_deref(),
                     raster_scale,
                     print_economy,
@@ -10744,8 +10715,12 @@ fn paint_in_flow_generated_box(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_positioned_pseudo(
-    text_engine: &mut crate::inline::TextEngine,
+    ifc: &mut crate::ifc::IfcStore,
+    tree: &DomTree,
+    styles: &HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    owner: obscura_dom::tree::NodeId,
     pixmap: &mut Pixmap,
     style: &crate::LayoutStyle,
     containing_block: &crate::Rect,
@@ -10780,12 +10755,13 @@ fn paint_positioned_pseudo(
     // positioned pseudo whose width and/or height is auto. Tailwind's code
     // gutters use exactly this shape (`width` plus auto height); requiring two
     // opposing insets previously discarded the pseudo before text painting.
-    let generated_item = style
+    let generated = style
         .before_content
         .as_deref()
         .filter(|content| !content.is_empty())
-        .and_then(|content| text_engine.push_generated_text(content, style));
-    let generated_intrinsic = generated_item.map(|item| text_engine.measure(item, None));
+        .and_then(|content| ifc.standalone(tree, styles, owner, style, content, None));
+    let generated_item = generated.map(|(index, _, _)| index);
+    let generated_intrinsic = generated.map(|(_, width, height)| (width, height));
     let width = resolve(style.width, containing_block.width)
         .or_else(|| Some(containing_block.width - left? - right?))
         .or_else(|| generated_intrinsic.map(|size| size.0));
@@ -11014,15 +10990,21 @@ fn paint_positioned_pseudo(
             }
             _ => rect.y + style.padding.top,
         };
-        text_engine.finalize(item, (x, y), text_width, Some(visible));
-        text_engine.paint_item_with_clip_mask_scaled(
-            item,
-            pixmap,
-            (0.0, 0.0),
-            Some(visible),
-            element_clip_mask.as_ref(),
-            raster_scale,
-        );
+        let _ = text_width;
+        let crate::ifc::IfcStore { ifcs, raster, .. } = ifc;
+        if let Some(generated) = ifcs.get(item).and_then(|slot| slot.as_deref()) {
+            generated.paint(
+                raster,
+                styles,
+                pixmap,
+                (x, y),
+                (0.0, 0.0),
+                Some(visible),
+                element_clip_mask.as_ref(),
+                raster_scale,
+                false,
+            );
+        }
     }
 }
 
@@ -21822,5 +21804,44 @@ mod tests {
         assert_eq!(at_end.layout.styles[&overlay].visibility_hidden, Some(true));
         assert!(at_end.layout.styles[&overlay].effectively_invisible);
         assert!(!at_end.has_active_css_animations());
+    }
+}
+
+#[cfg(all(test, feature = "scene"))]
+mod scene_text_tests {
+    use super::*;
+
+    /// The compositor scene (what redrob-shell draws) carries the IFC's text
+    /// as glyph runs with font resources.
+    #[test]
+    fn scene_frame_paints_ifc_text_as_glyph_runs() {
+        let tree = obscura_dom::parse_html(
+            "<!doctype html><body style='margin:8px;font:16px sans-serif'><p>Hello <b>scene</b> text</p></body>",
+        );
+        let mut resources = RenderResourceCache::default();
+        let mut prepared = prepare_dom(&tree, (400.0, 200.0), None, &mut resources).unwrap();
+        let frame = scene::build_scene_prepared(
+            &tree,
+            &mut prepared,
+            &mut resources,
+            (0.0, 0.0),
+            &HashMap::new(),
+            [255, 255, 255, 255],
+            &EMPTY_CANVAS_SURFACES,
+            1.0,
+        )
+        .unwrap();
+        let glyphs: usize = frame
+            .frame
+            .items
+            .iter()
+            .filter_map(|item| match &item.item {
+                redrob_scene::Item::Text { glyphs, .. } => Some(glyphs.len()),
+                _ => None,
+            })
+            .sum();
+        // "Hello scene text" without the spaces.
+        assert!(glyphs >= 14, "{glyphs} glyphs");
+        assert!(!frame.fonts.is_empty());
     }
 }

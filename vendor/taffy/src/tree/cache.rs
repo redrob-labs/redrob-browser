@@ -148,6 +148,8 @@ pub(crate) struct CacheEntry<T> {
 #[cfg_attr(feature = "serde", derive(Serialize))]
 struct MeasureOutput {
     size: Size<f32>,
+    first_baseline: Option<f32>,
+    last_baseline: Option<f32>,
     top_margin: CollapsibleMarginSet,
     bottom_margin: CollapsibleMarginSet,
     margins_can_collapse_through: bool,
@@ -158,6 +160,8 @@ impl MeasureOutput {
     fn new(input: &LayoutInput, output: LayoutOutput) -> Self {
         Self {
             size: output.size,
+            first_baseline: output.first_baselines.y,
+            last_baseline: output.last_baseline,
             top_margin: output.top_margin,
             bottom_margin: output.bottom_margin,
             margins_can_collapse_through: output.margins_can_collapse_through,
@@ -167,6 +171,8 @@ impl MeasureOutput {
 
     fn into_layout_output(self) -> LayoutOutput {
         let mut output = LayoutOutput::from_outer_size(self.size);
+        output.first_baselines.y = self.first_baseline;
+        output.last_baseline = self.last_baseline;
         output.top_margin = self.top_margin;
         output.bottom_margin = self.bottom_margin;
         output.margins_can_collapse_through = self.margins_can_collapse_through;

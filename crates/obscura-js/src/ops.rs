@@ -8281,6 +8281,7 @@ pub fn build_extension() -> Extension {
         ops.push(op_layout_hit_test());
         ops.push(op_layout_caret());
         ops.push(op_layout_caret_rect());
+        ops.push(op_layout_text_rects());
         ops.push(op_resize_observer_measurements());
         ops.push(op_intersection_observer_measurements());
         ops.push(op_computed_style());
@@ -9323,6 +9324,62 @@ fn op_layout_geometry(state: &OpState, #[string] nid_str: String, frame_id: u32)
         .to_string();
     }
     String::new()
+}
+
+/// Client rects of the UTF-16 range `start..end` of a text node, as a JSON
+/// array of `{x, y, width, height}` in viewport CSS pixels (empty string when
+/// the text has no layout). Feature-gated.
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_layout_text_rects(
+    state: &OpState,
+    #[string] nid_str: String,
+    start: u32,
+    end: u32,
+    frame_id: u32,
+) -> String {
+    let shared = frame_state(state, frame_id);
+    let nid: u32 = nid_str.parse().unwrap_or(0);
+    let nid = obscura_dom::tree::NodeId::new(nid);
+    let mut gs = shared.borrow_mut();
+    sample_live_document_animations(&mut gs);
+    if ensure_resolved_scroll_for_geometry(&mut gs).is_none() {
+        return String::new();
+    }
+    let gs = &*gs;
+    let Some((_, scroll)) = gs.resolved_scroll.as_ref() else {
+        return String::new();
+    };
+    let Some(prepared) = gs.prepared_render.as_ref() else {
+        return String::new();
+    };
+    let Some(dom) = gs.dom.as_ref() else {
+        return String::new();
+    };
+    let Some(rects) = prepared.text_range_client_rects_with_scroll(
+        dom,
+        nid,
+        start as usize,
+        end as usize,
+        scroll,
+    ) else {
+        return String::new();
+    };
+    serde_json::Value::Array(
+        rects
+            .into_iter()
+            .map(|rect| {
+                serde_json::json!({
+                    "x": rect.x,
+                    "y": rect.y,
+                    "width": rect.width,
+                    "height": rect.height,
+                })
+            })
+            .collect(),
+    )
+    .to_string()
 }
 
 /// Untransformed padding- and border-box sizes for CSSOM View. Keeping this

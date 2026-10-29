@@ -445,6 +445,10 @@ pub struct Style<S: CheapCloneStr = DefaultCheapStr> {
     /// Whether a child is display:table or not. This affects children of block layouts.
     /// This should really be part of `Display`, but it is currently seperate because table layout isn't implemented
     pub item_is_table: bool,
+    /// The box establishes an independent block formatting context
+    /// (`display: flow-root`, layout/paint containment, multi-column): it
+    /// contains its floats and is placed beside earlier floats, not under them.
+    pub establishes_bfc: bool,
     /// Is it a replaced element like an image or form field?
     /// <https://drafts.csswg.org/css-sizing-3/#min-content-zero>
     pub item_is_replaced: bool,
@@ -603,6 +607,7 @@ impl<S: CheapCloneStr> Style<S> {
         dummy: core::marker::PhantomData,
         display: Display::DEFAULT,
         item_is_table: false,
+        establishes_bfc: false,
         item_is_replaced: false,
         item_aspect_ratio_is_intrinsic: false,
         intrinsic_size_containment: Size { width: false, height: false },
@@ -865,6 +870,11 @@ impl<S: CheapCloneStr> BlockItemStyle for Style<S> {
         self.item_is_table
     }
 
+    #[inline(always)]
+    fn establishes_bfc(&self) -> bool {
+        self.establishes_bfc
+    }
+
     #[cfg(feature = "float_layout")]
     #[inline(always)]
     fn float(&self) -> Float {
@@ -883,6 +893,11 @@ impl<T: BlockItemStyle> BlockItemStyle for &'_ T {
     #[inline(always)]
     fn is_table(&self) -> bool {
         (*self).is_table()
+    }
+
+    #[inline(always)]
+    fn establishes_bfc(&self) -> bool {
+        (*self).establishes_bfc()
     }
 
     #[cfg(feature = "float_layout")]
@@ -1238,6 +1253,7 @@ mod tests {
             dummy: core::marker::PhantomData,
             display: Default::default(),
             item_is_table: false,
+        establishes_bfc: false,
             item_is_replaced: false,
             item_aspect_ratio_is_intrinsic: false,
             intrinsic_size_containment: Size { width: false, height: false },

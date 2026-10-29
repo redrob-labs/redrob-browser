@@ -91,6 +91,7 @@ pub use border::{
 };
 
 pub mod dom;
+pub(crate) mod ifc;
 pub use dom::{
     layout_dom, layout_dom_with_images, layout_dom_with_resources, AttributeStyleMutation,
     DomLayout, RetainedStyleMutation, StickyLayout, TreeStyleMutation,
@@ -209,327 +210,13 @@ pub use redrob_scene;
 #[cfg(feature = "paint")]
 pub use tiny_skia::Pixmap;
 
-// Real inline text layout (cosmic-text) lives behind the paint feature; the
-// layout-only build keeps the lighter word-split geometry. The stub lets
-// `dom.rs` name `inline::TextEngine` and call `try_build` unconditionally.
-#[cfg(feature = "paint")]
+// Replaced-element sizing; inline formatting contexts are `ifc`.
 pub mod inline;
-#[cfg(feature = "paint")]
-pub use inline::configure_font_directories;
+pub use ifc::fonts::configure_font_directories;
 
-#[cfg(not(feature = "paint"))]
-pub mod inline {
-    use obscura_dom::tree::{DomTree, NodeId};
-    use std::collections::HashMap;
-
-    #[derive(Clone)]
-    pub(crate) struct WebFont {
-        pub data: std::sync::Arc<Vec<u8>>,
-        pub family: Option<String>,
-        pub weight: Option<(u16, u16)>,
-        pub italic: Option<bool>,
-    }
-
-    #[derive(Default)]
-    pub struct TextEngine {
-        controls: Vec<(taffy::Size<f32>, bool)>,
-    }
-
-    pub(crate) fn text_may_need_emoji_font(_text: &str) -> bool {
-        false
-    }
-
-    pub(crate) fn without_shaped_item_reuse<R>(f: impl FnOnce() -> R) -> R {
-        f()
-    }
-
-    pub(crate) fn layout_reuse_enabled() -> bool {
-        false
-    }
-
-    #[derive(Clone)]
-    pub(crate) struct MeasureSignature;
-
-    impl MeasureSignature {
-        pub(crate) fn same_measure(&self, _other: &Self) -> bool {
-            false
-        }
-    }
-
-    impl TextEngine {
-        pub fn new() -> Self {
-            Self::default()
-        }
-
-        pub(crate) fn new_with_web_fonts(_fonts: &[WebFont]) -> Self {
-            Self::default()
-        }
-
-        pub(crate) fn new_with_web_fonts_and_emoji(_fonts: &[WebFont], _load_emoji: bool) -> Self {
-            Self::default()
-        }
-
-        pub(crate) fn for_document_layout(_fonts: &[WebFont], _load_emoji: bool) -> Self {
-            Self::default()
-        }
-
-        pub(crate) fn item_signature(&self, idx: usize) -> String {
-            format!("{idx}")
-        }
-
-        pub(crate) fn measure_signature(&self, _idx: usize) -> Option<MeasureSignature> {
-            None
-        }
-
-        pub(crate) fn register_native_control(
-            &mut self,
-            width: f32,
-            height: f32,
-            style: &crate::LayoutStyle,
-        ) -> usize {
-            let index = self.controls.len();
-            let zero_min_content = matches!(style.width, crate::Dimension::Percent(_))
-                || matches!(style.max_width, crate::Dimension::Percent(_))
-                || [0, 4].into_iter().any(|index| {
-                    style.size_expressions[index]
-                        .as_deref()
-                        .is_some_and(|expression| expression.contains('%'))
-                });
-            self.controls
-                .push((taffy::Size { width, height }, zero_min_content));
-            (1usize << (usize::BITS - 1)) | index
-        }
-
-        pub fn measure_taffy(
-            &mut self,
-            index: usize,
-            known: taffy::Size<Option<f32>>,
-            available: taffy::Size<taffy::AvailableSpace>,
-        ) -> taffy::Size<f32> {
-            let bit = 1usize << (usize::BITS - 1);
-            if index & bit == 0 {
-                return taffy::Size::ZERO;
-            }
-            let (intrinsic, zero_min_content) = self.controls[index & !bit];
-            taffy::Size {
-                width: known.width.unwrap_or_else(|| {
-                    if zero_min_content
-                        && matches!(available.width, taffy::AvailableSpace::MinContent)
-                    {
-                        0.0
-                    } else {
-                        intrinsic.width
-                    }
-                }),
-                height: known.height.unwrap_or(intrinsic.height),
-            }
-        }
-
-        pub fn register_replaced(
-            &mut self,
-            _width: f32,
-            _height: f32,
-            _style: &crate::LayoutStyle,
-        ) -> usize {
-            0
-        }
-
-        pub(crate) fn register_replaced_intrinsic(
-            &mut self,
-            _intrinsic: crate::ReplacedIntrinsic,
-            _style: &crate::LayoutStyle,
-        ) -> usize {
-            0
-        }
-        /// Layout-only builds have no shaper, so no container is ever treated
-        /// as a cosmic-text inline formatting context: the word-split path
-        /// handles text geometry for `getBoundingClientRect`.
-        pub fn try_build(
-            &mut self,
-            _tree: &DomTree,
-            _id: NodeId,
-            _styles: &HashMap<NodeId, crate::LayoutStyle>,
-        ) -> Option<usize> {
-            None
-        }
-        /// See `try_build`: inline runs likewise fall back to word-split
-        /// geometry in layout-only builds.
-        pub fn try_build_run(
-            &mut self,
-            _tree: &DomTree,
-            _parent: NodeId,
-            _run: &[NodeId],
-            _styles: &HashMap<NodeId, crate::LayoutStyle>,
-        ) -> Option<usize> {
-            None
-        }
-
-        /// Layout-only builds do not load page fonts. Preserve the same
-        /// line-vs-fragment contract with deterministic bundled metrics.
-        pub(crate) fn inline_font_box_height(&self, style: &crate::LayoutStyle) -> f32 {
-            style.font_size.unwrap_or(16.0)
-        }
-
-        pub(crate) fn selected_line_height(&self, style: &crate::LayoutStyle) -> f32 {
-            match style.line_height.unwrap_or(crate::LineHeight::Normal) {
-                crate::LineHeight::Normal => style.font_size.unwrap_or(16.0) * 1.2,
-                crate::LineHeight::Ratio(value) => style.font_size.unwrap_or(16.0) * value,
-                crate::LineHeight::Px(value) => value,
-                crate::LineHeight::Relative(crate::Dimension::Percent(value)) => {
-                    style.font_size.unwrap_or(16.0) * value
-                }
-                crate::LineHeight::Relative(crate::Dimension::Px(value)) => value,
-                crate::LineHeight::Relative(_) => style.font_size.unwrap_or(16.0),
-            }
-        }
-
-        pub(crate) fn push_generated_text(
-            &mut self,
-            _text: &str,
-            _style: &crate::LayoutStyle,
-        ) -> Option<usize> {
-            None
-        }
-
-        pub(crate) fn measure_word(&mut self, _idx: usize) -> (f32, f32) {
-            (0.0, 0.0)
-        }
-    }
-
-    pub(crate) fn used_line_height(style: &crate::LayoutStyle) -> f32 {
-        TextEngine::new().selected_line_height(style)
-    }
-
-    pub(crate) fn is_replaced(local: &str) -> bool {
-        matches!(
-            local,
-            "img"
-                | "svg"
-                | "canvas"
-                | "video"
-                | "audio"
-                | "iframe"
-                | "embed"
-                | "object"
-                | "input"
-                | "textarea"
-                | "select"
-                | "button"
-                | "progress"
-                | "meter"
-        )
-    }
-
-    pub(crate) fn has_replaced_sizing(local: &str) -> bool {
-        matches!(
-            local,
-            "img"
-                | "canvas"
-                | "video"
-                | "audio"
-                | "iframe"
-                | "embed"
-                | "object"
-                | "progress"
-                | "meter"
-        )
-    }
-
-    pub(crate) fn default_replaced_intrinsic_size(
-        local: &str,
-        font_size: f32,
-        has_controls: bool,
-        has_resource: bool,
-    ) -> Option<(f32, f32)> {
-        match local {
-            "canvas" | "video" | "iframe" | "object" => Some((300.0, 150.0)),
-            "embed" if has_resource => Some((300.0, 150.0)),
-            "audio" if has_controls => Some((300.0, 54.0)),
-            "progress" => Some((font_size * 10.0, font_size)),
-            "meter" => Some((font_size * 5.0, font_size)),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn constrained_auto_replaced_size(
-        width: f32,
-        height: f32,
-        style: &crate::LayoutStyle,
-    ) -> taffy::Size<f32> {
-        let px = |dimension| match dimension {
-            crate::Dimension::Px(value) => Some(value.max(0.0)),
-            _ => None,
-        };
-        let ratio = style
-            .aspect_ratio
-            .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
-            .unwrap_or_else(|| {
-                if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 {
-                    width / height
-                } else {
-                    2.0
-                }
-            });
-        let preferred_width = px(style.width);
-        let preferred_height = px(style.height);
-        let min_width = px(style.min_width).unwrap_or(0.0);
-        let min_height = px(style.min_height).unwrap_or(0.0);
-        let max_width = px(style.max_width).unwrap_or(f32::INFINITY).max(min_width);
-        let max_height = px(style.max_height)
-            .unwrap_or(f32::INFINITY)
-            .max(min_height);
-
-        let (width, height) = match (preferred_width, preferred_height) {
-            (Some(width), Some(height)) => (
-                width.min(max_width).max(min_width),
-                height.min(max_height).max(min_height),
-            ),
-            (Some(width), None) => {
-                let width = width.min(max_width).max(min_width);
-                (width, (width / ratio).min(max_height).max(min_height))
-            }
-            (None, Some(height)) => {
-                let height = height.min(max_height).max(min_height);
-                ((height * ratio).min(max_width).max(min_width), height)
-            }
-            (None, None) => {
-                let height_at_max_width = (max_width / ratio).max(min_height);
-                let height_at_min_width = (min_width / ratio).min(max_height);
-                let width_at_max_height = (max_height * ratio).max(min_width);
-                let width_at_min_height = (min_height * ratio).min(max_width);
-                if width > max_width {
-                    if height > max_height {
-                        if max_width * height <= max_height * width {
-                            (max_width, height_at_max_width)
-                        } else {
-                            (width_at_max_height, max_height)
-                        }
-                    } else {
-                        (max_width, height_at_max_width)
-                    }
-                } else if width < min_width {
-                    if height < min_height {
-                        if min_width * height <= min_height * width {
-                            (width_at_min_height, min_height)
-                        } else {
-                            (min_width, height_at_min_width)
-                        }
-                    } else {
-                        (min_width, height_at_min_width)
-                    }
-                } else if height > max_height {
-                    (width_at_max_height, max_height)
-                } else if height < min_height {
-                    (width_at_min_height, min_height)
-                } else {
-                    (width, height)
-                }
-            }
-        };
-
-        taffy::Size { width, height }
-    }
-}
+/// Inset of a closed select's label from its padding edge (Chromium's menu
+/// list inner padding).
+pub(crate) const SELECT_INLINE_START: f32 = 4.0;
 
 /// An axis-aligned rectangle in CSS pixels, relative to the containing block.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -1818,6 +1505,9 @@ pub struct LayoutStyle {
     /// cells inherit it); obscura applies it as main-axis alignment of the
     /// cell's flex-column stand-in. `None` on non-cell elements.
     pub vertical_align: Option<VerticalAlign>,
+    /// `vertical-align` of an inline-level box in its line box. Not
+    /// inherited; `None` is the initial `baseline`.
+    pub vertical_align_inline: Option<InlineVerticalAlign>,
     /// `z-index` on a positioned element. `None` is `auto` (tree order). A
     /// non-zero value lifts the element's whole subtree into a separate paint
     /// layer: negatives under the normal flow, positives above it, sorted.
@@ -2220,6 +1910,24 @@ pub enum VerticalAlign {
     Top,
     Middle,
     Bottom,
+}
+
+/// `vertical-align` of an inline-level box within its line (CSS 2.2 §10.8.1).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum InlineVerticalAlign {
+    #[default]
+    Baseline,
+    Sub,
+    Super,
+    TextTop,
+    TextBottom,
+    Middle,
+    Top,
+    Bottom,
+    /// Raise by a length (negative lowers).
+    Length(f32),
+    /// Raise by a fraction of the element's line-height.
+    Percent(f32),
 }
 
 /// `clear`: which floated side(s) an element moves below. Ends the float
@@ -2897,39 +2605,35 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
         BoxSizing::Inherit => taffy::BoxSizing::ContentBox,
     };
 
-    // A block box with centered/right inline content needs a flex-column
-    // stand-in because taffy's native block algorithm has no line alignment.
-    // `text_align` is separate from real flex/grid `align-items`, so a
-    // text-align declaration never changes how flex children are sized.
-    let promote_for_alignment = style.display == Display::Block
-        && matches!(
-            style.text_align,
-            Some(taffy::AlignItems::CENTER) | Some(taffy::AlignItems::FLEX_END)
-        );
-
+    // `text-align` moves line content inside inline formatting contexts
+    // (`crate::ifc`); it never changes the box tree. An inline-level box built
+    // as a box of its own (inline-block, or an inline that contains blocks)
+    // is a block container inside.
     s.display = match style.display {
-        Display::Block if promote_for_alignment => taffy::style::Display::Flex,
-        Display::Block => taffy::style::Display::Block,
+        Display::Block | Display::Inline => taffy::style::Display::Block,
         Display::Flex => taffy::style::Display::Flex,
         Display::Grid => taffy::style::Display::Grid,
-        Display::Inline => taffy::style::Display::Flex,
         Display::None => taffy::style::Display::None,
     };
-    if promote_for_alignment {
-        s.flex_direction = taffy::FlexDirection::Column;
-        s.align_items = style.text_align;
-    }
     if let Some(fd) = style.flex_direction {
         s.flex_direction = fd;
     }
-    if let Some(fw) = style.flex_wrap {
-        s.flex_wrap = fw;
-    } else if style.display == Display::Inline {
-        s.flex_direction = taffy::FlexDirection::Row;
-        s.flex_wrap = taffy::FlexWrap::Wrap;
-    } else {
-        s.flex_wrap = taffy::FlexWrap::NoWrap;
-    }
+    s.flex_wrap = style.flex_wrap.unwrap_or(taffy::FlexWrap::NoWrap);
+    s.establishes_bfc = style.flow_root
+        || style.containment & (CONTAIN_LAYOUT | CONTAIN_PAINT) != 0
+        || style.container_type != ContainerType::Normal
+        || style.column_count.is_some_and(|count| count > 1);
+    s.float = match style.float {
+        Some(Float::Left) => taffy::style::Float::Left,
+        Some(Float::Right) => taffy::style::Float::Right,
+        None => taffy::style::Float::None,
+    };
+    s.clear = match style.clear {
+        Some(Clear::Left) => taffy::style::Clear::Left,
+        Some(Clear::Right) => taffy::style::Clear::Right,
+        Some(Clear::Both) => taffy::style::Clear::Both,
+        None => taffy::style::Clear::None,
+    };
     s.size = taffy::Size {
         width: dimension(style.width),
         height: dimension(style.height),
@@ -2998,7 +2702,7 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
         if let Some(ai) = style.align_items {
             s.align_items = Some(ai);
         }
-    } else if !promote_for_alignment {
+    } else {
         // `align-items` has no effect on a block formatting context.
         s.align_items = None;
     }
@@ -3008,16 +2712,6 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
     s.align_content = style.align_content;
     if let Some(jc) = style.justify_content {
         s.justify_content = Some(jc);
-    } else if style.is_inline_block {
-        // Taffy's inline-box stand-in is a wrapping flex row. `text-align`
-        // aligns each line of an inline-block's internal formatting context;
-        // map that inherited value onto the row axis without affecting how
-        // the atomic box itself participates in its parent's inline flow.
-        s.justify_content = match style.text_align {
-            Some(taffy::AlignItems::CENTER) => Some(taffy::JustifyContent::CENTER),
-            Some(taffy::AlignItems::FLEX_END) => Some(taffy::JustifyContent::FLEX_END),
-            _ => None,
-        };
     }
     if let Some(fg) = style.flex_grow {
         s.flex_grow = fg;

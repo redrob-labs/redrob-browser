@@ -25,6 +25,12 @@ pub trait BlockItemStyle: CoreStyle {
         false
     }
 
+    /// Whether the item establishes an independent block formatting context.
+    #[inline(always)]
+    fn establishes_bfc(&self) -> bool {
+        false
+    }
+
     /// Whether the item is a floated
     #[cfg(feature = "float_layout")]
     #[inline(always)]
