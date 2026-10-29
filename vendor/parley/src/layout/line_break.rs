@@ -1216,13 +1216,23 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             Some(_) => true,
                             None => self.state.line.x == 0.0,
                         };
-                        let reason = if at_line_start {
+                        if at_line_start {
+                            // Accept the overflow and go on with the line: what
+                            // follows breaks at the soft wrap opportunity after
+                            // the box, and collapsible whitespace there hangs
+                            // instead of opening an empty line (Chrome: a
+                            // 160px image in a 100px block with trailing
+                            // whitespace is one line box).
+                            self.state.start_edge_boundary = None;
                             self.append_layout_inline_box(item.index, next_x);
-                            BreakReason::Emergency
+                            self.state.mark_line_break_opportunity();
                         } else {
-                            BreakReason::Regular
-                        };
-                        return self.start_new_line(reason, max_advance, line_indent);
+                            return self.start_new_line(
+                                BreakReason::Regular,
+                                max_advance,
+                                line_indent,
+                            );
+                        }
                     }
                 }
                 LayoutItemKind::TextRun => {
