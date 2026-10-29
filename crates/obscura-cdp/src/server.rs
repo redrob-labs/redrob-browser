@@ -1738,6 +1738,7 @@ fn forward_pending_events(ctx: &mut CdpContext, reply_tx: Option<&mpsc::Unbounde
     let Some(reply_tx) = reply_tx else {
         return;
     };
+    ctx.fan_out_page_lifecycle_events();
     for event in ctx.pending_events.drain(..) {
         if let Ok(json) = serde_json::to_string(&event) {
             let _ = reply_tx.send(json);
@@ -2385,6 +2386,7 @@ async fn process_with_interception(
             reached_network_idle,
         );
     }
+    ctx.fan_out_page_lifecycle_events();
     for event in ctx.pending_events.drain(..) {
         if let Ok(json) = serde_json::to_string(&event) {
             let _ = reply_tx.send(json);
@@ -2427,6 +2429,7 @@ async fn early_paint_window(
         if let Err(error) = crate::domains::page::queue_screencast_frame(ctx, session, true) {
             tracing::debug!("no commit screencast frame: {error}");
         }
+        ctx.fan_out_page_lifecycle_events();
         for event in ctx.pending_events.drain(..) {
             if let Ok(json) = serde_json::to_string(&event) {
                 let _ = reply_tx.send(json);
@@ -2591,6 +2594,7 @@ async fn process_cdp_message(
     // Playwright awaits the response and immediately reads state wired up
     // by those events; if the response lands first, accessing
     // Target._page errors with "Cannot read properties of undefined".
+    ctx.fan_out_page_lifecycle_events();
     for event in ctx.pending_events.drain(..) {
         if let Ok(json) = serde_json::to_string(&event) {
             let _ = reply_tx.send(json);

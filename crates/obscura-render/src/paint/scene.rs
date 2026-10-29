@@ -914,8 +914,8 @@ impl<'a> Builder<'a> {
             .push((element.index() as u64, id.0 as usize));
         self.by_key.insert(SpatialKey::Scroll(sid.0), id);
 
-        // Boundary: the scroller's outside clip, then its frame (rounded
-        // like its padding box), both in the parent's space.
+        // Boundary: the scroller's outside clip, in the parent's space. The
+        // compositor clips the scroller's subtree to `frame` itself.
         let mut boundary = (*self.boundary(parent)).clone();
         if let Some(clip) = self
             .scroll
@@ -927,28 +927,6 @@ impl<'a> Builder<'a> {
         {
             boundary.extend(overflow_clip_items(&clip, parent));
         }
-        let radii = style
-            .border_model
-            .radii
-            .resolve(rect.width, rect.height)
-            .inset(crate::Sides {
-                top: style.border.top,
-                right: style.border.right,
-                bottom: style.border.bottom,
-                left: style.border.left,
-            });
-        boundary.push(BoundaryClip {
-            spatial: parent,
-            item: rs::Item::PushClip {
-                rect: frame,
-                radii: [
-                    radii.top_left.0,
-                    radii.top_right.0,
-                    radii.bottom_right.0,
-                    radii.bottom_left.0,
-                ],
-            },
-        });
         self.boundaries.insert(id, Arc::new(boundary));
         id
     }
@@ -1423,24 +1401,8 @@ impl<'a> Builder<'a> {
                 } else {
                     (self.local_frame(spatial, transform), IDENTITY)
                 };
+                // The compositor leaves an outset shadow out of its own box.
                 let rect = map_rect(&transform, rect);
-                // An outset shadow never shows inside its own border box.
-                let reach = spread.abs() + blur * 1.5 + offset[0].abs().max(offset[1].abs()) + 2.0;
-                let outer = rs::Rect {
-                    x: rect.x - reach,
-                    y: rect.y - reach,
-                    w: rect.w + 2.0 * reach,
-                    h: rect.h + 2.0 * reach,
-                };
-                let mut verbs = rect_verbs(outer);
-                verbs.extend(rounded_rect_verbs(rect, *radii));
-                self.push_item(
-                    spatial,
-                    rs::Item::PushClipPath {
-                        verbs,
-                        even_odd: true,
-                    },
-                );
                 self.push_item(
                     spatial,
                     rs::Item::BoxShadow {
@@ -1453,7 +1415,6 @@ impl<'a> Builder<'a> {
                         inset: *inset,
                     },
                 );
-                self.push_item(spatial, rs::Item::PopClip);
             }
             Op::External {
                 key,
@@ -2005,39 +1966,6 @@ fn verbs_bounds(verbs: &[Verb]) -> Option<rs::Rect> {
         w: max.0 - min.0,
         h: max.1 - min.1,
     })
-}
-
-fn rect_verbs(rect: rs::Rect) -> Vec<rs::Verb> {
-    vec![
-        rs::Verb::M(rect.x, rect.y),
-        rs::Verb::L(rect.x + rect.w, rect.y),
-        rs::Verb::L(rect.x + rect.w, rect.y + rect.h),
-        rs::Verb::L(rect.x, rect.y + rect.h),
-        rs::Verb::Z,
-    ]
-}
-
-/// A rounded rectangle; corners are quarter ellipses as cubic curves.
-fn rounded_rect_verbs(rect: rs::Rect, radii: [f32; 4]) -> Vec<rs::Verb> {
-    if radii.iter().all(|r| *r <= 0.0) {
-        return rect_verbs(rect);
-    }
-    const K: f32 = 0.552_284_8;
-    let max = (rect.w / 2.0).min(rect.h / 2.0).max(0.0);
-    let [tl, tr, br, bl] = radii.map(|r| r.clamp(0.0, max));
-    let (x0, y0, x1, y1) = (rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
-    vec![
-        rs::Verb::M(x0 + tl, y0),
-        rs::Verb::L(x1 - tr, y0),
-        rs::Verb::C(x1 - tr + tr * K, y0, x1, y0 + tr - tr * K, x1, y0 + tr),
-        rs::Verb::L(x1, y1 - br),
-        rs::Verb::C(x1, y1 - br + br * K, x1 - br + br * K, y1, x1 - br, y1),
-        rs::Verb::L(x0 + bl, y1),
-        rs::Verb::C(x0 + bl - bl * K, y1, x0, y1 - bl + bl * K, x0, y1 - bl),
-        rs::Verb::L(x0, y0 + tl),
-        rs::Verb::C(x0, y0 + tl - tl * K, x0 + tl - tl * K, y0, x0 + tl, y0),
-        rs::Verb::Z,
-    ]
 }
 
 /// The clip items of an overflow clip chain, in `spatial`.

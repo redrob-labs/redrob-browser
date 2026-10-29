@@ -11,6 +11,8 @@ use vello_cpu::{PixelMetadata, Pixmap};
 pub struct ResourceStore {
     images: HashMap<ImageId, Arc<Pixmap>>,
     fonts: HashMap<FontId, (FontData, f32)>,
+    /// Variable-font instances: base font and normalized coordinates.
+    instances: HashMap<FontId, (FontId, Vec<i16>)>,
     externals: HashMap<u64, Arc<Pixmap>>,
     /// vello_cpu's glyph caches, reused across rasterizations.
     pub(crate) glyphs: Mutex<vello_cpu::Resources>,
@@ -47,6 +49,7 @@ impl ResourceStore {
         Self {
             images: HashMap::new(),
             fonts: HashMap::new(),
+            instances: HashMap::new(),
             externals: HashMap::new(),
             glyphs: Mutex::new(vello_cpu::Resources::new()),
         }
@@ -73,11 +76,29 @@ impl ResourceStore {
                     .unwrap_or(1000);
                 self.fonts.insert(id, (FontData::new(Blob::new(Arc::new(data)), index), upem as f32));
             }
+            Resource::FontInstance { id, font, axes } => {
+                let Some((data, _)) = self.fonts.get(&font) else {
+                    return;
+                };
+                let coords = skrifa::FontRef::from_index(data.data.as_ref(), data.index)
+                    .map(|face| {
+                        use skrifa::MetadataProvider;
+                        face.axes()
+                            .location(axes.iter().map(|(tag, value)| (skrifa::Tag::new(tag), *value)))
+                            .coords()
+                            .iter()
+                            .map(|coord| coord.to_bits())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                self.instances.insert(id, (font, coords));
+            }
             Resource::DropImage(id) => {
                 self.images.remove(&id);
             }
             Resource::DropFont(id) => {
                 self.fonts.remove(&id);
+                self.instances.remove(&id);
             }
         }
     }
@@ -123,7 +144,13 @@ impl ResourceStore {
     }
 
     /// The font and its units per em.
-    pub(crate) fn font(&self, id: FontId) -> Option<&(FontData, f32)> {
-        self.fonts.get(&id)
+    /// A font or a variable-font instance: the file and its normalized
+    /// coordinates (empty for the default instance).
+    pub(crate) fn font_with_coords(&self, id: FontId) -> Option<(&(FontData, f32), &[i16])> {
+        if let Some(font) = self.fonts.get(&id) {
+            return Some((font, &[]));
+        }
+        let (base, coords) = self.instances.get(&id)?;
+        Some((self.fonts.get(base)?, coords.as_slice()))
     }
 }

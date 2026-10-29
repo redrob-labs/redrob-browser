@@ -168,6 +168,16 @@ fn blend(b: BlendMode) -> peniko::BlendMode {
         BlendMode::Overlay => Mix::Overlay,
         BlendMode::Darken => Mix::Darken,
         BlendMode::Lighten => Mix::Lighten,
+        BlendMode::ColorDodge => Mix::ColorDodge,
+        BlendMode::ColorBurn => Mix::ColorBurn,
+        BlendMode::HardLight => Mix::HardLight,
+        BlendMode::SoftLight => Mix::SoftLight,
+        BlendMode::Difference => Mix::Difference,
+        BlendMode::Exclusion => Mix::Exclusion,
+        BlendMode::Hue => Mix::Hue,
+        BlendMode::Saturation => Mix::Saturation,
+        BlendMode::Color => Mix::Color,
+        BlendMode::Luminosity => Mix::Luminosity,
     };
     peniko::BlendMode::new(mix, Compose::SrcOver)
 }
@@ -410,7 +420,9 @@ impl Painter<'_> {
                 self.image(di.spatial, xf, pm, *rect, src, true);
             }
             Item::Text { font, size, color: c, glyphs, synthetic_bold, skew } => {
-                let Some((fd, upem)) = self.res.font(*font).cloned() else { return };
+                let Some(((fd, upem), coords)) = self.res.font_with_coords(*font).map(|(f, c)| (f.clone(), c.to_vec())) else {
+                    return;
+                };
                 if glyphs.is_empty() || *size <= 0.0 || c[3] <= 0.0 {
                     return;
                 }
@@ -431,6 +443,9 @@ impl Painter<'_> {
                 self.ctx.set_transform(xf);
                 self.ctx.set_paint(color(*c));
                 let mut run = self.ctx.glyph_run(self.glyphs, &fd).font_size(*size).hint(false);
+                if !coords.is_empty() {
+                    run = run.normalized_coords(&coords);
+                }
                 if *skew != 0.0 {
                     run = run.glyph_transform(Affine::skew(*skew as f64, 0.0));
                 }

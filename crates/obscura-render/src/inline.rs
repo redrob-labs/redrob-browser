@@ -4139,8 +4139,9 @@ impl TextEngine {
                 color: run.color.map(|c| c as f32 / 255.0),
                 glyphs: run.glyphs,
                 synthetic_bold: false,
-                // tan(14 degrees), the oblique angle the pixel path uses.
-                skew: if run.skew { 0.249_328 } else { 0.0 },
+                // Shear of the 14 degree oblique the pixel path uses; negative
+                // leans tops right (redrob-scene-raster's convention).
+                skew: if run.skew { -0.249_328 } else { 0.0 },
                 transform: crate::display_list::IDENTITY,
             };
             emit_scene_op(pixmap, clip_mask, clip, op);
