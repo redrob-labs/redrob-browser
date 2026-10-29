@@ -21723,6 +21723,26 @@ mod tests {
         }
     }
 
+    // w3schools js_json_syntax: a 612x285 image with width:100% and
+    // max-width:612px in an 810px block is 612x285 in Chrome (335.16 with
+    // 32/16px padding and a 1px border, box-sizing:border-box). The ratio
+    // transferred the unclamped 810px width (377px tall).
+    #[test]
+    fn max_width_clamps_before_the_ratio_transfers_to_the_height() {
+        let tree = parse_html(
+            r#"<!doctype html><style>*{box-sizing:border-box}</style><body style="margin:0"><div style="width:810px"><img id=a style="width:100%;max-width:612px;border:1px solid gray;padding:32px 16px"></div><div style="width:810px"><img id=b style="width:100%;max-width:612px"></div><div style="width:500px"><img id=c style="width:100%;max-width:612px;padding:32px 16px"></div>"#,
+        );
+        let intrinsic: HashMap<_, _> = ["a", "b", "c"]
+            .into_iter()
+            .map(|id| (tree.get_element_by_id(id).unwrap(), (612.0, 285.0)))
+            .collect();
+        let laid = layout_dom_with_images(&tree, (900.0, 600.0), &intrinsic);
+        let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
+        assert_eq!((rect("a").width, rect("a").height.round()), (612.0, 335.0));
+        assert_eq!((rect("b").width, rect("b").height), (612.0, 285.0));
+        assert_eq!((rect("c").width, rect("c").height.round()), (500.0, 282.0));
+    }
+
     /// Each line of text node `node`: (x, text), in line order.
     #[cfg(feature = "paint")]
     fn text_lines(laid: &DomLayout, node: NodeId) -> Vec<(f32, String)> {

@@ -64,7 +64,24 @@ where
                     size.maybe_apply_aspect_ratio(aspect_ratio).maybe_add(box_sizing_adjustment)
                 }
             };
-            let style_size = apply_ratio(resolved_size);
+            // The ratio transfers the *used* size of the definite axis: clamp
+            // it by its own min/max first (a `width:100%; max-width:612px`
+            // image takes its height from 612px, not from 100%).
+            let mut transfer_from = resolved_size;
+            if aspect_ratio.is_some() {
+                let min = style.min_size().maybe_resolve(parent_size, &resolve_calc_value);
+                let max = style.max_size().maybe_resolve(parent_size, &resolve_calc_value);
+                match (transfer_from.width, transfer_from.height) {
+                    (Some(width), None) => {
+                        transfer_from.width = Some(width.maybe_clamp(min.width, max.width));
+                    }
+                    (None, Some(height)) => {
+                        transfer_from.height = Some(height.maybe_clamp(min.height, max.height));
+                    }
+                    _ => {}
+                }
+            }
+            let style_size = apply_ratio(transfer_from);
             let style_min_size = apply_ratio(style.min_size().maybe_resolve(parent_size, &resolve_calc_value));
             let style_max_size =
                 style.max_size().maybe_resolve(parent_size, &resolve_calc_value).maybe_add(box_sizing_adjustment);
