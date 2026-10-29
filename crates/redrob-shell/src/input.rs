@@ -11,6 +11,7 @@ pub struct Wheel {
     pub delta: (f32, f32),
     /// Notches and pages ease; touchpad pixels move at once.
     pub smooth: bool,
+    pub modifiers: u32,
 }
 
 /// Page-area input: CDP operations for the page, and what the window
@@ -86,16 +87,12 @@ pub fn page_ops(
                 };
                 // egui reports wheel-up as positive; CDP scrolls down on positive deltaY.
                 let (dx, dy) = (-delta.x * step, -delta.y * step);
+                // The window sends the matching Op::Wheel once it knows
+                // whether it scrolls first (main.rs, TabScene::wheel_plan).
                 input.wheel.push(Wheel {
                     at: (x, y),
                     delta: (dx, dy),
                     smooth: *unit != egui::MouseWheelUnit::Point,
-                });
-                ops.push(Op::Wheel {
-                    x,
-                    y,
-                    dx,
-                    dy,
                     modifiers: mods(*modifiers),
                 });
             }

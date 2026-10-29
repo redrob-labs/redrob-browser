@@ -51,8 +51,12 @@ pub(crate) struct SceneStream {
     scroll_generation: u64,
     paint_epoch: Option<u64>,
     needs_frame: bool,
-    /// Device pixels per CSS pixel of the window (`rasterScale`).
-    pub(crate) raster_scale: f32,
+    /// Device pixels per CSS pixel the client asked for (`rasterScale`);
+    /// None follows the page's device scale factor, which the window keeps
+    /// equal to its own through Emulation.setDeviceMetricsOverride.
+    pub(crate) raster_scale: Option<f32>,
+    /// The scale the last frame was rasterized at.
+    built_scale: f32,
     /// The last frame's spatial tree, scroll node indices and the scrollers
     /// only script can move (a change there needs a new frame).
     spatial: Vec<rs::SpatialNode>,
@@ -127,7 +131,8 @@ impl SceneStream {
             scroll_generation: 0,
             paint_epoch: None,
             needs_frame: true,
-            raster_scale: 1.0,
+            raster_scale: None,
+            built_scale: 0.0,
             spatial: Vec::new(),
             scroll_nodes: HashMap::new(),
             baked_scrollers: HashSet::new(),
@@ -411,11 +416,9 @@ pub(crate) fn attach(
     let raster_scale = params
         .get("rasterScale")
         .and_then(|value| value.as_f64())
-        .map(|value| value as f32)
-        .or_else(|| ctx.get_page(&page_id).map(|page| page.device_scale_factor))
-        .unwrap_or(1.0);
+        .map(|value| value as f32);
     let stream = ctx.scenes.get_mut(&page_id).expect("scene stream");
-    if (stream.raster_scale - raster_scale).abs() > f32::EPSILON {
+    if stream.raster_scale != raster_scale {
         stream.raster_scale = raster_scale;
         stream.needs_frame = true;
     }
@@ -494,7 +497,12 @@ fn pump_stream(ctx: &mut CdpContext, page_id: &str, stream: &mut SceneStream) {
     let scrolled = scroll_generation != stream.scroll_generation;
     let activity_delta = activity.wrapping_sub(stream.activity);
     let scroll_delta = scroll_generation.wrapping_sub(stream.scroll_generation);
+    let scale = stream
+        .raster_scale
+        .unwrap_or(page.device_scale_factor)
+        .max(0.1);
     let content_changed = stream.needs_frame
+        || (scale - stream.built_scale).abs() > f32::EPSILON
         || dirty
         || paint_epoch != stream.paint_epoch
         || activity_delta > scroll_delta
@@ -504,8 +512,9 @@ fn pump_stream(ctx: &mut CdpContext, page_id: &str, stream: &mut SceneStream) {
             stream.needs_frame = true;
             return;
         }
-        match page.scene_frame(stream.raster_scale) {
+        match page.scene_frame(scale) {
             Ok(mut built) => {
+                stream.built_scale = scale;
                 media_keys(page, &mut built.frame, &mut stream.media_ids);
                 let (activity, scroll_generation, _, paint_epoch) = page.scene_change_signals();
                 let (_, elements, _) = page.scroll_snapshot();

@@ -27,7 +27,7 @@ pub use channel::{connect, Incoming};
 pub use paint::External;
 pub use scroll::ScrollKey;
 pub use spatial::Resolved;
-pub use state::TabScene;
+pub use state::{TabScene, WheelPlan};
 pub use ui::{cursor_icon, scrollbars, status_bubble};
 
 /// `REDROB_SCENE_FILE=<path>`: every web tab shows the scene in this file

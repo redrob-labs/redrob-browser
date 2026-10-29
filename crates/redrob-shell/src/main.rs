@@ -454,6 +454,25 @@ impl Window {
                     t.scene.scroll_key(key);
                     t.scene.flush();
                 }
+                Event::WheelAnswer {
+                    node,
+                    prevented,
+                    scrolled,
+                    at,
+                    delta,
+                    smooth,
+                } => {
+                    // A cancelled wheel must not have moved the page; a
+                    // deferred one moves now that the page let it.
+                    let res = t.scene.resolve(t.scene.viewport());
+                    t.scene.wheel_answer(node, prevented);
+                    if prevented && scrolled {
+                        t.scene.scroll_at(&res, at, (-delta.0, -delta.1), smooth);
+                    } else if !prevented && !scrolled {
+                        t.scene.scroll_at(&res, at, delta, smooth);
+                    }
+                    t.scene.flush();
+                }
                 Event::Console { level, text } => t.devtools.log(&level, text),
                 Event::NetRequest { id, method, url } => t.devtools.request(id, method, url),
                 Event::NetResponse { id, status, mime } => t.devtools.response(&id, status, mime),
@@ -2477,7 +2496,24 @@ impl Window {
                         t.scene.pointer_down(&res, at);
                     }
                     for w in input.wheel {
-                        t.scene.scroll_at(&res, w.at, w.delta, w.smooth);
+                        let node = t.scene.hover(&res, w.at).map(|h| h.node);
+                        let scrolled = match t.scene.wheel_plan(node) {
+                            compositor::WheelPlan::Scrolled => {
+                                t.scene.scroll_at(&res, w.at, w.delta, w.smooth);
+                                true
+                            }
+                            compositor::WheelPlan::Deferred | compositor::WheelPlan::Cancelled => false,
+                        };
+                        ops.push(Op::Wheel {
+                            x: w.at.0,
+                            y: w.at.1,
+                            dx: w.delta.0,
+                            dy: w.delta.1,
+                            modifiers: w.modifiers,
+                            node,
+                            scrolled,
+                            smooth: w.smooth,
+                        });
                     }
                     let id = t.id;
                     for op in ops {

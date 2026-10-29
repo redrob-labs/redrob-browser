@@ -1,6 +1,7 @@
 //! One tab's current frame, its resources and its scroll offsets.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use redrob_scene::{ClientMsg, FontId, Frame, ImageId, Item, SpatialId, SpatialKind, ROOT_SCROLL};
 use tokio::sync::mpsc::UnboundedSender;
@@ -31,6 +32,25 @@ pub struct TabScene {
     version: u64,
     /// Why there is no scene from the engine, if it said.
     pub error: Option<String>,
+    /// Hit nodes whose page called preventDefault on a wheel event: the
+    /// window waits for the page before scrolling over them, as Chromium
+    /// does for non-passive wheel listeners.
+    wheel_blocking: HashSet<u64>,
+    /// The page cancelled the current wheel gesture until then.
+    wheel_cancelled_until: Option<Instant>,
+}
+
+/// How long a cancelled wheel gesture stays cancelled after its last event.
+const WHEEL_GESTURE: Duration = Duration::from_millis(300);
+
+/// What the window does with one wheel event before the page answers.
+pub enum WheelPlan {
+    /// Scrolled already; undo if the page cancels.
+    Scrolled,
+    /// Wait for the page, then scroll unless it cancels.
+    Deferred,
+    /// The page cancels this gesture: send it, do not scroll.
+    Cancelled,
 }
 
 impl TabScene {
@@ -48,6 +68,37 @@ impl TabScene {
 
     pub fn debug_file() -> bool {
         std::env::var_os(super::DEBUG_FILE_ENV).is_some()
+    }
+
+    /// Decide how to scroll a wheel event at `node` (the front hit region).
+    pub fn wheel_plan(&self, node: Option<u64>) -> WheelPlan {
+        if self.wheel_cancelled_until.is_some_and(|t| Instant::now() < t) {
+            return WheelPlan::Cancelled;
+        }
+        match node {
+            Some(n) if self.wheel_blocking.contains(&n) => WheelPlan::Deferred,
+            _ => WheelPlan::Scrolled,
+        }
+    }
+
+    /// The page answered a wheel event at `node`.
+    pub fn wheel_answer(&mut self, node: Option<u64>, prevented: bool) {
+        if prevented {
+            if let Some(n) = node {
+                self.wheel_blocking.insert(n);
+            }
+            self.wheel_cancelled_until = Some(Instant::now() + WHEEL_GESTURE);
+        } else {
+            if let Some(n) = node {
+                self.wheel_blocking.remove(&n);
+            }
+            self.wheel_cancelled_until = None;
+        }
+    }
+
+    /// The page viewport of the current frame, CSS px.
+    pub fn viewport(&self) -> (f32, f32) {
+        self.frame.as_ref().map_or((0.0, 0.0), |f| f.viewport)
     }
 
     pub fn has_frame(&self) -> bool {

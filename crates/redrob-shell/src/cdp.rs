@@ -105,6 +105,11 @@ pub enum Op {
         dx: f32,
         dy: f32,
         modifiers: u32,
+        /// Front hit node under the pointer, echoed in `Event::WheelAnswer`.
+        node: Option<u64>,
+        /// Whether the window scrolled before asking (undo on cancel).
+        scrolled: bool,
+        smooth: bool,
     },
     /// The link under a page point, for a middle click (autoscroll.rs).
     LinkAt {
@@ -193,6 +198,15 @@ pub enum Event {
     SceneUnavailable(String),
     /// Scroll for a key the page did not use (`Op::ScrollKey`).
     ScrollKey(ScrollKey),
+    /// The page's answer to a wheel event (`Op::Wheel`).
+    WheelAnswer {
+        node: Option<u64>,
+        prevented: bool,
+        scrolled: bool,
+        at: (f32, f32),
+        delta: (f32, f32),
+        smooth: bool,
+    },
     /// A different document.
     Navigated(String),
     /// Same document, new URL (fragment or history API).
@@ -775,13 +789,31 @@ async fn handle(st: &mut State, window: WindowId, tab: TabId, op: Op) -> anyhow:
             dx,
             dy,
             modifiers,
+            node,
+            scrolled,
+            smooth,
         } => {
-            // The window has already scrolled (compositor/scroll.rs); the
-            // page only fires its `wheel` listeners and must not scroll again.
-            st.c.send(
-                s,
-                "Input.dispatchMouseEvent",
-                json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": dx, "deltaY": dy, "modifiers": modifiers, "redrobCompositorScrolls": true }),
+            // The window scrolls (compositor/scroll.rs); the page only fires
+            // its `wheel` listeners and says whether one cancelled it.
+            let r = st
+                .c
+                .call(
+                    s,
+                    "Input.dispatchMouseEvent",
+                    json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": dx, "deltaY": dy, "modifiers": modifiers, "redrobCompositorScrolls": true }),
+                )
+                .await?;
+            let prevented = r["redrobDefaultPrevented"].as_bool() == Some(true);
+            st.emit(
+                tab,
+                Event::WheelAnswer {
+                    node,
+                    prevented,
+                    scrolled,
+                    at: (x, y),
+                    delta: (dx, dy),
+                    smooth,
+                },
             );
         }
         Op::Key {
