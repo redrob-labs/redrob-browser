@@ -671,10 +671,9 @@ async fn resize(st: &mut State, window: WindowId, size: (u32, u32, f32)) {
         .collect();
     for (tab, session) in sessions {
         let params = json!({ "width": size.0, "height": size.1, "deviceScaleFactor": size.2, "mobile": false });
-        if let Err(e) = st
-            .c
-            .call(Some(&session), "Emulation.setDeviceMetricsOverride", params)
-            .await
+        if let Err(e) =
+            st.c.call(Some(&session), "Emulation.setDeviceMetricsOverride", params)
+                .await
         {
             st.emit(tab, Event::Error(e.to_string()));
         }

@@ -237,7 +237,12 @@ impl Media {
 
     /// A tab moves to another window: its players go with it, still playing.
     pub fn take_tab(&mut self, tab: TabId) -> TabMedia {
-        let keys: Vec<_> = self.items.keys().filter(|(t, _)| *t == tab).copied().collect();
+        let keys: Vec<_> = self
+            .items
+            .keys()
+            .filter(|(t, _)| *t == tab)
+            .copied()
+            .collect();
         let items = keys
             .into_iter()
             .filter_map(|k| self.items.remove(&k).map(|i| (k, i)))

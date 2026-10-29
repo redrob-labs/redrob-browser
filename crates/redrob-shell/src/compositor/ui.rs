@@ -60,12 +60,9 @@ pub fn status_bubble(ui: &egui::Ui, page: Rect, link: &str, pointer: Option<egui
     let p = *crate::theme::palette(ui);
     let font = egui::FontId::proportional(12.0);
     let max_w = (page.width() / 3.0).max(240.0).min(page.width() - 8.0);
-    let galley = ui.painter().layout(
-        link.to_string(),
-        font,
-        p.ink_primary,
-        f32::INFINITY,
-    );
+    let galley = ui
+        .painter()
+        .layout(link.to_string(), font, p.ink_primary, f32::INFINITY);
     let pad = vec2(8.0, 4.0);
     let w = (galley.size().x + pad.x * 2.0).min(max_w);
     let h = galley.size().y + pad.y * 2.0;
@@ -115,7 +112,12 @@ fn bars(page: &TabScene, res: &Resolved) -> Vec<Bar> {
             continue;
         };
         // Hidden when the scroll frame is itself scrolled out of sight.
-        let view = vello::kurbo::Rect::new(0.0, 0.0, f64::from(res.viewport.0), f64::from(res.viewport.1));
+        let view = vello::kurbo::Rect::new(
+            0.0,
+            0.0,
+            f64::from(res.viewport.0),
+            f64::from(res.viewport.1),
+        );
         let clipped = res
             .parent
             .get(s.index)
@@ -128,7 +130,10 @@ fn bars(page: &TabScene, res: &Resolved) -> Vec<Bar> {
         if r.width() < f64::from(BAR) * 2.0 || r.height() < f64::from(BAR) * 2.0 {
             continue;
         }
-        let r = Rect::from_min_max(pos2(r.x0 as f32, r.y0 as f32), pos2(r.x1 as f32, r.y1 as f32));
+        let r = Rect::from_min_max(
+            pos2(r.x0 as f32, r.y0 as f32),
+            pos2(r.x1 as f32, r.y1 as f32),
+        );
         let pos = page.pos(&s);
         let both = s.max.0 > 0.0 && s.max.1 > 0.0;
         let corner = if both { BAR } else { 0.0 };
@@ -171,7 +176,12 @@ fn bars(page: &TabScene, res: &Resolved) -> Vec<Bar> {
 /// Draw overlay scrollbars over the page area at `origin` and let the
 /// person drag them or click their track. Returns the bar rectangles
 /// (window coordinates), whose pointer input must not reach the page.
-pub fn scrollbars(ui: &egui::Ui, page_rect: Rect, page: &mut TabScene, res: &Resolved) -> Vec<Rect> {
+pub fn scrollbars(
+    ui: &egui::Ui,
+    page_rect: Rect,
+    page: &mut TabScene,
+    res: &Resolved,
+) -> Vec<Rect> {
     let origin = page_rect.min.to_vec2();
     let mut taken = Vec::new();
     let painter = ui.painter().with_clip_rect(page_rect);
@@ -193,13 +203,21 @@ pub fn scrollbars(ui: &egui::Ui, page_rect: Rect, page: &mut TabScene, res: &Res
             if room > 0.0 {
                 let to = bar.pos + moved * bar.max / room;
                 let cur = page.offset_of(bar.node);
-                let to = if bar.vertical { (cur.0, to) } else { (to, cur.1) };
+                let to = if bar.vertical {
+                    (cur.0, to)
+                } else {
+                    (to, cur.1)
+                };
                 page.scroll_node_to(bar.node, to, false);
             }
         } else if r.clicked() {
             // A click on the track pages toward the click, as Chrome does.
             if let Some(p) = r.interact_pointer_pos().filter(|p| !thumb.contains(*p)) {
-                let before = if bar.vertical { p.y < thumb.top() } else { p.x < thumb.left() };
+                let before = if bar.vertical {
+                    p.y < thumb.top()
+                } else {
+                    p.x < thumb.left()
+                };
                 let page_len = if bar.vertical {
                     track.height() * bar.max / (track.height() - thumb.height()).max(1.0)
                 } else {
@@ -208,7 +226,11 @@ pub fn scrollbars(ui: &egui::Ui, page_rect: Rect, page: &mut TabScene, res: &Res
                 let step = (page_len * 0.875).max(40.0);
                 let to = bar.pos + if before { -step } else { step };
                 let cur = page.offset_of(bar.node);
-                let to = if bar.vertical { (cur.0, to) } else { (to, cur.1) };
+                let to = if bar.vertical {
+                    (cur.0, to)
+                } else {
+                    (to, cur.1)
+                };
                 page.scroll_node_to(bar.node, to, true);
             }
         }
@@ -220,7 +242,13 @@ pub fn scrollbars(ui: &egui::Ui, page_rect: Rect, page: &mut TabScene, res: &Res
             };
             painter.rect_filled(track, 0.0, back);
         }
-        let alpha = if r.dragged() { 170 } else if active { 140 } else { 100 };
+        let alpha = if r.dragged() {
+            170
+        } else if active {
+            140
+        } else {
+            100
+        };
         let fill = if dark {
             Color32::from_white_alpha(alpha)
         } else {

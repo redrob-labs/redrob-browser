@@ -2,9 +2,7 @@
 
 use std::collections::HashMap;
 
-use redrob_scene::{
-    ClientMsg, FontId, Frame, ImageId, Item, SpatialId, SpatialKind, ROOT_SCROLL,
-};
+use redrob_scene::{ClientMsg, FontId, Frame, ImageId, Item, SpatialId, SpatialKind, ROOT_SCROLL};
 use tokio::sync::mpsc::UnboundedSender;
 use vello::kurbo::{BezPath, Rect, Shape as _};
 use vello::peniko::{FontData, ImageData};
@@ -201,7 +199,8 @@ impl TabScene {
             } = &mut node.kind
             {
                 let max = max_offset(f, *content);
-                self.scroll.adopt(*node, *offset, *offset_changed_by_page, max);
+                self.scroll
+                    .adopt(*node, *offset, *offset_changed_by_page, max);
                 // Taken: from now on the window's offset is the live one.
                 *offset_changed_by_page = false;
             }
@@ -247,7 +246,15 @@ impl TabScene {
                 Item::External { key, rect } => {
                     let world = res.world.get(*self.index.get(&d.spatial)?)?;
                     let r = world.transform_rect_bbox(spatial::rect(rect));
-                    Some((*key, [r.x0 as f32, r.y0 as f32, r.width() as f32, r.height() as f32]))
+                    Some((
+                        *key,
+                        [
+                            r.x0 as f32,
+                            r.y0 as f32,
+                            r.width() as f32,
+                            r.height() as f32,
+                        ],
+                    ))
                 }
                 _ => None,
             })
@@ -265,7 +272,8 @@ impl TabScene {
             .enumerate()
             .filter_map(|(i, n)| match &n.kind {
                 SpatialKind::Sticky { frame: f, .. } => {
-                    let p = *res.world.get(i)? * vello::kurbo::Point::new(f64::from(f.x), f64::from(f.y));
+                    let p = *res.world.get(i)?
+                        * vello::kurbo::Point::new(f64::from(f.x), f64::from(f.y));
                     Some((p.x as f32, p.y as f32))
                 }
                 _ => None,
@@ -290,7 +298,10 @@ fn instance_coords(font: &FontData, axes: &[([u8; 4], f32)]) -> Vec<vello::Norma
 }
 
 pub(super) fn max_offset(frame: &redrob_scene::Rect, content: (f32, f32)) -> (f32, f32) {
-    ((content.0 - frame.w).max(0.0), (content.1 - frame.h).max(0.0))
+    (
+        (content.0 - frame.w).max(0.0),
+        (content.1 - frame.h).max(0.0),
+    )
 }
 
 pub(super) fn path(verbs: &[redrob_scene::Verb]) -> BezPath {
@@ -355,8 +366,7 @@ fn item_bounds(item: &Item) -> Option<Rect> {
             ..
         } => {
             let w = f64::from(*width);
-            spatial::affine(transform)
-                .transform_rect_bbox(path(verbs).bounding_box().inflate(w, w))
+            spatial::affine(transform).transform_rect_bbox(path(verbs).bounding_box().inflate(w, w))
         }
         Item::Text {
             size, glyphs, skew, ..
@@ -383,5 +393,9 @@ fn item_bounds(item: &Item) -> Option<Rect> {
     };
     let finite = r.x0.is_finite() && r.y0.is_finite() && r.x1.is_finite() && r.y1.is_finite();
     // An item with no usable bounds is never culled.
-    Some(if finite { r } else { Rect::new(-1e9, -1e9, 1e9, 1e9) })
+    Some(if finite {
+        r
+    } else {
+        Rect::new(-1e9, -1e9, 1e9, 1e9)
+    })
 }

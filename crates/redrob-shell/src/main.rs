@@ -1315,9 +1315,8 @@ impl Window {
                             .ctx()
                             .input(|i| i.viewport().inner_rect.map(|r| r.min))
                             .unwrap_or_default();
-                        drop_at = Some(
-                            origin + pos.to_vec2() - Vec2::new(grab + left_pad, 6.0 + 12.0),
-                        );
+                        drop_at =
+                            Some(origin + pos.to_vec2() - Vec2::new(grab + left_pad, 6.0 + 12.0));
                     }
                 } else if !out(pos.y) {
                     let to = ((pos.x - grab - left) / width + 0.5).floor();
@@ -2413,12 +2412,8 @@ impl Window {
                 let mut animating = self.model.tabs[tab_index].scene.tick();
                 let res = self.model.tabs[tab_index].scene.resolve(view);
                 // Scrollbars take their own pointer input before the page.
-                let bars = compositor::scrollbars(
-                    ui,
-                    rect,
-                    &mut self.model.tabs[tab_index].scene,
-                    &res,
-                );
+                let bars =
+                    compositor::scrollbars(ui, rect, &mut self.model.tabs[tab_index].scene, &res);
                 let over_bar = |p: &egui::Pos2| bars.iter().any(|b| b.contains(*p));
 
                 if response.clicked() || response.drag_started() {
@@ -2451,7 +2446,12 @@ impl Window {
                     let step = self.autoscroll.tick(pointer, rect);
                     if let Some(anchor) = self.autoscroll.anchor() {
                         let t = &mut self.model.tabs[tab_index];
-                        t.scene.scroll_at(&res, local(anchor), (step.scroll.x, step.scroll.y), false);
+                        t.scene.scroll_at(
+                            &res,
+                            local(anchor),
+                            (step.scroll.x, step.scroll.y),
+                            false,
+                        );
                     }
                     let p = *theme::palette(ui);
                     self.autoscroll.paint(
@@ -2493,9 +2493,15 @@ impl Window {
                 match &mut self.gpu {
                     Ok(gpu) => {
                         let media = &mut self.media;
-                        let texture = gpu.draw(self.wid, page_id, &mut t.scene, &res, view, scale, &mut |key| {
-                            media.external_frame(page_id, key)
-                        });
+                        let texture = gpu.draw(
+                            self.wid,
+                            page_id,
+                            &mut t.scene,
+                            &res,
+                            view,
+                            scale,
+                            &mut |key| media.external_frame(page_id, key),
+                        );
                         if let (Some(id), true) = (texture, t.scene.has_frame()) {
                             // Whole physical pixels, so the texture maps 1:1.
                             let min = (rect.min.to_vec2() * scale).round() / scale;
@@ -2537,7 +2543,8 @@ impl Window {
                     .and_then(|p| t.scene.hover(&res, local(p)));
                 let in_page = pointer.is_some_and(|p| rect.contains(p));
                 if !self.autoscroll.active() && in_page && response.hovered() {
-                    ui.ctx().set_cursor_icon(compositor::cursor_icon(hovered.as_ref()));
+                    ui.ctx()
+                        .set_cursor_icon(compositor::cursor_icon(hovered.as_ref()));
                 }
                 if let Some(link) = hovered.as_ref().and_then(|h| h.link.as_deref()) {
                     compositor::status_bubble(ui, rect, link, pointer);

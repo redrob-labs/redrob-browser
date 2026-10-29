@@ -102,7 +102,11 @@ pub fn build(
     let base = Affine::scale(f64::from(scale));
     let view = Rect::new(0.0, 0.0, f64::from(size.0), f64::from(size.1));
     let bg = frame.background;
-    let bg = if bg[3] <= 0.0 { [1.0, 1.0, 1.0, 1.0] } else { bg };
+    let bg = if bg[3] <= 0.0 {
+        [1.0, 1.0, 1.0, 1.0]
+    } else {
+        bg
+    };
     scene.fill(Fill::NonZero, base, color(bg), None, &view);
 
     let mut layers = Layers {
@@ -161,8 +165,18 @@ pub fn build(
                 even_odd,
                 transform,
             } => {
-                let rule = if *even_odd { Fill::EvenOdd } else { Fill::NonZero };
-                scene.fill(rule, t * spatial::affine(transform), color(*c), None, &path(verbs));
+                let rule = if *even_odd {
+                    Fill::EvenOdd
+                } else {
+                    Fill::NonZero
+                };
+                scene.fill(
+                    rule,
+                    t * spatial::affine(transform),
+                    color(*c),
+                    None,
+                    &path(verbs),
+                );
             }
             Item::Stroke {
                 verbs,
@@ -311,7 +325,11 @@ pub fn build(
                 layers.pushed.push(layers.xf);
             }
             Item::PushClipPath { verbs, even_odd } => {
-                let rule = if *even_odd { Fill::EvenOdd } else { Fill::NonZero };
+                let rule = if *even_odd {
+                    Fill::EvenOdd
+                } else {
+                    Fill::NonZero
+                };
                 scene.push_clip_layer(rule, t, &path(verbs));
                 layers.pushed.push(layers.xf);
             }
@@ -322,7 +340,11 @@ pub fn build(
             } => {
                 // The layer covers everything; its content is clipped by its items.
                 let all = Rect::new(-1e7, -1e7, 1e7, 1e7);
-                let opacity = if opacity.is_finite() { opacity.clamp(0.0, 1.0) } else { 1.0 };
+                let opacity = if opacity.is_finite() {
+                    opacity.clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
                 scene.push_layer(Fill::NonZero, blend(*b), opacity, Affine::IDENTITY, &all);
                 layers.pushed.push(layers.xf);
                 // `transform` is in the item's local space.
@@ -407,7 +429,9 @@ fn box_shadow(
         }
         // Everything but the box itself.
         let mut outside = vello::kurbo::BezPath::new();
-        let far = shadow.inflate(std_dev * 3.0 + 1.0, std_dev * 3.0 + 1.0).union(r);
+        let far = shadow
+            .inflate(std_dev * 3.0 + 1.0, std_dev * 3.0 + 1.0)
+            .union(r);
         use vello::kurbo::Shape as _;
         outside.extend(far.path_elements(0.1));
         outside.extend(shape.path_elements(0.1));

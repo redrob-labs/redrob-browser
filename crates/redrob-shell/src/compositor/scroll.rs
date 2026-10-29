@@ -152,16 +152,21 @@ impl TabScene {
             return Vec::new();
         };
         // The box under the pointer, else the deepest scroll frame there.
-        let start = self.hit_index(res, p).map(|h| frame.hits[h].spatial).and_then(|id| self.index.get(&id).copied()).or_else(|| {
-            self.scrollers()
-                .into_iter()
-                .filter(|s| {
-                    res.scroll_rect(frame, s.index).is_some_and(|r| r.contains(p))
-                        && res.visible_at(frame, s.index, p)
-                })
-                .max_by_key(|s| res.clip_chain(s.index).len())
-                .map(|s| s.index)
-        });
+        let start = self
+            .hit_index(res, p)
+            .map(|h| frame.hits[h].spatial)
+            .and_then(|id| self.index.get(&id).copied())
+            .or_else(|| {
+                self.scrollers()
+                    .into_iter()
+                    .filter(|s| {
+                        res.scroll_rect(frame, s.index)
+                            .is_some_and(|r| r.contains(p))
+                            && res.visible_at(frame, s.index, p)
+                    })
+                    .max_by_key(|s| res.clip_chain(s.index).len())
+                    .map(|s| s.index)
+            });
         let mut chain = Vec::new();
         let mut at = start;
         let mut steps = 0;
@@ -201,7 +206,13 @@ impl TabScene {
 
     /// Scroll the innermost box under `at` that can move by `delta` CSS px
     /// (a wheel, a touchpad, autoscroll). Returns whether anything moved.
-    pub fn scroll_at(&mut self, res: &Resolved, at: (f32, f32), delta: (f32, f32), smooth: bool) -> bool {
+    pub fn scroll_at(
+        &mut self,
+        res: &Resolved,
+        at: (f32, f32),
+        delta: (f32, f32),
+        smooth: bool,
+    ) -> bool {
         if delta == (0.0, 0.0) {
             return false;
         }

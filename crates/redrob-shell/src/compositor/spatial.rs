@@ -120,10 +120,8 @@ pub fn resolve(
                 .filter(|s| *s != ROOT_SCROLL)
                 .and_then(at),
         );
-        r.clips.push(
-            map.clip(node.id)
-                .map(|c| (c.transform, rect(&c.rect))),
-        );
+        r.clips
+            .push(map.clip(node.id).map(|c| (c.transform, rect(&c.rect))));
     }
     r
 }

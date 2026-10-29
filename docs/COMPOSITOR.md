@@ -92,6 +92,15 @@ As WebRender:
   `"redrobCompositorScrolls": true` in `Input.dispatchMouseEvent` /
   `Input.dispatchKeyEvent`: the engine must not scroll for them itself.
 
+### Windows
+
+- All windows of a profile share one `Gpu`; each window draws into its own
+  page texture, re-rendered only when its tab's scene, scroll offsets, size
+  or video frames changed.
+- Each window is a deferred egui viewport, so it repaints only for its own
+  input, its own animations and engine updates for its own tabs (cdp.rs tags
+  every wake with its tab; browser.rs wakes the viewport showing it).
+
 ### Debugging
 
 - `REDROB_SCENE_FILE=<file>`: every web tab shows the scene in the file
