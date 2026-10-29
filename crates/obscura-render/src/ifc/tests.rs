@@ -1113,3 +1113,19 @@ fn picture_sources_are_empty_inlines() {
         "{r:?}"
     );
 }
+
+#[test]
+fn ch_lengths_use_the_inherited_font() {
+    // Chrome: an inline-block span in 17px <code> with width:10ch is
+    // 102.016 wide (inherited monospace "0"), not 85 (default serif).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><code style='font-size:17px'>\
+         <span id=s style='display:inline-block;width:10ch'></span></code>",
+        &[],
+    );
+    assert!(
+        (width(&tree, &laid, "s") - 102.0).abs() < 0.5,
+        "{}",
+        width(&tree, &laid, "s")
+    );
+}

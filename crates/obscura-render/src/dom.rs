@@ -6998,8 +6998,15 @@ fn layout_dom_once(
                     }
                 }
                 {
+                    // Font properties inherit later in this pass: read the
+                    // inherited family when the element sets none (a span
+                    // in <code> measures "0" in monospace, not the default
+                    // serif: 10ch at 17px is 102.016, not 85).
                     let bold = crate::style::used_font_weight(style) >= 600;
-                    let family = style.font_family.clone();
+                    let family = style
+                        .font_family
+                        .clone()
+                        .or_else(|| inh.font_family.clone());
                     let ch = |d: crate::Dimension| d.resolve_ch(em_px, bold, family.as_deref());
                     style.width = ch(style.width);
                     style.height = ch(style.height);
