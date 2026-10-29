@@ -10547,6 +10547,40 @@ fn apply_float_continuations(
     changed
 }
 
+/// Natural border-box height of a laid-out table cell: the bottom edge of its
+/// in-flow content (a cell is a block formatting context root, so the last
+/// child's margin and any floats stay inside) plus its bottom padding and
+/// border. Taffy's `content_size` cannot be used directly: leaves report
+/// measured size plus padding without borders, flex containers include the
+/// bottom padding but not the bottom border, and block/grid containers include
+/// neither, so cells came out one or two pixels short of Chrome's rows.
+fn table_cell_natural_height(
+    taffy_tree: &TaffyTree<usize>,
+    cell: taffy::NodeId,
+    layout: &taffy::Layout,
+) -> f32 {
+    let children = taffy_tree.children(cell).unwrap_or_default();
+    if children.is_empty() {
+        return layout.content_size.height + layout.border.top + layout.border.bottom;
+    }
+    let mut bottom = layout.border.top + layout.padding.top;
+    for child in children {
+        let (Ok(style), Ok(child_layout)) = (taffy_tree.style(child), taffy_tree.layout(child))
+        else {
+            continue;
+        };
+        if style.display == taffy::style::Display::None
+            || style.position == taffy::style::Position::Absolute
+        {
+            continue;
+        }
+        bottom = bottom.max(
+            child_layout.location.y + child_layout.size.height + child_layout.margin.bottom.max(0.0),
+        );
+    }
+    bottom + layout.padding.bottom + layout.border.bottom
+}
+
 /// Recompute table row tracks from the cells' content at their final column
 /// widths. Generic grid intrinsic sizing can retain a taller contribution
 /// from an earlier, narrower nested-table measurement even after that child
@@ -10589,10 +10623,7 @@ fn apply_table_row_geometry(
                 + layout.padding.bottom
                 + layout.border.top
                 + layout.border.bottom;
-            // Taffy's content_size is the furthest content/child overflow in
-            // border-box coordinates (an empty padded cell reports its padding
-            // extent), so it is already the right natural border-box floor.
-            let mut natural = layout.content_size.height.max(edges);
+            let mut natural = table_cell_natural_height(taffy_tree, cell, layout).max(edges);
             if let Some(dom_id) = id_map.get(&cell) {
                 if let Some(style) = styles.get(dom_id) {
                     if let crate::Dimension::Px(height) = style.height {
