@@ -9389,12 +9389,16 @@ fn place_inline_content(
         let Some(node) = ifc.node else {
             continue;
         };
-        let Some((x, y)) = taffy_global_origin(taffy_tree, node) else {
+        // Unrounded, in LayoutUnits: Chrome positions text (and inline
+        // boxes) at fractional offsets; only borders and backgrounds snap to
+        // device pixels at paint.
+        let Some((x, y)) = taffy_unrounded_global_origin(taffy_tree, node) else {
             continue;
         };
+        let snap = |value: f32| (value * 64.0).round() / 64.0;
         let origin = (
-            x + initial_cb_x + ifc.content_offset.0,
-            y + ifc.content_offset.1,
+            snap(x + initial_cb_x + ifc.content_offset.0),
+            snap(y + ifc.content_offset.1),
         );
         ifc.origin = origin;
         let root = ifc.root;
@@ -10652,6 +10656,23 @@ fn reparent_inset_positioned_nodes(
         }
     }
     static_candidates
+}
+
+/// Like `taffy_global_origin`, through the unrounded layout.
+fn taffy_unrounded_global_origin(
+    taffy_tree: &TaffyTree<usize>,
+    node: taffy::NodeId,
+) -> Option<(f32, f32)> {
+    let mut current = Some(node);
+    let mut x = 0.0;
+    let mut y = 0.0;
+    while let Some(id) = current {
+        let layout = taffy_tree.unrounded_layout(id);
+        x += layout.location.x;
+        y += layout.location.y;
+        current = taffy_tree.parent(id);
+    }
+    Some((x, y))
 }
 
 fn taffy_global_origin(taffy_tree: &TaffyTree<usize>, node: taffy::NodeId) -> Option<(f32, f32)> {
