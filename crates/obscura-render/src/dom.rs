@@ -11196,7 +11196,7 @@ fn build_flex_grid_children(
         EffectiveGridChild::Dom(node) => {
             tree.borrow_node(*node)
                 .is_some_and(|node| node.is_element())
-                || !tree.text_content(*node).trim().is_empty()
+                || !crate::ifc::build::is_css_whitespace(&tree.text_content(*node))
         }
         EffectiveGridChild::Generated { .. } => true,
     });
@@ -12192,7 +12192,7 @@ fn collect_css_table(
     let kind = |node: NodeId| {
         let is_element = tree.borrow_node(node).is_some_and(|n| n.is_element());
         if !is_element {
-            return if tree.text_content(node).trim().is_empty() {
+            return if crate::ifc::build::is_css_whitespace(&tree.text_content(node)) {
                 Kind::Skip
             } else {
                 Kind::Other
@@ -13977,7 +13977,7 @@ fn definite_row_flex_intrinsic_width(
             let node = tree.borrow_node(child)?;
             if matches!(
                 &node.data,
-                obscura_dom::tree::NodeData::Text { contents } if contents.trim().is_empty()
+                obscura_dom::tree::NodeData::Text { contents } if crate::ifc::build::is_css_whitespace(contents)
             ) {
                 continue;
             }
@@ -14786,7 +14786,7 @@ fn build(
         dom_children = flat;
         dom_children.retain(|&cid| {
             tree.borrow_node(cid).is_some_and(|n| n.is_element())
-                || !tree.text_content(cid).trim().is_empty()
+                || !crate::ifc::build::is_css_whitespace(&tree.text_content(cid))
         });
         dom_children.sort_by_key(|cid| styles.get(cid).map(|style| style.order).unwrap_or(0));
         // Main-axis auto margins absorb positive free space before
@@ -15036,7 +15036,7 @@ fn needs_column_flex_text_fit_content_cap(
             matches!(
                 &node.data,
                 obscura_dom::tree::NodeData::Text { contents }
-                    if !contents.trim().is_empty()
+                    if !crate::ifc::build::is_css_whitespace(contents)
             )
         })
     });

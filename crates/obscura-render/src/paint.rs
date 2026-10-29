@@ -2388,7 +2388,14 @@ impl PreparedRender {
         id: obscura_dom::tree::NodeId,
         scroll: &ResolvedScrollState,
     ) -> Option<crate::Rect> {
-        let mut rect = self.document_rect(id)?;
+        let rect = self.fractional_rect(id)?;
+        let mut rect = self
+            .layout
+            .transforms
+            .get(&id)
+            .copied()
+            .map(|transform| transform.map_rect(rect))
+            .unwrap_or(rect);
         let movement = scroll.movement_for(id);
         rect.x += movement.0;
         rect.y += movement.1;
@@ -2409,7 +2416,7 @@ impl PreparedRender {
             .inline_fragments
             .get(&id)
             .cloned()
-            .or_else(|| self.layout.rects.get(&id).copied().map(|rect| vec![rect]))?;
+            .or_else(|| self.fractional_rect(id).map(|rect| vec![rect]))?;
         let movement = self.root_only_movement_for(id, requested_scroll);
         Some(
             source
@@ -2482,6 +2489,19 @@ impl PreparedRender {
         None
     }
 
+    /// The box's rect with its 1/64 px used size (Chrome's LayoutUnit)
+    /// instead of the whole-pixel size paint snaps to.
+    fn fractional_rect(&self, id: obscura_dom::tree::NodeId) -> Option<crate::Rect> {
+        let mut rect = self.layout.rects.get(&id).copied()?;
+        if let Some(&(width, height)) = self.layout.fractional_sizes.get(&id) {
+            if (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0 {
+                rect.width = width;
+                rect.height = height;
+            }
+        }
+        Some(rect)
+    }
+
     pub fn viewport_client_rects_with_scroll(
         &self,
         id: obscura_dom::tree::NodeId,
@@ -2492,7 +2512,7 @@ impl PreparedRender {
             .inline_fragments
             .get(&id)
             .cloned()
-            .or_else(|| self.layout.rects.get(&id).copied().map(|rect| vec![rect]))?;
+            .or_else(|| self.fractional_rect(id).map(|rect| vec![rect]))?;
         let movement = scroll.movement_for(id);
         Some(
             source

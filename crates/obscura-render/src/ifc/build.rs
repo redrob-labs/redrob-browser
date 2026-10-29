@@ -636,7 +636,7 @@ impl IfcStore {
                         collapse,
                         WhiteSpaceCollapse::Preserve | WhiteSpaceCollapse::BreakSpaces
                     );
-                    if (preserves && !text.is_empty()) || !text.trim().is_empty() {
+                    if (preserves && !text.is_empty()) || !is_css_whitespace(&text) {
                         has_content = true;
                     }
                     builder.push_style_modification_span(&[StyleProperty::Brush(Brush(paint))]);
@@ -652,7 +652,7 @@ impl IfcStore {
                 }
                 Item::GeneratedText(text) => {
                     let text = case.transform(text, transform);
-                    if !text.trim().is_empty() {
+                    if !is_css_whitespace(&text) {
                         has_content = true;
                     }
                     builder.push_style_modification_span(&[StyleProperty::Brush(Brush(paint))]);
@@ -876,4 +876,11 @@ pub(crate) fn root_params(style: &LayoutStyle, has_marker: bool, center_block: b
             .map(|lines| lines as usize),
         ellipsis: style.text_overflow == crate::TextOverflow::Ellipsis && style.clips_overflow_x(),
     }
+}
+
+/// Whether `text` is only CSS document white space (space, tab, line feed,
+/// carriage return, form feed). U+00A0 and other Unicode spaces are content.
+pub(crate) fn is_css_whitespace(text: &str) -> bool {
+    text.chars()
+        .all(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{c}'))
 }

@@ -78,7 +78,7 @@ fn is_collapsible_whitespace(
             )
         )
     });
-    !preserves && tree.text_content(id).chars().all(char::is_whitespace)
+    !preserves && crate::ifc::build::is_css_whitespace(&tree.text_content(id))
 }
 
 /// Whether an element is an atomic inline-level box: replaced elements,
