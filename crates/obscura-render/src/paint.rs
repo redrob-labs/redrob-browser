@@ -5370,7 +5370,7 @@ fn paint_laid_dom_scrolled(
 
         // `backface-visibility: hidden` on a box turned away from the
         // viewer hides it and its content.
-        if style.backface_hidden && faces_back(tree, laid, nid) {
+        if style.backface_hidden && faces_back(laid, nid) {
             opacity_subtree_skip.insert(nid);
             opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
             continue;
@@ -10588,23 +10588,13 @@ fn layer_mask(
     (gradient || layers.len() > 1 || replaced || has_children).then_some(layers)
 }
 
-/// Whether a box shows its back: its own transform turns it, and so does
-/// each ancestor's while the ancestor keeps a 3D context (`preserve-3d`).
-fn faces_back(tree: &DomTree, laid: &crate::DomLayout, nid: obscura_dom::tree::NodeId) -> bool {
-    let mut back = false;
-    let mut current = Some(nid);
-    while let Some(id) = current {
-        let Some(style) = laid.styles.get(&id) else {
-            break;
-        };
-        back ^= style.transform_facing_back;
-        current = crate::dom::rendered_parent(tree, id).filter(|parent| {
-            laid.styles
-                .get(parent)
-                .is_some_and(|style| style.preserve_3d)
-        });
-    }
-    back
+/// Whether a box shows its back to the viewer: its accumulated 3D
+/// transform (through preserve-3d ancestors and perspective) maps the
+/// plane's normal away from the viewer.
+fn faces_back(laid: &crate::DomLayout, nid: obscura_dom::tree::NodeId) -> bool {
+    laid.projective_transforms
+        .get(&nid)
+        .is_some_and(|matrix| matrix.is_back_face_visible())
 }
 
 /// Background layers that take the layered paint path: more than one

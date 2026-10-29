@@ -2550,12 +2550,6 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
         }
         "transform-origin" => style.transform_origin = parse_transform_origin(value),
         "perspective-origin" => style.perspective_origin = parse_transform_origin(value),
-        "transform-style" => {
-            style.preserve_3d = value.trim().eq_ignore_ascii_case("preserve-3d");
-        }
-        "backface-visibility" => {
-            style.backface_hidden = value.trim().eq_ignore_ascii_case("hidden");
-        }
         "translate" => parse_individual_translate(style, value),
         "rotate" => parse_individual_rotate(style, value),
         "scale" => parse_individual_scale(style, value),
@@ -4243,7 +4237,6 @@ fn parse_transform(style: &mut LayoutStyle, value: &str) {
         "none" | "initial" | "unset" | "revert" | "revert-layer"
     ) {
         style.transform_ops.clear();
-        style.transform_facing_back = false;
         set_containing_block_trigger(style, crate::CB_TRIGGER_TRANSFORM, false);
         return;
     }
@@ -4251,7 +4244,7 @@ fn parse_transform(style: &mut LayoutStyle, value: &str) {
         return;
     };
     style.transform_ops = operations;
-    style.transform_facing_back = transform_faces_back(v);
+
     set_containing_block_trigger(style, crate::CB_TRIGGER_TRANSFORM, true);
 }
 
@@ -4730,62 +4723,6 @@ fn set_containing_block_trigger(style: &mut LayoutStyle, trigger: u16, enabled: 
 /// Strictly split a `transform` value into `name(args)` functions in source
 /// order. Any non-whitespace between functions, missing delimiter, or
 /// unbalanced parenthesis invalidates the whole declaration.
-/// Whether the 3D matrix of a transform list maps +z to -z (the z-axis
-/// component of each 3D rotation or z scale, multiplied).
-fn transform_faces_back(value: &str) -> bool {
-    let mut z = 1.0f32;
-    for (name, arguments) in transform_functions(value) {
-        let values: Vec<&str> = split_top_level(&arguments, ',')
-            .into_iter()
-            .map(str::trim)
-            .collect();
-        let angle = |index: usize| {
-            values
-                .get(index)
-                .and_then(|value| angle_degrees(value))
-                .map(|degrees| degrees.to_radians())
-        };
-        match name.to_ascii_lowercase().as_str() {
-            "rotatex" | "rotatey" => {
-                if let Some(radians) = angle(0) {
-                    z *= radians.cos();
-                }
-            }
-            "rotate3d" if values.len() == 4 => {
-                let axis: Vec<f32> = values[..3]
-                    .iter()
-                    .filter_map(|value| value.parse::<f32>().ok())
-                    .collect();
-                if let (3, Some(radians)) = (axis.len(), angle(3)) {
-                    let length = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
-                    if length > 0.0 {
-                        let nz = axis[2] / length;
-                        let cos = radians.cos();
-                        z *= cos + nz * nz * (1.0 - cos);
-                    }
-                }
-            }
-            "matrix3d" if values.len() == 16 => {
-                if let Ok(m33) = values[10].parse::<f32>() {
-                    z *= m33;
-                }
-            }
-            "scalez" => {
-                if let Some(Ok(scale)) = values.first().map(|value| value.parse::<f32>()) {
-                    z *= scale;
-                }
-            }
-            "scale3d" if values.len() == 3 => {
-                if let Ok(scale) = values[2].parse::<f32>() {
-                    z *= scale;
-                }
-            }
-            _ => {}
-        }
-    }
-    z < 0.0
-}
-
 fn transform_functions(value: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let bytes = value.as_bytes();

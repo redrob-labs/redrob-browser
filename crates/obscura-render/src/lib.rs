@@ -2028,14 +2028,6 @@ pub struct LayoutStyle {
     /// Ordered operations in the non-inherited `transform` property. Length
     /// percentages remain unresolved until the final border box is known.
     pub transform_ops: Vec<TransformOp>,
-    /// The transform turns the box's back toward the viewer (its 3D
-    /// matrix maps the z axis to negative z): `rotateY(180deg)` and the
-    /// like, which `transform_ops` flattens to a 2D mirror.
-    pub transform_facing_back: bool,
-    /// `backface-visibility: hidden`.
-    pub backface_hidden: bool,
-    /// `transform-style: preserve-3d`.
-    pub preserve_3d: bool,
     /// Transform value immediately below the Web Animations cascade origin.
     /// A retained compositor-style sample restores this value before replaying
     /// the registered effects, so sparse keyframes never compound on the
