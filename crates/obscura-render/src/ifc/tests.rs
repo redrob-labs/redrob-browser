@@ -1181,3 +1181,27 @@ fn angle_calc_and_matrix3d_parse() {
     let b = laid.projective_transforms[&element(&tree, "b")];
     assert_eq!(b.m[2][3], 7.0);
 }
+
+#[test]
+fn baseline_aligned_cells_share_the_row_baseline() {
+    // Chrome: a row of vertical-align:baseline cells, one with
+    // padding-top:20px: the 40px "B" span is at y 2 and the <br> of
+    // "c<br>d" at 24 (we had -8 and 5 with the cells top-aligned).
+    let (tree, laid) = layout(
+        "<!doctype html><style>body{margin:0;font:16px/20px sans-serif} td{border:1px solid;height:80px}</style>\
+         <table><tr><td style='vertical-align:baseline;padding-top:20px'>a</td>\
+         <td style='vertical-align:baseline'><span id=s style='font-size:40px'>B</span></td>\
+         <td style='vertical-align:baseline'>c<br id=t>d</td></tr></table>",
+        &[],
+    );
+    let y = |id: &str| {
+        let node = element(&tree, id);
+        laid.fractional_rects
+            .get(&node)
+            .copied()
+            .unwrap_or(laid.rects[&node])
+            .y
+    };
+    assert!((y("s") - 2.0).abs() < 0.5, "{}", y("s"));
+    assert!((y("t") - 24.0).abs() < 0.5, "{}", y("t"));
+}

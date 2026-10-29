@@ -2256,9 +2256,14 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
                 }
             };
             style.vertical_align = match keyword.as_str() {
-                "top" | "baseline" | "text-top" => Some(crate::VerticalAlign::Top),
+                "top" => Some(crate::VerticalAlign::Top),
                 "middle" => Some(crate::VerticalAlign::Middle),
-                "bottom" | "text-bottom" => Some(crate::VerticalAlign::Bottom),
+                "bottom" => Some(crate::VerticalAlign::Bottom),
+                // CSS 2 17.5.3: in a cell the text-relative values act as
+                // `baseline`.
+                "baseline" | "sub" | "super" | "text-top" | "text-bottom" => {
+                    Some(crate::VerticalAlign::Baseline)
+                }
                 // sub/super/lengths are text-level; leave the cell default.
                 _ => style.vertical_align,
             };

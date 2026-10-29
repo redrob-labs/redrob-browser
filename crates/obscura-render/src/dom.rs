@@ -8913,6 +8913,16 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
+                if apply_table_cell_baseline_alignment(
+                    tree,
+                    &mut taffy_tree,
+                    &id_map,
+                    &styles,
+                    &ifc_items,
+                ) {
+                    let _ =
+                        taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
+                }
                 if apply_table_row_geometry(&mut taffy_tree, &id_map, &styles, &ifc_items) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
@@ -9050,6 +9060,16 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
+                if apply_table_cell_baseline_alignment(
+                    tree,
+                    &mut taffy_tree,
+                    &id_map,
+                    &styles,
+                    &ifc_items,
+                ) {
+                    let _ =
+                        taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
+                }
                 if apply_table_row_geometry(&mut taffy_tree, &id_map, &styles, &ifc_items) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
@@ -9122,8 +9142,28 @@ fn layout_dom_once(
             grid_tracks = collect_grid_tracks(&taffy_tree, &id_map);
             used_auto_margins = collect_used_auto_margins(&taffy_tree, &id_map, &styles);
             fractional_sizes = collect_fractional_sizes(&taffy_tree, &id_map, &rects);
-            fractional_rects =
-                collect_fractional_rects(&taffy_tree, taffy_root, initial_cb_x, &id_map, &rects);
+            fractional_rects = collect_fractional_rects(
+                &taffy_tree,
+                taffy_root,
+                initial_cb_x,
+                &id_map,
+                &rects,
+                &{
+                    // Table cells: the table passes pin rows and shift cells
+                    // (collapsed half borders, border-spacing) on the
+                    // whole-pixel grid, so their rounded rects can sit more
+                    // than a pixel from the unrounded boxes, which are
+                    // Chrome's (a 1px collapsed border puts a cell 0.5px
+                    // inside the table).
+                    styles
+                        .keys()
+                        .copied()
+                        .filter(|&id| {
+                            matches!(flow::local_name(tree, id).as_deref(), Some("td" | "th"))
+                        })
+                        .collect::<HashSet<_>>()
+                },
+            );
             inline_fragments = place_inline_content(
                 &taffy_tree,
                 initial_cb_x,
@@ -9144,10 +9184,10 @@ fn layout_dom_once(
                     continue;
                 }
                 if let Some(rounded) = rects.get(&id) {
-                    let close = (rect.x - rounded.x).abs() < 1.0
-                        && (rect.y - rounded.y).abs() < 1.0
-                        && (rect.width - rounded.width).abs() < 1.0
-                        && (rect.height - rounded.height).abs() < 1.0;
+                    let close = (rect.x - rounded.x).abs() < 2.0
+                        && (rect.y - rounded.y).abs() < 2.0
+                        && (rect.width - rounded.width).abs() < 2.0
+                        && (rect.height - rounded.height).abs() < 2.0;
                     if close && rect != *rounded {
                         fractional_rects.insert(id, rect);
                     }
@@ -10299,6 +10339,7 @@ fn collect_fractional_rects(
     initial_cb_x: f32,
     id_map: &HashMap<taffy::NodeId, NodeId>,
     rects: &HashMap<NodeId, Rect>,
+    table_cells: &HashSet<NodeId>,
 ) -> HashMap<NodeId, Rect> {
     // Blink converts CSS lengths to LayoutUnits by truncation (13.9px is
     // 13.890625); the epsilon keeps float noise on exact values.
@@ -10318,10 +10359,15 @@ fn collect_fractional_rects(
                     width: snap(layout.size.width),
                     height: snap(layout.size.height),
                 };
-                let close = (rect.x - rounded.x).abs() < 1.0
-                    && (rect.y - rounded.y).abs() < 1.0
-                    && (rect.width - rounded.width).abs() < 1.0
-                    && (rect.height - rounded.height).abs() < 1.0;
+                let tolerance = if table_cells.contains(dom_id) {
+                    2.0
+                } else {
+                    1.0
+                };
+                let close = (rect.x - rounded.x).abs() < tolerance
+                    && (rect.y - rounded.y).abs() < tolerance
+                    && (rect.width - rounded.width).abs() < tolerance
+                    && (rect.height - rounded.height).abs() < tolerance;
                 if close && rect != *rounded {
                     out.insert(*dom_id, rect);
                 }
@@ -10994,6 +11040,135 @@ fn apply_multicol_balance(taffy_tree: &mut TaffyTree<usize>, multicol: &[Multico
                 .map(|range| &set.children[range.clone()])
                 .unwrap_or(&[]);
             if taffy_tree.set_children(*column, children).is_ok() {
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// Baseline-aligned table cells (CSS 2 17.5.3): in each row, every cell with
+/// `vertical-align: baseline` is pushed down by extra top padding so its
+/// first line's baseline meets the lowest such baseline in the row; the row
+/// grows to hold it. Runs before rows are sized, and is idempotent (cells
+/// already aligned get no extra padding). Cells without a line align by
+/// their content-box bottom, as CSS says.
+fn apply_table_cell_baseline_alignment(
+    tree: &DomTree,
+    taffy_tree: &mut TaffyTree<usize>,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    ifc_items: &IfcRegistry,
+) -> bool {
+    // First-line baseline of an IFC, relative to its Taffy node's border box.
+    // The IFCs are lent to the active layout while it runs.
+    let mut ifc_baseline: HashMap<taffy::NodeId, f32> = HashMap::new();
+    for &index in &ifc_items.ifc_nodes {
+        let found = crate::ifc::with_active_ifc(index, |ifc| {
+            let node = ifc.node?;
+            if !ifc.has_content {
+                return None;
+            }
+            // Content-box relative; the node's current top border and
+            // padding are added at lookup.
+            let line = ifc.final_layout().lines().next()?;
+            Some((node, line.metrics().baseline))
+        })
+        .flatten()
+        .or_else(|| {
+            let ifc = ifc_items.ifc.get(index)?;
+            let node = ifc.node?;
+            let line = ifc.final_layout().lines().next()?;
+            ifc.has_content.then(|| (node, line.metrics().baseline))
+        });
+        if let Some((node, baseline)) = found {
+            ifc_baseline.entry(node).or_insert(baseline);
+        }
+    }
+    // The first baseline inside `node`: its own IFC, else the first in-flow
+    // child that has one (depth-first).
+    fn first_baseline(
+        taffy_tree: &TaffyTree<usize>,
+        node: taffy::NodeId,
+        ifc_baseline: &HashMap<taffy::NodeId, f32>,
+        depth: usize,
+    ) -> Option<f32> {
+        if let Some(&baseline) = ifc_baseline.get(&node) {
+            let layout = taffy_tree.unrounded_layout(node);
+            return Some(layout.border.top + layout.padding.top + baseline);
+        }
+        if depth > 32 {
+            return None;
+        }
+        for child in taffy_tree.children(node).ok()? {
+            let Ok(style) = taffy_tree.style(child) else {
+                continue;
+            };
+            if style.display == taffy::style::Display::None
+                || style.position == taffy::style::Position::Absolute
+            {
+                continue;
+            }
+            if let Some(baseline) = first_baseline(taffy_tree, child, ifc_baseline, depth + 1) {
+                return Some(taffy_tree.unrounded_layout(child).location.y + baseline);
+            }
+        }
+        None
+    }
+    let mut rows: HashMap<(taffy::NodeId, i16), Vec<(taffy::NodeId, f32)>> = HashMap::new();
+    for (&node, &dom_id) in id_map {
+        let Some(style) = styles.get(&dom_id) else {
+            continue;
+        };
+        if style.vertical_align != Some(crate::VerticalAlign::Baseline) {
+            continue;
+        }
+        let is_cell = tree.borrow_node(dom_id).is_some_and(|dom_node| {
+            dom_node
+                .as_element()
+                .is_some_and(|element| matches!(element.local.as_ref(), "td" | "th"))
+        });
+        if !is_cell {
+            continue;
+        }
+        let Some(table) = taffy_tree.parent(node) else {
+            continue;
+        };
+        if !ifc_items.table_rows.contains_key(&table) {
+            continue;
+        }
+        let Ok(cell_style) = taffy_tree.style(node) else {
+            continue;
+        };
+        let row = match cell_style.grid_row.start {
+            taffy::GridPlacement::Line(line) => line.as_i16(),
+            _ => continue,
+        };
+        let layout = taffy_tree.unrounded_layout(node);
+        let baseline = first_baseline(taffy_tree, node, &ifc_baseline, 0)
+            .unwrap_or(layout.size.height - layout.padding.bottom - layout.border.bottom);
+        rows.entry((table, row)).or_default().push((node, baseline));
+    }
+    let mut changed = false;
+    for cells in rows.values() {
+        if cells.len() < 2 {
+            continue;
+        }
+        let row_baseline = cells.iter().map(|(_, b)| *b).fold(f32::MIN, f32::max);
+        for &(node, baseline) in cells {
+            let extra = row_baseline - baseline;
+            if extra <= 0.01 {
+                continue;
+            }
+            let Ok(current) = taffy_tree.style(node) else {
+                continue;
+            };
+            let mut shifted = current.clone();
+            let top = taffy_tree.unrounded_layout(node).padding.top;
+            shifted.padding.top = taffy::LengthPercentage::length(top + extra);
+            // A definite cell height is a border-box minimum in the grid
+            // table; the shift is extra content above it.
+            if taffy_tree.set_style_if_changed(node, shifted).is_ok() {
                 changed = true;
             }
         }

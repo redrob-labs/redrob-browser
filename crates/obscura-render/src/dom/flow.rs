@@ -60,7 +60,7 @@ fn is_text(tree: &DomTree, id: NodeId) -> bool {
         .is_some_and(|node| matches!(node.data, obscura_dom::tree::NodeData::Text { .. }))
 }
 
-fn local_name(tree: &DomTree, id: NodeId) -> Option<String> {
+pub(super) fn local_name(tree: &DomTree, id: NodeId) -> Option<String> {
     tree.with_node(id, |node| {
         node.as_element()
             .map(|element| element.local.as_ref().to_string())

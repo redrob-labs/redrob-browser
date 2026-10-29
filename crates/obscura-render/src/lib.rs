@@ -2279,6 +2279,9 @@ pub enum VerticalAlign {
     Top,
     Middle,
     Bottom,
+    /// `baseline` (and the text-relative values, which behave like it for
+    /// table cells): the cell's first baseline aligns with the row's.
+    Baseline,
 }
 
 /// `vertical-align` of an inline-level box within its line (CSS 2.2 §10.8.1).
