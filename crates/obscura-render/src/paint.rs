@@ -4619,6 +4619,30 @@ fn stacking_z_index(
     None
 }
 
+/// The paint layer of a box in its stacking context: its z-index stack
+/// level, or 0 for a positioned block-level box with `z-index: auto`.
+/// CSS 2.1 Appendix E paints the latter in step 8, after inline content, as
+/// if it created a stacking context. Positioned inline boxes keep their text
+/// in the parent's inline formatting context, so they stay in flow.
+fn paint_layer_z(
+    tree: &DomTree,
+    laid: &crate::DomLayout,
+    id: obscura_dom::tree::NodeId,
+) -> Option<i32> {
+    if let Some(z) = stacking_z_index(tree, laid, id) {
+        return Some(z);
+    }
+    let style = laid.styles.get(&id)?;
+    if style.position.is_none()
+        || style.display == crate::Display::None
+        || style.display_contents
+        || (style.display == crate::Display::Inline && !style.is_inline_block)
+    {
+        return None;
+    }
+    Some(0)
+}
+
 /// Whether this box participates in the float painting band of its current
 /// stacking context. A retained `float` declaration has no effect on an
 /// absolutely positioned box or on a flex/grid item, matching layout's
@@ -5004,6 +5028,10 @@ fn paint_laid_dom_scrolled(
     let mut normal: Vec<obscura_dom::tree::NodeId> = Vec::new();
     let mut consumed: std::collections::HashSet<obscura_dom::tree::NodeId> =
         std::collections::HashSet::new();
+    // Members of z >= 0 layers (Appendix E step 8 and up): the inline
+    // content of this context paints before them.
+    let mut positive_members: std::collections::HashSet<obscura_dom::tree::NodeId> =
+        std::collections::HashSet::new();
     let mut paint_nodes = paint_root.into_iter().collect::<Vec<_>>();
     paint_nodes.extend(crate::dom::rendered_descendants(
         tree,
@@ -5022,7 +5050,7 @@ fn paint_laid_dom_scrolled(
         let is_transform_root = suppress_transform_for != Some(nid)
             && laid.styles.get(&nid).is_some_and(has_authored_transform);
         let z = (suppress_stacking_for != Some(nid))
-            .then(|| stacking_z_index(tree, laid, nid))
+            .then(|| paint_layer_z(tree, laid, nid))
             .flatten();
         let is_float_root = paint_root != Some(nid) && is_effective_float(tree, laid, nid);
         if is_opacity_root || is_transform_root {
@@ -5035,7 +5063,10 @@ fn paint_laid_dom_scrolled(
             // z-order is resolved while painting its isolated surface.
             match z {
                 Some(z) if z < 0 => neg_layers.push((z, vec![nid])),
-                Some(z) => pos_layers.push((z, vec![nid])),
+                Some(z) => {
+                    positive_members.extend(sub.iter().copied());
+                    pos_layers.push((z, vec![nid]))
+                }
                 None if is_float_root => float_layers.push(nid),
                 None => normal.push(nid),
             }
@@ -5048,6 +5079,7 @@ fn paint_laid_dom_scrolled(
             if z < 0 {
                 neg_layers.push((z, vec![nid]));
             } else {
+                positive_members.extend(sub.iter().copied());
                 pos_layers.push((z, vec![nid]));
             }
         } else if is_float_root {
@@ -5060,6 +5092,7 @@ fn paint_laid_dom_scrolled(
     }
     neg_layers.sort_by_key(|(z, _)| *z);
     pos_layers.sort_by_key(|(z, _)| *z);
+    let positive_start = neg_layers.len() + normal.len() + float_layers.len();
     let paint_order: Vec<obscura_dom::tree::NodeId> = neg_layers
         .into_iter()
         .flat_map(|(_, sub)| sub)
@@ -5122,12 +5155,88 @@ fn paint_laid_dom_scrolled(
         }
     }
 
+    // Inline content (CSS 2.1 Appendix E step 7): the shaped text of this
+    // stacking context paints above its in-flow and float boxes and below
+    // its positioned descendants (step 8) and z >= 0 layers, so it runs
+    // just before the first positive layer.
+    let mut inline_content_painted = false;
+    macro_rules! paint_inline_content {
+        () => {
+            // Inline formatting contexts shaped by cosmic-text (paragraphs, headings,
+            // cells, labels) draw last, in tree order, so their glyphs sit above the
+            // box backgrounds/borders painted in the loop above. Each item already
+            // carries its final origin and clip from `TextEngine::finalize`.
+            for &nid in &paint_nodes {
+                if svg_subtree_skip.contains(&nid)
+                    || opacity_subtree_skip.contains(&nid)
+                    || positive_members.contains(&nid)
+                {
+                    continue;
+                }
+                let Some(ifcs) = laid.ifc.by_node.get(&nid).cloned() else {
+                    continue;
+                };
+                if laid
+                    .styles
+                    .get(&nid)
+                    .map(|s| s.effectively_invisible)
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                // Shaped text is the container's content: for a compositor scroller
+                // it scrolls with the scroll frame.
+                scene_content_node(&scroll_state, nid);
+                // Shift the shaped glyphs by the same accumulated translate as the
+                // container's box so text under a transformed ancestor moves with
+                // it. Computed before the mutable `paint_item` borrow.
+                let off = scroll_state.translation_for(laid, nid);
+                let overflow_clip = scroll_state.shaped_text_overflow_clip_for(laid, nid);
+                let clip = overflow_clip.as_ref().map(|clip| {
+                    clip.viewport_rect(scroll_state.surface_extent.unwrap_or(viewport))
+                });
+                let clip_mask = overflow_clip.as_ref().and_then(|clip| {
+                    cached_overflow_clip_mask(
+                        &mut overflow_mask_cache,
+                        pixmap.width(),
+                        pixmap.height(),
+                        clip,
+                        scroll_state.surface_extent.unwrap_or(viewport),
+                    )
+                });
+                {
+                    let store = &mut laid.ifc;
+                    for index in ifcs {
+                        let Some(ifc) = store.ifcs.get(index).and_then(|ifc| ifc.as_deref()) else {
+                            continue;
+                        };
+                        ifc.paint(
+                            &mut store.raster,
+                            &laid.styles,
+                            &mut pixmap,
+                            ifc.origin,
+                            off,
+                            clip.or(ifc.clip),
+                            clip_mask.as_deref(),
+                            raster_scale,
+                            print_economy,
+                        );
+                    }
+                }
+            }
+        };
+    }
+
     for (paint_index, nid) in paint_order.into_iter().enumerate() {
+        if paint_index == positive_start && !inline_content_painted {
+            inline_content_painted = true;
+            paint_inline_content!();
+        }
         scene_node(nid);
         if svg_subtree_skip.contains(&nid) {
             continue;
         }
-        if suppress_stacking_for != Some(nid) && stacking_z_index(tree, laid, nid).is_some() {
+        if suppress_stacking_for != Some(nid) && paint_layer_z(tree, laid, nid).is_some() {
             opacity_subtree_skip.insert(nid);
             opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
             // A stacking context is one structural paint item in its parent.
@@ -6370,64 +6479,8 @@ fn paint_laid_dom_scrolled(
         }
     }
 
-    // Inline formatting contexts shaped by cosmic-text (paragraphs, headings,
-    // cells, labels) draw last, in tree order, so their glyphs sit above the
-    // box backgrounds/borders painted in the loop above. Each item already
-    // carries its final origin and clip from `TextEngine::finalize`.
-    for nid in paint_nodes {
-        if svg_subtree_skip.contains(&nid) || opacity_subtree_skip.contains(&nid) {
-            continue;
-        }
-        let Some(ifcs) = laid.ifc.by_node.get(&nid).cloned() else {
-            continue;
-        };
-        if laid
-            .styles
-            .get(&nid)
-            .map(|s| s.effectively_invisible)
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        // Shaped text is the container's content: for a compositor scroller
-        // it scrolls with the scroll frame.
-        scene_content_node(&scroll_state, nid);
-        // Shift the shaped glyphs by the same accumulated translate as the
-        // container's box so text under a transformed ancestor moves with
-        // it. Computed before the mutable `paint_item` borrow.
-        let off = scroll_state.translation_for(laid, nid);
-        let overflow_clip = scroll_state.shaped_text_overflow_clip_for(laid, nid);
-        let clip = overflow_clip
-            .as_ref()
-            .map(|clip| clip.viewport_rect(scroll_state.surface_extent.unwrap_or(viewport)));
-        let clip_mask = overflow_clip.as_ref().and_then(|clip| {
-            cached_overflow_clip_mask(
-                &mut overflow_mask_cache,
-                pixmap.width(),
-                pixmap.height(),
-                clip,
-                scroll_state.surface_extent.unwrap_or(viewport),
-            )
-        });
-        {
-            let store = &mut laid.ifc;
-            for index in ifcs {
-                let Some(ifc) = store.ifcs.get(index).and_then(|ifc| ifc.as_deref()) else {
-                    continue;
-                };
-                ifc.paint(
-                    &mut store.raster,
-                    &laid.styles,
-                    &mut pixmap,
-                    ifc.origin,
-                    off,
-                    clip.or(ifc.clip),
-                    clip_mask.as_deref(),
-                    raster_scale,
-                    print_economy,
-                );
-            }
-        }
+    if !inline_content_painted {
+        paint_inline_content!();
     }
 
     Some(pixmap)
@@ -13968,6 +14021,41 @@ mod tests {
         assert!(blue.blue() > 240 && blue.red() < 20 && blue.green() < 20);
         assert!(red.red() > 240 && red.green() < 20 && red.blue() < 20);
         assert!(yellow.red() > 240 && yellow.green() > 240 && yellow.blue() < 20);
+    }
+
+    #[test]
+    fn positioned_boxes_paint_over_earlier_in_flow_text() {
+        // CSS 2.1 Appendix E: inline content (step 7) paints before
+        // positioned descendants with z-index auto or >= 0 (step 8).
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <p style="margin:0;font-size:40px;line-height:50px">MMMMMM</p>
+                <div style="position:absolute;left:0;top:0;width:80px;height:50px;
+                            background:rgb(0,0,255)"></div>
+                <div style="position:absolute;left:80px;top:0;width:80px;height:50px;
+                            z-index:1;background:rgb(0,255,0)"></div>
+                <div style="position:relative;top:-50px;margin-left:160px;width:80px;
+                            height:50px;background:rgb(255,0,0)"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (260.0, 120.0), None).expect("paint order");
+        for (x, expected, what) in [
+            (0, (0, 0, 255), "absolute z-index:auto"),
+            (80, (0, 255, 0), "absolute z-index:1"),
+            (160, (255, 0, 0), "relative z-index:auto"),
+        ] {
+            for dx in 0..80 {
+                for y in 0..50 {
+                    let p = pixmap.pixel(x + dx, y).expect("pixel");
+                    assert_eq!(
+                        (p.red(), p.green(), p.blue()),
+                        expected,
+                        "the {what} box must cover the paragraph's glyphs at {},{y}",
+                        x + dx
+                    );
+                }
+            }
+        }
     }
 
     #[test]
