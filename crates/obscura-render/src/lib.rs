@@ -495,6 +495,188 @@ pub enum Display {
     None,
 }
 
+/// CSSOM-only computed values (see `LayoutStyle::cssom`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct CssomValues {
+    /// Inherited `text-align` keyword. `None` during cascade means inherit;
+    /// the top-down pass resolves it (root: `start`).
+    pub text_align: Option<&'static str>,
+    /// `vertical-align` (not inherited). `None` is `baseline`.
+    pub vertical_align: Option<VerticalAlignCss>,
+    /// Inherited `font-family` with the author's case and quoting,
+    /// serialized the way Blink does. `None` means inherit.
+    pub font_family: Option<String>,
+    /// Authored `flex-direction` / `align-items`. Reported instead of the
+    /// layout value when the box is a table/control flex stand-in.
+    pub flex_direction: Option<taffy::FlexDirection>,
+    pub align_items: Option<taffy::AlignItems>,
+    /// UA-sheet computed values that the engine paints or lays out with a
+    /// different native approximation (control borders, replaced-element
+    /// `overflow: clip`). An author declaration of the property removes its
+    /// entry.
+    pub ua_overrides: Vec<(&'static str, &'static str)>,
+    /// The element's own font-size is an absolute length (author or a
+    /// control's UA font), which ends the medium-keyword chain.
+    pub font_size_absolute: bool,
+    /// Resolved: the computed font-size does not derive from the initial
+    /// `medium` keyword through em/% factors.
+    pub font_size_not_keyword: bool,
+    /// Resolved: the keyword-derived size before the monospace adjustment
+    /// (`None` is medium, 16px).
+    pub font_size_keyword_px: Option<f32>,
+    /// `border-*-color: inherit` from the UA sheet (row groups and rows),
+    /// per side [top, right, bottom, left]; an author color clears it.
+    pub border_color_inherit: [bool; 4],
+    /// Resolved border colors, kept for children that inherit them.
+    pub border_colors: Option<Sides<Option<[u8; 4]>>>,
+}
+
+impl CssomValues {
+    /// Resolve the inherited values against the parent's resolved values.
+    pub(crate) fn inherit_from(&mut self, parent: &CssomValues) {
+        if self.text_align.is_none() {
+            self.text_align = parent.text_align;
+        }
+        if self.font_family.is_none() {
+            self.font_family.clone_from(&parent.font_family);
+        }
+        if self.vertical_align == Some(VerticalAlignCss::Inherit) {
+            self.vertical_align = parent.vertical_align;
+        }
+    }
+
+    /// Apply `border-color: inherit` from the parent's resolved colors.
+    pub(crate) fn inherit_border_colors(
+        &self,
+        parent: &CssomValues,
+        colors: &mut Sides<Option<[u8; 4]>>,
+    ) -> bool {
+        let Some(from) = parent.border_colors else {
+            return false;
+        };
+        let [top, right, bottom, left] = self.border_color_inherit;
+        if top {
+            colors.top = from.top;
+        }
+        if right {
+            colors.right = from.right;
+        }
+        if bottom {
+            colors.bottom = from.bottom;
+        }
+        if left {
+            colors.left = from.left;
+        }
+        top || right || bottom || left
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum VerticalAlignCss {
+    Keyword(&'static str),
+    Length(Dimension),
+    Inherit,
+}
+
+/// A specified `display` keyword that [`Display`] and the layout stand-in
+/// flags cannot express. `Layout` means the layout fields already name the
+/// CSS value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum CssDisplay {
+    #[default]
+    Layout,
+    /// Computed `inline` whatever layout does with the box: SVG content
+    /// elements, and `noscript`/`source`/`track`, which the UA hides
+    /// without a `display:none` rule.
+    Inline,
+    /// Computed `block` for `option`/`optgroup`, which only render in the
+    /// native popup.
+    Block,
+    ListItem,
+    FlowRoot,
+    Table,
+    InlineTable,
+    TableRowGroup,
+    TableHeaderGroup,
+    TableFooterGroup,
+    TableRow,
+    TableCell,
+    TableColumnGroup,
+    TableColumn,
+    TableCaption,
+}
+
+impl CssDisplay {
+    /// The keyword for a specified display value this enum carries.
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "list-item" => Self::ListItem,
+            "flow-root" => Self::FlowRoot,
+            "table" => Self::Table,
+            "inline-table" => Self::InlineTable,
+            "table-row-group" => Self::TableRowGroup,
+            "table-header-group" => Self::TableHeaderGroup,
+            "table-footer-group" => Self::TableFooterGroup,
+            "table-row" => Self::TableRow,
+            "table-cell" => Self::TableCell,
+            "table-column-group" => Self::TableColumnGroup,
+            "table-column" => Self::TableColumn,
+            "table-caption" => Self::TableCaption,
+            _ => return None,
+        })
+    }
+
+    /// Whether the computed display is this keyword even though layout
+    /// generates no box.
+    pub(crate) fn survives_ua_hiding(self) -> bool {
+        matches!(self, Self::Inline | Self::Block)
+    }
+
+    /// Computed value, after blockification when `blockified`.
+    pub(crate) fn css_name(self, blockified: bool) -> Option<&'static str> {
+        Some(match self {
+            Self::Layout => return None,
+            Self::Inline if blockified => "block",
+            Self::Inline => "inline",
+            Self::Block => "block",
+            Self::ListItem => "list-item",
+            Self::FlowRoot => "flow-root",
+            Self::Table => "table",
+            Self::InlineTable if blockified => "table",
+            Self::InlineTable => "inline-table",
+            _ if blockified => "block",
+            Self::TableRowGroup => "table-row-group",
+            Self::TableHeaderGroup => "table-header-group",
+            Self::TableFooterGroup => "table-footer-group",
+            Self::TableRow => "table-row",
+            Self::TableCell => "table-cell",
+            Self::TableColumnGroup => "table-column-group",
+            Self::TableColumn => "table-column",
+            Self::TableCaption => "table-caption",
+        })
+    }
+
+    /// HTML UA sheet display for elements the engine lays out with a
+    /// stand-in mode.
+    pub(crate) fn for_tag(tag: &str) -> Self {
+        match tag {
+            "li" => Self::ListItem,
+            "table" => Self::Table,
+            "tbody" => Self::TableRowGroup,
+            "thead" => Self::TableHeaderGroup,
+            "tfoot" => Self::TableFooterGroup,
+            "tr" => Self::TableRow,
+            "td" | "th" => Self::TableCell,
+            "colgroup" => Self::TableColumnGroup,
+            "col" => Self::TableColumn,
+            "caption" => Self::TableCaption,
+            "noscript" | "source" | "track" => Self::Inline,
+            "option" | "optgroup" => Self::Block,
+            _ => Self::Layout,
+        }
+    }
+}
+
 /// Computed `container-type` value. Stage A carries it through the cascade;
 /// the layout convergence stage will use it for query eligibility.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -807,6 +989,17 @@ pub struct LayoutStyle {
     /// until the parent's computed outer/inner display is known. The DOM
     /// top-down pass copies that provenance and then clears this marker.
     pub(crate) display_inherit: bool,
+    /// The CSS `display` keyword when layout emulates it with a different
+    /// mode (tables, list items, flow roots). CSSOM reports this keyword;
+    /// layout keeps reading `display` and the stand-in flags.
+    pub(crate) css_display: CssDisplay,
+    /// Set by `blockify_outer_display`: the element is a root, flex/grid
+    /// item, float or absolutely positioned box, so its computed display is
+    /// blockified (CSS Display 3 §2.7).
+    pub(crate) blockified: bool,
+    /// Specified values CSSOM reports where layout keeps a different,
+    /// emulated value. Layout never reads these.
+    pub(crate) cssom: CssomValues,
     /// Inline outer display before absolute-position blockification. Retained
     /// styles need this provenance to reconstruct the hypothetical static box.
     pub(crate) static_position_inline: bool,
@@ -852,6 +1045,10 @@ pub struct LayoutStyle {
     /// `<td>`/`<th>` elements even though Taffy represents their cell-content
     /// wrapper as an internal column flexbox.
     pub(crate) is_table_cell_box: bool,
+    /// Authored internal table display other than `table-cell`
+    /// (`table-row`, `table-row-group`, `table-caption` ...). Native HTML
+    /// table parts are recognised by tag instead.
+    pub(crate) table_part: Option<TablePart>,
     /// The HTML UA sheet's vendor `text-align` behavior for `<center>`.
     /// Unlike ordinary `text-align:center`, it also centers fixed-width block
     /// descendants while leaving auto-width blocks fill-available.
@@ -1203,6 +1400,10 @@ pub struct LayoutStyle {
     /// is still approximate, but collapsed tables must at minimum contribute
     /// no border-spacing to their geometry.
     pub border_collapse: Option<bool>,
+    /// Inherited `caption-side`: `Some(true)` for `bottom`. `None` means no
+    /// value was specified on this node yet; resolved top-down like
+    /// `border_collapse`.
+    pub caption_side_bottom: Option<bool>,
 
     // Positioning. `position: absolute|fixed` takes the box out of normal flow.
     pub position: Option<taffy::Position>,
@@ -1216,6 +1417,10 @@ pub struct LayoutStyle {
     pub inset: [Option<Dimension>; 4], // top, right, bottom, left
     /// Deferred functional inset expressions in top/right/bottom/left order.
     pub inset_expressions: [Option<String>; 4],
+    /// calc() insets with a percentage, handed to Taffy so the percentage
+    /// resolves against the absolute box's real containing block. Owned
+    /// here for the lifetime of every layout of this style.
+    pub(crate) inset_calc: [Option<std::sync::Arc<crate::style::GridCalcExpression>>; 4],
 
     /// `overflow`/-x/-y other than `visible`: clips this element's descendants
     /// to its border box during paint. This is what makes the ubiquitous
@@ -1259,6 +1464,10 @@ pub struct LayoutStyle {
     /// a real inherited CSS property). Resolved into `effectively_invisible`
     /// during `dom::layout_dom`'s inheritance pass.
     pub visibility_hidden: Option<bool>,
+    /// `visibility: collapse` declared on this element (not inherited; the
+    /// inherited part is `visibility_hidden`). A collapsed table row or row
+    /// group takes no block space, but its cells still size the columns.
+    pub visibility_collapse: bool,
     // Preserve the own value above for retained inheritance updates while
     // exposing the resolved inherited value through CSSOM snapshots.
     pub(crate) computed_visibility_hidden: bool,
@@ -1546,6 +1755,7 @@ pub(crate) fn is_inline_level_box(style: &LayoutStyle) -> bool {
 /// Thus inline-flex becomes flex and inline-grid becomes grid, while
 /// inline-block/plain inline become block.
 pub(crate) fn blockify_outer_display(style: &mut LayoutStyle) {
+    style.blockified = true;
     if !is_inline_level_box(style) {
         return;
     }
@@ -1679,6 +1889,18 @@ impl Default for ObjectPosition {
 /// text-level values like sub/super, which do not apply to cells) map to
 /// `Top` as an approximation: real per-row baseline alignment needs shared
 /// ascent metrics across the row.
+/// Internal table display types besides `table-cell`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TablePart {
+    RowGroup,
+    HeaderGroup,
+    FooterGroup,
+    Row,
+    Column,
+    ColumnGroup,
+    Caption,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerticalAlign {
     Top,
@@ -2542,11 +2764,17 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
     if let Some(pos) = style.position {
         s.position = pos;
         if !style.position_sticky {
+            let inset = |index: usize| match &style.inset_calc[index] {
+                Some(calc) if pos == taffy::Position::Absolute && !style.position_fixed => {
+                    taffy::LengthPercentageAuto::calc(std::sync::Arc::as_ptr(calc).cast())
+                }
+                _ => inset_lpa(style.inset[index]),
+            };
             s.inset = taffy::Rect {
-                top: inset_lpa(style.inset[0]),
-                right: inset_lpa(style.inset[1]),
-                bottom: inset_lpa(style.inset[2]),
-                left: inset_lpa(style.inset[3]),
+                top: inset(0),
+                right: inset(1),
+                bottom: inset(2),
+                left: inset(3),
             };
         }
     }

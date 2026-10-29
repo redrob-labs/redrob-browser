@@ -47,6 +47,26 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         "tr" => Display::Flex,
         _ => Display::Block,
     };
+    style.css_display = crate::CssDisplay::for_tag(tag);
+    style.cssom.text_align = match tag {
+        "th" => Some("center"),
+        "caption" | "center" => Some("-webkit-center"),
+        _ => None,
+    };
+    style.cssom.vertical_align = match tag {
+        "tbody" | "thead" | "tfoot" => Some(crate::VerticalAlignCss::Keyword("middle")),
+        "tr" | "td" | "th" => Some(crate::VerticalAlignCss::Inherit),
+        "sub" => Some(crate::VerticalAlignCss::Keyword("sub")),
+        "sup" => Some(crate::VerticalAlignCss::Keyword("super")),
+        _ => None,
+    };
+    style.cssom.font_family = match tag {
+        "input" | "select" | "button" => Some("Arial".to_string()),
+        "textarea" | "pre" | "code" | "kbd" | "samp" | "tt" | "listing" | "xmp" | "plaintext" => {
+            Some("monospace".to_string())
+        }
+        _ => None,
+    };
     if tag == "slot" {
         // HTML's UA sheet makes a slot transparent to box generation; its
         // assigned nodes or fallback children participate at the slot's
@@ -289,14 +309,14 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         // other controls it keeps its content in the tree (the value is the
         // text child), laid out inside the sized box; line breaks in the
         // value must survive, hence pre-wrap. Chromium defaults the control
-        // to the fixed-pitch face and to border-box sizing.
+        // to the fixed-pitch face; unlike buttons and selects it keeps
+        // content-box sizing (`height: 36px` is a 42px border box).
         style.display = Display::Inline;
         style.is_inline_block = true;
         style.font_size = Some(13.333_333);
         style.font_family = Some("monospace".to_string());
         style.line_height = Some(crate::LineHeight::Normal);
         style.white_space = Some(crate::WhiteSpace::PreWrap);
-        style.box_sizing = crate::BoxSizing::BorderBox;
         style.padding = Edges {
             top: 2.0,
             right: 2.0,
@@ -374,7 +394,183 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         // establish its width.
         style.display = Display::Inline;
     }
+    apply_ua_sheet_extras(tag, &mut style);
     style
+}
+
+/// The rest of Chromium's HTML UA sheet (html.css) for common elements:
+/// margins, control fonts and colors, cursors, and the computed values the
+/// engine emulates natively (`LayoutStyle::cssom.ua_overrides`).
+fn apply_ua_sheet_extras(tag: &str, style: &mut LayoutStyle) {
+    use crate::{BorderStyle, Dimension, Sides};
+    let ua_border = |style: &mut LayoutStyle, width: f32, line: BorderStyle| {
+        style.border = Edges {
+            top: width,
+            right: width,
+            bottom: width,
+            left: width,
+        };
+        style.border_model.specified_widths = Sides::all(width);
+        style.border_model.styles = Sides::all(line);
+    };
+    const CLIP: [(&str, &str); 3] = [
+        ("overflow", "clip"),
+        ("overflow-x", "clip"),
+        ("overflow-y", "clip"),
+    ];
+    const OUTSET: [(&str, &str); 8] = [
+        ("border-top-style", "outset"),
+        ("border-right-style", "outset"),
+        ("border-bottom-style", "outset"),
+        ("border-left-style", "outset"),
+        ("border-top-color", "rgb(0, 0, 0)"),
+        ("border-right-color", "rgb(0, 0, 0)"),
+        ("border-bottom-color", "rgb(0, 0, 0)"),
+        ("border-left-color", "rgb(0, 0, 0)"),
+    ];
+    match tag {
+        "input" | "select" | "textarea" | "button" => {
+            // `input, textarea, select, button { color: FieldText;
+            // letter-spacing: normal; word-spacing: normal; text-transform:
+            // none; text-indent: 0; text-align: start }`.
+            style.color = Some([0, 0, 0, 255]);
+            style.letter_spacing = Some(0.0);
+            style.letter_spacing_non_normal = Some(false);
+            style.word_spacing = Some(0.0);
+            style.text_transform = Some(crate::TextTransform::None);
+            style.text_indent = Some(Dimension::Px(0.0));
+            style.cssom.text_align = Some("start");
+            style.cssom.font_size_absolute = true;
+            style.cursor = Some(if matches!(tag, "input" | "textarea") {
+                crate::Cursor::Text
+            } else {
+                crate::Cursor::Default
+            });
+            if !matches!(tag, "textarea" | "button") {
+                style.cssom.ua_overrides.extend(CLIP);
+            }
+            if tag == "input" {
+                style.cssom.ua_overrides.extend([
+                    ("border-top-style", "inset"),
+                    ("border-right-style", "inset"),
+                    ("border-bottom-style", "inset"),
+                    ("border-left-style", "inset"),
+                ]);
+            } else if tag == "textarea" {
+                style.cssom.ua_overrides.extend([
+                    ("overflow", "auto"),
+                    ("overflow-x", "auto"),
+                    ("overflow-y", "auto"),
+                ]);
+            } else if tag == "select" {
+                // The engine reserves the drop-down arrow as padding; the
+                // computed padding of a native select is zero.
+                style.background_color = Some([239, 239, 239, 255]);
+                style.box_sizing = crate::BoxSizing::BorderBox;
+                style.white_space = Some(crate::WhiteSpace::Pre);
+                style.cssom.ua_overrides.extend([
+                    ("padding-top", "0px"),
+                    ("padding-right", "0px"),
+                    ("padding-bottom", "0px"),
+                    ("padding-left", "0px"),
+                ]);
+            } else {
+                // Native buttons paint like the other controls; their
+                // computed border is `2px outset ButtonBorder`.
+                style.font_size = Some(13.333_333);
+                style.font_family = Some("arial".to_string());
+                style.line_height = Some(crate::LineHeight::Normal);
+                style.cssom.text_align = Some("center");
+                style.background_color = Some([239, 239, 239, 255]);
+                ua_border(style, 2.0, BorderStyle::Solid);
+                style.border_model.colors = Sides::all(Some([118, 118, 118, 255]));
+                style.border_color = Some([118, 118, 118, 255]);
+                style.cssom.ua_overrides.extend(OUTSET);
+            }
+        }
+        "option" | "optgroup" => {
+            style.cursor = Some(crate::Cursor::Default);
+            style.white_space = Some(crate::WhiteSpace::NoWrap);
+            if tag == "option" {
+                style.padding = Edges {
+                    top: 0.0,
+                    right: 2.0,
+                    bottom: 1.0,
+                    left: 2.0,
+                };
+            }
+        }
+        "img" | "video" | "canvas" | "iframe" | "embed" | "object" => {
+            style.cssom.ua_overrides.extend(CLIP);
+        }
+        "svg" => style.cssom.ua_overrides.extend([
+            ("overflow", "hidden"),
+            ("overflow-x", "hidden"),
+            ("overflow-y", "hidden"),
+        ]),
+        "hr" => {
+            // `hr { color: gray; border-style: inset; border-width: 1px;
+            // margin: 0.5em auto; overflow: hidden }`.
+            style.color = Some([128, 128, 128, 255]);
+            ua_border(style, 1.0, BorderStyle::Inset);
+            style.margin_relative[0] = Some(Dimension::Em(0.5));
+            style.margin_relative[2] = Some(Dimension::Em(0.5));
+            style.margin_auto[1] = true;
+            style.margin_auto[3] = true;
+            style.cssom.ua_overrides.extend([
+                ("overflow", "hidden"),
+                ("overflow-x", "hidden"),
+                ("overflow-y", "hidden"),
+            ]);
+        }
+        "blockquote" | "figure" => {
+            style.margin_relative[0] = Some(Dimension::Em(1.0));
+            style.margin_relative[2] = Some(Dimension::Em(1.0));
+            style.margin.left = 40.0;
+            style.margin.right = 40.0;
+        }
+        "dd" => style.margin.left = 40.0,
+        "pre" | "listing" | "xmp" => {
+            style.margin_relative[0] = Some(Dimension::Em(1.0));
+            style.margin_relative[2] = Some(Dimension::Em(1.0));
+        }
+        "fieldset" => {
+            style.margin.left = 2.0;
+            style.margin.right = 2.0;
+            style.padding_relative = [
+                Some(Dimension::Em(0.35)),
+                Some(Dimension::Em(0.75)),
+                Some(Dimension::Em(0.625)),
+                Some(Dimension::Em(0.75)),
+            ];
+            ua_border(style, 2.0, BorderStyle::Groove);
+            style.border_model.colors = Sides::all(Some([192, 192, 192, 255]));
+            style.border_color = Some([192, 192, 192, 255]);
+            style.cssom.ua_overrides.extend([
+                ("border-top-color", "rgb(239, 239, 239)"),
+                ("border-right-color", "rgb(239, 239, 239)"),
+                ("border-bottom-color", "rgb(239, 239, 239)"),
+                ("border-left-color", "rgb(239, 239, 239)"),
+            ]);
+        }
+        "legend" => {
+            style.padding.left = 2.0;
+            style.padding.right = 2.0;
+        }
+        "small" | "sub" | "sup" => {
+            style.font_size = None;
+            style.font_size_raw = Some(Dimension::Em(1.0 / 1.2));
+        }
+        "mark" => {
+            style.background_color = Some([255, 255, 0, 255]);
+            style.color = Some([0, 0, 0, 255]);
+        }
+        "summary" => style.css_display = crate::CssDisplay::ListItem,
+        // `thead, tbody, tfoot, tr { border-color: inherit }`.
+        "thead" | "tbody" | "tfoot" | "tr" => style.cssom.border_color_inherit = [true; 4],
+        "label" => style.cursor = Some(crate::Cursor::Default),
+        _ => {}
+    }
 }
 
 pub fn apply_inline(style: &mut LayoutStyle, css: &str) {
@@ -878,6 +1074,234 @@ fn unitless_math_tokens<'i, 't>(
 }
 
 fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
+    apply_layout_value(style, name, value);
+    apply_cssom_value(style, name, value);
+}
+
+/// Record the specified values CSSOM reports where layout keeps its own
+/// emulated value (`LayoutStyle::cssom`).
+fn apply_cssom_value(style: &mut LayoutStyle, name: &str, value: &str) {
+    if style
+        .cssom
+        .border_color_inherit
+        .iter()
+        .any(|&inherit| inherit)
+    {
+        for (index, side) in ["top", "right", "bottom", "left"].into_iter().enumerate() {
+            if declaration_sets(name, &format!("border-{side}-color")) {
+                style.cssom.border_color_inherit[index] = false;
+            }
+        }
+    }
+    if !style.cssom.ua_overrides.is_empty() {
+        style
+            .cssom
+            .ua_overrides
+            .retain(|(property, _)| !declaration_sets(name, property));
+    }
+    let lower = value.trim().to_ascii_lowercase();
+    match name {
+        "text-align" => {
+            let keyword = match lower.as_str() {
+                "left" => "left",
+                "right" => "right",
+                "center" => "center",
+                "justify" => "justify",
+                "start" | "initial" | "revert" | "revert-layer" => "start",
+                "end" => "end",
+                "match-parent" => "match-parent",
+                "-webkit-center" => "-webkit-center",
+                "-webkit-left" => "-webkit-left",
+                "-webkit-right" => "-webkit-right",
+                "inherit" | "unset" => {
+                    style.cssom.text_align = None;
+                    return;
+                }
+                _ => return,
+            };
+            style.cssom.text_align = Some(keyword);
+        }
+        "vertical-align" => {
+            style.cssom.vertical_align = match lower.as_str() {
+                "baseline" | "initial" | "unset" | "revert" | "revert-layer" => None,
+                "inherit" => Some(crate::VerticalAlignCss::Inherit),
+                "top" => Some(crate::VerticalAlignCss::Keyword("top")),
+                "middle" => Some(crate::VerticalAlignCss::Keyword("middle")),
+                "bottom" => Some(crate::VerticalAlignCss::Keyword("bottom")),
+                "sub" => Some(crate::VerticalAlignCss::Keyword("sub")),
+                "super" => Some(crate::VerticalAlignCss::Keyword("super")),
+                "text-top" => Some(crate::VerticalAlignCss::Keyword("text-top")),
+                "text-bottom" => Some(crate::VerticalAlignCss::Keyword("text-bottom")),
+                _ => match dimension_value(&lower) {
+                    crate::Dimension::Auto => return,
+                    length => Some(crate::VerticalAlignCss::Length(length)),
+                },
+            };
+        }
+        "font-family" => {
+            if matches!(lower.as_str(), "inherit" | "unset") {
+                style.cssom.font_family = None;
+            } else if let Some(family) = serialize_font_family(value) {
+                style.cssom.font_family = Some(family);
+            }
+        }
+        "font" => {
+            if matches!(lower.as_str(), "inherit" | "unset") {
+                style.cssom.font_family = None;
+                style.cssom.font_size_absolute = false;
+            } else if let Some(family) = style.font_family.as_deref().and_then(|_| {
+                // The shorthand's size is an absolute length unless em/%.
+                let value = value.trim();
+                style.cssom.font_size_absolute =
+                    font_shorthand_family(value).is_some_and(|family| {
+                        let head = value
+                            .get(..value.len() - family.len())
+                            .unwrap_or_default()
+                            .to_ascii_lowercase();
+                        !(head.contains('%') || head.contains("em ") || head.contains("em/"))
+                            || head.contains("rem")
+                    });
+                font_shorthand_family(value).and_then(serialize_font_family)
+            }) {
+                style.cssom.font_family = Some(family);
+            }
+        }
+        "font-size" => {
+            style.cssom.font_size_absolute = !(lower.ends_with('%')
+                || (lower.ends_with("em") && !lower.ends_with("rem"))
+                || matches!(
+                    lower.as_str(),
+                    "inherit" | "unset" | "initial" | "medium" | "revert" | "revert-layer"
+                ));
+        }
+        "flex-direction" | "flex-flow" => style.cssom.flex_direction = style.flex_direction,
+        "align-items" | "place-items" => style.cssom.align_items = style.align_items,
+        _ => {}
+    }
+}
+
+/// The family list of a `font` shorthand: everything after the size (and
+/// optional `/line-height`).
+fn font_shorthand_family(value: &str) -> Option<&str> {
+    let mut rest = value.trim();
+    loop {
+        let token_end = rest.find(char::is_whitespace)?;
+        let token = &rest[..token_end];
+        rest = rest[token_end..].trim_start();
+        let size = token.split('/').next().unwrap_or(token);
+        if size.starts_with(|c: char| c.is_ascii_digit() || c == '.')
+            || matches!(
+                size.to_ascii_lowercase().as_str(),
+                "xx-small"
+                    | "x-small"
+                    | "small"
+                    | "medium"
+                    | "large"
+                    | "x-large"
+                    | "xx-large"
+                    | "smaller"
+                    | "larger"
+            )
+        {
+            if token.ends_with('/') {
+                let end = rest.find(char::is_whitespace)?;
+                rest = rest[end..].trim_start();
+            } else if rest.starts_with('/') {
+                rest = rest[1..].trim_start();
+                let end = rest.find(char::is_whitespace)?;
+                rest = rest[end..].trim_start();
+            }
+            return (!rest.is_empty()).then_some(rest);
+        }
+    }
+}
+
+/// Serialize a `font-family` list as Blink does: names separated by `", "`,
+/// quoted names in double quotes, generic family keywords lowercased.
+fn serialize_font_family(value: &str) -> Option<String> {
+    let mut names = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut quoted = false;
+    for c in value.trim().chars() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), c) => current.push(c),
+            (None, '"' | '\'') => {
+                quote = Some(c);
+                quoted = true;
+            }
+            (None, ',') => {
+                names.push((std::mem::take(&mut current), quoted));
+                quoted = false;
+            }
+            (None, c) => current.push(c),
+        }
+    }
+    names.push((current, quoted));
+    let mut out = Vec::with_capacity(names.len());
+    for (name, quoted) in names {
+        let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+        if name.is_empty() {
+            return None;
+        }
+        let lower = name.to_ascii_lowercase();
+        let generic = matches!(
+            lower.as_str(),
+            "serif"
+                | "sans-serif"
+                | "monospace"
+                | "cursive"
+                | "fantasy"
+                | "system-ui"
+                | "math"
+                | "emoji"
+                | "fangsong"
+                | "ui-serif"
+                | "ui-sans-serif"
+                | "ui-monospace"
+                | "ui-rounded"
+        ) || lower.starts_with("-webkit-");
+        let identifier = !name.contains(' ')
+            && !name.starts_with(|c: char| c.is_ascii_digit())
+            && !name.starts_with("--")
+            && name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || !c.is_ascii());
+        out.push(if !quoted && generic {
+            lower
+        } else if identifier && !(quoted && generic) {
+            name
+        } else {
+            format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""))
+        });
+    }
+    Some(out.join(", "))
+}
+
+/// Whether a declaration of `name` (a longhand or a shorthand) sets the
+/// longhand `property`.
+fn declaration_sets(name: &str, property: &str) -> bool {
+    if name == property || name == "all" {
+        return true;
+    }
+    if let Some(rest) = property.strip_prefix(name) {
+        // `border` -> `border-top-style`, `overflow` -> `overflow-x`,
+        // `padding` -> `padding-top`, `background` -> `background-color`.
+        return rest.starts_with('-');
+    }
+    // `border-style`/`border-color`/`border-width` set the matching part of
+    // every side.
+    match name {
+        "border-style" | "border-color" | "border-width" => {
+            let part = &name["border".len()..];
+            property.starts_with("border-") && property.ends_with(part)
+        }
+        _ => false,
+    }
+}
+
+fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
     match name {
         "direction" => {
             match value.trim().to_ascii_lowercase().as_str() {
@@ -892,6 +1316,31 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
         }
         "display" => {
             let value = value.trim().to_ascii_lowercase();
+            let css_display = crate::CssDisplay::parse(&value);
+            if css_display.is_some()
+                || matches!(
+                    value.as_str(),
+                    "none"
+                        | "flex"
+                        | "inline-flex"
+                        | "inline"
+                        | "inline-block"
+                        | "grid"
+                        | "inline-grid"
+                        | "block"
+                        | "-webkit-box"
+                        | "-webkit-inline-box"
+                        | "contents"
+                        | "inherit"
+                        | "initial"
+                        | "unset"
+                )
+            {
+                // CSSOM reads the specified keyword; layout keeps its own
+                // stand-in below. `inherit` copies the parent's keyword in
+                // the DOM top-down pass.
+                style.css_display = css_display.unwrap_or_default();
+            }
             if matches!(
                 value.as_str(),
                 "none"
@@ -903,9 +1352,17 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
                     | "inline-grid"
                     | "block"
                     | "flow-root"
+                    | "list-item"
                     | "table"
                     | "inline-table"
                     | "table-cell"
+                    | "table-row"
+                    | "table-row-group"
+                    | "table-header-group"
+                    | "table-footer-group"
+                    | "table-column"
+                    | "table-column-group"
+                    | "table-caption"
                     | "-webkit-box"
                     | "-webkit-inline-box"
                     | "contents"
@@ -920,6 +1377,7 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
                 style.internal_flex_container = false;
                 style.is_table_box = false;
                 style.is_table_cell_box = false;
+                style.table_part = None;
                 style.is_inline_block = false;
                 style.flow_root = false;
                 style.display_contents = false;
@@ -944,6 +1402,9 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
                     style.is_inline_block = true;
                 }
                 "block" => style.display = crate::Display::Block,
+                // A list item is a block box with a marker; the marker is
+                // painted from the list-style properties.
+                "list-item" => style.display = crate::Display::Block,
                 "flow-root" => {
                     style.display = crate::Display::Block;
                     style.flow_root = true;
@@ -973,6 +1434,22 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
                     style.flex_direction = Some(taffy::FlexDirection::Column);
                     style.align_items = Some(taffy::AlignItems::FLEX_START);
                     style.is_table_cell_box = true;
+                }
+                // Internal table boxes other than cells. Outside a table
+                // box they lay out as blocks (the anonymous table wrapper is
+                // not generated); inside one, the table builder places them.
+                "table-row" | "table-row-group" | "table-header-group" | "table-footer-group"
+                | "table-column" | "table-column-group" | "table-caption" => {
+                    style.display = crate::Display::Block;
+                    style.table_part = Some(match value.as_str() {
+                        "table-row" => crate::TablePart::Row,
+                        "table-row-group" => crate::TablePart::RowGroup,
+                        "table-header-group" => crate::TablePart::HeaderGroup,
+                        "table-footer-group" => crate::TablePart::FooterGroup,
+                        "table-column" => crate::TablePart::Column,
+                        "table-column-group" => crate::TablePart::ColumnGroup,
+                        _ => crate::TablePart::Caption,
+                    });
                 }
                 "-webkit-box" => {
                     // The unclamped legacy display is an old flexbox. When it
@@ -1607,7 +2084,11 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
                 0
             };
         }
-        "visibility" => style.visibility_hidden = Some(value.eq_ignore_ascii_case("hidden")),
+        "visibility" => {
+            let collapse = value.trim().eq_ignore_ascii_case("collapse");
+            style.visibility_hidden = Some(collapse || value.trim().eq_ignore_ascii_case("hidden"));
+            style.visibility_collapse = collapse;
+        }
         "pointer-events" => {
             style.pointer_events_none = Some(value.eq_ignore_ascii_case("none"));
         }
@@ -1966,6 +2447,14 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
                 // an explicit inherit/unset are resolved in the top-down pass.
                 "inherit" | "unset" => None,
                 _ => style.border_collapse,
+            };
+        }
+        "caption-side" => {
+            style.caption_side_bottom = match value.trim().to_ascii_lowercase().as_str() {
+                "bottom" => Some(true),
+                "top" | "initial" | "revert" | "revert-layer" => Some(false),
+                "inherit" | "unset" => None,
+                _ => style.caption_side_bottom,
             };
         }
         "table-layout" => match value.trim().to_ascii_lowercase().as_str() {
@@ -2405,6 +2894,15 @@ pub fn supports_declaration(name: &str, value: &str) -> bool {
                 | "flow-root"
                 | "table"
                 | "inline-table"
+                | "list-item"
+                | "table-row-group"
+                | "table-header-group"
+                | "table-footer-group"
+                | "table-row"
+                | "table-cell"
+                | "table-column-group"
+                | "table-column"
+                | "table-caption"
                 | "-webkit-box"
                 | "-webkit-inline-box"
                 | "contents"
@@ -4130,6 +4628,8 @@ pub(crate) struct GridCalcExpression {
     vw: std::sync::atomic::AtomicU32,
     vh: std::sync::atomic::AtomicU32,
     context_initialized: std::sync::atomic::AtomicBool,
+    /// Insets may resolve negative; track sizes clamp at zero.
+    signed: bool,
 }
 
 impl PartialEq for GridCalcExpression {
@@ -4141,6 +4641,7 @@ impl PartialEq for GridCalcExpression {
             && self.vw.load(Relaxed) == other.vw.load(Relaxed)
             && self.vh.load(Relaxed) == other.vh.load(Relaxed)
             && self.context_initialized.load(Relaxed) == other.context_initialized.load(Relaxed)
+            && self.signed == other.signed
     }
 }
 
@@ -4210,7 +4711,19 @@ impl GridCalcExpression {
             vw: std::sync::atomic::AtomicU32::new(0.0f32.to_bits()),
             vh: std::sync::atomic::AtomicU32::new(0.0f32.to_bits()),
             context_initialized: std::sync::atomic::AtomicBool::new(false),
+            signed: false,
         })
+    }
+
+    /// A calc() inset whose percentages resolve against the containing
+    /// block Taffy positions the box in.
+    pub(crate) fn parse_inset(value: &str) -> Option<Self> {
+        if !value.contains('%') {
+            return None;
+        }
+        let mut calc = Self::parse(value)?;
+        calc.signed = true;
+        Some(calc)
     }
 
     fn set_context(&self, em_px: f32, rem_px: f32, vw: f32, vh: f32) {
@@ -4238,7 +4751,12 @@ pub(crate) fn set_grid_calc_context(
     vw: f32,
     vh: f32,
 ) {
-    for expression in style.grid_calc_expressions.iter().flatten() {
+    for expression in style
+        .grid_calc_expressions
+        .iter()
+        .flatten()
+        .chain(style.inset_calc.iter().flatten())
+    {
         expression.set_context(em_px, rem_px, vw, vh);
     }
 }
@@ -4264,8 +4782,10 @@ pub(crate) fn resolve_grid_calc(value: *const (), basis: f32) -> f32 {
         basis,
     )
     .filter(|value| value.is_finite())
-    .unwrap_or(0.0)
-    .max(0.0)
+    .map_or(
+        0.0,
+        |value| if calc.signed { value } else { value.max(0.0) },
+    )
 }
 
 /// Parse a track list into taffy sizing functions plus the `[line-name]` map
@@ -7068,6 +7588,7 @@ fn inset_dim(value: &str) -> Option<crate::Dimension> {
 
 fn set_inset_side(style: &mut LayoutStyle, index: usize, value: &str) {
     let value = value.trim();
+    style.inset_calc[index] = GridCalcExpression::parse_inset(value).map(std::sync::Arc::new);
     if let Some(expression) = deferred_length_expression(value) {
         style.inset[index] = None;
         style.inset_expressions[index] = Some(expression);
