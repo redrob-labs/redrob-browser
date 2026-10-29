@@ -503,6 +503,14 @@ fn fingerprint(mask: &Mask) -> u64 {
     let data = mask.data();
     let mut hasher = DefaultHasher::new();
     (mask.width(), mask.height()).hash(&mut hasher);
+    if SCENE.with(Cell::get) {
+        // Scene masks stay unrasterized and mostly unmapped: sampling across
+        // a document-sized mask would fault in hundreds of zero pages per
+        // clip. Their pixels only change through tracked calls, which
+        // re-store the entry, so the first bytes are enough.
+        data[..data.len().min(64)].hash(&mut hasher);
+        return hasher.finish();
+    }
     let step = (data.len() / 257).max(1);
     let mut i = 0;
     while i < data.len() {
@@ -590,6 +598,9 @@ pub struct RecordingCanvas {
     /// Scene recording: images by index, and their index by content id.
     scene_images: Vec<SceneImage>,
     scene_image_ids: HashMap<u64, usize>,
+    /// Scene recording: the surface size of masks allocated as 1x1
+    /// placeholders, by address. Their pixels exist only once materialized.
+    mask_sizes: HashMap<usize, (u32, u32)>,
 }
 
 impl RecordingCanvas {
@@ -603,6 +614,7 @@ impl RecordingCanvas {
             scratch: None,
             scene_images: Vec::new(),
             scene_image_ids: HashMap::new(),
+            mask_sizes: HashMap::new(),
         }
     }
 
@@ -684,9 +696,17 @@ impl RecordingCanvas {
             MaskShapes::Paths(shapes) => shapes,
             _ => return None,
         };
-        let mut out = Mask::new(mask.width(), mask.height())?;
+        let (width, height) = self.logical_size(mask);
+        let mut out = Mask::new(width, height)?;
         rasterize_shapes(&mut out, &shapes);
         Some(out)
+    }
+
+    fn logical_size(&self, mask: &Mask) -> (u32, u32) {
+        self.mask_sizes
+            .get(&mask_id(mask))
+            .copied()
+            .unwrap_or((mask.width(), mask.height()))
     }
 
     fn clip_state(&self, mask: Option<&Mask>) -> ClipState {
@@ -1590,6 +1610,12 @@ pub(crate) fn materialize_mask(mask: &mut Mask) {
     }) else {
         return;
     };
+    let size = with_recorder(|recorder| recorder.logical_size(mask));
+    if let Some((width, height)) = size.filter(|&size| size != (mask.width(), mask.height())) {
+        if let Some(full) = Mask::new(width, height) {
+            *mask = full;
+        }
+    }
     if let MaskShapes::Paths(paths) = &shapes {
         rasterize_shapes(mask, paths);
     }
@@ -1636,4 +1662,29 @@ pub fn path_of(verbs: &[Verb]) -> Option<Path> {
         }
     }
     builder.finish()
+}
+
+/// A clip mask for a `width` x `height` surface. A scene recording never
+/// reads mask pixels unless it materializes them, so it hands out a 1x1
+/// placeholder instead of allocating (and zeroing) a document-sized mask
+/// per clip; the shapes and surface size are kept on the side.
+pub(crate) fn scene_placeholder_mask(width: u32, height: u32) -> Option<Mask> {
+    if !scene_active() {
+        return None;
+    }
+    let mask = Mask::new(1, 1)?;
+    with_recorder(|recorder| {
+        recorder.mask_sizes.insert(mask_id(&mask), (width, height));
+        recorder.store_mask_lazy(&mask, MaskShapes::Empty, true);
+    });
+    Some(mask)
+}
+
+/// Carry a placeholder's surface size over to its copy.
+pub(crate) fn copy_mask_size(from: &Mask, to: &Mask) {
+    with_recorder(|recorder| {
+        if let Some(&size) = recorder.mask_sizes.get(&mask_id(from)) {
+            recorder.mask_sizes.insert(mask_id(to), size);
+        }
+    });
 }

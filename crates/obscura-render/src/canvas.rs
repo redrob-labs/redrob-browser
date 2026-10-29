@@ -400,6 +400,10 @@ impl PixmapCanvas for Pixmap {
 
 /// A new, empty (fully clipping) mask.
 pub fn new_mask(width: u32, height: u32) -> Option<Mask> {
+    #[cfg(feature = "display-list")]
+    if let Some(mask) = crate::display_list::scene_placeholder_mask(width, height) {
+        return Some(mask);
+    }
     let mask = Mask::new(width, height)?;
     #[cfg(feature = "display-list")]
     crate::display_list::set_mask_shapes(&mask, crate::display_list::MaskShapes::Empty);
@@ -409,6 +413,8 @@ pub fn new_mask(width: u32, height: u32) -> Option<Mask> {
 /// A copy of `mask` that keeps what it was built from.
 pub fn clone_mask(mask: &Mask) -> Mask {
     let copy = mask.clone();
+    #[cfg(feature = "display-list")]
+    crate::display_list::copy_mask_size(mask, &copy);
     #[cfg(feature = "display-list")]
     if let Some(shapes) = crate::display_list::mask_shapes(mask) {
         if crate::display_list::mask_is_lazy(mask) {

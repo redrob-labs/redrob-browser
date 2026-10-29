@@ -13,6 +13,12 @@ pub fn write_scene_dump(page: &Page, path: &std::path::Path) -> anyhow::Result<(
         .scene_frame()
         .map_err(|error| anyhow::anyhow!("scene frame failed: {error:?}"))?;
     let build_ms = started.elapsed().as_secs_f64() * 1000.0;
+    // A second build of the unchanged page: the steady-state cost of a
+    // content-change frame once images are decoded.
+    let again = std::time::Instant::now();
+    let rebuilt = page.scene_frame().ok();
+    let rebuild_ms = again.elapsed().as_secs_f64() * 1000.0;
+    let rebuild_paint_ms = rebuilt.as_ref().map(|frame| frame.stats.paint_ms);
     let mut resources = Vec::new();
     for image in &built.images {
         resources.push(rs::Resource::Image {
@@ -128,6 +134,8 @@ pub fn write_scene_dump(page: &Page, path: &std::path::Path) -> anyhow::Result<(
     let summary = serde_json::json!({
         "buildMs": build_ms,
         "paintMs": built.stats.paint_ms,
+        "rebuildMs": rebuild_ms,
+        "rebuildPaintMs": rebuild_paint_ms,
         "assembleMs": built.stats.assemble_ms,
         "encodeMs": encode_ms,
         "document": [built.stats.document.0, built.stats.document.1],

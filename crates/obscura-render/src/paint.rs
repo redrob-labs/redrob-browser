@@ -6162,7 +6162,7 @@ fn paint_inline_fragment_decorations(
         let background_origin = background_geometry(&union, style).origin_rect;
         let background_path = background_clip_path(background);
         let element_clip_mask = background_extra_clip(ancestor_clip_mask, clip_path_mask.as_ref());
-        let background_mask = element_clip_mask.clone();
+        let background_mask = element_clip_mask.as_ref().map(crate::canvas::clone_mask);
 
         if let Some(shadow) = fragment_style.box_shadow {
             paint_box_shadow(
@@ -10097,7 +10097,7 @@ fn paint_in_flow_generated_box(
     let background_path = background_clip_path(background);
     let element_clip_mask =
         background_extra_clip(ancestor_clip_mask.as_ref(), clip_path_mask.as_ref());
-    let background_mask = element_clip_mask.clone();
+    let background_mask = element_clip_mask.as_ref().map(crate::canvas::clone_mask);
     if style.mask_image.is_none() && !style.background_clip_text {
         if let (Some(color), Some(path)) = (style.background_color, background_path.as_ref()) {
             let mut paint = Paint::default();
@@ -10339,7 +10339,7 @@ fn paint_positioned_pseudo(
     let background_path = background_clip_path(background);
     let element_clip_mask =
         background_extra_clip(ancestor_clip_mask.as_ref(), clip_path_mask.as_ref());
-    let background_mask = element_clip_mask.clone();
+    let background_mask = element_clip_mask.as_ref().map(crate::canvas::clone_mask);
     if style.mask_image.is_none() && !style.background_clip_text {
         if let (Some(color), Some(path)) = (style.background_color, background_path.as_ref()) {
             let mut paint = Paint::default();
