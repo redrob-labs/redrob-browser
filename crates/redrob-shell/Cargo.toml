@@ -39,8 +39,10 @@ sha2 = "0.10"
 ureq = { version = "2.9", features = ["json"] }
 url = { workspace = true }
 gstreamer = { version = "0.25", optional = true }
-vello = { version = "0.11", optional = true }
-serde = { workspace = true, optional = true }
+vello = "0.11"
+# Validates engine fonts before vello draws them (vello panics on a bad face).
+skrifa = "0.44"
+redrob-scene = { workspace = true }
 gstreamer-app = { version = "0.25", optional = true }
 gstreamer-video = { version = "0.25", optional = true }
 open = "5"
@@ -69,7 +71,3 @@ default = []
 # Video and audio playback through GStreamer (docs/MEDIA.md). Needs the
 # GStreamer development files at build time and its runtime when running.
 media = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
-# Raster page tiles on the GPU with vello from the engine's display lists
-# (docs/GPU-PAINT.md, phase B). Needs an engine built with
-# obscura-cli/display-list; without one, tiles stay PNG captures.
-gpu = ["dep:vello", "dep:serde"]
