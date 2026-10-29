@@ -968,3 +968,18 @@ fn push_button_inputs_ignore_inherited_line_height() {
     assert_eq!(height(&tree, &laid, "a"), 24.0);
     assert_eq!(height(&tree, &laid, "b"), 30.0);
 }
+
+#[test]
+fn web_font_kerning_rounds_separately_from_the_advance() {
+    // Chrome, Liberation Sans served as a 17px web font: "T" 10, "y" 9,
+    // "Ty" 18 (the kerning rounds on its own), "AV" 21, "To" 17.
+    let fonts = [web_font(super::fonts::SANS_R, "W", None)];
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:17px W'>\
+         <div><span id=a>Ty</span></div><div><span id=d>AV</span></div><div><span id=e>To</span></div>",
+        &fonts,
+    );
+    assert_eq!(width(&tree, &laid, "a"), 18.0);
+    assert_eq!(width(&tree, &laid, "d"), 21.0);
+    assert_eq!(width(&tree, &laid, "e"), 17.0);
+}
