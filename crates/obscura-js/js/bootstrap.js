@@ -5566,13 +5566,24 @@ class Element extends Node {
     }
     return document.body || null;
   }
+  // offsetTop/offsetLeft are layout positions: scrolling the offsetParent
+  // or a scroller between it and the element does not change them.
+  _offsetScroll(parent, axis) {
+    let total = 0;
+    for (let a = this.parentElement; a; a = a.parentElement) {
+      if (a.tagName === 'HTML' || a.tagName === 'BODY') break;
+      total += axis === 'y' ? (a.scrollTop || 0) : (a.scrollLeft || 0);
+      if (a === parent) break;
+    }
+    return total;
+  }
   get offsetTop() {
     if (this.namespaceURI !== 'http://www.w3.org/1999/xhtml') return undefined;
     if (!this.isConnected || this._renderBoxGeometry() === null) return 0;
     const rect = this.getBoundingClientRect();
     const parent = this.offsetParent;
     const value = parent
-      ? rect.top - parent.getBoundingClientRect().top - parent.clientTop
+      ? rect.top - parent.getBoundingClientRect().top - parent.clientTop + this._offsetScroll(parent, 'y')
       : rect.top + (globalThis.scrollY || 0);
     return Math.round(value);
   }
@@ -5582,7 +5593,7 @@ class Element extends Node {
     const rect = this.getBoundingClientRect();
     const parent = this.offsetParent;
     const value = parent
-      ? rect.left - parent.getBoundingClientRect().left - parent.clientLeft
+      ? rect.left - parent.getBoundingClientRect().left - parent.clientLeft + this._offsetScroll(parent, 'x')
       : rect.left + (globalThis.scrollX || 0);
     return Math.round(value);
   }
