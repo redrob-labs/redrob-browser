@@ -6252,6 +6252,7 @@ fn layout_dom_once(
         },
     );
     grow_trailing_auto_cells(tree, &mut styles);
+    shrink_block_level_buttons(tree, &mut styles);
 
     let descendants = tree.descendants(tree.document());
     // Style and script text never renders, and is often megabytes of CSS.
@@ -9246,6 +9247,46 @@ fn container_snapshot(tree: &DomTree, layout: &DomLayout) -> crate::css::Contain
 /// layout intent (fixed-size leading cells, one expanding trailing cell) and
 /// leaves the others shrink-to-fit, matching a shrink-to-fit table exactly
 /// when there is no surplus width to distribute in the first place.
+/// A block-level `<button>` (display: block, flex or grid) with `width:
+/// auto` in block flow shrinks to fit like an inline-block one (Chrome: the
+/// flex button in a 600px block is 158px wide). As a flex or grid item it
+/// keeps the container's sizing (grid items stretch).
+fn shrink_block_level_buttons(tree: &DomTree, styles: &mut HashMap<NodeId, crate::LayoutStyle>) {
+    let buttons: Vec<NodeId> = styles
+        .iter()
+        .filter(|(_, style)| {
+            style.width == crate::Dimension::Auto
+                && !style.width_set
+                && !style.is_inline_block
+                && style.float.is_none()
+                && matches!(
+                    style.display,
+                    crate::Display::Block | crate::Display::Flex | crate::Display::Grid
+                )
+        })
+        .map(|(id, _)| *id)
+        .filter(|id| {
+            tree.borrow_node(*id).is_some_and(|node| {
+                node.as_element()
+                    .is_some_and(|element| element.local.as_ref() == "button")
+            })
+        })
+        .collect();
+    for id in buttons {
+        let in_block_flow = rendered_parent(tree, id)
+            .and_then(|parent| styles.get(&parent))
+            .is_some_and(|parent| {
+                !matches!(parent.display, crate::Display::Flex | crate::Display::Grid)
+                    && !parent.internal_flex_container
+            });
+        if in_block_flow {
+            if let Some(style) = styles.get_mut(&id) {
+                style.width_fit_content = true;
+            }
+        }
+    }
+}
+
 fn grow_trailing_auto_cells(tree: &DomTree, styles: &mut HashMap<NodeId, crate::LayoutStyle>) {
     let is_tag = |id: NodeId, tags: &[&str]| -> bool {
         match tree

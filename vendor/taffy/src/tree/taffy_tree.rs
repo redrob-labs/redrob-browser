@@ -1144,7 +1144,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
 
     /// Marks the layout of this node and its ancestors as outdated
     pub fn mark_dirty(&mut self, node: NodeId) -> TaffyResult<()> {
-        fn mark_dirty_recursive(
+        fn mark_dirty_to_root(
             nodes: &mut SlotMap<DefaultKey, NodeData>,
             parents: &SlotMap<DefaultKey, Option<NodeId>>,
             node_key: DefaultKey,
@@ -1152,14 +1152,16 @@ impl<NodeContext> TaffyTree<NodeContext> {
             // Always continue to the root: an empty cache does not mean the ancestors are dirty.
             // Nodes laid out beside floats (inline roots, float-sensitive boxes and blocks in a
             // block formatting context with floats) skip the cache, so theirs stays empty while
-            // their ancestors keep cached results that must be invalidated.
-            let _ = nodes[node_key].mark_dirty();
-            if let Some(Some(node)) = parents.get(node_key) {
-                mark_dirty_recursive(nodes, parents, (*node).into());
+            // their ancestors keep cached results that must be invalidated. Iterative, so a deep
+            // tree cannot overflow the stack.
+            let mut current = Some(node_key);
+            while let Some(key) = current {
+                let _ = nodes[key].mark_dirty();
+                current = parents.get(key).copied().flatten().map(Into::into);
             }
         }
 
-        mark_dirty_recursive(&mut self.nodes, &self.parents, node.into());
+        mark_dirty_to_root(&mut self.nodes, &self.parents, node.into());
 
         Ok(())
     }

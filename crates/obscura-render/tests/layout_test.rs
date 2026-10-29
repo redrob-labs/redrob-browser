@@ -1982,10 +1982,15 @@ fn text_alignment_does_not_shrink_block_children_or_wrap_inline_block_rows() {
         (row.width - 900.0).abs() < 0.01,
         "text-align must not shrink-wrap an auto-width block child: {row:?}"
     );
+    // Chrome: one line; "Why Vue" sits on its text baseline (y=26) while the
+    // empty inline-blocks sit on their bottom edges (y=0), x 230/340/450/560.
     assert!(
         items
-            .windows(2)
-            .all(|pair| (pair[0].y - pair[1].y).abs() < 0.01),
+            .iter()
+            .zip([230.0, 340.0, 450.0, 560.0])
+            .all(|(item, x)| (item.x - x).abs() < 0.5)
+            && (items[0].y - 26.0).abs() < 0.5
+            && items[1..].iter().all(|item| item.y.abs() < 0.01),
         "inline-block items should share one line when the block has room: {items:?}"
     );
     assert!(
@@ -2032,8 +2037,12 @@ fn non_replaced_inline_ignores_used_width_height_and_min_max_sizes() {
         token.height < 40.0,
         "height/min-height/max-height do not apply to a non-replaced inline: {token:?}"
     );
+    // Chrome: same line; the monospace font box is 18px and the serif one
+    // 17px, so their tops are y=2 and y=1 (after at x=76.69).
     assert!(
-        after.x >= token.x + token.width - 0.01 && (after.y - token.y).abs() < 0.01,
+        after.x >= token.x + token.width - 0.01
+            && (token.y - 2.0).abs() < 0.01
+            && (after.y - 1.0).abs() < 0.01,
         "the following inline must remain on the same line: {token:?} {after:?}"
     );
 }
