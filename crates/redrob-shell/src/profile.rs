@@ -27,9 +27,34 @@ pub struct SavedTab {
     pub title: String,
 }
 
+/// Where a window was on screen, in points: its outer top-left corner and
+/// the size of its content area.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Bounds {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+/// A window as it is restored on the next start.
+pub struct SavedWindow {
+    pub tabs: Vec<SavedTab>,
+    pub active: usize,
+    pub bounds: Option<Bounds>,
+    pub maximized: bool,
+}
+
+/// A window as it is saved: its tabs in strip order and which is active.
+pub struct SessionWindow<'a> {
+    pub model: &'a Model,
+    pub bounds: Option<Bounds>,
+    pub maximized: bool,
+}
+
 impl Profile {
     pub fn open_default() -> anyhow::Result<Self> {
-        Self::open(&data_dir().join("redrob-browser").join("Default"))
+        Self::open(&default_dir())
     }
 
     pub fn open(dir: &Path) -> anyhow::Result<Self> {
@@ -60,6 +85,14 @@ impl Profile {
                  title TEXT NOT NULL DEFAULT '',
                  active INTEGER NOT NULL DEFAULT 0
              );
+             CREATE TABLE IF NOT EXISTS session_windows (
+                 window INTEGER PRIMARY KEY,
+                 x REAL,
+                 y REAL,
+                 width REAL,
+                 height REAL,
+                 maximized INTEGER NOT NULL DEFAULT 0
+             );
              CREATE TABLE IF NOT EXISTS settings (
                  key TEXT PRIMARY KEY,
                  value TEXT NOT NULL
@@ -74,6 +107,13 @@ impl Profile {
                  started INTEGER NOT NULL
              );",
         )?;
+        // Profiles from before several windows were saved: every tab is in window 0.
+        let has_window: bool = db
+            .prepare("SELECT 1 FROM pragma_table_info('session') WHERE name = 'window'")?
+            .exists([])?;
+        if !has_window {
+            db.execute_batch("ALTER TABLE session ADD COLUMN window INTEGER NOT NULL DEFAULT 0")?;
+        }
         Ok(Self {
             dir: dir.to_path_buf(),
             db,
@@ -207,45 +247,112 @@ impl Profile {
         Ok(())
     }
 
-    pub fn save_session(&mut self, model: &Model) -> anyhow::Result<()> {
+    /// Save every window with its tabs, their order, the active tab and the
+    /// window's place on screen. Positions run across windows, so the order
+    /// of windows and of tabs within each comes back as it was.
+    pub fn save_session(&mut self, windows: &[SessionWindow<'_>]) -> anyhow::Result<()> {
         let tx = self.db.transaction()?;
         tx.execute("DELETE FROM session", [])?;
-        for (i, t) in model.tabs.iter().enumerate() {
-            if t.agent {
-                // Agent tabs belong to the agent's task, not to the person's session.
+        tx.execute("DELETE FROM session_windows", [])?;
+        let mut position = 0i64;
+        let mut saved_windows = 0i64;
+        for w in windows {
+            let mut saved_any = false;
+            for (i, t) in w.model.tabs.iter().enumerate() {
+                if t.agent {
+                    // Agent tabs belong to the agent's task, not to the person's session.
+                    continue;
+                }
+                tx.execute(
+                    "INSERT INTO session (position, url, title, active, window) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![position, t.url, t.title, (i == w.model.active) as i64, saved_windows],
+                )?;
+                position += 1;
+                saved_any = true;
+            }
+            if !saved_any {
                 continue;
             }
+            let b = w.bounds;
             tx.execute(
-                "INSERT INTO session (position, url, title, active) VALUES (?1, ?2, ?3, ?4)",
-                params![i as i64, t.url, t.title, (i == model.active) as i64],
+                "INSERT INTO session_windows (window, x, y, width, height, maximized) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    saved_windows,
+                    b.map(|b| b.x as f64),
+                    b.map(|b| b.y as f64),
+                    b.map(|b| b.width as f64),
+                    b.map(|b| b.height as f64),
+                    w.maximized as i64
+                ],
             )?;
+            saved_windows += 1;
         }
         tx.commit()?;
         Ok(())
     }
 
-    /// The tabs open when the browser last closed, and which was active.
-    pub fn load_session(&self) -> anyhow::Result<(Vec<SavedTab>, usize)> {
+    /// The windows open when the browser last closed, in order, each with its
+    /// tabs and which was active.
+    pub fn load_session(&self) -> anyhow::Result<Vec<SavedWindow>> {
         let mut q = self
             .db
-            .prepare("SELECT url, title, active FROM session ORDER BY position")?;
-        let mut active = 0;
-        let mut tabs = Vec::new();
+            .prepare("SELECT url, title, active, window FROM session ORDER BY window, position")?;
         let rows = q.query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })?;
+        let mut windows: Vec<(i64, SavedWindow)> = Vec::new();
+        for row in rows {
+            let (url, title, is_active, window) = row?;
+            if windows.last().is_none_or(|(w, _)| *w != window) {
+                windows.push((
+                    window,
+                    SavedWindow {
+                        tabs: Vec::new(),
+                        active: 0,
+                        bounds: None,
+                        maximized: false,
+                    },
+                ));
+            }
+            let w = &mut windows.last_mut().expect("just pushed").1;
+            if is_active != 0 {
+                w.active = w.tabs.len();
+            }
+            w.tabs.push(SavedTab { url, title });
+        }
+        let mut q = self
+            .db
+            .prepare("SELECT window, x, y, width, height, maximized FROM session_windows")?;
+        let rows = q.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, Option<f64>>(1)?,
+                r.get::<_, Option<f64>>(2)?,
+                r.get::<_, Option<f64>>(3)?,
+                r.get::<_, Option<f64>>(4)?,
+                r.get::<_, i64>(5)?,
             ))
         })?;
         for row in rows {
-            let (url, title, is_active) = row?;
-            if is_active != 0 {
-                active = tabs.len();
+            let (window, x, y, width, height, maximized) = row?;
+            if let Some((_, w)) = windows.iter_mut().find(|(id, _)| *id == window) {
+                if let (Some(x), Some(y), Some(width), Some(height)) = (x, y, width, height) {
+                    w.bounds = Some(Bounds {
+                        x: x as f32,
+                        y: y as f32,
+                        width: width as f32,
+                        height: height as f32,
+                    });
+                }
+                w.maximized = maximized != 0;
             }
-            tabs.push(SavedTab { url, title });
         }
-        Ok((tabs, active))
+        Ok(windows.into_iter().map(|(_, w)| w).collect())
     }
 
     pub fn record_download(&self, d: &crate::model::DownloadItem) -> anyhow::Result<()> {
@@ -279,6 +386,11 @@ impl Profile {
         )?;
         Ok(())
     }
+}
+
+/// The default profile's folder.
+pub fn default_dir() -> PathBuf {
+    data_dir().join("redrob-browser").join("Default")
 }
 
 /// The OS per-user data folder.
