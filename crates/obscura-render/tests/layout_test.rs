@@ -2246,7 +2246,9 @@ fn inline_block_flex_items_keep_block_inner_flow() {
         (chips.x - 0.0).abs() < 0.01
             && (chips.y - 140.0).abs() < 0.01
             && (chips.width - 90.0).abs() < 0.01
-            && (chips.height - 20.0).abs() < 0.01
+            // Chrome: 24px (the line box holds the inline-block items on
+            // the baseline plus the strut's descent).
+            && (chips.height - 24.0).abs() < 0.01
             && (alpha.x - 0.0).abs() < 0.01
             && (beta.x - 30.0).abs() < 0.01
             && (gamma.x - 60.0).abs() < 0.01,
@@ -4109,6 +4111,7 @@ fn negative_letter_spacing_changes_intrinsic_line_breaks() {
             line-height:40px;
             font-weight:500;
             padding-inline:8px;
+            font-family:Arial;
           }
           #tight { letter-spacing:var(--tracking-tighter) }
           #reset { letter-spacing:normal }
@@ -4512,14 +4515,16 @@ fn percentage_height_inside_floated_and_inline_block_controls_uses_content_box()
 
     assert_eq!(rect("floated").height, 44.0);
     assert_eq!(rect("inline").height, 44.0);
+    // Chrome: 38px. The buttons' 2px UA borders and 1px padding come off
+    // the 44px border box on both axes of the percentage basis.
     assert_eq!(
         rect("float-icon").height,
-        42.0,
+        38.0,
         "a floated containing block retains its definite content-box basis"
     );
     assert_eq!(
         rect("inline-icon").height,
-        42.0,
+        38.0,
         "border-box padding must not leak into the child percentage basis"
     );
 }
