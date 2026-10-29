@@ -22543,7 +22543,7 @@ mod tests {
                 tokio::time::timeout(std::time::Duration::from_millis(500), listener.accept()).await
             {
                 let mut buffer = [0u8; 4096];
-                stream.read(&mut buffer).await.unwrap();
+                let _request_len = stream.read(&mut buffer).await.unwrap();
                 stream
                     .write_all(
                         b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\
@@ -22687,7 +22687,7 @@ mod tests {
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut request = [0u8; 4096];
-            stream.read(&mut request).await.unwrap();
+            let _request_len = stream.read(&mut request).await.unwrap();
             stream
                 .write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\
@@ -22886,7 +22886,7 @@ mod tests {
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut request = [0u8; 4096];
-            stream.read(&mut request).await.unwrap();
+            let _request_len = stream.read(&mut request).await.unwrap();
             if after_headers {
                 stream
                     .write_all(
@@ -22993,7 +22993,7 @@ mod tests {
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut request = [0u8; 4096];
-            stream.read(&mut request).await.unwrap();
+            let _request_len = stream.read(&mut request).await.unwrap();
             stream
                 .write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\
@@ -23747,7 +23747,7 @@ mod tests {
                 for _ in 0..3 {
                     let (mut stream, _) = listener.accept().unwrap();
                     let mut request = [0u8; 4096];
-                    stream.read(&mut request).unwrap();
+                    let _request_len = stream.read(&mut request).unwrap();
                     write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/javascript\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", BODY.len(), BODY).unwrap();
                 }
             });
@@ -25538,7 +25538,7 @@ mod tests {
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0; 2048];
-            stream.read(&mut request).unwrap();
+            let _request_len = stream.read(&mut request).unwrap();
             // Close before sending headers, rather than returning an HTTP error.
         });
         let url = format!("http://{address}/entry.js");
@@ -25575,7 +25575,7 @@ mod tests {
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut request = [0; 2048];
-            stream.read(&mut request).await.unwrap();
+            let _request_len = stream.read(&mut request).await.unwrap();
             std::future::pending::<()>().await;
         });
         let url = format!("http://{address}/entry.js");

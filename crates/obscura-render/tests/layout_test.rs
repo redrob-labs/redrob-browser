@@ -1175,14 +1175,13 @@ fn long_text_run_wraps_across_multiple_lines() {
     // Tightest element enclosing the text: the 100px div itself.
     let mut div_rect: Option<obscura_render::Rect> = None;
     for (id, rect) in &layout.rects {
-        if tree.text_content(*id).contains("several lines") {
-            if div_rect
+        if tree.text_content(*id).contains("several lines")
+            && div_rect
                 .as_ref()
                 .map(|d| rect.width * rect.height < d.width * d.height)
                 .unwrap_or(true)
-            {
-                div_rect = Some(*rect);
-            }
+        {
+            div_rect = Some(*rect);
         }
     }
     let div_rect = div_rect.expect("text container laid out");
@@ -3792,7 +3791,7 @@ fn percentage_max_replaced_items_shrink_in_a_flex_row() {
     let columns =
         ["c1", "c2", "c3", "c4", "c5"].map(|id| layout.rects[&tree.get_element_by_id(id).unwrap()]);
     let images = ids.map(|id| layout.rects[&id]);
-    let expected_widths: [f32; 5] = [233.328125, 154.0, 385.03125, 154.015625, 225.625];
+    let expected_widths: [f32; 5] = [233.328_12, 154.0, 385.031_25, 154.015_63, 225.625];
 
     assert!((row.width - 1184.0).abs() < 0.01, "{row:?}");
     assert!(
@@ -3861,7 +3860,7 @@ fn functional_percentage_max_replaced_items_shrink_in_a_flex_row() {
     let columns =
         ["c1", "c2", "c3", "c4", "c5"].map(|id| layout.rects[&tree.get_element_by_id(id).unwrap()]);
     let images = ids.map(|id| layout.rects[&id]);
-    let expected_widths: [f32; 5] = [233.328125, 154.0, 385.03125, 154.015625, 225.625];
+    let expected_widths: [f32; 5] = [233.328_12, 154.0, 385.031_25, 154.015_63, 225.625];
 
     for (index, expected) in expected_widths.into_iter().enumerate() {
         let expected = expected.round();

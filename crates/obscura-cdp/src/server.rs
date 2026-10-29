@@ -3088,7 +3088,7 @@ mod tests {
             for _ in 0..3 {
                 let (mut stream, _) = http.accept().unwrap();
                 let mut request = [0u8; 2048];
-                stream.read(&mut request).unwrap();
+                let _request_len = stream.read(&mut request).unwrap();
                 std::thread::sleep(Duration::from_millis(20));
                 stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\nhydrated").unwrap();
             }
@@ -4103,7 +4103,7 @@ mod tests {
                 if script {
                     let (mut stream, _) = listener.accept().await.unwrap();
                     let mut buffer = [0; 2048];
-                    stream.read(&mut buffer).await.unwrap();
+                    let _request_len = stream.read(&mut buffer).await.unwrap();
                     let body = "<!doctype html><title>Partial</title><script src='/held.js'></script>";
                     let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
                     stream.write_all(response.as_bytes()).await.unwrap();

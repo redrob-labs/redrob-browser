@@ -53,7 +53,7 @@ async fn attach_to(ctx: &mut CdpContext, target_id: &str, id: u64) -> String {
         .to_string()
 }
 
-fn binding_calls<'a>(ctx: &'a CdpContext) -> Vec<(&'a str, &'a Value)> {
+fn binding_calls(ctx: &CdpContext) -> Vec<(&str, &Value)> {
     ctx.pending_events
         .iter()
         .filter(|e| e.method == "Runtime.bindingCalled")
