@@ -2549,6 +2549,9 @@ impl PreparedRender {
     /// The box's rect with its 1/64 px used size (Chrome's LayoutUnit)
     /// instead of the whole-pixel size paint snaps to.
     fn fractional_rect(&self, id: obscura_dom::tree::NodeId) -> Option<crate::Rect> {
+        if let Some(rect) = self.layout.fractional_rects.get(&id) {
+            return Some(*rect);
+        }
         let mut rect = self.layout.rects.get(&id).copied()?;
         if let Some(&(width, height)) = self.layout.fractional_sizes.get(&id) {
             if (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0 {

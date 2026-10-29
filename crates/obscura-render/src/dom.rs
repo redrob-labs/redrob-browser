@@ -273,6 +273,10 @@ pub struct DomLayout {
     /// they differ from the pixel-rounded rect by less than a pixel. CSSOM
     /// `width`/`height` report these, as Chrome does.
     pub(crate) fractional_sizes: HashMap<NodeId, (f32, f32)>,
+    /// Unrounded Taffy border boxes snapped to 1/64 px (Blink's
+    /// LayoutUnit), for CSSOM geometry; `rects` keeps the whole-pixel
+    /// boxes paint uses.
+    pub(crate) fractional_rects: HashMap<NodeId, Rect>,
     /// Per-line border-box fragments for ordinary non-replaced inline
     /// elements. `rects` retains their union for `getBoundingClientRect()`;
     /// this list is the source for background/border painting and
@@ -6308,6 +6312,7 @@ fn layout_dom_once(
     let mut grid_tracks = HashMap::new();
     let mut used_auto_margins = HashMap::new();
     let mut fractional_sizes = HashMap::new();
+    let mut fractional_rects = HashMap::new();
     let mut inline_fragments = HashMap::new();
     let mut text_runs = HashMap::new();
     let mut generated_rects: Vec<Option<Rect>> = Vec::new();
@@ -8979,6 +8984,8 @@ fn layout_dom_once(
             grid_tracks = collect_grid_tracks(&taffy_tree, &id_map);
             used_auto_margins = collect_used_auto_margins(&taffy_tree, &id_map, &styles);
             fractional_sizes = collect_fractional_sizes(&taffy_tree, &id_map, &rects);
+            fractional_rects =
+                collect_fractional_rects(&taffy_tree, taffy_root, initial_cb_x, &id_map, &rects);
             inline_fragments = place_inline_content(
                 &taffy_tree,
                 initial_cb_x,
@@ -9078,6 +9085,7 @@ fn layout_dom_once(
             grid_tracks,
             used_auto_margins,
             fractional_sizes,
+            fractional_rects,
             inline_fragments,
             styles,
             custom_properties,
@@ -10078,12 +10086,57 @@ fn collect_grid_tracks(
 
 /// Unrounded Taffy sizes snapped to 1/64 px for boxes whose final rect is
 /// the rounded Taffy size (the engine adjusts some rects after layout).
+/// Every DOM box's unrounded Taffy border box in document coordinates,
+/// snapped to 1/64 px, where it agrees with the final whole-pixel rect to
+/// within a pixel on every edge (boxes the engine adjusts after layout keep
+/// their final rect).
+fn collect_fractional_rects(
+    taffy_tree: &TaffyTree<usize>,
+    root: taffy::NodeId,
+    initial_cb_x: f32,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    rects: &HashMap<NodeId, Rect>,
+) -> HashMap<NodeId, Rect> {
+    // Blink converts CSS lengths to LayoutUnits by truncation (13.9px is
+    // 13.890625); the epsilon keeps float noise on exact values.
+    let snap = |value: f32| (value * 64.0 + 1e-3).floor() / 64.0;
+    let mut out = HashMap::new();
+    // An explicit stack: (node, parent's absolute unrounded origin).
+    let mut stack = vec![(root, initial_cb_x, 0.0f32)];
+    while let Some((node, parent_x, parent_y)) = stack.pop() {
+        let layout = taffy_tree.unrounded_layout(node);
+        let x = parent_x + layout.location.x;
+        let y = parent_y + layout.location.y;
+        if let Some(dom_id) = id_map.get(&node) {
+            if let Some(rounded) = rects.get(dom_id) {
+                let rect = Rect {
+                    x: snap(x),
+                    y: snap(y),
+                    width: snap(layout.size.width),
+                    height: snap(layout.size.height),
+                };
+                let close = (rect.x - rounded.x).abs() < 1.0
+                    && (rect.y - rounded.y).abs() < 1.0
+                    && (rect.width - rounded.width).abs() < 1.0
+                    && (rect.height - rounded.height).abs() < 1.0;
+                if close && rect != *rounded {
+                    out.insert(*dom_id, rect);
+                }
+            }
+        }
+        for child in taffy_tree.children(node).unwrap_or_default() {
+            stack.push((child, x, y));
+        }
+    }
+    out
+}
+
 fn collect_fractional_sizes(
     taffy_tree: &TaffyTree<usize>,
     id_map: &HashMap<taffy::NodeId, NodeId>,
     rects: &HashMap<NodeId, Rect>,
 ) -> HashMap<NodeId, (f32, f32)> {
-    let snap = |value: f32| (value * 64.0).round() / 64.0;
+    let snap = |value: f32| (value * 64.0 + 1e-3).floor() / 64.0;
     id_map
         .iter()
         .filter_map(|(&taffy_id, &dom_id)| {
@@ -21741,6 +21794,23 @@ mod tests {
         assert_eq!((rect("a").width, rect("a").height.round()), (612.0, 335.0));
         assert_eq!((rect("b").width, rect("b").height), (612.0, 285.0));
         assert_eq!((rect("c").width, rect("c").height.round()), (500.0, 282.0));
+    }
+
+    // Chrome getBoundingClientRect: 13.9px and 15.9px flex items are
+    // 13.890625 and 15.890625 wide (LayoutUnit truncation) and the second
+    // starts at 13.890625; paint keeps whole-pixel rects.
+    #[test]
+    fn cssom_rects_keep_layout_unit_fractions() {
+        let tree = parse_html(
+            r#"<!doctype html><body style="margin:0"><div style="display:flex"><div id=a style="width:13.9px;height:10px"></div><div id=b style="width:15.9px;height:10.5px"></div></div>"#,
+        );
+        let laid = layout_dom(&tree, (400.0, 200.0));
+        let frac = |id: &str| laid.fractional_rects[&tree.get_element_by_id(id).unwrap()];
+        assert_eq!(frac("a").width, 13.890625);
+        assert_eq!(
+            (frac("b").x, frac("b").width, frac("b").height),
+            (13.890625, 15.890625, 10.5)
+        );
     }
 
     /// Each line of text node `node`: (x, text), in line order.
