@@ -841,6 +841,11 @@ pub(crate) struct CssomValues {
     /// Resolved: the keyword-derived size before the monospace adjustment
     /// (`None` is medium, 16px).
     pub font_size_keyword_px: Option<f32>,
+    /// `border-*-color: inherit` from the UA sheet (row groups and rows),
+    /// per side [top, right, bottom, left]; an author color clears it.
+    pub border_color_inherit: [bool; 4],
+    /// Resolved border colors, kept for children that inherit them.
+    pub border_colors: Option<Sides<Option<[u8; 4]>>>,
 }
 
 impl CssomValues {
@@ -855,6 +860,31 @@ impl CssomValues {
         if self.vertical_align == Some(VerticalAlignCss::Inherit) {
             self.vertical_align = parent.vertical_align;
         }
+    }
+
+    /// Apply `border-color: inherit` from the parent's resolved colors.
+    pub(crate) fn inherit_border_colors(
+        &self,
+        parent: &CssomValues,
+        colors: &mut Sides<Option<[u8; 4]>>,
+    ) -> bool {
+        let Some(from) = parent.border_colors else {
+            return false;
+        };
+        let [top, right, bottom, left] = self.border_color_inherit;
+        if top {
+            colors.top = from.top;
+        }
+        if right {
+            colors.right = from.right;
+        }
+        if bottom {
+            colors.bottom = from.bottom;
+        }
+        if left {
+            colors.left = from.left;
+        }
+        top || right || bottom || left
     }
 }
 

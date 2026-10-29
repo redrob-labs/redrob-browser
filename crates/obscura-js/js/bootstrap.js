@@ -4062,6 +4062,8 @@ const _innerTextBlockDisplays = new Set([
   'block', 'flow-root', 'flex', 'grid', 'list-item', 'table', 'table-caption',
 ]);
 
+const _innerTextUnrenderedTags = new Set(['noscript', 'source', 'track', 'option', 'optgroup']);
+
 function _collectInnerText(node, items, inheritedVisibility = 'visible') {
   if (node.nodeType === 3) {
     if (inheritedVisibility === 'visible') items.push(node.data ?? '');
@@ -4072,6 +4074,11 @@ function _collectInnerText(node, items, inheritedVisibility = 'visible') {
   const style = getComputedStyle(node);
   const display = style.display;
   if (display === 'none') return;
+  // Elements the UA hides without display:none generate no box, so they
+  // are not being rendered (noscript with scripting on, media sources,
+  // options outside the select popup).
+  if (node.namespaceURI === 'http://www.w3.org/1999/xhtml'
+      && _innerTextUnrenderedTags.has(node.localName)) return;
   const visibility = style.visibility || inheritedVisibility;
   if (visibility === 'visible' && node.tagName === 'BR') {
     items.push('\n');

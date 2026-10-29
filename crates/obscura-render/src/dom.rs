@@ -7243,6 +7243,16 @@ fn layout_dom_once(
                     None => style.font_family = inh.font_family.clone(),
                 }
                 style.cssom.inherit_from(&inh.cssom);
+                let mut colors = style.border_model.colors;
+                if style.cssom.inherit_border_colors(&inh.cssom, &mut colors) {
+                    style.border_model.colors = colors;
+                    style.border_color = (colors.top == colors.right
+                        && colors.right == colors.bottom
+                        && colors.bottom == colors.left)
+                        .then_some(colors.top)
+                        .flatten();
+                }
+                style.cssom.border_colors = Some(style.border_model.colors);
                 inh.cssom.clone_from(&style.cssom);
                 match style.font_optical_sizing {
                     Some(value) => inh.font_optical_sizing = value,

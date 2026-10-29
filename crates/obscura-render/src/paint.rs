@@ -2181,7 +2181,7 @@ impl PreparedRender {
 
         out.insert(
             "flex-direction",
-            match if style.internal_flex_container {
+            match if style.internal_flex_container || style.css_display != crate::CssDisplay::Layout {
                 style.cssom.flex_direction
             } else {
                 style.flex_direction
@@ -2206,7 +2206,7 @@ impl PreparedRender {
         );
         out.insert(
             "align-items",
-            if style.internal_flex_container {
+            if style.internal_flex_container || style.css_display != crate::CssDisplay::Layout {
                 style.cssom.align_items
             } else {
                 style.align_items

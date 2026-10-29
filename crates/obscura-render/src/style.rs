@@ -531,6 +531,8 @@ fn apply_ua_sheet_extras(tag: &str, style: &mut LayoutStyle) {
             style.color = Some([0, 0, 0, 255]);
         }
         "summary" => style.css_display = crate::CssDisplay::ListItem,
+        // `thead, tbody, tfoot, tr { border-color: inherit }`.
+        "thead" | "tbody" | "tfoot" | "tr" => style.cssom.border_color_inherit = [true; 4],
         "label" => style.cursor = Some(crate::Cursor::Default),
         _ => {}
     }
@@ -1044,6 +1046,18 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
 /// Record the specified values CSSOM reports where layout keeps its own
 /// emulated value (`LayoutStyle::cssom`).
 fn apply_cssom_value(style: &mut LayoutStyle, name: &str, value: &str) {
+    if style
+        .cssom
+        .border_color_inherit
+        .iter()
+        .any(|&inherit| inherit)
+    {
+        for (index, side) in ["top", "right", "bottom", "left"].into_iter().enumerate() {
+            if declaration_sets(name, &format!("border-{side}-color")) {
+                style.cssom.border_color_inherit[index] = false;
+            }
+        }
+    }
     if !style.cssom.ua_overrides.is_empty() {
         style
             .cssom
