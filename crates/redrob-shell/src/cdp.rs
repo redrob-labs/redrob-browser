@@ -692,7 +692,8 @@ async fn handle(st: &mut State, window: WindowId, tab: TabId, op: Op) -> anyhow:
             st.tab_window.insert(tab, window);
             let (w, h, scale) = st.size_of(tab);
             if before != (w, h, scale) {
-                let params = json!({ "width": w, "height": h, "deviceScaleFactor": scale, "mobile": false });
+                let params =
+                    json!({ "width": w, "height": h, "deviceScaleFactor": scale, "mobile": false });
                 st.c.call(s, "Emulation.setDeviceMetricsOverride", params)
                     .await?;
             }

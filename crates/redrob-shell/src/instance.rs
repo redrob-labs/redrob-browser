@@ -83,7 +83,9 @@ pub fn claim(paths: &Paths, url: Option<&str>) -> anyhow::Result<Claim> {
             match hand_over(addr.trim(), url) {
                 Ok(()) => return Ok(Claim::Handed),
                 Err(e) if Instant::now() > deadline => {
-                    anyhow::bail!("Redrob Browser is already running but did not open a window: {e}")
+                    anyhow::bail!(
+                        "Redrob Browser is already running but did not open a window: {e}"
+                    )
                 }
                 Err(_) => {}
             }

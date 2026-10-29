@@ -295,7 +295,11 @@ pub fn now() -> u64 {
 /// Address field text to a URL: a URL as typed, a bare host gets https, anything else is a search.
 pub fn to_url(input: &str) -> String {
     let s = input.trim();
-    if s.contains("://") || s.starts_with("about:") || s.starts_with("redrob:") {
+    if s.contains("://")
+        || s.starts_with("about:")
+        || s.starts_with("redrob:")
+        || s.starts_with("data:")
+    {
         return s.to_string();
     }
     let host = s.split('/').next().unwrap_or("");

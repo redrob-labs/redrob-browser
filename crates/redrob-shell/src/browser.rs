@@ -62,12 +62,19 @@ struct Shared {
     history: Vec<HistoryEntry>,
     downloads: Vec<DownloadItem>,
     closed: Vec<(String, String)>,
+    /// One GPU painter for all windows: a moved tab's GPU tiles stay valid.
+    #[cfg(feature = "gpu")]
+    gpu: Option<crate::gpu_paint::GpuPainter>,
 }
 
 impl Shared {
     fn lend(&mut self, w: &mut Window) {
         w.profile = self.profile.take();
         w.vault = self.vault.take();
+        #[cfg(feature = "gpu")]
+        {
+            w.gpu = self.gpu.take();
+        }
         std::mem::swap(&mut w.model.bookmarks, &mut self.bookmarks);
         std::mem::swap(&mut w.model.history, &mut self.history);
         std::mem::swap(&mut w.model.downloads, &mut self.downloads);
@@ -77,6 +84,10 @@ impl Shared {
     fn reclaim(&mut self, w: &mut Window) {
         self.profile = w.profile.take();
         self.vault = w.vault.take();
+        #[cfg(feature = "gpu")]
+        {
+            self.gpu = w.gpu.take();
+        }
         std::mem::swap(&mut w.model.bookmarks, &mut self.bookmarks);
         std::mem::swap(&mut w.model.history, &mut self.history);
         std::mem::swap(&mut w.model.downloads, &mut self.downloads);
@@ -109,8 +120,6 @@ pub struct Browser {
     session_saved_at: Instant,
     /// The session was saved for the last time; closing must not overwrite it.
     final_saved: bool,
-    #[cfg(feature = "gpu")]
-    render_state: Option<eframe::egui_wgpu::RenderState>,
 }
 
 /// The OS window for a browser window: undecorated except on macOS, at
@@ -248,6 +257,11 @@ impl Browser {
                 history: loaded.history,
                 downloads: Vec::new(),
                 closed: Vec::new(),
+                #[cfg(feature = "gpu")]
+                gpu: cc
+                    .wgpu_render_state
+                    .as_ref()
+                    .and_then(crate::gpu_paint::GpuPainter::new),
             },
             updates: upd_rx,
             commands: cmd_tx,
@@ -263,8 +277,6 @@ impl Browser {
             session_sig: 0,
             session_saved_at: Instant::now(),
             final_saved: false,
-            #[cfg(feature = "gpu")]
-            render_state: cc.wgpu_render_state.clone(),
         };
 
         let mut restore = start.restore;
@@ -353,11 +365,9 @@ impl Browser {
             tab_drag: None,
             top_sites: None,
             new_tab_query: String::new(),
+            // Lent from `Shared` while the window draws.
             #[cfg(feature = "gpu")]
-            gpu: self
-                .render_state
-                .as_ref()
-                .and_then(crate::gpu_paint::GpuPainter::new),
+            gpu: None,
         }
     }
 
@@ -369,7 +379,11 @@ impl Browser {
             .and_then(|i| self.windows.get(i))
             .and_then(|w| w.bounds);
         let bounds = match (at, source) {
-            (Some(p), Some(b)) => Some(Bounds { x: p.x, y: p.y, ..b }),
+            (Some(p), Some(b)) => Some(Bounds {
+                x: p.x,
+                y: p.y,
+                ..b
+            }),
             (Some(p), None) => Some(Bounds {
                 x: p.x,
                 y: p.y,
@@ -577,7 +591,13 @@ impl Browser {
                 (t.id, &t.url, &t.title, t.agent).hash(&mut h);
             }
             if let Some(b) = w.bounds {
-                (b.x.to_bits(), b.y.to_bits(), b.width.to_bits(), b.height.to_bits()).hash(&mut h);
+                (
+                    b.x.to_bits(),
+                    b.y.to_bits(),
+                    b.width.to_bits(),
+                    b.height.to_bits(),
+                )
+                    .hash(&mut h);
             }
             w.maximized.hash(&mut h);
             u8::MAX.hash(&mut h);
@@ -637,7 +657,11 @@ impl eframe::App for Browser {
         let ctx = ui.ctx().clone();
         self.route();
 
-        if let Some(i) = self.windows.iter().position(|w| w.viewport == ViewportId::ROOT) {
+        if let Some(i) = self
+            .windows
+            .iter()
+            .position(|w| w.viewport == ViewportId::ROOT)
+        {
             self.show(i, ui);
             if ctx.input(|i| i.viewport().close_requested()) && self.windows.len() > 1 {
                 // The process lives on for the other windows: this one only hides.
