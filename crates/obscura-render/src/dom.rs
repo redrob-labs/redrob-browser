@@ -335,6 +335,20 @@ impl OverflowClip {
         out
     }
 
+    /// The rectangular bounds; an axis this clip leaves open spans far
+    /// beyond any document.
+    pub(crate) fn scene_bounds(&self) -> Rect {
+        const OPEN: (f32, f32) = (-1.0e7, 1.0e7);
+        let (left, right) = self.x.unwrap_or(OPEN);
+        let (top, bottom) = self.y.unwrap_or(OPEN);
+        Rect {
+            x: left,
+            y: top,
+            width: (right - left).max(0.0),
+            height: (bottom - top).max(0.0),
+        }
+    }
+
     pub(crate) fn rounded_chain(&self) -> Option<&Arc<RoundedOverflowClipChain>> {
         self.rounded.as_ref()
     }
@@ -976,6 +990,63 @@ impl StickyLayout {
     pub fn is_empty(&self) -> bool {
         self.frames.is_empty()
     }
+
+    /// The sticky frame whose movement applies to `id` (itself or the
+    /// nearest sticky ancestor), if any.
+    pub(crate) fn owner_of(&self, id: NodeId) -> Option<NodeId> {
+        self.owners.get(&id).copied()
+    }
+
+    /// Every sticky frame with its constraints resolved to pixels, for the
+    /// GPU compositor's spatial tree (redrob-scene `SpatialKind::Sticky`).
+    /// Rects are document space at zero scroll, like the frames themselves.
+    pub(crate) fn scene_frames(
+        &self,
+        viewport: (f32, f32),
+        scroll_tree: &ScrollTree,
+    ) -> Vec<SceneStickyFrame> {
+        let _ = scroll_tree;
+        self.frames
+            .iter()
+            .map(|frame| {
+                let port = if frame.scroll_owner == ScrollId::ROOT {
+                    (viewport.0, viewport.1)
+                } else {
+                    (frame.scrollport.width, frame.scrollport.height)
+                };
+                let insets = [
+                    resolve_frame_sticky_inset(frame, 0, port.1, viewport),
+                    resolve_frame_sticky_inset(frame, 1, port.0, viewport),
+                    resolve_frame_sticky_inset(frame, 2, port.1, viewport),
+                    resolve_frame_sticky_inset(frame, 3, port.0, viewport),
+                ];
+                SceneStickyFrame {
+                    id: frame.id,
+                    parent_sticky: frame.parent_sticky,
+                    scroll_owner: frame.scroll_owner,
+                    normal: frame.normal,
+                    containing: frame.containing,
+                    containing_is_scrollport: frame.containing_is_scrollport,
+                    margin: frame.margin,
+                    insets,
+                }
+            })
+            .collect()
+    }
+}
+
+/// One sticky frame as the scene builder reads it.
+#[derive(Debug, Clone)]
+pub(crate) struct SceneStickyFrame {
+    pub id: NodeId,
+    pub parent_sticky: Option<NodeId>,
+    pub scroll_owner: ScrollId,
+    pub normal: Rect,
+    pub containing: Rect,
+    pub containing_is_scrollport: bool,
+    pub margin: crate::Edges,
+    /// top, right, bottom, left; `None` is `auto`.
+    pub insets: [Option<f32>; 4],
 }
 
 fn root_only_cumulative_scroll(scroll_tree: &ScrollTree, scroll: (f32, f32)) -> Vec<(f32, f32)> {
@@ -2759,6 +2830,10 @@ fn cascade_node_style(
                 .filter(|value| value.is_finite() && *value >= 0.0);
         }
         let mut style = crate::style::ua_style(elem.local.as_ref());
+        // HTML's UA sheet: `a:any-link, area:any-link { cursor: pointer }`.
+        if matches!(elem.local.as_ref(), "a" | "area") && node.get_attribute("href").is_some() {
+            style.cursor = Some(crate::Cursor::Pointer);
+        }
         style.is_replaced_box = crate::inline::is_replaced(elem.local.as_ref());
         style.has_replaced_sizing = crate::inline::has_replaced_sizing(elem.local.as_ref())
             || (elem.local.as_ref() == "input"

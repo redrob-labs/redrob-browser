@@ -138,6 +138,13 @@ pub use paint::{
     RenderResourceCache, RenderResourceLoader, ResolvedScrollState, SelectedImage,
     MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS,
 };
+#[cfg(feature = "scene")]
+pub use paint::scene::{
+    build_scene_prepared, SceneFontData, SceneFontInstance, SceneFontResource, SceneFrame,
+    SceneImageResource, SceneStats,
+};
+#[cfg(feature = "scene")]
+pub use redrob_scene;
 #[cfg(feature = "paint")]
 pub use tiny_skia::Pixmap;
 

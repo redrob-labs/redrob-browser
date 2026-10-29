@@ -718,6 +718,16 @@ pub(crate) fn computed_overflow_axes(style: &LayoutStyle) -> (u8, u8) {
     (computed_x, computed_y)
 }
 
+/// Whether the person can scroll this box on each axis (`auto`/`scroll`),
+/// as opposed to `hidden`, which only script may scroll.
+pub(crate) fn user_scrollable_axes(style: &LayoutStyle) -> (bool, bool) {
+    if !style.overflow_axes_set {
+        return (false, false);
+    }
+    let (x, y) = computed_overflow_axes(style);
+    (x >= OVERFLOW_SCROLL, y >= OVERFLOW_SCROLL)
+}
+
 pub(crate) fn recompute_overflow(style: &mut LayoutStyle) {
     // CSS Overflow computed-value coupling: if exactly one axis is scrollable,
     // `visible` on the other computes to `auto` and `clip` computes to
