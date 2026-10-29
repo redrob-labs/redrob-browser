@@ -7187,7 +7187,9 @@ fn single_media_query_applies_for_viewport(
     ] {
         if let Some(ratio) = compact.find(prop).and_then(|start| {
             let rest = &compact[start + prop.len()..];
-            rest[..rest.find(')').unwrap_or(rest.len())].parse::<f32>().ok()
+            rest[..rest.find(')').unwrap_or(rest.len())]
+                .parse::<f32>()
+                .ok()
         }) {
             if (max && 1.0 > ratio) || (!max && 1.0 < ratio) {
                 return false;
@@ -7198,7 +7200,10 @@ fn single_media_query_applies_for_viewport(
         if let Some(dppx) = compact.find(prop).and_then(|start| {
             let rest = &compact[start + prop.len()..];
             let value = &rest[..rest.find(')').unwrap_or(rest.len())];
-            if let Some(v) = value.strip_suffix("dppx").or_else(|| value.strip_suffix('x')) {
+            if let Some(v) = value
+                .strip_suffix("dppx")
+                .or_else(|| value.strip_suffix('x'))
+            {
                 v.parse::<f32>().ok()
             } else if let Some(v) = value.strip_suffix("dpi") {
                 v.parse::<f32>().ok().map(|v| v / 96.0)

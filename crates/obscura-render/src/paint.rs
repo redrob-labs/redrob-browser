@@ -2254,12 +2254,9 @@ impl PreparedRender {
 
         // A grid container's resolved track lists are its used track sizes,
         // implicit tracks included (CSS Grid 1 §7.2.6).
-        if let Some((columns, rows)) = self
-            .layout
-            .grid_tracks
-            .get(&id)
-            .filter(|_| style.display == crate::Display::Grid && style.css_display == crate::CssDisplay::Layout)
-        {
+        if let Some((columns, rows)) = self.layout.grid_tracks.get(&id).filter(|_| {
+            style.display == crate::Display::Grid && style.css_display == crate::CssDisplay::Layout
+        }) {
             let tracks = |sizes: &[f32]| {
                 if sizes.is_empty() {
                     "none".to_string()
@@ -2604,7 +2601,10 @@ pub(crate) fn non_geometric_computed_style(
     out.insert("display", computed_display(style).to_string());
     out.insert(
         "float",
-        match style.float.filter(|_| style.position != Some(taffy::Position::Absolute)) {
+        match style
+            .float
+            .filter(|_| style.position != Some(taffy::Position::Absolute))
+        {
             Some(crate::Float::Left) => "left",
             Some(crate::Float::Right) => "right",
             None => "none",
@@ -8439,6 +8439,19 @@ fn fallback_font_bytes(family: Option<&str>) -> &'static [u8] {
         }
     }
     FONT_BYTES
+}
+
+/// Advance width of `text` at a CSS font-size of `size` px (one em).
+/// `measure_text` scales by the font's line height instead of its em.
+pub fn measure_text_em(text: &str, size: f32, is_bold: bool, family: Option<&str>) -> f32 {
+    let font = FontRef::try_from_slice(fallback_font_bytes(family)).unwrap();
+    let units_per_em = font.units_per_em().unwrap_or(1000.0);
+    measure_text(
+        text,
+        size * font.height_unscaled() / units_per_em,
+        is_bold,
+        family,
+    )
 }
 
 pub fn measure_text(text: &str, size: f32, is_bold: bool, family: Option<&str>) -> f32 {

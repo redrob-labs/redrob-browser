@@ -832,6 +832,15 @@ pub(crate) struct CssomValues {
     /// `overflow: clip`). An author declaration of the property removes its
     /// entry.
     pub ua_overrides: Vec<(&'static str, &'static str)>,
+    /// The element's own font-size is an absolute length (author or a
+    /// control's UA font), which ends the medium-keyword chain.
+    pub font_size_absolute: bool,
+    /// Resolved: the computed font-size does not derive from the initial
+    /// `medium` keyword through em/% factors.
+    pub font_size_not_keyword: bool,
+    /// Resolved: the keyword-derived size before the monospace adjustment
+    /// (`None` is medium, 16px).
+    pub font_size_keyword_px: Option<f32>,
 }
 
 impl CssomValues {

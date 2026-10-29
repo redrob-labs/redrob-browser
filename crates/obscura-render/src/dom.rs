@@ -3107,8 +3107,13 @@ fn apply_table_border_hints(
             let mut table = None;
             for _ in 0..3 {
                 let Some(id) = ancestor else { break };
-                let Some(parent) = tree.borrow_node(id) else { break };
-                if parent.as_element().is_some_and(|el| el.local.as_ref() == "table") {
+                let Some(parent) = tree.borrow_node(id) else {
+                    break;
+                };
+                if parent
+                    .as_element()
+                    .is_some_and(|el| el.local.as_ref() == "table")
+                {
                     table = border_width(&parent);
                     break;
                 }
@@ -3505,7 +3510,10 @@ fn cascade_node_style(
                     style.white_space = Some(crate::WhiteSpace::Pre);
                     style.box_sizing = crate::BoxSizing::BorderBox;
                     style.cursor = Some(crate::Cursor::Default);
-                    style.cssom.ua_overrides.retain(|(property, _)| !property.starts_with("border"));
+                    style
+                        .cssom
+                        .ua_overrides
+                        .retain(|(property, _)| !property.starts_with("border"));
                     style.cssom.ua_overrides.extend([
                         ("border-top-style", "outset"),
                         ("border-right-style", "outset"),
@@ -6948,6 +6956,35 @@ fn layout_dom_once(
                     };
                     style.font_size = Some(resolved);
                 }
+                // Blink sizes a font-size derived from the initial `medium`
+                // keyword by the generic family: `monospace` alone uses the
+                // 13px default instead of 16px (pre, code, kbd, textarea).
+                let parent_keyword = (!inh.cssom.font_size_not_keyword)
+                    .then(|| inh.cssom.font_size_keyword_px.unwrap_or(16.0));
+                let keyword =
+                    if style.cssom.font_size_absolute || style.font_size_expression.is_some() {
+                        None
+                    } else {
+                        match style.font_size_raw {
+                            Some(
+                                crate::Dimension::Percent(factor) | crate::Dimension::Em(factor),
+                            ) => parent_keyword.map(|size| size * factor),
+                            Some(_) => None,
+                            None if style.font_size.is_some() => None,
+                            None => parent_keyword,
+                        }
+                    };
+                style.cssom.font_size_not_keyword = keyword.is_none();
+                style.cssom.font_size_keyword_px = keyword;
+                if let Some(size) = keyword {
+                    let monospace = style
+                        .cssom
+                        .font_family
+                        .as_deref()
+                        .or(inh.cssom.font_family.as_deref())
+                        == Some("monospace");
+                    style.font_size = Some(if monospace { size * 13.0 / 16.0 } else { size });
+                }
                 match style.font_size {
                     Some(s) => inh.font_size = Some(s),
                     None => style.font_size = inh.font_size,
@@ -7932,7 +7969,9 @@ fn layout_dom_once(
                     + style.padding.bottom
                     + style.border.top
                     + style.border.bottom;
-                let intrinsic_width = cols * font_size * 0.6075 + horizontal_edges;
+                // Chrome: `cols` fixed-pitch advances plus the 15px
+                // scrollbar gutter (cols=20 -> 175px content box at 13.33px).
+                let intrinsic_width = cols * font_size * 0.6 + 15.0 + horizontal_edges;
                 let intrinsic_height =
                     crate::inline::used_line_height(style).max(1.0) * rows + vertical_edges;
                 assign_native_control_size(
@@ -7974,17 +8013,34 @@ fn layout_dom_once(
                 "color" => (50.0, 27.0),
                 "file" => (253.0, default_height.max(22.0)),
                 "submit" | "reset" | "button" => {
+                    // A push button is its label's advance plus its edges
+                    // (Chrome: "Submit" -> 57.48px at 13.33px Arial).
                     let fallback = match input_type.as_str() {
                         "reset" => "Reset",
                         "button" => "",
-                        _ => "Submit Query",
+                        _ => "Submit",
                     };
                     let label = node.get_attribute("value").unwrap_or(fallback);
+                    #[cfg(feature = "paint")]
+                    let label_width = crate::paint::measure_text_em(
+                        label,
+                        font_size,
+                        crate::style::used_font_weight(style) >= 600,
+                        style.font_family.as_deref(),
+                    );
+                    #[cfg(not(feature = "paint"))]
+                    let label_width = text_width(
+                        label,
+                        font_size,
+                        crate::style::used_font_weight(style) >= 600,
+                        style.font_family.as_deref(),
+                        0.0,
+                        0.0,
+                    );
                     (
-                        (label.chars().count() as f32 * font_size * 0.55
-                            + font_size * 1.5
-                            + horizontal_edges)
-                            .max(20.0),
+                        label_width
+                            + label.chars().count() as f32 * style.letter_spacing.unwrap_or(0.0)
+                            + horizontal_edges,
                         default_height,
                     )
                 }
@@ -7995,8 +8051,11 @@ fn layout_dom_once(
                         .and_then(|value| value.parse::<u32>().ok())
                         .filter(|&value| value > 0)
                         .unwrap_or(20) as f32;
+                    // Chrome: `size` average advances plus a fixed caret and
+                    // decoration allowance (size=20 -> 177px, size=1 -> 25px
+                    // content box at 13.33px).
                     (
-                        size * font_size * 0.6 + font_size * 0.675 + horizontal_edges,
+                        size * font_size * 0.6 + font_size * 1.275 + horizontal_edges,
                         default_height,
                     )
                 }
@@ -10217,12 +10276,15 @@ fn collect_grid_tracks(
 ) -> HashMap<NodeId, (Vec<f32>, Vec<f32>)> {
     id_map
         .iter()
-        .filter_map(|(&taffy_id, &dom_id)| match taffy_tree.detailed_layout_info(taffy_id) {
-            taffy::tree::DetailedLayoutInfo::Grid(info) => {
-                Some((dom_id, (info.columns.sizes.clone(), info.rows.sizes.clone())))
-            }
-            _ => None,
-        })
+        .filter_map(
+            |(&taffy_id, &dom_id)| match taffy_tree.detailed_layout_info(taffy_id) {
+                taffy::tree::DetailedLayoutInfo::Grid(info) => Some((
+                    dom_id,
+                    (info.columns.sizes.clone(), info.rows.sizes.clone()),
+                )),
+                _ => None,
+            },
+        )
         .collect()
 }
 
@@ -17385,7 +17447,9 @@ mod tests {
         let result = cache.resolve(&tree, id, "display").unwrap();
         assert_eq!(result["display"], "none");
         assert_eq!(result["visibility"], "hidden");
-        assert_eq!(result["color"], "rgb(0, 0, 255)");
+        // `input { color: FieldText }` in the UA sheet: a control does not
+        // inherit the page color (Chrome: rgb(0, 0, 0)).
+        assert_eq!(result["color"], "rgb(0, 0, 0)");
         let expected = full.computed_style(id).unwrap();
         for (property, value) in result {
             assert_eq!(value, expected[property], "hidden input {property}");
@@ -24353,8 +24417,9 @@ mod tests {
     #[test]
     fn textarea_intrinsic_box_comes_from_rows_and_cols() {
         // #685: an empty textarea must keep a real control box instead of
-        // laying out as a plain block. Chromium calibrates cols=20/rows=2 to
-        // a 168x36 border box with one 15px control line per row.
+        // laying out as a plain block. Chrome lays cols=20/rows=2 out as a
+        // 181x36 border box: 20 fixed-pitch advances plus the 15px scrollbar
+        // gutter, and one 15px control line per row.
         let tree = parse_html(
             r#"<style>html, body { margin: 0 }</style>
             <div><textarea id="plain"></textarea></div>
@@ -24366,18 +24431,19 @@ mod tests {
         let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
 
         let plain = rect("plain");
-        assert!((plain.width - 168.0).abs() < 0.5, "{}", plain.width);
+        assert!((plain.width - 181.0).abs() < 0.5, "{}", plain.width);
         assert!((plain.height - 36.0).abs() < 0.5, "{}", plain.height);
 
         let rows8 = rect("rows8");
-        assert!((rows8.width - 168.0).abs() < 0.5);
+        assert!((rows8.width - 181.0).abs() < 0.5);
         assert!((rows8.height - 126.0).abs() < 0.5, "{}", rows8.height);
 
-        // Author height wins over the rows-derived intrinsic height, and the
-        // control is border-box, so 36px stays the border-box height.
+        // Author height wins over the rows-derived intrinsic height. The
+        // control is content-box, so 36px plus 2px padding and 1px border
+        // per side is a 42px border box.
         let cssheight = rect("cssheight");
         assert!(
-            (cssheight.height - 36.0).abs() < 0.5,
+            (cssheight.height - 42.0).abs() < 0.5,
             "{}",
             cssheight.height
         );

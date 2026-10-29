@@ -274,14 +274,14 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         // other controls it keeps its content in the tree (the value is the
         // text child), laid out inside the sized box; line breaks in the
         // value must survive, hence pre-wrap. Chromium defaults the control
-        // to the fixed-pitch face and to border-box sizing.
+        // to the fixed-pitch face; unlike buttons and selects it keeps
+        // content-box sizing (`height: 36px` is a 42px border box).
         style.display = Display::Inline;
         style.is_inline_block = true;
         style.font_size = Some(13.333_333);
         style.font_family = Some("monospace".to_string());
         style.line_height = Some(crate::LineHeight::Normal);
         style.white_space = Some(crate::WhiteSpace::PreWrap);
-        style.box_sizing = crate::BoxSizing::BorderBox;
         style.padding = Edges {
             top: 2.0,
             right: 2.0,
@@ -405,6 +405,7 @@ fn apply_ua_sheet_extras(tag: &str, style: &mut LayoutStyle) {
             style.text_transform = Some(crate::TextTransform::None);
             style.text_indent = Some(Dimension::Px(0.0));
             style.cssom.text_align = Some("start");
+            style.cssom.font_size_absolute = true;
             style.cursor = Some(if matches!(tag, "input" | "textarea") {
                 crate::Cursor::Text
             } else {
@@ -422,7 +423,6 @@ fn apply_ua_sheet_extras(tag: &str, style: &mut LayoutStyle) {
                 ]);
             } else if tag == "textarea" {
                 style.cssom.ua_overrides.extend([
-                    ("box-sizing", "content-box"),
                     ("overflow", "auto"),
                     ("overflow-x", "auto"),
                     ("overflow-y", "auto"),
@@ -1099,11 +1099,31 @@ fn apply_cssom_value(style: &mut LayoutStyle, name: &str, value: &str) {
         "font" => {
             if matches!(lower.as_str(), "inherit" | "unset") {
                 style.cssom.font_family = None;
+                style.cssom.font_size_absolute = false;
             } else if let Some(family) = style.font_family.as_deref().and_then(|_| {
+                // The shorthand's size is an absolute length unless em/%.
+                let value = value.trim();
+                style.cssom.font_size_absolute =
+                    font_shorthand_family(value).is_some_and(|family| {
+                        let head = value
+                            .get(..value.len() - family.len())
+                            .unwrap_or_default()
+                            .to_ascii_lowercase();
+                        !(head.contains('%') || head.contains("em ") || head.contains("em/"))
+                            || head.contains("rem")
+                    });
                 font_shorthand_family(value).and_then(serialize_font_family)
             }) {
                 style.cssom.font_family = Some(family);
             }
+        }
+        "font-size" => {
+            style.cssom.font_size_absolute = !(lower.ends_with('%')
+                || (lower.ends_with("em") && !lower.ends_with("rem"))
+                || matches!(
+                    lower.as_str(),
+                    "inherit" | "unset" | "initial" | "medium" | "revert" | "revert-layer"
+                ));
         }
         "flex-direction" | "flex-flow" => style.cssom.flex_direction = style.flex_direction,
         "align-items" | "place-items" => style.cssom.align_items = style.align_items,
@@ -4646,7 +4666,10 @@ pub(crate) fn resolve_grid_calc(value: *const (), basis: f32) -> f32 {
         basis,
     )
     .filter(|value| value.is_finite())
-    .map_or(0.0, |value| if calc.signed { value } else { value.max(0.0) })
+    .map_or(
+        0.0,
+        |value| if calc.signed { value } else { value.max(0.0) },
+    )
 }
 
 /// Parse a track list into taffy sizing functions plus the `[line-name]` map
