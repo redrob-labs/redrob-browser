@@ -910,3 +910,25 @@ fn percentage_images_in_shrink_to_fit_boxes_resolve_against_the_used_width() {
     assert_eq!(w("f"), 433.0);
     assert!((w("ie") - 411.34).abs() < 0.02, "{}", w("ie"));
 }
+
+#[test]
+fn span_rects_exclude_whitespace_removed_at_line_ends() {
+    // Chrome: <span style=padding-left:1px> x </span> is 9 wide (16px
+    // Arial); an empty padded span after "x " at the end of a right-aligned
+    // 300px line starts at 299.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'>\
+         <div><span id=a style='padding-left:1px'> x </span></div>\
+         <div style='text-align:right;width:300px'>x <span id=d style='padding-left:1px'></span></div>",
+        &[],
+    );
+    let rect = |id: &str| {
+        let node = element(&tree, id);
+        laid.fractional_rects
+            .get(&node)
+            .copied()
+            .unwrap_or(laid.rects[&node])
+    };
+    assert!((rect("a").width - 9.0).abs() < 0.02, "{:?}", rect("a"));
+    assert!((rect("d").x - 299.0).abs() < 0.05, "{:?}", rect("d"));
+}
