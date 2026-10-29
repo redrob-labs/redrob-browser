@@ -932,3 +932,25 @@ fn span_rects_exclude_whitespace_removed_at_line_ends() {
     assert!((rect("a").width - 9.0).abs() < 0.02, "{:?}", rect("a"));
     assert!((rect("d").x - 299.0).abs() < 0.05, "{:?}", rect("d"));
 }
+
+#[test]
+fn characters_missing_from_bundled_liberation_use_the_host_copy() {
+    // Chrome: 16px Arial "עברית" is 42.328125 wide (host Liberation Sans 2,
+    // fractional advances; the bundled copy has no Hebrew).
+    if !super::fonts::tests_host_has_family("liberation sans") {
+        return;
+    }
+    let (tree, laid) = layout(
+        "<!doctype html><meta charset=utf-8><body style='margin:0;font:16px Arial'>\
+         <div><span id=he>עברית</span></div>",
+        &[],
+    );
+    let node = element(&tree, "he");
+    let w = laid
+        .fractional_rects
+        .get(&node)
+        .copied()
+        .unwrap_or(laid.rects[&node])
+        .width;
+    assert!((w - 42.328).abs() < 0.02, "{w}");
+}
