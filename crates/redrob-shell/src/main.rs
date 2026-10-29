@@ -12,6 +12,7 @@
 mod account;
 mod agent_bridge;
 mod autoscroll;
+mod browser;
 mod cdp;
 mod compositor;
 mod devtools;
@@ -20,6 +21,7 @@ mod engine;
 mod i18n;
 mod import_chrome;
 mod input;
+mod instance;
 mod internal;
 mod media;
 mod media_view;
@@ -43,14 +45,10 @@ use theme::{size, Bar, Icon};
 
 const NEW_TAB: &str = "about:blank";
 
-/// `--incognito`: a window whose profile and engine storage live in a
-/// temporary folder that is deleted when the window closes.
+/// `--incognito`: a private window. Its settings live in a temporary folder
+/// deleted when the browser closes, and its engine keeps cookies and storage
+/// in memory only.
 const INCOGNITO_FLAG: &str = "--incognito";
-
-/// `--new-window`: a further window, opened to hold a tab moved out of
-/// another one. It shares the profile but leaves the saved session and the
-/// agents' relay address to the first window.
-const NEW_WINDOW_FLAG: &str = "--new-window";
 
 fn main() -> anyhow::Result<()> {
     startup::init();
@@ -59,7 +57,14 @@ fn main() -> anyhow::Result<()> {
 
 fn run() -> anyhow::Result<()> {
     let incognito = std::env::args().any(|a| a == INCOGNITO_FLAG);
-    let secondary = std::env::args().any(|a| a == NEW_WINDOW_FLAG);
+    let start_url = std::env::args().skip(1).find(|a| !a.starts_with("--"));
+    // One process, and so one engine, per profile: a later launch asks the
+    // running browser for a window and exits (instance.rs).
+    let paths = instance::paths(incognito);
+    let _instance_lock = match instance::claim(&paths, start_url.as_deref())? {
+        instance::Claim::Handed => return Ok(()),
+        instance::Claim::Owner(lock) => lock,
+    };
     let mut profile = match profile::Profile::open_default() {
         Ok(p) => Some(p),
         Err(e) => {
@@ -94,176 +99,43 @@ fn run() -> anyhow::Result<()> {
     if let Some(engine) = profile.as_ref().and_then(|p| p.setting("search_engine")) {
         model::set_search_engine(&engine);
     }
+    // Incognito cookies and storage stay in the engine's memory.
     let storage = profile
         .as_ref()
-        .map(|p| p.engine_dir())
-        .unwrap_or_else(|| std::env::temp_dir().join("redrob-browser-engine"));
-    let engine = engine::Engine::start(&storage)?;
-    // `redrob-browser tab ...` and agents find this window's CDP relay here;
-    // cdp::run writes it once the relay is listening.
-    let endpoint_file = if secondary {
-        std::env::temp_dir().join(format!("redrob-browser-ws-{}", std::process::id()))
-    } else {
-        storage.join("ws-endpoint")
+        .filter(|_| !incognito)
+        .map(|p| p.engine_dir());
+    let engine = engine::Engine::start(storage.as_deref())?;
+    // `redrob-browser tab ...` and agents find the relay here; cdp::run
+    // writes it once the relay is listening. Every window's tabs are on it.
+    let endpoint_file = paths.endpoint.clone();
+    let restore = match profile.as_ref().filter(|_| !incognito) {
+        Some(p) => p.load_session().unwrap_or_else(|e| {
+            eprintln!("redrob-browser: could not read the last session: {e}");
+            Vec::new()
+        }),
+        None => Vec::new(),
     };
-    let relay_file = endpoint_file.clone();
-    let start_url = std::env::args().skip(1).find(|a| !a.starts_with("--"));
-
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(if incognito {
-                "Redrob Browser (Incognito)"
-            } else {
-                "Redrob Browser"
-            })
-            .with_inner_size([1280.0, 860.0])
-            .with_min_inner_size([480.0, 360.0])
-            // The tab strip is the title bar, as in Chrome: macOS keeps its
-            // traffic lights over it; Windows and Linux get the window's own
-            // minimize, maximize and close buttons at its right end.
-            .with_decorations(cfg!(target_os = "macos"))
-            .with_fullsize_content_view(cfg!(target_os = "macos"))
-            .with_titlebar_shown(!cfg!(target_os = "macos"))
-            .with_title_shown(!cfg!(target_os = "macos"))
-            .with_icon(std::sync::Arc::new(app_icon())),
+        viewport: browser::window_builder(
+            incognito,
+            restore.first().and_then(|w| w.bounds),
+            restore.first().is_some_and(|w| w.maximized),
+        ),
         ..Default::default()
     };
     let ws_url = engine.ws_url.clone();
+    let start = browser::Start {
+        ws_url,
+        endpoint_file: endpoint_file.clone(),
+        profile,
+        incognito,
+        restore,
+        start_url,
+    };
     let result = eframe::run_native(
         "Redrob Browser",
         options,
-        Box::new(move |cc| {
-            let ctx = cc.egui_ctx.clone();
-            theme::install(&ctx);
-            theme::set_preference(
-                &ctx,
-                &profile
-                    .as_ref()
-                    .and_then(|p| p.setting("theme"))
-                    .unwrap_or_default(),
-            );
-            let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
-            let (upd_tx, upd_rx) = mpsc::channel();
-            let (login_tx, login_rx) = mpsc::channel();
-            let wake_ctx = ctx.clone();
-            let relay_window = relay::Window {
-                login: login_tx,
-                wake: std::sync::Arc::new(move || wake_ctx.request_repaint()),
-            };
-            std::thread::spawn(move || {
-                let rt = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .expect("tokio runtime");
-                let errors = upd_tx.clone();
-                rt.block_on(async move {
-                    if let Err(e) = cdp::run(
-                        ws_url,
-                        relay_file,
-                        relay_window,
-                        cmd_rx,
-                        upd_tx,
-                        move || ctx.request_repaint(),
-                    )
-                    .await
-                    {
-                        let _ = errors.send(Update {
-                            tab: 0,
-                            event: Event::Error(e.to_string()),
-                        });
-                    }
-                });
-            });
-            let (agent_tx, agent_rx) = mpsc::channel();
-            let (account_tx, account_rx) = mpsc::channel();
-            let (update_tx, update_rx) = mpsc::channel();
-            // Check for a newer release at most once a day, off the UI thread.
-            let last = profile
-                .as_ref()
-                .and_then(|p| p.setting("update_checked"))
-                .and_then(|v| v.parse::<u64>().ok())
-                .unwrap_or(0);
-            if model::now().saturating_sub(last) > updater::CHECK_EVERY_SECS {
-                if let Some(p) = &profile {
-                    let _ = p.set_setting("update_checked", &model::now().to_string());
-                }
-                std::thread::spawn(move || {
-                    if let Ok(Some(a)) = updater::check() {
-                        let _ = update_tx.send(a);
-                    }
-                });
-            }
-            let mut model = Model::default();
-            let mut restore = (Vec::new(), 0);
-            if let Some(p) = &profile {
-                if let Err(e) = p.load(&mut model) {
-                    eprintln!("redrob-browser: could not read bookmarks and history: {e}");
-                }
-                if !secondary {
-                    restore = p.load_session().unwrap_or_default();
-                }
-            }
-            let mut window = Window {
-                commands: cmd_tx,
-                updates: upd_rx,
-                model,
-                profile,
-                last_session_save: std::time::Instant::now(),
-                show_downloads: false,
-                show_devtools: false,
-                internal: Default::default(),
-                media: Default::default(),
-                drm: Default::default(),
-                vault: None,
-                pending_save: None,
-                agent_tx,
-                agent_rx,
-                account_tx,
-                account_rx,
-                update_rx,
-                update: None,
-                self_update: Default::default(),
-                login_rx,
-                agent_logins: Default::default(),
-                notice: None,
-                address: String::new(),
-                editing: false,
-                focus_address: false,
-                error: None,
-                last_size: (0, 0, 0.0),
-                last_title: String::new(),
-                address_id: egui::Id::new("address"),
-                autoscroll: Default::default(),
-                incognito: false,
-                secondary,
-                tab_drag: None,
-                top_sites: None,
-                new_tab_query: String::new(),
-                gpu: match cc.wgpu_render_state.as_ref() {
-                    Some(state) => compositor::Gpu::new(state),
-                    None => Err("no wgpu device".to_string()),
-                },
-            };
-            window.incognito = incognito;
-            if incognito {
-                cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
-            }
-            if let Some(p) = window.profile.as_ref().filter(|_| !incognito) {
-                match vault::Vault::open(&p.dir) {
-                    Ok(v) => window.vault = Some(v),
-                    Err(e) => eprintln!("redrob-browser: password vault unavailable: {e}"),
-                }
-            }
-            window.restore(restore.0, restore.1);
-            match start_url {
-                // A moved tab's address is already a URL, data: ones included.
-                Some(url) if secondary => window.open_tab(&url, true),
-                Some(url) => window.open_tab(&model::to_url(&url), true),
-                None if window.model.tabs.is_empty() => window.open_tab(NEW_TAB, true),
-                None => {}
-            }
-            Ok(Box::new(window))
-        }),
+        Box::new(move |cc| Ok(Box::new(browser::App::start(cc, start)))),
     );
     let _ = std::fs::remove_file(&endpoint_file);
     drop(engine);
@@ -319,7 +191,7 @@ fn write_private(path: &std::path::Path, text: &str) {
 }
 
 struct Window {
-    commands: tokio::sync::mpsc::UnboundedSender<Command>,
+    commands: cdp::Commands,
     updates: mpsc::Receiver<Update>,
     model: Model,
     profile: Option<profile::Profile>,
@@ -357,8 +229,23 @@ struct Window {
     autoscroll: autoscroll::Autoscroll,
     /// A private window (`--incognito`).
     incognito: bool,
-    /// A window opened with `--new-window`: it does not save the session.
-    secondary: bool,
+    /// Which window this is, for the engine connection all windows share.
+    wid: cdp::WindowId,
+    /// The OS window it draws in.
+    viewport: egui::ViewportId,
+    /// Kept so the window is not re-created with changed attributes.
+    builder: egui::ViewportBuilder,
+    /// Where the browser sends this window's engine updates (browser.rs).
+    inbox: mpsc::Sender<Update>,
+    /// Where the browser sends agents' sign-in requests for this window's tabs.
+    login_tx: mpsc::Sender<relay::LoginRequest>,
+    /// What this window asks of the browser: new windows, moved tabs, quit.
+    requests: Vec<browser::Request>,
+    /// Outer top-left and page-area size on screen, in points.
+    bounds: Option<profile::Bounds>,
+    maximized: bool,
+    /// Something the saved session should catch up with.
+    session_dirty: bool,
     /// The tab being dragged in the strip, and where on it the pointer took hold.
     tab_drag: Option<(TabId, f32)>,
     /// Most visited sites for the new tab page, read once per new tab.
@@ -413,14 +300,10 @@ impl Window {
         }
     }
 
+    /// The browser saves every window's tabs together (browser.rs).
     fn save_session(&mut self) {
         self.last_session_save = std::time::Instant::now();
-        if self.secondary {
-            return;
-        }
-        if let Some(p) = &mut self.profile {
-            let _ = p.save_session(&self.model);
-        }
+        self.session_dirty = true;
     }
 
     fn open_tab(&mut self, url: &str, activate: bool) {
@@ -724,9 +607,12 @@ impl Window {
                 self.op(id, if back { Op::Back } else { Op::Forward });
             }
         }
-        // Ctrl+Shift+N: a new incognito window.
+        // Ctrl+Shift+N: a new incognito window. Ctrl+N: a new window.
         if ctx.input_mut(|i| i.consume_key(shift, Key::N)) {
             self.open_incognito();
+        }
+        if ctx.input_mut(|i| i.consume_key(cmd, Key::N)) {
+            self.requests.push(browser::Request::NewWindow);
         }
         // Ctrl+H: history.
         if ctx.input_mut(|i| i.consume_key(cmd, Key::H)) {
@@ -1152,6 +1038,10 @@ impl Window {
                     self.open_tab(NEW_TAB, true);
                     ui.close();
                 }
+                if item(ui, Icon::Plus, t("New window")).clicked() {
+                    self.requests.push(browser::Request::NewWindow);
+                    ui.close();
+                }
                 if item(ui, Icon::Incognito, t("New incognito window")).clicked() {
                     self.open_incognito();
                     ui.close();
@@ -1260,8 +1150,14 @@ impl Window {
             });
     }
 
-    /// A private window is its own process with a throwaway profile.
+    /// Private windows share one process with its own memory-only engine.
+    /// From an incognito window that is this process; from a normal one it
+    /// is started, or asked for a window if it already runs (instance.rs).
     fn open_incognito(&mut self) {
+        if self.incognito {
+            self.requests.push(browser::Request::NewWindow);
+            return;
+        }
         let started = std::env::current_exe().and_then(|exe| {
             startup::no_console(std::process::Command::new(exe).arg(INCOGNITO_FLAG)).spawn()
         });
@@ -1274,34 +1170,31 @@ impl Window {
         }
     }
 
-    /// Chrome's "Move to new window": a window is its own process with its
-    /// own engine, so the new window opens the tab's address and this one
-    /// closes the tab. Back and forward history stays behind.
-    fn move_to_new_window(&mut self, index: usize) {
-        let Some(tab) = self.model.tabs.get(index) else {
+    /// Chrome's "Move to new window": the tab goes to a new window of this
+    /// process with its engine target, so its page, back and forward
+    /// history, scroll position and typed text come along live. `at` is the
+    /// new window's top-left on screen (a tab dragged out lands under the
+    /// pointer); None puts it next to this window.
+    fn move_to_new_window(&mut self, index: usize, at: Option<egui::Pos2>) {
+        if self.model.tabs.len() < 2 {
+            return;
+        }
+        let Some(tab) = self.model.take_tab(index) else {
             return;
         };
-        // An agent drives its tab through this window's relay; it stays here.
-        if tab.agent || self.model.tabs.len() < 2 {
-            return;
-        }
-        let url = tab.url.clone();
-        let incognito = self.incognito;
-        let started = std::env::current_exe().and_then(|exe| {
-            let mut cmd = std::process::Command::new(exe);
-            cmd.arg(NEW_WINDOW_FLAG);
-            if incognito {
-                cmd.arg(INCOGNITO_FLAG);
-            }
-            startup::no_console(cmd.arg(&url)).spawn()
+        let id = tab.id;
+        let moved = browser::Moved {
+            media: self.media.take_tab(id),
+            drm: self.drm.take(id),
+            login: self.agent_logins.remove(&id),
+            tab,
+        };
+        self.requests.push(browser::Request::Detach {
+            moved: Box::new(moved),
+            at,
         });
-        match started {
-            Ok(mut child) => {
-                std::thread::spawn(move || child.wait());
-                self.close_tab(index);
-            }
-            Err(e) => self.notice = Some(tf("Could not open a new window: {0}", &[&e])),
-        }
+        self.activated();
+        self.save_session();
     }
 
     fn toggle_bookmark(&mut self) {
@@ -1372,6 +1265,8 @@ impl Window {
         let mut drag_state = self.tab_drag;
         let mut reorder = None;
         let mut move_out = None;
+        // Where a tab dragged out of the strip was let go, on screen.
+        let mut drop_at: Option<egui::Pos2> = None;
         // Pulled this far above or below the strip, a tab leaves the window.
         let detach_at = 40.0;
         let detached = |y: f32| y > strip.bottom() + detach_at || y < strip.top() - detach_at;
@@ -1383,8 +1278,8 @@ impl Window {
         }
         for i in order {
             let tab = &self.model.tabs[i];
-            // An agent drives its tab through this window's relay, so it stays here.
-            let detachable = !tab.agent && count > 1;
+            // Every window is on the one relay, so agent tabs move too.
+            let detachable = count > 1;
             let out = |y: f32| detachable && detached(y);
             let slot = left + i as f32 * width;
             if slot > strip.right() - plus_side {
@@ -1414,6 +1309,15 @@ impl Window {
                     drag_state = None;
                     if out(pos.y) {
                         move_out = Some(i);
+                        // The new window's first tab sits where this one was
+                        // held: its strip starts at the left pad, 6 points down.
+                        let origin = ui
+                            .ctx()
+                            .input(|i| i.viewport().inner_rect.map(|r| r.min))
+                            .unwrap_or_default();
+                        drop_at = Some(
+                            origin + pos.to_vec2() - Vec2::new(grab + left_pad, 6.0 + 12.0),
+                        );
                     }
                 } else if !out(pos.y) {
                     let to = ((pos.x - grab - left) / width + 0.5).floor();
@@ -1596,7 +1500,7 @@ impl Window {
             theme::icon_button_sized(&mut plus_ui, Icon::Plus, t("New tab"), plus_side, true)
                 .clicked();
         if let Some(i) = move_out {
-            self.move_to_new_window(i);
+            self.move_to_new_window(i, drop_at);
         } else if new_tab {
             self.open_tab(NEW_TAB, true);
         } else if let Some(i) = close {
@@ -2287,12 +2191,9 @@ impl Window {
     }
 }
 
-impl eframe::App for Window {
-    fn on_exit(&mut self) {
-        self.save_session();
-    }
-
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+impl Window {
+    /// One frame of this window, in its own OS window (browser.rs).
+    fn frame(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.drain_updates(&ctx);
         while let Ok(msg) = self.agent_rx.try_recv() {
@@ -2377,7 +2278,7 @@ impl eframe::App for Window {
                             if theme::button(ui, t("Restart to update"), true).clicked() {
                                 self.save_session();
                                 self.self_update.restart();
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                                self.requests.push(browser::Request::Quit);
                             }
                             return;
                         }
@@ -2592,7 +2493,7 @@ impl eframe::App for Window {
                 match &mut self.gpu {
                     Ok(gpu) => {
                         let media = &mut self.media;
-                        let texture = gpu.draw(page_id, &mut t.scene, &res, view, scale, &mut |key| {
+                        let texture = gpu.draw(self.wid, page_id, &mut t.scene, &res, view, scale, &mut |key| {
                             media.external_frame(page_id, key)
                         });
                         if let (Some(id), true) = (texture, t.scene.has_frame()) {

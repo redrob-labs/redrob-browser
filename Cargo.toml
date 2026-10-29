@@ -13,6 +13,7 @@ members = [
     "crates/obscura",
     "crates/redrob-shell",
     "crates/redrob-scene",
+    "crates/redrob-scene-raster",
 ]
 
 [workspace.package]

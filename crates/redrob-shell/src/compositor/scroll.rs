@@ -38,6 +38,10 @@ pub struct Scrolls {
 }
 
 impl Scrolls {
+    pub fn offsets(&self) -> &HashMap<u64, (f32, f32)> {
+        &self.pos
+    }
+
     pub fn offset(&self, node: u64) -> Option<(f32, f32)> {
         self.pos.get(&node).copied()
     }

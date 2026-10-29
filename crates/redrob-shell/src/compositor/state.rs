@@ -179,36 +179,34 @@ impl TabScene {
 
     /// New spatial nodes: index them and take offsets the page set.
     fn spatial_changed(&mut self) {
-        let Some(frame) = &self.frame else { return };
+        let Some(frame) = &mut self.frame else { return };
         self.index = spatial::index(frame);
-        for node in &frame.spatial {
+        for node in &mut frame.spatial {
             if let SpatialKind::Scroll {
                 frame: f,
                 content,
                 offset,
                 offset_changed_by_page,
                 node,
-            } = &node.kind
+            } = &mut node.kind
             {
                 let max = max_offset(f, *content);
                 self.scroll.adopt(*node, *offset, *offset_changed_by_page, max);
+                // Taken: from now on the window's offset is the live one.
+                *offset_changed_by_page = false;
             }
         }
     }
 
     /// Map the spatial tree for a page area of `viewport` CSS px.
     pub fn resolve(&self, viewport: (f32, f32)) -> Resolved {
-        let Some(frame) = &self.frame else {
-            return Resolved {
+        match &self.frame {
+            Some(frame) => spatial::resolve(frame, &self.index, viewport, self.scroll.offsets()),
+            None => Resolved {
                 viewport,
                 ..Default::default()
-            };
-        };
-        let offset = |i: usize| match &frame.spatial[i].kind {
-            SpatialKind::Scroll { node, offset, .. } => self.scroll.offset(*node).unwrap_or(*offset),
-            _ => (0.0, 0.0),
-        };
-        spatial::resolve(frame, &self.index, viewport, &offset)
+            },
+        }
     }
 
     /// The document scroller's offset.

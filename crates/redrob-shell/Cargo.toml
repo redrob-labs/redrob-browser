@@ -43,6 +43,8 @@ vello = "0.11"
 # Validates engine fonts before vello draws them (vello panics on a bad face).
 skrifa = "0.44"
 redrob-scene = { workspace = true }
+# The spatial mapping agent screenshots use; the window maps with the same code.
+redrob-scene-raster = { path = "../redrob-scene-raster" }
 gstreamer-app = { version = "0.25", optional = true }
 gstreamer-video = { version = "0.25", optional = true }
 open = "5"

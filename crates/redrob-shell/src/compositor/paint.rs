@@ -51,10 +51,12 @@ fn stops(stops: &[GradientStop]) -> Vec<(f32, Color)> {
         .collect()
 }
 
-/// How many vello layers one engine push opened (0 for an unmatched pop).
+/// The open engine pushes and the scroll clips of the current run.
 struct Layers {
-    /// Per engine push: layers it opened.
-    pushed: Vec<u32>,
+    /// Per engine push: the layer transform to restore when it pops.
+    pushed: Vec<Affine>,
+    /// Page-space transform of every open `PushLayer.transform`.
+    xf: Affine,
     /// Scroll clips open around the current run of drawing items, and the
     /// innermost clipping scroll node they are for.
     run: Option<(Option<usize>, u32)>,
@@ -89,13 +91,16 @@ pub fn build(
 
     let mut layers = Layers {
         pushed: Vec::new(),
+        xf: Affine::IDENTITY,
         run: None,
     };
     for (n, d) in frame.items.iter().enumerate() {
         let Some(&node) = page.index.get(&d.spatial) else {
             continue;
         };
-        let world = res.world[node];
+        // Layer transforms apply to everything inside them, scroll clips too
+        // (as redrob-scene-raster does for screenshots).
+        let world = layers.xf * res.world[node];
         let t = base * world;
         let drawing = page.bounds.get(n).copied().flatten();
         if let Some(local) = drawing {
@@ -109,7 +114,7 @@ pub fn build(
                 let chain = res.clip_chain(node);
                 for s in &chain {
                     if let Some((pt, r)) = res.scroll_clip(frame, *s) {
-                        scene.push_clip_layer(Fill::NonZero, base * pt, &r);
+                        scene.push_clip_layer(Fill::NonZero, base * layers.xf * pt, &r);
                     }
                 }
                 layers.run = Some((clip, chain.len() as u32));
@@ -239,10 +244,12 @@ pub fn build(
                     .font_size(*size)
                     .brush(color(*c));
                 if *skew != 0.0 {
-                    run = run.glyph_transform(Some(Affine::skew(f64::from(*skew), 0.0)));
+                    // The contract's skew is y-down (as Skia: -0.25 leans
+                    // right); vello's glyph space is y-up.
+                    run = run.glyph_transform(Some(Affine::skew(-f64::from(*skew), 0.0)));
                 }
                 if *synthetic_bold {
-                    let e = f64::from(*size) / 48.0;
+                    let e = f64::from(synthetic_bold_amount(*size));
                     run = run.font_embolden(FontEmbolden::new(Diagonal2::new(e, e)));
                 }
                 run.draw(
@@ -276,12 +283,12 @@ pub fn build(
             }
             Item::PushClip { rect, radii } => {
                 scene.push_clip_layer(Fill::NonZero, t, &rounded(spatial::rect(rect), *radii));
-                layers.pushed.push(1);
+                layers.pushed.push(layers.xf);
             }
             Item::PushClipPath { verbs, even_odd } => {
                 let rule = if *even_odd { Fill::EvenOdd } else { Fill::NonZero };
                 scene.push_clip_layer(rule, t, &path(verbs));
-                layers.pushed.push(1);
+                layers.pushed.push(layers.xf);
             }
             Item::PushLayer {
                 opacity,
@@ -290,28 +297,38 @@ pub fn build(
             } => {
                 // The layer covers everything; its content is clipped by its items.
                 let all = Rect::new(-1e7, -1e7, 1e7, 1e7);
-                scene.push_layer(
-                    Fill::NonZero,
-                    blend(*b),
-                    opacity.clamp(0.0, 1.0),
-                    t * spatial::affine(transform),
-                    &all,
-                );
-                layers.pushed.push(1);
+                let opacity = if opacity.is_finite() { opacity.clamp(0.0, 1.0) } else { 1.0 };
+                scene.push_layer(Fill::NonZero, blend(*b), opacity, Affine::IDENTITY, &all);
+                layers.pushed.push(layers.xf);
+                // `transform` is in the item's local space.
+                let l = spatial::affine(transform);
+                if l != Affine::IDENTITY {
+                    let raw = res.world[node];
+                    if let Some(inv) = spatial::invert(raw) {
+                        layers.xf = layers.xf * raw * l * inv;
+                    }
+                }
             }
             Item::PopClip | Item::PopLayer => {
-                for _ in 0..layers.pushed.pop().unwrap_or(0) {
+                if let Some(xf) = layers.pushed.pop() {
                     scene.pop_layer();
+                    layers.xf = xf;
                 }
             }
         }
     }
     layers.close_run(scene);
-    while let Some(n) = layers.pushed.pop() {
-        for _ in 0..n {
-            scene.pop_layer();
-        }
+    while layers.pushed.pop().is_some() {
+        scene.pop_layer();
     }
+}
+
+/// How far synthetic bold grows each glyph outline, per side (the same
+/// amount as redrob-scene-raster, from Skia's fake bold).
+fn synthetic_bold_amount(size: f32) -> f32 {
+    let t = ((size - 9.0) / 27.0).clamp(0.0, 1.0);
+    let ratio = 1.0 / 24.0 + (1.0 / 32.0 - 1.0 / 24.0) * t;
+    size * ratio / 2.0
 }
 
 /// `src` of `data` (image pixels) drawn into `dest` (local space).
@@ -351,7 +368,8 @@ fn box_shadow(
     inset: bool,
 ) {
     let r = spatial::rect(rect);
-    let radius = f64::from(radii.iter().sum::<f32>() / 4.0);
+    // Blurred corners use the largest radius, as the screenshot raster does.
+    let radius = f64::from(radii.iter().copied().fold(0.0f32, f32::max));
     let std_dev = f64::from(blur.max(0.0)) / 2.0;
     let spread = f64::from(spread);
     let off = (f64::from(offset.0), f64::from(offset.1));

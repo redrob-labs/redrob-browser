@@ -16,6 +16,7 @@ mod spatial;
 mod state;
 mod ui;
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu;
@@ -37,6 +38,12 @@ pub const DEBUG_FILE_ENV: &str = "REDROB_SCENE_FILE";
 /// scroll offset, sticky node positions), for measuring the compositor.
 pub const TRACE_ENV: &str = "REDROB_SCENE_TRACE";
 
+/// Whether `REDROB_SCENE_TRACE` is set (then every window pass is logged).
+pub fn tracing() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os(TRACE_ENV).is_some())
+}
+
 struct Target {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -55,13 +62,15 @@ struct Drawn {
     externals: u64,
 }
 
-/// vello on the window's own wgpu device, drawing into one texture.
+/// vello on the window's own wgpu device. One `Gpu` serves every window;
+/// each window (a `slot`) draws into its own texture, since all windows are
+/// painted before any of them is presented.
 pub struct Gpu {
     state: egui_wgpu::RenderState,
     renderer: vello::Renderer,
     scene: vello::Scene,
-    target: Option<Target>,
-    drawn: Option<Drawn>,
+    targets: HashMap<u64, Target>,
+    drawn: HashMap<u64, Drawn>,
     trace: Option<std::fs::File>,
     last_render: Option<Instant>,
     pub stats: Stats,
@@ -100,21 +109,21 @@ impl Gpu {
             state: state.clone(),
             renderer,
             scene: vello::Scene::new(),
-            target: None,
-            drawn: None,
+            targets: HashMap::new(),
+            drawn: HashMap::new(),
             trace,
             last_render: None,
             stats: Stats::default(),
         })
     }
 
-    fn target(&mut self, width: u32, height: u32) -> Option<&Target> {
+    fn target(&mut self, slot: u64, width: u32, height: u32) -> Option<&Target> {
         let fits = self
-            .target
-            .as_ref()
+            .targets
+            .get(&slot)
             .is_some_and(|t| t.width == width && t.height == height);
         if !fits {
-            if let Some(old) = self.target.take() {
+            if let Some(old) = self.targets.remove(&slot) {
                 self.state.renderer.write().free_texture(&old.id);
             }
             let texture = self.state.device.create_texture(&wgpu::TextureDescriptor {
@@ -139,22 +148,36 @@ impl Gpu {
                 &view,
                 wgpu::FilterMode::Nearest,
             );
-            self.target = Some(Target {
-                _texture: texture,
-                view,
-                id,
-                width,
-                height,
-            });
+            self.targets.insert(
+                slot,
+                Target {
+                    _texture: texture,
+                    view,
+                    id,
+                    width,
+                    height,
+                },
+            );
         }
-        self.target.as_ref()
+        self.targets.get(&slot)
     }
 
-    /// Draw `tab`'s page into the page texture at `scale` physical pixels
-    /// per CSS pixel and return the texture. Renders only when something
-    /// changed since the last call; `externals` gives video frames.
+    /// Window `slot` closed: free its texture.
+    pub fn release(&mut self, slot: u64) {
+        self.drawn.remove(&slot);
+        if let Some(old) = self.targets.remove(&slot) {
+            self.state.renderer.write().free_texture(&old.id);
+        }
+    }
+
+    /// Draw `tab`'s page into window `slot`'s texture at `scale` physical
+    /// pixels per CSS pixel and return the texture. Renders only when
+    /// something changed since that window last drew; `externals` gives
+    /// video frames.
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
+        slot: u64,
         tab: u64,
         page: &mut TabScene,
         res: &Resolved,
@@ -181,8 +204,8 @@ impl Gpu {
             height,
             externals: serials,
         };
-        if self.drawn == Some(drawn) {
-            return self.target.as_ref().map(|t| t.id);
+        if self.drawn.get(&slot) == Some(&drawn) {
+            return self.targets.get(&slot).map(|t| t.id);
         }
         let started = Instant::now();
         self.scene.reset();
@@ -194,7 +217,7 @@ impl Gpu {
             height,
             antialiasing_method: vello::AaConfig::Area,
         };
-        let target = self.target(width, height)?;
+        let target = self.target(slot, width, height)?;
         let (view, id) = (target.view.clone(), target.id);
         if let Err(e) = self.renderer.render_to_texture(
             &self.state.device,
@@ -204,7 +227,7 @@ impl Gpu {
             &params,
         ) {
             eprintln!("redrob-browser: page render failed: {e}");
-            self.drawn = None;
+            self.drawn.remove(&slot);
             return None;
         }
         let done = Instant::now();
@@ -219,16 +242,16 @@ impl Gpu {
         self.stats.build = built - started;
         self.stats.render = done - built;
         self.stats.frames += 1;
-        self.drawn = Some(drawn);
+        self.drawn.insert(slot, drawn);
         page.presented();
         if self.trace.is_some() {
-            self.trace_frame(page, res, done);
+            self.trace_frame(slot, page, res, done);
         }
         self.last_render = Some(done);
         Some(id)
     }
 
-    fn trace_frame(&mut self, page: &TabScene, res: &Resolved, now: Instant) {
+    fn trace_frame(&mut self, slot: u64, page: &TabScene, res: &Resolved, now: Instant) {
         use std::io::Write as _;
         let interval = self
             .last_render
@@ -240,7 +263,8 @@ impl Gpu {
             .map(|(x, y)| format!("{x:.2},{y:.2}"))
             .collect();
         let line = format!(
-            "frame={} epoch={} build_ms={:.3} render_ms={:.3} gpu_ms={:.3} interval_ms={:.2} root={:.2},{:.2} sticky={}\n",
+            "window={} frame={} epoch={} build_ms={:.3} render_ms={:.3} gpu_ms={:.3} interval_ms={:.2} root={:.2},{:.2} sticky={}\n",
+            slot,
             self.stats.frames,
             page.epoch(),
             self.stats.build.as_secs_f64() * 1000.0,
