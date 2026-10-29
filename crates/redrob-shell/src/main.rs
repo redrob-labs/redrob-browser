@@ -231,6 +231,7 @@ fn run() -> anyhow::Result<()> {
                 focus_address: false,
                 error: None,
                 last_size: (0, 0, 0.0),
+                last_title: String::new(),
                 address_id: egui::Id::new("address"),
                 autoscroll: Default::default(),
                 incognito: false,
@@ -351,6 +352,7 @@ struct Window {
     focus_address: bool,
     error: Option<String>,
     last_size: (u32, u32, f32),
+    last_title: String,
     address_id: egui::Id,
     autoscroll: autoscroll::Autoscroll,
     /// A private window (`--incognito`).
@@ -661,7 +663,11 @@ impl Window {
         } else {
             title
         };
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        // Setting the title wakes the window on X11: only when it changed.
+        if title != self.last_title {
+            self.last_title = title.clone();
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        }
     }
 
     /// Browser shortcuts, taken before the page sees the keys.

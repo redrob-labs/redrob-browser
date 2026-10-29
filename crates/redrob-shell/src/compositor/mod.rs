@@ -72,6 +72,8 @@ pub struct Gpu {
 pub struct Stats {
     pub build: Duration,
     pub render: Duration,
+    /// Submit to raster done on the GPU; measured only with the trace on.
+    pub gpu: Duration,
     pub frames: u64,
 }
 
@@ -206,6 +208,14 @@ impl Gpu {
             return None;
         }
         let done = Instant::now();
+        if self.trace.is_some() {
+            // Measuring only: wait for the GPU so the time covers the raster.
+            let _ = self.state.device.poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(Duration::from_secs(2)),
+            });
+            self.stats.gpu = Instant::now() - built;
+        }
         self.stats.build = built - started;
         self.stats.render = done - built;
         self.stats.frames += 1;
@@ -230,11 +240,12 @@ impl Gpu {
             .map(|(x, y)| format!("{x:.2},{y:.2}"))
             .collect();
         let line = format!(
-            "frame={} epoch={} build_ms={:.3} render_ms={:.3} interval_ms={:.2} root={:.2},{:.2} sticky={}\n",
+            "frame={} epoch={} build_ms={:.3} render_ms={:.3} gpu_ms={:.3} interval_ms={:.2} root={:.2},{:.2} sticky={}\n",
             self.stats.frames,
             page.epoch(),
             self.stats.build.as_secs_f64() * 1000.0,
             self.stats.render.as_secs_f64() * 1000.0,
+            self.stats.gpu.as_secs_f64() * 1000.0,
             interval,
             root.0,
             root.1,
