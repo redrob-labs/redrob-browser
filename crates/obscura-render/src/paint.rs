@@ -8458,6 +8458,54 @@ fn fallback_font_bytes(family: Option<&str>) -> &'static [u8] {
 
 /// Advance width of `text` at a CSS font-size of `size` px (one em).
 /// `measure_text` scales by the font's line height instead of its em.
+/// Advance width of `text` in a CSS `font` shorthand as canvas 2D uses it
+/// (`[style] [variant] [weight] <size>[/<line-height>] <family>`), with the
+/// bundled faces. Returns `None` when the shorthand has no size.
+pub fn measure_text_with_font_shorthand(text: &str, font: &str) -> Option<f32> {
+    let tokens: Vec<&str> = font.split_whitespace().collect();
+    let size_index = tokens.iter().position(|token| {
+        let size = token.split('/').next().unwrap_or(token);
+        size.ends_with("px") && size.trim_end_matches("px").parse::<f32>().is_ok()
+    })?;
+    let size: f32 = tokens[size_index]
+        .split('/')
+        .next()?
+        .trim_end_matches("px")
+        .parse()
+        .ok()?;
+    let bold = tokens[..size_index].iter().any(|token| {
+        token.eq_ignore_ascii_case("bold")
+            || token.eq_ignore_ascii_case("bolder")
+            || token.parse::<u16>().is_ok_and(|weight| weight >= 600)
+    });
+    let family = tokens[size_index + 1..].join(" ");
+    let family = (!family.is_empty()).then_some(family.as_str());
+    if !bold {
+        return Some(measure_text_em(text, size, false, family));
+    }
+    // The bold face of the family the regular measure would use.
+    use crate::ifc::fonts::{MONO_B, SANS_B, SERIF_B, SYSTEM_B};
+    let regular = fallback_font_bytes(family);
+    let bytes = if std::ptr::eq(regular, SERIF_FONT_BYTES) {
+        SERIF_B
+    } else if std::ptr::eq(regular, MONO_FONT_BYTES) {
+        MONO_B
+    } else if std::ptr::eq(regular, SYSTEM_FONT_BYTES) {
+        SYSTEM_B
+    } else {
+        SANS_B
+    };
+    let font = FontRef::try_from_slice(bytes).ok()?;
+    let units_per_em = font.units_per_em().unwrap_or(1000.0);
+    let scaled = font.as_scaled(PxScale::from(size * font.height_unscaled() / units_per_em));
+    Some(
+        text.chars()
+            .filter(|c| !c.is_control())
+            .map(|c| scaled.h_advance(font.glyph_id(c)))
+            .sum(),
+    )
+}
+
 pub fn measure_text_em(text: &str, size: f32, is_bold: bool, family: Option<&str>) -> f32 {
     let font = FontRef::try_from_slice(fallback_font_bytes(family)).unwrap();
     let units_per_em = font.units_per_em().unwrap_or(1000.0);

@@ -751,6 +751,31 @@ fn ch_lengths_use_the_advance_of_zero_in_the_font() {
          <div id=sans style='font:16px sans-serif;width:10ch'>x</div>",
         &[],
     );
-    assert!((width(&tree, &laid, "mono") - 102.016).abs() < 0.05, "{}", width(&tree, &laid, "mono"));
-    assert!((width(&tree, &laid, "sans") - 88.98).abs() < 0.05, "{}", width(&tree, &laid, "sans"));
+    assert!(
+        (width(&tree, &laid, "mono") - 102.016).abs() < 0.05,
+        "{}",
+        width(&tree, &laid, "mono")
+    );
+    assert!(
+        (width(&tree, &laid, "sans") - 88.98).abs() < 0.05,
+        "{}",
+        width(&tree, &laid, "sans")
+    );
+}
+
+#[test]
+fn canvas_font_shorthand_measures_with_the_bundled_faces() {
+    // Chrome canvas measureText("Download on the"): 12px Arial 90.064;
+    // "400 12px Arial" the same; bold 96.656 (Liberation Sans Bold).
+    let m = |font: &str| {
+        crate::paint::measure_text_with_font_shorthand("Download on the", font).unwrap()
+    };
+    assert!((m("12px Arial") - 90.064).abs() < 0.01);
+    assert!((m("400 12px Arial") - 90.064).abs() < 0.01);
+    assert!(
+        (m("bold 12px Arial") - 96.656).abs() < 0.01,
+        "{}",
+        m("bold 12px Arial")
+    );
+    assert!((m("600 12px Helvetica, Arial, sans-serif") - 96.656).abs() < 0.01);
 }
