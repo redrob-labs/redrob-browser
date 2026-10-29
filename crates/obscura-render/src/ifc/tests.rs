@@ -1056,3 +1056,16 @@ fn table_caption_min_content_keeps_its_fraction() {
         .width;
     assert!((w - 51.6).abs() < 0.05, "{w}");
 }
+
+#[test]
+fn inline_around_a_block_spans_the_anonymous_block() {
+    // Chrome: an <a> around a centered max-width:300px block in a 500px
+    // container is 500 wide (the anonymous block box), not 300.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><div style='width:500px'>\
+         <a id=a href=#><div style='max-width:300px;margin:auto;position:relative;height:10px'></div></a></div>",
+        &[],
+    );
+    let r = laid.rects[&element(&tree, "a")];
+    assert_eq!((r.x, r.width), (0.0, 500.0));
+}

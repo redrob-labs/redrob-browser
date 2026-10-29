@@ -9031,7 +9031,34 @@ fn layout_dom_once(
             }
             // Spliced block-in-inline wrappers span their children; the
             // innermost first so an outer wrapper includes the inner ones.
+            // A block inside an inline sits in an anonymous block box as wide
+            // as the containing block's content box, and the inline's rect
+            // includes that box (Chrome: an <a> around a centered
+            // max-width:720px block in a 778px content box is 778 wide).
+            let wrapper_set: HashSet<NodeId> =
+                ifc_items.transparent_wrappers.iter().copied().collect();
             for &wrapper in ifc_items.transparent_wrappers.iter().rev() {
+                let mut container = rendered_parent(tree, wrapper);
+                while let Some(id) = container.filter(|id| wrapper_set.contains(id)) {
+                    container = rendered_parent(tree, id);
+                }
+                let content = container.and_then(|id| {
+                    let rect = rects.get(&id)?;
+                    let style = styles.get(&id)?;
+                    let left = style.padding.left + style.border.left;
+                    let right = style.padding.right + style.border.right;
+                    Some((rect.x + left, (rect.width - left - right).max(0.0)))
+                });
+                let in_flow_block = |child: NodeId| {
+                    !wrapper_set.contains(&child)
+                        && styles.get(&child).is_some_and(|style| {
+                            style.display != crate::Display::None
+                                && !crate::is_inline_level_box(style)
+                                && style.float.is_none()
+                                && !matches!(style.position, Some(taffy::Position::Absolute))
+                                && !style.position_fixed
+                        })
+                };
                 // A decorated wrapper also has its own inline fragments.
                 let union = rects
                     .get(&wrapper)
@@ -9040,7 +9067,15 @@ fn layout_dom_once(
                     .chain(
                         rendered_children(tree, wrapper)
                             .into_iter()
-                            .filter_map(|child| rects.get(&child).copied()),
+                            .filter_map(|child| {
+                                let rect = rects.get(&child).copied()?;
+                                Some(match content {
+                                    Some((x, width)) if in_flow_block(child) => {
+                                        Rect { x, width, ..rect }
+                                    }
+                                    _ => rect,
+                                })
+                            }),
                     )
                     .reduce(|a, b| a.union(&b));
                 if let Some(rect) = union {
