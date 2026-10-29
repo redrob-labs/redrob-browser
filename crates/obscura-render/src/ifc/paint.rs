@@ -10,6 +10,7 @@ use swash::scale::{image::Content, image::Image, Render, ScaleContext, Source, S
 use swash::zeno::{Angle, Format, Transform, Vector};
 
 use super::Ifc;
+use crate::paint::lcd::LcdGlyph;
 use crate::{LayoutStyle, Rect};
 
 type ClipTextFill = (f32, Vec<([u8; 4], Option<f32>)>);
@@ -110,9 +111,80 @@ struct GlyphKey {
 pub(crate) struct GlyphRaster {
     context: ScaleContext,
     images: HashMap<GlyphKey, Option<Image>>,
+    lcd: HashMap<GlyphKey, Option<LcdGlyph>>,
 }
 
 impl GlyphRaster {
+    /// The LCD (subpixel) mask of an outline glyph, or None for a glyph
+    /// without an outline (bitmap and color glyphs take the gray path).
+    #[allow(clippy::too_many_arguments)]
+    fn lcd_image(
+        &mut self,
+        font: &parley::FontData,
+        glyph: u16,
+        size: f32,
+        x_bin: u8,
+        coords: &[i16],
+        embolden: bool,
+        skew: f32,
+    ) -> Option<&LcdGlyph> {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        coords.hash(&mut hasher);
+        let key = GlyphKey {
+            font: font.data.id(),
+            index: font.index,
+            glyph,
+            size_bits: size.to_bits(),
+            x_bin,
+            coords: hasher.finish(),
+            embolden,
+            skew_bits: skew.to_bits(),
+        };
+        let context = &mut self.context;
+        self.lcd
+            .entry(key)
+            .or_insert_with(|| {
+                let font_ref = swash::FontRef::from_index(font.data.as_ref(), font.index as usize)?;
+                let mut scaler = context
+                    .builder(font_ref)
+                    .size(size)
+                    .hint(true)
+                    .normalized_coords(coords.iter().copied())
+                    .build();
+                if scaler.has_color_outlines() || !scaler.has_outlines() {
+                    return None;
+                }
+                let mut render = Render::new(&[Source::Outline]);
+                // Three samples per pixel horizontally; the subpixel
+                // position moves the outline in thirds of those samples.
+                let mut transform = Transform::scale(3.0, 1.0);
+                if skew != 0.0 {
+                    transform =
+                        Transform::skew(Angle::from_degrees(skew), Angle::from_degrees(0.0))
+                            .then(&transform);
+                }
+                render
+                    .format(Format::Alpha)
+                    .transform(Some(transform))
+                    .offset(Vector::new(x_bin as f32 * 0.75, 0.0));
+                if embolden {
+                    render.embolden(size / 24.0);
+                }
+                let image = render.render(&mut scaler, glyph)?;
+                if image.content != Content::Mask {
+                    return None;
+                }
+                Some(LcdGlyph::from_subpixels(
+                    &image.data,
+                    image.placement.width as usize,
+                    image.placement.height as usize,
+                    image.placement.left,
+                    -image.placement.top,
+                ))
+            })
+            .as_ref()
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn image(
         &mut self,
@@ -529,7 +601,9 @@ impl Ifc {
             .collect();
 
         let pixels = pixmap.pixels_mut();
-        let mut blend = |px: i32, py: i32, rgba: [u8; 4], coverage: u32| {
+        // `lcd`: per-channel gamma-corrected coverage, blended as Skia's
+        // LCD16 on opaque pixels and as its channel average elsewhere.
+        let mut blend = |px: i32, py: i32, rgba: [u8; 4], coverage: u32, lcd: Option<[u8; 3]>| {
             if let Some((cx0, cy0, cx1, cy1)) = clip_bounds {
                 if (px as f32) < cx0
                     || (px as f32) >= cx1
@@ -547,11 +621,25 @@ impl Ifc {
                 .and_then(|mask| mask.data().get(idx))
                 .copied()
                 .unwrap_or(255) as u32;
+            let dst = pixels[idx];
+            if let Some(mask) = lcd {
+                if dst.alpha() == 255 {
+                    let alpha = rgba[3] as u32 * mask_alpha / 255;
+                    let [r, g, b] = crate::paint::lcd::blend_lcd(
+                        [rgba[0], rgba[1], rgba[2]],
+                        alpha,
+                        mask,
+                        [dst.red(), dst.green(), dst.blue()],
+                    );
+                    pixels[idx] =
+                        tiny_skia::PremultipliedColorU8::from_rgba(r, g, b, 255).unwrap_or(dst);
+                    return;
+                }
+            }
             let a = rgba[3] as u32 * coverage / 255 * mask_alpha / 255;
             if a == 0 {
                 return;
             }
-            let dst = pixels[idx];
             let inv = 255 - a;
             let out_a = a + dst.alpha() as u32 * inv / 255;
             let out_r = rgba[0] as u32 * a / 255 + dst.red() as u32 * inv / 255;
@@ -589,9 +677,42 @@ impl Ifc {
             }
             strokes.extend(decorations(self, run, color));
             let size = run.size * raster_scale;
+            let lcd_tables = crate::paint::lcd::lcd_preblend(color);
+            let gray_table = crate::paint::lcd::gray_preblend(color);
             for &(glyph, gx, gy) in &run.glyphs {
                 let (x, x_bin) = subpixel(ox + gx * raster_scale);
                 let y = (oy + gy * raster_scale).round() as i32;
+                if fill.is_none() {
+                    if let Some(image) = raster.lcd_image(
+                        &run.font,
+                        glyph,
+                        size,
+                        x_bin,
+                        &run.coords,
+                        run.embolden,
+                        run.skew,
+                    ) {
+                        let left = x + image.left;
+                        let top = y + image.top;
+                        for row in 0..image.height {
+                            for col in 0..image.width {
+                                let c = image.data[(row * image.width + col) as usize];
+                                if c == [0, 0, 0] {
+                                    continue;
+                                }
+                                let mask = [
+                                    lcd_tables[0][c[0] as usize],
+                                    lcd_tables[1][c[1] as usize],
+                                    lcd_tables[2][c[2] as usize],
+                                ];
+                                let gray = (c[0] as u32 + c[1] as u32 + c[2] as u32) / 3;
+                                let coverage = gray_table[gray as usize] as u32;
+                                blend(left + col, top + row, color, coverage, Some(mask));
+                            }
+                        }
+                        continue;
+                    }
+                }
                 let Some(image) = raster.image(
                     &run.font,
                     glyph,
@@ -630,7 +751,7 @@ impl Ifc {
                                     }
                                     None => color,
                                 };
-                                blend(px, py, rgba, coverage);
+                                blend(px, py, rgba, coverage, None);
                             }
                         }
                     }
@@ -648,7 +769,7 @@ impl Ifc {
                                 if coverage == 0 {
                                     continue;
                                 }
-                                blend(left + col, top + row, rgba, coverage);
+                                blend(left + col, top + row, rgba, coverage, None);
                             }
                         }
                     }
@@ -664,7 +785,7 @@ impl Ifc {
             let py0 = (oy + y * raster_scale) as i32;
             for dt in 0..t {
                 for px in (ox + x0 * raster_scale) as i32..(ox + x1 * raster_scale) as i32 {
-                    blend(px, py0 + dt, color, 255);
+                    blend(px, py0 + dt, color, 255, None);
                 }
             }
         }

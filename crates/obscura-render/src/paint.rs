@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 mod damage;
+pub(crate) mod lcd;
 #[cfg(feature = "scene")]
 pub mod scene;
 pub use damage::DamageSnapshot;
