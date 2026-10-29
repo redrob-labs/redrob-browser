@@ -118,58 +118,35 @@ fn directory_font_files() -> &'static [Arc<Vec<u8>>] {
 }
 
 /// The bundled family a CSS `font-family` token resolves to, the way
-/// Chromium picks a generic family on this host.
+/// Chromium resolves it on this host: generic families, the bundled faces
+/// and their fontconfig metric aliases (Arial and Helvetica are Liberation
+/// Sans, Times is Liberation Serif, Courier is Liberation Mono). Any other
+/// name (Verdana, Segoe UI, Roboto, Georgia, Menlo, ...) is not installed,
+/// so Chromium moves on to the next family in the list; `None` here.
 pub(crate) fn bundled_family_for_css_token(token: &str) -> Option<&'static str> {
     let token = token
         .trim()
         .trim_matches(|c| c == '"' || c == '\'')
         .trim()
         .to_ascii_lowercase();
-    if token.is_empty() {
-        return None;
+    match token.as_str() {
+        "" => None,
+        "system-ui" | "ui-sans-serif" | "dejavu sans" => Some(SYSTEM_FAMILY),
+        "monospace" | "ui-monospace" | "liberation mono" | "courier new" | "courier"
+        | "cousine" | "dejavu sans mono" => Some(MONO_FAMILY),
+        "serif" | "ui-serif" | "liberation serif" | "times new roman" | "times" | "tinos"
+        | "dejavu serif" | "nimbus roman" => Some(SERIF_FAMILY),
+        "sans-serif" | "liberation sans" | "arial" | "helvetica" | "arimo" | "nimbus sans" => {
+            Some(SANS_FAMILY)
+        }
+        "emoji" | "noto color emoji" => Some(EMOJI_FAMILY),
+        _ => None,
     }
-    if token == "system-ui" || token == "ui-sans-serif" {
-        return Some(SYSTEM_FAMILY);
-    }
-    if token == "monospace"
-        || token.contains("mono")
-        || token.contains("courier")
-        || token.contains("consol")
-        || token == "menlo"
-        || token == "monaco"
-        || token == "code"
-    {
-        return Some(MONO_FAMILY);
-    }
-    if token == "serif"
-        || token == "georgia"
-        || token.contains("times")
-        || token == "cambria"
-        || token.contains("garamond")
-        || token.contains("liberation serif")
-        || token == "roman"
-    {
-        return Some(SERIF_FAMILY);
-    }
-    if token == "sans-serif"
-        || token.contains("sans")
-        || token == "arial"
-        || token == "helvetica"
-        || token == "helvetica neue"
-        || token == "-apple-system"
-        || token == "roboto"
-        || token == "segoe ui"
-        || token == "inter"
-        || token == "verdana"
-        || token == "tahoma"
-    {
-        return Some(SANS_FAMILY);
-    }
-    if token == "emoji" || token.contains("emoji") {
-        return Some(EMOJI_FAMILY);
-    }
-    None
 }
+
+/// The family Chromium uses when no family in the list is available: its
+/// default standard font, Times New Roman (Liberation Serif here).
+pub(crate) const DEFAULT_FAMILY: &str = SERIF_FAMILY;
 
 fn signature(fonts: &[WebFont], load_emoji: bool) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -238,6 +215,11 @@ fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
         );
     }
     for font in web_fonts {
+        // A face declared for a weight range (`font-weight: 100 900`) is
+        // registered at the top of its range: requests inside it match the
+        // face without synthetic bold (CSS Fonts 4 §5.2), and a family with
+        // several ranged faces still orders them by range.
+        let declared_weight = font.weight.map(|(_, max)| FontWeight::new(max as f32));
         let info = FontInfoOverride {
             family_name: font.family.as_deref(),
             width: None,
@@ -248,18 +230,13 @@ fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
                     FontStyle::Normal
                 }
             }),
-            weight: font
-                .weight
-                .filter(|(min, max)| min == max)
-                .map(|(weight, _)| FontWeight::new(weight as f32)),
+            weight: declared_weight,
             axes: None,
         };
-        register(
-            &mut collection,
-            &mut order,
-            Blob::new(Arc::clone(&font.data) as Arc<dyn AsRef<[u8]> + Send + Sync>),
-            Some(info),
-        );
+        let blob = Blob::new(Arc::clone(&font.data) as Arc<dyn AsRef<[u8]> + Send + Sync>);
+        // Chromium on Linux shapes web fonts with whole-pixel advances.
+        parley::mark_whole_pixel_advances(blob.id());
+        register(&mut collection, &mut order, blob, Some(info));
     }
     if load_emoji {
         register(&mut collection, &mut order, static_blob(EMOJI_R), None);
@@ -359,7 +336,7 @@ impl Fonts {
     ///
     /// Each token resolves to a loaded family of that name, or else to the
     /// bundled family Chromium would use for it on this host. The UA default
-    /// (Liberation Sans) ends the list.
+    /// (Chromium's standard font, Times New Roman: Liberation Serif) ends the list.
     pub(crate) fn families(&mut self, css: Option<&str>) -> FontFamily<'static> {
         let mut names: Vec<FontFamilyName<'static>> = Vec::new();
         let push = |names: &mut Vec<FontFamilyName<'static>>, name: FontFamilyName<'static>| {
@@ -400,7 +377,7 @@ impl Fonts {
         }
         push(
             &mut names,
-            FontFamilyName::Named(Cow::Borrowed(SANS_FAMILY)),
+            FontFamilyName::Named(Cow::Borrowed(DEFAULT_FAMILY)),
         );
         FontFamily::List(Cow::Owned(names))
     }

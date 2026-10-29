@@ -481,7 +481,14 @@ fn layout_ifc(
         block_ctx.set_width(width + pbw);
     }
 
-    if run_mode == RunMode::ComputeSize && inputs.axis == RequestedAxis::Horizontal {
+    // A width-only query skips line breaking. Taffy's layout cache does not
+    // key on the requested axis, so the zero height must never answer a
+    // later height query with the same inputs: with a known width there is
+    // no width to compute anyway, so lay the lines out.
+    if run_mode == RunMode::ComputeSize
+        && inputs.axis == RequestedAxis::Horizontal
+        && known_dimensions.width.is_none()
+    {
         let measured = Size { width, height: 0.0 };
         let size = known_dimensions
             .or(node_size)

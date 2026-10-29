@@ -114,6 +114,7 @@ mod glyph;
 pub mod itemize;
 mod lru_cache;
 pub mod shape;
+pub mod whole_pixel;
 
 pub use linebender_resource_handle::FontData;
 pub use parlance::{BaseDirection, NormalizedCoord};

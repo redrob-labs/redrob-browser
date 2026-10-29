@@ -23,6 +23,8 @@ pub(crate) mod geom;
 pub(crate) mod layout;
 #[cfg(feature = "paint")]
 pub(crate) mod paint;
+#[cfg(all(test, feature = "paint"))]
+mod tests;
 
 use std::cell::RefCell;
 

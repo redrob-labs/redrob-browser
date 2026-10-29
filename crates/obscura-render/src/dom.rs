@@ -7660,16 +7660,7 @@ fn layout_dom_once(
                 let bold = crate::style::used_font_weight(style) >= 600;
                 let label_width = option_labels
                     .iter()
-                    .map(|label| {
-                        text_width(
-                            label,
-                            font_size,
-                            bold,
-                            style.font_family.as_deref(),
-                            style.letter_spacing.unwrap_or(0.0),
-                            style.word_spacing.unwrap_or(0.0),
-                        )
-                    })
+                    .map(|label| select_label_width(label, font_size, bold, style))
                     .fold(0.0f32, f32::max);
                 let horizontal_edges = style.padding.left
                     + style.padding.right
@@ -7684,13 +7675,13 @@ fn layout_dom_once(
                     .and_then(|value| value.parse::<usize>().ok())
                     .filter(|&value| value > 1)
                     .unwrap_or(1) as f32;
-                // Chromium's menu list keeps a 4px label inset and an arrow
-                // area that grows slowly with the font, inside any padding
-                // (fitted to Chrome: 88px for "Option one" at 13.33px Arial,
-                // 101px at 16px).
-                let intrinsic_width = label_width
+                // Chromium's menu list is its widest option label, rounded up
+                // to a whole pixel, plus a 4px label inset and a 16px arrow
+                // area inside any padding (Chrome: 88px for "Option one" at
+                // 13.33px Arial, 101px at 16px, 30px for "o", 22px empty).
+                let intrinsic_width = label_width.ceil()
                     + crate::SELECT_INLINE_START
-                    + select_arrow_width(font_size)
+                    + SELECT_ARROW_WIDTH
                     + horizontal_edges;
                 let intrinsic_height =
                     crate::inline::used_line_height(style).max(1.0) * rows + vertical_edges;
@@ -13726,8 +13717,26 @@ enum ContainerAutoBlockSize {
 /// height keeps winning, as does a grid axis that stretches the item:
 /// only an untouched auto axis adopts the intrinsic value.
 /// Width Chromium reserves for a closed select's drop-down arrow.
-fn select_arrow_width(font_size: f32) -> f32 {
-    23.6 + 0.5 * (font_size - 13.333_333)
+const SELECT_ARROW_WIDTH: f32 = 16.0;
+
+/// Advance width of one option label in the select's font, scaled per em.
+fn select_label_width(label: &str, font_size: f32, bold: bool, style: &crate::LayoutStyle) -> f32 {
+    #[cfg(feature = "paint")]
+    let glyphs =
+        crate::paint::measure_text_em(label, font_size, bold, style.font_family.as_deref());
+    #[cfg(not(feature = "paint"))]
+    let glyphs = text_width(
+        label,
+        font_size,
+        bold,
+        style.font_family.as_deref(),
+        0.0,
+        0.0,
+    );
+    glyphs
+        + label.chars().filter(|c| !c.is_control()).count() as f32
+            * style.letter_spacing.unwrap_or(0.0)
+        + word_spacing_advance(label, style.word_spacing.unwrap_or(0.0))
 }
 
 fn assign_native_control_size(
@@ -17162,12 +17171,13 @@ mod tests {
         let logo = rect("logo");
 
         assert_eq!((logo.width, logo.height), (70.0, 70.0));
+        // Chrome (default serif font): brand 215px, header 248px.
         assert!(
-            brand.width > 220.0,
+            (brand.width - 215.0).abs() < 1.0,
             "the nested float must aggregate the image and label on its max-content line: {brand:?}"
         );
         assert!(
-            header.width > 255.0 && header.width < 259.0,
+            (header.width - 248.0).abs() < 1.0,
             "the hidden 22px toggle icon must not cap the outer shrink-to-fit width: {header:?}"
         );
         assert!(
@@ -21396,6 +21406,58 @@ mod tests {
         assert_eq!(rect("f").x, 8.0);
         assert!((rect("a").x - 77.39).abs() < 0.5, "{:?}", rect("a"));
         assert!((rect("it").x - 127.22).abs() < 0.5, "{:?}", rect("it"));
+    }
+
+    // w3schools html_challenges_*: floats in a block before a flex row whose
+    // item holds a `width:100%` flex panel. The deferred percentage is
+    // restored after a first pass and the tree relaid; marking the panel
+    // dirty stopped at the block beside the floats (its cache is always
+    // empty), so the flex row reused its first-pass layout and the panel
+    // stayed 2px wide. Chrome: 399.58 x 42.
+    #[cfg(feature = "paint")]
+    #[test]
+    fn restyled_flex_item_beside_earlier_floats_is_relaid() {
+        let tree = parse_html(
+            r#"<!doctype html><style>body{margin:0;font:16px/20px Arial}
+            .w3-clear::after,.w3-clear::before{content:"";display:table;clear:both}
+            .l{float:left;width:100px;height:40px}.r{float:right;width:100px;height:40px}
+            #main{float:left;width:875px;padding:16px 32px 32px;box-sizing:border-box}
+            .grid{display:flex;margin-top:12px}
+            .work{display:flex;flex:1 1 50%;min-width:0;overflow:hidden}
+            .panel{display:flex;flex-direction:column;width:100%;overflow:hidden;border:1px solid;box-sizing:border-box}
+            .drag{width:12px}</style>
+            <div id=main><div class=w3-clear><a class=l></a><a class=r></a></div>
+            <div style="margin-top:10px"><div><div style="display:grid">split</div>
+            <div class=grid><div class=work><div class=panel id=panel><div>Some text that would wrap one character per line if the panel collapsed</div></div></div><div class=drag></div><div class=work>preview</div></div>
+            </div></div></div>"#,
+        );
+        let laid = layout_dom(&tree, (1280.0, 800.0));
+        let panel = laid.rects[&tree.get_element_by_id("panel").unwrap()];
+        assert!((panel.width - 399.58).abs() < 1.0, "{panel:?}");
+        assert_eq!(panel.height, 42.0, "{panel:?}");
+    }
+
+    // Chrome: a text item alone in an auto row of a grid with fr columns
+    // is 18px tall (grid 38px with a 20px first row). Taffy measured the
+    // item's width with a width-only query whose zero height was cached and
+    // then reused for the row's height query with the same inputs.
+    #[cfg(feature = "paint")]
+    #[test]
+    fn text_item_alone_in_an_auto_grid_row_keeps_its_height() {
+        for (rows, grid_height, top) in [
+            ("grid-template-rows:20px auto;", 38.0, 20.0),
+            ("", 36.0, 18.0),
+        ] {
+            let tree = parse_html(&format!(
+                "<!doctype html><body style='margin:0;font:16px Arial'><div id=grid \
+                 style='display:grid;grid-template-columns:100px 1fr 2fr;{rows}'>\
+                 <div>1</div><div>2</div><div>3</div><div id=g4>4</div></div>"
+            ));
+            let laid = layout_dom(&tree, (1280.0, 800.0));
+            let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
+            assert_eq!(rect("grid").height, grid_height, "{rows}");
+            assert_eq!((rect("g4").y, rect("g4").height), (top, 18.0), "{rows}");
+        }
     }
 
     /// Each line of text node `node`: (x, text), in line order.

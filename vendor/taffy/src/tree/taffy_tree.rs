@@ -1149,22 +1149,13 @@ impl<NodeContext> TaffyTree<NodeContext> {
             parents: &SlotMap<DefaultKey, Option<NodeId>>,
             node_key: DefaultKey,
         ) {
-            match nodes[node_key].mark_dirty() {
-                ClearState::AlreadyEmpty
-                    if !nodes[node_key].float_sensitive && !nodes[node_key].is_inline_root =>
-                {
-                    // Node was already marked as dirty.
-                    // No need to visit ancestors
-                    // as they should be marked as dirty already.
-                }
-                // A node that bypasses the cache (an inline root or a float-sensitive box laid
-                // out beside floats) has an empty cache without being dirty, so its ancestors
-                // must still be visited.
-                _ => {
-                    if let Some(Some(node)) = parents.get(node_key) {
-                        mark_dirty_recursive(nodes, parents, (*node).into());
-                    }
-                }
+            // Always continue to the root: an empty cache does not mean the ancestors are dirty.
+            // Nodes laid out beside floats (inline roots, float-sensitive boxes and blocks in a
+            // block formatting context with floats) skip the cache, so theirs stays empty while
+            // their ancestors keep cached results that must be invalidated.
+            let _ = nodes[node_key].mark_dirty();
+            if let Some(Some(node)) = parents.get(node_key) {
+                mark_dirty_recursive(nodes, parents, (*node).into());
             }
         }
 
