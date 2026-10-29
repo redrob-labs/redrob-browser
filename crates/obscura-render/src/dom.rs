@@ -9133,9 +9133,21 @@ fn place_inline_content(
         store.by_node.entry(root).or_default().push(index);
     }
     for (node, list) in &fragments {
-        let mut union = list[0];
-        for rect in &list[1..] {
+        // Blink unites an inline's fragments with UniteIfNonZero: a fragment
+        // with no width or no height (a span's edge left alone before a
+        // `<br>`) does not grow the bounding box unless nothing else is
+        // there.
+        let non_empty = list
+            .iter()
+            .filter(|rect| rect.width > 0.0 && rect.height > 0.0);
+        let mut union = non_empty.clone().next().copied().unwrap_or(list[0]);
+        for rect in non_empty.skip(1) {
             union = union.union(rect);
+        }
+        if !(union.width > 0.0 && union.height > 0.0) {
+            for rect in &list[1..] {
+                union = union.union(rect);
+            }
         }
         rects.insert(*node, union);
     }

@@ -837,7 +837,13 @@ fn css_last_declaration<'a>(block: &'a str, name: &str) -> Option<&'a str> {
         let Some((property, value)) = declaration.split_once(':') else {
             continue;
         };
-        if property.trim().eq_ignore_ascii_case(name) {
+        // A comment may precede the property (`/* IE9 Compat Modes */
+        // src: ...` on w3schools).
+        let mut property = property.trim();
+        while let Some(rest) = property.strip_prefix("/*") {
+            property = rest.split_once("*/").map_or("", |(_, after)| after).trim();
+        }
+        if property.eq_ignore_ascii_case(name) {
             found = Some(value.trim());
         }
     }
@@ -5934,8 +5940,8 @@ mod tests {
         let css = r#"
             @font-face {
               font-family: 'Probe';
-              src: url('/font/probe.eot');
-              src: url('/font/probe.eot?#iefix') format('embedded-opentype'),
+              src: url('/font/probe.eot'); /* IE9 Compat Modes */
+              src: url('/font/probe.eot?#iefix') format('embedded-opentype'), /* IE6-IE8 */
                    url('/font/probe.woff2') format('woff2'),
                    url('/font/probe.woff') format('woff'),
                    url('/font/probe.ttf') format('truetype'),

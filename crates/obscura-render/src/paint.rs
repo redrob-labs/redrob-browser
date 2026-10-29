@@ -8780,26 +8780,48 @@ fn collect_web_fonts(
     let mut fonts = Vec::new();
     let mut rules = Vec::new();
 
+    // Author style sheets in document order: `<style>` text, and linked
+    // sheets the host fetched (their URLs resolve against the sheet's own
+    // URL, as CSS requires).
+    let mut sheets: Vec<(String, Option<String>)> = Vec::new();
     for nid in crate::dom::rendered_descendants(tree, tree.document()) {
         // Inspect tags without copying unrelated script/text payloads.
-        if !tree
+        let kind = tree
             .with_node(nid, |node| {
-                node.as_element()
-                    .is_some_and(|element| element.local.as_ref() == "style")
+                let element = node.as_element()?;
+                match element.local.as_ref() {
+                    "style" => Some(None),
+                    "link" => Some(Some(node.get_attribute("href").unwrap_or("").to_string())),
+                    _ => None,
+                }
             })
-            .unwrap_or(false)
-        {
-            continue;
+            .flatten();
+        match kind {
+            Some(None) => sheets.push((tree.text_content(nid), base_url.map(str::to_string))),
+            Some(Some(href)) => {
+                if let Some(sheet) = tree.external_stylesheet(nid) {
+                    let css: String = sheet.sources.iter().map(|part| part.as_ref()).collect();
+                    let sheet_url = resolve_resource_url(&href, base_url)
+                        .or_else(|| base_url.map(str::to_string));
+                    sheets.push((css, sheet_url));
+                }
+            }
+            None => {}
         }
-        let css = tree.text_content(nid);
-        for face in font_face_blocks(&css) {
+    }
+    for (css, sheet_base) in &sheets {
+        let sheet_base = sheet_base.as_deref();
+        for face in font_face_blocks(css) {
             if !font_face_covers_ascii(face) {
                 continue;
             }
             let sources: Vec<_> = font_face_urls(face)
                 .into_iter()
                 .filter(|src| font_source_may_be_supported(src))
-                .map(|src| (font_resource_key(&src, base_url), src))
+                .map(|src| {
+                    let key = font_resource_key(&src, sheet_base);
+                    (key.clone(), key)
+                })
                 .collect();
             if sources.is_empty() {
                 continue;
@@ -9025,10 +9047,13 @@ fn font_face_declaration<'a>(face: &'a str, name: &str) -> Option<&'a str> {
         .into_iter()
         .filter_map(|declaration| {
             let (property, value) = declaration.split_once(':')?;
-            property
-                .trim()
-                .eq_ignore_ascii_case(name)
-                .then_some(value.trim())
+            // A comment may precede the property (`/* IE9 Compat Modes */
+            // src: ...`), as on w3schools.
+            let mut property = property.trim();
+            while let Some(rest) = property.strip_prefix("/*") {
+                property = rest.split_once("*/").map_or("", |(_, after)| after).trim();
+            }
+            property.eq_ignore_ascii_case(name).then_some(value.trim())
         })
         .next_back()
 }
