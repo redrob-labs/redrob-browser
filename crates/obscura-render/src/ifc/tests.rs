@@ -707,3 +707,36 @@ fn unavailable_families_fall_through_to_the_next_family_then_the_serif_default()
     }
     close(width(&tree, &laid, "plain"), 223.375, "no font-family");
 }
+
+#[test]
+fn host_installed_families_and_whole_pixel_glyph_fallback() {
+    // Chrome on this host: a family installed on the host is used by name
+    // (DejaVu Serif 282.453px, Nimbus Sans 240.453px for SAMPLE at 32px),
+    // and a glyph missing from the page's font falls back to DejaVu Sans
+    // with whole-pixel advances (❮ at 100px: 84px; DejaVu Sans named:
+    // 83.80px).
+    let (tree, laid) = layout(
+        &format!(
+            "<!doctype html><body style='margin:0;white-space:pre'>\
+             <div><span id=serif style=\"font:32px 'DejaVu Serif'\">{SAMPLE}</span></div>\
+             <div><span id=nimbus style=\"font:32px 'Nimbus Sans'\">{SAMPLE}</span></div>\
+             <div><span id=fallback style='font:100px sans-serif'>❮</span></div>\
+             <div><span id=named style=\"font:100px 'DejaVu Sans'\">❮</span></div>"
+        ),
+        &[],
+    );
+    let installed = |name: &str| super::fonts::tests_host_has_family(name);
+    if installed("dejavu serif") {
+        close(width(&tree, &laid, "serif"), 282.453, "DejaVu Serif");
+    }
+    if installed("nimbus sans") {
+        assert!((width(&tree, &laid, "nimbus") - 240.453).abs() < 0.05);
+    }
+    close(width(&tree, &laid, "fallback"), 84.0, "fallback ❮");
+    assert!(
+        (width(&tree, &laid, "named") - 83.80).abs() < 0.02,
+        "{} {:?}",
+        width(&tree, &laid, "named"),
+        faces(&tree, &laid, "named")
+    );
+}

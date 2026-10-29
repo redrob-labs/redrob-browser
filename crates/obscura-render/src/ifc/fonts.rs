@@ -43,6 +43,8 @@ pub(crate) const SANS_FAMILY: &str = "Liberation Sans";
 pub(crate) const SERIF_FAMILY: &str = "Liberation Serif";
 pub(crate) const MONO_FAMILY: &str = "Liberation Mono";
 pub(crate) const SYSTEM_FAMILY: &str = "DejaVu Sans";
+/// The glyph-fallback registration of DejaVu Sans (see `build_collection`).
+const FALLBACK_FAMILY: &str = "Obscura Fallback DejaVu Sans";
 pub(crate) const EMOJI_FAMILY: &str = "Noto Color Emoji";
 
 /// A font supplied by the document (`@font-face`, FontFace).
@@ -133,12 +135,11 @@ pub(crate) fn bundled_family_for_css_token(token: &str) -> Option<&'static str> 
         "" => None,
         "system-ui" | "ui-sans-serif" | "dejavu sans" => Some(SYSTEM_FAMILY),
         "monospace" | "ui-monospace" | "liberation mono" | "courier new" | "courier"
-        | "cousine" | "dejavu sans mono" => Some(MONO_FAMILY),
-        "serif" | "ui-serif" | "liberation serif" | "times new roman" | "times" | "tinos"
-        | "dejavu serif" | "nimbus roman" => Some(SERIF_FAMILY),
-        "sans-serif" | "liberation sans" | "arial" | "helvetica" | "arimo" | "nimbus sans" => {
-            Some(SANS_FAMILY)
+        | "cousine" => Some(MONO_FAMILY),
+        "serif" | "ui-serif" | "liberation serif" | "times new roman" | "times" | "tinos" => {
+            Some(SERIF_FAMILY)
         }
+        "sans-serif" | "liberation sans" | "arial" | "helvetica" | "arimo" => Some(SANS_FAMILY),
         "emoji" | "noto color emoji" => Some(EMOJI_FAMILY),
         _ => None,
     }
@@ -268,10 +269,39 @@ fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
         }
     }
 
-    // Glyph fallback after the authored families: the bundled faces first
-    // (DejaVu Sans covers most symbols), then every other loaded family in
-    // registration order, emoji last.
-    let mut fallback: Vec<FamilyId> = [sans, system, serif, mono].into_iter().flatten().collect();
+    // Glyph fallback after the authored families, the way Chromium asks
+    // fontconfig on this host (`fc-match sans-serif:charset=...` starts at
+    // DejaVu Sans). Chromium shapes fallback runs with whole-pixel advances
+    // even where the same face named by the page keeps fractional ones (a
+    // fallback ❮ at 100px is 84px wide; DejaVu Sans named, 83.80), so the
+    // fallback uses its own registration of DejaVu Sans, marked whole-pixel.
+    let mut fallback_faces: Vec<FamilyId> = Vec::new();
+    // Own copies of the bytes: the shaper caches faces by their data, so a
+    // second blob over the same static bytes would share the named face's
+    // shaping (and its fractional advances).
+    static FALLBACK_BYTES: OnceLock<[Arc<Vec<u8>>; 2]> = OnceLock::new();
+    let copies =
+        FALLBACK_BYTES.get_or_init(|| [Arc::new(SYSTEM_R.to_vec()), Arc::new(SYSTEM_B.to_vec())]);
+    for bytes in copies {
+        let blob = Blob::new(Arc::clone(bytes) as Arc<dyn AsRef<[u8]> + Send + Sync>);
+        parley::mark_whole_pixel_advances(blob.id());
+        let info = FontInfoOverride {
+            family_name: Some(FALLBACK_FAMILY),
+            width: None,
+            style: None,
+            weight: None,
+            axes: None,
+        };
+        for (family, _) in collection.register_fonts(blob, Some(info)) {
+            if !fallback_faces.contains(&family) {
+                fallback_faces.push(family);
+            }
+        }
+    }
+    // Then the bundled faces (DejaVu Sans covers most symbols), every other
+    // loaded family in registration order, and emoji last.
+    let mut fallback: Vec<FamilyId> = fallback_faces;
+    fallback.extend([sans, system, serif, mono].into_iter().flatten());
     for id in order {
         if !fallback.contains(&id) && Some(id) != emoji {
             fallback.push(id);
@@ -332,6 +362,26 @@ impl Fonts {
         });
     }
 
+    /// Register the host-installed family `lower` (a lowercase family name)
+    /// in this font set and return its name, or `None` when the host has no
+    /// such family.
+    fn register_host_family(&mut self, lower: &str) -> Option<String> {
+        let (name, paths) = host_font_index().get(lower)?;
+        for path in paths {
+            let Some(data) = host_font_bytes(path) else {
+                continue;
+            };
+            self.context
+                .collection
+                .register_fonts(Blob::new(data as Arc<dyn AsRef<[u8]> + Send + Sync>), None);
+        }
+        let id = self.context.collection.family_id(name)?;
+        self.context
+            .collection
+            .family_name(id)
+            .map(|family| family.to_string())
+    }
+
     /// The Parley family list for a computed CSS `font-family` value.
     ///
     /// Each token resolves to a loaded family of that name, or else to the
@@ -373,6 +423,12 @@ impl Fonts {
             }
             if let Some(family) = bundled_family_for_css_token(name) {
                 push(&mut names, FontFamilyName::Named(Cow::Borrowed(family)));
+                continue;
+            }
+            // A family installed on the host (Chromium finds it through
+            // fontconfig): register its files on first use.
+            if let Some(real) = self.register_host_family(&lower) {
+                push(&mut names, FontFamilyName::Named(Cow::Owned(real)));
             }
         }
         push(
@@ -381,4 +437,114 @@ impl Fonts {
         );
         FontFamily::List(Cow::Owned(names))
     }
+}
+
+/// Directories Chromium's fontconfig reads on Linux: the system and local
+/// font trees and the user's (`OBSCURA_NO_HOST_FONTS` disables them).
+fn host_font_directories() -> Vec<PathBuf> {
+    if std::env::var_os("OBSCURA_NO_HOST_FONTS").is_some() || cfg!(not(target_os = "linux")) {
+        return Vec::new();
+    }
+    let mut out = vec![
+        PathBuf::from("/usr/share/fonts"),
+        PathBuf::from("/usr/local/share/fonts"),
+    ];
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        out.push(home.join(".local/share/fonts"));
+        out.push(home.join(".fonts"));
+    }
+    out
+}
+
+/// Every font file under `roots` (no symlinked directories).
+fn font_files_under(roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut pending = roots;
+    let mut files = Vec::new();
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if file_type.is_dir() {
+                pending.push(path);
+            } else if path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| {
+                    matches!(
+                        extension.to_ascii_lowercase().as_str(),
+                        "ttf" | "ttc" | "otf" | "otc"
+                    )
+                })
+            {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+/// Host-installed families by lowercase family name: the name as the font
+/// spells it and the files that hold its faces. Built once, from the
+/// fonts' own name tables (typographic and legacy family names).
+fn host_font_index() -> &'static std::collections::HashMap<String, (String, Vec<PathBuf>)> {
+    static INDEX: OnceLock<std::collections::HashMap<String, (String, Vec<PathBuf>)>> =
+        OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut index: std::collections::HashMap<String, (String, Vec<PathBuf>)> =
+            std::collections::HashMap::new();
+        for path in font_files_under(host_font_directories()) {
+            let Ok(data) = std::fs::read(&path) else {
+                continue;
+            };
+            let Some(collection) = swash::FontDataRef::new(&data) else {
+                continue;
+            };
+            for font in collection.fonts() {
+                for id in [swash::StringId::TypographicFamily, swash::StringId::Family] {
+                    let Some(name) = font
+                        .localized_strings()
+                        .find_by_id(id, Some("en"))
+                        .or_else(|| font.localized_strings().find_by_id(id, None))
+                        .map(|name| name.to_string())
+                    else {
+                        continue;
+                    };
+                    let entry = index
+                        .entry(name.to_ascii_lowercase())
+                        .or_insert_with(|| (name.clone(), Vec::new()));
+                    if !entry.1.contains(&path) {
+                        entry.1.push(path.clone());
+                    }
+                }
+            }
+        }
+        index
+    })
+}
+
+/// The bytes of one host font file, read once per process.
+fn host_font_bytes(path: &PathBuf) -> Option<Arc<Vec<u8>>> {
+    static FILES: OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, Arc<Vec<u8>>>>> =
+        OnceLock::new();
+    let files = FILES.get_or_init(Default::default);
+    let mut files = files.lock().ok()?;
+    if let Some(data) = files.get(path) {
+        return Some(Arc::clone(data));
+    }
+    let data = Arc::new(std::fs::read(path).ok()?);
+    files.insert(path.clone(), Arc::clone(&data));
+    Some(data)
+}
+
+/// Whether the host index has `lower` (for tests that use host fonts only
+/// where they are installed).
+#[cfg(test)]
+pub(crate) fn tests_host_has_family(lower: &str) -> bool {
+    host_font_index().contains_key(lower)
 }

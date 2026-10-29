@@ -11,7 +11,7 @@
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-const SLOTS: usize = 64;
+const SLOTS: usize = 256;
 
 /// Blob ids marked for whole-pixel advances (0 = empty slot).
 static MARKED: [core::sync::atomic::AtomicU64; SLOTS] =
@@ -20,7 +20,7 @@ static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 /// Shape the font blob with this id (`Blob::id`) with whole-pixel glyph
 /// advances. Blob ids are unique for the process; the table keeps the most
-/// recent 64 marks.
+/// recent 256 marks.
 pub fn mark_whole_pixel_advances(blob_id: u64) {
     if blob_id == 0 || is_whole_pixel(blob_id) {
         return;
