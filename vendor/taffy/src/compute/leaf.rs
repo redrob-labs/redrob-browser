@@ -51,14 +51,38 @@ where
             } else {
                 style.aspect_ratio()
             };
-            let style_size = resolved_size
-                .maybe_apply_aspect_ratio(aspect_ratio)
-                .maybe_add(box_sizing_adjustment);
-            let style_min_size = style
-                .min_size()
-                .maybe_resolve(parent_size, &resolve_calc_value)
-                .maybe_apply_aspect_ratio(aspect_ratio)
-                .maybe_add(box_sizing_adjustment);
+            // A replaced element's natural ratio relates its content box,
+            // whatever `box-sizing` says (CSS Sizing 4 section 5.1).
+            let uses_content_box = style.aspect_ratio_uses_content_box();
+            let apply_ratio = |size: Size<Option<f32>>| -> Size<Option<f32>> {
+                if uses_content_box {
+                    size.maybe_add(box_sizing_adjustment)
+                        .maybe_sub(pb_sum)
+                        .maybe_apply_aspect_ratio(aspect_ratio)
+                        .maybe_add(pb_sum)
+                } else {
+                    size.maybe_apply_aspect_ratio(aspect_ratio).maybe_add(box_sizing_adjustment)
+                }
+            };
+            // The ratio transfers the *used* size of the definite axis: clamp
+            // it by its own min/max first (a `width:100%; max-width:612px`
+            // image takes its height from 612px, not from 100%).
+            let mut transfer_from = resolved_size;
+            if aspect_ratio.is_some() {
+                let min = style.min_size().maybe_resolve(parent_size, &resolve_calc_value);
+                let max = style.max_size().maybe_resolve(parent_size, &resolve_calc_value);
+                match (transfer_from.width, transfer_from.height) {
+                    (Some(width), None) => {
+                        transfer_from.width = Some(width.maybe_clamp(min.width, max.width));
+                    }
+                    (None, Some(height)) => {
+                        transfer_from.height = Some(height.maybe_clamp(min.height, max.height));
+                    }
+                    _ => {}
+                }
+            }
+            let style_size = apply_ratio(transfer_from);
+            let style_min_size = apply_ratio(style.min_size().maybe_resolve(parent_size, &resolve_calc_value));
             let style_max_size =
                 style.max_size().maybe_resolve(parent_size, &resolve_calc_value).maybe_add(box_sizing_adjustment);
 
@@ -151,9 +175,15 @@ where
         .or(node_size)
         .unwrap_or(measured_size + content_box_inset.sum_axes())
         .maybe_clamp(node_min_size, node_max_size);
+    let ratio_inset = if style.aspect_ratio_uses_content_box() { pb_sum } else { Size::ZERO };
     let size = Size {
         width: clamped_size.width,
-        height: f32_max(clamped_size.height, aspect_ratio.map(|ratio| clamped_size.width / ratio).unwrap_or(0.0)),
+        height: f32_max(
+            clamped_size.height,
+            aspect_ratio
+                .map(|ratio| (clamped_size.width - ratio_inset.width).max(0.0) / ratio + ratio_inset.height)
+                .unwrap_or(0.0),
+        ),
     };
     let size = size.maybe_max(padding_border.sum_axes().map(Some));
 

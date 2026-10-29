@@ -8284,6 +8284,7 @@ pub fn build_extension() -> Extension {
         ops.push(op_layout_text_rects());
         ops.push(op_resize_observer_measurements());
         ops.push(op_intersection_observer_measurements());
+        ops.push(op_measure_text());
         ops.push(op_computed_style());
         ops.push(op_set_hovered());
         ops.push(op_css_supports());
@@ -9567,6 +9568,14 @@ fn op_resize_observer_measurements(
 /// a separate retained-layout rebuild.
 ///
 /// Results are index-aligned with the input. A `null` entry means that the node
+/// Advance width of `text` in the canvas `font` shorthand, measured with the
+/// renderer's fonts (CanvasRenderingContext2D.measureText).
+#[cfg(feature = "render")]
+#[op2(fast)]
+fn op_measure_text(#[string] text: String, #[string] font: String) -> f64 {
+    obscura_render::measure_text_with_font_shorthand(&text, &font).map_or(-1.0, f64::from)
+}
+
 /// currently generates no layout box (for example, it is detached or hidden).
 #[cfg(feature = "render")]
 #[op2]

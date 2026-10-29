@@ -186,6 +186,7 @@ fn escape_text(s: &str, buf: &mut String) {
     for c in s.chars() {
         match c {
             '&' => buf.push_str("&amp;"),
+            '\u{a0}' => buf.push_str("&nbsp;"),
             '<' => buf.push_str("&lt;"),
             '>' => buf.push_str("&gt;"),
             _ => buf.push(c),
@@ -197,6 +198,7 @@ fn escape_attr(s: &str, buf: &mut String) {
     for c in s.chars() {
         match c {
             '&' => buf.push_str("&amp;"),
+            '\u{a0}' => buf.push_str("&nbsp;"),
             '"' => buf.push_str("&quot;"),
             _ => buf.push(c),
         }
@@ -270,6 +272,18 @@ mod tests {
         let html = tree.outer_html(p);
         assert!(html.contains("&amp;"));
         assert!(html.contains("&lt;"));
+    }
+
+    // HTML serialization escapes U+00A0 as `&nbsp;` in text and attribute
+    // values (w3schools' code highlighter relies on reading it back so).
+    #[test]
+    fn test_serialize_nbsp() {
+        let tree = parse_html("<p title=\"a&nbsp;b\">x&nbsp;&nbsp;y</p>");
+        let p = tree.query_selector("p").unwrap().unwrap();
+        assert_eq!(
+            tree.outer_html(p),
+            "<p title=\"a&nbsp;b\">x&nbsp;&nbsp;y</p>"
+        );
     }
 
     #[test]

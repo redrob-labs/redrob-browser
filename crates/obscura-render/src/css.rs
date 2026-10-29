@@ -5242,6 +5242,7 @@ fn dimension_to_css(value: crate::Dimension) -> String {
         crate::Dimension::Percent(value) => format!("{}%", value * 100.0),
         crate::Dimension::Em(value) => format!("{value}em"),
         crate::Dimension::Ex(value) => format!("{value}ex"),
+        crate::Dimension::Ch(value) => format!("{value}ch"),
         crate::Dimension::Rem(value) => format!("{value}rem"),
         crate::Dimension::Vw(value) => format!("{value}vw"),
         crate::Dimension::Vh(value) => format!("{value}vh"),

@@ -707,3 +707,75 @@ fn unavailable_families_fall_through_to_the_next_family_then_the_serif_default()
     }
     close(width(&tree, &laid, "plain"), 223.375, "no font-family");
 }
+
+#[test]
+fn host_installed_families_and_whole_pixel_glyph_fallback() {
+    // Chrome on this host: a family installed on the host is used by name
+    // (DejaVu Serif 282.453px, Nimbus Sans 240.453px for SAMPLE at 32px),
+    // and a glyph missing from the page's font falls back to DejaVu Sans
+    // with whole-pixel advances (❮ at 100px: 84px; DejaVu Sans named:
+    // 83.80px).
+    let (tree, laid) = layout(
+        &format!(
+            "<!doctype html><body style='margin:0;white-space:pre'>\
+             <div><span id=serif style=\"font:32px 'DejaVu Serif'\">{SAMPLE}</span></div>\
+             <div><span id=nimbus style=\"font:32px 'Nimbus Sans'\">{SAMPLE}</span></div>\
+             <div><span id=fallback style='font:100px sans-serif'>❮</span></div>\
+             <div><span id=named style=\"font:100px 'DejaVu Sans'\">❮</span></div>"
+        ),
+        &[],
+    );
+    let installed = |name: &str| super::fonts::tests_host_has_family(name);
+    if installed("dejavu serif") {
+        close(width(&tree, &laid, "serif"), 282.453, "DejaVu Serif");
+    }
+    if installed("nimbus sans") {
+        assert!((width(&tree, &laid, "nimbus") - 240.453).abs() < 0.05);
+    }
+    close(width(&tree, &laid, "fallback"), 84.0, "fallback ❮");
+    assert!(
+        (width(&tree, &laid, "named") - 83.80).abs() < 0.02,
+        "{} {:?}",
+        width(&tree, &laid, "named"),
+        faces(&tree, &laid, "named")
+    );
+}
+
+#[test]
+fn ch_lengths_use_the_advance_of_zero_in_the_font() {
+    // Chrome: width:10ch is 102.016px in 17px monospace (Liberation Mono's
+    // "0" is 0.6em) and 89.0px in 16px sans-serif (Liberation Sans 0.556em).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'>\
+         <div id=mono style='font:17px monospace;width:10ch'>x</div>\
+         <div id=sans style='font:16px sans-serif;width:10ch'>x</div>",
+        &[],
+    );
+    assert!(
+        (width(&tree, &laid, "mono") - 102.016).abs() < 0.05,
+        "{}",
+        width(&tree, &laid, "mono")
+    );
+    assert!(
+        (width(&tree, &laid, "sans") - 88.98).abs() < 0.05,
+        "{}",
+        width(&tree, &laid, "sans")
+    );
+}
+
+#[test]
+fn canvas_font_shorthand_measures_with_the_bundled_faces() {
+    // Chrome canvas measureText("Download on the"): 12px Arial 90.064;
+    // "400 12px Arial" the same; bold 96.656 (Liberation Sans Bold).
+    let m = |font: &str| {
+        crate::paint::measure_text_with_font_shorthand("Download on the", font).unwrap()
+    };
+    assert!((m("12px Arial") - 90.064).abs() < 0.01);
+    assert!((m("400 12px Arial") - 90.064).abs() < 0.01);
+    assert!(
+        (m("bold 12px Arial") - 96.656).abs() < 0.01,
+        "{}",
+        m("bold 12px Arial")
+    );
+    assert!((m("600 12px Helvetica, Arial, sans-serif") - 96.656).abs() < 0.01);
+}

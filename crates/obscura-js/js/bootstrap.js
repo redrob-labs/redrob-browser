@@ -16500,9 +16500,14 @@ class _Canvas2D {
   }
   strokeText(text, x, y) { this.fillText(text, x, y); }
   measureText(t) {
-    const fontSize = parseInt(this.font) || 10;
-    const scale = Math.max(1, Math.round(fontSize / 10));
-    return { width: String(t).length * 6 * scale, actualBoundingBoxAscent: 7*scale, actualBoundingBoxDescent: 2*scale };
+    const m = /(\d+(?:\.\d+)?)px/.exec(String(this.font));
+    const fontSize = m ? parseFloat(m[1]) : 10;
+    let width = -1;
+    if (typeof __obscuraCore.ops.op_measure_text === 'function') {
+      try { width = __obscuraCore.ops.op_measure_text(String(t), String(this.font)); } catch (_e) {}
+    }
+    if (!(width >= 0)) width = String(t).length * fontSize * 0.55;
+    return { width, actualBoundingBoxAscent: fontSize * 0.72, actualBoundingBoxDescent: fontSize * 0.21 };
   }
   getImageData(x, y, w, h) {
     x=Math.round(x); y=Math.round(y); w=Math.round(w); h=Math.round(h);
@@ -16908,15 +16913,29 @@ const _svgLocalBounds = (el) => {
     }
     case 'path': return fromPts(_svgPathPoints(el.getAttribute('d')));
     case 'text': case 'tspan': {
-      const size = parseFloat(getComputedStyle(el).fontSize) || 16;
+      // Font presentation attributes (font-size="12", font-family=...)
+      // apply like CSS and inherit inside the SVG tree.
+      const cs = getComputedStyle(el);
+      const svgAttr = (name) => {
+        for (let n = el; n && n.namespaceURI === _SVG_NS; n = n.parentElement) {
+          const v = n.getAttribute(name);
+          if (v != null && v !== '') return v;
+          if (n.localName === 'svg') break;
+        }
+        return null;
+      };
+      const sizeAttr = parseFloat(svgAttr('font-size'));
+      const size = Number.isFinite(sizeAttr) ? sizeAttr : (parseFloat(cs.fontSize) || 16);
+      const family = svgAttr('font-family') || cs.fontFamily || 'sans-serif';
+      const weight = svgAttr('font-weight') || cs.fontWeight || '400';
       const text = el.textContent || '';
       const x = _svgNum(el, 'x'), y = _svgNum(el, 'y');
       let w = text.length * size * 0.55;
       try {
         const ctx = (globalThis.__obscuraSvgMeasure ||= document.createElement('canvas').getContext('2d'));
-        if (ctx) { ctx.font = `${size}px ${getComputedStyle(el).fontFamily || 'sans-serif'}`; w = ctx.measureText(text).width; }
+        if (ctx) { ctx.font = `${weight} ${size}px ${family}`; w = ctx.measureText(text).width; }
       } catch (_e) {}
-      const anchor = getComputedStyle(el).textAnchor || el.getAttribute('text-anchor');
+      const anchor = svgAttr('text-anchor') || cs.textAnchor;
       const left = anchor === 'middle' ? x - w / 2 : anchor === 'end' ? x - w : x;
       return [left, y - size * 0.9, left + w, y + size * 0.25];
     }

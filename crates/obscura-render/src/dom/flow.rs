@@ -97,29 +97,66 @@ fn inline_contains_block(
     id: NodeId,
     styles: &HashMap<NodeId, crate::LayoutStyle>,
 ) -> bool {
-    for child in rendered_children(tree, id) {
-        let Some(style) = styles.get(&child) else {
-            continue;
-        };
-        if style.display == crate::Display::None
-            || style.float.is_some()
-            || matches!(style.position, Some(taffy::Position::Absolute))
-        {
-            continue;
-        }
-        if style.display_contents
-            || (style.display == crate::Display::Inline && !is_atomic(tree, child, style))
-        {
-            if inline_contains_block(tree, child, styles) {
+    // An explicit stack: page-controlled nesting must not grow the native
+    // stack.
+    let mut stack = vec![id];
+    while let Some(node) = stack.pop() {
+        for child in rendered_children(tree, node) {
+            let Some(style) = styles.get(&child) else {
+                continue;
+            };
+            if style.display == crate::Display::None
+                || style.float.is_some()
+                || matches!(style.position, Some(taffy::Position::Absolute))
+            {
+                continue;
+            }
+            if style.display_contents
+                || (style.display == crate::Display::Inline && !is_atomic(tree, child, style))
+            {
+                stack.push(child);
+                continue;
+            }
+            if !crate::is_inline_level_box(style) {
                 return true;
             }
-            continue;
-        }
-        if !crate::is_inline_level_box(style) {
-            return true;
         }
     }
     false
+}
+
+/// A non-atomic inline that contains a block-level box and draws nothing of
+/// its own (no box edges, background, offset or generated content). CSS
+/// splits it around the block; since none of its fragments paints or takes
+/// space, its children can join the parent's flow directly (its rect is the
+/// union of theirs). Splicing such wrappers keeps box construction flat
+/// however deeply a page nests them.
+fn is_transparent_block_wrapper(
+    tree: &DomTree,
+    id: NodeId,
+    style: &crate::LayoutStyle,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+) -> bool {
+    let zero = |edges: &crate::Edges| {
+        edges.top == 0.0 && edges.right == 0.0 && edges.bottom == 0.0 && edges.left == 0.0
+    };
+    style.display == crate::Display::Inline
+        && !style.display_contents
+        && !is_atomic(tree, id, style)
+        && style.float.is_none()
+        && style.position.is_none()
+        && zero(&style.margin)
+        && zero(&style.padding)
+        && zero(&style.border)
+        && style.background_color.is_none_or(|color| color[3] == 0)
+        && style.background_gradient.is_none()
+        && style.background_gradient_layers.is_empty()
+        && style.background_image.is_none()
+        && style.before_pseudo.is_none()
+        && style.after_pseudo.is_none()
+        && style.opacity.is_none_or(|opacity| opacity >= 1.0)
+        && local_name(tree, id).is_some_and(|name| name != "br")
+        && inline_contains_block(tree, id, styles)
 }
 
 fn level(
@@ -212,32 +249,66 @@ pub(super) fn flow_pieces(
     if with_pseudos && pseudo_style(styles, host, GeneratedBoxKind::Before).is_some() {
         out.push(Piece::Pseudo(host, GeneratedBoxKind::Before));
     }
-    fn splice(
-        tree: &DomTree,
-        children: &[NodeId],
-        styles: &HashMap<NodeId, crate::LayoutStyle>,
-        out: &mut Vec<Piece>,
-    ) {
-        for &child in children {
-            match styles.get(&child) {
-                Some(style) if style.display_contents && style.display != crate::Display::None => {
-                    if style.before_pseudo.is_some() {
-                        out.push(Piece::Pseudo(child, GeneratedBoxKind::Before));
-                    }
-                    splice(tree, &rendered_children(tree, child), styles, out);
-                    if style.after_pseudo.is_some() {
-                        out.push(Piece::Pseudo(child, GeneratedBoxKind::After));
-                    }
-                }
-                _ => out.push(Piece::Dom(child)),
-            }
-        }
-    }
-    splice(tree, children, styles, &mut out);
+    splice_pieces(tree, children, styles, None, &mut out);
     if with_pseudos && pseudo_style(styles, host, GeneratedBoxKind::After).is_some() {
         out.push(Piece::Pseudo(host, GeneratedBoxKind::After));
     }
     out
+}
+
+/// Expand `display: contents` children (and, with `wrappers`, transparent
+/// block-in-inline wrappers, recorded there) into `out`, in tree order,
+/// with an explicit stack.
+fn splice_pieces(
+    tree: &DomTree,
+    children: &[NodeId],
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    mut wrappers: Option<&mut Vec<NodeId>>,
+    out: &mut Vec<Piece>,
+) {
+    enum Work {
+        Node(NodeId),
+        Emit(Piece),
+    }
+    let mut stack: Vec<Work> = children
+        .iter()
+        .rev()
+        .map(|&child| Work::Node(child))
+        .collect();
+    while let Some(work) = stack.pop() {
+        let child = match work {
+            Work::Emit(piece) => {
+                out.push(piece);
+                continue;
+            }
+            Work::Node(child) => child,
+        };
+        match styles.get(&child) {
+            Some(style) if style.display_contents && style.display != crate::Display::None => {
+                if style.after_pseudo.is_some() {
+                    stack.push(Work::Emit(Piece::Pseudo(child, GeneratedBoxKind::After)));
+                }
+                for grandchild in rendered_children(tree, child).into_iter().rev() {
+                    stack.push(Work::Node(grandchild));
+                }
+                if style.before_pseudo.is_some() {
+                    stack.push(Work::Emit(Piece::Pseudo(child, GeneratedBoxKind::Before)));
+                }
+            }
+            Some(style)
+                if wrappers.is_some()
+                    && is_transparent_block_wrapper(tree, child, style, styles) =>
+            {
+                if let Some(list) = wrappers.as_deref_mut() {
+                    list.push(child);
+                }
+                for grandchild in rendered_children(tree, child).into_iter().rev() {
+                    stack.push(Work::Node(grandchild));
+                }
+            }
+            _ => out.push(Piece::Dom(child)),
+        }
+    }
 }
 
 /// Everything `build` threads through box construction.
@@ -366,8 +437,27 @@ impl BuildCx<'_> {
         parent_style: Option<&crate::LayoutStyle>,
         items: &mut Vec<Item>,
     ) {
-        for &piece in pieces {
-            let level = level(self.tree, piece, parent_style, self.styles);
+        // An explicit work stack: nested inline elements must not grow the
+        // native stack however deeply a page nests them.
+        enum Work {
+            Piece(Piece, usize),
+            SpanEnd,
+        }
+        let mut parents: Vec<Option<crate::LayoutStyle>> = vec![parent_style.cloned()];
+        let mut stack: Vec<Work> = pieces
+            .iter()
+            .rev()
+            .map(|&piece| Work::Piece(piece, 0))
+            .collect();
+        while let Some(work) = stack.pop() {
+            let (piece, parent) = match work {
+                Work::SpanEnd => {
+                    items.push(Item::SpanEnd);
+                    continue;
+                }
+                Work::Piece(piece, parent) => (piece, parent),
+            };
+            let level = level(self.tree, piece, parents[parent].as_ref(), self.styles);
             match (piece, level) {
                 (_, Level::Skip) => {}
                 (Piece::Dom(id), Level::Space) => items.push(Item::Text(id)),
@@ -395,8 +485,12 @@ impl BuildCx<'_> {
                         items.push(Item::SpanStart(SpanOwner::Element(id)));
                         let children = rendered_children(self.tree, id);
                         let pieces = flow_pieces(self.tree, id, &children, self.styles, true);
-                        self.collect(&pieces, Some(&style), items);
-                        items.push(Item::SpanEnd);
+                        parents.push(Some(style));
+                        let index = parents.len() - 1;
+                        stack.push(Work::SpanEnd);
+                        for &piece in pieces.iter().rev() {
+                            stack.push(Work::Piece(piece, index));
+                        }
                     }
                 }
                 (Piece::Dom(id), Level::Float) => {
@@ -512,7 +606,20 @@ pub(super) fn build_flow_children(
     dom_children: &[NodeId],
     can_be_inline_root: bool,
 ) -> FlowChildren {
-    let pieces = flow_pieces(cx.tree, id, dom_children, cx.styles, true);
+    let mut pieces = Vec::new();
+    if pseudo_style(cx.styles, id, GeneratedBoxKind::Before).is_some() {
+        pieces.push(Piece::Pseudo(id, GeneratedBoxKind::Before));
+    }
+    splice_pieces(
+        cx.tree,
+        dom_children,
+        cx.styles,
+        Some(&mut cx.ifc_items.transparent_wrappers),
+        &mut pieces,
+    );
+    if pseudo_style(cx.styles, id, GeneratedBoxKind::After).is_some() {
+        pieces.push(Piece::Pseudo(id, GeneratedBoxKind::After));
+    }
     // Segment into maximal runs of non-block pieces.
     enum Segment {
         Run(Vec<Piece>),

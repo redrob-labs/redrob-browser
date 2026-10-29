@@ -2549,6 +2549,9 @@ impl PreparedRender {
     /// The box's rect with its 1/64 px used size (Chrome's LayoutUnit)
     /// instead of the whole-pixel size paint snaps to.
     fn fractional_rect(&self, id: obscura_dom::tree::NodeId) -> Option<crate::Rect> {
+        if let Some(rect) = self.layout.fractional_rects.get(&id) {
+            return Some(*rect);
+        }
         let mut rect = self.layout.rects.get(&id).copied()?;
         if let Some(&(width, height)) = self.layout.fractional_sizes.get(&id) {
             if (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0 {
@@ -2919,6 +2922,7 @@ fn dimension_css(value: crate::Dimension, auto: &str) -> String {
         crate::Dimension::Percent(v) => format!("{}%", css_number(v * 100.0)),
         crate::Dimension::Em(v) => format!("{}em", css_number(v)),
         crate::Dimension::Ex(v) => format!("{}ex", css_number(v)),
+        crate::Dimension::Ch(v) => format!("{}ch", css_number(v)),
         crate::Dimension::Rem(v) => format!("{}rem", css_number(v)),
         crate::Dimension::Vw(v) => format!("{}vw", css_number(v)),
         crate::Dimension::Vh(v) => format!("{}vh", css_number(v)),
@@ -8454,6 +8458,54 @@ fn fallback_font_bytes(family: Option<&str>) -> &'static [u8] {
 
 /// Advance width of `text` at a CSS font-size of `size` px (one em).
 /// `measure_text` scales by the font's line height instead of its em.
+/// Advance width of `text` in a CSS `font` shorthand as canvas 2D uses it
+/// (`[style] [variant] [weight] <size>[/<line-height>] <family>`), with the
+/// bundled faces. Returns `None` when the shorthand has no size.
+pub fn measure_text_with_font_shorthand(text: &str, font: &str) -> Option<f32> {
+    let tokens: Vec<&str> = font.split_whitespace().collect();
+    let size_index = tokens.iter().position(|token| {
+        let size = token.split('/').next().unwrap_or(token);
+        size.ends_with("px") && size.trim_end_matches("px").parse::<f32>().is_ok()
+    })?;
+    let size: f32 = tokens[size_index]
+        .split('/')
+        .next()?
+        .trim_end_matches("px")
+        .parse()
+        .ok()?;
+    let bold = tokens[..size_index].iter().any(|token| {
+        token.eq_ignore_ascii_case("bold")
+            || token.eq_ignore_ascii_case("bolder")
+            || token.parse::<u16>().is_ok_and(|weight| weight >= 600)
+    });
+    let family = tokens[size_index + 1..].join(" ");
+    let family = (!family.is_empty()).then_some(family.as_str());
+    if !bold {
+        return Some(measure_text_em(text, size, false, family));
+    }
+    // The bold face of the family the regular measure would use.
+    use crate::ifc::fonts::{MONO_B, SANS_B, SERIF_B, SYSTEM_B};
+    let regular = fallback_font_bytes(family);
+    let bytes = if std::ptr::eq(regular, SERIF_FONT_BYTES) {
+        SERIF_B
+    } else if std::ptr::eq(regular, MONO_FONT_BYTES) {
+        MONO_B
+    } else if std::ptr::eq(regular, SYSTEM_FONT_BYTES) {
+        SYSTEM_B
+    } else {
+        SANS_B
+    };
+    let font = FontRef::try_from_slice(bytes).ok()?;
+    let units_per_em = font.units_per_em().unwrap_or(1000.0);
+    let scaled = font.as_scaled(PxScale::from(size * font.height_unscaled() / units_per_em));
+    Some(
+        text.chars()
+            .filter(|c| !c.is_control())
+            .map(|c| scaled.h_advance(font.glyph_id(c)))
+            .sum(),
+    )
+}
+
 pub fn measure_text_em(text: &str, size: f32, is_bold: bool, family: Option<&str>) -> f32 {
     let font = FontRef::try_from_slice(fallback_font_bytes(family)).unwrap();
     let units_per_em = font.units_per_em().unwrap_or(1000.0);
@@ -8780,26 +8832,48 @@ fn collect_web_fonts(
     let mut fonts = Vec::new();
     let mut rules = Vec::new();
 
+    // Author style sheets in document order: `<style>` text, and linked
+    // sheets the host fetched (their URLs resolve against the sheet's own
+    // URL, as CSS requires).
+    let mut sheets: Vec<(String, Option<String>)> = Vec::new();
     for nid in crate::dom::rendered_descendants(tree, tree.document()) {
         // Inspect tags without copying unrelated script/text payloads.
-        if !tree
+        let kind = tree
             .with_node(nid, |node| {
-                node.as_element()
-                    .is_some_and(|element| element.local.as_ref() == "style")
+                let element = node.as_element()?;
+                match element.local.as_ref() {
+                    "style" => Some(None),
+                    "link" => Some(Some(node.get_attribute("href").unwrap_or("").to_string())),
+                    _ => None,
+                }
             })
-            .unwrap_or(false)
-        {
-            continue;
+            .flatten();
+        match kind {
+            Some(None) => sheets.push((tree.text_content(nid), base_url.map(str::to_string))),
+            Some(Some(href)) => {
+                if let Some(sheet) = tree.external_stylesheet(nid) {
+                    let css: String = sheet.sources.iter().map(|part| part.as_ref()).collect();
+                    let sheet_url = resolve_resource_url(&href, base_url)
+                        .or_else(|| base_url.map(str::to_string));
+                    sheets.push((css, sheet_url));
+                }
+            }
+            None => {}
         }
-        let css = tree.text_content(nid);
-        for face in font_face_blocks(&css) {
+    }
+    for (css, sheet_base) in &sheets {
+        let sheet_base = sheet_base.as_deref();
+        for face in font_face_blocks(css) {
             if !font_face_covers_ascii(face) {
                 continue;
             }
             let sources: Vec<_> = font_face_urls(face)
                 .into_iter()
                 .filter(|src| font_source_may_be_supported(src))
-                .map(|src| (font_resource_key(&src, base_url), src))
+                .map(|src| {
+                    let key = font_resource_key(&src, sheet_base);
+                    (key.clone(), key)
+                })
                 .collect();
             if sources.is_empty() {
                 continue;
@@ -9025,10 +9099,13 @@ fn font_face_declaration<'a>(face: &'a str, name: &str) -> Option<&'a str> {
         .into_iter()
         .filter_map(|declaration| {
             let (property, value) = declaration.split_once(':')?;
-            property
-                .trim()
-                .eq_ignore_ascii_case(name)
-                .then_some(value.trim())
+            // A comment may precede the property (`/* IE9 Compat Modes */
+            // src: ...`), as on w3schools.
+            let mut property = property.trim();
+            while let Some(rest) = property.strip_prefix("/*") {
+                property = rest.split_once("*/").map_or("", |(_, after)| after).trim();
+            }
+            property.eq_ignore_ascii_case(name).then_some(value.trim())
         })
         .next_back()
 }

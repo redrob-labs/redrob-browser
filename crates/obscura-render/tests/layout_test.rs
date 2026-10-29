@@ -1982,10 +1982,15 @@ fn text_alignment_does_not_shrink_block_children_or_wrap_inline_block_rows() {
         (row.width - 900.0).abs() < 0.01,
         "text-align must not shrink-wrap an auto-width block child: {row:?}"
     );
+    // Chrome: one line; "Why Vue" sits on its text baseline (y=26) while the
+    // empty inline-blocks sit on their bottom edges (y=0), x 230/340/450/560.
     assert!(
         items
-            .windows(2)
-            .all(|pair| (pair[0].y - pair[1].y).abs() < 0.01),
+            .iter()
+            .zip([230.0, 340.0, 450.0, 560.0])
+            .all(|(item, x)| (item.x - x).abs() < 0.5)
+            && (items[0].y - 26.0).abs() < 0.5
+            && items[1..].iter().all(|item| item.y.abs() < 0.01),
         "inline-block items should share one line when the block has room: {items:?}"
     );
     assert!(
@@ -2032,8 +2037,12 @@ fn non_replaced_inline_ignores_used_width_height_and_min_max_sizes() {
         token.height < 40.0,
         "height/min-height/max-height do not apply to a non-replaced inline: {token:?}"
     );
+    // Chrome: same line; the monospace font box is 18px and the serif one
+    // 17px, so their tops are y=2 and y=1 (after at x=76.69).
     assert!(
-        after.x >= token.x + token.width - 0.01 && (after.y - token.y).abs() < 0.01,
+        after.x >= token.x + token.width - 0.01
+            && (token.y - 2.0).abs() < 0.01
+            && (after.y - 1.0).abs() < 0.01,
         "the following inline must remain on the same line: {token:?} {after:?}"
     );
 }
@@ -2237,7 +2246,9 @@ fn inline_block_flex_items_keep_block_inner_flow() {
         (chips.x - 0.0).abs() < 0.01
             && (chips.y - 140.0).abs() < 0.01
             && (chips.width - 90.0).abs() < 0.01
-            && (chips.height - 20.0).abs() < 0.01
+            // Chrome: 24px (the line box holds the inline-block items on
+            // the baseline plus the strut's descent).
+            && (chips.height - 24.0).abs() < 0.01
             && (alpha.x - 0.0).abs() < 0.01
             && (beta.x - 30.0).abs() < 0.01
             && (gamma.x - 60.0).abs() < 0.01,
@@ -4100,6 +4111,7 @@ fn negative_letter_spacing_changes_intrinsic_line_breaks() {
             line-height:40px;
             font-weight:500;
             padding-inline:8px;
+            font-family:Arial;
           }
           #tight { letter-spacing:var(--tracking-tighter) }
           #reset { letter-spacing:normal }
@@ -4503,14 +4515,16 @@ fn percentage_height_inside_floated_and_inline_block_controls_uses_content_box()
 
     assert_eq!(rect("floated").height, 44.0);
     assert_eq!(rect("inline").height, 44.0);
+    // Chrome: 38px. The buttons' 2px UA borders and 1px padding come off
+    // the 44px border box on both axes of the percentage basis.
     assert_eq!(
         rect("float-icon").height,
-        42.0,
+        38.0,
         "a floated containing block retains its definite content-box basis"
     );
     assert_eq!(
         rect("inline-icon").height,
-        42.0,
+        38.0,
         "border-box padding must not leak into the child percentage basis"
     );
 }
@@ -5120,4 +5134,30 @@ fn float_ending_at_rounded_segment_boundary_does_not_panic() {
         place(&mut context, 400.3333, FloatDirection::Left).y,
         1859.0
     );
+}
+
+#[test]
+fn deeply_nested_inline_spans_and_decorated_wrappers_lay_out() {
+    // 400 nested inline spans around text (one inline formatting context),
+    // and 400 nested spans that each hold text and, innermost, a block
+    // (block-in-inline), on the default test-thread stack.
+    for (open_tag, inner) in [
+        ("<span>", "<b id=\"deep\">deep</b>"),
+        (
+            "<span>t ",
+            "<div id=\"deep\" style=\"width:50px\">deep</div>",
+        ),
+    ] {
+        let open = open_tag.repeat(400);
+        let close = "</span>".repeat(400);
+        let tree = parse_html(&format!(
+            "<style>html,body{{margin:0;font:16px/18px monospace}}</style><div>{open}{inner}{close}</div>"
+        ));
+        let layout = layout_dom(&tree, (400.0, 200.0));
+        let rect = layout.rects[&tree.get_element_by_id("deep").unwrap()];
+        assert!(
+            rect.width > 0.0 && rect.height > 0.0,
+            "{open_tag}: {rect:?}"
+        );
+    }
 }

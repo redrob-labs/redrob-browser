@@ -273,6 +273,10 @@ pub struct DomLayout {
     /// they differ from the pixel-rounded rect by less than a pixel. CSSOM
     /// `width`/`height` report these, as Chrome does.
     pub(crate) fractional_sizes: HashMap<NodeId, (f32, f32)>,
+    /// Unrounded Taffy border boxes snapped to 1/64 px (Blink's
+    /// LayoutUnit), for CSSOM geometry; `rects` keeps the whole-pixel
+    /// boxes paint uses.
+    pub(crate) fractional_rects: HashMap<NodeId, Rect>,
     /// Per-line border-box fragments for ordinary non-replaced inline
     /// elements. `rects` retains their union for `getBoundingClientRect()`;
     /// this list is the source for background/border painting and
@@ -2580,6 +2584,10 @@ struct IfcRegistry {
     /// without changing the real box's percentage containing block.
     static_positions: HashMap<NodeId, taffy::NodeId>,
     generated: Vec<GeneratedBoxBuild>,
+    /// Block-in-inline wrappers spliced into their parent's flow (see
+    /// `flow::is_transparent_block_wrapper`), outermost first. Their rects
+    /// are the union of their descendants'.
+    pub(crate) transparent_wrappers: Vec<NodeId>,
     /// Specified column widths per table grid node, from `<col>` elements and
     /// colspan-1 cells: `(px, percent)` per column index. Consumed by the
     /// table column-balancing pass in `layout_dom_with_images`, which pins
@@ -2854,6 +2862,7 @@ pub(crate) fn resolve_translate(d: crate::Dimension, basis: f32) -> f32 {
         crate::Dimension::Percent(p) => p * basis,
         crate::Dimension::Em(v) | crate::Dimension::Rem(v) => v * 16.0,
         crate::Dimension::Ex(v) => v * 16.0 * 0.528_320_3,
+        crate::Dimension::Ch(v) => v * 8.0,
         crate::Dimension::Vw(v)
         | crate::Dimension::Vh(v)
         | crate::Dimension::Vmin(v)
@@ -6254,6 +6263,7 @@ fn layout_dom_once(
         },
     );
     grow_trailing_auto_cells(tree, &mut styles);
+    shrink_block_level_buttons(tree, &mut styles);
 
     let descendants = tree.descendants(tree.document());
     // Style and script text never renders, and is often megabytes of CSS.
@@ -6303,6 +6313,7 @@ fn layout_dom_once(
     let mut grid_tracks = HashMap::new();
     let mut used_auto_margins = HashMap::new();
     let mut fractional_sizes = HashMap::new();
+    let mut fractional_rects = HashMap::new();
     let mut inline_fragments = HashMap::new();
     let mut text_runs = HashMap::new();
     let mut generated_rects: Vec<Option<Rect>> = Vec::new();
@@ -6985,6 +6996,17 @@ fn layout_dom_once(
                         4 => style.max_width = resolved,
                         _ => style.max_height = resolved,
                     }
+                }
+                {
+                    let bold = crate::style::used_font_weight(style) >= 600;
+                    let family = style.font_family.clone();
+                    let ch = |d: crate::Dimension| d.resolve_ch(em_px, bold, family.as_deref());
+                    style.width = ch(style.width);
+                    style.height = ch(style.height);
+                    style.min_width = ch(style.min_width);
+                    style.min_height = ch(style.min_height);
+                    style.max_width = ch(style.max_width);
+                    style.max_height = ch(style.max_height);
                 }
                 style.width = style.width.resolve(em_px, root_fs, vw, vh);
                 style.height = style.height.resolve(em_px, root_fs, vw, vh);
@@ -8073,9 +8095,36 @@ fn layout_dom_once(
                                avail: taffy::Size<taffy::AvailableSpace>,
                                _node,
                                ctx: Option<&mut usize>,
-                               _style: &taffy::Style| {
+                               style: &taffy::Style| {
                 match ctx {
                     Some(&mut idx) if idx & crate::ifc::IFC_CONTEXT_BIT == 0 => {
+                        // Taffy hands a leaf its border-box known sizes; a
+                        // replaced box measures (and applies its natural
+                        // ratio to) its content box.
+                        let known = if idx & crate::inline::REPLACED_CONTEXT_BIT != 0 {
+                            let edge = |value: taffy::LengthPercentage| {
+                                let raw = value.into_raw();
+                                if raw.tag() == taffy::CompactLength::LENGTH_TAG {
+                                    raw.value()
+                                } else {
+                                    0.0
+                                }
+                            };
+                            let horizontal = edge(style.padding.left)
+                                + edge(style.padding.right)
+                                + edge(style.border.left)
+                                + edge(style.border.right);
+                            let vertical = edge(style.padding.top)
+                                + edge(style.padding.bottom)
+                                + edge(style.border.top)
+                                + edge(style.border.bottom);
+                            taffy::Size {
+                                width: known.width.map(|w| (w - horizontal).max(0.0)),
+                                height: known.height.map(|h| (h - vertical).max(0.0)),
+                            }
+                        } else {
+                            known
+                        };
                         engine.measure_taffy(idx, known, avail)
                     }
                     _ => taffy::Size::ZERO,
@@ -8947,6 +8996,8 @@ fn layout_dom_once(
             grid_tracks = collect_grid_tracks(&taffy_tree, &id_map);
             used_auto_margins = collect_used_auto_margins(&taffy_tree, &id_map, &styles);
             fractional_sizes = collect_fractional_sizes(&taffy_tree, &id_map, &rects);
+            fractional_rects =
+                collect_fractional_rects(&taffy_tree, taffy_root, initial_cb_x, &id_map, &rects);
             inline_fragments = place_inline_content(
                 &taffy_tree,
                 initial_cb_x,
@@ -8956,6 +9007,17 @@ fn layout_dom_once(
                 &mut generated_rects,
             );
             synthesize_row_rects(tree, &styles, &mut rects);
+            // Spliced block-in-inline wrappers span their children; the
+            // innermost first so an outer wrapper includes the inner ones.
+            for &wrapper in ifc_items.transparent_wrappers.iter().rev() {
+                let union = rendered_children(tree, wrapper)
+                    .into_iter()
+                    .filter_map(|child| rects.get(&child).copied())
+                    .reduce(|a, b| a.union(&b));
+                if let Some(rect) = union {
+                    rects.insert(wrapper, rect);
+                }
+            }
             synthesize_column_rects(&taffy_tree, &id_map, &ifc_items, &mut rects);
             retain_taffy_tree(
                 std::mem::replace(&mut taffy_tree, crate::new_taffy_tree()),
@@ -9035,6 +9097,7 @@ fn layout_dom_once(
             grid_tracks,
             used_auto_margins,
             fractional_sizes,
+            fractional_rects,
             inline_fragments,
             styles,
             custom_properties,
@@ -9119,9 +9182,21 @@ fn place_inline_content(
         store.by_node.entry(root).or_default().push(index);
     }
     for (node, list) in &fragments {
-        let mut union = list[0];
-        for rect in &list[1..] {
+        // Blink unites an inline's fragments with UniteIfNonZero: a fragment
+        // with no width or no height (a span's edge left alone before a
+        // `<br>`) does not grow the bounding box unless nothing else is
+        // there.
+        let non_empty = list
+            .iter()
+            .filter(|rect| rect.width > 0.0 && rect.height > 0.0);
+        let mut union = non_empty.clone().next().copied().unwrap_or(list[0]);
+        for rect in non_empty.skip(1) {
             union = union.union(rect);
+        }
+        if !(union.width > 0.0 && union.height > 0.0) {
+            for rect in &list[1..] {
+                union = union.union(rect);
+            }
         }
         rects.insert(*node, union);
     }
@@ -9248,6 +9323,46 @@ fn container_snapshot(tree: &DomTree, layout: &DomLayout) -> crate::css::Contain
 /// layout intent (fixed-size leading cells, one expanding trailing cell) and
 /// leaves the others shrink-to-fit, matching a shrink-to-fit table exactly
 /// when there is no surplus width to distribute in the first place.
+/// A block-level `<button>` (display: block, flex or grid) with `width:
+/// auto` in block flow shrinks to fit like an inline-block one (Chrome: the
+/// flex button in a 600px block is 158px wide). As a flex or grid item it
+/// keeps the container's sizing (grid items stretch).
+fn shrink_block_level_buttons(tree: &DomTree, styles: &mut HashMap<NodeId, crate::LayoutStyle>) {
+    let buttons: Vec<NodeId> = styles
+        .iter()
+        .filter(|(_, style)| {
+            style.width == crate::Dimension::Auto
+                && !style.width_set
+                && !style.is_inline_block
+                && style.float.is_none()
+                && matches!(
+                    style.display,
+                    crate::Display::Block | crate::Display::Flex | crate::Display::Grid
+                )
+        })
+        .map(|(id, _)| *id)
+        .filter(|id| {
+            tree.borrow_node(*id).is_some_and(|node| {
+                node.as_element()
+                    .is_some_and(|element| element.local.as_ref() == "button")
+            })
+        })
+        .collect();
+    for id in buttons {
+        let in_block_flow = rendered_parent(tree, id)
+            .and_then(|parent| styles.get(&parent))
+            .is_some_and(|parent| {
+                !matches!(parent.display, crate::Display::Flex | crate::Display::Grid)
+                    && !parent.internal_flex_container
+            });
+        if in_block_flow {
+            if let Some(style) = styles.get_mut(&id) {
+                style.width_fit_content = true;
+            }
+        }
+    }
+}
+
 fn grow_trailing_auto_cells(tree: &DomTree, styles: &mut HashMap<NodeId, crate::LayoutStyle>) {
     let is_tag = |id: NodeId, tags: &[&str]| -> bool {
         match tree
@@ -9983,12 +10098,57 @@ fn collect_grid_tracks(
 
 /// Unrounded Taffy sizes snapped to 1/64 px for boxes whose final rect is
 /// the rounded Taffy size (the engine adjusts some rects after layout).
+/// Every DOM box's unrounded Taffy border box in document coordinates,
+/// snapped to 1/64 px, where it agrees with the final whole-pixel rect to
+/// within a pixel on every edge (boxes the engine adjusts after layout keep
+/// their final rect).
+fn collect_fractional_rects(
+    taffy_tree: &TaffyTree<usize>,
+    root: taffy::NodeId,
+    initial_cb_x: f32,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    rects: &HashMap<NodeId, Rect>,
+) -> HashMap<NodeId, Rect> {
+    // Blink converts CSS lengths to LayoutUnits by truncation (13.9px is
+    // 13.890625); the epsilon keeps float noise on exact values.
+    let snap = |value: f32| (value * 64.0 + 1e-3).floor() / 64.0;
+    let mut out = HashMap::new();
+    // An explicit stack: (node, parent's absolute unrounded origin).
+    let mut stack = vec![(root, initial_cb_x, 0.0f32)];
+    while let Some((node, parent_x, parent_y)) = stack.pop() {
+        let layout = taffy_tree.unrounded_layout(node);
+        let x = parent_x + layout.location.x;
+        let y = parent_y + layout.location.y;
+        if let Some(dom_id) = id_map.get(&node) {
+            if let Some(rounded) = rects.get(dom_id) {
+                let rect = Rect {
+                    x: snap(x),
+                    y: snap(y),
+                    width: snap(layout.size.width),
+                    height: snap(layout.size.height),
+                };
+                let close = (rect.x - rounded.x).abs() < 1.0
+                    && (rect.y - rounded.y).abs() < 1.0
+                    && (rect.width - rounded.width).abs() < 1.0
+                    && (rect.height - rounded.height).abs() < 1.0;
+                if close && rect != *rounded {
+                    out.insert(*dom_id, rect);
+                }
+            }
+        }
+        for child in taffy_tree.children(node).unwrap_or_default() {
+            stack.push((child, x, y));
+        }
+    }
+    out
+}
+
 fn collect_fractional_sizes(
     taffy_tree: &TaffyTree<usize>,
     id_map: &HashMap<taffy::NodeId, NodeId>,
     rects: &HashMap<NodeId, Rect>,
 ) -> HashMap<NodeId, (f32, f32)> {
-    let snap = |value: f32| (value * 64.0).round() / 64.0;
+    let snap = |value: f32| (value * 64.0 + 1e-3).floor() / 64.0;
     id_map
         .iter()
         .filter_map(|(&taffy_id, &dom_id)| {
@@ -14878,9 +15038,26 @@ fn build(
             {
                 let constrained =
                     crate::inline::constrained_auto_replaced_size(width, height, style);
-                taffy_style.size.width = taffy::Dimension::length(constrained.width);
+                // The seeded size is the content box; Taffy reads `size` in
+                // the box's own `box-sizing` box.
+                let (extra_w, extra_h) = if style.box_sizing == crate::BoxSizing::BorderBox {
+                    (
+                        style.padding.left
+                            + style.padding.right
+                            + style.border.left
+                            + style.border.right,
+                        style.padding.top
+                            + style.padding.bottom
+                            + style.border.top
+                            + style.border.bottom,
+                    )
+                } else {
+                    (0.0, 0.0)
+                };
+                taffy_style.size.width = taffy::Dimension::length(constrained.width + extra_w);
                 if has_definite_constraint {
-                    taffy_style.size.height = taffy::Dimension::length(constrained.height);
+                    taffy_style.size.height =
+                        taffy::Dimension::length(constrained.height + extra_h);
                 }
             }
 
@@ -21590,6 +21767,62 @@ mod tests {
             assert_eq!(rect("grid").height, grid_height, "{rows}");
             assert_eq!((rect("g4").y, rect("g4").height), (top, 18.0), "{rows}");
         }
+    }
+
+    // w3schools check icons: a 13x14 image with padding-right:5px is 18x14
+    // in Chrome under both box-sizing values (the natural size and ratio
+    // belong to the content box). We had 18x19.4 (ratio on the border box)
+    // and, with border-box, 13x9 (the seeded size taken as the border box).
+    #[test]
+    fn padded_auto_image_keeps_its_natural_content_box() {
+        for box_sizing in ["content-box", "border-box"] {
+            let tree = parse_html(&format!(
+                "<!doctype html><style>*{{box-sizing:{box_sizing}}}</style><body style='margin:0'>\
+                 <p><img id=a style='padding-right:5px'> text</p>"
+            ));
+            let a = tree.get_element_by_id("a").unwrap();
+            let intrinsic = HashMap::from([(a, (13.0, 14.0))]);
+            let laid = layout_dom_with_images(&tree, (800.0, 600.0), &intrinsic);
+            let rect = laid.rects[&a];
+            assert_eq!((rect.width, rect.height), (18.0, 14.0), "{box_sizing}");
+        }
+    }
+
+    // w3schools js_json_syntax: a 612x285 image with width:100% and
+    // max-width:612px in an 810px block is 612x285 in Chrome (335.16 with
+    // 32/16px padding and a 1px border, box-sizing:border-box). The ratio
+    // transferred the unclamped 810px width (377px tall).
+    #[test]
+    fn max_width_clamps_before_the_ratio_transfers_to_the_height() {
+        let tree = parse_html(
+            r#"<!doctype html><style>*{box-sizing:border-box}</style><body style="margin:0"><div style="width:810px"><img id=a style="width:100%;max-width:612px;border:1px solid gray;padding:32px 16px"></div><div style="width:810px"><img id=b style="width:100%;max-width:612px"></div><div style="width:500px"><img id=c style="width:100%;max-width:612px;padding:32px 16px"></div>"#,
+        );
+        let intrinsic: HashMap<_, _> = ["a", "b", "c"]
+            .into_iter()
+            .map(|id| (tree.get_element_by_id(id).unwrap(), (612.0, 285.0)))
+            .collect();
+        let laid = layout_dom_with_images(&tree, (900.0, 600.0), &intrinsic);
+        let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
+        assert_eq!((rect("a").width, rect("a").height.round()), (612.0, 335.0));
+        assert_eq!((rect("b").width, rect("b").height), (612.0, 285.0));
+        assert_eq!((rect("c").width, rect("c").height.round()), (500.0, 282.0));
+    }
+
+    // Chrome getBoundingClientRect: 13.9px and 15.9px flex items are
+    // 13.890625 and 15.890625 wide (LayoutUnit truncation) and the second
+    // starts at 13.890625; paint keeps whole-pixel rects.
+    #[test]
+    fn cssom_rects_keep_layout_unit_fractions() {
+        let tree = parse_html(
+            r#"<!doctype html><body style="margin:0"><div style="display:flex"><div id=a style="width:13.9px;height:10px"></div><div id=b style="width:15.9px;height:10.5px"></div></div>"#,
+        );
+        let laid = layout_dom(&tree, (400.0, 200.0));
+        let frac = |id: &str| laid.fractional_rects[&tree.get_element_by_id(id).unwrap()];
+        assert_eq!(frac("a").width, 13.890625);
+        assert_eq!(
+            (frac("b").x, frac("b").width, frac("b").height),
+            (13.890625, 15.890625, 10.5)
+        );
     }
 
     /// Each line of text node `node`: (x, text), in line order.
