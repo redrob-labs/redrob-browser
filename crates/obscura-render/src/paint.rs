@@ -6036,7 +6036,8 @@ fn paint_laid_dom_scrolled(
         }
 
         scene_node(nid);
-        if box_on_surface && name.local.as_ref() == "canvas" {
+        // A canvas bitmap, or the painted child document of an iframe.
+        if box_on_surface && matches!(name.local.as_ref(), "canvas" | "iframe") {
             if let Some(surface) = canvas_surfaces.surface(nid) {
                 // A canvas bitmap is replaced content: CSS sizing and
                 // object-fit operate on the content box, never the padding or
