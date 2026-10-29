@@ -8199,17 +8199,17 @@ fn layout_dom_once(
                     let needs_layout_snapshot = group.iter().any(|(tnode, dom, _)| {
                         anonymous_tables.contains_key(tnode)
                             || table_style_of(*tnode, *dom).is_some_and(|style| {
-                            (style.width == crate::Dimension::Auto
-                                && (depth > 0
-                                    || reliable_table_available_width(
-                                        tree,
-                                        *dom,
-                                        &styles,
-                                        initial_cb_width,
-                                    )
-                                    .is_none()))
-                                || matches!(style.width, crate::Dimension::Percent(_))
-                        })
+                                (style.width == crate::Dimension::Auto
+                                    && (depth > 0
+                                        || reliable_table_available_width(
+                                            tree,
+                                            *dom,
+                                            &styles,
+                                            initial_cb_width,
+                                        )
+                                        .is_none()))
+                                    || matches!(style.width, crate::Dimension::Percent(_))
+                            })
                     });
                     if needs_layout_snapshot {
                         // This pass is gated to layout-dependent containing
@@ -8274,9 +8274,9 @@ fn layout_dom_once(
                                 });
                                 let margins = table_style
                                     .map_or(0.0, |style| style.margin.left + style.margin.right);
-                                let container = if let Some(percentage) =
-                                    percentage.filter(|_| !table_style.is_some_and(|style| style.table_layout_fixed))
-                                {
+                                let container = if let Some(percentage) = percentage.filter(|_| {
+                                    !table_style.is_some_and(|style| style.table_layout_fixed)
+                                }) {
                                     containing.map(|width| {
                                         let edges = table_style
                                             .filter(|style| {
@@ -8377,8 +8377,7 @@ fn layout_dom_once(
                         // gave a 100% w3schools table 342/245/189 columns where
                         // Chrome has 401/235/141).
                         let width_style = table_style.width;
-                        let percent_outer = if matches!(width_style, crate::Dimension::Percent(_))
-                        {
+                        let percent_outer = if matches!(width_style, crate::Dimension::Percent(_)) {
                             match available_widths.get(&tnode) {
                                 Some(width) => Some(*width),
                                 None => continue,
@@ -8465,7 +8464,7 @@ fn layout_dom_once(
                         }
                         let min_c = min_c.max(caption_min);
                         let inline_outer_edges =
-                                table_node_inline_outer_edges(&taffy_tree, tnode, table_style);
+                            table_node_inline_outer_edges(&taffy_tree, tnode, table_style);
                         let preferred_outer = match width_style {
                             crate::Dimension::Px(w)
                                 if table_style.box_sizing == crate::BoxSizing::ContentBox =>
@@ -10781,7 +10780,9 @@ fn table_cell_natural_height(
             continue;
         }
         bottom = bottom.max(
-            child_layout.location.y + child_layout.size.height + child_layout.margin.bottom.max(0.0),
+            child_layout.location.y
+                + child_layout.size.height
+                + child_layout.margin.bottom.max(0.0),
         );
     }
     bottom + layout.padding.bottom + layout.border.bottom
@@ -11152,10 +11153,8 @@ fn apply_table_cell_block_alignment(
                         + child_layout.margin.bottom.max(0.0),
                 );
             }
-            let inner = layout.size.height
-                - content_top
-                - layout.padding.bottom
-                - layout.border.bottom;
+            let inner =
+                layout.size.height - content_top - layout.padding.bottom - layout.border.bottom;
             let free = inner - (content_bottom - content_top);
             if free <= 0.5 {
                 continue;
@@ -12328,21 +12327,24 @@ fn synthesize_column_rects(
         (value.tag() == taffy::CompactLength::LENGTH_TAG).then(|| value.value())
     };
     for (table_node, columns) in &ifc_items.table_columns {
-        let Some(table_rect) = id_map.get(table_node).and_then(|dom| rects.get(dom)).copied()
+        let Some(table_rect) = id_map
+            .get(table_node)
+            .and_then(|dom| rects.get(dom))
+            .copied()
         else {
             continue;
         };
-        let (Ok(style), Ok(layout)) = (taffy_tree.style(*table_node), taffy_tree.layout(*table_node))
-        else {
+        let (Ok(style), Ok(layout)) = (
+            taffy_tree.style(*table_node),
+            taffy_tree.layout(*table_node),
+        ) else {
             continue;
         };
         let widths: Option<Vec<f32>> = style
             .grid_template_columns
             .iter()
             .map(|track| match track {
-                taffy::GridTemplateComponent::Single(minmax) => {
-                    length_of(minmax.min.into_raw())
-                }
+                taffy::GridTemplateComponent::Single(minmax) => length_of(minmax.min.into_raw()),
                 _ => None,
             })
             .collect();
@@ -13091,7 +13093,10 @@ fn cell_has_only_block_children(
         };
         if !node.is_element() {
             if matches!(node.data, obscura_dom::tree::NodeData::Text { .. })
-                && !tree.text_content(child).trim_matches([' ', '\t', '\n', '\r', '\x0c']).is_empty()
+                && !tree
+                    .text_content(child)
+                    .trim_matches([' ', '\t', '\n', '\r', '\x0c'])
+                    .is_empty()
             {
                 return false;
             }
@@ -13188,7 +13193,10 @@ fn collect_css_table(
             Kind::Cell
         } else if let Some(part) = child.table_part {
             Kind::Part(part)
-        } else if child.position.is_some_and(|p| p == taffy::Position::Absolute) {
+        } else if child
+            .position
+            .is_some_and(|p| p == taffy::Position::Absolute)
+        {
             Kind::Skip
         } else {
             Kind::Other
@@ -13209,9 +13217,7 @@ fn collect_css_table(
             match kind(child) {
                 Kind::Skip => {}
                 Kind::Cell => cells.push(child),
-                Kind::Other => {
-                    push_table_cell(&mut cells, &mut table.anonymous_cells, child, true)
-                }
+                Kind::Other => push_table_cell(&mut cells, &mut table.anonymous_cells, child, true),
                 Kind::Part(_) => return None,
             }
         }
@@ -13225,46 +13231,44 @@ fn collect_css_table(
         return Some(table);
     }
     // Rows of one group (or of the table itself for `group == None`).
-    let push_group = |table: &mut CssTable,
-                      group: Option<NodeId>,
-                      members: Vec<NodeId>|
-     -> Option<()> {
-        let start = table.rows.len();
-        let mut anonymous: Vec<NodeId> = Vec::new();
-        let flush = |table: &mut CssTable, anonymous: &mut Vec<NodeId>| {
-            if !anonymous.is_empty() {
-                table.rows.push((id, 0));
-                table.cells.push(std::mem::take(anonymous));
-                table.real.push(false);
+    let push_group =
+        |table: &mut CssTable, group: Option<NodeId>, members: Vec<NodeId>| -> Option<()> {
+            let start = table.rows.len();
+            let mut anonymous: Vec<NodeId> = Vec::new();
+            let flush = |table: &mut CssTable, anonymous: &mut Vec<NodeId>| {
+                if !anonymous.is_empty() {
+                    table.rows.push((id, 0));
+                    table.cells.push(std::mem::take(anonymous));
+                    table.real.push(false);
+                }
+            };
+            for child in members {
+                match kind(child) {
+                    Kind::Skip => {}
+                    Kind::Cell => anonymous.push(child),
+                    Kind::Other => {
+                        push_table_cell(&mut anonymous, &mut table.anonymous_cells, child, true)
+                    }
+                    Kind::Part(TablePart::Row) => {
+                        flush(table, &mut anonymous);
+                        table.rows.push((child, 0));
+                        let cells = row_cells(table, child)?;
+                        table.cells.push(cells);
+                        table.real.push(true);
+                    }
+                    _ => return None,
+                }
             }
+            flush(table, &mut anonymous);
+            let end = table.rows.len();
+            for row in &mut table.rows[start..end] {
+                row.1 = end;
+            }
+            if let Some(group) = group {
+                table.groups.push((group, start..end));
+            }
+            Some(())
         };
-        for child in members {
-            match kind(child) {
-                Kind::Skip => {}
-                Kind::Cell => anonymous.push(child),
-                Kind::Other => {
-                    push_table_cell(&mut anonymous, &mut table.anonymous_cells, child, true)
-                }
-                Kind::Part(TablePart::Row) => {
-                    flush(table, &mut anonymous);
-                    table.rows.push((child, 0));
-                    let cells = row_cells(table, child)?;
-                    table.cells.push(cells);
-                    table.real.push(true);
-                }
-                _ => return None,
-            }
-        }
-        flush(table, &mut anonymous);
-        let end = table.rows.len();
-        for row in &mut table.rows[start..end] {
-            row.1 = end;
-        }
-        if let Some(group) = group {
-            table.groups.push((group, start..end));
-        }
-        Some(())
-    };
     let children = flatten(id);
     let order = |node: NodeId| match kind(node) {
         Kind::Part(TablePart::HeaderGroup) => 0,
@@ -13867,8 +13871,9 @@ fn build_table_box(
                     .into_iter()
                     .filter(|cid| {
                         tree.borrow_node(*cid).is_some_and(|node| {
-                            node.as_element()
-                                .is_some_and(|element| matches!(element.local.as_ref(), "td" | "th"))
+                            node.as_element().is_some_and(|element| {
+                                matches!(element.local.as_ref(), "td" | "th")
+                            })
                         })
                     })
                     .collect(),
@@ -13966,17 +13971,10 @@ fn build_table_box(
     if placed.is_empty() || ncols == 0 {
         return None;
     }
-    let collapsed = style.border_collapse.unwrap_or(false).then(|| {
-        resolve_collapsed_table_borders(
-            style,
-            &rows,
-            &placed,
-            nrows,
-            ncols,
-            styles,
-            id,
-        )
-    });
+    let collapsed = style
+        .border_collapse
+        .unwrap_or(false)
+        .then(|| resolve_collapsed_table_borders(style, &rows, &placed, nrows, ncols, styles, id));
 
     // `<caption>` children: (DOM id, bottom side). They are built after the
     // cells and placed in their own full-width tracks around the rows.
@@ -14024,10 +14022,15 @@ fn build_table_box(
         .map(|(&(tr, _), real)| {
             *real
                 && (styles.get(&tr).is_some_and(|row| row.visibility_collapse)
-                    || tree.borrow_node(tr).and_then(|node| node.parent).is_some_and(|group| {
-                        group != id
-                            && styles.get(&group).is_some_and(|row| row.visibility_collapse)
-                    }))
+                    || tree
+                        .borrow_node(tr)
+                        .and_then(|node| node.parent)
+                        .is_some_and(|group| {
+                            group != id
+                                && styles
+                                    .get(&group)
+                                    .is_some_and(|row| row.visibility_collapse)
+                        }))
         })
         .collect();
     let mut track_of: Vec<Option<usize>> = Vec::with_capacity(nrows);
@@ -14532,7 +14535,6 @@ fn build_table_box(
         }
         caption_nodes.push(node);
     }
-    let mut children = children;
     children.extend(caption_nodes.iter().copied());
     tstyle.gap = taffy::Size {
         width: length(horizontal_spacing),

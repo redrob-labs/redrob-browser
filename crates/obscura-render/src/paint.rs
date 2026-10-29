@@ -6986,19 +6986,18 @@ fn paint_css_border(
     // reaches only the middle of each border; the border itself is centred
     // on that grid line.
     let collapsed_rect;
-    let rect = if style.border_collapse == Some(true)
-        && (style.is_table_cell_box || style.is_table_box)
-    {
-        collapsed_rect = crate::Rect {
-            x: rect.x - widths.left / 2.0,
-            y: rect.y - widths.top / 2.0,
-            width: rect.width + (widths.left + widths.right) / 2.0,
-            height: rect.height + (widths.top + widths.bottom) / 2.0,
+    let rect =
+        if style.border_collapse == Some(true) && (style.is_table_cell_box || style.is_table_box) {
+            collapsed_rect = crate::Rect {
+                x: rect.x - widths.left / 2.0,
+                y: rect.y - widths.top / 2.0,
+                width: rect.width + (widths.left + widths.right) / 2.0,
+                height: rect.height + (widths.top + widths.bottom) / 2.0,
+            };
+            &collapsed_rect
+        } else {
+            rect
         };
-        &collapsed_rect
-    } else {
-        rect
-    };
     if !rect_intersects_paint_surface(rect, pixmap, raster_scale) {
         return;
     }

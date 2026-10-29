@@ -1598,8 +1598,7 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
         }
         "visibility" => {
             let collapse = value.trim().eq_ignore_ascii_case("collapse");
-            style.visibility_hidden =
-                Some(collapse || value.trim().eq_ignore_ascii_case("hidden"));
+            style.visibility_hidden = Some(collapse || value.trim().eq_ignore_ascii_case("hidden"));
             style.visibility_collapse = collapse;
         }
         "pointer-events" => {
