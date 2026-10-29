@@ -92,9 +92,11 @@ impl TabScene {
         }
     }
 
-    /// A different document: scroll positions start over.
+    /// A different document: scroll positions start over. Its first frame
+    /// may already be here (the scene channel can beat the CDP event).
     pub fn navigated(&mut self) {
         self.scroll = Scrolls::default();
+        self.spatial_changed();
         self.changed();
     }
 
