@@ -8,8 +8,9 @@ use std::task::{Context, Poll};
 
 use deno_core::{v8, JsRuntime, RuntimeOptions};
 use obscura_dom::{DomTree, NodeId};
+use obscura_net::ResourceRequest;
 #[cfg(feature = "render")]
-use obscura_net::{RequestCredentials, RequestMode, ResourceRequest};
+use obscura_net::{RequestCredentials, RequestMode};
 
 /// Re-exported so other crates (obscura-browser, obscura-cdp) can name the V8
 /// isolate handle without taking a direct dependency on deno_core.
@@ -2475,14 +2476,6 @@ impl ObscuraJsRuntime {
         self.state.borrow().render_resource_notify.clone()
     }
 
-    /// Start page-transport loads for `requests` (already marked in flight).
-    /// Requests keep cookies, proxy policy, callbacks, CORS and response
-    /// limits of the page transport, share the page-wide concurrency limit,
-    /// run to completion in the background and deliver into this runtime's
-    /// result channel. Outside a Tokio context the requests are kept in a
-    /// backlog and started at the next event-loop turn. Returns the number
-    /// of requests started now.
-    #[cfg(feature = "render")]
     /// Start fetching parser-discovered entry modules now, through the page
     /// transport and with the request profile the module loader uses for an
     /// entry, so their downloads overlap instead of running one after another
@@ -2538,6 +2531,14 @@ impl ObscuraJsRuntime {
         started
     }
 
+    /// Start page-transport loads for `requests` (already marked in flight).
+    /// Requests keep cookies, proxy policy, callbacks, CORS and response
+    /// limits of the page transport, share the page-wide concurrency limit,
+    /// run to completion in the background and deliver into this runtime's
+    /// result channel. Outside a Tokio context the requests are kept in a
+    /// backlog and started at the next event-loop turn. Returns the number
+    /// of requests started now.
+    #[cfg(feature = "render")]
     pub fn start_render_resource_loads(
         &self,
         requests: Vec<(String, Option<crate::ops::ImageRequestProfile>, bool)>,
