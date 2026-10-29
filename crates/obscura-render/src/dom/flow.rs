@@ -356,9 +356,13 @@ impl BuildCx<'_> {
                 }
                 (Piece::Dom(id), Level::Inline) => {
                     let style = self.styles.get(&id).cloned().unwrap_or_default();
-                    if local_name(self.tree, id).as_deref() == Some("br") {
+                    let name = local_name(self.tree, id);
+                    if name.as_deref() == Some("br") {
                         // The element still needs a rect.
                         items.push(Item::Break(id));
+                    } else if name.as_deref() == Some("wbr") {
+                        // A line break opportunity with no box of its own.
+                        items.push(Item::GeneratedText("\u{200B}".to_string()));
                     } else if is_atomic(self.tree, id, &style) {
                         if let Some(node) = self.build_element(id) {
                             items.push(Item::Atomic {

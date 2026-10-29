@@ -2323,6 +2323,55 @@ impl PreparedRender {
         )
     }
 
+    /// Viewport client rects of the UTF-16 range `start..end` of text node
+    /// `text`, one per line box it occupies (`Range.getClientRects`).
+    pub fn text_range_client_rects_with_scroll(
+        &self,
+        tree: &DomTree,
+        text: obscura_dom::tree::NodeId,
+        start: usize,
+        end: usize,
+        scroll: &ResolvedScrollState,
+    ) -> Option<Vec<crate::Rect>> {
+        let parent = crate::dom::rendered_parent(tree, text)?;
+        for owner in std::iter::successors(Some(parent), |id| crate::dom::rendered_parent(tree, *id))
+            .take(tree.len() + 1)
+        {
+            let Some(list) = self.layout.ifc.by_node.get(&owner) else {
+                continue;
+            };
+            for &index in list {
+                let Some(ifc) = self.layout.ifc.get(index) else {
+                    continue;
+                };
+                if !ifc.contains_text(text) {
+                    continue;
+                }
+                let movement = scroll.movement_for(parent);
+                let transform = self.layout.transforms.get(&parent).copied();
+                return Some(
+                    ifc.text_range_rects(text, start, end)
+                        .into_iter()
+                        .map(|rect| {
+                            let rect = crate::Rect {
+                                x: rect.x + ifc.origin.0,
+                                y: rect.y + ifc.origin.1,
+                                ..rect
+                            };
+                            let rect = transform.map(|t| t.map_rect(rect)).unwrap_or(rect);
+                            crate::Rect {
+                                x: rect.x + movement.0,
+                                y: rect.y + movement.1,
+                                ..rect
+                            }
+                        })
+                        .collect(),
+                );
+            }
+        }
+        None
+    }
+
     pub fn viewport_client_rects_with_scroll(
         &self,
         id: obscura_dom::tree::NodeId,

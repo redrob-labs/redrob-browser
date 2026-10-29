@@ -1106,9 +1106,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let next_x = self.state.line.x + inline_box.width;
                         let is_start = inline_box.edge == crate::InlineBoxEdge::Start;
                         let has_width = inline_box.width != 0.0;
+                        // A zero-width edge never decides a break (it may follow
+                        // whitespace that hangs past the line end).
                         if next_x <= max_advance
                             || self.state.line.text_wrap_mode != TextWrapMode::Wrap
                             || is_start
+                            || !has_width
                         {
                             // A start edge that overflows is carried to the next line with the
                             // content after it once that content is found not to fit.

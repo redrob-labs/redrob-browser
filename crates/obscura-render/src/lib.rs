@@ -2704,6 +2704,9 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
         s.flex_direction = fd;
     }
     s.flex_wrap = style.flex_wrap.unwrap_or(taffy::FlexWrap::NoWrap);
+    s.establishes_bfc = style.flow_root
+        || style.containment & (CONTAIN_LAYOUT | CONTAIN_PAINT) != 0
+        || style.column_count.is_some_and(|count| count > 1);
     s.float = match style.float {
         Some(Float::Left) => taffy::style::Float::Left,
         Some(Float::Right) => taffy::style::Float::Right,

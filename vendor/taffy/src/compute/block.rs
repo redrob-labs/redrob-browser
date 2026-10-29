@@ -677,8 +677,12 @@ fn generate_item_list(
             let is_table = child_style.is_table();
             let is_scroll_container = overflow.x.is_scroll_container() || overflow.y.is_scroll_container();
 
-            let is_in_same_bfc: bool =
-                is_block && !is_table && position != Position::Absolute && is_not_floated && !is_scroll_container;
+            let is_in_same_bfc: bool = is_block
+                && !is_table
+                && !child_style.establishes_bfc()
+                && position != Position::Absolute
+                && is_not_floated
+                && !is_scroll_container;
 
             BlockItem {
                 node_id: child_node_id,
@@ -862,8 +866,10 @@ fn perform_final_layout_on_in_flow_children(
                 );
                 let margin_box = item_layout.size + item_non_auto_margin.sum_axes();
 
-                let mut location =
-                    block_ctx.place_floated_box(margin_box, y_offset_for_float, float_direction, item.clear);
+                // A float follows the margins collapsed so far (Chromium places it below
+                // the previous block's bottom margin).
+                let float_y = y_offset_for_float + active_collapsible_margin_set.resolve().max(0.0);
+                let mut location = block_ctx.place_floated_box(margin_box, float_y, float_direction, item.clear);
 
                 // Ensure that content that appears after a float does not get positioned before/above the float
                 //
@@ -1000,7 +1006,7 @@ fn perform_final_layout_on_in_flow_children(
                     } else {
                         active_collapsible_margin_set.collapse_with_margin(item_non_auto_margin.top).resolve()
                     };
-                let child_y = committed_y_offset.max(clear_pos) + estimated_top_margin;
+                let child_y = (committed_y_offset + estimated_top_margin).max(clear_pos);
                 let mut child_block_ctx = block_ctx.sub_context(child_y, insets);
                 let output = tree.compute_block_child_layout(item.node_id, inputs, Some(&mut child_block_ctx));
 
@@ -1098,7 +1104,9 @@ fn perform_final_layout_on_in_flow_children(
                                 + inset_offset.x
                         }
                     },
-                    y: committed_y_offset.max(clear_pos) + y_margin_offset + inset_offset.y,
+                    // Clearance places the border edge at the float bottom
+                    // when the collapsed-margin position is above it.
+                    y: (committed_y_offset + y_margin_offset).max(clear_pos) + inset_offset.y,
                 }
             } else {
                 // TODO: handle inset and margins

@@ -475,6 +475,12 @@ fn layout_ifc(
     let mut block_ctx =
         outer_block_ctx.sub_context(container_pb.top, [container_pb.left, container_pb.right]);
 
+    // Content widths and the line breaker sum advances in different orders;
+    // break with a little slack so a line exactly at max-content still fits
+    // (Chromium's LayoutUnit is 1/64 px).
+    let width_for_breaking = width + 1.0 / 64.0;
+    let fit = |slot_width: f32| (slot_width + 1.0 / 64.0).min(width_for_breaking);
+
     // Break lines one at a time into the space the floats leave.
     let float_child_inputs = LayoutInput {
         run_mode: RunMode::PerformLayout,
@@ -487,8 +493,8 @@ fn layout_ifc(
         let mut has_active_floats = initial_slot.segment_id.is_some();
         let mut slot = initial_slot;
         let state = breaker.state_mut();
-        state.set_layout_max_advance(width);
-        state.set_line_max_advance(initial_slot.width.min(width));
+        state.set_layout_max_advance(width_for_breaking);
+        state.set_line_max_advance(fit(initial_slot.width));
         state.set_line_x(initial_slot.x);
         state.set_line_y(initial_slot.y as f64);
         let mut floats_this_line = 0usize;
@@ -499,6 +505,12 @@ fn layout_ifc(
                     // A line whose content does not fit beside the floats
                     // moves down to the next band (CSS 2.2 §9.5).
                     let used = data.metrics.advance - data.metrics.hanging_advance;
+                    if std::env::var_os("OBSCURA_IFC_DEBUG").is_some() {
+                        eprintln!(
+                            "[ifc] line used={used} slot={slot:?} active={has_active_floats} floats={floats_this_line} y={}..{}",
+                            data.line_y_start, data.line_y_end
+                        );
+                    }
                     if has_active_floats
                         && floats_this_line == 0
                         && slot.segment_id.is_some()
@@ -513,9 +525,9 @@ fn layout_ifc(
                         slot = next;
                         let state = breaker.state_mut();
                         state.set_line_max_advance(if has_active_floats {
-                            next.width.min(width)
+                            fit(next.width)
                         } else {
-                            width
+                            width_for_breaking
                         });
                         state.set_line_x(if has_active_floats { next.x } else { 0.0 });
                         state.set_line_y(next.y as f64);
@@ -529,12 +541,12 @@ fn layout_ifc(
                         let next = block_ctx.find_content_slot(min_y, Clear::None, None);
                         has_active_floats = next.segment_id.is_some();
                         slot = next;
-                        state.set_line_max_advance(next.width.min(width));
+                        state.set_line_max_advance(fit(next.width));
                         state.set_line_x(next.x);
                         state.set_line_y(next.y as f64);
                     } else {
                         state.set_line_x(0.0);
-                        state.set_line_max_advance(width);
+                        state.set_line_max_advance(width_for_breaking);
                     }
                 }
                 YieldData::MaxHeightExceeded(_) => {}
@@ -587,9 +599,9 @@ fn layout_ifc(
                     let line_x = state.line_x();
                     let new_x = if has_active_floats { next.x } else { 0.0 };
                     state.set_line_max_advance(if has_active_floats {
-                        next.width.min(width)
+                        fit(next.width)
                     } else {
-                        width
+                        width_for_breaking
                     });
                     if (new_x - line_x).abs() > f32::EPSILON && box_break.advance == 0.0 {
                         state.set_line_x(new_x);
@@ -648,8 +660,17 @@ fn layout_ifc(
     );
 
     let has_inline_content = ifc.has_content;
+    // Lines moved down past floats leave gaps, so the content height is the
+    // bottom of the last line box rather than the sum of the line heights.
+    let lines_bottom = |layout: &parley::Layout<super::Brush>, skip_last: bool| {
+        let count = layout.len() - usize::from(skip_last && layout.len() > 0);
+        (0..count)
+            .filter_map(|index| layout.get(index))
+            .map(|line| line.metrics().block_max_coord)
+            .fold(0.0f32, f32::max)
+    };
     let mut height = if has_inline_content {
-        ifc.layout.height()
+        lines_bottom(&ifc.layout, false)
     } else {
         0.0
     };
@@ -665,10 +686,12 @@ fn layout_ifc(
                 && last_line.text_range().is_empty()
                 && last_line.items().next().is_none()
             {
-                height -= last_line.metrics().line_height;
                 trailing_empty_line = Some(line_count - 1);
             }
         }
+    }
+    if trailing_empty_line.is_some() && has_inline_content {
+        height = lines_bottom(&ifc.layout, true);
     }
     if is_bfc_root {
         height = height.max(float_height_contribution);

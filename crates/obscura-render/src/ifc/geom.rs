@@ -427,6 +427,61 @@ impl Ifc {
         Some(range.end)
     }
 
+    /// Client rects (content-box relative) of the UTF-16 range
+    /// `start..end` of text node `node`: one per line it occupies.
+    pub(crate) fn text_range_rects(&self, node: NodeId, start: usize, end: usize) -> Vec<Rect> {
+        let (Some(b0), Some(b1)) = (self.layout_byte(node, start), self.layout_byte(node, end)) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for line in self.final_layout().lines() {
+            let mut extent: Option<(f32, f32, f32, f32, f32, (f32, f32))> = None;
+            for item in line.items() {
+                let PositionedLayoutItem::GlyphRun(run) = item else {
+                    continue;
+                };
+                let Some(paint) = self.paints.get(run.style().brush.0 as usize) else {
+                    continue;
+                };
+                if paint.text_node != Some(node) {
+                    continue;
+                }
+                let font = run.run().font_metrics();
+                let mut cursor = run.offset();
+                for cluster in run.run().visual_clusters() {
+                    let range = cluster.text_range();
+                    let advance = cluster.advance();
+                    if range.start < b1 && range.end > b0 {
+                        let (x0, x1) = (cursor, cursor + advance);
+                        extent = Some(match extent {
+                            Some((a, b, base, asc, desc, offset)) => {
+                                (a.min(x0), b.max(x1), base, asc, desc, offset)
+                            }
+                            None => (
+                                x0,
+                                x1,
+                                run.baseline(),
+                                font.ascent.round(),
+                                font.descent.round(),
+                                paint.offset,
+                            ),
+                        });
+                    }
+                    cursor += advance;
+                }
+            }
+            if let Some((x0, x1, baseline, ascent, descent, offset)) = extent {
+                out.push(Rect {
+                    x: x0 + offset.0,
+                    y: baseline - ascent + offset.1,
+                    width: x1 - x0,
+                    height: ascent + descent,
+                });
+            }
+        }
+        out
+    }
+
     /// Whether this IFC lays out text node `node`.
     pub(crate) fn contains_text(&self, node: NodeId) -> bool {
         self.texts.iter().any(|range| range.node == node)

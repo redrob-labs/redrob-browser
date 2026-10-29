@@ -511,7 +511,10 @@ impl IfcStore {
             }
         }
 
-        let root_text_style = text_style(fonts, root_style, Brush(0));
+        let mut root_text_style = text_style(fonts, root_style, Brush(0));
+        // The root inline box is the strut: the root element's own
+        // `vertical-align` places it in its parent's line, not its content.
+        root_text_style.vertical_align = parley::VerticalAlign::BASELINE;
         let mut builder =
             self.layout_context
                 .tree_builder(&mut fonts.context, 1.0, true, &root_text_style);

@@ -7917,6 +7917,7 @@ fn layout_dom_once(
                 }
             };
 
+            mark_float_sensitive(&mut taffy_tree, taffy_root);
             let static_position_candidates = reparent_inset_positioned_nodes(
                 tree,
                 &mut taffy_tree,
@@ -8901,6 +8902,25 @@ fn layout_dom_once(
         query_stats,
         cascade_time,
     )
+}
+
+/// Mark every node whose subtree holds a float: its layout places that float
+/// into the enclosing block formatting context, so Taffy must not serve it
+/// from the cache when it is laid out inside one.
+fn mark_float_sensitive(taffy_tree: &mut TaffyTree<usize>, root: taffy::NodeId) -> bool {
+    let children = taffy_tree.children(root).unwrap_or_default();
+    let mut has_float = false;
+    for child in children {
+        has_float |= mark_float_sensitive(taffy_tree, child);
+        let floated = taffy_tree
+            .style(child)
+            .is_ok_and(|style| style.float != taffy::style::Float::None);
+        has_float |= floated;
+    }
+    if has_float {
+        taffy_tree.set_float_sensitive(root, true);
+    }
+    has_float
 }
 
 /// Place every inline formatting context at its final document position and

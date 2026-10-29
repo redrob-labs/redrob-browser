@@ -15460,8 +15460,56 @@ globalThis.Range = class Range {
     this.selectNode(newParent);
   }
   detach() {}
+  // CSSOM View: the border boxes of each selected element whose parent is
+  // not selected, and the line fragments of the selected text.
+  _layoutClientRects() {
+    const op = __obscuraCore.ops && __obscuraCore.ops.op_layout_text_rects;
+    if (typeof op !== "function") return null;
+    const out = [];
+    const textRects = (t, s, e) => {
+      if (e <= s) return;
+      const raw = op(String(t._nid | 0), s, e, _realmFrameId);
+      if (!raw) return;
+      for (const r of JSON.parse(raw)) out.push(new DOMRect(r.x, r.y, r.width, r.height));
+    };
+    const sc = this._sc, so = this._so, ec = this._ec, eo = this._eo;
+    if (_rngSame(sc, ec) && sc.nodeType === 3) {
+      textRects(sc, so, eo);
+      return out;
+    }
+    const visit = (node) => {
+      if (node.nodeType === 3) {
+        const startsHere = _rngSame(node, sc), endsHere = _rngSame(node, ec);
+        if (startsHere || endsHere || _rngContains(this, node)) {
+          textRects(node, startsHere ? so : 0, endsHere ? eo : _rngNodeLength(node));
+        }
+        return;
+      }
+      if (node.nodeType === 1 && _rngContains(this, node)) {
+        for (const r of node.getClientRects()) out.push(new DOMRect(r.x, r.y, r.width, r.height));
+        return;
+      }
+      for (const child of node.childNodes) {
+        if (_rngContains(this, child) || _rngPartiallyContains(this, child)
+            || _rngSame(child, sc) || _rngSame(child, ec)) visit(child);
+      }
+    };
+    visit(this.commonAncestorContainer);
+    return out;
+  }
   getBoundingClientRect() {
     if (this.collapsed) return new DOMRect();
+    const rects = this._layoutClientRects();
+    if (rects) {
+      const nonEmpty = rects.filter(r => r.width || r.height);
+      if (!nonEmpty.length) return rects.length ? rects[0] : new DOMRect();
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const r of nonEmpty) {
+        x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top);
+        x1 = Math.max(x1, r.right); y1 = Math.max(y1, r.bottom);
+      }
+      return new DOMRect(x0, y0, x1 - x0, y1 - y0);
+    }
     let cac = this.commonAncestorContainer;
     while (cac && cac.nodeType !== 1 && cac.nodeType !== 9) cac = cac.parentNode;
     if (cac && cac.getBoundingClientRect) {
@@ -15472,6 +15520,8 @@ globalThis.Range = class Range {
   }
   getClientRects() {
     if (this.collapsed) return new DOMRectList([]);
+    const rects = this._layoutClientRects();
+    if (rects) return new DOMRectList(rects);
     return new DOMRectList([this.getBoundingClientRect()]);
   }
   static get START_TO_START() { return 0; }
