@@ -16742,7 +16742,9 @@ mod tests {
             marker.green() > 220 && marker.red() < 40 && marker.blue() < 40,
             "a non-text box in the same clipped section must remain visible: {marker:?}"
         );
-        let svg_marker = scrolled.pixel(270, 50).expect("svg marker pixel");
+        // Probe the svg's right half: the LCD-filtered edge of the last
+        // glyph of "SECOND SHAPED LINE" reaches its left columns.
+        let svg_marker = scrolled.pixel(277, 50).expect("svg marker pixel");
         assert!(
             svg_marker.green() > 220 && svg_marker.blue() > 220 && svg_marker.red() < 40,
             "an inline svg in the same clipped section must remain visible: {svg_marker:?}"
