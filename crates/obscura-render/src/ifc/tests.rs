@@ -847,3 +847,19 @@ fn glyphs_missing_from_bundled_fonts_fall_back_to_host_fonts() {
         );
     }
 }
+
+#[test]
+fn floats_keep_their_first_childs_top_margin() {
+    // Chrome: a float is a block formatting context root, so its first
+    // child's margin-top stays inside it (float 80 tall around a 60px child
+    // 20px down); the float used to lose the margin (60 tall).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><div style='width:810px'><p>x</p>\
+         <div id=w style='float:left;width:100%'><div id=t style='margin-top:20px;padding:30px'></div></div>\
+         <p id=after style='clear:both'>y</p></div>",
+        &[],
+    );
+    assert_eq!(height(&tree, &laid, "w"), 80.0);
+    let top = |id: &str| laid.rects[&element(&tree, id)].y;
+    assert_eq!(top("t") - top("w"), 20.0);
+}

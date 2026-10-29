@@ -855,6 +855,10 @@ fn perform_final_layout_on_in_flow_children(
             if let Some(float_direction) = item.float.float_direction() {
                 has_active_floats = true;
 
+                // A float establishes a block formatting context: its
+                // children's margins never collapse through it (Chrome: a
+                // float whose first child has margin-top:20px is 20px
+                // taller than the child's border box).
                 let item_layout = tree.perform_child_layout(
                     item.node_id,
                     Size::NONE,
@@ -862,7 +866,7 @@ fn perform_final_layout_on_in_flow_children(
                     // available_space,
                     Size::MAX_CONTENT,
                     SizingMode::InherentSize,
-                    Line::TRUE,
+                    Line::FALSE,
                 );
                 let margin_box = item_layout.size + item_non_auto_margin.sum_axes();
 
