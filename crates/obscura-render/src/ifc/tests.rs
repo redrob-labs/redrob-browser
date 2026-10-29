@@ -1036,3 +1036,23 @@ fn decorated_inlines_split_around_blocks() {
     let (tree, laid) = layout(&html, &[]);
     assert_eq!(laid.rects[&element(&tree, "deep")].width, 1280.0);
 }
+
+#[test]
+fn table_caption_min_content_keeps_its_fraction() {
+    // Chrome: a table whose caption's longest word ("caption", 16px
+    // sans-serif) is wider than its two cells is 51.6 wide, not 52.
+    let (tree, laid) = layout(
+        "<!doctype html><style>body{margin:8px;font:16px/20px sans-serif} td{border:1px solid}</style>\
+         <table id=a><caption>Top caption that is longer than the table</caption>\
+         <tr><td>a</td><td>b</td></tr></table>",
+        &[],
+    );
+    let node = element(&tree, "a");
+    let w = laid
+        .fractional_rects
+        .get(&node)
+        .copied()
+        .unwrap_or(laid.rects[&node])
+        .width;
+    assert!((w - 51.6).abs() < 0.05, "{w}");
+}

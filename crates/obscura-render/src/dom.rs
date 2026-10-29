@@ -8390,7 +8390,7 @@ fn layout_dom_once(
                                 },
                                 &mut measure,
                             );
-                            if let Ok(layout) = taffy_tree.layout(*caption) {
+                            if let Some(layout) = Some(taffy_tree.unrounded_layout(*caption)) {
                                 caption_min = caption_min.max(layout.size.width);
                             }
                             if let Ok(current) = taffy_tree.style(*caption) {
@@ -8409,10 +8409,7 @@ fn layout_dom_once(
                                 },
                                 &mut measure,
                             );
-                            taffy_tree
-                                .layout(tnode)
-                                .map(|l| l.size.width)
-                                .unwrap_or(0.0)
+                            taffy_tree.unrounded_layout(tnode).size.width
                         };
                         // A table can never be narrower than an unshrinkable
                         // fixed-width descendant. A Wikipedia infobox holds a
@@ -8436,10 +8433,7 @@ fn layout_dom_once(
                                 },
                                 &mut measure,
                             );
-                            taffy_tree
-                                .layout(tnode)
-                                .map(|l| l.size.width)
-                                .unwrap_or(0.0)
+                            taffy_tree.unrounded_layout(tnode).size.width
                         };
                         for (caption, display) in caption_displays {
                             if let Ok(current) = taffy_tree.style(caption) {
