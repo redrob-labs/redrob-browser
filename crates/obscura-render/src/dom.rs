@@ -7605,14 +7605,17 @@ fn layout_dom_once(
                 }
                 let font_size = style.font_size.unwrap_or(13.333_333).max(1.0);
                 let content = native_button_intrinsic_content(tree, id, &styles, font_size);
-                // A label of nested boxes (YouTube's chip: an inline-flex
-                // button around a padded 14px flex box whose text sits in an
-                // overflow:hidden box) is not one run of text at the button's
-                // font. Where the button already shrinks to fit, layout
-                // measures its real contents; the label approximation sized
-                // such chips to a few pixels and clipped their text.
-                (!content.boxed || sizing != ContainerAutoInlineSize::Intrinsic)
-                    .then_some((id, content))
+                // Where the button already shrinks to fit (inline-block,
+                // inline-flex, float), layout measures its real contents. The
+                // label approximation is only for a button that would
+                // otherwise stretch. It cannot see generated text and uses a
+                // different text measurer than layout, so applying it to a
+                // shrink-to-fit button made it a few pixels too narrow: the
+                // label wrapped ("hide this" in two lines) and a floated
+                // `[hide]` toggle with ::before/::after brackets became three
+                // lines. YouTube's nested-box chips hit the same gap.
+                let _ = content.boxed;
+                (sizing != ContainerAutoInlineSize::Intrinsic).then_some((id, content))
             })
             .collect();
         let native_control_grid_stretch: HashMap<NodeId, (bool, bool)> = styles
@@ -12557,9 +12560,24 @@ where
 /// Collect rows together with the exclusive end of their originating row
 /// group. HTML rowspans never cross a thead/tbody/tfoot boundary; `rowspan=0`
 /// means the remainder of that group, not the remainder of the whole table.
-fn collect_table_rows(tree: &DomTree, id: NodeId, rows: &mut Vec<(NodeId, usize)>) {
+fn collect_table_rows(
+    tree: &DomTree,
+    id: NodeId,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    rows: &mut Vec<(NodeId, usize)>,
+) {
+    // A `display:none` row or row group generates no box, so it takes no
+    // track (collapsed MediaWiki navboxes hide every row but the title).
+    let hidden = |node: NodeId| {
+        styles
+            .get(&node)
+            .is_some_and(|style| style.display == crate::Display::None)
+    };
     let mut direct_start: Option<usize> = None;
     for cid in tree.children(id) {
+        if hidden(cid) {
+            continue;
+        }
         let local = tree
             .borrow_node(cid)
             .and_then(|n| n.as_element().map(|e| e.local.to_string()));
@@ -12580,7 +12598,8 @@ fn collect_table_rows(tree: &DomTree, id: NodeId, rows: &mut Vec<(NodeId, usize)
                     if tree.borrow_node(row).is_some_and(|node| {
                         node.as_element()
                             .is_some_and(|element| element.local.as_ref() == "tr")
-                    }) {
+                    }) && !hidden(row)
+                    {
                         rows.push((row, 0));
                     }
                 }
@@ -12953,7 +12972,7 @@ fn build_table(
     };
     let mut rows: Vec<(NodeId, usize)> = Vec::new();
     if native_html_table {
-        collect_table_rows(tree, id, &mut rows);
+        collect_table_rows(tree, id, styles, &mut rows);
         if rows.is_empty() {
             return None;
         }
@@ -14714,12 +14733,36 @@ fn build(
     // leave floats on children after a newer rule turns their parent into a
     // flex container; routing those children through the block float-zone
     // approximation corrupts flex sizing and percentage-margin placement.
-    let has_float_child = style.display == crate::Display::Block
+    // A table cell is a block container inside, even though its content
+    // wrapper is a column-flex stand-in, so floats inside it float. Otherwise
+    // MediaWiki navbox titles (a right-floated "hide" button and a
+    // left-floated v-t-e bar beside the centered title) stacked into a
+    // 112px cell instead of one 28px line.
+    let float_cell = style.is_table_cell_box
+        && style.internal_flex_container
+        && dom_children
+            .iter()
+            .any(|&cid| styles.get(&cid).is_some_and(|s| s.float.is_some()));
+    let block_inside_style;
+    let float_parent_style = if float_cell {
+        let mut block = style.clone();
+        block.display = crate::Display::Block;
+        block.internal_flex_container = false;
+        block.flex_direction = None;
+        block_inside_style = block;
+        &block_inside_style
+    } else {
+        style
+    };
+    let has_float_child = float_parent_style.display == crate::Display::Block
         && dom_children
             .iter()
             .any(|&cid| styles.get(&cid).map(|s| s.float.is_some()).unwrap_or(false));
-    let native_float_band =
-        has_float_child && can_use_native_float_band(tree, style, &dom_children, styles);
+    let native_float_band = has_float_child
+        && can_use_native_float_band(tree, float_parent_style, &dom_children, styles);
+    if float_cell {
+        taffy_style.display = taffy::style::Display::Block;
+    }
     let has_in_flow_block_child = dom_children
         .iter()
         .any(|cid| styles.get(cid).is_some_and(is_in_flow_block_level));
@@ -14848,7 +14891,7 @@ fn build(
         build_children_with_native_float_band(
             tree,
             id,
-            style,
+            float_parent_style,
             &dom_children,
             taffy_tree,
             id_map,
