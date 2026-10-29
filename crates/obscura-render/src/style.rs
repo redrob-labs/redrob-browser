@@ -410,7 +410,7 @@ fn apply_ua_sheet_extras(tag: &str, style: &mut LayoutStyle) {
             } else {
                 crate::Cursor::Default
             });
-            if tag != "textarea" {
+            if !matches!(tag, "textarea" | "button") {
                 style.cssom.ua_overrides.extend(CLIP);
             }
             if tag == "input" {
@@ -1096,7 +1096,9 @@ fn apply_cssom_value(style: &mut LayoutStyle, name: &str, value: &str) {
             }
         }
         "font" => {
-            if let Some(family) = style.font_family.as_deref().and_then(|_| {
+            if matches!(lower.as_str(), "inherit" | "unset") {
+                style.cssom.font_family = None;
+            } else if let Some(family) = style.font_family.as_deref().and_then(|_| {
                 font_shorthand_family(value).and_then(serialize_font_family)
             }) {
                 style.cssom.font_family = Some(family);
