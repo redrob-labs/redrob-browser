@@ -105,6 +105,14 @@ impl StreamingParser {
         self.feed(&self.script)
     }
 
+    /// `document.write` while a parsing-blocking script is pending: the text
+    /// joins the input at the insertion point but is not parsed yet.
+    pub fn append_written(&self, text: &str) {
+        if !self.finished.get() && !text.is_empty() {
+            self.script.push_back(StrTendril::from_slice(text));
+        }
+    }
+
     /// Keep parsing written text only, after a script it closed has run.
     pub fn continue_written(&self) -> Option<NodeId> {
         if self.finished.get() {

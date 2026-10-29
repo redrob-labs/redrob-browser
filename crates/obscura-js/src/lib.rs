@@ -9,6 +9,7 @@ pub mod indexed_db;
 pub mod markdown;
 pub mod module_loader;
 pub mod ops;
+pub mod parser_script;
 pub mod runtime;
 pub mod v8_flags;
 mod write_stream;

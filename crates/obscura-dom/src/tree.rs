@@ -349,6 +349,23 @@ impl DomTree {
         self.inner.borrow_mut().parser_insertions = enabled.then(Vec::new);
     }
 
+    pub fn has_parser_insertions(&self) -> bool {
+        self.inner
+            .borrow()
+            .parser_insertions
+            .as_ref()
+            .is_some_and(|log| !log.is_empty())
+    }
+
+    /// The nodes the streaming parser inserted since the last drain.
+    pub fn parser_insertions(&self) -> Vec<(NodeId, NodeId)> {
+        self.inner
+            .borrow()
+            .parser_insertions
+            .clone()
+            .unwrap_or_default()
+    }
+
     /// Take the nodes the streaming parser inserted since the last call.
     pub fn take_parser_insertions(&self) -> Vec<(NodeId, NodeId)> {
         self.inner

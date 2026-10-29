@@ -7030,6 +7030,21 @@ class Document extends Node {
     if (method) return Reflect.apply(method, this, args);
     var html = args.join('');
     if (!html) return;
+    // While a parser-inserted script runs, the text goes into the document
+    // parser at the insertion point and is parsed now. An inline script the
+    // text closes runs before write() returns, as HTML's parser does.
+    if (this === globalThis.document) {
+      var step = _domParse("parser_write", "", html);
+      if (step) {
+        _parserInsertedNodes();
+        while (step && step.length) {
+          _runWrittenParserScript(+step[0]);
+          step = _domParse("parser_write_continue", "", "");
+          _parserInsertedNodes();
+        }
+        return;
+      }
+    }
     // The host parses into the input stream and returns [[parent, node], …], parents first. The
     // insertion stays here, because appendChild does more than append: it reports the
     // mutation, registers window named access, and loads a written stylesheet.
@@ -7103,6 +7118,64 @@ class Document extends Node {
   }
   execCommand() { return false; }
 }
+
+// An inline classic script document.write closed while the parser was paused
+// at a script: it runs nested inside write(), with currentScript set to it.
+function _runWrittenParserScript(nid) {
+  var script = _wrap(nid);
+  if (!script) return;
+  var prev = globalThis.__currentScriptNid;
+  globalThis.__currentScriptNid = nid;
+  try { (0, eval)(script.textContent); }
+  catch (e) { console.error('Inline script error:', e && e.message); }
+  finally { globalThis.__currentScriptNid = prev || 0; }
+}
+
+// The document parser inserted nodes natively. Queue what script can observe
+// of them: childList records, custom element reactions, slot changes and
+// iframe loads. The parser's own scripts are prepared by the page driver.
+function _parserInsertedNodes() {
+  var flat = _domParse("parser_take_insertions") || [];
+  if (!flat.length) return;
+  _treeMutationEpoch++;
+  _domMutationEpoch++;
+  var observers = globalThis.__mutationObservers;
+  var wantRecords = observers && observers.length;
+  var nodes = [];
+  // Roots of what was inserted: a node whose parent was inserted in the same
+  // batch is reached through that parent, and must not get a second
+  // connectedCallback.
+  var roots = [];
+  var inserted = new Set();
+  for (var k = 1; k < flat.length; k += 2) inserted.add(+flat[k]);
+  for (var i = 0; i < flat.length; i += 2) {
+    var node = _wrap(+flat[i + 1]);
+    if (!node) continue;
+    if (wantRecords) {
+      var parent = _wrap(+flat[i]);
+      if (parent) _queueTreeMutationRecord(parent, [node], [], node.previousSibling, node.nextSibling);
+    }
+    if (node.nodeType === 1) {
+      nodes.push(node);
+      if (!inserted.has(+flat[i])) roots.push(node);
+    }
+  }
+  for (var j = 0; j < nodes.length; j++) {
+    var el = nodes[j];
+    if (el.localName === 'iframe' && el.isConnected) {
+      if (el.hasAttribute('srcdoc')) el._loadIframeSrcdoc();
+      else {
+        var src = el.getAttribute('src');
+        if (src && src !== 'about:blank') el._loadIframeSrc(src);
+      }
+    }
+  }
+  if (_ceDefinitionCount) _ceConnected(roots, true);
+  if (_shadowHostCount) _slotsMaybeChanged(roots);
+}
+Object.defineProperty(globalThis, '__obscuraParserInserted', {
+  value: _parserInsertedNodes, writable: false, enumerable: false, configurable: false,
+});
 
 // Shared by write and the final EOF flush. A nonnegative parent is a real node,
 // including document node 0; -1 denotes the running script's insertion point.

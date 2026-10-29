@@ -664,6 +664,16 @@ pub struct ObscuraState {
     /// Cheap native signal that the current parser script wrote another
     /// script. This avoids polling V8 after every ordinary parser script.
     pub(crate) document_write_inserted_script: Cell<bool>,
+    /// The document's streaming parser while the main document is being
+    /// parsed. `document.write` from a parser-inserted script feeds it.
+    pub(crate) html_parser: RefCell<Option<Rc<obscura_dom::StreamingParser>>>,
+    /// HTML's script nesting level: parser-inserted scripts running now.
+    pub(crate) parser_script_depth: Cell<u32>,
+    /// Non-inline scripts written into the parser, in order, for the page
+    /// driver to prepare once the writing script returns.
+    pub(crate) parser_written_scripts: RefCell<Vec<NodeId>>,
+    /// A written external classic script blocks the parser.
+    pub(crate) parser_blocking_written: Cell<bool>,
 }
 
 /// A frame document waiting to be given a realm.
@@ -854,6 +864,10 @@ impl ObscuraState {
             already_started_scripts: RefCell::new(HashSet::new()),
             write_stream: RefCell::new(None),
             document_write_inserted_script: Cell::new(false),
+            html_parser: RefCell::new(None),
+            parser_script_depth: Cell::new(0),
+            parser_written_scripts: RefCell::new(Vec::new()),
+            parser_blocking_written: Cell::new(false),
         }
     }
     #[cfg(feature = "render")]
@@ -2001,6 +2015,20 @@ fn render_timing_enabled() -> bool {
 }
 
 #[cfg(feature = "render")]
+/// The document parser inserted nodes natively, outside the mutation ops
+/// that normally invalidate render state.
+pub(crate) fn note_parser_dom_progress(state: &mut ObscuraState) {
+    state.activity_generation = state.activity_generation.wrapping_add(1);
+    #[cfg(feature = "render")]
+    {
+        state.prepared_render = None;
+        state.pending_style_mutations.clear();
+        state.style_query_cache = None;
+        state.resolved_scroll = None;
+    }
+    state.base_url_cache.get_mut().take();
+}
+
 fn is_render_mutation_command(cmd: &str) -> bool {
     matches!(
         cmd,
@@ -2365,6 +2393,38 @@ fn op_dom(
 }
 
 fn op_dom_inner(shared: SharedState, cmd: String, arg1: String, arg2: String) -> String {
+    // document.write while a parser-inserted script runs: the text goes into
+    // the document parser at the insertion point. Returns null when the
+    // parser is not paused at a script, [] when the written text is used up,
+    // or [nid] for an inline script it closed, which the caller runs before
+    // continuing with "parser_write_continue".
+    if cmd == "parser_write" || cmd == "parser_write_continue" {
+        let result = {
+            let gs = shared.borrow();
+            crate::parser_script::parser_write(&gs, &arg2, cmd == "parser_write_continue")
+        };
+        return match result {
+            Err(()) => "null".into(),
+            Ok(step) => {
+                note_parser_dom_progress(&mut shared.borrow_mut());
+                step.map_or_else(|| "[]".into(), |node| format!("[{}]", node.index()))
+            }
+        };
+    }
+    // Nodes the document parser inserted since the last call, as a flat
+    // [parent, node, ...] list.
+    if cmd == "parser_take_insertions" {
+        let gs = shared.borrow();
+        let flat: Vec<usize> = gs
+            .dom
+            .as_ref()
+            .map(|dom| dom.take_parser_insertions())
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|(parent, node)| [parent.index(), node.index()])
+            .collect();
+        return serde_json::to_string(&flat).unwrap_or("[]".into());
+    }
     if cmd == "prefers_reduced_motion" {
         return shared.borrow().media_preferences.get().0.to_string();
     }

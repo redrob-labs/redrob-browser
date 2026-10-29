@@ -239,6 +239,11 @@ pub enum PendingNavigationOutcome {
 }
 
 pub struct Page {
+    /// The document parser before the script runtime takes it over, and the
+    /// first step it reached (the parse runs up to the first script at commit).
+    pending_parser: Option<obscura_dom::StreamingParser>,
+    parser_first_step: Option<obscura_dom::ParseStep>,
+    lookahead: ParserLookahead,
     pub id: String,
     pub frame_id: String,
     pub url: Option<Url>,
@@ -412,6 +417,147 @@ struct LoadedStylesheet {
 struct StylesheetImport {
     url: String,
     media: Option<String>,
+}
+
+/// What a speculative full parse of the response found ahead of the real
+/// parser (HTML speculative parsing): resources to fetch early. Nothing here
+/// runs early; each script still runs when the parser reaches its element.
+#[derive(Default)]
+struct ParserLookahead {
+    /// Resolved URLs of external classic scripts, one per element.
+    classic_scripts: Vec<String>,
+    /// Resolved URLs of external module scripts.
+    module_scripts: Vec<String>,
+    /// Descendants of the body in the whole document.
+    body_nodes: usize,
+    /// Fetched linked sheets by the link's `href` attribute:
+    /// (css, origin clean, response URL).
+    linked_sheets: std::collections::HashMap<String, (String, bool, String)>,
+    /// Fetched `@import` sheets of inline styles, by the style's text.
+    inline_sheets: std::collections::HashMap<String, Vec<(String, bool)>>,
+}
+
+impl ParserLookahead {
+    fn scan(dom: &DomTree, document_url: &str) -> Self {
+        let mut lookahead = ParserLookahead::default();
+        let mut active_base = url::Url::parse(document_url).ok();
+        let mut found_base = false;
+        for nid in dom.descendants(dom.document()) {
+            let Some(node) = dom.get_node(nid) else {
+                continue;
+            };
+            let Some(name) = node.as_element() else {
+                continue;
+            };
+            match name.local.as_ref() {
+                "base" if !found_base => {
+                    if let Some(href) = node.get_attribute("href") {
+                        found_base = true;
+                        if let Some(resolved) =
+                            active_base.as_ref().and_then(|base| base.join(href).ok())
+                        {
+                            active_base = Some(resolved);
+                        }
+                    }
+                }
+                "body" => lookahead.body_nodes = dom.descendants(nid).len(),
+                "script" => {
+                    let Some(src) = node.get_attribute("src") else {
+                        continue;
+                    };
+                    let base = active_base
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| document_url.to_string());
+                    let url = Page::resolve_script_url(&base, src);
+                    let script_type = node
+                        .get_attribute("type")
+                        .unwrap_or("")
+                        .trim()
+                        .to_ascii_lowercase();
+                    match script_type.as_str() {
+                        "module" => lookahead.module_scripts.push(url),
+                        "" | "text/javascript" | "application/javascript" => {
+                            if node.get_attribute("nomodule").is_none() {
+                                lookahead.classic_scripts.push(url)
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        lookahead
+    }
+}
+
+/// One parser-inserted classic script, as prepared.
+struct ParserScriptInfo {
+    nid: u32,
+    /// Resolved `src`, for an external script.
+    url: Option<String>,
+    inline: String,
+    /// Document base URL when the parser reached the element.
+    base_url: String,
+}
+
+struct FetchedScript {
+    url: String,
+    code: String,
+    resp: obscura_net::Response,
+}
+
+struct ParserModule {
+    prepared: obscura_js::runtime::PreparedModule,
+    url: Option<String>,
+    remaining_active_ms: u64,
+    graph_elapsed_ms: u64,
+    queued_at: std::time::Instant,
+}
+
+/// HTML's "list of scripts that will execute when the document has finished
+/// parsing": defer classic scripts and non-async modules, in order.
+enum ScheduledScript {
+    Classic(ParserScriptInfo),
+    Module(ParserModule),
+}
+
+/// State of one document's parser-script run.
+struct ParserScriptRun {
+    deadline: tokio::time::Instant,
+    /// Speculative fetches by URL, one per element still to come.
+    prefetch: std::collections::HashMap<
+        String,
+        std::collections::VecDeque<tokio::task::JoinHandle<Option<obscura_net::Response>>>,
+    >,
+    post_parse: Vec<ScheduledScript>,
+    /// Async classic scripts the parser passed, with their downloads.
+    async_classic: Vec<(
+        ParserScriptInfo,
+        tokio::task::JoinHandle<Option<obscura_net::Response>>,
+    )>,
+    module_budget_ms: u64,
+    module_hostcall_grace_ms: u64,
+}
+
+fn remaining_budget_ms(deadline: tokio::time::Instant) -> Option<u64> {
+    let remaining = deadline.checked_duration_since(tokio::time::Instant::now())?;
+    if remaining.is_zero() {
+        return None;
+    }
+    let millis = remaining
+        .as_millis()
+        .saturating_add(u128::from(remaining.subsec_nanos() % 1_000_000 != 0));
+    Some(millis.min(u128::from(u64::MAX)) as u64)
+}
+
+fn elapsed_ms_ceil(elapsed: std::time::Duration) -> u64 {
+    elapsed
+        .as_micros()
+        .div_ceil(1_000)
+        .max(1)
+        .min(u128::from(u64::MAX)) as u64
 }
 
 #[derive(Clone, Copy)]
@@ -1148,6 +1294,9 @@ impl Page {
             document_timeline_origin: std::time::Instant::now(),
             navigation_timing: NavigationTiming::default(),
             document_committed: false,
+            pending_parser: None,
+            parser_first_step: None,
+            lookahead: ParserLookahead::default(),
             pending_finish: None,
             navigation_timeout: None,
             navigation_chain_limit: None,
@@ -1932,7 +2081,10 @@ impl Page {
         rt.set_runtime_events_enabled(self.runtime_events_enabled.get());
         rt.set_console_messages_enabled(self.console_messages_enabled.get());
 
-        if let Some(dom) = self.dom.take() {
+        if let Some(parser) = self.pending_parser.take() {
+            self.dom = None;
+            rt.begin_streaming_parse(parser);
+        } else if let Some(dom) = self.dom.take() {
             rt.set_dom(dom);
         }
 
@@ -1945,6 +2097,123 @@ impl Page {
         );
 
         self.js = Some(rt);
+    }
+
+    /// Start the incremental parse of an HTML document: parse up to the first
+    /// parser-inserted script, scan ahead for resources, and leave the parser
+    /// for the script runtime. Returns the speculative full parse.
+    pub(crate) fn begin_document_parse(&mut self, html: &str) -> DomTree {
+        let speculative = parse_html(html);
+        self.lookahead = ParserLookahead::scan(&speculative, &self.url_string());
+        let parser = obscura_dom::StreamingParser::new(html);
+        self.parser_first_step = Some(parser.pump());
+        self.dom = Some(parser.dom());
+        self.pending_parser = Some(parser);
+        speculative
+    }
+
+    /// Key the fetched author sheets by what identifies their elements in the
+    /// live parse, which numbers nodes differently once scripts create nodes.
+    fn store_lookahead_stylesheets(
+        &mut self,
+        speculative: &DomTree,
+        sheets: Vec<(AuthorStylesheetTarget, String, bool, String)>,
+    ) {
+        let styles = speculative.query_selector_all("style").unwrap_or_default();
+        for (target, css, origin_clean, response_url) in sheets {
+            match target {
+                AuthorStylesheetTarget::Linked(nid) => {
+                    let id = obscura_dom::NodeId::new(nid as u32);
+                    if let Some(href) = speculative
+                        .get_node(id)
+                        .and_then(|node| node.get_attribute("href").map(str::to_string))
+                    {
+                        self.lookahead
+                            .linked_sheets
+                            .insert(href, (css, origin_clean, response_url));
+                    }
+                }
+                AuthorStylesheetTarget::InlineImport(index) => {
+                    if let Some(style) = styles.get(index) {
+                        self.lookahead
+                            .inline_sheets
+                            .entry(speculative.text_content(*style))
+                            .or_default()
+                            .push((css, origin_clean));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Install fetched author sheets on the link and style elements the
+    /// parser inserted since the last drain of its insertion log.
+    fn install_parser_stylesheets(&mut self) {
+        if self.lookahead.linked_sheets.is_empty() && self.lookahead.inline_sheets.is_empty() {
+            return;
+        }
+        let lookahead = &self.lookahead;
+        let Some(js) = self.js.as_mut() else {
+            return;
+        };
+        let registrations = js
+            .with_dom(|dom| {
+                let mut registrations = Vec::new();
+                for (_, node_id) in dom.parser_insertions() {
+                    let Some(node) = dom.get_node(node_id) else {
+                        continue;
+                    };
+                    let Some(name) = node.as_element() else {
+                        continue;
+                    };
+                    match name.local.as_ref() {
+                        "link" => {
+                            let is_sheet = node.get_attribute("rel").is_some_and(|rel| {
+                                rel.split_ascii_whitespace()
+                                    .any(|token| token.eq_ignore_ascii_case("stylesheet"))
+                            });
+                            if !is_sheet || node.get_attribute("disabled").is_some() {
+                                continue;
+                            }
+                            let Some((css, origin_clean, response_url)) = node
+                                .get_attribute("href")
+                                .and_then(|href| lookahead.linked_sheets.get(href))
+                            else {
+                                continue;
+                            };
+                            dom.append_external_stylesheet(node_id, css.clone(), *origin_clean);
+                            registrations.push((node_id.index(), response_url.clone()));
+                        }
+                        "style" => {
+                            if let Some(sheets) =
+                                lookahead.inline_sheets.get(&dom.text_content(node_id))
+                            {
+                                for (css, origin_clean) in sheets {
+                                    dom.append_external_stylesheet(
+                                        node_id,
+                                        css.clone(),
+                                        *origin_clean,
+                                    );
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                registrations
+            })
+            .unwrap_or_default();
+        for (nid, response_url) in registrations {
+            let _ = js.execute_script(
+                "<fetch_stylesheets>",
+                &register_linked_stylesheet_script(nid, &response_url),
+            );
+        }
+    }
+
+    fn lookahead_sheets_clear(&mut self) {
+        self.lookahead.linked_sheets.clear();
+        self.lookahead.inline_sheets.clear();
     }
 
     /// Resolve the document base URL per HTML spec:
@@ -1967,21 +2236,14 @@ impl Page {
         }
     }
 
-    async fn fetch_stylesheets(&mut self) -> Vec<(AuthorStylesheetTarget, String, bool, String)> {
-        let (all_links, inline_imports) = match &self.js {
-            Some(js) => js
-                .with_dom(|dom| {
-                    (
-                        linked_stylesheet_requests(dom),
-                        inline_stylesheet_import_requests(dom),
-                    )
-                })
-                .unwrap_or_default(),
-            None => {
-                tracing::info!("fetch_stylesheets: no js runtime");
-                return Vec::new();
-            }
-        };
+    async fn fetch_stylesheets(
+        &mut self,
+        dom: &DomTree,
+    ) -> Vec<(AuthorStylesheetTarget, String, bool, String)> {
+        let (all_links, inline_imports) = (
+            linked_stylesheet_requests(dom),
+            inline_stylesheet_import_requests(dom),
+        );
 
         tracing::info!(
             "fetch_stylesheets: found {} stylesheet links and {} inline imports",
@@ -1992,8 +2254,13 @@ impl Page {
         let Some(document_url) = self.url.clone() else {
             return Vec::new();
         };
-        let document_base = self
-            .resolve_base_url()
+        let document_base = dom
+            .query_selector("base[href]")
+            .ok()
+            .flatten()
+            .and_then(|nid| dom.get_node(nid))
+            .and_then(|node| node.get_attribute("href").map(str::to_string))
+            .and_then(|href| document_url.join(&href).ok())
             .unwrap_or_else(|| document_url.clone());
         let mut roots = Vec::new();
         let mut scheduled = std::collections::HashSet::new();
@@ -2281,6 +2548,9 @@ impl Page {
             "execute_scripts called, js runtime exists: {}",
             self.js.is_some()
         );
+        if self.js.is_none() {
+            return;
+        }
         // Soft deadline on the entire script-execution phase. Heavy SPAs
         // (GitHub, Linear, CodeSandbox) ship 50+ scripts and our serial
         // fetch + execute loop can blow past a Puppeteer/Playwright goto
@@ -2312,299 +2582,43 @@ impl Page {
             .as_mut()
             .map(|js| js.arm_watchdog(std::time::Duration::from_millis(script_deadline_ms + 1000)));
 
-        #[derive(Debug, Clone, Copy)]
-        enum ScriptKind {
-            Classic,
-            Module,
-            ImportMap,
-        }
-
-        #[derive(Debug)]
-        struct ScriptInfo {
-            src: Option<String>,
-            inline: String,
-            is_defer: bool,
-            is_async: bool,
-            kind: ScriptKind,
-            nid: u32,
-            /// Document base URL at this element's parser encounter point.
-            base_url: String,
-        }
-
-        let all_scripts = match &self.js {
-            Some(js) => {
-                let document_url = self.url_string();
-                js.with_dom(|dom| {
-                    let script_ids = dom.query_selector_all("script").unwrap_or_default();
-                    let mut bases_at_script = std::collections::HashMap::new();
-                    let mut active_base = url::Url::parse(&document_url).ok();
-                    let mut found_base = false;
-                    for nid in dom.descendants(dom.document()) {
-                        let Some(node) = dom.get_node(nid) else {
-                            continue;
-                        };
-                        let Some(name) = node.as_element() else {
-                            continue;
-                        };
-                        if name.local.as_ref() == "base" && !found_base {
-                            if let Some(href) = node.get_attribute("href") {
-                                found_base = true;
-                                if let Some(resolved) =
-                                    active_base.as_ref().and_then(|base| base.join(href).ok())
-                                {
-                                    active_base = Some(resolved);
-                                }
-                            }
-                        } else if name.local.as_ref() == "script" {
-                            bases_at_script.insert(
-                                nid.raw(),
-                                active_base
-                                    .as_ref()
-                                    .map(ToString::to_string)
-                                    .unwrap_or_else(|| document_url.clone()),
-                            );
-                        }
-                    }
-                    let mut scripts = Vec::new();
-
-                    for sid in script_ids {
-                        if let Some(node) = dom.get_node(sid) {
-                            let src = node.get_attribute("src").map(|s| s.to_string());
-                            let script_type = node
-                                .get_attribute("type")
-                                .unwrap_or("")
-                                .trim()
-                                .to_ascii_lowercase();
-                            let is_defer = node.get_attribute("defer").is_some();
-                            let is_async = node.get_attribute("async").is_some();
-                            let kind = match script_type.as_str() {
-                                "module" => ScriptKind::Module,
-                                "importmap" => ScriptKind::ImportMap,
-                                "" | "text/javascript" | "application/javascript" => {
-                                    ScriptKind::Classic
-                                }
-                                _ => continue,
-                            };
-
-                            let inline_code = if src.is_none() {
-                                dom.text_content(sid)
-                            } else {
-                                String::new()
-                            };
-
-                            if matches!(kind, ScriptKind::ImportMap)
-                                || src.is_some()
-                                || !inline_code.trim().is_empty()
-                            {
-                                scripts.push(ScriptInfo {
-                                    src,
-                                    inline: inline_code,
-                                    is_defer,
-                                    is_async,
-                                    kind,
-                                    nid: sid.raw(),
-                                    base_url: bases_at_script
-                                        .get(&sid.raw())
-                                        .cloned()
-                                        .unwrap_or_else(|| document_url.clone()),
-                                });
-                            }
-                        }
-                    }
-                    scripts
-                })
-                .unwrap_or_default()
-            }
-            None => return,
+        // Speculative parsing: the response was scanned ahead of the parser at
+        // commit. Start every external classic script and entry module fetch
+        // now so the downloads overlap; each still runs only when the parser
+        // reaches its element. (Drive has 30+ entry modules: one round trip
+        // each was several seconds on a slow link.)
+        let lookahead = ParserLookahead {
+            classic_scripts: std::mem::take(&mut self.lookahead.classic_scripts),
+            module_scripts: std::mem::take(&mut self.lookahead.module_scripts),
+            body_nodes: self.lookahead.body_nodes,
+            ..ParserLookahead::default()
         };
-
-        // Module scripts are fetched by the module loader when each one is
-        // reached, in document order, after the previous script ran. Start
-        // every parser-discovered entry module now so the downloads overlap;
-        // the loader picks up the in-flight response. (Drive has 30+ entry
-        // modules: one round trip each was several seconds on a slow link.)
-        let module_entries: Vec<String> = all_scripts
-            .iter()
-            .filter(|script| matches!(script.kind, ScriptKind::Module))
-            .filter_map(|script| {
-                let src = script.src.as_deref()?;
-                url::Url::parse(&script.base_url)
-                    .ok()
-                    .and_then(|base| base.join(src).ok())
-                    .map(|url| url.to_string())
-            })
-            .collect();
-        if !module_entries.is_empty() {
+        if !lookahead.module_scripts.is_empty() {
             if let Some(js) = &self.js {
-                js.prefetch_entry_modules(module_entries);
+                js.prefetch_entry_modules(lookahead.module_scripts.clone());
             }
         }
-
-        // HTML scripts have an "already started" flag. Mark every
-        // parser-discovered script before running page code so React/Next
-        // hydration can move or hoist those nodes without appendChild
-        // executing them a second time.
-        if let Some(js) = &mut self.js {
-            let ids = all_scripts
-                .iter()
-                .map(|script| script.nid.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            let _ = js.execute_script(
-                "<parser-scripts>",
-                &format!("globalThis.__markParserScripts([{}]);", ids),
-            );
-        }
-
-        tracing::info!("Found {} parser-discovered scripts", all_scripts.len());
-        let mut fetch_tasks: Vec<(usize, String)> = Vec::new();
-
-        for (i, script) in all_scripts.iter().enumerate() {
-            if !matches!(script.kind, ScriptKind::Classic) {
-                continue;
-            }
-            if let Some(src_url) = &script.src {
-                let full_url = if src_url.starts_with("http://") || src_url.starts_with("https://")
-                {
-                    src_url.clone()
-                } else {
-                    url::Url::parse(&script.base_url)
-                        .ok()
-                        .and_then(|base| base.join(src_url).ok())
-                        .map(|url| url.to_string())
-                        .unwrap_or_else(|| src_url.clone())
-                };
-
-                if !subresource_allowed(self.url.as_ref(), &full_url) {
-                    // Block file://, data:, javascript:, and other
-                    // off-origin schemes from being injected as a
-                    // <script src>. Without this an http page can
-                    // include <script src="file:///etc/passwd"> and
-                    // see the body parsed as JS source.
-                    tracing::warn!(
-                        "blocking cross-scheme <script src>: page={} src={}",
-                        self.url_string(),
-                        full_url,
-                    );
-                    continue;
-                }
-                if self.should_block_url(&full_url) {
-                    tracing::info!("Blocked script by interception: {}", full_url);
-                    continue;
-                }
-                fetch_tasks.push((i, full_url));
-            }
-        }
-
-        let client = self.http_client.clone();
-        let page_callbacks = self.callbacks.clone();
-        let script_initiator = self
-            .url
-            .clone()
-            .unwrap_or_else(|| Url::parse("about:blank").unwrap());
-        let fetch_futures: Vec<_> = fetch_tasks
-            .iter()
-            .map(|(idx, url)| {
-                let client = client.clone();
-                let cbs = page_callbacks.clone();
-                let initiator = script_initiator.clone();
-                let url = url.clone();
-                let idx = *idx;
-                async move {
-                    let parsed =
-                        Url::parse(&url).unwrap_or_else(|_| Url::parse("about:blank").unwrap());
-                    if parsed.scheme() == "data" {
-                        // data: URIs are inline; decode locally, no network fetch.
-                        // Instagram and other Meta properties serve their bootstrap
-                        // as <script src="data:application/x-javascript;base64,...">.
-                        let body = decode_data_uri(&url).unwrap_or_default();
-                        let content_type = url
-                            .strip_prefix("data:")
-                            .and_then(|s| s.split(',').next())
-                            .unwrap_or("application/javascript")
-                            .split(';')
-                            .next()
-                            .unwrap_or("application/javascript")
-                            .to_string();
-                        let mut headers = std::collections::HashMap::new();
-                        headers.insert("content-type".to_string(), content_type);
-                        let resp = obscura_net::Response {
-                            url: parsed,
-                            status: 200,
-                            headers,
-                            body,
-                            redirected_from: Vec::new(),
-                        };
-                        return Some((idx, url, resp));
-                    }
-                    let request = ResourceRequest::subresource(ResourceType::Script, &initiator);
-                    match client
-                        .fetch_resource_with_callbacks(&parsed, request, Some(&cbs))
-                        .await
-                    {
-                        Ok(resp) => Some((idx, url, resp)),
-                        Err(e) => {
-                            tracing::warn!("Failed to fetch script {}: {}", url, e);
-                            None
-                        }
-                    }
-                }
-            })
-            .collect();
-
-        // Bound concurrency: a page with 100 external scripts would
-        // otherwise open 100 sockets at once, exhausting the connection
-        // pool / ephemeral ports and triggering OS-level backpressure.
-        // 16 is well above the per-host pool ceiling most browsers use
-        // and matches what real Chrome does for a given origin.
-        use futures::StreamExt as _;
-        let fetch_stream = futures::stream::iter(fetch_futures).buffer_unordered(32);
-        let fetch_results = match tokio::time::timeout_at(
-            script_deadline,
-            fetch_stream.collect::<Vec<_>>(),
-        )
-        .await
-        {
-            Ok(results) => results,
-            Err(_) => {
-                tracing::warn!(
-                    "execute_scripts: fetch deadline reached, some scripts may not have loaded"
-                );
-                Vec::new()
-            }
+        let mut run = ParserScriptRun {
+            deadline: script_deadline,
+            prefetch: std::collections::HashMap::new(),
+            post_parse: Vec::new(),
+            async_classic: Vec::new(),
+            module_budget_ms: 0,
+            module_hostcall_grace_ms: 0,
         };
-
-        let mut fetched: std::collections::HashMap<usize, (String, String, obscura_net::Response)> =
-            std::collections::HashMap::new();
-        for result in fetch_results {
-            if let Some((idx, url, resp)) = result {
-                if !script_response_is_executable(resp.status) {
-                    self.record_network_event_with_body(
-                        &url,
-                        "GET",
-                        "Script",
-                        resp.status,
-                        &resp.headers,
-                        &resp.body,
-                        false,
-                    );
-                    tracing::warn!(
-                        "Refusing to execute script {} after HTTP {}",
-                        url,
-                        resp.status
-                    );
-                    continue;
-                }
-                // Script bodies: only the HTTP Content-Type charset matters
-                // (no in-band meta-charset for JS).
-                let code = obscura_net::decode_non_html(&resp.body, resp.content_type());
-                fetched.insert(idx, (url, code, resp));
+        for url in &lookahead.classic_scripts {
+            if self.script_fetch_allowed(url) {
+                let handle = self.spawn_script_fetch(url);
+                run.prefetch
+                    .entry(url.clone())
+                    .or_insert_with(std::collections::VecDeque::new)
+                    .push_back(handle);
             }
         }
 
-        // Spec: readyState is "loading" while parser-discovered scripts execute.
-        // Scripts that check readyState === 'loading' will register DOMContentLoaded
-        // listeners instead of calling their callback immediately.
+        // Spec: readyState is "loading" while the parser runs. Scripts that
+        // check readyState === 'loading' register DOMContentLoaded listeners
+        // instead of calling their callback immediately.
         if let Some(js) = &mut self.js {
             let _ = js.execute_script(
                 "<ready-state>",
@@ -2631,21 +2645,10 @@ impl Page {
         // non-essential module (e.g. YC's bookface, whose top-level eval
         // idle-waits ~10s) cannot block navigation completion. A page whose
         // body is still an empty shell IS the SPA (issue #205), so give it the
-        // full script budget and the app module still mounts.
-        let module_budget_ms: u64 = {
-            let body_nodes = self
-                .js
-                .as_ref()
-                .and_then(|js| {
-                    js.with_dom(|dom| {
-                        dom.query_selector("body")
-                            .ok()
-                            .flatten()
-                            .map(|b| dom.descendants(b).len())
-                            .unwrap_or(0)
-                    })
-                })
-                .unwrap_or(0);
+        // full script budget and the app module still mounts. The body is
+        // measured on the speculative parse: the live one is still growing.
+        run.module_budget_ms = {
+            let body_nodes = lookahead.body_nodes;
             let short_ms: u64 = module_budget_override.unwrap_or_else(|| {
                 std::env::var("OBSCURA_MODULE_BUDGET_MS")
                     .ok()
@@ -2664,7 +2667,7 @@ impl Page {
         // progress, but it cannot preempt Rust after entering that call. Allow
         // one bounded, finite style/layout flush without weakening the
         // page-wide script deadline. Private test overrides keep zero grace.
-        let module_hostcall_grace_ms = if module_budget_override.is_some() {
+        run.module_hostcall_grace_ms = if module_budget_override.is_some() {
             0
         } else {
             std::env::var("OBSCURA_MODULE_HOSTCALL_GRACE_MS")
@@ -2673,274 +2676,66 @@ impl Page {
                 .unwrap_or(5_000)
         };
 
-        enum ScheduledScript {
-            Classic(usize),
-            Module {
-                prepared: obscura_js::runtime::PreparedModule,
-                url: Option<String>,
-                remaining_active_ms: u64,
-                graph_elapsed_ms: u64,
-                queued_at: std::time::Instant,
-            },
-        }
-
-        let remaining_budget_ms = |deadline: tokio::time::Instant| -> Option<u64> {
-            let remaining = deadline.checked_duration_since(tokio::time::Instant::now())?;
-            if remaining.is_zero() {
-                return None;
+        // Drive the parser. Each pump parses up to the next parser-inserted
+        // `</script>`; that script is prepared and, if it is inline or a
+        // parser-blocking external one, run before parsing resumes, so it sees
+        // only the nodes before it (HTML "prepare the script element").
+        let streaming = self
+            .js
+            .as_ref()
+            .is_some_and(|js| js.is_streaming_parse_active());
+        if streaming {
+            if let Some(js) = &mut self.js {
+                js.flush_parser_insertions();
             }
-            let millis = remaining
-                .as_millis()
-                .saturating_add(u128::from(remaining.subsec_nanos() % 1_000_000 != 0));
-            Some(millis.min(u128::from(u64::MAX)) as u64)
-        };
-        let elapsed_ms_ceil = |elapsed: std::time::Duration| -> u64 {
-            elapsed
-                .as_micros()
-                .div_ceil(1_000)
-                .max(1)
-                .min(u128::from(u64::MAX)) as u64
-        };
-        let evaluation_budget_ms = |remaining_active_ms: u64| -> Option<u64> {
-            let remaining_page_ms = remaining_budget_ms(script_deadline)?;
-            let budget = remaining_active_ms
-                .saturating_add(module_hostcall_grace_ms)
-                .min(remaining_page_ms);
-            (budget != 0).then_some(budget)
-        };
-
-        let execute_classic =
-            |page: &mut Self,
-             script: &ScriptInfo,
-             fetched_script: Option<(String, String, obscura_net::Response)>| {
-                if script.src.is_some() {
-                    if let Some((url, code, resp)) = fetched_script {
-                        tracing::info!("Executing script ({} bytes): {}", code.len(), url);
-                        let execution_url = resp.url.to_string();
-                        page.record_network_event_with_body(
-                            &url,
-                            "GET",
-                            "Script",
-                            resp.status,
-                            &resp.headers,
-                            &resp.body,
-                            false,
-                        );
-                        if let Some(js) = &mut page.js {
-                            let _ = js.execute_script(
-                                "<current-script>",
-                                &format!("globalThis.__currentScriptNid={};", script.nid),
-                            );
-                            if let Err(error) = js.execute_script_guarded(&execution_url, &code) {
-                                tracing::warn!("Script error ({}): {}", execution_url, error);
-                            }
-                            let _ = js.execute_script(
-                                "<current-script>",
-                                "globalThis.__currentScriptNid=0;",
-                            );
-                        }
-                    }
-                } else if !script.inline.is_empty() {
-                    if let Some(js) = &mut page.js {
-                        let _ = js.execute_script(
-                            "<current-script>",
-                            &format!("globalThis.__currentScriptNid={};", script.nid),
-                        );
-                        if let Err(error) =
-                            js.execute_script_guarded(&script.base_url, &script.inline)
-                        {
-                            tracing::warn!("Inline script error: {}", error);
-                        }
-                        let _ = js
-                            .execute_script("<current-script>", "globalThis.__currentScriptNid=0;");
-                    }
-                }
-            };
-
-        let mut post_parse = Vec::new();
-
-        // Process parser-discovered scripts in encounter order. Import maps
-        // register at their exact position; module graphs start there too, but
-        // evaluation of non-async modules remains post-parse.
-        for (index, script) in all_scripts.iter().enumerate() {
-            if tokio::time::Instant::now() >= script_deadline {
-                tracing::warn!(
-                    "execute_scripts: deadline reached, skipping {} remaining scripts",
-                    all_scripts.len() - index,
-                );
-                break;
-            }
-
-            match script.kind {
-                ScriptKind::ImportMap => {
-                    if script.src.is_some() {
-                        tracing::warn!("External import maps are not supported");
-                        continue;
-                    }
-                    if let Some(js) = &self.js {
-                        if let Err(error) = js.add_import_map(&script.inline, &script.base_url) {
-                            tracing::warn!("Ignoring invalid import map: {}", error);
-                        }
-                    }
-                }
-                ScriptKind::Classic => {
-                    if script.is_defer && !script.is_async && script.src.is_some() {
-                        post_parse.push(ScheduledScript::Classic(index));
-                    } else {
-                        let fetched_script = fetched.remove(&index);
-                        execute_classic(self, script, fetched_script);
+            let mut step = self.parser_first_step.take();
+            let mut skipped = 0usize;
+            loop {
+                let current = match step.take() {
+                    Some(step) => step,
+                    None => {
+                        let Some(next) = self.js.as_ref().and_then(|js| js.parser_pump()) else {
+                            break;
+                        };
+                        self.install_parser_stylesheets();
                         if let Some(js) = &mut self.js {
-                            if js.take_document_write_inserted_script()
-                                && !Self::drive_parser_blocking_scripts(js, script_deadline).await
-                            {
-                                tracing::warn!(
-                                    "script deadline reached with a parser-blocking document.write script pending"
-                                );
-                            }
+                            js.flush_parser_insertions();
                         }
+                        next
                     }
+                };
+                let obscura_dom::ParseStep::Script(node) = current else {
+                    break;
+                };
+                if tokio::time::Instant::now() >= script_deadline {
+                    skipped += 1;
+                    continue;
                 }
-                ScriptKind::Module => {
-                    // Graph loading and evaluation share one active-work
-                    // allowance. Queue time behind other post-parse scripts is
-                    // not work performed by this module.
-                    let Some(remaining_page_ms) = remaining_budget_ms(script_deadline) else {
-                        tracing::warn!("ES module budget exhausted before graph preparation");
-                        continue;
-                    };
-                    let prepare_budget_ms = module_budget_ms.min(remaining_page_ms);
-                    let prepare_started = std::time::Instant::now();
-                    let (prepared, module_url) = if let Some(src) = &script.src {
-                        let full_url = if src.starts_with("http://")
-                            || src.starts_with("https://")
-                            || src.starts_with("data:")
-                        {
-                            src.clone()
-                        } else {
-                            url::Url::parse(&script.base_url)
-                                .ok()
-                                .and_then(|base| base.join(src).ok())
-                                .map(|url| url.to_string())
-                                .unwrap_or_else(|| src.clone())
-                        };
-                        tracing::info!("Preparing ES module graph: {}", full_url);
-                        let result = match &mut self.js {
-                            Some(js) => js.prepare_module(&full_url, prepare_budget_ms).await,
-                            None => continue,
-                        };
-                        tracing::debug!(
-                            phase = "module-graph",
-                            module = %full_url,
-                            elapsed_ms = prepare_started.elapsed().as_millis(),
-                            budget_ms = prepare_budget_ms,
-                            success = result.is_ok(),
-                            "ES module phase complete",
-                        );
-                        match result {
-                            Ok(prepared) => (prepared, Some(full_url)),
-                            Err(error) => {
-                                tracing::warn!("ES module error ({}): {}", full_url, error);
-                                continue;
-                            }
-                        }
-                    } else {
-                        let result = match &mut self.js {
-                            Some(js) => {
-                                js.prepare_inline_module(
-                                    &script.inline,
-                                    &script.base_url,
-                                    prepare_budget_ms,
-                                )
-                                .await
-                            }
-                            None => continue,
-                        };
-                        tracing::debug!(
-                            phase = "module-graph",
-                            module = "<inline>",
-                            elapsed_ms = prepare_started.elapsed().as_millis(),
-                            budget_ms = prepare_budget_ms,
-                            success = result.is_ok(),
-                            "ES module phase complete",
-                        );
-                        match result {
-                            Ok(prepared) => (prepared, None),
-                            Err(error) => {
-                                tracing::warn!("Inline ES module error: {}", error);
-                                continue;
-                            }
-                        }
-                    };
-                    let graph_elapsed_ms = elapsed_ms_ceil(prepare_started.elapsed());
-                    let remaining_active_ms = module_budget_ms.saturating_sub(graph_elapsed_ms);
-                    if remaining_active_ms == 0 {
-                        tracing::warn!(
-                            module = module_url.as_deref().unwrap_or("<inline>"),
-                            graph_elapsed_ms,
-                            active_budget_ms = module_budget_ms,
-                            "ES module exhausted its active budget during graph preparation",
-                        );
-                        continue;
-                    }
-                    let scheduled = ScheduledScript::Module {
-                        prepared,
-                        url: module_url,
-                        remaining_active_ms,
-                        graph_elapsed_ms,
-                        queued_at: std::time::Instant::now(),
-                    };
-                    if script.is_async {
-                        let ScheduledScript::Module {
-                            prepared,
-                            url,
-                            remaining_active_ms,
-                            graph_elapsed_ms,
-                            queued_at,
-                        } = scheduled
-                        else {
-                            unreachable!();
-                        };
-                        let Some(evaluation_budget_ms) = evaluation_budget_ms(remaining_active_ms)
-                        else {
-                            tracing::warn!(
-                                module = url.as_deref().unwrap_or("<inline>"),
-                                graph_elapsed_ms,
-                                queue_wait_ms = queued_at.elapsed().as_millis(),
-                                "ES module exhausted the page budget before evaluation",
-                            );
-                            continue;
-                        };
-                        let queue_wait_ms = queued_at.elapsed().as_millis();
-                        let evaluation_started = std::time::Instant::now();
-                        let result = match &mut self.js {
-                            Some(js) => {
-                                js.evaluate_prepared_module(prepared, evaluation_budget_ms)
-                                    .await
-                            }
-                            None => continue,
-                        };
-                        tracing::debug!(
-                            phase = "module-evaluation",
-                            module = url.as_deref().unwrap_or("<inline>"),
-                            elapsed_ms = evaluation_started.elapsed().as_millis(),
-                            graph_elapsed_ms,
-                            queue_wait_ms,
-                            remaining_active_ms,
-                            evaluation_ceiling_ms = evaluation_budget_ms,
-                            success = result.is_ok(),
-                            "ES module phase complete",
-                        );
-                        if let Err(error) = result {
-                            tracing::warn!("ES module evaluation error: {}", error);
-                        } else if let Some(url) = url {
-                            tracing::info!("ES module loaded: {}", url);
-                        }
-                    } else {
-                        post_parse.push(scheduled);
-                    }
-                }
+                self.prepare_parser_script(node, &mut run).await;
+                self.prepare_written_parser_scripts(&mut run).await;
+            }
+            if skipped > 0 {
+                tracing::warn!(
+                    "execute_scripts: deadline reached, skipped {} parser scripts",
+                    skipped
+                );
+            }
+            if let Some(js) = &mut self.js {
+                js.end_streaming_parse();
+                // Static stylesheet registration is complete once parsing is.
+                // Remove the temporary host bridge; dynamic loads use the
+                // closure-private function directly.
+                let _ = js.execute_script(
+                    "<fetch_stylesheets-cleanup>",
+                    "delete globalThis.__obscura_registerLinkedStylesheet",
+                );
             }
         }
+        self.lookahead_sheets_clear();
+
+        // The parser yields once more at the end of input: async scripts that
+        // finished downloading during parsing run now, still in `loading`.
+        self.run_finished_async_scripts(&mut run).await;
 
         // Parsing has finished before defer scripts and non-async modules run.
         // They still gate DOMContentLoaded, but observe the browser's
@@ -2949,72 +2744,23 @@ impl Page {
             js.record_navigation_timing("domInteractive");
             let _ = js.execute_script(
                 "<ready-state-interactive>",
-                "globalThis.__documentReadyState__ = 'interactive';",
+                "globalThis.__documentReadyState__ = 'interactive';\n\
+                 try { document.dispatchEvent(new Event('readystatechange')); } catch(e) {}",
             );
         }
 
-        for scheduled in post_parse {
+        for scheduled in std::mem::take(&mut run.post_parse) {
             if tokio::time::Instant::now() >= script_deadline {
                 tracing::warn!("execute_scripts: deadline reached during post-parse scripts");
                 break;
             }
             match scheduled {
-                ScheduledScript::Classic(index) => {
-                    let script = &all_scripts[index];
-                    let fetched_script = fetched.remove(&index);
-                    execute_classic(self, script, fetched_script);
-                    if let Some(js) = &mut self.js {
-                        if js.take_document_write_inserted_script()
-                            && !Self::drive_parser_blocking_scripts(js, script_deadline).await
-                        {
-                            tracing::warn!(
-                                "script deadline reached with a parser-blocking document.write script pending"
-                            );
-                        }
-                    }
+                ScheduledScript::Classic(info) => {
+                    let fetched = self.fetch_parser_script(&info, &mut run).await;
+                    self.run_parser_classic(&info, fetched, false, &run).await;
                 }
-                ScheduledScript::Module {
-                    prepared,
-                    url,
-                    remaining_active_ms,
-                    graph_elapsed_ms,
-                    queued_at,
-                } => {
-                    let Some(evaluation_budget_ms) = evaluation_budget_ms(remaining_active_ms)
-                    else {
-                        tracing::warn!(
-                            module = url.as_deref().unwrap_or("<inline>"),
-                            graph_elapsed_ms,
-                            queue_wait_ms = queued_at.elapsed().as_millis(),
-                            "ES module exhausted the page budget before post-parse evaluation",
-                        );
-                        continue;
-                    };
-                    let queue_wait_ms = queued_at.elapsed().as_millis();
-                    let evaluation_started = std::time::Instant::now();
-                    let result = match &mut self.js {
-                        Some(js) => {
-                            js.evaluate_prepared_module(prepared, evaluation_budget_ms)
-                                .await
-                        }
-                        None => continue,
-                    };
-                    tracing::debug!(
-                        phase = "module-evaluation",
-                        module = url.as_deref().unwrap_or("<inline>"),
-                        elapsed_ms = evaluation_started.elapsed().as_millis(),
-                        graph_elapsed_ms,
-                        queue_wait_ms,
-                        remaining_active_ms,
-                        evaluation_ceiling_ms = evaluation_budget_ms,
-                        success = result.is_ok(),
-                        "ES module phase complete",
-                    );
-                    if let Err(error) = result {
-                        tracing::warn!("ES module evaluation error: {}", error);
-                    } else if let Some(url) = url {
-                        tracing::info!("ES module loaded: {}", url);
-                    }
+                ScheduledScript::Module(module) => {
+                    self.evaluate_parser_module(module, &run).await;
                 }
             }
         }
@@ -3033,7 +2779,13 @@ impl Page {
             if completed.is_ok() {
                 js.record_navigation_timing("domContentLoadedEventEnd");
             }
+        }
 
+        // Async parser scripts delay the load event. Run each as its download
+        // completes.
+        self.run_remaining_async_scripts(&mut run).await;
+
+        if let Some(js) = &mut self.js {
             let load_blockers_finished =
                 Self::drive_load_delaying_scripts(js, script_deadline).await;
             if !load_blockers_finished {
@@ -3050,6 +2802,7 @@ impl Page {
             let completed = js.execute_script(
                 "<load-event>",
                 "globalThis.__documentReadyState__ = 'complete';\n\
+                 try { document.dispatchEvent(new Event('readystatechange')); } catch(e) {}\n\
                  try {\n\
                    const loadEvent = new Event('load', {bubbles:false,cancelable:false});\n\
                    try { window.dispatchEvent(loadEvent); } catch(e) {}\n\
@@ -3071,6 +2824,517 @@ impl Page {
             "script execution phase complete",
         );
         self.sync_js_network_events();
+    }
+
+    /// The document base URL at this moment of parsing: the first `<base
+    /// href>` parsed so far, else the document URL.
+    fn parser_base_url(&self) -> String {
+        self.resolve_base_url()
+            .map(|url| url.to_string())
+            .unwrap_or_else(|| self.url_string())
+    }
+
+    fn resolve_script_url(base: &str, src: &str) -> String {
+        if src.starts_with("http://") || src.starts_with("https://") || src.starts_with("data:") {
+            return src.to_string();
+        }
+        url::Url::parse(base)
+            .ok()
+            .and_then(|base| base.join(src).ok())
+            .map(|url| url.to_string())
+            .unwrap_or_else(|| src.to_string())
+    }
+
+    /// Whether a parser script's URL may be fetched at all.
+    fn script_fetch_allowed(&self, full_url: &str) -> bool {
+        if !subresource_allowed(self.url.as_ref(), full_url) {
+            // Block file://, javascript:, and other off-origin schemes from
+            // being injected as a <script src>. Without this an http page can
+            // include <script src="file:///etc/passwd"> and see the body
+            // parsed as JS source.
+            tracing::warn!(
+                "blocking cross-scheme <script src>: page={} src={}",
+                self.url_string(),
+                full_url,
+            );
+            return false;
+        }
+        if self.should_block_url(full_url) {
+            tracing::info!("Blocked script by interception: {}", full_url);
+            return false;
+        }
+        true
+    }
+
+    /// Start fetching a classic script in the background.
+    fn spawn_script_fetch(
+        &self,
+        url: &str,
+    ) -> tokio::task::JoinHandle<Option<obscura_net::Response>> {
+        let client = self.http_client.clone();
+        let callbacks = self.callbacks.clone();
+        let initiator = self
+            .url
+            .clone()
+            .unwrap_or_else(|| Url::parse("about:blank").unwrap());
+        let url = url.to_string();
+        tokio::spawn(async move {
+            let parsed = Url::parse(&url).unwrap_or_else(|_| Url::parse("about:blank").unwrap());
+            if parsed.scheme() == "data" {
+                // data: URIs are inline; decode locally, no network fetch.
+                // Instagram and other Meta properties serve their bootstrap
+                // as <script src="data:application/x-javascript;base64,...">.
+                let body = decode_data_uri(&url).unwrap_or_default();
+                let content_type = url
+                    .strip_prefix("data:")
+                    .and_then(|s| s.split(',').next())
+                    .unwrap_or("application/javascript")
+                    .split(';')
+                    .next()
+                    .unwrap_or("application/javascript")
+                    .to_string();
+                let mut headers = std::collections::HashMap::new();
+                headers.insert("content-type".to_string(), content_type);
+                return Some(obscura_net::Response {
+                    url: parsed,
+                    status: 200,
+                    headers,
+                    body,
+                    redirected_from: Vec::new(),
+                });
+            }
+            let request = ResourceRequest::subresource(ResourceType::Script, &initiator);
+            match client
+                .fetch_resource_with_callbacks(&parsed, request, Some(&callbacks))
+                .await
+            {
+                Ok(resp) => Some(resp),
+                Err(e) => {
+                    tracing::warn!("Failed to fetch script {}: {}", url, e);
+                    None
+                }
+            }
+        })
+    }
+
+    /// The fetch for a parser script: the speculative one if it was started,
+    /// else a new one.
+    fn script_fetch_handle(
+        &self,
+        url: &str,
+        run: &mut ParserScriptRun,
+    ) -> tokio::task::JoinHandle<Option<obscura_net::Response>> {
+        run.prefetch
+            .get_mut(url)
+            .and_then(std::collections::VecDeque::pop_front)
+            .unwrap_or_else(|| self.spawn_script_fetch(url))
+    }
+
+    /// Wait for a classic script's bytes. `None` when the fetch failed, was
+    /// refused, or missed the script deadline.
+    async fn fetch_parser_script(
+        &mut self,
+        info: &ParserScriptInfo,
+        run: &mut ParserScriptRun,
+    ) -> Option<FetchedScript> {
+        let url = info.url.clone()?;
+        let handle = self.script_fetch_handle(&url, run);
+        self.await_parser_script(&url, handle, run).await
+    }
+
+    async fn await_parser_script(
+        &mut self,
+        url: &str,
+        handle: tokio::task::JoinHandle<Option<obscura_net::Response>>,
+        run: &mut ParserScriptRun,
+    ) -> Option<FetchedScript> {
+        if !handle.is_finished() {
+            // The parser is blocked on the network: async scripts that are
+            // already downloaded run in the meantime, as in a browser.
+            self.run_finished_async_scripts(run).await;
+        }
+        self.finish_script_fetch(url, handle, run.deadline).await
+    }
+
+    async fn finish_script_fetch(
+        &mut self,
+        url: &str,
+        handle: tokio::task::JoinHandle<Option<obscura_net::Response>>,
+        deadline: tokio::time::Instant,
+    ) -> Option<FetchedScript> {
+        let resp = match tokio::time::timeout_at(deadline, handle).await {
+            Ok(Ok(Some(resp))) => resp,
+            Ok(_) => return None,
+            Err(_) => {
+                tracing::warn!("script deadline reached while fetching {}", url);
+                return None;
+            }
+        };
+        if !script_response_is_executable(resp.status) {
+            self.record_network_event_with_body(
+                url,
+                "GET",
+                "Script",
+                resp.status,
+                &resp.headers,
+                &resp.body,
+                false,
+            );
+            tracing::warn!(
+                "Refusing to execute script {} after HTTP {}",
+                url,
+                resp.status
+            );
+            return None;
+        }
+        // Script bodies: only the HTTP Content-Type charset matters
+        // (no in-band meta-charset for JS).
+        let code = obscura_net::decode_non_html(&resp.body, resp.content_type());
+        Some(FetchedScript {
+            url: url.to_string(),
+            code,
+            resp,
+        })
+    }
+
+    /// Run one classic parser script. `during_parse` raises HTML's script
+    /// nesting level, so `document.write` feeds the parser at the
+    /// insertion point.
+    async fn run_parser_classic(
+        &mut self,
+        info: &ParserScriptInfo,
+        fetched: Option<FetchedScript>,
+        during_parse: bool,
+        run: &ParserScriptRun,
+    ) {
+        let (execution_url, code) = if info.url.is_some() {
+            let Some(fetched) = fetched else {
+                return;
+            };
+            tracing::info!(
+                "Executing script ({} bytes): {}",
+                fetched.code.len(),
+                fetched.url
+            );
+            self.record_network_event_with_body(
+                &fetched.url,
+                "GET",
+                "Script",
+                fetched.resp.status,
+                &fetched.resp.headers,
+                &fetched.resp.body,
+                false,
+            );
+            (fetched.resp.url.to_string(), fetched.code)
+        } else {
+            (info.base_url.clone(), info.inline.clone())
+        };
+        let Some(js) = &mut self.js else {
+            return;
+        };
+        let _ = js.execute_script(
+            "<current-script>",
+            &format!("globalThis.__currentScriptNid={};", info.nid),
+        );
+        if during_parse {
+            js.enter_parser_script();
+        }
+        if let Err(error) = js.execute_script_guarded(&execution_url, &code) {
+            tracing::warn!("Script error ({}): {}", execution_url, error);
+        }
+        if during_parse {
+            js.leave_parser_script();
+        }
+        let _ = js.execute_script("<current-script>", "globalThis.__currentScriptNid=0;");
+        if js.take_document_write_inserted_script()
+            && !Self::drive_parser_blocking_scripts(js, run.deadline).await
+        {
+            tracing::warn!(
+                "script deadline reached with a parser-blocking document.write script pending"
+            );
+        }
+    }
+
+    /// HTML "prepare the script element" for a script the parser closed.
+    async fn prepare_parser_script(
+        &mut self,
+        node: obscura_dom::NodeId,
+        run: &mut ParserScriptRun,
+    ) {
+        let Some(script) = self.js.as_ref().and_then(|js| {
+            js.with_dom(|dom| obscura_js::parser_script::classify_parser_script(dom, node))
+        }) else {
+            return;
+        };
+        if script == obscura_js::parser_script::ParserScript::Skip {
+            return;
+        }
+        if let Some(js) = &self.js {
+            js.mark_script_started(node);
+        }
+        let base_url = self.parser_base_url();
+        let nid = node.raw();
+        match script {
+            obscura_js::parser_script::ParserScript::Skip => {}
+            obscura_js::parser_script::ParserScript::ImportMap { src, inline } => {
+                if src.is_some() {
+                    tracing::warn!("External import maps are not supported");
+                    return;
+                }
+                if let Some(js) = &self.js {
+                    if let Err(error) = js.add_import_map(&inline, &base_url) {
+                        tracing::warn!("Ignoring invalid import map: {}", error);
+                    }
+                }
+            }
+            obscura_js::parser_script::ParserScript::Classic {
+                src,
+                inline,
+                is_async,
+                is_defer,
+            } => {
+                let url = src
+                    .as_deref()
+                    .map(|src| Self::resolve_script_url(&base_url, src));
+                if let Some(url) = &url {
+                    if !self.script_fetch_allowed(url) {
+                        return;
+                    }
+                }
+                let info = ParserScriptInfo {
+                    nid,
+                    url,
+                    inline,
+                    base_url,
+                };
+                match (&info.url, is_async, is_defer) {
+                    (None, _, _) => self.run_parser_classic(&info, None, true, run).await,
+                    (Some(url), true, _) => {
+                        let handle = self.script_fetch_handle(url, run);
+                        run.async_classic.push((info, handle));
+                    }
+                    (Some(_), false, true) => run.post_parse.push(ScheduledScript::Classic(info)),
+                    (Some(_), false, false) => {
+                        let fetched = self.fetch_parser_script(&info, run).await;
+                        self.run_parser_classic(&info, fetched, true, run).await;
+                    }
+                }
+            }
+            obscura_js::parser_script::ParserScript::Module {
+                src,
+                inline,
+                is_async,
+            } => {
+                let Some(module) = self.prepare_parser_module(src, inline, base_url, run).await
+                else {
+                    return;
+                };
+                if is_async {
+                    self.evaluate_parser_module(module, run).await;
+                } else {
+                    run.post_parse.push(ScheduledScript::Module(module));
+                }
+            }
+        }
+    }
+
+    /// Scripts `document.write` put into the parser that are not inline
+    /// classic code (which ran inside the write call). A written blocking
+    /// script runs before the parser resumes with the rest of the written text.
+    async fn prepare_written_parser_scripts(&mut self, run: &mut ParserScriptRun) {
+        loop {
+            let written = self
+                .js
+                .as_ref()
+                .map(|js| js.take_parser_written_scripts())
+                .unwrap_or_default();
+            if written.is_empty() {
+                return;
+            }
+            for node in written {
+                if tokio::time::Instant::now() >= run.deadline {
+                    return;
+                }
+                self.prepare_parser_script(node, run).await;
+            }
+        }
+    }
+
+    /// Run async parser scripts whose downloads have finished, in document order.
+    async fn run_finished_async_scripts(&mut self, run: &mut ParserScriptRun) {
+        while let Some(index) = run
+            .async_classic
+            .iter()
+            .position(|(_, handle)| handle.is_finished())
+        {
+            let (info, handle) = run.async_classic.remove(index);
+            let url = info.url.clone().unwrap_or_default();
+            let fetched = self.finish_script_fetch(&url, handle, run.deadline).await;
+            self.run_parser_classic(&info, fetched, false, run).await;
+        }
+    }
+
+    /// Run every remaining async parser script as its download completes.
+    async fn run_remaining_async_scripts(&mut self, run: &mut ParserScriptRun) {
+        while !run.async_classic.is_empty() {
+            if tokio::time::Instant::now() >= run.deadline {
+                tracing::warn!("execute_scripts: deadline reached with async scripts pending");
+                for (_, handle) in run.async_classic.drain(..) {
+                    handle.abort();
+                }
+                return;
+            }
+            // Keep the event loop turning while the downloads finish: timers
+            // and dynamic scripts from earlier scripts run meanwhile.
+            while !run
+                .async_classic
+                .iter()
+                .any(|(_, handle)| handle.is_finished())
+                && tokio::time::Instant::now() < run.deadline
+            {
+                if let Some(js) = &mut self.js {
+                    let _ = tokio::time::timeout(
+                        tokio::time::Duration::from_millis(5),
+                        js.run_load_delaying_event_loop_tick(),
+                    )
+                    .await;
+                } else {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+                }
+            }
+            self.run_finished_async_scripts(run).await;
+        }
+    }
+
+    async fn prepare_parser_module(
+        &mut self,
+        src: Option<String>,
+        inline: String,
+        base_url: String,
+        run: &ParserScriptRun,
+    ) -> Option<ParserModule> {
+        // Graph loading and evaluation share one active-work allowance. Queue
+        // time behind other post-parse scripts is not work performed by this
+        // module.
+        let Some(remaining_page_ms) = remaining_budget_ms(run.deadline) else {
+            tracing::warn!("ES module budget exhausted before graph preparation");
+            return None;
+        };
+        let prepare_budget_ms = run.module_budget_ms.min(remaining_page_ms);
+        let prepare_started = std::time::Instant::now();
+        let (prepared, module_url) = if let Some(src) = &src {
+            let full_url = Self::resolve_script_url(&base_url, src);
+            tracing::info!("Preparing ES module graph: {}", full_url);
+            let result = self
+                .js
+                .as_mut()?
+                .prepare_module(&full_url, prepare_budget_ms)
+                .await;
+            tracing::debug!(
+                phase = "module-graph",
+                module = %full_url,
+                elapsed_ms = prepare_started.elapsed().as_millis(),
+                budget_ms = prepare_budget_ms,
+                success = result.is_ok(),
+                "ES module phase complete",
+            );
+            match result {
+                Ok(prepared) => (prepared, Some(full_url)),
+                Err(error) => {
+                    tracing::warn!("ES module error ({}): {}", full_url, error);
+                    return None;
+                }
+            }
+        } else {
+            let result = self
+                .js
+                .as_mut()?
+                .prepare_inline_module(&inline, &base_url, prepare_budget_ms)
+                .await;
+            tracing::debug!(
+                phase = "module-graph",
+                module = "<inline>",
+                elapsed_ms = prepare_started.elapsed().as_millis(),
+                budget_ms = prepare_budget_ms,
+                success = result.is_ok(),
+                "ES module phase complete",
+            );
+            match result {
+                Ok(prepared) => (prepared, None),
+                Err(error) => {
+                    tracing::warn!("Inline ES module error: {}", error);
+                    return None;
+                }
+            }
+        };
+        let graph_elapsed_ms = elapsed_ms_ceil(prepare_started.elapsed());
+        let remaining_active_ms = run.module_budget_ms.saturating_sub(graph_elapsed_ms);
+        if remaining_active_ms == 0 {
+            tracing::warn!(
+                module = module_url.as_deref().unwrap_or("<inline>"),
+                graph_elapsed_ms,
+                active_budget_ms = run.module_budget_ms,
+                "ES module exhausted its active budget during graph preparation",
+            );
+            return None;
+        }
+        Some(ParserModule {
+            prepared,
+            url: module_url,
+            remaining_active_ms,
+            graph_elapsed_ms,
+            queued_at: std::time::Instant::now(),
+        })
+    }
+
+    async fn evaluate_parser_module(&mut self, module: ParserModule, run: &ParserScriptRun) {
+        let ParserModule {
+            prepared,
+            url,
+            remaining_active_ms,
+            graph_elapsed_ms,
+            queued_at,
+        } = module;
+        let evaluation_budget_ms =
+            remaining_budget_ms(run.deadline).and_then(|remaining_page_ms| {
+                let budget = remaining_active_ms
+                    .saturating_add(run.module_hostcall_grace_ms)
+                    .min(remaining_page_ms);
+                (budget != 0).then_some(budget)
+            });
+        let Some(evaluation_budget_ms) = evaluation_budget_ms else {
+            tracing::warn!(
+                module = url.as_deref().unwrap_or("<inline>"),
+                graph_elapsed_ms,
+                queue_wait_ms = queued_at.elapsed().as_millis(),
+                "ES module exhausted the page budget before evaluation",
+            );
+            return;
+        };
+        let queue_wait_ms = queued_at.elapsed().as_millis();
+        let evaluation_started = std::time::Instant::now();
+        let Some(js) = &mut self.js else {
+            return;
+        };
+        let result = js
+            .evaluate_prepared_module(prepared, evaluation_budget_ms)
+            .await;
+        tracing::debug!(
+            phase = "module-evaluation",
+            module = url.as_deref().unwrap_or("<inline>"),
+            elapsed_ms = evaluation_started.elapsed().as_millis(),
+            graph_elapsed_ms,
+            queue_wait_ms,
+            remaining_active_ms,
+            evaluation_ceiling_ms = evaluation_budget_ms,
+            success = result.is_ok(),
+            "ES module phase complete",
+        );
+        if let Err(error) = result {
+            tracing::warn!("ES module evaluation error: {}", error);
+        } else if let Some(url) = url {
+            tracing::info!("ES module loaded: {}", url);
+        }
     }
 
     pub async fn navigate(&mut self, url_str: &str) -> Result<(), PageError> {
@@ -3730,65 +3994,37 @@ impl Page {
         // would otherwise be parsed as an element and its contents dropped
         // from textContent (#1231). Chrome wraps the decoded text in a
         // single <pre> instead.
-        let (dom, document_content_type) = match plain_text_document_type(response.content_type()) {
-            Some(mime) => (parse_plain_text_document(&body_text), mime),
-            None => (
-                parse_html(&body_text),
-                base_content_type(response.content_type()).unwrap_or_default(),
-            ),
-        };
-        self.content_type = document_content_type;
-
-        self.title = dom
-            .query_selector("title")
-            .ok()
-            .flatten()
-            .map(|title_id| dom.text_content(title_id))
-            .unwrap_or_default();
-
-        self.dom = Some(dom);
-        self.init_js();
-        let author_stylesheets = self.fetch_stylesheets().await;
-        tracing::debug!(target: "obscura_browser::timing", "stylesheets at {}ms", phase_started.elapsed().as_millis());
-
-        // Install fetched CSS in native DOM state. Cross-origin bytes must not
-        // become observable through a synthetic style element or page global.
-        if !author_stylesheets.is_empty() {
-            if let Some(js) = &mut self.js {
-                js.with_dom(|dom| {
-                    let styles = dom.query_selector_all("style").unwrap_or_default();
-                    for (target, css, origin_clean, _) in &author_stylesheets {
-                        // Linked targets carry the link's node id (#1044), so
-                        // resolve it directly instead of indexing a query-order
-                        // list. InlineImport still uses the style query index.
-                        let owner = match target {
-                            AuthorStylesheetTarget::Linked(nid) => {
-                                let id = obscura_dom::NodeId::new(*nid as u32);
-                                dom.get_node(id).map(|_| id)
-                            }
-                            AuthorStylesheetTarget::InlineImport(index) => {
-                                styles.get(*index).copied()
-                            }
-                        };
-                        if let Some(owner) = owner {
-                            dom.append_external_stylesheet(owner, css.clone(), *origin_clean);
-                        }
-                    }
-                });
-                for (target, _, _, response_url) in &author_stylesheets {
-                    if let AuthorStylesheetTarget::Linked(link_index) = target {
-                        let _ = js.execute_script(
-                            "<fetch_stylesheets>",
-                            &register_linked_stylesheet_script(*link_index, response_url),
-                        );
-                    }
-                }
+        let speculative = match plain_text_document_type(response.content_type()) {
+            Some(mime) => {
+                self.content_type = mime;
+                let dom = parse_plain_text_document(&body_text);
+                self.title = document_title(&dom);
+                self.dom = Some(dom);
+                None
             }
-        }
-        // Static registration is complete before page script runs. Remove the
-        // temporary host bridge even when the document had no initial sheets;
-        // dynamic loads use the closure-private function directly.
-        if let Some(js) = &mut self.js {
+            None => {
+                self.content_type = base_content_type(response.content_type()).unwrap_or_default();
+                // The parse runs incrementally from here on: up to the first
+                // parser-inserted script now, the rest while scripts run.
+                let speculative = self.begin_document_parse(&body_text);
+                self.title = document_title(&speculative);
+                Some(speculative)
+            }
+        };
+
+        self.init_js();
+        if let Some(speculative) = &speculative {
+            // Author sheets are fetched ahead of the parser from the
+            // speculative parse, and each is installed in native DOM state
+            // when the parser inserts its element: cross-origin bytes must not
+            // become observable through a synthetic style element or page
+            // global. All of them are loaded before any script runs, so a
+            // script sees every sheet parsed before it.
+            let author_stylesheets = self.fetch_stylesheets(speculative).await;
+            tracing::debug!(target: "obscura_browser::timing", "stylesheets at {}ms", phase_started.elapsed().as_millis());
+            self.store_lookahead_stylesheets(speculative, author_stylesheets);
+            self.install_parser_stylesheets();
+        } else if let Some(js) = &mut self.js {
             let _ = js.execute_script(
                 "<fetch_stylesheets-cleanup>",
                 "delete globalThis.__obscura_registerLinkedStylesheet",
@@ -3810,10 +4046,6 @@ impl Page {
         #[cfg(feature = "render")]
         if let Some(js) = &self.js {
             js.reset_animation_timeline();
-        }
-        if let Some(js) = &mut self.js {
-            let _ = js.execute_script("<iframe-load>",
-                "(function() { var iframes = document.querySelectorAll('iframe[src]'); for (var i = 0; i < iframes.length; i++) { var src = iframes[i].getAttribute('src'); if (src && src !== 'about:blank') iframes[i]._loadIframeSrc(src); } })()");
         }
 
         // Scripts can synchronously flush style/layout through
@@ -5404,6 +5636,14 @@ impl Page {
             js.set_intercept_block_patterns(self.intercept_block_patterns.clone());
         }
     }
+}
+
+fn document_title(dom: &DomTree) -> String {
+    dom.query_selector("title")
+        .ok()
+        .flatten()
+        .map(|title_id| dom.text_content(title_id))
+        .unwrap_or_default()
 }
 
 fn script_response_is_executable(status: u16) -> bool {
@@ -8433,13 +8673,13 @@ mod tests {
         ));
         let mut page = super::Page::new("script-state-suspend".to_string(), context);
         page.url = Some(url::Url::parse("http://example.com/suspend.html").unwrap());
-        page.dom = Some(parse_html(
+        page.begin_document_parse(
             r#"<html><head></head><body data-parser-runs="0" data-dynamic-runs="0" data-inert-runs="0">
             <script id="parser">
               document.body.setAttribute("data-parser-runs", String(Number(document.body.getAttribute("data-parser-runs")) + 1));
             </script>
             </body></html>"#,
-        ));
+        );
         page.init_js();
         page.execute_scripts().await;
 
@@ -8643,7 +8883,7 @@ mod tests {
         ));
         let mut page = super::Page::new(name.to_string(), context);
         page.url = Some(url::Url::parse(&format!("{}/app/index.html", base)).unwrap());
-        page.dom = Some(parse_html(html));
+        page.begin_document_parse(html);
         page.init_js();
         page
     }
