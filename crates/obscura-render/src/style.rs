@@ -1902,6 +1902,14 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
                 _ => style.border_collapse,
             };
         }
+        "caption-side" => {
+            style.caption_side_bottom = match value.trim().to_ascii_lowercase().as_str() {
+                "bottom" => Some(true),
+                "top" | "initial" | "revert" | "revert-layer" => Some(false),
+                "inherit" | "unset" => None,
+                _ => style.caption_side_bottom,
+            };
+        }
         "table-layout" => match value.trim().to_ascii_lowercase().as_str() {
             "fixed" => style.table_layout_fixed = true,
             "auto" | "initial" | "unset" | "revert" | "revert-layer" => {

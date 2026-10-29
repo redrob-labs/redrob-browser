@@ -2756,6 +2756,10 @@ struct IfcRegistry {
     /// The post-width row-sizing pass combines these with each cell's final
     /// content height and pins the tracks before vertical alignment.
     table_rows: HashMap<taffy::NodeId, Vec<Option<f32>>>,
+    /// `<caption>` boxes per table grid node. Captions are grid items in
+    /// their own tracks before (`top` of them) and after the cell rows; they
+    /// take no part in column sizing beyond flooring the table width.
+    table_captions: HashMap<taffy::NodeId, TableCaptions>,
     /// Floats whose direct block parent does not establish a block formatting
     /// context and whose exclusion can therefore continue through later
     /// descendant blocks of the same BFC. The first layout pass gives these
@@ -2774,6 +2778,11 @@ struct IfcRegistry {
     /// post-pass then balances those already-built boxes without rebuilding
     /// or reshaping their subtrees.
     multicol: Vec<MulticolBuild>,
+}
+
+struct TableCaptions {
+    top: usize,
+    nodes: Vec<taffy::NodeId>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -6411,6 +6420,7 @@ fn layout_dom_once(
             italic: bool,
             box_sizing: crate::BoxSizing,
             border_collapse: bool,
+            caption_side_bottom: bool,
             table_vertical_align: Option<crate::VerticalAlign>,
             overflow_x: u8,
             overflow_y: u8,
@@ -6480,6 +6490,7 @@ fn layout_dom_once(
                     italic: false,
                     box_sizing: crate::BoxSizing::ContentBox,
                     border_collapse: false,
+                    caption_side_bottom: false,
                     table_vertical_align: None,
                     overflow_x: 0,
                     overflow_y: 0,
@@ -6645,6 +6656,9 @@ fn layout_dom_once(
                     inh.box_sizing = style.box_sizing;
                     if let Some(value) = style.border_collapse {
                         inh.border_collapse = value;
+                    }
+                    if let Some(value) = style.caption_side_bottom {
+                        inh.caption_side_bottom = value;
                     }
                     let is_table_part = tree.borrow_node(id).is_some_and(|node| {
                         node.as_element().is_some_and(|element| {
@@ -7168,6 +7182,10 @@ fn layout_dom_once(
                 match style.border_collapse {
                     Some(value) => inh.border_collapse = value,
                     None => style.border_collapse = Some(inh.border_collapse),
+                }
+                match style.caption_side_bottom {
+                    Some(value) => inh.caption_side_bottom = value,
+                    None => style.caption_side_bottom = Some(inh.caption_side_bottom),
                 }
                 let is_table_part = tree.borrow_node(id).is_some_and(|node| {
                     node.as_element().is_some_and(|name| {
@@ -8271,6 +8289,35 @@ fn layout_dom_once(
                         } else {
                             None
                         };
+                        // Captions do not take part in column sizing: measure
+                        // the grid without them, then floor the table by their
+                        // min-content width.
+                        let caption_nodes: Vec<taffy::NodeId> = ifc_items
+                            .table_captions
+                            .get(&tnode)
+                            .map(|captions| captions.nodes.clone())
+                            .unwrap_or_default();
+                        let mut caption_min = 0.0f32;
+                        let mut caption_displays = Vec::with_capacity(caption_nodes.len());
+                        for caption in &caption_nodes {
+                            let _ = taffy_tree.compute_layout_with_measure(
+                                *caption,
+                                taffy::Size {
+                                    width: taffy::AvailableSpace::MinContent,
+                                    height: taffy::AvailableSpace::MaxContent,
+                                },
+                                &mut measure,
+                            );
+                            if let Ok(layout) = taffy_tree.layout(*caption) {
+                                caption_min = caption_min.max(layout.size.width);
+                            }
+                            if let Ok(current) = taffy_tree.style(*caption) {
+                                caption_displays.push((*caption, current.display));
+                                let mut hidden = current.clone();
+                                hidden.display = taffy::style::Display::None;
+                                let _ = taffy_tree.set_style_if_changed(*caption, hidden);
+                            }
+                        }
                         let min_c = {
                             let _ = taffy_tree.compute_layout_with_measure(
                                 tnode,
@@ -8312,6 +8359,14 @@ fn layout_dom_once(
                                 .map(|l| l.size.width)
                                 .unwrap_or(0.0)
                         };
+                        for (caption, display) in caption_displays {
+                            if let Ok(current) = taffy_tree.style(caption) {
+                                let mut shown = current.clone();
+                                shown.display = display;
+                                let _ = taffy_tree.set_style_if_changed(caption, shown);
+                            }
+                        }
+                        let min_c = min_c.max(caption_min);
                         let inline_outer_edges =
                                 table_node_inline_outer_edges(&taffy_tree, tnode, table_style);
                         let preferred_outer = match width_style {
@@ -8354,6 +8409,7 @@ fn layout_dom_once(
                             .children(tnode)
                             .unwrap_or_default()
                             .into_iter()
+                            .filter(|cell| !caption_nodes.contains(cell))
                             .filter_map(|cell| {
                                 let gc = taffy_tree.style(cell).ok()?.grid_column.clone();
                                 let col = match gc.start {
@@ -10614,14 +10670,25 @@ fn apply_table_row_geometry(
             .iter()
             .map(|height| height.unwrap_or(0.0).max(0.0))
             .collect();
+        let captions = ifc_items.table_captions.get(&table_node);
+        let top_captions = captions.map_or(0, |captions| captions.top);
+        let caption_count = captions.map_or(0, |captions| captions.nodes.len());
         let mut cells = Vec::new();
         for cell in taffy_tree.children(table_node).unwrap_or_default() {
+            if captions.is_some_and(|captions| captions.nodes.contains(&cell)) {
+                continue;
+            }
             let (Ok(cell_style), Ok(layout)) = (taffy_tree.style(cell), taffy_tree.layout(cell))
             else {
                 continue;
             };
             let row = match cell_style.grid_row.start {
-                GridPlacement::Line(line) => (line.as_i16().max(1) as usize) - 1,
+                GridPlacement::Line(line) => {
+                    match ((line.as_i16().max(1) as usize) - 1).checked_sub(top_captions) {
+                        Some(row) => row,
+                        None => continue,
+                    }
+                }
                 _ => continue,
             };
             let span = match cell_style.grid_row.end {
@@ -10707,13 +10774,26 @@ fn apply_table_row_geometry(
         // A definite table height distributes surplus into rows; an auto
         // table must not preserve stale free space from the generic grid pass.
         if table_has_height {
+            let caption_extent: f32 = captions
+                .map(|captions| {
+                    captions
+                        .nodes
+                        .iter()
+                        .filter_map(|node| taffy_tree.layout(*node).ok())
+                        .map(|layout| {
+                            layout.size.height + layout.margin.top + layout.margin.bottom + row_gap
+                        })
+                        .sum()
+                })
+                .unwrap_or(0.0);
             if let Ok(table_layout) = taffy_tree.layout(table_node) {
                 let track_target = (table_layout.size.height
                     - table_layout.padding.top
                     - table_layout.padding.bottom
                     - table_layout.border.top
                     - table_layout.border.bottom
-                    - row_gap * nrows.saturating_sub(1) as f32)
+                    - row_gap * nrows.saturating_sub(1) as f32
+                    - caption_extent)
                     .max(0.0);
                 let current: f32 = row_heights.iter().sum();
                 let extra = track_target - current;
@@ -10739,14 +10819,21 @@ fn apply_table_row_geometry(
 
         if let Ok(current) = taffy_tree.style(table_node) {
             let mut fixed = current.clone();
-            fixed.grid_template_rows = row_heights
-                .iter()
-                .map(|height| {
+            let caption_track = || {
+                taffy::GridTemplateComponent::Single(taffy::MinMax {
+                    min: taffy::MinTrackSizingFunction::auto(),
+                    max: taffy::MaxTrackSizingFunction::auto(),
+                })
+            };
+            fixed.grid_template_rows = (0..top_captions)
+                .map(|_| caption_track())
+                .chain(row_heights.iter().map(|height| {
                     taffy::GridTemplateComponent::Single(taffy::MinMax {
                         min: taffy::MinTrackSizingFunction::length(*height),
                         max: taffy::MaxTrackSizingFunction::length(*height),
                     })
-                })
+                }))
+                .chain((top_captions..caption_count).map(|_| caption_track()))
                 .collect();
             if taffy_tree.set_style_if_changed(table_node, fixed).is_ok() {
                 changed = true;
@@ -13258,6 +13345,33 @@ fn build_table(
         )
     });
 
+    // `<caption>` children: (DOM id, bottom side). They are built after the
+    // cells and placed in their own full-width tracks around the rows.
+    let caption_ids: Vec<(NodeId, bool)> = if native_html_table {
+        tree.children(id)
+            .into_iter()
+            .filter(|cid| {
+                tree.borrow_node(*cid).is_some_and(|node| {
+                    node.as_element()
+                        .is_some_and(|element| element.local.as_ref() == "caption")
+                }) && styles
+                    .get(cid)
+                    .is_some_and(|caption| caption.display != crate::Display::None)
+            })
+            .map(|cid| {
+                let bottom = styles
+                    .get(&cid)
+                    .and_then(|caption| caption.caption_side_bottom)
+                    .or(style.caption_side_bottom)
+                    .unwrap_or(false);
+                (cid, bottom)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let top_captions = caption_ids.iter().filter(|(_, bottom)| !bottom).count();
+
     // Build each cell and pin it to its grid area.
     let mut children: Vec<taffy::NodeId> = Vec::new();
     for (cid, r, c, rs, cs) in &placed {
@@ -13269,7 +13383,7 @@ fn build_table(
         if let Ok(cur) = taffy_tree.style(cell_node) {
             let mut cstyle = cur.clone();
             cstyle.grid_row = taffy::Line {
-                start: line((*r as i16) + 1),
+                start: line((*r + top_captions) as i16 + 1),
                 end: span(*rs as u16),
             };
             cstyle.grid_column = taffy::Line {
@@ -13561,7 +13675,89 @@ fn build_table(
         };
     }
     tstyle.grid_template_columns = (0..ncols).map(col).collect();
-    tstyle.grid_template_rows = (0..nrows).map(row_track).collect();
+    let caption_track = || {
+        taffy::GridTemplateComponent::Single(taffy::MinMax {
+            min: taffy::MinTrackSizingFunction::auto(),
+            max: taffy::MaxTrackSizingFunction::auto(),
+        })
+    };
+    tstyle.grid_template_rows = (0..top_captions)
+        .map(|_| caption_track())
+        .chain((0..nrows).map(row_track))
+        .chain((top_captions..caption_ids.len()).map(|_| caption_track()))
+        .collect();
+    // A caption sits outside the table's border box in CSS but inside the
+    // table element's box. As a full-width grid item, negative margins pull
+    // it over the table border and outer spacing band, and a matching
+    // positive margin restores the border between the caption and the rows.
+    let edge = |value: taffy::LengthPercentage| {
+        let raw = value.into_raw();
+        if raw.tag() == taffy::CompactLength::LENGTH_TAG {
+            raw.value()
+        } else {
+            0.0
+        }
+    };
+    let (table_border, table_padding) = (tstyle.border, tstyle.padding);
+    let mut caption_nodes = Vec::new();
+    let mut top_index = 0usize;
+    let mut bottom_index = 0usize;
+    for (caption, bottom) in &caption_ids {
+        let Some(node) = build(
+            tree, *caption, taffy_tree, id_map, words, engine, ifc_items, styles,
+        ) else {
+            continue;
+        };
+        if let Ok(current) = taffy_tree.style(node) {
+            let mut caption_style = current.clone();
+            let track = if *bottom {
+                bottom_index += 1;
+                top_captions + nrows + bottom_index
+            } else {
+                top_index += 1;
+                top_index
+            };
+            caption_style.grid_row = taffy::Line {
+                start: line(track as i16),
+                end: span(1),
+            };
+            caption_style.grid_column = taffy::Line {
+                start: line(1),
+                end: span(ncols as u16),
+            };
+            caption_style.position = taffy::Position::Relative;
+            caption_style.size.width = Dimension::auto();
+            caption_style.align_self = Some(taffy::AlignSelf::START);
+            caption_style.justify_self = Some(taffy::JustifySelf::STRETCH);
+            // Grid padding already holds the authored padding plus the outer
+            // border-spacing band.
+            let (top, bottom_margin) = if *bottom {
+                (
+                    edge(table_border.bottom) + style.padding.bottom,
+                    -(edge(table_border.bottom) + edge(table_padding.bottom)),
+                )
+            } else {
+                (
+                    -(edge(table_border.top) + edge(table_padding.top)),
+                    edge(table_border.top) + style.padding.top,
+                )
+            };
+            caption_style.margin = taffy::Rect {
+                left: taffy::LengthPercentageAuto::length(
+                    -(edge(table_border.left) + edge(table_padding.left)),
+                ),
+                right: taffy::LengthPercentageAuto::length(
+                    -(edge(table_border.right) + edge(table_padding.right)),
+                ),
+                top: taffy::LengthPercentageAuto::length(top),
+                bottom: taffy::LengthPercentageAuto::length(bottom_margin),
+            };
+            let _ = taffy_tree.set_style_if_changed(node, caption_style);
+        }
+        caption_nodes.push(node);
+    }
+    let mut children = children;
+    children.extend(caption_nodes.iter().copied());
     tstyle.gap = taffy::Size {
         width: length(horizontal_spacing),
         height: length(vertical_spacing),
@@ -13569,6 +13765,15 @@ fn build_table(
     let table_node = taffy_tree.new_with_children(tstyle, &children).ok()?;
     id_map.insert(table_node, id);
     ifc_items.table_rows.insert(table_node, row_min);
+    if !caption_nodes.is_empty() {
+        ifc_items.table_captions.insert(
+            table_node,
+            TableCaptions {
+                top: top_captions,
+                nodes: caption_nodes,
+            },
+        );
+    }
     if fixed_layout {
         ifc_items.fixed_table_cols.insert(table_node, fixed_columns);
     }
