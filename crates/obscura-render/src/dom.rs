@@ -21407,6 +21407,35 @@ mod tests {
         assert!((rect("it").x - 127.22).abs() < 0.5, "{:?}", rect("it"));
     }
 
+    // w3schools html_challenges_*: floats in a block before a flex row whose
+    // item holds a `width:100%` flex panel. The deferred percentage is
+    // restored after a first pass and the tree relaid; marking the panel
+    // dirty stopped at the block beside the floats (its cache is always
+    // empty), so the flex row reused its first-pass layout and the panel
+    // stayed 2px wide. Chrome: 399.58 x 42.
+    #[cfg(feature = "paint")]
+    #[test]
+    fn restyled_flex_item_beside_earlier_floats_is_relaid() {
+        let tree = parse_html(
+            r#"<!doctype html><style>body{margin:0;font:16px/20px Arial}
+            .w3-clear::after,.w3-clear::before{content:"";display:table;clear:both}
+            .l{float:left;width:100px;height:40px}.r{float:right;width:100px;height:40px}
+            #main{float:left;width:875px;padding:16px 32px 32px;box-sizing:border-box}
+            .grid{display:flex;margin-top:12px}
+            .work{display:flex;flex:1 1 50%;min-width:0;overflow:hidden}
+            .panel{display:flex;flex-direction:column;width:100%;overflow:hidden;border:1px solid;box-sizing:border-box}
+            .drag{width:12px}</style>
+            <div id=main><div class=w3-clear><a class=l></a><a class=r></a></div>
+            <div style="margin-top:10px"><div><div style="display:grid">split</div>
+            <div class=grid><div class=work><div class=panel id=panel><div>Some text that would wrap one character per line if the panel collapsed</div></div></div><div class=drag></div><div class=work>preview</div></div>
+            </div></div></div>"#,
+        );
+        let laid = layout_dom(&tree, (1280.0, 800.0));
+        let panel = laid.rects[&tree.get_element_by_id("panel").unwrap()];
+        assert!((panel.width - 399.58).abs() < 1.0, "{panel:?}");
+        assert_eq!(panel.height, 42.0, "{panel:?}");
+    }
+
     /// Each line of text node `node`: (x, text), in line order.
     #[cfg(feature = "paint")]
     fn text_lines(laid: &DomLayout, node: NodeId) -> Vec<(f32, String)> {
