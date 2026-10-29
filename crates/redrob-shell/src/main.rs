@@ -2337,9 +2337,12 @@ impl eframe::App for Window {
                 let (rect, response) =
                     ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
                 let scale = ctx.pixels_per_point();
+                // At a fractional scale the page area is a fractional number
+                // of CSS pixels; round up so the page covers its last column
+                // and row instead of leaving a white line.
                 let size = (
-                    rect.width().round() as u32,
-                    rect.height().round() as u32,
+                    (rect.width() - 0.01).ceil() as u32,
+                    (rect.height() - 0.01).ceil() as u32,
                     scale,
                 );
                 if size != self.last_size && size.0 > 0 && size.1 > 0 {
