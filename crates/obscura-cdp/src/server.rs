@@ -184,6 +184,9 @@ fn refuse_control_connection(mut stream: std::net::TcpStream, refusal: ControlRe
 }
 use crate::types::CdpRequest;
 
+/// Stack reserved for each CDP connection thread (see its spawn).
+const CDP_CONNECTION_STACK_BYTES: usize = 512 * 1024 * 1024;
+
 struct CdpMessage {
     text: String,
     reply_tx: mpsc::UnboundedSender<String>,
@@ -838,6 +841,12 @@ fn run_connection(
     let slot = live_connections.clone();
     let spawned = std::thread::Builder::new()
         .name("obscura-cdp-conn".into())
+        // Script, style and layout for the connection's pages run on this
+        // thread. Like the CLI's main thread, reserve a large stack: a
+        // deeply nested document (thousands of padded spans around a
+        // block) overflowed the 2 MiB default in box construction and
+        // layout. Pages are committed only as the stack is used.
+        .stack_size(CDP_CONNECTION_STACK_BYTES)
         .spawn(move || {
             let mut slot_guard = SlotGuard(Some(slot));
             let default_context =

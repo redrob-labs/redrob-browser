@@ -2787,6 +2787,19 @@ impl Page {
                     if script.is_defer && !script.is_async && script.src.is_some() {
                         post_parse.push(ScheduledScript::Classic(index));
                     } else {
+                        // A parser-blocking script runs when the parser has
+                        // built the document only up to the script itself:
+                        // hide what follows it until the script is done
+                        // (an async external script runs whenever it
+                        // arrives, typically after parsing, and sees all).
+                        let parser_blocking = script.src.is_none() || !script.is_async;
+                        let suspended = if parser_blocking {
+                            self.js
+                                .as_mut()
+                                .and_then(|js| js.suspend_parser_tail(script.nid))
+                        } else {
+                            None
+                        };
                         let fetched_script = fetched.remove(&index);
                         execute_classic(self, script, fetched_script);
                         if let Some(js) = &mut self.js {
@@ -2796,6 +2809,9 @@ impl Page {
                                 tracing::warn!(
                                     "script deadline reached with a parser-blocking document.write script pending"
                                 );
+                            }
+                            if let Some(suspended) = suspended {
+                                js.resume_parser_tail(suspended);
                             }
                         }
                     }

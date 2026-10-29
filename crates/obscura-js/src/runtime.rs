@@ -267,6 +267,10 @@ pub struct CdpObjectState {
     evaluation_recipes: HashMap<String, String>,
 }
 
+/// Nodes the parser had not reached when a parser-blocking script ran,
+/// detached by `ObscuraJsRuntime::suspend_parser_tail`: (parent, children).
+pub struct ParserTail(Vec<(NodeId, Vec<NodeId>)>);
+
 pub struct ObscuraJsRuntime {
     state: Rc<RefCell<ObscuraState>>,
     object_store: HashMap<String, String>,
@@ -4523,6 +4527,77 @@ impl ObscuraJsRuntime {
             .filter(|node_id| node_is_script(dom, *node_id))
             .collect::<Vec<_>>();
         state.already_started_scripts.borrow_mut().extend(valid);
+    }
+
+    /// Detach everything the HTML parser has not yet reached when it runs
+    /// the parser-blocking script `script_nid`: every later sibling of the
+    /// script and of each of its ancestors. `None` when nothing follows.
+    /// Pair with [`Self::resume_parser_tail`], which appends the nodes back
+    /// the way the parser would continue.
+    pub fn suspend_parser_tail(&mut self, script_nid: u32) -> Option<ParserTail> {
+        let tail = {
+            let state = self.state.borrow();
+            let dom = state.dom.as_ref()?;
+            let script = NodeId::new(script_nid);
+            let mut tail = Vec::new();
+            let mut child = script;
+            for parent in dom.ancestors(script) {
+                let children = dom.children(parent);
+                let position = children.iter().position(|&node| node == child)?;
+                let later: Vec<NodeId> = children[position + 1..].to_vec();
+                for &node in &later {
+                    dom.detach(node);
+                }
+                if !later.is_empty() {
+                    tail.push((parent, later));
+                }
+                child = parent;
+            }
+            tail
+        };
+        if tail.is_empty() {
+            return None;
+        }
+        self.parser_tree_changed();
+        Some(ParserTail(tail))
+    }
+
+    /// Re-attach what [`Self::suspend_parser_tail`] detached: each node is
+    /// appended to its parser parent again, after anything the script added.
+    pub fn resume_parser_tail(&mut self, tail: ParserTail) {
+        {
+            let state = self.state.borrow();
+            let Some(dom) = state.dom.as_ref() else {
+                return;
+            };
+            for (parent, nodes) in tail.0 {
+                for node in nodes {
+                    // The script may have inserted the node's parser parent
+                    // nowhere or detached it: the parser still appends to it.
+                    dom.append_child(parent, node);
+                }
+            }
+        }
+        self.parser_tree_changed();
+    }
+
+    /// A native tree change outside the DOM ops: drop layout and the JS
+    /// ancestry caches.
+    fn parser_tree_changed(&mut self) {
+        {
+            let mut state = self.state.borrow_mut();
+            state.activity_generation = state.activity_generation.wrapping_add(1);
+            #[cfg(feature = "render")]
+            {
+                state.prepared_render = None;
+                state.pending_style_mutations.clear();
+                state.resolved_scroll = None;
+            }
+        }
+        let _ = self.execute_script(
+            "<parser-tree>",
+            "globalThis.__obscura_parser_tree_changed && globalThis.__obscura_parser_tree_changed();",
+        );
     }
 
     pub fn with_dom<R>(&self, f: impl FnOnce(&DomTree) -> R) -> Option<R> {
@@ -10431,7 +10506,9 @@ mod tests {
         }
         let after = result["after"].as_array().unwrap();
         assert!(after[0].as_f64().unwrap() >= token_x + token_width - 0.01);
-        assert!((after[1].as_f64().unwrap() - token_y).abs() < 0.01);
+        // The monospace <code> and the following span sit on one line but
+        // not at one y (Chrome: 2 and 1).
+        assert!((after[1].as_f64().unwrap() - token_y).abs() <= 1.0);
         assert_eq!(result["atomic"], serde_json::json!([80, 30]));
         assert_eq!(result["replaced"], serde_json::json!([80, 30]));
         assert_eq!(result["item"], serde_json::json!([90, 25, "block"]));
@@ -13477,8 +13554,10 @@ mod tests {
         assert_eq!(initial["tracker"], serde_json::json!([320, 200, 320, 200]));
         assert_eq!(initial["box"][0], serde_json::json!(116));
         assert_eq!(initial["box"][1], serde_json::json!(62));
-        assert!((initial["box"][2].as_f64().unwrap() - 123.0).abs() < 0.05);
-        assert_eq!(initial["box"][3], serde_json::json!(67));
+        // Chrome: 122.765625 (borders snap to 4px and 3px).
+        assert_eq!(initial["box"][2], serde_json::json!(122.765625));
+        // 50.6px of content is 50.59375 in LayoutUnits (Chrome: 66.59375).
+        assert_eq!(initial["box"][3], serde_json::json!(66.59375));
 
         // Attribute-backed inline-style changes invalidate the retained
         // render. Borders do not change the padding box; padding does.
@@ -13500,7 +13579,8 @@ mod tests {
             .unwrap();
         assert_eq!(mutated[0], serde_json::json!(100));
         assert_eq!(mutated[1], serde_json::json!(126));
-        assert_eq!(mutated[2], serde_json::json!(143));
+        // Chrome: 142.578125 (the 4.1px right border snaps to 4px).
+        assert_eq!(mutated[2], serde_json::json!(142.578125));
 
         // A later CDP/emulation viewport update invalidates the layout too;
         // both the root special case and an ordinary 100vh box are live.

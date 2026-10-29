@@ -205,6 +205,13 @@ const _dom = (cmd, a1, a2) => {
   return result;
 };
 
+// The page host detaches and re-attaches the parser's unparsed tail around
+// a parser-blocking script, outside the DOM ops: drop the ancestry caches.
+Object.defineProperty(globalThis, "__obscura_parser_tree_changed", {
+  value: () => { _domMutationEpoch++; _treeMutationEpoch++; },
+  configurable: true, enumerable: false, writable: false,
+});
+
 const _nativeFns = new Set();
 // Exact toString override for members whose native form is not just
 // `function <name>()`, e.g. accessors (`function get x() { [native code] }`)

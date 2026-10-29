@@ -779,3 +779,102 @@ fn canvas_font_shorthand_measures_with_the_bundled_faces() {
     );
     assert!((m("600 12px Helvetica, Arial, sans-serif") - 96.656).abs() < 0.01);
 }
+
+#[test]
+fn text_controls_size_from_the_fonts_average_character_width() {
+    // Chrome on the capture host: default input 185, 16px Arial 215,
+    // size=1 38, Helvetica (untrusted average: "0" advances) 186;
+    // textarea default 181, 16px Arial 207.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'>\
+         <input id=d><input id=a style='font:16px Arial'>\
+         <input id=one size=1 style='font:16px Arial'>\
+         <input id=h style='font:16px Helvetica, Arial'>\
+         <textarea id=t></textarea><textarea id=ta style='font:16px Arial'></textarea>",
+        &[],
+    );
+    for (id, want) in [
+        ("d", 185.0),
+        ("a", 215.0),
+        ("one", 38.0),
+        ("h", 186.0),
+        ("t", 181.0),
+        ("ta", 207.0),
+    ] {
+        assert_eq!(width(&tree, &laid, id), want, "{id}");
+    }
+}
+
+#[test]
+fn shrink_to_fit_treats_percentage_atomic_widths_as_auto() {
+    // Chrome: an abspos shrink-to-fit box around a 30% wide 2400x538 image
+    // in a 720px containing block is 720 wide (the image contributes its
+    // natural width, clamped by the available width) and the image is 216.
+    let tree = obscura_dom::parse_html(
+        "<!doctype html><body style='margin:0'>\
+         <div style='width:720px;position:relative;height:100px'>\
+         <div id=d style='position:absolute;text-align:center'>\
+         <span id=s><img id=i src=a.png style='width:30%'></span></div></div>",
+    );
+    let mut intrinsic = HashMap::new();
+    intrinsic.insert(
+        element(&tree, "i"),
+        crate::ReplacedIntrinsic::from_dimensions(2400.0, 538.0),
+    );
+    let laid = crate::dom::layout_dom_with_web_fonts(&tree, (1280.0, 800.0), &intrinsic, &[]);
+    assert_eq!(width(&tree, &laid, "d"), 720.0);
+    assert_eq!(width(&tree, &laid, "i"), 216.0);
+}
+
+#[test]
+fn glyphs_missing_from_bundled_fonts_fall_back_to_host_fonts() {
+    // Chrome on the capture host (fontconfig's sans-serif order): 16px
+    // Arial "漢字テスト" 80 wide, "한국어" 48, "ภาษาไทย" 68.
+    if !super::fonts::tests_host_has_family("wenquanyi zen hei") {
+        return;
+    }
+    let (tree, laid) = layout(
+        "<!doctype html><meta charset=utf-8><body style='margin:0;font:16px Arial'>\
+         <div><span id=ja>漢字テスト</span></div><div><span id=ko>한국어</span></div>\
+         <div><span id=th>ภาษาไทย</span></div>",
+        &[],
+    );
+    for (id, want) in [("ja", 80.0), ("ko", 48.0), ("th", 68.0)] {
+        assert!(
+            (width(&tree, &laid, id) - want).abs() < 0.5,
+            "{id}: {}",
+            width(&tree, &laid, id)
+        );
+    }
+}
+
+#[test]
+fn floats_keep_their_first_childs_top_margin() {
+    // Chrome: a float is a block formatting context root, so its first
+    // child's margin-top stays inside it (float 80 tall around a 60px child
+    // 20px down); the float used to lose the margin (60 tall).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><div style='width:810px'><p>x</p>\
+         <div id=w style='float:left;width:100%'><div id=t style='margin-top:20px;padding:30px'></div></div>\
+         <p id=after style='clear:both'>y</p></div>",
+        &[],
+    );
+    assert_eq!(height(&tree, &laid, "w"), 80.0);
+    let top = |id: &str| laid.rects[&element(&tree, id)].y;
+    assert_eq!(top("t") - top("w"), 20.0);
+}
+
+#[test]
+fn float_containing_boxes_keep_bottom_padding_below_floats() {
+    // Chrome: 178 and 112 tall (the last float, then padding-bottom 32px).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'>\
+         <div id=a style='float:left;width:300px;padding:16px 0 32px'><p>x</p>\
+         <div style='float:left;clear:both;width:100%;height:80px'></div></div>\
+         <div id=b style='display:flow-root;width:300px;padding-bottom:32px;clear:both'>\
+         <div style='float:left;height:80px;width:10px'></div></div>",
+        &[],
+    );
+    assert_eq!(height(&tree, &laid, "a"), 178.0);
+    assert_eq!(height(&tree, &laid, "b"), 112.0);
+}
