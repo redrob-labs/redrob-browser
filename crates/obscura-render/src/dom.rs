@@ -8264,6 +8264,7 @@ fn layout_dom_once(
     }
     sync_positioned_pseudo_percentage_padding(&rects, &mut styles);
 
+    phase_marks.push(("rects", std::time::Instant::now()));
     let mut clip_rects = HashMap::new();
     let mut translates = HashMap::new();
     let mut transforms = HashMap::new();
@@ -8289,6 +8290,7 @@ fn layout_dom_once(
         );
     }
 
+    phase_marks.push(("clips", std::time::Instant::now()));
     // Pin each shaped inline context to its final content-box origin/width now
     // that layout is done, so paint draws the same line breaks it was sized for.
     #[cfg(feature = "paint")]
@@ -8384,6 +8386,7 @@ fn layout_dom_once(
     // shaping provenance and install those fragments as canonical DOM geometry.
     // The common paragraph with no nested inline owner skips both this work and
     // the second clip-tree walk.
+    phase_marks.push(("finalize", std::time::Instant::now()));
     #[cfg(feature = "paint")]
     if engine.has_inline_owners() {
         let canonical = synthesize_shaped_inline_fragments(tree, &mut rects, &styles, &engine);

@@ -786,6 +786,15 @@ pub struct InlineItem {
     /// equal key reuses the shaped buffer and its measurements instead of
     /// shaping the same text again (see `ShapedItemCache`).
     cache_key: Option<Box<ItemKey>>,
+    /// `finalize` pinned this item at its used width. Reuse prefers such an
+    /// item: its buffer is already laid out at the width the next layout
+    /// most likely asks for.
+    finalized: bool,
+    /// `measure_word` result, a pure function of the shaping input.
+    word_measure: Option<(f32, f32)>,
+    /// Width bits and wrap `buffer` is currently laid out for by
+    /// `shape_with_text_indent`; `None` when unknown.
+    shaped_at: Option<(Option<u32>, Wrap)>,
 }
 
 /// The complete input of `TextEngine::push_shaped_item`. Shaping and
@@ -887,6 +896,9 @@ impl InlineItem {
             caret_run: None,
             measured: self.measured.clone(),
             cache_key: self.cache_key.clone(),
+            finalized: false,
+            word_measure: self.word_measure,
+            shaped_at: self.shaped_at,
         }
     }
 }
@@ -933,7 +945,12 @@ impl Drop for TextEngine {
         let mut items: HashMap<u64, Vec<InlineItem>> = HashMap::new();
         for item in std::mem::take(&mut self.items) {
             if let Some(hash) = item.cache_key.as_ref().map(|key| key.hash) {
-                items.entry(hash).or_default().push(item);
+                let bucket = items.entry(hash).or_default();
+                if item.finalized {
+                    bucket.insert(0, item);
+                } else {
+                    bucket.push(item);
+                }
             }
         }
         if items.is_empty() {
@@ -2158,6 +2175,9 @@ impl TextEngine {
             caret_run: None,
             measured: Vec::new(),
             cache_key: None,
+            finalized: false,
+            word_measure: None,
+            shaped_at: None,
         });
         Some(idx)
     }
@@ -2221,6 +2241,9 @@ impl TextEngine {
         let Some(item) = items.get_mut(idx) else {
             return (0.0, 0.0);
         };
+        if let Some(size) = item.word_measure {
+            return size;
+        }
         let wrap = item.layout_wrap;
         shape_with_text_indent(font_system, item, None, wrap);
         let mut width = 0.0f32;
@@ -2243,7 +2266,9 @@ impl TextEngine {
             );
             height = height.max(run.line_top + run.line_height);
         }
-        (width, height.max(item.forced_min_height))
+        let size = (width, height.max(item.forced_min_height));
+        item.word_measure = Some(size);
+        size
     }
 
     /// Register a replaced element's intrinsic size as a taffy measure
@@ -2344,7 +2369,22 @@ impl TextEngine {
         let item = &mut items[idx];
         let content_width = content_width.max(0.0);
         let wrap = item.layout_wrap;
+        let _prof = crate::prof::start();
+        let miss = item.buffer.size().0 != Some(content_width) || item.buffer.wrap() != wrap;
+
+        item.finalized = true;
         shape_with_text_indent(font_system, item, Some(content_width), wrap);
+        crate::prof::stop(
+            if miss {
+                crate::prof::ENGINE_NEW
+            } else {
+                crate::prof::MEASURE_MISS
+            },
+            _prof,
+        );
+        if item.balance_wrap {
+            item.shaped_at = None;
+        }
         let balanced_width = item
             .balance_wrap
             .then(|| balance_wrap_width(font_system, &mut item.buffer, content_width))
@@ -3547,7 +3587,24 @@ fn used_text_indent(value: Dimension, width: Option<f32>) -> f32 {
 /// and monotonically retry if those edges force an earlier break. Only final
 /// visual-line boundaries split BufferLines, so ligatures and kerning are not
 /// broken merely because an inline element starts or ends.
+/// Lay `item` out at `width`/`wrap`. A buffer still laid out for exactly
+/// these arguments is left untouched: reshaping it would produce the same
+/// lines, and items reused from an earlier layout usually are.
 fn shape_with_text_indent(
+    font_system: &mut FontSystem,
+    item: &mut InlineItem,
+    width: Option<f32>,
+    wrap: Wrap,
+) {
+    let state = (width.map(f32::to_bits), wrap);
+    if item.shaped_at == Some(state) {
+        return;
+    }
+    shape_with_text_indent_uncached(font_system, item, width, wrap);
+    item.shaped_at = Some(state);
+}
+
+fn shape_with_text_indent_uncached(
     font_system: &mut FontSystem,
     item: &mut InlineItem,
     width: Option<f32>,
