@@ -8073,6 +8073,9 @@ fn dimension_value(tok: &str) -> crate::Dimension {
     if let Some(v) = lower.strip_suffix("ex").and_then(parse) {
         return Dimension::Ex(v);
     }
+    if let Some(v) = lower.strip_suffix("ch").and_then(parse) {
+        return Dimension::Ch(v);
+    }
     if let Some(v) = lower.strip_suffix("vmin").and_then(parse) {
         return Dimension::Vmin(v);
     }
@@ -8168,6 +8171,7 @@ fn parse_clip_path_polygon(value: &str) -> Option<crate::ClipPathPolygon> {
             | crate::Dimension::Percent(value)
             | crate::Dimension::Em(value)
             | crate::Dimension::Ex(value)
+            | crate::Dimension::Ch(value)
             | crate::Dimension::Rem(value)
             | crate::Dimension::Vw(value)
             | crate::Dimension::Vh(value)
@@ -8768,6 +8772,7 @@ fn radial_radius_is_non_negative(value: crate::Dimension) -> bool {
         | crate::Dimension::Percent(value)
         | crate::Dimension::Em(value)
         | crate::Dimension::Ex(value)
+        | crate::Dimension::Ch(value)
         | crate::Dimension::Rem(value)
         | crate::Dimension::Vw(value)
         | crate::Dimension::Vh(value)

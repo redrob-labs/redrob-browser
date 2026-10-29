@@ -2862,6 +2862,7 @@ pub(crate) fn resolve_translate(d: crate::Dimension, basis: f32) -> f32 {
         crate::Dimension::Percent(p) => p * basis,
         crate::Dimension::Em(v) | crate::Dimension::Rem(v) => v * 16.0,
         crate::Dimension::Ex(v) => v * 16.0 * 0.528_320_3,
+        crate::Dimension::Ch(v) => v * 8.0,
         crate::Dimension::Vw(v)
         | crate::Dimension::Vh(v)
         | crate::Dimension::Vmin(v)
@@ -6995,6 +6996,17 @@ fn layout_dom_once(
                         4 => style.max_width = resolved,
                         _ => style.max_height = resolved,
                     }
+                }
+                {
+                    let bold = crate::style::used_font_weight(style) >= 600;
+                    let family = style.font_family.clone();
+                    let ch = |d: crate::Dimension| d.resolve_ch(em_px, bold, family.as_deref());
+                    style.width = ch(style.width);
+                    style.height = ch(style.height);
+                    style.min_width = ch(style.min_width);
+                    style.min_height = ch(style.min_height);
+                    style.max_width = ch(style.max_width);
+                    style.max_height = ch(style.max_height);
                 }
                 style.width = style.width.resolve(em_px, root_fs, vw, vh);
                 style.height = style.height.resolve(em_px, root_fs, vw, vh);

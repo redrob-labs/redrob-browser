@@ -740,3 +740,17 @@ fn host_installed_families_and_whole_pixel_glyph_fallback() {
         faces(&tree, &laid, "named")
     );
 }
+
+#[test]
+fn ch_lengths_use_the_advance_of_zero_in_the_font() {
+    // Chrome: width:10ch is 102.016px in 17px monospace (Liberation Mono's
+    // "0" is 0.6em) and 89.0px in 16px sans-serif (Liberation Sans 0.556em).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'>\
+         <div id=mono style='font:17px monospace;width:10ch'>x</div>\
+         <div id=sans style='font:16px sans-serif;width:10ch'>x</div>",
+        &[],
+    );
+    assert!((width(&tree, &laid, "mono") - 102.016).abs() < 0.05, "{}", width(&tree, &laid, "mono"));
+    assert!((width(&tree, &laid, "sans") - 88.98).abs() < 0.05, "{}", width(&tree, &laid, "sans"));
+}

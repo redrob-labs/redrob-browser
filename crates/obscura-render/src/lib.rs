@@ -706,6 +706,10 @@ pub enum Dimension {
     /// parse time (the old behavior) silently corrupted every relative length.
     Em(f32),
     Ex(f32),
+    /// `ch`: the advance of "0" in the element's font, resolved with the
+    /// computed font (see `Dimension::resolve_ch`); `resolve` falls back to
+    /// half an em.
+    Ch(f32),
     Rem(f32),
     Vw(f32),
     Vh(f32),
@@ -718,6 +722,24 @@ impl Dimension {
     /// own font-size, `rem_px` the root's, and `vw`/`vh` are one hundredth of
     /// the viewport width/height. `Px`, `Percent`, and `Auto` pass through
     /// (`Percent` stays for taffy to resolve against the containing block).
+    /// Resolve a `ch` length to px with the advance of "0" in `family` at
+    /// `em_px`; any other value passes through.
+    pub(crate) fn resolve_ch(self, em_px: f32, bold: bool, family: Option<&str>) -> Dimension {
+        match self {
+            Dimension::Ch(v) => {
+                #[cfg(feature = "paint")]
+                let zero = crate::paint::measure_text_em("0", em_px, bold, family);
+                #[cfg(not(feature = "paint"))]
+                let zero = {
+                    let _ = (bold, family);
+                    em_px * 0.5
+                };
+                Dimension::Px(v * zero)
+            }
+            other => other,
+        }
+    }
+
     pub fn resolve(self, em_px: f32, rem_px: f32, vw: f32, vh: f32) -> Dimension {
         match self {
             Dimension::Em(v) => Dimension::Px(v * em_px),
@@ -725,6 +747,7 @@ impl Dimension {
             // the renderer. This is its x-height as a fraction of the em,
             // matching Chromium's generic sans face on the capture host.
             Dimension::Ex(v) => Dimension::Px(v * em_px * 0.528_320_3),
+            Dimension::Ch(v) => Dimension::Px(v * em_px * 0.5),
             Dimension::Rem(v) => Dimension::Px(v * rem_px),
             Dimension::Vw(v) => Dimension::Px(v * vw),
             Dimension::Vh(v) => Dimension::Px(v * vh),
@@ -2822,6 +2845,7 @@ fn dimension(v: Dimension) -> taffy::style::Dimension {
         // rather than panicking.
         Dimension::Em(v) | Dimension::Rem(v) => taffy::style::Dimension::length(v * 16.0),
         Dimension::Ex(v) => taffy::style::Dimension::length(v * 16.0 * 0.528_320_3),
+        Dimension::Ch(v) => taffy::style::Dimension::length(v * 8.0),
         Dimension::Vw(v) | Dimension::Vh(v) | Dimension::Vmin(v) | Dimension::Vmax(v) => {
             taffy::style::Dimension::length(v)
         }

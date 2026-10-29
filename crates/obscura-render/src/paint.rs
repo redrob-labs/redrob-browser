@@ -2922,6 +2922,7 @@ fn dimension_css(value: crate::Dimension, auto: &str) -> String {
         crate::Dimension::Percent(v) => format!("{}%", css_number(v * 100.0)),
         crate::Dimension::Em(v) => format!("{}em", css_number(v)),
         crate::Dimension::Ex(v) => format!("{}ex", css_number(v)),
+        crate::Dimension::Ch(v) => format!("{}ch", css_number(v)),
         crate::Dimension::Rem(v) => format!("{}rem", css_number(v)),
         crate::Dimension::Vw(v) => format!("{}vw", css_number(v)),
         crate::Dimension::Vh(v) => format!("{}vh", css_number(v)),
