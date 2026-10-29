@@ -14608,6 +14608,10 @@ globalThis.HTMLTitleElement = _defineHTMLElementClass("HTMLTitleElement", ["titl
 globalThis.HTMLBaseElement = _defineHTMLElementClass("HTMLBaseElement", ["base"]);
 globalThis.HTMLQuoteElement = _defineHTMLElementClass("HTMLQuoteElement", ["blockquote", "q"]);
 globalThis.HTMLPictureElement = _defineHTMLElementClass("HTMLPictureElement", ["picture"]);
+const _sourceDimension = (raw) => {
+  const value = Number.parseInt(raw || "", 10);
+  return Number.isFinite(value) && value >= 0 && value <= 2147483647 ? value : 0;
+};
 // <source> reflects its attributes, and a change re-runs image selection
 // of the <picture>'s <img> (HTML "relevant mutations").
 globalThis.HTMLSourceElement = _registerHTMLElementClass(class HTMLSourceElement extends HTMLElement {
@@ -14626,10 +14630,11 @@ globalThis.HTMLSourceElement = _registerHTMLElementClass(class HTMLSourceElement
   set media(value) { this.setAttribute("media", value); }
   get type() { return this.getAttribute("type") || ""; }
   set type(value) { this.setAttribute("type", value); }
-  get width() { return Number.parseInt(this.getAttribute("width") || "", 10) || 0; }
-  set width(value) { this.setAttribute("width", Math.max(0, Number(value) || 0)); }
-  get height() { return Number.parseInt(this.getAttribute("height") || "", 10) || 0; }
-  set height(value) { this.setAttribute("height", Math.max(0, Number(value) || 0)); }
+  // Non-negative integers in [0, 2^31-1]; anything else reflects as 0.
+  get width() { return _sourceDimension(this.getAttribute("width")); }
+  set width(value) { this.setAttribute("width", String(Math.max(0, Number(value) >>> 0))); }
+  get height() { return _sourceDimension(this.getAttribute("height")); }
+  set height(value) { this.setAttribute("height", String(Math.max(0, Number(value) >>> 0))); }
   setAttribute(name, value) {
     super.setAttribute(name, value);
     this._sourceChanged(name);
