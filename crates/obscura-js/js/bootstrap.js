@@ -5566,13 +5566,24 @@ class Element extends Node {
     }
     return document.body || null;
   }
+  // offsetTop/offsetLeft are layout positions: scrolling the offsetParent
+  // or a scroller between it and the element does not change them.
+  _offsetScroll(parent, axis) {
+    let total = 0;
+    for (let a = this.parentElement; a; a = a.parentElement) {
+      if (a.tagName === 'HTML' || a.tagName === 'BODY') break;
+      total += axis === 'y' ? (a.scrollTop || 0) : (a.scrollLeft || 0);
+      if (a === parent) break;
+    }
+    return total;
+  }
   get offsetTop() {
     if (this.namespaceURI !== 'http://www.w3.org/1999/xhtml') return undefined;
     if (!this.isConnected || this._renderBoxGeometry() === null) return 0;
     const rect = this.getBoundingClientRect();
     const parent = this.offsetParent;
     const value = parent
-      ? rect.top - parent.getBoundingClientRect().top - parent.clientTop
+      ? rect.top - parent.getBoundingClientRect().top - parent.clientTop + this._offsetScroll(parent, 'y')
       : rect.top + (globalThis.scrollY || 0);
     return Math.round(value);
   }
@@ -5582,7 +5593,7 @@ class Element extends Node {
     const rect = this.getBoundingClientRect();
     const parent = this.offsetParent;
     const value = parent
-      ? rect.left - parent.getBoundingClientRect().left - parent.clientLeft
+      ? rect.left - parent.getBoundingClientRect().left - parent.clientLeft + this._offsetScroll(parent, 'x')
       : rect.left + (globalThis.scrollX || 0);
     return Math.round(value);
   }
@@ -14597,38 +14608,53 @@ globalThis.HTMLTitleElement = _defineHTMLElementClass("HTMLTitleElement", ["titl
 globalThis.HTMLBaseElement = _defineHTMLElementClass("HTMLBaseElement", ["base"]);
 globalThis.HTMLQuoteElement = _defineHTMLElementClass("HTMLQuoteElement", ["blockquote", "q"]);
 globalThis.HTMLPictureElement = _defineHTMLElementClass("HTMLPictureElement", ["picture"]);
-globalThis.HTMLSourceElement = _defineHTMLElementClass("HTMLSourceElement", ["source"]);
-// Reflected attributes (HTML: HTMLSourceElement). Without them a script's
-// `source.srcset = ...` made an expando and the picture kept its old source.
-(() => {
-  const proto = HTMLSourceElement.prototype;
-  const reflect = (name, get, set) => {
-    const descriptor = { get, set, enumerable: true, configurable: true };
-    Object.defineProperty(proto, name, descriptor);
-    _markNative(descriptor.get);
-    _markNative(descriptor.set);
-  };
-  for (const name of ["srcset", "sizes", "media", "type"]) {
-    reflect(name,
-      function() { return this.getAttribute(name) ?? ""; },
-      function(value) { this.setAttribute(name, String(value)); });
+const _sourceDimension = (raw) => {
+  const value = Number.parseInt(raw || "", 10);
+  return Number.isFinite(value) && value >= 0 && value <= 2147483647 ? value : 0;
+};
+// <source> reflects its attributes, and a change re-runs image selection
+// of the <picture>'s <img> (HTML "relevant mutations").
+globalThis.HTMLSourceElement = _registerHTMLElementClass(class HTMLSourceElement extends HTMLElement {
+  get src() {
+    const raw = this.getAttribute("src");
+    if (!raw) return "";
+    try { return new URL(raw, this.baseURI || globalThis.location?.href || "about:blank").href; }
+    catch (_error) { return raw; }
   }
-  reflect("src",
-    function() {
-      const raw = this.getAttribute("src");
-      if (raw == null) return "";
-      try { return new URL(raw, document.baseURI).href; } catch (_e) { return raw; }
-    },
-    function(value) { this.setAttribute("src", String(value)); });
-  for (const name of ["width", "height"]) {
-    reflect(name,
-      function() {
-        const value = Number.parseInt(this.getAttribute(name) || "", 10);
-        return Number.isFinite(value) && value >= 0 && value <= 2147483647 ? value : 0;
-      },
-      function(value) { this.setAttribute(name, String(Math.max(0, Number(value) >>> 0))); });
+  set src(value) { this.setAttribute("src", value); }
+  get srcset() { return this.getAttribute("srcset") || ""; }
+  set srcset(value) { this.setAttribute("srcset", value); }
+  get sizes() { return this.getAttribute("sizes") || ""; }
+  set sizes(value) { this.setAttribute("sizes", value); }
+  get media() { return this.getAttribute("media") || ""; }
+  set media(value) { this.setAttribute("media", value); }
+  get type() { return this.getAttribute("type") || ""; }
+  set type(value) { this.setAttribute("type", value); }
+  // Non-negative integers in [0, 2^31-1]; anything else reflects as 0.
+  get width() { return _sourceDimension(this.getAttribute("width")); }
+  set width(value) { this.setAttribute("width", String(Math.max(0, Number(value) >>> 0))); }
+  get height() { return _sourceDimension(this.getAttribute("height")); }
+  set height(value) { this.setAttribute("height", String(Math.max(0, Number(value) >>> 0))); }
+  setAttribute(name, value) {
+    super.setAttribute(name, value);
+    this._sourceChanged(name);
   }
-})();
+  removeAttribute(name) {
+    super.removeAttribute(name);
+    this._sourceChanged(name);
+  }
+  _sourceChanged(name) {
+    const normalized = String(name).toLowerCase();
+    if (!["src", "srcset", "sizes", "media", "type", "width", "height"].includes(normalized)) return;
+    const picture = this.parentElement;
+    if (!picture || picture.localName !== "picture") return;
+    for (const child of picture.children) {
+      if (child.localName === "img" && typeof child._imageSourceChanged === "function") {
+        child._imageSourceChanged();
+      }
+    }
+  }
+}, ["source"]);
 globalThis.HTMLObjectElement = _defineHTMLElementClass("HTMLObjectElement", ["object"]);
 globalThis.HTMLEmbedElement = _defineHTMLElementClass("HTMLEmbedElement", ["embed"]);
 globalThis.HTMLMapElement = _defineHTMLElementClass("HTMLMapElement", ["map"]);
@@ -19105,6 +19131,32 @@ if (typeof Document !== 'undefined' && !Document.prototype.elementFromPoint) {
     return best || this.body || this.documentElement || null;
   };
   Document.prototype.elementsFromPoint = function(x, y) {
+    const method = _documentRealmMember(this, 'elementsFromPoint');
+    if (method) return Reflect.apply(method, this, [x, y]);
+    if (typeof __obscuraCore.ops.op_layout_hit_test_all === 'function') {
+      if (typeof x !== 'number' || typeof y !== 'number' || !isFinite(x) || !isFinite(y)) {
+        return [];
+      }
+      var vw = (typeof window !== 'undefined' && window.innerWidth) || 1280;
+      var vh = (typeof window !== 'undefined' && window.innerHeight) || 720;
+      if (x < 0 || y < 0 || x > vw || y > vh) return [];
+      var ids = [];
+      try { ids = JSON.parse(__obscuraCore.ops.op_layout_hit_test_all(x, y, _realmFrameId)); }
+      catch (_e) { ids = []; }
+      var out = [];
+      for (var i = 0; i < ids.length; i++) {
+        var hit = _wrapEl(ids[i]);
+        if (hit && hit.nodeType === 1 && out.indexOf(hit) < 0) out.push(hit);
+      }
+      // The root boxes always stack at the bottom: body (when hit), then html.
+      var root = this.documentElement;
+      var body = this.body;
+      var bodyHit = out.indexOf(body) >= 0;
+      out = out.filter(function(e) { return e !== root && e !== body; });
+      if (body && bodyHit) out.push(body);
+      if (root) out.push(root);
+      return out;
+    }
     var el = this.elementFromPoint(x, y);
     return el ? [el] : [];
   };

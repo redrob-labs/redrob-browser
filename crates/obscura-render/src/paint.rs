@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 mod damage;
+pub(crate) mod lcd;
 #[cfg(feature = "scene")]
 pub mod scene;
 pub use damage::DamageSnapshot;
@@ -1658,6 +1659,19 @@ impl PreparedRender {
         x: f32,
         y: f32,
     ) -> Option<obscura_dom::tree::NodeId> {
+        self.hit_test_all(tree, scroll, x, y, 1).into_iter().next()
+    }
+
+    /// Every element whose box contains a viewport point, topmost first
+    /// (`document.elementsFromPoint`), at most `limit` of them.
+    pub fn hit_test_all(
+        &self,
+        tree: &DomTree,
+        scroll: &ResolvedScrollState,
+        x: f32,
+        y: f32,
+        limit: usize,
+    ) -> Vec<obscura_dom::tree::NodeId> {
         fn stacking_path(
             tree: &DomTree,
             laid: &crate::DomLayout,
@@ -1711,7 +1725,7 @@ impl PreparedRender {
             || x > self.viewport.0
             || y > self.viewport.1
         {
-            return None;
+            return Vec::new();
         }
         let point = crate::Rect {
             x,
@@ -1723,7 +1737,8 @@ impl PreparedRender {
             width: 0.001,
             height: 0.001,
         };
-        let mut best: Option<(Vec<i32>, bool, usize, usize, obscura_dom::tree::NodeId)> = None;
+        type Candidate = (Vec<i32>, bool, usize, usize, obscura_dom::tree::NodeId);
+        let mut candidates: Vec<Candidate> = Vec::new();
         for (order, id) in crate::dom::rendered_descendants(tree, tree.document())
             .into_iter()
             .enumerate()
@@ -1754,30 +1769,41 @@ impl PreparedRender {
             let positioned =
                 style.position.is_some() || style.position_fixed || style.position_sticky;
             let depth = tree.ancestors(id).len();
-            let replace = best.as_ref().is_none_or(
-                |(best_path, best_positioned, best_depth, best_order, best_id)| {
-                    let stacking = compare_stacking_paths(&path, best_path);
-                    if stacking != std::cmp::Ordering::Equal {
-                        return stacking.is_gt();
-                    }
-                    if tree.ancestors(id).contains(best_id) {
-                        return true;
-                    }
-                    if tree.ancestors(*best_id).contains(&id) {
-                        return false;
-                    }
-                    positioned
-                        .cmp(best_positioned)
-                        .then_with(|| depth.cmp(best_depth))
-                        .then_with(|| order.cmp(best_order))
-                        .is_gt()
-                },
-            );
-            if replace {
-                best = Some((path, positioned, depth, order, id));
-            }
+            candidates.push((path, positioned, depth, order, id));
         }
-        best.map(|(_, _, _, _, id)| id)
+        // Whether `a` paints above `b`.
+        let above = |a: &Candidate, b: &Candidate| {
+            let (path, positioned, depth, order, id) = a;
+            let (best_path, best_positioned, best_depth, best_order, best_id) = b;
+            let stacking = compare_stacking_paths(path, best_path);
+            if stacking != std::cmp::Ordering::Equal {
+                return stacking.is_gt();
+            }
+            if tree.ancestors(*id).contains(best_id) {
+                return true;
+            }
+            if tree.ancestors(*best_id).contains(id) {
+                return false;
+            }
+            positioned
+                .cmp(best_positioned)
+                .then_with(|| depth.cmp(best_depth))
+                .then_with(|| order.cmp(best_order))
+                .is_gt()
+        };
+        // Repeated selection, not a sort: `above` is not a total order
+        // across unrelated stacking branches.
+        let mut out = Vec::new();
+        while !candidates.is_empty() && out.len() < limit {
+            let mut top = 0;
+            for index in 1..candidates.len() {
+                if above(&candidates[index], &candidates[top]) {
+                    top = index;
+                }
+            }
+            out.push(candidates.swap_remove(top).4);
+        }
+        out
     }
 
     /// Shaped-text caret in the viewport. Hit testing selects the painted
@@ -7906,11 +7932,13 @@ fn paint_box_shadow(
     let rx0 = (radius.0 + spread).max(0.0);
     let ry0 = (radius.1 + spread).max(0.0);
     let blur = shadow.blur.max(0.0);
+    // A Gaussian with sigma = blur / 2 is negligible past 3 sigma.
+    let pad = if blur < 0.5 { 0.0 } else { (blur * 1.5).ceil() };
     let shadow_bounds = crate::Rect {
-        x: x0 - blur,
-        y: y0 - blur,
-        width: w0 + 2.0 * blur,
-        height: h0 + 2.0 * blur,
+        x: x0 - pad,
+        y: y0 - pad,
+        width: w0 + 2.0 * pad,
+        height: h0 + 2.0 * pad,
     };
     // Shadows disable the native >1x path, so their paint coordinate space is
     // the pixmap's one-CSS-pixel-per-pixel surface.
@@ -7957,28 +7985,40 @@ fn paint_box_shadow(
             Some(&shadow_mask),
         );
     } else {
-        let steps: u32 = (blur.ceil() as u32).clamp(2, 24);
-        // Per-layer alpha chosen so `steps` source-over composites reach the target
-        // alpha at the core: 1 - (1 - a)^steps == A  =>  a = 1 - (1 - A)^(1/steps).
+        // A Gaussian blur of the offset (and spread) shape with sigma =
+        // blur / 2 (CSS Backgrounds 3, as Skia draws Chrome's shadows).
+        let mut shape = match Pixmap::new(shadow_pixmap.width(), shadow_pixmap.height()) {
+            Some(p) => p,
+            None => return,
+        };
+        fill_shadow_rect(
+            &mut shape,
+            x0 - left as f32,
+            y0 - top as f32,
+            w0,
+            h0,
+            rx0,
+            ry0,
+            [255, 255, 255, 255],
+            None,
+        );
+        let width = shape.width() as usize;
+        let height = shape.height() as usize;
+        let mut coverage: Vec<f32> = shape
+            .pixels()
+            .iter()
+            .map(|p| p.alpha() as f32 / 255.0)
+            .collect();
+        gaussian_blur(&mut coverage, width, height, blur / 2.0);
+        let mask = shadow_mask.data();
         let a_frac = color[3] as f32 / 255.0;
-        let per = 1.0 - (1.0 - a_frac).powf(1.0 / steps as f32);
-        let layer_alpha = (per * 255.0).round().clamp(1.0, 255.0) as u8;
-        let layer_color = [color[0], color[1], color[2], layer_alpha];
-        for j in 0..steps {
-            // j = 0 is the solid core (expansion 0); j = steps-1 reaches the blur
-            // radius. Larger rects paint first, smaller (more-covered) ones on top.
-            let e = blur * (j as f32) / ((steps - 1) as f32);
-            fill_shadow_rect(
-                &mut shadow_pixmap,
-                x0 - e - left as f32,
-                y0 - e - top as f32,
-                w0 + 2.0 * e,
-                h0 + 2.0 * e,
-                rx0 + e,
-                ry0 + e,
-                layer_color,
-                Some(&shadow_mask),
-            );
+        for (i, pixel) in shadow_pixmap.pixels_mut().iter_mut().enumerate() {
+            let a = coverage[i] * a_frac * mask[i] as f32 / 255.0;
+            if a <= 0.0 {
+                continue;
+            }
+            let a8 = (a * 255.0).round().clamp(0.0, 255.0) as u8;
+            *pixel = tiny_skia::ColorU8::from_rgba(color[0], color[1], color[2], a8).premultiply();
         }
     }
     // Ancestor overflow clip is already the complete rect/rounded chain.
@@ -7990,6 +8030,51 @@ fn paint_box_shadow(
         Transform::identity(),
         ancestor_clip,
     );
+}
+
+/// Separable Gaussian blur of a coverage plane in place.
+fn gaussian_blur(plane: &mut [f32], width: usize, height: usize, sigma: f32) {
+    if sigma <= 0.0 || width == 0 || height == 0 {
+        return;
+    }
+    let radius = (sigma * 3.0).ceil() as i32;
+    let mut kernel: Vec<f32> = (-radius..=radius)
+        .map(|i| (-(i * i) as f32 / (2.0 * sigma * sigma)).exp())
+        .collect();
+    let sum: f32 = kernel.iter().sum();
+    for k in &mut kernel {
+        *k /= sum;
+    }
+    let mut line = vec![0.0f32; width.max(height)];
+    for y in 0..height {
+        let row = &mut plane[y * width..(y + 1) * width];
+        line[..width].copy_from_slice(row);
+        for (x, out) in row.iter_mut().enumerate() {
+            let mut v = 0.0;
+            for (k, w) in kernel.iter().enumerate() {
+                let sx = x as i32 + k as i32 - radius;
+                if sx >= 0 && (sx as usize) < width {
+                    v += w * line[sx as usize];
+                }
+            }
+            *out = v;
+        }
+    }
+    for x in 0..width {
+        for y in 0..height {
+            line[y] = plane[y * width + x];
+        }
+        for y in 0..height {
+            let mut v = 0.0;
+            for (k, w) in kernel.iter().enumerate() {
+                let sy = y as i32 + k as i32 - radius;
+                if sy >= 0 && (sy as usize) < height {
+                    v += w * line[sy as usize];
+                }
+            }
+            plane[y * width + x] = v;
+        }
+    }
 }
 
 /// Fill one (possibly rounded) shadow rectangle with a flat color, optionally
@@ -16657,7 +16742,9 @@ mod tests {
             marker.green() > 220 && marker.red() < 40 && marker.blue() < 40,
             "a non-text box in the same clipped section must remain visible: {marker:?}"
         );
-        let svg_marker = scrolled.pixel(270, 50).expect("svg marker pixel");
+        // Probe the svg's right half: the LCD-filtered edge of the last
+        // glyph of "SECOND SHAPED LINE" reaches its left columns.
+        let svg_marker = scrolled.pixel(277, 50).expect("svg marker pixel");
         assert!(
             svg_marker.green() > 220 && svg_marker.blue() > 220 && svg_marker.red() < 40,
             "an inline svg in the same clipped section must remain visible: {svg_marker:?}"
