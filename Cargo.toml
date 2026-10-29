@@ -70,6 +70,7 @@ taffy = { path = "vendor/taffy" }
 # Carry the same canonical variable-font coordinates through shaping and
 # rasterization until the upstream API exposes them.
 cosmic-text = { path = "vendor/cosmic-text" }
+parley = { path = "vendor/parley" }
 # Build rav1d (AVIF/AV1) without nasm-assembled x86 kernels; see vendor/avif-decode/Cargo.toml.
 avif-decode = { path = "vendor/avif-decode" }
 

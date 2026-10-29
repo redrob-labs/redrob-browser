@@ -172,7 +172,7 @@ impl BlockContext<'_> {
 
     /// Update the height that descendent floats with the height that floats consume
     /// within a particular child
-    fn add_child_floated_content_height_contribution(&mut self, child_contribution: f32) {
+    pub fn add_child_floated_content_height_contribution(&mut self, child_contribution: f32) {
         self.float_content_contribution = self.float_content_contribution.max(child_contribution);
     }
 
@@ -199,6 +199,8 @@ use super::common::content_size::compute_content_size_contribution;
 struct BlockItem {
     /// The identifier for the associated node
     node_id: NodeId,
+    /// The first and last baselines of an in-flow item, relative to its border box
+    baselines: (Option<f32>, Option<f32>),
 
     /// The "source order" of the item. This is the index of the item within the children iterator,
     /// and controls the order in which the nodes are placed
@@ -566,9 +568,22 @@ fn compute_inner(
         CollapsibleMarginSet::from_margin(margin_bottom)
     };
 
+    // The first and last baselines of the block are those of its first and last in-flow children
+    // that have one.
+    let in_flow_baselines = || {
+        items.iter().filter_map(|item| {
+            let layout = item.final_layout.as_ref()?;
+            Some((layout.location.y, item.baselines))
+        })
+    };
+    let first_baseline = in_flow_baselines().find_map(|(y, (first, _))| first.map(|b| y + b));
+    let last_baseline = in_flow_baselines().filter_map(|(y, (_, last))| last.map(|b| y + b)).last();
+
     // Short-circuit if computing size
     if run_mode == RunMode::ComputeSize {
         let mut output = LayoutOutput::from_outer_size(final_outer_size);
+        output.first_baselines.y = first_baseline;
+        output.last_baseline = last_baseline;
         output.top_margin = top_margin;
         output.bottom_margin = bottom_margin;
         output.margins_can_collapse_through = can_be_collapsed_through;
@@ -620,7 +635,8 @@ fn compute_inner(
         size: final_outer_size,
         #[cfg(feature = "content_size")]
         content_size,
-        first_baselines: Point::NONE,
+        first_baselines: Point { x: None, y: first_baseline },
+        last_baseline,
         top_margin,
         bottom_margin,
         margins_can_collapse_through: can_be_collapsed_through,
@@ -666,6 +682,7 @@ fn generate_item_list(
 
             BlockItem {
                 node_id: child_node_id,
+                baselines: (None, None),
                 order: order as u32,
                 is_table,
                 is_in_same_bfc,
@@ -1048,6 +1065,7 @@ fn perform_final_layout_on_in_flow_children(
             let float_or_not_clear = true;
 
             item.computed_size = item_layout.size;
+            item.baselines = (item_layout.first_baselines.y, item_layout.last_baseline.or(item_layout.first_baselines.y));
             item.can_be_collapsed_through = item_layout.margins_can_collapse_through && float_or_not_clear;
             item.static_position = if item.is_in_same_bfc {
                 let uncleared_y = committed_y_offset + active_collapsible_margin_set.resolve();

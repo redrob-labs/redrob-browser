@@ -21,6 +21,11 @@ scene = ["display-list"]
 
 [dependencies]
 taffy = { workspace = true }
+# Inline formatting contexts: shaping (harfrust), bidi, line breaking and
+# inline boxes (crate::ifc). Fonts come from our own fontique collection
+# (bundled faces, configured directories, web fonts), never the system scan.
+parley = { version = "0.12", default-features = false, features = ["std", "complex-scripts"] }
+fontique = { version = "0.12", default-features = false, features = ["std"] }
 obscura-dom = { workspace = true }
 # The CSS `cursor` value type and the scene protocol the compositor reads.
 redrob-scene = { workspace = true }

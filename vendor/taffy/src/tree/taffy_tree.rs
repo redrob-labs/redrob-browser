@@ -131,6 +131,15 @@ struct NodeData {
     /// Float exclusions that shortened this leaf's line boxes during its latest final layout
     #[cfg(all(feature = "block_layout", feature = "float_layout"))]
     pub(crate) float_bands: Vec<FloatBand>,
+
+    /// The node is the root of an inline formatting context, laid out by the tree's inline
+    /// layout function (see [`TaffyTree::set_inline_layout_function`]) instead of by its display.
+    pub(crate) is_inline_root: bool,
+
+    /// The node's layout places floats into, or reads floats from, the block formatting context
+    /// it is laid out in. Such a layout depends on more than its `LayoutInput` and is not cached
+    /// when laid out within a block formatting context.
+    pub(crate) float_sensitive: bool,
 }
 
 impl NodeData {
@@ -147,6 +156,8 @@ impl NodeData {
             detailed_layout_info: DetailedLayoutInfo::None,
             #[cfg(all(feature = "block_layout", feature = "float_layout"))]
             float_bands: Vec::new(),
+            is_inline_root: false,
+            float_sensitive: false,
         }
     }
 
@@ -183,7 +194,39 @@ pub struct TaffyTree<NodeContext = ()> {
 
     /// Layout mode configuration
     config: TaffyConfig,
+
+    /// Lays out nodes marked as inline formatting context roots
+    #[cfg(feature = "block_layout")]
+    inline_layout: Option<InlineLayoutFn<NodeContext>>,
 }
+
+/// The tree an [`InlineLayoutFn`] lays out an inline formatting context in. It gives access to the
+/// inline root's children (atomic inline boxes, floats and out-of-flow boxes), which the function
+/// lays out itself, and to their styles and contexts.
+#[cfg(feature = "block_layout")]
+pub trait InlineLayoutHost<NodeContext> {
+    /// Lay out a child of the inline root (an inline box, a float or an out-of-flow box). The child
+    /// establishes its own block formatting context.
+    fn compute_child_layout(&mut self, node: NodeId, inputs: LayoutInput) -> LayoutOutput;
+    /// Store the final position and size of a child
+    fn set_unrounded_layout(&mut self, node: NodeId, layout: &Layout);
+    /// The last stored layout of a node
+    fn get_unrounded_layout(&self, node: NodeId) -> Layout;
+    /// The style of a node
+    fn style(&self, node: NodeId) -> &Style;
+    /// The children of a node
+    fn children(&self, node: NodeId) -> Vec<NodeId>;
+    /// Resolve an opaque `calc()` handle against a percentage basis
+    fn resolve_calc(&self, val: *const (), basis: f32) -> f32;
+    /// The context attached to a node, if any
+    fn context(&mut self, node: NodeId) -> Option<&mut NodeContext>;
+}
+
+/// Lays out one inline formatting context root: `fn(host, node, inputs, block_ctx)`. `block_ctx` is
+/// the block formatting context the root is laid out in when it does not establish its own.
+#[cfg(feature = "block_layout")]
+pub type InlineLayoutFn<NodeContext> =
+    fn(&mut dyn InlineLayoutHost<NodeContext>, NodeId, LayoutInput, Option<&mut BlockContext<'_>>) -> LayoutOutput;
 
 impl Default for TaffyTree {
     fn default() -> TaffyTree<()> {
@@ -346,9 +389,27 @@ where
             self.taffy.nodes[node_id.into()].float_bands.clone_from(&float_bands);
         }
 
+        // A layout that places floats into the block formatting context it is laid out in, or that
+        // reads floats placed there earlier, depends on the float context as well as on `inputs`:
+        // it must run again rather than reuse a cached result.
+        #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+        let bypass_cache = block_ctx.as_ref().is_some_and(|ctx| {
+            let node = &self.taffy.nodes[node_id.into()];
+            node.float_sensitive || (ctx.has_floats() && (node.is_inline_root || node.style.display == Display::Block))
+        });
+        #[cfg(not(all(feature = "block_layout", feature = "float_layout")))]
+        let bypass_cache = false;
+
         let compute = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
             let display_mode = tree.taffy.nodes[node_id.into()].style.display;
             let has_children = tree.child_count(node_id) > 0;
+
+            #[cfg(feature = "block_layout")]
+            if display_mode != Display::None && tree.taffy.nodes[node_id.into()].is_inline_root {
+                if let Some(inline_layout) = tree.taffy.inline_layout {
+                    return inline_layout(tree, node_id, inputs, block_ctx);
+                }
+            }
 
             debug_log!(display_mode);
             debug_log_node!(inputs);
@@ -389,8 +450,58 @@ where
             return output;
         }
 
+        if bypass_cache {
+            return compute(self, node_id, inputs);
+        }
+
         // If there was no cache match and a new result needs to be computed then that result will be added to the cache
         compute_cached_layout(self, node_id, inputs, compute)
+    }
+}
+
+#[cfg(feature = "block_layout")]
+impl<NodeContext, MeasureFunction> InlineLayoutHost<NodeContext> for TaffyView<'_, NodeContext, MeasureFunction>
+where
+    MeasureFunction:
+        FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+{
+    fn compute_child_layout(&mut self, node: NodeId, inputs: LayoutInput) -> LayoutOutput {
+        TaffyView::compute_child_layout(
+            self,
+            node,
+            inputs,
+            #[cfg(feature = "block_layout")]
+            None,
+        )
+    }
+
+    fn set_unrounded_layout(&mut self, node: NodeId, layout: &Layout) {
+        self.taffy.nodes[node.into()].unrounded_layout = *layout;
+    }
+
+    fn get_unrounded_layout(&self, node: NodeId) -> Layout {
+        self.taffy.nodes[node.into()].unrounded_layout
+    }
+
+    fn style(&self, node: NodeId) -> &Style {
+        &self.taffy.nodes[node.into()].style
+    }
+
+    fn children(&self, node: NodeId) -> Vec<NodeId> {
+        self.taffy.children[node.into()].iter().copied().collect()
+    }
+
+    fn resolve_calc(&self, val: *const (), basis: f32) -> f32 {
+        (self.taffy.config.calc_resolver)(val, basis)
+    }
+
+    fn context(&mut self, node: NodeId) -> Option<&mut NodeContext> {
+        let key = node.into();
+        if self.taffy.nodes[key].has_context {
+            self.taffy.node_context_data.get_mut(key)
+        } else {
+            None
+        }
     }
 }
 
@@ -629,6 +740,8 @@ impl<NodeContext> TaffyTree<NodeContext> {
             parents: SlotMap::with_capacity(capacity),
             node_context_data: SecondaryMap::with_capacity(capacity),
             config: TaffyConfig::default(),
+            #[cfg(feature = "block_layout")]
+            inline_layout: None,
         }
     }
 
@@ -993,6 +1106,34 @@ impl<NodeContext> TaffyTree<NodeContext> {
     #[inline]
     pub fn leaf_float_bands(&self, node_id: NodeId) -> &[FloatBand] {
         &self.nodes[node_id.into()].float_bands
+    }
+
+    /// Set the function that lays out inline formatting context roots (see [`Self::set_inline_root`])
+    #[cfg(feature = "block_layout")]
+    pub fn set_inline_layout_function(&mut self, function: Option<InlineLayoutFn<NodeContext>>) {
+        self.inline_layout = function;
+    }
+
+    /// Mark a node as the root of an inline formatting context. Its layout is computed by the
+    /// tree's inline layout function; its children are the context's inline boxes.
+    pub fn set_inline_root(&mut self, node_id: NodeId, is_inline_root: bool) -> TaffyResult<()> {
+        let node = &mut self.nodes[node_id.into()];
+        if node.is_inline_root != is_inline_root {
+            node.is_inline_root = is_inline_root;
+            self.mark_dirty(node_id)?;
+        }
+        Ok(())
+    }
+
+    /// Whether a node is the root of an inline formatting context
+    pub fn is_inline_root(&self, node_id: NodeId) -> bool {
+        self.nodes[node_id.into()].is_inline_root
+    }
+
+    /// Mark a node whose layout places floats into (or reads floats from) the block formatting
+    /// context it belongs to, so that its layout is never served from the cache there.
+    pub fn set_float_sensitive(&mut self, node_id: NodeId, float_sensitive: bool) {
+        self.nodes[node_id.into()].float_sensitive = float_sensitive;
     }
 
     /// Marks the layout of this node and its ancestors as outdated
