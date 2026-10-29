@@ -178,13 +178,25 @@ impl<'a> TinySkiaCanvas<'a> {
         }
     }
 
+    /// Whether this canvas only records (a scene recording of a recorded
+    /// surface): no pixels are written then.
+    fn records_only(&self) -> bool {
+        #[cfg(feature = "display-list")]
+        {
+            crate::display_list::skip_raster(&*self.target)
+        }
+        #[cfg(not(feature = "display-list"))]
+        {
+            false
+        }
+    }
+
     /// Run one raw tiny-skia call on the current surface with the call site's
     /// mask combined with the pushed clip.
-    fn with_mask<R>(
-        &mut self,
-        mask: Option<&Mask>,
-        draw: impl FnOnce(&mut Pixmap, Option<&Mask>) -> R,
-    ) -> R {
+    fn with_mask(&mut self, mask: Option<&Mask>, draw: impl FnOnce(&mut Pixmap, Option<&Mask>)) {
+        if self.records_only() {
+            return;
+        }
         let surface: &mut Pixmap =
             match self.layers.iter_mut().rev().find_map(|l| l.pixmap.as_mut()) {
                 Some(layer) => layer,
@@ -298,6 +310,12 @@ impl Canvas for TinySkiaCanvas<'_> {
     }
 
     fn push_clip(&mut self, paths: &[ClipPath]) {
+        if self.records_only() {
+            self.clips.push(None);
+            #[cfg(feature = "display-list")]
+            crate::display_list::tee(&*self.target, |recorder| recorder.push_clip(paths));
+            return;
+        }
         let (width, height) = (self.target.width(), self.target.height());
         let previous = self.clips.last().and_then(Option::as_ref);
         let mut built: Option<Mask> = None;
@@ -332,7 +350,11 @@ impl Canvas for TinySkiaCanvas<'_> {
     }
 
     fn push_layer(&mut self, opacity: f32, blend: BlendMode) {
-        let pixmap = Pixmap::new(self.target.width(), self.target.height());
+        let pixmap = if self.records_only() {
+            None
+        } else {
+            Pixmap::new(self.target.width(), self.target.height())
+        };
         self.layers.push(Layer {
             pixmap,
             opacity,
@@ -378,6 +400,10 @@ impl PixmapCanvas for Pixmap {
 
 /// A new, empty (fully clipping) mask.
 pub fn new_mask(width: u32, height: u32) -> Option<Mask> {
+    #[cfg(feature = "display-list")]
+    if let Some(mask) = crate::display_list::scene_placeholder_mask(width, height) {
+        return Some(mask);
+    }
     let mask = Mask::new(width, height)?;
     #[cfg(feature = "display-list")]
     crate::display_list::set_mask_shapes(&mask, crate::display_list::MaskShapes::Empty);
@@ -388,10 +414,26 @@ pub fn new_mask(width: u32, height: u32) -> Option<Mask> {
 pub fn clone_mask(mask: &Mask) -> Mask {
     let copy = mask.clone();
     #[cfg(feature = "display-list")]
+    crate::display_list::copy_mask_size(mask, &copy);
+    #[cfg(feature = "display-list")]
     if let Some(shapes) = crate::display_list::mask_shapes(mask) {
-        crate::display_list::set_mask_shapes(&copy, shapes);
+        if crate::display_list::mask_is_lazy(mask) {
+            crate::display_list::store_lazy_mask(&copy, shapes);
+        } else {
+            crate::display_list::set_mask_shapes(&copy, shapes);
+        }
     }
     copy
+}
+
+/// `mask`'s real pixels, for code that reads them: a scene recording may
+/// leave a mask with known shapes unrasterized.
+pub fn readable_mask(mask: &Mask) -> std::borrow::Cow<'_, Mask> {
+    #[cfg(feature = "display-list")]
+    if let Some(real) = crate::display_list::materialized(mask) {
+        return std::borrow::Cow::Owned(real);
+    }
+    std::borrow::Cow::Borrowed(mask)
 }
 
 /// `first` becomes the intersection of `first` and `second`.
@@ -410,6 +452,18 @@ pub fn intersect_mask_into(first: &mut Mask, second: &Mask) {
                 _ => MaskShapes::Unknown,
             }
         });
+    #[cfg(feature = "display-list")]
+    if let Some(shapes) = shapes.as_ref() {
+        if crate::display_list::defer_mask_raster(first, shapes) {
+            crate::display_list::store_lazy_mask(first, shapes.clone());
+            return;
+        }
+        crate::display_list::materialize_mask(first);
+    }
+    #[cfg(feature = "display-list")]
+    let second_real = readable_mask(second);
+    #[cfg(feature = "display-list")]
+    let second: &Mask = &second_real;
     for (a, b) in first.data_mut().iter_mut().zip(second.data()) {
         *a = ((*a as u16 * *b as u16 + 127) / 255) as u8;
     }
@@ -449,18 +503,29 @@ impl ClipMask for Mask {
     ) {
         #[cfg(feature = "display-list")]
         let before = crate::display_list::mask_shapes(self);
-        self.fill_path(path, fill_rule, anti_alias, transform);
         #[cfg(feature = "display-list")]
-        if let Some(before) = before {
+        let after = before.as_ref().map(|before| {
             use crate::display_list::MaskShapes;
             // tiny-skia draws the path over what the mask holds: on an empty
             // mask that is the path, otherwise a union the list cannot express.
-            let after = match before {
+            match before {
                 MaskShapes::Empty => MaskShapes::Paths(vec![crate::display_list::clip_shape_of(
                     path, fill_rule, transform,
                 )]),
                 _ => MaskShapes::Unknown,
-            };
+            }
+        });
+        #[cfg(feature = "display-list")]
+        if let Some(after) = after.as_ref() {
+            if crate::display_list::defer_mask_raster(self, after) {
+                crate::display_list::store_lazy_mask(self, after.clone());
+                return;
+            }
+            crate::display_list::materialize_mask(self);
+        }
+        self.fill_path(path, fill_rule, anti_alias, transform);
+        #[cfg(feature = "display-list")]
+        if let Some(after) = after {
             crate::display_list::set_mask_shapes(self, after);
         }
     }
@@ -474,11 +539,10 @@ impl ClipMask for Mask {
     ) {
         #[cfg(feature = "display-list")]
         let before = crate::display_list::mask_shapes(self);
-        self.intersect_path(path, fill_rule, anti_alias, transform);
         #[cfg(feature = "display-list")]
-        if let Some(before) = before {
+        let after = before.map(|before| {
             use crate::display_list::MaskShapes;
-            let after = match before {
+            match before {
                 MaskShapes::Paths(mut shapes) => {
                     shapes.push(crate::display_list::clip_shape_of(
                         path, fill_rule, transform,
@@ -486,12 +550,26 @@ impl ClipMask for Mask {
                     MaskShapes::Paths(shapes)
                 }
                 other => other,
-            };
+            }
+        });
+        #[cfg(feature = "display-list")]
+        if let Some(after) = after.as_ref() {
+            if crate::display_list::defer_mask_raster(self, after) {
+                crate::display_list::store_lazy_mask(self, after.clone());
+                return;
+            }
+            crate::display_list::materialize_mask(self);
+        }
+        self.intersect_path(path, fill_rule, anti_alias, transform);
+        #[cfg(feature = "display-list")]
+        if let Some(after) = after {
             crate::display_list::set_mask_shapes(self, after);
         }
     }
 
     fn clip_invert(&mut self) {
+        #[cfg(feature = "display-list")]
+        crate::display_list::materialize_mask(self);
         self.invert();
         #[cfg(feature = "display-list")]
         crate::display_list::set_mask_shapes(self, crate::display_list::MaskShapes::Unknown);

@@ -2048,6 +2048,74 @@ impl ObscuraJsRuntime {
         })
     }
 
+    /// One GPU compositor frame of the prepared document
+    /// (crates/redrob-scene). The compositor starts from the live scroll
+    /// offsets returned with it.
+    #[cfg(feature = "render")]
+    pub fn scene_frame_with_surface_color(
+        &self,
+        surface_color: [u8; 4],
+        raster_scale: f32,
+    ) -> Result<obscura_render::SceneFrame, obscura_render::CaptureError> {
+        let mut state = self.state.borrow_mut();
+        with_sync_render_loading_disabled(&mut state, |state| {
+            ensure_resolved_scroll(state).ok_or(obscura_render::CaptureError::PaintFailed)?;
+            let ObscuraState {
+                dom,
+                prepared_render,
+                render_resources,
+                canvas_surfaces,
+                scroll_offset,
+                element_scroll_offsets,
+                ..
+            } = state;
+            let canvas_surfaces = RuntimeCanvasSurfaceSource(canvas_surfaces);
+            obscura_render::build_scene_prepared(
+                dom.as_ref()
+                    .ok_or(obscura_render::CaptureError::PaintFailed)?,
+                prepared_render
+                    .as_mut()
+                    .ok_or(obscura_render::CaptureError::PaintFailed)?,
+                render_resources,
+                *scroll_offset,
+                element_scroll_offsets,
+                surface_color,
+                &canvas_surfaces,
+                raster_scale,
+            )
+        })
+    }
+
+    /// What a compositor frame of this document depends on, cheaply: the
+    /// activity and scroll generations, whether layout must be rebuilt
+    /// before the next paint (DOM, style or resource changes), and the
+    /// retained layout's paint epoch.
+    #[cfg(feature = "render")]
+    pub fn scene_change_signals(&self) -> (u64, u64, bool, Option<u64>) {
+        let state = self.state.borrow();
+        let dirty = state.prepared_render.is_none() || !state.pending_style_mutations.is_empty();
+        (
+            state.activity_generation,
+            state.scroll_generation,
+            dirty,
+            state.prepared_render.as_ref().map(|render| render.paint_epoch()),
+        )
+    }
+
+    /// Live scroll offsets: the document's and every scrolled element's
+    /// (keyed by NodeId index), plus the scroll generation, which changes
+    /// whenever any of them does.
+    #[cfg(feature = "render")]
+    pub fn scroll_snapshot(&self) -> ((f32, f32), Vec<(u64, (f32, f32))>, u64) {
+        let state = self.state.borrow();
+        let elements = state
+            .element_scroll_offsets
+            .iter()
+            .map(|(node, offset)| (node.index() as u64, *offset))
+            .collect();
+        (state.scroll_offset, elements, state.scroll_generation)
+    }
+
     /// Capture a document-space rectangle with the PDF print-background
     /// policy without mutating the page DOM or retained geometry.
     #[cfg(feature = "render")]

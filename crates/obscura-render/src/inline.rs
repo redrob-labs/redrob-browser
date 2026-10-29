@@ -3837,6 +3837,35 @@ impl TextEngine {
         raster_scale: f32,
         print_economy: bool,
     ) {
+        #[cfg(feature = "scene")]
+        if crate::display_list::skip_raster(pixmap) {
+            if self.scene_paint_item(idx, pixmap, offset, clip_override, clip_mask) {
+                return;
+            }
+            // Not expressible as glyph runs (a background-clip:text fill or an
+            // unknown clip): paint pixels, which the scene keeps as an image.
+            // The scene's clip chain already excludes compositor scrollers,
+            // so the item's own finalized clip must not be reapplied.
+            let real = clip_mask.and_then(crate::display_list::materialized);
+            let clip_override = Some(clip_override.unwrap_or(Rect {
+                x: -1.0e7,
+                y: -1.0e7,
+                width: 2.0e7,
+                height: 2.0e7,
+            }));
+            crate::canvas::direct_pixels(pixmap, |pixmap| {
+                self.paint_item_pixels(
+                    idx,
+                    pixmap,
+                    offset,
+                    clip_override,
+                    real.as_ref().or(clip_mask),
+                    raster_scale,
+                    print_economy,
+                )
+            });
+            return;
+        }
         // Glyphs are blitted pixel by pixel; the canvas sees the result as one image.
         crate::canvas::direct_pixels(pixmap, |pixmap| {
             self.paint_item_pixels(
@@ -3849,6 +3878,312 @@ impl TextEngine {
                 print_economy,
             )
         })
+    }
+
+    /// Record shaped item `idx` as glyph runs, decoration rects and text hit
+    /// regions for the GPU compositor (scene recordings only). False when the
+    /// item cannot be expressed that way; the caller paints pixels instead.
+    #[cfg(feature = "scene")]
+    fn scene_paint_item(
+        &mut self,
+        idx: usize,
+        pixmap: &tiny_skia::Pixmap,
+        offset: (f32, f32),
+        clip_override: Option<Rect>,
+        clip_mask: Option<&tiny_skia::Mask>,
+    ) -> bool {
+        use crate::display_list::{emit_scene_marker, emit_scene_op, scene_clip_known, Op};
+        if !scene_clip_known(clip_mask) {
+            return false;
+        }
+        let TextEngine {
+            font_system,
+            variable_swash,
+            items,
+            ..
+        } = self;
+        let Some(item) = items.get(idx) else {
+            return true;
+        };
+        if item.buffer.layout_runs().any(|run| {
+            run.glyphs
+                .iter()
+                .any(|glyph| metadata_fill(glyph.metadata).is_some())
+        }) {
+            return false;
+        }
+        let clip = clip_override.map(|c| [c.x, c.y, c.width, c.height]);
+        let (ox, oy) = (item.origin.0 + offset.0, item.origin.1 + offset.1);
+        let line_source_starts = item
+            .owner_text
+            .as_deref()
+            .filter(|_| {
+                !item.relative_owner_ranges.is_empty()
+                    || !item.boundary_events.is_empty()
+                    || !item.owner_ranges.is_empty()
+            })
+            .map(|source| source_line_starts(&item.buffer, source))
+            .unwrap_or_default();
+        let default_owner = crate::display_list::current_node();
+        let owner_at = |source_byte: usize| -> u64 {
+            item.owner_ranges
+                .iter()
+                .rev()
+                .find(|range| range.start <= source_byte && source_byte < range.end)
+                .map_or(default_owner, |range| range.owner.index() as u64 + 1)
+        };
+
+        struct Run {
+            font: u64,
+            size_bits: u32,
+            color: [u8; 4],
+            skew: bool,
+            glyphs: Vec<(u32, f32, f32)>,
+        }
+        let mut runs: Vec<Run> = Vec::new();
+        let mut underlines: Vec<(f32, f32, f32, f32, [u8; 4])> = Vec::new();
+        let mut hits: Vec<(u64, f32, f32, f32, f32)> = Vec::new();
+        let default_color = [0u8, 0, 0, 255];
+
+        for (line_index, run) in item.buffer.layout_runs().enumerate() {
+            let line_offset = if line_index == 0 {
+                item.first_line_offset
+            } else {
+                0.0
+            };
+            let line_source_start = line_source_starts.get(run.line_i).copied().unwrap_or(0);
+            let line_source_end = line_source_start + run.text.len();
+            let inline_alignment =
+                line_edge_alignment_shift(item, line_source_start, line_source_end);
+            let base_y = run.line_y;
+            let mut segments: [Option<(f32, f32, f32, [u8; 4], (f32, f32))>; 3] = [None; 3];
+            let mut active_decorations = 0;
+            let mut hit: Option<(u64, f32, f32)> = None;
+            for g in run.glyphs {
+                if item.marker.is_some_and(|marker| {
+                    marker.line_index == line_index && g.x + line_offset + g.w > marker.content_end
+                }) {
+                    continue;
+                }
+                let mut relative = glyph_relative_offset(
+                    &item.relative_owner_ranges,
+                    line_source_start,
+                    g.start,
+                    g.end,
+                );
+                relative.0 += inline_alignment
+                    + line_advance_before_text(
+                        item,
+                        line_source_start + g.start,
+                        line_source_start,
+                        line_source_end,
+                    );
+                let color = g
+                    .color_opt
+                    .map(|c| [c.r(), c.g(), c.b(), c.a()])
+                    .unwrap_or(default_color);
+
+                // Text hit region: one rect per owner span per line.
+                let owner = owner_at(line_source_start + g.start);
+                let x0 = g.x + line_offset + relative.0;
+                let x1 = x0 + g.w;
+                match hit.as_mut() {
+                    Some((current, start, end)) if *current == owner => {
+                        *start = start.min(x0);
+                        *end = end.max(x1);
+                    }
+                    _ => {
+                        if let Some((node, start, end)) = hit.take() {
+                            hits.push((node, start, run.line_top, end - start, run.line_height));
+                        }
+                        hit = Some((owner, x0, x1));
+                    }
+                }
+
+                // Glyph.
+                let font = crate::paint::scene::cosmic_font_id(font_system, g.font_id);
+                let font = match (font, g.font_is_variable) {
+                    (Some(font), true) => {
+                        let explicit = metadata_variation(g.metadata)
+                            .and_then(|index| item.variation_sets.get(index))
+                            .map(Arc::clone);
+                        let variations = variable_swash.effective_variations(
+                            font_system,
+                            g.font_id,
+                            g.font_weight_axis_opt,
+                            g.font_optical_size_opt,
+                            g.font_italic_axis,
+                            explicit,
+                        );
+                        match variations {
+                            Some(variations) => {
+                                let axes: Vec<([u8; 4], f32)> = variations
+                                    .iter()
+                                    .map(|setting| (*setting.tag.as_bytes(), setting.value.0))
+                                    .collect();
+                                Some(crate::paint::scene::font_instance_id(font, &axes))
+                            }
+                            None => Some(font),
+                        }
+                    }
+                    (font, _) => font,
+                };
+                if let Some(font) = font {
+                    let x = ox + g.x + g.font_size * g.x_offset + line_offset + relative.0;
+                    let y = oy + run.line_y + g.y - g.font_size * g.y_offset + relative.1;
+                    let skew = g.cache_key_flags.contains(CacheKeyFlags::FAKE_ITALIC);
+                    let size_bits = g.font_size.to_bits();
+                    let same = runs.last().is_some_and(|last| {
+                        last.font == font
+                            && last.size_bits == size_bits
+                            && last.color == color
+                            && last.skew == skew
+                    });
+                    if !same {
+                        runs.push(Run {
+                            font,
+                            size_bits,
+                            color,
+                            skew,
+                            glyphs: Vec::new(),
+                        });
+                    }
+                    if let Some(last) = runs.last_mut() {
+                        last.glyphs.push((g.glyph_id as u32, x, y));
+                    }
+                }
+
+                // Decorations, the same segments the pixel path strokes.
+                let decoration_flags = g.metadata & META_DECORATIONS;
+                if decoration_flags | active_decorations == 0 {
+                    continue;
+                }
+                active_decorations = decoration_flags;
+                for (index, flag) in [META_UNDERLINE, META_OVERLINE, META_LINE_THROUGH]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let segment = &mut segments[index];
+                    if decoration_flags & flag != 0 {
+                        match segment {
+                            Some((_, end, size, segment_color, prior_relative))
+                                if *segment_color == color && *prior_relative == relative =>
+                            {
+                                *end = g.x + line_offset + g.w + relative.0;
+                                *size = size.max(g.font_size);
+                            }
+                            _ => {
+                                if let Some(previous) = segment.take() {
+                                    underlines.push(decoration_stroke(previous, base_y, flag));
+                                }
+                                *segment = Some((
+                                    g.x + line_offset + relative.0,
+                                    g.x + line_offset + g.w + relative.0,
+                                    g.font_size,
+                                    color,
+                                    relative,
+                                ));
+                            }
+                        }
+                    } else if let Some(previous) = segment.take() {
+                        underlines.push(decoration_stroke(previous, base_y, flag));
+                    }
+                }
+            }
+            for (segment, flag) in
+                segments
+                    .into_iter()
+                    .zip([META_UNDERLINE, META_OVERLINE, META_LINE_THROUGH])
+            {
+                if let Some(previous) = segment {
+                    underlines.push(decoration_stroke(previous, base_y, flag));
+                }
+            }
+            if let Some((node, start, end)) = hit.take() {
+                hits.push((node, start, run.line_top, end - start, run.line_height));
+            }
+        }
+
+        // The ellipsis marker's own shaped buffer.
+        if let (Some(marker), Some(marker_buffer)) = (item.marker, item.marker_buffer.as_ref()) {
+            for run in marker_buffer.layout_runs() {
+                for g in run.glyphs {
+                    let Some(font) = crate::paint::scene::cosmic_font_id(font_system, g.font_id)
+                    else {
+                        continue;
+                    };
+                    let color = g
+                        .color_opt
+                        .map(|c| [c.r(), c.g(), c.b(), c.a()])
+                        .unwrap_or(default_color);
+                    let x = ox + marker.x.round() + g.x + g.font_size * g.x_offset;
+                    let y = oy + marker.y.round() + run.line_y + g.y - g.font_size * g.y_offset;
+                    runs.push(Run {
+                        font,
+                        size_bits: g.font_size.to_bits(),
+                        color,
+                        skew: g.cache_key_flags.contains(CacheKeyFlags::FAKE_ITALIC),
+                        glyphs: vec![(g.glyph_id as u32, x, y)],
+                    });
+                }
+            }
+        }
+
+        for run in runs {
+            if run.color[3] == 0 {
+                continue;
+            }
+            let op = Op::Glyphs {
+                font: run.font,
+                size: f32::from_bits(run.size_bits),
+                color: run.color.map(|c| c as f32 / 255.0),
+                glyphs: run.glyphs,
+                synthetic_bold: false,
+                // Shear of the 14 degree oblique the pixel path uses; negative
+                // leans tops right (redrob-scene-raster's convention).
+                skew: if run.skew { -0.249_328 } else { 0.0 },
+                transform: crate::display_list::IDENTITY,
+            };
+            emit_scene_op(pixmap, clip_mask, clip, op);
+        }
+        for (x0, x1, y, thick, color) in underlines {
+            if color[3] == 0 || x1 <= x0 {
+                continue;
+            }
+            let (x, y, w, h) = (ox + x0, oy + y, x1 - x0, thick.max(1.0).round().max(1.0));
+            let op = Op::Fill {
+                path: vec![
+                    crate::display_list::Verb::M(x, y),
+                    crate::display_list::Verb::L(x + w, y),
+                    crate::display_list::Verb::L(x + w, y + h),
+                    crate::display_list::Verb::L(x, y + h),
+                    crate::display_list::Verb::Z,
+                ],
+                brush: crate::display_list::Brush::Solid {
+                    color: color.map(|c| c as f32 / 255.0),
+                },
+                rule: crate::display_list::Rule::NonZero,
+                transform: crate::display_list::IDENTITY,
+            };
+            emit_scene_op(pixmap, clip_mask, clip, op);
+        }
+        for (node, x, y, w, h) in hits {
+            if w <= 0.0 || h <= 0.0 {
+                continue;
+            }
+            emit_scene_marker(
+                pixmap,
+                Op::Hit {
+                    node,
+                    rect: [ox + x, oy + y, w, h],
+                    radii: [0.0; 4],
+                    clip,
+                    text: true,
+                    transform: crate::display_list::IDENTITY,
+                },
+            );
+        }
+        true
     }
 
     #[allow(clippy::too_many_arguments)]

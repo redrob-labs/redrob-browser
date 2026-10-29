@@ -42,10 +42,44 @@ person sees.
 
 ## Channel
 
-The engine listens on a local socket per tab when started with
-`--scene-socket`; the window opens it with the CDP session. Messages are
-`u32` little-endian length + bincode body (`redrob_scene::encode`).
-CDP: `Page.redrobSceneAttach { targetId }` returns the socket path for a tab.
+`Page.redrobSceneAttach { rasterScale? }` on a page session opens a local
+socket for that tab and returns `{ transport, address, socketPath }`: a Unix
+socket readable only by this user (`$XDG_RUNTIME_DIR` or the temp dir) on
+Linux and macOS, `127.0.0.1:<port>` TCP on Windows. Attaching again returns
+the same socket; `Page.redrobSceneDetach` closes it, and it goes away with
+the tab. A window that reconnects gets every resource and a full frame again.
+Messages are `u32` little-endian length + bincode body
+(`redrob_scene::encode`). `rasterScale` (default: the page's device scale
+factor) is the density the engine rasterizes SVG images at.
+
+Engine side (`crates/obscura-render/src/paint/scene.rs`,
+`crates/obscura-cdp/src/scene_channel.rs`):
+
+- A frame is recorded from the screenshot painter itself, run over the whole
+  document at zero scroll with a canvas that keeps ops and writes no pixels.
+  Every op carries the DOM node being painted, which places it in the spatial
+  tree; text is glyph runs in the fonts cosmic-text shaped with (variable
+  fonts as `Resource::FontInstance`), images are interned by content.
+- Compositor scrollers are `overflow: auto|scroll` boxes and the document.
+  An `overflow: hidden` box only script can scroll is painted at its live
+  offset; script scrolling it sends a new frame.
+- Each 16 ms tick: a `Frame` when DOM, style, layout, images, fonts, a
+  canvas or a CSS animation changed, while fewer than two frames are
+  unpresented; otherwise a spatial-only `Delta` when only script scrolled,
+  with `offset_changed_by_page` set on the scrollers it moved. Resources go
+  out before the frame that first uses them; ones no frame uses are dropped.
+- `Scrolled` sets `scrollLeft`/`scrollTop` (or the window scroll) through the
+  page, so `scroll` events fire; there is no relayout and no echo back.
+- Hit regions: every element box (inline boxes per line fragment) and every
+  line of text, in paint order, with the computed `cursor` (links get
+  `pointer` from the UA sheet), `is_text` for text and editable fields, the
+  resolved `href` of the nearest link, and no regions for
+  `pointer-events: none` or `visibility: hidden`.
+- `External.key` is the video's media id; canvases are sent as images.
+- Checks: `OBSCURA_SCENE_DUMP=<file.json> redrob-browser fetch <url>
+  --screenshot <png>` writes the frame (`.bin`, the exact stream) and a
+  summary; `cargo run -p redrob-scene-raster --example render_stream` draws a
+  dumped stream, `--example scene_client` connects to a live channel.
 
 ## Window side (`crates/redrob-shell/src/compositor/`)
 

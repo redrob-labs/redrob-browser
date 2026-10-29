@@ -7,6 +7,8 @@ pub mod domains;
 pub mod server;
 pub mod types;
 pub(crate) mod util;
+#[cfg(feature = "render")]
+pub(crate) mod scene_channel;
 
 pub use server::{
     start, start_with_full_options, start_with_full_serve_options, start_with_host,

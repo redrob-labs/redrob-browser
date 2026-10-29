@@ -12,6 +12,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 mod damage;
+#[cfg(feature = "scene")]
+pub mod scene;
 pub use damage::DamageSnapshot;
 use tiny_skia::{
     Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, Point, Rect, SpreadMode,
@@ -940,6 +942,10 @@ pub struct ResolvedScrollState {
     container_offsets: Vec<(f32, f32)>,
     node_movement: Vec<(f32, f32)>,
     inherited_clips: Vec<Option<crate::dom::OverflowClip>>,
+    /// Scene recordings only: scroll containers the GPU compositor scrolls
+    /// and clips itself. Their own overflow clip is left out of paint, and
+    /// their content starts a fresh clip chain in the scroll frame's space.
+    scene_unclipped: Option<Arc<HashSet<obscura_dom::tree::NodeId>>>,
 }
 
 /// A rectangle in immutable document CSS-pixel coordinates.
@@ -1092,6 +1098,13 @@ pub fn validate_capture_region(region: CaptureRegion) -> Result<(), CaptureError
 impl ResolvedScrollState {
     pub fn root_offset(&self) -> (f32, f32) {
         self.root_offset
+    }
+
+    /// The compositor scrolls `id` itself (scene recordings only).
+    fn scene_unclipped(&self, id: obscura_dom::tree::NodeId) -> bool {
+        self.scene_unclipped
+            .as_ref()
+            .is_some_and(|set| set.contains(&id))
     }
 
     fn movement_for(&self, id: obscura_dom::tree::NodeId) -> (f32, f32) {
@@ -1271,6 +1284,11 @@ impl PreparedRender {
 
     pub fn base_url(&self) -> Option<&str> {
         self.base_url.as_deref()
+    }
+
+    /// Changes whenever layout, styles or selected images change.
+    pub fn paint_epoch(&self) -> u64 {
+        self.paint_epoch
     }
 
     pub fn layout(&self) -> &crate::DomLayout {
@@ -1506,6 +1524,7 @@ impl PreparedRender {
             container_offsets: offsets,
             node_movement,
             inherited_clips,
+            scene_unclipped: None,
         }
     }
 
@@ -2469,6 +2488,7 @@ pub(crate) fn non_geometric_computed_style(
         }
         .to_string(),
     );
+    out.insert("cursor", cursor_css(style.cursor.unwrap_or_default()).to_string());
     out.insert("opacity", css_number(style.opacity.unwrap_or(1.0)));
     out.insert(
         "background-color",
@@ -2495,6 +2515,48 @@ pub(crate) fn non_geometric_computed_style(
     );
     out.insert("color", css_color(style.color.unwrap_or([0, 0, 0, 255])));
     out
+}
+
+fn cursor_css(cursor: crate::Cursor) -> &'static str {
+    use crate::Cursor as C;
+    match cursor {
+        C::Auto => "auto",
+        C::Default => "default",
+        C::Pointer => "pointer",
+        C::Text => "text",
+        C::VerticalText => "vertical-text",
+        C::Wait => "wait",
+        C::Progress => "progress",
+        C::Help => "help",
+        C::Crosshair => "crosshair",
+        C::Move => "move",
+        C::Grab => "grab",
+        C::Grabbing => "grabbing",
+        C::NotAllowed => "not-allowed",
+        C::NoDrop => "no-drop",
+        C::ContextMenu => "context-menu",
+        C::Cell => "cell",
+        C::Copy => "copy",
+        C::Alias => "alias",
+        C::ZoomIn => "zoom-in",
+        C::ZoomOut => "zoom-out",
+        C::ColResize => "col-resize",
+        C::RowResize => "row-resize",
+        C::EResize => "e-resize",
+        C::NResize => "n-resize",
+        C::NeResize => "ne-resize",
+        C::NwResize => "nw-resize",
+        C::SResize => "s-resize",
+        C::SeResize => "se-resize",
+        C::SwResize => "sw-resize",
+        C::WResize => "w-resize",
+        C::EwResize => "ew-resize",
+        C::NsResize => "ns-resize",
+        C::NeswResize => "nesw-resize",
+        C::NwseResize => "nwse-resize",
+        C::AllScroll => "all-scroll",
+        C::None => "none",
+    }
 }
 
 fn computed_display(style: &crate::LayoutStyle) -> &'static str {
@@ -4393,6 +4455,7 @@ fn paint_laid_dom_scrolled(
     }
 
     for (paint_index, nid) in paint_order.into_iter().enumerate() {
+        scene_node(nid);
         if svg_subtree_skip.contains(&nid) {
             continue;
         }
@@ -4433,6 +4496,7 @@ fn paint_laid_dom_scrolled(
                 print_economy,
                 canvas_background,
             )?;
+            scene_node(nid);
             continue;
         }
         if paint_root != Some(nid) && is_effective_float(tree, laid, nid) {
@@ -4470,6 +4534,7 @@ fn paint_laid_dom_scrolled(
                 print_economy,
                 canvas_background,
             )?;
+            scene_node(nid);
             continue;
         }
         let node = match tree.get_node(nid) {
@@ -4574,6 +4639,7 @@ fn paint_laid_dom_scrolled(
                     print_economy,
                     canvas_background,
                 )?;
+                scene_node(nid);
                 continue;
             }
 
@@ -4636,6 +4702,15 @@ fn paint_laid_dom_scrolled(
             let Some(layer) = Pixmap::new(layer_width, layer_height) else {
                 continue;
             };
+            #[cfg(feature = "display-list")]
+            crate::display_list::note_reference_layer(
+                &layer,
+                scene_node_id(nid),
+                (
+                    surface_offset.0 + layer_delta.0,
+                    surface_offset.1 + layer_delta.1,
+                ),
+            );
             crate::canvas::begin_layer(&layer);
             let layer = paint_laid_dom_scrolled(
                 tree,
@@ -4668,6 +4743,7 @@ fn paint_laid_dom_scrolled(
                 print_economy,
                 canvas_background,
             )?;
+            scene_node(nid);
             let transform =
                 display_transform.then(crate::Affine2::translate(-layer_delta.0, -layer_delta.1));
             let transform = Transform::from_row(
@@ -4708,6 +4784,9 @@ fn paint_laid_dom_scrolled(
             opacity_subtree_skip.insert(nid);
             opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
             if own_opacity <= 0.0 {
+                // Fully transparent boxes still take pointer input.
+                #[cfg(feature = "display-list")]
+                scene_subtree_hits(tree, laid, &scroll_state, &pixmap, nid, viewport);
                 continue;
             }
             // Opacity is applied to the finished stacking context, never to
@@ -4743,6 +4822,7 @@ fn paint_laid_dom_scrolled(
                 print_economy,
                 canvas_background,
             )?;
+            scene_node(nid);
             let group_paint = tiny_skia::PixmapPaint {
                 opacity: own_opacity,
                 ..tiny_skia::PixmapPaint::default()
@@ -4786,6 +4866,8 @@ fn paint_laid_dom_scrolled(
         let clip = overflow_clip
             .as_ref()
             .map(|clip| clip.viewport_rect(scroll_state.surface_extent.unwrap_or(viewport)));
+        #[cfg(feature = "display-list")]
+        scene_element_hit(&pixmap, tree, laid, nid, &rect, style, clip, (ox, oy));
         let cull_rect = rect;
         let visible_rect = match clip {
             Some(c) => match cull_rect.intersect(&c) {
@@ -5073,6 +5155,7 @@ fn paint_laid_dom_scrolled(
         .flatten()
         .any(|pseudo| pseudo.position == Some(taffy::Position::Absolute));
         if has_positioned_pseudo {
+            scene_content_node(&scroll_state, nid);
             let positioned_pseudo_containing_block = {
                 let mut ancestor = Some(nid);
                 let mut found = None;
@@ -5130,6 +5213,7 @@ fn paint_laid_dom_scrolled(
             }
         }
 
+        scene_node(nid);
         if box_on_surface && name.local.as_ref() == "canvas" {
             if let Some(surface) = canvas_surfaces.surface(nid) {
                 // A canvas bitmap is replaced content: CSS sizing and
@@ -5232,6 +5316,12 @@ fn paint_laid_dom_scrolled(
             }
         }
 
+        // The window draws the video frame over the poster painted above.
+        #[cfg(feature = "display-list")]
+        if name.local.as_ref() == "video" {
+            scene_external(&pixmap, nid, &rect, style, element_clip_mask, clip);
+        }
+
         // Inline `<svg>...</svg>`: serialize the whole subtree back to one
         // standalone SVG document and rasterize it as a unit, so a
         // `<use href="#id">` resolves against the `<symbol>`/`<defs>` in the
@@ -5275,11 +5365,12 @@ fn paint_laid_dom_scrolled(
                 // the sprite, splice the referenced `<symbol>` into a local `<defs>`,
                 // and rewrite the href to a same-document `#id`. Same-document
                 // `<use href="#id">` (empty url) is untouched.
-                if let Some(content) = render_svg_with_font_database(
+                if let Some(content) = render_svg_with_font_database_scaled(
                     markup.as_bytes(),
                     rect.width as u32,
                     rect.height as u32,
                     svg_fonts,
+                    scene_svg_scale(),
                 ) {
                     let mut mask = element_clip_mask.map(crate::canvas::clone_mask);
                     if has_radius {
@@ -5291,12 +5382,35 @@ fn paint_laid_dom_scrolled(
                         );
                         mask = intersect_clip_masks(mask, own.as_ref());
                     }
+                    // A scene raster is denser than CSS pixels; map it back.
+                    let density = content.width() as f32 / (rect.width as u32).max(1) as f32;
+                    let (paint, transform) = if density > 1.0 {
+                        (
+                            tiny_skia::PixmapPaint {
+                                quality: tiny_skia::FilterQuality::Bilinear,
+                                ..tiny_skia::PixmapPaint::default()
+                            },
+                            Transform::from_row(
+                                1.0 / density,
+                                0.0,
+                                0.0,
+                                1.0 / density,
+                                rect.x as i32 as f32,
+                                rect.y as i32 as f32,
+                            ),
+                        )
+                    } else {
+                        (
+                            tiny_skia::PixmapPaint::default(),
+                            Transform::from_translate(rect.x as i32 as f32, rect.y as i32 as f32),
+                        )
+                    };
                     pixmap.canvas().draw_image(
-                        rect.x as i32,
-                        rect.y as i32,
+                        0,
+                        0,
                         content.as_ref(),
-                        &tiny_skia::PixmapPaint::default(),
-                        Transform::identity(),
+                        &paint,
+                        transform,
                         mask.as_ref(),
                     );
                 }
@@ -5307,6 +5421,7 @@ fn paint_laid_dom_scrolled(
         }
 
         if let Some(generated) = generated_before.get(&nid) {
+            scene_content_node(&scroll_state, nid);
             for generated in generated {
                 paint_in_flow_generated_box(
                     &mut pixmap,
@@ -5320,6 +5435,7 @@ fn paint_laid_dom_scrolled(
                     raster_scale,
                 );
             }
+            scene_node(nid);
         }
 
         // List-item marker (bullet or number), drawn in the indent to the left
@@ -5355,6 +5471,7 @@ fn paint_laid_dom_scrolled(
         // paint them here. The static path remains for layout-only builds and
         // for a face that cosmic-text cannot decode.
         if let Some(items) = laid.word_ifc_items.get(&nid) {
+            scene_content_node(&scroll_state, nid);
             let offset = scroll_state.translation_for(laid, nid);
             for &item in items {
                 laid.text_engine.paint_item_with_clip_mask_scaled_for_print(
@@ -5367,6 +5484,7 @@ fn paint_laid_dom_scrolled(
                     print_economy,
                 );
             }
+            scene_node(nid);
         } else if let Some(runs) = laid.text_runs.get(&nid) {
             let color = style.color.unwrap_or([0, 0, 0, 255]);
             let fsize = style.font_size.unwrap_or(16.0);
@@ -5671,6 +5789,9 @@ fn paint_laid_dom_scrolled(
         {
             continue;
         }
+        // Shaped text is the container's content: for a compositor scroller
+        // it scrolls with the scroll frame.
+        scene_content_node(&scroll_state, nid);
         // Shift the shaped glyphs by the same accumulated translate as the
         // container's box so text under a transformed ancestor moves with
         // it. Computed before the mutable `paint_item` borrow.
@@ -5717,6 +5838,218 @@ fn paint_laid_dom_scrolled(
     }
 
     Some(pixmap)
+}
+
+/// Device scale SVG images are rasterized at (1 outside scene recordings).
+fn scene_svg_scale() -> f32 {
+    #[cfg(feature = "display-list")]
+    {
+        crate::display_list::scene_raster_scale()
+    }
+    #[cfg(not(feature = "display-list"))]
+    {
+        1.0
+    }
+}
+
+/// Scene node tag for `nid` (index + 1; 0 means none).
+fn scene_node_id(nid: obscura_dom::tree::NodeId) -> u64 {
+    nid.index() as u64 + 1
+}
+
+/// Tag later recorded ops with `nid` (scene recordings only; free otherwise).
+#[inline]
+fn scene_node(nid: obscura_dom::tree::NodeId) {
+    #[cfg(feature = "display-list")]
+    crate::display_list::set_current_node(scene_node_id(nid));
+    #[cfg(not(feature = "display-list"))]
+    let _ = nid;
+}
+
+/// Bit set on a node tag for ops that are the node's *content* (its shaped
+/// text, generated boxes): for a compositor scroller they scroll.
+pub(crate) const SCENE_CONTENT_FLAG: u64 = 1 << 63;
+
+#[inline]
+fn scene_content_node(scroll_state: &ScrollPaintState<'_>, nid: obscura_dom::tree::NodeId) {
+    #[cfg(feature = "display-list")]
+    {
+        let content = scroll_state
+            .resolved
+            .is_some_and(|resolved| resolved.scene_unclipped(nid));
+        let tag = scene_node_id(nid) | if content { SCENE_CONTENT_FLAG } else { 0 };
+        crate::display_list::set_current_node(tag);
+    }
+    #[cfg(not(feature = "display-list"))]
+    let _ = (scroll_state, nid);
+}
+
+fn rect_array(rect: &crate::Rect) -> [f32; 4] {
+    [rect.x, rect.y, rect.width, rect.height]
+}
+
+/// Whether text editing happens in this element's box (an I-beam over it).
+fn scene_editable_text(tree: &DomTree, nid: obscura_dom::tree::NodeId) -> bool {
+    tree.with_node(nid, |node| {
+        let Some(element) = node.as_element() else {
+            return false;
+        };
+        match element.local.as_ref() {
+            "textarea" => true,
+            "input" => {
+                let kind = node
+                    .get_attribute("type")
+                    .map(|kind| kind.trim().to_ascii_lowercase())
+                    .unwrap_or_default();
+                matches!(
+                    kind.as_str(),
+                    "" | "text" | "search" | "email" | "url" | "tel" | "password" | "number"
+                )
+            }
+            _ => node
+                .get_attribute("contenteditable")
+                .is_some_and(|value| !value.eq_ignore_ascii_case("false")),
+        }
+    })
+    .unwrap_or(false)
+}
+
+/// Hit region(s) for an element box at its paint position.
+#[cfg(feature = "display-list")]
+#[allow(clippy::too_many_arguments)]
+fn scene_element_hit(
+    pixmap: &Pixmap,
+    tree: &DomTree,
+    laid: &crate::DomLayout,
+    nid: obscura_dom::tree::NodeId,
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    clip: Option<crate::Rect>,
+    offset: (f32, f32),
+) {
+    if !crate::display_list::scene_active() || style.pointer_events_none.unwrap_or(false) {
+        return;
+    }
+    let text = scene_editable_text(tree, nid);
+    let clip = clip.map(|clip| rect_array(&clip));
+    let fragments = style
+        .ignores_used_box_sizes()
+        .then(|| laid.inline_fragments.get(&nid))
+        .flatten()
+        .filter(|fragments| !fragments.is_empty());
+    if let Some(fragments) = fragments {
+        for fragment in fragments {
+            let rect = crate::Rect {
+                x: fragment.x + offset.0,
+                y: fragment.y + offset.1,
+                ..*fragment
+            };
+            crate::display_list::emit_scene_marker(
+                pixmap,
+                crate::display_list::Op::Hit {
+                    node: scene_node_id(nid),
+                    rect: rect_array(&rect),
+                    radii: [0.0; 4],
+                    clip,
+                    text,
+                    transform: crate::display_list::IDENTITY,
+                },
+            );
+        }
+        return;
+    }
+    let radii = style.border_model.radii.resolve(rect.width, rect.height);
+    crate::display_list::emit_scene_marker(
+        pixmap,
+        crate::display_list::Op::Hit {
+            node: scene_node_id(nid),
+            rect: rect_array(rect),
+            radii: [
+                radii.top_left.0,
+                radii.top_right.0,
+                radii.bottom_right.0,
+                radii.bottom_left.0,
+            ],
+            clip,
+            text,
+            transform: crate::display_list::IDENTITY,
+        },
+    );
+}
+
+/// Hit regions for an `opacity: 0` subtree, which paints nothing but still
+/// receives pointer input.
+#[cfg(feature = "display-list")]
+fn scene_subtree_hits(
+    tree: &DomTree,
+    laid: &crate::DomLayout,
+    scroll_state: &ScrollPaintState<'_>,
+    pixmap: &Pixmap,
+    nid: obscura_dom::tree::NodeId,
+    viewport: (f32, f32),
+) {
+    if !crate::display_list::scene_active() {
+        return;
+    }
+    let mut ids = vec![nid];
+    ids.extend(crate::dom::rendered_descendants(tree, nid));
+    for id in ids {
+        let (Some(rect), Some(style)) = (laid.rects.get(&id), laid.styles.get(&id)) else {
+            continue;
+        };
+        if style.computed_visibility_hidden || !tree.get_node(id).is_some_and(|n| n.is_element()) {
+            continue;
+        }
+        scene_node(id);
+        let (ox, oy) = scroll_state.translation_for(laid, id);
+        let moved = crate::Rect {
+            x: rect.x + ox,
+            y: rect.y + oy,
+            ..*rect
+        };
+        let clip = scroll_state
+            .overflow_clip_for(laid, id)
+            .map(|clip| clip.viewport_rect(scroll_state.surface_extent.unwrap_or(viewport)));
+        scene_element_hit(pixmap, tree, laid, id, &moved, style, clip, (ox, oy));
+    }
+    scene_node(nid);
+}
+
+/// A region the window fills itself: the content box of a video or canvas.
+#[cfg(feature = "display-list")]
+fn scene_external(
+    pixmap: &Pixmap,
+    nid: obscura_dom::tree::NodeId,
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    mask: Option<&tiny_skia::Mask>,
+    clip: Option<crate::Rect>,
+) {
+    if !crate::display_list::scene_active() {
+        return;
+    }
+    let content = crate::Rect {
+        x: rect.x + style.border.left + style.padding.left,
+        y: rect.y + style.border.top + style.padding.top,
+        width: (rect.width
+            - style.border.left
+            - style.border.right
+            - style.padding.left
+            - style.padding.right)
+            .max(0.0),
+        height: (rect.height
+            - style.border.top
+            - style.border.bottom
+            - style.padding.top
+            - style.padding.bottom)
+            .max(0.0),
+    };
+    let op = crate::display_list::Op::External {
+        key: scene_node_id(nid),
+        rect: rect_array(&content),
+        transform: crate::display_list::IDENTITY,
+    };
+    crate::display_list::emit_scene_op(pixmap, mask, clip.map(|c| rect_array(&c)), op);
 }
 
 fn raster_transform(scale: f32) -> Transform {
@@ -5863,7 +6196,7 @@ fn paint_inline_fragment_decorations(
         let background_origin = background_geometry(&union, style).origin_rect;
         let background_path = background_clip_path(background);
         let element_clip_mask = background_extra_clip(ancestor_clip_mask, clip_path_mask.as_ref());
-        let background_mask = element_clip_mask.clone();
+        let background_mask = element_clip_mask.as_ref().map(crate::canvas::clone_mask);
 
         if let Some(shadow) = fragment_style.box_shadow {
             paint_box_shadow(
@@ -6269,7 +6602,10 @@ impl<'a> ScrollPaintState<'a> {
                     else {
                         continue;
                     };
-                    if !style.overflow_hidden || style.overflow_propagated_to_viewport {
+                    if !style.overflow_hidden
+                        || style.overflow_propagated_to_viewport
+                        || self.resolved.is_some_and(|r| r.scene_unclipped(owner))
+                    {
                         continue;
                     }
                     let (x, y) = self.translation_for(laid, owner);
@@ -6301,6 +6637,11 @@ impl<'a> ScrollPaintState<'a> {
         laid: &crate::DomLayout,
         id: obscura_dom::tree::NodeId,
     ) -> Option<crate::dom::OverflowClip> {
+        if self.resolved.is_some_and(|r| r.scene_unclipped(id)) {
+            // Content of a compositor scroller: its clip chain restarts in
+            // the scroll frame's space, and the compositor clips the frame.
+            return None;
+        }
         let inherited = self.overflow_clip_for(laid, id);
         let Some(style) = laid.styles.get(&id) else {
             return inherited;
@@ -6957,6 +7298,27 @@ fn paint_box_shadow(
         return;
     }
     let border_radii = border_radius.resolve(rect.width, rect.height);
+    #[cfg(feature = "display-list")]
+    {
+        let op = crate::display_list::Op::BoxShadow {
+            rect: [rect.x, rect.y, rect.width, rect.height],
+            radii: [
+                border_radii.top_left.0,
+                border_radii.top_right.0,
+                border_radii.bottom_right.0,
+                border_radii.bottom_left.0,
+            ],
+            color: shadow.color.map(|c| c as f32 / 255.0),
+            blur: shadow.blur.max(0.0),
+            offset: [shadow.offset_x, shadow.offset_y],
+            spread,
+            inset: false,
+            transform: crate::display_list::IDENTITY,
+        };
+        if crate::display_list::emit_scene_op(pixmap, ancestor_clip, None, op) {
+            return;
+        }
+    }
     let radius = border_radii.top_left;
     let rx0 = (radius.0 + spread).max(0.0);
     let ry0 = (radius.1 + spread).max(0.0);
@@ -7673,6 +8035,24 @@ fn draw_text(
     clip_mask: Option<&tiny_skia::Mask>,
     raster_scale: f32,
 ) {
+    #[cfg(feature = "scene")]
+    if crate::display_list::skip_raster(pixmap) {
+        if scene::scene_draw_text(
+            pixmap,
+            text,
+            (x, y),
+            color,
+            size,
+            is_bold,
+            fallback_font_bytes(family),
+            letter_spacing,
+            word_spacing,
+            clip,
+            clip_mask,
+        ) {
+            return;
+        }
+    }
     // Glyphs are blitted pixel by pixel; the canvas sees the result as one image.
     crate::canvas::direct_pixels(pixmap, |pixmap| {
         draw_text_pixels(
@@ -9751,7 +10131,7 @@ fn paint_in_flow_generated_box(
     let background_path = background_clip_path(background);
     let element_clip_mask =
         background_extra_clip(ancestor_clip_mask.as_ref(), clip_path_mask.as_ref());
-    let background_mask = element_clip_mask.clone();
+    let background_mask = element_clip_mask.as_ref().map(crate::canvas::clone_mask);
     if style.mask_image.is_none() && !style.background_clip_text {
         if let (Some(color), Some(path)) = (style.background_color, background_path.as_ref()) {
             let mut paint = Paint::default();
@@ -9993,7 +10373,7 @@ fn paint_positioned_pseudo(
     let background_path = background_clip_path(background);
     let element_clip_mask =
         background_extra_clip(ancestor_clip_mask.as_ref(), clip_path_mask.as_ref());
-    let background_mask = element_clip_mask.clone();
+    let background_mask = element_clip_mask.as_ref().map(crate::canvas::clone_mask);
     if style.mask_image.is_none() && !style.background_clip_text {
         if let (Some(color), Some(path)) = (style.background_color, background_path.as_ref()) {
             let mut paint = Paint::default();
@@ -10770,7 +11150,13 @@ fn paint_image(
     // result up on draw when the destination is larger.
     let (rw, rh) = bounded_raster_size(dw, dh);
     let content = if svg {
-        render_svg(&bytes, rw, rh).map(Arc::new)
+        let scale = scene_svg_scale();
+        if scale > 1.0 {
+            render_svg_with_font_database_scaled(&bytes, rw, rh, &svg_font_database(), scale)
+                .map(Arc::new)
+        } else {
+            render_svg(&bytes, rw, rh).map(Arc::new)
+        }
     } else if !src.starts_with("data:") {
         let key = resolved.map(|url| match profile {
             Some(profile) => image_resource_key(&url, profile),
@@ -10845,6 +11231,7 @@ fn paint_image(
             )
         })
         .unwrap_or_else(Transform::identity);
+    let (rw, rh) = (content.width(), content.height());
     if (rw, rh) == (dw, dh) {
         pixmap.canvas().draw_image(
             dest.x as i32,
@@ -11310,6 +11697,18 @@ fn render_svg_with_font_database(
     height: u32,
     fonts: &std::sync::Arc<usvg::fontdb::Database>,
 ) -> Option<Pixmap> {
+    render_svg_with_font_database_scaled(bytes, width, height, fonts, 1.0)
+}
+
+/// [`render_svg_with_font_database`] at `scale` device pixels per CSS
+/// pixel: the SVG viewport stays `width` x `height`, the pixmap is larger.
+fn render_svg_with_font_database_scaled(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    fonts: &std::sync::Arc<usvg::fontdb::Database>,
+    scale: f32,
+) -> Option<Pixmap> {
     if width == 0 || height == 0 {
         return None;
     }
@@ -11332,9 +11731,19 @@ fn render_svg_with_font_database(
     if size.width() <= 0.0 || size.height() <= 0.0 {
         return None;
     }
-    let mut svg_pixmap = Pixmap::new(width, height)?;
-    let transform =
-        Transform::from_scale(width as f32 / size.width(), height as f32 / size.height());
+    let (pixel_width, pixel_height) = if scale > 1.0 {
+        (
+            ((width as f32 * scale).round() as u32).max(1),
+            ((height as f32 * scale).round() as u32).max(1),
+        )
+    } else {
+        (width, height)
+    };
+    let mut svg_pixmap = Pixmap::new(pixel_width, pixel_height)?;
+    let transform = Transform::from_scale(
+        pixel_width as f32 / size.width(),
+        pixel_height as f32 / size.height(),
+    );
     resvg::render(&tree, transform, &mut svg_pixmap.as_mut());
     Some(svg_pixmap)
 }

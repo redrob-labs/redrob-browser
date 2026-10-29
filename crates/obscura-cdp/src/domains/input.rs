@@ -362,6 +362,27 @@ pub async fn handle(
             } else if event_type == "mouseWheel" {
                 let delta_x = params.get("deltaX").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let delta_y = params.get("deltaY").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                // Redrob window: its GPU compositor scrolls (docs/COMPOSITOR.md).
+                // Only the DOM wheel event fires here; scrolling it as well
+                // would scroll twice. The reply says whether the page
+                // cancelled it, so the window can skip its own scroll.
+                if compositor_scrolls(params) {
+                    let prevented = match ctx.get_session_page_mut(session_id) {
+                        Some(page) => {
+                            let code = format!(
+                                "(function() {{\
+                                    var target = (document.elementFromPoint && document.elementFromPoint({x},{y})) || document.body || document.documentElement;\
+                                    if (!target) return false;\
+                                    var wheel = globalThis.__obscura_markTrusted(new WheelEvent('wheel', {{bubbles:true,cancelable:true,view:globalThis,clientX:{x},clientY:{y},deltaX:{delta_x},deltaY:{delta_y},deltaMode:0,altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
+                                    return !target.dispatchEvent(wheel);\
+                                }})()",
+                            );
+                            page.evaluate(&code).as_bool().unwrap_or(false)
+                        }
+                        None => false,
+                    };
+                    return Ok(json!({ "redrobDefaultPrevented": prevented }));
+                }
                 if let Some(page) = ctx.get_session_page_mut(session_id) {
                     let code = format!(
                         "(function() {{\
@@ -456,6 +477,12 @@ pub async fn handle(
                             virtual_key_code = virtual_key_code,
                         );
                         if page.evaluate(&js).as_bool() == Some(false) {
+                            // The window's compositor scrolls for keys
+                            // (Space, arrows, Page Up/Down); a cancelled
+                            // keydown means it must not.
+                            if compositor_scrolls(params) {
+                                return Ok(json!({ "redrobDefaultPrevented": true }));
+                            }
                             return Ok(json!({}));
                         }
 
@@ -521,6 +548,9 @@ pub async fn handle(
                 }
             }
 
+            if compositor_scrolls(params) && matches!(event_type, "keyDown" | "rawKeyDown") {
+                return Ok(json!({ "redrobDefaultPrevented": false }));
+            }
             Ok(json!({}))
         }
         "dispatchTouchEvent" => Ok(json!({})),
@@ -547,4 +577,13 @@ mod tests {
         let decoded: String = serde_json::from_str(&lit).expect("the literal must be valid JSON");
         assert_eq!(decoded, "a\nb\r\t'c\\d\"e");
     }
+}
+
+/// Redrob window extension: `redrobCompositorScrolls: true` means the
+/// window's compositor owns scrolling for this input event.
+fn compositor_scrolls(params: &serde_json::Value) -> bool {
+    params
+        .get("redrobCompositorScrolls")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
 }

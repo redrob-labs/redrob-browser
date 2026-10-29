@@ -5078,6 +5078,7 @@ dependencies = [
  "log",
  "obscura-dom",
  "obscura-ssrf",
+ "redrob-scene",
  "resvg 0.47.0",
  "serde",
  "swash",
