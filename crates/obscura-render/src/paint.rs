@@ -3095,7 +3095,8 @@ pub fn prepare_dom_with_retained_styles_with_animation_state(
         animation_sample,
         animation_timeline,
     );
-    if let (Some(prepared), Some(timeline)) = (prepared.as_ref(), timeline_before) {
+    let mut prepared = prepared;
+    if let (Some(prepared), Some(timeline)) = (prepared.as_mut(), timeline_before) {
         verify_against_scratch(
             "retained",
             prepared,
@@ -3124,7 +3125,7 @@ thread_local! {
 #[allow(clippy::too_many_arguments)]
 fn verify_against_scratch(
     path: &str,
-    prepared: &PreparedRender,
+    prepared: &mut PreparedRender,
     tree: &DomTree,
     viewport: (f32, f32),
     base_url: Option<&str>,
@@ -3151,7 +3152,7 @@ fn verify_against_scratch(
         )
     });
     VERIFYING.with(|flag| flag.set(false));
-    let Some(scratch) = scratch else {
+    let Some(mut scratch) = scratch else {
         panic!("OBSCURA_LAYOUT_VERIFY ({path}): scratch layout failed");
     };
     let mut difference = crate::dom::layout_difference(&prepared.layout, &scratch.layout);
@@ -3169,6 +3170,35 @@ fn verify_against_scratch(
     }
     if difference.is_none() {
         difference = crate::dom::scroll_tree_difference(&prepared.scroll_tree, &scratch.scroll_tree);
+    }
+    // The compositor frame built from the incremental layout must equal the
+    // frame built from scratch: no stale boxes, glyph runs or clips.
+    #[cfg(feature = "scene")]
+    if difference.is_none() {
+        let no_scroll = HashMap::new();
+        let mut frame = |render: &mut PreparedRender, resources: &mut RenderResourceCache| {
+            scene::build_scene_prepared(
+                tree,
+                render,
+                resources,
+                (0.0, 0.0),
+                &no_scroll,
+                [255, 255, 255, 255],
+                &EMPTY_CANVAS_SURFACES,
+                1.0,
+            )
+            .ok()
+            .map(|frame| redrob_scene::encode(&frame.frame))
+        };
+        let incremental = frame(prepared, resources);
+        let from_scratch = frame(&mut scratch, resources);
+        if incremental != from_scratch {
+            difference = Some(format!(
+                "scene frame differs ({:?} vs {:?} bytes)",
+                incremental.as_ref().map(Vec::len),
+                from_scratch.as_ref().map(Vec::len)
+            ));
+        }
     }
     if let Some(difference) = difference {
         panic!("OBSCURA_LAYOUT_VERIFY ({path}): incremental layout differs from scratch: {difference}");
@@ -3461,7 +3491,8 @@ fn prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
         animation_sample,
         animation_timeline,
     );
-    if let (Some(prepared), Some(timeline)) = (prepared.as_ref(), timeline_before) {
+    let mut prepared = prepared;
+    if let (Some(prepared), Some(timeline)) = (prepared.as_mut(), timeline_before) {
         verify_against_scratch(
             "full",
             prepared,
