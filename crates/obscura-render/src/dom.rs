@@ -21436,6 +21436,29 @@ mod tests {
         assert_eq!(panel.height, 42.0, "{panel:?}");
     }
 
+    // Chrome: a text item alone in an auto row of a grid with fr columns
+    // is 18px tall (grid 38px with a 20px first row). Taffy measured the
+    // item's width with a width-only query whose zero height was cached and
+    // then reused for the row's height query with the same inputs.
+    #[cfg(feature = "paint")]
+    #[test]
+    fn text_item_alone_in_an_auto_grid_row_keeps_its_height() {
+        for (rows, grid_height, top) in [
+            ("grid-template-rows:20px auto;", 38.0, 20.0),
+            ("", 36.0, 18.0),
+        ] {
+            let tree = parse_html(&format!(
+                "<!doctype html><body style='margin:0;font:16px Arial'><div id=grid \
+                 style='display:grid;grid-template-columns:100px 1fr 2fr;{rows}'>\
+                 <div>1</div><div>2</div><div>3</div><div id=g4>4</div></div>"
+            ));
+            let laid = layout_dom(&tree, (1280.0, 800.0));
+            let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
+            assert_eq!(rect("grid").height, grid_height, "{rows}");
+            assert_eq!((rect("g4").y, rect("g4").height), (top, 18.0), "{rows}");
+        }
+    }
+
     /// Each line of text node `node`: (x, text), in line order.
     #[cfg(feature = "paint")]
     fn text_lines(laid: &DomLayout, node: NodeId) -> Vec<(f32, String)> {
