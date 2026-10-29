@@ -9368,6 +9368,8 @@ mod tests {
                 "the terminated {event} handler never completed"
             );
         }
+        // The deadline is process-wide: later tests must get the default.
+        std::env::remove_var("OBSCURA_SCRIPT_DEADLINE_MS");
     }
 
     #[tokio::test(flavor = "current_thread")]
