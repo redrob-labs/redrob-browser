@@ -3198,9 +3198,10 @@ impl Page {
                         js.run_load_delaying_event_loop_tick(),
                     )
                     .await;
-                } else {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
                 }
+                // An idle event loop returns at once; sleep so the download
+                // tasks get the thread.
+                tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
             }
             self.run_finished_async_scripts(run).await;
         }
