@@ -6044,6 +6044,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn source_elements_reflect_their_attributes() {
+        // HTML HTMLSourceElement: srcset/sizes/media/type reflect strings,
+        // width/height unsigned longs; a script swapping a <picture>'s
+        // source must change the attribute the image selection reads.
+        let mut rt = setup_runtime(
+            "<picture><source id=s srcset=a.webp media='(min-width:1px)'><img></picture>",
+        );
+        assert_eq!(
+            rt.evaluate(
+                r#"(() => {
+            const s = document.getElementById('s');
+            s.srcset = 'b.webp 2x'; s.sizes = '50vw'; s.type = 'image/webp'; s.width = 160;
+            return [s.getAttribute('srcset'), s.getAttribute('sizes'), s.type, s.media,
+                s.getAttribute('width'), s.height, Object.keys(s).includes('srcset')];
+        })()"#
+            )
+            .unwrap(),
+            serde_json::json!([
+                "b.webp 2x",
+                "50vw",
+                "image/webp",
+                "(min-width:1px)",
+                "160",
+                0,
+                false
+            ])
+        );
+    }
+
     #[cfg(feature = "render")]
     #[test]
     fn document_carets_keep_receiver_realm_and_current_geometry() {
