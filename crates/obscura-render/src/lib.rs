@@ -812,6 +812,45 @@ pub enum Display {
     None,
 }
 
+/// CSSOM-only computed values (see `LayoutStyle::cssom`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct CssomValues {
+    /// Inherited `text-align` keyword. `None` during cascade means inherit;
+    /// the top-down pass resolves it (root: `start`).
+    pub text_align: Option<&'static str>,
+    /// `vertical-align` (not inherited). `None` is `baseline`.
+    pub vertical_align: Option<VerticalAlignCss>,
+    /// Inherited `font-family` with the author's case and quoting,
+    /// serialized the way Blink does. `None` means inherit.
+    pub font_family: Option<String>,
+    /// Authored `flex-direction` / `align-items`. Reported instead of the
+    /// layout value when the box is a table/control flex stand-in.
+    pub flex_direction: Option<taffy::FlexDirection>,
+    pub align_items: Option<taffy::AlignItems>,
+}
+
+impl CssomValues {
+    /// Resolve the inherited values against the parent's resolved values.
+    pub(crate) fn inherit_from(&mut self, parent: &CssomValues) {
+        if self.text_align.is_none() {
+            self.text_align = parent.text_align;
+        }
+        if self.font_family.is_none() {
+            self.font_family.clone_from(&parent.font_family);
+        }
+        if self.vertical_align == Some(VerticalAlignCss::Inherit) {
+            self.vertical_align = parent.vertical_align;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum VerticalAlignCss {
+    Keyword(&'static str),
+    Length(Dimension),
+    Inherit,
+}
+
 /// A specified `display` keyword that [`Display`] and the layout stand-in
 /// flags cannot express. `Layout` means the layout fields already name the
 /// CSS value.
@@ -1213,6 +1252,9 @@ pub struct LayoutStyle {
     /// item, float or absolutely positioned box, so its computed display is
     /// blockified (CSS Display 3 §2.7).
     pub(crate) blockified: bool,
+    /// Specified values CSSOM reports where layout keeps a different,
+    /// emulated value. Layout never reads these.
+    pub(crate) cssom: CssomValues,
     /// Inline outer display before absolute-position blockification. Retained
     /// styles need this provenance to reconstruct the hypothetical static box.
     pub(crate) static_position_inline: bool,

@@ -48,6 +48,25 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         _ => Display::Block,
     };
     style.css_display = crate::CssDisplay::for_tag(tag);
+    style.cssom.text_align = match tag {
+        "th" => Some("center"),
+        "caption" | "center" => Some("-webkit-center"),
+        _ => None,
+    };
+    style.cssom.vertical_align = match tag {
+        "tbody" | "thead" | "tfoot" => Some(crate::VerticalAlignCss::Keyword("middle")),
+        "tr" | "td" | "th" => Some(crate::VerticalAlignCss::Inherit),
+        "sub" => Some(crate::VerticalAlignCss::Keyword("sub")),
+        "sup" => Some(crate::VerticalAlignCss::Keyword("super")),
+        _ => None,
+    };
+    style.cssom.font_family = match tag {
+        "input" | "select" | "button" => Some("Arial".to_string()),
+        "textarea" | "pre" | "code" | "kbd" | "samp" | "tt" | "listing" | "xmp" | "plaintext" => {
+            Some("monospace".to_string())
+        }
+        _ => None,
+    };
     if tag == "slot" {
         // HTML's UA sheet makes a slot transparent to box generation; its
         // assigned nodes or fallback children participate at the slot's
@@ -844,6 +863,172 @@ fn unitless_math_tokens<'i, 't>(
 }
 
 fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
+    apply_layout_value(style, name, value);
+    apply_cssom_value(style, name, value);
+}
+
+/// Record the specified values CSSOM reports where layout keeps its own
+/// emulated value (`LayoutStyle::cssom`).
+fn apply_cssom_value(style: &mut LayoutStyle, name: &str, value: &str) {
+    let lower = value.trim().to_ascii_lowercase();
+    match name {
+        "text-align" => {
+            let keyword = match lower.as_str() {
+                "left" => "left",
+                "right" => "right",
+                "center" => "center",
+                "justify" => "justify",
+                "start" | "initial" | "revert" | "revert-layer" => "start",
+                "end" => "end",
+                "match-parent" => "match-parent",
+                "-webkit-center" => "-webkit-center",
+                "-webkit-left" => "-webkit-left",
+                "-webkit-right" => "-webkit-right",
+                "inherit" | "unset" => {
+                    style.cssom.text_align = None;
+                    return;
+                }
+                _ => return,
+            };
+            style.cssom.text_align = Some(keyword);
+        }
+        "vertical-align" => {
+            style.cssom.vertical_align = match lower.as_str() {
+                "baseline" | "initial" | "unset" | "revert" | "revert-layer" => None,
+                "inherit" => Some(crate::VerticalAlignCss::Inherit),
+                "top" => Some(crate::VerticalAlignCss::Keyword("top")),
+                "middle" => Some(crate::VerticalAlignCss::Keyword("middle")),
+                "bottom" => Some(crate::VerticalAlignCss::Keyword("bottom")),
+                "sub" => Some(crate::VerticalAlignCss::Keyword("sub")),
+                "super" => Some(crate::VerticalAlignCss::Keyword("super")),
+                "text-top" => Some(crate::VerticalAlignCss::Keyword("text-top")),
+                "text-bottom" => Some(crate::VerticalAlignCss::Keyword("text-bottom")),
+                _ => match dimension_value(&lower) {
+                    crate::Dimension::Auto => return,
+                    length => Some(crate::VerticalAlignCss::Length(length)),
+                },
+            };
+        }
+        "font-family" => {
+            if matches!(lower.as_str(), "inherit" | "unset") {
+                style.cssom.font_family = None;
+            } else if let Some(family) = serialize_font_family(value) {
+                style.cssom.font_family = Some(family);
+            }
+        }
+        "font" => {
+            if let Some(family) = style.font_family.as_deref().and_then(|_| {
+                font_shorthand_family(value).and_then(serialize_font_family)
+            }) {
+                style.cssom.font_family = Some(family);
+            }
+        }
+        "flex-direction" | "flex-flow" => style.cssom.flex_direction = style.flex_direction,
+        "align-items" | "place-items" => style.cssom.align_items = style.align_items,
+        _ => {}
+    }
+}
+
+/// The family list of a `font` shorthand: everything after the size (and
+/// optional `/line-height`).
+fn font_shorthand_family(value: &str) -> Option<&str> {
+    let mut rest = value.trim();
+    loop {
+        let token_end = rest.find(char::is_whitespace)?;
+        let token = &rest[..token_end];
+        rest = rest[token_end..].trim_start();
+        let size = token.split('/').next().unwrap_or(token);
+        if size.starts_with(|c: char| c.is_ascii_digit() || c == '.')
+            || matches!(
+                size.to_ascii_lowercase().as_str(),
+                "xx-small"
+                    | "x-small"
+                    | "small"
+                    | "medium"
+                    | "large"
+                    | "x-large"
+                    | "xx-large"
+                    | "smaller"
+                    | "larger"
+            )
+        {
+            if token.ends_with('/') {
+                let end = rest.find(char::is_whitespace)?;
+                rest = rest[end..].trim_start();
+            } else if rest.starts_with('/') {
+                rest = rest[1..].trim_start();
+                let end = rest.find(char::is_whitespace)?;
+                rest = rest[end..].trim_start();
+            }
+            return (!rest.is_empty()).then_some(rest);
+        }
+    }
+}
+
+/// Serialize a `font-family` list as Blink does: names separated by `", "`,
+/// quoted names in double quotes, generic family keywords lowercased.
+fn serialize_font_family(value: &str) -> Option<String> {
+    let mut names = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut quoted = false;
+    for c in value.trim().chars() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), c) => current.push(c),
+            (None, '"' | '\'') => {
+                quote = Some(c);
+                quoted = true;
+            }
+            (None, ',') => {
+                names.push((std::mem::take(&mut current), quoted));
+                quoted = false;
+            }
+            (None, c) => current.push(c),
+        }
+    }
+    names.push((current, quoted));
+    let mut out = Vec::with_capacity(names.len());
+    for (name, quoted) in names {
+        let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+        if name.is_empty() {
+            return None;
+        }
+        let lower = name.to_ascii_lowercase();
+        let generic = matches!(
+            lower.as_str(),
+            "serif"
+                | "sans-serif"
+                | "monospace"
+                | "cursive"
+                | "fantasy"
+                | "system-ui"
+                | "math"
+                | "emoji"
+                | "fangsong"
+                | "ui-serif"
+                | "ui-sans-serif"
+                | "ui-monospace"
+                | "ui-rounded"
+        ) || lower.starts_with("-webkit-");
+        let identifier = !name.contains(' ')
+            && !name.starts_with(|c: char| c.is_ascii_digit())
+            && !name.starts_with("--")
+            && name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || !c.is_ascii());
+        out.push(if !quoted && generic {
+            lower
+        } else if identifier && !(quoted && generic) {
+            name
+        } else {
+            format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""))
+        });
+    }
+    Some(out.join(", "))
+}
+
+fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
     match name {
         "direction" => {
             match value.trim().to_ascii_lowercase().as_str() {

@@ -375,6 +375,9 @@ pub struct DomLayout {
     /// Native grid track extents beyond the content box, including unoccupied
     /// tracks. Only element scroll containers expose these through CSSOM.
     grid_overflow: HashMap<NodeId, Rect>,
+    /// Used track sizes (columns, rows) of every grid container, explicit and
+    /// implicit, for the resolved `grid-template-*` CSSOM values.
+    pub(crate) grid_tracks: HashMap<NodeId, (Vec<f32>, Vec<f32>)>,
     /// Per-line border-box fragments for ordinary non-replaced inline
     /// elements. `rects` retains their union for `getBoundingClientRect()`;
     /// this list is the source for background/border painting and
@@ -487,6 +490,14 @@ pub fn layout_difference(incremental: &DomLayout, scratch: &DomLayout) -> Option
                 "grid_overflow",
                 &incremental.grid_overflow,
                 &scratch.grid_overflow,
+                |a, b| a == b,
+            )
+        })
+        .or_else(|| {
+            first_map_difference(
+                "grid_tracks",
+                &incremental.grid_tracks,
+                &scratch.grid_tracks,
                 |a, b| a == b,
             )
         })
@@ -6349,6 +6360,7 @@ fn layout_dom_once(
 
     let mut rects = HashMap::new();
     let mut grid_overflow = HashMap::new();
+    let mut grid_tracks = HashMap::new();
     let mut inline_fragments = HashMap::new();
     let mut text_runs = HashMap::new();
     // Final absolute rects of anonymous inline-run leaves, keyed by the
@@ -6383,6 +6395,7 @@ fn layout_dom_once(
             is_table_box: bool,
             is_table_cell_box: bool,
             css_display: crate::CssDisplay,
+            cssom: crate::CssomValues,
             color: Option<[u8; 4]>,
             font_size: Option<f32>,
             font_weight: u16,
@@ -6452,6 +6465,7 @@ fn layout_dom_once(
                     is_table_box: false,
                     is_table_cell_box: false,
                     css_display: crate::CssDisplay::Layout,
+                    cssom: crate::CssomValues::default(),
                     color: None,
                     font_size: None,
                     font_weight: 400,
@@ -6584,6 +6598,7 @@ fn layout_dom_once(
                     inh.is_table_box = style.is_table_box;
                     inh.is_table_cell_box = style.is_table_cell_box;
                     inh.css_display = style.css_display;
+                    inh.cssom.clone_from(&style.cssom);
                     inh.color = style.color.or(inh.color);
                     inh.font_size = style.font_size.or(inh.font_size);
                     inh.font_weight = crate::style::used_font_weight(style);
@@ -7080,6 +7095,8 @@ fn layout_dom_once(
                     Some(f) => inh.font_family = Some(f.clone()),
                     None => style.font_family = inh.font_family.clone(),
                 }
+                style.cssom.inherit_from(&inh.cssom);
+                inh.cssom.clone_from(&style.cssom);
                 match style.font_optical_sizing {
                     Some(value) => inh.font_optical_sizing = value,
                     None => style.font_optical_sizing = Some(inh.font_optical_sizing),
@@ -7287,6 +7304,7 @@ fn layout_dom_once(
                 let host_is_table_box = style.is_table_box;
                 let host_is_table_cell_box = style.is_table_cell_box;
                 let host_css_display = style.css_display;
+                let host_cssom = style.cssom.clone();
                 let host_grid_auto_columns = style.grid_auto_columns.clone();
                 let host_grid_auto_rows = style.grid_auto_rows.clone();
                 let host_grid_auto_column_calcs = style.grid_calc_expressions[2].clone();
@@ -7457,6 +7475,7 @@ fn layout_dom_once(
                     if pseudo.font_family.is_none() {
                         pseudo.font_family = host_family.clone();
                     }
+                    pseudo.cssom.inherit_from(&host_cssom);
                     if pseudo.font_optical_sizing.is_none() {
                         pseudo.font_optical_sizing = host_optical_sizing;
                     }
@@ -8828,6 +8847,7 @@ fn layout_dom_once(
                 &generated_nodes,
                 &mut generated_rects,
             );
+            grid_tracks = collect_grid_tracks(&taffy_tree, &id_map);
             inline_fragments = synthesize_ordinary_inline_fragments(&mut rects, &styles, &engine);
             synthesize_row_rects(tree, &mut rects);
             retain_taffy_tree(
@@ -9045,6 +9065,7 @@ fn layout_dom_once(
         DomLayout {
             rects,
             grid_overflow,
+            grid_tracks,
             inline_fragments,
             styles,
             custom_properties,
@@ -10073,6 +10094,22 @@ fn resolve_named_placement(
             end: taffy::GridPlacement::Auto,
         })
     }
+}
+
+/// Used grid track sizes for every DOM grid container in the laid-out tree.
+fn collect_grid_tracks(
+    taffy_tree: &TaffyTree<usize>,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+) -> HashMap<NodeId, (Vec<f32>, Vec<f32>)> {
+    id_map
+        .iter()
+        .filter_map(|(&taffy_id, &dom_id)| match taffy_tree.detailed_layout_info(taffy_id) {
+            taffy::tree::DetailedLayoutInfo::Grid(info) => {
+                Some((dom_id, (info.columns.sizes.clone(), info.rows.sizes.clone())))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 fn compute_absolute_rects(

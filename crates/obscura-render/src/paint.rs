@@ -1899,6 +1899,42 @@ impl PreparedRender {
             out.insert("font-family", family.clone());
         }
         out.insert(
+            "font-family",
+            style
+                .cssom
+                .font_family
+                .clone()
+                .unwrap_or_else(|| "\"Times New Roman\"".to_string()),
+        );
+        out.insert(
+            "font-style",
+            if style.font_style_italic.unwrap_or(false) {
+                "italic"
+            } else {
+                "normal"
+            }
+            .to_string(),
+        );
+        out.insert(
+            "vertical-align",
+            match style.cssom.vertical_align {
+                None | Some(crate::VerticalAlignCss::Inherit) => "baseline".to_string(),
+                Some(crate::VerticalAlignCss::Keyword(keyword)) => keyword.to_string(),
+                Some(crate::VerticalAlignCss::Length(crate::Dimension::Percent(value))) => {
+                    format!("{}%", css_number(value * 100.0))
+                }
+                Some(crate::VerticalAlignCss::Length(length)) => dimension_css(
+                    length.resolve(
+                        style.font_size.unwrap_or(16.0),
+                        self.root_font_size,
+                        self.viewport.0,
+                        self.viewport.1,
+                    ),
+                    "0px",
+                ),
+            },
+        );
+        out.insert(
             "line-height",
             match style.line_height.unwrap_or(crate::LineHeight::Normal) {
                 crate::LineHeight::Normal => "normal".to_string(),
@@ -1968,12 +2004,7 @@ impl PreparedRender {
         );
         out.insert(
             "text-align",
-            match style.text_align {
-                Some(taffy::AlignItems::CENTER) => "center",
-                Some(taffy::AlignItems::FLEX_END | taffy::AlignItems::END) => "end",
-                _ => "start",
-            }
-            .to_string(),
+            style.cssom.text_align.unwrap_or("start").to_string(),
         );
 
         if style.ignores_used_box_sizes() {
@@ -2021,6 +2052,29 @@ impl PreparedRender {
         let (overflow_x, overflow_y) = crate::style::computed_overflow_axes(style);
         out.insert("overflow-x", overflow_axis(overflow_x).to_string());
         out.insert("overflow-y", overflow_axis(overflow_y).to_string());
+        out.insert(
+            "overflow",
+            if overflow_x == overflow_y {
+                overflow_axis(overflow_x).to_string()
+            } else {
+                format!(
+                    "{} {}",
+                    overflow_axis(overflow_x),
+                    overflow_axis(overflow_y)
+                )
+            },
+        );
+        out.insert(
+            "flex-grow",
+            css_number(if style.flex_grow_from_table_cell {
+                0.0
+            } else {
+                style.flex_grow.unwrap_or(0.0)
+            }),
+        );
+        out.insert("flex-shrink", css_number(style.flex_shrink.unwrap_or(1.0)));
+        out.insert("flex-basis", dimension_css(style.flex_basis, "auto"));
+        out.insert("order", style.order.to_string());
 
         for (name, value, auto) in [
             ("margin-top", style.margin.top, style.margin_auto[0]),
@@ -2097,7 +2151,13 @@ impl PreparedRender {
 
         out.insert(
             "flex-direction",
-            match style.flex_direction.unwrap_or(taffy::FlexDirection::Row) {
+            match if style.internal_flex_container {
+                style.cssom.flex_direction
+            } else {
+                style.flex_direction
+            }
+            .unwrap_or(taffy::FlexDirection::Row)
+            {
                 taffy::FlexDirection::Row => "row",
                 taffy::FlexDirection::RowReverse => "row-reverse",
                 taffy::FlexDirection::Column => "column",
@@ -2116,9 +2176,12 @@ impl PreparedRender {
         );
         out.insert(
             "align-items",
-            style
-                .align_items
-                .map_or_else(|| "normal".to_string(), align_items_css),
+            if style.internal_flex_container {
+                style.cssom.align_items
+            } else {
+                style.align_items
+            }
+            .map_or_else(|| "normal".to_string(), align_items_css),
         );
         out.insert(
             "justify-items",
@@ -2159,6 +2222,23 @@ impl PreparedRender {
             .to_string(),
         );
 
+        // A grid container's resolved track lists are its used track sizes,
+        // implicit tracks included (CSS Grid 1 §7.2.6).
+        if let Some((columns, rows)) = self.layout.grid_tracks.get(&id) {
+            let tracks = |sizes: &[f32]| {
+                if sizes.is_empty() {
+                    "none".to_string()
+                } else {
+                    sizes
+                        .iter()
+                        .map(|&size| css_px(size))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                }
+            };
+            out.insert("grid-template-columns", tracks(columns));
+            out.insert("grid-template-rows", tracks(rows));
+        }
         out.insert(
             "transform",
             transform_css(style, rect, self.root_font_size, self.viewport),
@@ -2429,7 +2509,7 @@ pub(crate) fn non_geometric_computed_style(
     out.insert("display", computed_display(style).to_string());
     out.insert(
         "float",
-        match style.float {
+        match style.float.filter(|_| style.position != Some(taffy::Position::Absolute)) {
             Some(crate::Float::Left) => "left",
             Some(crate::Float::Right) => "right",
             None => "none",
@@ -2593,11 +2673,40 @@ fn computed_display(style: &crate::LayoutStyle) -> &'static str {
     }
 }
 
+/// Serialize a number the way Blink does: six significant digits, trailing
+/// zeros trimmed, exponent form outside [1e-6, 1e6).
 fn css_number(value: f32) -> String {
-    if value == 0.0 {
+    let value = value as f64;
+    if value == 0.0 || !value.is_finite() {
+        return "0".to_string();
+    }
+    let exponent = value.abs().log10().floor() as i32;
+    let trim = |s: String| {
+        if s.contains('.') {
+            s.trim_end_matches('0').trim_end_matches('.').to_string()
+        } else {
+            s
+        }
+    };
+    if !(-6..6).contains(&exponent) {
+        let formatted = format!("{value:.5e}");
+        let (mantissa, exp) = formatted.split_once('e').unwrap_or((&formatted, "0"));
+        let exp: i32 = exp.parse().unwrap_or(0);
+        return format!(
+            "{}e{}{:02}",
+            trim(mantissa.to_string()),
+            if exp < 0 { '-' } else { '+' },
+            exp.abs()
+        );
+    }
+    let decimals = (5 - exponent).max(0) as usize;
+    let formatted = trim(format!("{value:.decimals$}"));
+    // Rounding can carry into a new digit (999999.5 -> 1000000); six
+    // significant digits still hold, so this stays fixed notation.
+    if formatted == "-0" {
         "0".to_string()
     } else {
-        value.to_string()
+        formatted
     }
 }
 
@@ -2646,8 +2755,20 @@ fn css_color([r, g, b, a]: [u8; 4]) -> String {
     if a == 255 {
         format!("rgb({r}, {g}, {b})")
     } else {
-        format!("rgba({r}, {g}, {b}, {})", css_number(a as f32 / 255.0))
+        format!("rgba({r}, {g}, {b}, {})", css_alpha(a))
     }
+}
+
+/// Blink keeps 8-bit alpha and prints the shortest of two or three decimals
+/// that maps back to the same byte.
+fn css_alpha(a: u8) -> String {
+    let two = (a as f64 / 255.0 * 100.0).round() / 100.0;
+    let value = if (two * 255.0).round() as u8 == a {
+        two
+    } else {
+        (a as f64 / 255.0 * 1000.0).round() / 1000.0
+    };
+    css_number(value as f32)
 }
 
 fn align_items_css(value: taffy::AlignItems) -> String {
