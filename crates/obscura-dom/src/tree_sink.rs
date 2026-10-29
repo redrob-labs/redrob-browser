@@ -181,7 +181,8 @@ impl TreeSink for DomTree {
     fn append(&self, parent: &NodeId, child: NodeOrText<NodeId>) {
         match child {
             NodeOrText::AppendNode(node_id) => {
-                self.append_child(*parent, node_id);
+                let parent = self.parser_depth_capped_parent(*parent, node_id);
+                self.append_child(parent, node_id);
             }
             NodeOrText::AppendText(text) => {
                 self.append_text(*parent, &text);
@@ -362,6 +363,43 @@ impl TreeSink for DomTree {
     }
 }
 
+/// Chromium's HTML parser nests elements at most this deep
+/// (`kMaximumHTMLParserDOMTreeDepth`): an element whose parser parent is
+/// deeper is inserted into that parent's parent instead, so the deepest
+/// elements of a hostile document become siblings.
+const MAX_PARSER_ELEMENT_PARENT_DEPTH: usize = 512;
+
+impl DomTree {
+    /// The node the parser appends element `child` to: `parent`, or its
+    /// parent when `parent` already sits below the parser's depth limit
+    /// (Chrome: in 600 nested divs, the element at depth 512, counting
+    /// <html> as 1, holds the 90 deepest as children). Text is not moved.
+    fn parser_depth_capped_parent(&self, parent: NodeId, child: NodeId) -> NodeId {
+        if !self
+            .with_node(child, |node| node.is_element())
+            .unwrap_or(false)
+        {
+            return parent;
+        }
+        let mut depth = 0usize;
+        let mut current = Some(parent);
+        while let Some(node) = current {
+            current = self.with_node(node, |n| n.parent).flatten();
+            if current.is_none() {
+                break;
+            }
+            depth += 1;
+            if depth > MAX_PARSER_ELEMENT_PARENT_DEPTH {
+                return self
+                    .with_node(parent, |n| n.parent)
+                    .flatten()
+                    .unwrap_or(parent);
+            }
+        }
+        parent
+    }
+}
+
 pub fn parse_html(html: &str) -> DomTree {
     use html5ever::tendril::TendrilSink;
     use html5ever::{parse_document, ParseOpts};
@@ -413,6 +451,25 @@ pub fn parse_fragment_with_context(html: &str, context_name: QualName) -> DomTre
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parser_caps_element_nesting_depth_like_chrome() {
+        let n = 600;
+        let html = format!(
+            "<!doctype html><body>{}x{}",
+            (0..n).map(|i| format!("<div id=n{i}>")).collect::<String>(),
+            "</div>".repeat(n)
+        );
+        let tree = parse_html(&html);
+        let id = |i: usize| tree.get_element_by_id(&format!("n{i}")).unwrap();
+        // Depth with <html> as 1 is the number of ancestors.
+        let depth = |node| tree.ancestors(node).len();
+        assert_eq!(depth(id(509)), 512);
+        assert_eq!(depth(id(510)), 513);
+        assert_eq!(depth(id(599)), 513);
+        assert_eq!(tree.children(id(509)).len(), 90);
+        assert_eq!(tree.text_content(id(599)), "x");
+    }
 
     #[test]
     fn test_parse_simple_html() {
