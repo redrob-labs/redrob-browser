@@ -40,6 +40,22 @@ fn blend(b: SBlend) -> BlendMode {
         SBlend::Overlay => Mix::Overlay,
         SBlend::Darken => Mix::Darken,
         SBlend::Lighten => Mix::Lighten,
+        // Modes added to the contract later, by name, so this builds
+        // against either version of it.
+        #[allow(unreachable_patterns)]
+        other => match format!("{other:?}").as_str() {
+            "ColorDodge" => Mix::ColorDodge,
+            "ColorBurn" => Mix::ColorBurn,
+            "HardLight" => Mix::HardLight,
+            "SoftLight" => Mix::SoftLight,
+            "Difference" => Mix::Difference,
+            "Exclusion" => Mix::Exclusion,
+            "Hue" => Mix::Hue,
+            "Saturation" => Mix::Saturation,
+            "Color" => Mix::Color,
+            "Luminosity" => Mix::Luminosity,
+            _ => Mix::Normal,
+        },
     };
     BlendMode::new(mix, Compose::SrcOver)
 }
@@ -232,8 +248,16 @@ pub fn build(
                 synthetic_bold,
                 skew,
             } => {
-                let Some(font) = page.fonts.get(font) else {
-                    continue;
+                let (font, coords) = match page.fonts.get(font) {
+                    Some(f) => (f, &[][..]),
+                    None => match page
+                        .instances
+                        .get(font)
+                        .and_then(|(base, c)| Some((page.fonts.get(base)?, c.as_slice())))
+                    {
+                        Some(found) => found,
+                        None => continue,
+                    },
                 };
                 if glyphs.is_empty() || *size <= 0.0 {
                     continue;
@@ -242,6 +266,7 @@ pub fn build(
                     .draw_glyphs(font)
                     .transform(t)
                     .font_size(*size)
+                    .normalized_coords(coords)
                     .brush(color(*c));
                 if *skew != 0.0 {
                     // The contract's skew is y-down (as Skia: -0.25 leans

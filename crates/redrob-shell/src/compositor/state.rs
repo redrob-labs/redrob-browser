@@ -22,6 +22,9 @@ pub struct TabScene {
     externals: Vec<u64>,
     pub(super) images: HashMap<ImageId, ImageData>,
     pub(super) fonts: HashMap<FontId, FontData>,
+    /// Variable font instances: the font they draw with and its
+    /// normalized axis coordinates.
+    pub(super) instances: HashMap<FontId, (FontId, Vec<vello::NormalizedCoord>)>,
     pub(super) scroll: Scrolls,
     link: Option<UnboundedSender<ClientMsg>>,
     /// The newest epoch reported as presented.
@@ -114,8 +117,15 @@ impl TabScene {
                         Prepared::DropImage(id) => {
                             self.images.remove(&id);
                         }
+                        Prepared::FontInstance { id, font, axes } => {
+                            let coords = self.fonts.get(&font).map(|f| instance_coords(f, &axes));
+                            if let Some(coords) = coords {
+                                self.instances.insert(id, (font, coords));
+                            }
+                        }
                         Prepared::DropFont(id) => {
                             self.fonts.remove(&id);
+                            self.instances.remove(&id);
                         }
                     }
                 }
@@ -262,6 +272,21 @@ impl TabScene {
             })
             .collect()
     }
+}
+
+/// Normalized coordinates of `font` at user-space axis `axes`.
+fn instance_coords(font: &FontData, axes: &[([u8; 4], f32)]) -> Vec<vello::NormalizedCoord> {
+    use skrifa::MetadataProvider as _;
+    skrifa::FontRef::from_index(font.data.as_ref(), font.index)
+        .map(|face| {
+            face.axes()
+                .location(axes.iter().map(|(tag, v)| (skrifa::Tag::new(tag), *v)))
+                .coords()
+                .iter()
+                .map(|c| c.to_bits())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub(super) fn max_offset(frame: &redrob_scene::Rect, content: (f32, f32)) -> (f32, f32) {

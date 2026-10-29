@@ -17,6 +17,13 @@ const MAX_MESSAGE: usize = 1 << 30;
 pub enum Prepared {
     Image(ImageId, ImageData),
     Font(FontId, FontData),
+    /// A variable font at fixed axis values: `id` draws with `font`'s
+    /// file at these (OpenType tag, user value) settings.
+    FontInstance {
+        id: FontId,
+        font: FontId,
+        axes: Vec<([u8; 4], f32)>,
+    },
     DropImage(ImageId),
     DropFont(FontId),
 }
@@ -69,10 +76,36 @@ pub fn prepare(msg: SceneMsg) -> Incoming {
                     }
                     Resource::DropImage(id) => Some(Prepared::DropImage(id)),
                     Resource::DropFont(id) => Some(Prepared::DropFont(id)),
+                    // Resources added to the contract later (FontInstance),
+                    // read by name so this builds against either version.
+                    #[allow(unreachable_patterns)]
+                    other => font_instance(&other),
                 })
                 .collect(),
         ),
     }
+}
+
+/// A `Resource::FontInstance { id, font, axes }`, from its serde form.
+fn font_instance(r: &Resource) -> Option<Prepared> {
+    let v = serde_json::to_value(r).ok()?;
+    let fi = v.get("FontInstance")?;
+    let id = FontId(fi.get("id")?.as_u64()?);
+    let font = FontId(fi.get("font")?.as_u64()?);
+    let axes = fi
+        .get("axes")?
+        .as_array()?
+        .iter()
+        .filter_map(|a| {
+            let tag = a.get(0)?.as_array()?;
+            let mut t = [0u8; 4];
+            for (i, b) in tag.iter().take(4).enumerate() {
+                t[i] = b.as_u64()? as u8;
+            }
+            Some((t, a.get(1)?.as_f64()? as f32))
+        })
+        .collect();
+    Some(Prepared::FontInstance { id, font, axes })
 }
 
 /// Read framed messages until the stream ends.
