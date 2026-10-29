@@ -170,6 +170,8 @@ pub(crate) struct RootParams {
     pub(crate) line_clamp: Option<usize>,
     /// `text-overflow: ellipsis` with clipped inline overflow.
     pub(crate) ellipsis: bool,
+    /// `text-wrap-style: balance`.
+    pub(crate) balance: bool,
 }
 
 /// One inline formatting context.

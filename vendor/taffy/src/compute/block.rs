@@ -986,6 +986,18 @@ fn perform_final_layout_on_in_flow_children(
             #[cfg(not(feature = "float_layout"))]
             let clear_pos = 0.0;
 
+            // Clearance separates a box's top margin from its parent's: a cleared first child
+            // whose collapsed position would sit above the floats does not collapse through.
+            #[cfg(feature = "float_layout")]
+            if item.is_in_same_bfc
+                && !item.float.is_floated()
+                && item.clear != Clear::None
+                && is_collapsing_with_first_margin_set
+                && clear_pos > committed_y_offset
+            {
+                is_collapsing_with_first_margin_set = false;
+            }
+
             let item_layout = if item.is_in_same_bfc {
                 let width = known_dimensions
                     .width

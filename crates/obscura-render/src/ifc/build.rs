@@ -875,6 +875,7 @@ pub(crate) fn root_params(style: &LayoutStyle, has_marker: bool, center_block: b
             .flatten()
             .map(|lines| lines as usize),
         ellipsis: style.text_overflow == crate::TextOverflow::Ellipsis && style.clips_overflow_x(),
+        balance: style.text_wrap_style == Some(crate::TextWrapStyle::Balance),
     }
 }
 

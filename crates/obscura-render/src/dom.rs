@@ -10476,6 +10476,14 @@ fn apply_table_row_geometry(
         // box. Once the tracks are pinned, restore auto block-size so every
         // cell stretches to its complete (possibly spanned) grid area.
         for (cell, _, _, _) in cells {
+            // A float among the cells is not a cell: it keeps its own height.
+            if id_map
+                .get(&cell)
+                .and_then(|dom_id| styles.get(dom_id))
+                .is_some_and(|style| style.float.is_some())
+            {
+                continue;
+            }
             if let Ok(current) = taffy_tree.style(cell) {
                 let mut stretched = current.clone();
                 stretched.size.height = taffy::Dimension::auto();
@@ -13160,17 +13168,6 @@ fn build_table_box(
             // grid area. Left in place, a `width:50%` cell would shrink to
             // half of its own already-halved track.
             cstyle.size.width = Dimension::auto();
-            // A rowspan-1 cell's px `height` is already the row track's
-            // minimum (see `row_min`); as a fixed item size it would stop
-            // taller content from growing the row.
-            if *rs == 1
-                && styles.get(cid).is_some_and(|cell_style| {
-                    matches!(cell_style.height, crate::Dimension::Px(_))
-                        && cell_style.float.is_none()
-                })
-            {
-                cstyle.size.height = Dimension::auto();
-            }
             // Taffy's grid-item automatic minimum is an engine artifact here:
             // the table track has already collected the cell's min-content
             // contribution and owns final column sizing. Remove only the
@@ -21297,6 +21294,97 @@ mod tests {
             pseudo(relative).width < 80.0 && pseudo(relative).height < 40.0,
             "an ordinary inline pseudo must ignore authored box sizes"
         );
+    }
+
+    // Chrome: the inline-table sits after "text " at x=38.23 beside the
+    // float. The table passes measure the table as a root at the origin;
+    // the IFC must place it again.
+    #[cfg(feature = "paint")]
+    #[test]
+    fn inline_table_beside_a_float_keeps_its_line_position() {
+        let tree = parse_html(
+            r#"<!doctype html><body style="margin:8px;font:16px/20px sans-serif"><div style="float:right;width:50px;height:20px"></div><div id=a>text <table id=t style="display:inline-table"><tr><td>x</td></tr></table> after</div></body>"#,
+        );
+        let laid = layout_dom(&tree, (1280.0, 800.0));
+        let table = laid.rects[&tree.get_element_by_id("t").unwrap()];
+        assert!((table.x - 38.0).abs() < 1.0, "{table:?}");
+        assert!((table.y - 8.0).abs() < 0.5, "{table:?}");
+    }
+
+    // Chrome: the cleared paragraph's 16px top margin does not collapse
+    // through the body (clearance separates them), so the body and the
+    // float stay at y=8 and the paragraph sits at the float's bottom (36).
+    #[test]
+    fn clearance_stops_a_first_child_margin_collapsing_through_its_parent() {
+        let tree = parse_html(
+            r#"<!doctype html><body style="margin:8px;font:16px/20px sans-serif"><div id=f style="float:left;width:100px;height:28px"></div><p id=p style="clear:both;margin:16px 0">text</p></body>"#,
+        );
+        let laid = layout_dom(&tree, (800.0, 600.0));
+        let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
+        assert_eq!(rect("f").y, 8.0);
+        assert_eq!(rect("p").y, 36.0);
+    }
+
+    /// Each line of text node `node`: (x, text), in line order.
+    #[cfg(feature = "paint")]
+    fn text_lines(laid: &DomLayout, node: NodeId) -> Vec<(f32, String)> {
+        let mut runs = laid.text_runs.get(&node).cloned().unwrap_or_default();
+        runs.sort_by(|a, b| a.0.y.total_cmp(&b.0.y));
+        runs.into_iter()
+            .map(|(rect, text)| (rect.x, text.trim().to_string()))
+            .collect()
+    }
+
+    // Replaces the cosmic-text Buffer test of the same name; the expected
+    // lines and offsets are Chrome's for the same markup.
+    #[cfg(feature = "paint")]
+    #[test]
+    fn text_indent_changes_only_the_first_formatted_line() {
+        let tree = parse_html(
+            r#"<!doctype html><style>body{margin:0} p{margin:0;font:16px/20px sans-serif}</style>
+            <p id=a style="width:150px;text-indent:40px">alpha beta gamma delta epsilon zeta eta theta</p>
+            <p id=b style="width:200px;text-indent:25%">alpha beta gamma delta epsilon zeta eta theta</p>"#,
+        );
+        let laid = layout_dom(&tree, (800.0, 400.0));
+        let text = |id: &str| {
+            let host = tree.get_element_by_id(id).unwrap();
+            text_lines(&laid, tree.children(host)[0])
+        };
+        let fixed = text("a");
+        assert_eq!(fixed.len(), 3, "{fixed:?}");
+        assert!((fixed[0].0 - 40.0).abs() < 0.01, "{fixed:?}");
+        assert!(
+            fixed[1].0.abs() < 0.01 && fixed[2].0.abs() < 0.01,
+            "{fixed:?}"
+        );
+        assert_eq!(fixed[0].1, "alpha beta");
+        let percent = text("b");
+        assert!((percent[0].0 - 50.0).abs() < 0.01, "{percent:?}");
+        assert!(percent[1].0.abs() < 0.01, "{percent:?}");
+    }
+
+    // Replaces the cosmic-text Buffer test of the same name; Chrome breaks
+    // the balanced heading as "Welcome" / "to Mozilla".
+    #[cfg(feature = "paint")]
+    #[test]
+    fn text_wrap_balance_changes_line_grouping_without_changing_line_count() {
+        let tree = parse_html(
+            r#"<!doctype html><style>body{margin:0} h1{margin:0;font:128px/128px sans-serif}</style>
+            <div style="width:912px"><h1 id=h style="text-wrap:balance">Welcome to Mozilla</h1>
+            <h1 id=n>Welcome to Mozilla</h1></div>"#,
+        );
+        let laid = layout_dom(&tree, (1000.0, 600.0));
+        let text = |id: &str| {
+            let host = tree.get_element_by_id(id).unwrap();
+            text_lines(&laid, tree.children(host)[0])
+                .into_iter()
+                .map(|(_, text)| text)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(text("n"), ["Welcome to", "Mozilla"]);
+        assert_eq!(text("h"), ["Welcome", "to Mozilla"]);
+        let heading = tree.get_element_by_id("h").unwrap();
+        assert!((laid.rects[&heading].width - 912.0).abs() < 0.01);
     }
 
     #[cfg(feature = "paint")]

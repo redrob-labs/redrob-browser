@@ -1150,12 +1150,17 @@ impl<NodeContext> TaffyTree<NodeContext> {
             node_key: DefaultKey,
         ) {
             match nodes[node_key].mark_dirty() {
-                ClearState::AlreadyEmpty => {
+                ClearState::AlreadyEmpty
+                    if !nodes[node_key].float_sensitive && !nodes[node_key].is_inline_root =>
+                {
                     // Node was already marked as dirty.
                     // No need to visit ancestors
                     // as they should be marked as dirty already.
                 }
-                ClearState::Cleared => {
+                // A node that bypasses the cache (an inline root or a float-sensitive box laid
+                // out beside floats) has an empty cache without being dirty, so its ancestors
+                // must still be visited.
+                _ => {
                     if let Some(Some(node)) = parents.get(node_key) {
                         mark_dirty_recursive(nodes, parents, (*node).into());
                     }
@@ -1186,10 +1191,19 @@ impl<NodeContext> TaffyTree<NodeContext> {
             FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
     {
         let use_rounding = self.config.use_rounding;
+        // Laying out a node that has a parent (a measuring pass over one subtree) treats it as a
+        // root at the origin. Keep the location its parent gave it, and dirty it so the next
+        // layout of the real root places it again instead of reusing a cached parent.
+        let parent_location =
+            self.parents[node_id.into()].map(|_| self.nodes[node_id.into()].unrounded_layout.location);
         let mut taffy_view = TaffyView { taffy: self, measure_function };
         compute_root_layout(&mut taffy_view, node_id, available_space);
         if use_rounding {
             round_layout(&mut taffy_view, node_id);
+        }
+        if let Some(location) = parent_location {
+            self.nodes[node_id.into()].unrounded_layout.location = location;
+            let _ = self.mark_dirty(node_id);
         }
         Ok(())
     }

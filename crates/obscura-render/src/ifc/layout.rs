@@ -506,7 +506,19 @@ fn layout_ifc(
     // break with a little slack so a line exactly at max-content still fits
     // (Chromium's LayoutUnit is 1/64 px).
     let width_for_breaking = width + 1.0 / 64.0;
-    let fit = |slot_width: f32| (slot_width + 1.0 / 64.0).min(width_for_breaking);
+    // `text-wrap: balance` breaks every line at the narrowest width that
+    // keeps the natural line count. Lines still align in the full width.
+    let line_width = if ifc.params.balance
+        && block_ctx
+            .find_content_slot(0.0, Clear::None, None)
+            .segment_id
+            .is_none()
+    {
+        balanced_width(&mut ifc.layout, width_for_breaking).unwrap_or(width_for_breaking)
+    } else {
+        width_for_breaking
+    };
+    let fit = |slot_width: f32| (slot_width + 1.0 / 64.0).min(line_width);
 
     // Break lines one at a time into the space the floats leave.
     let float_child_inputs = LayoutInput {
@@ -555,7 +567,7 @@ fn layout_ifc(
                         state.set_line_max_advance(if has_active_floats {
                             fit(next.width)
                         } else {
-                            width_for_breaking
+                            line_width
                         });
                         state.set_line_x(if has_active_floats { next.x } else { 0.0 });
                         state.set_line_y(next.y as f64);
@@ -574,7 +586,7 @@ fn layout_ifc(
                         state.set_line_y(next.y as f64);
                     } else {
                         state.set_line_x(0.0);
-                        state.set_line_max_advance(width_for_breaking);
+                        state.set_line_max_advance(line_width);
                     }
                 }
                 YieldData::MaxHeightExceeded(_) => {}
@@ -629,7 +641,7 @@ fn layout_ifc(
                     state.set_line_max_advance(if has_active_floats {
                         fit(next.width)
                     } else {
-                        width_for_breaking
+                        line_width
                     });
                     if (new_x - line_x).abs() > f32::EPSILON && box_break.advance == 0.0 {
                         state.set_line_x(new_x);
@@ -1121,4 +1133,26 @@ fn resolve_relative_offsets(ifc: &mut Ifc, content: Size<f32>) {
             .map(|span| span.relative)
             .unwrap_or((0.0, 0.0));
     }
+}
+
+/// The narrowest line width, to 1/64 px, at which `layout` breaks into as
+/// many lines as at `width`, for `text-wrap: balance`. Chromium balances at
+/// most six lines and leaves longer paragraphs alone.
+fn balanced_width(layout: &mut parley::Layout<super::Brush>, width: f32) -> Option<f32> {
+    layout.break_all_lines(Some(width));
+    let lines = layout.len();
+    if !(2..=6).contains(&lines) {
+        return None;
+    }
+    let (mut low, mut high) = (0.0f32, width);
+    while high - low > 1.0 / 64.0 {
+        let mid = (low + high) / 2.0;
+        layout.break_all_lines(Some(mid));
+        if layout.len() <= lines {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    Some(high)
 }
