@@ -195,6 +195,10 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) scale: f32,
     /// Whether metrics should be quantized to pixel boundaries
     pub(crate) quantize: bool,
+    /// The quirks-mode line height calculation quirk: the root span box (the
+    /// strut) only contributes to a line that has text or an inline box edge
+    /// with a nonzero width.
+    pub(crate) line_height_quirk: bool,
     /// The `BiDi` base level
     pub(crate) base_level: BidiLevel,
     /// The length of the text in the layout
@@ -243,6 +247,7 @@ impl<B: Brush> Default for LayoutData<B> {
         Self {
             scale: 1.,
             quantize: true,
+            line_height_quirk: false,
             base_level: BidiLevel::new(0),
             text_len: 0,
             width: 0.,
@@ -527,7 +532,13 @@ impl ContentWidthsMeasurer {
                     }
                 }
                 LayoutItemKind::InlineBox => {
-                    let inline_box = &layout_data.inline_boxes[item.index].inline_box;
+                    let layout_box = &layout_data.inline_boxes[item.index];
+                    if let Some(style) =
+                        layout_data.styles.get(usize::from(layout_box.parent_style_index))
+                    {
+                        self.text_wrap_mode = style.text_wrap_mode;
+                    }
+                    let inline_box = &layout_box.inline_box;
                     if inline_box.kind == InlineBoxKind::InFlow
                         && inline_box.edge != crate::InlineBoxEdge::None
                     {

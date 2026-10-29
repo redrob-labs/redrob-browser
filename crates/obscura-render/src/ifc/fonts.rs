@@ -30,8 +30,7 @@ pub(crate) static SANS_BO: &[u8] = include_bytes!("../../assets/liberation-sans-
 pub(crate) static SERIF_R: &[u8] = include_bytes!("../../assets/liberation-serif.ttf");
 pub(crate) static SERIF_B: &[u8] = include_bytes!("../../assets/liberation-serif-bold.ttf");
 pub(crate) static SERIF_O: &[u8] = include_bytes!("../../assets/liberation-serif-oblique.ttf");
-pub(crate) static SERIF_BO: &[u8] =
-    include_bytes!("../../assets/liberation-serif-boldoblique.ttf");
+pub(crate) static SERIF_BO: &[u8] = include_bytes!("../../assets/liberation-serif-boldoblique.ttf");
 pub(crate) static MONO_R: &[u8] = include_bytes!("../../assets/liberation-mono.ttf");
 pub(crate) static MONO_B: &[u8] = include_bytes!("../../assets/liberation-mono-bold.ttf");
 pub(crate) static MONO_O: &[u8] = include_bytes!("../../assets/liberation-mono-oblique.ttf");
@@ -214,10 +213,10 @@ fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
         system_fonts: false,
     });
     let mut order: Vec<FamilyId> = Vec::new();
-    let mut register = |collection: &mut Collection,
-                        order: &mut Vec<FamilyId>,
-                        blob: Blob<u8>,
-                        info: Option<FontInfoOverride<'_>>| {
+    let register = |collection: &mut Collection,
+                    order: &mut Vec<FamilyId>,
+                    blob: Blob<u8>,
+                    info: Option<FontInfoOverride<'_>>| {
         for (family, _) in collection.register_fonts(blob, info) {
             if !order.contains(&family) {
                 order.push(family);
@@ -304,7 +303,10 @@ fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
     if let Some(emoji) = emoji {
         fallback.push(emoji);
     }
-    let mut scripts: Vec<Script> = Script::all_samples().iter().map(|(script, _)| *script).collect();
+    let mut scripts: Vec<Script> = Script::all_samples()
+        .iter()
+        .map(|(script, _)| *script)
+        .collect();
     for tag in [*b"Zyyy", *b"Zinh", *b"Zzzz", *b"Zsye", *b"Zsym", *b"Zmth"] {
         scripts.push(Script::from_bytes(tag));
     }
@@ -360,7 +362,7 @@ impl Fonts {
     /// (Liberation Sans) ends the list.
     pub(crate) fn families(&mut self, css: Option<&str>) -> FontFamily<'static> {
         let mut names: Vec<FontFamilyName<'static>> = Vec::new();
-        let mut push = |names: &mut Vec<FontFamilyName<'static>>, name: FontFamilyName<'static>| {
+        let push = |names: &mut Vec<FontFamilyName<'static>>, name: FontFamilyName<'static>| {
             if !names.contains(&name) {
                 names.push(name);
             }
@@ -385,7 +387,10 @@ impl Fonts {
             }
             if let Some(id) = self.context.collection.family_id(name) {
                 if let Some(real) = self.context.collection.family_name(id) {
-                    push(&mut names, FontFamilyName::Named(Cow::Owned(real.to_string())));
+                    push(
+                        &mut names,
+                        FontFamilyName::Named(Cow::Owned(real.to_string())),
+                    );
                     continue;
                 }
             }
@@ -393,7 +398,10 @@ impl Fonts {
                 push(&mut names, FontFamilyName::Named(Cow::Borrowed(family)));
             }
         }
-        push(&mut names, FontFamilyName::Named(Cow::Borrowed(SANS_FAMILY)));
+        push(
+            &mut names,
+            FontFamilyName::Named(Cow::Borrowed(SANS_FAMILY)),
+        );
         FontFamily::List(Cow::Owned(names))
     }
 }

@@ -1,8 +1,6 @@
 //! Geometry of inline content after layout: inline element fragments, text
 //! node fragments, `<br>` boxes, caret positions and hit testing.
 
-use std::collections::HashMap;
-
 use obscura_dom::tree::NodeId;
 use parley::PositionedLayoutItem;
 
@@ -139,6 +137,7 @@ impl Ifc {
             .root_span_metrics()
             .map(|metrics| (metrics.ascent, metrics.descent))
             .unwrap_or((14.0, 4.0));
+        let mut placed: std::collections::HashSet<u32> = std::collections::HashSet::new();
         for line in layout.lines() {
             let metrics = *line.metrics();
             let mut pieces: Vec<Piece> = Vec::new();
@@ -258,6 +257,7 @@ impl Ifc {
                 let Some(span) = self.spans.get(index as usize) else {
                     continue;
                 };
+                placed.insert(index);
                 for (x0, x1, baseline) in self.span_line_rects(&pieces, index) {
                     let rect = Rect {
                         x: origin.0 + x0 + span.relative.0,
@@ -273,8 +273,16 @@ impl Ifc {
             }
 
             // Text nodes: one font box per line.
-            let mut texts: Vec<(NodeId, f32, f32, f32, f32, f32, std::ops::Range<usize>, (f32, f32))> =
-                Vec::new();
+            let mut texts: Vec<(
+                NodeId,
+                f32,
+                f32,
+                f32,
+                f32,
+                f32,
+                std::ops::Range<usize>,
+                (f32, f32),
+            )> = Vec::new();
             for piece in &pieces {
                 let Some((node, range, ascent, descent)) = piece.text.clone() else {
                     continue;
@@ -315,6 +323,33 @@ impl Ifc {
                     },
                     text,
                 ));
+            }
+        }
+        // A span with no content on any line (an empty inline, or one in an
+        // IFC that formed no line box) still has a zero-width box at the
+        // start of the first line, on the strut's baseline.
+        let baseline = layout
+            .lines()
+            .next()
+            .map(|line| line.metrics().baseline)
+            .unwrap_or(root_ascent);
+        for (index, span) in self.spans.iter().enumerate() {
+            if placed.contains(&(index as u32)) {
+                continue;
+            }
+            let rect = Rect {
+                x: origin.0 + span.start.margin + span.relative.0,
+                y: origin.1 + baseline - span.ascent - span.block_start + span.relative.1,
+                width: (span.start.border
+                    + span.start.padding
+                    + span.end.border
+                    + span.end.padding)
+                    .max(0.0),
+                height: span.ascent + span.descent + span.block_start + span.block_end,
+            };
+            match span.owner {
+                SpanOwner::Element(node) => out.elements.push((node, rect)),
+                SpanOwner::Pseudo(host, kind) => out.pseudos.push((host, kind, rect)),
             }
         }
         out
@@ -430,7 +465,8 @@ impl Ifc {
     /// Client rects (content-box relative) of the UTF-16 range
     /// `start..end` of text node `node`: one per line it occupies.
     pub(crate) fn text_range_rects(&self, node: NodeId, start: usize, end: usize) -> Vec<Rect> {
-        let (Some(b0), Some(b1)) = (self.layout_byte(node, start), self.layout_byte(node, end)) else {
+        let (Some(b0), Some(b1)) = (self.layout_byte(node, start), self.layout_byte(node, end))
+        else {
             return Vec::new();
         };
         let mut out = Vec::new();

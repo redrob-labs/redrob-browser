@@ -330,13 +330,12 @@ pub(crate) fn inline_box_placement(
         .unwrap_or_default();
     let shift = shift_from_parent(inline_box.vertical_align, ascent, descent, &parent);
     let baseline_offset = parent.exact_baseline_offset + shift;
+    // Box sizes are exact layout sizes; a shifted box (`vertical-align:
+    // middle`, lengths) keeps its fractional position as in Chromium.
+    let _ = quantize;
     InlineBoxPlacement {
         aligned_subtree_root: parent.aligned_subtree_root,
-        baseline_offset: if quantize {
-            baseline_offset.round()
-        } else {
-            baseline_offset
-        },
+        baseline_offset,
         ascent,
         descent,
     }

@@ -9357,9 +9357,13 @@ fn op_layout_text_rects(
     let Some(dom) = gs.dom.as_ref() else {
         return String::new();
     };
-    let Some(rects) =
-        prepared.text_range_client_rects_with_scroll(dom, nid, start as usize, end as usize, scroll)
-    else {
+    let Some(rects) = prepared.text_range_client_rects_with_scroll(
+        dom,
+        nid,
+        start as usize,
+        end as usize,
+        scroll,
+    ) else {
         return String::new();
     };
     serde_json::Value::Array(

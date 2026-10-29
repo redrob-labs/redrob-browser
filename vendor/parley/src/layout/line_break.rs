@@ -900,12 +900,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         state.line.reset();
         state.contributed.clear();
         state.subtrees.clear();
-        state.line.box_metrics.add_style(
-            0,
-            &self.layout.data.style_metrics,
-            &mut state.contributed,
-            &mut state.subtrees,
-        );
+        // In quirks mode the strut joins the line with its first text (which
+        // adds its ancestor span boxes, the root included) or nonzero edge.
+        if !self.layout.data.line_height_quirk {
+            state.line.box_metrics.add_style(
+                0,
+                &self.layout.data.style_metrics,
+                &mut state.contributed,
+                &mut state.subtrees,
+            );
+        }
         state.update_max_height_exceeded();
     }
 
@@ -1093,6 +1097,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
             match item.kind {
                 LayoutItemKind::InlineBox => {
+                    let item_index_for_quirk = item.index;
                     let inline_box = &self.layout.data.inline_boxes[item.index].inline_box;
 
                     // In-flow boxes are aligned relative to their containing style's span box
@@ -1100,6 +1105,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     // content: unlike an atomic inline they neither contribute to the line's
                     // extents nor introduce a line break opportunity, so they are appended to the
                     // line and otherwise skipped.
+                    // Wrapping around an inline box follows the style that contains it.
+                    if inline_box.kind == InlineBoxKind::InFlow {
+                        let parent_style =
+                            self.layout.data.inline_boxes[item.index].parent_style_index;
+                        if let Some(style) = self.layout.data.styles.get(usize::from(parent_style)) {
+                            self.state.line.text_wrap_mode = style.text_wrap_mode;
+                        }
+                    }
                     if inline_box.kind == InlineBoxKind::InFlow
                         && inline_box.edge != crate::InlineBoxEdge::None
                     {
@@ -1138,6 +1151,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         }
                         if has_width {
                             self.state.line.box_metrics.has_content = true;
+                            if self.layout.data.line_height_quirk {
+                                let style = self.layout.data.inline_boxes[item_index_for_quirk]
+                                    .parent_style_index;
+                                let state = &mut self.state;
+                                state.line.box_metrics.add_style(
+                                    style,
+                                    &self.layout.data.style_metrics,
+                                    &mut state.contributed,
+                                    &mut state.subtrees,
+                                );
+                            }
                         }
                         continue;
                     }

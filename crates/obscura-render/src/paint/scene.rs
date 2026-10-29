@@ -34,7 +34,6 @@ use crate::display_list::{self, Brush, Extend, Op, Rule, Verb};
 
 /// Bytes of one font file the scene references.
 enum FontBytes {
-    Cosmic(Arc<cosmic_text::Font>),
     Static(&'static [u8]),
     Blob(parley::fontique::Blob<u8>),
 }
@@ -48,15 +47,13 @@ struct FontEntry {
 #[derive(Clone)]
 pub struct SceneFontData(Arc<FontEntry>);
 
-// The font bytes are immutable once loaded; cosmic-text's `Font` keeps
-// shaping state the scene never touches.
+// The font bytes are immutable once loaded.
 unsafe impl Send for SceneFontData {}
 unsafe impl Sync for SceneFontData {}
 
 impl SceneFontData {
     pub fn bytes(&self) -> &[u8] {
         match &self.0.bytes {
-            FontBytes::Cosmic(font) => font.data(),
             FontBytes::Static(bytes) => bytes,
             FontBytes::Blob(blob) => blob.as_ref(),
         }
@@ -100,7 +97,6 @@ fn font_content_id(data: &[u8], index: u32) -> u64 {
 fn register_font(bytes: FontBytes, index: u32) -> u64 {
     let (address, len) = {
         let data: &[u8] = match &bytes {
-            FontBytes::Cosmic(font) => font.data(),
             FontBytes::Static(data) => data,
             FontBytes::Blob(blob) => blob.as_ref(),
         };
@@ -114,7 +110,6 @@ fn register_font(bytes: FontBytes, index: u32) -> u64 {
             }
         }
         let data: &[u8] = match &bytes {
-            FontBytes::Cosmic(font) => font.data(),
             FontBytes::Static(data) => data,
             FontBytes::Blob(blob) => blob.as_ref(),
         };
@@ -126,16 +121,6 @@ fn register_font(bytes: FontBytes, index: u32) -> u64 {
             .or_insert_with(|| Arc::new(FontEntry { bytes, index }));
         id
     })
-}
-
-/// Scene font id of a face cosmic-text shaped with.
-pub(crate) fn cosmic_font_id(
-    font_system: &mut cosmic_text::FontSystem,
-    id: cosmic_text::fontdb::ID,
-) -> Option<u64> {
-    let index = font_system.db().face(id).map(|face| face.index)?;
-    let font = font_system.get_font(id)?;
-    Some(register_font(FontBytes::Cosmic(font), index))
 }
 
 /// Scene font id of a face Parley shaped with.

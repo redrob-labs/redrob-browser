@@ -75,6 +75,14 @@ impl<B: Brush> Layout<B> {
     ///
     /// The motivating use case is placing bullet list markers - Blink uses the root
     /// span's ascent and descent for their location and size.
+    /// Apply the quirks-mode line height calculation quirk to the next line
+    /// break: a line with no text and no inline box edge of nonzero width is
+    /// sized by its inline boxes alone, without the root span's strut
+    /// (<https://quirks.spec.whatwg.org/#the-line-height-calculation-quirk>).
+    pub fn set_line_height_quirk(&mut self, enabled: bool) {
+        self.data.line_height_quirk = enabled;
+    }
+
     pub fn root_span_metrics(&self) -> Option<SpanMetrics> {
         self.data.style_metrics.first().map(|it| SpanMetrics {
             ascent: it.ascent,

@@ -15,8 +15,8 @@ use parley::{
 };
 
 use super::{
-    BaselineSource, BoxKind, Brush, Ifc, IfcBox, IfcStore, InlineEdge, RootParams, Span,
-    SpanOwner, TextPaint, TextRange,
+    BaselineSource, BoxKind, Brush, Ifc, IfcBox, IfcStore, InlineEdge, RootParams, Span, SpanOwner,
+    TextPaint, TextRange,
 };
 use crate::dom::GeneratedBoxKind;
 use crate::LayoutStyle;
@@ -225,30 +225,89 @@ pub(crate) fn text_style(
     }
 }
 
-/// The `position: relative` offset of an inline element.
-fn relative_offset(style: &LayoutStyle) -> (f32, f32) {
-    if style.position != Some(taffy::Position::Relative) || style.position_sticky {
-        return (0.0, 0.0);
-    }
-    let font_size = style.font_size.unwrap_or(16.0);
-    let px = |value: Option<crate::Dimension>| {
-        value.and_then(|value| match value.resolve(font_size, 16.0, 0.0, 0.0) {
-            crate::Dimension::Px(px) => Some(px),
-            _ => None,
-        })
-    };
-    let [top, right, bottom, left] = style.inset;
-    (
-        px(left).or(px(right).map(|x| -x)).unwrap_or(0.0),
-        px(top).or(px(bottom).map(|y| -y)).unwrap_or(0.0),
-    )
+/// UAX #14 classes of printable ASCII, as Blink's break-all pair table uses
+/// them (PLUS SIGN tailored to AL).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AsciiClass {
+    Al,
+    Nu,
+    Hy,
+    Sy,
+    Ba,
+    Pr,
+    Po,
+    Cp,
+    Cl,
+    Op,
+    Ex,
+    Is,
+    Qu,
+    Other,
 }
+
+fn ascii_class(ch: char) -> AsciiClass {
+    use AsciiClass::*;
+    match ch {
+        'a'..='z' | 'A'..='Z' => Al,
+        '0'..='9' => Nu,
+        '-' => Hy,
+        '/' => Sy,
+        '|' => Ba,
+        '+' => Al,
+        '$' | '\\' => Pr,
+        '%' => Po,
+        ')' | ']' => Cp,
+        '}' => Cl,
+        '(' | '[' | '{' => Op,
+        '!' | '?' => Ex,
+        ',' | '.' | ':' | ';' => Is,
+        '"' | '\'' => Qu,
+        '#' | '&' | '*' | '@' | '^' | '_' | '`' | '~' | '<' | '=' | '>' => Al,
+        _ => Other,
+    }
+}
+
+/// Blink's `word-break: break-all` pair table for ASCII
+/// (`kBreakAllLineBreakClassTable`): the extra opportunities break-all adds.
+fn break_all_pair(before: char, after: char) -> bool {
+    use AsciiClass::*;
+    let (b, a) = (ascii_class(before), ascii_class(after));
+    let after_vertical_line = after == '|';
+    let al_like_after = matches!(a, Al | Hy | Nu | Op | Pr) || after_vertical_line;
+    match b {
+        Al | Nu | Sy | Ba => al_like_after,
+        Cl => matches!(a, Al | Hy | Nu | Pr) || after_vertical_line,
+        Cp => matches!(a, Al | Hy | Nu | Pr) || after_vertical_line,
+        Ex | Po => matches!(a, Al | Hy | Nu | Po | Pr) || after_vertical_line,
+        Is => matches!(a, Al | Hy | Nu) || after_vertical_line,
+        Hy => a == Nu,
+        Pr => a == Po,
+        _ => false,
+    }
+}
+
+/// Line break opportunities as Chromium finds them: its ASCII pair table in
+/// normal text, plus its break-all pair table where `word-break: break-all`.
+fn chromium_line_break(cx: parley::LineBreakContext) -> Option<bool> {
+    let normal = (parley::CHROMIUM_LINE_BREAK_OVERRIDE)(cx);
+    if !cx.break_all || !cx.before.is_ascii() || !cx.after.is_ascii() {
+        return normal;
+    }
+    if cx.before == ' ' || cx.after == ' ' {
+        return normal;
+    }
+    Some(normal.unwrap_or(false) || break_all_pair(cx.before, cx.after))
+}
+
+static LINE_BREAK_OVERRIDE: &parley::LineBreakOverrideFn =
+    &(chromium_line_break as fn(parley::LineBreakContext) -> Option<bool>);
 
 /// Whether an inline element generates no box fragment of its own in
 /// Chromium (a "culled" inline): no box decoration, positioning, vertical
 /// alignment or font metrics of its own.
 fn is_culled(style: &LayoutStyle, parent: &LayoutStyle) -> bool {
-    let edges_zero = |e: &crate::Edges| e.top == 0.0 && e.right == 0.0 && e.bottom == 0.0 && e.left == 0.0;
+    let edges_zero =
+        |e: &crate::Edges| e.top == 0.0 && e.right == 0.0 && e.bottom == 0.0 && e.left == 0.0;
     edges_zero(&style.padding)
         && edges_zero(&style.border)
         && style.margin.left == 0.0
@@ -408,7 +467,9 @@ impl IfcStore {
             span: None,
             decorations: root_decorations,
             color: root_color,
-            transform: root_style.text_transform.unwrap_or(crate::TextTransform::None),
+            transform: root_style
+                .text_transform
+                .unwrap_or(crate::TextTransform::None),
             clip_fill: root_fill,
             owner: root,
             white_space: white_space(root_style).0,
@@ -460,8 +521,11 @@ impl IfcStore {
                         None
                     };
                     let decorations = parent.decorations.with(style);
-                    let own_offset = relative_offset(style);
-                    let offset = (parent.offset.0 + own_offset.0, parent.offset.1 + own_offset.1);
+                    // Relative offsets resolve against the content box at layout.
+                    let offset = parent.offset;
+                    let inset = (style.position == Some(taffy::Position::Relative)
+                        && !style.position_sticky)
+                        .then_some(style.inset);
                     paints.push(TextPaint {
                         color,
                         underline: decorations.underline,
@@ -484,6 +548,8 @@ impl IfcStore {
                         ascent: 0.0,
                         descent: 0.0,
                         relative: offset,
+                        inset,
+                        font_size: style.font_size.unwrap_or(16.0),
                         culled,
                     });
                     span_text_styles.push(text_style(fonts, style, Brush(paint)));
@@ -518,6 +584,7 @@ impl IfcStore {
         let mut builder =
             self.layout_context
                 .tree_builder(&mut fonts.context, 1.0, true, &root_text_style);
+        builder.set_line_break_override(Some(LINE_BREAK_OVERRIDE));
         builder.set_base_direction(if root_style.direction == Some(taffy::Direction::Rtl) {
             parley::BaseDirection::Rtl
         } else {
@@ -534,20 +601,23 @@ impl IfcStore {
         // (span index, transform, white-space) of the open spans.
         let mut open: Vec<(Option<u32>, crate::TextTransform, WhiteSpaceCollapse)> = vec![(
             None,
-            root_style.text_transform.unwrap_or(crate::TextTransform::None),
+            root_style
+                .text_transform
+                .unwrap_or(crate::TextTransform::None),
             white_space(root_style).0,
         )];
         let mut next_span = 0u32;
-        let edge_box = |kind: InlineBoxKind, id: usize, width: f32, edge: InlineBoxEdge| InlineBox {
-            id: id as u64,
-            kind,
-            index: 0,
-            width,
-            height: 0.0,
-            baseline: None,
-            vertical_align: parley::VerticalAlign::BASELINE,
-            edge,
-        };
+        let edge_box =
+            |kind: InlineBoxKind, id: usize, width: f32, edge: InlineBoxEdge| InlineBox {
+                id: id as u64,
+                kind,
+                index: 0,
+                width,
+                height: 0.0,
+                baseline: None,
+                vertical_align: parley::VerticalAlign::BASELINE,
+                edge,
+            };
         for (item, paint) in items.iter().zip(item_paint) {
             let (current_span, transform, collapse) = *open.last().expect("root span");
             match item {
@@ -630,7 +700,7 @@ impl IfcStore {
                     if let Some(span_index) = current_span {
                         let index = boxes.len();
                         boxes.push(IfcBox {
-                        parent_span: current_span,
+                            parent_span: current_span,
                             kind: BoxKind::Edge {
                                 span: span_index,
                                 start: false,
@@ -732,6 +802,7 @@ impl IfcStore {
         }
         let mut layout = parley::Layout::new();
         let text = builder.build_into(&mut layout);
+        layout.set_line_height_quirk(tree.is_quirks());
 
         // Span font boxes come from the style each start edge was pushed in.
         for (index, inline_box) in boxes.iter().enumerate() {
@@ -743,6 +814,19 @@ impl IfcStore {
                 }
             }
         }
+
+        // The truncation marker, shaped like the root's text.
+        let marker = (params.line_clamp.is_some() || params.ellipsis).then(|| {
+            let marker_style = text_style(fonts, root_style, Brush(0));
+            let mut builder =
+                self.layout_context
+                    .tree_builder(&mut fonts.context, 1.0, true, &marker_style);
+            builder.push_text("\u{2026}");
+            let mut marker = parley::Layout::new();
+            let _ = builder.build_into(&mut marker);
+            marker.break_all_lines(None);
+            marker
+        });
 
         let index = self.ifcs.len();
         self.ifcs.push(Some(Box::new(Ifc {
@@ -762,6 +846,7 @@ impl IfcStore {
             has_content,
             origin: (0.0, 0.0),
             clip: None,
+            marker,
         })));
         Some(index)
     }
@@ -785,5 +870,10 @@ pub(crate) fn root_params(style: &LayoutStyle, has_marker: bool, center_block: b
         direction_rtl: rtl,
         has_marker,
         center_block,
+        line_clamp: (style.webkit_box_display.is_some() && style.webkit_box_orient_vertical)
+            .then_some(style.webkit_line_clamp)
+            .flatten()
+            .map(|lines| lines as usize),
+        ellipsis: style.text_overflow == crate::TextOverflow::Ellipsis && style.clips_overflow_x(),
     }
 }

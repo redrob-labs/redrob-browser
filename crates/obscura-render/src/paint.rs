@@ -1776,33 +1776,7 @@ impl PreparedRender {
                 continue;
             };
             let (local_x, local_y) = inverse.map_point(x - movement.0, y - movement.1);
-            let indices = self
-                .layout
-                .ifc_items
-                .get(&parent)
-                .into_iter()
-                .copied()
-                .chain(
-                    self.layout
-                        .run_ifc_items
-                        .get(&parent)
-                        .into_iter()
-                        .flatten()
-                        .copied(),
-                );
-            let best = indices
-                .filter_map(|index| {
-                    self.layout.text_engine.caret_from_point(
-                        index,
-                        parent,
-                        tree,
-                        &self.layout.styles,
-                        local_x,
-                        local_y,
-                        hit,
-                    )
-                })
-                .min_by(|a, b| a.2.total_cmp(&b.2));
+            let best: Option<(obscura_dom::tree::NodeId, usize, f32)> = None;
             let best = best.or_else(|| {
                 self.layout
                     .ifc
@@ -1838,20 +1812,6 @@ impl PreparedRender {
         })
         .take(tree.len() + 1)
         {
-            let indices = self
-                .layout
-                .ifc_items
-                .get(&parent)
-                .into_iter()
-                .copied()
-                .chain(
-                    self.layout
-                        .run_ifc_items
-                        .get(&parent)
-                        .into_iter()
-                        .flatten()
-                        .copied(),
-                );
             let ifc_rect = self.layout.ifc.by_node.get(&parent).and_then(|list| {
                 list.iter().find_map(|&index| {
                     let ifc = self.layout.ifc.get(index)?;
@@ -1867,29 +1827,6 @@ impl PreparedRender {
                 })
             });
             if let Some(rect) = ifc_rect {
-                let mut rect = self
-                    .layout
-                    .transforms
-                    .get(&parent)
-                    .copied()
-                    .unwrap_or_default()
-                    .map_rect(rect);
-                let movement = scroll.movement_for(parent);
-                rect.x += movement.0;
-                rect.y += movement.1;
-                return Some(rect);
-            }
-            for index in indices {
-                let Some(rect) = self.layout.text_engine.caret_rect(
-                    index,
-                    parent,
-                    tree,
-                    &self.layout.styles,
-                    node,
-                    offset,
-                ) else {
-                    continue;
-                };
                 let mut rect = self
                     .layout
                     .transforms
@@ -2334,8 +2271,9 @@ impl PreparedRender {
         scroll: &ResolvedScrollState,
     ) -> Option<Vec<crate::Rect>> {
         let parent = crate::dom::rendered_parent(tree, text)?;
-        for owner in std::iter::successors(Some(parent), |id| crate::dom::rendered_parent(tree, *id))
-            .take(tree.len() + 1)
+        for owner in
+            std::iter::successors(Some(parent), |id| crate::dom::rendered_parent(tree, *id))
+                .take(tree.len() + 1)
         {
             let Some(list) = self.layout.ifc.by_node.get(&owner) else {
                 continue;
@@ -4847,33 +4785,6 @@ fn paint_laid_dom_scrolled(
         };
 
         if node.is_text() {
-            if let Some(items) = laid.word_ifc_items.get(&nid) {
-                let offset = scroll_state.translation_for(laid, nid);
-                let overflow_clip = scroll_state.shaped_text_overflow_clip_for(laid, nid);
-                let clip = overflow_clip.as_ref().map(|clip| {
-                    clip.viewport_rect(scroll_state.surface_extent.unwrap_or(viewport))
-                });
-                let clip_mask = overflow_clip.as_ref().and_then(|clip| {
-                    cached_overflow_clip_mask(
-                        &mut overflow_mask_cache,
-                        pixmap.width(),
-                        pixmap.height(),
-                        clip,
-                        scroll_state.surface_extent.unwrap_or(viewport),
-                    )
-                });
-                for &item in items {
-                    laid.text_engine.paint_item_with_clip_mask_scaled_for_print(
-                        item,
-                        &mut pixmap,
-                        offset,
-                        clip,
-                        clip_mask.as_deref(),
-                        raster_scale,
-                        print_economy,
-                    );
-                }
-            }
             // Other text is painted with its inline formatting context.
             for generated in &generated_after_at[paint_index] {
                 paint_in_flow_generated_box(
@@ -5500,7 +5411,10 @@ fn paint_laid_dom_scrolled(
             .flatten()
             {
                 paint_positioned_pseudo(
-                    &mut laid.text_engine,
+                    &mut laid.ifc,
+                    tree,
+                    &laid.styles,
+                    nid,
                     &mut pixmap,
                     pseudo,
                     &positioned_pseudo_containing_block,
@@ -5767,27 +5681,6 @@ fn paint_laid_dom_scrolled(
                     raster_scale,
                 );
             }
-        }
-
-        // `::before`/`::after` generated text has no DOM text node of its own.
-        // Its shaped word items are registered under the host element, so
-        // paint them here. The static path remains for layout-only builds and
-        // for a face that cosmic-text cannot decode.
-        if let Some(items) = laid.word_ifc_items.get(&nid) {
-            scene_content_node(&scroll_state, nid);
-            let offset = scroll_state.translation_for(laid, nid);
-            for &item in items {
-                laid.text_engine.paint_item_with_clip_mask_scaled_for_print(
-                    item,
-                    &mut pixmap,
-                    offset,
-                    clip,
-                    element_clip_mask,
-                    raster_scale,
-                    print_economy,
-                );
-            }
-            scene_node(nid);
         }
 
         // A closed native `<select>` paints only its selected option. Options
@@ -6058,12 +5951,9 @@ fn paint_laid_dom_scrolled(
         if svg_subtree_skip.contains(&nid) || opacity_subtree_skip.contains(&nid) {
             continue;
         }
-        let whole = laid.ifc_items.get(&nid).copied();
-        let run_items = laid.run_ifc_items.get(&nid).cloned();
-        let ifcs = laid.ifc.by_node.get(&nid).cloned();
-        if whole.is_none() && run_items.is_none() && ifcs.is_none() {
+        let Some(ifcs) = laid.ifc.by_node.get(&nid).cloned() else {
             continue;
-        }
+        };
         if laid
             .styles
             .get(&nid)
@@ -6092,18 +5982,7 @@ fn paint_laid_dom_scrolled(
                 scroll_state.surface_extent.unwrap_or(viewport),
             )
         });
-        if let Some(idx) = whole {
-            laid.text_engine.paint_item_with_clip_mask_scaled_for_print(
-                idx,
-                &mut pixmap,
-                off,
-                clip,
-                clip_mask.as_deref(),
-                raster_scale,
-                print_economy,
-            );
-        }
-        if let Some(ifcs) = ifcs {
+        {
             let store = &mut laid.ifc;
             for index in ifcs {
                 let Some(ifc) = store.ifcs.get(index).and_then(|ifc| ifc.as_deref()) else {
@@ -6116,21 +5995,6 @@ fn paint_laid_dom_scrolled(
                     ifc.origin,
                     off,
                     clip.or(ifc.clip),
-                    clip_mask.as_deref(),
-                    raster_scale,
-                    print_economy,
-                );
-            }
-        }
-        // Anonymous inline-run leaves of a mixed block (see
-        // `build_mixed_block`), pinned to their own boxes at finalize.
-        if let Some(items) = run_items {
-            for idx in items {
-                laid.text_engine.paint_item_with_clip_mask_scaled_for_print(
-                    idx,
-                    &mut pixmap,
-                    off,
-                    clip,
                     clip_mask.as_deref(),
                     raster_scale,
                     print_economy,
@@ -10578,8 +10442,12 @@ fn paint_in_flow_generated_box(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_positioned_pseudo(
-    text_engine: &mut crate::inline::TextEngine,
+    ifc: &mut crate::ifc::IfcStore,
+    tree: &DomTree,
+    styles: &HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    owner: obscura_dom::tree::NodeId,
     pixmap: &mut Pixmap,
     style: &crate::LayoutStyle,
     containing_block: &crate::Rect,
@@ -10614,12 +10482,13 @@ fn paint_positioned_pseudo(
     // positioned pseudo whose width and/or height is auto. Tailwind's code
     // gutters use exactly this shape (`width` plus auto height); requiring two
     // opposing insets previously discarded the pseudo before text painting.
-    let generated_item = style
+    let generated = style
         .before_content
         .as_deref()
         .filter(|content| !content.is_empty())
-        .and_then(|content| text_engine.push_generated_text(content, style));
-    let generated_intrinsic = generated_item.map(|item| text_engine.measure(item, None));
+        .and_then(|content| ifc.standalone(tree, styles, owner, style, content, None));
+    let generated_item = generated.map(|(index, _, _)| index);
+    let generated_intrinsic = generated.map(|(_, width, height)| (width, height));
     let width = resolve(style.width, containing_block.width)
         .or_else(|| Some(containing_block.width - left? - right?))
         .or_else(|| generated_intrinsic.map(|size| size.0));
@@ -10848,15 +10717,21 @@ fn paint_positioned_pseudo(
             }
             _ => rect.y + style.padding.top,
         };
-        text_engine.finalize(item, (x, y), text_width, Some(visible));
-        text_engine.paint_item_with_clip_mask_scaled(
-            item,
-            pixmap,
-            (0.0, 0.0),
-            Some(visible),
-            element_clip_mask.as_ref(),
-            raster_scale,
-        );
+        let _ = text_width;
+        let crate::ifc::IfcStore { ifcs, raster, .. } = ifc;
+        if let Some(generated) = ifcs.get(item).and_then(|slot| slot.as_deref()) {
+            generated.paint(
+                raster,
+                styles,
+                pixmap,
+                (x, y),
+                (0.0, 0.0),
+                Some(visible),
+                element_clip_mask.as_ref(),
+                raster_scale,
+                false,
+            );
+        }
     }
 }
 

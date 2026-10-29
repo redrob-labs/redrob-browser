@@ -91,6 +91,11 @@ pub(crate) struct Span {
     /// Accumulated `position: relative` offset of the span and its
     /// ancestor spans (applies to its fragments and content).
     pub(crate) relative: (f32, f32),
+    /// `top`, `right`, `bottom`, `left` of a `position: relative` span,
+    /// resolved against the IFC's content box at layout.
+    pub(crate) inset: Option<[Option<crate::Dimension>; 4]>,
+    /// The span's font size, for font-relative insets.
+    pub(crate) font_size: f32,
     /// Chromium "culls" an inline box that has no decoration of its own and
     /// the same font metrics as its parent: it has no fragment of its own,
     /// and its client rects are those of its content.
@@ -106,17 +111,26 @@ pub(crate) enum BaselineSource {
     FirstLine,
     /// Replaced elements and boxes without a line: the bottom margin edge.
     MarginBottom,
+    /// Buttons: their first line, else the bottom of their content box.
+    Button,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum BoxKind {
-    Atomic { baseline: BaselineSource },
+    Atomic {
+        baseline: BaselineSource,
+    },
     Float,
     OutOfFlow,
     /// The start or end edge of span `span`.
-    Edge { span: u32, start: bool },
+    Edge {
+        span: u32,
+        start: bool,
+    },
     /// A `<br>`, placed just before its forced break.
-    Break { node: NodeId },
+    Break {
+        node: NodeId,
+    },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -151,6 +165,11 @@ pub(crate) struct RootParams {
     pub(crate) has_marker: bool,
     /// Vertically center the line boxes in a taller box (buttons).
     pub(crate) center_block: bool,
+    /// `-webkit-line-clamp` of a legacy vertical `-webkit-box`: only this
+    /// many lines count towards the height and paint, the last with a marker.
+    pub(crate) line_clamp: Option<usize>,
+    /// `text-overflow: ellipsis` with clipped inline overflow.
+    pub(crate) ellipsis: bool,
 }
 
 /// One inline formatting context.
@@ -183,6 +202,8 @@ pub(crate) struct Ifc {
     pub(crate) origin: (f32, f32),
     /// Clip of the root's ancestors (and its own overflow), screen space.
     pub(crate) clip: Option<crate::Rect>,
+    /// The shaped "…" marker of a clamped or ellipsized IFC.
+    pub(crate) marker: Option<parley::Layout<Brush>>,
 }
 
 impl Ifc {
@@ -236,6 +257,46 @@ impl IfcStore {
 
     pub(crate) fn len(&self) -> usize {
         self.ifcs.len()
+    }
+
+    /// Lay out `text` in `style` outside the box tree (the generated text of
+    /// a positioned pseudo-element its host paints), at `width` or its
+    /// max-content width. Returns the IFC and its (width, height).
+    pub(crate) fn standalone(
+        &mut self,
+        tree: &obscura_dom::tree::DomTree,
+        styles: &std::collections::HashMap<NodeId, crate::LayoutStyle>,
+        owner: NodeId,
+        style: &crate::LayoutStyle,
+        text: &str,
+        width: Option<f32>,
+    ) -> Option<(usize, f32, f32)> {
+        let params = build::root_params(style, false, false);
+        let index = self.create(
+            tree,
+            styles,
+            owner,
+            style,
+            false,
+            &[build::Item::GeneratedText(text.to_string())],
+            params,
+        )?;
+        let ifc = self.get_mut(index)?;
+        ifc.layout.break_all_lines(width);
+        ifc.layout.align(
+            ifc.params.align,
+            parley::AlignmentOptions {
+                align_when_overflowing: false,
+                last_line_alignment: None,
+            },
+        );
+        ifc.layout_is_final = true;
+        let height = ifc
+            .layout
+            .lines()
+            .map(|line| line.metrics().block_max_coord)
+            .fold(0.0f32, f32::max);
+        Some((index, ifc.layout.width(), height))
     }
 
     /// Make the IFCs available to Taffy's inline layout function until

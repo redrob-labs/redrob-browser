@@ -188,11 +188,14 @@ struct PaintRun {
     underline_size: f32,
     strikethrough_offset: f32,
     ascent: f32,
+    /// Index of the line the run is on, and that line's right edge.
+    line: usize,
+    line_end: f32,
 }
 
 fn runs(ifc: &Ifc) -> Vec<PaintRun> {
     let mut out = Vec::new();
-    for line in ifc.final_layout().lines() {
+    for (line_index, line) in ifc.final_layout().lines().enumerate() {
         let metrics = *line.metrics();
         for item in line.items() {
             let PositionedLayoutItem::GlyphRun(run) = item else {
@@ -215,7 +218,11 @@ fn runs(ifc: &Ifc) -> Vec<PaintRun> {
                 paint,
                 font: parley_run.font().clone(),
                 size: parley_run.font_size(),
-                coords: parley_run.normalized_coords().iter().map(|c| c.to_bits()).collect(),
+                coords: parley_run
+                    .normalized_coords()
+                    .iter()
+                    .map(|c| c.to_bits())
+                    .collect(),
                 embolden: synthesis.embolden(),
                 skew: synthesis.skew().unwrap_or(0.0),
                 glyphs,
@@ -228,9 +235,135 @@ fn runs(ifc: &Ifc) -> Vec<PaintRun> {
                 underline_size: font_metrics.underline_size,
                 strikethrough_offset: font_metrics.strikethrough_offset,
                 ascent: font_metrics.ascent,
+                line: line_index,
+                line_end: metrics.inline_max_coord,
             });
         }
     }
+    out
+}
+
+/// Apply `-webkit-line-clamp` and `text-overflow: ellipsis`: drop the lines
+/// after the clamp and the glyphs the marker replaces, and add the marker.
+fn truncate(ifc: &Ifc, mut runs: Vec<PaintRun>) -> Vec<PaintRun> {
+    let Some(marker) = ifc.marker.as_ref() else {
+        return runs;
+    };
+    let marker_runs = runs_of_layout(ifc, marker);
+    let marker_width: f32 = marker_runs.iter().map(|run| run.x1 - run.x0).sum();
+    let mut lines: Vec<usize> = runs.iter().map(|run| run.line).collect();
+    lines.dedup();
+    // The clamped line, when more lines follow it.
+    let clamp_line = ifc
+        .params
+        .line_clamp
+        .filter(|limit| *limit > 0 && lines.len() > *limit)
+        .map(|limit| lines[limit - 1]);
+    if let Some(last) = clamp_line {
+        runs.retain(|run| run.line <= last);
+    }
+    // The line the marker goes on, and where.
+    let content_end = |line: usize| {
+        runs.iter()
+            .filter(|run| run.line == line)
+            .map(|run| run.x1)
+            .fold(0.0f32, f32::max)
+    };
+    let line_end = |line: usize| {
+        runs.iter()
+            .find(|run| run.line == line)
+            .map(|run| run.line_end)
+            .unwrap_or(0.0)
+    };
+    let target = match clamp_line {
+        Some(line) => Some((line, content_end(line).min(line_end(line) - marker_width))),
+        None if ifc.params.ellipsis => lines
+            .iter()
+            .copied()
+            .find(|line| content_end(*line) > line_end(*line) + 0.01)
+            .map(|line| (line, (line_end(line) - marker_width).max(0.0))),
+        None => None,
+    };
+    let Some((line, marker_x)) = target else {
+        return runs;
+    };
+    let mut baseline = 0.0;
+    for run in runs.iter_mut().filter(|run| run.line == line) {
+        baseline = run.baseline;
+        let mut kept = Vec::new();
+        for (index, &(glyph, gx, gy)) in run.glyphs.iter().enumerate() {
+            // Keep glyphs that end before the marker.
+            let end = run
+                .glyphs
+                .get(index + 1)
+                .map(|next| next.1)
+                .unwrap_or(run.x1);
+            if end <= marker_x + 0.01 {
+                kept.push((glyph, gx, gy));
+            }
+        }
+        run.glyphs = kept;
+        run.x1 = run.x1.min(marker_x);
+    }
+    for mut run in marker_runs {
+        let dx = marker_x - run.x0;
+        let dy = baseline - run.baseline;
+        run.glyphs = run
+            .glyphs
+            .iter()
+            .map(|&(glyph, x, y)| (glyph, x + dx, y + dy))
+            .collect();
+        run.x0 += dx;
+        run.x1 += dx;
+        run.baseline += dy;
+        run.line = line;
+        runs.push(run);
+    }
+    runs
+}
+
+/// The paint runs of a separately shaped layout (the truncation marker).
+fn runs_of_layout(ifc: &Ifc, layout: &parley::Layout<super::Brush>) -> Vec<PaintRun> {
+    let mut out = Vec::new();
+    for line in layout.lines() {
+        let metrics = *line.metrics();
+        for item in line.items() {
+            let PositionedLayoutItem::GlyphRun(run) = item else {
+                continue;
+            };
+            let parley_run = run.run();
+            let font_metrics = parley_run.font_metrics();
+            let synthesis = parley_run.synthesis();
+            out.push(PaintRun {
+                paint: 0,
+                font: parley_run.font().clone(),
+                size: parley_run.font_size(),
+                coords: parley_run
+                    .normalized_coords()
+                    .iter()
+                    .map(|c| c.to_bits())
+                    .collect(),
+                embolden: synthesis.embolden(),
+                skew: synthesis.skew().unwrap_or(0.0),
+                glyphs: run
+                    .positioned_glyphs()
+                    .map(|glyph| (glyph.id as u16, glyph.x, glyph.y))
+                    .collect(),
+                x0: run.offset(),
+                x1: run.offset() + run.advance(),
+                baseline: run.baseline(),
+                line_top: metrics.block_min_coord,
+                line_bottom: metrics.block_max_coord,
+                underline_offset: font_metrics.underline_offset,
+                underline_size: font_metrics.underline_size,
+                strikethrough_offset: font_metrics.strikethrough_offset,
+                ascent: font_metrics.ascent,
+                line: 0,
+                line_end: metrics.inline_max_coord,
+            });
+        }
+    }
+    let _ = ifc;
     out
 }
 
@@ -254,7 +387,13 @@ fn decorations(ifc: &Ifc, run: &PaintRun, color: [u8; 4]) -> Vec<(f32, f32, f32,
         } else {
             run.size * 0.3
         };
-        out.push((run.x0, run.x1, (run.baseline - offset).round(), thickness, color));
+        out.push((
+            run.x0,
+            run.x1,
+            (run.baseline - offset).round(),
+            thickness,
+            color,
+        ));
     }
     out
 }
@@ -355,7 +494,7 @@ impl Ifc {
                 (c.y + c.height) * raster_scale,
             )
         });
-        let runs = runs(self);
+        let runs = truncate(self, runs(self));
         if runs.is_empty() {
             return;
         }
@@ -392,7 +531,11 @@ impl Ifc {
         let pixels = pixmap.pixels_mut();
         let mut blend = |px: i32, py: i32, rgba: [u8; 4], coverage: u32| {
             if let Some((cx0, cy0, cx1, cy1)) = clip_bounds {
-                if (px as f32) < cx0 || (px as f32) >= cx1 || (py as f32) < cy0 || (py as f32) >= cy1 {
+                if (px as f32) < cx0
+                    || (px as f32) >= cx1
+                    || (py as f32) < cy0
+                    || (py as f32) >= cy1
+                {
                     return;
                 }
             }
@@ -449,9 +592,15 @@ impl Ifc {
             for &(glyph, gx, gy) in &run.glyphs {
                 let (x, x_bin) = subpixel(ox + gx * raster_scale);
                 let y = (oy + gy * raster_scale).round() as i32;
-                let Some(image) =
-                    raster.image(&run.font, glyph, size, x_bin, &run.coords, run.embolden, run.skew)
-                else {
+                let Some(image) = raster.image(
+                    &run.font,
+                    glyph,
+                    size,
+                    x_bin,
+                    &run.coords,
+                    run.embolden,
+                    run.skew,
+                ) else {
                     continue;
                 };
                 let left = x + image.placement.left;
@@ -538,7 +687,7 @@ impl Ifc {
         if !scene_clip_known(clip_mask) {
             return false;
         }
-        let runs = runs(self);
+        let runs = truncate(self, runs(self));
         if runs.iter().any(|run| {
             self.paints
                 .get(run.paint)
@@ -631,6 +780,59 @@ impl Ifc {
             );
         }
         true
+    }
+
+    /// Per line, its ink rectangle in document coordinates and a fingerprint
+    /// of everything it paints (glyphs, fonts, colors, decorations), for
+    /// paint damage tracking.
+    pub(crate) fn line_fingerprints(&self) -> Vec<(Rect, u64)> {
+        let runs = truncate(self, runs(self));
+        let mut lines: Vec<(Rect, std::collections::hash_map::DefaultHasher)> = Vec::new();
+        for run in &runs {
+            while lines.len() <= run.line {
+                lines.push((
+                    Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: 0.0,
+                        height: 0.0,
+                    },
+                    std::collections::hash_map::DefaultHasher::new(),
+                ));
+            }
+            let (rect, hasher) = &mut lines[run.line];
+            let pad = run.size;
+            let ink = Rect {
+                x: self.origin.0 + run.x0 - pad,
+                y: self.origin.1 + run.line_top - pad,
+                width: run.x1 - run.x0 + 2.0 * pad,
+                height: run.line_bottom - run.line_top + 2.0 * pad,
+            };
+            *rect = if rect.width == 0.0 && rect.height == 0.0 {
+                ink
+            } else {
+                rect.union(&ink)
+            };
+            run.font.data.id().hash(hasher);
+            run.font.index.hash(hasher);
+            run.size.to_bits().hash(hasher);
+            run.coords.hash(hasher);
+            run.embolden.hash(hasher);
+            if let Some(paint) = self.paints.get(run.paint) {
+                paint.color.hash(hasher);
+                (paint.underline, paint.overline, paint.line_through).hash(hasher);
+                paint.clip_fill.hash(hasher);
+            }
+            for &(glyph, x, y) in &run.glyphs {
+                glyph.hash(hasher);
+                (self.origin.0 + x).to_bits().hash(hasher);
+                (self.origin.1 + y).to_bits().hash(hasher);
+            }
+        }
+        lines
+            .into_iter()
+            .map(|(rect, hasher)| (rect, hasher.finish()))
+            .collect()
     }
 
     /// Ink rectangles of each line (content-box relative) for damage

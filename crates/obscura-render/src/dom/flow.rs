@@ -55,7 +55,8 @@ fn is_text(tree: &DomTree, id: NodeId) -> bool {
 
 fn local_name(tree: &DomTree, id: NodeId) -> Option<String> {
     tree.with_node(id, |node| {
-        node.as_element().map(|element| element.local.as_ref().to_string())
+        node.as_element()
+            .map(|element| element.local.as_ref().to_string())
     })
     .flatten()
 }
@@ -244,7 +245,6 @@ pub(super) struct BuildCx<'a> {
     pub(super) tree: &'a DomTree,
     pub(super) taffy_tree: &'a mut TaffyTree<usize>,
     pub(super) id_map: &'a mut HashMap<taffy::NodeId, NodeId>,
-    pub(super) words: &'a mut HashMap<taffy::NodeId, (NodeId, String)>,
     pub(super) engine: &'a mut crate::inline::TextEngine,
     pub(super) ifc_items: &'a mut IfcRegistry,
     pub(super) styles: &'a HashMap<NodeId, crate::LayoutStyle>,
@@ -257,7 +257,6 @@ impl BuildCx<'_> {
             id,
             self.taffy_tree,
             self.id_map,
-            self.words,
             self.engine,
             self.ifc_items,
             self.styles,
@@ -266,7 +265,11 @@ impl BuildCx<'_> {
 
     /// A box for a `::before`/`::after` that generates its own box (block,
     /// inline-block, float). Its text forms an inline formatting context.
-    pub(super) fn build_generated_box(&mut self, host: NodeId, kind: GeneratedBoxKind) -> Option<taffy::NodeId> {
+    pub(super) fn build_generated_box(
+        &mut self,
+        host: NodeId,
+        kind: GeneratedBoxKind,
+    ) -> Option<taffy::NodeId> {
         let pseudo = pseudo_style(self.styles, host, kind)?.clone();
         let mut taffy_style = crate::to_taffy_style(&pseudo);
         taffy_style.display = match pseudo.display {
@@ -327,7 +330,10 @@ impl BuildCx<'_> {
         {
             return BaselineSource::MarginBottom;
         }
-        if matches!(name.as_str(), "input" | "select" | "textarea" | "button")
+        if name == "button" {
+            return BaselineSource::Button;
+        }
+        if matches!(name.as_str(), "input" | "select" | "textarea")
             || matches!(style.display, crate::Display::Flex | crate::Display::Grid)
         {
             return BaselineSource::FirstLine;
@@ -421,7 +427,8 @@ impl BuildCx<'_> {
                         }
                     } else {
                         items.push(Item::SpanStart(SpanOwner::Pseudo(host, kind)));
-                        if let Some(text) = style.before_content.as_deref().filter(|t| !t.is_empty())
+                        if let Some(text) =
+                            style.before_content.as_deref().filter(|t| !t.is_empty())
                         {
                             items.push(Item::GeneratedText(text.to_string()));
                         }
@@ -443,7 +450,6 @@ impl BuildCx<'_> {
                     }
                 }
                 (Piece::Pseudo(..), _) => {}
-                (Piece::Dom(_), _) => {}
             }
         }
     }
@@ -536,18 +542,18 @@ pub(super) fn build_flow_children(
                     child,
                     cx.taffy_tree,
                     cx.id_map,
-                    cx.words,
                     cx.engine,
                     cx.ifc_items,
                     cx.styles,
                 );
                 if style.legacy_center {
-                    let has_default_horizontal_margins = cx.styles.get(&child).is_some_and(|child| {
-                        child.margin.left == 0.0
-                            && child.margin.right == 0.0
-                            && !child.margin_auto[1]
-                            && !child.margin_auto[3]
-                    });
+                    let has_default_horizontal_margins =
+                        cx.styles.get(&child).is_some_and(|child| {
+                            child.margin.left == 0.0
+                                && child.margin.right == 0.0
+                                && !child.margin_auto[1]
+                                && !child.margin_auto[3]
+                        });
                     if has_default_horizontal_margins {
                         for node in &built {
                             if let Ok(current) = cx.taffy_tree.style(*node) {

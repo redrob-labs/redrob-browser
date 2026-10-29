@@ -31,7 +31,8 @@ pub(crate) fn compute_inline_layout(
         return LayoutOutput::HIDDEN;
     };
     let style = host.style(node).clone();
-    let is_scroll_container = style.overflow.x.is_scroll_container() || style.overflow.y.is_scroll_container();
+    let is_scroll_container =
+        style.overflow.x.is_scroll_container() || style.overflow.y.is_scroll_container();
     let result = super::with_active_ifc(index, |ifc| match block_ctx {
         Some(block_ctx) if !is_scroll_container => {
             layout_ifc(host, node, &style, ifc, inputs, block_ctx)
@@ -121,11 +122,21 @@ fn subtract_margins(mut inputs: LayoutInput, margin: Rect<f32>) -> LayoutInput {
     inputs
 }
 
-fn last_baseline(output: &LayoutOutput, source: BaselineSource) -> Option<f32> {
+fn last_baseline(
+    output: &LayoutOutput,
+    source: BaselineSource,
+    padding: Rect<f32>,
+    border: Rect<f32>,
+) -> Option<f32> {
     match source {
         BaselineSource::LastLine => output.last_baseline.or(output.first_baselines.y),
         BaselineSource::FirstLine => output.first_baselines.y.or(output.last_baseline),
         BaselineSource::MarginBottom => None,
+        BaselineSource::Button => output
+            .first_baselines
+            .y
+            .or(output.last_baseline)
+            .or(Some(output.size.height - padding.bottom - border.bottom)),
     }
 }
 
@@ -183,7 +194,8 @@ fn layout_ifc(
                 .max_size
                 .maybe_resolve(parent_size, calc_fn)
                 .maybe_add(box_sizing_adjustment);
-            let node_size = known_dimensions.or(style_size.maybe_clamp(style_min_size, style_max_size));
+            let node_size =
+                known_dimensions.or(style_size.maybe_clamp(style_min_size, style_max_size));
             (node_size, style_min_size, style_max_size, aspect_ratio)
         }
     };
@@ -218,6 +230,7 @@ fn layout_ifc(
     let has_box = |box_node: Option<NodeId>| box_node.is_some_and(|n| children.contains(&n));
 
     if !ifc.has_content
+        && ifc.spans.is_empty()
         && !ifc
             .boxes
             .iter()
@@ -227,7 +240,14 @@ fn layout_ifc(
         // position (their static position is the content-box start).
         if run_mode == RunMode::PerformLayout {
             ifc.content_offset = (container_pb.left, container_pb.top);
-            place_out_of_flow_without_lines(host, ifc, &children, container_pb, border, known_dimensions);
+            place_out_of_flow_without_lines(
+                host,
+                ifc,
+                &children,
+                container_pb,
+                border,
+                known_dimensions,
+            );
             mark_final(ifc);
         }
         let size = known_dimensions
@@ -312,14 +332,21 @@ fn layout_ifc(
                     box_inputs,
                     box_inputs.available_space.width.into_option(),
                 );
-                let baseline = last_baseline(&output, baseline).map(|b| {
-                    let b = if child_style.overflow.y != Overflow::Visible {
-                        b.clamp(0.0, output.size.height)
-                    } else {
-                        b
-                    };
-                    margin.top + b
-                });
+                let child_padding = child_style
+                    .padding
+                    .resolve_or_zero(child_inputs.parent_size.width, calc_fn);
+                let child_border = child_style
+                    .border
+                    .resolve_or_zero(child_inputs.parent_size.width, calc_fn);
+                let baseline =
+                    last_baseline(&output, baseline, child_padding, child_border).map(|b| {
+                        let b = if child_style.overflow.y != Overflow::Visible {
+                            b.clamp(0.0, output.size.height)
+                        } else {
+                            b
+                        };
+                        margin.top + b
+                    });
                 let margin_box_height = margin.top + margin.bottom + output.size.height;
                 (
                     margin.left + margin.right + output.size.width,
@@ -520,7 +547,8 @@ fn layout_ifc(
                         && breaker.revert()
                     {
                         retries += 1;
-                        let next = block_ctx.find_content_slot(slot.y + slot.height, Clear::None, None);
+                        let next =
+                            block_ctx.find_content_slot(slot.y + slot.height, Clear::None, None);
                         has_active_floats = next.segment_id.is_some();
                         slot = next;
                         let state = breaker.state_mut();
@@ -648,8 +676,9 @@ fn layout_ifc(
     }
 
     let float_height_contribution = block_ctx.floated_content_height_contribution();
-    outer_block_ctx
-        .add_child_floated_content_height_contribution(container_pb.top + float_height_contribution);
+    outer_block_ctx.add_child_floated_content_height_contribution(
+        container_pb.top + float_height_contribution,
+    );
 
     ifc.layout.align(
         ifc.params.align,
@@ -679,9 +708,10 @@ fn layout_ifc(
     let line_count = ifc.layout.len();
     let mut trailing_empty_line = None;
     if line_count >= 2 {
-        if let (Some(prev_line), Some(last_line)) =
-            (ifc.layout.get(line_count - 2), ifc.layout.get(line_count - 1))
-        {
+        if let (Some(prev_line), Some(last_line)) = (
+            ifc.layout.get(line_count - 2),
+            ifc.layout.get(line_count - 1),
+        ) {
             if prev_line.break_reason() == BreakReason::Explicit
                 && last_line.text_range().is_empty()
                 && last_line.items().next().is_none()
@@ -692,6 +722,12 @@ fn layout_ifc(
     }
     if trailing_empty_line.is_some() && has_inline_content {
         height = lines_bottom(&ifc.layout, true);
+    }
+    // A line clamp cuts the content height after the last counted line.
+    if let Some(limit) = ifc.params.line_clamp.filter(|limit| *limit > 0) {
+        if let Some(line) = clamped_last_line(&ifc.layout, limit) {
+            height = height.min(line);
+        }
     }
     if is_bfc_root {
         height = height.max(float_height_contribution);
@@ -726,6 +762,7 @@ fn layout_ifc(
     let line_box_top = container_pb.top + block_offset;
 
     if run_mode == RunMode::PerformLayout {
+        resolve_relative_offsets(ifc, final_size - content_box_inset.sum_axes());
         place_inline_boxes(
             host,
             ifc,
@@ -741,7 +778,8 @@ fn layout_ifc(
         mark_final(ifc);
     }
 
-    let line_baseline = |line: parley::Line<'_, super::Brush>| line.metrics().baseline + line_box_top;
+    let line_baseline =
+        |line: parley::Line<'_, super::Brush>| line.metrics().baseline + line_box_top;
     let first_baseline = has_inline_content
         .then(|| ifc.layout.lines().next().map(line_baseline))
         .flatten();
@@ -987,7 +1025,11 @@ fn place_out_of_flow(
         parent_size: area.map(Some),
         available_space: Size {
             width: AvailableSpace::Definite(
-                (area.width - left.unwrap_or(0.0) - right.unwrap_or(0.0) - margin.left - margin.right)
+                (area.width
+                    - left.unwrap_or(0.0)
+                    - right.unwrap_or(0.0)
+                    - margin.left
+                    - margin.right)
                     .max(0.0),
             ),
             height: AvailableSpace::Definite(area.height),
@@ -1023,4 +1065,60 @@ fn place_out_of_flow(
             margin,
         },
     );
+}
+
+/// The bottom of the `limit`th line that has content, when more lines follow.
+fn clamped_last_line(layout: &parley::Layout<super::Brush>, limit: usize) -> Option<f32> {
+    let mut counted = 0;
+    for index in 0..layout.len() {
+        let line = layout.get(index)?;
+        if line.items().next().is_none() {
+            continue;
+        }
+        counted += 1;
+        if counted == limit {
+            return Some(line.metrics().block_max_coord);
+        }
+    }
+    None
+}
+
+/// Resolve `position: relative` on inline spans against the content box and
+/// accumulate them down the span tree into the text that paints.
+fn resolve_relative_offsets(ifc: &mut Ifc, content: Size<f32>) {
+    for index in 0..ifc.spans.len() {
+        let parent = ifc.spans[index]
+            .parent
+            .and_then(|parent| ifc.spans.get(parent as usize))
+            .map(|parent| parent.relative)
+            .unwrap_or((0.0, 0.0));
+        let span = &ifc.spans[index];
+        let own = span.inset.map_or((0.0, 0.0), |[top, right, bottom, left]| {
+            let px = |value: Option<crate::Dimension>, basis: f32| {
+                value.and_then(|value| match value {
+                    crate::Dimension::Percent(fraction) => Some(fraction * basis),
+                    other => match other.resolve(span.font_size, 16.0, 0.0, 0.0) {
+                        crate::Dimension::Px(px) => Some(px),
+                        _ => None,
+                    },
+                })
+            };
+            (
+                px(left, content.width)
+                    .or(px(right, content.width).map(|x| -x))
+                    .unwrap_or(0.0),
+                px(top, content.height)
+                    .or(px(bottom, content.height).map(|y| -y))
+                    .unwrap_or(0.0),
+            )
+        });
+        ifc.spans[index].relative = (parent.0 + own.0, parent.1 + own.1);
+    }
+    for paint in &mut ifc.paints {
+        paint.offset = paint
+            .span
+            .and_then(|span| ifc.spans.get(span as usize))
+            .map(|span| span.relative)
+            .unwrap_or((0.0, 0.0));
+    }
 }

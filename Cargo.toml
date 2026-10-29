@@ -67,10 +67,8 @@ base64 = "0.22"
 [patch.crates-io]
 # Keep the grid shrink-to-fit correction local until it lands upstream.
 taffy = { path = "vendor/taffy" }
-# Carry the same canonical variable-font coordinates through shaping and
-# rasterization until the upstream API exposes them.
-cosmic-text = { path = "vendor/cosmic-text" }
 parley = { path = "vendor/parley" }
+parley_engine = { path = "vendor/parley_engine" }
 # Build rav1d (AVIF/AV1) without nasm-assembled x86 kernels; see vendor/avif-decode/Cargo.toml.
 avif-decode = { path = "vendor/avif-decode" }
 
