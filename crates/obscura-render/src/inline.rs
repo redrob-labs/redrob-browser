@@ -5332,16 +5332,16 @@ mod tests {
             (Some(100.49), Wrap::WordOrGlyph),
             (Some(100.51), Wrap::Glyph),
         ] {
-            let actual = engine.measure_text_with_wrap(item, width, wrap);
+            let actual = engine.measure_text_with_wrap(item, width, wrap, &[]);
             let cached_entries = engine.items[item].measured.len();
-            assert_eq!(engine.measure_text_with_wrap(item, width, wrap), actual);
+            assert_eq!(engine.measure_text_with_wrap(item, width, wrap, &[]), actual);
             assert_eq!(engine.items[item].measured.len(), cached_entries);
 
             let mut fresh = TextEngine::new();
             let fresh_item = fresh.try_build(&tree, copy, &styles).unwrap();
             assert_eq!(
                 actual,
-                fresh.measure_text_with_wrap(fresh_item, width, wrap)
+                fresh.measure_text_with_wrap(fresh_item, width, wrap, &[])
             );
             engine.finalize(item, (0.0, 0.0), 100.49, None);
             fresh.finalize(fresh_item, (0.0, 0.0), 100.49, None);
