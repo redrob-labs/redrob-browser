@@ -5828,6 +5828,13 @@ class Element extends Node {
     const geometry = this._renderBoxGeometry();
     if (geometry !== undefined) {
       if (geometry) return this._rectFromRenderGeometry(geometry);
+      // SVG shapes have no layout box of their own; their rect comes from
+      // their geometry inside the outer <svg>'s box.
+      if (this.namespaceURI === 'http://www.w3.org/2000/svg' && this.localName !== 'svg'
+          && typeof globalThis.__obscuraSvgClientRect === 'function') {
+        const r = globalThis.__obscuraSvgClientRect(this);
+        if (r) return { ...r, top: r.y, left: r.x, right: r.x + r.width, bottom: r.y + r.height, toJSON() { return this; } };
+      }
       // CSSOM View: an element without an associated box has an all-zero
       // bounding rect. Do not leak the non-render 100x20 compatibility cell.
       return {
@@ -16694,7 +16701,211 @@ HTMLCanvasElement.prototype.toBlob = function(cb, type, q) {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   cb(new Blob([bytes], {type: String(type || 'image/png')}));
 };
-Element.prototype.getBBox = function() { return { x: 0, y: 0, width: 0, height: 0 }; };
+// SVG geometry. Layout gives the outer <svg> a box; shapes inside it have
+// none, so compute their user-space bounds from their attributes, then map
+// them through ancestor transforms and the outer viewBox (CSSOM View and
+// SVG 2 getBBox). Curves are sampled, which is within a pixel of Chrome.
+const _SVG_NS = 'http://www.w3.org/2000/svg';
+const _svgNum = (el, name, ref) => {
+  const raw = el.getAttribute(name);
+  if (raw == null || raw === '') return 0;
+  const v = parseFloat(raw);
+  if (!Number.isFinite(v)) return 0;
+  return /%\s*$/.test(raw) ? v / 100 * (ref || 0) : v;
+};
+const _svgMul = (a, b) => [
+  a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1],
+  a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3],
+  a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5],
+];
+const _svgTransform = (text) => {
+  let m = [1, 0, 0, 1, 0, 0];
+  if (!text) return m;
+  const re = /(matrix|translate|scale|rotate|skewX|skewY)\s*\(([^)]*)\)/g;
+  let hit;
+  while ((hit = re.exec(text))) {
+    const a = hit[2].split(/[\s,]+/).filter(Boolean).map(Number);
+    let t;
+    switch (hit[1]) {
+      case 'matrix': t = a.length === 6 ? a : [1, 0, 0, 1, 0, 0]; break;
+      case 'translate': t = [1, 0, 0, 1, a[0] || 0, a[1] || 0]; break;
+      case 'scale': t = [a[0] ?? 1, 0, 0, a[1] ?? a[0] ?? 1, 0, 0]; break;
+      case 'rotate': {
+        const r = (a[0] || 0) * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+        t = [c, s, -s, c, 0, 0];
+        if (a.length >= 3) t = _svgMul(_svgMul([1, 0, 0, 1, a[1], a[2]], t), [1, 0, 0, 1, -a[1], -a[2]]);
+        break;
+      }
+      case 'skewX': t = [1, 0, Math.tan((a[0] || 0) * Math.PI / 180), 1, 0, 0]; break;
+      case 'skewY': t = [1, Math.tan((a[0] || 0) * Math.PI / 180), 0, 1, 0, 0]; break;
+    }
+    m = _svgMul(m, t);
+  }
+  return m;
+};
+const _svgPathPoints = (d) => {
+  const pts = [];
+  const tok = String(d || '').match(/[a-zA-Z]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/g) || [];
+  let i = 0, cmd = '', x = 0, y = 0, sx = 0, sy = 0, cx = 0, cy = 0;
+  const num = () => parseFloat(tok[i++]);
+  const more = () => i < tok.length && !/^[a-zA-Z]$/.test(tok[i]);
+  const cubic = (x1, y1, x2, y2, x3, y3) => {
+    for (let k = 1; k <= 16; k++) {
+      const t = k / 16, u = 1 - t;
+      pts.push([u * u * u * x + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3,
+                u * u * u * y + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3]);
+    }
+  };
+  while (i < tok.length) {
+    if (/^[a-zA-Z]$/.test(tok[i])) cmd = tok[i++];
+    const rel = cmd === cmd.toLowerCase();
+    const ox = rel ? x : 0, oy = rel ? y : 0;
+    switch (cmd.toUpperCase()) {
+      case 'M': x = ox + num(); y = oy + num(); sx = x; sy = y; pts.push([x, y]); cmd = rel ? 'l' : 'L'; cx = x; cy = y; break;
+      case 'L': x = ox + num(); y = oy + num(); pts.push([x, y]); cx = x; cy = y; break;
+      case 'H': x = ox + num(); pts.push([x, y]); cx = x; cy = y; break;
+      case 'V': y = oy + num(); pts.push([x, y]); cx = x; cy = y; break;
+      case 'C': { const x1 = ox + num(), y1 = oy + num(), x2 = ox + num(), y2 = oy + num(), x3 = ox + num(), y3 = oy + num(); cubic(x1, y1, x2, y2, x3, y3); cx = x2; cy = y2; x = x3; y = y3; break; }
+      case 'S': { const x1 = 2 * x - cx, y1 = 2 * y - cy, x2 = ox + num(), y2 = oy + num(), x3 = ox + num(), y3 = oy + num(); cubic(x1, y1, x2, y2, x3, y3); cx = x2; cy = y2; x = x3; y = y3; break; }
+      case 'Q': { const x1 = ox + num(), y1 = oy + num(), x3 = ox + num(), y3 = oy + num(); cubic(x + 2 / 3 * (x1 - x), y + 2 / 3 * (y1 - y), x3 + 2 / 3 * (x1 - x3), y3 + 2 / 3 * (y1 - y3), x3, y3); cx = x1; cy = y1; x = x3; y = y3; break; }
+      case 'T': { const x1 = 2 * x - cx, y1 = 2 * y - cy, x3 = ox + num(), y3 = oy + num(); cubic(x + 2 / 3 * (x1 - x), y + 2 / 3 * (y1 - y), x3 + 2 / 3 * (x1 - x3), y3 + 2 / 3 * (y1 - y3), x3, y3); cx = x1; cy = y1; x = x3; y = y3; break; }
+      case 'A': {
+        const rx = Math.abs(num()), ry = Math.abs(num()); num(); num(); num();
+        const x3 = ox + num(), y3 = oy + num();
+        // Bounds of the arc's ellipse clipped to the chord box keep this
+        // within the true arc for the usual icon arcs; endpoints always count.
+        pts.push([x3, y3]);
+        const mx = (x + x3) / 2, my = (y + y3) / 2;
+        pts.push([Math.min(Math.max(mx, Math.min(x, x3) - rx), Math.max(x, x3) + rx), my]);
+        x = x3; y = y3; cx = x; cy = y; break;
+      }
+      case 'Z': x = sx; y = sy; cx = x; cy = y; break;
+      default: i++;
+    }
+    if (cmd.toUpperCase() === 'Z' && more()) cmd = 'L';
+    if (!more() && i < tok.length && !/^[a-zA-Z]$/.test(tok[i])) i++;
+  }
+  return pts;
+};
+// User-space bounds of one element (not including its own transform).
+const _svgLocalBounds = (el) => {
+  const tag = el.localName;
+  const box = (x, y, w, h) => (w >= 0 && h >= 0 ? [x, y, x + w, y + h] : null);
+  const fromPts = (pts) => {
+    if (!pts.length) return null;
+    let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+    for (const [px, py] of pts) { if (px < a) a = px; if (py < b) b = py; if (px > c) c = px; if (py > d) d = py; }
+    return [a, b, c, d];
+  };
+  switch (tag) {
+    case 'rect': case 'image': case 'foreignObject':
+      return box(_svgNum(el, 'x'), _svgNum(el, 'y'), _svgNum(el, 'width'), _svgNum(el, 'height'));
+    case 'circle': { const r = _svgNum(el, 'r'), cx = _svgNum(el, 'cx'), cy = _svgNum(el, 'cy'); return [cx - r, cy - r, cx + r, cy + r]; }
+    case 'ellipse': { const rx = _svgNum(el, 'rx'), ry = _svgNum(el, 'ry'), cx = _svgNum(el, 'cx'), cy = _svgNum(el, 'cy'); return [cx - rx, cy - ry, cx + rx, cy + ry]; }
+    case 'line': return fromPts([[_svgNum(el, 'x1'), _svgNum(el, 'y1')], [_svgNum(el, 'x2'), _svgNum(el, 'y2')]]);
+    case 'polyline': case 'polygon': {
+      const n = String(el.getAttribute('points') || '').split(/[\s,]+/).filter(Boolean).map(Number);
+      const pts = [];
+      for (let k = 0; k + 1 < n.length; k += 2) pts.push([n[k], n[k + 1]]);
+      return fromPts(pts);
+    }
+    case 'path': return fromPts(_svgPathPoints(el.getAttribute('d')));
+    case 'text': case 'tspan': {
+      const size = parseFloat(getComputedStyle(el).fontSize) || 16;
+      const text = el.textContent || '';
+      const x = _svgNum(el, 'x'), y = _svgNum(el, 'y');
+      let w = text.length * size * 0.55;
+      try {
+        const ctx = (globalThis.__obscuraSvgMeasure ||= document.createElement('canvas').getContext('2d'));
+        if (ctx) { ctx.font = `${size}px ${getComputedStyle(el).fontFamily || 'sans-serif'}`; w = ctx.measureText(text).width; }
+      } catch (_e) {}
+      const anchor = getComputedStyle(el).textAnchor || el.getAttribute('text-anchor');
+      const left = anchor === 'middle' ? x - w / 2 : anchor === 'end' ? x - w : x;
+      return [left, y - size * 0.9, left + w, y + size * 0.25];
+    }
+    case 'use': {
+      const ref = el.getAttribute('href') || el.getAttributeNS?.('http://www.w3.org/1999/xlink', 'href');
+      const target = ref && ref.startsWith('#') ? el.ownerDocument.getElementById(ref.slice(1)) : null;
+      const inner = target ? _svgSubtreeBounds(target, [1, 0, 0, 1, _svgNum(el, 'x'), _svgNum(el, 'y')]) : null;
+      return inner;
+    }
+    default: return null;
+  }
+};
+// Bounds of an element and its descendants in the coordinate system m maps from.
+const _svgSubtreeBounds = (el, m, skipOwnTransform) => {
+  if (!el || el.nodeType !== 1) return null;
+  const cs = getComputedStyle(el);
+  if (cs.display === 'none') return null;
+  const own = skipOwnTransform ? m : _svgMul(m, _svgTransform(el.getAttribute('transform')));
+  let acc = null;
+  const add = (b, mm) => {
+    if (!b) return;
+    for (const [px, py] of [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]]) {
+      const tx = mm[0] * px + mm[2] * py + mm[4], ty = mm[1] * px + mm[3] * py + mm[5];
+      acc = acc ? [Math.min(acc[0], tx), Math.min(acc[1], ty), Math.max(acc[2], tx), Math.max(acc[3], ty)] : [tx, ty, tx, ty];
+    }
+  };
+  if (['g', 'a', 'switch', 'symbol', 'svg'].includes(el.localName)) {
+    for (const c of el.children) {
+      if (['defs', 'clipPath', 'mask', 'linearGradient', 'radialGradient', 'pattern', 'title', 'desc', 'style', 'script', 'marker', 'filter'].includes(c.localName)) continue;
+      const b = _svgSubtreeBounds(c, own);
+      if (b) add(b, [1, 0, 0, 1, 0, 0]);
+    }
+  } else {
+    add(_svgLocalBounds(el), own);
+  }
+  return acc;
+};
+// Screen rect of an SVG descendant, from its outermost <svg> box.
+const _svgClientRect = (el) => {
+  let outer = null;
+  const chain = [];
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (p.namespaceURI !== _SVG_NS) break;
+    if (p.localName === 'svg') outer = p;
+    chain.push(p);
+  }
+  if (!outer) return null;
+  const host = outer.getBoundingClientRect();
+  if (!host.width && !host.height) return null;
+  // Outer viewBox -> viewport mapping (preserveAspectRatio xMidYMid meet).
+  let m = [1, 0, 0, 1, host.left, host.top];
+  const vb = String(outer.getAttribute('viewBox') || '').split(/[\s,]+/).filter(Boolean).map(Number);
+  if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) {
+    const par = String(outer.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+    let sx = host.width / vb[2], sy = host.height / vb[3];
+    let tx = 0, ty = 0;
+    if (!/^none/.test(par)) {
+      const s = /slice/.test(par) ? Math.max(sx, sy) : Math.min(sx, sy);
+      const dx = host.width - vb[2] * s, dy = host.height - vb[3] * s;
+      tx = /xMid/.test(par) || !/x(Min|Max)/.test(par) ? dx / 2 : /xMax/.test(par) ? dx : 0;
+      ty = /YMid/.test(par) || !/Y(Min|Max)/.test(par) ? dy / 2 : /YMax/.test(par) ? dy : 0;
+      sx = sy = s;
+    }
+    m = _svgMul(m, [sx, 0, 0, sy, tx - vb[0] * sx, ty - vb[1] * sy]);
+  }
+  // Ancestors between the outer svg and this element, outermost first.
+  for (let k = chain.length - 1; k >= 0; k--) {
+    const p = chain[k];
+    if (p === outer) continue;
+    m = _svgMul(m, _svgTransform(p.getAttribute('transform')));
+    if (p.localName === 'svg') m = _svgMul(m, [1, 0, 0, 1, _svgNum(p, 'x'), _svgNum(p, 'y')]);
+  }
+  const b = _svgSubtreeBounds(el, m);
+  if (!b) return null;
+  return { x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1] };
+};
+globalThis.__obscuraSvgClientRect = _svgClientRect;
+Element.prototype.getBBox = function() {
+  // SVG 2: bounds in the element's own user space, so its own transform is
+  // not applied (descendants' transforms are).
+  const own = this.namespaceURI === _SVG_NS
+    ? _svgSubtreeBounds(this, [1, 0, 0, 1, 0, 0], true)
+    : null;
+  if (!own) return { x: 0, y: 0, width: 0, height: 0 };
+  return { x: own[0], y: own[1], width: own[2] - own[0], height: own[3] - own[1] };
+};
 Element.prototype.getComputedTextLength = function() { return 0; };
 Element.prototype.getExtentOfChar = function(ch) { return { x: 0, y: 0, width: 0, height: 0 }; };
 Element.prototype.getSubStringLength = function(ch, len) { return 0; };

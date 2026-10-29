@@ -7605,17 +7605,14 @@ fn layout_dom_once(
                 }
                 let font_size = style.font_size.unwrap_or(13.333_333).max(1.0);
                 let content = native_button_intrinsic_content(tree, id, &styles, font_size);
-                // Where the button already shrinks to fit (inline-block,
-                // inline-flex, float), layout measures its real contents. The
-                // label approximation is only for a button that would
-                // otherwise stretch. It cannot see generated text and uses a
-                // different text measurer than layout, so applying it to a
-                // shrink-to-fit button made it a few pixels too narrow: the
-                // label wrapped ("hide this" in two lines) and a floated
-                // `[hide]` toggle with ::before/::after brackets became three
-                // lines. YouTube's nested-box chips hit the same gap.
-                let _ = content.boxed;
-                (sizing != ContainerAutoInlineSize::Intrinsic).then_some((id, content))
+                // A label of nested boxes (YouTube's chip: an inline-flex
+                // button around a padded 14px flex box whose text sits in an
+                // overflow:hidden box) is not one run of text at the button's
+                // font. Where the button already shrinks to fit, layout
+                // measures its real contents; the label approximation sized
+                // such chips to a few pixels and clipped their text.
+                (!content.boxed || sizing != ContainerAutoInlineSize::Intrinsic)
+                    .then_some((id, content))
             })
             .collect();
         let native_control_grid_stretch: HashMap<NodeId, (bool, bool)> = styles
@@ -15538,6 +15535,9 @@ fn inline_wraps_only_in_flow_blocks(
     };
     if style.display != crate::Display::Inline
         || style.is_inline_block
+        // A replaced element (an inline <svg>) is atomic: its children are
+        // SVG content, never boxes to hoist into the parent's flow.
+        || style.is_replaced_box
         || style.before_pseudo.is_some()
         || style.after_pseudo.is_some()
         || style.float.is_some()
