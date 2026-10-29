@@ -218,6 +218,8 @@ pub trait InlineLayoutHost<NodeContext> {
     fn children(&self, node: NodeId) -> Vec<NodeId>;
     /// Resolve an opaque `calc()` handle against a percentage basis
     fn resolve_calc(&self, val: *const (), basis: f32) -> f32;
+    /// The function that resolves opaque `calc()` handles
+    fn calc_resolver(&self) -> fn(*const (), f32) -> f32;
     /// The context attached to a node, if any
     fn context(&mut self, node: NodeId) -> Option<&mut NodeContext>;
 }
@@ -493,6 +495,10 @@ where
 
     fn resolve_calc(&self, val: *const (), basis: f32) -> f32 {
         (self.taffy.config.calc_resolver)(val, basis)
+    }
+
+    fn calc_resolver(&self) -> fn(*const (), f32) -> f32 {
+        self.taffy.config.calc_resolver
     }
 
     fn context(&mut self, node: NodeId) -> Option<&mut NodeContext> {

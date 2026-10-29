@@ -91,6 +91,7 @@ pub use border::{
 };
 
 pub mod dom;
+pub(crate) mod ifc;
 pub use dom::{
     layout_dom, layout_dom_with_images, layout_dom_with_resources, AttributeStyleMutation,
     DomLayout, RetainedStyleMutation, StickyLayout, TreeStyleMutation,
@@ -214,21 +215,14 @@ pub use tiny_skia::Pixmap;
 // `dom.rs` name `inline::TextEngine` and call `try_build` unconditionally.
 #[cfg(feature = "paint")]
 pub mod inline;
-#[cfg(feature = "paint")]
-pub use inline::configure_font_directories;
+pub use ifc::fonts::configure_font_directories;
 
 #[cfg(not(feature = "paint"))]
 pub mod inline {
     use obscura_dom::tree::{DomTree, NodeId};
     use std::collections::HashMap;
 
-    #[derive(Clone)]
-    pub(crate) struct WebFont {
-        pub data: std::sync::Arc<Vec<u8>>,
-        pub family: Option<String>,
-        pub weight: Option<(u16, u16)>,
-        pub italic: Option<bool>,
-    }
+    pub(crate) use crate::ifc::fonts::WebFont;
 
     #[derive(Default)]
     pub struct TextEngine {
@@ -1609,6 +1603,9 @@ pub struct LayoutStyle {
     /// cells inherit it); obscura applies it as main-axis alignment of the
     /// cell's flex-column stand-in. `None` on non-cell elements.
     pub vertical_align: Option<VerticalAlign>,
+    /// `vertical-align` of an inline-level box in its line box. Not
+    /// inherited; `None` is the initial `baseline`.
+    pub vertical_align_inline: Option<InlineVerticalAlign>,
     /// `z-index` on a positioned element. `None` is `auto` (tree order). A
     /// non-zero value lifts the element's whole subtree into a separate paint
     /// layer: negatives under the normal flow, positives above it, sorted.
@@ -1998,6 +1995,24 @@ pub enum VerticalAlign {
     Top,
     Middle,
     Bottom,
+}
+
+/// `vertical-align` of an inline-level box within its line (CSS 2.2 §10.8.1).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum InlineVerticalAlign {
+    #[default]
+    Baseline,
+    Sub,
+    Super,
+    TextTop,
+    TextBottom,
+    Middle,
+    Top,
+    Bottom,
+    /// Raise by a length (negative lowers).
+    Length(f32),
+    /// Raise by a fraction of the element's line-height.
+    Percent(f32),
 }
 
 /// `clear`: which floated side(s) an element moves below. Ends the float
@@ -2675,39 +2690,31 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
         BoxSizing::Inherit => taffy::BoxSizing::ContentBox,
     };
 
-    // A block box with centered/right inline content needs a flex-column
-    // stand-in because taffy's native block algorithm has no line alignment.
-    // `text_align` is separate from real flex/grid `align-items`, so a
-    // text-align declaration never changes how flex children are sized.
-    let promote_for_alignment = style.display == Display::Block
-        && matches!(
-            style.text_align,
-            Some(taffy::AlignItems::CENTER) | Some(taffy::AlignItems::FLEX_END)
-        );
-
+    // `text-align` moves line content inside inline formatting contexts
+    // (`crate::ifc`); it never changes the box tree. An inline-level box built
+    // as a box of its own (inline-block, or an inline that contains blocks)
+    // is a block container inside.
     s.display = match style.display {
-        Display::Block if promote_for_alignment => taffy::style::Display::Flex,
-        Display::Block => taffy::style::Display::Block,
+        Display::Block | Display::Inline => taffy::style::Display::Block,
         Display::Flex => taffy::style::Display::Flex,
         Display::Grid => taffy::style::Display::Grid,
-        Display::Inline => taffy::style::Display::Flex,
         Display::None => taffy::style::Display::None,
     };
-    if promote_for_alignment {
-        s.flex_direction = taffy::FlexDirection::Column;
-        s.align_items = style.text_align;
-    }
     if let Some(fd) = style.flex_direction {
         s.flex_direction = fd;
     }
-    if let Some(fw) = style.flex_wrap {
-        s.flex_wrap = fw;
-    } else if style.display == Display::Inline {
-        s.flex_direction = taffy::FlexDirection::Row;
-        s.flex_wrap = taffy::FlexWrap::Wrap;
-    } else {
-        s.flex_wrap = taffy::FlexWrap::NoWrap;
-    }
+    s.flex_wrap = style.flex_wrap.unwrap_or(taffy::FlexWrap::NoWrap);
+    s.float = match style.float {
+        Some(Float::Left) => taffy::style::Float::Left,
+        Some(Float::Right) => taffy::style::Float::Right,
+        None => taffy::style::Float::None,
+    };
+    s.clear = match style.clear {
+        Some(Clear::Left) => taffy::style::Clear::Left,
+        Some(Clear::Right) => taffy::style::Clear::Right,
+        Some(Clear::Both) => taffy::style::Clear::Both,
+        None => taffy::style::Clear::None,
+    };
     s.size = taffy::Size {
         width: dimension(style.width),
         height: dimension(style.height),
@@ -2776,7 +2783,7 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
         if let Some(ai) = style.align_items {
             s.align_items = Some(ai);
         }
-    } else if !promote_for_alignment {
+    } else {
         // `align-items` has no effect on a block formatting context.
         s.align_items = None;
     }
@@ -2786,16 +2793,6 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
     s.align_content = style.align_content;
     if let Some(jc) = style.justify_content {
         s.justify_content = Some(jc);
-    } else if style.is_inline_block {
-        // Taffy's inline-box stand-in is a wrapping flex row. `text-align`
-        // aligns each line of an inline-block's internal formatting context;
-        // map that inherited value onto the row axis without affecting how
-        // the atomic box itself participates in its parent's inline flow.
-        s.justify_content = match style.text_align {
-            Some(taffy::AlignItems::CENTER) => Some(taffy::JustifyContent::CENTER),
-            Some(taffy::AlignItems::FLEX_END) => Some(taffy::JustifyContent::FLEX_END),
-            _ => None,
-        };
     }
     if let Some(fg) = style.flex_grow {
         s.flex_grow = fg;

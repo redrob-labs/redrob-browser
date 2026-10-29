@@ -83,6 +83,20 @@ impl<B: Brush> Layout<B> {
         })
     }
 
+    /// The inherent metrics of the span that contains inline box `index` (in the order the boxes
+    /// were pushed): the metrics of the first available font of that span's style.
+    pub fn inline_box_span_metrics(&self, index: usize) -> Option<SpanMetrics> {
+        let style = self.data.inline_boxes.get(index)?.parent_style_index;
+        self.data
+            .style_metrics
+            .get(usize::from(style))
+            .map(|it| SpanMetrics {
+                ascent: it.ascent,
+                descent: it.descent,
+                x_height: it.x_height,
+            })
+    }
+
     /// Returns the length of the source text, in bytes.
     pub fn text_len(&self) -> usize {
         self.data.text_len

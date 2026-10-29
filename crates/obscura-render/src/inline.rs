@@ -201,13 +201,7 @@ struct ResolvedFont {
     synthetic_italic: bool,
 }
 
-#[derive(Clone, Eq, PartialEq)]
-pub(crate) struct WebFont {
-    pub data: Arc<Vec<u8>>,
-    pub family: Option<String>,
-    pub weight: Option<(u16, u16)>,
-    pub italic: Option<bool>,
-}
+pub(crate) use crate::ifc::fonts::WebFont;
 
 type FontDatabase = (cosmic_text::fontdb::Database, HashMap<String, LoadedFamily>);
 type FontDeclaration = (
@@ -239,11 +233,8 @@ static BASE_FONT_DATABASE_BUILDS: AtomicUsize = AtomicUsize::new(0);
 /// Configure additional process-wide fonts before the first render.
 ///
 /// Returns false when fonts have already been configured or initialized.
-pub fn configure_font_directories(directories: Vec<PathBuf>) -> bool {
-    if BASE_FONT_DATABASE.get().is_some() {
-        return false;
-    }
-    FONT_DIRECTORIES.set(directories).is_ok()
+pub(crate) fn configure_font_directories(directories: Vec<PathBuf>) -> bool {
+    crate::ifc::fonts::configure_font_directories(directories)
 }
 
 fn load_font_directories(
@@ -352,7 +343,7 @@ fn base_font_database(load_emoji: bool) -> &'static FontDatabase {
             }
         }
         declarations.extend(
-            load_font_directories(&mut database, FONT_DIRECTORIES.get_or_init(Vec::new))
+            load_font_directories(&mut database, crate::ifc::fonts::font_directories())
                 .into_iter()
                 .map(|id| (id, None, None, None)),
         );

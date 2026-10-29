@@ -91,9 +91,27 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         // not lay out as a real box (news CDNs put dimensions on `<source>`,
         // which otherwise paints an empty box the size of the image).
         style.display = crate::Display::None;
-    } else if tag == "pre" {
+    } else if tag == "pre" || tag == "listing" || tag == "xmp" {
         // HTML's UA sheet preserves source whitespace in preformatted blocks.
         style.white_space = Some(crate::WhiteSpace::Pre);
+        style.font_family = Some("monospace".to_string());
+    } else if matches!(tag, "code" | "kbd" | "samp" | "tt") {
+        style.font_family = Some("monospace".to_string());
+    } else if tag == "sub" || tag == "sup" {
+        // `vertical-align: sub|super; font-size: smaller`.
+        style.vertical_align_inline = Some(if tag == "sub" {
+            crate::InlineVerticalAlign::Sub
+        } else {
+            crate::InlineVerticalAlign::Super
+        });
+        style.font_size = None;
+        style.font_size_raw = Some(crate::Dimension::Em(1.0 / 1.2));
+    } else if tag == "small" {
+        style.font_size = None;
+        style.font_size_raw = Some(crate::Dimension::Em(1.0 / 1.2));
+    } else if tag == "big" {
+        style.font_size = None;
+        style.font_size_raw = Some(crate::Dimension::Em(1.2));
     } else if tag == "body" {
         style.margin = Edges {
             top: 8.0,
@@ -180,6 +198,23 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         style.is_inline_block = true;
         style.text_align = Some(taffy::AlignItems::CENTER);
         style.box_sizing = crate::BoxSizing::BorderBox;
+        // `font: -webkit-small-control`, `color: buttontext`,
+        // `background-color: buttonface`, `border: 2px outset buttonborder`.
+        style.font_size = Some(13.333_333);
+        style.font_family = Some("arial".to_string());
+        style.line_height = Some(crate::LineHeight::Normal);
+        style.color = Some([0, 0, 0, 255]);
+        style.background_color = Some([239, 239, 239, 255]);
+        style.border = Edges {
+            top: 2.0,
+            right: 2.0,
+            bottom: 2.0,
+            left: 2.0,
+        };
+        style.border_model.specified_widths = crate::Sides::all(2.0);
+        style.border_model.styles = crate::Sides::all(crate::BorderStyle::Outset);
+        style.border_model.colors = crate::Sides::all(Some([118, 118, 118, 255]));
+        style.border_color = Some([118, 118, 118, 255]);
         // Chromium's native button content box keeps one pixel of block-axis
         // and six pixels of inline-axis padding. Framework resets commonly
         // remove the native border/background but intentionally retain this
@@ -1706,7 +1741,38 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
             };
         }
         "vertical-align" => {
-            style.vertical_align = match value.trim().to_ascii_lowercase().as_str() {
+            let keyword = value.trim().to_ascii_lowercase();
+            style.vertical_align_inline = match keyword.as_str() {
+                "baseline" => Some(crate::InlineVerticalAlign::Baseline),
+                "sub" => Some(crate::InlineVerticalAlign::Sub),
+                "super" => Some(crate::InlineVerticalAlign::Super),
+                "text-top" => Some(crate::InlineVerticalAlign::TextTop),
+                "text-bottom" => Some(crate::InlineVerticalAlign::TextBottom),
+                "middle" => Some(crate::InlineVerticalAlign::Middle),
+                "top" => Some(crate::InlineVerticalAlign::Top),
+                "bottom" => Some(crate::InlineVerticalAlign::Bottom),
+                other => {
+                    if let Some(percent) = other.strip_suffix('%') {
+                        percent
+                            .trim()
+                            .parse::<f32>()
+                            .ok()
+                            .map(|p| crate::InlineVerticalAlign::Percent(p / 100.0))
+                            .or(style.vertical_align_inline)
+                    } else {
+                        let font_size = style.font_size.unwrap_or(16.0);
+                        match parse_word_spacing_length(other)
+                            .map(|length| length.resolve(font_size, 16.0, 1.0, 1.0))
+                        {
+                            Some(crate::Dimension::Px(px)) => {
+                                Some(crate::InlineVerticalAlign::Length(px))
+                            }
+                            _ => style.vertical_align_inline,
+                        }
+                    }
+                }
+            };
+            style.vertical_align = match keyword.as_str() {
                 "top" | "baseline" | "text-top" => Some(crate::VerticalAlign::Top),
                 "middle" => Some(crate::VerticalAlign::Middle),
                 "bottom" | "text-bottom" => Some(crate::VerticalAlign::Bottom),

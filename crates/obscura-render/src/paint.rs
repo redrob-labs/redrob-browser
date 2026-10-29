@@ -1803,6 +1803,18 @@ impl PreparedRender {
                     )
                 })
                 .min_by(|a, b| a.2.total_cmp(&b.2));
+            let best = best.or_else(|| {
+                self.layout
+                    .ifc
+                    .by_node
+                    .get(&parent)?
+                    .iter()
+                    .filter_map(|&index| {
+                        let ifc = self.layout.ifc.get(index)?;
+                        ifc.caret_from_point(local_x - ifc.origin.0, local_y - ifc.origin.1)
+                    })
+                    .min_by(|a, b| a.2.total_cmp(&b.2))
+            });
             if let Some((node, offset, _)) = best {
                 return Some((node, offset));
             }
@@ -1840,6 +1852,33 @@ impl PreparedRender {
                         .flatten()
                         .copied(),
                 );
+            let ifc_rect = self.layout.ifc.by_node.get(&parent).and_then(|list| {
+                list.iter().find_map(|&index| {
+                    let ifc = self.layout.ifc.get(index)?;
+                    if !ifc.contains_text(node) {
+                        return None;
+                    }
+                    let rect = ifc.caret_rect(node, offset)?;
+                    Some(crate::Rect {
+                        x: rect.x + ifc.origin.0,
+                        y: rect.y + ifc.origin.1,
+                        ..rect
+                    })
+                })
+            });
+            if let Some(rect) = ifc_rect {
+                let mut rect = self
+                    .layout
+                    .transforms
+                    .get(&parent)
+                    .copied()
+                    .unwrap_or_default()
+                    .map_rect(rect);
+                let movement = scroll.movement_for(parent);
+                rect.x += movement.0;
+                rect.y += movement.1;
+                return Some(rect);
+            }
             for index in indices {
                 let Some(rect) = self.layout.text_engine.caret_rect(
                     index,
@@ -4785,9 +4824,8 @@ fn paint_laid_dom_scrolled(
                         print_economy,
                     );
                 }
-            } else {
-                paint_text_node(tree, nid, laid, &scroll_state, &mut pixmap, raster_scale);
             }
+            // Other text is painted with its inline formatting context.
             for generated in &generated_after_at[paint_index] {
                 paint_in_flow_generated_box(
                     &mut pixmap,
@@ -5701,27 +5739,6 @@ fn paint_laid_dom_scrolled(
                 );
             }
             scene_node(nid);
-        } else if let Some(runs) = laid.text_runs.get(&nid) {
-            let color = style.color.unwrap_or([0, 0, 0, 255]);
-            let fsize = style.font_size.unwrap_or(16.0);
-            let is_bold = crate::style::used_font_weight(style) >= 600;
-            for (word_rect, word) in runs {
-                draw_text(
-                    &mut pixmap,
-                    word,
-                    word_rect.x + ox,
-                    word_rect.y + oy,
-                    color,
-                    fsize,
-                    is_bold,
-                    style.font_family.as_deref(),
-                    style.letter_spacing.unwrap_or(0.0),
-                    style.word_spacing.unwrap_or(0.0),
-                    clip,
-                    element_clip_mask,
-                    raster_scale,
-                );
-            }
         }
 
         // A closed native `<select>` paints only its selected option. Options
@@ -5994,7 +6011,8 @@ fn paint_laid_dom_scrolled(
         }
         let whole = laid.ifc_items.get(&nid).copied();
         let run_items = laid.run_ifc_items.get(&nid).cloned();
-        if whole.is_none() && run_items.is_none() {
+        let ifcs = laid.ifc.by_node.get(&nid).cloned();
+        if whole.is_none() && run_items.is_none() && ifcs.is_none() {
             continue;
         }
         if laid
@@ -6035,6 +6053,25 @@ fn paint_laid_dom_scrolled(
                 raster_scale,
                 print_economy,
             );
+        }
+        if let Some(ifcs) = ifcs {
+            let store = &mut laid.ifc;
+            for index in ifcs {
+                let Some(ifc) = store.ifcs.get(index).and_then(|ifc| ifc.as_deref()) else {
+                    continue;
+                };
+                ifc.paint(
+                    &mut store.raster,
+                    &laid.styles,
+                    &mut pixmap,
+                    ifc.origin,
+                    off,
+                    clip.or(ifc.clip),
+                    clip_mask.as_deref(),
+                    raster_scale,
+                    print_economy,
+                );
+            }
         }
         // Anonymous inline-run leaves of a mixed block (see
         // `build_mixed_block`), pinned to their own boxes at finalize.
