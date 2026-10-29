@@ -4419,6 +4419,58 @@ impl Page {
         js.screenshot_prepared_region_with_surface_color(region, self.capture_surface_color())
     }
 
+    /// One GPU compositor frame of the live document (docs/COMPOSITOR.md),
+    /// at the live animation time.
+    #[cfg(feature = "render")]
+    pub fn scene_frame(&self) -> Result<obscura_js::SceneFrame, obscura_js::CaptureError> {
+        let js = self
+            .js
+            .as_ref()
+            .ok_or(obscura_js::CaptureError::PaintFailed)?;
+        if !js.set_animation_sample(self.live_animation_sample()) {
+            return Err(obscura_js::CaptureError::PaintFailed);
+        }
+        js.scene_frame_with_surface_color(self.capture_surface_color())
+    }
+
+    /// See `ObscuraRuntime::scene_change_signals`.
+    #[cfg(feature = "render")]
+    pub fn scene_change_signals(&self) -> (u64, u64, bool, Option<u64>) {
+        self.js
+            .as_ref()
+            .map(|js| js.scene_change_signals())
+            .unwrap_or((0, 0, true, None))
+    }
+
+    /// Live scroll offsets (document, then elements by node index) and the
+    /// generation that changes with any of them.
+    #[cfg(feature = "render")]
+    pub fn scroll_snapshot(&self) -> ((f32, f32), Vec<(u64, (f32, f32))>, u64) {
+        self.js
+            .as_ref()
+            .map(|js| js.scroll_snapshot())
+            .unwrap_or(((0.0, 0.0), Vec::new(), 0))
+    }
+
+    /// The window's compositor scrolled `node` (0: the document) to
+    /// `offset`. Sets scrollLeft/scrollTop through the page's own scroll
+    /// path, so `scroll` events fire, without a relayout.
+    #[cfg(feature = "render")]
+    pub fn apply_compositor_scroll(&mut self, node: u64, offset: (f32, f32)) {
+        let (x, y) = (offset.0 as f64, offset.1 as f64);
+        if !x.is_finite() || !y.is_finite() {
+            return;
+        }
+        let code = if node == 0 {
+            format!("(function(){{try{{window.scrollTo({{left:{x},top:{y},behavior:'instant'}});}}catch(_e){{window.scrollTo({x},{y});}}}})()")
+        } else {
+            format!(
+                "(function(){{var e=globalThis._wrap&&globalThis._wrap({node});if(!e||e.nodeType!==1)return;e.scrollLeft={x};e.scrollTop={y};}})()"
+            )
+        };
+        self.evaluate(&code);
+    }
+
     /// A document-space rectangle as a display list (docs/GPU-PAINT.md).
     #[cfg(feature = "display-list")]
     pub fn display_list_region_with_animation_sample(

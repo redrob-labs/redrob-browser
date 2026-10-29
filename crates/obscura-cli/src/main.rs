@@ -8,6 +8,8 @@ use std::time::Instant;
 
 mod agent;
 mod pool;
+#[cfg(feature = "render")]
+mod scene_dump;
 
 use clap::{Parser, Subcommand};
 use obscura_browser::{BrowserContext, Page};
@@ -1557,6 +1559,9 @@ async fn run_fetch(
             match capture_screenshot(&page) {
                 Some(bytes) => std::fs::write(path, &bytes)?,
                 None => anyhow::bail!("screenshot failed: page has no DOM to render"),
+            }
+            if let Some(scene) = std::env::var_os("OBSCURA_SCENE_DUMP") {
+                scene_dump::write_scene_dump(&page, std::path::Path::new(&scene))?;
             }
             // A screenshot+eval command used to ignore the expression
             // completely. Emit both its value and a standard state sampled

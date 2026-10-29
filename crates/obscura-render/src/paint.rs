@@ -1286,6 +1286,11 @@ impl PreparedRender {
         self.base_url.as_deref()
     }
 
+    /// Changes whenever layout, styles or selected images change.
+    pub fn paint_epoch(&self) -> u64 {
+        self.paint_epoch
+    }
+
     pub fn layout(&self) -> &crate::DomLayout {
         &self.layout
     }
