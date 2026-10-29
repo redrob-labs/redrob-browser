@@ -30,6 +30,9 @@ pub(crate) enum Item {
     GeneratedText(String),
     /// The start of a non-atomic inline element or inline pseudo-element.
     SpanStart(SpanOwner),
+    /// A fragment of an inline element split around a block: whether its
+    /// inline-start and inline-end edges belong to this IFC.
+    SplitSpanStart(NodeId, bool, bool),
     SpanEnd,
     /// An atomic inline box (inline-block, inline-flex/grid, replaced element).
     Atomic {
@@ -519,10 +522,23 @@ impl IfcStore {
                         offset: parent.offset,
                     });
                 }
-                Item::SpanStart(owner) => {
+                Item::SpanStart(_) | Item::SplitSpanStart(..) => {
+                    let (owner, keep_start, keep_end) = match item {
+                        Item::SplitSpanStart(id, start, end) => {
+                            (&SpanOwner::Element(*id), *start, *end)
+                        }
+                        Item::SpanStart(owner) => (owner, true, true),
+                        _ => unreachable!(),
+                    };
                     let style = owner_style(*owner, styles).unwrap_or(root_style);
                     let span_index = spans.len() as u32;
-                    let (start, end) = inline_edges(style);
+                    let (mut start, mut end) = inline_edges(style);
+                    if !keep_start {
+                        start = InlineEdge::default();
+                    }
+                    if !keep_end {
+                        end = InlineEdge::default();
+                    }
                     let color = style.color.unwrap_or(parent.color);
                     let paint = paints.len() as u32;
                     let clip_fill = if style.background_clip_text {
@@ -681,7 +697,12 @@ impl IfcStore {
                     builder.push_text(&text);
                     builder.pop_style_span();
                 }
-                Item::SpanStart(owner) => {
+                Item::SpanStart(_) | Item::SplitSpanStart(..) => {
+                    let owner = match item {
+                        Item::SplitSpanStart(id, ..) => &SpanOwner::Element(*id),
+                        Item::SpanStart(owner) => owner,
+                        _ => unreachable!(),
+                    };
                     let span_index = next_span;
                     next_span += 1;
                     let span = &spans[span_index as usize];

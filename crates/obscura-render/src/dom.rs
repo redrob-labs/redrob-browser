@@ -9038,9 +9038,16 @@ fn layout_dom_once(
             // Spliced block-in-inline wrappers span their children; the
             // innermost first so an outer wrapper includes the inner ones.
             for &wrapper in ifc_items.transparent_wrappers.iter().rev() {
-                let union = rendered_children(tree, wrapper)
+                // A decorated wrapper also has its own inline fragments.
+                let union = rects
+                    .get(&wrapper)
+                    .copied()
                     .into_iter()
-                    .filter_map(|child| rects.get(&child).copied())
+                    .chain(
+                        rendered_children(tree, wrapper)
+                            .into_iter()
+                            .filter_map(|child| rects.get(&child).copied()),
+                    )
                     .reduce(|a, b| a.union(&b));
                 if let Some(rect) = union {
                     rects.insert(wrapper, rect);

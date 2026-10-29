@@ -20,6 +20,13 @@ use crate::ifc::{BaselineSource, SpanOwner, IFC_CONTEXT_BIT};
 pub(super) enum Piece {
     Dom(NodeId),
     Pseudo(NodeId, GeneratedBoxKind),
+    /// The start of a decorated inline that contains a block, spliced into
+    /// its container's flow (block-in-inline): (element, its inline-start
+    /// edge is in this run, its inline-end edge is in this run).
+    Open(NodeId, bool, bool),
+    /// The end of the innermost `Open` in the same run: (element, whether
+    /// the element really ends here rather than at a block that splits it).
+    Close(NodeId, bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -159,6 +166,23 @@ fn is_transparent_block_wrapper(
         && inline_contains_block(tree, id, styles)
 }
 
+/// A non-atomic inline with decoration (padding, border, background...)
+/// that contains a block: split around the block like a transparent one.
+fn is_decorated_block_wrapper(
+    tree: &DomTree,
+    id: NodeId,
+    style: &crate::LayoutStyle,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+) -> bool {
+    style.display == crate::Display::Inline
+        && !style.display_contents
+        && !is_atomic(tree, id, style)
+        && style.float.is_none()
+        && style.position.is_none()
+        && local_name(tree, id).is_some_and(|name| name != "br")
+        && inline_contains_block(tree, id, styles)
+}
+
 fn level(
     tree: &DomTree,
     piece: Piece,
@@ -166,6 +190,7 @@ fn level(
     styles: &HashMap<NodeId, crate::LayoutStyle>,
 ) -> Level {
     match piece {
+        Piece::Open(..) | Piece::Close(..) => Level::Inline,
         Piece::Pseudo(host, kind) => {
             let Some(style) = pseudo_style(styles, host, kind) else {
                 return Level::Skip;
@@ -305,6 +330,28 @@ fn splice_pieces(
                 for grandchild in rendered_children(tree, child).into_iter().rev() {
                     stack.push(Work::Node(grandchild));
                 }
+            }
+            // A decorated inline around a block is split around it as
+            // well (CSS 2 9.2.1.1): its inline content keeps the span (and
+            // its edges on the first and last fragment), the block becomes
+            // a sibling block of the container's flow.
+            Some(style)
+                if wrappers.is_some() && is_decorated_block_wrapper(tree, child, style, styles) =>
+            {
+                if let Some(list) = wrappers.as_deref_mut() {
+                    list.push(child);
+                }
+                stack.push(Work::Emit(Piece::Close(child, true)));
+                if style.after_pseudo.is_some() {
+                    stack.push(Work::Emit(Piece::Pseudo(child, GeneratedBoxKind::After)));
+                }
+                for grandchild in rendered_children(tree, child).into_iter().rev() {
+                    stack.push(Work::Node(grandchild));
+                }
+                if style.before_pseudo.is_some() {
+                    stack.push(Work::Emit(Piece::Pseudo(child, GeneratedBoxKind::Before)));
+                }
+                stack.push(Work::Emit(Piece::Open(child, true, true)));
             }
             _ => out.push(Piece::Dom(child)),
         }
@@ -459,6 +506,10 @@ impl BuildCx<'_> {
             };
             let level = level(self.tree, piece, parents[parent].as_ref(), self.styles);
             match (piece, level) {
+                (Piece::Open(owner, start, end), _) => {
+                    items.push(Item::SplitSpanStart(owner, start, end));
+                }
+                (Piece::Close(..), _) => items.push(Item::SpanEnd),
                 (_, Level::Skip) => {}
                 (Piece::Dom(id), Level::Space) => items.push(Item::Text(id)),
                 (Piece::Dom(id), Level::Inline) if is_text(self.tree, id) => {
@@ -626,18 +677,83 @@ pub(super) fn build_flow_children(
         Block(Piece),
     }
     let mut segments: Vec<Segment> = Vec::new();
+    // Split decorated inlines open at a block: close them at the end of the
+    // run before it and reopen them (without their start edge) after it.
+    let mut open: Vec<NodeId> = Vec::new();
     for piece in pieces {
+        match piece {
+            Piece::Open(owner, ..) => open.push(owner),
+            Piece::Close(..) => {
+                open.pop();
+            }
+            _ => {}
+        }
         match level(cx.tree, piece, Some(style), cx.styles) {
             Level::Skip => {}
-            Level::Block => segments.push(Segment::Block(piece)),
+            Level::Block => {
+                if !open.is_empty() {
+                    if let Some(Segment::Run(run)) = segments.last_mut() {
+                        for &owner in open.iter().rev() {
+                            run.push(Piece::Close(owner, false));
+                        }
+                    }
+                }
+                segments.push(Segment::Block(piece));
+                if !open.is_empty() {
+                    segments.push(Segment::Run(
+                        open.iter()
+                            .map(|&owner| Piece::Open(owner, false, true))
+                            .collect(),
+                    ));
+                }
+            }
             _ => match segments.last_mut() {
                 Some(Segment::Run(run)) => run.push(piece),
                 _ => segments.push(Segment::Run(vec![piece])),
             },
         }
     }
+    // An Open whose element does not close in the same run has no end edge
+    // there.
+    for segment in &mut segments {
+        let Segment::Run(run) = segment else {
+            continue;
+        };
+        let mut stack: Vec<usize> = Vec::new();
+        let mut closed = vec![false; run.len()];
+        for index in 0..run.len() {
+            match run[index] {
+                Piece::Open(..) => stack.push(index),
+                Piece::Close(_, real) => {
+                    if let Some(open_index) = stack.pop() {
+                        closed[open_index] = real;
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (index, piece) in run.iter_mut().enumerate() {
+            if let Piece::Open(owner, start, _) = *piece {
+                *piece = Piece::Open(owner, start, closed[index]);
+            }
+        }
+    }
+    // A Close the segmentation added after a block may now be the real
+    // close of a reopened span: the reopened run ends where the element
+    // ends, so its Close keeps the end edge (already the default above).
+    // A split inline's fragment with a non-zero edge is content (it makes
+    // a line box, CSS 2 10.8); one without is not.
+    let has_edge = |cx: &BuildCx<'_>, piece: &Piece| match *piece {
+        Piece::Open(owner, start, end) => cx.styles.get(&owner).is_some_and(|style| {
+            let left = style.padding.left + style.border.left + style.margin.left;
+            let right = style.padding.right + style.border.right + style.margin.right;
+            (start && left != 0.0) || (end && right != 0.0)
+        }),
+        _ => true,
+    };
     let run_has_inline = |cx: &BuildCx<'_>, run: &[Piece]| {
         run.iter()
+            .filter(|piece| !matches!(piece, Piece::Close(..)) && has_edge(cx, piece))
             .any(|piece| level(cx.tree, *piece, Some(style), cx.styles) == Level::Inline)
     };
 
@@ -691,6 +807,7 @@ pub(super) fn build_flow_children(
             Segment::Block(Piece::Pseudo(host, kind)) => {
                 children.extend(cx.build_generated_box(host, kind));
             }
+            Segment::Block(Piece::Open(..) | Piece::Close(..)) => {}
             Segment::Run(run) => {
                 if run_has_inline(cx, &run) {
                     let mut items = Vec::new();
@@ -726,6 +843,7 @@ pub(super) fn build_flow_children(
                             Piece::Pseudo(host, kind) => {
                                 children.extend(cx.build_generated_box(host, kind));
                             }
+                            Piece::Open(..) | Piece::Close(..) => {}
                         }
                     }
                 }

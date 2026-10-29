@@ -1008,3 +1008,31 @@ fn block_level_images_apply_their_ratio_to_the_content_box() {
         .height;
     assert!((h - 235.19).abs() < 0.02, "{h}");
 }
+
+#[test]
+fn decorated_inlines_split_around_blocks() {
+    // Chrome: the block inside a padded/bordered span spans the container
+    // (400) and the span's first fragment keeps only its start edge
+    // (24.8 = 2 + 5 + "bb"); a padding-left-only span before a block makes
+    // a 17px line. 512 nested padded spans leave the block 1280 wide.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'>\
+         <div style='width:400px'>aa <span id=s style='padding:0 5px;border:2px solid'>bb\
+         <div id=d style='height:20px'>blk</div>cc</span> dd</div>\
+         <div style='width:400px'><span style='padding-left:3px'><div id=d2>x</div></span></div>",
+        &[],
+    );
+    let r = |id: &str| laid.rects[&element(&tree, id)];
+    assert_eq!((r("d").x, r("d").y, r("d").width), (0.0, 18.0, 400.0));
+    assert_eq!((r("d2").y, r("d2").width), (74.0, 400.0));
+    let first = laid.inline_fragments[&element(&tree, "s")][0];
+    assert!((first.width - 24.797).abs() < 0.02, "{first:?}");
+    let n = 512;
+    let html = format!(
+        "<!doctype html><body style='margin:0'>{}<div id=deep>x</div>{}",
+        "<span style='padding-left:1px'>".repeat(n),
+        "</span>".repeat(n)
+    );
+    let (tree, laid) = layout(&html, &[]);
+    assert_eq!(laid.rects[&element(&tree, "deep")].width, 1280.0);
+}
