@@ -492,6 +492,39 @@ impl ParserLookahead {
     }
 }
 
+/// A parser script download. Dropping it aborts the download: a navigation
+/// that is stopped (Page.stopLoading) or replaced while the parser waits on
+/// a script must close that script's request, not leave it running until
+/// its HTTP timeout.
+struct ScriptFetch(tokio::task::JoinHandle<Option<obscura_net::Response>>);
+
+impl ScriptFetch {
+    fn is_finished(&self) -> bool {
+        self.0.is_finished()
+    }
+
+    fn abort(&self) {
+        self.0.abort();
+    }
+}
+
+impl Drop for ScriptFetch {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+impl std::future::Future for ScriptFetch {
+    type Output = Result<Option<obscura_net::Response>, tokio::task::JoinError>;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        std::pin::Pin::new(&mut self.0).poll(cx)
+    }
+}
+
 /// One parser-inserted classic script, as prepared.
 struct ParserScriptInfo {
     nid: u32,
@@ -527,16 +560,10 @@ enum ScheduledScript {
 struct ParserScriptRun {
     deadline: tokio::time::Instant,
     /// Speculative fetches by URL, one per element still to come.
-    prefetch: std::collections::HashMap<
-        String,
-        std::collections::VecDeque<tokio::task::JoinHandle<Option<obscura_net::Response>>>,
-    >,
+    prefetch: std::collections::HashMap<String, std::collections::VecDeque<ScriptFetch>>,
     post_parse: Vec<ScheduledScript>,
     /// Async classic scripts the parser passed, with their downloads.
-    async_classic: Vec<(
-        ParserScriptInfo,
-        tokio::task::JoinHandle<Option<obscura_net::Response>>,
-    )>,
+    async_classic: Vec<(ParserScriptInfo, ScriptFetch)>,
     module_budget_ms: u64,
     module_hostcall_grace_ms: u64,
 }
@@ -2867,10 +2894,7 @@ impl Page {
     }
 
     /// Start fetching a classic script in the background.
-    fn spawn_script_fetch(
-        &self,
-        url: &str,
-    ) -> tokio::task::JoinHandle<Option<obscura_net::Response>> {
+    fn spawn_script_fetch(&self, url: &str) -> ScriptFetch {
         let client = self.http_client.clone();
         let callbacks = self.callbacks.clone();
         let initiator = self
@@ -2878,7 +2902,7 @@ impl Page {
             .clone()
             .unwrap_or_else(|| Url::parse("about:blank").unwrap());
         let url = url.to_string();
-        tokio::spawn(async move {
+        ScriptFetch(tokio::spawn(async move {
             let parsed = Url::parse(&url).unwrap_or_else(|_| Url::parse("about:blank").unwrap());
             if parsed.scheme() == "data" {
                 // data: URIs are inline; decode locally, no network fetch.
@@ -2914,16 +2938,12 @@ impl Page {
                     None
                 }
             }
-        })
+        }))
     }
 
     /// The fetch for a parser script: the speculative one if it was started,
     /// else a new one.
-    fn script_fetch_handle(
-        &self,
-        url: &str,
-        run: &mut ParserScriptRun,
-    ) -> tokio::task::JoinHandle<Option<obscura_net::Response>> {
+    fn script_fetch_handle(&self, url: &str, run: &mut ParserScriptRun) -> ScriptFetch {
         run.prefetch
             .get_mut(url)
             .and_then(std::collections::VecDeque::pop_front)
@@ -2945,7 +2965,7 @@ impl Page {
     async fn await_parser_script(
         &mut self,
         url: &str,
-        handle: tokio::task::JoinHandle<Option<obscura_net::Response>>,
+        handle: ScriptFetch,
         run: &mut ParserScriptRun,
     ) -> Option<FetchedScript> {
         if !handle.is_finished() {
@@ -2959,7 +2979,7 @@ impl Page {
     async fn finish_script_fetch(
         &mut self,
         url: &str,
-        handle: tokio::task::JoinHandle<Option<obscura_net::Response>>,
+        handle: ScriptFetch,
         deadline: tokio::time::Instant,
     ) -> Option<FetchedScript> {
         let resp = match tokio::time::timeout_at(deadline, handle).await {

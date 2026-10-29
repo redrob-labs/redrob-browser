@@ -2014,7 +2014,6 @@ fn render_timing_enabled() -> bool {
     *ENABLED.get_or_init(|| std::env::var_os("OBSCURA_RENDER_TIMING").is_some())
 }
 
-#[cfg(feature = "render")]
 /// The document parser inserted nodes natively, outside the mutation ops
 /// that normally invalidate render state.
 pub(crate) fn note_parser_dom_progress(state: &mut ObscuraState) {
@@ -2025,8 +2024,8 @@ pub(crate) fn note_parser_dom_progress(state: &mut ObscuraState) {
         state.pending_style_mutations.clear();
         state.style_query_cache = None;
         state.resolved_scroll = None;
+        state.base_url_cache.get_mut().take();
     }
-    state.base_url_cache.get_mut().take();
 }
 
 fn is_render_mutation_command(cmd: &str) -> bool {

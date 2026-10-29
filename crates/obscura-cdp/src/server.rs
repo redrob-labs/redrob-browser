@@ -2202,18 +2202,32 @@ async fn process_with_interception(
                 break;
             }
             Some((committed_page, back_tx)) = commit_rx.recv() => {
-                let committed_page = early_paint_window(
+                let (committed_page, held) = early_paint_window(
                     committed_page,
                     ctx,
                     reply_tx,
                     rx,
-                    deferred,
                     &page_id,
                     &session_for_events,
                 )
                 .await;
                 if back_tx.send(committed_page).is_err() {
                     tracing::warn!("navigation task ended during its paint window");
+                }
+                // Commands the paint window did not serve get the same routing
+                // as during the rest of the navigation: a Page.stopLoading
+                // sent while the committed document waits on a parser-blocking
+                // script must cancel it, not wait in the deferred queue for
+                // the script's HTTP timeout.
+                for msg in held {
+                    route_navigation_cdp_message(
+                        msg,
+                        ctx,
+                        &page_id,
+                        &mut cancel_tx,
+                        deferred,
+                        intercepted_paused,
+                    );
                 }
             }
             Some(intercepted) = async {
@@ -2241,58 +2255,14 @@ async fn process_with_interception(
                         ctx.sessions.insert(sid.clone(), pid.clone());
                         let _ = new_tx.send(json!({"__init": true, "pageId": pid, "sessionId": sid}).to_string());
                     }
-                    ServerMessage::Cdp(msg) => {
-                        if let Ok(command) = serde_json::from_str::<CdpRequest>(&msg.text) {
-                            let same_page = command.session_id.as_ref()
-                                .and_then(|session| ctx.sessions.get(session)) == Some(&page_id);
-                            let stop = command.method == "Page.stopLoading" && same_page;
-                            let close = (command.method == "Page.close" && same_page)
-                                || (command.method == "Target.closeTarget"
-                                    && command.params.get("targetId").and_then(|id| id.as_str()) == Some(page_id.as_str()));
-                            if stop || close {
-                                if let Some(cancel) = cancel_tx.take() { let _ = cancel.send(()); }
-                                if stop {
-                                    let response = crate::types::CdpResponse::success(command.id, json!({}), command.session_id);
-                                    if let Ok(json) = serde_json::to_string(&response) { let _ = msg.reply_tx.send(json); }
-                                    continue;
-                                }
-                            }
-                        }
-                        if msg.text.contains("Fetch.continueRequest")
-                            || msg.text.contains("Fetch.fulfillRequest")
-                            || msg.text.contains("Fetch.failRequest")
-                        {
-                            // Safe: only flips a oneshot to resume the parked
-                            // op inside the spawned nav task. No V8 enter on
-                            // this side; the actual V8 work happens back on
-                            // the nav task's thread.
-                            handle_fetch_resolution(&msg.text, &msg.reply_tx, intercepted_paused);
-                        } else {
-                            // UNSAFE during nav: would route through dispatch,
-                            // which can `suspend_js` other pages and trip the
-                            // V8 invariant. Defer until nav completes —
-                            // pushed to the outer `cdp_processor` queue so
-                            // it's processed sequentially with no nav task
-                            // in flight.
-                            if deferred.len() >= MAX_DEFERRED_MESSAGES {
-                                tracing::warn!("INTERCEPTION: deferred queue full ({}), returning error to client", MAX_DEFERRED_MESSAGES);
-                                if let Ok(req) = serde_json::from_str::<CdpRequest>(&msg.text) {
-                                    let resp = crate::types::CdpResponse::error(
-                                        req.id,
-                                        -32000,
-                                        "Server busy: navigation in progress, try again later".to_string(),
-                                        req.session_id,
-                                    );
-                                    if let Ok(json) = serde_json::to_string(&resp) {
-                                        let _ = msg.reply_tx.send(json);
-                                    }
-                                }
-                            } else {
-                                tracing::info!("INTERCEPTION: deferring CDP message until nav completes");
-                                deferred.push_back(ServerMessage::Cdp(msg));
-                            }
-                        }
-                    }
+                    ServerMessage::Cdp(msg) => route_navigation_cdp_message(
+                        msg,
+                        ctx,
+                        &page_id,
+                        &mut cancel_tx,
+                        deferred,
+                        intercepted_paused,
+                    ),
                 }
             }
         }
@@ -2418,17 +2388,19 @@ const EARLY_PAINT_METHODS: &[&str] = &[
 /// Let a watching viewer paint a navigation's parsed document before its
 /// scripts run. The page is back in `ctx` for the window: emit a screencast
 /// change frame, then serve paint requests from this page's session until
-/// the viewer has been quiet for a moment (bounded). Everything else waits
-/// in `deferred` exactly as it does during the rest of the navigation.
+/// the viewer has been quiet for a moment (bounded). Everything else is
+/// returned, in order, for the navigation's own routing.
 async fn early_paint_window(
     page: obscura_browser::Page,
     ctx: &mut CdpContext,
     reply_tx: &mpsc::UnboundedSender<String>,
     rx: &mut mpsc::UnboundedReceiver<ServerMessage>,
-    deferred: &mut std::collections::VecDeque<ServerMessage>,
     page_id: &str,
     session: &Option<String>,
-) -> obscura_browser::Page {
+) -> (obscura_browser::Page, Vec<CdpMessage>) {
+    let mut held = Vec::new();
+    #[cfg(not(feature = "render"))]
+    let _ = reply_tx;
     const QUIET: std::time::Duration = std::time::Duration::from_millis(100);
     const LIMIT: std::time::Duration = std::time::Duration::from_millis(1000);
     let started = std::time::Instant::now();
@@ -2470,7 +2442,7 @@ async fn early_paint_window(
                 if paint {
                     process_cdp_message(&msg.text, ctx, &msg.reply_tx).await;
                 } else {
-                    deferred.push_back(ServerMessage::Cdp(msg));
+                    held.push(msg);
                 }
             }
         }
@@ -2485,7 +2457,86 @@ async fn early_paint_window(
         .iter()
         .position(|page| page.id == page_id)
         .expect("the paint window serves no command that removes the page");
-    ctx.pages.remove(index)
+    (ctx.pages.remove(index), held)
+}
+
+/// Route a CDP command that arrives while a navigation task owns the page:
+/// stop/close of this page cancel the navigation, Fetch resolutions resume
+/// the parked request, everything else waits in `deferred` until the
+/// navigation is done.
+fn route_navigation_cdp_message(
+    msg: CdpMessage,
+    ctx: &mut CdpContext,
+    page_id: &str,
+    cancel_tx: &mut Option<tokio::sync::oneshot::Sender<()>>,
+    deferred: &mut std::collections::VecDeque<ServerMessage>,
+    intercepted_paused: &mut HashMap<
+        String,
+        tokio::sync::oneshot::Sender<obscura_js::ops::InterceptResolution>,
+    >,
+) {
+    if let Ok(command) = serde_json::from_str::<CdpRequest>(&msg.text) {
+        let same_page = command
+            .session_id
+            .as_ref()
+            .and_then(|session| ctx.sessions.get(session))
+            .map(String::as_str)
+            == Some(page_id);
+        let stop = command.method == "Page.stopLoading" && same_page;
+        let close = (command.method == "Page.close" && same_page)
+            || (command.method == "Target.closeTarget"
+                && command.params.get("targetId").and_then(|id| id.as_str()) == Some(page_id));
+        if stop || close {
+            if let Some(cancel) = cancel_tx.take() {
+                let _ = cancel.send(());
+            }
+            if stop {
+                let response =
+                    crate::types::CdpResponse::success(command.id, json!({}), command.session_id);
+                if let Ok(json) = serde_json::to_string(&response) {
+                    let _ = msg.reply_tx.send(json);
+                }
+                return;
+            }
+        }
+    }
+    if msg.text.contains("Fetch.continueRequest")
+        || msg.text.contains("Fetch.fulfillRequest")
+        || msg.text.contains("Fetch.failRequest")
+    {
+        // Safe: only flips a oneshot to resume the parked
+        // op inside the spawned nav task. No V8 enter on
+        // this side; the actual V8 work happens back on
+        // the nav task's thread.
+        handle_fetch_resolution(&msg.text, &msg.reply_tx, intercepted_paused);
+    } else {
+        // UNSAFE during nav: would route through dispatch,
+        // which can `suspend_js` other pages and trip the
+        // V8 invariant. Defer until nav completes —
+        // pushed to the outer `cdp_processor` queue so
+        // it's processed sequentially with no nav task
+        // in flight.
+        if deferred.len() >= MAX_DEFERRED_MESSAGES {
+            tracing::warn!(
+                "INTERCEPTION: deferred queue full ({}), returning error to client",
+                MAX_DEFERRED_MESSAGES
+            );
+            if let Ok(req) = serde_json::from_str::<CdpRequest>(&msg.text) {
+                let resp = crate::types::CdpResponse::error(
+                    req.id,
+                    -32000,
+                    "Server busy: navigation in progress, try again later".to_string(),
+                    req.session_id,
+                );
+                if let Ok(json) = serde_json::to_string(&resp) {
+                    let _ = msg.reply_tx.send(json);
+                }
+            }
+        } else {
+            tracing::info!("INTERCEPTION: deferring CDP message until nav completes");
+            deferred.push_back(ServerMessage::Cdp(msg));
+        }
+    }
 }
 
 async fn process_awaited_with_interception(
