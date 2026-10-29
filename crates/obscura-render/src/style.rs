@@ -4491,6 +4491,8 @@ pub(crate) struct GridCalcExpression {
     vw: std::sync::atomic::AtomicU32,
     vh: std::sync::atomic::AtomicU32,
     context_initialized: std::sync::atomic::AtomicBool,
+    /// Insets may resolve negative; track sizes clamp at zero.
+    signed: bool,
 }
 
 impl PartialEq for GridCalcExpression {
@@ -4502,6 +4504,7 @@ impl PartialEq for GridCalcExpression {
             && self.vw.load(Relaxed) == other.vw.load(Relaxed)
             && self.vh.load(Relaxed) == other.vh.load(Relaxed)
             && self.context_initialized.load(Relaxed) == other.context_initialized.load(Relaxed)
+            && self.signed == other.signed
     }
 }
 
@@ -4571,7 +4574,19 @@ impl GridCalcExpression {
             vw: std::sync::atomic::AtomicU32::new(0.0f32.to_bits()),
             vh: std::sync::atomic::AtomicU32::new(0.0f32.to_bits()),
             context_initialized: std::sync::atomic::AtomicBool::new(false),
+            signed: false,
         })
+    }
+
+    /// A calc() inset whose percentages resolve against the containing
+    /// block Taffy positions the box in.
+    pub(crate) fn parse_inset(value: &str) -> Option<Self> {
+        if !value.contains('%') {
+            return None;
+        }
+        let mut calc = Self::parse(value)?;
+        calc.signed = true;
+        Some(calc)
     }
 
     fn set_context(&self, em_px: f32, rem_px: f32, vw: f32, vh: f32) {
@@ -4599,7 +4614,12 @@ pub(crate) fn set_grid_calc_context(
     vw: f32,
     vh: f32,
 ) {
-    for expression in style.grid_calc_expressions.iter().flatten() {
+    for expression in style
+        .grid_calc_expressions
+        .iter()
+        .flatten()
+        .chain(style.inset_calc.iter().flatten())
+    {
         expression.set_context(em_px, rem_px, vw, vh);
     }
 }
@@ -4625,8 +4645,7 @@ pub(crate) fn resolve_grid_calc(value: *const (), basis: f32) -> f32 {
         basis,
     )
     .filter(|value| value.is_finite())
-    .unwrap_or(0.0)
-    .max(0.0)
+    .map_or(0.0, |value| if calc.signed { value } else { value.max(0.0) })
 }
 
 /// Parse a track list into taffy sizing functions plus the `[line-name]` map
@@ -7429,6 +7448,7 @@ fn inset_dim(value: &str) -> Option<crate::Dimension> {
 
 fn set_inset_side(style: &mut LayoutStyle, index: usize, value: &str) {
     let value = value.trim();
+    style.inset_calc[index] = GridCalcExpression::parse_inset(value).map(std::sync::Arc::new);
     if let Some(expression) = deferred_length_expression(value) {
         style.inset[index] = None;
         style.inset_expressions[index] = Some(expression);

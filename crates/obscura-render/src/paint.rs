@@ -2015,11 +2015,20 @@ impl PreparedRender {
                 style.border.left + style.border.right + style.padding.left + style.padding.right;
             let vertical_non_content =
                 style.border.top + style.border.bottom + style.padding.top + style.padding.bottom;
+            let (border_width, border_height) = self
+                .layout
+                .fractional_sizes
+                .get(&id)
+                .copied()
+                .filter(|&(width, height)| {
+                    (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0
+                })
+                .unwrap_or((rect.width, rect.height));
             let (width, height) = match style.box_sizing {
-                crate::BoxSizing::BorderBox => (rect.width, rect.height),
+                crate::BoxSizing::BorderBox => (border_width, border_height),
                 _ => (
-                    (rect.width - horizontal_non_content).max(0.0),
-                    (rect.height - vertical_non_content).max(0.0),
+                    (border_width - horizontal_non_content).max(0.0),
+                    (border_height - vertical_non_content).max(0.0),
                 ),
             };
             out.insert("width", css_px(width));

@@ -381,6 +381,10 @@ pub struct DomLayout {
     /// Used left/right margins of boxes with an `auto` horizontal margin;
     /// CSSOM reports the used value, not `auto`.
     pub(crate) used_auto_margins: HashMap<NodeId, (f32, f32)>,
+    /// Unrounded border-box sizes in Chrome's 1/64 px layout units, where
+    /// they differ from the pixel-rounded rect by less than a pixel. CSSOM
+    /// `width`/`height` report these, as Chrome does.
+    pub(crate) fractional_sizes: HashMap<NodeId, (f32, f32)>,
     /// Per-line border-box fragments for ordinary non-replaced inline
     /// elements. `rects` retains their union for `getBoundingClientRect()`;
     /// this list is the source for background/border painting and
@@ -6408,6 +6412,7 @@ fn layout_dom_once(
     let mut grid_overflow = HashMap::new();
     let mut grid_tracks = HashMap::new();
     let mut used_auto_margins = HashMap::new();
+    let mut fractional_sizes = HashMap::new();
     let mut inline_fragments = HashMap::new();
     let mut text_runs = HashMap::new();
     // Final absolute rects of anonymous inline-run leaves, keyed by the
@@ -8896,6 +8901,7 @@ fn layout_dom_once(
             );
             grid_tracks = collect_grid_tracks(&taffy_tree, &id_map);
             used_auto_margins = collect_used_auto_margins(&taffy_tree, &id_map, &styles);
+            fractional_sizes = collect_fractional_sizes(&taffy_tree, &id_map, &rects);
             inline_fragments = synthesize_ordinary_inline_fragments(&mut rects, &styles, &engine);
             synthesize_row_rects(tree, &mut rects);
             retain_taffy_tree(
@@ -9115,6 +9121,7 @@ fn layout_dom_once(
             grid_overflow,
             grid_tracks,
             used_auto_margins,
+            fractional_sizes,
             inline_fragments,
             styles,
             custom_properties,
@@ -10157,6 +10164,27 @@ fn collect_grid_tracks(
                 Some((dom_id, (info.columns.sizes.clone(), info.rows.sizes.clone())))
             }
             _ => None,
+        })
+        .collect()
+}
+
+/// Unrounded Taffy sizes snapped to 1/64 px for boxes whose final rect is
+/// the rounded Taffy size (the engine adjusts some rects after layout).
+fn collect_fractional_sizes(
+    taffy_tree: &TaffyTree<usize>,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    rects: &HashMap<NodeId, Rect>,
+) -> HashMap<NodeId, (f32, f32)> {
+    let snap = |value: f32| (value * 64.0).round() / 64.0;
+    id_map
+        .iter()
+        .filter_map(|(&taffy_id, &dom_id)| {
+            let rect = rects.get(&dom_id)?;
+            let size = taffy_tree.unrounded_layout(taffy_id).size;
+            let (width, height) = (snap(size.width), snap(size.height));
+            let close = (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0;
+            (close && (width != rect.width || height != rect.height))
+                .then_some((dom_id, (width, height)))
         })
         .collect()
 }

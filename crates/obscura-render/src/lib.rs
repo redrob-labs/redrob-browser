@@ -1687,6 +1687,10 @@ pub struct LayoutStyle {
     pub inset: [Option<Dimension>; 4], // top, right, bottom, left
     /// Deferred functional inset expressions in top/right/bottom/left order.
     pub inset_expressions: [Option<String>; 4],
+    /// calc() insets with a percentage, handed to Taffy so the percentage
+    /// resolves against the absolute box's real containing block. Owned
+    /// here for the lifetime of every layout of this style.
+    pub(crate) inset_calc: [Option<std::sync::Arc<crate::style::GridCalcExpression>>; 4],
 
     /// `overflow`/-x/-y other than `visible`: clips this element's descendants
     /// to its border box during paint. This is what makes the ubiquitous
@@ -3007,11 +3011,17 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
     if let Some(pos) = style.position {
         s.position = pos;
         if !style.position_sticky {
+            let inset = |index: usize| match &style.inset_calc[index] {
+                Some(calc) if pos == taffy::Position::Absolute && !style.position_fixed => {
+                    taffy::LengthPercentageAuto::calc(std::sync::Arc::as_ptr(calc).cast())
+                }
+                _ => inset_lpa(style.inset[index]),
+            };
             s.inset = taffy::Rect {
-                top: inset_lpa(style.inset[0]),
-                right: inset_lpa(style.inset[1]),
-                bottom: inset_lpa(style.inset[2]),
-                left: inset_lpa(style.inset[3]),
+                top: inset(0),
+                right: inset(1),
+                bottom: inset(2),
+                left: inset(3),
             };
         }
     }

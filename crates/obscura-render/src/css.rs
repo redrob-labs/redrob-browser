@@ -5154,6 +5154,7 @@ fn set_size_animation_value(
 }
 
 fn set_inset_animation_value(style: &mut LayoutStyle, index: usize, value: AnimatedLength) {
+    style.inset_calc[index] = None;
     match value {
         AnimatedLength::Auto => {
             style.inset[index] = None;
