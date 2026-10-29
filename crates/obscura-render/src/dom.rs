@@ -7680,6 +7680,10 @@ fn layout_dom_once(
                     })
                     .map(|option_id| tree.text_content(option_id).trim().to_string())
                     .collect();
+                // Chromium lays a menu list out at `line-height: normal`
+                // whatever the cascade says (computed "normal" even under
+                // `font: inherit` from a 24px line-height parent: 21px tall).
+                style.line_height = Some(crate::LineHeight::Normal);
                 let font_size = style.font_size.unwrap_or(13.333_333).max(1.0);
                 let bold = crate::style::used_font_weight(style) >= 600;
                 let label_width = option_labels
@@ -7776,6 +7780,12 @@ fn layout_dom_once(
                 .unwrap_or("text")
                 .trim()
                 .to_ascii_lowercase();
+            // Chromium's push-button inputs use `line-height: normal` (an
+            // inherited 24px line-height leaves a 16px Arial button 24 tall,
+            // where text inputs and <button> follow the cascade).
+            if matches!(input_type.as_str(), "submit" | "reset" | "button") {
+                style.line_height = Some(crate::LineHeight::Normal);
+            }
             if input_type == "hidden" {
                 style.display = crate::Display::None;
                 continue;

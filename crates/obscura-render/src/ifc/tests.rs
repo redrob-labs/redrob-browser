@@ -954,3 +954,17 @@ fn characters_missing_from_bundled_liberation_use_the_host_copy() {
         .width;
     assert!((w - 42.328).abs() < 0.02, "{w}");
 }
+
+#[test]
+fn push_button_inputs_ignore_inherited_line_height() {
+    // Chrome: under `font: inherit` from a 1.5 line-height parent, a 16px
+    // Arial <input type=button> is 24 tall; a text input stays 30.
+    let (tree, laid) = layout(
+        "<!doctype html><style>input{font:inherit}</style>\
+         <body style='margin:0;font:16px Arial;line-height:1.5'>\
+         <input id=a type=button value='Go Back'><br><input id=b>",
+        &[],
+    );
+    assert_eq!(height(&tree, &laid, "a"), 24.0);
+    assert_eq!(height(&tree, &laid, "b"), 30.0);
+}
