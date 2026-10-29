@@ -2576,6 +2576,8 @@ fn computed_display(style: &crate::LayoutStyle) -> &'static str {
         "-webkit-box"
     } else if style.webkit_box_display == Some(true) && !active_webkit_clamp {
         "-webkit-inline-box"
+    } else if let Some(name) = style.css_display.css_name(style.blockified) {
+        name
     } else if style.internal_flex_container {
         "block"
     } else {

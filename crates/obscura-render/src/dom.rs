@@ -6382,6 +6382,7 @@ fn layout_dom_once(
             flow_root: bool,
             is_table_box: bool,
             is_table_cell_box: bool,
+            css_display: crate::CssDisplay,
             color: Option<[u8; 4]>,
             font_size: Option<f32>,
             font_weight: u16,
@@ -6450,6 +6451,7 @@ fn layout_dom_once(
                     flow_root: false,
                     is_table_box: false,
                     is_table_cell_box: false,
+                    css_display: crate::CssDisplay::Layout,
                     color: None,
                     font_size: None,
                     font_weight: 400,
@@ -6581,6 +6583,7 @@ fn layout_dom_once(
                     inh.flow_root = style.flow_root;
                     inh.is_table_box = style.is_table_box;
                     inh.is_table_cell_box = style.is_table_cell_box;
+                    inh.css_display = style.css_display;
                     inh.color = style.color.or(inh.color);
                     inh.font_size = style.font_size.or(inh.font_size);
                     inh.font_weight = crate::style::used_font_weight(style);
@@ -6776,6 +6779,7 @@ fn layout_dom_once(
                     style.flow_root = inh.flow_root;
                     style.is_table_box = inh.is_table_box;
                     style.is_table_cell_box = inh.is_table_cell_box;
+                    style.css_display = inh.css_display;
                     // Reconstruct the internal cell-content wrapper only when
                     // the inherited computed display is table-cell.
                     style.internal_flex_container = style.is_table_cell_box;
@@ -6796,6 +6800,7 @@ fn layout_dom_once(
                 inh.flow_root = style.flow_root;
                 inh.is_table_box = style.is_table_box;
                 inh.is_table_cell_box = style.is_table_cell_box;
+                inh.css_display = style.css_display;
                 match style.color {
                     Some(c) => inh.color = Some(c),
                     None => style.color = inh.color,
@@ -7281,6 +7286,7 @@ fn layout_dom_once(
                 let host_flow_root = style.flow_root;
                 let host_is_table_box = style.is_table_box;
                 let host_is_table_cell_box = style.is_table_cell_box;
+                let host_css_display = style.css_display;
                 let host_grid_auto_columns = style.grid_auto_columns.clone();
                 let host_grid_auto_rows = style.grid_auto_rows.clone();
                 let host_grid_auto_column_calcs = style.grid_calc_expressions[2].clone();
@@ -7309,6 +7315,7 @@ fn layout_dom_once(
                         pseudo.flow_root = host_flow_root;
                         pseudo.is_table_box = host_is_table_box;
                         pseudo.is_table_cell_box = host_is_table_cell_box;
+                        pseudo.css_display = host_css_display;
                         pseudo.internal_flex_container = pseudo.is_table_cell_box;
                         if pseudo.is_table_cell_box {
                             pseudo.flex_direction = Some(taffy::FlexDirection::Column);

@@ -47,6 +47,7 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         "tr" => Display::Flex,
         _ => Display::Block,
     };
+    style.css_display = crate::CssDisplay::for_tag(tag);
     if tag == "slot" {
         // HTML's UA sheet makes a slot transparent to box generation; its
         // assigned nodes or fallback children participate at the slot's
@@ -857,6 +858,31 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
         }
         "display" => {
             let value = value.trim().to_ascii_lowercase();
+            let css_display = crate::CssDisplay::parse(&value);
+            if css_display.is_some()
+                || matches!(
+                    value.as_str(),
+                    "none"
+                        | "flex"
+                        | "inline-flex"
+                        | "inline"
+                        | "inline-block"
+                        | "grid"
+                        | "inline-grid"
+                        | "block"
+                        | "-webkit-box"
+                        | "-webkit-inline-box"
+                        | "contents"
+                        | "inherit"
+                        | "initial"
+                        | "unset"
+                )
+            {
+                // CSSOM reads the specified keyword; layout keeps its own
+                // stand-in below. `inherit` copies the parent's keyword in
+                // the DOM top-down pass.
+                style.css_display = css_display.unwrap_or_default();
+            }
             if matches!(
                 value.as_str(),
                 "none"
@@ -868,6 +894,7 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
                     | "inline-grid"
                     | "block"
                     | "flow-root"
+                    | "list-item"
                     | "table"
                     | "inline-table"
                     | "table-cell"
@@ -909,6 +936,9 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
                     style.is_inline_block = true;
                 }
                 "block" => style.display = crate::Display::Block,
+                // A list item is a block box with a marker; the marker is
+                // painted from the list-style properties.
+                "list-item" => style.display = crate::Display::Block,
                 "flow-root" => {
                     style.display = crate::Display::Block;
                     style.flow_root = true;
@@ -2339,6 +2369,15 @@ pub fn supports_declaration(name: &str, value: &str) -> bool {
                 | "flow-root"
                 | "table"
                 | "inline-table"
+                | "list-item"
+                | "table-row-group"
+                | "table-header-group"
+                | "table-footer-group"
+                | "table-row"
+                | "table-cell"
+                | "table-column-group"
+                | "table-column"
+                | "table-caption"
                 | "-webkit-box"
                 | "-webkit-inline-box"
                 | "contents"

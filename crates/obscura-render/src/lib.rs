@@ -812,6 +812,87 @@ pub enum Display {
     None,
 }
 
+/// A specified `display` keyword that [`Display`] and the layout stand-in
+/// flags cannot express. `Layout` means the layout fields already name the
+/// CSS value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum CssDisplay {
+    #[default]
+    Layout,
+    ListItem,
+    FlowRoot,
+    Table,
+    InlineTable,
+    TableRowGroup,
+    TableHeaderGroup,
+    TableFooterGroup,
+    TableRow,
+    TableCell,
+    TableColumnGroup,
+    TableColumn,
+    TableCaption,
+}
+
+impl CssDisplay {
+    /// The keyword for a specified display value this enum carries.
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "list-item" => Self::ListItem,
+            "flow-root" => Self::FlowRoot,
+            "table" => Self::Table,
+            "inline-table" => Self::InlineTable,
+            "table-row-group" => Self::TableRowGroup,
+            "table-header-group" => Self::TableHeaderGroup,
+            "table-footer-group" => Self::TableFooterGroup,
+            "table-row" => Self::TableRow,
+            "table-cell" => Self::TableCell,
+            "table-column-group" => Self::TableColumnGroup,
+            "table-column" => Self::TableColumn,
+            "table-caption" => Self::TableCaption,
+            _ => return None,
+        })
+    }
+
+    /// Computed value, after blockification when `blockified`.
+    pub(crate) fn css_name(self, blockified: bool) -> Option<&'static str> {
+        Some(match self {
+            Self::Layout => return None,
+            Self::ListItem => "list-item",
+            Self::FlowRoot => "flow-root",
+            Self::Table => "table",
+            Self::InlineTable if blockified => "table",
+            Self::InlineTable => "inline-table",
+            _ if blockified => "block",
+            Self::TableRowGroup => "table-row-group",
+            Self::TableHeaderGroup => "table-header-group",
+            Self::TableFooterGroup => "table-footer-group",
+            Self::TableRow => "table-row",
+            Self::TableCell => "table-cell",
+            Self::TableColumnGroup => "table-column-group",
+            Self::TableColumn => "table-column",
+            Self::TableCaption => "table-caption",
+        })
+    }
+
+    /// HTML UA sheet display for elements the engine lays out with a
+    /// stand-in mode.
+    pub(crate) fn for_tag(tag: &str) -> Self {
+        match tag {
+            "li" => Self::ListItem,
+            "table" => Self::Table,
+            "tbody" => Self::TableRowGroup,
+            "thead" => Self::TableHeaderGroup,
+            "tfoot" => Self::TableFooterGroup,
+            "tr" => Self::TableRow,
+            "td" | "th" => Self::TableCell,
+            "colgroup" => Self::TableColumnGroup,
+            "col" => Self::TableColumn,
+            "caption" => Self::TableCaption,
+            _ => Self::Layout,
+        }
+    }
+}
+
 /// Computed `container-type` value. Stage A carries it through the cascade;
 /// the layout convergence stage will use it for query eligibility.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1124,6 +1205,14 @@ pub struct LayoutStyle {
     /// until the parent's computed outer/inner display is known. The DOM
     /// top-down pass copies that provenance and then clears this marker.
     pub(crate) display_inherit: bool,
+    /// The CSS `display` keyword when layout emulates it with a different
+    /// mode (tables, list items, flow roots). CSSOM reports this keyword;
+    /// layout keeps reading `display` and the stand-in flags.
+    pub(crate) css_display: CssDisplay,
+    /// Set by `blockify_outer_display`: the element is a root, flex/grid
+    /// item, float or absolutely positioned box, so its computed display is
+    /// blockified (CSS Display 3 §2.7).
+    pub(crate) blockified: bool,
     /// Inline outer display before absolute-position blockification. Retained
     /// styles need this provenance to reconstruct the hypothetical static box.
     pub(crate) static_position_inline: bool,
@@ -1860,6 +1949,7 @@ pub(crate) fn is_inline_level_box(style: &LayoutStyle) -> bool {
 /// Thus inline-flex becomes flex and inline-grid becomes grid, while
 /// inline-block/plain inline become block.
 pub(crate) fn blockify_outer_display(style: &mut LayoutStyle) {
+    style.blockified = true;
     if !is_inline_level_box(style) {
         return;
     }
