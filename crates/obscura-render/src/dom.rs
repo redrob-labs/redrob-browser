@@ -5662,6 +5662,10 @@ fn layout_dom_once(
             /// A definite post-flexing height whose numeric basis is only
             /// available during layout. Keep descendant percentages intact.
             cb_height_deferred: bool,
+            /// Definite padding-box height of the containing block for an
+            /// absolutely positioned child: the nearest positioned ancestor,
+            /// or the viewport when there is none.
+            abs_cb_height: Option<f32>,
         }
         impl Default for Inherited {
             fn default() -> Self {
@@ -5711,6 +5715,7 @@ fn layout_dom_once(
                     cb_height: 0.0,
                     cb_height_definite: false,
                     cb_height_deferred: false,
+                    abs_cb_height: None,
                 }
             }
         }
@@ -5747,6 +5752,7 @@ fn layout_dom_once(
         root_inh.cb_width = initial_cb_width;
         root_inh.cb_height = viewport.1;
         root_inh.cb_height_definite = true;
+        root_inh.abs_cb_height = Some(viewport.1);
         // This set records computed definiteness after walking the real
         // containing-block chain. Merely retaining `height:Percent` is not
         // sufficient: under an auto-height containing block it computes to
@@ -5759,6 +5765,7 @@ fn layout_dom_once(
             let mut child_cb_width = inh.cb_width;
             let mut child_cb_height = inh.cb_height;
             let mut child_cb_height_definite = false;
+            let mut abs_inset_height: Option<f32> = None;
             let mut child_cb_height_deferred = (inh.cb_height_definite || inh.cb_height_deferred)
                 && styles.get(&id).is_some_and(|style| {
                     style.height == crate::Dimension::Auto
@@ -5769,13 +5776,13 @@ fn layout_dom_once(
                             .is_some_and(|parent| {
                                 parent.display == crate::Display::Flex
                                     && !parent.internal_flex_container
-                                    && matches!(
+                                    && (matches!(
                                         parent.flex_direction,
                                         Some(
                                             taffy::FlexDirection::Column
                                                 | taffy::FlexDirection::ColumnReverse
                                         )
-                                    )
+                                    ) || stretched_row_flex_item(parent, style))
                             })
                 });
             let reused_computed_style = fresh_styles
@@ -5904,6 +5911,13 @@ fn layout_dom_once(
                                 .max(0.0)
                         };
                     }
+                    if !child_cb_height_definite {
+                        if let Some(height) = abspos_inset_content_height(style, inh.abs_cb_height)
+                        {
+                            child_cb_height_definite = true;
+                            child_cb_height = height;
+                        }
+                    }
                     if child_cb_height_definite {
                         definite_height_nodes.insert(id);
                     }
@@ -5930,6 +5944,12 @@ fn layout_dom_once(
                     };
                 }
                 inh.cb_width = child_cb_width;
+                if let Some(style) = styles.get(&id) {
+                    if style.position.is_some() {
+                        inh.abs_cb_height = child_cb_height_definite
+                            .then(|| child_cb_height + style.padding.top + style.padding.bottom);
+                    }
+                }
                 inh.cb_height = child_cb_height;
                 inh.cb_height_definite = child_cb_height_definite;
                 inh.cb_height_deferred = child_cb_height_deferred;
@@ -6264,6 +6284,13 @@ fn layout_dom_once(
                         style.height,
                         crate::Dimension::Px(_) | crate::Dimension::Percent(_)
                     );
+                }
+                if !child_cb_height_definite && !child_cb_height_deferred {
+                    abs_inset_height = abspos_inset_content_height(style, inh.abs_cb_height);
+                    if abs_inset_height.is_some() {
+                        child_cb_height_definite = true;
+                        definite_height_nodes.insert(id);
+                    }
                 }
                 let computed_weight = crate::style::computed_font_weight(
                     style.font_weight.as_deref(),
@@ -6737,7 +6764,9 @@ fn layout_dom_once(
                         - style.border.right)
                         .max(0.0)
                 };
-                if child_cb_height_definite {
+                if let Some(height) = abs_inset_height {
+                    child_cb_height = height;
+                } else if child_cb_height_definite {
                     let used_height = match style.height {
                         crate::Dimension::Px(height) => height,
                         crate::Dimension::Percent(percent) => percent * inh.cb_height,
@@ -6756,6 +6785,12 @@ fn layout_dom_once(
                 }
             }
             inh.cb_width = child_cb_width;
+            if let Some(style) = styles.get(&id) {
+                if style.position.is_some() {
+                    inh.abs_cb_height = child_cb_height_definite
+                        .then(|| child_cb_height + style.padding.top + style.padding.bottom);
+                }
+            }
             inh.cb_height = child_cb_height;
             inh.cb_height_definite = child_cb_height_definite;
             inh.cb_height_deferred = child_cb_height_deferred;
@@ -10272,6 +10307,64 @@ pub(crate) fn rendered_children(tree: &DomTree, id: NodeId) -> Vec<NodeId> {
 /// Shadow-root children are parented to the host for layout/paint ancestry;
 /// an assigned light child is parented to its slot; and an unslotted light
 /// child has no rendered parent at all.
+/// A `height:auto` item of a single-line row flex container that stretches
+/// on the cross axis. CSS Flexbox §9.8: when the container's cross size is
+/// definite, the stretched item's height is treated as definite, so its
+/// percentage-height children resolve. YouTube's search box container is
+/// `height:100%` inside such an item and collapsed to its content without it.
+fn stretched_row_flex_item(parent: &crate::LayoutStyle, item: &crate::LayoutStyle) -> bool {
+    let row = matches!(
+        parent.flex_direction,
+        None | Some(taffy::FlexDirection::Row | taffy::FlexDirection::RowReverse)
+    );
+    let single_line = matches!(parent.flex_wrap, None | Some(taffy::FlexWrap::NoWrap));
+    let align = item.align_self.or(parent.align_items);
+    row && single_line
+        && align.is_none_or(|align| align == taffy::AlignItems::STRETCH)
+        && !item.margin_auto[0]
+        && !item.margin_auto[2]
+}
+
+/// Content height of an absolutely positioned box whose height comes from
+/// its insets (`height:auto` with `top` and `bottom` set), as in CSS 2.1
+/// §10.6.4. Such a height is definite, so percentage heights inside it
+/// resolve. `cb_height` is the padding-box height of the containing block
+/// (nearest positioned ancestor, else the viewport), when definite.
+/// YouTube's guide drawer is `position:absolute; top:0; bottom:0` around a
+/// `height:100%` flex column; without this the column was 0px tall and its
+/// `overflow-y:auto` child clipped the whole side menu.
+fn abspos_inset_content_height(style: &crate::LayoutStyle, cb_height: Option<f32>) -> Option<f32> {
+    let cb_height = cb_height?;
+    if style.position_fixed
+        || !matches!(style.position, Some(taffy::Position::Absolute))
+        || style.height != crate::Dimension::Auto
+        || style.margin_auto[0]
+        || style.margin_auto[2]
+    {
+        return None;
+    }
+    let (Some(crate::Dimension::Px(top)), Some(crate::Dimension::Px(bottom))) =
+        (style.inset[0], style.inset[2])
+    else {
+        return None;
+    };
+    let border_box = cb_height - top - bottom - style.margin.top - style.margin.bottom;
+    let mut content = border_box
+        - style.padding.top
+        - style.padding.bottom
+        - style.border.top
+        - style.border.bottom;
+    if let crate::Dimension::Px(max) = style.max_height {
+        let max = if style.box_sizing == crate::BoxSizing::ContentBox {
+            max
+        } else {
+            max - style.padding.top - style.padding.bottom - style.border.top - style.border.bottom
+        };
+        content = content.min(max);
+    }
+    Some(content.max(0.0))
+}
+
 pub(crate) fn rendered_parent(tree: &DomTree, id: NodeId) -> Option<NodeId> {
     let parent = tree.with_node(id, |node| node.parent)??;
     if let Some(root) = tree.shadow_root_info(parent) {
