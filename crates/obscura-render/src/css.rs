@@ -7159,6 +7159,65 @@ fn single_media_query_applies_for_viewport(
     if compact.contains("orientation:landscape") && viewport_h > viewport_w {
         return false;
     }
+    // The screen is the viewport here (headless, no window chrome), at one
+    // device pixel per CSS pixel, with a fine hover-capable pointer.
+    for (prop, size, max) in [
+        ("max-device-width:", viewport_w, true),
+        ("min-device-width:", viewport_w, false),
+        ("max-device-height:", viewport_h, true),
+        ("min-device-height:", viewport_h, false),
+    ] {
+        let axis = if prop.contains("width") {
+            LengthAxis::Width
+        } else {
+            LengthAxis::Height
+        };
+        if let Some(px) = extract_length(compact, prop, viewport, axis) {
+            if (max && size > px) || (!max && size < px) {
+                return false;
+            }
+        }
+    }
+    for (prop, max) in [
+        ("-webkit-min-device-pixel-ratio:", false),
+        ("min-device-pixel-ratio:", false),
+        ("-webkit-max-device-pixel-ratio:", true),
+        ("max-device-pixel-ratio:", true),
+    ] {
+        if let Some(ratio) = compact.find(prop).and_then(|start| {
+            let rest = &compact[start + prop.len()..];
+            rest[..rest.find(')').unwrap_or(rest.len())].parse::<f32>().ok()
+        }) {
+            if (max && 1.0 > ratio) || (!max && 1.0 < ratio) {
+                return false;
+            }
+        }
+    }
+    for (prop, max) in [("min-resolution:", false), ("max-resolution:", true)] {
+        if let Some(dppx) = compact.find(prop).and_then(|start| {
+            let rest = &compact[start + prop.len()..];
+            let value = &rest[..rest.find(')').unwrap_or(rest.len())];
+            if let Some(v) = value.strip_suffix("dppx").or_else(|| value.strip_suffix('x')) {
+                v.parse::<f32>().ok()
+            } else if let Some(v) = value.strip_suffix("dpi") {
+                v.parse::<f32>().ok().map(|v| v / 96.0)
+            } else if let Some(v) = value.strip_suffix("dpcm") {
+                v.parse::<f32>().ok().map(|v| v * 2.54 / 96.0)
+            } else {
+                None
+            }
+        }) {
+            if (max && 1.0 > dppx) || (!max && 1.0 < dppx) {
+                return false;
+            }
+        }
+    }
+    if compact.contains("hover:none")
+        || compact.contains("pointer:coarse")
+        || compact.contains("pointer:none")
+    {
+        return false;
+    }
     true
 }
 

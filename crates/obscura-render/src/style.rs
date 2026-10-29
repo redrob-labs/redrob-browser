@@ -359,7 +359,180 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         // establish its width.
         style.display = Display::Inline;
     }
+    apply_ua_sheet_extras(tag, &mut style);
     style
+}
+
+/// The rest of Chromium's HTML UA sheet (html.css) for common elements:
+/// margins, control fonts and colors, cursors, and the computed values the
+/// engine emulates natively (`LayoutStyle::cssom.ua_overrides`).
+fn apply_ua_sheet_extras(tag: &str, style: &mut LayoutStyle) {
+    use crate::{BorderStyle, Dimension, Sides};
+    let ua_border = |style: &mut LayoutStyle, width: f32, line: BorderStyle| {
+        style.border = Edges {
+            top: width,
+            right: width,
+            bottom: width,
+            left: width,
+        };
+        style.border_model.specified_widths = Sides::all(width);
+        style.border_model.styles = Sides::all(line);
+    };
+    const CLIP: [(&str, &str); 3] = [
+        ("overflow", "clip"),
+        ("overflow-x", "clip"),
+        ("overflow-y", "clip"),
+    ];
+    const OUTSET: [(&str, &str); 8] = [
+        ("border-top-style", "outset"),
+        ("border-right-style", "outset"),
+        ("border-bottom-style", "outset"),
+        ("border-left-style", "outset"),
+        ("border-top-color", "rgb(0, 0, 0)"),
+        ("border-right-color", "rgb(0, 0, 0)"),
+        ("border-bottom-color", "rgb(0, 0, 0)"),
+        ("border-left-color", "rgb(0, 0, 0)"),
+    ];
+    match tag {
+        "input" | "select" | "textarea" | "button" => {
+            // `input, textarea, select, button { color: FieldText;
+            // letter-spacing: normal; word-spacing: normal; text-transform:
+            // none; text-indent: 0; text-align: start }`.
+            style.color = Some([0, 0, 0, 255]);
+            style.letter_spacing = Some(0.0);
+            style.letter_spacing_non_normal = Some(false);
+            style.word_spacing = Some(0.0);
+            style.text_transform = Some(crate::TextTransform::None);
+            style.text_indent = Some(Dimension::Px(0.0));
+            style.cssom.text_align = Some("start");
+            style.cursor = Some(if matches!(tag, "input" | "textarea") {
+                crate::Cursor::Text
+            } else {
+                crate::Cursor::Default
+            });
+            if tag != "textarea" {
+                style.cssom.ua_overrides.extend(CLIP);
+            }
+            if tag == "input" {
+                style.cssom.ua_overrides.extend([
+                    ("border-top-style", "inset"),
+                    ("border-right-style", "inset"),
+                    ("border-bottom-style", "inset"),
+                    ("border-left-style", "inset"),
+                ]);
+            } else if tag == "textarea" {
+                style.cssom.ua_overrides.extend([
+                    ("overflow", "auto"),
+                    ("overflow-x", "auto"),
+                    ("overflow-y", "auto"),
+                ]);
+            } else if tag == "select" {
+                // The engine reserves the drop-down arrow as padding; the
+                // computed padding of a native select is zero.
+                style.background_color = Some([239, 239, 239, 255]);
+                style.box_sizing = crate::BoxSizing::BorderBox;
+                style.white_space = Some(crate::WhiteSpace::Pre);
+                style.cssom.ua_overrides.extend([
+                    ("padding-top", "0px"),
+                    ("padding-right", "0px"),
+                    ("padding-bottom", "0px"),
+                    ("padding-left", "0px"),
+                ]);
+            } else {
+                // Native buttons paint like the other controls; their
+                // computed border is `2px outset ButtonBorder`.
+                style.font_size = Some(13.333_333);
+                style.font_family = Some("arial".to_string());
+                style.line_height = Some(crate::LineHeight::Normal);
+                style.cssom.text_align = Some("center");
+                style.background_color = Some([239, 239, 239, 255]);
+                ua_border(style, 2.0, BorderStyle::Solid);
+                style.border_model.colors = Sides::all(Some([118, 118, 118, 255]));
+                style.border_color = Some([118, 118, 118, 255]);
+                style.cssom.ua_overrides.extend(OUTSET);
+            }
+        }
+        "option" | "optgroup" => {
+            style.cursor = Some(crate::Cursor::Default);
+            style.white_space = Some(crate::WhiteSpace::NoWrap);
+            if tag == "option" {
+                style.padding = Edges {
+                    top: 0.0,
+                    right: 2.0,
+                    bottom: 1.0,
+                    left: 2.0,
+                };
+            }
+        }
+        "img" | "video" | "canvas" | "iframe" | "embed" | "object" => {
+            style.cssom.ua_overrides.extend(CLIP);
+        }
+        "svg" => style.cssom.ua_overrides.extend([
+            ("overflow", "hidden"),
+            ("overflow-x", "hidden"),
+            ("overflow-y", "hidden"),
+        ]),
+        "hr" => {
+            // `hr { color: gray; border-style: inset; border-width: 1px;
+            // margin: 0.5em auto; overflow: hidden }`.
+            style.color = Some([128, 128, 128, 255]);
+            ua_border(style, 1.0, BorderStyle::Inset);
+            style.margin_relative[0] = Some(Dimension::Em(0.5));
+            style.margin_relative[2] = Some(Dimension::Em(0.5));
+            style.margin_auto[1] = true;
+            style.margin_auto[3] = true;
+            style.cssom.ua_overrides.extend([
+                ("overflow", "hidden"),
+                ("overflow-x", "hidden"),
+                ("overflow-y", "hidden"),
+            ]);
+        }
+        "blockquote" | "figure" => {
+            style.margin_relative[0] = Some(Dimension::Em(1.0));
+            style.margin_relative[2] = Some(Dimension::Em(1.0));
+            style.margin.left = 40.0;
+            style.margin.right = 40.0;
+        }
+        "dd" => style.margin.left = 40.0,
+        "pre" | "listing" | "xmp" => {
+            style.margin_relative[0] = Some(Dimension::Em(1.0));
+            style.margin_relative[2] = Some(Dimension::Em(1.0));
+        }
+        "fieldset" => {
+            style.margin.left = 2.0;
+            style.margin.right = 2.0;
+            style.padding_relative = [
+                Some(Dimension::Em(0.35)),
+                Some(Dimension::Em(0.75)),
+                Some(Dimension::Em(0.625)),
+                Some(Dimension::Em(0.75)),
+            ];
+            ua_border(style, 2.0, BorderStyle::Groove);
+            style.border_model.colors = Sides::all(Some([192, 192, 192, 255]));
+            style.border_color = Some([192, 192, 192, 255]);
+            style.cssom.ua_overrides.extend([
+                ("border-top-color", "rgb(239, 239, 239)"),
+                ("border-right-color", "rgb(239, 239, 239)"),
+                ("border-bottom-color", "rgb(239, 239, 239)"),
+                ("border-left-color", "rgb(239, 239, 239)"),
+            ]);
+        }
+        "legend" => {
+            style.padding.left = 2.0;
+            style.padding.right = 2.0;
+        }
+        "small" | "sub" | "sup" => {
+            style.font_size = None;
+            style.font_size_raw = Some(Dimension::Em(1.0 / 1.2));
+        }
+        "mark" => {
+            style.background_color = Some([255, 255, 0, 255]);
+            style.color = Some([0, 0, 0, 255]);
+        }
+        "summary" => style.css_display = crate::CssDisplay::ListItem,
+        "label" => style.cursor = Some(crate::Cursor::Default),
+        _ => {}
+    }
 }
 
 pub fn apply_inline(style: &mut LayoutStyle, css: &str) {
@@ -870,6 +1043,12 @@ fn apply_value(style: &mut LayoutStyle, name: &str, value: &str) {
 /// Record the specified values CSSOM reports where layout keeps its own
 /// emulated value (`LayoutStyle::cssom`).
 fn apply_cssom_value(style: &mut LayoutStyle, name: &str, value: &str) {
+    if !style.cssom.ua_overrides.is_empty() {
+        style
+            .cssom
+            .ua_overrides
+            .retain(|(property, _)| !declaration_sets(name, property));
+    }
     let lower = value.trim().to_ascii_lowercase();
     match name {
         "text-align" => {
@@ -1026,6 +1205,28 @@ fn serialize_font_family(value: &str) -> Option<String> {
         });
     }
     Some(out.join(", "))
+}
+
+/// Whether a declaration of `name` (a longhand or a shorthand) sets the
+/// longhand `property`.
+fn declaration_sets(name: &str, property: &str) -> bool {
+    if name == property || name == "all" {
+        return true;
+    }
+    if let Some(rest) = property.strip_prefix(name) {
+        // `border` -> `border-top-style`, `overflow` -> `overflow-x`,
+        // `padding` -> `padding-top`, `background` -> `background-color`.
+        return rest.starts_with('-');
+    }
+    // `border-style`/`border-color`/`border-width` set the matching part of
+    // every side.
+    match name {
+        "border-style" | "border-color" | "border-width" => {
+            let part = &name["border".len()..];
+            property.starts_with("border-") && property.ends_with(part)
+        }
+        _ => false,
+    }
 }
 
 fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {

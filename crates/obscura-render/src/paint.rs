@@ -2076,18 +2076,31 @@ impl PreparedRender {
         out.insert("flex-basis", dimension_css(style.flex_basis, "auto"));
         out.insert("order", style.order.to_string());
 
-        for (name, value, auto) in [
+        let used_auto = self.layout.used_auto_margins.get(&id).copied();
+        for (index, (name, value, auto)) in [
             ("margin-top", style.margin.top, style.margin_auto[0]),
             ("margin-right", style.margin.right, style.margin_auto[1]),
             ("margin-bottom", style.margin.bottom, style.margin_auto[2]),
             ("margin-left", style.margin.left, style.margin_auto[3]),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            // A rendered box reports its used margin; `auto` survives only
+            // without a box.
+            let used = match (index, used_auto) {
+                (1, Some((_, right))) => Some(right),
+                (3, Some((left, _))) => Some(left),
+                (0 | 2, _) if rect.is_some() => Some(0.0),
+                (_, None) if rect.is_some() && style.ignores_used_box_sizes() => Some(0.0),
+                _ => None,
+            };
             out.insert(
                 name,
-                if auto {
-                    "auto".to_string()
-                } else {
-                    css_px(value)
+                match (auto, used) {
+                    (true, Some(used)) => css_px(used),
+                    (true, None) => "auto".to_string(),
+                    _ => css_px(value),
                 },
             );
         }
@@ -2224,7 +2237,12 @@ impl PreparedRender {
 
         // A grid container's resolved track lists are its used track sizes,
         // implicit tracks included (CSS Grid 1 §7.2.6).
-        if let Some((columns, rows)) = self.layout.grid_tracks.get(&id) {
+        if let Some((columns, rows)) = self
+            .layout
+            .grid_tracks
+            .get(&id)
+            .filter(|_| style.display == crate::Display::Grid && style.css_display == crate::CssDisplay::Layout)
+        {
             let tracks = |sizes: &[f32]| {
                 if sizes.is_empty() {
                     "none".to_string()
@@ -2265,6 +2283,35 @@ impl PreparedRender {
                 |(x, y)| format!("{} {}", css_number(x), css_number(y)),
             ),
         );
+        out.insert(
+            "text-transform",
+            match style.text_transform.unwrap_or(crate::TextTransform::None) {
+                crate::TextTransform::None => "none",
+                crate::TextTransform::Uppercase => "uppercase",
+                crate::TextTransform::Lowercase => "lowercase",
+                crate::TextTransform::Capitalize => "capitalize",
+            }
+            .to_string(),
+        );
+        out.insert("word-spacing", css_px(style.word_spacing.unwrap_or(0.0)));
+        out.insert(
+            "text-indent",
+            match style.text_indent.unwrap_or(crate::Dimension::Px(0.0)) {
+                crate::Dimension::Percent(value) => format!("{}%", css_number(value * 100.0)),
+                length => dimension_css(
+                    length.resolve(
+                        style.font_size.unwrap_or(16.0),
+                        self.root_font_size,
+                        self.viewport.0,
+                        self.viewport.1,
+                    ),
+                    "0px",
+                ),
+            },
+        );
+        for &(property, value) in &style.cssom.ua_overrides {
+            out.insert(property, value.to_string());
+        }
         Some(out)
     }
 
@@ -2648,7 +2695,7 @@ fn computed_display(style: &crate::LayoutStyle) -> &'static str {
         && style.webkit_line_clamp.is_some();
     if style.display_contents {
         "contents"
-    } else if style.display == crate::Display::None {
+    } else if style.display == crate::Display::None && !style.css_display.survives_ua_hiding() {
         "none"
     } else if active_webkit_clamp && style.webkit_box_display == Some(false) {
         "flow-root"

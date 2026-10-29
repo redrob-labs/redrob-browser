@@ -827,6 +827,11 @@ pub(crate) struct CssomValues {
     /// layout value when the box is a table/control flex stand-in.
     pub flex_direction: Option<taffy::FlexDirection>,
     pub align_items: Option<taffy::AlignItems>,
+    /// UA-sheet computed values that the engine paints or lays out with a
+    /// different native approximation (control borders, replaced-element
+    /// `overflow: clip`). An author declaration of the property removes its
+    /// entry.
+    pub ua_overrides: Vec<(&'static str, &'static str)>,
 }
 
 impl CssomValues {
@@ -858,6 +863,13 @@ pub(crate) enum VerticalAlignCss {
 pub(crate) enum CssDisplay {
     #[default]
     Layout,
+    /// Computed `inline` whatever layout does with the box: SVG content
+    /// elements, and `noscript`/`source`/`track`, which the UA hides
+    /// without a `display:none` rule.
+    Inline,
+    /// Computed `block` for `option`/`optgroup`, which only render in the
+    /// native popup.
+    Block,
     ListItem,
     FlowRoot,
     Table,
@@ -892,10 +904,19 @@ impl CssDisplay {
         })
     }
 
+    /// Whether the computed display is this keyword even though layout
+    /// generates no box.
+    pub(crate) fn survives_ua_hiding(self) -> bool {
+        matches!(self, Self::Inline | Self::Block)
+    }
+
     /// Computed value, after blockification when `blockified`.
     pub(crate) fn css_name(self, blockified: bool) -> Option<&'static str> {
         Some(match self {
             Self::Layout => return None,
+            Self::Inline if blockified => "block",
+            Self::Inline => "inline",
+            Self::Block => "block",
             Self::ListItem => "list-item",
             Self::FlowRoot => "flow-root",
             Self::Table => "table",
@@ -927,6 +948,8 @@ impl CssDisplay {
             "colgroup" => Self::TableColumnGroup,
             "col" => Self::TableColumn,
             "caption" => Self::TableCaption,
+            "noscript" | "source" | "track" => Self::Inline,
+            "option" | "optgroup" => Self::Block,
             _ => Self::Layout,
         }
     }

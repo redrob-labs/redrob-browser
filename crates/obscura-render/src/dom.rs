@@ -378,6 +378,9 @@ pub struct DomLayout {
     /// Used track sizes (columns, rows) of every grid container, explicit and
     /// implicit, for the resolved `grid-template-*` CSSOM values.
     pub(crate) grid_tracks: HashMap<NodeId, (Vec<f32>, Vec<f32>)>,
+    /// Used left/right margins of boxes with an `auto` horizontal margin;
+    /// CSSOM reports the used value, not `auto`.
+    pub(crate) used_auto_margins: HashMap<NodeId, (f32, f32)>,
     /// Per-line border-box fragments for ordinary non-replaced inline
     /// elements. `rects` retains their union for `getBoundingClientRect()`;
     /// this list is the source for background/border painting and
@@ -3322,6 +3325,10 @@ fn cascade_node_style(
                 .filter(|value| value.is_finite() && *value >= 0.0);
         }
         let mut style = crate::style::ua_style(elem.local.as_ref());
+        if elem.ns.as_ref() == "http://www.w3.org/2000/svg" && elem.local.as_ref() != "svg" {
+            // SVG content elements keep the initial `display: inline`.
+            style.css_display = crate::CssDisplay::Inline;
+        }
         // HTML's UA sheet: `a:any-link, area:any-link { cursor: pointer }`.
         if matches!(elem.local.as_ref(), "a" | "area") && node.get_attribute("href").is_some() {
             style.cursor = Some(crate::Cursor::Pointer);
@@ -3396,11 +3403,19 @@ fn cascade_node_style(
                     style.margin = crate::Edges {
                         top: 3.0,
                         right: 3.0,
-                        bottom: 3.0,
-                        left: 4.0,
+                        bottom: if input_type == "radio" { 0.0 } else { 3.0 },
+                        left: if input_type == "radio" { 5.0 } else { 4.0 },
                     };
                     style.padding = crate::Edges::default();
                     style.border = crate::Edges::default();
+                    style.border_model.specified_widths = crate::Sides::all(0.0);
+                    style.border_model.styles = crate::Sides::all(crate::BorderStyle::None);
+                    style.border_model.colors = crate::Sides::all(None);
+                    style.border_color = None;
+                    style.background_color = None;
+                    style.box_sizing = crate::BoxSizing::BorderBox;
+                    style.cursor = Some(crate::Cursor::Default);
+                    style.cssom.ua_overrides.clear();
                 }
                 "range" | "color" => {
                     style.margin = crate::Edges {
@@ -3411,7 +3426,37 @@ fn cascade_node_style(
                     };
                     style.padding = crate::Edges::default();
                     style.border = crate::Edges::default();
+                    style.cursor = Some(crate::Cursor::Default);
                 }
+                "submit" | "reset" | "button" => {
+                    // `input[type=submit|reset|button]` takes the button UA
+                    // rules: `padding: 1px 6px; border: 2px outset
+                    // ButtonBorder; background-color: ButtonFace`.
+                    style.padding = crate::Edges {
+                        top: 1.0,
+                        right: 6.0,
+                        bottom: 1.0,
+                        left: 6.0,
+                    };
+                    style.background_color = Some([239, 239, 239, 255]);
+                    style.text_align = Some(taffy::AlignItems::CENTER);
+                    style.cssom.text_align = Some("center");
+                    style.white_space = Some(crate::WhiteSpace::Pre);
+                    style.box_sizing = crate::BoxSizing::BorderBox;
+                    style.cursor = Some(crate::Cursor::Default);
+                    style.cssom.ua_overrides.retain(|(property, _)| !property.starts_with("border"));
+                    style.cssom.ua_overrides.extend([
+                        ("border-top-style", "outset"),
+                        ("border-right-style", "outset"),
+                        ("border-bottom-style", "outset"),
+                        ("border-left-style", "outset"),
+                        ("border-top-color", "rgb(0, 0, 0)"),
+                        ("border-right-color", "rgb(0, 0, 0)"),
+                        ("border-bottom-color", "rgb(0, 0, 0)"),
+                        ("border-left-color", "rgb(0, 0, 0)"),
+                    ]);
+                }
+                "file" | "image" | "hidden" => style.cursor = Some(crate::Cursor::Default),
                 _ => {}
             }
         }
@@ -3425,6 +3470,7 @@ fn cascade_node_style(
         if let Some(h) = node.get_attribute("hidden") {
             if !h.eq_ignore_ascii_case("until-found") {
                 style.display = crate::Display::None;
+                style.css_display = crate::CssDisplay::Layout;
             }
         }
         apply_presentational_hints(&node, &mut style);
@@ -6361,6 +6407,7 @@ fn layout_dom_once(
     let mut rects = HashMap::new();
     let mut grid_overflow = HashMap::new();
     let mut grid_tracks = HashMap::new();
+    let mut used_auto_margins = HashMap::new();
     let mut inline_fragments = HashMap::new();
     let mut text_runs = HashMap::new();
     // Final absolute rects of anonymous inline-run leaves, keyed by the
@@ -8848,6 +8895,7 @@ fn layout_dom_once(
                 &mut generated_rects,
             );
             grid_tracks = collect_grid_tracks(&taffy_tree, &id_map);
+            used_auto_margins = collect_used_auto_margins(&taffy_tree, &id_map, &styles);
             inline_fragments = synthesize_ordinary_inline_fragments(&mut rects, &styles, &engine);
             synthesize_row_rects(tree, &mut rects);
             retain_taffy_tree(
@@ -9066,6 +9114,7 @@ fn layout_dom_once(
             rects,
             grid_overflow,
             grid_tracks,
+            used_auto_margins,
             inline_fragments,
             styles,
             custom_properties,
@@ -10108,6 +10157,26 @@ fn collect_grid_tracks(
                 Some((dom_id, (info.columns.sizes.clone(), info.rows.sizes.clone())))
             }
             _ => None,
+        })
+        .collect()
+}
+
+/// Used horizontal margins of every box with an `auto` left or right margin.
+fn collect_used_auto_margins(
+    taffy_tree: &TaffyTree<usize>,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+) -> HashMap<NodeId, (f32, f32)> {
+    id_map
+        .iter()
+        .filter(|(_, dom_id)| {
+            styles
+                .get(dom_id)
+                .is_some_and(|style| style.margin_auto[1] || style.margin_auto[3])
+        })
+        .filter_map(|(&taffy_id, &dom_id)| {
+            let layout = taffy_tree.layout(taffy_id).ok()?;
+            Some((dom_id, (layout.margin.left, layout.margin.right)))
         })
         .collect()
 }
