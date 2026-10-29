@@ -10431,7 +10431,9 @@ mod tests {
         }
         let after = result["after"].as_array().unwrap();
         assert!(after[0].as_f64().unwrap() >= token_x + token_width - 0.01);
-        assert!((after[1].as_f64().unwrap() - token_y).abs() < 0.01);
+        // The monospace <code> and the following span sit on one line but
+        // not at one y (Chrome: 2 and 1).
+        assert!((after[1].as_f64().unwrap() - token_y).abs() <= 1.0);
         assert_eq!(result["atomic"], serde_json::json!([80, 30]));
         assert_eq!(result["replaced"], serde_json::json!([80, 30]));
         assert_eq!(result["item"], serde_json::json!([90, 25, "block"]));
@@ -13477,8 +13479,10 @@ mod tests {
         assert_eq!(initial["tracker"], serde_json::json!([320, 200, 320, 200]));
         assert_eq!(initial["box"][0], serde_json::json!(116));
         assert_eq!(initial["box"][1], serde_json::json!(62));
-        assert!((initial["box"][2].as_f64().unwrap() - 123.0).abs() < 0.05);
-        assert_eq!(initial["box"][3], serde_json::json!(67));
+        // Chrome: 122.765625 (borders snap to 4px and 3px).
+        assert_eq!(initial["box"][2], serde_json::json!(122.765625));
+        // 50.6px of content is 50.59375 in LayoutUnits (Chrome: 66.59375).
+        assert_eq!(initial["box"][3], serde_json::json!(66.59375));
 
         // Attribute-backed inline-style changes invalidate the retained
         // render. Borders do not change the padding box; padding does.
@@ -13500,7 +13504,8 @@ mod tests {
             .unwrap();
         assert_eq!(mutated[0], serde_json::json!(100));
         assert_eq!(mutated[1], serde_json::json!(126));
-        assert_eq!(mutated[2], serde_json::json!(143));
+        // Chrome: 142.578125 (the 4.1px right border snaps to 4px).
+        assert_eq!(mutated[2], serde_json::json!(142.578125));
 
         // A later CDP/emulation viewport update invalidates the layout too;
         // both the root special case and an ordinary 100vh box are live.

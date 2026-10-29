@@ -1865,6 +1865,9 @@ impl PreparedRender {
                 let movement = scroll.movement_for(parent);
                 rect.x += movement.0;
                 rect.y += movement.1;
+                // A caret position's client rect has no width (Chrome:
+                // 0 x 23 at the start of 20px/24px monospace text).
+                rect.width = 0.0;
                 return Some(rect);
             }
         }

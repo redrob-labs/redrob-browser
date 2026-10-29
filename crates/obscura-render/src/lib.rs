@@ -2827,7 +2827,7 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
 
 fn inset_lpa(v: Option<Dimension>) -> taffy::style::LengthPercentageAuto {
     match v {
-        Some(Dimension::Px(px)) => taffy::style::LengthPercentageAuto::length(px),
+        Some(Dimension::Px(px)) => taffy::style::LengthPercentageAuto::length(layout_unit(px)),
         Some(Dimension::Percent(p)) => taffy::style::LengthPercentageAuto::percent(p),
         // Relative units are resolved to Px before layout; unresolved leftovers
         // and `auto`/absent both map to Auto.
@@ -2837,7 +2837,7 @@ fn inset_lpa(v: Option<Dimension>) -> taffy::style::LengthPercentageAuto {
 
 fn dimension(v: Dimension) -> taffy::style::Dimension {
     match v {
-        Dimension::Px(px) => taffy::style::Dimension::length(px),
+        Dimension::Px(px) => taffy::style::Dimension::length(layout_unit(px)),
         Dimension::Percent(p) => taffy::style::Dimension::percent(p),
         Dimension::Auto => taffy::style::Dimension::auto(),
         // Relative units are resolved to Px before layout; if one slips
@@ -2852,12 +2852,32 @@ fn dimension(v: Dimension) -> taffy::style::Dimension {
     }
 }
 
+/// A px length as Blink stores it: a LayoutUnit, truncated to 1/64 px
+/// (100.4px is 100.390625). Each length truncates on its own, so a box's
+/// size is the sum of truncated parts (Chrome: 100.4px wide with 8.2px and
+/// 7.2px padding and 4px + 3px borders is 122.765625).
+fn layout_unit(px: f32) -> f32 {
+    if !px.is_finite() || px.abs() >= 1.0e7 {
+        return px;
+    }
+    let scaled = px * 64.0;
+    // Lengths that are already whole LayoutUnits stay exact despite float
+    // noise (33.333332 * 64 is 2133.3333; 0.1 * 3 * 64 is 19.2).
+    let snapped = scaled.round();
+    let units = if (scaled - snapped).abs() < 1e-3 {
+        snapped
+    } else {
+        scaled.trunc()
+    };
+    units / 64.0
+}
+
 fn rect_lp(e: Edges) -> taffy::Rect<taffy::style::LengthPercentage> {
     taffy::Rect {
-        top: taffy::style::LengthPercentage::length(e.top),
-        right: taffy::style::LengthPercentage::length(e.right),
-        bottom: taffy::style::LengthPercentage::length(e.bottom),
-        left: taffy::style::LengthPercentage::length(e.left),
+        top: taffy::style::LengthPercentage::length(layout_unit(e.top)),
+        right: taffy::style::LengthPercentage::length(layout_unit(e.right)),
+        bottom: taffy::style::LengthPercentage::length(layout_unit(e.bottom)),
+        left: taffy::style::LengthPercentage::length(layout_unit(e.left)),
     }
 }
 
@@ -2867,7 +2887,7 @@ fn rect_lp_percent(
 ) -> taffy::Rect<taffy::style::LengthPercentage> {
     let side = |value, percent| match percent {
         Some(percent) => taffy::style::LengthPercentage::percent(percent),
-        None => taffy::style::LengthPercentage::length(value),
+        None => taffy::style::LengthPercentage::length(layout_unit(value)),
     };
     taffy::Rect {
         top: side(e.top, percent[0]),
@@ -2882,7 +2902,7 @@ fn rect_auto(e: Edges, auto: [bool; 4]) -> taffy::Rect<taffy::style::LengthPerce
         if is_auto {
             taffy::style::LengthPercentageAuto::auto()
         } else {
-            taffy::style::LengthPercentageAuto::length(value)
+            taffy::style::LengthPercentageAuto::length(layout_unit(value))
         }
     };
     taffy::Rect {
