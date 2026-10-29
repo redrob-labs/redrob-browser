@@ -267,10 +267,6 @@ pub struct CdpObjectState {
     evaluation_recipes: HashMap<String, String>,
 }
 
-/// Nodes the parser had not reached when a parser-blocking script ran,
-/// detached by `ObscuraJsRuntime::suspend_parser_tail`: (parent, children).
-pub struct ParserTail(Vec<(NodeId, Vec<NodeId>)>);
-
 pub struct ObscuraJsRuntime {
     state: Rc<RefCell<ObscuraState>>,
     object_store: HashMap<String, String>,
@@ -1302,6 +1298,10 @@ impl ObscuraJsRuntime {
         gs.activity_generation = 0;
         gs.page_in_flight = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         gs.already_started_scripts.borrow_mut().clear();
+        gs.html_parser.borrow_mut().take();
+        gs.parser_written_scripts.borrow_mut().clear();
+        gs.parser_blocking_written.set(false);
+        gs.parser_script_depth.set(0);
         // A new document owns a fresh retained scene and resource cache.
         #[cfg(feature = "render")]
         {
@@ -3948,6 +3948,98 @@ impl ObscuraJsRuntime {
             .replace(false)
     }
 
+    /// Make `parser`'s live document this runtime's document and let
+    /// `document.write` from parser-inserted scripts feed it.
+    pub fn begin_streaming_parse(&self, parser: obscura_dom::StreamingParser) {
+        self.set_dom(parser.dom());
+        let state = self.state.borrow();
+        *state.html_parser.borrow_mut() = Some(Rc::new(parser));
+        state.parser_script_depth.set(0);
+        state.parser_written_scripts.borrow_mut().clear();
+        state.parser_blocking_written.set(false);
+    }
+
+    /// Whether the document parser is still running.
+    pub fn is_streaming_parse_active(&self) -> bool {
+        self.state.borrow().html_parser.borrow().is_some()
+    }
+
+    /// Parse until the next parser-inserted `</script>` or the end of input.
+    /// `None` when no streaming parse is running.
+    pub fn parser_pump(&self) -> Option<obscura_dom::ParseStep> {
+        let parser = self.state.borrow().html_parser.borrow().clone()?;
+        let step = parser.pump();
+        crate::ops::note_parser_dom_progress(&mut self.state.borrow_mut());
+        Some(step)
+    }
+
+    /// Parsing reached the end of the document.
+    pub fn end_streaming_parse(&self) {
+        let state = self.state.borrow();
+        state.html_parser.borrow_mut().take();
+        state.parser_written_scripts.borrow_mut().clear();
+        state.parser_blocking_written.set(false);
+        if let Some(dom) = state.dom.as_ref() {
+            dom.take_parser_insertions();
+        }
+    }
+
+    /// HTML's script nesting level, raised while a parser-inserted script runs.
+    pub fn enter_parser_script(&self) {
+        let state = self.state.borrow();
+        state
+            .parser_script_depth
+            .set(state.parser_script_depth.get() + 1);
+    }
+
+    pub fn leave_parser_script(&self) {
+        let state = self.state.borrow();
+        state
+            .parser_script_depth
+            .set(state.parser_script_depth.get().saturating_sub(1));
+    }
+
+    /// Scripts `document.write` put into the parser that the page must
+    /// prepare (external, module, import map), in order. Taking them also
+    /// lifts a parsing-blocking pause; the caller runs the blocking one first.
+    pub fn take_parser_written_scripts(&self) -> Vec<NodeId> {
+        let state = self.state.borrow();
+        state.parser_blocking_written.set(false);
+        let written = std::mem::take(&mut *state.parser_written_scripts.borrow_mut());
+        written
+    }
+
+    /// HTML's "already started" flag for a parser-inserted script.
+    pub fn mark_script_started(&self, node: NodeId) {
+        self.state
+            .borrow()
+            .already_started_scripts
+            .borrow_mut()
+            .insert(node);
+    }
+
+    /// Tell page script about nodes the parser inserted since the last call:
+    /// mutation records, custom element upgrades, iframe loads. Skipped when
+    /// nothing in the page can observe them.
+    pub fn flush_parser_insertions(&mut self) {
+        let has_insertions = self
+            .state
+            .borrow()
+            .dom
+            .as_ref()
+            .is_some_and(|dom| dom.has_parser_insertions());
+        if !has_insertions {
+            return;
+        }
+        let _ = self.execute_script(
+            "<parser-insertions>",
+            "globalThis.__obscuraParserInserted && globalThis.__obscuraParserInserted();",
+        );
+        if let Some(dom) = self.state.borrow().dom.as_ref() {
+            dom.take_parser_insertions();
+        }
+    }
+
     /// Generation of observable connected-document mutations. This excludes
     /// detached-tree construction and no-op writes, which cannot affect a
     /// screenshot or DOM dump.
@@ -4527,77 +4619,6 @@ impl ObscuraJsRuntime {
             .filter(|node_id| node_is_script(dom, *node_id))
             .collect::<Vec<_>>();
         state.already_started_scripts.borrow_mut().extend(valid);
-    }
-
-    /// Detach everything the HTML parser has not yet reached when it runs
-    /// the parser-blocking script `script_nid`: every later sibling of the
-    /// script and of each of its ancestors. `None` when nothing follows.
-    /// Pair with [`Self::resume_parser_tail`], which appends the nodes back
-    /// the way the parser would continue.
-    pub fn suspend_parser_tail(&mut self, script_nid: u32) -> Option<ParserTail> {
-        let tail = {
-            let state = self.state.borrow();
-            let dom = state.dom.as_ref()?;
-            let script = NodeId::new(script_nid);
-            let mut tail = Vec::new();
-            let mut child = script;
-            for parent in dom.ancestors(script) {
-                let children = dom.children(parent);
-                let position = children.iter().position(|&node| node == child)?;
-                let later: Vec<NodeId> = children[position + 1..].to_vec();
-                for &node in &later {
-                    dom.detach(node);
-                }
-                if !later.is_empty() {
-                    tail.push((parent, later));
-                }
-                child = parent;
-            }
-            tail
-        };
-        if tail.is_empty() {
-            return None;
-        }
-        self.parser_tree_changed();
-        Some(ParserTail(tail))
-    }
-
-    /// Re-attach what [`Self::suspend_parser_tail`] detached: each node is
-    /// appended to its parser parent again, after anything the script added.
-    pub fn resume_parser_tail(&mut self, tail: ParserTail) {
-        {
-            let state = self.state.borrow();
-            let Some(dom) = state.dom.as_ref() else {
-                return;
-            };
-            for (parent, nodes) in tail.0 {
-                for node in nodes {
-                    // The script may have inserted the node's parser parent
-                    // nowhere or detached it: the parser still appends to it.
-                    dom.append_child(parent, node);
-                }
-            }
-        }
-        self.parser_tree_changed();
-    }
-
-    /// A native tree change outside the DOM ops: drop layout and the JS
-    /// ancestry caches.
-    fn parser_tree_changed(&mut self) {
-        {
-            let mut state = self.state.borrow_mut();
-            state.activity_generation = state.activity_generation.wrapping_add(1);
-            #[cfg(feature = "render")]
-            {
-                state.prepared_render = None;
-                state.pending_style_mutations.clear();
-                state.resolved_scroll = None;
-            }
-        }
-        let _ = self.execute_script(
-            "<parser-tree>",
-            "globalThis.__obscura_parser_tree_changed && globalThis.__obscura_parser_tree_changed();",
-        );
     }
 
     pub fn with_dom<R>(&self, f: impl FnOnce(&DomTree) -> R) -> Option<R> {
