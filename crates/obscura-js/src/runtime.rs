@@ -1577,8 +1577,13 @@ impl ObscuraJsRuntime {
         self.state.borrow_mut().set_viewport(width, height);
         let _ = self.execute_runtime_script(
             "<set-viewport>",
+            // A changed size fires the window's resize event, as a browser
+            // does when its window is resized: pages that lay out from
+            // innerWidth/innerHeight in script (YouTube's guide and grid)
+            // otherwise keep the size they loaded at.
             format!(
-                "globalThis.__obscura_viewport_w={width};\
+                "{{const __resized=globalThis.innerWidth!=={width}||globalThis.innerHeight!=={height};\
+                 globalThis.__obscura_viewport_w={width};\
                  globalThis.__obscura_viewport_h={height};\
                  globalThis.innerWidth={width};globalThis.innerHeight={height};\
                  globalThis.__obscura_recompute_media_queries();\
@@ -1591,7 +1596,10 @@ impl ObscuraJsRuntime {
                  }}\
                  if(typeof globalThis.__obscura_recompute_resizes==='function'){{\
                    globalThis.__obscura_recompute_resizes();\
-                 }}",
+                 }}\
+                 if(__resized&&globalThis.document&&typeof Event==='function'){{\
+                   try{{globalThis.dispatchEvent(new Event('resize'));}}catch(_e){{}}\
+                 }}}}",
             ),
         );
     }

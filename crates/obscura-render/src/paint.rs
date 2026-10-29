@@ -11733,7 +11733,37 @@ fn serialize_svg_node_impl(
             let skip_stroke = inherited(&computed.svg_stroke, |style| &style.svg_stroke);
             let skip_stroke_width =
                 inherited(&computed.svg_stroke_width, |style| &style.svg_stroke_width);
-            if let Some(value) = computed.svg_fill.as_deref().filter(|_| !skip_fill) {
+            // `fill` and `stroke` are inherited properties. The standalone
+            // document starts at the <svg> root, so a value set on an HTML
+            // ancestor (YouTube's icons put `fill: currentcolor` on the
+            // wrapping <div>) must be carried onto the root explicitly.
+            let ancestor_value = |pick: fn(&crate::LayoutStyle) -> &Option<String>| {
+                if !is_root || use_clone {
+                    return None;
+                }
+                let all = styles?;
+                let mut parent = node.parent;
+                while let Some(id) = parent {
+                    if let Some(value) = all.get(&id).and_then(|style| pick(style).clone()) {
+                        return Some(value);
+                    }
+                    parent = tree.get_node(id).and_then(|n| n.parent);
+                }
+                None
+            };
+            let root_fill = computed
+                .svg_fill
+                .is_none()
+                .then(|| ancestor_value(|style| &style.svg_fill))
+                .flatten();
+            let root_stroke = computed
+                .svg_stroke
+                .is_none()
+                .then(|| ancestor_value(|style| &style.svg_stroke))
+                .flatten();
+            let fill_value = computed.svg_fill.as_deref().or(root_fill.as_deref());
+            let stroke_value = computed.svg_stroke.as_deref().or(root_stroke.as_deref());
+            if let Some(value) = fill_value.filter(|_| !skip_fill) {
                 if let Some(value) = resolve_svg_presentation_value("fill", value, properties) {
                     append(
                         "fill",
@@ -11745,7 +11775,7 @@ fn serialize_svg_node_impl(
                     );
                 }
             }
-            if let Some(value) = computed.svg_stroke.as_deref().filter(|_| !skip_stroke) {
+            if let Some(value) = stroke_value.filter(|_| !skip_stroke) {
                 if let Some(value) = resolve_svg_presentation_value("stroke", value, properties) {
                     append(
                         "stroke",
