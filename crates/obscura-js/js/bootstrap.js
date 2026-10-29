@@ -4062,6 +4062,8 @@ const _innerTextBlockDisplays = new Set([
   'block', 'flow-root', 'flex', 'grid', 'list-item', 'table', 'table-caption',
 ]);
 
+const _innerTextUnrenderedTags = new Set(['noscript', 'source', 'track', 'option', 'optgroup']);
+
 function _collectInnerText(node, items, inheritedVisibility = 'visible') {
   if (node.nodeType === 3) {
     if (inheritedVisibility === 'visible') items.push(node.data ?? '');
@@ -4072,6 +4074,11 @@ function _collectInnerText(node, items, inheritedVisibility = 'visible') {
   const style = getComputedStyle(node);
   const display = style.display;
   if (display === 'none') return;
+  // Elements the UA hides without display:none generate no box, so they
+  // are not being rendered (noscript with scripting on, media sources,
+  // options outside the select popup).
+  if (node.namespaceURI === 'http://www.w3.org/1999/xhtml'
+      && _innerTextUnrenderedTags.has(node.localName)) return;
   const visibility = style.visibility || inheritedVisibility;
   if (visibility === 'visible' && node.tagName === 'BR') {
     items.push('\n');
@@ -5513,37 +5520,54 @@ class Element extends Node {
     });
     return this._dataset;
   }
+  // offset* are HTMLElement members: SVG and MathML elements have none.
   get offsetWidth() {
+    if (this.namespaceURI !== 'http://www.w3.org/1999/xhtml') return undefined;
     if (this._isViewportRoot()) return globalThis.innerWidth || 1280;
     const metrics = this._renderBoxMetrics();
     return metrics ? metrics.offsetWidth : this.getBoundingClientRect().width;
   }
   get offsetHeight() {
+    if (this.namespaceURI !== 'http://www.w3.org/1999/xhtml') return undefined;
     if (this._isViewportRoot()) return globalThis.innerHeight || 720;
     const metrics = this._renderBoxMetrics();
     return metrics ? metrics.offsetHeight : this.getBoundingClientRect().height;
   }
   get offsetParent() {
-    if (!this.isConnected || this._renderBoxGeometry() === null) return null;
+    if (this.namespaceURI !== 'http://www.w3.org/1999/xhtml') return undefined;
+    if (!this.isConnected) return null;
     // CSSOM View: null for the root element and the body element. Returning
     // document.body here made body.offsetParent === body, so the common
     // `while (el) { x += el.offsetLeft; el = el.offsetParent; }` never ended.
     if (this === document.documentElement || this === document.body) return null;
+    // Null when the element has no box: display:none on it or an ancestor,
+    // or display:contents on itself. Decided from style, since an inline
+    // box can exist without a layout rect of its own.
     const ownStyle = globalThis.getComputedStyle(this);
+    if (ownStyle.display === 'none' || ownStyle.display === 'contents') return null;
+    for (let ancestor = this.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      if (globalThis.getComputedStyle(ancestor).display === 'none') return null;
+    }
     if (ownStyle.position === 'fixed') return null;
-
+    const ownStatic = ownStyle.position === 'static';
     for (let ancestor = this.parentElement; ancestor; ancestor = ancestor.parentElement) {
       if (ancestor.tagName === 'HTML') break;
+      if (ancestor.tagName === 'BODY') return ancestor;
       const style = globalThis.getComputedStyle(ancestor);
-      if (style.display === 'none') return null;
-      if (ancestor.tagName === 'BODY' || style.position !== 'static'
-          || style.display === 'table-cell' || style.display === 'table') {
+      if (style.display === 'contents') continue;
+      // The nearest containing block of positioned descendants, or, for a
+      // static element, the nearest td/th/table element.
+      if (style.position !== 'static' || style.transform !== 'none') return ancestor;
+      if (ownStatic && ancestor.namespaceURI === 'http://www.w3.org/1999/xhtml'
+          && (ancestor.localName === 'td' || ancestor.localName === 'th'
+              || ancestor.localName === 'table')) {
         return ancestor;
       }
     }
     return document.body || null;
   }
   get offsetTop() {
+    if (this.namespaceURI !== 'http://www.w3.org/1999/xhtml') return undefined;
     if (!this.isConnected || this._renderBoxGeometry() === null) return 0;
     const rect = this.getBoundingClientRect();
     const parent = this.offsetParent;
@@ -5553,6 +5577,7 @@ class Element extends Node {
     return Math.round(value);
   }
   get offsetLeft() {
+    if (this.namespaceURI !== 'http://www.w3.org/1999/xhtml') return undefined;
     if (!this.isConnected || this._renderBoxGeometry() === null) return 0;
     const rect = this.getBoundingClientRect();
     const parent = this.offsetParent;
@@ -5874,7 +5899,16 @@ class Element extends Node {
   }
   getClientRects() {
     const geometry = this._renderBoxGeometry();
-    if (geometry === null) return new DOMRectList([]);
+    if (geometry === null) {
+      // SVG shapes have no layout box; their one client rect is their
+      // bounding rect inside the outer <svg>.
+      if (this.namespaceURI === 'http://www.w3.org/2000/svg' && this.localName !== 'svg'
+          && typeof globalThis.__obscuraSvgClientRect === 'function'
+          && globalThis.__obscuraSvgClientRect(this)) {
+        return new DOMRectList([this.getBoundingClientRect()]);
+      }
+      return new DOMRectList([]);
+    }
     if (geometry !== undefined) {
       if (Array.isArray(geometry.clientRects)) {
         return new DOMRectList(geometry.clientRects.map(
@@ -10113,8 +10147,21 @@ globalThis.getComputedStyle = (el, pseudo = '') => {
     // property instead of adding per-property aliases to the native snapshot.
     if (kebab.startsWith('webkit-')) kebab = '-' + kebab;
     refreshRendered(kebab);
-    if (snapshot.rendered && Object.prototype.hasOwnProperty.call(snapshot.rendered, kebab))
-      return snapshot.rendered[kebab];
+    if (snapshot.rendered && Object.prototype.hasOwnProperty.call(snapshot.rendered, kebab)) {
+      const value = snapshot.rendered[kebab];
+      // SVG 2 geometry properties: the width/height presentation attributes
+      // of rect, image, foreignObject, use and nested svg are their computed
+      // CSS width/height. Those elements have no CSS box of their own here.
+      if (value === 'auto' && (kebab === 'width' || kebab === 'height')
+          && el.namespaceURI === 'http://www.w3.org/2000/svg'
+          && /^(rect|image|foreignObject|use|svg)$/.test(el.localName)
+          && typeof el.getAttribute === 'function') {
+        const raw = (el.getAttribute(kebab) || '').trim();
+        const m = /^(-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(px|%)?$/i.exec(raw);
+        if (m) return m[2] === '%' ? `${+m[1]}%` : `${+m[1]}px`;
+      }
+      return value;
+    }
     // Non-render builds and properties outside the renderer snapshot retain
     // the lightweight inline CSSOM behavior.
     const inlineVal = target.getPropertyValue ? target.getPropertyValue(rawProp) : '';

@@ -375,6 +375,16 @@ pub struct DomLayout {
     /// Native grid track extents beyond the content box, including unoccupied
     /// tracks. Only element scroll containers expose these through CSSOM.
     grid_overflow: HashMap<NodeId, Rect>,
+    /// Used track sizes (columns, rows) of every grid container, explicit and
+    /// implicit, for the resolved `grid-template-*` CSSOM values.
+    pub(crate) grid_tracks: HashMap<NodeId, (Vec<f32>, Vec<f32>)>,
+    /// Used left/right margins of boxes with an `auto` horizontal margin;
+    /// CSSOM reports the used value, not `auto`.
+    pub(crate) used_auto_margins: HashMap<NodeId, (f32, f32)>,
+    /// Unrounded border-box sizes in Chrome's 1/64 px layout units, where
+    /// they differ from the pixel-rounded rect by less than a pixel. CSSOM
+    /// `width`/`height` report these, as Chrome does.
+    pub(crate) fractional_sizes: HashMap<NodeId, (f32, f32)>,
     /// Per-line border-box fragments for ordinary non-replaced inline
     /// elements. `rects` retains their union for `getBoundingClientRect()`;
     /// this list is the source for background/border painting and
@@ -487,6 +497,14 @@ pub fn layout_difference(incremental: &DomLayout, scratch: &DomLayout) -> Option
                 "grid_overflow",
                 &incremental.grid_overflow,
                 &scratch.grid_overflow,
+                |a, b| a == b,
+            )
+        })
+        .or_else(|| {
+            first_map_difference(
+                "grid_tracks",
+                &incremental.grid_tracks,
+                &scratch.grid_tracks,
                 |a, b| a == b,
             )
         })
@@ -3056,6 +3074,68 @@ fn legacy_font_size_hint(value: &str) -> Option<&'static str> {
 
 /// Apply HTML presentational attributes at their cascade origin: above the UA
 /// defaults, but below every author stylesheet and style attribute.
+/// HTML's `table[border]` rules: the table gets `border: <N>px outset`
+/// (N defaults to 1), and its cells `border: 1px inset`.
+fn apply_table_border_hints(
+    tree: &DomTree,
+    node: &obscura_dom::tree::Node,
+    style: &mut crate::LayoutStyle,
+) {
+    let Some(name) = node.as_element() else {
+        return;
+    };
+    if name.ns.as_ref() != "http://www.w3.org/1999/xhtml" {
+        return;
+    }
+    let border_width = |table: &obscura_dom::tree::Node| {
+        let value = table.get_attribute("border")?.trim();
+        let digits: String = value.chars().take_while(char::is_ascii_digit).collect();
+        Some(if digits.is_empty() {
+            1.0
+        } else {
+            digits.parse::<f32>().ok()?
+        })
+    };
+    let (width, line) = match name.local.as_ref() {
+        "table" => match border_width(node) {
+            Some(width) if width > 0.0 => (width, crate::BorderStyle::Outset),
+            _ => return,
+        },
+        "td" | "th" => {
+            // The cell's table: through an optional row group and its row.
+            let mut ancestor = node.parent;
+            let mut table = None;
+            for _ in 0..3 {
+                let Some(id) = ancestor else { break };
+                let Some(parent) = tree.borrow_node(id) else {
+                    break;
+                };
+                if parent
+                    .as_element()
+                    .is_some_and(|el| el.local.as_ref() == "table")
+                {
+                    table = border_width(&parent);
+                    break;
+                }
+                ancestor = parent.parent;
+            }
+            match table {
+                Some(width) if width > 0.0 => (1.0, crate::BorderStyle::Inset),
+                _ => return,
+            }
+        }
+        _ => return,
+    };
+    style.border = crate::Edges {
+        top: width,
+        right: width,
+        bottom: width,
+        left: width,
+    };
+    style.border_model.specified_widths = crate::Sides::all(width);
+    style.border_model.styles = crate::Sides::all(line);
+}
+
 fn apply_presentational_hints(node: &obscura_dom::tree::Node, style: &mut crate::LayoutStyle) {
     if node.as_element().is_some_and(|name| {
         name.local.as_ref() == "font" && name.ns.as_ref() == "http://www.w3.org/1999/xhtml"
@@ -3311,6 +3391,10 @@ fn cascade_node_style(
                 .filter(|value| value.is_finite() && *value >= 0.0);
         }
         let mut style = crate::style::ua_style(elem.local.as_ref());
+        if elem.ns.as_ref() == "http://www.w3.org/2000/svg" && elem.local.as_ref() != "svg" {
+            // SVG content elements keep the initial `display: inline`.
+            style.css_display = crate::CssDisplay::Inline;
+        }
         // HTML's UA sheet: `a:any-link, area:any-link { cursor: pointer }`.
         if matches!(elem.local.as_ref(), "a" | "area") && node.get_attribute("href").is_some() {
             style.cursor = Some(crate::Cursor::Pointer);
@@ -3385,11 +3469,19 @@ fn cascade_node_style(
                     style.margin = crate::Edges {
                         top: 3.0,
                         right: 3.0,
-                        bottom: 3.0,
-                        left: 4.0,
+                        bottom: if input_type == "radio" { 0.0 } else { 3.0 },
+                        left: if input_type == "radio" { 5.0 } else { 4.0 },
                     };
                     style.padding = crate::Edges::default();
                     style.border = crate::Edges::default();
+                    style.border_model.specified_widths = crate::Sides::all(0.0);
+                    style.border_model.styles = crate::Sides::all(crate::BorderStyle::None);
+                    style.border_model.colors = crate::Sides::all(None);
+                    style.border_color = None;
+                    style.background_color = None;
+                    style.box_sizing = crate::BoxSizing::BorderBox;
+                    style.cursor = Some(crate::Cursor::Default);
+                    style.cssom.ua_overrides.clear();
                 }
                 "range" | "color" => {
                     style.margin = crate::Edges {
@@ -3400,7 +3492,40 @@ fn cascade_node_style(
                     };
                     style.padding = crate::Edges::default();
                     style.border = crate::Edges::default();
+                    style.cursor = Some(crate::Cursor::Default);
                 }
+                "submit" | "reset" | "button" => {
+                    // `input[type=submit|reset|button]` takes the button UA
+                    // rules: `padding: 1px 6px; border: 2px outset
+                    // ButtonBorder; background-color: ButtonFace`.
+                    style.padding = crate::Edges {
+                        top: 1.0,
+                        right: 6.0,
+                        bottom: 1.0,
+                        left: 6.0,
+                    };
+                    style.background_color = Some([239, 239, 239, 255]);
+                    style.text_align = Some(taffy::AlignItems::CENTER);
+                    style.cssom.text_align = Some("center");
+                    style.white_space = Some(crate::WhiteSpace::Pre);
+                    style.box_sizing = crate::BoxSizing::BorderBox;
+                    style.cursor = Some(crate::Cursor::Default);
+                    style
+                        .cssom
+                        .ua_overrides
+                        .retain(|(property, _)| !property.starts_with("border"));
+                    style.cssom.ua_overrides.extend([
+                        ("border-top-style", "outset"),
+                        ("border-right-style", "outset"),
+                        ("border-bottom-style", "outset"),
+                        ("border-left-style", "outset"),
+                        ("border-top-color", "rgb(0, 0, 0)"),
+                        ("border-right-color", "rgb(0, 0, 0)"),
+                        ("border-bottom-color", "rgb(0, 0, 0)"),
+                        ("border-left-color", "rgb(0, 0, 0)"),
+                    ]);
+                }
+                "file" | "image" | "hidden" => style.cursor = Some(crate::Cursor::Default),
                 _ => {}
             }
         }
@@ -3414,9 +3539,11 @@ fn cascade_node_style(
         if let Some(h) = node.get_attribute("hidden") {
             if !h.eq_ignore_ascii_case("until-found") {
                 style.display = crate::Display::None;
+                style.css_display = crate::CssDisplay::Layout;
             }
         }
         apply_presentational_hints(&node, &mut style);
+        apply_table_border_hints(tree, &node, &mut style);
         apply_picture_source_hints(tree, id, viewport, &mut style);
         let node_id = node.get_attribute("id");
         let classes: Vec<String> = node
@@ -6349,6 +6476,9 @@ fn layout_dom_once(
 
     let mut rects = HashMap::new();
     let mut grid_overflow = HashMap::new();
+    let mut grid_tracks = HashMap::new();
+    let mut used_auto_margins = HashMap::new();
+    let mut fractional_sizes = HashMap::new();
     let mut inline_fragments = HashMap::new();
     let mut text_runs = HashMap::new();
     // Final absolute rects of anonymous inline-run leaves, keyed by the
@@ -6382,6 +6512,8 @@ fn layout_dom_once(
             flow_root: bool,
             is_table_box: bool,
             is_table_cell_box: bool,
+            css_display: crate::CssDisplay,
+            cssom: crate::CssomValues,
             color: Option<[u8; 4]>,
             font_size: Option<f32>,
             font_weight: u16,
@@ -6450,6 +6582,8 @@ fn layout_dom_once(
                     flow_root: false,
                     is_table_box: false,
                     is_table_cell_box: false,
+                    css_display: crate::CssDisplay::Layout,
+                    cssom: crate::CssomValues::default(),
                     color: None,
                     font_size: None,
                     font_weight: 400,
@@ -6581,6 +6715,8 @@ fn layout_dom_once(
                     inh.flow_root = style.flow_root;
                     inh.is_table_box = style.is_table_box;
                     inh.is_table_cell_box = style.is_table_cell_box;
+                    inh.css_display = style.css_display;
+                    inh.cssom.clone_from(&style.cssom);
                     inh.color = style.color.or(inh.color);
                     inh.font_size = style.font_size.or(inh.font_size);
                     inh.font_weight = crate::style::used_font_weight(style);
@@ -6776,6 +6912,7 @@ fn layout_dom_once(
                     style.flow_root = inh.flow_root;
                     style.is_table_box = inh.is_table_box;
                     style.is_table_cell_box = inh.is_table_cell_box;
+                    style.css_display = inh.css_display;
                     // Reconstruct the internal cell-content wrapper only when
                     // the inherited computed display is table-cell.
                     style.internal_flex_container = style.is_table_cell_box;
@@ -6796,6 +6933,7 @@ fn layout_dom_once(
                 inh.flow_root = style.flow_root;
                 inh.is_table_box = style.is_table_box;
                 inh.is_table_cell_box = style.is_table_cell_box;
+                inh.css_display = style.css_display;
                 match style.color {
                     Some(c) => inh.color = Some(c),
                     None => style.color = inh.color,
@@ -6817,6 +6955,35 @@ fn layout_dom_once(
                         },
                     };
                     style.font_size = Some(resolved);
+                }
+                // Blink sizes a font-size derived from the initial `medium`
+                // keyword by the generic family: `monospace` alone uses the
+                // 13px default instead of 16px (pre, code, kbd, textarea).
+                let parent_keyword = (!inh.cssom.font_size_not_keyword)
+                    .then(|| inh.cssom.font_size_keyword_px.unwrap_or(16.0));
+                let keyword =
+                    if style.cssom.font_size_absolute || style.font_size_expression.is_some() {
+                        None
+                    } else {
+                        match style.font_size_raw {
+                            Some(
+                                crate::Dimension::Percent(factor) | crate::Dimension::Em(factor),
+                            ) => parent_keyword.map(|size| size * factor),
+                            Some(_) => None,
+                            None if style.font_size.is_some() => None,
+                            None => parent_keyword,
+                        }
+                    };
+                style.cssom.font_size_not_keyword = keyword.is_none();
+                style.cssom.font_size_keyword_px = keyword;
+                if let Some(size) = keyword {
+                    let monospace = style
+                        .cssom
+                        .font_family
+                        .as_deref()
+                        .or(inh.cssom.font_family.as_deref())
+                        == Some("monospace");
+                    style.font_size = Some(if monospace { size * 13.0 / 16.0 } else { size });
                 }
                 match style.font_size {
                     Some(s) => inh.font_size = Some(s),
@@ -7075,6 +7242,18 @@ fn layout_dom_once(
                     Some(f) => inh.font_family = Some(f.clone()),
                     None => style.font_family = inh.font_family.clone(),
                 }
+                style.cssom.inherit_from(&inh.cssom);
+                let mut colors = style.border_model.colors;
+                if style.cssom.inherit_border_colors(&inh.cssom, &mut colors) {
+                    style.border_model.colors = colors;
+                    style.border_color = (colors.top == colors.right
+                        && colors.right == colors.bottom
+                        && colors.bottom == colors.left)
+                        .then_some(colors.top)
+                        .flatten();
+                }
+                style.cssom.border_colors = Some(style.border_model.colors);
+                inh.cssom.clone_from(&style.cssom);
                 match style.font_optical_sizing {
                     Some(value) => inh.font_optical_sizing = value,
                     None => style.font_optical_sizing = Some(inh.font_optical_sizing),
@@ -7281,6 +7460,8 @@ fn layout_dom_once(
                 let host_flow_root = style.flow_root;
                 let host_is_table_box = style.is_table_box;
                 let host_is_table_cell_box = style.is_table_cell_box;
+                let host_css_display = style.css_display;
+                let host_cssom = style.cssom.clone();
                 let host_grid_auto_columns = style.grid_auto_columns.clone();
                 let host_grid_auto_rows = style.grid_auto_rows.clone();
                 let host_grid_auto_column_calcs = style.grid_calc_expressions[2].clone();
@@ -7309,6 +7490,7 @@ fn layout_dom_once(
                         pseudo.flow_root = host_flow_root;
                         pseudo.is_table_box = host_is_table_box;
                         pseudo.is_table_cell_box = host_is_table_cell_box;
+                        pseudo.css_display = host_css_display;
                         pseudo.internal_flex_container = pseudo.is_table_cell_box;
                         if pseudo.is_table_cell_box {
                             pseudo.flex_direction = Some(taffy::FlexDirection::Column);
@@ -7450,6 +7632,7 @@ fn layout_dom_once(
                     if pseudo.font_family.is_none() {
                         pseudo.font_family = host_family.clone();
                     }
+                    pseudo.cssom.inherit_from(&host_cssom);
                     if pseudo.font_optical_sizing.is_none() {
                         pseudo.font_optical_sizing = host_optical_sizing;
                     }
@@ -7796,7 +7979,9 @@ fn layout_dom_once(
                     + style.padding.bottom
                     + style.border.top
                     + style.border.bottom;
-                let intrinsic_width = cols * font_size * 0.6075 + horizontal_edges;
+                // Chrome: `cols` fixed-pitch advances plus the 15px
+                // scrollbar gutter (cols=20 -> 175px content box at 13.33px).
+                let intrinsic_width = cols * font_size * 0.6 + 15.0 + horizontal_edges;
                 let intrinsic_height =
                     crate::inline::used_line_height(style).max(1.0) * rows + vertical_edges;
                 assign_native_control_size(
@@ -7838,17 +8023,34 @@ fn layout_dom_once(
                 "color" => (50.0, 27.0),
                 "file" => (253.0, default_height.max(22.0)),
                 "submit" | "reset" | "button" => {
+                    // A push button is its label's advance plus its edges
+                    // (Chrome: "Submit" -> 57.48px at 13.33px Arial).
                     let fallback = match input_type.as_str() {
                         "reset" => "Reset",
                         "button" => "",
-                        _ => "Submit Query",
+                        _ => "Submit",
                     };
                     let label = node.get_attribute("value").unwrap_or(fallback);
+                    #[cfg(feature = "paint")]
+                    let label_width = crate::paint::measure_text_em(
+                        label,
+                        font_size,
+                        crate::style::used_font_weight(style) >= 600,
+                        style.font_family.as_deref(),
+                    );
+                    #[cfg(not(feature = "paint"))]
+                    let label_width = text_width(
+                        label,
+                        font_size,
+                        crate::style::used_font_weight(style) >= 600,
+                        style.font_family.as_deref(),
+                        0.0,
+                        0.0,
+                    );
                     (
-                        (label.chars().count() as f32 * font_size * 0.55
-                            + font_size * 1.5
-                            + horizontal_edges)
-                            .max(20.0),
+                        label_width
+                            + label.chars().count() as f32 * style.letter_spacing.unwrap_or(0.0)
+                            + horizontal_edges,
                         default_height,
                     )
                 }
@@ -7859,8 +8061,11 @@ fn layout_dom_once(
                         .and_then(|value| value.parse::<u32>().ok())
                         .filter(|&value| value > 0)
                         .unwrap_or(20) as f32;
+                    // Chrome: `size` average advances plus a fixed caret and
+                    // decoration allowance (size=20 -> 177px, size=1 -> 25px
+                    // content box at 13.33px).
                     (
-                        size * font_size * 0.6 + font_size * 0.675 + horizontal_edges,
+                        size * font_size * 0.6 + font_size * 1.275 + horizontal_edges,
                         default_height,
                     )
                 }
@@ -8821,6 +9026,9 @@ fn layout_dom_once(
                 &generated_nodes,
                 &mut generated_rects,
             );
+            grid_tracks = collect_grid_tracks(&taffy_tree, &id_map);
+            used_auto_margins = collect_used_auto_margins(&taffy_tree, &id_map, &styles);
+            fractional_sizes = collect_fractional_sizes(&taffy_tree, &id_map, &rects);
             inline_fragments = synthesize_ordinary_inline_fragments(&mut rects, &styles, &engine);
             synthesize_row_rects(tree, &mut rects);
             retain_taffy_tree(
@@ -9038,6 +9246,9 @@ fn layout_dom_once(
         DomLayout {
             rects,
             grid_overflow,
+            grid_tracks,
+            used_auto_margins,
+            fractional_sizes,
             inline_fragments,
             styles,
             custom_properties,
@@ -10066,6 +10277,66 @@ fn resolve_named_placement(
             end: taffy::GridPlacement::Auto,
         })
     }
+}
+
+/// Used grid track sizes for every DOM grid container in the laid-out tree.
+fn collect_grid_tracks(
+    taffy_tree: &TaffyTree<usize>,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+) -> HashMap<NodeId, (Vec<f32>, Vec<f32>)> {
+    id_map
+        .iter()
+        .filter_map(
+            |(&taffy_id, &dom_id)| match taffy_tree.detailed_layout_info(taffy_id) {
+                taffy::tree::DetailedLayoutInfo::Grid(info) => Some((
+                    dom_id,
+                    (info.columns.sizes.clone(), info.rows.sizes.clone()),
+                )),
+                _ => None,
+            },
+        )
+        .collect()
+}
+
+/// Unrounded Taffy sizes snapped to 1/64 px for boxes whose final rect is
+/// the rounded Taffy size (the engine adjusts some rects after layout).
+fn collect_fractional_sizes(
+    taffy_tree: &TaffyTree<usize>,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    rects: &HashMap<NodeId, Rect>,
+) -> HashMap<NodeId, (f32, f32)> {
+    let snap = |value: f32| (value * 64.0).round() / 64.0;
+    id_map
+        .iter()
+        .filter_map(|(&taffy_id, &dom_id)| {
+            let rect = rects.get(&dom_id)?;
+            let size = taffy_tree.unrounded_layout(taffy_id).size;
+            let (width, height) = (snap(size.width), snap(size.height));
+            let close = (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0;
+            (close && (width != rect.width || height != rect.height))
+                .then_some((dom_id, (width, height)))
+        })
+        .collect()
+}
+
+/// Used horizontal margins of every box with an `auto` left or right margin.
+fn collect_used_auto_margins(
+    taffy_tree: &TaffyTree<usize>,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+) -> HashMap<NodeId, (f32, f32)> {
+    id_map
+        .iter()
+        .filter(|(_, dom_id)| {
+            styles
+                .get(dom_id)
+                .is_some_and(|style| style.margin_auto[1] || style.margin_auto[3])
+        })
+        .filter_map(|(&taffy_id, &dom_id)| {
+            let layout = taffy_tree.layout(taffy_id).ok()?;
+            Some((dom_id, (layout.margin.left, layout.margin.right)))
+        })
+        .collect()
 }
 
 fn compute_absolute_rects(
@@ -17186,7 +17457,9 @@ mod tests {
         let result = cache.resolve(&tree, id, "display").unwrap();
         assert_eq!(result["display"], "none");
         assert_eq!(result["visibility"], "hidden");
-        assert_eq!(result["color"], "rgb(0, 0, 255)");
+        // `input { color: FieldText }` in the UA sheet: a control does not
+        // inherit the page color (Chrome: rgb(0, 0, 0)).
+        assert_eq!(result["color"], "rgb(0, 0, 0)");
         let expected = full.computed_style(id).unwrap();
         for (property, value) in result {
             assert_eq!(value, expected[property], "hidden input {property}");
@@ -24154,8 +24427,9 @@ mod tests {
     #[test]
     fn textarea_intrinsic_box_comes_from_rows_and_cols() {
         // #685: an empty textarea must keep a real control box instead of
-        // laying out as a plain block. Chromium calibrates cols=20/rows=2 to
-        // a 168x36 border box with one 15px control line per row.
+        // laying out as a plain block. Chrome lays cols=20/rows=2 out as a
+        // 181x36 border box: 20 fixed-pitch advances plus the 15px scrollbar
+        // gutter, and one 15px control line per row.
         let tree = parse_html(
             r#"<style>html, body { margin: 0 }</style>
             <div><textarea id="plain"></textarea></div>
@@ -24167,18 +24441,19 @@ mod tests {
         let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
 
         let plain = rect("plain");
-        assert!((plain.width - 168.0).abs() < 0.5, "{}", plain.width);
+        assert!((plain.width - 181.0).abs() < 0.5, "{}", plain.width);
         assert!((plain.height - 36.0).abs() < 0.5, "{}", plain.height);
 
         let rows8 = rect("rows8");
-        assert!((rows8.width - 168.0).abs() < 0.5);
+        assert!((rows8.width - 181.0).abs() < 0.5);
         assert!((rows8.height - 126.0).abs() < 0.5, "{}", rows8.height);
 
-        // Author height wins over the rows-derived intrinsic height, and the
-        // control is border-box, so 36px stays the border-box height.
+        // Author height wins over the rows-derived intrinsic height. The
+        // control is content-box, so 36px plus 2px padding and 1px border
+        // per side is a 42px border box.
         let cssheight = rect("cssheight");
         assert!(
-            (cssheight.height - 36.0).abs() < 0.5,
+            (cssheight.height - 42.0).abs() < 0.5,
             "{}",
             cssheight.height
         );
