@@ -46,6 +46,21 @@ pub struct ContentSlot {
     pub height: f32,
 }
 
+/// A horizontal band of a box's content area in which floats shorten its line boxes.
+///
+/// Coordinates are relative to the content box of the box whose lines are being laid out.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FloatBand {
+    /// Top of the band, from the top of the content box
+    pub top: f32,
+    /// Bottom of the band, from the top of the content box
+    pub bottom: f32,
+    /// How far floats intrude past the left content edge
+    pub left: f32,
+    /// How far floats intrude past the right content edge
+    pub right: f32,
+}
+
 /// A floated box
 #[derive(Debug, Clone, Default)]
 pub struct PlacedFloatedBox {
@@ -388,9 +403,12 @@ impl FloatContext {
 
         let end_idx = match end {
             None => {
+                // The float extends below every existing segment: add a segment that covers
+                // the rest of its height, so content beside its lower part is narrowed too.
                 let last_y_end = self.segments.last().map(|seg| seg.y.end).unwrap_or(0.0);
-                if min_y > last_y_end {
-                    self.segments.push(Segment { y: last_y_end..min_y, insets: [0.0, 0.0] });
+                let end_y = start_y + floated_box.height;
+                if end_y > last_y_end {
+                    self.segments.push(Segment { y: last_y_end..end_y, insets: [0.0, 0.0] });
                 }
                 self.segments.len() - 1
             }
@@ -424,6 +442,35 @@ impl FloatContext {
             },
             Clear::None => None,
         }
+    }
+
+    /// The float exclusions that overlap a box whose content box starts at `content_top` (BFC
+    /// coordinates) with the given absolute left/right content-box insets. Each band is expressed
+    /// relative to that content box: `top`/`bottom` from its top edge, `left`/`right` as the
+    /// amount the floats intrude past its left/right content edges. Bands that do not intrude are
+    /// omitted, so an empty result means the box's lines are unaffected by floats.
+    pub fn exclusion_bands(&self, content_top: f32, content_insets: [f32; 2]) -> Vec<FloatBand> {
+        let mut bands = Vec::new();
+        if !self.has_floats {
+            return bands;
+        }
+        for segment in &self.segments {
+            if segment.y.end <= content_top {
+                continue;
+            }
+            let left = (segment.insets[0] - content_insets[0]).max(0.0);
+            let right = (segment.insets[1] - content_insets[1]).max(0.0);
+            if left <= 0.0 && right <= 0.0 {
+                continue;
+            }
+            bands.push(FloatBand {
+                top: segment.y.start - content_top,
+                bottom: segment.y.end - content_top,
+                left,
+                right,
+            });
+        }
+        bands
     }
 
     /// Search for a space suitable for laying out non-floated content into

@@ -146,6 +146,16 @@ impl BlockContext<'_> {
         pos
     }
 
+    /// Float exclusion bands for the lines of a box laid out in this context. `content_top` is the
+    /// distance from this block's border-top to its content-top, and `content_insets` the
+    /// left/right distance from its border-box to its content-box.
+    pub fn leaf_float_bands(&self, content_top: f32, content_insets: [f32; 2]) -> Vec<super::float::FloatBand> {
+        self.bfc.float_context.exclusion_bands(
+            self.y_offset + content_top,
+            [self.insets[0] + content_insets[0], self.insets[1] + content_insets[1]],
+        )
+    }
+
     /// Search a space suitable for laying out non-floated content into
     pub fn find_content_slot(&self, min_y: f32, clear: Clear, after: Option<usize>) -> ContentSlot {
         let mut slot =
@@ -963,16 +973,25 @@ fn perform_final_layout_on_in_flow_children(
                 let inset_right = container_outer_width - width - inset_left;
                 let insets = [inset_left, inset_right];
 
-                // Compute child layout
-                let mut child_block_ctx =
-                    block_ctx.sub_context((y_offset_for_absolute + item_non_auto_margin.top).max(clear_pos), insets);
+                // Compute child layout. The child's block context starts at the position its
+                // border-top will be placed at below, so that floats and float exclusions inside it
+                // line up with the child's real geometry. The child's top margin collapses with
+                // the pending margins (or escapes into this container's own top margin).
+                let estimated_top_margin =
+                    if is_collapsing_with_first_margin_set && own_margins_collapse_with_children.start {
+                        0.0
+                    } else {
+                        active_collapsible_margin_set.collapse_with_margin(item_non_auto_margin.top).resolve()
+                    };
+                let child_y = committed_y_offset.max(clear_pos) + estimated_top_margin;
+                let mut child_block_ctx = block_ctx.sub_context(child_y, insets);
                 let output = tree.compute_block_child_layout(item.node_id, inputs, Some(&mut child_block_ctx));
 
                 // Extract float contribution from child block context
                 #[cfg(feature = "float_layout")]
                 {
                     let child_contribution = child_block_ctx.floated_content_height_contribution();
-                    block_ctx.add_child_floated_content_height_contribution(y_offset_for_absolute + child_contribution);
+                    block_ctx.add_child_floated_content_height_contribution(child_y + child_contribution);
                 }
 
                 output
