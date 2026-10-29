@@ -8,15 +8,19 @@ use obscura_browser::Page;
 use obscura_js::redrob_scene as rs;
 
 pub fn write_scene_dump(page: &Page, path: &std::path::Path) -> anyhow::Result<()> {
+    let scale = std::env::var("OBSCURA_SCENE_SCALE")
+        .ok()
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(1.0);
     let started = std::time::Instant::now();
     let built = page
-        .scene_frame()
+        .scene_frame(scale)
         .map_err(|error| anyhow::anyhow!("scene frame failed: {error:?}"))?;
     let build_ms = started.elapsed().as_secs_f64() * 1000.0;
     // A second build of the unchanged page: the steady-state cost of a
     // content-change frame once images are decoded.
     let again = std::time::Instant::now();
-    let rebuilt = page.scene_frame().ok();
+    let rebuilt = page.scene_frame(scale).ok();
     let rebuild_ms = again.elapsed().as_secs_f64() * 1000.0;
     let rebuild_paint_ms = rebuilt.as_ref().map(|frame| frame.stats.paint_ms);
     let mut resources = Vec::new();

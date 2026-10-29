@@ -560,6 +560,7 @@ pub fn build_scene_prepared(
     requested_elements: &HashMap<NodeId, (f32, f32)>,
     surface_color: [u8; 4],
     canvas_surfaces: &dyn CanvasSurfaceSource,
+    raster_scale: f32,
 ) -> Result<SceneFrame, CaptureError> {
     let started = std::time::Instant::now();
     let scroll = prepared.resolve_scene_scroll_state(tree, requested_root, requested_elements);
@@ -575,6 +576,7 @@ pub fn build_scene_prepared(
         .unwrap_or(surface_color);
 
     let (painted, list) = display_list::record_scene(|| {
+        display_list::set_scene_raster_scale(raster_scale);
         // Never touched: the recording keeps ops, not pixels, so the
         // zeroed allocation stays virtual.
         let pixmap = Pixmap::new(width, height)?;

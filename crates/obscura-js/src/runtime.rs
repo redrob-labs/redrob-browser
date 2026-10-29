@@ -2055,6 +2055,7 @@ impl ObscuraJsRuntime {
     pub fn scene_frame_with_surface_color(
         &self,
         surface_color: [u8; 4],
+        raster_scale: f32,
     ) -> Result<obscura_render::SceneFrame, obscura_render::CaptureError> {
         let mut state = self.state.borrow_mut();
         with_sync_render_loading_disabled(&mut state, |state| {
@@ -2080,6 +2081,7 @@ impl ObscuraJsRuntime {
                 element_scroll_offsets,
                 surface_color,
                 &canvas_surfaces,
+                raster_scale,
             )
         })
     }

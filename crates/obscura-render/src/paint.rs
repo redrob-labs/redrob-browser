@@ -5367,11 +5367,12 @@ fn paint_laid_dom_scrolled(
                 // the sprite, splice the referenced `<symbol>` into a local `<defs>`,
                 // and rewrite the href to a same-document `#id`. Same-document
                 // `<use href="#id">` (empty url) is untouched.
-                if let Some(content) = render_svg_with_font_database(
+                if let Some(content) = render_svg_with_font_database_scaled(
                     markup.as_bytes(),
                     rect.width as u32,
                     rect.height as u32,
                     svg_fonts,
+                    scene_svg_scale(),
                 ) {
                     let mut mask = element_clip_mask.map(crate::canvas::clone_mask);
                     if has_radius {
@@ -5383,12 +5384,35 @@ fn paint_laid_dom_scrolled(
                         );
                         mask = intersect_clip_masks(mask, own.as_ref());
                     }
+                    // A scene raster is denser than CSS pixels; map it back.
+                    let density = content.width() as f32 / (rect.width as u32).max(1) as f32;
+                    let (paint, transform) = if density > 1.0 {
+                        (
+                            tiny_skia::PixmapPaint {
+                                quality: tiny_skia::FilterQuality::Bilinear,
+                                ..tiny_skia::PixmapPaint::default()
+                            },
+                            Transform::from_row(
+                                1.0 / density,
+                                0.0,
+                                0.0,
+                                1.0 / density,
+                                rect.x as i32 as f32,
+                                rect.y as i32 as f32,
+                            ),
+                        )
+                    } else {
+                        (
+                            tiny_skia::PixmapPaint::default(),
+                            Transform::from_translate(rect.x as i32 as f32, rect.y as i32 as f32),
+                        )
+                    };
                     pixmap.canvas().draw_image(
-                        rect.x as i32,
-                        rect.y as i32,
+                        0,
+                        0,
                         content.as_ref(),
-                        &tiny_skia::PixmapPaint::default(),
-                        Transform::identity(),
+                        &paint,
+                        transform,
                         mask.as_ref(),
                     );
                 }
@@ -5816,6 +5840,18 @@ fn paint_laid_dom_scrolled(
     }
 
     Some(pixmap)
+}
+
+/// Device scale SVG images are rasterized at (1 outside scene recordings).
+fn scene_svg_scale() -> f32 {
+    #[cfg(feature = "display-list")]
+    {
+        crate::display_list::scene_raster_scale()
+    }
+    #[cfg(not(feature = "display-list"))]
+    {
+        1.0
+    }
 }
 
 /// Scene node tag for `nid` (index + 1; 0 means none).
@@ -11116,7 +11152,13 @@ fn paint_image(
     // result up on draw when the destination is larger.
     let (rw, rh) = bounded_raster_size(dw, dh);
     let content = if svg {
-        render_svg(&bytes, rw, rh).map(Arc::new)
+        let scale = scene_svg_scale();
+        if scale > 1.0 {
+            render_svg_with_font_database_scaled(&bytes, rw, rh, &svg_font_database(), scale)
+                .map(Arc::new)
+        } else {
+            render_svg(&bytes, rw, rh).map(Arc::new)
+        }
     } else if !src.starts_with("data:") {
         let key = resolved.map(|url| match profile {
             Some(profile) => image_resource_key(&url, profile),
@@ -11191,6 +11233,7 @@ fn paint_image(
             )
         })
         .unwrap_or_else(Transform::identity);
+    let (rw, rh) = (content.width(), content.height());
     if (rw, rh) == (dw, dh) {
         pixmap.canvas().draw_image(
             dest.x as i32,
@@ -11656,6 +11699,18 @@ fn render_svg_with_font_database(
     height: u32,
     fonts: &std::sync::Arc<usvg::fontdb::Database>,
 ) -> Option<Pixmap> {
+    render_svg_with_font_database_scaled(bytes, width, height, fonts, 1.0)
+}
+
+/// [`render_svg_with_font_database`] at `scale` device pixels per CSS
+/// pixel: the SVG viewport stays `width` x `height`, the pixmap is larger.
+fn render_svg_with_font_database_scaled(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    fonts: &std::sync::Arc<usvg::fontdb::Database>,
+    scale: f32,
+) -> Option<Pixmap> {
     if width == 0 || height == 0 {
         return None;
     }
@@ -11678,9 +11733,19 @@ fn render_svg_with_font_database(
     if size.width() <= 0.0 || size.height() <= 0.0 {
         return None;
     }
-    let mut svg_pixmap = Pixmap::new(width, height)?;
-    let transform =
-        Transform::from_scale(width as f32 / size.width(), height as f32 / size.height());
+    let (pixel_width, pixel_height) = if scale > 1.0 {
+        (
+            ((width as f32 * scale).round() as u32).max(1),
+            ((height as f32 * scale).round() as u32).max(1),
+        )
+    } else {
+        (width, height)
+    };
+    let mut svg_pixmap = Pixmap::new(pixel_width, pixel_height)?;
+    let transform = Transform::from_scale(
+        pixel_width as f32 / size.width(),
+        pixel_height as f32 / size.height(),
+    );
     resvg::render(&tree, transform, &mut svg_pixmap.as_mut());
     Some(svg_pixmap)
 }

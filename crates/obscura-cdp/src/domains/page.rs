@@ -2291,7 +2291,7 @@ pub async fn handle(
             // (docs/COMPOSITOR.md) over a local socket; returns its address.
             #[cfg(feature = "render")]
             {
-                crate::scene_channel::attach(ctx, session_id)
+                crate::scene_channel::attach(ctx, session_id, params)
             }
             #[cfg(not(feature = "render"))]
             Err("Page.redrobSceneAttach requires a build with the render feature".to_string())

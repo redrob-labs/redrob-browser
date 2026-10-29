@@ -51,6 +51,8 @@ pub(crate) struct SceneStream {
     scroll_generation: u64,
     paint_epoch: Option<u64>,
     needs_frame: bool,
+    /// Device pixels per CSS pixel of the window (`rasterScale`).
+    pub(crate) raster_scale: f32,
     /// The last frame's spatial tree, scroll node indices and the scrollers
     /// only script can move (a change there needs a new frame).
     spatial: Vec<rs::SpatialNode>,
@@ -123,6 +125,7 @@ impl SceneStream {
             scroll_generation: 0,
             paint_epoch: None,
             needs_frame: true,
+            raster_scale: 1.0,
             spatial: Vec::new(),
             scroll_nodes: HashMap::new(),
             baked_scrollers: HashSet::new(),
@@ -387,7 +390,11 @@ impl Drop for SceneStream {
 }
 
 /// `Page.redrobSceneAttach`: start streaming the session's tab.
-pub(crate) fn attach(ctx: &mut CdpContext, session_id: &Option<String>) -> Result<serde_json::Value, String> {
+pub(crate) fn attach(
+    ctx: &mut CdpContext,
+    session_id: &Option<String>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let page_id = session_id
         .as_ref()
         .and_then(|session| ctx.sessions.get(session))
@@ -398,7 +405,17 @@ pub(crate) fn attach(ctx: &mut CdpContext, session_id: &Option<String>) -> Resul
             .map_err(|error| format!("Page.redrobSceneAttach could not open the scene socket: {error}"))?;
         ctx.scenes.insert(page_id.clone(), stream);
     }
-    let stream = &ctx.scenes[&page_id];
+    let raster_scale = params
+        .get("rasterScale")
+        .and_then(|value| value.as_f64())
+        .map(|value| value as f32)
+        .or_else(|| ctx.get_page(&page_id).map(|page| page.device_scale_factor))
+        .unwrap_or(1.0);
+    let stream = ctx.scenes.get_mut(&page_id).expect("scene stream");
+    if (stream.raster_scale - raster_scale).abs() > f32::EPSILON {
+        stream.raster_scale = raster_scale;
+        stream.needs_frame = true;
+    }
     Ok(serde_json::json!({
         "transport": stream.transport(),
         "address": stream.address,
@@ -484,7 +501,7 @@ fn pump_stream(ctx: &mut CdpContext, page_id: &str, stream: &mut SceneStream) {
             stream.needs_frame = true;
             return;
         }
-        match page.scene_frame() {
+        match page.scene_frame(stream.raster_scale) {
             Ok(built) => {
                 let (activity, scroll_generation, _, paint_epoch) = page.scene_change_signals();
                 let (_, elements, _) = page.scroll_snapshot();

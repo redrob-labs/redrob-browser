@@ -1415,6 +1415,7 @@ thread_local! {
     static CURRENT_NODE: Cell<u64> = const { Cell::new(0) };
     static REFERENCES: RefCell<HashMap<usize, Reference>> = RefCell::new(HashMap::new());
     static SCENE_GENERATION: Cell<u64> = const { Cell::new(0) };
+    static SCENE_RASTER_SCALE: Cell<f32> = const { Cell::new(1.0) };
     static SCENE_IMAGE_CACHE: RefCell<SceneImageCache> = RefCell::new(SceneImageCache::default());
 }
 
@@ -1472,6 +1473,7 @@ pub(crate) fn record_scene<R>(paint: impl FnOnce() -> R) -> (R, Option<DisplayLi
     impl Drop for Reset {
         fn drop(&mut self) {
             SCENE.with(|scene| scene.set(false));
+            SCENE_RASTER_SCALE.with(|scale| scale.set(1.0));
             REFERENCES.with(|references| references.borrow_mut().clear());
         }
     }
@@ -1497,6 +1499,22 @@ pub(crate) fn record_scene<R>(paint: impl FnOnce() -> R) -> (R, Option<DisplayLi
             .retain(|_, rgba| std::sync::Arc::strong_count(rgba) > 1);
     });
     result
+}
+
+/// Device pixels per CSS pixel for what a scene recording must rasterize
+/// itself (SVG images): the window's scale, so they stay sharp there.
+pub(crate) fn set_scene_raster_scale(scale: f32) {
+    let scale = if scale.is_finite() { scale.clamp(1.0, 4.0) } else { 1.0 };
+    SCENE_RASTER_SCALE.with(|cell| cell.set(scale));
+}
+
+/// 1.0 outside a scene recording.
+pub(crate) fn scene_raster_scale() -> f32 {
+    if scene_active() {
+        SCENE_RASTER_SCALE.with(Cell::get)
+    } else {
+        1.0
+    }
 }
 
 /// The DOM node (index + 1, 0 for none) later ops are tagged with.

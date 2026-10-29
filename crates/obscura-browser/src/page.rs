@@ -4420,9 +4420,13 @@ impl Page {
     }
 
     /// One GPU compositor frame of the live document (docs/COMPOSITOR.md),
-    /// at the live animation time.
+    /// at the live animation time. What the engine rasterizes itself (SVG
+    /// images) is drawn at `raster_scale` device pixels per CSS pixel.
     #[cfg(feature = "render")]
-    pub fn scene_frame(&self) -> Result<obscura_js::SceneFrame, obscura_js::CaptureError> {
+    pub fn scene_frame(
+        &self,
+        raster_scale: f32,
+    ) -> Result<obscura_js::SceneFrame, obscura_js::CaptureError> {
         let js = self
             .js
             .as_ref()
@@ -4430,7 +4434,7 @@ impl Page {
         if !js.set_animation_sample(self.live_animation_sample()) {
             return Err(obscura_js::CaptureError::PaintFailed);
         }
-        js.scene_frame_with_surface_color(self.capture_surface_color())
+        js.scene_frame_with_surface_color(self.capture_surface_color(), raster_scale)
     }
 
     /// See `ObscuraRuntime::scene_change_signals`.
