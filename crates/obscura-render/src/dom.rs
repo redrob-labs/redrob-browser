@@ -2602,7 +2602,9 @@ struct IfcRegistry {
     /// derived from the final column tracks.
     table_columns: HashMap<taffy::NodeId, Vec<(NodeId, Option<NodeId>, usize, usize)>>,
     /// CSS table rows and row groups with the cells whose rects they union.
-    table_part_boxes: Vec<(NodeId, Vec<NodeId>)>,
+    /// `Some(bottom)` marks an empty group: a zero-height rect at the bottom
+    /// (or top) edge of the given cells.
+    table_part_boxes: Vec<(NodeId, Vec<NodeId>, Option<bool>)>,
     /// Anonymous table grid nodes: (the box whose children they wrap, the
     /// anonymous table style). They generate no DOM rect.
     anonymous_tables: HashMap<taffy::NodeId, (NodeId, crate::LayoutStyle)>,
@@ -8953,7 +8955,7 @@ fn layout_dom_once(
                 &mut text_runs,
                 &mut generated_rects,
             );
-            synthesize_row_rects(tree, &mut rects);
+            synthesize_row_rects(tree, &styles, &mut rects);
             synthesize_column_rects(&taffy_tree, &id_map, &ifc_items, &mut rects);
             retain_taffy_tree(
                 std::mem::replace(&mut taffy_tree, crate::new_taffy_tree()),
@@ -10253,10 +10255,10 @@ fn table_cell_natural_height(
     }
     let mut bottom = layout.border.top + layout.padding.top;
     for child in children {
-        let (Ok(style), Ok(child_layout)) = (taffy_tree.style(child), taffy_tree.layout(child))
-        else {
+        let Ok(style) = taffy_tree.style(child) else {
             continue;
         };
+        let child_layout = taffy_tree.unrounded_layout(child);
         if style.display == taffy::style::Display::None
             || style.position == taffy::style::Position::Absolute
         {
@@ -10306,10 +10308,12 @@ fn apply_table_row_geometry(
             {
                 continue;
             }
-            let (Ok(cell_style), Ok(layout)) = (taffy_tree.style(cell), taffy_tree.layout(cell))
-            else {
+            let Ok(cell_style) = taffy_tree.style(cell) else {
                 continue;
             };
+            // Unrounded: collapsed borders give cells half-pixel edges, which
+            // rounding turned into a whole pixel per side (rows 1px taller).
+            let layout = taffy_tree.unrounded_layout(cell);
             let row = match cell_style.grid_row.start {
                 GridPlacement::Line(line) => {
                     match ((line.as_i16().max(1) as usize) - 1).checked_sub(top_captions) {
@@ -11415,20 +11419,30 @@ fn synthesize_column_rects(
         }
         rects.extend(groups);
     }
-    for (part, cells) in &ifc_items.table_part_boxes {
+    for (part, cells, empty) in &ifc_items.table_part_boxes {
         let mut union: Option<Rect> = None;
         for cell in cells {
             if let Some(rect) = rects.get(cell) {
                 union = Some(union.map_or(*rect, |current| current.union(rect)));
             }
         }
-        if let Some(rect) = union {
+        if let Some(mut rect) = union {
+            if let Some(bottom) = empty {
+                if *bottom {
+                    rect.y += rect.height;
+                }
+                rect.height = 0.0;
+            }
             rects.insert(*part, rect);
         }
     }
 }
 
-fn synthesize_row_rects(tree: &DomTree, rects: &mut HashMap<NodeId, Rect>) {
+fn synthesize_row_rects(
+    tree: &DomTree,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    rects: &mut HashMap<NodeId, Rect>,
+) {
     let mut rows = Vec::new();
     let mut sections = Vec::new();
     let mut table_inline: HashMap<NodeId, Rect> = HashMap::new();
@@ -11466,7 +11480,20 @@ fn synthesize_row_rects(tree: &DomTree, rects: &mut HashMap<NodeId, Rect>) {
         }
     }
 
-    for id in rows {
+    let table_of = |node: NodeId| {
+        let mut ancestor = rendered_parent(tree, node);
+        while let Some(parent) = ancestor {
+            if tree.borrow_node(parent).is_some_and(|n| {
+                n.as_element()
+                    .is_some_and(|element| element.local.as_ref() == "table")
+            }) {
+                return Some(parent);
+            }
+            ancestor = rendered_parent(tree, parent);
+        }
+        None
+    };
+    for &id in &rows {
         if rects.contains_key(&id) {
             continue;
         }
@@ -11527,8 +11554,82 @@ fn synthesize_row_rects(tree: &DomTree, rects: &mut HashMap<NodeId, Rect>) {
         }
     }
 
+    // A row or row group without cells still has a (zero-height) box: as
+    // wide as the table's rows, at the end of the previous one plus the
+    // border-spacing, or at the top of the table's row area.
+    let hidden = |id: NodeId| {
+        let mut node = Some(id);
+        while let Some(current) = node {
+            if styles
+                .get(&current)
+                .is_some_and(|style| style.display == crate::Display::None)
+            {
+                return true;
+            }
+            if tree.borrow_node(current).is_some_and(|n| {
+                n.as_element()
+                    .is_some_and(|element| element.local.as_ref() == "table")
+            }) {
+                return false;
+            }
+            node = rendered_parent(tree, current);
+        }
+        false
+    };
+    let place_empty =
+        |id: NodeId, previous: Option<Rect>, row_gap: bool, rects: &HashMap<NodeId, Rect>| {
+            if hidden(id) {
+                return None;
+            }
+            let table = table_of(id)?;
+            let band = table_inline.get(&table).copied();
+            let table_rect = rects.get(&table).copied()?;
+            let style = styles.get(&table);
+            let gap = style.map_or(0.0, |style| table_spacing(style).1);
+            let top_edge = style.map_or(0.0, |style| {
+                if style.border_collapse == Some(true) {
+                    style.border.top / 2.0
+                } else {
+                    style.border.top + style.padding.top
+                }
+            });
+            let y = match previous {
+                // Rows are separated by border-spacing; an empty group follows
+                // the previous row directly.
+                Some(previous) => previous.y + previous.height + if row_gap { gap } else { 0.0 },
+                None => table_rect.y + top_edge + gap,
+            };
+            let (x, width) = band.map_or((table_rect.x, table_rect.width), |band| {
+                (band.x, band.width)
+            });
+            Some(Rect {
+                x,
+                y,
+                width,
+                height: 0.0,
+            })
+        };
+    let mut previous_in_table: HashMap<NodeId, Rect> = HashMap::new();
+    for &id in &rows {
+        let table = table_of(id);
+        if !rects.contains_key(&id) {
+            let previous = table.and_then(|table| previous_in_table.get(&table).copied());
+            if let Some(rect) = place_empty(id, previous, true, rects) {
+                rects.insert(id, rect);
+            }
+        }
+        if let (Some(table), Some(rect)) = (table, rects.get(&id)) {
+            previous_in_table.insert(table, *rect);
+        }
+    }
+
+    let mut previous_section: HashMap<NodeId, Rect> = HashMap::new();
     for id in sections {
+        let table = table_of(id);
         if rects.contains_key(&id) {
+            if let (Some(table), Some(rect)) = (table, rects.get(&id)) {
+                previous_section.insert(table, *rect);
+            }
             continue;
         }
         let mut section: Option<Rect> = None;
@@ -11547,7 +11648,24 @@ fn synthesize_row_rects(tree: &DomTree, rects: &mut HashMap<NodeId, Rect>) {
                 });
             }
         }
+        let section = section.or_else(|| {
+            // An empty group sits after the last row (a footer) or where the
+            // next rows start.
+            let is_footer = tree.borrow_node(id).is_some_and(|node| {
+                node.as_element()
+                    .is_some_and(|element| element.local.as_ref() == "tfoot")
+            });
+            let previous = if is_footer {
+                table.and_then(|table| previous_in_table.get(&table).copied())
+            } else {
+                table.and_then(|table| previous_section.get(&table).copied())
+            };
+            place_empty(id, previous, false, rects)
+        });
         if let Some(rect) = section {
+            if let Some(table) = table {
+                previous_section.insert(table, rect);
+            }
             rects.insert(id, rect);
         }
     }
@@ -13100,8 +13218,12 @@ fn build_table_box(
                     end: span(1),
                 };
                 cstyle.position = taffy::Position::Absolute;
+                // An absolutely positioned grid item's area starts at the
+                // gutter before its first line; skip that border-spacing.
+                let spacing = table_spacing(style).0;
+                let inset_left = if *c > 0 { spacing } else { 0.0 };
                 cstyle.inset = taffy::Rect {
-                    left: taffy::LengthPercentageAuto::length(0.0),
+                    left: taffy::LengthPercentageAuto::length(inset_left),
                     right: taffy::LengthPercentageAuto::length(0.0),
                     top,
                     bottom: taffy::LengthPercentageAuto::auto(),
@@ -13574,16 +13696,26 @@ fn build_table_box(
     if !native_html_table {
         for (r, &(row, _)) in rows.iter().enumerate() {
             if row_real[r] && row != id {
-                ifc_items.table_part_boxes.push((row, row_cells[r].clone()));
+                ifc_items
+                    .table_part_boxes
+                    .push((row, row_cells[r].clone(), None));
             }
         }
         for (group, range) in css_groups {
+            if range.is_empty() {
+                // An empty row group still generates a zero-height box at its
+                // place among the rows, as wide as the rows.
+                let all: Vec<NodeId> = row_cells.iter().flatten().copied().collect();
+                let bottom = range.start >= nrows;
+                ifc_items.table_part_boxes.push((group, all, Some(bottom)));
+                continue;
+            }
             let cells: Vec<NodeId> = row_cells[range.start.min(nrows)..range.end.min(nrows)]
                 .iter()
                 .flatten()
                 .copied()
                 .collect();
-            ifc_items.table_part_boxes.push((group, cells));
+            ifc_items.table_part_boxes.push((group, cells, None));
         }
     }
     if !caption_nodes.is_empty() {
