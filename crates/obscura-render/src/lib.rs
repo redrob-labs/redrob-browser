@@ -82,6 +82,7 @@ pub use css::{CssMediaType, Stylesheet, StylesheetCache};
 
 pub mod style;
 pub use style::compute_style;
+pub use redrob_scene::Cursor;
 
 pub mod border;
 pub use border::{
@@ -198,6 +199,13 @@ pub use paint::{
     RenderResourceCache, RenderResourceLoader, ResolvedScrollState, SelectedImage,
     MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS,
 };
+#[cfg(feature = "scene")]
+pub use paint::scene::{
+    build_scene_prepared, SceneFontData, SceneFontInstance, SceneFontResource, SceneFrame,
+    SceneImageResource, SceneStats,
+};
+#[cfg(feature = "scene")]
+pub use redrob_scene;
 #[cfg(feature = "paint")]
 pub use tiny_skia::Pixmap;
 
@@ -1574,6 +1582,10 @@ pub struct LayoutStyle {
     /// Computed `pointer-events: none|auto`. The property is inherited, so
     /// `None` means the top-down style pass still needs the parent's value.
     pub pointer_events_none: Option<bool>,
+    /// CSS `cursor`, inherited like `pointer_events_none`: the own value
+    /// until the style pass, then the computed value. `url()` images resolve
+    /// to their keyword fallback; the compositor maps keywords to OS cursors.
+    pub cursor: Option<Cursor>,
     /// `opacity`, own (non-inherited) value in 0.0-1.0. `None` means the
     /// default of 1.0.
     pub opacity: Option<f32>,

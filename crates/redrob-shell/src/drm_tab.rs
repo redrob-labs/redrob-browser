@@ -32,6 +32,11 @@ impl Offers {
         self.by_tab.insert(tab, key_system);
     }
 
+    /// A tab moves to another window: what its page asked for goes with it.
+    pub fn take(&mut self, tab: TabId) -> Option<String> {
+        self.by_tab.remove(&tab)
+    }
+
     /// The tab left the page, or closed.
     pub fn clear(&mut self, tab: TabId) {
         self.by_tab.remove(&tab);

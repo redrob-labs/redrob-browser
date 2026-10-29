@@ -16,7 +16,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 #[derive(clap::Subcommand)]
 pub enum TabCmd {
-    /// List open tabs: id, URL and title.
+    /// List open tabs: id, URL, title, window and whether an agent opened it.
     List,
     /// Open a new agent tab and print its id.
     Open { url: String },
@@ -66,11 +66,20 @@ pub async fn run(cmd: TabCmd) -> anyhow::Result<()> {
                 .flatten()
                 .filter(|i| i["type"] == "page")
             {
+                // The window adds which of its windows shows the tab and
+                // whether an agent opened it.
+                let window = i["redrobWindow"]
+                    .as_u64()
+                    .map(|w| format!("window {w}"))
+                    .unwrap_or_default();
+                let agent = if i["redrobAgent"] == true { "agent" } else { "" };
                 println!(
-                    "{}\t{}\t{}",
+                    "{}\t{}\t{}\t{}\t{}",
                     i["targetId"].as_str().unwrap_or(""),
                     i["url"].as_str().unwrap_or(""),
-                    i["title"].as_str().unwrap_or("")
+                    i["title"].as_str().unwrap_or(""),
+                    window,
+                    agent
                 );
             }
         }

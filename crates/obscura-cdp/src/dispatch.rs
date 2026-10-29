@@ -77,6 +77,9 @@ pub struct CdpContext {
     pub(crate) screencasts: HashMap<String, ScreencastState>,
     #[cfg(feature = "render")]
     next_screencast_session_id: i64,
+    /// Scene channels by page id (`Page.redrobSceneAttach`).
+    #[cfg(feature = "render")]
+    pub(crate) scenes: HashMap<String, crate::scene_channel::SceneStream>,
     pub default_context: Arc<BrowserContext>,
     pub browser_contexts: HashMap<String, Arc<BrowserContext>>,
     page_counter: u32,
@@ -194,6 +197,8 @@ impl CdpContext {
             screencasts: HashMap::new(),
             #[cfg(feature = "render")]
             next_screencast_session_id: 0,
+            #[cfg(feature = "render")]
+            scenes: HashMap::new(),
             default_context,
             browser_contexts: HashMap::new(),
             page_counter: 0,
@@ -583,6 +588,69 @@ impl CdpContext {
         // Never wrap a delayed acknowledgement onto a replacement stream.
         self.next_screencast_session_id = self.next_screencast_session_id.saturating_add(1);
         self.next_screencast_session_id
+    }
+
+    /// A page's lifecycle (navigation, title, load) concerns every client
+    /// attached to it, not only the session whose command caused it: the
+    /// window must see an agent's `Page.navigate` on the same tab. Copy each
+    /// such event to the page's other sessions before events go out.
+    pub fn fan_out_page_lifecycle_events(&mut self) {
+        const LIFECYCLE: &[&str] = &[
+            "Page.frameStartedNavigating",
+            "Page.frameRequestedNavigation",
+            "Page.frameStartedLoading",
+            "Page.frameNavigated",
+            "Page.navigatedWithinDocument",
+            "Page.domContentEventFired",
+            "Page.loadEventFired",
+            "Page.lifecycleEvent",
+            "Page.frameStoppedLoading",
+            "Page.frameAttached",
+            "Page.frameDetached",
+        ];
+        if self.sessions.len() < 2 {
+            return;
+        }
+        let mut by_page: HashMap<&str, Vec<&str>> = HashMap::new();
+        for (session, page) in &self.sessions {
+            by_page.entry(page.as_str()).or_default().push(session.as_str());
+        }
+        if by_page.values().all(|sessions| sessions.len() < 2) {
+            return;
+        }
+        let mut out = Vec::with_capacity(self.pending_events.len());
+        for event in &self.pending_events {
+            out.push(event.clone());
+            let Some(origin) = event.session_id.as_deref() else {
+                continue;
+            };
+            if !LIFECYCLE.contains(&event.method.as_str()) {
+                continue;
+            }
+            let Some(page) = self.sessions.get(origin) else {
+                continue;
+            };
+            let Some(peers) = by_page.get(page.as_str()) else {
+                continue;
+            };
+            for peer in peers {
+                if *peer == origin {
+                    continue;
+                }
+                // Already emitted for that session (some paths do).
+                let duplicate = self.pending_events.iter().any(|other| {
+                    other.session_id.as_deref() == Some(*peer)
+                        && other.method == event.method
+                        && other.params == event.params
+                });
+                if !duplicate {
+                    let mut copy = event.clone();
+                    copy.session_id = Some((*peer).to_string());
+                    out.push(copy);
+                }
+            }
+        }
+        self.pending_events = out;
     }
 
     pub fn get_session_page(&self, session_id: &Option<String>) -> Option<&Page> {

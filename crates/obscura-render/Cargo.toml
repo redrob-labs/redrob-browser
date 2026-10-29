@@ -15,10 +15,15 @@ paint = ["dep:obscura-ssrf", "dep:tiny-skia", "dep:ab_glyph", "dep:cosmic-text",
 # Record a paint as a serializable display list (docs/GPU-PAINT.md, phase B)
 # for a GPU rasterizer to replay. The CPU paint is unchanged without it.
 display-list = ["paint", "dep:serde"]
+# Build GPU compositor frames (crates/redrob-scene): a display list with a
+# spatial tree and hit regions, recorded from the same paint as screenshots.
+scene = ["display-list"]
 
 [dependencies]
 taffy = { workspace = true }
 obscura-dom = { workspace = true }
+# The CSS `cursor` value type and the scene protocol the compositor reads.
+redrob-scene = { workspace = true }
 obscura-ssrf = { workspace = true, optional = true }
 tiny-skia = { workspace = true, optional = true }
 ab_glyph = { workspace = true, optional = true }

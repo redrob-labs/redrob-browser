@@ -3,17 +3,35 @@
 use egui::{Key, Rect};
 
 use crate::cdp::Op;
+use crate::compositor::ScrollKey;
 
-/// Page-area input as CDP operations, plus the wheel delta the window
-/// applies to its own scroll at once.
+/// One wheel step for the window to scroll by, at a page point.
+pub struct Wheel {
+    pub at: (f32, f32),
+    pub delta: (f32, f32),
+    /// Notches and pages ease; touchpad pixels move at once.
+    pub smooth: bool,
+    pub modifiers: u32,
+}
+
+/// Page-area input: CDP operations for the page, and what the window
+/// itself scrolls (compositor/scroll.rs).
+#[derive(Default)]
+pub struct PageInput {
+    pub ops: Vec<Op>,
+    pub wheel: Vec<Wheel>,
+    /// Where a button went down, so keys scroll the box there.
+    pub pressed_at: Option<(f32, f32)>,
+}
+
 pub fn page_ops(
     events: &[egui::Event],
     hover: Option<egui::Pos2>,
     rect: Rect,
     focused: bool,
-) -> (Vec<Op>, (f32, f32)) {
-    let mut ops = Vec::new();
-    let mut wheel = (0.0, 0.0);
+) -> PageInput {
+    let mut input = PageInput::default();
+    let ops = &mut input.ops;
     for ev in events {
         match ev {
             egui::Event::PointerMoved(p) if rect.contains(*p) => {
@@ -34,6 +52,9 @@ pub fn page_ops(
                 modifiers,
             } if rect.contains(*pos) => {
                 let (x, y) = local(rect, *pos);
+                if *pressed {
+                    input.pressed_at = Some((x, y));
+                }
                 let kind = if *pressed {
                     "mousePressed"
                 } else {
@@ -66,13 +87,12 @@ pub fn page_ops(
                 };
                 // egui reports wheel-up as positive; CDP scrolls down on positive deltaY.
                 let (dx, dy) = (-delta.x * step, -delta.y * step);
-                wheel.0 += dx;
-                wheel.1 += dy;
-                ops.push(Op::Wheel {
-                    x,
-                    y,
-                    dx,
-                    dy,
+                // The window sends the matching Op::Wheel once it knows
+                // whether it scrolls first (main.rs, TabScene::wheel_plan).
+                input.wheel.push(Wheel {
+                    at: (x, y),
+                    delta: (dx, dy),
+                    smooth: *unit != egui::MouseWheelUnit::Point,
                     modifiers: mods(*modifiers),
                 });
             }
@@ -93,11 +113,19 @@ pub fn page_ops(
                         modifiers: mods(*modifiers),
                     });
                 }
+                // The page gets the key first; the window scrolls only when
+                // no text field has focus (cdp.rs asks the page).
+                let plain = !(modifiers.ctrl || modifiers.alt || modifiers.mac_cmd);
+                if *pressed && plain {
+                    if let Some(k) = ScrollKey::from_key(*key, modifiers.shift) {
+                        ops.push(Op::ScrollKey(k));
+                    }
+                }
             }
             _ => {}
         }
     }
-    (ops, wheel)
+    input
 }
 
 fn local(rect: Rect, p: egui::Pos2) -> (f32, f32) {

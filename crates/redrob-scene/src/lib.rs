@@ -82,6 +82,11 @@ pub enum Resource {
     Image { id: ImageId, width: u32, height: u32, rgba: Vec<u8> },
     /// A font file (TTF/OTF/TTC bytes) and the face index inside it.
     Font { id: FontId, data: Vec<u8>, index: u32 },
+    /// A variable font at fixed axis values (added, additive): Text items
+    /// may name `id`; draw with `font`'s file at these `axes`
+    /// (OpenType tag, user-space value). A client that ignores it can draw
+    /// with `font` at its default instance.
+    FontInstance { id: FontId, font: FontId, axes: Vec<([u8; 4], f32)> },
     /// The client may drop it.
     DropImage(ImageId),
     DropFont(FontId),
@@ -122,6 +127,17 @@ pub enum BlendMode {
     Overlay,
     Darken,
     Lighten,
+    // Added for the engine (additive): the remaining CSS mix-blend-mode values.
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
 }
 
 /// One display item. Painted in list order (painter's algorithm, already

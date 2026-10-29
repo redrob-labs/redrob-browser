@@ -1,21 +1,22 @@
 //! The window's CDP connection to the engine.
 //!
 //! One WebSocket, one flattened session per tab. The UI thread sends
-//! [`Command`]s; this task turns them into CDP calls and sends painted tiles,
-//! scroll state and page changes back as [`Update`]s tagged with the tab.
+//! [`Command`]s; this task turns them into CDP calls and sends page changes
+//! back as [`Update`]s tagged with the tab. Each tab's pixels come over its
+//! own scene channel (compositor/), opened here with `Page.redrobSceneAttach`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 use std::time::Duration;
 
-use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::compositor::{Incoming, ScrollKey};
 use crate::model::TabId;
-use crate::tiles::{TileKey, TILE};
 
 /// Finds the sign-in form on the page and types into it. The values arrive
 /// as call arguments, never inside the script text.
@@ -72,6 +73,9 @@ const DRM_BINDING: &str = "redrobDrm";
 /// MediaSource/SourceBuffer bytes and calls, delivered like media requests.
 const MSE_BINDING: &str = "redrobMse";
 /// After load the window starts muted `autoplay` media; autoplay with sound stays blocked.
+/// Whether a text field (or an editable element) has focus, so arrow and
+/// space keys belong to it instead of scrolling.
+const EDITING_JS: &str = "(() => { let e = document.activeElement; while (e && e.shadowRoot && e.shadowRoot.activeElement) e = e.shadowRoot.activeElement; if (!e) return false; if (e.isContentEditable) return true; const t = e.tagName; if (t === 'TEXTAREA' || t === 'SELECT') return true; if (t !== 'INPUT') return false; return !/^(button|checkbox|radio|submit|reset|image|file|color|range)$/i.test(e.type || ''); })()";
 const AUTOPLAY_JS: &str = "document.querySelectorAll('video[autoplay][muted], audio[autoplay][muted]').forEach((e) => { if (e.paused && e.muted) e.play().catch(() => {}); })";
 
 /// Tab ids the engine side hands out for pages a page opened itself.
@@ -101,6 +105,11 @@ pub enum Op {
         dx: f32,
         dy: f32,
         modifiers: u32,
+        /// Front hit node under the pointer, echoed in `Event::WheelAnswer`.
+        node: Option<u64>,
+        /// Whether the window scrolled before asking (undo on cancel).
+        scrolled: bool,
+        smooth: bool,
     },
     /// The link under a page point, for a middle click (autoscroll.rs).
     LinkAt {
@@ -115,11 +124,8 @@ pub enum Op {
         modifiers: u32,
     },
     Text(String),
-    /// Paint these document tiles for this paint generation.
-    Tiles {
-        keys: Vec<TileKey>,
-        generation: u64,
-    },
+    /// A scrolling key went to the page: scroll unless a text field has focus.
+    ScrollKey(ScrollKey),
     /// The developer tools opened on this tab: start reporting network traffic.
     DevtoolsOpen,
     /// Run JavaScript typed into the console.
@@ -153,9 +159,29 @@ pub enum Op {
     },
 }
 
+/// The browser window a command came from. Every window of the process
+/// shares this one engine connection; a tab belongs to the window that last
+/// opened or activated it, so a tab moved to another window keeps its target.
+pub type WindowId = u64;
+
+/// A window's way to the engine connection: every command it sends carries
+/// its window id.
+#[derive(Clone)]
+pub struct Commands {
+    pub window: WindowId,
+    pub tx: mpsc::UnboundedSender<(WindowId, Command)>,
+}
+
+impl Commands {
+    pub fn send(&self, cmd: Command) -> Result<(), mpsc::error::SendError<(WindowId, Command)>> {
+        self.tx.send((self.window, cmd))
+    }
+}
+
 pub enum Command {
     Tab(TabId, Op),
-    /// Viewport in CSS pixels and the device scale factor, for every tab.
+    /// Viewport in CSS pixels and the device scale factor, for every tab of
+    /// the window that sent it.
     Resize {
         width: u32,
         height: u32,
@@ -164,38 +190,27 @@ pub enum Command {
 }
 
 pub enum Event {
-    /// The engine could not paint this tile.
-    TileFailed {
-        key: TileKey,
-        generation: u64,
+    /// A message on the tab's scene channel.
+    Scene(Incoming),
+    /// The tab's scene channel is open; messages to the engine go here.
+    SceneLink(mpsc::UnboundedSender<redrob_scene::ClientMsg>),
+    /// The engine gave no scene channel for the tab.
+    SceneUnavailable(String),
+    /// Scroll for a key the page did not use (`Op::ScrollKey`).
+    ScrollKey(ScrollKey),
+    /// The page's answer to a wheel event (`Op::Wheel`).
+    WheelAnswer {
+        node: Option<u64>,
+        prevented: bool,
+        scrolled: bool,
+        at: (f32, f32),
+        delta: (f32, f32),
+        smooth: bool,
     },
-    Tile {
-        key: TileKey,
-        generation: u64,
-        image: egui::ColorImage,
-    },
-    /// A tile as a display list, for the GPU painter.
-    #[cfg(feature = "gpu")]
-    TileList {
-        key: TileKey,
-        generation: u64,
-        list: crate::gpu_paint::DisplayList,
-    },
-    /// Pixels may have changed: repaint tiles.
-    Invalidate,
-    /// Only these document rects (CSS px: x, y, width, height) changed.
-    Damage(Vec<[f32; 4]>),
-    /// A different document: drop every tile.
+    /// A different document.
     Navigated(String),
     /// Same document, new URL (fragment or history API).
     UrlChanged(String),
-    /// The page's own scroll position and document size, in CSS pixels.
-    Scroll {
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-    },
     Title(String),
     Loading(bool),
     /// The page opened a new window; show it as a new tab next to its opener.
@@ -292,8 +307,8 @@ impl Conn {
     }
 
     /// Send a command whose reply comes much later (a navigation replies at
-    /// load) without holding up this loop, so frames and tiles of the
-    /// loading page are handled meanwhile. `on_error` gets an error reply.
+    /// load) without holding up this loop, so events of the loading page
+    /// are handled meanwhile. `on_error` gets an error reply.
     fn call_in_background(
         &mut self,
         session: Option<&str>,
@@ -348,10 +363,15 @@ struct State {
     by_session: HashMap<String, TabId>,
     /// Targets this window created, so their targetCreated is not taken for a popup.
     own_targets: HashSet<String>,
-    active: Option<TabId>,
-    size: (u32, u32, f32),
+    /// The tab on screen in each window.
+    active: HashMap<WindowId, TabId>,
+    /// Each window's page area.
+    sizes: HashMap<WindowId, (u32, u32, f32)>,
+    /// Which window shows each tab.
+    tab_window: HashMap<TabId, WindowId>,
     next_popup: TabId,
     updates: Sender<Update>,
+    repaint: Arc<dyn Fn(Option<TabId>) + Send + Sync>,
 }
 
 impl State {
@@ -379,6 +399,17 @@ impl State {
 
     fn session(&self, tab: TabId) -> Option<String> {
         self.tabs.get(&tab).map(|t| t.session.clone())
+    }
+
+    /// The page area of the tab's window, or of any window for a tab no
+    /// window has shown yet (an agent's).
+    fn size_of(&self, tab: TabId) -> (u32, u32, f32) {
+        self.tab_window
+            .get(&tab)
+            .and_then(|w| self.sizes.get(w))
+            .or_else(|| self.sizes.values().next())
+            .copied()
+            .unwrap_or((1280, 800, 1.0))
     }
 
     async fn attach(&mut self, tab: TabId, target: String) -> anyhow::Result<()> {
@@ -416,7 +447,7 @@ impl State {
                 json!({ "source": LOGIN_SUBMIT_JS }),
             )
             .await?;
-        let (w, h, scale) = self.size;
+        let (w, h, scale) = self.size_of(tab);
         self.c
             .call(
                 s,
@@ -426,8 +457,55 @@ impl State {
             .await?;
         self.by_session.insert(session.clone(), tab);
         self.emit(tab, Event::Target(target.clone()));
+        if !crate::compositor::TabScene::debug_file() {
+            self.attach_scene(tab, &session, &target).await;
+        }
         self.tabs.insert(tab, TabConn { session, target });
         Ok(())
+    }
+
+    /// Open the tab's scene channel: the engine names a socket for it.
+    async fn attach_scene(&mut self, tab: TabId, session: &str, target: &str) {
+        let params = json!({ "targetId": target });
+        let reply = match self
+            .c
+            .call(Some(session), "Page.redrobSceneAttach", params.clone())
+            .await
+        {
+            Ok(v) => Ok(v),
+            Err(_) => self.c.call(None, "Page.redrobSceneAttach", params).await,
+        };
+        let address = match reply {
+            Ok(v) => ["address", "socket", "path"]
+                .iter()
+                .find_map(|k| v[*k].as_str().map(str::to_string))
+                .ok_or_else(|| "Page.redrobSceneAttach returned no address".to_string()),
+            Err(e) => Err(e.to_string()),
+        };
+        let result = match address {
+            Ok(address) => {
+                let updates = self.updates.clone();
+                let repaint = self.repaint.clone();
+                let deliver: Arc<dyn Fn(Incoming) + Send + Sync> = Arc::new(move |msg| {
+                    let _ = updates.send(Update {
+                        tab,
+                        event: Event::Scene(msg),
+                    });
+                    repaint(Some(tab));
+                });
+                crate::compositor::connect(&address, deliver)
+                    .await
+                    .map_err(|e| format!("scene socket {address}: {e}"))
+            }
+            Err(e) => Err(e),
+        };
+        match result {
+            Ok(link) => self.emit(tab, Event::SceneLink(link)),
+            Err(e) => {
+                eprintln!("redrob-browser: no scene for tab {tab}: {e}");
+                self.emit(tab, Event::SceneUnavailable(e));
+            }
+        }
     }
 }
 
@@ -435,10 +513,11 @@ pub async fn run(
     ws_url: String,
     endpoint_file: std::path::PathBuf,
     window: crate::relay::Window,
-    mut commands: mpsc::UnboundedReceiver<Command>,
+    mut commands: mpsc::UnboundedReceiver<(WindowId, Command)>,
     updates: Sender<Update>,
-    repaint: impl Fn() + Send + 'static,
+    repaint: impl Fn(Option<TabId>) + Send + Sync + 'static,
 ) -> anyhow::Result<()> {
+    let repaint: Arc<dyn Fn(Option<TabId>) + Send + Sync> = Arc::new(repaint);
     let (ws, _) = tokio_tungstenite::connect_async(ws_url.as_str()).await?;
     let (mut sink, mut stream) = ws.split();
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
@@ -486,10 +565,12 @@ pub async fn run(
         tabs: HashMap::new(),
         by_session: HashMap::new(),
         own_targets: HashSet::new(),
-        active: None,
-        size: (1280, 800, 1.0),
+        active: HashMap::new(),
+        sizes: HashMap::new(),
+        tab_window: HashMap::new(),
         next_popup: POPUP_ID_BASE,
         updates,
+        repaint: repaint.clone(),
     };
     st.c.call(
         None,
@@ -506,31 +587,36 @@ pub async fn run(
     .await?;
 
     // Commands taken from the channel early while coalescing pointer moves.
-    let mut backlog: std::collections::VecDeque<Command> = std::collections::VecDeque::new();
+    let mut backlog: std::collections::VecDeque<(WindowId, Command)> =
+        std::collections::VecDeque::new();
     loop {
+        // Wake the window showing the tab a command or event was about.
         if let Some(cmd) = backlog.pop_front() {
+            let tab = command_tab(&cmd.1);
             run_command(&mut st, cmd, &mut commands, &mut backlog).await;
-            repaint();
+            repaint(tab);
             continue;
         }
         tokio::select! {
             cmd = commands.recv() => {
                 let Some(cmd) = cmd else { break };
+                let tab = command_tab(&cmd.1);
                 run_command(&mut st, cmd, &mut commands, &mut backlog).await;
-                repaint();
+                repaint(tab);
             }
             ev = event_rx.recv() => {
                 let Some(ev) = ev else { break };
+                let tab = ev["sessionId"].as_str().and_then(|s| st.by_session.get(s).copied());
                 on_event(&mut st, ev).await;
-                repaint();
+                repaint(tab);
             }
         }
     }
     Ok(())
 }
 
-fn is_move(cmd: &Command, tab: TabId) -> bool {
-    matches!(cmd, Command::Tab(t, Op::Mouse { kind: "mouseMoved", .. }) if *t == tab)
+fn is_move(cmd: &(WindowId, Command), tab: TabId) -> bool {
+    matches!(cmd, (_, Command::Tab(t, Op::Mouse { kind: "mouseMoved", .. })) if *t == tab)
 }
 
 /// Run one command. A pointer move first absorbs the moves queued behind it
@@ -539,15 +625,18 @@ fn is_move(cmd: &Command, tab: TabId) -> bool {
 /// pointer, and clicks waited behind the queue.
 async fn run_command(
     st: &mut State,
-    mut cmd: Command,
-    commands: &mut tokio::sync::mpsc::UnboundedReceiver<Command>,
-    backlog: &mut std::collections::VecDeque<Command>,
+    mut cmd: (WindowId, Command),
+    commands: &mut tokio::sync::mpsc::UnboundedReceiver<(WindowId, Command)>,
+    backlog: &mut std::collections::VecDeque<(WindowId, Command)>,
 ) {
-    if let Command::Tab(
-        tab,
-        Op::Mouse {
-            kind: "mouseMoved", ..
-        },
+    if let (
+        _,
+        Command::Tab(
+            tab,
+            Op::Mouse {
+                kind: "mouseMoved", ..
+            },
+        ),
     ) = &cmd
     {
         let tab = *tab;
@@ -568,46 +657,46 @@ async fn run_command(
             }
         }
     }
+    let (window, cmd) = cmd;
     match cmd {
         Command::Resize {
             width,
             height,
             scale,
-        } => resize(st, (width, height, scale)).await,
+        } => resize(st, window, (width, height, scale)).await,
         Command::Tab(tab, op) => {
-            if let Err(e) = handle(st, tab, op).await {
+            if let Err(e) = handle(st, window, tab, op).await {
                 st.emit(tab, Event::Error(e.to_string()));
             }
         }
     }
 }
 
-async fn resize(st: &mut State, size: (u32, u32, f32)) {
-    if size == st.size {
+async fn resize(st: &mut State, window: WindowId, size: (u32, u32, f32)) {
+    if st.sizes.get(&window) == Some(&size) {
         return;
     }
-    st.size = size;
+    st.sizes.insert(window, size);
     let sessions: Vec<(TabId, String)> = st
         .tabs
         .iter()
+        .filter(|(id, _)| st.tab_window.get(id) == Some(&window))
         .map(|(id, t)| (*id, t.session.clone()))
         .collect();
     for (tab, session) in sessions {
         let params = json!({ "width": size.0, "height": size.1, "deviceScaleFactor": size.2, "mobile": false });
-        if st
-            .c
-            .call(Some(&session), "Emulation.setDeviceMetricsOverride", params)
-            .await
-            .is_ok()
+        if let Err(e) =
+            st.c.call(Some(&session), "Emulation.setDeviceMetricsOverride", params)
+                .await
         {
-            report_scroll(st, tab).await;
-            st.emit(tab, Event::Invalidate);
+            st.emit(tab, Event::Error(e.to_string()));
         }
     }
 }
 
-async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
+async fn handle(st: &mut State, window: WindowId, tab: TabId, op: Op) -> anyhow::Result<()> {
     if let Op::Open(url) = &op {
+        st.tab_window.insert(tab, window);
         let created =
             st.c.call(None, "Target.createTarget", json!({ "url": "about:blank" }))
                 .await?;
@@ -639,32 +728,29 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
                 st.c.call(None, "Target.closeTarget", json!({ "targetId": t.target }))
                     .await?;
             }
-            if st.active == Some(tab) {
-                st.active = None;
-            }
+            st.tab_window.remove(&tab);
+            st.active.retain(|_, t| *t != tab);
         }
         Op::Activate => {
-            if let Some(prev) = st.active.and_then(|p| st.session(p)) {
-                if prev != session {
-                    st.c.send(Some(&prev), "Page.stopScreencast", json!({}));
-                }
+            // A tab handed to another window: same target and session, the
+            // new window's page size.
+            let before = st.size_of(tab);
+            st.tab_window.insert(tab, window);
+            let (w, h, scale) = st.size_of(tab);
+            if before != (w, h, scale) {
+                let params =
+                    json!({ "width": w, "height": h, "deviceScaleFactor": scale, "mobile": false });
+                st.c.call(s, "Emulation.setDeviceMetricsOverride", params)
+                    .await?;
             }
-            st.active = Some(tab);
+            st.active.retain(|_, t| *t != tab);
+            st.active.insert(window, tab);
             st.c.call(
                 None,
                 "Target.activateTarget",
                 json!({ "targetId": st.tabs[&tab].target }),
             )
             .await?;
-            // Frames are only a change signal; tiles carry the pixels.
-            st.c.call(
-                s,
-                "Page.startScreencast",
-                json!({ "format": "jpeg", "quality": 1, "everyNthFrame": 1, "redrobSignalOnly": true }),
-            )
-            .await?;
-            report_scroll(st, tab).await;
-            st.emit(tab, Event::Invalidate);
         }
         Op::Navigate(url) => {
             st.emit(tab, Event::Loading(true));
@@ -695,7 +781,7 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
             } else {
                 st.c.send(s, "Input.dispatchMouseEvent", params);
             }
-            // What a click changes comes back as screencast damage.
+            // What a click changes comes back on the scene channel.
         }
         Op::Wheel {
             x,
@@ -703,16 +789,32 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
             dx,
             dy,
             modifiers,
+            node,
+            scrolled,
+            smooth,
         } => {
-            // The page decides what scrolls (the document or an inner box);
-            // the window then follows the document's real position.
-            st.c.call(
-                s,
-                "Input.dispatchMouseEvent",
-                json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": dx, "deltaY": dy, "modifiers": modifiers }),
-            )
-            .await?;
-            report_scroll(st, tab).await;
+            // The window scrolls (compositor/scroll.rs); the page only fires
+            // its `wheel` listeners and says whether one cancelled it.
+            let r = st
+                .c
+                .call(
+                    s,
+                    "Input.dispatchMouseEvent",
+                    json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": dx, "deltaY": dy, "modifiers": modifiers, "redrobCompositorScrolls": true }),
+                )
+                .await?;
+            let prevented = r["redrobDefaultPrevented"].as_bool() == Some(true);
+            st.emit(
+                tab,
+                Event::WheelAnswer {
+                    node,
+                    prevented,
+                    scrolled,
+                    at: (x, y),
+                    delta: (dx, dy),
+                    smooth,
+                },
+            );
         }
         Op::Key {
             down,
@@ -722,13 +824,23 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
             modifiers,
         } => {
             let kind = if down { "keyDown" } else { "keyUp" };
-            let mut p = json!({ "type": kind, "key": key, "code": code, "windowsVirtualKeyCode": vk, "modifiers": modifiers });
+            // Scrolling keys scroll in the window (Op::ScrollKey), not in the engine.
+            let mut p = json!({ "type": kind, "key": key, "code": code, "windowsVirtualKeyCode": vk, "modifiers": modifiers, "redrobCompositorScrolls": true });
             if down && key == "Enter" {
                 p["text"] = json!("\r");
             }
             st.c.call(s, "Input.dispatchKeyEvent", p).await?;
-            if down {
-                report_scroll(st, tab).await;
+        }
+        Op::ScrollKey(key) => {
+            let r =
+                st.c.call(
+                    s,
+                    "Runtime.evaluate",
+                    json!({ "expression": EDITING_JS, "returnByValue": true }),
+                )
+                .await?;
+            if r["result"]["value"].as_bool() == Some(false) {
+                st.emit(tab, Event::ScrollKey(key));
             }
         }
         Op::Text(text) => {
@@ -883,74 +995,16 @@ async fn handle(st: &mut State, tab: TabId, op: Op) -> anyhow::Result<()> {
                 .unwrap_or("no-form")
                 .to_string();
             st.emit(tab, Event::Filled(outcome));
-            st.emit(tab, Event::Invalidate);
-        }
-        Op::Tiles { keys, generation } => {
-            for key in keys {
-                let clip = json!({
-                    "x": key.tx as f32 * TILE, "y": key.ty as f32 * TILE,
-                    "width": TILE, "height": TILE, "scale": 1,
-                });
-                #[cfg(feature = "gpu")]
-                if crate::gpu_paint::lists_wanted() {
-                    match st
-                        .c
-                        .call(s, "Page.redrobDisplayList", json!({ "clip": clip.clone() }))
-                        .await
-                    {
-                        Ok(value) => match crate::gpu_paint::parse(value) {
-                            Some(list) => {
-                                st.emit(
-                                    tab,
-                                    Event::TileList {
-                                        key,
-                                        generation,
-                                        list,
-                                    },
-                                );
-                                continue;
-                            }
-                            None => crate::gpu_paint::lists_unsupported(),
-                        },
-                        // An engine without display lists says so; other errors
-                        // fall back to a PNG for this tile only.
-                        Err(e) => {
-                            let text = e.to_string();
-                            if text.contains("display-list feature")
-                                || text.contains("Unknown Page method")
-                            {
-                                crate::gpu_paint::lists_unsupported();
-                            }
-                        }
-                    }
-                }
-                let shot =
-                    st.c.call(
-                        s,
-                        "Page.captureScreenshot",
-                        json!({ "format": "png", "clip": clip, "captureBeyondViewport": true }),
-                    )
-                    .await;
-                let image = shot
-                    .ok()
-                    .and_then(|shot| shot["data"].as_str().and_then(decode));
-                if image.is_none() {
-                    st.emit(tab, Event::TileFailed { key, generation });
-                }
-                if let Some(image) = image {
-                    st.emit(
-                        tab,
-                        Event::Tile {
-                            key,
-                            generation,
-                            image,
-                        },
-                    );
-                }
-            }
         }
     }
     Ok(())
+}
+
+fn command_tab(cmd: &Command) -> Option<TabId> {
+    match cmd {
+        Command::Tab(tab, _) => Some(*tab),
+        Command::Resize { .. } => None,
+    }
 }
 
 async fn on_event(st: &mut State, ev: Value) {
@@ -974,6 +1028,10 @@ async fn on_event(st: &mut State, ev: Value) {
         });
         st.next_popup += 1;
         let tab = st.next_popup;
+        // A popup opens in its opener's window.
+        if let Some(w) = opener.and_then(|o| st.tab_window.get(&o).copied()) {
+            st.tab_window.insert(tab, w);
+        }
         if st.attach(tab, target).await.is_ok() {
             let url = info["url"].as_str().unwrap_or("about:blank").to_string();
             st.emit(tab, Event::Opened { url, opener });
@@ -1011,17 +1069,6 @@ async fn on_event(st: &mut State, ev: Value) {
         return;
     };
     match method {
-        "Page.screencastFrame" => {
-            if let Some(id) = p["sessionId"].as_u64() {
-                let session = st.session(tab);
-                st.c.send(
-                    session.as_deref(),
-                    "Page.screencastFrameAck",
-                    json!({ "sessionId": id }),
-                );
-            }
-            st.emit(tab, frame_event(&p["damage"]));
-        }
         "Page.frameNavigated" => {
             let frame = &p["frame"];
             if frame.get("parentId").is_none() {
@@ -1154,60 +1201,9 @@ async fn on_event(st: &mut State, ev: Value) {
                     json!({ "expression": AUTOPLAY_JS }),
                 );
             }
-            report_scroll(st, tab).await;
-            st.emit(tab, Event::Invalidate);
         }
         _ => {}
     }
-}
-
-/// A signal frame's `damage` (Redrob extension) names the document rects
-/// that changed; without it the whole page may have.
-fn frame_event(damage: &Value) -> Event {
-    let Some(rects) = damage.as_array() else {
-        return Event::Invalidate;
-    };
-    let mut out = Vec::with_capacity(rects.len());
-    for r in rects {
-        let field = |name: &str| r[name].as_f64().map(|v| v as f32);
-        match (field("x"), field("y"), field("width"), field("height")) {
-            (Some(x), Some(y), Some(w), Some(h)) => out.push([x, y, w, h]),
-            _ => return Event::Invalidate,
-        }
-    }
-    Event::Damage(out)
-}
-
-async fn report_scroll(st: &mut State, tab: TabId) {
-    let Some(session) = st.session(tab) else {
-        return;
-    };
-    let expr = "JSON.stringify([scrollX, scrollY, document.documentElement.scrollWidth, document.documentElement.scrollHeight])";
-    let Ok(v) =
-        st.c.call(
-            Some(&session),
-            "Runtime.evaluate",
-            json!({ "expression": expr, "returnByValue": true }),
-        )
-        .await
-    else {
-        return;
-    };
-    let Some(s) = v["result"]["value"].as_str() else {
-        return;
-    };
-    let Ok(a) = serde_json::from_str::<[f32; 4]>(s) else {
-        return;
-    };
-    st.emit(
-        tab,
-        Event::Scroll {
-            x: a[0],
-            y: a[1],
-            width: a[2],
-            height: a[3],
-        },
-    );
 }
 
 async fn step_history(st: &mut State, session: &str, delta: i64) -> anyhow::Result<()> {
@@ -1244,13 +1240,4 @@ fn remote_object_text(o: &Value) -> String {
         .as_str()
         .map(str::to_string)
         .unwrap_or_else(|| o["type"].as_str().unwrap_or("undefined").to_string())
-}
-
-fn decode(data: &str) -> Option<egui::ColorImage> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .ok()?;
-    let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
-    let size = [img.width() as usize, img.height() as usize];
-    Some(egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()))
 }

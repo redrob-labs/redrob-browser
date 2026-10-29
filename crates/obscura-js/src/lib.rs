@@ -24,6 +24,8 @@ pub use v8_flags::set_v8_flags;
 #[cfg(feature = "display-list")]
 pub use obscura_render::display_list::DisplayList;
 #[cfg(feature = "render")]
+pub use obscura_render::{redrob_scene, SceneFrame};
+#[cfg(feature = "render")]
 pub use obscura_render::{
     configure_font_directories, screenshot_png, screenshot_png_scrolled,
     screenshot_png_scrolled_at_animation_time,
