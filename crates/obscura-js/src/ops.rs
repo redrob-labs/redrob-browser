@@ -1337,6 +1337,25 @@ impl RealmStates {
         }
     }
 
+    /// The live child documents `parent`'s current document owns, with the
+    /// node of the element (`<iframe>`) that holds each.
+    #[cfg(feature = "render")]
+    pub(crate) fn child_frames(&self, parent: &SharedState) -> Vec<(NodeId, SharedState)> {
+        let generation = parent.borrow().document_generation;
+        self.entries
+            .iter()
+            .filter_map(|(_, frame_id, state)| {
+                let timers = self.frame_timers.get(frame_id)?;
+                let (owner, node, owner_generation) = timers.owner.as_ref()?;
+                let owner = owner.upgrade()?;
+                (Rc::ptr_eq(&owner, parent)
+                    && *owner_generation == generation
+                    && !timers.cancel.is_canceled())
+                .then(|| (*node, state.clone()))
+            })
+            .collect()
+    }
+
     fn own_frame(&mut self, frame_id: u32, parent: &SharedState, node: NodeId) {
         let generation = parent.borrow().document_generation;
         self.frame_timers

@@ -1177,6 +1177,17 @@ pub struct BackgroundPosition {
     pub y: BackgroundPositionAxis,
 }
 
+/// Authored per-layer values of the background (or mask) longhands.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BackgroundLayerLists {
+    pub images: Vec<String>,
+    pub sizes: Vec<String>,
+    pub positions: Vec<String>,
+    pub repeats: Vec<String>,
+    pub origins: Vec<String>,
+    pub clips: Vec<String>,
+}
+
 /// Box used to establish a background layer's positioning area.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BackgroundOrigin {
@@ -1562,6 +1573,14 @@ pub struct LayoutStyle {
     /// (gradients and repeat keywords in the same shorthand are ignored: we
     /// paint the referenced image, not the gradient layer).
     pub background_image: Option<String>,
+    /// Authored background layers, topmost first, one entry per
+    /// comma-separated layer of `background`/`background-image`, and the
+    /// per-layer longhand lists (`background-size` and the rest). A shorthand
+    /// stores each layer's own text in every list. Empty means not set; a
+    /// shorter list repeats (CSS Backgrounds 3, 2.2).
+    pub background_layers: BackgroundLayerLists,
+    /// The same for `mask-*`.
+    pub mask_layers: BackgroundLayerLists,
     /// `background-size`, in px, when given as explicit length(s) (a bare
     /// `10px` applies to both axes, matching how small square icons are
     /// almost always sized).
@@ -2009,6 +2028,14 @@ pub struct LayoutStyle {
     /// Ordered operations in the non-inherited `transform` property. Length
     /// percentages remain unresolved until the final border box is known.
     pub transform_ops: Vec<TransformOp>,
+    /// The transform turns the box's back toward the viewer (its 3D
+    /// matrix maps the z axis to negative z): `rotateY(180deg)` and the
+    /// like, which `transform_ops` flattens to a 2D mirror.
+    pub transform_facing_back: bool,
+    /// `backface-visibility: hidden`.
+    pub backface_hidden: bool,
+    /// `transform-style: preserve-3d`.
+    pub preserve_3d: bool,
     /// Transform value immediately below the Web Animations cascade origin.
     /// A retained compositor-style sample restores this value before replaying
     /// the registered effects, so sparse keyframes never compound on the

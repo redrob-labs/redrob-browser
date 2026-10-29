@@ -4339,10 +4339,9 @@ impl Page {
                     if let Some(style) = node.get_attribute("style") {
                         sources.push(style.to_string());
                     }
-                    if node
-                        .as_element()
-                        .is_some_and(|element| element.local.as_ref() == "use")
-                    {
+                    if node.as_element().is_some_and(|element| {
+                        matches!(element.local.as_ref(), "use" | "image" | "feImage")
+                    }) {
                         if let Some(href) = node
                             .get_attribute("href")
                             .or_else(|| node.get_attribute("xlink:href"))
