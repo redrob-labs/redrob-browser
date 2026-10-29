@@ -5354,6 +5354,13 @@ fn paint_laid_dom_scrolled(
             None => continue,
         };
 
+        // `backface-visibility: hidden` on a box turned away from the
+        // viewer hides it and its content.
+        if style.backface_hidden && faces_back(tree, laid, nid) {
+            opacity_subtree_skip.insert(nid);
+            opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
+            continue;
+        }
         if suppress_transform_for != Some(nid) && has_authored_transform(style) {
             opacity_subtree_skip.insert(nid);
             opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
@@ -6175,6 +6182,9 @@ fn paint_laid_dom_scrolled(
                 if let Some(color) = style.color {
                     inject_svg_current_color(&mut markup, color);
                 }
+                // resvg reads only `data:` images; the standalone document
+                // has no base URL for the page's relative ones.
+                inline_svg_image_hrefs(&mut markup, base_url, image_cache);
                 // `<use href="url#id">` pointing at an EXTERNAL sprite file resolves
                 // to nothing in resvg (the symbol lives in another document). Fetch
                 // the sprite, splice the referenced `<symbol>` into a local `<defs>`,
@@ -10563,6 +10573,25 @@ fn layer_mask(
     (gradient || layers.len() > 1 || replaced || has_children).then_some(layers)
 }
 
+/// Whether a box shows its back: its own transform turns it, and so does
+/// each ancestor's while the ancestor keeps a 3D context (`preserve-3d`).
+fn faces_back(tree: &DomTree, laid: &crate::DomLayout, nid: obscura_dom::tree::NodeId) -> bool {
+    let mut back = false;
+    let mut current = Some(nid);
+    while let Some(id) = current {
+        let Some(style) = laid.styles.get(&id) else {
+            break;
+        };
+        back ^= style.transform_facing_back;
+        current = crate::dom::rendered_parent(tree, id).filter(|parent| {
+            laid.styles
+                .get(parent)
+                .is_some_and(|style| style.preserve_3d)
+        });
+    }
+    back
+}
+
 /// Background layers that take the layered paint path: more than one
 /// layer, or any image layer. A single gradient keeps the gradient path.
 fn layered_background(style: &crate::LayoutStyle) -> Option<Vec<crate::style::ResolvedLayer>> {
@@ -13868,6 +13897,75 @@ fn svg_escape_attr(s: &str, buf: &mut String) {
 /// document-level symbol sprite (`href="#id"`) or an external sprite file
 /// (`href="url#id"`), splicing the referenced symbol into the standalone SVG
 /// handed to resvg. Symbols already inside `root` need no injection.
+/// Replace the `href`/`xlink:href` of each `<image>` in standalone SVG
+/// markup with a `data:` URL of the bytes it names, fetched through the
+/// page's resource cache.
+fn inline_svg_image_hrefs(
+    markup: &mut String,
+    base_url: Option<&str>,
+    cache: &mut RenderResourceCache,
+) {
+    use base64::Engine;
+    let mut out = String::with_capacity(markup.len());
+    let mut rest = markup.as_str();
+    let mut changed = false;
+    while let Some(start) = rest.find("<image") {
+        let Some(end) = rest[start..].find('>').map(|end| start + end) else {
+            break;
+        };
+        out.push_str(&rest[..start]);
+        let mut tag = rest[start..end].to_string();
+        for attribute in ["xlink:href=", " href="] {
+            let Some(at) = tag.find(attribute) else {
+                continue;
+            };
+            let value_start = at + attribute.len();
+            let Some(quote) = tag[value_start..].chars().next() else {
+                continue;
+            };
+            if quote != '"' && quote != '\'' {
+                continue;
+            }
+            let Some(len) = tag[value_start + 1..].find(quote) else {
+                continue;
+            };
+            let raw = tag[value_start + 1..value_start + 1 + len].replace("&amp;", "&");
+            if raw.starts_with("data:") || raw.starts_with('#') {
+                continue;
+            }
+            let Some(bytes) = fetch_bytes(&raw, base_url, cache) else {
+                continue;
+            };
+            let mime = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+                "image/png"
+            } else if bytes.starts_with(&[0xFF, 0xD8]) {
+                "image/jpeg"
+            } else if bytes.starts_with(b"GIF8") {
+                "image/gif"
+            } else if bytes.len() > 12 && &bytes[8..12] == b"WEBP" {
+                "image/webp"
+            } else if is_svg(&bytes) {
+                "image/svg+xml"
+            } else {
+                continue;
+            };
+            let data = format!(
+                "data:{mime};base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(&bytes[..])
+            );
+            tag.replace_range(value_start + 1..value_start + 1 + len, &data);
+            changed = true;
+            break;
+        }
+        out.push_str(&tag);
+        rest = &rest[end..];
+    }
+    if changed {
+        out.push_str(rest);
+        *markup = out;
+    }
+}
+
 fn inject_external_sprites(
     tree: &DomTree,
     root: obscura_dom::tree::NodeId,
@@ -14636,6 +14734,67 @@ mod tests {
         assert!(blue.blue() > 240 && blue.red() < 20 && blue.green() < 20);
         assert!(red.red() > 240 && red.green() < 20 && red.blue() < 20);
         assert!(yellow.red() > 240 && yellow.green() > 240 && yellow.blue() < 20);
+    }
+
+    #[test]
+    fn inline_svg_images_paint_relative_hrefs() {
+        let source = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            40,
+            20,
+            image::Rgba([255, 0, 0, 255]),
+        ));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        source
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("png");
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <svg width="100" height="50" xmlns="http://www.w3.org/2000/svg">
+                  <image href="red.png"></image></svg>
+            </body></html>"#,
+        );
+        let mut resources = RenderResourceCache::with_loader(|_url: &str| None);
+        resources.seed("https://assets.test/red.png".into(), encoded.into_inner());
+        let mut prepared = prepare_dom(
+            &tree,
+            (120.0, 60.0),
+            Some("https://assets.test/page.html"),
+            &mut resources,
+        )
+        .expect("prepared");
+        let pixmap =
+            paint_prepared(&tree, &mut prepared, &mut resources, (0.0, 0.0)).expect("paint");
+        let inside = pixmap.pixel(10, 10).expect("pixel");
+        assert_eq!(
+            (inside.red(), inside.green(), inside.blue()),
+            (255, 0, 0),
+            "the svg <image> paints its relative href at its intrinsic size"
+        );
+        let outside = pixmap.pixel(60, 10).expect("pixel");
+        assert_eq!(outside.green(), 255, "and only there");
+    }
+
+    #[test]
+    fn hidden_backfaces_are_not_painted() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:relative;width:100px;height:50px;transform-style:preserve-3d">
+                  <div style="position:absolute;inset:0;background:rgb(0,128,0);
+                              backface-visibility:hidden"></div>
+                  <div style="position:absolute;inset:0;background:rgb(255,0,0);
+                              backface-visibility:hidden;transform:rotateY(180deg)"></div>
+                </div>
+                <div style="width:100px;height:50px;background:rgb(0,0,255);
+                            backface-visibility:hidden;transform:scaleX(-1)"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (120.0, 120.0), None).expect("backface");
+        let rgb = |x, y| {
+            let p = pixmap.pixel(x, y).expect("pixel");
+            (p.red(), p.green(), p.blue())
+        };
+        assert_eq!(rgb(50, 25), (0, 128, 0), "the turned face hides its back");
+        assert_eq!(rgb(50, 75), (0, 0, 255), "a 2D mirror keeps its front");
     }
 
     #[test]
