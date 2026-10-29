@@ -7660,16 +7660,7 @@ fn layout_dom_once(
                 let bold = crate::style::used_font_weight(style) >= 600;
                 let label_width = option_labels
                     .iter()
-                    .map(|label| {
-                        text_width(
-                            label,
-                            font_size,
-                            bold,
-                            style.font_family.as_deref(),
-                            style.letter_spacing.unwrap_or(0.0),
-                            style.word_spacing.unwrap_or(0.0),
-                        )
-                    })
+                    .map(|label| select_label_width(label, font_size, bold, style))
                     .fold(0.0f32, f32::max);
                 let horizontal_edges = style.padding.left
                     + style.padding.right
@@ -7684,13 +7675,13 @@ fn layout_dom_once(
                     .and_then(|value| value.parse::<usize>().ok())
                     .filter(|&value| value > 1)
                     .unwrap_or(1) as f32;
-                // Chromium's menu list keeps a 4px label inset and an arrow
-                // area that grows slowly with the font, inside any padding
-                // (fitted to Chrome: 88px for "Option one" at 13.33px Arial,
-                // 101px at 16px).
-                let intrinsic_width = label_width
+                // Chromium's menu list is its widest option label, rounded up
+                // to a whole pixel, plus a 4px label inset and a 16px arrow
+                // area inside any padding (Chrome: 88px for "Option one" at
+                // 13.33px Arial, 101px at 16px, 30px for "o", 22px empty).
+                let intrinsic_width = label_width.ceil()
                     + crate::SELECT_INLINE_START
-                    + select_arrow_width(font_size)
+                    + SELECT_ARROW_WIDTH
                     + horizontal_edges;
                 let intrinsic_height =
                     crate::inline::used_line_height(style).max(1.0) * rows + vertical_edges;
@@ -13726,8 +13717,26 @@ enum ContainerAutoBlockSize {
 /// height keeps winning, as does a grid axis that stretches the item:
 /// only an untouched auto axis adopts the intrinsic value.
 /// Width Chromium reserves for a closed select's drop-down arrow.
-fn select_arrow_width(font_size: f32) -> f32 {
-    23.6 + 0.5 * (font_size - 13.333_333)
+const SELECT_ARROW_WIDTH: f32 = 16.0;
+
+/// Advance width of one option label in the select's font, scaled per em.
+fn select_label_width(label: &str, font_size: f32, bold: bool, style: &crate::LayoutStyle) -> f32 {
+    #[cfg(feature = "paint")]
+    let glyphs =
+        crate::paint::measure_text_em(label, font_size, bold, style.font_family.as_deref());
+    #[cfg(not(feature = "paint"))]
+    let glyphs = text_width(
+        label,
+        font_size,
+        bold,
+        style.font_family.as_deref(),
+        0.0,
+        0.0,
+    );
+    glyphs
+        + label.chars().filter(|c| !c.is_control()).count() as f32
+            * style.letter_spacing.unwrap_or(0.0)
+        + word_spacing_advance(label, style.word_spacing.unwrap_or(0.0))
 }
 
 fn assign_native_control_size(

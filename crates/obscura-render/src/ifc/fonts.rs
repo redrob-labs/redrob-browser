@@ -238,6 +238,11 @@ fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
         );
     }
     for font in web_fonts {
+        // A face declared for a weight range (`font-weight: 100 900`) is
+        // registered at the top of its range: requests inside it match the
+        // face without synthetic bold (CSS Fonts 4 §5.2), and a family with
+        // several ranged faces still orders them by range.
+        let declared_weight = font.weight.map(|(_, max)| FontWeight::new(max as f32));
         let info = FontInfoOverride {
             family_name: font.family.as_deref(),
             width: None,
@@ -248,18 +253,13 @@ fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
                     FontStyle::Normal
                 }
             }),
-            weight: font
-                .weight
-                .filter(|(min, max)| min == max)
-                .map(|(weight, _)| FontWeight::new(weight as f32)),
+            weight: declared_weight,
             axes: None,
         };
-        register(
-            &mut collection,
-            &mut order,
-            Blob::new(Arc::clone(&font.data) as Arc<dyn AsRef<[u8]> + Send + Sync>),
-            Some(info),
-        );
+        let blob = Blob::new(Arc::clone(&font.data) as Arc<dyn AsRef<[u8]> + Send + Sync>);
+        // Chromium on Linux shapes web fonts with whole-pixel advances.
+        parley::mark_whole_pixel_advances(blob.id());
+        register(&mut collection, &mut order, blob, Some(info));
     }
     if load_emoji {
         register(&mut collection, &mut order, static_blob(EMOJI_R), None);

@@ -154,7 +154,7 @@ pub(crate) fn text_style(
             },
         ),
     };
-    let variations: Vec<FontVariation> = style
+    let mut variations: Vec<FontVariation> = style
         .font_variation_settings
         .as_deref()
         .unwrap_or(&[])
@@ -165,6 +165,18 @@ pub(crate) fn text_style(
             value: setting.value,
         })
         .collect();
+    // `font-optical-sizing: auto` sets a variable font's `opsz` axis to the
+    // font size in CSS px; an explicit `opsz` setting wins. Faces without the
+    // axis ignore it, and the face clamps it to its own range.
+    let opsz = parley::setting::Tag::new(b"opsz");
+    if style.font_optical_sizing.unwrap_or_default() == crate::FontOpticalSizing::Auto
+        && !variations.iter().any(|variation| variation.tag == opsz)
+    {
+        variations.push(FontVariation {
+            tag: opsz,
+            value: style.font_size.unwrap_or(16.0),
+        });
+    }
     let letter_spacing = style.letter_spacing.unwrap_or(0.0);
     let features: Vec<FontFeature> = if style.letter_spacing_non_normal.unwrap_or(false)
         && letter_spacing.is_finite()
@@ -639,7 +651,12 @@ impl IfcStore {
                     if (preserves && !text.is_empty()) || !is_css_whitespace(&text) {
                         has_content = true;
                     }
-                    builder.push_style_modification_span(&[StyleProperty::Brush(Brush(paint))]);
+                    // A text-only style span: `vertical-align` is not inherited, so it
+                    // must not shift the text again inside its (shifted) span.
+                    builder.push_style_modification_span(&[
+                        StyleProperty::Brush(Brush(paint)),
+                        StyleProperty::VerticalAlign(parley::VerticalAlign::BASELINE),
+                    ]);
                     let start = builder.text().len();
                     builder.push_text(&text);
                     let end = builder.text().len();
@@ -655,7 +672,12 @@ impl IfcStore {
                     if !is_css_whitespace(&text) {
                         has_content = true;
                     }
-                    builder.push_style_modification_span(&[StyleProperty::Brush(Brush(paint))]);
+                    // A text-only style span: `vertical-align` is not inherited, so it
+                    // must not shift the text again inside its (shifted) span.
+                    builder.push_style_modification_span(&[
+                        StyleProperty::Brush(Brush(paint)),
+                        StyleProperty::VerticalAlign(parley::VerticalAlign::BASELINE),
+                    ]);
                     builder.push_text(&text);
                     builder.pop_style_span();
                 }

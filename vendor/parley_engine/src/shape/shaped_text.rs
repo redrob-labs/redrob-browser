@@ -320,6 +320,7 @@ impl ShapedText {
 
         let glyph_positions = glyph_buffer.glyph_positions();
         let scale_factor = options.font_size / units_per_em;
+        let whole_pixel = crate::whole_pixel::is_whole_pixel(font.font.data.id());
         let shaped_clusters_start = self.shaped_clusters.len();
 
         // Push all characters.
@@ -352,6 +353,7 @@ impl ShapedText {
                 &mut self.shaped_clusters,
                 &mut self.glyphs,
                 scale_factor,
+                whole_pixel,
                 glyph_infos.iter(),
                 glyph_positions.iter(),
                 &self.characters,
@@ -362,6 +364,7 @@ impl ShapedText {
                 &mut self.shaped_clusters,
                 &mut self.glyphs,
                 scale_factor,
+                whole_pixel,
                 glyph_infos.iter().rev(),
                 glyph_positions.iter().rev(),
                 &self.characters,
@@ -438,6 +441,7 @@ pub struct ShapedRun {
 ///
 /// ## Input Parameters:
 /// * `scale_factor` - Scaling factor used to convert font units to the target size.
+/// * `whole_pixel` - Round each glyph advance to whole pixels (see [`crate::whole_pixel`]).
 /// * `glyph_infos` - `HarfRust` glyph information in logical order (i.e., reversed for RTL runs).
 /// * `glyph_positions` - `HarfRust` glyph positioning data in logical order (i.e., reversed for RTL
 ///   runs).
@@ -448,6 +452,7 @@ fn process_shaped_clusters<'a>(
     shaped_clusters: &mut Vec<ShapedCluster>,
     glyphs: &mut Vec<Glyph>,
     scale_factor: f32,
+    whole_pixel: bool,
     glyph_infos: impl Iterator<Item = &'a harfrust::GlyphInfo>,
     glyph_positions: impl Iterator<Item = &'a harfrust::GlyphPosition>,
     characters: &[Character],
@@ -532,7 +537,11 @@ fn process_shaped_clusters<'a>(
             x: (glyph_pos.x_offset as f32) * scale_factor,
             // Convert from font space (Y-up) to layout space (Y-down)
             y: -(glyph_pos.y_offset as f32) * scale_factor,
-            advance: (glyph_pos.x_advance as f32) * scale_factor,
+            advance: if whole_pixel {
+                ((glyph_pos.x_advance as f32) * scale_factor).round()
+            } else {
+                (glyph_pos.x_advance as f32) * scale_factor
+            },
         };
         if cluster.glyphs == 0 && glyph.x == 0. && glyph.y == 0. {
             // Defer this potential zero-offset, single glyph cluster

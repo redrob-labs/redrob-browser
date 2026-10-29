@@ -158,10 +158,10 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
             } else {
                 let shift = shift_from_parent(align, metrics.over, metrics.under, parent);
                 metrics.exact_baseline_offset = parent.exact_baseline_offset + shift;
-                // Rounded once from the accumulated offset (not per level) so the total error
-                // stays within half a pixel.
+                // Snapped once from the accumulated offset (not per level) to 1/64 px, Blink's
+                // LayoutUnit, so `vertical-align: middle` keeps its fractional shift.
                 metrics.baseline_offset = if quantize {
-                    metrics.exact_baseline_offset.round()
+                    (metrics.exact_baseline_offset * 64.0).round() / 64.0
                 } else {
                     metrics.exact_baseline_offset
                 };
@@ -257,7 +257,7 @@ impl StyleMetrics {
         Self {
             ascent: box_metrics.ascent,
             descent: box_metrics.descent,
-            x_height: if quantize { x_height.round() } else { x_height },
+            x_height: if quantize { (x_height * 64.0).round() / 64.0 } else { x_height },
             over: box_metrics.over,
             under: box_metrics.under,
             baseline_offset: 0.,
@@ -287,9 +287,10 @@ pub(crate) fn shift_from_parent(
     };
     let shift = match align.shift {
         BaselineShift::Length(length) => length,
-        // Constants as used by WebKit and Blink.
-        BaselineShift::Sub => -(parent.font_size / 5.),
-        BaselineShift::Super => parent.font_size / 3.,
+        // Blink's constants (`InlineBoxState`): one pixel beyond a fifth (sub) or a third
+        // (super) of the parent's font size, truncated to a LayoutUnit (1/64 px).
+        BaselineShift::Sub => -((parent.font_size / 5. + 1.) * 64.).floor() / 64.,
+        BaselineShift::Super => ((parent.font_size / 3. + 1.) * 64.).floor() / 64.,
         BaselineShift::Top | BaselineShift::Bottom => 0.,
     };
     alignment + shift
