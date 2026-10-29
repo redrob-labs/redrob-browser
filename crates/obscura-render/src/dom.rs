@@ -17171,12 +17171,13 @@ mod tests {
         let logo = rect("logo");
 
         assert_eq!((logo.width, logo.height), (70.0, 70.0));
+        // Chrome (default serif font): brand 215px, header 248px.
         assert!(
-            brand.width > 220.0,
+            (brand.width - 215.0).abs() < 1.0,
             "the nested float must aggregate the image and label on its max-content line: {brand:?}"
         );
         assert!(
-            header.width > 255.0 && header.width < 259.0,
+            (header.width - 248.0).abs() < 1.0,
             "the hidden 22px toggle icon must not cap the outer shrink-to-fit width: {header:?}"
         );
         assert!(

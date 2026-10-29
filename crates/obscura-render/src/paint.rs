@@ -8436,53 +8436,20 @@ fn paint_text_node(
 }
 
 fn fallback_font_bytes(family: Option<&str>) -> &'static [u8] {
-    let Some(family) = family else {
-        return FONT_BYTES;
+    use crate::ifc::fonts::{
+        bundled_family_for_css_token, DEFAULT_FAMILY, MONO_FAMILY, SERIF_FAMILY, SYSTEM_FAMILY,
     };
-    for token in family.split(',') {
-        let token = token
-            .trim()
-            .trim_matches(|c| c == '"' || c == '\'')
-            .to_ascii_lowercase();
-        if token == "system-ui" || token == "ui-sans-serif" {
-            return SYSTEM_FONT_BYTES;
-        }
-        if token == "monospace"
-            || token.contains("mono")
-            || token.contains("courier")
-            || token.contains("consol")
-            || token == "menlo"
-            || token == "monaco"
-            || token == "code"
-        {
-            return MONO_FONT_BYTES;
-        }
-        if token == "serif"
-            || token == "georgia"
-            || token.contains("times")
-            || token == "cambria"
-            || token.contains("garamond")
-            || token.contains("liberation serif")
-            || token == "roman"
-        {
-            return SERIF_FONT_BYTES;
-        }
-        if token == "sans-serif"
-            || token.contains("sans")
-            || token == "arial"
-            || token == "helvetica"
-            || token == "helvetica neue"
-            || token == "-apple-system"
-            || token == "roboto"
-            || token == "segoe ui"
-            || token == "inter"
-            || token == "verdana"
-            || token == "tahoma"
-        {
-            return FONT_BYTES;
-        }
+    let resolved = family
+        .into_iter()
+        .flat_map(|family| family.split(','))
+        .find_map(bundled_family_for_css_token)
+        .unwrap_or(DEFAULT_FAMILY);
+    match resolved {
+        SYSTEM_FAMILY => SYSTEM_FONT_BYTES,
+        MONO_FAMILY => MONO_FONT_BYTES,
+        SERIF_FAMILY => SERIF_FONT_BYTES,
+        _ => FONT_BYTES,
     }
-    FONT_BYTES
 }
 
 /// Advance width of `text` at a CSS font-size of `size` px (one em).
@@ -20200,7 +20167,7 @@ mod tests {
                 .lock()
                 .expect("font loads")
                 .push(url.to_string());
-            (url == "https://example.test/fonts/fixture.ttf").then(|| SERIF_FONT_BYTES.to_vec())
+            (url == "https://example.test/fonts/fixture.ttf").then(|| FONT_BYTES.to_vec())
         });
         let prepared = prepare_dom_with_dynamic_fonts(
             &tree,

@@ -668,3 +668,42 @@ fn closed_select_width_is_its_widest_label_plus_the_arrow_area() {
         assert_eq!(width(&tree, &laid, id), chrome, "{id}");
     }
 }
+
+#[test]
+fn unavailable_families_fall_through_to_the_next_family_then_the_serif_default() {
+    // Chrome on this host: names that are not installed (Verdana, Segoe UI,
+    // Roboto, Georgia, Menlo...) move on down the list and end at the
+    // default standard font, Times New Roman = Liberation Serif (223.375px);
+    // Arial/Helvetica alias Liberation Sans (241.891), Courier Liberation
+    // Mono (288.047).
+    let cases = [
+        ("Verdana", 223.375),
+        ("'Segoe UI'", 223.375),
+        ("Roboto", 223.375),
+        ("Georgia", 223.375),
+        ("Menlo", 223.375),
+        ("Verdana, sans-serif", 241.891),
+        ("Helvetica", 241.891),
+        ("Arial", 241.891),
+        ("'Courier New'", 288.047),
+        ("Times", 223.375),
+    ];
+    let html: String = cases
+        .iter()
+        .enumerate()
+        .map(|(i, (family, _))| {
+            format!("<div><span id=f{i} style=\"font-family:{family}\">{SAMPLE}</span></div>")
+        })
+        .collect();
+    let (tree, laid) = layout(
+        &format!(
+            "<!doctype html><body style='margin:0;font-size:32px;white-space:pre'>{html}\
+             <div><span id=plain>{SAMPLE}</span></div>"
+        ),
+        &[],
+    );
+    for (i, (family, chrome)) in cases.iter().enumerate() {
+        close(width(&tree, &laid, &format!("f{i}")), *chrome, family);
+    }
+    close(width(&tree, &laid, "plain"), 223.375, "no font-family");
+}

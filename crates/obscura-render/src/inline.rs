@@ -13,6 +13,7 @@ const FAMILY: &str = crate::ifc::fonts::SANS_FAMILY;
 const SERIF_FAMILY: &str = crate::ifc::fonts::SERIF_FAMILY;
 const MONO_FAMILY: &str = crate::ifc::fonts::MONO_FAMILY;
 const SYSTEM_FAMILY: &str = crate::ifc::fonts::SYSTEM_FAMILY;
+const DEFAULT: &str = crate::ifc::fonts::DEFAULT_FAMILY;
 
 /// Whether text contains a code point that can request emoji presentation.
 /// Keep the color face out of ordinary render passes: its bitmap table is
@@ -60,13 +61,13 @@ pub(crate) fn text_may_need_emoji_font(text: &str) -> bool {
 
 /// The bundled face Chromium would use for a CSS `font-family` list.
 fn resolve_font_family(fam: Option<&str>) -> &'static str {
-    let Some(f) = fam else { return FAMILY };
+    let Some(f) = fam else { return DEFAULT };
     for tok in f.split(',') {
         if let Some(family) = crate::ifc::fonts::bundled_family_for_css_token(tok) {
             return family;
         }
     }
-    FAMILY
+    DEFAULT
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
