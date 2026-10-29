@@ -333,7 +333,16 @@ impl BuildCx<'_> {
         if name == "button" {
             return BaselineSource::Button;
         }
-        if matches!(name.as_str(), "input" | "select" | "textarea")
+        // A textarea is a scroll container: its inline-block baseline is the
+        // bottom margin edge.
+        if name == "textarea" {
+            return BaselineSource::MarginBottom;
+        }
+        if matches!(name.as_str(), "input" | "select") && style.display != crate::Display::Flex {
+            let (ascent, descent) = crate::inline::fitted_font_ascent_descent(style);
+            return BaselineSource::Control { ascent, descent };
+        }
+        if matches!(name.as_str(), "input" | "select")
             || matches!(style.display, crate::Display::Flex | crate::Display::Grid)
         {
             return BaselineSource::FirstLine;

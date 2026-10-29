@@ -103,7 +103,7 @@ pub(crate) struct Span {
 }
 
 /// Where an atomic inline box sits relative to the line's baseline.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum BaselineSource {
     /// `inline-block` with visible overflow: the baseline of its last line box.
     LastLine,
@@ -113,6 +113,10 @@ pub(crate) enum BaselineSource {
     MarginBottom,
     /// Buttons: their first line, else the bottom of their content box.
     Button,
+    /// A text input or closed select without line boxes: the baseline of
+    /// its label centred in the content box (grid-fitted font ascent and
+    /// descent).
+    Control { ascent: f32, descent: f32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

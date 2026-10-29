@@ -1710,8 +1710,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             );
         }
 
+        // Line boxes snap to 1/64 px (Blink's LayoutUnit), so a 22.5px
+        // line-height stays 22.5px instead of alternating 22 and 23.
+        let snap = |value: f64| (value * 64.0).round() / 64.0;
         let top = if quantize {
-            self.state.line_y.round() as f32
+            snap(self.state.line_y) as f32
         } else {
             self.state.line_y as f32
         };
@@ -1724,7 +1727,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             // ```
             // (self.state.line_y as f32 + self.state.line.box_metrics.line_height()).round()
             // ```
-            (line.metrics.baseline + line_box_extents.under).round()
+            snap(f64::from(line.metrics.baseline + line_box_extents.under)) as f32
         } else {
             line.metrics.baseline + line_box_extents.under
         };

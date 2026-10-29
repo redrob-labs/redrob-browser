@@ -131,6 +131,15 @@ pub(crate) fn used_line_height(style: &LayoutStyle) -> f32 {
     used_line_height_with_metrics(style, bundled_face_metrics(family))
 }
 
+/// Grid-fitted ascent and descent of the bundled face `style` selects.
+pub(crate) fn fitted_font_ascent_descent(style: &LayoutStyle) -> (f32, f32) {
+    let family = resolve_font_family(style.font_family.as_deref());
+    fitted_font_box_metrics(
+        style.font_size.unwrap_or(16.0),
+        bundled_face_metrics(family),
+    )
+}
+
 /// Grid-fitted ascent and descent of a face at `font_size`.
 fn fitted_font_box_metrics(font_size: f32, metrics: FaceMetrics) -> (f32, f32) {
     let scale = font_size / metrics.units_per_em.max(1.0);

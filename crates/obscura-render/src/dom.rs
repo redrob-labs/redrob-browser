@@ -7684,7 +7684,14 @@ fn layout_dom_once(
                     .and_then(|value| value.parse::<usize>().ok())
                     .filter(|&value| value > 1)
                     .unwrap_or(1) as f32;
-                let intrinsic_width = label_width + horizontal_edges;
+                // Chromium's menu list keeps a 4px label inset and an arrow
+                // area that grows slowly with the font, inside any padding
+                // (fitted to Chrome: 88px for "Option one" at 13.33px Arial,
+                // 101px at 16px).
+                let intrinsic_width = label_width
+                    + crate::SELECT_INLINE_START
+                    + select_arrow_width(font_size)
+                    + horizontal_edges;
                 let intrinsic_height =
                     crate::inline::used_line_height(style).max(1.0) * rows + vertical_edges;
                 assign_native_control_size(
@@ -13718,6 +13725,11 @@ enum ContainerAutoBlockSize {
 /// a content-box control receives the content part. An authored width or
 /// height keeps winning, as does a grid axis that stretches the item:
 /// only an untouched auto axis adopts the intrinsic value.
+/// Width Chromium reserves for a closed select's drop-down arrow.
+fn select_arrow_width(font_size: f32) -> f32 {
+    23.6 + 0.5 * (font_size - 13.333_333)
+}
+
 fn assign_native_control_size(
     style: &mut crate::LayoutStyle,
     stretched_grid_item: (bool, bool),
@@ -21323,6 +21335,23 @@ mod tests {
         let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
         assert_eq!(rect("f").y, 8.0);
         assert_eq!(rect("p").y, 36.0);
+    }
+
+    // Chrome geometry for one line of an input, a select and a textarea:
+    // the textarea (a scroll container) sits on its bottom margin edge and
+    // the empty-of-lines controls on their centred label baseline.
+    #[cfg(feature = "paint")]
+    #[test]
+    fn form_controls_share_a_baseline_like_chrome() {
+        let tree = parse_html(
+            r#"<!doctype html><style>body{margin:8px;font:16px/1.5 sans-serif}</style><div id=w4>Text <input id=in1 value="text input"> <select id=sel1><option>Option one</option></select> <textarea id=ta1 rows=2 cols=10></textarea> end</div>"#,
+        );
+        let laid = layout_dom(&tree, (1280.0, 800.0));
+        let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
+        assert_eq!((rect("in1").y, rect("in1").height), (29.0, 21.0));
+        assert_eq!((rect("sel1").y, rect("sel1").width), (30.0, 88.0));
+        assert_eq!((rect("ta1").y, rect("ta1").height), (8.0, 36.0));
+        assert_eq!(rect("w4").height, 43.0);
     }
 
     /// Each line of text node `node`: (x, text), in line order.

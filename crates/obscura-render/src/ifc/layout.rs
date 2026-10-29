@@ -137,6 +137,11 @@ fn last_baseline(
             .y
             .or(output.last_baseline)
             .or(Some(output.size.height - padding.bottom - border.bottom)),
+        BaselineSource::Control { ascent, descent } => output.first_baselines.y.or_else(|| {
+            let top = padding.top + border.top;
+            let content = output.size.height - top - padding.bottom - border.bottom;
+            Some(top + ((content - ascent - descent) / 2.0).floor() + ascent)
+        }),
     }
 }
 

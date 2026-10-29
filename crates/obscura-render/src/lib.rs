@@ -214,6 +214,10 @@ pub use tiny_skia::Pixmap;
 pub mod inline;
 pub use ifc::fonts::configure_font_directories;
 
+/// Inset of a closed select's label from its padding edge (Chromium's menu
+/// list inner padding).
+pub(crate) const SELECT_INLINE_START: f32 = 4.0;
+
 /// An axis-aligned rectangle in CSS pixels, relative to the containing block.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Rect {

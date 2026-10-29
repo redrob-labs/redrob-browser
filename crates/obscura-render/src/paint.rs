@@ -5933,7 +5933,8 @@ fn paint_laid_dom_scrolled(
             if let Some(label) = selected_option_label(tree, nid) {
                 let fsize = style.font_size.unwrap_or(13.333_333);
                 let line_height = crate::inline::used_line_height(style);
-                let text_x = rect.x + style.border.left + style.padding.left;
+                let text_x =
+                    rect.x + style.border.left + style.padding.left + crate::SELECT_INLINE_START;
                 let text_y = rect.y + (rect.height - line_height) / 2.0;
                 draw_text(
                     &mut pixmap,

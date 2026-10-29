@@ -256,11 +256,13 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         style.font_size = Some(13.333_333);
         style.font_family = Some("arial".to_string());
         style.line_height = Some(crate::LineHeight::Normal);
+        // The label inset and the drop-down arrow are internal to the
+        // control (see `SELECT_INLINE_START`), not padding.
         style.padding = Edges {
             top: 1.0,
-            right: 20.0,
+            right: 0.0,
             bottom: 1.0,
-            left: 2.0,
+            left: 0.0,
         };
         style.border = Edges {
             top: 1.0,
