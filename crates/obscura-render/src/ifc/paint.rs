@@ -129,6 +129,7 @@ impl GlyphRaster {
         coords: &[i16],
         embolden: bool,
         skew: f32,
+        matrix: [f32; 4],
     ) -> Option<&LcdGlyph> {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         coords.hash(&mut hasher);
@@ -141,7 +142,7 @@ impl GlyphRaster {
             coords: hasher.finish(),
             embolden,
             skew_bits: skew.to_bits(),
-            matrix: IDENTITY_LINEAR.map(f32::to_bits),
+            matrix: matrix.map(f32::to_bits),
         };
         let context = &mut self.context;
         self.lcd
@@ -160,7 +161,16 @@ impl GlyphRaster {
                 let mut render = Render::new(&[Source::Outline]);
                 // Three samples per pixel horizontally; the subpixel
                 // position moves the outline in thirds of those samples.
+                // A turned glyph (vertical text) is turned first, so its
+                // samples stay along the device's horizontal subpixel axis,
+                // as Skia rasterizes LCD text under a 90 degree matrix.
                 let mut transform = Transform::scale(3.0, 1.0);
+                if matrix != IDENTITY_LINEAR {
+                    // `matrix` is in y-down page space; outlines are y-up.
+                    let [a, b, c, d] = matrix;
+                    // swash composes `then` as "this after that".
+                    transform = transform.then(&Transform::new(a, -b, -c, d, 0.0, 0.0));
+                }
                 if skew != 0.0 {
                     transform =
                         Transform::skew(Angle::from_degrees(skew), Angle::from_degrees(0.0))
@@ -923,14 +933,9 @@ impl Ifc {
             let gray_table = crate::paint::lcd::gray_preblend(color);
             let placed = self.placed(run, origin.0 + offset.0, origin.1 + offset.1);
             for &(glyph, gx, gy, matrix) in &placed {
-                let turned = matrix != IDENTITY_LINEAR;
-                let (x, x_bin) = if turned {
-                    ((gx * raster_scale).round() as i32, 0)
-                } else {
-                    subpixel(gx * raster_scale)
-                };
+                let (x, x_bin) = subpixel(gx * raster_scale);
                 let y = (gy * raster_scale).round() as i32;
-                if fill.is_none() && !self.params.vertical {
+                if fill.is_none() {
                     if let Some(image) = raster.lcd_image(
                         &run.font,
                         glyph,
@@ -939,6 +944,7 @@ impl Ifc {
                         &run.coords,
                         run.embolden,
                         run.skew,
+                        matrix,
                     ) {
                         let left = x + image.left;
                         let top = y + image.top;

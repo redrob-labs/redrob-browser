@@ -15634,6 +15634,13 @@ mod tests {
         let (x0, y0, x1, y1) = ink_box(red, (0, 0, 60, 230)).expect("vertical-rl ink");
         assert!(x0 >= 3 && x1 <= 23, "column x {x0}..{x1}");
         assert!(y0 <= 4 && (118..=130).contains(&y1), "column y {y0}..{y1}");
+        // Turned glyphs take the LCD path with the device's horizontal
+        // subpixel axis, as Chrome: their edges carry color fringes.
+        let fringed = (0..230)
+            .flat_map(|y| (0..30).map(move |x| (x, y)))
+            .filter_map(|(x, y)| pixmap.pixel(x, y))
+            .any(|p| (p.red() as i32 - p.blue() as i32).abs() > 60);
+        assert!(fringed, "vertical-rl glyphs are LCD antialiased");
         // The horizontal paragraph still paints horizontally.
         let (hx0, hy0, hx1, hy1) = ink_box(red, (0, 238, 320, 280)).expect("horizontal ink");
         assert!(
