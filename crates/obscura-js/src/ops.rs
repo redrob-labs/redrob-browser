@@ -8365,6 +8365,8 @@ pub fn build_extension() -> Extension {
         ops.push(op_resize_observer_measurements());
         ops.push(op_intersection_observer_measurements());
         ops.push(op_measure_text());
+        ops.push(op_text_run_metrics());
+        ops.push(op_svg_image_natural_size());
         ops.push(op_font_face_states());
         ops.push(op_computed_style());
         ops.push(op_set_hovered());
@@ -8771,8 +8773,19 @@ fn document_base_url_for_javascript_task(state: &ObscuraState) -> Option<String>
 #[cfg(feature = "render")]
 fn ensure_prepared_geometry(state: &mut ObscuraState) -> Option<&obscura_render::PreparedRender> {
     let base_url = document_base_url_for_javascript_task(state);
-    let reusable = state.pending_style_mutations.is_empty()
-        && !state.animation_timeline.has_pending_start_candidates()
+    // A selector-only change inside a display:none subtree keeps every box.
+    // Its animation start candidates are hidden too, so they start nothing.
+    let hidden_only = !state.pending_style_mutations.is_empty()
+        && match (state.prepared_render.as_ref(), state.dom.as_ref()) {
+            (Some(prepared), Some(dom)) => prepared.geometry_survives_hidden_mutations(
+                dom,
+                &mut state.stylesheet_cache,
+                &state.pending_style_mutations,
+            ),
+            _ => false,
+        };
+    let reusable = (state.pending_style_mutations.is_empty() || hidden_only)
+        && (!state.animation_timeline.has_pending_start_candidates() || hidden_only)
         && state.prepared_render.as_ref().is_some_and(|prepared| {
             prepared.viewport() == state.viewport
                 && prepared.base_url() == base_url.as_deref()
@@ -8813,15 +8826,27 @@ fn ensure_prepared_box_metrics(
                         )
             )
         });
+    // A selector-only change inside a display:none subtree keeps every box.
+    // Its animation start candidates are hidden too, so they start nothing.
+    let hidden_only = !state.pending_style_mutations.is_empty()
+        && match (state.prepared_render.as_ref(), state.dom.as_ref()) {
+            (Some(prepared), Some(dom)) => prepared.geometry_survives_hidden_mutations(
+                dom,
+                &mut state.stylesheet_cache,
+                &state.pending_style_mutations,
+            ),
+            _ => false,
+        };
     let reusable = (!state.animation_timeline.has_pending_start_candidates()
-        || paint_only_inline_styles)
+        || paint_only_inline_styles
+        || hidden_only)
         && state.prepared_render.as_ref().is_some_and(|prepared| {
             prepared.viewport() == state.viewport
                 && prepared.base_url() == base_url.as_deref()
                 && (prepared.animation_sample() == state.animation_sample
                     || prepared.can_reuse_geometry_for_animation_sample(state.animation_sample))
         })
-        && (state.pending_style_mutations.is_empty() || paint_only_inline_styles);
+        && (state.pending_style_mutations.is_empty() || paint_only_inline_styles || hidden_only);
     if reusable {
         return state.prepared_render.as_ref();
     }
@@ -9813,6 +9838,57 @@ fn op_font_face_states(state: &OpState, #[string] faces: String, frame_id: u32) 
 #[op2(fast)]
 fn op_measure_text(#[string] text: String, #[string] font: String) -> f64 {
     obscura_render::measure_text_with_font_shorthand(&text, &font).map_or(-1.0, f64::from)
+}
+
+/// `[width, height]` of the cached image an SVG `<image>` names, or `null`
+/// while its bytes are not loaded.
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_svg_image_natural_size(state: &OpState, #[string] href: String, frame_id: u32) -> String {
+    let shared = frame_state(state, frame_id);
+    let mut gs = shared.borrow_mut();
+    let base_url = document_base_url(&gs);
+    obscura_render::cached_image_natural_size(&href, base_url.as_deref(), &mut gs.render_resources)
+        .map_or_else(
+            || "null".to_string(),
+            |(width, height)| serde_json::json!([width, height]).to_string(),
+        )
+}
+
+/// `[width, ascent, descent]` of `text` in the document's fonts (web fonts
+/// included) at `size` px, or `null`.
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_text_run_metrics(
+    state: &OpState,
+    #[string] text: String,
+    #[string] family: String,
+    #[string] weight: String,
+    italic: bool,
+    size: f64,
+    frame_id: u32,
+) -> String {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let shared = frame_state(state, frame_id);
+        let mut gs = shared.borrow_mut();
+        ensure_prepared_render(&mut gs)?;
+        let gs = &mut *gs;
+        let dom = gs.dom.as_ref()?;
+        let (width, ascent, descent) = gs.prepared_render.as_mut()?.measure_text_run(
+            dom,
+            &text,
+            &family,
+            &weight,
+            italic,
+            size as f32,
+        )?;
+        Some(serde_json::json!([width, ascent, descent]).to_string())
+    }))
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| "null".into())
 }
 
 /// currently generates no layout box (for example, it is detached or hidden).

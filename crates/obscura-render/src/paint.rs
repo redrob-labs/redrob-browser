@@ -1664,6 +1664,43 @@ impl PreparedRender {
         })
     }
 
+    /// Advance width, ascent and descent of `text` in this document's fonts
+    /// (web fonts included, with their whole-pixel advances) at
+    /// `font_size` px: (width, ascent, descent).
+    pub fn measure_text_run(
+        &mut self,
+        tree: &DomTree,
+        text: &str,
+        family: &str,
+        weight: &str,
+        italic: bool,
+        font_size: f32,
+    ) -> Option<(f32, f32, f32)> {
+        let mut style = crate::LayoutStyle {
+            font_family: Some(family.to_string()),
+            font_weight: Some(weight.to_string()),
+            font_size: Some(font_size),
+            font_style_italic: Some(italic),
+            white_space: Some(crate::WhiteSpace::Pre),
+            ..Default::default()
+        };
+        style.line_height = Some(crate::LineHeight::Normal);
+        let owner = tree.document();
+        let store = &mut self.layout.ifc;
+        let before = store.len();
+        let (index, width, _) =
+            store.standalone(tree, &self.layout.styles, owner, &style, text, None)?;
+        let metrics = store
+            .get(index)
+            .and_then(|ifc| ifc.layout.root_span_metrics())
+            .map(|metrics| (metrics.ascent, metrics.descent));
+        while store.len() > before {
+            store.ifcs.pop();
+        }
+        let (ascent, descent) = metrics?;
+        Some((width, ascent, descent))
+    }
+
     /// Axis-aligned bounds of the transformed border box in immutable document
     /// space, excluding root-scroll and sticky movement.
     pub fn document_rect(&self, id: obscura_dom::tree::NodeId) -> Option<crate::Rect> {
@@ -2753,6 +2790,57 @@ impl PreparedRender {
                 && selected.profile == profile
                 && self.image_intrinsics_affect_geometry(tree, *id)
         })
+    }
+
+    /// Whether this layout's geometry still holds after `mutations`: each is
+    /// a selector-only attribute change inside a `display: none` subtree and
+    /// restyles nothing outside it (beyond the mutated nodes' ancestor
+    /// chain, which the planner rebuilds for context only). Such a change
+    /// cannot create, remove or resize a box (Chrome restyles the hidden
+    /// subtree and skips layout), so a geometry read may keep this layout
+    /// while the mutations stay queued for the next style read or paint.
+    pub fn geometry_survives_hidden_mutations(
+        &self,
+        tree: &DomTree,
+        stylesheet_cache: &mut crate::css::StylesheetCache,
+        mutations: &[crate::dom::RetainedStyleMutation],
+    ) -> bool {
+        let suppressed = |id: obscura_dom::tree::NodeId| {
+            let mut ancestor = crate::dom::rendered_parent(tree, id);
+            while let Some(node) = ancestor {
+                if self
+                    .layout
+                    .styles
+                    .get(&node)
+                    .is_some_and(|style| style.display == crate::Display::None)
+                {
+                    return true;
+                }
+                ancestor = crate::dom::rendered_parent(tree, node);
+            }
+            false
+        };
+        let mut chain = std::collections::HashSet::new();
+        for mutation in mutations {
+            let crate::dom::RetainedStyleMutation::Attribute(attribute) = mutation else {
+                return false;
+            };
+            if !suppressed(attribute.node) {
+                return false;
+            }
+            chain.extend(tree.ancestors(attribute.node));
+        }
+        let Some(dirty) = crate::dom::retained_selector_dirty_set(
+            tree,
+            self.viewport,
+            stylesheet_cache,
+            mutations,
+        ) else {
+            return false;
+        };
+        dirty
+            .into_iter()
+            .all(|node| chain.contains(&node) || suppressed(node))
     }
 
     fn image_is_display_suppressed(&self, tree: &DomTree, id: obscura_dom::tree::NodeId) -> bool {
@@ -9522,6 +9610,16 @@ fn draw_text_pixels(
                 };
         }
     }
+}
+
+/// Natural size of the image at `src` when its bytes are already in the
+/// page's resource cache (an SVG `<image>` without width/height uses it).
+pub fn cached_image_natural_size(
+    src: &str,
+    base_url: Option<&str>,
+    cache: &mut RenderResourceCache,
+) -> Option<(f32, f32)> {
+    image_intrinsic_dimensions(&fetch_bytes(src, base_url, cache)?)
 }
 
 /// Resolve `src` (a `data:` URI, or an absolute/relative URL against

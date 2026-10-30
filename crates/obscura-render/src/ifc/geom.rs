@@ -222,8 +222,17 @@ impl Ifc {
             .unwrap_or((14.0, 4.0));
         let mut placed: std::collections::HashSet<u32> = std::collections::HashSet::new();
         let depths = self.span_depths();
-        for line in layout.lines() {
+        let line_count = layout.len();
+        for (line_index, line) in layout.lines().enumerate() {
             let metrics = *line.metrics();
+            // After a forced break, a last line holding only collapsed
+            // whitespace (`<br><span>\n</span>`) is no line box: Chrome puts
+            // its inline boxes at the end of the previous line box, empty.
+            let trailing_empty = line_index + 1 == line_count
+                && line_index > 0
+                && layout
+                    .get(line_index - 1)
+                    .is_some_and(|prev| prev.break_reason() == parley::BreakReason::Explicit);
             let mut pieces: Vec<Piece> = Vec::new();
             for item in line.items() {
                 match item {
@@ -368,6 +377,11 @@ impl Ifc {
                     current = self.spans.get(index as usize).and_then(|span| span.parent);
                 }
             }
+            let trailing_empty = trailing_empty
+                && line.text_range().start >= line.text_range().end
+                && pieces
+                    .iter()
+                    .all(|piece| piece.edge.is_some() && piece.x1 - piece.x0 <= 0.0);
             let mut line_rects = self.line_span_rects(&pieces, &line_spans, &depths);
             for index in line_spans {
                 let Some(span) = self.spans.get(index as usize) else {
@@ -375,6 +389,19 @@ impl Ifc {
                 };
                 placed.insert(index);
                 for (x0, x1, baseline) in line_rects.remove(&index).unwrap_or_default() {
+                    if trailing_empty {
+                        let rect = Rect {
+                            x: origin.0 + x0 + span.relative.0,
+                            y: origin.1 + metrics.block_min_coord + span.relative.1,
+                            width: 0.0,
+                            height: 0.0,
+                        };
+                        match span.owner {
+                            SpanOwner::Element(node) => out.elements.push((node, rect)),
+                            SpanOwner::Pseudo(host, kind) => out.pseudos.push((host, kind, rect)),
+                        }
+                        continue;
+                    }
                     let rect = Rect {
                         x: origin.0 + x0 + span.relative.0,
                         y: origin.1 + baseline - span.ascent - span.block_start + span.relative.1,

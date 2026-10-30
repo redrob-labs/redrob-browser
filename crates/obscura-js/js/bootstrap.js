@@ -17037,6 +17037,46 @@ const _svgPathPoints = (d) => {
   let i = 0, cmd = '', x = 0, y = 0, sx = 0, sy = 0, cx = 0, cy = 0;
   const num = () => parseFloat(tok[i++]);
   const more = () => i < tok.length && !/^[a-zA-Z]$/.test(tok[i]);
+  // Arc flags are single digits and may run into the next number
+  // ("a.5.5 0 01.5-.5" is flags 0, 0 then x 1.5).
+  const flag = () => {
+    const t = tok[i];
+    if (t && t.length > 1 && (t[0] === '0' || t[0] === '1')) { tok[i] = t.slice(1); return +t[0]; }
+    i++;
+    return +t ? 1 : 0;
+  };
+  // The arc itself, sampled from its centre parameterisation (SVG 2
+  // implementation notes B.2.4), so the bounds follow the curve the way
+  // Chrome's getBBox does instead of only its endpoints.
+  const arc = (rx, ry, phi, large, sweep, x3, y3) => {
+    if (!rx || !ry || (x === x3 && y === y3)) { pts.push([x3, y3]); return; }
+    const c = Math.cos(phi), s = Math.sin(phi);
+    const dx = (x - x3) / 2, dy = (y - y3) / 2;
+    const x1p = c * dx + s * dy, y1p = -s * dx + c * dy;
+    const lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+    if (lambda > 1) { const k = Math.sqrt(lambda); rx *= k; ry *= k; }
+    const num2 = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+    const den = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+    let coef = Math.sqrt(Math.max(0, num2 / den));
+    if (large === sweep) coef = -coef;
+    const cxp = coef * rx * y1p / ry, cyp = -coef * ry * x1p / rx;
+    const ccx = c * cxp - s * cyp + (x + x3) / 2, ccy = s * cxp + c * cyp + (y + y3) / 2;
+    const ang = (ux, uy, vx, vy) => {
+      const a = Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+      return a;
+    };
+    const t1 = ang(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+    let dt = ang((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+    if (!sweep && dt > 0) dt -= 2 * Math.PI;
+    if (sweep && dt < 0) dt += 2 * Math.PI;
+    const n = 64;
+    for (let k = 1; k <= n; k++) {
+      const t = t1 + dt * k / n;
+      const ex = rx * Math.cos(t), ey = ry * Math.sin(t);
+      pts.push([c * ex - s * ey + ccx, s * ex + c * ey + ccy]);
+    }
+    pts.push([x3, y3]);
+  };
   const cubic = (x1, y1, x2, y2, x3, y3) => {
     for (let k = 1; k <= 16; k++) {
       const t = k / 16, u = 1 - t;
@@ -17058,13 +17098,11 @@ const _svgPathPoints = (d) => {
       case 'Q': { const x1 = ox + num(), y1 = oy + num(), x3 = ox + num(), y3 = oy + num(); cubic(x + 2 / 3 * (x1 - x), y + 2 / 3 * (y1 - y), x3 + 2 / 3 * (x1 - x3), y3 + 2 / 3 * (y1 - y3), x3, y3); cx = x1; cy = y1; x = x3; y = y3; break; }
       case 'T': { const x1 = 2 * x - cx, y1 = 2 * y - cy, x3 = ox + num(), y3 = oy + num(); cubic(x + 2 / 3 * (x1 - x), y + 2 / 3 * (y1 - y), x3 + 2 / 3 * (x1 - x3), y3 + 2 / 3 * (y1 - y3), x3, y3); cx = x1; cy = y1; x = x3; y = y3; break; }
       case 'A': {
-        const rx = Math.abs(num()), ry = Math.abs(num()); num(); num(); num();
+        let rx = Math.abs(num()), ry = Math.abs(num());
+        const phi = num() * Math.PI / 180;
+        const large = flag(), sweep = flag();
         const x3 = ox + num(), y3 = oy + num();
-        // Bounds of the arc's ellipse clipped to the chord box keep this
-        // within the true arc for the usual icon arcs; endpoints always count.
-        pts.push([x3, y3]);
-        const mx = (x + x3) / 2, my = (y + y3) / 2;
-        pts.push([Math.min(Math.max(mx, Math.min(x, x3) - rx), Math.max(x, x3) + rx), my]);
+        arc(rx, ry, phi, large, sweep, x3, y3);
         x = x3; y = y3; cx = x; cy = y; break;
       }
       case 'Z': x = sx; y = sy; cx = x; cy = y; break;
@@ -17086,7 +17124,30 @@ const _svgLocalBounds = (el) => {
     return [a, b, c, d];
   };
   switch (tag) {
-    case 'rect': case 'image': case 'foreignObject':
+    case 'image': {
+      // SVG 2: an auto width/height is the image's natural size, the other
+      // axis following its ratio when only one is given.
+      let w = el.getAttribute('width'), h = el.getAttribute('height');
+      w = w == null || w === '' || w === 'auto' ? null : _svgNum(el, 'width');
+      h = h == null || h === '' || h === 'auto' ? null : _svgNum(el, 'height');
+      if (w == null || h == null) {
+        const href = el.getAttribute('href') || el.getAttributeNS?.('http://www.w3.org/1999/xlink', 'href')
+          || el.getAttribute('xlink:href');
+        let natural = null;
+        try {
+          if (href && typeof __obscuraCore.ops.op_svg_image_natural_size === 'function') {
+            natural = JSON.parse(__obscuraCore.ops.op_svg_image_natural_size(String(href), _realmFrameId));
+          }
+        } catch (_e) { natural = null; }
+        if (Array.isArray(natural) && natural[0] > 0 && natural[1] > 0) {
+          if (w == null && h == null) { w = natural[0]; h = natural[1]; }
+          else if (w == null) w = h * natural[0] / natural[1];
+          else h = w * natural[1] / natural[0];
+        }
+      }
+      return box(_svgNum(el, 'x'), _svgNum(el, 'y'), w || 0, h || 0);
+    }
+    case 'rect': case 'foreignObject':
       return box(_svgNum(el, 'x'), _svgNum(el, 'y'), _svgNum(el, 'width'), _svgNum(el, 'height'));
     case 'circle': { const r = _svgNum(el, 'r'), cx = _svgNum(el, 'cx'), cy = _svgNum(el, 'cy'); return [cx - r, cy - r, cx + r, cy + r]; }
     case 'ellipse': { const rx = _svgNum(el, 'rx'), ry = _svgNum(el, 'ry'), cx = _svgNum(el, 'cx'), cy = _svgNum(el, 'cy'); return [cx - rx, cy - ry, cx + rx, cy + ry]; }
@@ -17115,15 +17176,35 @@ const _svgLocalBounds = (el) => {
       const family = svgAttr('font-family') || cs.fontFamily || 'sans-serif';
       const weight = svgAttr('font-weight') || cs.fontWeight || '400';
       const text = el.textContent || '';
-      const x = _svgNum(el, 'x'), y = _svgNum(el, 'y');
-      let w = text.length * size * 0.55;
+      // dx/dy shift the text (d3 axes place tick labels with dy="0.71em").
+      const shift = (name) => {
+        const v = String(el.getAttribute(name) || '').trim().split(/[\s,]+/)[0] || '';
+        const n = parseFloat(v);
+        if (!Number.isFinite(n)) return 0;
+        return /em$/.test(v) ? n * size : n;
+      };
+      const x = _svgNum(el, 'x') + shift('dx'), y = _svgNum(el, 'y') + shift('dy');
+      let w = text.length * size * 0.55, ascent = size * 0.9, descent = size * 0.25;
+      // The document's own fonts (web fonts included), so the box spans the
+      // font's ascent and descent like Chrome's text bounding box.
+      let run = null;
       try {
-        const ctx = (globalThis.__obscuraSvgMeasure ||= document.createElement('canvas').getContext('2d'));
-        if (ctx) { ctx.font = `${weight} ${size}px ${family}`; w = ctx.measureText(text).width; }
-      } catch (_e) {}
+        if (typeof __obscuraCore.ops.op_text_run_metrics === 'function') {
+          run = JSON.parse(__obscuraCore.ops.op_text_run_metrics(text, String(family), String(weight),
+            /italic|oblique/.test(cs.fontStyle || ''), size, 0));
+        }
+      } catch (_e) { run = null; }
+      if (Array.isArray(run)) {
+        [w, ascent, descent] = run;
+      } else {
+        try {
+          const ctx = (globalThis.__obscuraSvgMeasure ||= document.createElement('canvas').getContext('2d'));
+          if (ctx) { ctx.font = `${weight} ${size}px ${family}`; w = ctx.measureText(text).width; }
+        } catch (_e) {}
+      }
       const anchor = svgAttr('text-anchor') || cs.textAnchor;
       const left = anchor === 'middle' ? x - w / 2 : anchor === 'end' ? x - w : x;
-      return [left, y - size * 0.9, left + w, y + size * 0.25];
+      return [left, y - ascent, left + w, y + descent];
     }
     case 'use': {
       const ref = el.getAttribute('href') || el.getAttributeNS?.('http://www.w3.org/1999/xlink', 'href');
@@ -17159,12 +17240,19 @@ const _svgSubtreeBounds = (el, m, skipOwnTransform) => {
   }
   return acc;
 };
+const _SVG_UNRENDERED = new Set(['defs', 'mask', 'clipPath', 'pattern', 'marker', 'linearGradient',
+  'radialGradient', 'filter', 'symbol']);
 // Screen rect of an SVG descendant, from its outermost <svg> box.
 const _svgClientRect = (el) => {
+  if (_SVG_UNRENDERED.has(el.localName)) return null;
   let outer = null;
   const chain = [];
   for (let p = el.parentElement; p; p = p.parentElement) {
     if (p.namespaceURI !== _SVG_NS) break;
+    // Content of a never-rendered container (a mask, clip path, pattern,
+    // marker, gradient or <defs>) has no box of its own: Chrome reports an
+    // all-zero rect for it.
+    if (_SVG_UNRENDERED.has(p.localName)) return null;
     if (p.localName === 'svg') outer = p;
     chain.push(p);
   }
@@ -17195,7 +17283,14 @@ const _svgClientRect = (el) => {
     if (p.localName === 'svg') m = _svgMul(m, [1, 0, 0, 1, _svgNum(p, 'x'), _svgNum(p, 'y')]);
   }
   const b = _svgSubtreeBounds(el, m);
-  if (!b) return null;
+  if (!b) {
+    // A rendered element with nothing to draw (an empty <g>, a path
+    // without data) still has a box: an empty rect at its user-space
+    // origin (Chrome: plotly's empty layer groups sit at the plot corner).
+    if (getComputedStyle(el).display === 'none') return null;
+    const own = _svgMul(m, _svgTransform(el.getAttribute('transform')));
+    return { x: own[4], y: own[5], width: 0, height: 0 };
+  }
   return { x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1] };
 };
 globalThis.__obscuraSvgClientRect = _svgClientRect;

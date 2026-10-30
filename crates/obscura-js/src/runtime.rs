@@ -10601,6 +10601,137 @@ mod tests {
 
     #[cfg(feature = "render")]
     #[tokio::test(flavor = "current_thread")]
+    async fn class_changes_inside_hidden_subtrees_keep_geometry_and_styles_current() {
+        // w3schools' sidebar patch reads offsetHeight and adds a class to
+        // each of ~300 links in collapsed (display:none) sections. Geometry
+        // reads between those writes keep the layout; styles and a later
+        // reveal still see every change.
+        let dom = parse_html(
+            r##"<html><head><style>
+                body { margin:0 } a { display:block; height:20px }
+                .tall { height:50px; color:rgb(255, 0, 0) }
+            </style></head><body><div id="v">visible</div>
+            <div id="hid" style="display:none"><a>1</a><a>2</a><a>3</a></div>
+            </body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(800.0, 600.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"(() => {
+                    const v = document.getElementById("v");
+                    const links = [...document.querySelectorAll("#hid a")];
+                    const before = v.offsetHeight;
+                    const reads = [];
+                    for (const a of links) {
+                        reads.push(a.offsetHeight);
+                        a.classList.add("tall");
+                        reads.push(v.offsetHeight);
+                    }
+                    const color = getComputedStyle(links[1]).color;
+                    document.getElementById("hid").style.display = "block";
+                    return [before, reads, color, links.map((a) => a.offsetHeight)];
+                })()"##,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!([18, [0, 18, 0, 18, 0, 18], "rgb(255, 0, 0)", [50, 50, 50]])
+        );
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn svg_path_bbox_follows_elliptical_arcs() {
+        // Chrome: a half circle M2 8a6 6 0 0 1 12 0 spans y 2..8, and arc
+        // flags may run into the next number ("0 01" is flags 0 and 0).
+        let dom = parse_html(
+            r##"<html><body style="margin:0"><svg width="160" height="160" viewBox="0 0 16 16">
+                <path id="a" d="M2 8a6 6 0 0 1 12 0"/>
+                <path id="b" d="M8 2a.5.5 0 0 1 .5.5v1a.5.5 0 01-1 0v-1A.5.5 0 0 1 8 2Z"/>
+            </svg></body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(800.0, 600.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"["a", "b"].map((id) => {
+                    const b = document.getElementById(id).getBBox();
+                    return [b.x, b.y, b.width, b.height].map((v) => Math.round(v * 100) / 100);
+                })"##,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!([[2, 2, 12, 6], [7.5, 2, 1, 2]]));
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn empty_svg_groups_have_an_empty_rect_at_their_origin() {
+        // Chrome: plotly's empty layer <g>s report (x, y, 0, 0) at their
+        // transformed user-space origin, not an all-zero rect.
+        let dom = parse_html(
+            r##"<html><body style="margin:0"><div style="height:30px"></div>
+                <svg width="300" height="200"><g id="a"></g>
+                <g id="b" transform="translate(40,50)"><g id="c"></g><path id="d" d=""/></g></svg>
+            </body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(800.0, 600.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"["a", "b", "c", "d"].map((id) => {
+                    const r = document.getElementById(id).getBoundingClientRect();
+                    return [r.x, r.y, r.width, r.height];
+                })"##,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!([
+                [0, 30, 0, 0],
+                [40, 80, 0, 0],
+                [40, 80, 0, 0],
+                [40, 80, 0, 0]
+            ])
+        );
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn svg_text_bbox_uses_font_metrics_and_dy() {
+        // Chrome: a d3 tick label <text y="9" dy="0.71em">0</text> at 10px
+        // sans-serif has bbox y 7.1 (9 + 7.1 - ascent 9) and height 11
+        // (ascent 9 + descent 2); <defs> itself has no rect.
+        let dom = parse_html(
+            r##"<html><body style="margin:0"><svg width="300" height="200">
+                <defs id="d"><circle r="3"/></defs>
+                <g font-size="10" font-family="sans-serif"><text id="t" y="9" dy="0.71em">0</text></g>
+            </svg></body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(800.0, 600.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"(() => {
+                    const b = document.getElementById("t").getBBox();
+                    const d = document.getElementById("d").getBoundingClientRect();
+                    return [Math.round(b.y * 10) / 10, b.height, [d.x, d.y, d.width, d.height]];
+                })()"##,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!([7.1, 11, [0, 0, 0, 0]]));
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
     async fn nested_svg_content_rects_come_from_svg_geometry() {
         // Chrome: a nested <svg> (as d3 appends one) and its shapes report
         // their geometry in the outer <svg>'s viewport, (40.5, 40.5, 420, 5.5).
@@ -18805,6 +18936,31 @@ mod tests {
                 .unwrap() as i64,
             1
         );
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn svg_image_without_size_uses_natural_size_and_mask_content_has_no_rect() {
+        // Chrome: <image href> with no width/height is the image's natural
+        // size (css3_masking_svg: 600x400); one given axis scales the other
+        // by the natural ratio; a shape inside <mask> reports a zero rect.
+        let mut rt = parser_image_runtime(
+            r##"<html><body style="margin:0"><svg width="600" height="400">
+                <mask id="m"><circle id="c" r="5" cx="10" cy="10" fill="#fff"/></mask>
+                <image id="a" href="p.png" mask="url(#m)"/>
+                <image id="b" href="p.png" width="20"/>
+            </svg></body></html>"##,
+            |url: &str| (url == "http://example.com/page/p.png").then(two_by_three_png),
+        );
+        let result = rt
+            .evaluate(
+                r##"["a", "b", "c"].map((id) => {
+                    const r = document.getElementById(id).getBoundingClientRect();
+                    return [r.width, r.height];
+                })"##,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!([[2, 3], [20, 30], [0, 0]]));
     }
 
     #[cfg(feature = "render")]
