@@ -552,6 +552,10 @@ fn encode_long_full_page_png(
 /// hatch for callers investigating a slow or missing asset.
 #[cfg(feature = "render")]
 pub(crate) async fn prepare_capture_resources_if_requested(page: &mut obscura_browser::Page) {
+    // Text in a web font that is still loading is not painted with a
+    // fallback (Chromium's block period), so a screenshot does not depend on
+    // network timing.
+    page.wait_for_web_fonts(3_000).await;
     let Some(deadline_ms) = std::env::var("OBSCURA_RENDER_RESOURCE_DEADLINE_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())

@@ -8364,6 +8364,7 @@ pub fn build_extension() -> Extension {
         ops.push(op_resize_observer_measurements());
         ops.push(op_intersection_observer_measurements());
         ops.push(op_measure_text());
+        ops.push(op_font_face_states());
         ops.push(op_computed_style());
         ops.push(op_set_hovered());
         ops.push(op_css_supports());
@@ -9680,6 +9681,94 @@ fn op_resize_observer_measurements(
 /// a separate retained-layout rebuild.
 ///
 /// Results are index-aligned with the input. A `null` entry means that the node
+/// FontFace status of CSS-connected faces from what the renderer did:
+/// `[{"family", "urls": [absolute...]}]` -> `["loaded"|"loading"|"error"|
+/// "unloaded", ...]`. A face is loaded when the renderer holds bytes for
+/// one of its sources and the last layout used its family (Chrome loads a
+/// face only when text needs it), loading while a source is in flight,
+/// error when every source failed.
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_font_face_states(state: &OpState, #[string] faces: String, frame_id: u32) -> String {
+    #[derive(serde::Deserialize)]
+    struct Face {
+        family: String,
+        urls: Vec<String>,
+    }
+    let Ok(faces) = serde_json::from_str::<Vec<Face>>(&faces) else {
+        return "[]".into();
+    };
+    let shared = frame_state(state, frame_id);
+    let state = shared.borrow();
+    let normalize = |family: &str| {
+        family
+            .trim()
+            .trim_matches(|c| c == '"' || c == '\'')
+            .trim()
+            .to_ascii_lowercase()
+    };
+    let used: std::collections::HashSet<String> = state
+        .prepared_render
+        .as_ref()
+        .map(|prepared| {
+            let mut used = std::collections::HashSet::new();
+            // The first declared web font family of each element's list:
+            // later families are only fallbacks Chrome loads on demand.
+            let declared: std::collections::HashSet<String> =
+                faces.iter().map(|face| normalize(&face.family)).collect();
+            for style in prepared.layout().styles.values() {
+                if let Some(families) = style.font_family.as_deref() {
+                    if let Some(family) = families
+                        .split(',')
+                        .map(normalize)
+                        .find(|family| declared.contains(family))
+                    {
+                        used.insert(family);
+                    }
+                }
+            }
+            used
+        })
+        .unwrap_or_default();
+    let in_flight = |url: &str| {
+        state
+            .render_resource_in_flight
+            .iter()
+            .any(|(pending, _, is_font)| *is_font && pending == url)
+    };
+    let statuses: Vec<&str> = faces
+        .iter()
+        .map(|face| {
+            if face.urls.iter().any(|url| in_flight(url)) {
+                return "loading";
+            }
+            let loaded = face
+                .urls
+                .iter()
+                .any(|url| state.render_resources.has_cached_bytes(url));
+            if loaded {
+                return if used.contains(&normalize(&face.family)) {
+                    "loaded"
+                } else {
+                    "unloaded"
+                };
+            }
+            let failed = !face.urls.is_empty()
+                && face
+                    .urls
+                    .iter()
+                    .all(|url| state.render_resources.has_live_outcome(url));
+            if failed && used.contains(&normalize(&face.family)) {
+                "error"
+            } else {
+                "unloaded"
+            }
+        })
+        .collect();
+    serde_json::to_string(&statuses).unwrap_or_else(|_| "[]".into())
+}
+
 /// Advance width of `text` in the canvas `font` shorthand, measured with the
 /// renderer's fonts (CanvasRenderingContext2D.measureText).
 #[cfg(feature = "render")]

@@ -18686,6 +18686,7 @@ if (typeof FontFace === 'undefined') {
   const _fontFaceDescriptor = (descriptors, name, fallback) =>
     descriptors && descriptors[name] !== undefined ? String(descriptors[name]) : fallback;
   const _fontFaceDeclarations = block => {
+    block = block.replace(/\/\*[\s\S]*?\*\//g, '');
     const declarations = Object.create(null);
     let start = 0, depth = 0, quote = '', escaped = false;
     const commit = end => {
@@ -18716,20 +18717,22 @@ if (typeof FontFace === 'undefined') {
     const texts = [];
     for (const owner of doc.querySelectorAll('style, link[rel~="stylesheet" i]')) {
       if (owner.localName === 'style') {
-        texts.push(owner.textContent || '');
+        texts.push({ css: owner.textContent || '', base: doc.baseURI });
         continue;
       }
       if (typeof __obscuraCore.ops.op_external_stylesheet_get !== 'function') continue;
       try {
         const sheet = JSON.parse(__obscuraCore.ops.op_external_stylesheet_get(owner._nid, _realmFrameId));
-        if (sheet && sheet.originClean && typeof sheet.css === 'string') texts.push(sheet.css);
+        if (sheet && sheet.originClean && typeof sheet.css === 'string') {
+          texts.push({ css: sheet.css, base: owner.href || doc.baseURI });
+        }
       } catch (_) {}
     }
     return texts;
   };
   const _fontFaceAuthoredRules = doc => {
     const out = [];
-    for (const css of _authoredStyleSheetTexts(doc)) {
+    for (const { css, base } of _authoredStyleSheetTexts(doc)) {
       const pattern = /@font-face\s*\{([\s\S]*?)\}/gi;
       let match;
       while ((match = pattern.exec(css))) {
@@ -18740,6 +18743,7 @@ if (typeof FontFace === 'undefined') {
         out.push({
           family,
           source,
+          base,
           descriptors: {
             style: declarations['font-style'] || 'normal',
             weight: declarations['font-weight'] || 'normal',
@@ -18829,6 +18833,7 @@ if (typeof FontFace === 'undefined') {
       Promise.resolve().then(() => {
         if (this._status !== 'loading') return;
         this._status = 'loaded';
+        this._scriptLoaded = true;
         this._resolveLoaded?.(this);
         this._changed();
       });
@@ -18867,9 +18872,70 @@ if (typeof FontFace === 'undefined') {
       this.onloadingerror = null;
       if (initialFaces != null) for (const face of initialFaces) this.add(face);
     }
-    get status() { return this._status; }
-    get ready() { return this._readyPromise; }
+    get status() { this._discoverCssFaces(); this._syncCssFaceStatus(); return this._status; }
+    get ready() {
+      this._discoverCssFaces();
+      this._syncCssFaceStatus();
+      if (this._status === 'loading' && !this._scriptLoading) {
+        if (!this._readyPending) {
+          this._readyPending = true;
+          this._readyPromise = new Promise(resolve => { this._resolveReady = value => { this._readyPending = false; resolve(value); }; });
+          // Poll the renderer while its loads are in flight.
+          const poll = () => {
+            this._syncCssFaceStatus();
+            if (this._status === 'loading') setTimeout(poll, 50);
+          };
+          setTimeout(poll, 50);
+        }
+      }
+      return this._readyPromise;
+    }
     get size() { this._discoverCssFaces(); return this._faces.size; }
+    // CSS-connected faces report what the renderer fetched and used.
+    _syncCssFaceStatus() {
+      if (!this._cssFaces.size || typeof __obscuraCore.ops.op_font_face_states !== 'function') return;
+      const all = Array.from(this._cssFaces.values());
+      const faces = all.filter(face => face._status !== 'loaded' || !face._scriptLoaded);
+      // Of several faces for one family, weight and style, the last one
+      // declared serves the text (an earlier one stays unloaded in Chrome).
+      const facetKey = face => [face.family.toLowerCase(), face.weight, face.style].join('|');
+      const lastFace = new Map();
+      for (const face of all) lastFace.set(facetKey(face), face);
+      let states = [];
+      try {
+        states = JSON.parse(__obscuraCore.ops.op_font_face_states(JSON.stringify(
+          faces.map(face => ({ family: face.family, urls: face._cssUrls || [] }))), _realmFrameId));
+      } catch (_) { return; }
+      const changed = [];
+      faces.forEach((face, index) => {
+        let next = states[index];
+        if (lastFace.get(facetKey(face)) !== face && next !== 'loading') next = 'unloaded';
+        if (!next || face._scriptLoaded || next === face._status) return;
+        // A face never goes back to unloaded once it started.
+        if (next === 'unloaded' && face._status !== 'unloaded') return;
+        face._status = next;
+        if (next === 'loaded') face._resolveLoaded?.(face);
+        if (next === 'error') face._rejectLoaded?.(new DOMException('A network error occurred.', 'NetworkError'));
+        if (!face._loadedPromise && next === 'loaded') face._loadedPromise = Promise.resolve(face);
+        changed.push(face);
+      });
+      if (changed.length) this._faceSetChanged();
+    }
+    _faceSetChanged() {
+      const loading = Array.from(this._faces).filter(face => face.status === 'loading');
+      if (loading.length && this._status !== 'loading') {
+        this._status = 'loading';
+        this._dispatch('loading', loading);
+      }
+      if (!loading.length && this._status === 'loading') {
+        this._status = 'loaded';
+        const done = Array.from(this._faces).filter(face => face.status === 'loaded');
+        this._dispatch('loadingdone', done);
+        const errors = Array.from(this._faces).filter(face => face.status === 'error');
+        if (errors.length) this._dispatch('loadingerror', errors);
+        this._resolveReady?.(this);
+      }
+    }
     _discoverCssFaces() {
       if (!this._ownerDocument) return;
       const retained = new Set();
@@ -18880,6 +18946,13 @@ if (typeof FontFace === 'undefined') {
         try {
           const face = new FontFace(rule.family, rule.source, rule.descriptors);
           face._cssConnected = true;
+          face._cssUrls = [];
+          // Absolute source URLs from the normalized source text.
+          for (let at = face._source.indexOf('url('); at >= 0; at = face._source.indexOf('url(', at + 4)) {
+            let value = face._source.slice(at + 4, face._source.indexOf(')', at)).trim();
+            value = value.split('\\').join('').replace(/^['"]|['"]$/g, '');
+            try { face._cssUrls.push(new URL(value, rule.base || this._ownerDocument.baseURI).href); } catch (_) { face._cssUrls.push(value); }
+          }
           face._sets.add(this);
           this._cssFaces.set(key, face);
           this._faces.add(face);
@@ -18919,8 +18992,10 @@ if (typeof FontFace === 'undefined') {
       this._syncNative();
       if (face.status === 'loading' && this._status !== 'loading') {
         this._status = 'loading';
+        this._scriptLoading = true;
         const pending = Array.from(this._faces).filter(candidate => candidate.status === 'loading');
         this._readyPromise = Promise.all(pending.map(candidate => candidate.loaded)).then(() => {
+          this._scriptLoading = false;
           this._status = 'loaded';
           this._dispatch('loadingdone', Array.from(this._faces));
           return this;
@@ -18941,6 +19016,7 @@ if (typeof FontFace === 'undefined') {
     check(font, text=' ') {
       void String(text);
       this._discoverCssFaces();
+      this._syncCssFaceStatus();
       const selection = _fontFaceSelection(font);
       const matches = Array.from(this._faces).filter(face => _fontFaceMatches(face, selection));
       return matches.length === 0 || matches.every(face => face.status === 'loaded');
@@ -18970,12 +19046,13 @@ if (typeof FontFace === 'undefined') {
     forEach(callback, thisArg=undefined) {
       if (typeof callback !== 'function') throw new TypeError('FontFaceSet.forEach callback must be callable');
       this._discoverCssFaces();
+      this._syncCssFaceStatus();
       for (const face of this._faces) callback.call(thisArg, face, face, this);
     }
     has(face) { this._discoverCssFaces(); return this._faces.has(face); }
     entries() { this._discoverCssFaces(); return Array.from(this._faces, face => [face, face])[Symbol.iterator](); }
     keys() { this._discoverCssFaces(); return Array.from(this._faces).values(); }
-    values() { this._discoverCssFaces(); return Array.from(this._faces).values(); }
+    values() { this._discoverCssFaces(); this._syncCssFaceStatus(); return Array.from(this._faces).values(); }
     [Symbol.iterator]() { return this.values(); }
   };
   Object.defineProperty(Document.prototype, 'fonts', {

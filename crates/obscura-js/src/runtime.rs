@@ -2844,6 +2844,16 @@ impl ObscuraJsRuntime {
         !self.state.borrow().render_resource_in_flight.is_empty()
     }
 
+    /// Whether a web font this document requested is still loading.
+    #[cfg(feature = "render")]
+    pub fn has_pending_font_resources(&self) -> bool {
+        self.state
+            .borrow()
+            .render_resource_in_flight
+            .iter()
+            .any(|(_, _, is_font)| *is_font)
+    }
+
     /// Apply every finished page-transport load without waiting. Called at
     /// the runtime's own event-loop turns and promise waits and by the page
     /// around protocol commands, so late bytes reach layout, paint and the

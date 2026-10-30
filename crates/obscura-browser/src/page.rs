@@ -4136,6 +4136,9 @@ impl Page {
             }
         }
 
+        // The load event waits for web fonts requested before it (bounded
+        // by Chromium's 3s font block period).
+        self.wait_for_web_fonts(3_000).await;
         tracing::debug!(target: "obscura_browser::timing", "load at {}ms", phase_started.elapsed().as_millis());
         self.lifecycle = LifecycleState::Loaded;
 
@@ -4500,6 +4503,41 @@ impl Page {
             .as_ref()
             .is_some_and(|js| js.has_pending_render_resources())
     }
+
+    /// Wait up to `max_ms` for this document's web fonts that are loading.
+    /// Chromium blocks text in a loading font (font-display auto/block) for
+    /// up to 3s and holds the load event for fonts requested before it, so
+    /// layout, paint and the load event see the downloaded face rather
+    /// than a fallback that depends on network timing.
+    #[cfg(feature = "render")]
+    pub async fn wait_for_web_fonts(&mut self, max_ms: u64) {
+        let Some(notify) = self.js.as_ref().map(|js| js.render_resource_notify()) else {
+            return;
+        };
+        // Start loads for what layout has asked for so far.
+        self.queue_pending_render_resources();
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(max_ms);
+        loop {
+            let notified = notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            self.drain_render_resource_results();
+            let pending = self
+                .js
+                .as_ref()
+                .is_some_and(|js| js.has_pending_font_resources());
+            if !pending {
+                break;
+            }
+            if tokio::time::timeout_at(deadline, notified).await.is_err() {
+                self.drain_render_resource_results();
+                break;
+            }
+        }
+    }
+
+    #[cfg(not(feature = "render"))]
+    pub async fn wait_for_web_fonts(&mut self, _max_ms: u64) {}
 
     /// Seed the renderer cache through the owning page transport and wait up
     /// to `max_ms` for the results. This removes serial image/font HTTP from
