@@ -6496,6 +6496,24 @@ fn paint_laid_dom_scrolled(
         if !paints_inline_fragments {
             paint_css_border(&mut pixmap, &rect, style, element_clip_mask, raster_scale);
         }
+        // Multicol column rules sit between the columns, over the
+        // container's background (CSS Multi-column 1 §4).
+        if let Some(rules) = laid.column_rules.get(&nid) {
+            for (rule, color) in rules {
+                if let Some(shape) =
+                    tiny_skia::Rect::from_xywh(rule.x, rule.y, rule.width, rule.height)
+                {
+                    let mut paint = Paint::default();
+                    paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
+                    pixmap.fill_rect(
+                        shape,
+                        &paint,
+                        raster_transform(raster_scale),
+                        element_clip_mask,
+                    );
+                }
+            }
+        }
         paint_css_outline(&mut pixmap, &rect, style, element_clip_mask, raster_scale);
 
         if box_on_surface && matches!(name.local.as_ref(), "img" | "video") {

@@ -1834,6 +1834,10 @@ pub struct LayoutStyle {
     /// `column-span: all`: the box spans every column of its multicol
     /// container, splitting the column flow above and below it.
     pub column_span_all: bool,
+    /// `column-rule-width` (px; medium = 3) / `-style` / `-color`.
+    pub column_rule_width: Option<f32>,
+    pub column_rule_style: Option<BorderStyle>,
+    pub column_rule_color: Option<[u8; 4]>,
     /// `column-width` in px: the used column count follows the container's
     /// width (CSS Multi-column 1 §3.4).
     pub column_width: Option<f32>,

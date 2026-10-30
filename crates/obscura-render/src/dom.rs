@@ -282,6 +282,9 @@ pub struct DomLayout {
     /// this list is the source for background/border painting and
     /// `getClientRects()` as wrapping support is extended.
     pub inline_fragments: HashMap<NodeId, Vec<Rect>>,
+    /// Multicol `column-rule` segments to paint over each container:
+    /// (rect, color), between columns that hold content.
+    pub column_rules: HashMap<NodeId, Vec<(Rect, [u8; 4])>>,
     pub styles: HashMap<NodeId, crate::LayoutStyle>,
     /// Computed custom properties in force for each element. Values are
     /// reference-counted because the overwhelmingly common case is inheritance
@@ -6481,6 +6484,7 @@ fn layout_dom_once(
     let mut fractional_sizes = HashMap::new();
     let mut fractional_rects = HashMap::new();
     let mut inline_fragments = HashMap::new();
+    let mut column_rules: HashMap<NodeId, Vec<(Rect, [u8; 4])>> = HashMap::new();
     let mut text_runs = HashMap::new();
     let mut generated_rects: Vec<Option<Rect>> = Vec::new();
     if let Some(root_id) = root {
@@ -9374,6 +9378,72 @@ fn layout_dom_once(
             );
             // A box split across columns: its client rects are its column
             // fragments and its bounding box their union (CSSOM View).
+            let (multicol_fragments, multicol_used) = multicol_fragments;
+            for &(set_index, used) in &multicol_used {
+                let Some(set) = ifc_items.multicol.get(set_index) else {
+                    continue;
+                };
+                let Some(&first) = set.columns.first() else {
+                    continue;
+                };
+                // The rule belongs to the multicol container: the column set,
+                // or its parent when spanners split the flow into sets.
+                let Some(set_node) = taffy_tree.parent(first) else {
+                    continue;
+                };
+                let container = id_map.get(&set_node).copied().or_else(|| {
+                    taffy_tree
+                        .parent(set_node)
+                        .and_then(|p| id_map.get(&p).copied())
+                });
+                let Some(container) = container else {
+                    continue;
+                };
+                let Some(style) = styles.get(&container) else {
+                    continue;
+                };
+                let rule_style = style.column_rule_style.unwrap_or(crate::BorderStyle::None);
+                if !rule_style.is_visible() {
+                    continue;
+                }
+                let width = style
+                    .column_rule_width
+                    .unwrap_or(crate::border::MEDIUM_BORDER_WIDTH);
+                if width <= 0.0 {
+                    continue;
+                }
+                let color = style
+                    .column_rule_color
+                    .or(style.color)
+                    .unwrap_or([0, 0, 0, 255]);
+                let columns: Vec<Rect> = set.columns[..used.min(set.columns.len())]
+                    .iter()
+                    .filter_map(|column| {
+                        let (x, y) = taffy_unrounded_global_origin(&taffy_tree, *column)?;
+                        let layout = taffy_tree.unrounded_layout(*column);
+                        Some(Rect {
+                            x: x + initial_cb_x,
+                            y,
+                            width: layout.size.width,
+                            height: layout.size.height,
+                        })
+                    })
+                    .collect();
+                let height = columns.first().map_or(0.0, |c| c.height);
+                for pair in columns.windows(2) {
+                    let middle = (pair[0].x + pair[0].width + pair[1].x) / 2.0;
+                    column_rules.entry(container).or_default().push((
+                        // Snapped to whole pixels like Chrome's rule paint.
+                        Rect {
+                            x: (middle - width / 2.0).round(),
+                            y: pair[0].y.round(),
+                            width: width.round().max(1.0),
+                            height: height.round(),
+                        },
+                        color,
+                    ));
+                }
+            }
             for (node, parts) in &multicol_fragments {
                 let Some(&dom) = id_map.get(node) else {
                     continue;
@@ -9577,6 +9647,7 @@ fn layout_dom_once(
             fractional_sizes,
             fractional_rects,
             inline_fragments,
+            column_rules,
             styles,
             custom_properties,
             clip_rects,
@@ -11762,7 +11833,11 @@ fn apply_multicol_column_heights(
 
 /// A box split across columns: its fragments as (dx, dy, top, bottom)
 /// relative to its unmoved border box.
-pub(crate) type MulticolFragments = Vec<(taffy::NodeId, Vec<(f32, f32, f32, f32)>)>;
+pub(crate) type MulticolFragments = (
+    Vec<(taffy::NodeId, Vec<(f32, f32, f32, f32)>)>,
+    // (column set's first column, columns holding content)
+    Vec<(usize, usize)>,
+);
 
 /// Move the pieces of every breakable multicol flow into their columns:
 /// the column `k` piece moves right by k column widths plus gaps and up by
@@ -11777,7 +11852,8 @@ fn apply_multicol_fragmentation(
     styles: &HashMap<NodeId, crate::LayoutStyle>,
 ) -> MulticolFragments {
     let mut fragments = Vec::new();
-    for set in multicol.iter().filter(|set| set.flow) {
+    let mut used = Vec::new();
+    for (set_index, set) in multicol.iter().enumerate().filter(|(_, set)| set.flow) {
         let (Some(&first), Some(&second)) = (set.columns.first(), set.columns.get(1)) else {
             continue;
         };
@@ -11792,6 +11868,7 @@ fn apply_multicol_fragmentation(
             continue;
         }
         let (starts, _) = multicol_fill(&pieces, height + 0.01);
+        used.push((set_index, starts.len()));
         let mut column_of = vec![0usize; pieces.len()];
         let mut column_top = Vec::with_capacity(starts.len());
         for (column, start) in starts.iter().enumerate() {
@@ -11888,7 +11965,7 @@ fn apply_multicol_fragmentation(
             }
         }
     }
-    fragments
+    (fragments, used)
 }
 
 /// Baseline-aligned table cells (CSS 2 17.5.3): in each row, every cell with
@@ -16694,11 +16771,11 @@ fn build(
             ..Default::default()
         };
         let fill_auto = style.column_fill_auto && matches!(style.height, crate::Dimension::Px(_));
-        let mut make_set = |taffy_tree: &mut TaffyTree<usize>,
-                            ifc_items: &mut IfcRegistry,
-                            children: Vec<taffy::NodeId>,
-                            ifc: Option<usize>,
-                            style_for_set: Option<taffy::Style>|
+        let make_set = |taffy_tree: &mut TaffyTree<usize>,
+                        ifc_items: &mut IfcRegistry,
+                        children: Vec<taffy::NodeId>,
+                        ifc: Option<usize>,
+                        style_for_set: Option<taffy::Style>|
          -> Option<taffy::NodeId> {
             let first = if let Some(index) = ifc {
                 let leaf = taffy_tree.new_leaf(column_style.clone()).ok()?;
@@ -21791,6 +21868,30 @@ mod tests {
         assert_eq!(heights("a"), vec![70.0, 70.0, 70.0, 40.0]);
         assert_eq!(heights("b"), vec![20.0, 70.0, 70.0, 70.0, 40.0]);
         assert_eq!(heights("c"), vec![20.0, 70.0, 70.0, 70.0, 60.0]);
+    }
+
+    #[test]
+    fn multicol_column_rules_sit_between_filled_columns() {
+        // Chrome paints a 4px red rule at x 191..195 and 405..409, the
+        // column height (140) tall, for three 173.33px columns 40px apart.
+        let text = "Lorem ipsum dolor sit amet, consectetuer adipiscing elit, sed diam nonummy nibh euismod tincidunt ut laoreet dolore magna aliquam erat volutpat.";
+        let tree = parse_html(&format!(
+            "<html><body style=\"margin:0;font:16px/20px Arial\"><div id=m style=\"width:600px;columns:3;\
+             column-gap:40px;column-rule:4px solid rgb(255,0,0)\">{text} {text} {text}</div></body></html>"
+        ));
+        let laid = layout_dom(&tree, (800.0, 300.0));
+        let rules = &laid.column_rules[&tree.get_element_by_id("m").unwrap()];
+        let got: Vec<(f32, f32, f32, f32, [u8; 4])> = rules
+            .iter()
+            .map(|(r, c)| (r.x, r.y, r.width, r.height, *c))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (191.0, 0.0, 4.0, 140.0, [255, 0, 0, 255]),
+                (405.0, 0.0, 4.0, 140.0, [255, 0, 0, 255])
+            ]
+        );
     }
 
     #[test]
