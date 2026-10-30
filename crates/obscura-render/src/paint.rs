@@ -1664,8 +1664,6 @@ impl PreparedRender {
         })
     }
 
-    /// Axis-aligned bounds of the transformed border box in immutable document
-    /// space, excluding root-scroll and sticky movement.
     /// Advance width, ascent and descent of `text` in this document's fonts
     /// (web fonts included, with their whole-pixel advances) at
     /// `font_size` px: (width, ascent, descent).
@@ -1703,6 +1701,8 @@ impl PreparedRender {
         Some((width, ascent, descent))
     }
 
+    /// Axis-aligned bounds of the transformed border box in immutable document
+    /// space, excluding root-scroll and sticky movement.
     pub fn document_rect(&self, id: obscura_dom::tree::NodeId) -> Option<crate::Rect> {
         let rect = *self.layout.rects.get(&id)?;
         Some(self.layout.transformed_rect(id, rect))
@@ -9612,9 +9612,6 @@ fn draw_text_pixels(
     }
 }
 
-/// Resolve `src` (a `data:` URI, or an absolute/relative URL against
-/// `base_url`) to raw bytes, fetching over the network at most once per
-/// distinct URL through the retained resource cache.
 /// Natural size of the image at `src` when its bytes are already in the
 /// page's resource cache (an SVG `<image>` without width/height uses it).
 pub fn cached_image_natural_size(
@@ -9625,6 +9622,9 @@ pub fn cached_image_natural_size(
     image_intrinsic_dimensions(&fetch_bytes(src, base_url, cache)?)
 }
 
+/// Resolve `src` (a `data:` URI, or an absolute/relative URL against
+/// `base_url`) to raw bytes, fetching over the network at most once per
+/// distinct URL through the retained resource cache.
 fn fetch_bytes(
     src: &str,
     base_url: Option<&str>,
