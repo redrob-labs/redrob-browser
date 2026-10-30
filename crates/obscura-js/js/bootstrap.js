@@ -17176,15 +17176,35 @@ const _svgLocalBounds = (el) => {
       const family = svgAttr('font-family') || cs.fontFamily || 'sans-serif';
       const weight = svgAttr('font-weight') || cs.fontWeight || '400';
       const text = el.textContent || '';
-      const x = _svgNum(el, 'x'), y = _svgNum(el, 'y');
-      let w = text.length * size * 0.55;
+      // dx/dy shift the text (d3 axes place tick labels with dy="0.71em").
+      const shift = (name) => {
+        const v = String(el.getAttribute(name) || '').trim().split(/[\s,]+/)[0] || '';
+        const n = parseFloat(v);
+        if (!Number.isFinite(n)) return 0;
+        return /em$/.test(v) ? n * size : n;
+      };
+      const x = _svgNum(el, 'x') + shift('dx'), y = _svgNum(el, 'y') + shift('dy');
+      let w = text.length * size * 0.55, ascent = size * 0.9, descent = size * 0.25;
+      // The document's own fonts (web fonts included), so the box spans the
+      // font's ascent and descent like Chrome's text bounding box.
+      let run = null;
       try {
-        const ctx = (globalThis.__obscuraSvgMeasure ||= document.createElement('canvas').getContext('2d'));
-        if (ctx) { ctx.font = `${weight} ${size}px ${family}`; w = ctx.measureText(text).width; }
-      } catch (_e) {}
+        if (typeof __obscuraCore.ops.op_text_run_metrics === 'function') {
+          run = JSON.parse(__obscuraCore.ops.op_text_run_metrics(text, String(family), String(weight),
+            /italic|oblique/.test(cs.fontStyle || ''), size, 0));
+        }
+      } catch (_e) { run = null; }
+      if (Array.isArray(run)) {
+        [w, ascent, descent] = run;
+      } else {
+        try {
+          const ctx = (globalThis.__obscuraSvgMeasure ||= document.createElement('canvas').getContext('2d'));
+          if (ctx) { ctx.font = `${weight} ${size}px ${family}`; w = ctx.measureText(text).width; }
+        } catch (_e) {}
+      }
       const anchor = svgAttr('text-anchor') || cs.textAnchor;
       const left = anchor === 'middle' ? x - w / 2 : anchor === 'end' ? x - w : x;
-      return [left, y - size * 0.9, left + w, y + size * 0.25];
+      return [left, y - ascent, left + w, y + descent];
     }
     case 'use': {
       const ref = el.getAttribute('href') || el.getAttributeNS?.('http://www.w3.org/1999/xlink', 'href');
@@ -17224,6 +17244,7 @@ const _SVG_UNRENDERED = new Set(['defs', 'mask', 'clipPath', 'pattern', 'marker'
   'radialGradient', 'filter', 'symbol']);
 // Screen rect of an SVG descendant, from its outermost <svg> box.
 const _svgClientRect = (el) => {
+  if (_SVG_UNRENDERED.has(el.localName)) return null;
   let outer = null;
   const chain = [];
   for (let p = el.parentElement; p; p = p.parentElement) {

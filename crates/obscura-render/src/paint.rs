@@ -1666,6 +1666,43 @@ impl PreparedRender {
 
     /// Axis-aligned bounds of the transformed border box in immutable document
     /// space, excluding root-scroll and sticky movement.
+    /// Advance width, ascent and descent of `text` in this document's fonts
+    /// (web fonts included, with their whole-pixel advances) at
+    /// `font_size` px: (width, ascent, descent).
+    pub fn measure_text_run(
+        &mut self,
+        tree: &DomTree,
+        text: &str,
+        family: &str,
+        weight: &str,
+        italic: bool,
+        font_size: f32,
+    ) -> Option<(f32, f32, f32)> {
+        let mut style = crate::LayoutStyle {
+            font_family: Some(family.to_string()),
+            font_weight: Some(weight.to_string()),
+            font_size: Some(font_size),
+            font_style_italic: Some(italic),
+            white_space: Some(crate::WhiteSpace::Pre),
+            ..Default::default()
+        };
+        style.line_height = Some(crate::LineHeight::Normal);
+        let owner = tree.document();
+        let store = &mut self.layout.ifc;
+        let before = store.len();
+        let (index, width, _) =
+            store.standalone(tree, &self.layout.styles, owner, &style, text, None)?;
+        let metrics = store
+            .get(index)
+            .and_then(|ifc| ifc.layout.root_span_metrics())
+            .map(|metrics| (metrics.ascent, metrics.descent));
+        while store.len() > before {
+            store.ifcs.pop();
+        }
+        let (ascent, descent) = metrics?;
+        Some((width, ascent, descent))
+    }
+
     pub fn document_rect(&self, id: obscura_dom::tree::NodeId) -> Option<crate::Rect> {
         let rect = *self.layout.rects.get(&id)?;
         Some(self.layout.transformed_rect(id, rect))

@@ -8365,6 +8365,7 @@ pub fn build_extension() -> Extension {
         ops.push(op_resize_observer_measurements());
         ops.push(op_intersection_observer_measurements());
         ops.push(op_measure_text());
+        ops.push(op_text_run_metrics());
         ops.push(op_svg_image_natural_size());
         ops.push(op_font_face_states());
         ops.push(op_computed_style());
@@ -9853,6 +9854,41 @@ fn op_svg_image_natural_size(state: &OpState, #[string] href: String, frame_id: 
             || "null".to_string(),
             |(width, height)| serde_json::json!([width, height]).to_string(),
         )
+}
+
+/// `[width, ascent, descent]` of `text` in the document's fonts (web fonts
+/// included) at `size` px, or `null`.
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_text_run_metrics(
+    state: &OpState,
+    #[string] text: String,
+    #[string] family: String,
+    #[string] weight: String,
+    italic: bool,
+    size: f64,
+    frame_id: u32,
+) -> String {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let shared = frame_state(state, frame_id);
+        let mut gs = shared.borrow_mut();
+        ensure_prepared_render(&mut gs)?;
+        let gs = &mut *gs;
+        let dom = gs.dom.as_ref()?;
+        let (width, ascent, descent) = gs.prepared_render.as_mut()?.measure_text_run(
+            dom,
+            &text,
+            &family,
+            &weight,
+            italic,
+            size as f32,
+        )?;
+        Some(serde_json::json!([width, ascent, descent]).to_string())
+    }))
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| "null".into())
 }
 
 /// currently generates no layout box (for example, it is detached or hidden).
