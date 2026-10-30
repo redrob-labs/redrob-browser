@@ -17,6 +17,7 @@
 use taffy::prelude::*;
 
 pub mod css;
+pub mod video_header;
 
 /// Opt-in layout profiling counters, printed with `OBSCURA_RENDER_TIMING`.
 #[doc(hidden)]

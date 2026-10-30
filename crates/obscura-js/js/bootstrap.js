@@ -7922,7 +7922,7 @@ class HTMLMediaElement extends HTMLElement {
     globalThis.__redrobMediaUpdate(m.id, {
       currentTime: m.currentTime,
       duration: info.duration == null ? Infinity : info.duration,
-      width: info.width, height: info.height, readyState: 4,
+      width: info.width, height: info.height, readyState: info.metadataOnly ? 1 : 4,
       paused: m.paused, ended: false,
     });
     return true;

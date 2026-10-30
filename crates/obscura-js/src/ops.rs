@@ -9637,7 +9637,19 @@ fn op_video_frame_metadata(state: &OpState, nid: u32, time: f64, frame_id: u32) 
             "hasAudio": frame.has_audio,
         })
         .to_string(),
-        None => String::new(),
+        // No decoder (or not decodable): the container header still gives
+        // the natural size, so metadata is known (HAVE_METADATA).
+        None => match gs.render_resources.video_header_dimensions(&url) {
+            Some((width, height)) => serde_json::json!({
+                "width": width,
+                "height": height,
+                "duration": serde_json::Value::Null,
+                "hasAudio": false,
+                "metadataOnly": true,
+            })
+            .to_string(),
+            None => String::new(),
+        },
     }
 }
 

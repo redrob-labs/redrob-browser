@@ -628,6 +628,14 @@ impl RenderResourceCache {
         }
     }
 
+    /// The natural size a video at `url` declares in its container header,
+    /// read from the cached bytes (a cache-only miss requests them). Needs
+    /// no decoder.
+    pub fn video_header_dimensions(&mut self, url: &str) -> Option<(f32, f32)> {
+        let bytes = self.get_or_load(url, false)?;
+        crate::video_header::video_dimensions(&bytes)
+    }
+
     /// The frame a paused video at `url` shows at `time`, decoding it from
     /// the media bytes once they are cached (a cache-only miss requests
     /// them). None until then, or when the media does not decode.
@@ -12730,9 +12738,9 @@ fn collect_image_intrinsics(
                     .map(|poster| Source::VideoPoster(poster.to_owned()))
                     .or_else(|| {
                         // Without a poster a paused video shows its frame at
-                        // the playback position.
-                        if !cfg!(feature = "media") || node.get_attribute("preload") == Some("none")
-                        {
+                        // the playback position; without a decoder its header
+                        // still gives the natural size.
+                        if node.get_attribute("preload") == Some("none") {
                             return None;
                         }
                         video_source_url(tree, nid).map(Source::VideoFrame)
@@ -12755,6 +12763,13 @@ fn collect_image_intrinsics(
                 };
                 let time = cache.video_time(nid);
                 let Some(frame) = cache.video_frame(&media_url, time) else {
+                    // Chrome sizes the box from the metadata alone.
+                    if let Some((width, height)) = cache.video_header_dimensions(&media_url) {
+                        out.insert(
+                            nid,
+                            crate::ReplacedIntrinsic::from_dimensions(width, height),
+                        );
+                    }
                     continue;
                 };
                 (frame.data_url.to_string(), 1.0)
