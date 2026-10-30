@@ -1914,6 +1914,14 @@ pub struct LayoutStyle {
     pub cursor: Option<Cursor>,
     /// `opacity`, own (non-inherited) value in 0.0-1.0. `None` means the
     /// default of 1.0.
+    /// Specified `filter` and `backdrop-filter` text (`None` is `none`),
+    /// for CSSOM. Paint uses `backdrop_blur`.
+    pub filter_css: Option<String>,
+    pub backdrop_filter_css: Option<String>,
+    /// The blur radius (px) of a `backdrop-filter: blur(...)`.
+    pub backdrop_blur: Option<f32>,
+    /// `isolation: isolate`.
+    pub isolation_isolate: bool,
     /// `mix-blend-mode`; `None` is `normal`.
     pub mix_blend_mode: Option<MixBlendMode>,
     pub opacity: Option<f32>,

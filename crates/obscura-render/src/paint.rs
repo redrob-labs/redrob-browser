@@ -2996,6 +2996,35 @@ pub(crate) fn non_geometric_computed_style(
         cursor_css(style.cursor.unwrap_or_default()).to_string(),
     );
     out.insert("opacity", css_number(style.opacity.unwrap_or(1.0)));
+    // Filter-like longhands: their initial values, as Chrome reports them.
+    out.insert(
+        "filter",
+        style.filter_css.clone().unwrap_or_else(|| "none".into()),
+    );
+    let backdrop = style
+        .backdrop_filter_css
+        .clone()
+        .unwrap_or_else(|| "none".into());
+    out.insert("backdrop-filter", backdrop);
+    out.insert(
+        "mix-blend-mode",
+        mix_blend_css(style.mix_blend_mode).to_string(),
+    );
+    if style.clip_path.is_none() {
+        out.insert("clip-path", "none".to_string());
+    }
+    if style.mask_image.is_none() && style.mask_layers.images.is_empty() {
+        out.insert("mask-image", "none".to_string());
+    }
+    out.insert(
+        "isolation",
+        if style.isolation_isolate {
+            "isolate"
+        } else {
+            "auto"
+        }
+        .to_string(),
+    );
     out.insert(
         "background-color",
         css_color(style.background_color.unwrap_or([0, 0, 0, 0])),
@@ -6129,6 +6158,13 @@ fn paint_laid_dom_scrolled(
             .as_ref()
             .or(ancestor_clip_mask.as_deref());
         let background_mask = element_clip_mask;
+        // backdrop-filter: blur the backdrop under the box before its own
+        // background paints over it.
+        if let Some(radius) = style.backdrop_blur {
+            if box_on_surface && !paints_inline_fragments {
+                blur_backdrop(&mut pixmap, &rect, radius, raster_scale, element_clip_mask);
+            }
+        }
         // Several layers or an image layer: painted per layer, each with its
         // own size, position, repeat, origin and clip.
         let layered = (raster_scale == 1.0)
@@ -8740,6 +8776,98 @@ fn paint_inset_box_shadow(
         Transform::identity(),
         clip,
     );
+}
+
+/// CSS keyword of a `mix-blend-mode`.
+fn mix_blend_css(mode: Option<crate::MixBlendMode>) -> &'static str {
+    use crate::MixBlendMode as M;
+    match mode {
+        None => "normal",
+        Some(M::Multiply) => "multiply",
+        Some(M::Screen) => "screen",
+        Some(M::Overlay) => "overlay",
+        Some(M::Darken) => "darken",
+        Some(M::Lighten) => "lighten",
+        Some(M::ColorDodge) => "color-dodge",
+        Some(M::ColorBurn) => "color-burn",
+        Some(M::HardLight) => "hard-light",
+        Some(M::SoftLight) => "soft-light",
+        Some(M::Difference) => "difference",
+        Some(M::Exclusion) => "exclusion",
+        Some(M::Hue) => "hue",
+        Some(M::Saturation) => "saturation",
+        Some(M::Color) => "color",
+        Some(M::Luminosity) => "luminosity",
+        Some(M::PlusLighter) => "plus-lighter",
+    }
+}
+
+/// `backdrop-filter: blur(radius)`: blur what is already painted under
+/// `rect` (surface CSS px) with a Gaussian of standard deviation `radius`,
+/// sampling past the box edge with clamped edges, as Skia's backdrop
+/// filter does. Pixels outside `rect` (and outside `clip`) are untouched.
+pub(crate) fn blur_backdrop(
+    pixmap: &mut Pixmap,
+    rect: &crate::Rect,
+    radius: f32,
+    raster_scale: f32,
+    clip: Option<&tiny_skia::Mask>,
+) {
+    let sigma = radius * raster_scale;
+    if sigma <= 0.0 {
+        return;
+    }
+    let (pw, ph) = (pixmap.width() as i32, pixmap.height() as i32);
+    let x0 = ((rect.x * raster_scale).round() as i32).clamp(0, pw);
+    let y0 = ((rect.y * raster_scale).round() as i32).clamp(0, ph);
+    let x1 = (((rect.x + rect.width) * raster_scale).round() as i32).clamp(0, pw);
+    let y1 = (((rect.y + rect.height) * raster_scale).round() as i32).clamp(0, ph);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    // The backdrop is the box itself, extended by clamping its edge pixels
+    // (Skia's kClamp edge mode for backdrop filters).
+    let margin = (sigma * 3.0).ceil() as i32;
+    let (w, h) = ((x1 - x0) as usize, (y1 - y0) as usize);
+    let (ew, eh) = (w + 2 * margin as usize, h + 2 * margin as usize);
+    let src = pixmap.pixels();
+    let mut planes = vec![vec![0f32; ew * eh]; 4];
+    for y in 0..eh {
+        let sy = (y0 + y as i32 - margin).clamp(y0, y1 - 1);
+        for x in 0..ew {
+            let sx = (x0 + x as i32 - margin).clamp(x0, x1 - 1);
+            let p = src[(sy * pw + sx) as usize];
+            let i = y * ew + x;
+            planes[0][i] = p.red() as f32;
+            planes[1][i] = p.green() as f32;
+            planes[2][i] = p.blue() as f32;
+            planes[3][i] = p.alpha() as f32;
+        }
+    }
+    for plane in &mut planes {
+        gaussian_blur(plane, ew, eh, sigma);
+    }
+    let mask = clip.map(|mask| mask.data());
+    let out = pixmap.pixels_mut();
+    for y in 0..h {
+        for x in 0..w {
+            let index = ((y0 + y as i32) * pw + x0 + x as i32) as usize;
+            if mask.is_some_and(|mask| mask[index] == 0) {
+                continue;
+            }
+            let i = (y + margin as usize) * ew + x + margin as usize;
+            let a = planes[3][i].round().clamp(0.0, 255.0) as u8;
+            let c = |v: f32| (v.round().clamp(0.0, 255.0) as u8).min(a);
+            if let Some(color) = tiny_skia::PremultipliedColorU8::from_rgba(
+                c(planes[0][i]),
+                c(planes[1][i]),
+                c(planes[2][i]),
+                a,
+            ) {
+                out[index] = color;
+            }
+        }
+    }
 }
 
 /// The tiny-skia blend mode of a CSS `mix-blend-mode`.
@@ -15411,6 +15539,73 @@ mod tests {
         assert!(mid > 100 && mid < 160, "half way up the gradient: {mid}");
         assert!(p(24, 129).red() > 240, "the play icon is white");
         assert!(p(160, 157).red() > 150, "the timeline track");
+    }
+
+    #[test]
+    fn backdrop_filter_blurs_what_is_under_a_translucent_fixed_header() {
+        let rows: String = (0..20)
+            .map(|i| {
+                format!(
+                    r#"<div style="height:20px;background:{}"></div>"#,
+                    if i % 2 == 0 {
+                        "rgb(0,0,0)"
+                    } else {
+                        "rgb(255,255,255)"
+                    }
+                )
+            })
+            .collect();
+        let tree = parse_html(&format!(
+            r#"<html style="margin:0"><body style="margin:0">
+                <div style="position:fixed;top:0;left:0;width:100px;height:60px;
+                    backdrop-filter:blur(8px);background:rgba(255,255,255,0.2)"></div>{rows}
+            </body></html>"#
+        ));
+        let pixmap = paint_dom(&tree, (200.0, 100.0), None).expect("backdrop");
+        // Inside the header the 20px stripes blur toward mid grey;
+        // outside it they stay black and white.
+        let inside = pixmap.pixel(50, 10).expect("pixel").red();
+        let outside = pixmap.pixel(150, 10).expect("pixel").red();
+        // Unblurred it would be the 20% white over black: 51.
+        assert!(
+            inside > 65 && inside < 200,
+            "blurred under the header: {inside}"
+        );
+        assert_eq!(outside, 0, "untouched beside it");
+        let mut layout = crate::layout_dom(&tree, (200.0, 100.0));
+        let header = tree
+            .descendants(tree.document())
+            .into_iter()
+            .find(|id| {
+                layout
+                    .styles
+                    .get(id)
+                    .is_some_and(|s| s.backdrop_blur.is_some())
+            })
+            .expect("header");
+        let style = layout.styles.remove(&header).unwrap();
+        let computed = non_geometric_computed_style(&style);
+        assert_eq!(computed["backdrop-filter"], "blur(8px)");
+        let body = tree
+            .descendants(tree.document())
+            .into_iter()
+            .find(|id| {
+                tree.get_node(*id)
+                    .and_then(|n| n.as_element().map(|e| e.local.as_ref() == "body"))
+                    .unwrap_or(false)
+            })
+            .expect("body");
+        let plain = non_geometric_computed_style(&layout.styles[&body]);
+        for (property, value) in [
+            ("backdrop-filter", "none"),
+            ("filter", "none"),
+            ("mix-blend-mode", "normal"),
+            ("isolation", "auto"),
+            ("clip-path", "none"),
+            ("mask-image", "none"),
+        ] {
+            assert_eq!(plain[property], value, "{property}");
+        }
     }
 
     #[test]
