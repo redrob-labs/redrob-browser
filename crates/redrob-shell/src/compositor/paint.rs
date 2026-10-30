@@ -111,6 +111,7 @@ pub fn build(
     externals: &[(u64, Option<External>)],
     end: usize,
     patches: &HashMap<usize, Patch>,
+    skip: &std::collections::HashSet<usize>,
 ) -> Option<Affine> {
     let frame = page.frame.as_ref()?;
     let mut end_device = None;
@@ -136,6 +137,10 @@ pub fn build(
         if n >= end {
             end_device = Some(base * layers.xf * res.world[node]);
             break;
+        }
+        // Drawn by the LCD text pass (`super::lcd`).
+        if skip.contains(&n) {
+            continue;
         }
         // Layer transforms apply to everything inside them, scroll clips too
         // (as redrob-scene-raster does for screenshots).

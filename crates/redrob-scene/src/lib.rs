@@ -17,6 +17,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod filter;
+pub mod lcd;
 pub use filter::FilterOp;
 
 pub type Affine = [f32; 6]; // [sx, ky, kx, sy, tx, ty] as kurbo::Affine::new

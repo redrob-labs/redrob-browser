@@ -24490,6 +24490,86 @@ mod scene_text_tests {
         }
     }
 
+    /// The scene rasterizer draws text with the CPU paint's LCD coverage
+    /// and gamma, and keeps grayscale text where Skia does (a layer).
+    #[test]
+    fn scene_text_is_lcd_like_the_cpu_paint() {
+        let tree = obscura_dom::parse_html(
+            r#"<html style="margin:0"><body style="margin:0;font:16px sans-serif;background:#fff">
+              <p style="position:absolute;left:3px;top:0;margin:0">Hello LCD text, 0123</p>
+              <p style="position:absolute;left:0;top:30px;margin:0;color:#c33;background:#eef">Colored on blue</p>
+              <p style="position:absolute;left:0;top:60px;margin:0;opacity:0.6">In an opacity layer</p>
+            </body></html>"#,
+        );
+        let viewport = (240.0, 90.0);
+        let mut resources = RenderResourceCache::default();
+        let mut prepared = prepare_dom(&tree, viewport, None, &mut resources).unwrap();
+        let built = scene::build_scene_prepared(
+            &tree,
+            &mut prepared,
+            &mut resources,
+            (0.0, 0.0),
+            &HashMap::new(),
+            [255, 255, 255, 255],
+            &EMPTY_CANVAS_SURFACES,
+            1.0,
+        )
+        .unwrap();
+        let mut store = redrob_scene_raster::ResourceStore::new();
+        for font in &built.fonts {
+            store.apply(redrob_scene::Resource::Font {
+                id: font.id,
+                data: font.data.bytes().to_vec(),
+                index: font.data.index(),
+            });
+        }
+        let image = redrob_scene_raster::rasterize(
+            &built.frame,
+            &store,
+            &HashMap::new(),
+            redrob_scene::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: viewport.0,
+                h: viewport.1,
+            },
+            1.0,
+        );
+        let cpu = paint_dom(&tree, viewport, None).unwrap();
+        let fringed = |y0: u32, y1: u32| {
+            (y0..y1)
+                .flat_map(|y| (0..240u32).map(move |x| (x, y)))
+                .filter(|&(x, y)| {
+                    let [r, _, b, _] = image.pixel(x, y);
+                    (r as i32 - b as i32).abs() > 60
+                })
+                .count()
+        };
+        assert!(fringed(0, 25) > 20, "LCD fringes on black text");
+        let differing = |y0: u32, y1: u32| {
+            (y0..y1)
+                .flat_map(|y| (0..240u32).map(move |x| (x, y)))
+                .filter(|&(x, y)| {
+                    let a = image.pixel(x, y);
+                    let b = cpu.pixel(x, y).unwrap();
+                    [b.red(), b.green(), b.blue()]
+                        .iter()
+                        .zip(&a[..3])
+                        .any(|(p, q)| (*p as i32 - *q as i32).abs() > 8)
+                })
+                .count()
+        };
+        // Same masks, gamma and blend as the CPU paint: a few pixels where
+        // the backgrounds' edges round differently at most.
+        assert!(
+            differing(0, 55) < 12,
+            "LCD text differs on {} px",
+            differing(0, 55)
+        );
+        // Text in an opacity layer is grayscale: neutral gray antialiasing.
+        assert_eq!(fringed(60, 85), 0, "grayscale text in a layer");
+    }
+
     /// The compositor scene (what redrob-shell draws) carries the IFC's text
     /// as glyph runs with font resources.
     #[test]

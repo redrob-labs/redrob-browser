@@ -10,6 +10,7 @@
 
 mod channel;
 mod hit;
+mod lcd;
 mod paint;
 mod scroll;
 mod spatial;
@@ -45,7 +46,7 @@ pub fn tracing() -> bool {
 }
 
 struct Target {
-    _texture: wgpu::Texture,
+    texture: wgpu::Texture,
     view: wgpu::TextureView,
     id: egui::TextureId,
     width: u32,
@@ -72,6 +73,8 @@ pub struct Gpu {
     targets: HashMap<u64, Target>,
     /// The texture backdrops are read back from.
     scratch: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// LCD text (`lcd`).
+    lcd: lcd::LcdPass,
     drawn: HashMap<u64, Drawn>,
     trace: Option<std::fs::File>,
     last_render: Option<Instant>,
@@ -113,6 +116,7 @@ impl Gpu {
             scene: vello::Scene::new(),
             targets: HashMap::new(),
             scratch: None,
+            lcd: lcd::LcdPass::new(&state.device),
             drawn: HashMap::new(),
             trace,
             last_render: None,
@@ -132,6 +136,7 @@ impl Gpu {
         scale: f32,
         frames: &[(u64, Option<External>)],
         params: &vello::RenderParams,
+        skip: &std::collections::HashSet<usize>,
     ) -> HashMap<usize, paint::Patch> {
         let mut patches = HashMap::new();
         let Some(frame) = &page.frame else {
@@ -149,9 +154,17 @@ impl Gpu {
                 continue;
             };
             self.scene.reset();
-            let Some(device) =
-                paint::build(&mut self.scene, page, res, size, scale, frames, i, &patches)
-            else {
+            let Some(device) = paint::build(
+                &mut self.scene,
+                page,
+                res,
+                size,
+                scale,
+                frames,
+                i,
+                &patches,
+                skip,
+            ) else {
                 continue;
             };
             let (w, h) = (params.width as f64, params.height as f64);
@@ -310,7 +323,11 @@ impl Gpu {
                 dimension: wgpu::TextureDimension::D2,
                 // vello writes Rgba8Unorm storage; egui-wgpu samples native textures in it.
                 format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                // COPY_DST and RENDER_ATTACHMENT: the LCD text pass.
+                usage: wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
             });
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -323,7 +340,7 @@ impl Gpu {
             self.targets.insert(
                 slot,
                 Target {
-                    _texture: texture,
+                    texture,
                     view,
                     id,
                     width,
@@ -386,7 +403,18 @@ impl Gpu {
             height,
             antialiasing_method: vello::AaConfig::Area,
         };
-        let patches = self.backdrops(page, res, size, scale, &frames, &params);
+        let lcd = self.lcd.prepare(
+            &self.state.queue,
+            &lcd::WindowView {
+                page,
+                res,
+                base: vello::kurbo::Affine::scale(f64::from(scale)),
+                size: (width, height),
+            },
+        );
+        let no_skip = std::collections::HashSet::new();
+        let skip = lcd.as_ref().map_or(&no_skip, |p| p.skip());
+        let patches = self.backdrops(page, res, size, scale, &frames, &params, skip);
         self.scene.reset();
         let all = page.frame.as_ref().map_or(0, |f| f.items.len());
         paint::build(
@@ -398,20 +426,34 @@ impl Gpu {
             &frames,
             all,
             &patches,
+            skip,
         );
         let built = Instant::now();
         let target = self.target(slot, width, height)?;
-        let (view, id) = (target.view.clone(), target.id);
+        let (view, id, texture) = (target.view.clone(), target.id, target.texture.clone());
+        let render_view = match &lcd {
+            Some(_) => self.lcd.under(&self.state.device, width, height).clone(),
+            None => view.clone(),
+        };
         if let Err(e) = self.renderer.render_to_texture(
             &self.state.device,
             &self.state.queue,
             &self.scene,
-            &view,
+            &render_view,
             &params,
         ) {
             eprintln!("redrob-browser: page render failed: {e}");
             self.drawn.remove(&slot);
             return None;
+        }
+        if let Some(prepared) = &lcd {
+            self.lcd.blend(
+                &self.state.device,
+                &self.state.queue,
+                prepared,
+                &texture,
+                &view,
+            );
         }
         let done = Instant::now();
         if self.trace.is_some() {

@@ -33,6 +33,7 @@
 //!   clipped to its rounded rect and the scroll clips. Inside a projective
 //!   plane it is not drawn.
 
+pub mod lcd_text;
 mod resources;
 mod spatial;
 
@@ -124,12 +125,27 @@ pub fn rasterize(
     };
     let root = Affine::scale(scale) * Affine::translate((-clip.x as f64, -clip.y as f64));
     let mut glyphs = resources.glyphs.lock().unwrap_or_else(|e| e.into_inner());
+    // LCD text: planned first, left out of the vector passes, blended last.
+    let lcd = if lcd_text_enabled() {
+        let view = RasterView {
+            frame,
+            resources,
+            map: &map,
+            root,
+            size: (w, h),
+        };
+        let mut cache = resources.lcd.lock().unwrap_or_else(|e| e.into_inner());
+        lcd_text::plan(&view, &mut cache)
+    } else {
+        lcd_text::LcdPlan::default()
+    };
     let target = Target {
         frame,
         resources,
         map: &map,
         root,
         size: (w, h),
+        skip: &lcd.skip,
     };
     // Each backdrop filters what the items before it drew (earlier
     // backdrops included), then the whole list draws with the results.
@@ -146,7 +162,8 @@ pub fn rasterize(
             patches.insert(i, patch);
         }
     }
-    let (pm, _) = target.paint(&mut glyphs, frame.items.len(), &patches);
+    let (mut pm, _) = target.paint(&mut glyphs, frame.items.len(), &patches);
+    lcd_text::composite(pm.data_as_u8_slice_mut(), w as usize, h as usize, &lcd);
     RgbaImage {
         width: w as u32,
         height: h as u32,
@@ -160,6 +177,15 @@ struct Patch {
     origin: (f64, f64),
 }
 
+/// `REDROB_GRAY_TEXT=1` draws all scene text grayscale (vello only), in
+/// screenshots and the window, for comparing against the LCD path.
+pub fn lcd_text_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var_os("REDROB_GRAY_TEXT").is_none_or(|v| v.is_empty() || v == "0")
+    })
+}
+
 /// The output a frame draws into.
 struct Target<'a> {
     frame: &'a Frame,
@@ -167,6 +193,59 @@ struct Target<'a> {
     map: &'a SpatialMap,
     root: Affine,
     size: (u16, u16),
+    /// Items drawn by the LCD text pass instead.
+    skip: &'a std::collections::HashSet<usize>,
+}
+
+/// The CPU rasterizer's mapping, for the LCD text planner.
+struct RasterView<'a> {
+    frame: &'a Frame,
+    resources: &'a ResourceStore,
+    map: &'a SpatialMap,
+    root: Affine,
+    size: (u16, u16),
+}
+
+impl lcd_text::LcdView for RasterView<'_> {
+    fn items(&self) -> &[DisplayItem] {
+        &self.frame.items
+    }
+    fn device(&self, i: usize) -> Option<Affine> {
+        let spatial = self.frame.items.get(i)?.spatial;
+        Some(self.root * self.map.transform(spatial))
+    }
+    fn scroll_clip(&self, i: usize) -> Result<Option<kurbo::Rect>, lcd_text::NotAxisAligned> {
+        let Some(di) = self.frame.items.get(i) else {
+            return Ok(None);
+        };
+        let mut acc: Option<kurbo::Rect> = None;
+        for c in self.map.clip_chain(di.spatial) {
+            let xf = self.root * c.transform;
+            if !is_axis_aligned(&xf) {
+                return Err(lcd_text::NotAxisAligned);
+            }
+            let r = xf.transform_rect_bbox(to_kurbo_rect(c.rect));
+            acc = Some(acc.map_or(r, |a| a.intersect(r)));
+        }
+        Ok(acc)
+    }
+    fn projective(&self, i: usize) -> bool {
+        self.frame
+            .items
+            .get(i)
+            .is_some_and(|di| self.map.projective_root(di.spatial).is_some())
+    }
+    fn font(&self, id: redrob_scene::FontId) -> Option<lcd_text::FontRef<'_>> {
+        let ((data, _), coords) = self.resources.font_with_coords(id)?;
+        Some(lcd_text::FontRef {
+            data: data.data.as_ref(),
+            index: data.index,
+            coords,
+        })
+    }
+    fn screen(&self) -> kurbo::Rect {
+        kurbo::Rect::new(0.0, 0.0, self.size.0 as f64, self.size.1 as f64)
+    }
 }
 
 impl Target<'_> {
@@ -195,6 +274,7 @@ impl Target<'_> {
                 scroll_clip: None,
                 patches: Some(patches),
                 index: 0,
+                skip: Some(self.skip),
             };
             p.background(self.frame.background);
             let items = &self.frame.items[..end.min(self.frame.items.len())];
@@ -378,6 +458,8 @@ struct Painter<'a> {
     patches: Option<&'a HashMap<usize, Patch>>,
     /// Index of the item being drawn.
     index: usize,
+    /// Items the LCD text pass draws instead.
+    skip: Option<&'a std::collections::HashSet<usize>>,
 }
 
 type Homography = [[f64; 3]; 3];
@@ -519,6 +601,7 @@ impl Painter<'_> {
                 scroll_clip: None,
                 patches: None,
                 index: 0,
+                skip: None,
             };
             for di in items {
                 sub.item(di);
@@ -736,6 +819,9 @@ impl Painter<'_> {
     }
 
     fn item(&mut self, di: &DisplayItem) {
+        if self.skip.is_some_and(|skip| skip.contains(&self.index)) {
+            return;
+        }
         let xf = self.device(di.spatial);
         match &di.item {
             Item::Backdrop { rect, radii, .. } => {
