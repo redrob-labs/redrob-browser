@@ -166,6 +166,7 @@ pub mod canvas;
 pub mod display_list;
 #[cfg(feature = "display-list")]
 pub use paint::record_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces;
+pub use paint::{video_media_url, VideoFrameEntry};
 #[cfg(feature = "paint")]
 mod paint;
 #[cfg(feature = "scene")]
@@ -2031,14 +2032,6 @@ pub struct LayoutStyle {
     /// Ordered operations in the non-inherited `transform` property. Length
     /// percentages remain unresolved until the final border box is known.
     pub transform_ops: Vec<TransformOp>,
-    /// The transform turns the box's back toward the viewer (its 3D
-    /// matrix maps the z axis to negative z): `rotateY(180deg)` and the
-    /// like, which `transform_ops` flattens to a 2D mirror.
-    pub transform_facing_back: bool,
-    /// `backface-visibility: hidden`.
-    pub backface_hidden: bool,
-    /// `transform-style: preserve-3d`.
-    pub preserve_3d: bool,
     /// Transform value immediately below the Web Animations cascade origin.
     /// A retained compositor-style sample restores this value before replaying
     /// the registered effects, so sparse keyframes never compound on the
@@ -2067,6 +2060,10 @@ pub struct LayoutStyle {
     pub perspective: Option<f32>,
     /// `perspective-origin`; `None` is 50% 50%.
     pub perspective_origin: Option<(Dimension, Dimension)>,
+    /// `transform-style: preserve-3d`.
+    pub preserve_3d: bool,
+    /// `backface-visibility: hidden`.
+    pub backface_hidden: bool,
     /// `box-shadow` (first layer only). Painted behind the element's own
     /// background/border box: cards, buttons, menus, and modals across the
     /// modern web rely on it for depth, and without it those elements paint

@@ -7783,6 +7783,42 @@ class HTMLMediaElement extends HTMLElement {
   __fire(name) {
     try { this.dispatchEvent(new Event(name)); } catch (_e) {}
   }
+  // Headless (`serve` built with media): no window plays the element, but
+  // the engine decodes the frame a paused video shows and reports its
+  // metadata, so readyState and the media events follow Chrome's for a
+  // paused element. Returns true once the element has its metadata.
+  __headlessSync() {
+    if (typeof globalThis.redrobMedia === 'function') return true;
+    const op = __obscuraCore.ops.op_video_frame_metadata;
+    if (typeof op !== 'function' || this.localName !== 'video') return true;
+    if ((this.getAttribute('preload') || '').toLowerCase() === 'none' && !this.__redrobMediaLoadRequested) return true;
+    const m = this.__media;
+    let raw = '';
+    try { raw = op(this._nid >>> 0, m.currentTime, _realmFrameId); } catch (_e) { return false; }
+    if (!raw) return false;
+    let info;
+    try { info = JSON.parse(raw); } catch (_e) { return false; }
+    globalThis.__redrobMediaUpdate(m.id, {
+      currentTime: m.currentTime,
+      duration: info.duration == null ? Infinity : info.duration,
+      width: info.width, height: info.height, readyState: 4,
+      paused: m.paused, ended: false,
+    });
+    return true;
+  }
+  __headlessPoll() {
+    if (this.__redrobMediaPolling) return;
+    this.__redrobMediaPolling = true;
+    let tries = 0;
+    const tick = () => {
+      if (!this.isConnected || this.__headlessSync() || ++tries > 150) {
+        this.__redrobMediaPolling = false;
+        return;
+      }
+      setTimeout(tick, 100);
+    };
+    setTimeout(tick, 0);
+  }
   canPlayType(type) {
     if (typeof globalThis.redrobMedia !== 'function') return '';
     const t = String(type).toLowerCase();
@@ -7792,7 +7828,9 @@ class HTMLMediaElement extends HTMLElement {
   load() {
     const m = this.__media;
     m.currentTime = 0; m.ended = false; m.paused = true; m.readyState = 0;
-    if (this.__send('load')) { m.networkState = 2; this.__fire('loadstart'); }
+    if (this.__send('load')) { m.networkState = 2; this.__fire('loadstart'); return; }
+    this.__redrobMediaLoadRequested = true;
+    this.__headlessPoll();
   }
   play() {
     const m = this.__media;
@@ -7833,7 +7871,11 @@ class HTMLMediaElement extends HTMLElement {
     m.currentTime = Math.max(0, t);
     m.seeking = true;
     this.__fire('seeking');
-    this.__send('seek', { currentTime: m.currentTime });
+    if (!this.__send('seek', { currentTime: m.currentTime }) && m.readyState >= 1) {
+      // Headless: the engine paints the frame at the new position.
+      const el = this;
+      setTimeout(() => { if (!el.__headlessSync()) el.__headlessPoll(); }, 0);
+    }
   }
   get duration() { return this.__media.duration; }
   get volume() { return this.__media.volume; }
@@ -7943,6 +7985,7 @@ class HTMLTrackElement extends HTMLElement {
   }
 }
 globalThis.HTMLMediaElement = HTMLMediaElement;
+
 globalThis.HTMLVideoElement = HTMLVideoElement;
 globalThis.HTMLAudioElement = HTMLAudioElement;
 globalThis.HTMLTrackElement = HTMLTrackElement;
@@ -19407,6 +19450,15 @@ globalThis.__obscura_init = function() {
   // canonical so getRootNode(), isConnected, and identity comparisons return
   // the same Document object exposed as globalThis.document.
   _cache.set(documentNid, globalThis.document);
+  // Headless captures: start each video's metadata poll once the parser
+  // has built the document (HTMLMediaElement.__headlessSync).
+  globalThis.document.addEventListener('DOMContentLoaded', () => {
+    if (typeof globalThis.redrobMedia === 'function'
+        || typeof __obscuraCore.ops.op_video_frame_metadata !== 'function') return;
+    for (const v of globalThis.document.querySelectorAll('video')) {
+      if (typeof v.__headlessPoll === 'function') v.__headlessPoll();
+    }
+  });
   const previousWindowNames = new Set(_windowNamedPropertyNames);
   _registerWindowNamedTree(globalThis.document.documentElement);
   _reconcileWindowNamedProperties(previousWindowNames);

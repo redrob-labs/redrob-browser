@@ -26,7 +26,8 @@ page JS: <video>.play()
 - Elements with `controls` get a play/pause button, a seek bar and the time, drawn by the window.
 - Media stops when its tab navigates or closes. A background tab keeps playing sound.
 - Headless use (`redrob-browser serve`, `fetch`) has no window and no binding: `play()` rejects
-  with `NotSupportedError` and `canPlayType` answers `""`, as before.
+  with `NotSupportedError` and `canPlayType` answers `""`. Built with `obscura-cli/media` it
+  still shows paused videos as Chrome does; see [Headless frames](#headless-frames).
 
 ## Autoplay
 
@@ -78,6 +79,41 @@ page JS: new MediaSource(); video.src = URL.createObjectURL(ms)
   to GStreamer still play.
 - The window code is `redrob-shell/src/mse.rs`, built with the `media` feature.
 
+## Headless frames
+
+Agent screenshots of a page with `<video>` show what Chrome shows for a paused element: the poster
+if there is one, else the frame at the playback position, and, with `controls`, Chrome's default
+controls bar.
+
+```text
+layout/paint: <video src> without poster
+  -> RenderResourceCache::video_frame(url, currentTime)
+     media bytes from the page's resource cache (a cache-only miss requests them through the
+     page transport, with the page's cookies, like an image)
+     -> paint/video.rs: appsrc ! decodebin ! videoconvert ! videoscale ! RGBA appsink
+        (seek to currentTime, take the preroll frame; audio pads go to a fakesink)
+  -> the frame is the replaced content: it sizes the element (intrinsic size) and paints with
+     object-fit like a poster
+page JS: readyState, videoWidth/Height, duration
+  <- op_video_frame_metadata: polled after DOMContentLoaded and load(), then
+     loadedmetadata, loadeddata, canplay, canplaythrough fire; setting currentTime repaints the
+     frame at the new position and fires seeked
+```
+
+- The decoders are GStreamer's plugins, the same ones the window plays with: the engine ships no
+  codec. On this repository's Linux build hosts VP8/VP9 (WebM) decode with `libgstvpx`; H.264
+  needs an H.264 plugin on the machine (OS hardware decoder or `gst-libav`). Without a decoder the
+  element stays at `readyState` 0 and paints its poster or nothing, as before.
+- `preload="none"` decodes nothing until `load()`.
+- The controls bar (`paint_video_controls` in `paint.rs`) is drawn only in screenshots; the window
+  draws its own. Its geometry, gradient and colours are measured from headless Chrome 153
+  (play, `m:ss / m:ss`, timeline, volume greyed when there is no audio track, fullscreen, overflow
+  menu); icons are the Material icons Chromium's controls use. It is the paused, never-played
+  state; narrow players do not drop buttons as Chrome does.
+- Build: `cargo build -p obscura-cli --features render,media`; same GStreamer requirements as
+  the window. `release.yml` does not pass `obscura-cli/media` yet, so released `serve` binaries
+  keep painting posters only.
+
 ## Build
 
 `cargo build -p redrob-shell --features media`. Building needs the GStreamer development files
@@ -91,5 +127,5 @@ macOS and Windows.
 - Picture in picture.
 - `appendWindowStart`/`appendWindowEnd`, and `SourceBuffer.remove()` evicting bytes GStreamer
   already has.
-- Media requests go out from GStreamer, not the engine, so they carry no page cookies. Subtitle
-  files are fetched the same way.
+- In the window, media requests go out from GStreamer, not the engine, so they carry no page
+  cookies. Subtitle files are fetched the same way. Headless frames load through the engine.

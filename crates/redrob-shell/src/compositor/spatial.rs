@@ -114,7 +114,9 @@ pub fn resolve(
         viewport,
     };
     for node in &frame.spatial {
-        r.world.push(map.transform(node.id));
+        // The GPU scene draws affinely: a 3D plane is approximated by the
+        // affine through its projected corners.
+        r.world.push(map.flattened_transform(node.id));
         r.clip_scroll.push(
             map.scroller_of(node.id)
                 .filter(|s| *s != ROOT_SCROLL)

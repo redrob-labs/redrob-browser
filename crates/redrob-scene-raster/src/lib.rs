@@ -22,6 +22,10 @@
 //! - Scroll frame clips apply to every item of the scroller and its
 //!   descendants; `PushClip`/`PushClipPath` are in their item's space.
 //! - Unbalanced `PopClip`/`PopLayer` are ignored; open ones close at the end.
+//! - A `Reference` with a `projective` 4x4: the contiguous run of items in
+//!   its subtree is drawn flat in its local plane, then projected onto the
+//!   frame with perspective-correct sampling; points the matrix maps behind
+//!   the viewer are not drawn.
 
 mod resources;
 mod spatial;
@@ -129,8 +133,19 @@ pub fn rasterize(
             scroll_clip: None,
         };
         p.background(frame.background);
-        for di in &frame.items {
-            p.item(di);
+        let items = &frame.items;
+        let mut i = 0;
+        while i < items.len() {
+            if let Some(plane) = map.projective_root(items[i].spatial) {
+                let start = i;
+                while i < items.len() && map.projective_root(items[i].spatial) == Some(plane) {
+                    i += 1;
+                }
+                p.projected(&items[start..i], plane);
+                continue;
+            }
+            p.item(&items[i]);
+            i += 1;
         }
         p.finish();
     }
@@ -255,7 +270,263 @@ struct Painter<'a> {
     scroll_clip: Option<(SpatialId, usize)>,
 }
 
+type Homography = [[f64; 3]; 3];
+
+fn mul3(a: &Homography, b: &Homography) -> Homography {
+    let mut out = [[0.0; 3]; 3];
+    for (r, row) in out.iter_mut().enumerate() {
+        for (c, cell) in row.iter_mut().enumerate() {
+            *cell = (0..3).map(|k| a[r][k] * b[k][c]).sum();
+        }
+    }
+    out
+}
+
+fn affine3(a: &Affine) -> Homography {
+    let c = a.as_coeffs();
+    [[c[0], c[2], c[4]], [c[1], c[3], c[5]], [0.0, 0.0, 1.0]]
+}
+
+fn inv3(h: &Homography) -> Option<Homography> {
+    let det = h[0][0] * (h[1][1] * h[2][2] - h[1][2] * h[2][1])
+        - h[0][1] * (h[1][0] * h[2][2] - h[1][2] * h[2][0])
+        + h[0][2] * (h[1][0] * h[2][1] - h[1][1] * h[2][0]);
+    if !det.is_finite() || det.abs() < 1e-14 {
+        return None;
+    }
+    let i = 1.0 / det;
+    Some([
+        [
+            (h[1][1] * h[2][2] - h[1][2] * h[2][1]) * i,
+            (h[0][2] * h[2][1] - h[0][1] * h[2][2]) * i,
+            (h[0][1] * h[1][2] - h[0][2] * h[1][1]) * i,
+        ],
+        [
+            (h[1][2] * h[2][0] - h[1][0] * h[2][2]) * i,
+            (h[0][0] * h[2][2] - h[0][2] * h[2][0]) * i,
+            (h[0][2] * h[1][0] - h[0][0] * h[1][2]) * i,
+        ],
+        [
+            (h[1][0] * h[2][1] - h[1][1] * h[2][0]) * i,
+            (h[0][1] * h[2][0] - h[0][0] * h[2][1]) * i,
+            (h[0][0] * h[1][1] - h[0][1] * h[1][0]) * i,
+        ],
+    ])
+}
+
+fn apply3(h: &Homography, x: f64, y: f64) -> Option<(f64, f64)> {
+    let w = h[2][0] * x + h[2][1] * y + h[2][2];
+    if !w.is_finite() || w <= 1e-9 {
+        return None;
+    }
+    Some((
+        (h[0][0] * x + h[0][1] * y + h[0][2]) / w,
+        (h[1][0] * x + h[1][1] * y + h[1][2]) / w,
+    ))
+}
+
+/// Largest side of the flat layer a projected plane is drawn into.
+const MAX_PLANE_SIDE: f64 = 4096.0;
+
 impl Painter<'_> {
+    /// Draw `items` (the subtree of projective Reference `plane`) flat in the
+    /// plane's local space, then project that layer onto the frame.
+    fn projected(&mut self, items: &[DisplayItem], plane: SpatialId) {
+        let Some(m) = self.map.projective(plane).copied() else {
+            for di in items {
+                self.item(di);
+            }
+            return;
+        };
+        let m = m.map(f64::from);
+        let local: Homography = [
+            [m[0], m[1], m[3]],
+            [m[4], m[5], m[7]],
+            [m[12], m[13], m[15]],
+        ];
+        // plane local -> device px.
+        let world = self.root * self.layer_xf * self.map.transform(plane);
+        let to_device = mul3(&affine3(&world), &local);
+        let Some(from_device) = inv3(&to_device) else {
+            return;
+        };
+        // The part of the plane the screen shows.
+        let (sw, sh) = (self.screen.x1, self.screen.y1);
+        let corners: Vec<(f64, f64)> = [(0.0, 0.0), (sw, 0.0), (0.0, sh), (sw, sh)]
+            .iter()
+            .filter_map(|(x, y)| apply3(&from_device, *x, *y))
+            .collect();
+        let half = MAX_PLANE_SIDE / 2.0;
+        let (mut x0, mut y0, mut x1, mut y1) = (-half, -half, half, half);
+        if corners.len() == 4 {
+            x0 = corners
+                .iter()
+                .map(|c| c.0)
+                .fold(f64::MAX, f64::min)
+                .max(-half);
+            y0 = corners
+                .iter()
+                .map(|c| c.1)
+                .fold(f64::MAX, f64::min)
+                .max(-half);
+            x1 = corners
+                .iter()
+                .map(|c| c.0)
+                .fold(f64::MIN, f64::max)
+                .min(half);
+            y1 = corners
+                .iter()
+                .map(|c| c.1)
+                .fold(f64::MIN, f64::max)
+                .min(half);
+        }
+        // Local layer resolution: the plane's largest device scale, capped.
+        let scale = {
+            let c = world.as_coeffs();
+            (c[0].hypot(c[1])).max(c[2].hypot(c[3])).clamp(0.25, 4.0)
+        };
+        let lw = ((x1 - x0) * scale).ceil().clamp(1.0, MAX_PLANE_SIDE) as u16;
+        let lh = ((y1 - y0) * scale).ceil().clamp(1.0, MAX_PLANE_SIDE) as u16;
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let sx = lw as f64 / (x1 - x0);
+        let sy = lh as f64 / (y1 - y0);
+        // Flat pass: device(s) = layer_root * inv(world_plane) * world(s).
+        let layer_root = Affine::scale_non_uniform(sx, sy) * Affine::translate((-x0, -y0));
+        let mut ctx = RenderContext::new(lw, lh);
+        {
+            let mut sub = Painter {
+                ctx: &mut ctx,
+                res: self.res,
+                glyphs: &mut *self.glyphs,
+                map: self.map,
+                root: layer_root,
+                screen: kurbo::Rect::new(0.0, 0.0, lw as f64, lh as f64),
+                layer_xf: self.map.transform(plane).inverse(),
+                layers: Vec::new(),
+                user_clips: 0,
+                scroll_clip: None,
+            };
+            for di in items {
+                sub.item(di);
+            }
+            sub.finish();
+        }
+        ctx.flush();
+        let mut flat = Pixmap::new(lw, lh);
+        ctx.render(&mut flat, self.glyphs);
+        // layer px -> plane -> device.
+        let layer_to_plane: Homography =
+            [[1.0 / sx, 0.0, x0], [0.0, 1.0 / sy, y0], [0.0, 0.0, 1.0]];
+        let h = mul3(&to_device, &layer_to_plane);
+        let Some(hi) = inv3(&h) else {
+            return;
+        };
+        // Device bbox of the projected layer.
+        let (fw, fh) = (lw as f64, lh as f64);
+        let projected: Vec<(f64, f64)> = [(0.0, 0.0), (fw, 0.0), (0.0, fh), (fw, fh)]
+            .iter()
+            .filter_map(|(x, y)| apply3(&h, *x, *y))
+            .collect();
+        let (mut bx0, mut by0, mut bx1, mut by1) = (0.0, 0.0, sw, sh);
+        if projected.len() == 4 {
+            bx0 = projected
+                .iter()
+                .map(|c| c.0)
+                .fold(f64::MAX, f64::min)
+                .floor()
+                .max(0.0);
+            by0 = projected
+                .iter()
+                .map(|c| c.1)
+                .fold(f64::MAX, f64::min)
+                .floor()
+                .max(0.0);
+            bx1 = projected
+                .iter()
+                .map(|c| c.0)
+                .fold(f64::MIN, f64::max)
+                .ceil()
+                .min(sw);
+            by1 = projected
+                .iter()
+                .map(|c| c.1)
+                .fold(f64::MIN, f64::max)
+                .ceil()
+                .min(sh);
+        }
+        if bx1 <= bx0 || by1 <= by0 {
+            return;
+        }
+        let (ow, oh) = ((bx1 - bx0) as u16, (by1 - by0) as u16);
+        let mut out = Pixmap::new(ow, oh);
+        let src = flat.data_as_u8_slice();
+        let (iw, ih) = (lw as i64, lh as i64);
+        let fetch = |x: i64, y: i64| -> [f32; 4] {
+            if x < 0 || y < 0 || x >= iw || y >= ih {
+                return [0.0; 4];
+            }
+            let i = ((y * iw + x) * 4) as usize;
+            [
+                src[i] as f32,
+                src[i + 1] as f32,
+                src[i + 2] as f32,
+                src[i + 3] as f32,
+            ]
+        };
+        {
+            let dst = out.data_as_u8_slice_mut();
+            for y in 0..oh as usize {
+                for x in 0..ow as usize {
+                    let (px, py) = (bx0 + x as f64 + 0.5, by0 + y as f64 + 0.5);
+                    let w = hi[2][0] * px + hi[2][1] * py + hi[2][2];
+                    if w.abs() < 1e-12 {
+                        continue;
+                    }
+                    let u = (hi[0][0] * px + hi[0][1] * py + hi[0][2]) / w - 0.5;
+                    let v = (hi[1][0] * px + hi[1][1] * py + hi[1][2]) / w - 0.5;
+                    let front = h[2][0] * (u + 0.5) + h[2][1] * (v + 0.5) + h[2][2];
+                    if front <= 1e-9 || u < -1.0 || v < -1.0 || u > fw || v > fh {
+                        continue;
+                    }
+                    let (ix, iy) = (u.floor() as i64, v.floor() as i64);
+                    let (tx, ty) = ((u - ix as f64) as f32, (v - iy as f64) as f32);
+                    let (a, b, c, d) = (
+                        fetch(ix, iy),
+                        fetch(ix + 1, iy),
+                        fetch(ix, iy + 1),
+                        fetch(ix + 1, iy + 1),
+                    );
+                    let o = (y * ow as usize + x) * 4;
+                    for k in 0..4 {
+                        let top = a[k] + (b[k] - a[k]) * tx;
+                        let bottom = c[k] + (d[k] - c[k]) * tx;
+                        dst[o + k] = (top + (bottom - top) * ty).round().clamp(0.0, 255.0) as u8;
+                    }
+                }
+            }
+        }
+        out.set_may_have_transparency(true);
+        let dest = kurbo::Rect::new(bx0, by0, bx1, by1);
+        if !self.enter(plane, dest) {
+            return;
+        }
+        self.ctx.set_transform(Affine::IDENTITY);
+        self.ctx.set_paint(Image {
+            image: ImageSource::Pixmap(Arc::new(out)),
+            sampler: ImageSampler {
+                x_extend: Extend::Pad,
+                y_extend: Extend::Pad,
+                quality: ImageQuality::Low,
+                alpha: 1.0,
+            },
+        });
+        self.ctx.set_paint_transform(Affine::translate((bx0, by0)));
+        self.ctx.fill_rect(&dest);
+        self.ctx.reset_paint_transform();
+    }
+
     fn background(&mut self, bg: [f32; 4]) {
         if bg[3] <= 0.0 {
             return;

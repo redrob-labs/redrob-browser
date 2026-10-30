@@ -140,6 +140,9 @@ pub enum Op {
         node: u64,
         offset: [f32; 2],
         transform: Affine,
+        /// A row-major 4x4 applied before `transform` (a 3D plane).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        projective: Option<[f32; 16]>,
     },
     PopRef,
 }
@@ -999,6 +1002,7 @@ impl RecordingCanvas {
                     node: reference.node,
                     offset: reference.offset,
                     transform: t,
+                    projective: reference.projective,
                 },
             );
             nodes.insert(0, reference.node);
@@ -1470,6 +1474,7 @@ fn sparse_fingerprint(data: &[u8]) -> u64 {
 struct Reference {
     node: u64,
     offset: [f32; 2],
+    projective: Option<[f32; 16]>,
 }
 
 /// Whether a scene recording is running on this thread.
@@ -1552,6 +1557,29 @@ pub(crate) fn note_reference_layer(layer: &Pixmap, node: u64, offset: (f32, f32)
                 Reference {
                     node,
                     offset: [offset.0, offset.1],
+                    projective: None,
+                },
+            )
+        });
+    }
+}
+
+/// As [`note_reference_layer`], for a 3D plane drawn through `projective`
+/// (row-major 4x4, layer pixels to the enclosing surface's pixels).
+pub(crate) fn note_projective_layer(
+    layer: &Pixmap,
+    node: u64,
+    offset: (f32, f32),
+    projective: [f32; 16],
+) {
+    if scene_active() {
+        REFERENCES.with(|references| {
+            references.borrow_mut().insert(
+                surface_id(layer),
+                Reference {
+                    node,
+                    offset: [offset.0, offset.1],
+                    projective: Some(projective),
                 },
             )
         });

@@ -8358,6 +8358,7 @@ pub fn build_extension() -> Extension {
         ops.push(op_layout_box_metrics());
         ops.push(op_layout_hit_test());
         ops.push(op_layout_hit_test_all());
+        ops.push(op_video_frame_metadata());
         ops.push(op_layout_caret());
         ops.push(op_layout_caret_rect());
         ops.push(op_layout_text_rects());
@@ -9521,6 +9522,43 @@ fn op_layout_hit_test(state: &OpState, x: f64, y: f64, frame_id: u32) -> i32 {
     prepared
         .hit_test(dom, scroll, x as f32, y as f32)
         .map_or(-1, |id| id.index() as i32)
+}
+
+/// Size, duration and audio presence of `<video>` `nid` at `time` seconds,
+/// as JSON, or "" until its frame decodes (docs/MEDIA.md). Records `time` as
+/// the position captures paint.
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_video_frame_metadata(state: &OpState, nid: u32, time: f64, frame_id: u32) -> String {
+    let shared = frame_state(state, frame_id);
+    let mut gs = shared.borrow_mut();
+    let node = NodeId::new(nid);
+    let base = document_base_url(&gs);
+    let Some(url) = gs
+        .dom
+        .as_ref()
+        .and_then(|dom| obscura_render::video_media_url(dom, node, base.as_deref()))
+    else {
+        return String::new();
+    };
+    let time = if time.is_finite() { time.max(0.0) } else { 0.0 };
+    if (gs.render_resources.video_time(node) - time).abs() > 1e-6 {
+        gs.render_resources.set_video_time(node, time);
+        // The painted frame follows the position.
+        gs.prepared_render = None;
+        gs.resolved_scroll = None;
+    }
+    match gs.render_resources.video_frame(&url, time) {
+        Some(frame) => serde_json::json!({
+            "width": frame.width,
+            "height": frame.height,
+            "duration": if frame.duration.is_finite() { serde_json::json!(frame.duration) } else { serde_json::Value::Null },
+            "hasAudio": frame.has_audio,
+        })
+        .to_string(),
+        None => String::new(),
+    }
 }
 
 /// Every rendered element containing the point, topmost first, as a JSON

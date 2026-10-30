@@ -2,7 +2,9 @@
 //! the current scroll offsets, and builds each node's scroll clip chain.
 //!
 //! The mapping follows WebRender:
-//! - `Reference { transform }`: `world = parent_world * transform`.
+//! - `Reference { transform, projective }`: `world = parent_world * transform`.
+//!   A `projective` 4x4 is kept beside the affine `world` ([`SpatialMap::projective`]);
+//!   the rasterizer draws that node's subtree flat and projects it.
 //! - `Scroll { frame, offset, .. }`: children are in the parent's space,
 //!   moved by the scroll offset: `world = parent_world * translate(-offset)`.
 //!   `frame` (in the parent's space) clips the node and all descendants.
@@ -54,6 +56,37 @@ pub struct SpatialMap {
     clips: HashMap<SpatialId, ScrollClip>,
     offsets: HashMap<SpatialId, (f32, f32)>,
     viewport: Rect,
+    /// Reference nodes with a projective matrix, and each node's outermost
+    /// projective ancestor-or-self.
+    projective: HashMap<SpatialId, [f32; 16]>,
+    projective_root: HashMap<SpatialId, SpatialId>,
+    /// Per projective node: the affine through the projected corners of
+    /// the bounds of its own items (see [`SpatialMap::flattened_transform`]).
+    projective_fit: HashMap<SpatialId, Affine>,
+}
+
+/// The affine through the projections of three corners of `r` under the
+/// x, y, w part of row-major 4x4 `m`.
+fn affine_fit(m: &[f32; 16], r: kurbo::Rect) -> Option<Affine> {
+    let m = m.map(f64::from);
+    let project = |x: f64, y: f64| {
+        let w = m[12] * x + m[13] * y + m[15];
+        (w > 1e-9).then(|| {
+            (
+                (m[0] * x + m[1] * y + m[3]) / w,
+                (m[4] * x + m[5] * y + m[7]) / w,
+            )
+        })
+    };
+    let (w, h) = (r.width().max(1e-6), r.height().max(1e-6));
+    let p0 = project(r.x0, r.y0)?;
+    let p1 = project(r.x1, r.y0)?;
+    let p2 = project(r.x0, r.y1)?;
+    let (a, b) = ((p1.0 - p0.0) / w, (p1.1 - p0.1) / w);
+    let (c, d) = ((p2.0 - p0.0) / h, (p2.1 - p0.1) / h);
+    let e = p0.0 - a * r.x0 - c * r.y0;
+    let f = p0.1 - b * r.x0 - d * r.y0;
+    Some(Affine::new([a, b, c, d, e, f]))
 }
 
 pub fn to_kurbo_affine(a: [f32; 6]) -> Affine {
@@ -99,6 +132,9 @@ impl SpatialMap {
             resolved: HashMap::with_capacity(nodes.len()),
             clips: HashMap::new(),
             offsets: HashMap::new(),
+            projective: HashMap::new(),
+            projective_root: HashMap::new(),
+            projective_fit: HashMap::new(),
             viewport: Rect {
                 x: 0.0,
                 y: 0.0,
@@ -110,7 +146,93 @@ impl SpatialMap {
         for id in nodes.keys() {
             map.resolve(*id, &nodes, scroll, &mut visiting);
         }
+        for node in &frame.spatial {
+            if let SpatialKind::Reference {
+                projective: Some(matrix),
+                ..
+            } = &node.kind
+            {
+                map.projective.insert(node.id, *matrix);
+            }
+        }
+        if !map.projective.is_empty() {
+            for id in nodes.keys() {
+                let mut outer = None;
+                let mut current = Some(*id);
+                let mut steps = 0;
+                while let Some(node) = current {
+                    if map.projective.contains_key(&node) {
+                        outer = Some(node);
+                    }
+                    steps += 1;
+                    if steps > nodes.len() {
+                        break;
+                    }
+                    current = nodes.get(&node).and_then(|n| n.parent);
+                }
+                if let Some(outer) = outer {
+                    map.projective_root.insert(*id, outer);
+                }
+            }
+            let mut bounds: HashMap<SpatialId, kurbo::Rect> = HashMap::new();
+            for di in &frame.items {
+                if !map.projective.contains_key(&di.spatial) {
+                    continue;
+                }
+                let r = match &di.item {
+                    redrob_scene::Item::Rect { rect, .. }
+                    | redrob_scene::Item::RoundedRect { rect, .. }
+                    | redrob_scene::Item::BoxShadow { rect, .. }
+                    | redrob_scene::Item::LinearGradient { rect, .. }
+                    | redrob_scene::Item::RadialGradient { rect, .. }
+                    | redrob_scene::Item::External { rect, .. } => to_kurbo_rect(*rect),
+                    redrob_scene::Item::Image { dest, .. } => to_kurbo_rect(*dest),
+                    _ => continue,
+                };
+                bounds
+                    .entry(di.spatial)
+                    .and_modify(|b| *b = b.union(r))
+                    .or_insert(r);
+            }
+            for (id, m) in &map.projective {
+                let r = bounds
+                    .get(id)
+                    .copied()
+                    .unwrap_or(kurbo::Rect::new(0.0, 0.0, 100.0, 100.0));
+                if let Some(fit) = affine_fit(m, r) {
+                    map.projective_fit.insert(*id, fit);
+                }
+            }
+        }
         map
+    }
+
+    /// `transform` with every projective node replaced by the affine
+    /// through its projected item bounds: for a compositor that cannot
+    /// draw projectively.
+    pub fn flattened_transform(&self, id: SpatialId) -> Affine {
+        let world = self.transform(id);
+        let Some(plane) = self.projective_root(id) else {
+            return world;
+        };
+        let Some(fit) = self.projective_fit.get(&plane) else {
+            return world;
+        };
+        let wp = self.transform(plane);
+        if !invertible(&wp) {
+            return world;
+        }
+        wp * *fit * wp.inverse() * world
+    }
+
+    /// The projective 4x4 of a Reference node, if it has one.
+    pub fn projective(&self, id: SpatialId) -> Option<&[f32; 16]> {
+        self.projective.get(&id)
+    }
+
+    /// The outermost projective Reference at or above `id`.
+    pub fn projective_root(&self, id: SpatialId) -> Option<SpatialId> {
+        self.projective_root.get(&id).copied()
     }
 
     fn resolve(
@@ -142,7 +264,7 @@ impl SpatialMap {
         };
         let pw = parent.world;
         let out = match &node.kind {
-            SpatialKind::Reference { transform } => Resolved {
+            SpatialKind::Reference { transform, .. } => Resolved {
                 world: pw * to_kurbo_affine(*transform),
                 scroll: parent.scroll,
             },

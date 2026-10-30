@@ -4386,7 +4386,11 @@ fn positioned_counter_inside_nested_inline_code_uses_the_code_gutter() {
             .flat_map(|y| x_range.clone().map(move |x| (x, y)))
             .filter(|&(x, y)| {
                 let pixel = pixmap.pixel(x, y).expect("inside pixmap");
-                pixel.red() > 160 && pixel.green() < 100 && pixel.blue() < 100
+                // Red counter ink over the black gutter keeps green and blue
+                // at zero at any coverage. The LCD colour fringe of the
+                // pink source text is red-leaning but keeps a fraction of
+                // pink's green and blue, so it is not counter ink.
+                pixel.red() > 160 && pixel.green() < 24 && pixel.blue() < 24
             })
             .count()
     };
