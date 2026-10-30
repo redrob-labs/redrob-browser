@@ -10601,6 +10601,40 @@ mod tests {
 
     #[cfg(feature = "render")]
     #[tokio::test(flavor = "current_thread")]
+    async fn nested_svg_content_rects_come_from_svg_geometry() {
+        // Chrome: a nested <svg> (as d3 appends one) and its shapes report
+        // their geometry in the outer <svg>'s viewport, (40.5, 40.5, 420, 5.5).
+        let dom = parse_html(
+            r#"<html><body style="margin:0"><svg id="o" style="width:500px;height:500px">
+                <svg id="n"><g id="g" transform="translate(40,40)">
+                <path id="p" d="M0.5,6V0.5H420.5V6" stroke="black"/></g></svg></svg>
+            </body></html>"#,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(800.0, 600.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r#"["n", "g", "p"].map((id) => {
+                    const r = document.getElementById(id).getBoundingClientRect();
+                    return [r.x, r.y, r.width, r.height];
+                })"#,
+            )
+            .unwrap();
+        for rect in result.as_array().unwrap() {
+            let v: Vec<f64> = rect
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x.as_f64().unwrap())
+                .collect();
+            assert_eq!(v, vec![40.5, 40.5, 420.0, 5.5], "{result}");
+        }
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
     async fn ordinary_inline_keeps_computed_sizes_but_uses_content_geometry() {
         let dom = parse_html(
             r#"<html><head><style>
