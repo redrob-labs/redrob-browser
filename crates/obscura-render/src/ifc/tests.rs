@@ -1440,3 +1440,34 @@ fn absolutely_positioned_box_of_floats_shrinks_to_the_float_row() {
     assert_eq!((r("m").x, r("m").width), (602.0, 96.0), "{:?}", r("m"));
     assert_eq!((r("c").x, r("c").y), (666.0, 2.0), "{:?}", r("c"));
 }
+
+#[test]
+fn null_cells_in_grid_template_areas_count_as_explicit_columns() {
+    // Chrome: grid-template-areas 'a a a . .' makes five auto columns, so
+    // items 2 and 3 fill columns 4 and 5 of the first row (a 443.59, b at
+    // 443.59 and 153.2 wide, c at 596.8) and item 4 wraps.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><div style=\"display:grid;width:750px;grid-template-areas:'a a a . .'\">\
+         <div id=a style='grid-area:a'>1</div><div id=b>2</div><div id=c>3</div><div id=d>4</div></div>",
+        &[],
+    );
+    let r = |id: &str| {
+        let node = element(&tree, id);
+        laid.fractional_rects
+            .get(&node)
+            .copied()
+            .unwrap_or(laid.rects[&node])
+    };
+    assert!((r("a").width - 443.59).abs() < 0.05, "{:?}", r("a"));
+    assert!(
+        (r("b").x - 443.59).abs() < 0.05 && r("b").y == 0.0,
+        "{:?}",
+        r("b")
+    );
+    assert!(
+        (r("c").x - 596.8).abs() < 0.05 && r("c").y == 0.0,
+        "{:?}",
+        r("c")
+    );
+    assert!(r("d").x == 0.0 && r("d").y == 18.0, "{:?}", r("d"));
+}

@@ -9915,6 +9915,36 @@ fn resolve_grid_areas(
         );
 
         if let Some(areas) = &areas {
+            // grid-template-areas sizes the explicit grid: its columns and
+            // rows count even where only "." null cells fill them. Tracks
+            // the templates do not list are sized by grid-auto-*, like
+            // Chrome (`'myArea myArea myArea . .'` makes five columns, so
+            // the auto-placed items after it fill the two empty ones).
+            let area_cols = areas.iter().map(Vec::len).max().unwrap_or(0);
+            let area_rows = areas.len();
+            if let Some(style) = styles.get_mut(&id) {
+                let pad = |template: &mut Vec<taffy::GridTemplateComponent<String>>,
+                           auto: &[taffy::TrackSizingFunction],
+                           count: usize| {
+                    if template.iter().all(|component| {
+                        matches!(component, taffy::GridTemplateComponent::Single(_))
+                    }) {
+                        let mut index = 0;
+                        while template.len() < count {
+                            let track = auto
+                                .get(index % auto.len().max(1))
+                                .copied()
+                                .unwrap_or_else(taffy::style_helpers::auto);
+                            template.push(taffy::GridTemplateComponent::Single(track));
+                            index += 1;
+                        }
+                    }
+                };
+                let auto_cols = style.grid_auto_columns.clone();
+                let auto_rows = style.grid_auto_rows.clone();
+                pad(&mut style.grid_template_columns, &auto_cols, area_cols);
+                pad(&mut style.grid_template_rows, &auto_rows, area_rows);
+            }
             // name -> (row_start, row_end, col_start, col_end) in 0-based track indices.
             let mut spans: HashMap<String, (usize, usize, usize, usize)> = HashMap::new();
             for (r, row) in areas.iter().enumerate() {
