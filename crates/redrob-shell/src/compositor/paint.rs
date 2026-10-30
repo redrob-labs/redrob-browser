@@ -5,6 +5,8 @@
 //! layers the compositor opens around runs of drawing items, so the
 //! engine's own push/pop items always nest correctly around them.
 
+use std::collections::HashMap;
+
 use redrob_scene::{BlendMode as SBlend, Brush as SBrush, GradientStop, Item};
 use vello::kurbo::{Affine, Diagonal2, Rect, RoundedRect, RoundedRectRadii, Stroke};
 use vello::peniko::{
@@ -14,6 +16,13 @@ use vello::{FontEmbolden, Scene};
 
 use super::spatial::{self, Resolved};
 use super::state::{path, TabScene};
+
+/// A filtered `Backdrop`: device pixels (premultiplied RGBA8) placed at
+/// `origin` (device px of the page area).
+pub struct Patch {
+    pub image: ImageData,
+    pub origin: (f64, f64),
+}
 
 /// A frame of an `External` item (a playing video), straight RGBA.
 #[derive(Clone)]
@@ -89,7 +98,10 @@ impl Layers {
 }
 
 /// Build the scene of `page` for a page area of `size` CSS px drawn at
-/// `scale` physical px per CSS px.
+/// `scale` physical px per CSS px: items `..end` (open layers closed), with
+/// the filtered backdrops in `patches` by item index. Returns the device
+/// transform item `end` draws with, for reading its backdrop back.
+#[allow(clippy::too_many_arguments)]
 pub fn build(
     scene: &mut Scene,
     page: &TabScene,
@@ -97,8 +109,11 @@ pub fn build(
     size: (f32, f32),
     scale: f32,
     externals: &[(u64, Option<External>)],
-) {
-    let Some(frame) = &page.frame else { return };
+    end: usize,
+    patches: &HashMap<usize, Patch>,
+) -> Option<Affine> {
+    let frame = page.frame.as_ref()?;
+    let mut end_device = None;
     let base = Affine::scale(f64::from(scale));
     let view = Rect::new(0.0, 0.0, f64::from(size.0), f64::from(size.1));
     let bg = frame.background;
@@ -118,6 +133,10 @@ pub fn build(
         let Some(&node) = page.index.get(&d.spatial) else {
             continue;
         };
+        if n >= end {
+            end_device = Some(base * layers.xf * res.world[node]);
+            break;
+        }
         // Layer transforms apply to everything inside them, scroll clips too
         // (as redrob-scene-raster does for screenshots).
         let world = layers.xf * res.world[node];
@@ -356,8 +375,21 @@ pub fn build(
                     }
                 }
             }
-            // Drawn by the GPU path's backdrop pass (not yet).
-            Item::Backdrop { .. } => {}
+            // What was drawn below, filtered by the render pass
+            // (`Gpu::backdrops`), clipped to the rounded box.
+            Item::Backdrop { rect, radii, .. } => {
+                if let (Some(patch), Some(inv)) = (patches.get(&n), spatial::invert(t)) {
+                    let brush =
+                        ImageBrush::new(patch.image.clone()).with_quality(ImageQuality::Low);
+                    scene.fill(
+                        Fill::NonZero,
+                        t,
+                        &brush,
+                        Some(inv * Affine::translate(patch.origin)),
+                        &rounded(spatial::rect(rect), *radii),
+                    );
+                }
+            }
             Item::PopClip | Item::PopLayer => {
                 if let Some(xf) = layers.pushed.pop() {
                     scene.pop_layer();
@@ -370,6 +402,7 @@ pub fn build(
     while layers.pushed.pop().is_some() {
         scene.pop_layer();
     }
+    end_device
 }
 
 /// How far synthetic bold grows each glyph outline, per side (the same

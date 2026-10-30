@@ -70,6 +70,8 @@ pub struct Gpu {
     renderer: vello::Renderer,
     scene: vello::Scene,
     targets: HashMap<u64, Target>,
+    /// The texture backdrops are read back from.
+    scratch: Option<(wgpu::Texture, wgpu::TextureView)>,
     drawn: HashMap<u64, Drawn>,
     trace: Option<std::fs::File>,
     last_render: Option<Instant>,
@@ -110,11 +112,181 @@ impl Gpu {
             renderer,
             scene: vello::Scene::new(),
             targets: HashMap::new(),
+            scratch: None,
             drawn: HashMap::new(),
             trace,
             last_render: None,
             stats: Stats::default(),
         })
+    }
+
+    /// `backdrop-filter`: for each `Backdrop` item, render the items before
+    /// it (earlier backdrops included) into a scratch texture, read its
+    /// device box back and filter it on the CPU with the same code as
+    /// screenshots (`redrob_scene::filter`).
+    fn backdrops(
+        &mut self,
+        page: &TabScene,
+        res: &Resolved,
+        size: (f32, f32),
+        scale: f32,
+        frames: &[(u64, Option<External>)],
+        params: &vello::RenderParams,
+    ) -> HashMap<usize, paint::Patch> {
+        let mut patches = HashMap::new();
+        let Some(frame) = &page.frame else {
+            return patches;
+        };
+        let wanted: Vec<usize> = frame
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| matches!(d.item, redrob_scene::Item::Backdrop { .. }))
+            .map(|(i, _)| i)
+            .collect();
+        for i in wanted {
+            let redrob_scene::Item::Backdrop { rect, filters, .. } = &frame.items[i].item else {
+                continue;
+            };
+            self.scene.reset();
+            let Some(device) =
+                paint::build(&mut self.scene, page, res, size, scale, frames, i, &patches)
+            else {
+                continue;
+            };
+            let (w, h) = (params.width as f64, params.height as f64);
+            let bbox = device
+                .transform_rect_bbox(spatial::rect(rect))
+                .intersect(vello::kurbo::Rect::new(0.0, 0.0, w, h));
+            let (x0, y0) = (bbox.x0.round().max(0.0), bbox.y0.round().max(0.0));
+            let (x1, y1) = (bbox.x1.round().min(w), bbox.y1.round().min(h));
+            if x1 <= x0 || y1 <= y0 {
+                continue;
+            }
+            let region = (x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32);
+            let Some(mut rgba) = self.render_region(params, region) else {
+                continue;
+            };
+            let c = device.as_coeffs();
+            let scale = (c[0] * c[3] - c[1] * c[2]).abs().sqrt() as f32;
+            let (rw, rh) = (region.2 as usize, region.3 as usize);
+            redrob_scene::filter::apply_filters(&mut rgba, rw, rh, filters, scale);
+            patches.insert(
+                i,
+                paint::Patch {
+                    image: vello::peniko::ImageData {
+                        data: vello::peniko::Blob::from(rgba),
+                        format: vello::peniko::ImageFormat::Rgba8,
+                        alpha_type: vello::peniko::ImageAlphaType::AlphaPremultiplied,
+                        width: region.2,
+                        height: region.3,
+                    },
+                    origin: (x0, y0),
+                },
+            );
+        }
+        patches
+    }
+
+    /// Render `self.scene` into the scratch texture and read `region`
+    /// (x, y, w, h device px) back as premultiplied RGBA8.
+    fn render_region(
+        &mut self,
+        params: &vello::RenderParams,
+        region: (u32, u32, u32, u32),
+    ) -> Option<Vec<u8>> {
+        let device = self.state.device.clone();
+        let fits = self
+            .scratch
+            .as_ref()
+            .is_some_and(|(t, _)| t.width() == params.width && t.height() == params.height);
+        if !fits {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("redrob-backdrop"),
+                size: wgpu::Extent3d {
+                    width: params.width,
+                    height: params.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.scratch = Some((texture, view));
+        }
+        let (texture, view) = self.scratch.as_ref()?;
+        if let Err(e) =
+            self.renderer
+                .render_to_texture(&device, &self.state.queue, &self.scene, view, params)
+        {
+            eprintln!("redrob-browser: backdrop render failed: {e}");
+            return None;
+        }
+        let (x, y, w, h) = region;
+        let row = (w * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("redrob-backdrop-read"),
+            size: u64::from(row) * u64::from(h),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("redrob-backdrop-read"),
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x, y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row),
+                    rows_per_image: Some(h),
+                },
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.state.queue.submit([encoder.finish()]);
+        let slice = buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(Duration::from_secs(2)),
+        });
+        rx.recv_timeout(Duration::from_secs(2)).ok()?.ok()?;
+        let mut out = Vec::with_capacity((w * h * 4) as usize);
+        {
+            let mapped = slice.get_mapped_range().ok()?;
+            for r in 0..h as usize {
+                let start = r * row as usize;
+                out.extend_from_slice(&mapped[start..start + w as usize * 4]);
+            }
+        }
+        buffer.unmap();
+        // vello stores straight alpha; the filters take premultiplied.
+        for px in out.as_chunks_mut::<4>().0 {
+            let a = u16::from(px[3]);
+            for c in &mut px[..3] {
+                *c = ((u16::from(*c) * a + 127) / 255) as u8;
+            }
+        }
+        Some(out)
     }
 
     fn target(&mut self, slot: u64, width: u32, height: u32) -> Option<&Target> {
@@ -208,15 +380,26 @@ impl Gpu {
             return self.targets.get(&slot).map(|t| t.id);
         }
         let started = Instant::now();
-        self.scene.reset();
-        paint::build(&mut self.scene, page, res, size, scale, &frames);
-        let built = Instant::now();
         let params = vello::RenderParams {
             base_color: Color::TRANSPARENT,
             width,
             height,
             antialiasing_method: vello::AaConfig::Area,
         };
+        let patches = self.backdrops(page, res, size, scale, &frames, &params);
+        self.scene.reset();
+        let all = page.frame.as_ref().map_or(0, |f| f.items.len());
+        paint::build(
+            &mut self.scene,
+            page,
+            res,
+            size,
+            scale,
+            &frames,
+            all,
+            &patches,
+        );
+        let built = Instant::now();
         let target = self.target(slot, width, height)?;
         let (view, id) = (target.view.clone(), target.id);
         if let Err(e) = self.renderer.render_to_texture(
