@@ -10731,6 +10731,30 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn xml_parse_from_string_returns_the_source_root_element() {
+        // Chrome: plotly's icon parseFromString(svg, "application/xml")
+        // .childNodes[0] is the <svg> itself (it was the <html> wrapper).
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(parse_html("<html><body></body></html>"));
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"(() => {
+                    const d = new DOMParser().parseFromString(
+                        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'><path d='M0 0'/></svg>",
+                        "application/xml");
+                    const n = d.childNodes[0];
+                    return [n.localName, n.namespaceURI, d.documentElement === n, d.childNodes.length];
+                })()"##,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!(["svg", "http://www.w3.org/2000/svg", true, 1])
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn window_listeners_survive_garbage_collection() {
         // A window load listener added during parsing must still run after a
         // full GC (w3schools' exercise box lost its load_quiz listener when
