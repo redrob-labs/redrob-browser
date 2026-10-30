@@ -5397,11 +5397,35 @@ fn paint_laid_dom_scrolled(
                 continue;
             };
             let surface_movement = scroll_state.translation_for(laid, nid);
-            let mut layers: Vec<(f64, usize, Pixmap, three_d::Homography)> = Vec::new();
-            for (order, (plane, own_only)) in three_d::context_planes(tree, laid, nid)
-                .into_iter()
-                .enumerate()
-            {
+            let outside_overflow_clip = scroll_state.overflow_clip_for(laid, nid);
+            let clip_mask = outside_overflow_clip.as_ref().and_then(|clip| {
+                cached_overflow_clip_mask(
+                    &mut overflow_mask_cache,
+                    pixmap.width(),
+                    pixmap.height(),
+                    clip,
+                    scroll_state.surface_extent.unwrap_or(viewport),
+                )
+            });
+            // Back to front by the depth of each plane's centre (z / w in
+            // the surface frame, larger is nearer), tree order on ties.
+            let mut planes: Vec<(f64, usize, obscura_dom::tree::NodeId, bool)> =
+                three_d::context_planes(tree, laid, nid)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(order, (plane, own_only))| {
+                        let rect = laid.rects.get(&plane).copied().unwrap_or_default();
+                        let relative = surface_inverse.then(three_d::accumulated(laid, plane));
+                        let (cx, cy) = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+                        let m = &relative.m;
+                        let w = m[3][0] * cx + m[3][1] * cy + m[3][3];
+                        let z = m[2][0] * cx + m[2][1] * cy + m[2][3];
+                        let depth = if w.abs() > 1e-6 { (z / w) as f64 } else { 0.0 };
+                        (depth, order, plane, own_only)
+                    })
+                    .collect();
+            planes.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            for (_, _, plane, own_only) in planes {
                 let (Some(plane_style), Some(plane_rect)) =
                     (laid.styles.get(&plane), laid.rects.get(&plane).copied())
                 else {
@@ -5439,6 +5463,26 @@ fn paint_laid_dom_scrolled(
                 let Some(layer) = Pixmap::new(width, height) else {
                     continue;
                 };
+                // layer pixel -> plane space -> surface space -> surface pixel.
+                let h = three_d::multiply(
+                    &three_d::translation(surface_movement.0 as f64, surface_movement.1 as f64),
+                    &three_d::multiply(
+                        &three_d::homography(&relative),
+                        &three_d::translation(
+                            left as f64 - movement.0 as f64,
+                            top as f64 - movement.1 as f64,
+                        ),
+                    ),
+                );
+                // A scene recording keeps the plane as a projective reference
+                // frame (the window and scene rasterizer project it).
+                #[cfg(feature = "display-list")]
+                crate::display_list::note_projective_layer(
+                    &layer,
+                    scene_node_id(plane),
+                    (surface_offset.0 - left, surface_offset.1 - top),
+                    three_d::to_4x4(&h),
+                );
                 let excluded = if own_only {
                     three_d::exclude(tree, &three_d::plane_children(tree, laid, plane))
                 } else {
@@ -5475,41 +5519,19 @@ fn paint_laid_dom_scrolled(
                 );
                 three_d::restore(excluded);
                 let layer = painted?;
-                // layer pixel -> plane space -> surface space -> surface pixel.
-                let h = three_d::multiply(
-                    &three_d::translation(surface_movement.0 as f64, surface_movement.1 as f64),
-                    &three_d::multiply(
-                        &three_d::homography(&relative),
-                        &three_d::translation(
-                            left as f64 - movement.0 as f64,
-                            top as f64 - movement.1 as f64,
-                        ),
-                    ),
-                );
-                // Depth of the plane's centre, larger is nearer the viewer.
-                let (cx, cy) = (
-                    plane_rect.x + plane_rect.width / 2.0,
-                    plane_rect.y + plane_rect.height / 2.0,
-                );
-                let m = &relative.m;
-                let w = m[3][0] * cx + m[3][1] * cy + m[3][3];
-                let z = m[2][0] * cx + m[2][1] * cy + m[2][3];
-                let depth = if w.abs() > 1e-6 { (z / w) as f64 } else { 0.0 };
-                layers.push((depth, order, layer, h));
-            }
-            layers.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-            let outside_overflow_clip = scroll_state.overflow_clip_for(laid, nid);
-            let clip_mask = outside_overflow_clip.as_ref().and_then(|clip| {
-                cached_overflow_clip_mask(
-                    &mut overflow_mask_cache,
-                    pixmap.width(),
-                    pixmap.height(),
-                    clip,
-                    scroll_state.surface_extent.unwrap_or(viewport),
-                )
-            });
-            for (_, _, layer, h) in &layers {
-                three_d::draw_projective(&mut pixmap, layer, h, clip_mask.as_deref());
+                #[cfg(feature = "display-list")]
+                if crate::display_list::scene_active() {
+                    pixmap.canvas().draw_image(
+                        0,
+                        0,
+                        layer.as_ref(),
+                        &tiny_skia::PixmapPaint::default(),
+                        Transform::identity(),
+                        clip_mask.as_deref(),
+                    );
+                    continue;
+                }
+                three_d::draw_projective(&mut pixmap, &layer, &h, clip_mask.as_deref());
             }
             scene_node(nid);
             continue;
@@ -23296,6 +23318,101 @@ mod tests {
 #[cfg(all(test, feature = "scene"))]
 mod scene_text_tests {
     use super::*;
+
+    /// 3D planes reach the scene as projective reference frames, and the
+    /// scene rasterizer projects them like the CPU paint.
+    #[test]
+    fn scene_frame_carries_projective_planes_the_rasterizer_projects() {
+        let tree = obscura_dom::parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:100px;perspective:200px">
+                  <div style="width:100px;height:100px;background:rgb(255,0,0);transform:rotateY(45deg)"></div>
+                </div>
+                <div style="position:absolute;left:150px;top:0;width:100px;height:100px;perspective:300px">
+                  <div style="width:100px;height:100px;transform-style:preserve-3d">
+                    <div style="position:absolute;inset:0;background:rgb(255,0,0);transform:translateZ(40px)"></div>
+                    <div style="position:absolute;inset:0;background:rgb(0,0,255);transform:translateZ(-40px)"></div>
+                  </div>
+                </div>
+            </body></html>"#,
+        );
+        let viewport = (260.0, 120.0);
+        let mut resources = RenderResourceCache::default();
+        let mut prepared = prepare_dom(&tree, viewport, None, &mut resources).unwrap();
+        let built = scene::build_scene_prepared(
+            &tree,
+            &mut prepared,
+            &mut resources,
+            (0.0, 0.0),
+            &HashMap::new(),
+            [255, 255, 255, 255],
+            &EMPTY_CANVAS_SURFACES,
+            1.0,
+        )
+        .unwrap();
+        let projective = built
+            .frame
+            .spatial
+            .iter()
+            .filter(|node| {
+                matches!(
+                    node.kind,
+                    redrob_scene::SpatialKind::Reference {
+                        projective: Some(_),
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert!(
+            projective >= 3,
+            "one projective frame per plane, found {projective}"
+        );
+        let image = redrob_scene_raster::rasterize(
+            &built.frame,
+            &redrob_scene_raster::ResourceStore::new(),
+            &HashMap::new(),
+            redrob_scene::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: viewport.0,
+                h: viewport.1,
+            },
+            1.0,
+        );
+        let red_rows = |x: u32| {
+            (0..120u32)
+                .filter(|&y| {
+                    let [r, g, b, _] = image.pixel(x, y);
+                    r > 200 && g < 60 && b < 60
+                })
+                .count()
+        };
+        let (near, far) = (red_rows(22), red_rows(70));
+        assert!(
+            near > far + 6,
+            "perspective: near edge {near} rows, far edge {far}"
+        );
+        assert_eq!(&image.pixel(200, 50)[..3], &[255, 0, 0], "depth order");
+        // The window's raster and the CPU screenshot agree.
+        let cpu = paint_dom(&tree, viewport, None).unwrap();
+        let differing = (0..120u32)
+            .flat_map(|y| (0..260u32).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let a = image.pixel(x, y);
+                let b = cpu.pixel(x, y).unwrap();
+                [b.red(), b.green(), b.blue()]
+                    .iter()
+                    .zip(&a[..3])
+                    .any(|(p, q)| (*p as i32 - *q as i32).abs() > 24)
+            })
+            .count();
+        // Plane edges are resampled from layers of different resolution.
+        assert!(
+            differing < 700,
+            "scene raster and CPU paint differ on {differing} pixels"
+        );
+    }
 
     /// The compositor scene (what redrob-shell draws) carries the IFC's text
     /// as glyph runs with font resources.

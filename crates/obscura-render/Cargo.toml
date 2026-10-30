@@ -53,6 +53,8 @@ avif-parse = { version = "2.1.0", optional = true }
 # install a collector and assert on them.
 [dev-dependencies]
 log = "0.4"
+# Rasterizes scene frames in tests, as the window does.
+redrob-scene-raster = { path = "../redrob-scene-raster" }
 
 [lib]
 path = "src/lib.rs"

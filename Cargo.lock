@@ -5083,6 +5083,7 @@ dependencies = [
  "obscura-ssrf",
  "parley",
  "redrob-scene",
+ "redrob-scene-raster",
  "resvg 0.47.0",
  "serde",
  "swash",

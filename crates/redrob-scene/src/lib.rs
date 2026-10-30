@@ -45,7 +45,16 @@ pub struct SpatialNode {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum SpatialKind {
     /// A transform (CSS `transform`, or a plain offset), relative to the parent.
-    Reference { transform: Affine },
+    /// `projective`, when present, is a row-major 4x4 matrix applied before
+    /// `transform` (local -> `projective` -> `transform` -> parent): a CSS 3D
+    /// transform or perspective. Content is the plane z = 0, so its x, y and
+    /// w rows and columns act; points it maps behind the viewer (w <= 0) are
+    /// not drawn.
+    Reference {
+        transform: Affine,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        projective: Option<[f32; 16]>,
+    },
     /// A scroll container. `frame` is its clip/viewport rect in the parent's
     /// space; `content` is the scrollable size. The compositor owns the live
     /// offset; `offset` is the engine's last known offset (JS scrollTo etc.).

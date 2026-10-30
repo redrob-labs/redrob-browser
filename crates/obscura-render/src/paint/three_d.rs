@@ -220,6 +220,29 @@ pub(crate) fn multiply(a: &Homography, b: &Homography) -> Homography {
     out
 }
 
+/// A plane homography as a row-major 4x4 (z row and column identity).
+pub(crate) fn to_4x4(h: &Homography) -> [f32; 16] {
+    let f = |v: f64| v as f32;
+    [
+        f(h[0][0]),
+        f(h[0][1]),
+        0.0,
+        f(h[0][2]),
+        f(h[1][0]),
+        f(h[1][1]),
+        0.0,
+        f(h[1][2]),
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        f(h[2][0]),
+        f(h[2][1]),
+        0.0,
+        f(h[2][2]),
+    ]
+}
+
 pub(crate) fn translation(x: f64, y: f64) -> Homography {
     [[1.0, 0.0, x], [0.0, 1.0, y], [0.0, 0.0, 1.0]]
 }
