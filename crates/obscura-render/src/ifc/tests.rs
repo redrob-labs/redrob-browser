@@ -1623,3 +1623,26 @@ fn column_width_fits_the_column_count_and_fragments_inline_text() {
     let h = |id: &str| laid.rects[&element(&tree, id)].height;
     assert_eq!((h("a"), h("b"), h("c")), (160.0, 200.0, 220.0));
 }
+
+#[test]
+fn vertical_block_is_as_wide_as_its_stacked_lines() {
+    // Chrome: a vertical-rl block in horizontal flow with a 150px (100px)
+    // inline size stacks its lines in the block direction: 2 (6) lines of
+    // 24px make it 48 (144) wide, not the parent's width; one short line
+    // is 24 wide.
+    let t = "Lorem ipsum dolor sit amet consectetur";
+    let (tree, laid) = layout(
+        &format!(
+            "<!doctype html><body style='margin:0;font:16px/24px Arial'>\
+             <div id=a style='writing-mode:vertical-rl;height:150px'>{t}</div>\
+             <div id=b style='writing-mode:vertical-rl;height:100px'>{t} {t}</div>\
+             <div id=c style='writing-mode:vertical-rl;height:600px'>short</div>"
+        ),
+        &[],
+    );
+    let r = |id: &str| laid.rects[&element(&tree, id)];
+    assert_eq!(
+        (r("a").width, r("a").height, r("b").width, r("c").width),
+        (48.0, 150.0, 144.0, 24.0)
+    );
+}

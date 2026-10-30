@@ -8216,6 +8216,27 @@ fn layout_dom_once(
                 style.is_inline_block = true;
             }
         }
+        // A block-level orthogonal root does not stretch to its parent's
+        // width: its physical width is its block size, the extent of all of
+        // its stacked vertical lines (CSS Writing Modes 3 7.3), so it sizes
+        // like fit-content from its turned layout.
+        let orthogonal_blocks: Vec<NodeId> = styles
+            .iter()
+            .filter(|(id, style)| {
+                style.vertical_writing
+                    && style.display == crate::Display::Block
+                    && style.width == crate::Dimension::Auto
+                    && rendered_parent(tree, **id)
+                        .and_then(|parent| styles.get(&parent))
+                        .is_some_and(|parent| !parent.vertical_writing)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in orthogonal_blocks {
+            if let Some(style) = styles.get_mut(&id) {
+                style.width_fit_content = true;
+            }
+        }
 
         // Absolute/fixed boxes and floats are blockified externally but retain
         // their inner formatting mode and their context-specific shrink-fit.
