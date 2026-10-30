@@ -1502,3 +1502,20 @@ fn percentage_image_wrapper_shrinks_in_a_full_flex_row() {
         width(&tree, &laid, "p")
     );
 }
+
+#[test]
+fn absolute_shrink_to_fit_room_excludes_insets() {
+    // Chrome (CSS 2 10.3.7): in a 300px containing block, an auto-width box
+    // at left:250px wraps in 50px, one at left:-200px fits on one line
+    // (213 wide) instead of wrapping at 300.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'><div style='position:relative;width:300px;height:100px'>\
+         <div id=a style='position:absolute;left:250px;top:0'>hello world foo bar</div>\
+         <div id=b style='position:absolute;left:-200px;top:20px'>hello world foo bar baz qux quux</div></div>",
+        &[],
+    );
+    let a = laid.rects[&element(&tree, "a")];
+    let b = laid.rects[&element(&tree, "b")];
+    assert!(a.width <= 50.0 && a.height > 50.0, "{a:?}");
+    assert!(b.width > 210.0 && b.height < 20.0, "{b:?}");
+}
