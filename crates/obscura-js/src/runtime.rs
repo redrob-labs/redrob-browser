@@ -2481,7 +2481,10 @@ impl ObscuraJsRuntime {
                 .blocked_urls
                 .iter()
                 .any(|pattern| crate::ops::glob_match(pattern, &url));
-            let allowed = page_render_resource_url_allowed(&state.url, &url);
+            let allowed = page_render_resource_url_allowed(
+                &state.url,
+                obscura_render::video_header::media_header_target(&url).unwrap_or(&url),
+            );
             if blocked || !allowed {
                 match profile {
                     Some(profile) => state.render_resources.seed_image_missing(url, profile),
@@ -2697,7 +2700,10 @@ impl ObscuraJsRuntime {
                         // Every load of this page waits for the same permits, so
                         // repeated scans cannot multiply the request rate.
                         let _permit = limiter.acquire_owned().await.ok();
-                        let parsed = match url::Url::parse(&raw) {
+                        let header_target = obscura_render::video_header::media_header_target(&raw)
+                            .map(str::to_owned);
+                        let parsed = match url::Url::parse(header_target.as_deref().unwrap_or(&raw))
+                        {
                             Ok(parsed) => parsed,
                             Err(_) => {
                                 return crate::ops::RenderResourceLoad {
@@ -2715,6 +2721,11 @@ impl ObscuraJsRuntime {
                             obscura_net::ResourceType::Image
                         };
                         let mut request = ResourceRequest::subresource(kind, &initiator);
+                        if header_target.is_some() {
+                            request.resource_type = obscura_net::ResourceType::Other;
+                            request.prefix_bytes =
+                                Some(obscura_render::video_header::MEDIA_HEADER_BYTES);
+                        }
                         match profile {
                             Some(crate::ops::ImageRequestProfile::CorsSameOrigin) => {
                                 request.mode = RequestMode::Cors;
@@ -2885,6 +2896,7 @@ impl ObscuraJsRuntime {
             ));
             let is_font = load.is_font;
             let bytes = match &load.response {
+                // 206 Partial Content answers a header (Range) read.
                 Some(response) if (200..300).contains(&response.status) => {
                     loaded += 1;
                     Some(std::sync::Arc::clone(&response.body))
