@@ -386,7 +386,7 @@ impl ShapedText {
                         .iter()
                         .map(|info| {
                             let ch = *run_chars.get(info.cluster as usize)?;
-                            if !crate::shape::shaped_text::vertical_upright(ch) {
+                            if !vertical_upright(ch) {
                                 return None;
                             }
                             let advance = vmtx

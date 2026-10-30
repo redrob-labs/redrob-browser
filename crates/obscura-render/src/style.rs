@@ -1307,6 +1307,26 @@ fn declaration_sets(name: &str, property: &str) -> bool {
 }
 
 fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
+    // Chromium drops a control's native appearance once the author styles
+    // its background or border (or sets appearance: none).
+    if matches!(
+        name,
+        "background"
+            | "background-color"
+            | "background-image"
+            | "border"
+            | "border-top"
+            | "border-right"
+            | "border-bottom"
+            | "border-left"
+            | "border-style"
+            | "border-width"
+            | "border-color"
+    ) || (matches!(name, "appearance" | "-webkit-appearance")
+        && value.trim().eq_ignore_ascii_case("none"))
+    {
+        style.native_appearance_dropped = true;
+    }
     match name {
         "direction" => {
             match value.trim().to_ascii_lowercase().as_str() {

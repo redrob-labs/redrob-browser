@@ -2013,6 +2013,10 @@ function _eventTargetAdd(target, type, callback, options) {
     abortHandler: null,
   };
   listeners.push(entry);
+  if ((type === 'animationstart' || type === 'webkitAnimationStart')
+      && typeof globalThis._watchAnimationStart === 'function') {
+    globalThis._watchAnimationStart(target);
+  }
   _eventTargetListenerChanged.get(target)?.();
   if (signal && typeof signal.addEventListener === "function") {
     entry.abortHandler = () => _eventTargetRemove(target, type, callback, capture);
@@ -4153,6 +4157,39 @@ function _cssAnimations() {
   for (const [key, wrapper] of live) _cssAnimationWrappers.set(key, wrapper);
   return Array.from(live.values());
 }
+// animationstart: Chromium fires it at the frame after a CSS animation
+// starts. An element with a listener is checked each frame (~16ms) for CSS
+// animation instances it has not reported yet; libraries such as Chart.js
+// use the event to detect that a node was rendered.
+const _animationStartWatched = new Set();
+const _animationStartFired = new WeakMap();
+let _animationStartTimer = null;
+function _animationStartTick() {
+  _animationStartTimer = null;
+  for (const el of [..._animationStartWatched]) {
+    if (!el.isConnected) continue;
+    try { void el.offsetWidth; } catch (_e) {}
+    const live = new Set(_cssAnimations()
+      .filter(animation => animation._nid === (el._nid | 0))
+      .map(animation => animation.animationName));
+    const fired = _animationStartFired.get(el) || new Set();
+    for (const name of [...fired]) if (!live.has(name)) fired.delete(name);
+    for (const name of live) {
+      if (fired.has(name)) continue;
+      fired.add(name);
+      try { el.dispatchEvent(new AnimationEvent('animationstart', { animationName: name, bubbles: true })); }
+      catch (e) { console.error(e); }
+    }
+    _animationStartFired.set(el, fired);
+  }
+  if (_animationStartWatched.size) _animationStartTimer = setTimeout(_animationStartTick, 16);
+}
+globalThis._watchAnimationStart = function (el) {
+  if (!el || typeof el._nid !== 'number' || _animationStartWatched.has(el)) return;
+  if (_animationStartWatched.size >= 256) return;
+  _animationStartWatched.add(el);
+  if (_animationStartTimer == null) _animationStartTimer = setTimeout(_animationStartTick, 16);
+};
 function _animationsForTarget(target) {
   const css = _cssAnimations().filter(animation => animation._nid === (target?._nid | 0));
   return css.concat(Array.from(_waapiAnimations).filter(animation => {
@@ -12419,7 +12456,14 @@ globalThis.PointerEvent = class extends MouseEvent {
     this.isPrimary=!!o.isPrimary;
   }
 };
-globalThis.AnimationEvent = class extends Event {};
+globalThis.AnimationEvent = class AnimationEvent extends Event {
+  constructor(type, init = {}) {
+    super(type, init);
+    this.animationName = String(init.animationName ?? '');
+    this.elapsedTime = Number(init.elapsedTime) || 0;
+    this.pseudoElement = String(init.pseudoElement ?? '');
+  }
+};
 globalThis.TransitionEvent = class extends Event {};
 globalThis.UIEvent = class extends Event {
   constructor(t,o={}) { super(t,o);this.view=o.view||null;this.detail=o.detail||0; }
@@ -17304,22 +17348,31 @@ const _svgLocalBounds = (el) => {
       const x = _svgNum(el, 'x') + shift('dx'), y = _svgNum(el, 'y') + shift('dy');
       let w = text.length * size * 0.55, ascent = size * 0.9, descent = size * 0.25;
       // The document's own fonts (web fonts included), so the box spans the
-      // font's ascent and descent like Chrome's text bounding box.
+      // font's ascent and descent like Chrome's text bounding box. Chrome
+      // lays SVG text out at its on-screen font size (the user-space size
+      // times the CTM scale) with whole-pixel ascent and descent, then maps
+      // the box back to user space.
+      const scale = _svgTextScale > 0 && Number.isFinite(_svgTextScale) ? _svgTextScale : 1;
       let run = null;
       try {
         if (typeof __obscuraCore.ops.op_text_run_metrics === 'function') {
           run = JSON.parse(__obscuraCore.ops.op_text_run_metrics(text, String(family), String(weight),
-            /italic|oblique/.test(cs.fontStyle || ''), size, 0));
+            /italic|oblique/.test(cs.fontStyle || ''), size * scale, 0));
         }
       } catch (_e) { run = null; }
       if (Array.isArray(run)) {
-        [w, ascent, descent] = run;
+        w = run[0] / scale;
+        ascent = Math.round(run[1]) / scale;
+        descent = Math.round(run[2]) / scale;
       } else {
         try {
           const ctx = (globalThis.__obscuraSvgMeasure ||= document.createElement('canvas').getContext('2d'));
           if (ctx) { ctx.font = `${weight} ${size}px ${family}`; w = ctx.measureText(text).width; }
         } catch (_e) {}
       }
+      // letter-spacing follows every character (attribute or CSS).
+      const spacing = parseFloat(svgAttr('letter-spacing') ?? cs.letterSpacing);
+      if (Number.isFinite(spacing) && spacing !== 0) w += spacing * [...text].length;
       const anchor = svgAttr('text-anchor') || cs.textAnchor;
       const left = anchor === 'middle' ? x - w / 2 : anchor === 'end' ? x - w : x;
       return [left, y - ascent, left + w, y + descent];
@@ -17360,6 +17413,8 @@ const _svgSubtreeBounds = (el, m, skipOwnTransform) => {
 };
 const _SVG_UNRENDERED = new Set(['defs', 'mask', 'clipPath', 'pattern', 'marker', 'linearGradient',
   'radialGradient', 'filter', 'symbol']);
+// The CTM scale of the SVG text being measured (1 for getBBox()).
+let _svgTextScale = 1;
 // Screen rect of an SVG descendant, from its outermost <svg> box.
 const _svgClientRect = (el) => {
   if (_SVG_UNRENDERED.has(el.localName)) return null;
@@ -17400,7 +17455,10 @@ const _svgClientRect = (el) => {
     m = _svgMul(m, _svgTransform(p.getAttribute('transform')));
     if (p.localName === 'svg') m = _svgMul(m, [1, 0, 0, 1, _svgNum(p, 'x'), _svgNum(p, 'y')]);
   }
-  const b = _svgSubtreeBounds(el, m);
+  const previousScale = _svgTextScale;
+  _svgTextScale = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1;
+  let b;
+  try { b = _svgSubtreeBounds(el, m); } finally { _svgTextScale = previousScale; }
   if (!b) {
     // A rendered element with nothing to draw (an empty <g>, a path
     // without data) still has a box: an empty rect at its user-space

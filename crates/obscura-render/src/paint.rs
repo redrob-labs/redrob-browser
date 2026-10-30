@@ -9987,6 +9987,12 @@ fn resolve_resource_url(src: &str, base_url: Option<&str>) -> Option<String> {
 /// filtering is load-bearing for performance: generated font packages commonly
 /// emit six or seven script subsets per face, while an English page needs only
 /// the subset containing ASCII.
+/// Web font faces registered per document. Pages that load a batch of
+/// Google Fonts declare 16+ faces before their own (w3schools'
+/// css_font_google: its PS2P button font came after 16 others and fell
+/// back to monospace); Chrome registers all of them.
+const MAX_WEB_FONT_FACES: usize = 64;
+
 fn collect_web_fonts(
     tree: &DomTree,
     base_url: Option<&str>,
@@ -10109,7 +10115,7 @@ fn collect_web_fonts(
             preloads.push(href);
         }
     }
-    for src in preloads.iter().take(16) {
+    for src in preloads.iter().take(MAX_WEB_FONT_FACES) {
         let key = font_resource_key(src, base_url);
         if !seen.insert(key.clone()) {
             continue;
@@ -10133,7 +10139,7 @@ fn collect_web_fonts(
     // `src` (one file under two families or weights) both register a face.
     let mut fetched: HashMap<String, Arc<Vec<u8>>> = HashMap::new();
     for rule in rules {
-        if fonts.len() >= 16 {
+        if fonts.len() >= MAX_WEB_FONT_FACES {
             break;
         }
         for (key, src) in rule.sources {
@@ -22517,6 +22523,34 @@ mod tests {
             ],
             "unsupported EOT must be skipped without a request"
         );
+    }
+
+    #[test]
+    fn a_page_registers_more_than_sixteen_font_faces() {
+        // w3schools' css_font_google declares 16+ Google Fonts faces before
+        // its own button font; that face must still be registered.
+        let mut css = String::new();
+        for index in 0..20 {
+            css.push_str(&format!(
+                "@font-face {{ font-family: F{index}; src: url(f{index}.ttf) format(\"truetype\"); }}\n"
+            ));
+        }
+        css.push_str("@font-face { font-family: PS2P; src: url(ps2p.ttf) format(\"truetype\"); }");
+        let tree = parse_html(&format!(
+            "<html><head><style>{css}</style></head><body></body></html>"
+        ));
+        let mut resources =
+            RenderResourceCache::with_loader(|_url: &str| Some(SERIF_FONT_BYTES.to_vec()));
+        let fonts = collect_web_fonts(
+            &tree,
+            Some("https://example.test/page.html"),
+            &mut resources,
+            &[],
+        );
+        assert_eq!(fonts.len(), 21);
+        assert!(fonts
+            .iter()
+            .any(|font| font.family.as_deref() == Some("PS2P")));
     }
 
     #[test]

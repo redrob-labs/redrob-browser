@@ -2108,6 +2108,9 @@ pub struct LayoutStyle {
     /// `orphans` / `widows` (inherited, initial 2): the fewest lines of a
     /// block left before / after a column break.
     pub orphans: Option<u16>,
+    /// A declaration that drops a form control's native appearance
+    /// (background, border, `appearance: none`) applied to the element.
+    pub native_appearance_dropped: bool,
     pub widows: Option<u16>,
     /// Deferred functional line-height (`calc()`, `min()`, `clamp()`) resolved
     /// after the element font and live viewport are known.

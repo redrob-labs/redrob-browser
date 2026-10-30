@@ -10801,6 +10801,66 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn animationstart_fires_for_a_css_animation_started_by_a_class() {
+        // Chrome: Chart.js adds a class with a 0.001s animation and waits for
+        // animationstart (its render monitor) before inserting its resizer.
+        let dom = parse_html(
+            r##"<html><head><style>
+                @keyframes k { from { opacity: .99 } to { opacity: 1 } }
+                .m { animation: k .001s }
+            </style></head><body><div><canvas id="c"></canvas></div></body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(400.0, 300.0);
+        rt.run_page_init();
+        rt.evaluate(
+            r##"(() => {
+                globalThis.__seen = [];
+                const c = document.getElementById("c");
+                c.addEventListener("animationstart", (e) => __seen.push(e.animationName));
+                c.classList.add("m");
+                return true;
+            })()"##,
+        )
+        .unwrap();
+        let _ = rt.run_event_loop_bounded(300).await;
+        let seen = rt.evaluate("__seen").unwrap();
+        assert_eq!(seen, serde_json::json!(["k"]));
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn svg_text_bounds_add_letter_spacing_and_use_the_screen_font_size() {
+        // Chrome: letter-spacing="1" adds 1 per character to the text box;
+        // under a 0.5 viewBox scale the box height is the whole-pixel
+        // ascent + descent of the 10px on-screen font, mapped back (x2).
+        let dom = parse_html(
+            r##"<html><body style="margin:0"><svg width="200" height="100" viewBox="0 0 400 200">
+                <text id="a" x="10" y="50" font-family="Arial" font-size="20">GET IT</text>
+                <text id="b" x="10" y="90" font-family="Arial" font-size="20" letter-spacing="1">GET IT</text>
+            </svg></body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(400.0, 300.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"(() => {
+                    const a = document.getElementById("a").getBBox();
+                    const b = document.getElementById("b").getBBox();
+                    const r = document.getElementById("a").getBoundingClientRect();
+                    return [Math.round((b.width - a.width) * 100) / 100, r.height];
+                })()"##,
+            )
+            .unwrap();
+        // 9 + 2 px at 10px Arial: ascent 9, descent 2 -> 11 screen px.
+        assert_eq!(result, serde_json::json!([6, 11]));
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn window_listeners_survive_garbage_collection() {
         // A window load listener added during parsing must still run after a
