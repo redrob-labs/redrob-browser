@@ -7010,6 +7010,28 @@ fn non_text_ink_bounds(rect: &crate::Rect, style: &crate::LayoutStyle) -> crate:
     bounds
 }
 
+/// Blink's pixel snapping of a box for painting (PixelSnappedIntRect): each
+/// edge rounds to the nearest device pixel, so the size is the distance
+/// between rounded edges rather than a rounded size. Inline fragments carry
+/// fractional positions from text layout; backgrounds and borders paint on
+/// whole device pixels.
+fn snap_to_device_pixels(rect: crate::Rect, scale: f32) -> crate::Rect {
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    let snap = |v: f32| (v * scale).round() / scale;
+    let (x0, y0) = (snap(rect.x), snap(rect.y));
+    let (x1, y1) = (snap(rect.x + rect.width), snap(rect.y + rect.height));
+    crate::Rect {
+        x: x0,
+        y: y0,
+        width: (x1 - x0).max(0.0),
+        height: (y1 - y0).max(0.0),
+    }
+}
+
 /// Paint an ordinary inline's sliced border boxes instead of its multiline
 /// bounding union. Background coordinates stay anchored to the union so
 /// gradients and images remain one joined `box-decoration-break:slice`
@@ -7037,11 +7059,14 @@ fn paint_inline_fragment_decorations(
     };
     let mut fragment_style = style.clone();
     for (index, fragment) in fragments.iter().enumerate() {
-        let fragment = crate::Rect {
-            x: fragment.x + offset.0,
-            y: fragment.y + offset.1,
-            ..*fragment
-        };
+        let fragment = snap_to_device_pixels(
+            crate::Rect {
+                x: fragment.x + offset.0,
+                y: fragment.y + offset.1,
+                ..*fragment
+            },
+            raster_scale,
+        );
         if clip.is_some_and(|clip| fragment.intersect(&clip).is_none()) {
             continue;
         }
@@ -14938,6 +14963,33 @@ mod tests {
         );
         let outside = pixmap.pixel(60, 10).expect("pixel");
         assert_eq!(outside.green(), 255, "and only there");
+    }
+
+    #[test]
+    fn inline_fragment_decorations_snap_to_device_pixels() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white;font:16px sans-serif">
+                <p style="margin:0"><span style="margin-left:11.4px;background:rgb(0,0,255)">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></p>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (120.0, 30.0), None).expect("snapped inline");
+        // A background edge at x = 11.4 paints on whole pixels: every pixel
+        // of the row is the background or the canvas, none half covered.
+        let row: Vec<(u8, u8, u8)> = (0..120u32)
+            .map(|x| {
+                let p = pixmap.pixel(x, 8).expect("pixel");
+                (p.red(), p.green(), p.blue())
+            })
+            .collect();
+        let blue = row.iter().filter(|&&p| p == (0, 0, 255)).count();
+        assert!(blue > 20, "the background paints: {blue}");
+        assert!(
+            row.iter()
+                .all(|&p| p == (0, 0, 255) || p == (255, 255, 255)),
+            "inline backgrounds paint on whole pixels: {row:?}"
+        );
+        // The left edge at 11.4 rounds to pixel 11, as Blink snaps it.
+        assert_eq!((row[10], row[11]), ((255, 255, 255), (0, 0, 255)));
     }
 
     #[test]
