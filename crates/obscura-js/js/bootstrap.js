@@ -17037,6 +17037,46 @@ const _svgPathPoints = (d) => {
   let i = 0, cmd = '', x = 0, y = 0, sx = 0, sy = 0, cx = 0, cy = 0;
   const num = () => parseFloat(tok[i++]);
   const more = () => i < tok.length && !/^[a-zA-Z]$/.test(tok[i]);
+  // Arc flags are single digits and may run into the next number
+  // ("a.5.5 0 01.5-.5" is flags 0, 0 then x 1.5).
+  const flag = () => {
+    const t = tok[i];
+    if (t && t.length > 1 && (t[0] === '0' || t[0] === '1')) { tok[i] = t.slice(1); return +t[0]; }
+    i++;
+    return +t ? 1 : 0;
+  };
+  // The arc itself, sampled from its centre parameterisation (SVG 2
+  // implementation notes B.2.4), so the bounds follow the curve the way
+  // Chrome's getBBox does instead of only its endpoints.
+  const arc = (rx, ry, phi, large, sweep, x3, y3) => {
+    if (!rx || !ry || (x === x3 && y === y3)) { pts.push([x3, y3]); return; }
+    const c = Math.cos(phi), s = Math.sin(phi);
+    const dx = (x - x3) / 2, dy = (y - y3) / 2;
+    const x1p = c * dx + s * dy, y1p = -s * dx + c * dy;
+    const lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+    if (lambda > 1) { const k = Math.sqrt(lambda); rx *= k; ry *= k; }
+    const num2 = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+    const den = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+    let coef = Math.sqrt(Math.max(0, num2 / den));
+    if (large === sweep) coef = -coef;
+    const cxp = coef * rx * y1p / ry, cyp = -coef * ry * x1p / rx;
+    const ccx = c * cxp - s * cyp + (x + x3) / 2, ccy = s * cxp + c * cyp + (y + y3) / 2;
+    const ang = (ux, uy, vx, vy) => {
+      const a = Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+      return a;
+    };
+    const t1 = ang(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+    let dt = ang((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+    if (!sweep && dt > 0) dt -= 2 * Math.PI;
+    if (sweep && dt < 0) dt += 2 * Math.PI;
+    const n = 64;
+    for (let k = 1; k <= n; k++) {
+      const t = t1 + dt * k / n;
+      const ex = rx * Math.cos(t), ey = ry * Math.sin(t);
+      pts.push([c * ex - s * ey + ccx, s * ex + c * ey + ccy]);
+    }
+    pts.push([x3, y3]);
+  };
   const cubic = (x1, y1, x2, y2, x3, y3) => {
     for (let k = 1; k <= 16; k++) {
       const t = k / 16, u = 1 - t;
@@ -17058,13 +17098,11 @@ const _svgPathPoints = (d) => {
       case 'Q': { const x1 = ox + num(), y1 = oy + num(), x3 = ox + num(), y3 = oy + num(); cubic(x + 2 / 3 * (x1 - x), y + 2 / 3 * (y1 - y), x3 + 2 / 3 * (x1 - x3), y3 + 2 / 3 * (y1 - y3), x3, y3); cx = x1; cy = y1; x = x3; y = y3; break; }
       case 'T': { const x1 = 2 * x - cx, y1 = 2 * y - cy, x3 = ox + num(), y3 = oy + num(); cubic(x + 2 / 3 * (x1 - x), y + 2 / 3 * (y1 - y), x3 + 2 / 3 * (x1 - x3), y3 + 2 / 3 * (y1 - y3), x3, y3); cx = x1; cy = y1; x = x3; y = y3; break; }
       case 'A': {
-        const rx = Math.abs(num()), ry = Math.abs(num()); num(); num(); num();
+        let rx = Math.abs(num()), ry = Math.abs(num());
+        const phi = num() * Math.PI / 180;
+        const large = flag(), sweep = flag();
         const x3 = ox + num(), y3 = oy + num();
-        // Bounds of the arc's ellipse clipped to the chord box keep this
-        // within the true arc for the usual icon arcs; endpoints always count.
-        pts.push([x3, y3]);
-        const mx = (x + x3) / 2, my = (y + y3) / 2;
-        pts.push([Math.min(Math.max(mx, Math.min(x, x3) - rx), Math.max(x, x3) + rx), my]);
+        arc(rx, ry, phi, large, sweep, x3, y3);
         x = x3; y = y3; cx = x; cy = y; break;
       }
       case 'Z': x = sx; y = sy; cx = x; cy = y; break;

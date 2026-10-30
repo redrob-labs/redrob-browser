@@ -10644,6 +10644,32 @@ mod tests {
 
     #[cfg(feature = "render")]
     #[tokio::test(flavor = "current_thread")]
+    async fn svg_path_bbox_follows_elliptical_arcs() {
+        // Chrome: a half circle M2 8a6 6 0 0 1 12 0 spans y 2..8, and arc
+        // flags may run into the next number ("0 01" is flags 0 and 0).
+        let dom = parse_html(
+            r##"<html><body style="margin:0"><svg width="160" height="160" viewBox="0 0 16 16">
+                <path id="a" d="M2 8a6 6 0 0 1 12 0"/>
+                <path id="b" d="M8 2a.5.5 0 0 1 .5.5v1a.5.5 0 01-1 0v-1A.5.5 0 0 1 8 2Z"/>
+            </svg></body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(800.0, 600.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"["a", "b"].map((id) => {
+                    const b = document.getElementById(id).getBBox();
+                    return [b.x, b.y, b.width, b.height].map((v) => Math.round(v * 100) / 100);
+                })"##,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!([[2, 2, 12, 6], [7.5, 2, 1, 2]]));
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
     async fn nested_svg_content_rects_come_from_svg_geometry() {
         // Chrome: a nested <svg> (as d3 appends one) and its shapes report
         // their geometry in the outer <svg>'s viewport, (40.5, 40.5, 420, 5.5).
