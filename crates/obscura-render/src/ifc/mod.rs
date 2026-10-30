@@ -178,6 +178,10 @@ pub(crate) struct RootParams {
     pub(crate) ellipsis: bool,
     /// `text-wrap-style: balance`.
     pub(crate) balance: bool,
+    /// An orthogonal vertical writing-mode root: its lines run top to
+    /// bottom, so its block size is its text's inline extent and its
+    /// inline-axis width is the line box height.
+    pub(crate) vertical: bool,
 }
 
 /// One inline formatting context.

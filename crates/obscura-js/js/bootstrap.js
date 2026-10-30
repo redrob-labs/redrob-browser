@@ -4078,11 +4078,87 @@ class DocumentTimeline {
   get currentTime() { return performance.now() - this.originTime; }
 }
 
+// CSS animations as Web Animations (CSSAnimation): one wrapper per running
+// instance, keyed by element and animation-name, so pause() and currentTime
+// reach the renderer's animation timeline.
+const _cssAnimationWrappers = new Map();
+class CSSAnimation {
+  constructor(nid, name) {
+    this._nid = nid;
+    this.animationName = name;
+    this.id = '';
+    this.onfinish = null;
+    this.oncancel = null;
+    this._paused = false;
+    this._current = 0;
+    this.ready = Promise.resolve(this);
+    this.finished = new Promise(() => {});
+  }
+  get effect() {
+    const target = _wrapEl(this._nid);
+    return { target, getTiming() { return {}; }, getComputedTiming() { return {}; } };
+  }
+  get timeline() { return globalThis.document?.timeline || null; }
+  get playState() { return this._paused ? 'paused' : 'running'; }
+  get pending() { return false; }
+  get playbackRate() { return 1; }
+  get startTime() { return this._paused ? null : (globalThis.performance?.now() || 0) - this._current; }
+  get currentTime() { return this._current; }
+  set currentTime(value) {
+    const t = Number(value);
+    if (!Number.isFinite(t)) return;
+    this._control('currentTime', t);
+    this._current = Math.max(0, t);
+  }
+  _control(action, value = 0) {
+    try {
+      if (__obscuraCore.ops.op_css_animation_control?.(this._nid >>> 0, action, Number(value) || 0)) {
+        _domMutationEpoch++;
+        return true;
+      }
+    } catch (_e) {}
+    return false;
+  }
+  pause() { if (this._control('pause')) this._paused = true; }
+  play() { if (this._control('play')) this._paused = false; }
+  cancel() {}
+  finish() {}
+  reverse() {}
+  updatePlaybackRate() {}
+  commitStyles() {}
+  persist() {}
+  addEventListener(type, callback, options) { _eventTargetAdd(this, type, callback, options); }
+  removeEventListener(type, callback, options) { _eventTargetRemove(this, type, callback, options); }
+  dispatchEvent(event) { return _eventTargetDispatch(this, event); }
+  get [Symbol.toStringTag]() { return 'CSSAnimation'; }
+}
+globalThis.CSSAnimation = CSSAnimation;
+function _cssAnimations() {
+  let rows = [];
+  try {
+    if (typeof __obscuraCore.ops.op_css_animations === 'function') {
+      rows = JSON.parse(__obscuraCore.ops.op_css_animations()) || [];
+    }
+  } catch (_e) { rows = []; }
+  const live = new Map();
+  for (const [nid, name, paused, current] of rows) {
+    const key = nid + ' ' + name;
+    let wrapper = _cssAnimationWrappers.get(key);
+    if (!wrapper) wrapper = new CSSAnimation(nid, name);
+    wrapper._paused = !!paused;
+    wrapper._current = Number(current) || 0;
+    live.set(key, wrapper);
+  }
+  _cssAnimationWrappers.clear();
+  for (const [key, wrapper] of live) _cssAnimationWrappers.set(key, wrapper);
+  return Array.from(live.values());
+}
 function _animationsForTarget(target) {
-  return Array.from(_waapiAnimations).filter(animation => {
+  const css = _cssAnimations().filter(animation => animation._nid === (target?._nid | 0));
+  return css.concat(Array.from(_waapiAnimations).filter(animation => {
     if (animation.effect?.target !== target || animation.playState === 'idle') return false;
     return animation.playState !== 'finished' || animation.effect._timing.fill === 'forwards' || animation.effect._timing.fill === 'both';
-  });
+  }));
 }
 
 const _innerTextBlockDisplays = new Set([
@@ -6453,8 +6529,8 @@ class Document extends Node {
     return this._timeline;
   }
   getAnimations() {
-    return Array.from(_waapiAnimations).filter(animation => animation.playState !== 'idle'
-      && (animation.playState !== 'finished' || animation.effect?._timing.fill === 'forwards' || animation.effect?._timing.fill === 'both'));
+    return _cssAnimations().concat(Array.from(_waapiAnimations).filter(animation => animation.playState !== 'idle'
+      && (animation.playState !== 'finished' || animation.effect?._timing.fill === 'forwards' || animation.effect?._timing.fill === 'both')));
   }
   get documentElement() {
     if (this._detached) return _childNodeOfType(this, 1);
@@ -7846,7 +7922,7 @@ class HTMLMediaElement extends HTMLElement {
     globalThis.__redrobMediaUpdate(m.id, {
       currentTime: m.currentTime,
       duration: info.duration == null ? Infinity : info.duration,
-      width: info.width, height: info.height, readyState: 4,
+      width: info.width, height: info.height, readyState: info.metadataOnly ? 1 : 4,
       paused: m.paused, ended: false,
     });
     return true;

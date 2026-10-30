@@ -8378,6 +8378,8 @@ pub fn build_extension() -> Extension {
         ops.push(op_scroll_to());
         ops.push(op_waapi_create());
         ops.push(op_waapi_control());
+        ops.push(op_css_animations());
+        ops.push(op_css_animation_control());
     }
     Extension {
         name: "obscura_dom",
@@ -8548,6 +8550,59 @@ fn op_waapi_control(state: &OpState, id: f64, #[string] action: &str, value: f64
     };
     if changed {
         invalidate_waapi_render(&mut state, node);
+    }
+    changed
+}
+
+/// `[[nid, animation-name, paused, currentTime], ...]` of the document's
+/// running CSS animations (document.getAnimations()).
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_css_animations(state: &OpState) -> String {
+    let shared = state.borrow::<SharedState>().clone();
+    let mut gs = shared.borrow_mut();
+    // Instances exist once a style flush has sampled them. Build a first
+    // layout when there is none, but never flush pending style work here:
+    // getComputedStyle asks for the element's running animations on every
+    // read.
+    if gs.prepared_render.is_none() {
+        let _ = ensure_prepared_render(&mut gs);
+    }
+    let now = waapi_document_time_ms(&gs);
+    let rows: Vec<_> = gs
+        .animation_timeline
+        .css_animations(now)
+        .into_iter()
+        .map(|(node, name, paused, current)| {
+            serde_json::json!([node.index(), name, paused, current])
+        })
+        .collect();
+    serde_json::Value::Array(rows).to_string()
+}
+
+#[cfg(feature = "render")]
+#[op2(fast)]
+fn op_css_animation_control(state: &OpState, nid: u32, #[string] action: &str, value: f64) -> bool {
+    let shared = state.borrow::<SharedState>().clone();
+    let mut gs = shared.borrow_mut();
+    let node = NodeId::new(nid);
+    let now = waapi_document_time_ms(&gs);
+    let changed = gs
+        .animation_timeline
+        .control_css_animation(node, action, value as f32, now);
+    if changed {
+        if gs.prepared_render.is_some()
+            && !queue_retained_style_mutation(
+                &mut gs.pending_style_mutations,
+                obscura_render::RetainedStyleMutation::Animation { node },
+            )
+        {
+            gs.prepared_render = None;
+            gs.pending_style_mutations.clear();
+        }
+        gs.resolved_scroll = None;
+        gs.activity_generation = gs.activity_generation.wrapping_add(1);
     }
     changed
 }
@@ -9582,7 +9637,19 @@ fn op_video_frame_metadata(state: &OpState, nid: u32, time: f64, frame_id: u32) 
             "hasAudio": frame.has_audio,
         })
         .to_string(),
-        None => String::new(),
+        // No decoder (or not decodable): the container header still gives
+        // the natural size, so metadata is known (HAVE_METADATA).
+        None => match gs.render_resources.video_header_dimensions(&url) {
+            Some((width, height)) => serde_json::json!({
+                "width": width,
+                "height": height,
+                "duration": serde_json::Value::Null,
+                "hasAudio": false,
+                "metadataOnly": true,
+            })
+            .to_string(),
+            None => String::new(),
+        },
     }
 }
 

@@ -257,6 +257,94 @@ impl FloatContext {
         }
     }
 
+    /// Replace the rectangular exclusion of the float placed last on
+    /// `direction` with its `shape-outside`: the segments it covers are cut
+    /// into 1px rows whose inset follows the shape (CSS Shapes 1), and rows
+    /// outside the shape fall back to the space before the float.
+    pub fn apply_shape_to_last(
+        &mut self,
+        margin_box: Size<f32>,
+        direction: FloatDirection,
+        shape: crate::style::FloatShape,
+    ) {
+        let placed = match direction {
+            FloatDirection::Left => self.left_floats.last(),
+            FloatDirection::Right => self.right_floats.last(),
+        };
+        let Some(placed) = placed.cloned() else { return };
+        let (cx, cy, rx, ry) = shape.resolve(margin_box.width, margin_box.height);
+        let top = placed.y;
+        let bottom = placed.y + placed.height;
+        if bottom <= top || ry <= 0.0 || rx <= 0.0 {
+            return;
+        }
+        let slot = direction as usize;
+        // Distance from the float's start edge to the shape's far edge on
+        // a row: the ellipse's widest point within that row.
+        let reach = |row_top: f32, row_bottom: f32| -> Option<f32> {
+            let center_y = top + cy;
+            let dy = if center_y < row_top {
+                row_top - center_y
+            } else if center_y > row_bottom {
+                center_y - row_bottom
+            } else {
+                0.0
+            };
+            if dy >= ry {
+                return None;
+            }
+            let half = rx * (1.0 - (dy / ry) * (dy / ry)).max(0.0).sqrt();
+            Some(match direction {
+                FloatDirection::Left => cx + half,
+                FloatDirection::Right => (margin_box.width - cx) + half,
+            })
+        };
+        let mut y = top;
+        while y < bottom {
+            let row_bottom = (y.floor() + 1.0).min(bottom);
+            // Split segments so that [y, row_bottom) is its own segment.
+            for cut in [y, row_bottom] {
+                if let Some(idx) =
+                    self.segments.iter().position(|s| s.y.start < cut && s.y.end > cut)
+                {
+                    self.subdivide_segment(idx, cut);
+                }
+            }
+            let row_inset = reach(y, row_bottom).map(|r| placed.x_inset + r);
+            for segment in self.segments.iter_mut() {
+                if segment.y.start >= y && segment.y.end <= row_bottom {
+                    // Only this float's own intrusion is replaced; an earlier
+                    // float further in (x_inset) still holds.
+                    let shaped = row_inset.unwrap_or(placed.x_inset).min(placed.x_inset + margin_box.width);
+                    segment.insets[slot] = shaped.max(placed.x_inset);
+                }
+            }
+            y = row_bottom;
+        }
+    }
+
+    /// The content slot over the band `[top, bottom)`: the widest float
+    /// intrusion of every segment overlapping it on each side.
+    pub fn band_slot(&self, top: f32, bottom: f32, containing_block_insets: [f32; 2]) -> ContentSlot {
+        let mut insets = containing_block_insets;
+        let mut any = None;
+        for (idx, segment) in self.segments.iter().enumerate() {
+            if segment.y.end <= top || segment.y.start >= bottom.max(top + 0.01) {
+                continue;
+            }
+            any.get_or_insert(idx);
+            insets[0] = insets[0].max(segment.insets[0]);
+            insets[1] = insets[1].max(segment.insets[1]);
+        }
+        ContentSlot {
+            segment_id: any,
+            x: insets[0],
+            y: top,
+            width: (self.available_width - insets[0] - insets[1]).max(0.0),
+            height: bottom - top,
+        }
+    }
+
     /// Inner implementation of float placement, split into a separate function so that it can early-return
     fn place_floated_box_inner(
         &mut self,

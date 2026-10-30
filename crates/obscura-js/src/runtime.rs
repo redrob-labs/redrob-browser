@@ -10754,6 +10754,41 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn css_animations_are_pausable_through_get_animations() {
+        // Chrome: document.getAnimations() lists a running CSS animation as
+        // a CSSAnimation; pause() + currentTime = 0 renders its first frame.
+        let dom = parse_html(
+            r##"<html><head><style>
+                @keyframes s { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+                #a { width: 50px; height: 50px; animation: s 4s infinite linear }
+            </style></head><body style="margin:0"><div id="a"></div></body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(400.0, 300.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"(() => {
+                    document.getElementById("a").getBoundingClientRect();
+                    const all = document.getAnimations();
+                    for (const a of all) { a.pause(); a.currentTime = 500; a.currentTime = 0; }
+                    const again = document.getAnimations();
+                    return [all.length, all[0] && all[0].animationName, again[0] && again[0].playState,
+                        again[0] && again[0].currentTime,
+                        getComputedStyle(document.getElementById("a")).transform,
+                        document.getElementById("a").getAnimations().length];
+                })()"##,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!([1, "s", "paused", 0, "matrix(1, 0, 0, 1, 0, 0)", 1])
+        );
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn window_listeners_survive_garbage_collection() {
         // A window load listener added during parsing must still run after a

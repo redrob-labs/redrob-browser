@@ -6851,7 +6851,7 @@ fn layout_dom_once(
                     let cb_w = inh.cb_width;
                     let used_w = match style.width {
                         crate::Dimension::Px(width) => width,
-                        crate::Dimension::Percent(percent) => percent * cb_w,
+                        crate::Dimension::Percent(percent) => crate::layout_unit(percent * cb_w),
                         _ => (cb_w - style.margin.left - style.margin.right).max(0.0),
                     };
                     let definite_content_box = matches!(
@@ -7777,7 +7777,9 @@ fn layout_dom_once(
                 // padding and border, which must be removed.
                 let used_w = match style.width {
                     crate::Dimension::Px(w) => w,
-                    crate::Dimension::Percent(p) => p * cb_w,
+                    // A percentage width is a LayoutUnit (Blink truncates it
+                    // to 1/64 px), so descendants resolve against that.
+                    crate::Dimension::Percent(p) => crate::layout_unit(p * cb_w),
                     _ => (cb_w - style.margin.left - style.margin.right).max(0.0),
                 };
                 let definite_content_box = matches!(
@@ -8160,6 +8162,26 @@ fn layout_dom_once(
                 {
                     style.flex_basis = crate::Dimension::Auto;
                 }
+            }
+        }
+
+        // An inline box whose writing mode is orthogonal to its parent's
+        // becomes an inline-block (CSS Writing Modes 3 9.1).
+        let orthogonal: Vec<NodeId> = styles
+            .iter()
+            .filter(|(id, style)| {
+                style.vertical_writing
+                    && style.display == crate::Display::Inline
+                    && !style.is_inline_block
+                    && rendered_parent(tree, **id)
+                        .and_then(|parent| styles.get(&parent))
+                        .is_some_and(|parent| !parent.vertical_writing)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in orthogonal {
+            if let Some(style) = styles.get_mut(&id) {
+                style.is_inline_block = true;
             }
         }
 

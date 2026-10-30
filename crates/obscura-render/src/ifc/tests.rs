@@ -1536,3 +1536,71 @@ fn culled_inline_rect_spans_its_padded_children() {
     assert_eq!((b.y, b.height), (-8.0, 33.0), "{b:?}");
     assert_eq!((d.y, d.height), (0.0, 17.0), "{d:?}");
 }
+
+#[test]
+fn calc_percentages_resolve_against_layout_unit_widths() {
+    // Chrome: 83.33333% of 1050 is the LayoutUnit 874.984375, so four
+    // calc(25% - 20px) images with 10px margins fit one row of the flex
+    // gallery inside it (175.234375 each); against 874.99997 they were
+    // 175.25 and the fourth wrapped.
+    let png = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22600%22%20height%3D%22400%22%2F%3E";
+    let img = |id: &str| {
+        format!("<img id={id} src=\"{png}\" width=600 height=400 style='position:relative;width:calc(25% - 20px);height:auto;margin:10px'>")
+    };
+    let html = format!(
+        "<!doctype html><body style='margin:0'><div style='width:1050px'>\
+         <div style='float:left;width:83.33333%;padding:0 32px;box-sizing:border-box'>\
+         <div style='display:flex;flex-wrap:wrap;padding:0 15px;box-sizing:border-box'>{}{}{}{}</div></div></div>",
+        img("a"), img("b"), img("c"), img("d")
+    );
+    let (tree, laid) = layout(&html, &[]);
+    let d = laid
+        .fractional_rects
+        .get(&element(&tree, "d"))
+        .copied()
+        .unwrap_or(laid.rects[&element(&tree, "d")]);
+    assert_eq!((d.y, d.width), (10.0, 175.234375), "{d:?}");
+}
+
+#[test]
+fn text_wraps_around_shape_outside_circles_and_ellipses() {
+    // Chrome: a paragraph in 500px beside a 300x300 left float is 360 tall;
+    // with shape-outside:circle(45%) 312, with ellipse(25% 50%) 264
+    // (16px/24px Arial).
+    let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla ac laoreet quam, id aliquet nisl. Etiam id eros ligula. Aenean euismod, enim sed mollis feugiat, magna massa cursus leo, ut maximus metus eros non ante. Praesent quis neque eu urna dignissim consequat. Sed vitae tincidunt quam. Vivamus nec ipsum vitae justo pretium ornare. Maecenas tempor tellus at lacus interdum, in congue lectus ultricies.";
+    let height = |shape: &str| {
+        let (tree, laid) = layout(
+            &format!(
+                "<!doctype html><body style='margin:0;font:16px/24px Arial'><div style='width:500px'>\
+                 <div style='float:left;width:300px;height:300px;{shape}'></div>\
+                 <p id=p style='margin:0'>{text}</p></div>"
+            ),
+            &[],
+        );
+        laid.rects[&element(&tree, "p")].height
+    };
+    assert_eq!(
+        (
+            height(""),
+            height("shape-outside:circle(45%)"),
+            height("shape-outside:ellipse(25% 50%)")
+        ),
+        (360.0, 312.0, 264.0)
+    );
+}
+
+#[test]
+fn vertical_writing_mode_inline_becomes_an_upright_inline_block() {
+    // Chrome: <span style=writing-mode:vertical-rl>vertical-rl</span> in
+    // 16px/24px text is an inline-block 24 wide (one line box) and as tall
+    // as its text, and the line box grows to hold it.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px/24px Arial'><p id=p style='margin:0'>a \
+         <span id=s style='writing-mode:vertical-rl'>vertical-rl</span> b</p>",
+        &[],
+    );
+    let s = laid.rects[&element(&tree, "s")];
+    let p = laid.rects[&element(&tree, "p")];
+    assert_eq!(s.width, 24.0, "{s:?}");
+    assert!(s.height > 60.0 && p.height > s.height, "{s:?} {p:?}");
+}

@@ -44,6 +44,13 @@ pub trait BlockItemStyle: CoreStyle {
     fn clear(&self) -> super::Clear {
         super::Clear::None
     }
+
+    /// The float's shape-outside, if any
+    #[cfg(feature = "float_layout")]
+    #[inline(always)]
+    fn shape_outside(&self) -> Option<super::FloatShape> {
+        None
+    }
 }
 
 /// Used by block layout to implement the legacy behaviour of `<center>` and `<div align="left | right | center">`

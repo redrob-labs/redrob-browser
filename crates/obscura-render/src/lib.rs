@@ -17,6 +17,7 @@
 use taffy::prelude::*;
 
 pub mod css;
+pub mod video_header;
 
 /// Opt-in layout profiling counters, printed with `OBSCURA_RENDER_TIMING`.
 #[doc(hidden)]
@@ -1820,6 +1821,10 @@ pub struct LayoutStyle {
     // bounded balancing pass then distributes them in column-major order.
     // `None` is the initial `auto` column count.
     pub column_count: Option<u16>,
+    /// `writing-mode: vertical-*` / `sideways-*` declared on the element.
+    pub vertical_writing: bool,
+    /// `shape-outside: circle() | ellipse()` of a float.
+    pub shape_outside: Option<taffy::FloatShape>,
     /// `break-inside: avoid` makes this box an atomic balancing unit. The
     /// current box-level multicol implementation cannot fragment the inside
     /// of a child yet, but retaining the computed value makes that limitation
@@ -2572,6 +2577,9 @@ struct AnimationInstance {
     start_ms: f32,
     hold_time_ms: Option<f32>,
     was_paused: bool,
+    /// Paused by script (CSSAnimation.pause() / currentTime): the hold time
+    /// wins over animation-play-state until script plays it again.
+    script_paused: bool,
 }
 
 /// A normalized property keyframe supplied through the Web Animations API.
@@ -2691,6 +2699,69 @@ impl AnimationTimelineState {
     /// their existing instances.
     pub fn has_pending_start_candidates(&self) -> bool {
         !self.start_candidates.is_empty() || !self.subtree_start_candidates.is_empty()
+    }
+
+    /// The running CSS animation instances: (element, animation-name,
+    /// paused, current time in ms) at `document_time_ms`.
+    pub fn css_animations(
+        &self,
+        document_time_ms: f32,
+    ) -> Vec<(obscura_dom::tree::NodeId, String, bool, f32)> {
+        let mut out: Vec<_> = self
+            .instances
+            .iter()
+            .map(|(node, instance)| {
+                let current = instance
+                    .hold_time_ms
+                    .unwrap_or_else(|| (document_time_ms - instance.start_ms).max(0.0));
+                (
+                    *node,
+                    instance.key.name.clone(),
+                    instance.script_paused || instance.was_paused,
+                    current,
+                )
+            })
+            .collect();
+        out.sort_by_key(|(node, ..)| node.index());
+        out
+    }
+
+    /// Script control of one CSS animation instance (CSSAnimation): pause,
+    /// play, or seek to `local_ms`. Returns whether the instance exists.
+    pub fn control_css_animation(
+        &mut self,
+        node: obscura_dom::tree::NodeId,
+        action: &str,
+        local_ms: f32,
+        document_time_ms: f32,
+    ) -> bool {
+        let Some(instance) = self.instances.get_mut(&node) else {
+            return false;
+        };
+        let current = instance
+            .hold_time_ms
+            .unwrap_or_else(|| (document_time_ms - instance.start_ms).max(0.0));
+        match action {
+            "pause" => {
+                instance.hold_time_ms = Some(current);
+                instance.script_paused = true;
+            }
+            "play" => {
+                instance.start_ms = document_time_ms - current;
+                instance.hold_time_ms = None;
+                instance.script_paused = false;
+                instance.was_paused = false;
+            }
+            "currentTime" if local_ms.is_finite() => {
+                let local = local_ms.max(0.0);
+                instance.start_ms = document_time_ms - local;
+                if instance.script_paused || instance.was_paused {
+                    instance.hold_time_ms = Some(local);
+                }
+            }
+            _ => return false,
+        }
+        true
     }
 
     pub fn cancel_waapi(&mut self, id: u64) -> bool {
@@ -2838,6 +2909,7 @@ impl AnimationTimelineState {
                         start_ms: if paused { document_time_ms } else { candidate },
                         hold_time_ms: paused.then_some(0.0),
                         was_paused: paused,
+                        script_paused: false,
                     },
                 );
                 self.instances
@@ -2846,6 +2918,11 @@ impl AnimationTimelineState {
             }
         };
 
+        if instance.script_paused {
+            return AnimationSampleTime {
+                milliseconds: instance.hold_time_ms.unwrap_or(0.0),
+            };
+        }
         let paused = play_state == AnimationPlayState::Paused;
         if paused && !instance.was_paused {
             let paused_at = transition_time_ms.unwrap_or(document_time_ms);
@@ -3078,6 +3155,7 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
         || style.containment & (CONTAIN_LAYOUT | CONTAIN_PAINT) != 0
         || style.container_type != ContainerType::Normal
         || style.column_count.is_some_and(|count| count > 1);
+    s.shape_outside = style.shape_outside;
     s.float = match style.float {
         Some(Float::Left) => taffy::style::Float::Left,
         Some(Float::Right) => taffy::style::Float::Right,
@@ -3288,7 +3366,7 @@ fn dimension(v: Dimension) -> taffy::style::Dimension {
 /// (100.4px is 100.390625). Each length truncates on its own, so a box's
 /// size is the sum of truncated parts (Chrome: 100.4px wide with 8.2px and
 /// 7.2px padding and 4px + 3px borders is 122.765625).
-fn layout_unit(px: f32) -> f32 {
+pub(crate) fn layout_unit(px: f32) -> f32 {
     if !px.is_finite() || px.abs() >= 1.0e7 {
         return px;
     }

@@ -33,6 +33,52 @@ pub(crate) fn compute_inline_layout(
     let style = host.style(node).clone();
     let is_scroll_container =
         style.overflow.x.is_scroll_container() || style.overflow.y.is_scroll_container();
+    let vertical = super::with_active_ifc(index, |ifc| ifc.params.vertical).unwrap_or(false);
+    if vertical {
+        // An orthogonal (vertical) root: lay its lines out in its own
+        // inline axis, which is our vertical, then turn the result: its
+        // physical width is the line box height and its height the line
+        // length (Chrome: a vertical-rl inline-block "vertical-rl" in 16px
+        // text is 24 x 64.89). Only the box geometry is vertical; its
+        // contents keep their horizontal positions.
+        let turned = LayoutInput {
+            known_dimensions: Size {
+                width: inputs.known_dimensions.height,
+                height: inputs.known_dimensions.width,
+            },
+            parent_size: Size {
+                width: inputs.parent_size.height,
+                height: inputs.parent_size.width,
+            },
+            available_space: Size {
+                width: match inputs.available_space.height {
+                    AvailableSpace::Definite(h) => AvailableSpace::Definite(h),
+                    _ => AvailableSpace::MaxContent,
+                },
+                height: inputs.available_space.width,
+            },
+            axis: taffy::RequestedAxis::Both,
+            ..inputs
+        };
+        let result = super::with_active_ifc(index, |ifc| {
+            let mut bfc = BlockFormattingContext::new();
+            let mut root = bfc.root_block_context();
+            layout_ifc(host, node, &style, ifc, turned, &mut root)
+        });
+        return result.map_or(LayoutOutput::HIDDEN, |output| {
+            let size = Size {
+                width: output.size.height,
+                height: output.size.width,
+            };
+            LayoutOutput::from_sizes(
+                size,
+                Size {
+                    width: output.content_size.height,
+                    height: output.content_size.width,
+                },
+            )
+        });
+    }
     let result = super::with_active_ifc(index, |ifc| match block_ctx {
         Some(block_ctx) if !is_scroll_container => {
             layout_ifc(host, node, &style, ifc, inputs, block_ctx)
@@ -659,6 +705,29 @@ fn layout_ifc(
                             "[ifc] line used={used} slot={slot:?} active={has_active_floats} floats={floats_this_line} y={}..{}",
                             data.line_y_start, data.line_y_end
                         );
+                    }
+                    // A line box avoids every float over its whole height,
+                    // not only at its top (CSS 2.2 9.5): a float, or a
+                    // shape-outside, that intrudes further lower down on the
+                    // line narrows it at the same y.
+                    if has_active_floats && slot.segment_id.is_some() && retries < 64 {
+                        let band =
+                            block_ctx.band_slot(data.line_y_start as f32, data.line_y_end as f32);
+                        if used > band.width + 0.01
+                            && band.width + 0.01 < slot.width
+                            && breaker.revert()
+                        {
+                            retries += 1;
+                            slot = taffy::compute::ContentSlot {
+                                x: band.x,
+                                width: band.width,
+                                ..slot
+                            };
+                            let state = breaker.state_mut();
+                            state.set_line_max_advance(fit(band.width));
+                            state.set_line_x(band.x);
+                            continue;
+                        }
                     }
                     // Floats placed on this line stay placed: re-breaking it
                     // below them only skips their boxes (see InlineBoxBreak).
