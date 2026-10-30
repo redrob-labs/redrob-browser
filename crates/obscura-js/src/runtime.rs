@@ -10730,6 +10730,31 @@ mod tests {
         assert_eq!(result, serde_json::json!([7.1, 11, [0, 0, 0, 0]]));
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn window_listeners_survive_garbage_collection() {
+        // A window load listener added during parsing must still run after a
+        // full GC (w3schools' exercise box lost its load_quiz listener when
+        // a collection ran before the load event).
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(parse_html("<html><body></body></html>"));
+        rt.run_page_init();
+        rt.evaluate(
+            r##"(() => {
+                globalThis.__ran = [];
+                window.addEventListener("load", () => __ran.push("load"));
+                window.addEventListener("message", () => {});
+                return true;
+            })()"##,
+        )
+        .unwrap();
+        rt.collect_garbage();
+        rt.collect_garbage();
+        let result = rt
+            .evaluate(r##"(() => { window.dispatchEvent(new Event("load")); return __ran; })()"##)
+            .unwrap();
+        assert_eq!(result, serde_json::json!(["load"]));
+    }
+
     #[cfg(feature = "render")]
     #[tokio::test(flavor = "current_thread")]
     async fn nested_svg_content_rects_come_from_svg_geometry() {
