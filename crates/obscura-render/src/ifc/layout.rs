@@ -33,6 +33,52 @@ pub(crate) fn compute_inline_layout(
     let style = host.style(node).clone();
     let is_scroll_container =
         style.overflow.x.is_scroll_container() || style.overflow.y.is_scroll_container();
+    let vertical = super::with_active_ifc(index, |ifc| ifc.params.vertical).unwrap_or(false);
+    if vertical {
+        // An orthogonal (vertical) root: lay its lines out in its own
+        // inline axis, which is our vertical, then turn the result: its
+        // physical width is the line box height and its height the line
+        // length (Chrome: a vertical-rl inline-block "vertical-rl" in 16px
+        // text is 24 x 64.89). Only the box geometry is vertical; its
+        // contents keep their horizontal positions.
+        let turned = LayoutInput {
+            known_dimensions: Size {
+                width: inputs.known_dimensions.height,
+                height: inputs.known_dimensions.width,
+            },
+            parent_size: Size {
+                width: inputs.parent_size.height,
+                height: inputs.parent_size.width,
+            },
+            available_space: Size {
+                width: match inputs.available_space.height {
+                    AvailableSpace::Definite(h) => AvailableSpace::Definite(h),
+                    _ => AvailableSpace::MaxContent,
+                },
+                height: inputs.available_space.width,
+            },
+            axis: taffy::RequestedAxis::Both,
+            ..inputs
+        };
+        let result = super::with_active_ifc(index, |ifc| {
+            let mut bfc = BlockFormattingContext::new();
+            let mut root = bfc.root_block_context();
+            layout_ifc(host, node, &style, ifc, turned, &mut root)
+        });
+        return result.map_or(LayoutOutput::HIDDEN, |output| {
+            let size = Size {
+                width: output.size.height,
+                height: output.size.width,
+            };
+            LayoutOutput::from_sizes(
+                size,
+                Size {
+                    width: output.content_size.height,
+                    height: output.content_size.width,
+                },
+            )
+        });
+    }
     let result = super::with_active_ifc(index, |ifc| match block_ctx {
         Some(block_ctx) if !is_scroll_container => {
             layout_ifc(host, node, &style, ifc, inputs, block_ctx)

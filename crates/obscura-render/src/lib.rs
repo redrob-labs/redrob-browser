@@ -1821,6 +1821,8 @@ pub struct LayoutStyle {
     // bounded balancing pass then distributes them in column-major order.
     // `None` is the initial `auto` column count.
     pub column_count: Option<u16>,
+    /// `writing-mode: vertical-*` / `sideways-*` declared on the element.
+    pub vertical_writing: bool,
     /// `shape-outside: circle() | ellipse()` of a float.
     pub shape_outside: Option<taffy::FloatShape>,
     /// `break-inside: avoid` makes this box an atomic balancing unit. The

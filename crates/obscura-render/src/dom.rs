@@ -8165,6 +8165,26 @@ fn layout_dom_once(
             }
         }
 
+        // An inline box whose writing mode is orthogonal to its parent's
+        // becomes an inline-block (CSS Writing Modes 3 9.1).
+        let orthogonal: Vec<NodeId> = styles
+            .iter()
+            .filter(|(id, style)| {
+                style.vertical_writing
+                    && style.display == crate::Display::Inline
+                    && !style.is_inline_block
+                    && rendered_parent(tree, **id)
+                        .and_then(|parent| styles.get(&parent))
+                        .is_some_and(|parent| !parent.vertical_writing)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in orthogonal {
+            if let Some(style) = styles.get_mut(&id) {
+                style.is_inline_block = true;
+            }
+        }
+
         // Absolute/fixed boxes and floats are blockified externally but retain
         // their inner formatting mode and their context-specific shrink-fit.
         for style in styles.values_mut() {

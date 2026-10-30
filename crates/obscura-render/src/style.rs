@@ -2470,6 +2470,11 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
             apply_gap_value(style, false, value)
         }
         "shape-outside" => style.shape_outside = parse_shape_outside(value),
+        "writing-mode" | "-webkit-writing-mode" => {
+            let v = value.trim().to_ascii_lowercase();
+            style.vertical_writing =
+                v.starts_with("vertical") || v.starts_with("sideways") || v.starts_with("tb");
+        }
         "column-count" | "-webkit-column-count" => {
             style.column_count = parse_column_count(value);
         }

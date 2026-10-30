@@ -1588,3 +1588,19 @@ fn text_wraps_around_shape_outside_circles_and_ellipses() {
         (360.0, 312.0, 264.0)
     );
 }
+
+#[test]
+fn vertical_writing_mode_inline_becomes_an_upright_inline_block() {
+    // Chrome: <span style=writing-mode:vertical-rl>vertical-rl</span> in
+    // 16px/24px text is an inline-block 24 wide (one line box) and as tall
+    // as its text, and the line box grows to hold it.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px/24px Arial'><p id=p style='margin:0'>a \
+         <span id=s style='writing-mode:vertical-rl'>vertical-rl</span> b</p>",
+        &[],
+    );
+    let s = laid.rects[&element(&tree, "s")];
+    let p = laid.rects[&element(&tree, "p")];
+    assert_eq!(s.width, 24.0, "{s:?}");
+    assert!(s.height > 60.0 && p.height > s.height, "{s:?} {p:?}");
+}
