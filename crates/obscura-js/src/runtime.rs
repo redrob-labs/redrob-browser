@@ -42,6 +42,29 @@ impl obscura_render::CanvasSurfaceSource for RuntimeCanvasSurfaceSource<'_> {
     }
 }
 
+/// Canvas bitmaps plus the painted child documents of iframes: both are
+/// replaced content a capture draws into the element's content box.
+#[cfg(feature = "render")]
+struct CaptureSurfaceSource<'a> {
+    canvases: &'a HashMap<NodeId, crate::ops::CanvasBackingSurface>,
+    frames: &'a HashMap<NodeId, (u32, u32, Vec<u8>)>,
+}
+
+#[cfg(feature = "render")]
+impl obscura_render::CanvasSurfaceSource for CaptureSurfaceSource<'_> {
+    fn surface(&self, node: NodeId) -> Option<obscura_render::CanvasSurface<'_>> {
+        if let Some(surface) = self.canvases.get(&node) {
+            return obscura_render::CanvasSurface::from_rgba8(
+                surface.width,
+                surface.height,
+                surface.pixels.as_ref(),
+            );
+        }
+        let (width, height, pixels) = self.frames.get(&node)?;
+        obscura_render::CanvasSurface::from_rgba8(*width, *height, pixels)
+    }
+}
+
 static SNAPSHOT: &[u8] = include_bytes!(env!("OBSCURA_SNAPSHOT_PATH"));
 
 /// Serializes V8 isolate construction across OS threads. The thread-per-
@@ -1781,6 +1804,78 @@ impl ObscuraJsRuntime {
     /// CSSOM geometry. A mismatched ad-hoc viewport/base returns `None` so the
     /// browser layer can retain its compatibility one-shot path.
     #[cfg(feature = "render")]
+    /// The child documents of this document's iframes, each painted at its
+    /// own viewport with a transparent canvas (straight RGBA), by owning
+    /// element. A capture draws them as the iframes' content.
+    #[cfg(feature = "render")]
+    fn frame_surfaces(&self) -> HashMap<NodeId, (u32, u32, Vec<u8>)> {
+        let mut out = HashMap::new();
+        let children = self.realm_states().borrow().child_frames(&self.state);
+        if children.is_empty() {
+            return out;
+        }
+        // A child document's viewport is its iframe's padding box.
+        let sizes: HashMap<NodeId, (f32, f32)> = {
+            let mut parent = self.state.borrow_mut();
+            with_sync_render_loading_disabled(&mut parent, |parent| {
+                ensure_resolved_scroll(parent)?;
+                let prepared = parent.prepared_render.as_ref()?;
+                let (_, scroll) = parent.resolved_scroll.as_ref()?;
+                Some(
+                    children
+                        .iter()
+                        .filter_map(|(node, _)| {
+                            let metrics = prepared.element_scroll_metrics(*node, scroll)?;
+                            Some((*node, metrics.client_size))
+                        })
+                        .collect(),
+                )
+            })
+            .unwrap_or_default()
+        };
+        for (node, child) in children {
+            if Rc::ptr_eq(&child, &self.state) {
+                continue;
+            }
+            let Some(&(width, height)) = sizes.get(&node) else {
+                continue;
+            };
+            if width < 1.0 || height < 1.0 {
+                continue;
+            }
+            let Ok(mut state) = child.try_borrow_mut() else {
+                continue;
+            };
+            state.set_viewport(width.round() as f64, height.round() as f64);
+            let pixmap = with_sync_render_loading_disabled(&mut state, |state| {
+                ensure_resolved_scroll(state)?;
+                let ObscuraState {
+                    dom,
+                    prepared_render,
+                    render_resources,
+                    resolved_scroll,
+                    canvas_surfaces,
+                    ..
+                } = state;
+                let (_, scroll) = resolved_scroll.as_ref()?;
+                let canvas_surfaces = RuntimeCanvasSurfaceSource(canvas_surfaces);
+                obscura_render::paint_prepared_with_scroll_and_surface_color_and_canvas_surfaces(
+                    dom.as_ref()?,
+                    prepared_render.as_mut()?,
+                    render_resources,
+                    scroll,
+                    [0, 0, 0, 0],
+                    &canvas_surfaces,
+                )
+            });
+            if let Some(pixmap) = pixmap {
+                let (width, height) = (pixmap.width(), pixmap.height());
+                out.insert(node, (width, height, pixmap.take_demultiplied()));
+            }
+        }
+        out
+    }
+
     pub fn screenshot_prepared(
         &self,
         viewport: (f32, f32),
@@ -1854,6 +1949,7 @@ impl ObscuraJsRuntime {
         base_url: Option<&str>,
         surface_color: [u8; 4],
     ) -> Option<Vec<u8>> {
+        let frames = self.frame_surfaces();
         let mut state = self.state.borrow_mut();
         let effective_base = document_base_url(&state);
         if viewport != state.viewport || base_url != effective_base.as_deref() {
@@ -1870,7 +1966,10 @@ impl ObscuraJsRuntime {
                 ..
             } = state;
             let (_, scroll) = resolved_scroll.as_ref()?;
-            let canvas_surfaces = RuntimeCanvasSurfaceSource(canvas_surfaces);
+            let canvas_surfaces = CaptureSurfaceSource {
+                canvases: canvas_surfaces,
+                frames: &frames,
+            };
             obscura_render::screenshot_prepared_with_scroll_and_surface_color_and_canvas_surfaces(
                 dom.as_ref()?,
                 prepared_render.as_mut()?,
@@ -1929,6 +2028,7 @@ impl ObscuraJsRuntime {
         region: obscura_render::CaptureRegion,
         surface_color: [u8; 4],
     ) -> Result<obscura_render::Pixmap, obscura_render::CaptureError> {
+        let frames = self.frame_surfaces();
         let mut state = self.state.borrow_mut();
         with_sync_render_loading_disabled(&mut state, |state| {
             ensure_resolved_scroll(state).ok_or(obscura_render::CaptureError::PaintFailed)?;
@@ -1943,7 +2043,10 @@ impl ObscuraJsRuntime {
             let (_, scroll) = resolved_scroll
                 .as_ref()
                 .ok_or(obscura_render::CaptureError::PaintFailed)?;
-            let canvas_surfaces = RuntimeCanvasSurfaceSource(canvas_surfaces);
+            let canvas_surfaces = CaptureSurfaceSource {
+                canvases: canvas_surfaces,
+                frames: &frames,
+            };
             obscura_render::paint_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces(
                 dom.as_ref()
                     .ok_or(obscura_render::CaptureError::PaintFailed)?,
@@ -6098,6 +6201,40 @@ mod tests {
                 Math.abs(after.x - before.x - 40) < .01, Math.abs(after.y - before.y - 50) < .01,
                 new Document().caretPositionFromPoint(1, 12) === null, invalid];
         })()"#).unwrap(), serde_json::json!([true, true, true, true, true, true, true, true]));
+    }
+
+    #[cfg(feature = "render")]
+    #[test]
+    fn captures_paint_iframe_documents_into_their_frames() {
+        let mut rt = setup_runtime(
+            "<style>body{margin:0;background:white}iframe{display:block;border:0;width:100px;height:50px}</style><iframe></iframe>",
+        );
+        rt.evaluate(r#"(() => {
+            const d = document.querySelector('iframe').contentDocument;
+            d.body.innerHTML = '<style>body{margin:0}</style><div style="width:60px;height:50px;background:rgb(0,0,255)"></div>';
+            return document.querySelector('iframe').getBoundingClientRect().width;
+        })()"#).unwrap();
+        let (width, _, pixels) = rt
+            .screenshot_prepared_region_raster_with_surface_color(
+                obscura_render::CaptureRegion::new(0.0, 0.0, 120.0, 60.0, 1.0),
+                [255, 255, 255, 255],
+            )
+            .expect("capture");
+        let pixel = |x: usize, y: usize| {
+            let i = (y * width as usize + x) * 4;
+            [pixels[i], pixels[i + 1], pixels[i + 2]]
+        };
+        assert_eq!(
+            pixel(30, 25),
+            [0, 0, 255],
+            "the child document paints in the frame"
+        );
+        assert_eq!(pixel(80, 25), [255, 255, 255], "its canvas is transparent");
+        assert_eq!(
+            pixel(110, 25),
+            [255, 255, 255],
+            "nothing paints past the frame"
+        );
     }
 
     #[cfg(feature = "render")]

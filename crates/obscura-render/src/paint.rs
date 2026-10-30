@@ -4562,6 +4562,8 @@ fn native_raster_scale_supported(tree: &DomTree, laid: &crate::DomLayout) -> boo
             && style.clip_path.is_none()
             && style.background_image.is_none()
             && style.mask_image.is_none()
+            && style.mask_layers.images.is_empty()
+            && style.background_layers.images.len() <= 1
             && gradients_supported
             && !style.background_clip_text
             && style.box_shadow.is_none()
@@ -4631,6 +4633,30 @@ fn stacking_z_index(
         return is_flex_or_grid.then_some(z);
     }
     None
+}
+
+/// The paint layer of a box in its stacking context: its z-index stack
+/// level, or 0 for a positioned block-level box with `z-index: auto`.
+/// CSS 2.1 Appendix E paints the latter in step 8, after inline content, as
+/// if it created a stacking context. Positioned inline boxes keep their text
+/// in the parent's inline formatting context, so they stay in flow.
+fn paint_layer_z(
+    tree: &DomTree,
+    laid: &crate::DomLayout,
+    id: obscura_dom::tree::NodeId,
+) -> Option<i32> {
+    if let Some(z) = stacking_z_index(tree, laid, id) {
+        return Some(z);
+    }
+    let style = laid.styles.get(&id)?;
+    if style.position.is_none()
+        || style.display == crate::Display::None
+        || style.display_contents
+        || (style.display == crate::Display::Inline && !style.is_inline_block)
+    {
+        return None;
+    }
+    Some(0)
 }
 
 /// Whether this box participates in the float painting band of its current
@@ -5018,6 +5044,10 @@ fn paint_laid_dom_scrolled(
     let mut normal: Vec<obscura_dom::tree::NodeId> = Vec::new();
     let mut consumed: std::collections::HashSet<obscura_dom::tree::NodeId> =
         std::collections::HashSet::new();
+    // Members of z >= 0 layers (Appendix E step 8 and up): the inline
+    // content of this context paints before them.
+    let mut positive_members: std::collections::HashSet<obscura_dom::tree::NodeId> =
+        std::collections::HashSet::new();
     let mut paint_nodes = paint_root.into_iter().collect::<Vec<_>>();
     paint_nodes.extend(crate::dom::rendered_descendants(
         tree,
@@ -5028,15 +5058,16 @@ fn paint_laid_dom_scrolled(
             continue;
         }
         let is_opacity_root = suppress_opacity_for != Some(nid)
-            && laid
+            && (laid
                 .styles
                 .get(&nid)
                 .and_then(|style| style.opacity)
-                .is_some_and(|opacity| opacity.clamp(0.0, 1.0) < 1.0);
+                .is_some_and(|opacity| opacity.clamp(0.0, 1.0) < 1.0)
+                || layer_mask(tree, laid, nid).is_some());
         let is_transform_root = suppress_transform_for != Some(nid)
             && laid.styles.get(&nid).is_some_and(has_authored_transform);
         let z = (suppress_stacking_for != Some(nid))
-            .then(|| stacking_z_index(tree, laid, nid))
+            .then(|| paint_layer_z(tree, laid, nid))
             .flatten();
         let is_float_root = paint_root != Some(nid) && is_effective_float(tree, laid, nid);
         if is_opacity_root || is_transform_root {
@@ -5049,7 +5080,10 @@ fn paint_laid_dom_scrolled(
             // z-order is resolved while painting its isolated surface.
             match z {
                 Some(z) if z < 0 => neg_layers.push((z, vec![nid])),
-                Some(z) => pos_layers.push((z, vec![nid])),
+                Some(z) => {
+                    positive_members.extend(sub.iter().copied());
+                    pos_layers.push((z, vec![nid]))
+                }
                 None if is_float_root => float_layers.push(nid),
                 None => normal.push(nid),
             }
@@ -5062,6 +5096,7 @@ fn paint_laid_dom_scrolled(
             if z < 0 {
                 neg_layers.push((z, vec![nid]));
             } else {
+                positive_members.extend(sub.iter().copied());
                 pos_layers.push((z, vec![nid]));
             }
         } else if is_float_root {
@@ -5074,6 +5109,7 @@ fn paint_laid_dom_scrolled(
     }
     neg_layers.sort_by_key(|(z, _)| *z);
     pos_layers.sort_by_key(|(z, _)| *z);
+    let positive_start = neg_layers.len() + normal.len() + float_layers.len();
     let paint_order: Vec<obscura_dom::tree::NodeId> = neg_layers
         .into_iter()
         .flat_map(|(_, sub)| sub)
@@ -5136,12 +5172,88 @@ fn paint_laid_dom_scrolled(
         }
     }
 
+    // Inline content (CSS 2.1 Appendix E step 7): the shaped text of this
+    // stacking context paints above its in-flow and float boxes and below
+    // its positioned descendants (step 8) and z >= 0 layers, so it runs
+    // just before the first positive layer.
+    let mut inline_content_painted = false;
+    macro_rules! paint_inline_content {
+        () => {
+            // Inline formatting contexts shaped by cosmic-text (paragraphs, headings,
+            // cells, labels) draw last, in tree order, so their glyphs sit above the
+            // box backgrounds/borders painted in the loop above. Each item already
+            // carries its final origin and clip from `TextEngine::finalize`.
+            for &nid in &paint_nodes {
+                if svg_subtree_skip.contains(&nid)
+                    || opacity_subtree_skip.contains(&nid)
+                    || positive_members.contains(&nid)
+                {
+                    continue;
+                }
+                let Some(ifcs) = laid.ifc.by_node.get(&nid).cloned() else {
+                    continue;
+                };
+                if laid
+                    .styles
+                    .get(&nid)
+                    .map(|s| s.effectively_invisible)
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                // Shaped text is the container's content: for a compositor scroller
+                // it scrolls with the scroll frame.
+                scene_content_node(&scroll_state, nid);
+                // Shift the shaped glyphs by the same accumulated translate as the
+                // container's box so text under a transformed ancestor moves with
+                // it. Computed before the mutable `paint_item` borrow.
+                let off = scroll_state.translation_for(laid, nid);
+                let overflow_clip = scroll_state.shaped_text_overflow_clip_for(laid, nid);
+                let clip = overflow_clip.as_ref().map(|clip| {
+                    clip.viewport_rect(scroll_state.surface_extent.unwrap_or(viewport))
+                });
+                let clip_mask = overflow_clip.as_ref().and_then(|clip| {
+                    cached_overflow_clip_mask(
+                        &mut overflow_mask_cache,
+                        pixmap.width(),
+                        pixmap.height(),
+                        clip,
+                        scroll_state.surface_extent.unwrap_or(viewport),
+                    )
+                });
+                {
+                    let store = &mut laid.ifc;
+                    for index in ifcs {
+                        let Some(ifc) = store.ifcs.get(index).and_then(|ifc| ifc.as_deref()) else {
+                            continue;
+                        };
+                        ifc.paint(
+                            &mut store.raster,
+                            &laid.styles,
+                            &mut pixmap,
+                            ifc.origin,
+                            off,
+                            clip.or(ifc.clip),
+                            clip_mask.as_deref(),
+                            raster_scale,
+                            print_economy,
+                        );
+                    }
+                }
+            }
+        };
+    }
+
     for (paint_index, nid) in paint_order.into_iter().enumerate() {
+        if paint_index == positive_start && !inline_content_painted {
+            inline_content_painted = true;
+            paint_inline_content!();
+        }
         scene_node(nid);
         if svg_subtree_skip.contains(&nid) {
             continue;
         }
-        if suppress_stacking_for != Some(nid) && stacking_z_index(tree, laid, nid).is_some() {
+        if suppress_stacking_for != Some(nid) && paint_layer_z(tree, laid, nid).is_some() {
             opacity_subtree_skip.insert(nid);
             opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
             // A stacking context is one structural paint item in its parent.
@@ -5256,6 +5368,13 @@ fn paint_laid_dom_scrolled(
             None => continue,
         };
 
+        // `backface-visibility: hidden` on a box turned away from the
+        // viewer hides it and its content.
+        if style.backface_hidden && faces_back(tree, laid, nid) {
+            opacity_subtree_skip.insert(nid);
+            opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
+            continue;
+        }
         if suppress_transform_for != Some(nid) && has_authored_transform(style) {
             opacity_subtree_skip.insert(nid);
             opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
@@ -5434,7 +5553,12 @@ fn paint_laid_dom_scrolled(
             .and_then(|style| style.opacity)
             .unwrap_or(1.0)
             .clamp(0.0, 1.0);
-        if suppress_opacity_for != Some(nid) && own_opacity < 1.0 {
+        // A mask (CSS Masking 1) is applied, like opacity, to the finished
+        // element: its layers' alpha multiplies the isolated surface.
+        let mask_layers = (suppress_opacity_for != Some(nid) && raster_scale == 1.0)
+            .then(|| layer_mask(tree, laid, nid))
+            .flatten();
+        if suppress_opacity_for != Some(nid) && (own_opacity < 1.0 || mask_layers.is_some()) {
             opacity_subtree_skip.insert(nid);
             opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
             if own_opacity <= 0.0 {
@@ -5448,7 +5572,7 @@ fn paint_laid_dom_scrolled(
             // opacity:.5 incorrectly become .75 alpha in their overlap.
             let layer = Pixmap::new(pixmap.width(), pixmap.height())?;
             crate::canvas::begin_layer(&layer);
-            let layer = paint_laid_dom_scrolled(
+            let mut layer = paint_laid_dom_scrolled(
                 tree,
                 viewport,
                 base_url,
@@ -5477,6 +5601,33 @@ fn paint_laid_dom_scrolled(
                 canvas_background,
             )?;
             scene_node(nid);
+            if let Some(layers) = mask_layers.as_deref() {
+                let (tx, ty) = scroll_state.translation_for(laid, nid);
+                let border_box = crate::Rect {
+                    x: rect.x + tx,
+                    y: rect.y + ty,
+                    ..rect
+                };
+                if let (Some(mut alpha), Some(style)) = (
+                    Pixmap::new(layer.width(), layer.height()),
+                    laid.styles.get(&nid),
+                ) {
+                    paint_resolved_layers(
+                        &mut alpha,
+                        (0, 0),
+                        &border_box,
+                        style,
+                        layers,
+                        base_url,
+                        root_font_size,
+                        viewport,
+                        image_cache,
+                    );
+                    let mask =
+                        tiny_skia::Mask::from_pixmap(alpha.as_ref(), tiny_skia::MaskType::Alpha);
+                    layer.apply_mask(&mask);
+                }
+            }
             let group_paint = tiny_skia::PixmapPaint {
                 opacity: own_opacity,
                 ..tiny_skia::PixmapPaint::default()
@@ -5654,6 +5805,15 @@ fn paint_laid_dom_scrolled(
             .as_ref()
             .or(ancestor_clip_mask.as_deref());
         let background_mask = element_clip_mask;
+        // Several layers or an image layer: painted per layer, each with its
+        // own size, position, repeat, origin and clip.
+        let layered = (raster_scale == 1.0)
+            .then(|| layered_background(style))
+            .flatten();
+        // Masked through its layers by the effect path above; the mask is
+        // not also a fill.
+        let layer_masked =
+            !style.mask_layers.images.is_empty() && layer_mask(tree, laid, nid).is_some();
         // A linear-gradient background (heavily used by modern hero sections);
         // without this it paints white. Takes precedence over a solid color.
         // `background-clip: text` clips the background to the glyphs, so it must
@@ -5661,7 +5821,7 @@ fn paint_laid_dom_scrolled(
         if box_on_surface
             && !paints_inline_fragments
             && !background_transfers_to_canvas
-            && style.mask_image.is_none()
+            && (style.mask_image.is_none() || layer_masked)
             && !style.background_clip_text
         {
             if let Some(bg) = style.background_color {
@@ -5678,7 +5838,19 @@ fn paint_laid_dom_scrolled(
                     );
                 }
             }
-            if !style.background_gradient_layers.is_empty() {
+            if let Some(layers) = layered.as_deref() {
+                paint_layered_background(
+                    &mut pixmap,
+                    &rect,
+                    style,
+                    layers,
+                    base_url,
+                    root_font_size,
+                    viewport,
+                    image_cache,
+                    background_mask,
+                );
+            } else if !style.background_gradient_layers.is_empty() {
                 if let Some(path) = background_path.as_ref() {
                     paint_background_gradient_layers(
                         &mut pixmap,
@@ -5740,7 +5912,7 @@ fn paint_laid_dom_scrolled(
         }
 
         if box_on_surface && !paints_inline_fragments && !background_transfers_to_canvas {
-            if let Some(mask_url) = &style.mask_image {
+            if let (false, Some(mask_url)) = (layer_masked, &style.mask_image) {
                 let fill = style
                     .background_color
                     .or(style.color)
@@ -5764,7 +5936,7 @@ fn paint_laid_dom_scrolled(
                     &mut pixmap,
                     image_cache,
                 );
-            } else if let Some(bg_url) = &style.background_image {
+            } else if let (None, Some(bg_url)) = (&layered, &style.background_image) {
                 if let Some(img_rect) = background_image_rect(
                     bg_url,
                     base_url,
@@ -5799,6 +5971,13 @@ fn paint_laid_dom_scrolled(
                         );
                     }
                 }
+            }
+        }
+        // An inset shadow paints above the backgrounds, inside the padding
+        // box, below the border and content.
+        if let Some(shadow) = style.box_shadow.filter(|shadow| shadow.inset) {
+            if box_on_surface && !paints_inline_fragments && raster_scale == 1.0 {
+                paint_inset_box_shadow(&mut pixmap, &shadow, &rect, style, element_clip_mask);
             }
         }
         let has_positioned_pseudo = [
@@ -5871,7 +6050,8 @@ fn paint_laid_dom_scrolled(
         }
 
         scene_node(nid);
-        if box_on_surface && name.local.as_ref() == "canvas" {
+        // A canvas bitmap, or the painted child document of an iframe.
+        if box_on_surface && matches!(name.local.as_ref(), "canvas" | "iframe") {
             if let Some(surface) = canvas_surfaces.surface(nid) {
                 // A canvas bitmap is replaced content: CSS sizing and
                 // object-fit operate on the content box, never the padding or
@@ -6017,6 +6197,9 @@ fn paint_laid_dom_scrolled(
                 if let Some(color) = style.color {
                     inject_svg_current_color(&mut markup, color);
                 }
+                // resvg reads only `data:` images; the standalone document
+                // has no base URL for the page's relative ones.
+                inline_svg_image_hrefs(&mut markup, base_url, image_cache);
                 // `<use href="url#id">` pointing at an EXTERNAL sprite file resolves
                 // to nothing in resvg (the symbol lives in another document). Fetch
                 // the sprite, splice the referenced `<symbol>` into a local `<defs>`,
@@ -6384,64 +6567,8 @@ fn paint_laid_dom_scrolled(
         }
     }
 
-    // Inline formatting contexts shaped by cosmic-text (paragraphs, headings,
-    // cells, labels) draw last, in tree order, so their glyphs sit above the
-    // box backgrounds/borders painted in the loop above. Each item already
-    // carries its final origin and clip from `TextEngine::finalize`.
-    for nid in paint_nodes {
-        if svg_subtree_skip.contains(&nid) || opacity_subtree_skip.contains(&nid) {
-            continue;
-        }
-        let Some(ifcs) = laid.ifc.by_node.get(&nid).cloned() else {
-            continue;
-        };
-        if laid
-            .styles
-            .get(&nid)
-            .map(|s| s.effectively_invisible)
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        // Shaped text is the container's content: for a compositor scroller
-        // it scrolls with the scroll frame.
-        scene_content_node(&scroll_state, nid);
-        // Shift the shaped glyphs by the same accumulated translate as the
-        // container's box so text under a transformed ancestor moves with
-        // it. Computed before the mutable `paint_item` borrow.
-        let off = scroll_state.translation_for(laid, nid);
-        let overflow_clip = scroll_state.shaped_text_overflow_clip_for(laid, nid);
-        let clip = overflow_clip
-            .as_ref()
-            .map(|clip| clip.viewport_rect(scroll_state.surface_extent.unwrap_or(viewport)));
-        let clip_mask = overflow_clip.as_ref().and_then(|clip| {
-            cached_overflow_clip_mask(
-                &mut overflow_mask_cache,
-                pixmap.width(),
-                pixmap.height(),
-                clip,
-                scroll_state.surface_extent.unwrap_or(viewport),
-            )
-        });
-        {
-            let store = &mut laid.ifc;
-            for index in ifcs {
-                let Some(ifc) = store.ifcs.get(index).and_then(|ifc| ifc.as_deref()) else {
-                    continue;
-                };
-                ifc.paint(
-                    &mut store.raster,
-                    &laid.styles,
-                    &mut pixmap,
-                    ifc.origin,
-                    off,
-                    clip.or(ifc.clip),
-                    clip_mask.as_deref(),
-                    raster_scale,
-                    print_economy,
-                );
-            }
-        }
+    if !inline_content_painted {
+        paint_inline_content!();
     }
 
     Some(pixmap)
@@ -7655,6 +7782,35 @@ fn stroke_rounded_border_path(
     mask: Option<&tiny_skia::Mask>,
     raster_scale: f32,
 ) {
+    if radii.is_zero()
+        && matches!(
+            line_style,
+            crate::BorderStyle::Dashed | crate::BorderStyle::Dotted
+        )
+    {
+        // Square corners: each side is its own dash run over the full
+        // border-box edge, as Blink paints it.
+        let outer = crate::Rect {
+            x: center_rect.x - width / 2.0,
+            y: center_rect.y - width / 2.0,
+            width: center_rect.width + width,
+            height: center_rect.height + width,
+        };
+        for side in [Side::Top, Side::Right, Side::Bottom, Side::Left] {
+            paint_straight_border_side(
+                pixmap,
+                &outer,
+                side,
+                width,
+                width / 2.0,
+                color,
+                Some(line_style),
+                mask,
+                raster_scale,
+            );
+        }
+        return;
+    }
     let Some(path) = rounded_rect_path_radii(
         center_rect.x,
         center_rect.y,
@@ -7671,15 +7827,19 @@ fn stroke_rounded_border_path(
         width,
         ..Default::default()
     };
-    match line_style {
-        crate::BorderStyle::Dashed => {
-            stroke.dash = tiny_skia::StrokeDash::new(vec![width * 3.0, width * 3.0], 0.0);
-        }
-        crate::BorderStyle::Dotted => {
-            stroke.dash = tiny_skia::StrokeDash::new(vec![0.0, width * 2.0], 0.0);
+    if matches!(
+        line_style,
+        crate::BorderStyle::Dashed | crate::BorderStyle::Dotted
+    ) {
+        let r = (radii.top_left.0 + radii.top_right.0 + radii.bottom_right.0 + radii.bottom_left.0)
+            / 4.0;
+        let perimeter =
+            2.0 * (center_rect.width + center_rect.height) - (8.0 - 2.0 * std::f32::consts::PI) * r;
+        let (dash, round) = border_dash(line_style, width, perimeter, true);
+        stroke.dash = dash;
+        if round {
             stroke.line_cap = tiny_skia::LineCap::Round;
         }
-        _ => {}
     }
     pixmap
         .canvas()
@@ -7865,15 +8025,63 @@ fn paint_straight_border_side(
         width: stroke_width,
         ..Default::default()
     };
-    if pattern == Some(crate::BorderStyle::Dashed) {
-        stroke.dash = tiny_skia::StrokeDash::new(vec![stroke_width * 3.0, stroke_width * 3.0], 0.0);
-    } else if pattern == Some(crate::BorderStyle::Dotted) {
-        stroke.dash = tiny_skia::StrokeDash::new(vec![0.0, stroke_width * 2.0], 0.0);
-        stroke.line_cap = tiny_skia::LineCap::Round;
+    if let Some(pattern) = pattern {
+        let length = match side {
+            Side::Top | Side::Bottom => rect.width,
+            Side::Left | Side::Right => rect.height,
+        };
+        let (dash, round) = border_dash(pattern, stroke_width, length, false);
+        stroke.dash = dash;
+        if round {
+            stroke.line_cap = tiny_skia::LineCap::Round;
+        }
     }
     pixmap
         .canvas()
         .stroke_path(&path, &paint, &stroke, raster_transform(raster_scale), mask);
+}
+
+/// Blink's dash pattern for a dashed or dotted border side of `length`
+/// (StrokeData::SetupPaintDashPathEffect): dashes 3w long with 2w gaps
+/// below 3px, 2w with 1w gaps from 3px; the gap is stretched so whole
+/// dashes start and end the side. A side too
+/// short for two dashes is solid (`None`). Dots wider than 3px are round.
+/// Returns the dash and whether the
+/// caps are round.
+fn border_dash(
+    pattern: crate::BorderStyle,
+    width: f32,
+    length: f32,
+    closed: bool,
+) -> (Option<tiny_skia::StrokeDash>, bool) {
+    let (mut dash, mut gap) = (width, width);
+    if pattern == crate::BorderStyle::Dashed {
+        dash *= if width >= 3.0 { 2.0 } else { 3.0 };
+        gap *= if width >= 3.0 { 1.0 } else { 2.0 };
+    }
+    if length <= 2.0 * dash + gap {
+        return (None, false);
+    }
+    // SelectBestDashGap: the dash count whose gap is nearest the ideal.
+    let min_dashes = ((length + gap) / (dash + gap)).floor();
+    let max_dashes = min_dashes + 1.0;
+    let gaps = |dashes: f32| if closed { dashes } else { dashes - 1.0 };
+    let min_gap = (length - min_dashes * dash) / gaps(min_dashes).max(1.0);
+    let max_gap = (length - max_dashes * dash) / gaps(max_dashes).max(1.0);
+    let gap = if max_gap <= 0.0 || (min_gap - gap).abs() < (max_gap - gap).abs() {
+        min_gap
+    } else {
+        max_gap
+    };
+    let round = pattern == crate::BorderStyle::Dotted && width > 3.0;
+    let intervals = if round {
+        // A zero-length dash with round caps is a dot of diameter `width`.
+        vec![0.0, dash + gap]
+    } else {
+        vec![dash, gap]
+    };
+    let phase = if round { dash + gap - dash / 2.0 } else { 0.0 };
+    (tiny_skia::StrokeDash::new(intervals, phase), round)
 }
 
 fn shade_border_color(color: [u8; 4], amount: f32) -> [u8; 4] {
@@ -8043,6 +8251,112 @@ fn paint_box_shadow(
         &tiny_skia::PixmapPaint::default(),
         Transform::identity(),
         ancestor_clip,
+    );
+}
+
+/// An inset box shadow: the padding box minus a blurred copy of itself moved
+/// by the offset and shrunk by the spread (CSS Backgrounds 3, 7.1).
+fn paint_inset_box_shadow(
+    pixmap: &mut Pixmap,
+    shadow: &crate::BoxShadow,
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    clip: Option<&tiny_skia::Mask>,
+) {
+    if shadow.color[3] == 0 {
+        return;
+    }
+    let geometry = layer_geometry(
+        rect,
+        style,
+        crate::BackgroundOrigin::PaddingBox,
+        crate::BackgroundClip::PaddingBox,
+    );
+    let padding = geometry.clip_rect;
+    let x0 = padding.x.floor().max(0.0) as i32;
+    let y0 = padding.y.floor().max(0.0) as i32;
+    let x1 = ((padding.x + padding.width).ceil() as i32).min(pixmap.width() as i32);
+    let y1 = ((padding.y + padding.height).ceil() as i32).min(pixmap.height() as i32);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let (width, height) = ((x1 - x0) as u32, (y1 - y0) as u32);
+    let blur = shadow.blur.max(0.0);
+    let sigma = blur / 2.0;
+    // The hole is painted on a margin wide enough for the blur to read
+    // "outside the hole" (shadow) past the padding box edges.
+    let margin = (sigma * 3.0).ceil() as i32 + 1;
+    let (hw, hh) = (width + 2 * margin as u32, height + 2 * margin as u32);
+    let Some(mut hole) = Pixmap::new(hw, hh) else {
+        return;
+    };
+    let radii = geometry.clip_radii;
+    let hx = padding.x + shadow.offset_x + shadow.spread - (x0 - margin) as f32;
+    let hy = padding.y + shadow.offset_y + shadow.spread - (y0 - margin) as f32;
+    let hwid = padding.width - 2.0 * shadow.spread;
+    let hhei = padding.height - 2.0 * shadow.spread;
+    if hwid > 0.0 && hhei > 0.0 {
+        let r = radii.top_left;
+        fill_shadow_rect(
+            &mut hole,
+            hx,
+            hy,
+            hwid,
+            hhei,
+            (r.0 - shadow.spread).max(0.0),
+            (r.1 - shadow.spread).max(0.0),
+            [255, 255, 255, 255],
+            None,
+        );
+    }
+    let mut coverage: Vec<f32> = hole
+        .pixels()
+        .iter()
+        .map(|p| p.alpha() as f32 / 255.0)
+        .collect();
+    gaussian_blur(&mut coverage, hw as usize, hh as usize, sigma);
+    let Some(mut out) = Pixmap::new(width, height) else {
+        return;
+    };
+    let a = shadow.color[3] as f32 / 255.0;
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let c = coverage[(y + margin as usize) * hw as usize + x + margin as usize];
+            let alpha = ((1.0 - c) * a * 255.0).round().clamp(0.0, 255.0) as u8;
+            if alpha > 0 {
+                out.pixels_mut()[y * width as usize + x] = tiny_skia::ColorU8::from_rgba(
+                    shadow.color[0],
+                    shadow.color[1],
+                    shadow.color[2],
+                    alpha,
+                )
+                .premultiply();
+            }
+        }
+    }
+    // Only inside the (rounded) padding box.
+    let local = BackgroundGeometry {
+        origin_rect: padding,
+        clip_rect: crate::Rect {
+            x: padding.x - x0 as f32,
+            y: padding.y - y0 as f32,
+            ..padding
+        },
+        clip_radii: radii,
+    };
+    if let Some(path) = background_clip_path(local) {
+        if let Some(mut mask) = crate::canvas::new_mask(width, height) {
+            mask.clip_fill_path(&path, FillRule::Winding, true, Transform::identity());
+            out.apply_mask(&mask);
+        }
+    }
+    pixmap.canvas().draw_image(
+        x0,
+        y0,
+        out.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        Transform::identity(),
+        clip,
     );
 }
 
@@ -8452,6 +8766,7 @@ struct PrintEconomyStyleSnapshot {
     background_conic_gradient: Option<(f32, (f32, f32), Vec<([u8; 4], Option<f32>)>)>,
     background_gradient_layers: Vec<crate::BackgroundGradientLayer>,
     background_image: Option<String>,
+    background_layers: crate::BackgroundLayerLists,
     color: Option<[u8; 4]>,
     before_pseudo: Option<Box<PrintEconomyStyleSnapshot>>,
     after_pseudo: Option<Box<PrintEconomyStyleSnapshot>>,
@@ -8465,6 +8780,7 @@ impl PrintEconomyStyleSnapshot {
         let background_conic_gradient = style.background_conic_gradient.take();
         let background_gradient_layers = std::mem::take(&mut style.background_gradient_layers);
         let background_image = style.background_image.take();
+        let background_layers = std::mem::take(&mut style.background_layers);
         let had_background = background_color.is_some_and(|color| color[3] != 0)
             || background_gradient.is_some()
             || background_radial_gradient.is_some()
@@ -8491,6 +8807,7 @@ impl PrintEconomyStyleSnapshot {
             background_conic_gradient,
             background_gradient_layers,
             background_image,
+            background_layers,
             color,
             before_pseudo,
             after_pseudo,
@@ -8504,6 +8821,7 @@ impl PrintEconomyStyleSnapshot {
         style.background_conic_gradient = self.background_conic_gradient;
         style.background_gradient_layers = self.background_gradient_layers;
         style.background_image = self.background_image;
+        style.background_layers = self.background_layers;
         style.color = self.color;
         if let (Some(snapshot), Some(pseudo)) =
             (self.before_pseudo, style.before_pseudo.as_deref_mut())
@@ -9933,6 +10251,376 @@ fn paint_linear_gradient_layer(
     );
 }
 
+/// Size of a gradient layer's image: `background-size` resolved against the
+/// positioning area; `auto` and cover/contain fill it.
+fn gradient_layer_size(
+    size: Option<&str>,
+    fit: Option<crate::ObjectFit>,
+    rect: &crate::Rect,
+    em: f32,
+    rem: f32,
+    viewport: (f32, f32),
+) -> (f32, f32) {
+    let Some(expression) = size else {
+        return (rect.width, rect.height);
+    };
+    if fit.is_some() {
+        return (rect.width, rect.height);
+    }
+    let components = split_background_size_components(expression);
+    let resolve = |value: &&str, basis: f32| {
+        (!value.eq_ignore_ascii_case("auto"))
+            .then(|| {
+                crate::style::resolve_contextual_length(
+                    value,
+                    em,
+                    rem,
+                    viewport.0 / 100.0,
+                    viewport.1 / 100.0,
+                    basis,
+                )
+            })
+            .flatten()
+    };
+    let width = components
+        .first()
+        .and_then(|value| resolve(value, rect.width))
+        .unwrap_or(rect.width);
+    let height = match components.get(1) {
+        Some(value) => resolve(value, rect.height).unwrap_or(rect.height),
+        // One value sets the width; a gradient has no ratio, so the height
+        // is `auto`: the positioning area's.
+        None => rect.height,
+    };
+    (width, height)
+}
+
+/// Paint background (or mask) layers bottom-up into `surface`, whose
+/// top-left pixel is page pixel `offset`. `rect` is the box's border box in
+/// page pixels. Each layer is tiled over its painting area per its own
+/// size, position, repeat, origin and clip (CSS Backgrounds 3).
+#[allow(clippy::too_many_arguments)]
+fn paint_resolved_layers(
+    surface: &mut Pixmap,
+    offset: (i32, i32),
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    layers: &[crate::style::ResolvedLayer],
+    base_url: Option<&str>,
+    root_font_size: f32,
+    viewport: (f32, f32),
+    cache: &mut RenderResourceCache,
+) {
+    let em = style.font_size.unwrap_or(16.0);
+    let (ox, oy) = (offset.0 as f32, offset.1 as f32);
+    for layer in layers.iter().rev() {
+        let geometry = layer_geometry(rect, style, layer.origin, layer.clip);
+        let origin = geometry.origin_rect;
+        let tile_rect = match &layer.image {
+            crate::style::LayerImage::Url(url) => background_image_rect(
+                url,
+                base_url,
+                &origin,
+                None,
+                layer.size.as_deref(),
+                layer.fit,
+                layer.position,
+                em,
+                root_font_size,
+                viewport,
+                cache,
+            ),
+            crate::style::LayerImage::Gradient(..) => {
+                let (width, height) = gradient_layer_size(
+                    layer.size.as_deref(),
+                    layer.fit,
+                    &origin,
+                    em,
+                    root_font_size,
+                    viewport,
+                );
+                Some(crate::Rect {
+                    x: origin.x + layer.position.x.resolve(origin.width - width),
+                    y: origin.y + layer.position.y.resolve(origin.height - height),
+                    width,
+                    height,
+                })
+            }
+        };
+        let Some(tile_rect) = tile_rect else {
+            continue;
+        };
+        if tile_rect.width <= 0.0 || tile_rect.height <= 0.0 {
+            continue;
+        }
+        let width = tile_rect.width.ceil().clamp(1.0, 4096.0) as u32;
+        let height = tile_rect.height.ceil().clamp(1.0, 4096.0) as u32;
+        let Some(mut tile) = Pixmap::new(width, height) else {
+            continue;
+        };
+        let local = crate::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: tile_rect.width,
+            height: tile_rect.height,
+        };
+        match &layer.image {
+            crate::style::LayerImage::Url(url)
+                if fetch_bytes(url, base_url, cache).is_some_and(|bytes| is_svg(&bytes)) =>
+            {
+                // An SVG image is scaled as a whole to its concrete size;
+                // one without a viewBox gets one from its intrinsic size.
+                let Some(bytes) = fetch_bytes(url, base_url, cache) else {
+                    continue;
+                };
+                let bytes = svg_with_intrinsic_viewbox(&bytes);
+                match render_svg(&bytes, width, height) {
+                    Some(rendered) => tile = rendered,
+                    None => continue,
+                }
+            }
+            crate::style::LayerImage::Url(url) => {
+                paint_image(
+                    url,
+                    base_url,
+                    &local,
+                    &local,
+                    crate::ObjectFit::Fill,
+                    crate::ObjectPosition::default(),
+                    &mut tile,
+                    cache,
+                    None,
+                    None,
+                    crate::ResolvedBorderRadii::default(),
+                    None,
+                );
+            }
+            crate::style::LayerImage::Gradient(gradient, geometry) => {
+                let Some(path) = Rect::from_xywh(0.0, 0.0, local.width, local.height)
+                    .map(PathBuilder::from_rect)
+                else {
+                    continue;
+                };
+                paint_gradient_layer_stack(
+                    &mut tile,
+                    &path,
+                    &local,
+                    &local,
+                    crate::ResolvedBorderRadii::default(),
+                    std::slice::from_ref(gradient),
+                    std::slice::from_ref(geometry),
+                    em,
+                    root_font_size,
+                    viewport,
+                    None,
+                    1.0,
+                );
+            }
+        }
+        // The painting area, cut to one tile along an axis that does not
+        // repeat.
+        let clip = geometry.clip_rect;
+        let (mut x0, mut x1) = (clip.x, clip.x + clip.width);
+        let (mut y0, mut y1) = (clip.y, clip.y + clip.height);
+        if !layer.repeat.0 {
+            x0 = x0.max(tile_rect.x);
+            x1 = x1.min(tile_rect.x + tile_rect.width);
+        }
+        if !layer.repeat.1 {
+            y0 = y0.max(tile_rect.y);
+            y1 = y1.min(tile_rect.y + tile_rect.height);
+        }
+        let Some(area) = Rect::from_ltrb(x0 - ox, y0 - oy, x1 - ox, y1 - oy) else {
+            continue;
+        };
+        let sx = tile_rect.width / width as f32;
+        let sy = tile_rect.height / height as f32;
+        let exact = (sx - 1.0).abs() < 1e-4
+            && (sy - 1.0).abs() < 1e-4
+            && (tile_rect.x - tile_rect.x.round()).abs() < 1e-3
+            && (tile_rect.y - tile_rect.y.round()).abs() < 1e-3;
+        let mut paint = Paint::default();
+        paint.shader = Pattern::new(
+            tile.as_ref(),
+            SpreadMode::Repeat,
+            if exact {
+                FilterQuality::Nearest
+            } else {
+                FilterQuality::Bilinear
+            },
+            1.0,
+            Transform::from_row(sx, 0.0, 0.0, sy, tile_rect.x - ox, tile_rect.y - oy),
+        );
+        let rounded_clip = (!geometry.clip_radii.is_zero())
+            .then(|| {
+                let local_geometry = BackgroundGeometry {
+                    origin_rect: geometry.origin_rect,
+                    clip_rect: crate::Rect {
+                        x: clip.x - ox,
+                        y: clip.y - oy,
+                        ..clip
+                    },
+                    clip_radii: geometry.clip_radii,
+                };
+                let path = background_clip_path(local_geometry)?;
+                let mut mask = crate::canvas::new_mask(surface.width(), surface.height())?;
+                mask.clip_fill_path(&path, FillRule::Winding, true, Transform::identity());
+                Some(mask)
+            })
+            .flatten();
+        surface.fill_rect(area, &paint, Transform::identity(), rounded_clip.as_ref());
+    }
+}
+
+/// `bytes` with a `viewBox` of its `width` x `height` on the root `<svg>`
+/// when it has none, so the image scales with its concrete size as CSS
+/// images do.
+fn svg_with_intrinsic_viewbox(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return bytes.into();
+    };
+    let Some(start) = text.find("<svg") else {
+        return bytes.into();
+    };
+    let Some(end) = text[start..].find('>').map(|end| start + end) else {
+        return bytes.into();
+    };
+    let tag = &text[start..end];
+    if tag.contains("viewBox") {
+        return bytes.into();
+    }
+    let attribute = |name: &str| -> Option<f32> {
+        let at = tag.find(&format!(" {name}="))? + name.len() + 2;
+        let rest = &tag[at..];
+        let quote = rest.chars().next()?;
+        let value = if quote == '"' || quote == '\'' {
+            rest[1..].split(quote).next()?
+        } else {
+            rest.split(|c: char| c.is_whitespace() || c == '/').next()?
+        };
+        value.trim().trim_end_matches("px").parse::<f32>().ok()
+    };
+    let (Some(width), Some(height)) = (attribute("width"), attribute("height")) else {
+        return bytes.into();
+    };
+    let mut out = String::with_capacity(text.len() + 32);
+    out.push_str(&text[..start + 4]);
+    out.push_str(&format!(" viewBox=\"0 0 {width} {height}\""));
+    out.push_str(&text[start + 4..]);
+    out.into_bytes().into()
+}
+
+/// Paint every background layer of a box with more than one layer or an
+/// image layer. Background color is painted by the caller.
+#[allow(clippy::too_many_arguments)]
+fn paint_layered_background(
+    pixmap: &mut Pixmap,
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    layers: &[crate::style::ResolvedLayer],
+    base_url: Option<&str>,
+    root_font_size: f32,
+    viewport: (f32, f32),
+    cache: &mut RenderResourceCache,
+    clip: Option<&tiny_skia::Mask>,
+) {
+    let x0 = rect.x.floor().max(0.0) as i32;
+    let y0 = rect.y.floor().max(0.0) as i32;
+    let x1 = ((rect.x + rect.width).ceil() as i32).min(pixmap.width() as i32);
+    let y1 = ((rect.y + rect.height).ceil() as i32).min(pixmap.height() as i32);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let Some(mut surface) = Pixmap::new((x1 - x0) as u32, (y1 - y0) as u32) else {
+        return;
+    };
+    paint_resolved_layers(
+        &mut surface,
+        (x0, y0),
+        rect,
+        style,
+        layers,
+        base_url,
+        root_font_size,
+        viewport,
+        cache,
+    );
+    pixmap.canvas().draw_image(
+        x0,
+        y0,
+        surface.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        Transform::identity(),
+        clip,
+    );
+}
+
+/// The mask layers of an element when they mask its rendering: any
+/// gradient layer, several layers, or a box with content (children or a
+/// replaced element). A single image mask on an empty box keeps the icon
+/// path (`paint_mask`), which fills the mask shape with the box's color.
+fn layer_mask(
+    tree: &DomTree,
+    laid: &crate::DomLayout,
+    nid: obscura_dom::tree::NodeId,
+) -> Option<Vec<crate::style::ResolvedLayer>> {
+    let style = laid.styles.get(&nid)?;
+    if style.mask_layers.images.is_empty() {
+        return None;
+    }
+    let layers = crate::style::resolve_layers(&style.mask_layers, style, true);
+    if layers.is_empty() {
+        return None;
+    }
+    let gradient = layers
+        .iter()
+        .any(|layer| matches!(layer.image, crate::style::LayerImage::Gradient(..)));
+    let replaced = tree
+        .get_node(nid)
+        .and_then(|node| node.as_element().map(|e| e.local.to_string()))
+        .is_some_and(|tag| {
+            matches!(
+                tag.as_str(),
+                "img" | "video" | "canvas" | "svg" | "picture" | "iframe" | "input" | "object"
+            )
+        });
+    let has_children = !crate::dom::rendered_descendants(tree, nid).is_empty();
+    (gradient || layers.len() > 1 || replaced || has_children).then_some(layers)
+}
+
+/// Whether a box shows its back: its own transform turns it, and so does
+/// each ancestor's while the ancestor keeps a 3D context (`preserve-3d`).
+fn faces_back(tree: &DomTree, laid: &crate::DomLayout, nid: obscura_dom::tree::NodeId) -> bool {
+    let mut back = false;
+    let mut current = Some(nid);
+    while let Some(id) = current {
+        let Some(style) = laid.styles.get(&id) else {
+            break;
+        };
+        back ^= style.transform_facing_back;
+        current = crate::dom::rendered_parent(tree, id).filter(|parent| {
+            laid.styles
+                .get(parent)
+                .is_some_and(|style| style.preserve_3d)
+        });
+    }
+    back
+}
+
+/// Background layers that take the layered paint path: more than one
+/// layer, or any image layer. A single gradient keeps the gradient path.
+fn layered_background(style: &crate::LayoutStyle) -> Option<Vec<crate::style::ResolvedLayer>> {
+    if style.background_layers.images.is_empty() {
+        return None;
+    }
+    let layers = crate::style::resolve_layers(&style.background_layers, style, false);
+    (layers.len() > 1
+        || layers
+            .iter()
+            .any(|layer| matches!(layer.image, crate::style::LayerImage::Url(_))))
+    .then_some(layers)
+}
+
 #[derive(Clone, Copy)]
 struct BackgroundGeometry {
     origin_rect: crate::Rect,
@@ -9959,6 +10647,16 @@ fn add_sides(a: crate::Sides<f32>, b: crate::Sides<f32>) -> crate::Sides<f32> {
 }
 
 fn background_geometry(rect: &crate::Rect, style: &crate::LayoutStyle) -> BackgroundGeometry {
+    layer_geometry(rect, style, style.background_origin, style.background_clip)
+}
+
+/// Positioning and painting areas of one background or mask layer.
+fn layer_geometry(
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    origin: crate::BackgroundOrigin,
+    clip: crate::BackgroundClip,
+) -> BackgroundGeometry {
     let border = crate::Sides {
         top: style.border.top,
         right: style.border.right,
@@ -9972,12 +10670,12 @@ fn background_geometry(rect: &crate::Rect, style: &crate::LayoutStyle) -> Backgr
         left: style.padding.left,
     };
     let content = add_sides(border, padding);
-    let origin_insets = match style.background_origin {
+    let origin_insets = match origin {
         crate::BackgroundOrigin::BorderBox => crate::Sides::all(0.0),
         crate::BackgroundOrigin::PaddingBox => border,
         crate::BackgroundOrigin::ContentBox => content,
     };
-    let clip_insets = match style.background_clip {
+    let clip_insets = match clip {
         crate::BackgroundClip::BorderBox | crate::BackgroundClip::Text => crate::Sides::all(0.0),
         crate::BackgroundClip::PaddingBox => border,
         crate::BackgroundClip::ContentBox => content,
@@ -13214,6 +13912,75 @@ fn svg_escape_attr(s: &str, buf: &mut String) {
 /// document-level symbol sprite (`href="#id"`) or an external sprite file
 /// (`href="url#id"`), splicing the referenced symbol into the standalone SVG
 /// handed to resvg. Symbols already inside `root` need no injection.
+/// Replace the `href`/`xlink:href` of each `<image>` in standalone SVG
+/// markup with a `data:` URL of the bytes it names, fetched through the
+/// page's resource cache.
+fn inline_svg_image_hrefs(
+    markup: &mut String,
+    base_url: Option<&str>,
+    cache: &mut RenderResourceCache,
+) {
+    use base64::Engine;
+    let mut out = String::with_capacity(markup.len());
+    let mut rest = markup.as_str();
+    let mut changed = false;
+    while let Some(start) = rest.find("<image") {
+        let Some(end) = rest[start..].find('>').map(|end| start + end) else {
+            break;
+        };
+        out.push_str(&rest[..start]);
+        let mut tag = rest[start..end].to_string();
+        for attribute in ["xlink:href=", " href="] {
+            let Some(at) = tag.find(attribute) else {
+                continue;
+            };
+            let value_start = at + attribute.len();
+            let Some(quote) = tag[value_start..].chars().next() else {
+                continue;
+            };
+            if quote != '"' && quote != '\'' {
+                continue;
+            }
+            let Some(len) = tag[value_start + 1..].find(quote) else {
+                continue;
+            };
+            let raw = tag[value_start + 1..value_start + 1 + len].replace("&amp;", "&");
+            if raw.starts_with("data:") || raw.starts_with('#') {
+                continue;
+            }
+            let Some(bytes) = fetch_bytes(&raw, base_url, cache) else {
+                continue;
+            };
+            let mime = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+                "image/png"
+            } else if bytes.starts_with(&[0xFF, 0xD8]) {
+                "image/jpeg"
+            } else if bytes.starts_with(b"GIF8") {
+                "image/gif"
+            } else if bytes.len() > 12 && &bytes[8..12] == b"WEBP" {
+                "image/webp"
+            } else if is_svg(&bytes) {
+                "image/svg+xml"
+            } else {
+                continue;
+            };
+            let data = format!(
+                "data:{mime};base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(&bytes[..])
+            );
+            tag.replace_range(value_start + 1..value_start + 1 + len, &data);
+            changed = true;
+            break;
+        }
+        out.push_str(&tag);
+        rest = &rest[end..];
+    }
+    if changed {
+        out.push_str(rest);
+        *markup = out;
+    }
+}
+
 fn inject_external_sprites(
     tree: &DomTree,
     root: obscura_dom::tree::NodeId,
@@ -13982,6 +14749,205 @@ mod tests {
         assert!(blue.blue() > 240 && blue.red() < 20 && blue.green() < 20);
         assert!(red.red() > 240 && red.green() < 20 && red.blue() < 20);
         assert!(yellow.red() > 240 && yellow.green() > 240 && yellow.blue() < 20);
+    }
+
+    #[test]
+    fn inline_svg_images_paint_relative_hrefs() {
+        let source = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            40,
+            20,
+            image::Rgba([255, 0, 0, 255]),
+        ));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        source
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("png");
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <svg width="100" height="50" xmlns="http://www.w3.org/2000/svg">
+                  <image href="red.png"></image></svg>
+            </body></html>"#,
+        );
+        let mut resources = RenderResourceCache::with_loader(|_url: &str| None);
+        resources.seed("https://assets.test/red.png".into(), encoded.into_inner());
+        let mut prepared = prepare_dom(
+            &tree,
+            (120.0, 60.0),
+            Some("https://assets.test/page.html"),
+            &mut resources,
+        )
+        .expect("prepared");
+        let pixmap =
+            paint_prepared(&tree, &mut prepared, &mut resources, (0.0, 0.0)).expect("paint");
+        let inside = pixmap.pixel(10, 10).expect("pixel");
+        assert_eq!(
+            (inside.red(), inside.green(), inside.blue()),
+            (255, 0, 0),
+            "the svg <image> paints its relative href at its intrinsic size"
+        );
+        let outside = pixmap.pixel(60, 10).expect("pixel");
+        assert_eq!(outside.green(), 255, "and only there");
+    }
+
+    #[test]
+    fn hidden_backfaces_are_not_painted() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:relative;width:100px;height:50px;transform-style:preserve-3d">
+                  <div style="position:absolute;inset:0;background:rgb(0,128,0);
+                              backface-visibility:hidden"></div>
+                  <div style="position:absolute;inset:0;background:rgb(255,0,0);
+                              backface-visibility:hidden;transform:rotateY(180deg)"></div>
+                </div>
+                <div style="width:100px;height:50px;background:rgb(0,0,255);
+                            backface-visibility:hidden;transform:scaleX(-1)"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (120.0, 120.0), None).expect("backface");
+        let rgb = |x, y| {
+            let p = pixmap.pixel(x, y).expect("pixel");
+            (p.red(), p.green(), p.blue())
+        };
+        assert_eq!(rgb(50, 25), (0, 128, 0), "the turned face hides its back");
+        assert_eq!(rgb(50, 75), (0, 0, 255), "a 2D mirror keeps its front");
+    }
+
+    #[test]
+    fn inset_shadow_and_dashed_borders_follow_chrome() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:40px;
+                    box-shadow:inset 0 0 8px rgba(0,0,0,.5)"></div>
+                <div style="position:absolute;left:0;top:60px;width:200px;height:40px;
+                    border:10px dashed black"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (240.0, 130.0), None).expect("inset and dashes");
+        let gray = |x, y| pixmap.pixel(x, y).expect("pixel").red();
+        assert!(gray(50, 0) < 210, "the inset shadow darkens the inner edge");
+        assert!(gray(50, 4) > gray(50, 0), "and fades inward");
+        assert_eq!(gray(50, 20), 255, "the middle stays clear");
+        // Blink: 10px dashes are 20px long; gaps stretch so the side starts
+        // and ends with a dash (220px side: 8 dashes, gaps 160/7 px).
+        assert_eq!(gray(10, 65), 0, "the side starts with a dash");
+        assert_eq!(gray(24, 65), 255, "the first gap starts after 20px");
+        assert_eq!(gray(215, 65), 0, "and the side ends with a dash");
+    }
+
+    #[test]
+    fn gradient_mask_layers_mask_the_element_and_its_content() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:100px;
+                    background:rgb(255,0,0);
+                    -webkit-mask-image:linear-gradient(black,transparent)">
+                  <div style="width:50px;height:100px;background:rgb(0,0,255)"></div>
+                </div>
+                <div style="position:absolute;left:110px;top:0;width:100px;height:100px;
+                    background:rgb(255,0,0);
+                    mask:linear-gradient(black,black) 0 0/50px 50px no-repeat,
+                         linear-gradient(black,black) right bottom/20px 20px no-repeat"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (220.0, 110.0), None).expect("mask");
+        let rgb = |x, y| {
+            let p = pixmap.pixel(x, y).expect("pixel");
+            (p.red(), p.green(), p.blue())
+        };
+        let top = rgb(75, 0);
+        assert!(
+            top.0 == 255 && top.1 < 8,
+            "the mask is opaque at the top: {top:?}"
+        );
+        assert!(rgb(25, 0).2 > 245, "the child is masked with its parent");
+        let bottom = rgb(75, 99);
+        assert!(
+            bottom.1 > 245,
+            "the mask is transparent at the bottom: {bottom:?}"
+        );
+        let middle = rgb(75, 50);
+        assert!(
+            middle.1 > 100 && middle.1 < 160,
+            "half way down, half of the red shows: {middle:?}"
+        );
+        assert_eq!(rgb(120, 10), (255, 0, 0), "first mask layer");
+        assert_eq!(rgb(170, 10), (255, 255, 255), "outside both mask layers");
+        assert_eq!(rgb(205, 95), (255, 0, 0), "second mask layer");
+    }
+
+    #[test]
+    fn background_layers_each_take_their_own_size_position_and_repeat() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:60px;
+                    background:linear-gradient(rgb(255,0,0),rgb(255,0,0)) 0 0/20px 20px no-repeat,
+                               linear-gradient(rgb(0,0,255),rgb(0,0,255)) right top/10px 10px repeat-y,
+                               rgb(0,255,0)"></div>
+                <div style="position:absolute;left:0;top:70px;width:100px;height:40px;
+                    padding:10px;background-image:linear-gradient(rgb(255,0,0),rgb(255,0,0)),
+                                                  linear-gradient(rgb(0,0,255),rgb(0,0,255));
+                    background-clip:content-box,border-box;background-repeat:no-repeat"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (140.0, 140.0), None).expect("layers");
+        let rgb = |x, y| {
+            let p = pixmap.pixel(x, y).expect("pixel");
+            (p.red(), p.green(), p.blue())
+        };
+        assert_eq!(rgb(5, 5), (255, 0, 0), "top layer at 0 0, 20px");
+        assert_eq!(rgb(25, 5), (0, 255, 0), "top layer does not repeat");
+        assert_eq!(rgb(95, 5), (0, 0, 255), "second layer at the right edge");
+        assert_eq!(rgb(95, 55), (0, 0, 255), "second layer repeats down");
+        assert_eq!(
+            rgb(85, 30),
+            (0, 255, 0),
+            "second layer does not repeat across"
+        );
+        assert_eq!(
+            rgb(60, 100),
+            (255, 0, 0),
+            "first layer fills the content box"
+        );
+        assert_eq!(
+            rgb(3, 100),
+            (0, 0, 255),
+            "second layer fills the padding of the border box"
+        );
+    }
+
+    #[test]
+    fn positioned_boxes_paint_over_earlier_in_flow_text() {
+        // CSS 2.1 Appendix E: inline content (step 7) paints before
+        // positioned descendants with z-index auto or >= 0 (step 8).
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <p style="margin:0;font-size:40px;line-height:50px">MMMMMM</p>
+                <div style="position:absolute;left:0;top:0;width:80px;height:50px;
+                            background:rgb(0,0,255)"></div>
+                <div style="position:absolute;left:80px;top:0;width:80px;height:50px;
+                            z-index:1;background:rgb(0,255,0)"></div>
+                <div style="position:relative;top:-50px;margin-left:160px;width:80px;
+                            height:50px;background:rgb(255,0,0)"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (260.0, 120.0), None).expect("paint order");
+        for (x, expected, what) in [
+            (0, (0, 0, 255), "absolute z-index:auto"),
+            (80, (0, 255, 0), "absolute z-index:1"),
+            (160, (255, 0, 0), "relative z-index:auto"),
+        ] {
+            for dx in 0..80 {
+                for y in 0..50 {
+                    let p = pixmap.pixel(x + dx, y).expect("pixel");
+                    assert_eq!(
+                        (p.red(), p.green(), p.blue()),
+                        expected,
+                        "the {what} box must cover the paragraph's glyphs at {},{y}",
+                        x + dx
+                    );
+                }
+            }
+        }
     }
 
     #[test]
