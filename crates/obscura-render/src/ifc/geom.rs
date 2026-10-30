@@ -286,7 +286,12 @@ impl Ifc {
                                 edge: None,
                                 x0: ibox.x,
                                 x1: ibox.x + ibox.width,
-                                baseline,
+                                // The enclosing span's fragment stands on the
+                                // line's baseline, wherever vertical-align
+                                // puts the box (Chrome: an <a> around a
+                                // middle-aligned image has a text-height
+                                // fragment at the line's baseline).
+                                baseline: metrics.baseline,
                                 text: None,
                             }),
                             BoxKind::Break { node } => {

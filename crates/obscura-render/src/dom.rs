@@ -7996,6 +7996,44 @@ fn layout_dom_once(
 
         resolve_grid_areas(tree, root_id, &mut styles);
 
+        // A fieldset's rendered legend (its first legend child, in flow)
+        // sits on the fieldset's top border: the border and padding-top
+        // come after it (Chrome: the legend's top is the fieldset's border
+        // edge, the content starts padding-top below the legend).
+        for id in rendered_descendants(tree, root_id) {
+            if !tree.borrow_node(id).is_some_and(|node| {
+                node.as_element()
+                    .is_some_and(|e| e.local.as_ref() == "fieldset")
+            }) {
+                continue;
+            }
+            let Some(fieldset) = styles.get(&id).cloned() else {
+                continue;
+            };
+            let legend = rendered_children(tree, id).into_iter().find(|&child| {
+                tree.borrow_node(child)
+                    .is_some_and(|node| node.is_element())
+            });
+            let Some(legend) = legend.filter(|&child| {
+                tree.borrow_node(child).is_some_and(|node| {
+                    node.as_element()
+                        .is_some_and(|e| e.local.as_ref() == "legend")
+                })
+            }) else {
+                continue;
+            };
+            if let Some(style) = styles.get_mut(&legend) {
+                if style.float.is_some()
+                    || style.position.is_some()
+                    || style.display == crate::Display::None
+                {
+                    continue;
+                }
+                style.margin.top -= fieldset.border.top + fieldset.padding.top;
+                style.margin.bottom += fieldset.padding.top;
+            }
+        }
+
         // The root's outer display is always blockified. Keep a declared
         // inline-flex/grid root's inner mode, but remove its inline
         // participation marker before box construction.

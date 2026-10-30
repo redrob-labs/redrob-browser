@@ -1338,3 +1338,46 @@ fn web_fonts_use_light_autohinted_advances() {
     let w = width(&tree, &laid, "a");
     assert_eq!(w, w.round(), "{w}");
 }
+
+#[test]
+fn legend_sits_on_the_fieldset_border_and_shrinks_to_fit() {
+    // Chrome: a legend in a full-width fieldset is 84 wide at the fieldset
+    // top (y 0), and the fieldset is 53.59 tall; <map> is inline.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'>\
+         <fieldset id=f><legend id=l>Personalia:</legend>x</fieldset>\
+         <div>a<map id=m name=x></map>b</div>",
+        &[],
+    );
+    let r = |id: &str| {
+        let node = element(&tree, id);
+        laid.fractional_rects
+            .get(&node)
+            .copied()
+            .unwrap_or(laid.rects[&node])
+    };
+    assert!(
+        (r("l").width - 84.05).abs() < 0.5 && r("l").y == 0.0,
+        "{:?}",
+        r("l")
+    );
+    assert!((r("f").height - 53.59).abs() < 0.05, "{:?}", r("f"));
+    assert_eq!(
+        laid.styles[&element(&tree, "m")].display,
+        crate::Display::Inline
+    );
+}
+
+#[test]
+fn inline_fragment_around_a_middle_aligned_image_stands_on_the_baseline() {
+    // Chrome: <a><img middle 395px tall><br>... has a first fragment at
+    // y 187.73 (the line's baseline), not at the image bottom.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'><div style='width:300px'>\
+         <a id=a href=#><img style='width:220px;height:375px;vertical-align:middle;border:10px solid'>\
+         <br><br><b>Without</b></a></div>",
+        &[],
+    );
+    let first = laid.inline_fragments[&element(&tree, "a")][0];
+    assert!((first.y - 187.73).abs() < 0.1, "{first:?}");
+}

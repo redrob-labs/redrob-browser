@@ -39,7 +39,7 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         "span" | "a" | "b" | "i" | "strong" | "em" | "font" | "code" | "small" | "sub" | "sup"
         | "mark" | "abbr" | "cite" | "var" | "dfn" | "kbd" | "samp" | "q" | "time" | "s" | "u"
         | "del" | "ins" | "tt" | "big" | "bdi" | "bdo" | "br" | "wbr" | "data" | "output"
-        | "label" | "ruby" | "rt" | "rp" | "picture" | "source" => Display::Inline,
+        | "label" | "ruby" | "rt" | "rp" | "picture" | "source" | "map" => Display::Inline,
         // Replaced elements are inline-level in the HTML UA sheet. Defaulting
         // them to block stacked two adjacent icons or canvases vertically
         // and broke "text <svg> text" lines into three.
@@ -558,6 +558,9 @@ fn apply_ua_sheet_extras(tag: &str, style: &mut LayoutStyle) {
         "legend" => {
             style.padding.left = 2.0;
             style.padding.right = 2.0;
+            // A rendered legend is shrink-to-fit (Chrome: "Personalia:" in
+            // a full-width fieldset is 84 wide).
+            style.width_fit_content = true;
         }
         "small" | "sub" | "sup" => {
             style.font_size = None;
