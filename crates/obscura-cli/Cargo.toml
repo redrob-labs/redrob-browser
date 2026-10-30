@@ -21,6 +21,8 @@ default = []
 stealth = ["obscura-browser/stealth", "obscura-net/stealth", "obscura-mcp/stealth"]
 render = ["obscura-browser/render", "obscura-cdp/render", "obscura-mcp/render"]
 display-list = ["render", "obscura-cdp/display-list"]
+# Paint <video> frames in headless captures (docs/MEDIA.md).
+media = ["render", "obscura-browser/media"]
 
 [dependencies]
 iana-time-zone = "0.1"

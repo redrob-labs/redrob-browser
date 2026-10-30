@@ -15,8 +15,13 @@ pub struct Engine {
 
 impl Engine {
     /// Spawn `redrob-browser serve` next to this binary on a free loopback port,
-    /// keeping cookies and localStorage in `storage`.
-    pub fn start(storage: &std::path::Path) -> anyhow::Result<Self> {
+    /// keeping cookies and localStorage in `storage`, or only in memory when
+    /// it is `None` (incognito).
+    ///
+    /// One engine serves every window of a profile: the window process that
+    /// holds the profile's instance lock (instance.rs) starts it, and a second
+    /// launch hands its window to that process instead of starting another.
+    pub fn start(storage: Option<&std::path::Path>) -> anyhow::Result<Self> {
         let exe = sibling_binary("redrob-browser");
         let ready =
             std::env::temp_dir().join(format!("redrob-browser-ready-{}.json", std::process::id()));
@@ -24,16 +29,12 @@ impl Engine {
 
         // Its standard error is the window's: a terminal, or on Windows the
         // window's log file (startup.rs). No console window of its own.
-        let mut child = crate::startup::no_console(&mut Command::new(&exe))
-            .args([
-                "serve",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "0",
-                "--storage-dir",
-            ])
-            .arg(storage)
+        let mut cmd = Command::new(&exe);
+        cmd.args(["serve", "--host", "127.0.0.1", "--port", "0"]);
+        if let Some(dir) = storage {
+            cmd.arg("--storage-dir").arg(dir);
+        }
+        let mut child = crate::startup::no_console(&mut cmd)
             .arg("--ready-file")
             .arg(&ready)
             .args(

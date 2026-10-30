@@ -59,6 +59,10 @@ pub(in super::super) struct GridItem {
     pub justify_self: AlignSelf,
     /// The items first baseline (horizontal)
     pub baseline: Option<f32>,
+    /// The item's first baseline from its final layout, used for the grid
+    /// container's own baseline when the item takes no part in baseline
+    /// alignment.
+    pub final_baseline: Option<f32>,
     /// Shim for baseline alignment that acts like an extra top margin
     /// TODO: Support last baseline and vertical text baselines
     pub baseline_shim: f32,
@@ -127,6 +131,7 @@ impl GridItem {
             align_self: style.align_self().unwrap_or(parent_align_items),
             justify_self: style.justify_self().unwrap_or(parent_justify_items),
             baseline: None,
+            final_baseline: None,
             baseline_shim: 0.0,
             row_indexes: Line { start: 0, end: 0 }, // Properly initialised later
             column_indexes: Line { start: 0, end: 0 }, // Properly initialised later

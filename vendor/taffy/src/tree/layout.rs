@@ -166,6 +166,9 @@ pub struct LayoutOutput {
     pub content_size: Size<f32>,
     /// The first baseline of the node in each dimension, if any
     pub first_baselines: Point<Option<f32>>,
+    /// The last baseline of the node in the block (vertical) axis, if any. This is the baseline
+    /// of the last line box in the node, which an `inline-block` aligns on.
+    pub last_baseline: Option<f32>,
     /// Top margin that can be collapsed with. This is used for CSS block layout and can be set to
     /// `CollapsibleMarginSet::ZERO` for other layout modes that don't support margin collapsing
     pub top_margin: CollapsibleMarginSet,
@@ -184,6 +187,7 @@ impl LayoutOutput {
         #[cfg(feature = "content_size")]
         content_size: Size::ZERO,
         first_baselines: Point::NONE,
+        last_baseline: None,
         top_margin: CollapsibleMarginSet::ZERO,
         bottom_margin: CollapsibleMarginSet::ZERO,
         margins_can_collapse_through: false,
@@ -203,6 +207,7 @@ impl LayoutOutput {
             #[cfg(feature = "content_size")]
             content_size,
             first_baselines,
+            last_baseline: first_baselines.y,
             top_margin: CollapsibleMarginSet::ZERO,
             bottom_margin: CollapsibleMarginSet::ZERO,
             margins_can_collapse_through: false,

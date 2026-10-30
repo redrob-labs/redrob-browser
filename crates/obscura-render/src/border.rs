@@ -155,9 +155,42 @@ impl BorderModel {
 
 fn used_width(specified: f32, style: BorderStyle) -> f32 {
     if style.is_visible() {
-        specified.max(0.0)
+        snap_border_width(specified.max(0.0))
     } else {
         0.0
+    }
+}
+
+/// CSS Values 4 "snap as a border width" at one device pixel per CSS pixel,
+/// as Chromium does: a width under one pixel becomes one, a larger one is
+/// floored (4.1px is 4; Chrome getBoundingClientRect of a 100.4px box with
+/// 4.1px and 3.1px side borders is 122.765625 wide).
+pub(crate) fn snap_border_width(width: f32) -> f32 {
+    if width <= 0.0 {
+        0.0
+    } else if width < 1.0 {
+        1.0
+    } else {
+        (width + 1e-4).floor()
+    }
+}
+
+#[cfg(test)]
+mod snap_tests {
+    #[test]
+    fn border_widths_snap_like_chrome() {
+        use super::snap_border_width as snap;
+        assert_eq!(
+            [
+                snap(0.0),
+                snap(0.3),
+                snap(1.0),
+                snap(3.1),
+                snap(4.9),
+                snap(13.0)
+            ],
+            [0.0, 1.0, 1.0, 3.0, 4.0, 13.0]
+        );
     }
 }
 

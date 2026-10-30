@@ -1953,7 +1953,34 @@ function _shallowCloneNode(node) {
 // EventTarget listener state belongs to the JS wrapper rather than the backing
 // DOM node.  This is also what makes `new EventTarget()` and subclasses used by
 // framework schedulers work: those targets deliberately have no native node id.
-const _eventTargetListeners = new WeakMap();
+// The window's own listeners live outside the WeakMap. This WeakMap is
+// created while the startup snapshot is built and already holds the global
+// (bootstrap's resize listener); after deserialization a lookup keyed by the
+// global intermittently misses, so a later addEventListener started a fresh
+// listener list and every window listener added before it was lost. On
+// w3schools that dropped load_quiz on a few percent of loads under parallel
+// load, leaving the exercise box empty (810x60).
+const _eventTargetListeners = (() => {
+  const weak = new WeakMap();
+  let windowListeners;
+  return {
+    get(target) { return target === globalThis ? windowListeners : weak.get(target); },
+    set(target, value) {
+      if (target === globalThis) windowListeners = value;
+      else weak.set(target, value);
+      return this;
+    },
+    delete(target) {
+      if (target === globalThis) {
+        const had = windowListeners !== undefined;
+        windowListeners = undefined;
+        return had;
+      }
+      return weak.delete(target);
+    },
+    has(target) { return target === globalThis ? windowListeners !== undefined : weak.has(target); },
+  };
+})();
 const _eventTargetListenerChanged = new WeakMap();
 function _eventCapture(options) {
   return typeof options === "boolean" ? options : !!(options && options.capture);
@@ -1986,6 +2013,10 @@ function _eventTargetAdd(target, type, callback, options) {
     abortHandler: null,
   };
   listeners.push(entry);
+  if ((type === 'animationstart' || type === 'webkitAnimationStart')
+      && typeof globalThis._watchAnimationStart === 'function') {
+    globalThis._watchAnimationStart(target);
+  }
   _eventTargetListenerChanged.get(target)?.();
   if (signal && typeof signal.addEventListener === "function") {
     entry.abortHandler = () => _eventTargetRemove(target, type, callback, capture);
@@ -4051,16 +4082,127 @@ class DocumentTimeline {
   get currentTime() { return performance.now() - this.originTime; }
 }
 
+// CSS animations as Web Animations (CSSAnimation): one wrapper per running
+// instance, keyed by element and animation-name, so pause() and currentTime
+// reach the renderer's animation timeline.
+const _cssAnimationWrappers = new Map();
+class CSSAnimation {
+  constructor(nid, name) {
+    this._nid = nid;
+    this.animationName = name;
+    this.id = '';
+    this.onfinish = null;
+    this.oncancel = null;
+    this._paused = false;
+    this._current = 0;
+    this.ready = Promise.resolve(this);
+    this.finished = new Promise(() => {});
+  }
+  get effect() {
+    const target = _wrapEl(this._nid);
+    return { target, getTiming() { return {}; }, getComputedTiming() { return {}; } };
+  }
+  get timeline() { return globalThis.document?.timeline || null; }
+  get playState() { return this._paused ? 'paused' : 'running'; }
+  get pending() { return false; }
+  get playbackRate() { return 1; }
+  get startTime() { return this._paused ? null : (globalThis.performance?.now() || 0) - this._current; }
+  get currentTime() { return this._current; }
+  set currentTime(value) {
+    const t = Number(value);
+    if (!Number.isFinite(t)) return;
+    this._control('currentTime', t);
+    this._current = Math.max(0, t);
+  }
+  _control(action, value = 0) {
+    try {
+      if (__obscuraCore.ops.op_css_animation_control?.(this._nid >>> 0, action, Number(value) || 0)) {
+        _domMutationEpoch++;
+        return true;
+      }
+    } catch (_e) {}
+    return false;
+  }
+  pause() { if (this._control('pause')) this._paused = true; }
+  play() { if (this._control('play')) this._paused = false; }
+  cancel() {}
+  finish() {}
+  reverse() {}
+  updatePlaybackRate() {}
+  commitStyles() {}
+  persist() {}
+  addEventListener(type, callback, options) { _eventTargetAdd(this, type, callback, options); }
+  removeEventListener(type, callback, options) { _eventTargetRemove(this, type, callback, options); }
+  dispatchEvent(event) { return _eventTargetDispatch(this, event); }
+  get [Symbol.toStringTag]() { return 'CSSAnimation'; }
+}
+globalThis.CSSAnimation = CSSAnimation;
+function _cssAnimations() {
+  let rows = [];
+  try {
+    if (typeof __obscuraCore.ops.op_css_animations === 'function') {
+      rows = JSON.parse(__obscuraCore.ops.op_css_animations()) || [];
+    }
+  } catch (_e) { rows = []; }
+  const live = new Map();
+  for (const [nid, name, paused, current] of rows) {
+    const key = nid + ' ' + name;
+    let wrapper = _cssAnimationWrappers.get(key);
+    if (!wrapper) wrapper = new CSSAnimation(nid, name);
+    wrapper._paused = !!paused;
+    wrapper._current = Number(current) || 0;
+    live.set(key, wrapper);
+  }
+  _cssAnimationWrappers.clear();
+  for (const [key, wrapper] of live) _cssAnimationWrappers.set(key, wrapper);
+  return Array.from(live.values());
+}
+// animationstart: Chromium fires it at the frame after a CSS animation
+// starts. An element with a listener is checked each frame (~16ms) for CSS
+// animation instances it has not reported yet; libraries such as Chart.js
+// use the event to detect that a node was rendered.
+const _animationStartWatched = new Set();
+const _animationStartFired = new WeakMap();
+let _animationStartTimer = null;
+function _animationStartTick() {
+  _animationStartTimer = null;
+  for (const el of [..._animationStartWatched]) {
+    if (!el.isConnected) continue;
+    try { void el.offsetWidth; } catch (_e) {}
+    const live = new Set(_cssAnimations()
+      .filter(animation => animation._nid === (el._nid | 0))
+      .map(animation => animation.animationName));
+    const fired = _animationStartFired.get(el) || new Set();
+    for (const name of [...fired]) if (!live.has(name)) fired.delete(name);
+    for (const name of live) {
+      if (fired.has(name)) continue;
+      fired.add(name);
+      try { el.dispatchEvent(new AnimationEvent('animationstart', { animationName: name, bubbles: true })); }
+      catch (e) { console.error(e); }
+    }
+    _animationStartFired.set(el, fired);
+  }
+  if (_animationStartWatched.size) _animationStartTimer = setTimeout(_animationStartTick, 16);
+}
+globalThis._watchAnimationStart = function (el) {
+  if (!el || typeof el._nid !== 'number' || _animationStartWatched.has(el)) return;
+  if (_animationStartWatched.size >= 256) return;
+  _animationStartWatched.add(el);
+  if (_animationStartTimer == null) _animationStartTimer = setTimeout(_animationStartTick, 16);
+};
 function _animationsForTarget(target) {
-  return Array.from(_waapiAnimations).filter(animation => {
+  const css = _cssAnimations().filter(animation => animation._nid === (target?._nid | 0));
+  return css.concat(Array.from(_waapiAnimations).filter(animation => {
     if (animation.effect?.target !== target || animation.playState === 'idle') return false;
     return animation.playState !== 'finished' || animation.effect._timing.fill === 'forwards' || animation.effect._timing.fill === 'both';
-  });
+  }));
 }
 
 const _innerTextBlockDisplays = new Set([
   'block', 'flow-root', 'flex', 'grid', 'list-item', 'table', 'table-caption',
 ]);
+
+const _innerTextUnrenderedTags = new Set(['noscript', 'source', 'track', 'option', 'optgroup']);
 
 function _collectInnerText(node, items, inheritedVisibility = 'visible') {
   if (node.nodeType === 3) {
@@ -4072,6 +4214,11 @@ function _collectInnerText(node, items, inheritedVisibility = 'visible') {
   const style = getComputedStyle(node);
   const display = style.display;
   if (display === 'none') return;
+  // Elements the UA hides without display:none generate no box, so they
+  // are not being rendered (noscript with scripting on, media sources,
+  // options outside the select popup).
+  if (node.namespaceURI === 'http://www.w3.org/1999/xhtml'
+      && _innerTextUnrenderedTags.has(node.localName)) return;
   const visibility = style.visibility || inheritedVisibility;
   if (visibility === 'visible' && node.tagName === 'BR') {
     items.push('\n');
@@ -5513,51 +5660,80 @@ class Element extends Node {
     });
     return this._dataset;
   }
+  // offset* are HTMLElement members: SVG and MathML elements have none.
   get offsetWidth() {
+    if (this.namespaceURI !== 'http://www.w3.org/1999/xhtml') return undefined;
     if (this._isViewportRoot()) return globalThis.innerWidth || 1280;
     const metrics = this._renderBoxMetrics();
     return metrics ? metrics.offsetWidth : this.getBoundingClientRect().width;
   }
   get offsetHeight() {
+    if (this.namespaceURI !== 'http://www.w3.org/1999/xhtml') return undefined;
     if (this._isViewportRoot()) return globalThis.innerHeight || 720;
     const metrics = this._renderBoxMetrics();
     return metrics ? metrics.offsetHeight : this.getBoundingClientRect().height;
   }
   get offsetParent() {
-    if (!this.isConnected || this._renderBoxGeometry() === null) return null;
+    if (this.namespaceURI !== 'http://www.w3.org/1999/xhtml') return undefined;
+    if (!this.isConnected) return null;
     // CSSOM View: null for the root element and the body element. Returning
     // document.body here made body.offsetParent === body, so the common
     // `while (el) { x += el.offsetLeft; el = el.offsetParent; }` never ended.
     if (this === document.documentElement || this === document.body) return null;
+    // Null when the element has no box: display:none on it or an ancestor,
+    // or display:contents on itself. Decided from style, since an inline
+    // box can exist without a layout rect of its own.
     const ownStyle = globalThis.getComputedStyle(this);
+    if (ownStyle.display === 'none' || ownStyle.display === 'contents') return null;
+    for (let ancestor = this.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      if (globalThis.getComputedStyle(ancestor).display === 'none') return null;
+    }
     if (ownStyle.position === 'fixed') return null;
-
+    const ownStatic = ownStyle.position === 'static';
     for (let ancestor = this.parentElement; ancestor; ancestor = ancestor.parentElement) {
       if (ancestor.tagName === 'HTML') break;
+      if (ancestor.tagName === 'BODY') return ancestor;
       const style = globalThis.getComputedStyle(ancestor);
-      if (style.display === 'none') return null;
-      if (ancestor.tagName === 'BODY' || style.position !== 'static'
-          || style.display === 'table-cell' || style.display === 'table') {
+      if (style.display === 'contents') continue;
+      // The nearest containing block of positioned descendants, or, for a
+      // static element, the nearest td/th/table element.
+      if (style.position !== 'static' || style.transform !== 'none') return ancestor;
+      if (ownStatic && ancestor.namespaceURI === 'http://www.w3.org/1999/xhtml'
+          && (ancestor.localName === 'td' || ancestor.localName === 'th'
+              || ancestor.localName === 'table')) {
         return ancestor;
       }
     }
     return document.body || null;
   }
+  // offsetTop/offsetLeft are layout positions: scrolling the offsetParent
+  // or a scroller between it and the element does not change them.
+  _offsetScroll(parent, axis) {
+    let total = 0;
+    for (let a = this.parentElement; a; a = a.parentElement) {
+      if (a.tagName === 'HTML' || a.tagName === 'BODY') break;
+      total += axis === 'y' ? (a.scrollTop || 0) : (a.scrollLeft || 0);
+      if (a === parent) break;
+    }
+    return total;
+  }
   get offsetTop() {
+    if (this.namespaceURI !== 'http://www.w3.org/1999/xhtml') return undefined;
     if (!this.isConnected || this._renderBoxGeometry() === null) return 0;
     const rect = this.getBoundingClientRect();
     const parent = this.offsetParent;
     const value = parent
-      ? rect.top - parent.getBoundingClientRect().top - parent.clientTop
+      ? rect.top - parent.getBoundingClientRect().top - parent.clientTop + this._offsetScroll(parent, 'y')
       : rect.top + (globalThis.scrollY || 0);
     return Math.round(value);
   }
   get offsetLeft() {
+    if (this.namespaceURI !== 'http://www.w3.org/1999/xhtml') return undefined;
     if (!this.isConnected || this._renderBoxGeometry() === null) return 0;
     const rect = this.getBoundingClientRect();
     const parent = this.offsetParent;
     const value = parent
-      ? rect.left - parent.getBoundingClientRect().left - parent.clientLeft
+      ? rect.left - parent.getBoundingClientRect().left - parent.clientLeft + this._offsetScroll(parent, 'x')
       : rect.left + (globalThis.scrollX || 0);
     return Math.round(value);
   }
@@ -5827,6 +6003,19 @@ class Element extends Node {
     // build, so probe with typeof and fall through to the synthetic rect below.
     const geometry = this._renderBoxGeometry();
     if (geometry !== undefined) {
+      // Everything inside an outer <svg> (a nested <svg> included) is SVG
+      // content, not a CSS box: its rect is its geometry in the outer
+      // <svg>'s viewport even when the layout cache holds a stray box.
+      const svgContent = this.namespaceURI === 'http://www.w3.org/2000/svg'
+        && this.parentElement?.namespaceURI === 'http://www.w3.org/2000/svg';
+      if (geometry && !svgContent) return this._rectFromRenderGeometry(geometry);
+      // SVG shapes have no layout box of their own; their rect comes from
+      // their geometry inside the outer <svg>'s box.
+      if (this.namespaceURI === 'http://www.w3.org/2000/svg' && (this.localName !== 'svg' || svgContent)
+          && typeof globalThis.__obscuraSvgClientRect === 'function') {
+        const r = globalThis.__obscuraSvgClientRect(this);
+        if (r) return { ...r, top: r.y, left: r.x, right: r.x + r.width, bottom: r.y + r.height, toJSON() { return this; } };
+      }
       if (geometry) return this._rectFromRenderGeometry(geometry);
       // CSSOM View: an element without an associated box has an all-zero
       // bounding rect. Do not leak the non-render 100x20 compatibility cell.
@@ -5867,7 +6056,23 @@ class Element extends Node {
   }
   getClientRects() {
     const geometry = this._renderBoxGeometry();
-    if (geometry === null) return new DOMRectList([]);
+    const svgContent = this.namespaceURI === 'http://www.w3.org/2000/svg'
+      && this.parentElement?.namespaceURI === 'http://www.w3.org/2000/svg';
+    if (svgContent && geometry !== undefined
+        && typeof globalThis.__obscuraSvgClientRect === 'function'
+        && globalThis.__obscuraSvgClientRect(this)) {
+      return new DOMRectList([this.getBoundingClientRect()]);
+    }
+    if (geometry === null) {
+      // SVG shapes have no layout box; their one client rect is their
+      // bounding rect inside the outer <svg>.
+      if (this.namespaceURI === 'http://www.w3.org/2000/svg' && this.localName !== 'svg'
+          && typeof globalThis.__obscuraSvgClientRect === 'function'
+          && globalThis.__obscuraSvgClientRect(this)) {
+        return new DOMRectList([this.getBoundingClientRect()]);
+      }
+      return new DOMRectList([]);
+    }
     if (geometry !== undefined) {
       if (Array.isArray(geometry.clientRects)) {
         return new DOMRectList(geometry.clientRects.map(
@@ -6361,8 +6566,8 @@ class Document extends Node {
     return this._timeline;
   }
   getAnimations() {
-    return Array.from(_waapiAnimations).filter(animation => animation.playState !== 'idle'
-      && (animation.playState !== 'finished' || animation.effect?._timing.fill === 'forwards' || animation.effect?._timing.fill === 'both'));
+    return _cssAnimations().concat(Array.from(_waapiAnimations).filter(animation => animation.playState !== 'idle'
+      && (animation.playState !== 'finished' || animation.effect?._timing.fill === 'forwards' || animation.effect?._timing.fill === 'both')));
   }
   get documentElement() {
     if (this._detached) return _childNodeOfType(this, 1);
@@ -6989,6 +7194,21 @@ class Document extends Node {
     if (method) return Reflect.apply(method, this, args);
     var html = args.join('');
     if (!html) return;
+    // While a parser-inserted script runs, the text goes into the document
+    // parser at the insertion point and is parsed now. An inline script the
+    // text closes runs before write() returns, as HTML's parser does.
+    if (this === globalThis.document) {
+      var step = _domParse("parser_write", "", html);
+      if (step) {
+        _parserInsertedNodes();
+        while (step && step.length) {
+          _runWrittenParserScript(+step[0]);
+          step = _domParse("parser_write_continue", "", "");
+          _parserInsertedNodes();
+        }
+        return;
+      }
+    }
     // The host parses into the input stream and returns [[parent, node], …], parents first. The
     // insertion stays here, because appendChild does more than append: it reports the
     // mutation, registers window named access, and loads a written stylesheet.
@@ -7062,6 +7282,69 @@ class Document extends Node {
   }
   execCommand() { return false; }
 }
+
+// An inline classic script document.write closed while the parser was paused
+// at a script: it runs nested inside write(), with currentScript set to it.
+function _runWrittenParserScript(nid) {
+  var script = _wrap(nid);
+  if (!script) return;
+  var prev = globalThis.__currentScriptNid;
+  globalThis.__currentScriptNid = nid;
+  try { (0, eval)(script.textContent); }
+  catch (e) { console.error('Inline script error:', e && e.message); }
+  finally { globalThis.__currentScriptNid = prev || 0; }
+}
+
+// The document parser inserted nodes natively. Queue what script can observe
+// of them: childList records, custom element reactions, slot changes and
+// iframe loads. The parser's own scripts are prepared by the page driver.
+function _parserInsertedNodes() {
+  var flat = _domParse("parser_take_insertions") || [];
+  if (!flat.length) return;
+  _treeMutationEpoch++;
+  _domMutationEpoch++;
+  var observers = globalThis.__mutationObservers;
+  var wantRecords = observers && observers.length;
+  var nodes = [];
+  // Roots of what was inserted: a node whose parent was inserted in the same
+  // batch is reached through that parent, and must not get a second
+  // connectedCallback.
+  var roots = [];
+  var inserted = new Set();
+  for (var k = 1; k < flat.length; k += 2) inserted.add(+flat[k]);
+  for (var i = 0; i < flat.length; i += 2) {
+    var node = _wrap(+flat[i + 1]);
+    if (!node) continue;
+    if (wantRecords) {
+      var parent = _wrap(+flat[i]);
+      if (parent) _queueTreeMutationRecord(parent, [node], [], node.previousSibling, node.nextSibling);
+    }
+    if (node.nodeType === 1) {
+      nodes.push(node);
+      if (!inserted.has(+flat[i])) roots.push(node);
+    }
+  }
+  for (var j = 0; j < nodes.length; j++) {
+    var el = nodes[j];
+    if (el.localName === 'iframe' && el.isConnected) {
+      if (el.hasAttribute('srcdoc')) el._loadIframeSrcdoc();
+      else {
+        var src = el.getAttribute('src');
+        if (src && src !== 'about:blank') el._loadIframeSrc(src);
+      }
+    }
+  }
+  if (_ceDefinitionCount) _ceConnected(roots, true);
+  if (_shadowHostCount) _slotsMaybeChanged(roots);
+  // Named access on window (HTML 7.2.2.3): `window.someId` for elements the
+  // parser inserted, as for script insertions.
+  for (var r = 0; r < roots.length; r++) {
+    if (roots[r].isConnected) _registerWindowNamedTree(roots[r]);
+  }
+}
+Object.defineProperty(globalThis, '__obscuraParserInserted', {
+  value: _parserInsertedNodes, writable: false, enumerable: false, configurable: false,
+});
 
 // Shared by write and the final EOF flush. A nonnegative parent is a real node,
 // including document node 0; -1 denotes the running script's insertion point.
@@ -7658,6 +7941,42 @@ class HTMLMediaElement extends HTMLElement {
   __fire(name) {
     try { this.dispatchEvent(new Event(name)); } catch (_e) {}
   }
+  // Headless (`serve` built with media): no window plays the element, but
+  // the engine decodes the frame a paused video shows and reports its
+  // metadata, so readyState and the media events follow Chrome's for a
+  // paused element. Returns true once the element has its metadata.
+  __headlessSync() {
+    if (typeof globalThis.redrobMedia === 'function') return true;
+    const op = __obscuraCore.ops.op_video_frame_metadata;
+    if (typeof op !== 'function' || this.localName !== 'video') return true;
+    if ((this.getAttribute('preload') || '').toLowerCase() === 'none' && !this.__redrobMediaLoadRequested) return true;
+    const m = this.__media;
+    let raw = '';
+    try { raw = op(this._nid >>> 0, m.currentTime, _realmFrameId); } catch (_e) { return false; }
+    if (!raw) return false;
+    let info;
+    try { info = JSON.parse(raw); } catch (_e) { return false; }
+    globalThis.__redrobMediaUpdate(m.id, {
+      currentTime: m.currentTime,
+      duration: info.duration == null ? Infinity : info.duration,
+      width: info.width, height: info.height, readyState: info.metadataOnly ? 1 : 4,
+      paused: m.paused, ended: false,
+    });
+    return true;
+  }
+  __headlessPoll() {
+    if (this.__redrobMediaPolling) return;
+    this.__redrobMediaPolling = true;
+    let tries = 0;
+    const tick = () => {
+      if (!this.isConnected || this.__headlessSync() || ++tries > 150) {
+        this.__redrobMediaPolling = false;
+        return;
+      }
+      setTimeout(tick, 100);
+    };
+    setTimeout(tick, 0);
+  }
   canPlayType(type) {
     if (typeof globalThis.redrobMedia !== 'function') return '';
     const t = String(type).toLowerCase();
@@ -7667,7 +7986,9 @@ class HTMLMediaElement extends HTMLElement {
   load() {
     const m = this.__media;
     m.currentTime = 0; m.ended = false; m.paused = true; m.readyState = 0;
-    if (this.__send('load')) { m.networkState = 2; this.__fire('loadstart'); }
+    if (this.__send('load')) { m.networkState = 2; this.__fire('loadstart'); return; }
+    this.__redrobMediaLoadRequested = true;
+    this.__headlessPoll();
   }
   play() {
     const m = this.__media;
@@ -7708,7 +8029,11 @@ class HTMLMediaElement extends HTMLElement {
     m.currentTime = Math.max(0, t);
     m.seeking = true;
     this.__fire('seeking');
-    this.__send('seek', { currentTime: m.currentTime });
+    if (!this.__send('seek', { currentTime: m.currentTime }) && m.readyState >= 1) {
+      // Headless: the engine paints the frame at the new position.
+      const el = this;
+      setTimeout(() => { if (!el.__headlessSync()) el.__headlessPoll(); }, 0);
+    }
   }
   get duration() { return this.__media.duration; }
   get volume() { return this.__media.volume; }
@@ -7818,6 +8143,7 @@ class HTMLTrackElement extends HTMLElement {
   }
 }
 globalThis.HTMLMediaElement = HTMLMediaElement;
+
 globalThis.HTMLVideoElement = HTMLVideoElement;
 globalThis.HTMLAudioElement = HTMLAudioElement;
 globalThis.HTMLTrackElement = HTMLTrackElement;
@@ -10106,8 +10432,21 @@ globalThis.getComputedStyle = (el, pseudo = '') => {
     // property instead of adding per-property aliases to the native snapshot.
     if (kebab.startsWith('webkit-')) kebab = '-' + kebab;
     refreshRendered(kebab);
-    if (snapshot.rendered && Object.prototype.hasOwnProperty.call(snapshot.rendered, kebab))
-      return snapshot.rendered[kebab];
+    if (snapshot.rendered && Object.prototype.hasOwnProperty.call(snapshot.rendered, kebab)) {
+      const value = snapshot.rendered[kebab];
+      // SVG 2 geometry properties: the width/height presentation attributes
+      // of rect, image, foreignObject, use and nested svg are their computed
+      // CSS width/height. Those elements have no CSS box of their own here.
+      if (value === 'auto' && (kebab === 'width' || kebab === 'height')
+          && el.namespaceURI === 'http://www.w3.org/2000/svg'
+          && /^(rect|image|foreignObject|use|svg)$/.test(el.localName)
+          && typeof el.getAttribute === 'function') {
+        const raw = (el.getAttribute(kebab) || '').trim();
+        const m = /^(-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(px|%)?$/i.exec(raw);
+        if (m) return m[2] === '%' ? `${+m[1]}%` : `${+m[1]}px`;
+      }
+      return value;
+    }
     // Non-render builds and properties outside the renderer snapshot retain
     // the lightweight inline CSSOM behavior.
     const inlineVal = target.getPropertyValue ? target.getPropertyValue(rawProp) : '';
@@ -12117,7 +12456,14 @@ globalThis.PointerEvent = class extends MouseEvent {
     this.isPrimary=!!o.isPrimary;
   }
 };
-globalThis.AnimationEvent = class extends Event {};
+globalThis.AnimationEvent = class AnimationEvent extends Event {
+  constructor(type, init = {}) {
+    super(type, init);
+    this.animationName = String(init.animationName ?? '');
+    this.elapsedTime = Number(init.elapsedTime) || 0;
+    this.pseudoElement = String(init.pseudoElement ?? '');
+  }
+};
 globalThis.TransitionEvent = class extends Event {};
 globalThis.UIEvent = class extends Event {
   constructor(t,o={}) { super(t,o);this.view=o.view||null;this.detail=o.detail||0; }
@@ -12796,6 +13142,16 @@ globalThis.DOMParser = class DOMParser {
     };
 
     const findByTagName = (name) => walk(root, n => n.tagName === name);
+    // An XML document's element is the source's own root (an <svg> for
+    // plotly's icons: parseFromString(svg, "application/xml").childNodes[0]
+    // must be the <svg>, not the <html> wrapper the fragment parser needs).
+    const sourceRootName = (() => {
+      const m = /<([A-Za-z_][\w:.-]*)/.exec(html.replace(/<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<![^>]*>/g, ''));
+      return m ? m[1].toLowerCase() : '';
+    })();
+    const xmlElement = isXml && !isParserError && sourceRootName && sourceRootName !== 'html'
+      ? walk(root, n => n !== root && String(n.localName).toLowerCase() === sourceRootName) : null;
+    const top = xmlElement || root;
 
     const docNode = {
       _root: root,
@@ -12807,7 +13163,7 @@ globalThis.DOMParser = class DOMParser {
         // For XML parsererror docs, return the <parsererror> child, not the
         // <html> wrapper — matches Chrome's behavior.
         if (isParserError) return root.firstElementChild;
-        return root;
+        return top;
       },
       get body() { return findByTagName("BODY"); },
       get head() { return findByTagName("HEAD"); },
@@ -12828,10 +13184,10 @@ globalThis.DOMParser = class DOMParser {
         }
         t.textContent = String(value);
       },
-      get firstChild() { return root; },
-      get lastChild() { return root; },
-      get children() { return [root]; },
-      get childNodes() { return [root]; },
+      get firstChild() { return top; },
+      get lastChild() { return top; },
+      get children() { return [top]; },
+      get childNodes() { return [top]; },
       // Inert documents inherit the parser realm's URL, not its browsing context.
       get URL() { return parserURL; },
       get documentURI() { return parserURL; },
@@ -14470,7 +14826,53 @@ globalThis.HTMLTitleElement = _defineHTMLElementClass("HTMLTitleElement", ["titl
 globalThis.HTMLBaseElement = _defineHTMLElementClass("HTMLBaseElement", ["base"]);
 globalThis.HTMLQuoteElement = _defineHTMLElementClass("HTMLQuoteElement", ["blockquote", "q"]);
 globalThis.HTMLPictureElement = _defineHTMLElementClass("HTMLPictureElement", ["picture"]);
-globalThis.HTMLSourceElement = _defineHTMLElementClass("HTMLSourceElement", ["source"]);
+const _sourceDimension = (raw) => {
+  const value = Number.parseInt(raw || "", 10);
+  return Number.isFinite(value) && value >= 0 && value <= 2147483647 ? value : 0;
+};
+// <source> reflects its attributes, and a change re-runs image selection
+// of the <picture>'s <img> (HTML "relevant mutations").
+globalThis.HTMLSourceElement = _registerHTMLElementClass(class HTMLSourceElement extends HTMLElement {
+  get src() {
+    const raw = this.getAttribute("src");
+    if (!raw) return "";
+    try { return new URL(raw, this.baseURI || globalThis.location?.href || "about:blank").href; }
+    catch (_error) { return raw; }
+  }
+  set src(value) { this.setAttribute("src", value); }
+  get srcset() { return this.getAttribute("srcset") || ""; }
+  set srcset(value) { this.setAttribute("srcset", value); }
+  get sizes() { return this.getAttribute("sizes") || ""; }
+  set sizes(value) { this.setAttribute("sizes", value); }
+  get media() { return this.getAttribute("media") || ""; }
+  set media(value) { this.setAttribute("media", value); }
+  get type() { return this.getAttribute("type") || ""; }
+  set type(value) { this.setAttribute("type", value); }
+  // Non-negative integers in [0, 2^31-1]; anything else reflects as 0.
+  get width() { return _sourceDimension(this.getAttribute("width")); }
+  set width(value) { this.setAttribute("width", String(Math.max(0, Number(value) >>> 0))); }
+  get height() { return _sourceDimension(this.getAttribute("height")); }
+  set height(value) { this.setAttribute("height", String(Math.max(0, Number(value) >>> 0))); }
+  setAttribute(name, value) {
+    super.setAttribute(name, value);
+    this._sourceChanged(name);
+  }
+  removeAttribute(name) {
+    super.removeAttribute(name);
+    this._sourceChanged(name);
+  }
+  _sourceChanged(name) {
+    const normalized = String(name).toLowerCase();
+    if (!["src", "srcset", "sizes", "media", "type", "width", "height"].includes(normalized)) return;
+    const picture = this.parentElement;
+    if (!picture || picture.localName !== "picture") return;
+    for (const child of picture.children) {
+      if (child.localName === "img" && typeof child._imageSourceChanged === "function") {
+        child._imageSourceChanged();
+      }
+    }
+  }
+}, ["source"]);
 globalThis.HTMLObjectElement = _defineHTMLElementClass("HTMLObjectElement", ["object"]);
 globalThis.HTMLEmbedElement = _defineHTMLElementClass("HTMLEmbedElement", ["embed"]);
 globalThis.HTMLMapElement = _defineHTMLElementClass("HTMLMapElement", ["map"]);
@@ -15453,8 +15855,56 @@ globalThis.Range = class Range {
     this.selectNode(newParent);
   }
   detach() {}
+  // CSSOM View: the border boxes of each selected element whose parent is
+  // not selected, and the line fragments of the selected text.
+  _layoutClientRects() {
+    const op = __obscuraCore.ops && __obscuraCore.ops.op_layout_text_rects;
+    if (typeof op !== "function") return null;
+    const out = [];
+    const textRects = (t, s, e) => {
+      if (e <= s) return;
+      const raw = op(String(t._nid | 0), s, e, _realmFrameId);
+      if (!raw) return;
+      for (const r of JSON.parse(raw)) out.push(new DOMRect(r.x, r.y, r.width, r.height));
+    };
+    const sc = this._sc, so = this._so, ec = this._ec, eo = this._eo;
+    if (_rngSame(sc, ec) && sc.nodeType === 3) {
+      textRects(sc, so, eo);
+      return out;
+    }
+    const visit = (node) => {
+      if (node.nodeType === 3) {
+        const startsHere = _rngSame(node, sc), endsHere = _rngSame(node, ec);
+        if (startsHere || endsHere || _rngContains(this, node)) {
+          textRects(node, startsHere ? so : 0, endsHere ? eo : _rngNodeLength(node));
+        }
+        return;
+      }
+      if (node.nodeType === 1 && _rngContains(this, node)) {
+        for (const r of node.getClientRects()) out.push(new DOMRect(r.x, r.y, r.width, r.height));
+        return;
+      }
+      for (const child of node.childNodes) {
+        if (_rngContains(this, child) || _rngPartiallyContains(this, child)
+            || _rngSame(child, sc) || _rngSame(child, ec)) visit(child);
+      }
+    };
+    visit(this.commonAncestorContainer);
+    return out;
+  }
   getBoundingClientRect() {
     if (this.collapsed) return new DOMRect();
+    const rects = this._layoutClientRects();
+    if (rects) {
+      const nonEmpty = rects.filter(r => r.width || r.height);
+      if (!nonEmpty.length) return rects.length ? rects[0] : new DOMRect();
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const r of nonEmpty) {
+        x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top);
+        x1 = Math.max(x1, r.right); y1 = Math.max(y1, r.bottom);
+      }
+      return new DOMRect(x0, y0, x1 - x0, y1 - y0);
+    }
     let cac = this.commonAncestorContainer;
     while (cac && cac.nodeType !== 1 && cac.nodeType !== 9) cac = cac.parentNode;
     if (cac && cac.getBoundingClientRect) {
@@ -15465,6 +15915,8 @@ globalThis.Range = class Range {
   }
   getClientRects() {
     if (this.collapsed) return new DOMRectList([]);
+    const rects = this._layoutClientRects();
+    if (rects) return new DOMRectList(rects);
     return new DOMRectList([this.getBoundingClientRect()]);
   }
   static get START_TO_START() { return 0; }
@@ -16396,9 +16848,14 @@ class _Canvas2D {
   }
   strokeText(text, x, y) { this.fillText(text, x, y); }
   measureText(t) {
-    const fontSize = parseInt(this.font) || 10;
-    const scale = Math.max(1, Math.round(fontSize / 10));
-    return { width: String(t).length * 6 * scale, actualBoundingBoxAscent: 7*scale, actualBoundingBoxDescent: 2*scale };
+    const m = /(\d+(?:\.\d+)?)px/.exec(String(this.font));
+    const fontSize = m ? parseFloat(m[1]) : 10;
+    let width = -1;
+    if (typeof __obscuraCore.ops.op_measure_text === 'function') {
+      try { width = __obscuraCore.ops.op_measure_text(String(t), String(this.font)); } catch (_e) {}
+    }
+    if (!(width >= 0)) width = String(t).length * fontSize * 0.55;
+    return { width, actualBoundingBoxAscent: fontSize * 0.72, actualBoundingBoxDescent: fontSize * 0.21 };
   }
   getImageData(x, y, w, h) {
     x=Math.round(x); y=Math.round(y); w=Math.round(w); h=Math.round(h);
@@ -16694,7 +17151,334 @@ HTMLCanvasElement.prototype.toBlob = function(cb, type, q) {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   cb(new Blob([bytes], {type: String(type || 'image/png')}));
 };
-Element.prototype.getBBox = function() { return { x: 0, y: 0, width: 0, height: 0 }; };
+// SVG geometry. Layout gives the outer <svg> a box; shapes inside it have
+// none, so compute their user-space bounds from their attributes, then map
+// them through ancestor transforms and the outer viewBox (CSSOM View and
+// SVG 2 getBBox). Curves are sampled, which is within a pixel of Chrome.
+const _SVG_NS = 'http://www.w3.org/2000/svg';
+const _svgNum = (el, name, ref) => {
+  const raw = el.getAttribute(name);
+  if (raw == null || raw === '') return 0;
+  const v = parseFloat(raw);
+  if (!Number.isFinite(v)) return 0;
+  return /%\s*$/.test(raw) ? v / 100 * (ref || 0) : v;
+};
+const _svgMul = (a, b) => [
+  a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1],
+  a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3],
+  a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5],
+];
+const _svgTransform = (text) => {
+  let m = [1, 0, 0, 1, 0, 0];
+  if (!text) return m;
+  const re = /(matrix|translate|scale|rotate|skewX|skewY)\s*\(([^)]*)\)/g;
+  let hit;
+  while ((hit = re.exec(text))) {
+    const a = hit[2].split(/[\s,]+/).filter(Boolean).map(Number);
+    let t;
+    switch (hit[1]) {
+      case 'matrix': t = a.length === 6 ? a : [1, 0, 0, 1, 0, 0]; break;
+      case 'translate': t = [1, 0, 0, 1, a[0] || 0, a[1] || 0]; break;
+      case 'scale': t = [a[0] ?? 1, 0, 0, a[1] ?? a[0] ?? 1, 0, 0]; break;
+      case 'rotate': {
+        const r = (a[0] || 0) * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+        t = [c, s, -s, c, 0, 0];
+        if (a.length >= 3) t = _svgMul(_svgMul([1, 0, 0, 1, a[1], a[2]], t), [1, 0, 0, 1, -a[1], -a[2]]);
+        break;
+      }
+      case 'skewX': t = [1, 0, Math.tan((a[0] || 0) * Math.PI / 180), 1, 0, 0]; break;
+      case 'skewY': t = [1, Math.tan((a[0] || 0) * Math.PI / 180), 0, 1, 0, 0]; break;
+    }
+    m = _svgMul(m, t);
+  }
+  return m;
+};
+const _svgPathPoints = (d) => {
+  const pts = [];
+  const tok = String(d || '').match(/[a-zA-Z]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/g) || [];
+  let i = 0, cmd = '', x = 0, y = 0, sx = 0, sy = 0, cx = 0, cy = 0;
+  const num = () => parseFloat(tok[i++]);
+  const more = () => i < tok.length && !/^[a-zA-Z]$/.test(tok[i]);
+  // Arc flags are single digits and may run into the next number
+  // ("a.5.5 0 01.5-.5" is flags 0, 0 then x 1.5).
+  const flag = () => {
+    const t = tok[i];
+    if (t && t.length > 1 && (t[0] === '0' || t[0] === '1')) { tok[i] = t.slice(1); return +t[0]; }
+    i++;
+    return +t ? 1 : 0;
+  };
+  // The arc itself, sampled from its centre parameterisation (SVG 2
+  // implementation notes B.2.4), so the bounds follow the curve the way
+  // Chrome's getBBox does instead of only its endpoints.
+  const arc = (rx, ry, phi, large, sweep, x3, y3) => {
+    if (!rx || !ry || (x === x3 && y === y3)) { pts.push([x3, y3]); return; }
+    const c = Math.cos(phi), s = Math.sin(phi);
+    const dx = (x - x3) / 2, dy = (y - y3) / 2;
+    const x1p = c * dx + s * dy, y1p = -s * dx + c * dy;
+    const lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+    if (lambda > 1) { const k = Math.sqrt(lambda); rx *= k; ry *= k; }
+    const num2 = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+    const den = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+    let coef = Math.sqrt(Math.max(0, num2 / den));
+    if (large === sweep) coef = -coef;
+    const cxp = coef * rx * y1p / ry, cyp = -coef * ry * x1p / rx;
+    const ccx = c * cxp - s * cyp + (x + x3) / 2, ccy = s * cxp + c * cyp + (y + y3) / 2;
+    const ang = (ux, uy, vx, vy) => {
+      const a = Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+      return a;
+    };
+    const t1 = ang(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+    let dt = ang((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+    if (!sweep && dt > 0) dt -= 2 * Math.PI;
+    if (sweep && dt < 0) dt += 2 * Math.PI;
+    const n = 64;
+    for (let k = 1; k <= n; k++) {
+      const t = t1 + dt * k / n;
+      const ex = rx * Math.cos(t), ey = ry * Math.sin(t);
+      pts.push([c * ex - s * ey + ccx, s * ex + c * ey + ccy]);
+    }
+    pts.push([x3, y3]);
+  };
+  const cubic = (x1, y1, x2, y2, x3, y3) => {
+    for (let k = 1; k <= 16; k++) {
+      const t = k / 16, u = 1 - t;
+      pts.push([u * u * u * x + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3,
+                u * u * u * y + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3]);
+    }
+  };
+  while (i < tok.length) {
+    if (/^[a-zA-Z]$/.test(tok[i])) cmd = tok[i++];
+    const rel = cmd === cmd.toLowerCase();
+    const ox = rel ? x : 0, oy = rel ? y : 0;
+    switch (cmd.toUpperCase()) {
+      case 'M': x = ox + num(); y = oy + num(); sx = x; sy = y; pts.push([x, y]); cmd = rel ? 'l' : 'L'; cx = x; cy = y; break;
+      case 'L': x = ox + num(); y = oy + num(); pts.push([x, y]); cx = x; cy = y; break;
+      case 'H': x = ox + num(); pts.push([x, y]); cx = x; cy = y; break;
+      case 'V': y = oy + num(); pts.push([x, y]); cx = x; cy = y; break;
+      case 'C': { const x1 = ox + num(), y1 = oy + num(), x2 = ox + num(), y2 = oy + num(), x3 = ox + num(), y3 = oy + num(); cubic(x1, y1, x2, y2, x3, y3); cx = x2; cy = y2; x = x3; y = y3; break; }
+      case 'S': { const x1 = 2 * x - cx, y1 = 2 * y - cy, x2 = ox + num(), y2 = oy + num(), x3 = ox + num(), y3 = oy + num(); cubic(x1, y1, x2, y2, x3, y3); cx = x2; cy = y2; x = x3; y = y3; break; }
+      case 'Q': { const x1 = ox + num(), y1 = oy + num(), x3 = ox + num(), y3 = oy + num(); cubic(x + 2 / 3 * (x1 - x), y + 2 / 3 * (y1 - y), x3 + 2 / 3 * (x1 - x3), y3 + 2 / 3 * (y1 - y3), x3, y3); cx = x1; cy = y1; x = x3; y = y3; break; }
+      case 'T': { const x1 = 2 * x - cx, y1 = 2 * y - cy, x3 = ox + num(), y3 = oy + num(); cubic(x + 2 / 3 * (x1 - x), y + 2 / 3 * (y1 - y), x3 + 2 / 3 * (x1 - x3), y3 + 2 / 3 * (y1 - y3), x3, y3); cx = x1; cy = y1; x = x3; y = y3; break; }
+      case 'A': {
+        let rx = Math.abs(num()), ry = Math.abs(num());
+        const phi = num() * Math.PI / 180;
+        const large = flag(), sweep = flag();
+        const x3 = ox + num(), y3 = oy + num();
+        arc(rx, ry, phi, large, sweep, x3, y3);
+        x = x3; y = y3; cx = x; cy = y; break;
+      }
+      case 'Z': x = sx; y = sy; cx = x; cy = y; break;
+      default: i++;
+    }
+    if (cmd.toUpperCase() === 'Z' && more()) cmd = 'L';
+    if (!more() && i < tok.length && !/^[a-zA-Z]$/.test(tok[i])) i++;
+  }
+  return pts;
+};
+// User-space bounds of one element (not including its own transform).
+const _svgLocalBounds = (el) => {
+  const tag = el.localName;
+  const box = (x, y, w, h) => (w >= 0 && h >= 0 ? [x, y, x + w, y + h] : null);
+  const fromPts = (pts) => {
+    if (!pts.length) return null;
+    let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+    for (const [px, py] of pts) { if (px < a) a = px; if (py < b) b = py; if (px > c) c = px; if (py > d) d = py; }
+    return [a, b, c, d];
+  };
+  switch (tag) {
+    case 'image': {
+      // SVG 2: an auto width/height is the image's natural size, the other
+      // axis following its ratio when only one is given.
+      let w = el.getAttribute('width'), h = el.getAttribute('height');
+      w = w == null || w === '' || w === 'auto' ? null : _svgNum(el, 'width');
+      h = h == null || h === '' || h === 'auto' ? null : _svgNum(el, 'height');
+      if (w == null || h == null) {
+        const href = el.getAttribute('href') || el.getAttributeNS?.('http://www.w3.org/1999/xlink', 'href')
+          || el.getAttribute('xlink:href');
+        let natural = null;
+        try {
+          if (href && typeof __obscuraCore.ops.op_svg_image_natural_size === 'function') {
+            natural = JSON.parse(__obscuraCore.ops.op_svg_image_natural_size(String(href), _realmFrameId));
+          }
+        } catch (_e) { natural = null; }
+        if (Array.isArray(natural) && natural[0] > 0 && natural[1] > 0) {
+          if (w == null && h == null) { w = natural[0]; h = natural[1]; }
+          else if (w == null) w = h * natural[0] / natural[1];
+          else h = w * natural[1] / natural[0];
+        }
+      }
+      return box(_svgNum(el, 'x'), _svgNum(el, 'y'), w || 0, h || 0);
+    }
+    case 'rect': case 'foreignObject':
+      return box(_svgNum(el, 'x'), _svgNum(el, 'y'), _svgNum(el, 'width'), _svgNum(el, 'height'));
+    case 'circle': { const r = _svgNum(el, 'r'), cx = _svgNum(el, 'cx'), cy = _svgNum(el, 'cy'); return [cx - r, cy - r, cx + r, cy + r]; }
+    case 'ellipse': { const rx = _svgNum(el, 'rx'), ry = _svgNum(el, 'ry'), cx = _svgNum(el, 'cx'), cy = _svgNum(el, 'cy'); return [cx - rx, cy - ry, cx + rx, cy + ry]; }
+    case 'line': return fromPts([[_svgNum(el, 'x1'), _svgNum(el, 'y1')], [_svgNum(el, 'x2'), _svgNum(el, 'y2')]]);
+    case 'polyline': case 'polygon': {
+      const n = String(el.getAttribute('points') || '').split(/[\s,]+/).filter(Boolean).map(Number);
+      const pts = [];
+      for (let k = 0; k + 1 < n.length; k += 2) pts.push([n[k], n[k + 1]]);
+      return fromPts(pts);
+    }
+    case 'path': return fromPts(_svgPathPoints(el.getAttribute('d')));
+    case 'text': case 'tspan': {
+      // Font presentation attributes (font-size="12", font-family=...)
+      // apply like CSS and inherit inside the SVG tree.
+      const cs = getComputedStyle(el);
+      const svgAttr = (name) => {
+        for (let n = el; n && n.namespaceURI === _SVG_NS; n = n.parentElement) {
+          const v = n.getAttribute(name);
+          if (v != null && v !== '') return v;
+          if (n.localName === 'svg') break;
+        }
+        return null;
+      };
+      const sizeAttr = parseFloat(svgAttr('font-size'));
+      const size = Number.isFinite(sizeAttr) ? sizeAttr : (parseFloat(cs.fontSize) || 16);
+      const family = svgAttr('font-family') || cs.fontFamily || 'sans-serif';
+      const weight = svgAttr('font-weight') || cs.fontWeight || '400';
+      const text = el.textContent || '';
+      // dx/dy shift the text (d3 axes place tick labels with dy="0.71em").
+      const shift = (name) => {
+        const v = String(el.getAttribute(name) || '').trim().split(/[\s,]+/)[0] || '';
+        const n = parseFloat(v);
+        if (!Number.isFinite(n)) return 0;
+        return /em$/.test(v) ? n * size : n;
+      };
+      const x = _svgNum(el, 'x') + shift('dx'), y = _svgNum(el, 'y') + shift('dy');
+      let w = text.length * size * 0.55, ascent = size * 0.9, descent = size * 0.25;
+      // The document's own fonts (web fonts included), so the box spans the
+      // font's ascent and descent like Chrome's text bounding box. Chrome
+      // lays SVG text out at its on-screen font size (the user-space size
+      // times the CTM scale) with whole-pixel ascent and descent, then maps
+      // the box back to user space.
+      const scale = _svgTextScale > 0 && Number.isFinite(_svgTextScale) ? _svgTextScale : 1;
+      let run = null;
+      try {
+        if (typeof __obscuraCore.ops.op_text_run_metrics === 'function') {
+          run = JSON.parse(__obscuraCore.ops.op_text_run_metrics(text, String(family), String(weight),
+            /italic|oblique/.test(cs.fontStyle || ''), size * scale, 0));
+        }
+      } catch (_e) { run = null; }
+      if (Array.isArray(run)) {
+        w = run[0] / scale;
+        ascent = Math.round(run[1]) / scale;
+        descent = Math.round(run[2]) / scale;
+      } else {
+        try {
+          const ctx = (globalThis.__obscuraSvgMeasure ||= document.createElement('canvas').getContext('2d'));
+          if (ctx) { ctx.font = `${weight} ${size}px ${family}`; w = ctx.measureText(text).width; }
+        } catch (_e) {}
+      }
+      // letter-spacing follows every character (attribute or CSS).
+      const spacing = parseFloat(svgAttr('letter-spacing') ?? cs.letterSpacing);
+      if (Number.isFinite(spacing) && spacing !== 0) w += spacing * [...text].length;
+      const anchor = svgAttr('text-anchor') || cs.textAnchor;
+      const left = anchor === 'middle' ? x - w / 2 : anchor === 'end' ? x - w : x;
+      return [left, y - ascent, left + w, y + descent];
+    }
+    case 'use': {
+      const ref = el.getAttribute('href') || el.getAttributeNS?.('http://www.w3.org/1999/xlink', 'href');
+      const target = ref && ref.startsWith('#') ? el.ownerDocument.getElementById(ref.slice(1)) : null;
+      const inner = target ? _svgSubtreeBounds(target, [1, 0, 0, 1, _svgNum(el, 'x'), _svgNum(el, 'y')]) : null;
+      return inner;
+    }
+    default: return null;
+  }
+};
+// Bounds of an element and its descendants in the coordinate system m maps from.
+const _svgSubtreeBounds = (el, m, skipOwnTransform) => {
+  if (!el || el.nodeType !== 1) return null;
+  const cs = getComputedStyle(el);
+  if (cs.display === 'none') return null;
+  const own = skipOwnTransform ? m : _svgMul(m, _svgTransform(el.getAttribute('transform')));
+  let acc = null;
+  const add = (b, mm) => {
+    if (!b) return;
+    for (const [px, py] of [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]]) {
+      const tx = mm[0] * px + mm[2] * py + mm[4], ty = mm[1] * px + mm[3] * py + mm[5];
+      acc = acc ? [Math.min(acc[0], tx), Math.min(acc[1], ty), Math.max(acc[2], tx), Math.max(acc[3], ty)] : [tx, ty, tx, ty];
+    }
+  };
+  if (['g', 'a', 'switch', 'symbol', 'svg'].includes(el.localName)) {
+    for (const c of el.children) {
+      if (['defs', 'clipPath', 'mask', 'linearGradient', 'radialGradient', 'pattern', 'title', 'desc', 'style', 'script', 'marker', 'filter'].includes(c.localName)) continue;
+      const b = _svgSubtreeBounds(c, own);
+      if (b) add(b, [1, 0, 0, 1, 0, 0]);
+    }
+  } else {
+    add(_svgLocalBounds(el), own);
+  }
+  return acc;
+};
+const _SVG_UNRENDERED = new Set(['defs', 'mask', 'clipPath', 'pattern', 'marker', 'linearGradient',
+  'radialGradient', 'filter', 'symbol']);
+// The CTM scale of the SVG text being measured (1 for getBBox()).
+let _svgTextScale = 1;
+// Screen rect of an SVG descendant, from its outermost <svg> box.
+const _svgClientRect = (el) => {
+  if (_SVG_UNRENDERED.has(el.localName)) return null;
+  let outer = null;
+  const chain = [];
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (p.namespaceURI !== _SVG_NS) break;
+    // Content of a never-rendered container (a mask, clip path, pattern,
+    // marker, gradient or <defs>) has no box of its own: Chrome reports an
+    // all-zero rect for it.
+    if (_SVG_UNRENDERED.has(p.localName)) return null;
+    if (p.localName === 'svg') outer = p;
+    chain.push(p);
+  }
+  if (!outer) return null;
+  const host = outer.getBoundingClientRect();
+  if (!host.width && !host.height) return null;
+  // Outer viewBox -> viewport mapping (preserveAspectRatio xMidYMid meet).
+  let m = [1, 0, 0, 1, host.left, host.top];
+  const vb = String(outer.getAttribute('viewBox') || '').split(/[\s,]+/).filter(Boolean).map(Number);
+  if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) {
+    const par = String(outer.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+    let sx = host.width / vb[2], sy = host.height / vb[3];
+    let tx = 0, ty = 0;
+    if (!/^none/.test(par)) {
+      const s = /slice/.test(par) ? Math.max(sx, sy) : Math.min(sx, sy);
+      const dx = host.width - vb[2] * s, dy = host.height - vb[3] * s;
+      tx = /xMid/.test(par) || !/x(Min|Max)/.test(par) ? dx / 2 : /xMax/.test(par) ? dx : 0;
+      ty = /YMid/.test(par) || !/Y(Min|Max)/.test(par) ? dy / 2 : /YMax/.test(par) ? dy : 0;
+      sx = sy = s;
+    }
+    m = _svgMul(m, [sx, 0, 0, sy, tx - vb[0] * sx, ty - vb[1] * sy]);
+  }
+  // Ancestors between the outer svg and this element, outermost first.
+  for (let k = chain.length - 1; k >= 0; k--) {
+    const p = chain[k];
+    if (p === outer) continue;
+    m = _svgMul(m, _svgTransform(p.getAttribute('transform')));
+    if (p.localName === 'svg') m = _svgMul(m, [1, 0, 0, 1, _svgNum(p, 'x'), _svgNum(p, 'y')]);
+  }
+  const previousScale = _svgTextScale;
+  _svgTextScale = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1;
+  let b;
+  try { b = _svgSubtreeBounds(el, m); } finally { _svgTextScale = previousScale; }
+  if (!b) {
+    // A rendered element with nothing to draw (an empty <g>, a path
+    // without data) still has a box: an empty rect at its user-space
+    // origin (Chrome: plotly's empty layer groups sit at the plot corner).
+    if (getComputedStyle(el).display === 'none') return null;
+    const own = _svgMul(m, _svgTransform(el.getAttribute('transform')));
+    return { x: own[4], y: own[5], width: 0, height: 0 };
+  }
+  return { x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1] };
+};
+globalThis.__obscuraSvgClientRect = _svgClientRect;
+Element.prototype.getBBox = function() {
+  // SVG 2: bounds in the element's own user space, so its own transform is
+  // not applied (descendants' transforms are).
+  const own = this.namespaceURI === _SVG_NS
+    ? _svgSubtreeBounds(this, [1, 0, 0, 1, 0, 0], true)
+    : null;
+  if (!own) return { x: 0, y: 0, width: 0, height: 0 };
+  return { x: own[0], y: own[1], width: own[2] - own[0], height: own[3] - own[1] };
+};
 Element.prototype.getComputedTextLength = function() { return 0; };
 Element.prototype.getExtentOfChar = function(ch) { return { x: 0, y: 0, width: 0, height: 0 }; };
 Element.prototype.getSubStringLength = function(ch, len) { return 0; };
@@ -18229,6 +19013,7 @@ if (typeof FontFace === 'undefined') {
   const _fontFaceDescriptor = (descriptors, name, fallback) =>
     descriptors && descriptors[name] !== undefined ? String(descriptors[name]) : fallback;
   const _fontFaceDeclarations = block => {
+    block = block.replace(/\/\*[\s\S]*?\*\//g, '');
     const declarations = Object.create(null);
     let start = 0, depth = 0, quote = '', escaped = false;
     const commit = end => {
@@ -18252,10 +19037,29 @@ if (typeof FontFace === 'undefined') {
     }
     return declarations;
   };
+  // CSS text of every author style sheet in order: <style> contents and
+  // the fetched text of linked sheets (Chrome lists their @font-face rules
+  // in document.fonts as CSS-connected faces).
+  const _authoredStyleSheetTexts = doc => {
+    const texts = [];
+    for (const owner of doc.querySelectorAll('style, link[rel~="stylesheet" i]')) {
+      if (owner.localName === 'style') {
+        texts.push({ css: owner.textContent || '', base: doc.baseURI });
+        continue;
+      }
+      if (typeof __obscuraCore.ops.op_external_stylesheet_get !== 'function') continue;
+      try {
+        const sheet = JSON.parse(__obscuraCore.ops.op_external_stylesheet_get(owner._nid, _realmFrameId));
+        if (sheet && sheet.originClean && typeof sheet.css === 'string') {
+          texts.push({ css: sheet.css, base: owner.href || doc.baseURI });
+        }
+      } catch (_) {}
+    }
+    return texts;
+  };
   const _fontFaceAuthoredRules = doc => {
     const out = [];
-    for (const style of doc.querySelectorAll('style')) {
-      const css = style.textContent || '';
+    for (const { css, base } of _authoredStyleSheetTexts(doc)) {
       const pattern = /@font-face\s*\{([\s\S]*?)\}/gi;
       let match;
       while ((match = pattern.exec(css))) {
@@ -18266,6 +19070,7 @@ if (typeof FontFace === 'undefined') {
         out.push({
           family,
           source,
+          base,
           descriptors: {
             style: declarations['font-style'] || 'normal',
             weight: declarations['font-weight'] || 'normal',
@@ -18355,6 +19160,7 @@ if (typeof FontFace === 'undefined') {
       Promise.resolve().then(() => {
         if (this._status !== 'loading') return;
         this._status = 'loaded';
+        this._scriptLoaded = true;
         this._resolveLoaded?.(this);
         this._changed();
       });
@@ -18393,9 +19199,70 @@ if (typeof FontFace === 'undefined') {
       this.onloadingerror = null;
       if (initialFaces != null) for (const face of initialFaces) this.add(face);
     }
-    get status() { return this._status; }
-    get ready() { return this._readyPromise; }
+    get status() { this._discoverCssFaces(); this._syncCssFaceStatus(); return this._status; }
+    get ready() {
+      this._discoverCssFaces();
+      this._syncCssFaceStatus();
+      if (this._status === 'loading' && !this._scriptLoading) {
+        if (!this._readyPending) {
+          this._readyPending = true;
+          this._readyPromise = new Promise(resolve => { this._resolveReady = value => { this._readyPending = false; resolve(value); }; });
+          // Poll the renderer while its loads are in flight.
+          const poll = () => {
+            this._syncCssFaceStatus();
+            if (this._status === 'loading') setTimeout(poll, 50);
+          };
+          setTimeout(poll, 50);
+        }
+      }
+      return this._readyPromise;
+    }
     get size() { this._discoverCssFaces(); return this._faces.size; }
+    // CSS-connected faces report what the renderer fetched and used.
+    _syncCssFaceStatus() {
+      if (!this._cssFaces.size || typeof __obscuraCore.ops.op_font_face_states !== 'function') return;
+      const all = Array.from(this._cssFaces.values());
+      const faces = all.filter(face => face._status !== 'loaded' || !face._scriptLoaded);
+      // Of several faces for one family, weight and style, the last one
+      // declared serves the text (an earlier one stays unloaded in Chrome).
+      const facetKey = face => [face.family.toLowerCase(), face.weight, face.style].join('|');
+      const lastFace = new Map();
+      for (const face of all) lastFace.set(facetKey(face), face);
+      let states = [];
+      try {
+        states = JSON.parse(__obscuraCore.ops.op_font_face_states(JSON.stringify(
+          faces.map(face => ({ family: face.family, urls: face._cssUrls || [] }))), _realmFrameId));
+      } catch (_) { return; }
+      const changed = [];
+      faces.forEach((face, index) => {
+        let next = states[index];
+        if (lastFace.get(facetKey(face)) !== face && next !== 'loading') next = 'unloaded';
+        if (!next || face._scriptLoaded || next === face._status) return;
+        // A face never goes back to unloaded once it started.
+        if (next === 'unloaded' && face._status !== 'unloaded') return;
+        face._status = next;
+        if (next === 'loaded') face._resolveLoaded?.(face);
+        if (next === 'error') face._rejectLoaded?.(new DOMException('A network error occurred.', 'NetworkError'));
+        if (!face._loadedPromise && next === 'loaded') face._loadedPromise = Promise.resolve(face);
+        changed.push(face);
+      });
+      if (changed.length) this._faceSetChanged();
+    }
+    _faceSetChanged() {
+      const loading = Array.from(this._faces).filter(face => face.status === 'loading');
+      if (loading.length && this._status !== 'loading') {
+        this._status = 'loading';
+        this._dispatch('loading', loading);
+      }
+      if (!loading.length && this._status === 'loading') {
+        this._status = 'loaded';
+        const done = Array.from(this._faces).filter(face => face.status === 'loaded');
+        this._dispatch('loadingdone', done);
+        const errors = Array.from(this._faces).filter(face => face.status === 'error');
+        if (errors.length) this._dispatch('loadingerror', errors);
+        this._resolveReady?.(this);
+      }
+    }
     _discoverCssFaces() {
       if (!this._ownerDocument) return;
       const retained = new Set();
@@ -18406,6 +19273,13 @@ if (typeof FontFace === 'undefined') {
         try {
           const face = new FontFace(rule.family, rule.source, rule.descriptors);
           face._cssConnected = true;
+          face._cssUrls = [];
+          // Absolute source URLs from the normalized source text.
+          for (let at = face._source.indexOf('url('); at >= 0; at = face._source.indexOf('url(', at + 4)) {
+            let value = face._source.slice(at + 4, face._source.indexOf(')', at)).trim();
+            value = value.split('\\').join('').replace(/^['"]|['"]$/g, '');
+            try { face._cssUrls.push(new URL(value, rule.base || this._ownerDocument.baseURI).href); } catch (_) { face._cssUrls.push(value); }
+          }
           face._sets.add(this);
           this._cssFaces.set(key, face);
           this._faces.add(face);
@@ -18445,8 +19319,10 @@ if (typeof FontFace === 'undefined') {
       this._syncNative();
       if (face.status === 'loading' && this._status !== 'loading') {
         this._status = 'loading';
+        this._scriptLoading = true;
         const pending = Array.from(this._faces).filter(candidate => candidate.status === 'loading');
         this._readyPromise = Promise.all(pending.map(candidate => candidate.loaded)).then(() => {
+          this._scriptLoading = false;
           this._status = 'loaded';
           this._dispatch('loadingdone', Array.from(this._faces));
           return this;
@@ -18467,6 +19343,7 @@ if (typeof FontFace === 'undefined') {
     check(font, text=' ') {
       void String(text);
       this._discoverCssFaces();
+      this._syncCssFaceStatus();
       const selection = _fontFaceSelection(font);
       const matches = Array.from(this._faces).filter(face => _fontFaceMatches(face, selection));
       return matches.length === 0 || matches.every(face => face.status === 'loaded');
@@ -18496,12 +19373,13 @@ if (typeof FontFace === 'undefined') {
     forEach(callback, thisArg=undefined) {
       if (typeof callback !== 'function') throw new TypeError('FontFaceSet.forEach callback must be callable');
       this._discoverCssFaces();
+      this._syncCssFaceStatus();
       for (const face of this._faces) callback.call(thisArg, face, face, this);
     }
     has(face) { this._discoverCssFaces(); return this._faces.has(face); }
     entries() { this._discoverCssFaces(); return Array.from(this._faces, face => [face, face])[Symbol.iterator](); }
     keys() { this._discoverCssFaces(); return Array.from(this._faces).values(); }
-    values() { this._discoverCssFaces(); return Array.from(this._faces).values(); }
+    values() { this._discoverCssFaces(); this._syncCssFaceStatus(); return Array.from(this._faces).values(); }
     [Symbol.iterator]() { return this.values(); }
   };
   Object.defineProperty(Document.prototype, 'fonts', {
@@ -18674,6 +19552,32 @@ if (typeof Document !== 'undefined' && !Document.prototype.elementFromPoint) {
     return best || this.body || this.documentElement || null;
   };
   Document.prototype.elementsFromPoint = function(x, y) {
+    const method = _documentRealmMember(this, 'elementsFromPoint');
+    if (method) return Reflect.apply(method, this, [x, y]);
+    if (typeof __obscuraCore.ops.op_layout_hit_test_all === 'function') {
+      if (typeof x !== 'number' || typeof y !== 'number' || !isFinite(x) || !isFinite(y)) {
+        return [];
+      }
+      var vw = (typeof window !== 'undefined' && window.innerWidth) || 1280;
+      var vh = (typeof window !== 'undefined' && window.innerHeight) || 720;
+      if (x < 0 || y < 0 || x > vw || y > vh) return [];
+      var ids = [];
+      try { ids = JSON.parse(__obscuraCore.ops.op_layout_hit_test_all(x, y, _realmFrameId)); }
+      catch (_e) { ids = []; }
+      var out = [];
+      for (var i = 0; i < ids.length; i++) {
+        var hit = _wrapEl(ids[i]);
+        if (hit && hit.nodeType === 1 && out.indexOf(hit) < 0) out.push(hit);
+      }
+      // The root boxes always stack at the bottom: body (when hit), then html.
+      var root = this.documentElement;
+      var body = this.body;
+      var bodyHit = out.indexOf(body) >= 0;
+      out = out.filter(function(e) { return e !== root && e !== body; });
+      if (body && bodyHit) out.push(body);
+      if (root) out.push(root);
+      return out;
+    }
     var el = this.elementFromPoint(x, y);
     return el ? [el] : [];
   };
@@ -18795,7 +19699,7 @@ function _installCaretGeometry() {
 // Capture late-defined members too, before page code can replace them.
 const _nativeElementClick = Element.prototype.click;
 const _documentMembers = Object.freeze(Object.fromEntries([
-  ...['URL', 'defaultView', 'readyState', 'compatMode', 'contentType', 'getElementById', 'querySelector', 'querySelectorAll', 'open', 'write', 'close', 'elementFromPoint', 'queryCommandSupported'].map(name => {
+  ...['URL', 'defaultView', 'readyState', 'compatMode', 'contentType', 'getElementById', 'querySelector', 'querySelectorAll', 'open', 'write', 'close', 'elementFromPoint', 'elementsFromPoint', 'queryCommandSupported'].map(name => {
     const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, name);
     return [name, descriptor.value || descriptor.get];
   }),
@@ -18830,6 +19734,15 @@ globalThis.__obscura_init = function() {
   // canonical so getRootNode(), isConnected, and identity comparisons return
   // the same Document object exposed as globalThis.document.
   _cache.set(documentNid, globalThis.document);
+  // Headless captures: start each video's metadata poll once the parser
+  // has built the document (HTMLMediaElement.__headlessSync).
+  globalThis.document.addEventListener('DOMContentLoaded', () => {
+    if (typeof globalThis.redrobMedia === 'function'
+        || typeof __obscuraCore.ops.op_video_frame_metadata !== 'function') return;
+    for (const v of globalThis.document.querySelectorAll('video')) {
+      if (typeof v.__headlessPoll === 'function') v.__headlessPoll();
+    }
+  });
   const previousWindowNames = new Set(_windowNamedPropertyNames);
   _registerWindowNamedTree(globalThis.document.documentElement);
   _reconcileWindowNamedProperties(previousWindowNames);

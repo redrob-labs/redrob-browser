@@ -46,6 +46,21 @@ pub struct ContentSlot {
     pub height: f32,
 }
 
+/// A horizontal band of a box's content area in which floats shorten its line boxes.
+///
+/// Coordinates are relative to the content box of the box whose lines are being laid out.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FloatBand {
+    /// Top of the band, from the top of the content box
+    pub top: f32,
+    /// Bottom of the band, from the top of the content box
+    pub bottom: f32,
+    /// How far floats intrude past the left content edge
+    pub left: f32,
+    /// How far floats intrude past the right content edge
+    pub right: f32,
+}
+
 /// A floated box
 #[derive(Debug, Clone, Default)]
 pub struct PlacedFloatedBox {
@@ -242,6 +257,94 @@ impl FloatContext {
         }
     }
 
+    /// Replace the rectangular exclusion of the float placed last on
+    /// `direction` with its `shape-outside`: the segments it covers are cut
+    /// into 1px rows whose inset follows the shape (CSS Shapes 1), and rows
+    /// outside the shape fall back to the space before the float.
+    pub fn apply_shape_to_last(
+        &mut self,
+        margin_box: Size<f32>,
+        direction: FloatDirection,
+        shape: crate::style::FloatShape,
+    ) {
+        let placed = match direction {
+            FloatDirection::Left => self.left_floats.last(),
+            FloatDirection::Right => self.right_floats.last(),
+        };
+        let Some(placed) = placed.cloned() else { return };
+        let (cx, cy, rx, ry) = shape.resolve(margin_box.width, margin_box.height);
+        let top = placed.y;
+        let bottom = placed.y + placed.height;
+        if bottom <= top || ry <= 0.0 || rx <= 0.0 {
+            return;
+        }
+        let slot = direction as usize;
+        // Distance from the float's start edge to the shape's far edge on
+        // a row: the ellipse's widest point within that row.
+        let reach = |row_top: f32, row_bottom: f32| -> Option<f32> {
+            let center_y = top + cy;
+            let dy = if center_y < row_top {
+                row_top - center_y
+            } else if center_y > row_bottom {
+                center_y - row_bottom
+            } else {
+                0.0
+            };
+            if dy >= ry {
+                return None;
+            }
+            let half = rx * (1.0 - (dy / ry) * (dy / ry)).max(0.0).sqrt();
+            Some(match direction {
+                FloatDirection::Left => cx + half,
+                FloatDirection::Right => (margin_box.width - cx) + half,
+            })
+        };
+        let mut y = top;
+        while y < bottom {
+            let row_bottom = (y.floor() + 1.0).min(bottom);
+            // Split segments so that [y, row_bottom) is its own segment.
+            for cut in [y, row_bottom] {
+                if let Some(idx) =
+                    self.segments.iter().position(|s| s.y.start < cut && s.y.end > cut)
+                {
+                    self.subdivide_segment(idx, cut);
+                }
+            }
+            let row_inset = reach(y, row_bottom).map(|r| placed.x_inset + r);
+            for segment in self.segments.iter_mut() {
+                if segment.y.start >= y && segment.y.end <= row_bottom {
+                    // Only this float's own intrusion is replaced; an earlier
+                    // float further in (x_inset) still holds.
+                    let shaped = row_inset.unwrap_or(placed.x_inset).min(placed.x_inset + margin_box.width);
+                    segment.insets[slot] = shaped.max(placed.x_inset);
+                }
+            }
+            y = row_bottom;
+        }
+    }
+
+    /// The content slot over the band `[top, bottom)`: the widest float
+    /// intrusion of every segment overlapping it on each side.
+    pub fn band_slot(&self, top: f32, bottom: f32, containing_block_insets: [f32; 2]) -> ContentSlot {
+        let mut insets = containing_block_insets;
+        let mut any = None;
+        for (idx, segment) in self.segments.iter().enumerate() {
+            if segment.y.end <= top || segment.y.start >= bottom.max(top + 0.01) {
+                continue;
+            }
+            any.get_or_insert(idx);
+            insets[0] = insets[0].max(segment.insets[0]);
+            insets[1] = insets[1].max(segment.insets[1]);
+        }
+        ContentSlot {
+            segment_id: any,
+            x: insets[0],
+            y: top,
+            width: (self.available_width - insets[0] - insets[1]).max(0.0),
+            height: bottom - top,
+        }
+    }
+
     /// Inner implementation of float placement, split into a separate function so that it can early-return
     fn place_floated_box_inner(
         &mut self,
@@ -388,9 +491,12 @@ impl FloatContext {
 
         let end_idx = match end {
             None => {
+                // The float extends below every existing segment: add a segment that covers
+                // the rest of its height, so content beside its lower part is narrowed too.
                 let last_y_end = self.segments.last().map(|seg| seg.y.end).unwrap_or(0.0);
-                if min_y > last_y_end {
-                    self.segments.push(Segment { y: last_y_end..min_y, insets: [0.0, 0.0] });
+                let end_y = start_y + floated_box.height;
+                if end_y > last_y_end {
+                    self.segments.push(Segment { y: last_y_end..end_y, insets: [0.0, 0.0] });
                 }
                 self.segments.len() - 1
             }
@@ -424,6 +530,35 @@ impl FloatContext {
             },
             Clear::None => None,
         }
+    }
+
+    /// The float exclusions that overlap a box whose content box starts at `content_top` (BFC
+    /// coordinates) with the given absolute left/right content-box insets. Each band is expressed
+    /// relative to that content box: `top`/`bottom` from its top edge, `left`/`right` as the
+    /// amount the floats intrude past its left/right content edges. Bands that do not intrude are
+    /// omitted, so an empty result means the box's lines are unaffected by floats.
+    pub fn exclusion_bands(&self, content_top: f32, content_insets: [f32; 2]) -> Vec<FloatBand> {
+        let mut bands = Vec::new();
+        if !self.has_floats {
+            return bands;
+        }
+        for segment in &self.segments {
+            if segment.y.end <= content_top {
+                continue;
+            }
+            let left = (segment.insets[0] - content_insets[0]).max(0.0);
+            let right = (segment.insets[1] - content_insets[1]).max(0.0);
+            if left <= 0.0 && right <= 0.0 {
+                continue;
+            }
+            bands.push(FloatBand {
+                top: segment.y.start - content_top,
+                bottom: segment.y.end - content_top,
+                left,
+                right,
+            });
+        }
+        bands
     }
 
     /// Search for a space suitable for laying out non-floated content into
@@ -460,12 +595,14 @@ impl FloatContext {
             Some(segment) => {
                 let inset_left = segment.insets[0].max(containing_block_insets[0]);
                 let inset_right = segment.insets[1].max(containing_block_insets[1]);
+                let y = segment.y.start.max(min_y);
                 ContentSlot {
                     segment_id: Some(start_idx),
                     x: inset_left,
-                    y: segment.y.start.max(min_y),
+                    y,
                     width: self.available_width - inset_left - inset_right,
-                    height: f32::INFINITY,
+                    // The slot keeps this width until the segment ends.
+                    height: segment.y.end - y,
                 }
             }
             None => ContentSlot {
@@ -485,28 +622,34 @@ pub struct FloatIntrinsicWidthCalculator {
     available_width: AvailableSpace,
     /// The running total intrinsic width contribution
     contribution: f32,
+    /// The widest single float (its min-content contribution)
+    widest: f32,
 }
 
 impl FloatIntrinsicWidthCalculator {
     /// Create a new `FloatIntrinsicWidthCalculator`
     pub fn new(available_width: AvailableSpace) -> Self {
-        Self { available_width, contribution: 0.0 }
+        Self { available_width, contribution: 0.0, widest: 0.0 }
     }
 
     /// Add a float to the computation
     pub fn add_float(&mut self, width: f32, _direction: FloatDirection, _clear: Clear) {
+        self.widest = self.widest.max(width);
         match self.available_width {
-            AvailableSpace::Definite(_) => {
-                // We will never hit this code path with definite available space
-            }
             AvailableSpace::MinContent => self.contribution = self.contribution.max(width),
-            AvailableSpace::MaxContent => self.contribution += width,
+            // A definite width here is a shrink-to-fit container (an
+            // absolutely positioned box holding only floats): its floats sit
+            // side by side up to the available width.
+            AvailableSpace::MaxContent | AvailableSpace::Definite(_) => self.contribution += width,
         };
     }
 
     /// Get the computed float contribution to intrinsic width
     pub fn result(&self) -> f32 {
-        self.contribution
+        match self.available_width {
+            AvailableSpace::Definite(limit) => self.contribution.min(limit).max(self.widest),
+            _ => self.contribution,
+        }
     }
 }
 

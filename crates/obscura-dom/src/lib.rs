@@ -6,9 +6,11 @@ extern crate html5ever;
 
 pub mod selector;
 pub mod serialize;
+pub mod streaming;
 pub mod tree;
 pub mod tree_sink;
 
+pub use streaming::{ParseStep, StreamingParser};
 pub use tree::{
     AttachShadowError, Attribute, DomTree, Node, NodeData, NodeId, ShadowRoot, ShadowRootMode,
 };

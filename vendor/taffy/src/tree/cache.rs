@@ -9,6 +9,8 @@ use crate::RequestedAxis;
 
 /// The number of cache entries for each node in the tree
 const CACHE_SIZE: usize = 9;
+/// Most size results a node keeps beyond its nine slots. See `Cache::history`.
+const HISTORY_LIMIT: usize = 24;
 
 // Manually written-out results of float to u32 bit casts because
 // `f32::to_bits` is not yet const at our MSRV.
@@ -146,6 +148,8 @@ pub(crate) struct CacheEntry<T> {
 #[cfg_attr(feature = "serde", derive(Serialize))]
 struct MeasureOutput {
     size: Size<f32>,
+    first_baseline: Option<f32>,
+    last_baseline: Option<f32>,
     top_margin: CollapsibleMarginSet,
     bottom_margin: CollapsibleMarginSet,
     margins_can_collapse_through: bool,
@@ -156,6 +160,8 @@ impl MeasureOutput {
     fn new(input: &LayoutInput, output: LayoutOutput) -> Self {
         Self {
             size: output.size,
+            first_baseline: output.first_baselines.y,
+            last_baseline: output.last_baseline,
             top_margin: output.top_margin,
             bottom_margin: output.bottom_margin,
             margins_can_collapse_through: output.margins_can_collapse_through,
@@ -165,6 +171,8 @@ impl MeasureOutput {
 
     fn into_layout_output(self) -> LayoutOutput {
         let mut output = LayoutOutput::from_outer_size(self.size);
+        output.first_baselines.y = self.first_baseline;
+        output.last_baseline = self.last_baseline;
         output.top_margin = self.top_margin;
         output.bottom_margin = self.bottom_margin;
         output.margins_can_collapse_through = self.margins_can_collapse_through;
@@ -180,6 +188,14 @@ pub struct Cache {
     final_layout_entry: Option<CacheEntry<LayoutOutput>>,
     /// The cache entries for the node's preliminary size measurements
     measure_entries: [Option<CacheEntry<MeasureOutput>>; CACHE_SIZE],
+    /// Every distinct size result since the node was last marked dirty, up to
+    /// `HISTORY_LIMIT`. The nine slots keep only the latest result per kind of
+    /// constraint, which suits one layout pass. An embedder that re-runs layout
+    /// after adjusting styles, or that copies a previous layout's cache into an
+    /// unchanged subtree of a rebuilt tree, asks again with the constraints of
+    /// every earlier pass; they hit here. Results are pure sizes, so an older
+    /// one stays valid until the node is dirtied.
+    history: Vec<CacheEntry<MeasureOutput>>,
     /// Tracks if all cache entries are empty
     is_empty: bool,
 }
@@ -193,7 +209,7 @@ impl Default for Cache {
 impl Cache {
     /// Create a new empty cache
     pub const fn new() -> Self {
-        Self { final_layout_entry: None, measure_entries: [None; CACHE_SIZE], is_empty: true }
+        Self { final_layout_entry: None, measure_entries: [None; CACHE_SIZE], history: Vec::new(), is_empty: true }
     }
 
     /// Return the cache slot to cache the current computed result in
@@ -267,17 +283,18 @@ impl Cache {
         match input.run_mode {
             RunMode::PerformLayout => self.final_layout_entry.filter(|entry| entry.key == key).map(|e| e.content),
             RunMode::ComputeSize => {
-                for entry in self.measure_entries.iter().flatten() {
-                    if entry.key.kd_available_space == key.kd_available_space
+                let margins = vertical_margin_context_key(input);
+                let matches = |entry: &CacheEntry<MeasureOutput>| {
+                    entry.key.kd_available_space == key.kd_available_space
                         && (entry.key.x_axis_parent_size() == key.x_axis_parent_size())
-                        && entry.content.vertical_margins_are_collapsible
-                            == vertical_margin_context_key(input)
-                    {
+                        && entry.content.vertical_margins_are_collapsible == margins
+                };
+                for entry in self.measure_entries.iter().flatten() {
+                    if matches(entry) {
                         return Some(entry.content.into_layout_output());
                     }
                 }
-
-                None
+                self.history.iter().rev().find(|entry| matches(entry)).map(|entry| entry.content.into_layout_output())
             }
             RunMode::PerformHiddenLayout => None,
         }
@@ -294,8 +311,19 @@ impl Cache {
             RunMode::ComputeSize => {
                 self.is_empty = false;
                 let cache_slot = Self::compute_cache_slot(input.known_dimensions, input.available_space);
-                self.measure_entries[cache_slot] =
-                    Some(CacheEntry { key, content: MeasureOutput::new(input, layout_output) });
+                let entry = CacheEntry { key, content: MeasureOutput::new(input, layout_output) };
+                if let Some(previous) = self.measure_entries[cache_slot] {
+                    if previous.key != key
+                        || previous.content.vertical_margins_are_collapsible
+                            != entry.content.vertical_margins_are_collapsible
+                    {
+                        if self.history.len() == HISTORY_LIMIT {
+                            self.history.remove(0);
+                        }
+                        self.history.push(previous);
+                    }
+                }
+                self.measure_entries[cache_slot] = Some(entry);
             }
             RunMode::PerformHiddenLayout => {}
         }
@@ -309,6 +337,7 @@ impl Cache {
         self.is_empty = true;
         self.final_layout_entry = None;
         self.measure_entries = [None; CACHE_SIZE];
+        self.history.clear();
         ClearState::Cleared
     }
 

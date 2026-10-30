@@ -3,8 +3,6 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::tiles::TileCache;
-
 pub type TabId = u64;
 
 pub struct Tab {
@@ -12,10 +10,8 @@ pub struct Tab {
     pub url: String,
     pub title: String,
     pub loading: bool,
-    pub tiles: TileCache,
-    /// Document scroll position and size in CSS pixels, as the page last reported them.
-    pub scroll: (f32, f32),
-    pub content: (f32, f32),
+    /// The page as the engine last sent it, with the window's scroll offsets.
+    pub scene: crate::compositor::TabScene,
     /// Opened by the agent rather than the person; shown with a marker.
     pub agent: bool,
     pub devtools: crate::devtools::State,
@@ -30,9 +26,7 @@ impl Tab {
             url: url.to_string(),
             title: String::new(),
             loading: url != "about:blank",
-            tiles: TileCache::default(),
-            scroll: (0.0, 0.0),
-            content: (0.0, 0.0),
+            scene: crate::compositor::TabScene::new(),
             agent: false,
             devtools: Default::default(),
             target_id: String::new(),
@@ -101,13 +95,30 @@ pub struct Model {
     pub closed: Vec<(String, String)>,
     pub bookmarks: Vec<Bookmark>,
     pub history: Vec<HistoryEntry>,
-    next_id: TabId,
 }
+
+/// Tab ids are unique across every window of the process, so a tab keeps its
+/// id (and its engine session) when it moves to another window.
+static NEXT_TAB_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl Model {
     pub fn alloc_id(&mut self) -> TabId {
-        self.next_id += 1;
-        self.next_id
+        NEXT_TAB_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+    }
+
+    /// Take a tab out to hand it to another window. Unlike [`Model::close_tab`]
+    /// it is not remembered as closed.
+    pub fn take_tab(&mut self, index: usize) -> Option<Tab> {
+        if index >= self.tabs.len() {
+            return None;
+        }
+        let tab = self.tabs.remove(index);
+        if index < self.active {
+            self.active -= 1;
+        } else if self.active >= self.tabs.len() {
+            self.active = self.tabs.len().saturating_sub(1);
+        }
+        Some(tab)
     }
 
     pub fn active_tab(&self) -> Option<&Tab> {
@@ -278,7 +289,11 @@ pub fn now() -> u64 {
 /// Address field text to a URL: a URL as typed, a bare host gets https, anything else is a search.
 pub fn to_url(input: &str) -> String {
     let s = input.trim();
-    if s.contains("://") || s.starts_with("about:") || s.starts_with("redrob:") {
+    if s.contains("://")
+        || s.starts_with("about:")
+        || s.starts_with("redrob:")
+        || s.starts_with("data:")
+    {
         return s.to_string();
     }
     let host = s.split('/').next().unwrap_or("");

@@ -40,6 +40,24 @@ pub struct DisplayList {
     pub ops: Vec<Op>,
     /// Images referenced by [`Op::Image`], stored once each.
     pub images: Vec<Image>,
+    /// Scene recordings only: the DOM node being painted when each op was
+    /// recorded, parallel to `ops` (0 for none).
+    #[serde(skip)]
+    pub nodes: Vec<u64>,
+    /// Scene recordings only: images [`Op::Image`] indexes instead of
+    /// `images`. Shared with the cross-frame cache, never copied per frame.
+    #[serde(skip)]
+    pub scene_images: Vec<SceneImage>,
+}
+
+/// An image of a scene recording: premultiplied RGBA, identified by a hash
+/// of its content so the same picture keeps its id across frames.
+#[derive(Clone, Debug)]
+pub struct SceneImage {
+    pub id: u64,
+    pub width: u32,
+    pub height: u32,
+    pub rgba: std::sync::Arc<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -76,6 +94,65 @@ pub enum Op {
         blend: Blend,
     },
     PopLayer,
+    /// Scene recordings only: a glyph run in font `font` (a
+    /// [`crate::scene`] font id) at `size` px. Glyph origins are user space.
+    Glyphs {
+        font: u64,
+        size: f32,
+        color: [f32; 4],
+        glyphs: Vec<(u32, f32, f32)>,
+        synthetic_bold: bool,
+        skew: f32,
+        transform: Affine,
+    },
+    /// Scene recordings only: an outset or inset CSS box shadow of `rect`.
+    BoxShadow {
+        rect: [f32; 4],
+        radii: [f32; 4],
+        color: [f32; 4],
+        blur: f32,
+        offset: [f32; 2],
+        spread: f32,
+        inset: bool,
+        transform: Affine,
+    },
+    /// Scene recordings only: `backdrop-filter` over `rect` (rounded by
+    /// `radii`): what is painted under it so far, filtered.
+    Backdrop {
+        rect: [f32; 4],
+        radii: [f32; 4],
+        filters: Vec<redrob_scene::FilterOp>,
+        transform: Affine,
+    },
+    /// Scene recordings only: a hit-test region for DOM node `node`, painted
+    /// at this point of the paint order. Draws nothing.
+    Hit {
+        node: u64,
+        rect: [f32; 4],
+        radii: [f32; 4],
+        clip: Option<[f32; 4]>,
+        text: bool,
+        transform: Affine,
+    },
+    /// Scene recordings only: a region the window fills itself (video, canvas).
+    External {
+        key: u64,
+        rect: [f32; 4],
+        transform: Affine,
+    },
+    /// Scene recordings only: the ops up to the matching `PopRef` are in the
+    /// local space of transformed element `node`; `transform` maps that
+    /// space to the enclosing one. `offset` is document space to local space
+    /// before the transform (the layer's surface offset).
+    PushRef {
+        node: u64,
+        offset: [f32; 2],
+        transform: Affine,
+        /// A row-major 4x4 applied before `transform` (a 3D plane).
+        #[serde(default)]
+        projective: Option<[f32; 16]>,
+    },
+    PopRef,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -385,7 +462,15 @@ fn blend(mode: BlendMode) -> Blend {
 
 fn map_op(op: &mut Op, t: &Affine) {
     match op {
-        Op::Fill { transform, .. } | Op::Stroke { transform, .. } | Op::Image { transform, .. } => {
+        Op::Fill { transform, .. }
+        | Op::Stroke { transform, .. }
+        | Op::Image { transform, .. }
+        | Op::Glyphs { transform, .. }
+        | Op::BoxShadow { transform, .. }
+        | Op::Backdrop { transform, .. }
+        | Op::Hit { transform, .. }
+        | Op::External { transform, .. }
+        | Op::PushRef { transform, .. } => {
             *transform = concat(t, transform);
         }
         Op::PushClip { clips } => {
@@ -393,7 +478,26 @@ fn map_op(op: &mut Op, t: &Affine) {
                 clip.transform = concat(t, &clip.transform);
             }
         }
-        Op::PopClip | Op::PushLayer { .. } | Op::PopLayer => {}
+        Op::PopClip | Op::PushLayer { .. } | Op::PopLayer | Op::PopRef => {}
+    }
+}
+
+/// Map a group's ops into its parent's space. Ops inside a reference frame
+/// stay in that frame's local space; only the frame's transform moves.
+fn map_ops(ops: &mut [Op], t: &Affine) {
+    let mut depth = 0usize;
+    for op in ops {
+        match op {
+            Op::PushRef { .. } => {
+                if depth == 0 {
+                    map_op(op, t);
+                }
+                depth += 1;
+            }
+            Op::PopRef => depth = depth.saturating_sub(1),
+            _ if depth == 0 => map_op(op, t),
+            _ => {}
+        }
     }
 }
 
@@ -411,6 +515,14 @@ fn fingerprint(mask: &Mask) -> u64 {
     let data = mask.data();
     let mut hasher = DefaultHasher::new();
     (mask.width(), mask.height()).hash(&mut hasher);
+    if SCENE.with(Cell::get) {
+        // Scene masks stay unrasterized and mostly unmapped: sampling across
+        // a document-sized mask would fault in hundreds of zero pages per
+        // clip. Their pixels only change through tracked calls, which
+        // re-store the entry, so the first bytes are enough.
+        data[..data.len().min(64)].hash(&mut hasher);
+        return hasher.finish();
+    }
     let step = (data.len() / 257).max(1);
     let mut i = 0;
     while i < data.len() {
@@ -438,6 +550,9 @@ struct MaskEntry {
     shapes: MaskShapes,
     version: u64,
     fingerprint: u64,
+    /// Scene recording: the mask's pixels were never rasterized because its
+    /// shapes are known. Pixel readers call [`materialize_mask`] first.
+    lazy: bool,
 }
 
 struct Frame {
@@ -445,15 +560,33 @@ struct Frame {
     width: u32,
     height: u32,
     ops: Vec<Op>,
+    /// Paint node per op, parallel to `ops`.
+    nodes: Vec<u64>,
     /// The mask (address, version) whose clip is open at the end of `ops`, so
     /// consecutive draws under one mask share one PushClip.
     open_clip: Option<(usize, u64)>,
 }
 
 impl Frame {
+    fn new(target: usize, width: u32, height: u32) -> Self {
+        Self {
+            target,
+            width,
+            height,
+            ops: Vec::new(),
+            nodes: Vec::new(),
+            open_clip: None,
+        }
+    }
+
+    fn push(&mut self, op: Op) {
+        self.ops.push(op);
+        self.nodes.push(current_node());
+    }
+
     fn close_clip(&mut self) {
         if self.open_clip.take().is_some() {
-            self.ops.push(Op::PopClip);
+            self.push(Op::PopClip);
         }
     }
 }
@@ -474,6 +607,12 @@ pub struct RecordingCanvas {
     masks: HashMap<usize, MaskEntry>,
     next_version: u64,
     scratch: Option<Pixmap>,
+    /// Scene recording: images by index, and their index by content id.
+    scene_images: Vec<SceneImage>,
+    scene_image_ids: HashMap<u64, usize>,
+    /// Scene recording: the surface size of masks allocated as 1x1
+    /// placeholders, by address. Their pixels exist only once materialized.
+    mask_sizes: HashMap<usize, (u32, u32)>,
 }
 
 impl RecordingCanvas {
@@ -485,6 +624,9 @@ impl RecordingCanvas {
             masks: HashMap::new(),
             next_version: 0,
             scratch: None,
+            scene_images: Vec::new(),
+            scene_image_ids: HashMap::new(),
+            mask_sizes: HashMap::new(),
         }
     }
 
@@ -500,6 +642,8 @@ impl RecordingCanvas {
             height: root.height,
             ops: root.ops,
             images: self.images,
+            nodes: root.nodes,
+            scene_images: self.scene_images,
         })
     }
 
@@ -532,7 +676,17 @@ impl RecordingCanvas {
         }
     }
 
+    fn mask_is_lazy(&self, mask: &Mask) -> bool {
+        self.masks
+            .get(&mask_id(mask))
+            .is_some_and(|entry| entry.lazy && entry.fingerprint == fingerprint(mask))
+    }
+
     fn store_mask(&mut self, mask: &Mask, shapes: MaskShapes) {
+        self.store_mask_lazy(mask, shapes, false);
+    }
+
+    fn store_mask_lazy(&mut self, mask: &Mask, shapes: MaskShapes, lazy: bool) {
         self.next_version += 1;
         self.masks.insert(
             mask_id(mask),
@@ -540,8 +694,31 @@ impl RecordingCanvas {
                 shapes,
                 version: self.next_version,
                 fingerprint: fingerprint(mask),
+                lazy,
             },
         );
+    }
+
+    /// A rasterized copy of a lazy mask, for code that reads mask pixels.
+    fn materialized_copy(&self, mask: &Mask) -> Option<Mask> {
+        if !self.mask_is_lazy(mask) {
+            return None;
+        }
+        let shapes = match self.lookup_mask(mask).0 {
+            MaskShapes::Paths(shapes) => shapes,
+            _ => return None,
+        };
+        let (width, height) = self.logical_size(mask);
+        let mut out = Mask::new(width, height)?;
+        rasterize_shapes(&mut out, &shapes);
+        Some(out)
+    }
+
+    fn logical_size(&self, mask: &Mask) -> (u32, u32) {
+        self.mask_sizes
+            .get(&mask_id(mask))
+            .copied()
+            .unwrap_or((mask.width(), mask.height()))
     }
 
     fn clip_state(&self, mask: Option<&Mask>) -> ClipState {
@@ -571,17 +748,17 @@ impl RecordingCanvas {
             ClipState::None => {
                 if let Some(frame) = self.frame() {
                     frame.close_clip();
-                    frame.ops.push(op);
+                    frame.push(op);
                 }
             }
             ClipState::Shapes(key, clips) => {
                 if let Some(frame) = self.frame() {
                     if frame.open_clip != Some(key) {
                         frame.close_clip();
-                        frame.ops.push(Op::PushClip { clips });
+                        frame.push(Op::PushClip { clips });
                         frame.open_clip = Some(key);
                     }
-                    frame.ops.push(op);
+                    frame.push(op);
                 }
             }
         }
@@ -590,7 +767,63 @@ impl RecordingCanvas {
     fn push_unclipped(&mut self, op: Op) {
         if let Some(frame) = self.frame() {
             frame.close_clip();
-            frame.ops.push(op);
+            frame.push(op);
+        }
+    }
+
+    /// Record a scene-only op under `mask` (and an extra rectangular clip).
+    /// Returns false when the clip is not expressible, so the caller paints
+    /// pixels instead.
+    pub(crate) fn emit_scene(
+        &mut self,
+        mask: Option<&Mask>,
+        clip_rect: Option<[f32; 4]>,
+        op: Op,
+    ) -> bool {
+        let extra = clip_rect.map(|[x, y, w, h]| ClipShape {
+            path: vec![
+                Verb::M(x, y),
+                Verb::L(x + w, y),
+                Verb::L(x + w, y + h),
+                Verb::L(x, y + h),
+                Verb::Z,
+            ],
+            rule: Rule::NonZero,
+            transform: IDENTITY,
+        });
+        let state = self.clip_state(mask);
+        match (state, extra) {
+            (ClipState::Empty, _) => true,
+            (ClipState::Unknown, _) => false,
+            (ClipState::None, None) => {
+                self.push_unclipped(op);
+                true
+            }
+            (ClipState::Shapes(key, clips), None) => {
+                if let Some(frame) = self.frame() {
+                    if frame.open_clip != Some(key) {
+                        frame.close_clip();
+                        frame.push(Op::PushClip { clips });
+                        frame.open_clip = Some(key);
+                    }
+                    frame.push(op);
+                }
+                true
+            }
+            (state, Some(extra)) => {
+                let mut clips = match state {
+                    ClipState::Shapes(_, clips) => clips,
+                    _ => Vec::new(),
+                };
+                clips.push(extra);
+                if let Some(frame) = self.frame() {
+                    frame.close_clip();
+                    frame.push(Op::PushClip { clips });
+                    frame.push(op);
+                    frame.push(Op::PopClip);
+                }
+                true
+            }
         }
     }
 
@@ -612,7 +845,8 @@ impl RecordingCanvas {
         let Some(mut scratch) = self.take_scratch(width, height) else {
             return;
         };
-        raster(&mut scratch, mask);
+        let real = mask.and_then(|mask| self.materialized_copy(mask));
+        raster(&mut scratch, real.as_ref().or(mask));
         if let Some((op, _)) = self.capture(&mut scratch) {
             self.push_unclipped(op);
         }
@@ -648,12 +882,16 @@ impl RecordingCanvas {
             rgba.extend_from_slice(&data[start..end]);
             data[start..end].fill(0);
         }
-        let image = self.intern_image(Image {
-            width: w,
-            height: h,
-            premultiplied: true,
-            rgba,
-        });
+        let image = if scene_active() {
+            self.intern_scene_owned(w, h, rgba)
+        } else {
+            self.intern_image(Image {
+                width: w,
+                height: h,
+                premultiplied: true,
+                rgba,
+            })
+        };
         let op = Op::Image {
             image,
             transform: [1.0, 0.0, 0.0, 1.0, x0 as f32, y0 as f32],
@@ -661,6 +899,77 @@ impl RecordingCanvas {
             smooth: false,
         };
         Some((op, (x0, y0, w, h)))
+    }
+
+    /// Scene recording: intern pixels by content. `rgba` is premultiplied.
+    fn intern_scene_owned(&mut self, width: u32, height: u32, rgba: Vec<u8>) -> usize {
+        let id = content_hash(width, height, &rgba);
+        let rgba = scene_image_cache(|cache| {
+            cache
+                .by_id
+                .entry(id)
+                .or_insert_with(|| std::sync::Arc::new(rgba))
+                .clone()
+        });
+        self.scene_image_index(id, width, height, rgba)
+    }
+
+    /// Scene recording: intern a pixmap without copying it when the
+    /// cross-frame cache already holds the same pixels.
+    fn intern_scene_ref(&mut self, image: PixmapRef<'_>) -> usize {
+        let (width, height) = (image.width(), image.height());
+        let data = image.data();
+        let key = if (width as usize) * (height as usize) <= SMALL_IMAGE_PIXELS {
+            None
+        } else {
+            Some((
+                data.as_ptr() as usize,
+                width,
+                height,
+                sparse_fingerprint(data),
+            ))
+        };
+        let generation = SCENE_GENERATION.with(Cell::get);
+        let (id, rgba) = scene_image_cache(|cache| {
+            if let Some(key) = key {
+                if let Some(entry) = cache.by_pointer.get_mut(&key) {
+                    entry.2 = generation;
+                    return (entry.0, entry.1.clone());
+                }
+            }
+            let id = content_hash(width, height, data);
+            let rgba = cache
+                .by_id
+                .entry(id)
+                .or_insert_with(|| std::sync::Arc::new(data.to_vec()))
+                .clone();
+            if let Some(key) = key {
+                cache.by_pointer.insert(key, (id, rgba.clone(), generation));
+            }
+            (id, rgba)
+        });
+        self.scene_image_index(id, width, height, rgba)
+    }
+
+    fn scene_image_index(
+        &mut self,
+        id: u64,
+        width: u32,
+        height: u32,
+        rgba: std::sync::Arc<Vec<u8>>,
+    ) -> usize {
+        if let Some(&index) = self.scene_image_ids.get(&id) {
+            return index;
+        }
+        let index = self.scene_images.len();
+        self.scene_images.push(SceneImage {
+            id,
+            width,
+            height,
+            rgba,
+        });
+        self.scene_image_ids.insert(id, index);
+        index
     }
 
     fn intern_image(&mut self, image: Image) -> usize {
@@ -690,11 +999,26 @@ impl RecordingCanvas {
     ) {
         layer.close_clip();
         let t = affine(transform.pre_translate(x as f32, y as f32));
+        let reference = take_reference(layer.target);
         let mut ops = layer.ops;
-        if t != IDENTITY {
-            for op in &mut ops {
-                map_op(op, &t);
-            }
+        let mut nodes = layer.nodes;
+        if let Some(reference) = reference {
+            // A transformed element's subtree keeps its local space; the
+            // scene builder turns this into a reference frame.
+            ops.insert(
+                0,
+                Op::PushRef {
+                    node: reference.node,
+                    offset: reference.offset,
+                    transform: t,
+                    projective: reference.projective,
+                },
+            );
+            nodes.insert(0, reference.node);
+            ops.push(Op::PopRef);
+            nodes.push(reference.node);
+        } else if t != IDENTITY {
+            map_ops(&mut ops, &t);
         }
         let grouped = paint.opacity < 1.0 || paint.blend_mode != BlendMode::SourceOver;
         let group_op = Op::PushLayer {
@@ -714,18 +1038,19 @@ impl RecordingCanvas {
                     ClipState::Shapes(key, clips) => {
                         if frame.open_clip != Some(key) {
                             frame.close_clip();
-                            frame.ops.push(Op::PushClip { clips });
+                            frame.push(Op::PushClip { clips });
                             frame.open_clip = Some(key);
                         }
                     }
                     _ => frame.close_clip(),
                 }
                 if grouped {
-                    frame.ops.push(group_op);
+                    frame.push(group_op);
                 }
                 frame.ops.extend(ops);
+                frame.nodes.extend(nodes);
                 if grouped {
-                    frame.ops.push(Op::PopLayer);
+                    frame.push(Op::PopLayer);
                 }
             }
         }
@@ -833,12 +1158,16 @@ impl Canvas for RecordingCanvas {
         transform: Transform,
         mask: Option<&Mask>,
     ) {
-        let index = self.intern_image(Image {
-            width: image.width(),
-            height: image.height(),
-            premultiplied: true,
-            rgba: image.data().to_vec(),
-        });
+        let index = if scene_active() {
+            self.intern_scene_ref(image)
+        } else {
+            self.intern_image(Image {
+                width: image.width(),
+                height: image.height(),
+                premultiplied: true,
+                rgba: image.data().to_vec(),
+            })
+        };
         let image_op = Op::Image {
             image: index,
             transform: affine(transform.pre_translate(x as f32, y as f32)),
@@ -924,6 +1253,7 @@ pub fn record<R>(paint: impl FnOnce() -> R) -> (R, Option<DisplayList>) {
         }
     }
     RECORDER.with(|recorder| *recorder.borrow_mut() = Some(RecordingCanvas::new()));
+    CURRENT_NODE.with(|node| node.set(0));
     ACTIVE.with(|active| active.set(true));
     let reset = Reset;
     let result = paint();
@@ -1004,13 +1334,10 @@ pub(crate) fn begin_root(root: &Pixmap, color: [u8; 4]) {
                 transform: IDENTITY,
             });
         }
-        recorder.frames.push(Frame {
-            target: surface_id(root),
-            width,
-            height,
-            ops,
-            open_clip: None,
-        });
+        let mut frame = Frame::new(surface_id(root), width, height);
+        frame.nodes = vec![0; ops.len()];
+        frame.ops = ops;
+        recorder.frames.push(frame);
     });
 }
 
@@ -1019,13 +1346,9 @@ pub(crate) fn begin_layer(layer: &Pixmap) {
         if recorder.frames.is_empty() {
             return;
         }
-        recorder.frames.push(Frame {
-            target: surface_id(layer),
-            width: layer.width(),
-            height: layer.height(),
-            ops: Vec::new(),
-            open_clip: None,
-        });
+        recorder
+            .frames
+            .push(Frame::new(surface_id(layer), layer.width(), layer.height()));
     });
 }
 
@@ -1053,8 +1376,12 @@ pub(crate) fn direct_finish(target: &mut Pixmap, scratch: Pixmap) {
             Op::Image { image, .. } => *image,
             _ => return None,
         };
-        let pixels = recorder.images[index].rgba.clone();
         recorder.push_unclipped(op);
+        if scene_active() {
+            // The scene keeps the op; recorded surfaces carry no pixels.
+            return Some((Vec::new(), (0, 0, 0, 0)));
+        }
+        let pixels = recorder.images[index].rgba.clone();
         Some((pixels, rect))
     })
     .flatten();
@@ -1099,4 +1426,334 @@ pub(crate) fn clip_shape_of(path: &Path, fill_rule: FillRule, transform: Transfo
         rule: rule(fill_rule),
         transform: affine(transform),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Scene recording (crate::scene): the same paint, recorded without rasterizing
+// recorded surfaces, with paint-node tags, glyph runs, hit regions and
+// reference frames for transformed subtrees.
+
+thread_local! {
+    static SCENE: Cell<bool> = const { Cell::new(false) };
+    static CURRENT_NODE: Cell<u64> = const { Cell::new(0) };
+    static REFERENCES: RefCell<HashMap<usize, Reference>> = RefCell::new(HashMap::new());
+    static SCENE_GENERATION: Cell<u64> = const { Cell::new(0) };
+    static SCENE_RASTER_SCALE: Cell<f32> = const { Cell::new(1.0) };
+    static SCENE_IMAGE_CACHE: RefCell<SceneImageCache> = RefCell::new(SceneImageCache::default());
+}
+
+/// Images up to this many pixels are keyed by a full content hash; larger
+/// ones by address and a sparse sample, so a decoded photo is hashed and
+/// copied once, not on every frame.
+const SMALL_IMAGE_PIXELS: usize = 128 * 128;
+/// Frames an unused large image stays in the cross-frame cache.
+const IMAGE_CACHE_GENERATIONS: u64 = 4;
+
+#[derive(Default)]
+struct SceneImageCache {
+    by_pointer: HashMap<(usize, u32, u32, u64), (u64, std::sync::Arc<Vec<u8>>, u64)>,
+    by_id: HashMap<u64, std::sync::Arc<Vec<u8>>>,
+}
+
+fn scene_image_cache<R>(f: impl FnOnce(&mut SceneImageCache) -> R) -> R {
+    SCENE_IMAGE_CACHE.with(|cache| f(&mut cache.borrow_mut()))
+}
+
+fn content_hash(width: u32, height: u32, data: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    (width, height).hash(&mut hasher);
+    data.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn sparse_fingerprint(data: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    data.len().hash(&mut hasher);
+    let pixels = data.len() / 4;
+    let step = (pixels / 1021).max(1);
+    let mut i = 0;
+    while i < pixels {
+        data[i * 4..i * 4 + 4].hash(&mut hasher);
+        i += step;
+    }
+    hasher.finish()
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Reference {
+    node: u64,
+    offset: [f32; 2],
+    projective: Option<[f32; 16]>,
+}
+
+/// Whether a scene recording is running on this thread.
+pub(crate) fn scene_active() -> bool {
+    SCENE.with(Cell::get) && ACTIVE.with(Cell::get)
+}
+
+/// Run `paint` as a scene recording.
+pub(crate) fn record_scene<R>(paint: impl FnOnce() -> R) -> (R, Option<DisplayList>) {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            SCENE.with(|scene| scene.set(false));
+            SCENE_RASTER_SCALE.with(|scale| scale.set(1.0));
+            REFERENCES.with(|references| references.borrow_mut().clear());
+        }
+    }
+    if ACTIVE.with(Cell::get) {
+        return (paint(), None);
+    }
+    let generation = SCENE_GENERATION.with(|g| {
+        g.set(g.get() + 1);
+        g.get()
+    });
+    SCENE.with(|scene| scene.set(true));
+    let reset = Reset;
+    let result = record(paint);
+    drop(reset);
+    // Drop large images no frame used lately. Content-keyed entries go with
+    // them unless the current frame still holds them.
+    scene_image_cache(|cache| {
+        cache
+            .by_pointer
+            .retain(|_, entry| generation.saturating_sub(entry.2) < IMAGE_CACHE_GENERATIONS);
+        cache
+            .by_id
+            .retain(|_, rgba| std::sync::Arc::strong_count(rgba) > 1);
+    });
+    result
+}
+
+/// Device pixels per CSS pixel for what a scene recording must rasterize
+/// itself (SVG images): the window's scale, so they stay sharp there.
+pub(crate) fn set_scene_raster_scale(scale: f32) {
+    let scale = if scale.is_finite() {
+        scale.clamp(1.0, 4.0)
+    } else {
+        1.0
+    };
+    SCENE_RASTER_SCALE.with(|cell| cell.set(scale));
+}
+
+/// 1.0 outside a scene recording.
+pub(crate) fn scene_raster_scale() -> f32 {
+    if scene_active() {
+        SCENE_RASTER_SCALE.with(Cell::get)
+    } else {
+        1.0
+    }
+}
+
+/// The DOM node (index + 1, 0 for none) later ops are tagged with.
+pub(crate) fn set_current_node(node: u64) {
+    if SCENE.with(Cell::get) {
+        CURRENT_NODE.with(|current| current.set(node));
+    }
+}
+
+pub(crate) fn current_node() -> u64 {
+    CURRENT_NODE.with(Cell::get)
+}
+
+/// `layer` is the offscreen surface of transformed element `node`, painted
+/// with document-to-layer offset `offset`.
+pub(crate) fn note_reference_layer(layer: &Pixmap, node: u64, offset: (f32, f32)) {
+    if scene_active() {
+        REFERENCES.with(|references| {
+            references.borrow_mut().insert(
+                surface_id(layer),
+                Reference {
+                    node,
+                    offset: [offset.0, offset.1],
+                    projective: None,
+                },
+            )
+        });
+    }
+}
+
+/// As [`note_reference_layer`], for a 3D plane drawn through `projective`
+/// (row-major 4x4, layer pixels to the enclosing surface's pixels).
+pub(crate) fn note_projective_layer(
+    layer: &Pixmap,
+    node: u64,
+    offset: (f32, f32),
+    projective: [f32; 16],
+) {
+    if scene_active() {
+        REFERENCES.with(|references| {
+            references.borrow_mut().insert(
+                surface_id(layer),
+                Reference {
+                    node,
+                    offset: [offset.0, offset.1],
+                    projective: Some(projective),
+                },
+            )
+        });
+    }
+}
+
+fn take_reference(target: usize) -> Option<Reference> {
+    if !SCENE.with(Cell::get) {
+        return None;
+    }
+    REFERENCES.with(|references| references.borrow_mut().remove(&target))
+}
+
+/// Whether drawing on `target` may skip rasterizing: a scene recording
+/// keeps only the ops of recorded surfaces, never their pixels.
+pub(crate) fn skip_raster(target: &Pixmap) -> bool {
+    if !SCENE.with(Cell::get) {
+        return false;
+    }
+    with_recorder(|recorder| recorder.frame_index(surface_id(target)).is_some()).unwrap_or(false)
+}
+
+/// Record a scene op on `target` with its clip. False when `target` is not
+/// recorded or the clip cannot be expressed; the caller then paints pixels.
+pub(crate) fn emit_scene_op(
+    target: &Pixmap,
+    mask: Option<&Mask>,
+    clip_rect: Option<[f32; 4]>,
+    op: Op,
+) -> bool {
+    if !scene_active() {
+        return false;
+    }
+    with_recorder(|recorder| {
+        if !recorder.focus(surface_id(target)) {
+            return false;
+        }
+        recorder.emit_scene(mask, clip_rect, op)
+    })
+    .unwrap_or(false)
+}
+
+/// Whether ops under `mask` can carry their clip in a scene recording.
+pub(crate) fn scene_clip_known(mask: Option<&Mask>) -> bool {
+    with_recorder(|recorder| !matches!(recorder.clip_state(mask), ClipState::Unknown))
+        .unwrap_or(false)
+}
+
+/// A hit region marker on `target` (no clip of its own; `clip` is carried).
+pub(crate) fn emit_scene_marker(target: &Pixmap, op: Op) {
+    if !scene_active() {
+        return;
+    }
+    with_recorder(|recorder| {
+        if recorder.focus(surface_id(target)) {
+            recorder.push_unclipped(op);
+        }
+    });
+}
+
+/// Whether a mask's pixels may stay unrasterized: a scene recording with
+/// known shapes. `shapes_after` is what the mask will be made of.
+pub(crate) fn defer_mask_raster(mask: &Mask, shapes_after: &MaskShapes) -> bool {
+    if !scene_active() {
+        return false;
+    }
+    let lazy_now = with_recorder(|recorder| {
+        let (shapes, _) = recorder.lookup_mask(mask);
+        matches!(shapes, MaskShapes::Empty) || recorder.mask_is_lazy(mask)
+    })
+    .unwrap_or(false);
+    lazy_now && !matches!(shapes_after, MaskShapes::Unknown)
+}
+
+pub(crate) fn store_lazy_mask(mask: &Mask, shapes: MaskShapes) {
+    with_recorder(|recorder| recorder.store_mask_lazy(mask, shapes, true));
+}
+
+pub(crate) fn mask_is_lazy(mask: &Mask) -> bool {
+    with_recorder(|recorder| recorder.mask_is_lazy(mask)).unwrap_or(false)
+}
+
+/// Rasterize a lazy mask in place before something reads or unions its
+/// pixels. No-op for ordinary masks.
+pub(crate) fn materialize_mask(mask: &mut Mask) {
+    let Some((shapes, true)) =
+        with_recorder(|recorder| (recorder.lookup_mask(mask).0, recorder.mask_is_lazy(mask)))
+    else {
+        return;
+    };
+    let size = with_recorder(|recorder| recorder.logical_size(mask));
+    if let Some((width, height)) = size.filter(|&size| size != (mask.width(), mask.height())) {
+        if let Some(full) = Mask::new(width, height) {
+            *mask = full;
+        }
+    }
+    if let MaskShapes::Paths(paths) = &shapes {
+        rasterize_shapes(mask, paths);
+    }
+    with_recorder(|recorder| recorder.store_mask(mask, shapes));
+}
+
+/// A rasterized copy of `mask` when it is lazy, for pixel readers.
+pub(crate) fn materialized(mask: &Mask) -> Option<Mask> {
+    with_recorder(|recorder| recorder.materialized_copy(mask)).flatten()
+}
+
+fn rasterize_shapes(mask: &mut Mask, shapes: &[ClipShape]) {
+    let mut first = true;
+    for shape in shapes {
+        let Some(path) = path_of(&shape.path) else {
+            continue;
+        };
+        let fill_rule = match shape.rule {
+            Rule::NonZero => FillRule::Winding,
+            Rule::EvenOdd => FillRule::EvenOdd,
+        };
+        let [sx, ky, kx, sy, tx, ty] = shape.transform;
+        let transform = Transform::from_row(sx, ky, kx, sy, tx, ty);
+        if first {
+            mask.data_mut().fill(0);
+            mask.fill_path(&path, fill_rule, true, transform);
+            first = false;
+        } else {
+            mask.intersect_path(&path, fill_rule, true, transform);
+        }
+    }
+}
+
+/// A tiny-skia path from recorded verbs.
+pub fn path_of(verbs: &[Verb]) -> Option<Path> {
+    let mut builder = tiny_skia::PathBuilder::new();
+    for verb in verbs {
+        match *verb {
+            Verb::M(x, y) => builder.move_to(x, y),
+            Verb::L(x, y) => builder.line_to(x, y),
+            Verb::Q(x1, y1, x, y) => builder.quad_to(x1, y1, x, y),
+            Verb::C(x1, y1, x2, y2, x, y) => builder.cubic_to(x1, y1, x2, y2, x, y),
+            Verb::Z => builder.close(),
+        }
+    }
+    builder.finish()
+}
+
+/// A clip mask for a `width` x `height` surface. A scene recording never
+/// reads mask pixels unless it materializes them, so it hands out a 1x1
+/// placeholder instead of allocating (and zeroing) a document-sized mask
+/// per clip; the shapes and surface size are kept on the side.
+pub(crate) fn scene_placeholder_mask(width: u32, height: u32) -> Option<Mask> {
+    if !scene_active() {
+        return None;
+    }
+    let mask = Mask::new(1, 1)?;
+    with_recorder(|recorder| {
+        recorder.mask_sizes.insert(mask_id(&mask), (width, height));
+        recorder.store_mask_lazy(&mask, MaskShapes::Empty, true);
+    });
+    Some(mask)
+}
+
+/// Carry a placeholder's surface size over to its copy.
+pub(crate) fn copy_mask_size(from: &Mask, to: &Mask) {
+    with_recorder(|recorder| {
+        if let Some(&size) = recorder.mask_sizes.get(&mask_id(from)) {
+            recorder.mask_sizes.insert(mask_id(to), size);
+        }
+    });
 }

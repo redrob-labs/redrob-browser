@@ -185,6 +185,46 @@ pub trait CoreStyle {
 /// Sets the layout used for the children of this node
 ///
 /// The default values depends on on which feature flags are enabled. The order of precedence is: Flex, Grid, Block, None.
+/// A float's `shape-outside: circle() | ellipse()`, relative to its margin
+/// box. Radii are px, or fractions of the reference size when `*_percent`
+/// (a circle's percentage uses sqrt(w^2 + h^2) / sqrt(2)); the centre is a
+/// fraction of the box.
+#[derive(Copy, Clone, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct FloatShape {
+    /// `circle()` (one radius) rather than `ellipse()`
+    pub circle: bool,
+    /// Horizontal radius (the circle's radius)
+    pub rx: f32,
+    /// Whether `rx` is a fraction of the reference size
+    pub rx_percent: bool,
+    /// Vertical radius (unused for a circle)
+    pub ry: f32,
+    /// Whether `ry` is a fraction of the box height
+    pub ry_percent: bool,
+    /// Centre x as a fraction of the box width
+    pub cx: f32,
+    /// Centre y as a fraction of the box height
+    pub cy: f32,
+}
+
+impl FloatShape {
+    /// The shape's centre and radii in px for a `width` x `height` box.
+    pub fn resolve(&self, width: f32, height: f32) -> (f32, f32, f32, f32) {
+        let (rx, ry) = if self.circle {
+            let reference = (width * width + height * height).sqrt() / core::f32::consts::SQRT_2;
+            let r = if self.rx_percent { self.rx * reference } else { self.rx };
+            (r, r)
+        } else {
+            (
+                if self.rx_percent { self.rx * width } else { self.rx },
+                if self.ry_percent { self.ry * height } else { self.ry },
+            )
+        };
+        (self.cx * width, self.cy * height, rx.max(0.0), ry.max(0.0))
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Display {
@@ -445,6 +485,10 @@ pub struct Style<S: CheapCloneStr = DefaultCheapStr> {
     /// Whether a child is display:table or not. This affects children of block layouts.
     /// This should really be part of `Display`, but it is currently seperate because table layout isn't implemented
     pub item_is_table: bool,
+    /// The box establishes an independent block formatting context
+    /// (`display: flow-root`, layout/paint containment, multi-column): it
+    /// contains its floats and is placed beside earlier floats, not under them.
+    pub establishes_bfc: bool,
     /// Is it a replaced element like an image or form field?
     /// <https://drafts.csswg.org/css-sizing-3/#min-content-zero>
     pub item_is_replaced: bool,
@@ -472,6 +516,9 @@ pub struct Style<S: CheapCloneStr = DefaultCheapStr> {
     #[cfg(feature = "float_layout")]
     /// Should the box clear floats
     pub clear: Clear,
+    #[cfg(feature = "float_layout")]
+    /// A float's `shape-outside` basic shape (inline content wraps around it)
+    pub shape_outside: Option<FloatShape>,
 
     // Position properties
     /// What should the `position` value of this struct use as a base offset?
@@ -603,6 +650,7 @@ impl<S: CheapCloneStr> Style<S> {
         dummy: core::marker::PhantomData,
         display: Display::DEFAULT,
         item_is_table: false,
+        establishes_bfc: false,
         item_is_replaced: false,
         item_aspect_ratio_is_intrinsic: false,
         intrinsic_size_containment: Size { width: false, height: false },
@@ -614,6 +662,8 @@ impl<S: CheapCloneStr> Style<S> {
         float: Float::None,
         #[cfg(feature = "float_layout")]
         clear: Clear::None,
+        #[cfg(feature = "float_layout")]
+        shape_outside: None,
         position: Position::Relative,
         inset: Rect::auto(),
         margin: Rect::zero(),
@@ -865,6 +915,11 @@ impl<S: CheapCloneStr> BlockItemStyle for Style<S> {
         self.item_is_table
     }
 
+    #[inline(always)]
+    fn establishes_bfc(&self) -> bool {
+        self.establishes_bfc
+    }
+
     #[cfg(feature = "float_layout")]
     #[inline(always)]
     fn float(&self) -> Float {
@@ -876,6 +931,12 @@ impl<S: CheapCloneStr> BlockItemStyle for Style<S> {
     fn clear(&self) -> Clear {
         self.clear
     }
+
+    #[cfg(feature = "float_layout")]
+    #[inline(always)]
+    fn shape_outside(&self) -> Option<FloatShape> {
+        self.shape_outside
+    }
 }
 
 #[cfg(feature = "block_layout")]
@@ -883,6 +944,11 @@ impl<T: BlockItemStyle> BlockItemStyle for &'_ T {
     #[inline(always)]
     fn is_table(&self) -> bool {
         (*self).is_table()
+    }
+
+    #[inline(always)]
+    fn establishes_bfc(&self) -> bool {
+        (*self).establishes_bfc()
     }
 
     #[cfg(feature = "float_layout")]
@@ -895,6 +961,12 @@ impl<T: BlockItemStyle> BlockItemStyle for &'_ T {
     #[inline(always)]
     fn clear(&self) -> Clear {
         (*self).clear()
+    }
+
+    #[cfg(feature = "float_layout")]
+    #[inline(always)]
+    fn shape_outside(&self) -> Option<FloatShape> {
+        (*self).shape_outside()
     }
 }
 
@@ -1238,6 +1310,7 @@ mod tests {
             dummy: core::marker::PhantomData,
             display: Default::default(),
             item_is_table: false,
+        establishes_bfc: false,
             item_is_replaced: false,
             item_aspect_ratio_is_intrinsic: false,
             intrinsic_size_containment: Size { width: false, height: false },
@@ -1246,6 +1319,8 @@ mod tests {
             float: Default::default(),
             #[cfg(feature = "float_layout")]
             clear: Default::default(),
+            #[cfg(feature = "float_layout")]
+            shape_outside: None,
             direction: Default::default(),
             overflow: Default::default(),
             scrollbar_width: 0.0,

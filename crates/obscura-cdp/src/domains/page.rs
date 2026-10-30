@@ -552,6 +552,10 @@ fn encode_long_full_page_png(
 /// hatch for callers investigating a slow or missing asset.
 #[cfg(feature = "render")]
 pub(crate) async fn prepare_capture_resources_if_requested(page: &mut obscura_browser::Page) {
+    // Text in a web font that is still loading is not painted with a
+    // fallback (Chromium's block period), so a screenshot does not depend on
+    // network timing.
+    page.wait_for_web_fonts(3_000).await;
     let Some(deadline_ms) = std::env::var("OBSCURA_RENDER_RESOURCE_DEADLINE_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -2285,6 +2289,21 @@ pub async fn handle(
             }
             #[cfg(not(feature = "render"))]
             Err("Page.captureScreenshot requires a build with the render feature".to_string())
+        }
+        "redrobSceneAttach" => {
+            // A Redrob extension: stream this tab's compositor frames
+            // (docs/COMPOSITOR.md) over a local socket; returns its address.
+            #[cfg(feature = "render")]
+            {
+                crate::scene_channel::attach(ctx, session_id, params)
+            }
+            #[cfg(not(feature = "render"))]
+            Err("Page.redrobSceneAttach requires a build with the render feature".to_string())
+        }
+        "redrobSceneDetach" => {
+            #[cfg(feature = "render")]
+            crate::scene_channel::detach(ctx, session_id);
+            Ok(json!({}))
         }
         "redrobDisplayList" => {
             // A Redrob extension: the region `clip` (same shape and units as

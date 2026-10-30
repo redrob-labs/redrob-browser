@@ -163,7 +163,7 @@ async fn assert_stop_loading_cancels_images(native: bool) {
         let fixture = tokio::task::spawn_local(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut buffer = [0; 2048];
-            stream.read(&mut buffer).await.unwrap();
+            let _request_len = stream.read(&mut buffer).await.unwrap();
             let body = if native { "<!doctype html><title>Images</title>" }
                 else { "<!doctype html><img src='/held.png'>" };
             stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();

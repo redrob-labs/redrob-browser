@@ -54,6 +54,11 @@ impl Autoscroll {
         self.anchor.is_some()
     }
 
+    /// Where autoscroll started: the box there is the one that scrolls.
+    pub fn anchor(&self) -> Option<Pos2> {
+        self.anchor
+    }
+
     /// Take middle-button events (and the stopping click while active) out of
     /// `events` before they reach the page.
     pub fn filter(&mut self, events: &mut Vec<egui::Event>, rect: Rect) -> Step {

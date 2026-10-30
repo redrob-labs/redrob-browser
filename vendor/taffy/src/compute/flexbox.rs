@@ -2330,12 +2330,23 @@ fn perform_absolute_layout_on_absolute_children(
             known_dimensions.height = Some(f32_max(new_height_raw, 0.0));
             known_dimensions = known_dimensions.maybe_apply_aspect_ratio(aspect_ratio).maybe_clamp(min_size, max_size);
         }
+        // CSS 2 §10.3.7: an auto-width absolutely positioned box shrinks to
+        // fit the containing block minus its insets and margins, so a box
+        // at left:-9999px has 9999px more room (w3schools measures a hidden
+        // solution panel that way) and one at left:100% has none.
+        let abs_available_width = (container_width
+            - left.unwrap_or(0.0)
+            - right.unwrap_or(0.0)
+            - margin.left.unwrap_or(0.0)
+            - margin.right.unwrap_or(0.0))
+        .max(0.0)
+        .maybe_clamp(min_size.width, max_size.width);
         let measured_size = tree.measure_child_size_both(
             child,
             known_dimensions,
             constants.node_inner_size,
             Size {
-                width: AvailableSpace::Definite(container_width.maybe_clamp(min_size.width, max_size.width)),
+                width: AvailableSpace::Definite(abs_available_width),
                 height: AvailableSpace::Definite(container_height.maybe_clamp(min_size.height, max_size.height)),
             },
             SizingMode::InherentSize,
@@ -2348,7 +2359,7 @@ fn perform_absolute_layout_on_absolute_children(
             final_size.map(Some),
             constants.node_inner_size,
             Size {
-                width: AvailableSpace::Definite(container_width.maybe_clamp(min_size.width, max_size.width)),
+                width: AvailableSpace::Definite(abs_available_width),
                 height: AvailableSpace::Definite(container_height.maybe_clamp(min_size.height, max_size.height)),
             },
             SizingMode::InherentSize,

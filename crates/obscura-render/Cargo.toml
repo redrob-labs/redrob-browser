@@ -8,27 +8,35 @@ description = "Optional scoped render layer for Obscura: layout (taffy) and, wit
 
 [features]
 default = []
-# Rasterize the laid-out tree to a pixmap (tiny-skia) with text (cosmic-text
-# shaping + line breaking, ab_glyph fallback) and images.
+# Rasterize the laid-out tree to a pixmap (tiny-skia) with text (Parley
+# inline layout, swash glyphs, ab_glyph fallback) and images.
 # Off by default; the layout core (getBoundingClientRect etc.) works without it.
-paint = ["dep:obscura-ssrf", "dep:tiny-skia", "dep:ab_glyph", "dep:cosmic-text", "dep:swash", "dep:image", "dep:ureq", "dep:base64", "dep:resvg", "dep:usvg", "dep:url", "dep:wuff", "dep:avif-decode", "dep:avif-parse"]
+paint = ["dep:obscura-ssrf", "dep:tiny-skia", "dep:ab_glyph", "dep:swash", "dep:image", "dep:ureq", "dep:base64", "dep:resvg", "dep:usvg", "dep:url", "dep:wuff", "dep:avif-decode", "dep:avif-parse"]
 # Record a paint as a serializable display list (docs/GPU-PAINT.md, phase B)
 # for a GPU rasterizer to replay. The CPU paint is unchanged without it.
 display-list = ["paint", "dep:serde"]
+# Build GPU compositor frames (crates/redrob-scene): a display list with a
+# spatial tree and hit regions, recorded from the same paint as screenshots.
+scene = ["display-list"]
+# Decode the frame a paused <video> shows through GStreamer (docs/MEDIA.md).
+# Needs the GStreamer development files at build time and its runtime when
+# running, as redrob-shell's `media` feature.
+media = ["paint", "dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
 
 [dependencies]
 taffy = { workspace = true }
+# Inline formatting contexts: shaping (harfrust), bidi, line breaking and
+# inline boxes (crate::ifc). Fonts come from our own fontique collection
+# (bundled faces, configured directories, web fonts), never the system scan.
+parley = { version = "0.12", default-features = false, features = ["std", "complex-scripts"] }
+fontique = { version = "0.12", default-features = false, features = ["std"] }
 obscura-dom = { workspace = true }
+# The CSS `cursor` value type and the scene protocol the compositor reads.
+redrob-scene = { workspace = true }
 obscura-ssrf = { workspace = true, optional = true }
 tiny-skia = { workspace = true, optional = true }
 ab_glyph = { workspace = true, optional = true }
-# Real inline text layout: HarfBuzz-class shaping (rustybuzz) + UAX#14 line
-# breaking, the same algorithms browsers use. Built with only our embedded
-# fonts (no system-font scan) so layout stays deterministic across hosts.
-cosmic-text = { version = "=0.14.2", default-features = false, features = ["std", "swash", "shape-run-cache"], optional = true }
-# Keep this exactly aligned with cosmic-text 0.14's raster backend. Cosmic
-# and the renderer consume the same canonical variation coordinates for
-# shaping and rasterization.
+# Rasterizes Parley glyph runs.
 swash = { version = "=0.2.0", default-features = false, features = ["std", "scale", "render"], optional = true }
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "ico", "jpeg", "png", "webp"], optional = true }
 ureq = { version = "2.9", default-features = false, features = ["tls"], optional = true }
@@ -47,8 +55,14 @@ avif-decode = { version = "3.0.0", default-features = false, optional = true }
 avif-parse = { version = "2.1.0", optional = true }
 # Same `log` instance usvg emits glyph-fallback warnings through, so tests can
 # install a collector and assert on them.
+gstreamer = { version = "0.25", optional = true }
+gstreamer-app = { version = "0.25", optional = true }
+gstreamer-video = { version = "0.25", optional = true }
+
 [dev-dependencies]
 log = "0.4"
+# Rasterizes scene frames in tests, as the window does.
+redrob-scene-raster = { path = "../redrob-scene-raster" }
 
 [lib]
 path = "src/lib.rs"
@@ -56,4 +70,9 @@ path = "src/lib.rs"
 [[bin]]
 name = "paint_file"
 path = "src/bin/paint_file.rs"
+required-features = ["paint"]
+
+[[bin]]
+name = "layout_bench"
+path = "src/bin/layout_bench.rs"
 required-features = ["paint"]

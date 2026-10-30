@@ -8,8 +8,9 @@ use std::task::{Context, Poll};
 
 use deno_core::{v8, JsRuntime, RuntimeOptions};
 use obscura_dom::{DomTree, NodeId};
+use obscura_net::ResourceRequest;
 #[cfg(feature = "render")]
-use obscura_net::{RequestCredentials, RequestMode, ResourceRequest};
+use obscura_net::{RequestCredentials, RequestMode};
 
 /// Re-exported so other crates (obscura-browser, obscura-cdp) can name the V8
 /// isolate handle without taking a direct dependency on deno_core.
@@ -38,6 +39,29 @@ impl obscura_render::CanvasSurfaceSource for RuntimeCanvasSurfaceSource<'_> {
             surface.height,
             surface.pixels.as_ref(),
         )
+    }
+}
+
+/// Canvas bitmaps plus the painted child documents of iframes: both are
+/// replaced content a capture draws into the element's content box.
+#[cfg(feature = "render")]
+struct CaptureSurfaceSource<'a> {
+    canvases: &'a HashMap<NodeId, crate::ops::CanvasBackingSurface>,
+    frames: &'a HashMap<NodeId, (u32, u32, Vec<u8>)>,
+}
+
+#[cfg(feature = "render")]
+impl obscura_render::CanvasSurfaceSource for CaptureSurfaceSource<'_> {
+    fn surface(&self, node: NodeId) -> Option<obscura_render::CanvasSurface<'_>> {
+        if let Some(surface) = self.canvases.get(&node) {
+            return obscura_render::CanvasSurface::from_rgba8(
+                surface.width,
+                surface.height,
+                surface.pixels.as_ref(),
+            );
+        }
+        let (width, height, pixels) = self.frames.get(&node)?;
+        obscura_render::CanvasSurface::from_rgba8(*width, *height, pixels)
     }
 }
 
@@ -1297,6 +1321,10 @@ impl ObscuraJsRuntime {
         gs.activity_generation = 0;
         gs.page_in_flight = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         gs.already_started_scripts.borrow_mut().clear();
+        gs.html_parser.borrow_mut().take();
+        gs.parser_written_scripts.borrow_mut().clear();
+        gs.parser_blocking_written.set(false);
+        gs.parser_script_depth.set(0);
         // A new document owns a fresh retained scene and resource cache.
         #[cfg(feature = "render")]
         {
@@ -1776,6 +1804,78 @@ impl ObscuraJsRuntime {
     /// CSSOM geometry. A mismatched ad-hoc viewport/base returns `None` so the
     /// browser layer can retain its compatibility one-shot path.
     #[cfg(feature = "render")]
+    /// The child documents of this document's iframes, each painted at its
+    /// own viewport with a transparent canvas (straight RGBA), by owning
+    /// element. A capture draws them as the iframes' content.
+    #[cfg(feature = "render")]
+    fn frame_surfaces(&self) -> HashMap<NodeId, (u32, u32, Vec<u8>)> {
+        let mut out = HashMap::new();
+        let children = self.realm_states().borrow().child_frames(&self.state);
+        if children.is_empty() {
+            return out;
+        }
+        // A child document's viewport is its iframe's padding box.
+        let sizes: HashMap<NodeId, (f32, f32)> = {
+            let mut parent = self.state.borrow_mut();
+            with_sync_render_loading_disabled(&mut parent, |parent| {
+                ensure_resolved_scroll(parent)?;
+                let prepared = parent.prepared_render.as_ref()?;
+                let (_, scroll) = parent.resolved_scroll.as_ref()?;
+                Some(
+                    children
+                        .iter()
+                        .filter_map(|(node, _)| {
+                            let metrics = prepared.element_scroll_metrics(*node, scroll)?;
+                            Some((*node, metrics.client_size))
+                        })
+                        .collect(),
+                )
+            })
+            .unwrap_or_default()
+        };
+        for (node, child) in children {
+            if Rc::ptr_eq(&child, &self.state) {
+                continue;
+            }
+            let Some(&(width, height)) = sizes.get(&node) else {
+                continue;
+            };
+            if width < 1.0 || height < 1.0 {
+                continue;
+            }
+            let Ok(mut state) = child.try_borrow_mut() else {
+                continue;
+            };
+            state.set_viewport(width.round() as f64, height.round() as f64);
+            let pixmap = with_sync_render_loading_disabled(&mut state, |state| {
+                ensure_resolved_scroll(state)?;
+                let ObscuraState {
+                    dom,
+                    prepared_render,
+                    render_resources,
+                    resolved_scroll,
+                    canvas_surfaces,
+                    ..
+                } = state;
+                let (_, scroll) = resolved_scroll.as_ref()?;
+                let canvas_surfaces = RuntimeCanvasSurfaceSource(canvas_surfaces);
+                obscura_render::paint_prepared_with_scroll_and_surface_color_and_canvas_surfaces(
+                    dom.as_ref()?,
+                    prepared_render.as_mut()?,
+                    render_resources,
+                    scroll,
+                    [0, 0, 0, 0],
+                    &canvas_surfaces,
+                )
+            });
+            if let Some(pixmap) = pixmap {
+                let (width, height) = (pixmap.width(), pixmap.height());
+                out.insert(node, (width, height, pixmap.take_demultiplied()));
+            }
+        }
+        out
+    }
+
     pub fn screenshot_prepared(
         &self,
         viewport: (f32, f32),
@@ -1849,6 +1949,7 @@ impl ObscuraJsRuntime {
         base_url: Option<&str>,
         surface_color: [u8; 4],
     ) -> Option<Vec<u8>> {
+        let frames = self.frame_surfaces();
         let mut state = self.state.borrow_mut();
         let effective_base = document_base_url(&state);
         if viewport != state.viewport || base_url != effective_base.as_deref() {
@@ -1865,7 +1966,10 @@ impl ObscuraJsRuntime {
                 ..
             } = state;
             let (_, scroll) = resolved_scroll.as_ref()?;
-            let canvas_surfaces = RuntimeCanvasSurfaceSource(canvas_surfaces);
+            let canvas_surfaces = CaptureSurfaceSource {
+                canvases: canvas_surfaces,
+                frames: &frames,
+            };
             obscura_render::screenshot_prepared_with_scroll_and_surface_color_and_canvas_surfaces(
                 dom.as_ref()?,
                 prepared_render.as_mut()?,
@@ -1924,6 +2028,7 @@ impl ObscuraJsRuntime {
         region: obscura_render::CaptureRegion,
         surface_color: [u8; 4],
     ) -> Result<obscura_render::Pixmap, obscura_render::CaptureError> {
+        let frames = self.frame_surfaces();
         let mut state = self.state.borrow_mut();
         with_sync_render_loading_disabled(&mut state, |state| {
             ensure_resolved_scroll(state).ok_or(obscura_render::CaptureError::PaintFailed)?;
@@ -1938,7 +2043,10 @@ impl ObscuraJsRuntime {
             let (_, scroll) = resolved_scroll
                 .as_ref()
                 .ok_or(obscura_render::CaptureError::PaintFailed)?;
-            let canvas_surfaces = RuntimeCanvasSurfaceSource(canvas_surfaces);
+            let canvas_surfaces = CaptureSurfaceSource {
+                canvases: canvas_surfaces,
+                frames: &frames,
+            };
             obscura_render::paint_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces(
                 dom.as_ref()
                     .ok_or(obscura_render::CaptureError::PaintFailed)?,
@@ -2046,6 +2154,77 @@ impl ObscuraJsRuntime {
                 &canvas_surfaces,
             )
         })
+    }
+
+    /// One GPU compositor frame of the prepared document
+    /// (crates/redrob-scene). The compositor starts from the live scroll
+    /// offsets returned with it.
+    #[cfg(feature = "render")]
+    pub fn scene_frame_with_surface_color(
+        &self,
+        surface_color: [u8; 4],
+        raster_scale: f32,
+    ) -> Result<obscura_render::SceneFrame, obscura_render::CaptureError> {
+        let mut state = self.state.borrow_mut();
+        with_sync_render_loading_disabled(&mut state, |state| {
+            ensure_resolved_scroll(state).ok_or(obscura_render::CaptureError::PaintFailed)?;
+            let ObscuraState {
+                dom,
+                prepared_render,
+                render_resources,
+                canvas_surfaces,
+                scroll_offset,
+                element_scroll_offsets,
+                ..
+            } = state;
+            let canvas_surfaces = RuntimeCanvasSurfaceSource(canvas_surfaces);
+            obscura_render::build_scene_prepared(
+                dom.as_ref()
+                    .ok_or(obscura_render::CaptureError::PaintFailed)?,
+                prepared_render
+                    .as_mut()
+                    .ok_or(obscura_render::CaptureError::PaintFailed)?,
+                render_resources,
+                *scroll_offset,
+                element_scroll_offsets,
+                surface_color,
+                &canvas_surfaces,
+                raster_scale,
+            )
+        })
+    }
+
+    /// What a compositor frame of this document depends on, cheaply: the
+    /// activity and scroll generations, whether layout must be rebuilt
+    /// before the next paint (DOM, style or resource changes), and the
+    /// retained layout's paint epoch.
+    #[cfg(feature = "render")]
+    pub fn scene_change_signals(&self) -> (u64, u64, bool, Option<u64>) {
+        let state = self.state.borrow();
+        let dirty = state.prepared_render.is_none() || !state.pending_style_mutations.is_empty();
+        (
+            state.activity_generation,
+            state.scroll_generation,
+            dirty,
+            state
+                .prepared_render
+                .as_ref()
+                .map(|render| render.paint_epoch()),
+        )
+    }
+
+    /// Live scroll offsets: the document's and every scrolled element's
+    /// (keyed by NodeId index), plus the scroll generation, which changes
+    /// whenever any of them does.
+    #[cfg(feature = "render")]
+    pub fn scroll_snapshot(&self) -> ((f32, f32), Vec<(u64, (f32, f32))>, u64) {
+        let state = self.state.borrow();
+        let elements = state
+            .element_scroll_offsets
+            .iter()
+            .map(|(node, offset)| (node.index() as u64, *offset))
+            .collect();
+        (state.scroll_offset, elements, state.scroll_generation)
     }
 
     /// Capture a document-space rectangle with the PDF print-background
@@ -2302,7 +2481,10 @@ impl ObscuraJsRuntime {
                 .blocked_urls
                 .iter()
                 .any(|pattern| crate::ops::glob_match(pattern, &url));
-            let allowed = page_render_resource_url_allowed(&state.url, &url);
+            let allowed = page_render_resource_url_allowed(
+                &state.url,
+                obscura_render::video_header::media_header_target(&url).unwrap_or(&url),
+            );
             if blocked || !allowed {
                 match profile {
                     Some(profile) => state.render_resources.seed_image_missing(url, profile),
@@ -2407,14 +2589,6 @@ impl ObscuraJsRuntime {
         self.state.borrow().render_resource_notify.clone()
     }
 
-    /// Start page-transport loads for `requests` (already marked in flight).
-    /// Requests keep cookies, proxy policy, callbacks, CORS and response
-    /// limits of the page transport, share the page-wide concurrency limit,
-    /// run to completion in the background and deliver into this runtime's
-    /// result channel. Outside a Tokio context the requests are kept in a
-    /// backlog and started at the next event-loop turn. Returns the number
-    /// of requests started now.
-    #[cfg(feature = "render")]
     /// Start fetching parser-discovered entry modules now, through the page
     /// transport and with the request profile the module loader uses for an
     /// entry, so their downloads overlap instead of running one after another
@@ -2470,6 +2644,14 @@ impl ObscuraJsRuntime {
         started
     }
 
+    /// Start page-transport loads for `requests` (already marked in flight).
+    /// Requests keep cookies, proxy policy, callbacks, CORS and response
+    /// limits of the page transport, share the page-wide concurrency limit,
+    /// run to completion in the background and deliver into this runtime's
+    /// result channel. Outside a Tokio context the requests are kept in a
+    /// backlog and started at the next event-loop turn. Returns the number
+    /// of requests started now.
+    #[cfg(feature = "render")]
     pub fn start_render_resource_loads(
         &self,
         requests: Vec<(String, Option<crate::ops::ImageRequestProfile>, bool)>,
@@ -2518,7 +2700,10 @@ impl ObscuraJsRuntime {
                         // Every load of this page waits for the same permits, so
                         // repeated scans cannot multiply the request rate.
                         let _permit = limiter.acquire_owned().await.ok();
-                        let parsed = match url::Url::parse(&raw) {
+                        let header_target = obscura_render::video_header::media_header_target(&raw)
+                            .map(str::to_owned);
+                        let parsed = match url::Url::parse(header_target.as_deref().unwrap_or(&raw))
+                        {
                             Ok(parsed) => parsed,
                             Err(_) => {
                                 return crate::ops::RenderResourceLoad {
@@ -2536,6 +2721,11 @@ impl ObscuraJsRuntime {
                             obscura_net::ResourceType::Image
                         };
                         let mut request = ResourceRequest::subresource(kind, &initiator);
+                        if header_target.is_some() {
+                            request.resource_type = obscura_net::ResourceType::Other;
+                            request.prefix_bytes =
+                                Some(obscura_render::video_header::MEDIA_HEADER_BYTES);
+                        }
                         match profile {
                             Some(crate::ops::ImageRequestProfile::CorsSameOrigin) => {
                                 request.mode = RequestMode::Cors;
@@ -2665,6 +2855,16 @@ impl ObscuraJsRuntime {
         !self.state.borrow().render_resource_in_flight.is_empty()
     }
 
+    /// Whether a web font this document requested is still loading.
+    #[cfg(feature = "render")]
+    pub fn has_pending_font_resources(&self) -> bool {
+        self.state
+            .borrow()
+            .render_resource_in_flight
+            .iter()
+            .any(|(_, _, is_font)| *is_font)
+    }
+
     /// Apply every finished page-transport load without waiting. Called at
     /// the runtime's own event-loop turns and promise waits and by the page
     /// around protocol commands, so late bytes reach layout, paint and the
@@ -2696,6 +2896,7 @@ impl ObscuraJsRuntime {
             ));
             let is_font = load.is_font;
             let bytes = match &load.response {
+                // 206 Partial Content answers a header (Range) read.
                 Some(response) if (200..300).contains(&response.status) => {
                     loaded += 1;
                     Some(std::sync::Arc::clone(&response.body))
@@ -3870,6 +4071,98 @@ impl ObscuraJsRuntime {
             .borrow()
             .document_write_inserted_script
             .replace(false)
+    }
+
+    /// Make `parser`'s live document this runtime's document and let
+    /// `document.write` from parser-inserted scripts feed it.
+    pub fn begin_streaming_parse(&self, parser: obscura_dom::StreamingParser) {
+        self.set_dom(parser.dom());
+        let state = self.state.borrow();
+        *state.html_parser.borrow_mut() = Some(Rc::new(parser));
+        state.parser_script_depth.set(0);
+        state.parser_written_scripts.borrow_mut().clear();
+        state.parser_blocking_written.set(false);
+    }
+
+    /// Whether the document parser is still running.
+    pub fn is_streaming_parse_active(&self) -> bool {
+        self.state.borrow().html_parser.borrow().is_some()
+    }
+
+    /// Parse until the next parser-inserted `</script>` or the end of input.
+    /// `None` when no streaming parse is running.
+    pub fn parser_pump(&self) -> Option<obscura_dom::ParseStep> {
+        let parser = self.state.borrow().html_parser.borrow().clone()?;
+        let step = parser.pump();
+        crate::ops::note_parser_dom_progress(&mut self.state.borrow_mut());
+        Some(step)
+    }
+
+    /// Parsing reached the end of the document.
+    pub fn end_streaming_parse(&self) {
+        let state = self.state.borrow();
+        state.html_parser.borrow_mut().take();
+        state.parser_written_scripts.borrow_mut().clear();
+        state.parser_blocking_written.set(false);
+        if let Some(dom) = state.dom.as_ref() {
+            dom.take_parser_insertions();
+        }
+    }
+
+    /// HTML's script nesting level, raised while a parser-inserted script runs.
+    pub fn enter_parser_script(&self) {
+        let state = self.state.borrow();
+        state
+            .parser_script_depth
+            .set(state.parser_script_depth.get() + 1);
+    }
+
+    pub fn leave_parser_script(&self) {
+        let state = self.state.borrow();
+        state
+            .parser_script_depth
+            .set(state.parser_script_depth.get().saturating_sub(1));
+    }
+
+    /// Scripts `document.write` put into the parser that the page must
+    /// prepare (external, module, import map), in order. Taking them also
+    /// lifts a parsing-blocking pause; the caller runs the blocking one first.
+    pub fn take_parser_written_scripts(&self) -> Vec<NodeId> {
+        let state = self.state.borrow();
+        state.parser_blocking_written.set(false);
+        let written = std::mem::take(&mut *state.parser_written_scripts.borrow_mut());
+        written
+    }
+
+    /// HTML's "already started" flag for a parser-inserted script.
+    pub fn mark_script_started(&self, node: NodeId) {
+        self.state
+            .borrow()
+            .already_started_scripts
+            .borrow_mut()
+            .insert(node);
+    }
+
+    /// Tell page script about nodes the parser inserted since the last call:
+    /// mutation records, custom element upgrades, iframe loads. Skipped when
+    /// nothing in the page can observe them.
+    pub fn flush_parser_insertions(&mut self) {
+        let has_insertions = self
+            .state
+            .borrow()
+            .dom
+            .as_ref()
+            .is_some_and(|dom| dom.has_parser_insertions());
+        if !has_insertions {
+            return;
+        }
+        let _ = self.execute_script(
+            "<parser-insertions>",
+            "globalThis.__obscuraParserInserted && globalThis.__obscuraParserInserted();",
+        );
+        if let Some(dom) = self.state.borrow().dom.as_ref() {
+            dom.take_parser_insertions();
+        }
     }
 
     /// Generation of observable connected-document mutations. This excludes
@@ -5876,6 +6169,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn source_elements_reflect_their_attributes() {
+        // HTML HTMLSourceElement: srcset/sizes/media/type reflect strings,
+        // width/height unsigned longs; a script swapping a <picture>'s
+        // source must change the attribute the image selection reads.
+        let mut rt = setup_runtime(
+            "<picture><source id=s srcset=a.webp media='(min-width:1px)'><img></picture>",
+        );
+        assert_eq!(
+            rt.evaluate(
+                r#"(() => {
+            const s = document.getElementById('s');
+            s.srcset = 'b.webp 2x'; s.sizes = '50vw'; s.type = 'image/webp'; s.width = 160;
+            return [s.getAttribute('srcset'), s.getAttribute('sizes'), s.type, s.media,
+                s.getAttribute('width'), s.height, Object.keys(s).includes('srcset')];
+        })()"#
+            )
+            .unwrap(),
+            serde_json::json!([
+                "b.webp 2x",
+                "50vw",
+                "image/webp",
+                "(min-width:1px)",
+                "160",
+                0,
+                false
+            ])
+        );
+    }
+
     #[cfg(feature = "render")]
     #[test]
     fn document_carets_keep_receiver_realm_and_current_geometry() {
@@ -5900,6 +6223,40 @@ mod tests {
                 Math.abs(after.x - before.x - 40) < .01, Math.abs(after.y - before.y - 50) < .01,
                 new Document().caretPositionFromPoint(1, 12) === null, invalid];
         })()"#).unwrap(), serde_json::json!([true, true, true, true, true, true, true, true]));
+    }
+
+    #[cfg(feature = "render")]
+    #[test]
+    fn captures_paint_iframe_documents_into_their_frames() {
+        let mut rt = setup_runtime(
+            "<style>body{margin:0;background:white}iframe{display:block;border:0;width:100px;height:50px}</style><iframe></iframe>",
+        );
+        rt.evaluate(r#"(() => {
+            const d = document.querySelector('iframe').contentDocument;
+            d.body.innerHTML = '<style>body{margin:0}</style><div style="width:60px;height:50px;background:rgb(0,0,255)"></div>';
+            return document.querySelector('iframe').getBoundingClientRect().width;
+        })()"#).unwrap();
+        let (width, _, pixels) = rt
+            .screenshot_prepared_region_raster_with_surface_color(
+                obscura_render::CaptureRegion::new(0.0, 0.0, 120.0, 60.0, 1.0),
+                [255, 255, 255, 255],
+            )
+            .expect("capture");
+        let pixel = |x: usize, y: usize| {
+            let i = (y * width as usize + x) * 4;
+            [pixels[i], pixels[i + 1], pixels[i + 2]]
+        };
+        assert_eq!(
+            pixel(30, 25),
+            [0, 0, 255],
+            "the child document paints in the frame"
+        );
+        assert_eq!(pixel(80, 25), [255, 255, 255], "its canvas is transparent");
+        assert_eq!(
+            pixel(110, 25),
+            [255, 255, 255],
+            "nothing paints past the frame"
+        );
     }
 
     #[cfg(feature = "render")]
@@ -10256,6 +10613,315 @@ mod tests {
 
     #[cfg(feature = "render")]
     #[tokio::test(flavor = "current_thread")]
+    async fn class_changes_inside_hidden_subtrees_keep_geometry_and_styles_current() {
+        // w3schools' sidebar patch reads offsetHeight and adds a class to
+        // each of ~300 links in collapsed (display:none) sections. Geometry
+        // reads between those writes keep the layout; styles and a later
+        // reveal still see every change.
+        let dom = parse_html(
+            r##"<html><head><style>
+                body { margin:0 } a { display:block; height:20px }
+                .tall { height:50px; color:rgb(255, 0, 0) }
+            </style></head><body><div id="v">visible</div>
+            <div id="hid" style="display:none"><a>1</a><a>2</a><a>3</a></div>
+            </body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(800.0, 600.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"(() => {
+                    const v = document.getElementById("v");
+                    const links = [...document.querySelectorAll("#hid a")];
+                    const before = v.offsetHeight;
+                    const reads = [];
+                    for (const a of links) {
+                        reads.push(a.offsetHeight);
+                        a.classList.add("tall");
+                        reads.push(v.offsetHeight);
+                    }
+                    const color = getComputedStyle(links[1]).color;
+                    document.getElementById("hid").style.display = "block";
+                    return [before, reads, color, links.map((a) => a.offsetHeight)];
+                })()"##,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!([18, [0, 18, 0, 18, 0, 18], "rgb(255, 0, 0)", [50, 50, 50]])
+        );
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn svg_path_bbox_follows_elliptical_arcs() {
+        // Chrome: a half circle M2 8a6 6 0 0 1 12 0 spans y 2..8, and arc
+        // flags may run into the next number ("0 01" is flags 0 and 0).
+        let dom = parse_html(
+            r##"<html><body style="margin:0"><svg width="160" height="160" viewBox="0 0 16 16">
+                <path id="a" d="M2 8a6 6 0 0 1 12 0"/>
+                <path id="b" d="M8 2a.5.5 0 0 1 .5.5v1a.5.5 0 01-1 0v-1A.5.5 0 0 1 8 2Z"/>
+            </svg></body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(800.0, 600.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"["a", "b"].map((id) => {
+                    const b = document.getElementById(id).getBBox();
+                    return [b.x, b.y, b.width, b.height].map((v) => Math.round(v * 100) / 100);
+                })"##,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!([[2, 2, 12, 6], [7.5, 2, 1, 2]]));
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn empty_svg_groups_have_an_empty_rect_at_their_origin() {
+        // Chrome: plotly's empty layer <g>s report (x, y, 0, 0) at their
+        // transformed user-space origin, not an all-zero rect.
+        let dom = parse_html(
+            r##"<html><body style="margin:0"><div style="height:30px"></div>
+                <svg width="300" height="200"><g id="a"></g>
+                <g id="b" transform="translate(40,50)"><g id="c"></g><path id="d" d=""/></g></svg>
+            </body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(800.0, 600.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"["a", "b", "c", "d"].map((id) => {
+                    const r = document.getElementById(id).getBoundingClientRect();
+                    return [r.x, r.y, r.width, r.height];
+                })"##,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!([
+                [0, 30, 0, 0],
+                [40, 80, 0, 0],
+                [40, 80, 0, 0],
+                [40, 80, 0, 0]
+            ])
+        );
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn svg_text_bbox_uses_font_metrics_and_dy() {
+        // Chrome: a d3 tick label <text y="9" dy="0.71em">0</text> at 10px
+        // sans-serif has bbox y 7.1 (9 + 7.1 - ascent 9) and height 11
+        // (ascent 9 + descent 2); <defs> itself has no rect.
+        let dom = parse_html(
+            r##"<html><body style="margin:0"><svg width="300" height="200">
+                <defs id="d"><circle r="3"/></defs>
+                <g font-size="10" font-family="sans-serif"><text id="t" y="9" dy="0.71em">0</text></g>
+            </svg></body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(800.0, 600.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"(() => {
+                    const b = document.getElementById("t").getBBox();
+                    const d = document.getElementById("d").getBoundingClientRect();
+                    return [Math.round(b.y * 10) / 10, b.height, [d.x, d.y, d.width, d.height]];
+                })()"##,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!([7.1, 11, [0, 0, 0, 0]]));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn xml_parse_from_string_returns_the_source_root_element() {
+        // Chrome: plotly's icon parseFromString(svg, "application/xml")
+        // .childNodes[0] is the <svg> itself (it was the <html> wrapper).
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(parse_html("<html><body></body></html>"));
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"(() => {
+                    const d = new DOMParser().parseFromString(
+                        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'><path d='M0 0'/></svg>",
+                        "application/xml");
+                    const n = d.childNodes[0];
+                    return [n.localName, n.namespaceURI, d.documentElement === n, d.childNodes.length];
+                })()"##,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!(["svg", "http://www.w3.org/2000/svg", true, 1])
+        );
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn css_animations_are_pausable_through_get_animations() {
+        // Chrome: document.getAnimations() lists a running CSS animation as
+        // a CSSAnimation; pause() + currentTime = 0 renders its first frame.
+        let dom = parse_html(
+            r##"<html><head><style>
+                @keyframes s { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+                #a { width: 50px; height: 50px; animation: s 4s infinite linear }
+            </style></head><body style="margin:0"><div id="a"></div></body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(400.0, 300.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"(() => {
+                    document.getElementById("a").getBoundingClientRect();
+                    const all = document.getAnimations();
+                    for (const a of all) { a.pause(); a.currentTime = 500; a.currentTime = 0; }
+                    const again = document.getAnimations();
+                    return [all.length, all[0] && all[0].animationName, again[0] && again[0].playState,
+                        again[0] && again[0].currentTime,
+                        getComputedStyle(document.getElementById("a")).transform,
+                        document.getElementById("a").getAnimations().length];
+                })()"##,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!([1, "s", "paused", 0, "matrix(1, 0, 0, 1, 0, 0)", 1])
+        );
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn animationstart_fires_for_a_css_animation_started_by_a_class() {
+        // Chrome: Chart.js adds a class with a 0.001s animation and waits for
+        // animationstart (its render monitor) before inserting its resizer.
+        let dom = parse_html(
+            r##"<html><head><style>
+                @keyframes k { from { opacity: .99 } to { opacity: 1 } }
+                .m { animation: k .001s }
+            </style></head><body><div><canvas id="c"></canvas></div></body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(400.0, 300.0);
+        rt.run_page_init();
+        rt.evaluate(
+            r##"(() => {
+                globalThis.__seen = [];
+                const c = document.getElementById("c");
+                c.addEventListener("animationstart", (e) => __seen.push(e.animationName));
+                c.classList.add("m");
+                return true;
+            })()"##,
+        )
+        .unwrap();
+        let _ = rt.run_event_loop_bounded(300).await;
+        let seen = rt.evaluate("__seen").unwrap();
+        assert_eq!(seen, serde_json::json!(["k"]));
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn svg_text_bounds_add_letter_spacing_and_use_the_screen_font_size() {
+        // Chrome: letter-spacing="1" adds 1 per character to the text box;
+        // under a 0.5 viewBox scale the box height is the whole-pixel
+        // ascent + descent of the 10px on-screen font, mapped back (x2).
+        let dom = parse_html(
+            r##"<html><body style="margin:0"><svg width="200" height="100" viewBox="0 0 400 200">
+                <text id="a" x="10" y="50" font-family="Arial" font-size="20">GET IT</text>
+                <text id="b" x="10" y="90" font-family="Arial" font-size="20" letter-spacing="1">GET IT</text>
+            </svg></body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(400.0, 300.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"(() => {
+                    const a = document.getElementById("a").getBBox();
+                    const b = document.getElementById("b").getBBox();
+                    const r = document.getElementById("a").getBoundingClientRect();
+                    return [Math.round((b.width - a.width) * 100) / 100, r.height];
+                })()"##,
+            )
+            .unwrap();
+        // 9 + 2 px at 10px Arial: ascent 9, descent 2 -> 11 screen px.
+        assert_eq!(result, serde_json::json!([6, 11]));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn window_listeners_survive_garbage_collection() {
+        // A window load listener added during parsing must still run after a
+        // full GC (w3schools' exercise box lost its load_quiz listener when
+        // a collection ran before the load event).
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(parse_html("<html><body></body></html>"));
+        rt.run_page_init();
+        rt.evaluate(
+            r##"(() => {
+                globalThis.__ran = [];
+                window.addEventListener("load", () => __ran.push("load"));
+                window.addEventListener("message", () => {});
+                return true;
+            })()"##,
+        )
+        .unwrap();
+        rt.collect_garbage();
+        rt.collect_garbage();
+        let result = rt
+            .evaluate(r##"(() => { window.dispatchEvent(new Event("load")); return __ran; })()"##)
+            .unwrap();
+        assert_eq!(result, serde_json::json!(["load"]));
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn nested_svg_content_rects_come_from_svg_geometry() {
+        // Chrome: a nested <svg> (as d3 appends one) and its shapes report
+        // their geometry in the outer <svg>'s viewport, (40.5, 40.5, 420, 5.5).
+        let dom = parse_html(
+            r#"<html><body style="margin:0"><svg id="o" style="width:500px;height:500px">
+                <svg id="n"><g id="g" transform="translate(40,40)">
+                <path id="p" d="M0.5,6V0.5H420.5V6" stroke="black"/></g></svg></svg>
+            </body></html>"#,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(800.0, 600.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r#"["n", "g", "p"].map((id) => {
+                    const r = document.getElementById(id).getBoundingClientRect();
+                    return [r.x, r.y, r.width, r.height];
+                })"#,
+            )
+            .unwrap();
+        for rect in result.as_array().unwrap() {
+            let v: Vec<f64> = rect
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x.as_f64().unwrap())
+                .collect();
+            assert_eq!(v, vec![40.5, 40.5, 420.0, 5.5], "{result}");
+        }
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
     async fn ordinary_inline_keeps_computed_sizes_but_uses_content_geometry() {
         let dom = parse_html(
             r#"<html><head><style>
@@ -10359,7 +11025,9 @@ mod tests {
         }
         let after = result["after"].as_array().unwrap();
         assert!(after[0].as_f64().unwrap() >= token_x + token_width - 0.01);
-        assert!((after[1].as_f64().unwrap() - token_y).abs() < 0.01);
+        // The monospace <code> and the following span sit on one line but
+        // not at one y (Chrome: 2 and 1).
+        assert!((after[1].as_f64().unwrap() - token_y).abs() <= 1.0);
         assert_eq!(result["atomic"], serde_json::json!([80, 30]));
         assert_eq!(result["replaced"], serde_json::json!([80, 30]));
         assert_eq!(result["item"], serde_json::json!([90, 25, "block"]));
@@ -13405,8 +14073,10 @@ mod tests {
         assert_eq!(initial["tracker"], serde_json::json!([320, 200, 320, 200]));
         assert_eq!(initial["box"][0], serde_json::json!(116));
         assert_eq!(initial["box"][1], serde_json::json!(62));
-        assert!((initial["box"][2].as_f64().unwrap() - 123.0).abs() < 0.05);
-        assert_eq!(initial["box"][3], serde_json::json!(67));
+        // Chrome: 122.765625 (borders snap to 4px and 3px).
+        assert_eq!(initial["box"][2], serde_json::json!(122.765625));
+        // 50.6px of content is 50.59375 in LayoutUnits (Chrome: 66.59375).
+        assert_eq!(initial["box"][3], serde_json::json!(66.59375));
 
         // Attribute-backed inline-style changes invalidate the retained
         // render. Borders do not change the padding box; padding does.
@@ -13428,7 +14098,8 @@ mod tests {
             .unwrap();
         assert_eq!(mutated[0], serde_json::json!(100));
         assert_eq!(mutated[1], serde_json::json!(126));
-        assert_eq!(mutated[2], serde_json::json!(143));
+        // Chrome: 142.578125 (the 4.1px right border snaps to 4px).
+        assert_eq!(mutated[2], serde_json::json!(142.578125));
 
         // A later CDP/emulation viewport update invalidates the layout too;
         // both the root special case and an ordinary 100vh box are live.
@@ -18424,6 +19095,31 @@ mod tests {
     }
 
     #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn svg_image_without_size_uses_natural_size_and_mask_content_has_no_rect() {
+        // Chrome: <image href> with no width/height is the image's natural
+        // size (css3_masking_svg: 600x400); one given axis scales the other
+        // by the natural ratio; a shape inside <mask> reports a zero rect.
+        let mut rt = parser_image_runtime(
+            r##"<html><body style="margin:0"><svg width="600" height="400">
+                <mask id="m"><circle id="c" r="5" cx="10" cy="10" fill="#fff"/></mask>
+                <image id="a" href="p.png" mask="url(#m)"/>
+                <image id="b" href="p.png" width="20"/>
+            </svg></body></html>"##,
+            |url: &str| (url == "http://example.com/page/p.png").then(two_by_three_png),
+        );
+        let result = rt
+            .evaluate(
+                r##"["a", "b", "c"].map((id) => {
+                    const r = document.getElementById(id).getBoundingClientRect();
+                    return [r.width, r.height];
+                })"##,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!([[2, 3], [20, 30], [0, 0]]));
+    }
+
+    #[cfg(feature = "render")]
     fn parser_image_runtime(
         html: &str,
         loader: impl obscura_render::RenderResourceLoader + 'static,
@@ -22471,7 +23167,7 @@ mod tests {
                 tokio::time::timeout(std::time::Duration::from_millis(500), listener.accept()).await
             {
                 let mut buffer = [0u8; 4096];
-                stream.read(&mut buffer).await.unwrap();
+                let _request_len = stream.read(&mut buffer).await.unwrap();
                 stream
                     .write_all(
                         b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\
@@ -22615,7 +23311,7 @@ mod tests {
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut request = [0u8; 4096];
-            stream.read(&mut request).await.unwrap();
+            let _request_len = stream.read(&mut request).await.unwrap();
             stream
                 .write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\
@@ -22814,7 +23510,7 @@ mod tests {
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut request = [0u8; 4096];
-            stream.read(&mut request).await.unwrap();
+            let _request_len = stream.read(&mut request).await.unwrap();
             if after_headers {
                 stream
                     .write_all(
@@ -22921,7 +23617,7 @@ mod tests {
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut request = [0u8; 4096];
-            stream.read(&mut request).await.unwrap();
+            let _request_len = stream.read(&mut request).await.unwrap();
             stream
                 .write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\
@@ -23675,7 +24371,7 @@ mod tests {
                 for _ in 0..3 {
                     let (mut stream, _) = listener.accept().unwrap();
                     let mut request = [0u8; 4096];
-                    stream.read(&mut request).unwrap();
+                    let _request_len = stream.read(&mut request).unwrap();
                     write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/javascript\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", BODY.len(), BODY).unwrap();
                 }
             });
@@ -25466,7 +26162,7 @@ mod tests {
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0; 2048];
-            stream.read(&mut request).unwrap();
+            let _request_len = stream.read(&mut request).unwrap();
             // Close before sending headers, rather than returning an HTTP error.
         });
         let url = format!("http://{address}/entry.js");
@@ -25503,7 +26199,7 @@ mod tests {
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut request = [0; 2048];
-            stream.read(&mut request).await.unwrap();
+            let _request_len = stream.read(&mut request).await.unwrap();
             std::future::pending::<()>().await;
         });
         let url = format!("http://{address}/entry.js");

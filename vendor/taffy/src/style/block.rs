@@ -25,6 +25,12 @@ pub trait BlockItemStyle: CoreStyle {
         false
     }
 
+    /// Whether the item establishes an independent block formatting context.
+    #[inline(always)]
+    fn establishes_bfc(&self) -> bool {
+        false
+    }
+
     /// Whether the item is a floated
     #[cfg(feature = "float_layout")]
     #[inline(always)]
@@ -37,6 +43,13 @@ pub trait BlockItemStyle: CoreStyle {
     #[inline(always)]
     fn clear(&self) -> super::Clear {
         super::Clear::None
+    }
+
+    /// The float's shape-outside, if any
+    #[cfg(feature = "float_layout")]
+    #[inline(always)]
+    fn shape_outside(&self) -> Option<super::FloatShape> {
+        None
     }
 }
 
