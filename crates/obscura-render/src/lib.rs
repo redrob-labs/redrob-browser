@@ -1179,6 +1179,51 @@ pub struct BackgroundPosition {
     pub y: BackgroundPositionAxis,
 }
 
+/// A separable or non-separable `mix-blend-mode` other than `normal`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MixBlendMode {
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
+    PlusLighter,
+}
+
+impl MixBlendMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value.trim().to_ascii_lowercase().as_str() {
+            "multiply" => Self::Multiply,
+            "screen" => Self::Screen,
+            "overlay" => Self::Overlay,
+            "darken" => Self::Darken,
+            "lighten" => Self::Lighten,
+            "color-dodge" => Self::ColorDodge,
+            "color-burn" => Self::ColorBurn,
+            "hard-light" => Self::HardLight,
+            "soft-light" => Self::SoftLight,
+            "difference" => Self::Difference,
+            "exclusion" => Self::Exclusion,
+            "hue" => Self::Hue,
+            "saturation" => Self::Saturation,
+            "color" => Self::Color,
+            "luminosity" => Self::Luminosity,
+            "plus-lighter" => Self::PlusLighter,
+            _ => return None,
+        })
+    }
+}
+
 /// Authored per-layer values of the background (or mask) longhands.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct BackgroundLayerLists {
@@ -1869,6 +1914,8 @@ pub struct LayoutStyle {
     pub cursor: Option<Cursor>,
     /// `opacity`, own (non-inherited) value in 0.0-1.0. `None` means the
     /// default of 1.0.
+    /// `mix-blend-mode`; `None` is `normal`.
+    pub mix_blend_mode: Option<MixBlendMode>,
     pub opacity: Option<f32>,
     /// First CSS animation name and its timing contract. The stylesheet
     /// sampler contributes animated opacity after normal declarations and

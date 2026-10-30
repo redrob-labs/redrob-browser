@@ -5219,6 +5219,10 @@ fn paint_laid_dom_scrolled(
                 .get(&nid)
                 .and_then(|style| style.opacity)
                 .is_some_and(|opacity| opacity.clamp(0.0, 1.0) < 1.0)
+                || laid
+                    .styles
+                    .get(&nid)
+                    .is_some_and(|style| style.mix_blend_mode.is_some())
                 || layer_mask(tree, laid, nid).is_some());
         let is_transform_root = suppress_transform_for != Some(nid)
             && (laid.styles.get(&nid).is_some_and(has_authored_transform)
@@ -5874,7 +5878,10 @@ fn paint_laid_dom_scrolled(
         let mask_layers = (suppress_opacity_for != Some(nid) && raster_scale == 1.0)
             .then(|| layer_mask(tree, laid, nid))
             .flatten();
-        if suppress_opacity_for != Some(nid) && (own_opacity < 1.0 || mask_layers.is_some()) {
+        let blend_mode = laid.styles.get(&nid).and_then(|style| style.mix_blend_mode);
+        if suppress_opacity_for != Some(nid)
+            && (own_opacity < 1.0 || mask_layers.is_some() || blend_mode.is_some())
+        {
             opacity_subtree_skip.insert(nid);
             opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
             if own_opacity <= 0.0 {
@@ -5946,6 +5953,7 @@ fn paint_laid_dom_scrolled(
             }
             let group_paint = tiny_skia::PixmapPaint {
                 opacity: own_opacity,
+                blend_mode: blend_mode.map_or(tiny_skia::BlendMode::SourceOver, tiny_blend_mode),
                 ..tiny_skia::PixmapPaint::default()
             };
             pixmap.canvas().draw_image(
@@ -8732,6 +8740,30 @@ fn paint_inset_box_shadow(
         Transform::identity(),
         clip,
     );
+}
+
+/// The tiny-skia blend mode of a CSS `mix-blend-mode`.
+fn tiny_blend_mode(mode: crate::MixBlendMode) -> tiny_skia::BlendMode {
+    use crate::MixBlendMode as M;
+    use tiny_skia::BlendMode as B;
+    match mode {
+        M::Multiply => B::Multiply,
+        M::Screen => B::Screen,
+        M::Overlay => B::Overlay,
+        M::Darken => B::Darken,
+        M::Lighten => B::Lighten,
+        M::ColorDodge => B::ColorDodge,
+        M::ColorBurn => B::ColorBurn,
+        M::HardLight => B::HardLight,
+        M::SoftLight => B::SoftLight,
+        M::Difference => B::Difference,
+        M::Exclusion => B::Exclusion,
+        M::Hue => B::Hue,
+        M::Saturation => B::Saturation,
+        M::Color => B::Color,
+        M::Luminosity => B::Luminosity,
+        M::PlusLighter => B::Plus,
+    }
 }
 
 /// Separable Gaussian blur of a coverage plane in place.
@@ -15379,6 +15411,25 @@ mod tests {
         assert!(mid > 100 && mid < 160, "half way up the gradient: {mid}");
         assert!(p(24, 129).red() > 240, "the play icon is white");
         assert!(p(160, 157).red() > 150, "the timeline track");
+    }
+
+    #[test]
+    fn mix_blend_mode_multiplies_the_element_over_its_backdrop() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:50px;background:rgb(200,100,50)"></div>
+                <div style="position:absolute;left:0;top:0;width:100px;height:50px;
+                            background:rgb(128,128,255);mix-blend-mode:multiply"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (120.0, 60.0), None).expect("blend");
+        let p = pixmap.pixel(50, 25).expect("pixel");
+        // multiply: 200*128/255, 100*128/255, 50*255/255
+        let close = |a: u8, b: u8| (a as i32 - b as i32).abs() <= 2;
+        assert!(
+            close(p.red(), 100) && close(p.green(), 50) && close(p.blue(), 50),
+            "multiplied: {p:?}"
+        );
     }
 
     #[test]
