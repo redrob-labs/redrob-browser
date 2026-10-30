@@ -282,6 +282,9 @@ pub struct DomLayout {
     /// this list is the source for background/border painting and
     /// `getClientRects()` as wrapping support is extended.
     pub inline_fragments: HashMap<NodeId, Vec<Rect>>,
+    /// Multicol `column-rule` segments to paint over each container:
+    /// (rect, color), between columns that hold content.
+    pub column_rules: HashMap<NodeId, Vec<(Rect, [u8; 4])>>,
     pub styles: HashMap<NodeId, crate::LayoutStyle>,
     /// Computed custom properties in force for each element. Values are
     /// reference-counted because the overwhelmingly common case is inheritance
@@ -2671,6 +2674,16 @@ struct FixedTableColumn {
 struct MulticolBuild {
     columns: Vec<taffy::NodeId>,
     children: Vec<taffy::NodeId>,
+    /// Breakable content: every box stays in the first column and its
+    /// lines and boxes are moved into later columns after layout
+    /// (`apply_multicol_fragmentation`), instead of reparenting whole
+    /// children (`apply_multicol_balance`).
+    flow: bool,
+    /// `column-fill: auto` under a definite height: fill in order.
+    fill_auto: bool,
+    /// `column-width`: the used count is fitted to the container width, at
+    /// most `columns.len()` (column-count, or a cap of 16).
+    column_width: Option<f32>,
 }
 
 /// Walk the tree top-down accumulating the clip rect imposed by ancestor
@@ -6471,6 +6484,7 @@ fn layout_dom_once(
     let mut fractional_sizes = HashMap::new();
     let mut fractional_rects = HashMap::new();
     let mut inline_fragments = HashMap::new();
+    let mut column_rules: HashMap<NodeId, Vec<(Rect, [u8; 4])>> = HashMap::new();
     let mut text_runs = HashMap::new();
     let mut generated_rects: Vec<Option<Rect>> = Vec::new();
     if let Some(root_id) = root {
@@ -6529,6 +6543,8 @@ fn layout_dom_once(
             overflow_wrap: crate::OverflowWrap,
             word_break: crate::WordBreak,
             text_wrap_style: crate::TextWrapStyle,
+            orphans: u16,
+            widows: u16,
             text_transform: crate::TextTransform,
             italic: bool,
             box_sizing: crate::BoxSizing,
@@ -6602,6 +6618,8 @@ fn layout_dom_once(
                     overflow_wrap: crate::OverflowWrap::Normal,
                     word_break: crate::WordBreak::Normal,
                     text_wrap_style: crate::TextWrapStyle::Auto,
+                    orphans: 2,
+                    widows: 2,
                     text_transform: crate::TextTransform::None,
                     italic: false,
                     box_sizing: crate::BoxSizing::ContentBox,
@@ -6784,6 +6802,12 @@ fn layout_dom_once(
                     }
                     if let Some(value) = style.text_wrap_style {
                         inh.text_wrap_style = value;
+                    }
+                    if let Some(value) = style.orphans {
+                        inh.orphans = value;
+                    }
+                    if let Some(value) = style.widows {
+                        inh.widows = value;
                     }
                     if let Some(value) = style.text_transform {
                         inh.text_transform = value;
@@ -7397,6 +7421,14 @@ fn layout_dom_once(
                 match style.text_wrap_style {
                     Some(v) => inh.text_wrap_style = v,
                     None => style.text_wrap_style = Some(inh.text_wrap_style),
+                }
+                match style.orphans {
+                    Some(v) => inh.orphans = v,
+                    None => style.orphans = Some(inh.orphans),
+                }
+                match style.widows {
+                    Some(v) => inh.widows = v,
+                    None => style.widows = Some(inh.widows),
                 }
                 match style.text_transform {
                     Some(v) => inh.text_transform = v,
@@ -8182,6 +8214,27 @@ fn layout_dom_once(
         for id in orthogonal {
             if let Some(style) = styles.get_mut(&id) {
                 style.is_inline_block = true;
+            }
+        }
+        // A block-level orthogonal root does not stretch to its parent's
+        // width: its physical width is its block size, the extent of all of
+        // its stacked vertical lines (CSS Writing Modes 3 7.3), so it sizes
+        // like fit-content from its turned layout.
+        let orthogonal_blocks: Vec<NodeId> = styles
+            .iter()
+            .filter(|(id, style)| {
+                style.vertical_writing
+                    && style.display == crate::Display::Block
+                    && style.width == crate::Dimension::Auto
+                    && rendered_parent(tree, **id)
+                        .and_then(|parent| styles.get(&parent))
+                        .is_some_and(|parent| !parent.vertical_writing)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in orthogonal_blocks {
+            if let Some(style) = styles.get_mut(&id) {
+                style.width_fit_content = true;
             }
         }
 
@@ -9055,6 +9108,18 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
+                for _ in 0..3 {
+                    if !apply_multicol_column_heights(
+                        &mut taffy_tree,
+                        &ifc_items.multicol,
+                        &id_map,
+                        &styles,
+                    ) {
+                        break;
+                    }
+                    let _ =
+                        taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
+                }
                 if apply_table_cell_baseline_alignment(
                     tree,
                     &mut taffy_tree,
@@ -9202,6 +9267,18 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
+                for _ in 0..3 {
+                    if !apply_multicol_column_heights(
+                        &mut taffy_tree,
+                        &ifc_items.multicol,
+                        &id_map,
+                        &styles,
+                    ) {
+                        break;
+                    }
+                    let _ =
+                        taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
+                }
                 if apply_table_cell_baseline_alignment(
                     tree,
                     &mut taffy_tree,
@@ -9253,6 +9330,12 @@ fn layout_dom_once(
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
             }
+            let multicol_fragments = apply_multicol_fragmentation(
+                &mut taffy_tree,
+                &ifc_items.multicol,
+                &id_map,
+                &styles,
+            );
             ifc_items.ifc.deactivate();
             phase_marks.push(("compute", std::time::Instant::now()));
             sync_resolved_percentage_padding(
@@ -9314,6 +9397,120 @@ fn layout_dom_once(
                 &mut text_runs,
                 &mut generated_rects,
             );
+            // A box split across columns: its client rects are its column
+            // fragments and its bounding box their union (CSSOM View).
+            let (multicol_fragments, multicol_used) = multicol_fragments;
+            for &(set_index, used) in &multicol_used {
+                let Some(set) = ifc_items.multicol.get(set_index) else {
+                    continue;
+                };
+                let Some(&first) = set.columns.first() else {
+                    continue;
+                };
+                // The rule belongs to the multicol container: the column set,
+                // or its parent when spanners split the flow into sets.
+                let Some(set_node) = taffy_tree.parent(first) else {
+                    continue;
+                };
+                let container = id_map.get(&set_node).copied().or_else(|| {
+                    taffy_tree
+                        .parent(set_node)
+                        .and_then(|p| id_map.get(&p).copied())
+                });
+                let Some(container) = container else {
+                    continue;
+                };
+                let Some(style) = styles.get(&container) else {
+                    continue;
+                };
+                let rule_style = style.column_rule_style.unwrap_or(crate::BorderStyle::None);
+                if !rule_style.is_visible() {
+                    continue;
+                }
+                let width = style
+                    .column_rule_width
+                    .unwrap_or(crate::border::MEDIUM_BORDER_WIDTH);
+                if width <= 0.0 {
+                    continue;
+                }
+                let color = style
+                    .column_rule_color
+                    .or(style.color)
+                    .unwrap_or([0, 0, 0, 255]);
+                let columns: Vec<Rect> = set.columns[..used.min(set.columns.len())]
+                    .iter()
+                    .filter_map(|column| {
+                        let (x, y) = taffy_unrounded_global_origin(&taffy_tree, *column)?;
+                        let layout = taffy_tree.unrounded_layout(*column);
+                        Some(Rect {
+                            x: x + initial_cb_x,
+                            y,
+                            width: layout.size.width,
+                            height: layout.size.height,
+                        })
+                    })
+                    .collect();
+                let height = columns.first().map_or(0.0, |c| c.height);
+                for pair in columns.windows(2) {
+                    let middle = (pair[0].x + pair[0].width + pair[1].x) / 2.0;
+                    column_rules.entry(container).or_default().push((
+                        // Snapped to whole pixels like Chrome's rule paint.
+                        Rect {
+                            x: (middle - width / 2.0).round(),
+                            y: pair[0].y.round(),
+                            width: width.round().max(1.0),
+                            height: height.round(),
+                        },
+                        color,
+                    ));
+                }
+            }
+            for (node, parts) in &multicol_fragments {
+                let Some(&dom) = id_map.get(node) else {
+                    continue;
+                };
+                let base = fractional_rects
+                    .get(&dom)
+                    .copied()
+                    .or_else(|| rects.get(&dom).copied());
+                let Some(base) = base else {
+                    continue;
+                };
+                let frags: Vec<Rect> = parts
+                    .iter()
+                    .map(|&(dx, dy, top, bottom)| Rect {
+                        x: base.x + dx,
+                        y: base.y + top + dy,
+                        width: base.width,
+                        height: (bottom - top).max(0.0),
+                    })
+                    .collect();
+                let Some(union) = frags.iter().copied().reduce(|a, b| {
+                    let x = a.x.min(b.x);
+                    let y = a.y.min(b.y);
+                    Rect {
+                        x,
+                        y,
+                        width: (a.x + a.width).max(b.x + b.width) - x,
+                        height: (a.y + a.height).max(b.y + b.height) - y,
+                    }
+                }) else {
+                    continue;
+                };
+                if fractional_rects.contains_key(&dom) {
+                    fractional_rects.insert(dom, union);
+                }
+                rects.insert(
+                    dom,
+                    Rect {
+                        x: union.x.round(),
+                        y: union.y.round(),
+                        width: union.width.round(),
+                        height: union.height.round(),
+                    },
+                );
+                inline_fragments.insert(dom, frags);
+            }
             // CSSOM rows and sections are the same unions over the cells'
             // fractional rects.
             let mut fractional_cells = rects.clone();
@@ -9471,6 +9668,7 @@ fn layout_dom_once(
             fractional_sizes,
             fractional_rects,
             inline_fragments,
+            column_rules,
             styles,
             custom_properties,
             clip_rects,
@@ -11186,7 +11384,7 @@ fn apply_multicol_balance(taffy_tree: &mut TaffyTree<usize>, multicol: &[Multico
     let mut changed = false;
     for set in multicol {
         let column_count = set.columns.len();
-        if column_count < 2 || set.children.is_empty() {
+        if set.flow || column_count < 2 || set.children.is_empty() {
             continue;
         }
         let weights: Vec<f32> = set
@@ -11257,6 +11455,538 @@ fn apply_multicol_balance(taffy_tree: &mut TaffyTree<usize>, multicol: &[Multico
         }
     }
     changed
+}
+
+/// One unbreakable piece of a multicol flow, in first-column coordinates.
+#[derive(Clone, Copy, Debug)]
+enum FlowPieceKind {
+    /// A box moved as a whole.
+    Node(taffy::NodeId),
+    /// Line `line` of IFC `ifc` (its atomic inline boxes move with it).
+    Line { ifc: usize, line: usize },
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FlowPiece {
+    kind: FlowPieceKind,
+    top: f32,
+    bottom: f32,
+    /// A column break may come before this piece (class A between boxes,
+    /// class C between lines when orphans/widows allow it).
+    break_before: bool,
+    /// `break-before: column` forces one.
+    forced: bool,
+}
+
+/// A box whose content was opened into pieces (a block container or an
+/// IFC): `pieces` are its descendants' pieces; `top`/`bottom` its border
+/// box in first-column coordinates.
+#[derive(Clone, Debug)]
+struct FlowGroup {
+    node: taffy::NodeId,
+    pieces: std::ops::Range<usize>,
+    top: f32,
+    bottom: f32,
+    /// An IFC root: its pieces are its own lines.
+    ifc: Option<usize>,
+}
+
+/// The pieces of the flow in multicol first column `column`, in order:
+/// boxes that may not break are whole; block containers are opened; an IFC
+/// contributes its line boxes (orphans and widows 2, the initial values).
+fn multicol_flow_pieces(
+    taffy_tree: &TaffyTree<usize>,
+    column: taffy::NodeId,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+) -> (Vec<FlowPiece>, Vec<FlowGroup>) {
+    #[allow(clippy::too_many_arguments)]
+    fn walk(
+        taffy_tree: &TaffyTree<usize>,
+        node: taffy::NodeId,
+        base_y: f32,
+        id_map: &HashMap<taffy::NodeId, NodeId>,
+        styles: &HashMap<NodeId, crate::LayoutStyle>,
+        out: &mut Vec<FlowPiece>,
+        groups: &mut Vec<FlowGroup>,
+        forced_next: &mut bool,
+    ) {
+        let Ok(children) = taffy_tree.children(node) else {
+            return;
+        };
+        for child in children {
+            let layout = *taffy_tree.unrounded_layout(child);
+            let style = id_map.get(&child).and_then(|dom| styles.get(dom));
+            if style.is_some_and(|style| {
+                style.display == crate::Display::None
+                    || matches!(style.position, Some(taffy::Position::Absolute))
+            }) {
+                continue;
+            }
+            let top = base_y + layout.location.y;
+            let bottom = top + layout.size.height;
+            let forced =
+                std::mem::take(forced_next) || style.is_some_and(|style| style.break_before_column);
+            if style.is_some_and(|style| style.break_after_column) {
+                *forced_next = true;
+            }
+            let context = taffy_tree
+                .get_node_context(child)
+                .copied()
+                .filter(|context| context & crate::ifc::IFC_CONTEXT_BIT != 0)
+                .map(|context| context & !crate::ifc::IFC_CONTEXT_BIT);
+            let avoid = style.is_some_and(|style| {
+                style.break_inside_avoid
+                    || style.float.is_some()
+                    || style.is_inline_block
+                    || style.display == crate::Display::Flex
+                    || style.display == crate::Display::Grid
+                    || style.has_replaced_sizing
+            }) || taffy_tree
+                .style(child)
+                .is_ok_and(|s| s.display != taffy::style::Display::Block);
+            if !avoid {
+                if let Some(index) = context {
+                    let lines = crate::ifc::with_active_ifc(index, |ifc| {
+                        let offset = ifc.content_offset.1;
+                        let root = ifc.root;
+                        let lines = ifc
+                            .final_layout()
+                            .lines()
+                            .map(|line| {
+                                let m = line.metrics();
+                                (offset + m.block_min_coord, offset + m.block_max_coord)
+                            })
+                            .collect::<Vec<_>>();
+                        (lines, root)
+                    })
+                    .map(|(lines, root)| {
+                        let limits = styles.get(&root).map_or((2, 2), |style| {
+                            (style.orphans.unwrap_or(2), style.widows.unwrap_or(2))
+                        });
+                        (lines, limits)
+                    });
+                    let (lines, (orphans, widows)) = lines.unwrap_or_else(|| (Vec::new(), (2, 2)));
+                    if !lines.is_empty() {
+                        let count = lines.len();
+                        let first = out.len();
+                        for (i, (line_top, line_bottom)) in lines.into_iter().enumerate() {
+                            out.push(FlowPiece {
+                                kind: FlowPieceKind::Line {
+                                    ifc: index,
+                                    line: i,
+                                },
+                                top: top + line_top,
+                                bottom: top + line_bottom,
+                                break_before: i == 0
+                                    || (i >= orphans as usize && count - i >= widows as usize),
+                                forced: i == 0 && forced,
+                            });
+                        }
+                        groups.push(FlowGroup {
+                            node: child,
+                            pieces: first..out.len(),
+                            top,
+                            bottom,
+                            ifc: Some(index),
+                        });
+                        continue;
+                    }
+                }
+                if context.is_none() && taffy_tree.child_count(child) > 0 {
+                    let first = out.len();
+                    walk(
+                        taffy_tree,
+                        child,
+                        top,
+                        id_map,
+                        styles,
+                        out,
+                        groups,
+                        forced_next,
+                    );
+                    if let Some(piece) = out.get_mut(first) {
+                        piece.forced |= forced;
+                    }
+                    if out.len() > first {
+                        groups.push(FlowGroup {
+                            node: child,
+                            pieces: first..out.len(),
+                            top,
+                            bottom,
+                            ifc: None,
+                        });
+                    }
+                    continue;
+                }
+            }
+            out.push(FlowPiece {
+                kind: FlowPieceKind::Node(child),
+                top,
+                bottom,
+                break_before: true,
+                forced,
+            });
+        }
+    }
+    let mut out = Vec::new();
+    let mut groups = Vec::new();
+    let mut forced_next = false;
+    // All-inline content: the first column is the IFC itself.
+    let own = taffy_tree
+        .get_node_context(column)
+        .copied()
+        .filter(|context| context & crate::ifc::IFC_CONTEXT_BIT != 0)
+        .map(|context| context & !crate::ifc::IFC_CONTEXT_BIT);
+    if let Some(index) = own {
+        let (lines, root) = crate::ifc::with_active_ifc(index, |ifc| {
+            let offset = ifc.content_offset.1;
+            let lines = ifc
+                .final_layout()
+                .lines()
+                .map(|line| {
+                    let m = line.metrics();
+                    (offset + m.block_min_coord, offset + m.block_max_coord)
+                })
+                .collect::<Vec<_>>();
+            (lines, Some(ifc.root))
+        })
+        .unwrap_or_default();
+        let (orphans, widows) = root
+            .and_then(|root| styles.get(&root))
+            .map_or((2, 2), |style| {
+                (style.orphans.unwrap_or(2), style.widows.unwrap_or(2))
+            });
+        let count = lines.len();
+        for (i, (top, bottom)) in lines.into_iter().enumerate() {
+            out.push(FlowPiece {
+                kind: FlowPieceKind::Line {
+                    ifc: index,
+                    line: i,
+                },
+                top,
+                bottom,
+                break_before: i == 0 || (i >= orphans as usize && count - i >= widows as usize),
+                forced: false,
+            });
+        }
+        return (out, groups);
+    }
+    walk(
+        taffy_tree,
+        column,
+        0.0,
+        id_map,
+        styles,
+        &mut out,
+        &mut groups,
+        &mut forced_next,
+    );
+    (out, groups)
+}
+
+/// Fill columns of height `height` in order (LayoutNG's column filling):
+/// the first piece of every column and the smallest extra height that
+/// would have let a broken-off piece stay in its column.
+fn multicol_fill(pieces: &[FlowPiece], height: f32) -> (Vec<usize>, f32) {
+    let mut starts = vec![0usize];
+    let mut shortage = f32::INFINITY;
+    let column_origin = |index: usize| if index == 0 { 0.0 } else { pieces[index].top };
+    let mut i = 0usize;
+    while i < pieces.len() {
+        let piece = pieces[i];
+        let col_start = *starts.last().unwrap();
+        let origin = column_origin(col_start);
+        if i != col_start && piece.break_before && piece.forced {
+            starts.push(i);
+            continue;
+        }
+        let over = piece.bottom - origin - height;
+        if i != col_start && over > 0.01 {
+            shortage = shortage.min(over);
+            // Break before the last allowed point at or before this piece.
+            if let Some(back) = (col_start + 1..=i).rev().find(|&k| pieces[k].break_before) {
+                starts.push(back);
+                i = back;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    (starts, shortage)
+}
+
+/// The balanced column height (CSS Multi-column 1 §7, as LayoutNG does
+/// it): start at the flow's height divided by the column count (at least
+/// its tallest unbreakable piece), then stretch by the minimal space
+/// shortage until the flow fits the columns.
+fn multicol_balanced_height(pieces: &[FlowPiece], count: usize, content_end: f32) -> f32 {
+    // The flow's block size includes the last box's end margin (Chrome:
+    // 442 / 3 = 147.33 for 130px of boxes, a 16px margin and 280px of
+    // lines with its trailing 16px margin).
+    let total = pieces.iter().map(|p| p.bottom).fold(content_end, f32::max);
+    let tallest = pieces
+        .iter()
+        .map(|p| p.bottom - p.top)
+        .fold(0.0f32, f32::max);
+    let mut height = crate::layout_unit((total / count.max(1) as f32).max(tallest));
+    for _ in 0..64 {
+        let (starts, shortage) = multicol_fill(pieces, height);
+        if starts.len() <= count || !shortage.is_finite() {
+            break;
+        }
+        height = crate::layout_unit(height + shortage.max(1.0 / 64.0));
+    }
+    height
+}
+
+/// The columns of a set that take part in layout (column-width can hide
+/// the trailing ones).
+fn multicol_used_columns(taffy_tree: &TaffyTree<usize>, set: &MulticolBuild) -> usize {
+    set.columns
+        .iter()
+        .filter(|column| {
+            taffy_tree
+                .style(**column)
+                .is_ok_and(|style| style.display != taffy::style::Display::None)
+        })
+        .count()
+        .max(1)
+}
+
+/// Balance each breakable multicol flow and set the result as the first
+/// column's height, so the container and the content after it are laid
+/// out at it.
+fn apply_multicol_column_heights(
+    taffy_tree: &mut TaffyTree<usize>,
+    multicol: &[MulticolBuild],
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+) -> bool {
+    let mut changed = false;
+    for set in multicol.iter().filter(|set| set.flow) {
+        let Some(&first) = set.columns.first() else {
+            continue;
+        };
+        if let Some(width) = set.column_width {
+            // N = max(1, floor((W + gap) / (column-width + gap))), at most
+            // column-count; the unused columns take no space.
+            let Some(parent) = taffy_tree.parent(first) else {
+                continue;
+            };
+            let outer = *taffy_tree.unrounded_layout(parent);
+            let available = (outer.size.width
+                - outer.padding.left
+                - outer.padding.right
+                - outer.border.left
+                - outer.border.right)
+                .max(0.0);
+            let gap = match taffy_tree.style(parent).map(|s| s.gap.width.into_raw()) {
+                Ok(raw) if raw.tag() == taffy::CompactLength::LENGTH_TAG => raw.value(),
+                _ => 16.0,
+            };
+            let fitted =
+                (((available + gap) / (width + gap)).floor() as usize).clamp(1, set.columns.len());
+            let mut count_changed = false;
+            for (index, column) in set.columns.iter().enumerate() {
+                let display = if index < fitted {
+                    taffy::style::Display::Block
+                } else {
+                    taffy::style::Display::None
+                };
+                if let Ok(current) = taffy_tree.style(*column) {
+                    if current.display != display {
+                        let mut style = current.clone();
+                        style.display = display;
+                        if taffy_tree.set_style(*column, style).is_ok() {
+                            count_changed = true;
+                        }
+                    }
+                }
+            }
+            if count_changed {
+                // Lay out at the new column width before balancing.
+                changed = true;
+                continue;
+            }
+        }
+        let count = multicol_used_columns(taffy_tree, set);
+        let (pieces, _) = multicol_flow_pieces(taffy_tree, first, id_map, styles);
+        if pieces.is_empty() {
+            continue;
+        }
+        let height = if set.fill_auto {
+            let Some(parent) = taffy_tree.parent(first) else {
+                continue;
+            };
+            let layout = *taffy_tree.unrounded_layout(parent);
+            (layout.size.height
+                - layout.padding.top
+                - layout.padding.bottom
+                - layout.border.top
+                - layout.border.bottom)
+                .max(0.0)
+        } else {
+            let content_end = taffy_tree
+                .children(first)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|child| {
+                    let l = taffy_tree.unrounded_layout(child);
+                    l.location.y + l.size.height + l.margin.bottom.max(0.0)
+                })
+                .fold(0.0f32, f32::max);
+            multicol_balanced_height(&pieces, count, content_end)
+        };
+        let target = taffy::style::Dimension::length(height);
+        if let Ok(current) = taffy_tree.style(first) {
+            if current.size.height != target {
+                let mut style = current.clone();
+                style.size.height = target;
+                if taffy_tree.set_style(first, style).is_ok() {
+                    changed = true;
+                }
+            }
+        }
+    }
+    changed
+}
+
+/// A box split across columns: its fragments as (dx, dy, top, bottom)
+/// relative to its unmoved border box.
+pub(crate) type MulticolFragments = (
+    Vec<(taffy::NodeId, Vec<(f32, f32, f32, f32)>)>,
+    // (column set's first column, columns holding content)
+    Vec<(usize, usize)>,
+);
+
+/// Move the pieces of every breakable multicol flow into their columns:
+/// the column `k` piece moves right by k column widths plus gaps and up by
+/// its column's start offset. A box whose pieces all land in one column
+/// moves whole; line boxes move through their IFC's line shifts (with the
+/// atomic inline boxes on them). Returns the fragments of the boxes that
+/// were split, for their client rects.
+fn apply_multicol_fragmentation(
+    taffy_tree: &mut TaffyTree<usize>,
+    multicol: &[MulticolBuild],
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+) -> MulticolFragments {
+    let mut fragments = Vec::new();
+    let mut used = Vec::new();
+    for (set_index, set) in multicol.iter().enumerate().filter(|(_, set)| set.flow) {
+        let (Some(&first), Some(&second)) = (set.columns.first(), set.columns.get(1)) else {
+            continue;
+        };
+        if multicol_used_columns(taffy_tree, set) < 2 {
+            continue;
+        }
+        let height = taffy_tree.unrounded_layout(first).size.height;
+        let step = taffy_tree.unrounded_layout(second).location.x
+            - taffy_tree.unrounded_layout(first).location.x;
+        let (pieces, mut groups) = multicol_flow_pieces(taffy_tree, first, id_map, styles);
+        if pieces.is_empty() || height <= 0.0 {
+            continue;
+        }
+        let (starts, _) = multicol_fill(&pieces, height + 0.01);
+        used.push((set_index, starts.len()));
+        let mut column_of = vec![0usize; pieces.len()];
+        let mut column_top = Vec::with_capacity(starts.len());
+        for (column, start) in starts.iter().enumerate() {
+            let end = starts.get(column + 1).copied().unwrap_or(pieces.len());
+            for slot in &mut column_of[*start..end] {
+                *slot = column;
+            }
+            column_top.push(if column == 0 { 0.0 } else { pieces[*start].top });
+        }
+        let shift = |column: usize| (step * column as f32, -column_top[column]);
+        let mut handled = vec![false; pieces.len()];
+        // Outermost groups first: a box whose pieces share one column moves
+        // whole (its descendants with it).
+        groups.sort_by(|a, b| {
+            a.pieces
+                .start
+                .cmp(&b.pieces.start)
+                .then(b.pieces.end.cmp(&a.pieces.end))
+        });
+        let mut line_shifts: HashMap<usize, Vec<(f32, f32)>> = HashMap::new();
+        for group in &groups {
+            if group.pieces.is_empty() || handled[group.pieces.start] {
+                continue;
+            }
+            let first_col = column_of[group.pieces.start];
+            let last_col = column_of[group.pieces.end - 1];
+            if first_col == last_col {
+                if first_col > 0 {
+                    let (dx, dy) = shift(first_col);
+                    taffy_tree.translate_layout(group.node, dx, dy);
+                }
+                for flag in &mut handled[group.pieces.clone()] {
+                    *flag = true;
+                }
+                continue;
+            }
+            // Split: one fragment per column, clipped to the column.
+            let mut parts = Vec::new();
+            for column in first_col..=last_col {
+                let (dx, dy) = shift(column);
+                let column_start = column_top[column];
+                let top = if column == first_col {
+                    group.top
+                } else {
+                    column_start.max(group.top)
+                };
+                let bottom = if column == last_col {
+                    group.bottom
+                } else {
+                    (column_start + height).min(group.bottom)
+                };
+                parts.push((dx, dy, top - group.top, bottom - group.top));
+            }
+            fragments.push((group.node, parts));
+        }
+        for (index, piece) in pieces.iter().enumerate() {
+            if handled[index] || column_of[index] == 0 {
+                continue;
+            }
+            let (dx, dy) = shift(column_of[index]);
+            match piece.kind {
+                FlowPieceKind::Node(node) => taffy_tree.translate_layout(node, dx, dy),
+                FlowPieceKind::Line { ifc, line } => {
+                    let shifts = line_shifts.entry(ifc).or_default();
+                    if shifts.len() <= line {
+                        shifts.resize(line + 1, (0.0, 0.0));
+                    }
+                    shifts[line] = (dx, dy);
+                }
+            }
+        }
+        for (index, shifts) in line_shifts {
+            let boxes = crate::ifc::with_active_ifc(index, |ifc| {
+                let mut moved = Vec::new();
+                for (line_index, line) in ifc.final_layout().lines().enumerate() {
+                    let Some(&(dx, dy)) = shifts.get(line_index) else {
+                        continue;
+                    };
+                    for item in line.items() {
+                        if let parley::PositionedLayoutItem::InlineBox(ibox) = item {
+                            if let Some(node) = ifc.boxes.get(ibox.id as usize).and_then(|b| b.node)
+                            {
+                                moved.push((node, dx, dy));
+                            }
+                        }
+                    }
+                }
+                ifc.line_shifts = shifts;
+                moved
+            })
+            .unwrap_or_default();
+            for (node, dx, dy) in boxes {
+                taffy_tree.translate_layout(node, dx, dy);
+            }
+        }
+    }
+    (fragments, used)
 }
 
 /// Baseline-aligned table cells (CSS 2 17.5.3): in each row, every cell with
@@ -15977,7 +16707,11 @@ fn build(
                         && !matches!(child_style.position, Some(taffy::Position::Absolute))
                 })
         });
-    let taffy_id = if let Some(column_count) = multicol_count.filter(|_| atomic_multicol_children) {
+    let width_columns =
+        style.column_width.is_some() && style.column_count.is_none_or(|count| count > 1);
+    let taffy_id = if let Some(column_count) =
+        multicol_count.filter(|_| atomic_multicol_children && !width_columns)
+    {
         // A multicol container keeps its ordinary outer/block box, but its
         // inner formatting context is a horizontal sequence of equal-width
         // fragmentainers. Taffy does not expose CSS fragmentation, so build
@@ -16017,8 +16751,146 @@ fn build(
         ifc_items.multicol.push(MulticolBuild {
             columns,
             children: child_ids,
+            flow: false,
+            fill_auto: false,
+            column_width: None,
         });
         multicol
+    } else if let Some(column_count) = (if width_columns {
+        Some(style.column_count.map_or(16, usize::from))
+    } else {
+        multicol_count
+    })
+    .filter(|_| !child_ids.is_empty() || own_ifc.is_some())
+    {
+        // Breakable multicol content (CSS Multi-column 1, fragmented like
+        // LayoutNG): the flow is laid out in the first column at the column
+        // width; after layout its line boxes and unbreakable boxes are moved
+        // into later columns at the balanced column height. `column-span:
+        // all` boxes split the flow into column sets stacked between them.
+        if style.column_gap.is_none() {
+            taffy_style.gap.width =
+                taffy::style::LengthPercentage::length(style.font_size.unwrap_or(16.0));
+        }
+        let column_style = taffy::Style {
+            display: taffy::style::Display::Block,
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
+            flex_basis: taffy::style::Dimension::length(0.0),
+            min_size: taffy::Size {
+                width: taffy::style::Dimension::length(0.0),
+                height: taffy::style::Dimension::auto(),
+            },
+            ..Default::default()
+        };
+        let set_style = taffy::Style {
+            display: taffy::style::Display::Flex,
+            flex_direction: taffy::FlexDirection::Row,
+            flex_wrap: taffy::FlexWrap::NoWrap,
+            gap: taffy_style.gap,
+            align_items: Some(taffy::AlignItems::FLEX_START),
+            ..Default::default()
+        };
+        let fill_auto = style.column_fill_auto && matches!(style.height, crate::Dimension::Px(_));
+        let make_set = |taffy_tree: &mut TaffyTree<usize>,
+                        ifc_items: &mut IfcRegistry,
+                        children: Vec<taffy::NodeId>,
+                        ifc: Option<usize>,
+                        style_for_set: Option<taffy::Style>|
+         -> Option<taffy::NodeId> {
+            let first = if let Some(index) = ifc {
+                let leaf = taffy_tree.new_leaf(column_style.clone()).ok()?;
+                let _ =
+                    taffy_tree.set_node_context(leaf, Some(index | crate::ifc::IFC_CONTEXT_BIT));
+                let _ = taffy_tree.set_inline_root(leaf, true);
+                if let Some(ifc) = ifc_items.ifc.get_mut(index) {
+                    ifc.node = Some(leaf);
+                }
+                ifc_items.ifc_nodes.push(index);
+                leaf
+            } else {
+                taffy_tree
+                    .new_with_children(column_style.clone(), &children)
+                    .ok()?
+            };
+            let mut columns = vec![first];
+            for _ in 1..column_count {
+                columns.push(taffy_tree.new_leaf(column_style.clone()).ok()?);
+            }
+            let set = taffy_tree
+                .new_with_children(style_for_set.unwrap_or_else(|| set_style.clone()), &columns)
+                .ok()?;
+            ifc_items.multicol.push(MulticolBuild {
+                columns,
+                children,
+                flow: true,
+                fill_auto,
+                column_width: style.column_width,
+            });
+            Some(set)
+        };
+        let spanner = |child: &taffy::NodeId| {
+            id_map
+                .get(child)
+                .and_then(|dom_id| styles.get(dom_id))
+                .is_some_and(|child_style| {
+                    child_style.column_span_all
+                        && child_style.float.is_none()
+                        && !matches!(child_style.position, Some(taffy::Position::Absolute))
+                })
+        };
+        if own_ifc.is_some() && child_ids.is_empty() {
+            // All-inline content: the first column holds the IFC.
+            let mut container_style = taffy_style.clone();
+            container_style.display = taffy::style::Display::Flex;
+            container_style.flex_direction = taffy::FlexDirection::Row;
+            container_style.flex_wrap = taffy::FlexWrap::NoWrap;
+            container_style.align_items = Some(taffy::AlignItems::FLEX_START);
+            let index = own_ifc.take();
+            make_set(
+                taffy_tree,
+                ifc_items,
+                Vec::new(),
+                index,
+                Some(container_style),
+            )?
+        } else if !child_ids.iter().any(spanner) {
+            let mut container_style = taffy_style.clone();
+            container_style.display = taffy::style::Display::Flex;
+            container_style.flex_direction = taffy::FlexDirection::Row;
+            container_style.flex_wrap = taffy::FlexWrap::NoWrap;
+            container_style.align_items = Some(taffy::AlignItems::FLEX_START);
+            make_set(
+                taffy_tree,
+                ifc_items,
+                child_ids,
+                None,
+                Some(container_style),
+            )?
+        } else {
+            let mut parts = Vec::new();
+            let mut run = Vec::new();
+            for child in child_ids {
+                if spanner(&child) {
+                    if !run.is_empty() {
+                        parts.push(make_set(
+                            taffy_tree,
+                            ifc_items,
+                            std::mem::take(&mut run),
+                            None,
+                            None,
+                        )?);
+                    }
+                    parts.push(child);
+                } else {
+                    run.push(child);
+                }
+            }
+            if !run.is_empty() {
+                parts.push(make_set(taffy_tree, ifc_items, run, None, None)?);
+            }
+            taffy_tree.new_with_children(taffy_style, &parts).ok()?
+        }
     } else if child_ids.is_empty() {
         taffy_tree.new_leaf(taffy_style).ok()?
     } else {
@@ -20985,10 +21857,90 @@ mod tests {
         let columns = laid.rects[&tree.get_element_by_id("columns").unwrap()];
         let first = laid.rects[&tree.get_element_by_id("first").unwrap()];
         let second = laid.rects[&tree.get_element_by_id("second").unwrap()];
-        assert!((columns.height - 200.0).abs() < 0.1, "{columns:?}");
-        assert!((first.width - 200.0).abs() < 0.1, "{first:?}");
-        assert!((second.x - first.x).abs() < 0.1, "{second:?}");
-        assert!((second.y - first.y - 100.0).abs() < 0.1, "{second:?}");
+        // Chrome: the paragraphs fill one 92px column each (gap 1em).
+        assert!((columns.height - 100.0).abs() < 0.1, "{columns:?}");
+        assert!((first.width - 92.0).abs() < 0.1, "{first:?}");
+        assert!((second.x - first.x - 108.0).abs() < 0.1, "{second:?}");
+        assert!((second.y - first.y).abs() < 0.1, "{second:?}");
+    }
+
+    #[test]
+    fn multicol_breaks_honour_orphans_and_widows() {
+        // Chrome: column-fill:auto at 70px with a 50px spacer leaves room
+        // for one line; orphans 2 (initial) moves the paragraph to column
+        // 2, orphans:1 keeps a line, widows:3 keeps three in the last.
+        let text = "Lorem ipsum dolor sit amet, consectetuer adipiscing elit, sed diam nonummy nibh euismod tincidunt ut laoreet dolore magna aliquam erat volutpat.";
+        let mut html = String::from("<html><body style=\"margin:0;font:16px/20px Arial\">");
+        for (id, extra) in [("a", ""), ("b", "orphans:1"), ("c", "orphans:1;widows:3")] {
+            html.push_str(&format!(
+                "<div style=\"width:400px;columns:3;column-fill:auto;height:70px;margin-bottom:200px;{extra}\">\
+                 <div style=\"height:50px\"></div><p id={id} style=\"margin:0\">{text}</p></div>"
+            ));
+        }
+        html.push_str("</body></html>");
+        let tree = parse_html(&html);
+        let laid = layout_dom(&tree, (800.0, 1200.0));
+        let heights = |id: &str| -> Vec<f32> {
+            laid.inline_fragments[&tree.get_element_by_id(id).unwrap()]
+                .iter()
+                .map(|r| r.height.round())
+                .collect()
+        };
+        assert_eq!(heights("a"), vec![70.0, 70.0, 70.0, 40.0]);
+        assert_eq!(heights("b"), vec![20.0, 70.0, 70.0, 70.0, 40.0]);
+        assert_eq!(heights("c"), vec![20.0, 70.0, 70.0, 70.0, 60.0]);
+    }
+
+    #[test]
+    fn multicol_column_rules_sit_between_filled_columns() {
+        // Chrome paints a 4px red rule at x 191..195 and 405..409, the
+        // column height (140) tall, for three 173.33px columns 40px apart.
+        let text = "Lorem ipsum dolor sit amet, consectetuer adipiscing elit, sed diam nonummy nibh euismod tincidunt ut laoreet dolore magna aliquam erat volutpat.";
+        let tree = parse_html(&format!(
+            "<html><body style=\"margin:0;font:16px/20px Arial\"><div id=m style=\"width:600px;columns:3;\
+             column-gap:40px;column-rule:4px solid rgb(255,0,0)\">{text} {text} {text}</div></body></html>"
+        ));
+        let laid = layout_dom(&tree, (800.0, 300.0));
+        let rules = &laid.column_rules[&tree.get_element_by_id("m").unwrap()];
+        let got: Vec<(f32, f32, f32, f32, [u8; 4])> = rules
+            .iter()
+            .map(|(r, c)| (r.x, r.y, r.width, r.height, *c))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (191.0, 0.0, 4.0, 140.0, [255, 0, 0, 255]),
+                (405.0, 0.0, 4.0, 140.0, [255, 0, 0, 255])
+            ]
+        );
+    }
+
+    #[test]
+    fn multicol_fragments_lines_across_balanced_columns() {
+        // Chrome: a 2-column flow under a spanner balances at 240px; the
+        // second paragraph's lines continue at the top of column 2, its
+        // client rects are the two column fragments, and a forced
+        // break-before starts the next column.
+        let text = "Lorem ipsum dolor sit amet, consectetuer adipiscing elit, sed diam nonummy nibh euismod tincidunt ut laoreet dolore magna aliquam erat volutpat. Ut wisi enim ad minim veniam, quis nostrud exerci tation ullamcorper suscipit lobortis nisl ut aliquip ex ea commodo consequat.";
+        let tree = parse_html(&format!(
+            "<html><body style=\"margin:0;font:16px/20px Arial\">\
+             <div id=b style=\"width:600px;column-count:2;padding:10px\">\
+             <h2 id=h style=\"column-span:all;margin:0\">Title</h2>\
+             <p id=p1 style=\"margin:0 0 10px\">{text}</p><p id=p2 style=\"margin:0\">{text} {text}</p></div>\
+             <div id=e style=\"width:600px;column-count:3\"><p id=p4 style=\"margin:0\">{text}</p>\
+             <p id=p5 style=\"break-before:column;margin:0\">short</p></div></body></html>"
+        ));
+        let laid = layout_dom(&tree, (800.0, 600.0));
+        let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
+        assert_eq!((rect("b").height, rect("h").width), (280.0, 600.0));
+        let p2 = tree.get_element_by_id("p2").unwrap();
+        let fragments: Vec<(f32, f32, f32)> = laid.inline_fragments[&p2]
+            .iter()
+            .map(|r| (r.x.round(), r.y.round(), r.height.round()))
+            .collect();
+        assert_eq!(fragments, vec![(10.0, 200.0, 70.0), (318.0, 30.0, 240.0)]);
+        assert_eq!(rect("e").height, 120.0);
+        assert_eq!((rect("p5").x.round(), rect("p5").y), (411.0, rect("e").y));
     }
 
     #[test]

@@ -1604,3 +1604,88 @@ fn vertical_writing_mode_inline_becomes_an_upright_inline_block() {
     assert_eq!(s.width, 24.0, "{s:?}");
     assert!(s.height > 60.0 && p.height > s.height, "{s:?} {p:?}");
 }
+
+#[test]
+fn column_width_fits_the_column_count_and_fragments_inline_text() {
+    // Chrome: column-width:150px in 600px gives 3 columns (gap 1em), and
+    // all-inline text balances to 160px; columns:100px 3 in 500px is capped
+    // at 3; column-width wider than the box leaves one column.
+    let t = "Lorem ipsum dolor sit amet, consectetuer adipiscing elit, sed diam nonummy nibh euismod tincidunt ut laoreet dolore magna aliquam erat volutpat. Ut wisi enim ad minim veniam, quis nostrud exerci tation ullamcorper suscipit lobortis nisl ut aliquip ex ea commodo consequat.";
+    let (tree, laid) = layout(
+        &format!(
+            "<!doctype html><body style='margin:0;font:16px/20px Arial'>\
+             <div id=a style='width:600px;column-width:150px'>{t} {t}</div>\
+             <div id=b style='width:500px;columns:100px 3'>{t} {t}</div>\
+             <div id=c style='width:200px;column-width:150px'>{t}</div>"
+        ),
+        &[],
+    );
+    let h = |id: &str| laid.rects[&element(&tree, id)].height;
+    assert_eq!((h("a"), h("b"), h("c")), (160.0, 200.0, 220.0));
+}
+
+#[test]
+fn vertical_block_is_as_wide_as_its_stacked_lines() {
+    // Chrome: a vertical-rl block in horizontal flow with a 150px (100px)
+    // inline size stacks its lines in the block direction: 2 (6) lines of
+    // 24px make it 48 (144) wide, not the parent's width; one short line
+    // is 24 wide.
+    let t = "Lorem ipsum dolor sit amet consectetur";
+    let (tree, laid) = layout(
+        &format!(
+            "<!doctype html><body style='margin:0;font:16px/24px Arial'>\
+             <div id=a style='writing-mode:vertical-rl;height:150px'>{t}</div>\
+             <div id=b style='writing-mode:vertical-rl;height:100px'>{t} {t}</div>\
+             <div id=c style='writing-mode:vertical-rl;height:600px'>short</div>"
+        ),
+        &[],
+    );
+    let r = |id: &str| laid.rects[&element(&tree, id)];
+    assert_eq!(
+        (r("a").width, r("a").height, r("b").width, r("c").width),
+        (48.0, 150.0, 144.0, 24.0)
+    );
+}
+
+#[test]
+fn culled_inline_over_a_bigger_or_shifted_child_keeps_its_own_font_box() {
+    // Chrome: an undecorated span around a 24px child, or a child shifted
+    // by vertical-align, reports its own 17px font box on the baseline;
+    // around a same-font child with padding it reports the child's box.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px/24px Arial'><p style='margin:0'>x \
+         <b id=a><span style='font-size:24px'>=</span></b> \
+         <span id=g><span style='vertical-align:10px'>=</span></span> \
+         <span id=f><span style='padding:8px'>=</span></span></p>",
+        &[],
+    );
+    let h = |id: &str| laid.inline_fragments[&element(&tree, id)][0].height;
+    assert_eq!((h("a"), h("g"), h("f")), (17.0, 17.0, 33.0));
+}
+
+#[test]
+fn inline_ending_at_a_forced_break_has_no_fragment_on_the_next_line() {
+    // Chrome: abc <strong><br></strong>def has one 0x17 fragment at the end
+    // of the first line; <span style=background:red><br></span> likewise.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px/24px Arial'><div style='width:300px'>abc \
+         <strong id=a><br></strong>def <span id=c style='background:red'><br></span>ij</div>",
+        &[],
+    );
+    let frags = |id: &str| laid.inline_fragments[&element(&tree, id)].len();
+    assert_eq!((frags("a"), frags("c")), (1, 1));
+    assert_eq!(laid.inline_fragments[&element(&tree, "a")][0].y, 3.0);
+}
+
+#[test]
+fn space_after_an_atomic_inline_at_a_line_start_is_kept() {
+    // Chrome: in y<br><input> <span>em</span> the space after the input
+    // stays; the span starts after it (x 62.45 with a 50px input).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'><div>y<br>\n\
+         <input style='width:50px'> <span id=s>em</span></div>",
+        &[],
+    );
+    let s = laid.inline_fragments[&element(&tree, "s")][0];
+    assert!(s.x > 60.0, "{s:?}");
+}

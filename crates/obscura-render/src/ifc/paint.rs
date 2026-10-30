@@ -402,6 +402,8 @@ fn runs(ifc: &Ifc) -> Vec<PaintRun> {
                 .get(paint)
                 .map(|paint| paint.offset)
                 .unwrap_or((0.0, 0.0));
+            let (sx, sy) = ifc.line_shift(line_index);
+            let (dx, dy) = (dx + sx, dy + sy);
             let glyphs: Vec<(u16, f32, f32)> = run
                 .positioned_glyphs()
                 .map(|glyph| (glyph.id as u16, glyph.x + dx, glyph.y + dy))

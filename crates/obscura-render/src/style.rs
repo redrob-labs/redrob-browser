@@ -2506,6 +2506,63 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
             style.column_count = split_ws_paren(value)
                 .into_iter()
                 .find_map(parse_column_count);
+            style.column_width =
+                split_ws_paren(value)
+                    .into_iter()
+                    .find_map(|token| match dimension_value(token) {
+                        crate::Dimension::Px(px) if px > 0.0 => Some(px),
+                        _ => None,
+                    });
+        }
+        "column-width" | "-webkit-column-width" => {
+            style.column_width = match dimension_value(value.trim()) {
+                crate::Dimension::Px(px) if px > 0.0 => Some(px),
+                _ => None,
+            };
+        }
+        "orphans" => style.orphans = value.trim().parse::<u16>().ok().filter(|v| *v > 0),
+        "widows" => style.widows = value.trim().parse::<u16>().ok().filter(|v| *v > 0),
+        "column-rule-width" => style.column_rule_width = border_width(value),
+        "column-rule-style" => style.column_rule_style = border_style(value),
+        "column-rule-color" => style.column_rule_color = parse_color(value),
+        "column-rule" | "-webkit-column-rule" => {
+            // `<width> || <style> || <color>`; omitted parts reset.
+            style.column_rule_width = None;
+            style.column_rule_style = None;
+            style.column_rule_color = None;
+            for token in split_ws_paren(value) {
+                if style.column_rule_style.is_none() {
+                    if let Some(rule) = border_style(token) {
+                        style.column_rule_style = Some(rule);
+                        continue;
+                    }
+                }
+                if style.column_rule_width.is_none() {
+                    if let Some(width) = border_width(token) {
+                        style.column_rule_width = Some(width);
+                        continue;
+                    }
+                }
+                if let Some(color) = parse_color(token) {
+                    style.column_rule_color = Some(color);
+                }
+            }
+        }
+        "column-span" | "-webkit-column-span" => {
+            style.column_span_all = value.trim().eq_ignore_ascii_case("all");
+        }
+        "column-fill" => {
+            style.column_fill_auto = value.trim().eq_ignore_ascii_case("auto");
+        }
+        "break-before" | "-webkit-column-break-before" => {
+            let v = value.trim().to_ascii_lowercase();
+            style.break_before_column =
+                matches!(v.as_str(), "column" | "page" | "always" | "left" | "right");
+        }
+        "break-after" | "-webkit-column-break-after" => {
+            let v = value.trim().to_ascii_lowercase();
+            style.break_after_column =
+                matches!(v.as_str(), "column" | "page" | "always" | "left" | "right");
         }
         "break-inside" => {
             style.break_inside_avoid = matches!(

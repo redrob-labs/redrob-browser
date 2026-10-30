@@ -367,6 +367,44 @@ impl ShapedText {
         } else {
             Vec::new()
         };
+        // Vertical text (`vert` on): an upright glyph advances by its
+        // vertical advance (vmtx, else the font's height), as HarfBuzz's
+        // vertical shaping does in Chromium. Rotated glyphs keep theirs.
+        let vertical_advances: Vec<Option<f32>> = if options
+            .features
+            .iter()
+            .any(|f| f.tag.to_bytes() == *b"vert" && f.value != 0)
+        {
+            let font = &self.fonts[font_index];
+            let run_chars: Vec<char> = text[range.byte_range.clone()].chars().collect();
+            match skrifa::FontRef::from_index(font.font.data.as_ref(), font.font.index) {
+                Ok(font_ref) => {
+                    use skrifa::raw::TableProvider as _;
+                    let vmtx = font_ref.vmtx().ok();
+                    let height = (metrics.ascent - metrics.descent) * scale_factor;
+                    glyph_infos
+                        .iter()
+                        .map(|info| {
+                            let ch = *run_chars.get(info.cluster as usize)?;
+                            if !crate::shape::shaped_text::vertical_upright(ch) {
+                                return None;
+                            }
+                            let advance = vmtx
+                                .as_ref()
+                                .and_then(|vmtx| {
+                                    vmtx.advance(skrifa::GlyphId::new(info.glyph_id))
+                                })
+                                .map(|units| units as f32 * scale_factor)
+                                .unwrap_or(height);
+                            Some(if whole_pixel { advance.round() } else { advance })
+                        })
+                        .collect()
+                }
+                Err(_) => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
         let shaped_clusters_start = self.shaped_clusters.len();
 
         // Push all characters.
@@ -403,6 +441,7 @@ impl ShapedText {
                 glyph_infos.iter(),
                 glyph_positions.iter(),
                 unkerned_advances.iter().copied(),
+                vertical_advances.iter().copied(),
                 &self.characters,
                 characters_start,
             );
@@ -415,6 +454,7 @@ impl ShapedText {
                 glyph_infos.iter().rev(),
                 glyph_positions.iter().rev(),
                 unkerned_advances.iter().rev().copied(),
+                vertical_advances.iter().rev().copied(),
                 &self.characters,
                 characters_start,
             );
@@ -504,10 +544,12 @@ fn process_shaped_clusters<'a>(
     glyph_infos: impl Iterator<Item = &'a harfrust::GlyphInfo>,
     glyph_positions: impl Iterator<Item = &'a harfrust::GlyphPosition>,
     unkerned_advances: impl Iterator<Item = (f32, f32)>,
+    vertical_advances: impl Iterator<Item = Option<f32>>,
     characters: &[Character],
     characters_start: usize,
 ) {
     let mut unkerned_advances = unkerned_advances;
+    let mut vertical_advances = vertical_advances;
     struct Cluster {
         id: u32,
         characters_start: usize,
@@ -587,7 +629,16 @@ fn process_shaped_clusters<'a>(
             x: (glyph_pos.x_offset as f32) * scale_factor,
             // Convert from font space (Y-up) to layout space (Y-down)
             y: -(glyph_pos.y_offset as f32) * scale_factor,
-            advance: if whole_pixel {
+            advance: if let Some(Some(vertical)) = {
+                let next = vertical_advances.next();
+                if next.is_some_and(|v| v.is_some()) && whole_pixel {
+                    // Keep the horizontal advances in step.
+                    unkerned_advances.next();
+                }
+                next
+            } {
+                vertical
+            } else if whole_pixel {
                 let advance = (glyph_pos.x_advance as f32) * scale_factor;
                 match unkerned_advances.next() {
                     Some((base, hinted)) if base.is_finite() => {
@@ -903,4 +954,26 @@ mod tests {
         // But note that, had we had three regional indicator symbols, like `[R0 R1 R2]` itemized as
         // `[R0] [R1 R2]`, the last pair should form a single grapheme. We don't do that currently.
     }
+}
+
+/// Whether `ch` is set upright in vertical text under `text-orientation:
+/// mixed` (UAX #50 Vertical_Orientation U or Tu, approximated by the CJK,
+/// kana, Hangul, fullwidth and CJK symbol blocks).
+pub(crate) fn vertical_upright(ch: char) -> bool {
+    matches!(ch as u32,
+        0x1100..=0x11FF
+        | 0x2E80..=0x2FFF
+        | 0x3000..=0x30FF
+        | 0x3100..=0x31FF
+        | 0x3200..=0x4DBF
+        | 0x4E00..=0x9FFF
+        | 0xA960..=0xA97F
+        | 0xAC00..=0xD7FF
+        | 0xF900..=0xFAFF
+        | 0xFE10..=0xFE1F
+        | 0xFE30..=0xFE4F
+        | 0xFF01..=0xFF60
+        | 0xFFE0..=0xFFE6
+        | 0x1F000..=0x1FAFF
+        | 0x20000..=0x3FFFF)
 }

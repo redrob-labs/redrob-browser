@@ -7,6 +7,19 @@
 //! picture size of an Ogg Theora identification header. Only the first
 //! bytes of a file are needed when its `moov` comes first.
 
+/// Resource-cache key prefix of a header-only (first bytes) media fetch.
+/// The page transport strips it and sends `Range: bytes=0-N`.
+pub const MEDIA_HEADER_PREFIX: &str = "obscura-media-header:";
+
+/// How many leading bytes a header read asks for. Enough for `moov` up to
+/// the first track header of a fast-start MP4 and for a WebM's Tracks.
+pub const MEDIA_HEADER_BYTES: usize = 128 * 1024;
+
+/// The media URL behind a header-only cache key, if `url` is one.
+pub fn media_header_target(url: &str) -> Option<&str> {
+    url.strip_prefix(MEDIA_HEADER_PREFIX)
+}
+
 /// The video's natural (width, height) in CSS px, or `None`.
 pub fn video_dimensions(bytes: &[u8]) -> Option<(f32, f32)> {
     if bytes.len() >= 8 && &bytes[4..8] == b"ftyp"

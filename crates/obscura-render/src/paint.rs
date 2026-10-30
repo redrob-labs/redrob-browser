@@ -632,8 +632,37 @@ impl RenderResourceCache {
     /// read from the cached bytes (a cache-only miss requests them). Needs
     /// no decoder.
     pub fn video_header_dimensions(&mut self, url: &str) -> Option<(f32, f32)> {
-        let bytes = self.get_or_load(url, false)?;
-        crate::video_header::video_dimensions(&bytes)
+        // Bytes the decoder path already holds.
+        if let Some(CachedResource::Bytes { bytes, .. }) =
+            self.entries.get(&network_resource_url(url))
+        {
+            return crate::video_header::video_dimensions(bytes);
+        }
+        // Otherwise only the first bytes (a Range request): a fast-start
+        // MP4's moov or a WebM's Tracks comes first.
+        let header_key = format!(
+            "{}{}",
+            crate::video_header::MEDIA_HEADER_PREFIX,
+            network_resource_url(url)
+        );
+        if let Some(bytes) = self.get_or_load(&header_key, false) {
+            if let Some(size) = crate::video_header::video_dimensions(&bytes) {
+                return Some(size);
+            }
+            // moov after mdat: the header is past the prefix.
+            if bytes.len() < crate::video_header::MEDIA_HEADER_BYTES {
+                return None;
+            }
+            let bytes = self.get_or_load(url, false)?;
+            return crate::video_header::video_dimensions(&bytes);
+        }
+        // A loader without the prefix scheme (standalone renders): the whole
+        // resource.
+        if self.sync_loading_enabled {
+            let bytes = self.get_or_load(url, false)?;
+            return crate::video_header::video_dimensions(&bytes);
+        }
+        None
     }
 
     /// The frame a paused video at `url` shows at `time`, decoding it from
@@ -6495,6 +6524,24 @@ fn paint_laid_dom_scrolled(
 
         if !paints_inline_fragments {
             paint_css_border(&mut pixmap, &rect, style, element_clip_mask, raster_scale);
+        }
+        // Multicol column rules sit between the columns, over the
+        // container's background (CSS Multi-column 1 §4).
+        if let Some(rules) = laid.column_rules.get(&nid) {
+            for (rule, color) in rules {
+                if let Some(shape) =
+                    tiny_skia::Rect::from_xywh(rule.x, rule.y, rule.width, rule.height)
+                {
+                    let mut paint = Paint::default();
+                    paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
+                    pixmap.fill_rect(
+                        shape,
+                        &paint,
+                        raster_transform(raster_scale),
+                        element_clip_mask,
+                    );
+                }
+            }
         }
         paint_css_outline(&mut pixmap, &rect, style, element_clip_mask, raster_scale);
 
@@ -16717,6 +16764,37 @@ mod tests {
             Some(b"png-bytes".as_slice())
         );
         assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn video_header_size_comes_from_a_prefix_request() {
+        // Cache-only (page) mode: the size needs only the header key, which
+        // the page transport fetches with a Range request; the whole video
+        // is never asked for when the prefix holds the moov.
+        let mut cache = RenderResourceCache::with_loader(|_: &str| None);
+        cache.set_sync_loading_enabled(false);
+        let url = "https://media.test/v.mp4";
+        assert_eq!(cache.video_header_dimensions(url), None);
+        let misses: Vec<String> = cache.take_sync_misses().into_iter().map(|m| m.0).collect();
+        let key = format!("{}{url}", crate::video_header::MEDIA_HEADER_PREFIX);
+        assert_eq!(misses, vec![key.clone()]);
+        let mp4_box = |kind: &[u8; 4], payload: &[u8]| {
+            let mut v = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
+            v.extend_from_slice(kind);
+            v.extend_from_slice(payload);
+            v
+        };
+        let mut tkhd = vec![0u8; 76];
+        tkhd.extend_from_slice(&(320u32 << 16).to_be_bytes());
+        tkhd.extend_from_slice(&(176u32 << 16).to_be_bytes());
+        let mut file = mp4_box(b"ftyp", b"isom\0\0\0\0");
+        file.extend(mp4_box(
+            b"moov",
+            &mp4_box(b"trak", &mp4_box(b"tkhd", &tkhd)),
+        ));
+        cache.seed(key, file);
+        assert_eq!(cache.video_header_dimensions(url), Some((320.0, 176.0)));
+        assert!(cache.take_sync_misses().is_empty());
     }
 
     #[test]

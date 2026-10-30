@@ -218,6 +218,9 @@ pub(crate) struct Ifc {
     pub(crate) has_content: bool,
     /// Content-box origin in document coordinates (set after layout).
     pub(crate) origin: (f32, f32),
+    /// Per-line offset of a line box moved into a later column of its
+    /// multicol container (empty when the IFC is not fragmented).
+    pub(crate) line_shifts: Vec<(f32, f32)>,
     /// Content-box size of the final layout in the IFC's own (logical)
     /// axes: inline extent, block extent.
     pub(crate) logical_size: (f32, f32),
@@ -336,6 +339,13 @@ impl IfcStore {
         if let Some(ifcs) = ACTIVE.with(|active| active.borrow_mut().pop()) {
             self.ifcs = ifcs;
         }
+    }
+}
+
+impl Ifc {
+    /// The column-fragmentation offset of line `index`.
+    pub(crate) fn line_shift(&self, index: usize) -> (f32, f32) {
+        self.line_shifts.get(index).copied().unwrap_or((0.0, 0.0))
     }
 }
 

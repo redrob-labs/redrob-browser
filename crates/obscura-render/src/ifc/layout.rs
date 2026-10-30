@@ -60,10 +60,25 @@ pub(crate) fn compute_inline_layout(
             axis: taffy::RequestedAxis::Both,
             ..inputs
         };
+        // The box's own sizes are physical: its height is the turned
+        // layout's line length, its width the block extent of the lines.
+        let mut turned_style = style.clone();
+        turned_style.size = Size {
+            width: style.size.height,
+            height: style.size.width,
+        };
+        turned_style.min_size = Size {
+            width: style.min_size.height,
+            height: style.min_size.width,
+        };
+        turned_style.max_size = Size {
+            width: style.max_size.height,
+            height: style.max_size.width,
+        };
         let result = super::with_active_ifc(index, |ifc| {
             let mut bfc = BlockFormattingContext::new();
             let mut root = bfc.root_block_context();
-            layout_ifc(host, node, &style, ifc, turned, &mut root)
+            layout_ifc(host, node, &turned_style, ifc, turned, &mut root)
         });
         return result.map_or(LayoutOutput::HIDDEN, |output| {
             let size = Size {

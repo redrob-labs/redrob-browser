@@ -930,6 +930,7 @@ impl IfcStore {
             texts,
             params,
             content_offset: (0.0, 0.0),
+            line_shifts: Vec::new(),
             has_content,
             origin: (0.0, 0.0),
             logical_size: (0.0, 0.0),

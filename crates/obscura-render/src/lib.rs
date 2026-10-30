@@ -1856,6 +1856,22 @@ pub struct LayoutStyle {
     /// explicit and lets the balancing path distinguish authored break
     /// avoidance as finer-grained fragmentation is added.
     pub break_inside_avoid: bool,
+    /// `column-span: all`: the box spans every column of its multicol
+    /// container, splitting the column flow above and below it.
+    pub column_span_all: bool,
+    /// `column-rule-width` (px; medium = 3) / `-style` / `-color`.
+    pub column_rule_width: Option<f32>,
+    pub column_rule_style: Option<BorderStyle>,
+    pub column_rule_color: Option<[u8; 4]>,
+    /// `column-width` in px: the used column count follows the container's
+    /// width (CSS Multi-column 1 §3.4).
+    pub column_width: Option<f32>,
+    /// `column-fill: auto` (fill columns in order instead of balancing).
+    pub column_fill_auto: bool,
+    /// `break-before: column | page` (forced column break before the box).
+    pub break_before_column: bool,
+    /// `break-after: column | page`.
+    pub break_after_column: bool,
 
     /// `border-spacing: <horizontal> <vertical>?` (or the `cellspacing`
     /// attribute). Only meaningful on a `<table>`; taffy has no native table
@@ -2089,6 +2105,10 @@ pub struct LayoutStyle {
     /// line count but tightens the effective line-breaking width during the
     /// inline formatter's final shaping pass.
     pub text_wrap_style: Option<TextWrapStyle>,
+    /// `orphans` / `widows` (inherited, initial 2): the fewest lines of a
+    /// block left before / after a column break.
+    pub orphans: Option<u16>,
+    pub widows: Option<u16>,
     /// Deferred functional line-height (`calc()`, `min()`, `clamp()`) resolved
     /// after the element font and live viewport are known.
     pub line_height_expression: Option<String>,

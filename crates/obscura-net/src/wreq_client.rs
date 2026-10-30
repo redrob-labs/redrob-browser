@@ -134,12 +134,23 @@ async fn read_wreq_body_limited(
     url: &Url,
     limit: usize,
 ) -> Result<Vec<u8>, ObscuraNetError> {
-    if response
-        .headers()
-        .get("content-length")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .is_some_and(|length| length > limit as u64)
+    read_wreq_body_bounded(response, url, limit, false).await
+}
+
+#[cfg(feature = "stealth")]
+async fn read_wreq_body_bounded(
+    response: wreq::Response,
+    url: &Url,
+    limit: usize,
+    truncate: bool,
+) -> Result<Vec<u8>, ObscuraNetError> {
+    if !truncate
+        && response
+            .headers()
+            .get("content-length")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .is_some_and(|length| length > limit as u64)
     {
         return Err(response_too_large(url, limit));
     }
@@ -157,6 +168,11 @@ async fn read_wreq_body_limited(
             ObscuraNetError::Network(format!("Failed to read body: {}", error_chain(&error)))
         })?;
         if chunk.len() > limit.saturating_sub(body.len()) {
+            if truncate {
+                let room = limit.saturating_sub(body.len());
+                body.extend_from_slice(&chunk[..room]);
+                return Ok(body);
+            }
             return Err(response_too_large(url, limit));
         }
         body.extend_from_slice(&chunk);
@@ -390,6 +406,9 @@ impl StealthHttpClient {
             if cors_required(&request, &current_url) {
                 req = req.header("origin", &request_origin);
             }
+            if let Some(prefix) = request.prefix_bytes {
+                req = req.header("range", format!("bytes=0-{}", prefix.saturating_sub(1)));
+            }
 
             let request_info = RequestInfo {
                 url: current_url.clone(),
@@ -448,8 +467,13 @@ impl StealthHttpClient {
                 }
             }
 
-            let body =
-                read_wreq_body_limited(resp, &current_url, request.max_response_bytes).await?;
+            let body = read_wreq_body_bounded(
+                resp,
+                &current_url,
+                request.prefix_bytes.unwrap_or(request.max_response_bytes),
+                request.prefix_bytes.is_some(),
+            )
+            .await?;
             drop(in_flight);
 
             let response = Response {
