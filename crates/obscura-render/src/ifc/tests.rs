@@ -1484,3 +1484,21 @@ fn bundled_liberation_sans_kerns_digit_pairs_like_chrome() {
     let w = width(&tree, &laid, "a");
     assert!((w - 32.03).abs() < 0.05, "{w}");
 }
+
+#[test]
+fn percentage_image_wrapper_shrinks_in_a_full_flex_row() {
+    // Chrome: in a 376px row, a 170px column and a shrinkable wrapper of a
+    // width:100% image (natural 250) leave the wrapper 206 wide, not 250.
+    let png = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22250%22%20height%3D%22179%22%2F%3E";
+    let html = format!(
+        "<!doctype html><body style='margin:0'><div style='display:flex;width:376px'>\
+         <div style='flex:0 0 170px'>x</div><div id=p style='flex:1 1 auto;display:flex'>\
+         <img src=\"{png}\" width=250 height=179 style='width:100%;display:block'></div></div>"
+    );
+    let (tree, laid) = layout(&html, &[]);
+    assert!(
+        (width(&tree, &laid, "p") - 206.0).abs() < 0.5,
+        "{}",
+        width(&tree, &laid, "p")
+    );
+}
