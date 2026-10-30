@@ -1934,7 +1934,7 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
             }
         }
         "justify-items" => {
-            if let Some(Some(value)) = self_alignment_value(value) {
+            if let Some(Some(value)) = inline_self_alignment_value(value) {
                 style.justify_items = Some(value);
             }
         }
@@ -1950,7 +1950,7 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
             }
         }
         "justify-self" => {
-            if let Some(value) = self_alignment_value(value) {
+            if let Some(value) = inline_self_alignment_value(value) {
                 style.justify_self = value;
             }
         }
@@ -3800,9 +3800,8 @@ fn supports_conservative_known_value(name: &str, value: &str) -> bool {
             dimension(value, true)
         }
         "aspect-ratio" => lower == "auto" || parse_aspect_ratio(value).is_some(),
-        "align-items" | "justify-items" | "align-self" | "justify-self" => {
-            self_alignment_value(value).is_some()
-        }
+        "align-items" | "align-self" => self_alignment_value(value).is_some(),
+        "justify-items" | "justify-self" => inline_self_alignment_value(value).is_some(),
         "place-items" | "place-self" => self_alignment_pair(value).is_some(),
         "align-content" => content_alignment_value(value).is_some(),
         "justify-content" => {
@@ -4279,6 +4278,20 @@ fn self_alignment_value(value: &str) -> Option<Option<taffy::AlignSelf>> {
     Some(Some(alignment))
 }
 
+/// `justify-self` / `justify-items` also take `left` and `right` (CSS Box
+/// Alignment 3 §6): the line-left / line-right edge, start / end in
+/// left-to-right text (Chrome: `justify-self: right` puts a grid item at
+/// its area's right edge, shrunk to fit).
+fn inline_self_alignment_value(value: &str) -> Option<Option<taffy::AlignSelf>> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "left" | "unsafe left" => Some(Some(taffy::AlignSelf::START)),
+        "right" | "unsafe right" => Some(Some(taffy::AlignSelf::END)),
+        "safe left" => Some(Some(taffy::AlignSelf::SAFE_START)),
+        "safe right" => Some(Some(taffy::AlignSelf::SAFE_END)),
+        _ => self_alignment_value(value),
+    }
+}
+
 fn self_alignment_pair(
     value: &str,
 ) -> Option<(Option<taffy::AlignSelf>, Option<taffy::JustifySelf>)> {
@@ -4289,9 +4302,10 @@ fn self_alignment_pair(
     for split in 1..tokens.len() {
         let align = tokens[..split].join(" ");
         let justify = tokens[split..].join(" ");
-        if let (Some(align), Some(justify)) =
-            (self_alignment_value(&align), self_alignment_value(&justify))
-        {
+        if let (Some(align), Some(justify)) = (
+            self_alignment_value(&align),
+            inline_self_alignment_value(&justify),
+        ) {
             return Some((align, justify));
         }
     }

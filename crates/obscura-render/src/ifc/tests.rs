@@ -1722,3 +1722,23 @@ fn empty_inline_elements_put_their_strut_on_the_line() {
     let h = |id: &str| laid.rects[&element(&tree, id)].height;
     assert_eq!((h("a"), h("c"), h("d")), (48.0, 60.0, 0.0));
 }
+
+#[test]
+fn justify_self_left_and_right_align_grid_items_in_their_area() {
+    // Chrome: `justify-self: right` puts a grid item at its area's right
+    // edge, shrunk to its content; `place-self: center left` at the left.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'>\
+         <div style='display:grid;grid-template-columns:300px 300px;width:600px'>\
+         <div id=a style='justify-self:right'>Item 1</div>\
+         <div id=b style='place-self:center left'>Item 2</div></div>",
+        &[],
+    );
+    let a = laid.rects[&element(&tree, "a")];
+    let b = laid.rects[&element(&tree, "b")];
+    assert!(
+        a.width < 100.0 && (a.x + a.width - 300.0).abs() < 1.0,
+        "{a:?}"
+    );
+    assert!(b.width < 100.0 && b.x == 300.0, "{b:?}");
+}
