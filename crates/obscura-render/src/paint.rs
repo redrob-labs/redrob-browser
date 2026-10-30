@@ -2755,6 +2755,57 @@ impl PreparedRender {
         })
     }
 
+    /// Whether this layout's geometry still holds after `mutations`: each is
+    /// a selector-only attribute change inside a `display: none` subtree and
+    /// restyles nothing outside it (beyond the mutated nodes' ancestor
+    /// chain, which the planner rebuilds for context only). Such a change
+    /// cannot create, remove or resize a box (Chrome restyles the hidden
+    /// subtree and skips layout), so a geometry read may keep this layout
+    /// while the mutations stay queued for the next style read or paint.
+    pub fn geometry_survives_hidden_mutations(
+        &self,
+        tree: &DomTree,
+        stylesheet_cache: &mut crate::css::StylesheetCache,
+        mutations: &[crate::dom::RetainedStyleMutation],
+    ) -> bool {
+        let suppressed = |id: obscura_dom::tree::NodeId| {
+            let mut ancestor = crate::dom::rendered_parent(tree, id);
+            while let Some(node) = ancestor {
+                if self
+                    .layout
+                    .styles
+                    .get(&node)
+                    .is_some_and(|style| style.display == crate::Display::None)
+                {
+                    return true;
+                }
+                ancestor = crate::dom::rendered_parent(tree, node);
+            }
+            false
+        };
+        let mut chain = std::collections::HashSet::new();
+        for mutation in mutations {
+            let crate::dom::RetainedStyleMutation::Attribute(attribute) = mutation else {
+                return false;
+            };
+            if !suppressed(attribute.node) {
+                return false;
+            }
+            chain.extend(tree.ancestors(attribute.node));
+        }
+        let Some(dirty) = crate::dom::retained_selector_dirty_set(
+            tree,
+            self.viewport,
+            stylesheet_cache,
+            mutations,
+        ) else {
+            return false;
+        };
+        dirty
+            .into_iter()
+            .all(|node| chain.contains(&node) || suppressed(node))
+    }
+
     fn image_is_display_suppressed(&self, tree: &DomTree, id: obscura_dom::tree::NodeId) -> bool {
         let mut ancestor = Some(id);
         while let Some(node) = ancestor {

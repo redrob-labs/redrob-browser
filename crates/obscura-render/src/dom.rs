@@ -5120,6 +5120,45 @@ pub(crate) fn can_retain_layout_for_metadata(
         )
 }
 
+/// The style-dirty set of selector-only attribute `mutations`, or `None` when
+/// they need a full cascade (or the stylesheet is not cached yet).
+pub(crate) fn retained_selector_dirty_set(
+    tree: &DomTree,
+    viewport: (f32, f32),
+    cache: &mut crate::css::StylesheetCache,
+    mutations: &[RetainedStyleMutation],
+) -> Option<HashSet<NodeId>> {
+    if mutations.is_empty()
+        || !mutations.iter().all(|mutation| {
+            matches!(mutation, RetainedStyleMutation::Attribute(attribute)
+                if retained_attribute_mutation_kind(tree, attribute.node, &attribute.name)
+                    == RetainedAttributeMutationKind::Selector)
+        })
+    {
+        return None;
+    }
+    if tree
+        .descendants(tree.document())
+        .iter()
+        .any(|node| tree.shadow_root(*node).is_some())
+    {
+        return None;
+    }
+    let sources = document_stylesheet_sources(tree, viewport, crate::CssMediaType::Screen);
+    let (sheet, cache_hit) =
+        cache.get_or_parse(tree, &sources, viewport, crate::CssMediaType::Screen);
+    if !cache_hit {
+        return None;
+    }
+    match retained_style_plan(tree, &sheet, mutations) {
+        RetainedStylePlan::Reuse {
+            dirty,
+            has_animation_damage: false,
+        } => Some(dirty),
+        _ => None,
+    }
+}
+
 fn image_source_attribute(name: &str) -> bool {
     matches!(
         name,

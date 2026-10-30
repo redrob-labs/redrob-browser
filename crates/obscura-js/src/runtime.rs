@@ -10601,6 +10601,49 @@ mod tests {
 
     #[cfg(feature = "render")]
     #[tokio::test(flavor = "current_thread")]
+    async fn class_changes_inside_hidden_subtrees_keep_geometry_and_styles_current() {
+        // w3schools' sidebar patch reads offsetHeight and adds a class to
+        // each of ~300 links in collapsed (display:none) sections. Geometry
+        // reads between those writes keep the layout; styles and a later
+        // reveal still see every change.
+        let dom = parse_html(
+            r##"<html><head><style>
+                body { margin:0 } a { display:block; height:20px }
+                .tall { height:50px; color:rgb(255, 0, 0) }
+            </style></head><body><div id="v">visible</div>
+            <div id="hid" style="display:none"><a>1</a><a>2</a><a>3</a></div>
+            </body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(800.0, 600.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"(() => {
+                    const v = document.getElementById("v");
+                    const links = [...document.querySelectorAll("#hid a")];
+                    const before = v.offsetHeight;
+                    const reads = [];
+                    for (const a of links) {
+                        reads.push(a.offsetHeight);
+                        a.classList.add("tall");
+                        reads.push(v.offsetHeight);
+                    }
+                    const color = getComputedStyle(links[1]).color;
+                    document.getElementById("hid").style.display = "block";
+                    return [before, reads, color, links.map((a) => a.offsetHeight)];
+                })()"##,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!([18, [0, 18, 0, 18, 0, 18], "rgb(255, 0, 0)", [50, 50, 50]])
+        );
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
     async fn nested_svg_content_rects_come_from_svg_geometry() {
         // Chrome: a nested <svg> (as d3 appends one) and its shapes report
         // their geometry in the outer <svg>'s viewport, (40.5, 40.5, 420, 5.5).

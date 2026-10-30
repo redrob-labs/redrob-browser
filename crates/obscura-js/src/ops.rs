@@ -8771,8 +8771,19 @@ fn document_base_url_for_javascript_task(state: &ObscuraState) -> Option<String>
 #[cfg(feature = "render")]
 fn ensure_prepared_geometry(state: &mut ObscuraState) -> Option<&obscura_render::PreparedRender> {
     let base_url = document_base_url_for_javascript_task(state);
-    let reusable = state.pending_style_mutations.is_empty()
-        && !state.animation_timeline.has_pending_start_candidates()
+    // A selector-only change inside a display:none subtree keeps every box.
+    // Its animation start candidates are hidden too, so they start nothing.
+    let hidden_only = !state.pending_style_mutations.is_empty()
+        && match (state.prepared_render.as_ref(), state.dom.as_ref()) {
+            (Some(prepared), Some(dom)) => prepared.geometry_survives_hidden_mutations(
+                dom,
+                &mut state.stylesheet_cache,
+                &state.pending_style_mutations,
+            ),
+            _ => false,
+        };
+    let reusable = (state.pending_style_mutations.is_empty() || hidden_only)
+        && (!state.animation_timeline.has_pending_start_candidates() || hidden_only)
         && state.prepared_render.as_ref().is_some_and(|prepared| {
             prepared.viewport() == state.viewport
                 && prepared.base_url() == base_url.as_deref()
@@ -8813,15 +8824,27 @@ fn ensure_prepared_box_metrics(
                         )
             )
         });
+    // A selector-only change inside a display:none subtree keeps every box.
+    // Its animation start candidates are hidden too, so they start nothing.
+    let hidden_only = !state.pending_style_mutations.is_empty()
+        && match (state.prepared_render.as_ref(), state.dom.as_ref()) {
+            (Some(prepared), Some(dom)) => prepared.geometry_survives_hidden_mutations(
+                dom,
+                &mut state.stylesheet_cache,
+                &state.pending_style_mutations,
+            ),
+            _ => false,
+        };
     let reusable = (!state.animation_timeline.has_pending_start_candidates()
-        || paint_only_inline_styles)
+        || paint_only_inline_styles
+        || hidden_only)
         && state.prepared_render.as_ref().is_some_and(|prepared| {
             prepared.viewport() == state.viewport
                 && prepared.base_url() == base_url.as_deref()
                 && (prepared.animation_sample() == state.animation_sample
                     || prepared.can_reuse_geometry_for_animation_sample(state.animation_sample))
         })
-        && (state.pending_style_mutations.is_empty() || paint_only_inline_styles);
+        && (state.pending_style_mutations.is_empty() || paint_only_inline_styles || hidden_only);
     if reusable {
         return state.prepared_render.as_ref();
     }
