@@ -1324,3 +1324,17 @@ fn atomic_with_negative_margin_box_keeps_the_line_and_sits_on_the_baseline() {
     assert_eq!(height(&tree, &laid, "d"), 24.0);
     assert_eq!(laid.rects[&element(&tree, "s")].y, 12.0);
 }
+
+#[test]
+fn web_fonts_use_light_autohinted_advances() {
+    // Chrome on Linux (FreeType light autohinting): Liberation Sans served
+    // as an 18px web font: "t" advance 5 (linear 5.0), "m" 15 and the
+    // word "mt" 20; widths are whole pixels.
+    let fonts = [web_font(super::fonts::SANS_R, "W", None)];
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:18px W'><div><span id=a>mt</span></div>",
+        &fonts,
+    );
+    let w = width(&tree, &laid, "a");
+    assert_eq!(w, w.round(), "{w}");
+}
