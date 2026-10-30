@@ -1297,3 +1297,17 @@ fn preserved_spaces_hanging_at_a_line_end_stay_in_the_inline_box() {
     assert!((w("a") - 84.03).abs() < 0.1, "{}", w("a"));
     assert!((w("b") - 75.61).abs() < 0.1, "{}", w("b"));
 }
+
+#[test]
+fn negative_collapsed_first_child_margin_can_rise_above_the_content_edge() {
+    // Chrome: in a padding-top:25px box, a child whose own first child has
+    // margin-top:-40px (collapsing through it) starts 15px above the box's
+    // border edge: y 60 for a box at 75.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><div style='height:100px'></div>\
+         <div style='margin-top:-25px;padding-top:25px'><div id=h>\
+         <h2 style='margin-top:-40px;padding-top:40px;margin-bottom:0'>x</h2></div></div>",
+        &[],
+    );
+    assert_eq!(laid.rects[&element(&tree, "h")].y, 60.0);
+}

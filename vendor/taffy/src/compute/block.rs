@@ -1026,9 +1026,11 @@ fn perform_final_layout_on_in_flow_children(
             };
 
             #[cfg(feature = "float_layout")]
-            let clear_pos = block_ctx.cleared_threshold(item.clear).unwrap_or(0.0);
+            // No clearance: no lower bound (a negative collapsed top margin
+            // may put the child above the content edge, as in Chrome).
+            let clear_pos = block_ctx.cleared_threshold(item.clear).unwrap_or(f32::MIN);
             #[cfg(not(feature = "float_layout"))]
-            let clear_pos = 0.0;
+            let clear_pos = f32::MIN;
 
             // Clearance separates a box's top margin from its parent's: a cleared first child
             // whose collapsed position would sit above the floats does not collapse through.
