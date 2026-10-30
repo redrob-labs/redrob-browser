@@ -534,28 +534,34 @@ pub struct FloatIntrinsicWidthCalculator {
     available_width: AvailableSpace,
     /// The running total intrinsic width contribution
     contribution: f32,
+    /// The widest single float (its min-content contribution)
+    widest: f32,
 }
 
 impl FloatIntrinsicWidthCalculator {
     /// Create a new `FloatIntrinsicWidthCalculator`
     pub fn new(available_width: AvailableSpace) -> Self {
-        Self { available_width, contribution: 0.0 }
+        Self { available_width, contribution: 0.0, widest: 0.0 }
     }
 
     /// Add a float to the computation
     pub fn add_float(&mut self, width: f32, _direction: FloatDirection, _clear: Clear) {
+        self.widest = self.widest.max(width);
         match self.available_width {
-            AvailableSpace::Definite(_) => {
-                // We will never hit this code path with definite available space
-            }
             AvailableSpace::MinContent => self.contribution = self.contribution.max(width),
-            AvailableSpace::MaxContent => self.contribution += width,
+            // A definite width here is a shrink-to-fit container (an
+            // absolutely positioned box holding only floats): its floats sit
+            // side by side up to the available width.
+            AvailableSpace::MaxContent | AvailableSpace::Definite(_) => self.contribution += width,
         };
     }
 
     /// Get the computed float contribution to intrinsic width
     pub fn result(&self) -> f32 {
-        self.contribution
+        match self.available_width {
+            AvailableSpace::Definite(limit) => self.contribution.min(limit).max(self.widest),
+            _ => self.contribution,
+        }
     }
 }
 

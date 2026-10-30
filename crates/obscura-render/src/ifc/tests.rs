@@ -1423,3 +1423,20 @@ fn inline_boxes_on_the_empty_line_after_a_last_br_are_empty() {
     let s = laid.inline_fragments[&element(&tree, "s")][0];
     assert_eq!(s.height, 17.0, "{s:?}");
 }
+
+#[test]
+fn absolutely_positioned_box_of_floats_shrinks_to_the_float_row() {
+    // Chrome: a right:2px absolute box holding three 32px left floats is
+    // 96 wide with the floats in one row (plotly's modebar); it was 0 wide
+    // with the floats stacked.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><div style='position:relative;width:700px;height:400px'>\
+         <div id=m style='position:absolute;top:2px;right:2px'>\
+         <div id=a style='float:left;width:32px'>x</div><div style='float:left;width:32px'>x</div>\
+         <div id=c style='float:left;width:32px'>x</div></div></div>",
+        &[],
+    );
+    let r = |id: &str| laid.rects[&element(&tree, id)];
+    assert_eq!((r("m").x, r("m").width), (602.0, 96.0), "{:?}", r("m"));
+    assert_eq!((r("c").x, r("c").y), (666.0, 2.0), "{:?}", r("c"));
+}
