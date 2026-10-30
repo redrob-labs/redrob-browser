@@ -1408,3 +1408,18 @@ fn functional_flex_basis_resolves_against_the_container() {
     assert!((width(&tree, &laid, "a") - 432.0).abs() < 0.5);
     assert!((width(&tree, &laid, "b") - 304.0).abs() < 0.5);
 }
+
+#[test]
+fn inline_boxes_on_the_empty_line_after_a_last_br_are_empty() {
+    // Chrome: in <span>a<br><span>\n</span>b<br><span id=t>\n</span></span>
+    // the last span makes no line box: (0, 45, 0, 0) at the end of the
+    // second line, not a 17px box.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:15px/22.5px monospace'><div><span id=p>a<br><span id=s>\n</span>b<br><span id=t>\n</span></span></div>",
+        &[],
+    );
+    let t = laid.inline_fragments[&element(&tree, "t")][0];
+    assert_eq!((t.y, t.width, t.height), (45.0, 0.0, 0.0), "{t:?}");
+    let s = laid.inline_fragments[&element(&tree, "s")][0];
+    assert_eq!(s.height, 17.0, "{s:?}");
+}
