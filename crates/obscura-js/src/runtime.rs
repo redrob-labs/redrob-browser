@@ -10670,6 +10670,40 @@ mod tests {
 
     #[cfg(feature = "render")]
     #[tokio::test(flavor = "current_thread")]
+    async fn empty_svg_groups_have_an_empty_rect_at_their_origin() {
+        // Chrome: plotly's empty layer <g>s report (x, y, 0, 0) at their
+        // transformed user-space origin, not an all-zero rect.
+        let dom = parse_html(
+            r##"<html><body style="margin:0"><div style="height:30px"></div>
+                <svg width="300" height="200"><g id="a"></g>
+                <g id="b" transform="translate(40,50)"><g id="c"></g><path id="d" d=""/></g></svg>
+            </body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(800.0, 600.0);
+        rt.run_page_init();
+        let result = rt
+            .evaluate(
+                r##"["a", "b", "c", "d"].map((id) => {
+                    const r = document.getElementById(id).getBoundingClientRect();
+                    return [r.x, r.y, r.width, r.height];
+                })"##,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!([
+                [0, 30, 0, 0],
+                [40, 80, 0, 0],
+                [40, 80, 0, 0],
+                [40, 80, 0, 0]
+            ])
+        );
+    }
+
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
     async fn nested_svg_content_rects_come_from_svg_geometry() {
         // Chrome: a nested <svg> (as d3 appends one) and its shapes report
         // their geometry in the outer <svg>'s viewport, (40.5, 40.5, 420, 5.5).

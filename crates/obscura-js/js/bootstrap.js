@@ -17262,7 +17262,14 @@ const _svgClientRect = (el) => {
     if (p.localName === 'svg') m = _svgMul(m, [1, 0, 0, 1, _svgNum(p, 'x'), _svgNum(p, 'y')]);
   }
   const b = _svgSubtreeBounds(el, m);
-  if (!b) return null;
+  if (!b) {
+    // A rendered element with nothing to draw (an empty <g>, a path
+    // without data) still has a box: an empty rect at its user-space
+    // origin (Chrome: plotly's empty layer groups sit at the plot corner).
+    if (getComputedStyle(el).display === 'none') return null;
+    const own = _svgMul(m, _svgTransform(el.getAttribute('transform')));
+    return { x: own[4], y: own[5], width: 0, height: 0 };
+  }
   return { x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1] };
 };
 globalThis.__obscuraSvgClientRect = _svgClientRect;
