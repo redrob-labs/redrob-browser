@@ -6160,9 +6160,22 @@ fn paint_laid_dom_scrolled(
         let background_mask = element_clip_mask;
         // backdrop-filter: blur the backdrop under the box before its own
         // background paints over it.
-        if let Some(radius) = style.backdrop_blur {
+        if let Some(filters) = &style.backdrop_filters {
             if box_on_surface && !paints_inline_fragments {
-                blur_backdrop(&mut pixmap, &rect, radius, raster_scale, element_clip_mask);
+                let radii = style.border_model.radii.resolve(rect.width, rect.height);
+                filter_backdrop(
+                    &mut pixmap,
+                    &rect,
+                    [
+                        radii.top_left.0,
+                        radii.top_right.0,
+                        radii.bottom_right.0,
+                        radii.bottom_left.0,
+                    ],
+                    filters,
+                    raster_scale,
+                    element_clip_mask,
+                );
             }
         }
         // Several layers or an image layer: painted per layer, each with its
@@ -8802,20 +8815,34 @@ fn mix_blend_css(mode: Option<crate::MixBlendMode>) -> &'static str {
     }
 }
 
-/// `backdrop-filter: blur(radius)`: blur what is already painted under
-/// `rect` (surface CSS px) with a Gaussian of standard deviation `radius`,
-/// sampling past the box edge with clamped edges, as Skia's backdrop
-/// filter does. Pixels outside `rect` (and outside `clip`) are untouched.
-pub(crate) fn blur_backdrop(
+/// `backdrop-filter`: replace what is already painted under `rect`
+/// (surface CSS px, rounded by `radii`) with itself through `filters`
+/// (`redrob_scene::filter`, the same code the compositor uses). Blur samples
+/// clamp at the box edge, as Skia's backdrop filter does. Pixels outside
+/// the rounded box (and outside `clip`) are untouched. A scene recording
+/// records a `Backdrop` op instead.
+pub(crate) fn filter_backdrop(
     pixmap: &mut Pixmap,
     rect: &crate::Rect,
-    radius: f32,
+    radii: [f32; 4],
+    filters: &[redrob_scene::FilterOp],
     raster_scale: f32,
     clip: Option<&tiny_skia::Mask>,
 ) {
-    let sigma = radius * raster_scale;
-    if sigma <= 0.0 {
+    if filters.is_empty() {
         return;
+    }
+    #[cfg(feature = "display-list")]
+    {
+        let op = crate::display_list::Op::Backdrop {
+            rect: [rect.x, rect.y, rect.width, rect.height],
+            radii,
+            filters: filters.to_vec(),
+            transform: crate::display_list::IDENTITY,
+        };
+        if crate::display_list::emit_scene_op(pixmap, clip, None, op) {
+            return;
+        }
     }
     let (pw, ph) = (pixmap.width() as i32, pixmap.height() as i32);
     let x0 = ((rect.x * raster_scale).round() as i32).clamp(0, pw);
@@ -8825,47 +8852,51 @@ pub(crate) fn blur_backdrop(
     if x1 <= x0 || y1 <= y0 {
         return;
     }
-    // The backdrop is the box itself, extended by clamping its edge pixels
-    // (Skia's kClamp edge mode for backdrop filters).
-    let margin = (sigma * 3.0).ceil() as i32;
     let (w, h) = ((x1 - x0) as usize, (y1 - y0) as usize);
-    let (ew, eh) = (w + 2 * margin as usize, h + 2 * margin as usize);
-    let src = pixmap.pixels();
-    let mut planes = vec![vec![0f32; ew * eh]; 4];
-    for y in 0..eh {
-        let sy = (y0 + y as i32 - margin).clamp(y0, y1 - 1);
-        for x in 0..ew {
-            let sx = (x0 + x as i32 - margin).clamp(x0, x1 - 1);
-            let p = src[(sy * pw + sx) as usize];
-            let i = y * ew + x;
-            planes[0][i] = p.red() as f32;
-            planes[1][i] = p.green() as f32;
-            planes[2][i] = p.blue() as f32;
-            planes[3][i] = p.alpha() as f32;
+    let mut region = Vec::with_capacity(w * h * 4);
+    {
+        let src = pixmap.data();
+        for y in 0..h {
+            let start = (((y0 as usize + y) * pw as usize) + x0 as usize) * 4;
+            region.extend_from_slice(&src[start..start + w * 4]);
         }
     }
-    for plane in &mut planes {
-        gaussian_blur(plane, ew, eh, sigma);
-    }
+    redrob_scene::filter::apply_filters(&mut region, w, h, filters, raster_scale);
     let mask = clip.map(|mask| mask.data());
-    let out = pixmap.pixels_mut();
+    let r = radii.map(|r| (r * raster_scale).max(0.0));
+    let (bw, bh) = (w as f32, h as f32);
+    // Inside the rounded box: corners by their circle.
+    let inside = |x: f32, y: f32| -> bool {
+        let corner = |cx: f32, cy: f32, radius: f32| {
+            let (dx, dy) = (x - cx, y - cy);
+            dx * dx + dy * dy <= radius * radius
+        };
+        if x < r[0] && y < r[0] {
+            return corner(r[0], r[0], r[0]);
+        }
+        if x > bw - r[1] && y < r[1] {
+            return corner(bw - r[1], r[1], r[1]);
+        }
+        if x > bw - r[2] && y > bh - r[2] {
+            return corner(bw - r[2], bh - r[2], r[2]);
+        }
+        if x < r[3] && y > bh - r[3] {
+            return corner(r[3], bh - r[3], r[3]);
+        }
+        true
+    };
+    let data = pixmap.data_mut();
     for y in 0..h {
         for x in 0..w {
-            let index = ((y0 + y as i32) * pw + x0 + x as i32) as usize;
+            let index = (y0 as usize + y) * pw as usize + x0 as usize + x;
             if mask.is_some_and(|mask| mask[index] == 0) {
                 continue;
             }
-            let i = (y + margin as usize) * ew + x + margin as usize;
-            let a = planes[3][i].round().clamp(0.0, 255.0) as u8;
-            let c = |v: f32| (v.round().clamp(0.0, 255.0) as u8).min(a);
-            if let Some(color) = tiny_skia::PremultipliedColorU8::from_rgba(
-                c(planes[0][i]),
-                c(planes[1][i]),
-                c(planes[2][i]),
-                a,
-            ) {
-                out[index] = color;
+            if !inside(x as f32 + 0.5, y as f32 + 0.5) {
+                continue;
             }
+            let o = (y * w + x) * 4;
+            data[index * 4..index * 4 + 4].copy_from_slice(&region[o..o + 4]);
         }
     }
 }
@@ -15580,7 +15611,7 @@ mod tests {
                 layout
                     .styles
                     .get(id)
-                    .is_some_and(|s| s.backdrop_blur.is_some())
+                    .is_some_and(|s| s.backdrop_filters.is_some())
             })
             .expect("header");
         let style = layout.styles.remove(&header).unwrap();
@@ -24126,6 +24157,111 @@ mod scene_text_tests {
             differing < 700,
             "scene raster and CPU paint differ on {differing} pixels"
         );
+    }
+
+    /// backdrop-filter reaches the scene as a Backdrop item, and the scene
+    /// rasterizer filters what is scrolled under a fixed header live, as the
+    /// CPU paint does.
+    #[test]
+    fn scene_backdrop_filters_content_scrolled_under_a_fixed_header() {
+        let rows: String = (0..30)
+            .map(|i| {
+                format!(
+                    r#"<div style="height:20px;background:{}"></div>"#,
+                    if i % 2 == 0 {
+                        "rgb(200,0,0)"
+                    } else {
+                        "rgb(255,255,255)"
+                    }
+                )
+            })
+            .collect();
+        let tree = obscura_dom::parse_html(&format!(
+            r#"<html style="margin:0"><body style="margin:0">
+                <div style="position:fixed;top:0;left:0;width:100px;height:60px;border-radius:10px;
+                    backdrop-filter:blur(6px) grayscale(1);background:rgba(255,255,255,0.2)"></div>{rows}
+            </body></html>"#
+        ));
+        let viewport = (200.0, 100.0);
+        let mut resources = RenderResourceCache::default();
+        let mut prepared = prepare_dom(&tree, viewport, None, &mut resources).unwrap();
+        let built = scene::build_scene_prepared(
+            &tree,
+            &mut prepared,
+            &mut resources,
+            (0.0, 0.0),
+            &HashMap::new(),
+            [255, 255, 255, 255],
+            &EMPTY_CANVAS_SURFACES,
+            1.0,
+        )
+        .unwrap();
+        let backdrop = built.frame.items.iter().find_map(|d| match &d.item {
+            redrob_scene::Item::Backdrop { filters, radii, .. } => Some((filters.clone(), *radii)),
+            _ => None,
+        });
+        assert_eq!(
+            backdrop,
+            Some((
+                vec![
+                    redrob_scene::FilterOp::Blur(6.0),
+                    redrob_scene::FilterOp::Grayscale(1.0)
+                ],
+                [10.0; 4]
+            ))
+        );
+        let raster = |scroll_y: f32| {
+            let scroll: HashMap<u64, (f32, f32)> = [(0u64, (0.0, scroll_y))].into();
+            redrob_scene_raster::rasterize(
+                &built.frame,
+                &redrob_scene_raster::ResourceStore::new(),
+                &scroll,
+                redrob_scene::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: viewport.0,
+                    h: viewport.1,
+                },
+                1.0,
+            )
+        };
+        let image = raster(0.0);
+        // Inside: grey (grayscale), between the stripe colors (blur).
+        let [r, g, b, _] = image.pixel(50, 20);
+        assert!(r == g && g == b, "grayscale under the header: {r},{g},{b}");
+        assert!(r > 120 && r < 240, "blurred under the header: {r}");
+        // Beside the header the stripes stay sharp red; the rounded corner
+        // shows them unfiltered too.
+        assert_eq!(&image.pixel(150, 10)[..3], &[200, 0, 0]);
+        assert_eq!(&image.pixel(0, 0)[..3], &[200, 0, 0]);
+        // The window's raster and the CPU screenshot agree.
+        let cpu = paint_dom(&tree, viewport, None).unwrap();
+        let differing = (0..100u32)
+            .flat_map(|y| (0..200u32).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let a = image.pixel(x, y);
+                let b = cpu.pixel(x, y).unwrap();
+                [b.red(), b.green(), b.blue()]
+                    .iter()
+                    .zip(&a[..3])
+                    .any(|(p, q)| (*p as i32 - *q as i32).abs() > 12)
+            })
+            .count();
+        assert!(
+            differing < 60,
+            "scene raster and CPU paint differ on {differing} pixels"
+        );
+        // Scrolled by half a stripe, the header filters the new content.
+        let row = |img: &redrob_scene_raster::RgbaImage| -> Vec<u8> {
+            (0..60).map(|y| img.pixel(50, y)[0]).collect()
+        };
+        let scrolled = raster(10.0);
+        assert_ne!(
+            row(&scrolled),
+            row(&image),
+            "the backdrop follows the scroll"
+        );
+        assert_eq!(&scrolled.pixel(150, 12)[..3], &[255, 255, 255]);
     }
 
     /// The compositor scene (what redrob-shell draws) carries the IFC's text

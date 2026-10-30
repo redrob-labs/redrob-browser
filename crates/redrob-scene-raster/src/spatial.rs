@@ -185,7 +185,8 @@ impl SpatialMap {
                     | redrob_scene::Item::BoxShadow { rect, .. }
                     | redrob_scene::Item::LinearGradient { rect, .. }
                     | redrob_scene::Item::RadialGradient { rect, .. }
-                    | redrob_scene::Item::External { rect, .. } => to_kurbo_rect(*rect),
+                    | redrob_scene::Item::External { rect, .. }
+                    | redrob_scene::Item::Backdrop { rect, .. } => to_kurbo_rect(*rect),
                     redrob_scene::Item::Image { dest, .. } => to_kurbo_rect(*dest),
                     _ => continue,
                 };

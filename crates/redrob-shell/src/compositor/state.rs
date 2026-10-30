@@ -390,7 +390,8 @@ fn item_bounds(item: &Item) -> Option<Rect> {
         | Item::RoundedRect { rect, .. }
         | Item::LinearGradient { rect, .. }
         | Item::RadialGradient { rect, .. }
-        | Item::External { rect, .. } => spatial::rect(rect),
+        | Item::External { rect, .. }
+        | Item::Backdrop { rect, .. } => spatial::rect(rect),
         Item::Image { dest, .. } => spatial::rect(dest),
         Item::BoxShadow {
             rect,

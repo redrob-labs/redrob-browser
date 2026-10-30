@@ -65,6 +65,7 @@ pub fn write_scene_dump(page: &Page, path: &std::path::Path) -> anyhow::Result<(
             rs::Item::LinearGradient { .. } => "LinearGradient",
             rs::Item::RadialGradient { .. } => "RadialGradient",
             rs::Item::BoxShadow { .. } => "BoxShadow",
+            rs::Item::Backdrop { .. } => "Backdrop",
             rs::Item::Image { .. } => "Image",
             rs::Item::Text { glyphs: run, .. } => {
                 glyphs += run.len();

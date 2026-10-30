@@ -356,6 +356,8 @@ pub fn build(
                     }
                 }
             }
+            // Drawn by the GPU path's backdrop pass (not yet).
+            Item::Backdrop { .. } => {}
             Item::PopClip | Item::PopLayer => {
                 if let Some(xf) = layers.pushed.pop() {
                     scene.pop_layer();

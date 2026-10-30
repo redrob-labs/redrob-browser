@@ -16,6 +16,9 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod filter;
+pub use filter::FilterOp;
+
 pub type Affine = [f32; 6]; // [sx, ky, kx, sy, tx, ty] as kurbo::Affine::new
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -244,6 +247,16 @@ pub enum Item {
         transform: Affine,
     },
     PopLayer,
+    /// `backdrop-filter`: replace what is already drawn under `rect` (local
+    /// space, rounded by `radii` tl,tr,br,bl) with itself through `filters`
+    /// (`redrob_scene::filter::apply_filters`). The backdrop is everything
+    /// earlier in the list, as it shows on screen at the current scroll
+    /// offsets. The element's own background follows as ordinary items.
+    Backdrop {
+        rect: Rect,
+        radii: [f32; 4],
+        filters: Vec<FilterOp>,
+    },
 }
 
 /// An item with the spatial node its coordinates are in.
@@ -444,18 +457,41 @@ mod tests {
                     },
                 },
             ],
-            items: vec![DisplayItem {
-                spatial: SpatialId(2),
-                item: Item::Rect {
-                    rect: Rect {
-                        x: 1.0,
-                        y: 2.0,
-                        w: 3.0,
-                        h: 4.0,
+            items: vec![
+                DisplayItem {
+                    spatial: ROOT_SPATIAL,
+                    item: Item::Backdrop {
+                        rect: Rect {
+                            x: 0.0,
+                            y: 0.0,
+                            w: 100.0,
+                            h: 60.0,
+                        },
+                        radii: [4.0; 4],
+                        filters: vec![
+                            FilterOp::Blur(5.0),
+                            FilterOp::Saturate(1.8),
+                            FilterOp::DropShadow {
+                                offset: (1.0, 2.0),
+                                blur: 3.0,
+                                color: [0.0, 0.0, 0.0, 0.5],
+                            },
+                        ],
                     },
-                    color: [0.0, 0.0, 0.0, 1.0],
                 },
-            }],
+                DisplayItem {
+                    spatial: SpatialId(2),
+                    item: Item::Rect {
+                        rect: Rect {
+                            x: 1.0,
+                            y: 2.0,
+                            w: 3.0,
+                            h: 4.0,
+                        },
+                        color: [0.0, 0.0, 0.0, 1.0],
+                    },
+                },
+            ],
             hits: Vec::new(),
         };
         let bytes = encode(&SceneMsg::Frame(frame.clone()));

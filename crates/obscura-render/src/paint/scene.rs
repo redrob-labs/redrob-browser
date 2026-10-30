@@ -1433,6 +1433,27 @@ impl<'a> Builder<'a> {
                     },
                 );
             }
+            Op::Backdrop {
+                rect,
+                radii,
+                filters,
+                transform,
+            } => {
+                let (spatial, transform) = if is_translation(transform) {
+                    (spatial, *transform)
+                } else {
+                    (self.local_frame(spatial, transform), IDENTITY)
+                };
+                let rect = map_rect(&transform, rect);
+                self.push_item(
+                    spatial,
+                    rs::Item::Backdrop {
+                        rect,
+                        radii: *radii,
+                        filters: filters.clone(),
+                    },
+                );
+            }
             Op::External {
                 key,
                 rect,
