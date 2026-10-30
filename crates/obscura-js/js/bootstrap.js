@@ -1953,7 +1953,34 @@ function _shallowCloneNode(node) {
 // EventTarget listener state belongs to the JS wrapper rather than the backing
 // DOM node.  This is also what makes `new EventTarget()` and subclasses used by
 // framework schedulers work: those targets deliberately have no native node id.
-const _eventTargetListeners = new WeakMap();
+// The window's own listeners live outside the WeakMap. This WeakMap is
+// created while the startup snapshot is built and already holds the global
+// (bootstrap's resize listener); after deserialization a lookup keyed by the
+// global intermittently misses, so a later addEventListener started a fresh
+// listener list and every window listener added before it was lost. On
+// w3schools that dropped load_quiz on a few percent of loads under parallel
+// load, leaving the exercise box empty (810x60).
+const _eventTargetListeners = (() => {
+  const weak = new WeakMap();
+  let windowListeners;
+  return {
+    get(target) { return target === globalThis ? windowListeners : weak.get(target); },
+    set(target, value) {
+      if (target === globalThis) windowListeners = value;
+      else weak.set(target, value);
+      return this;
+    },
+    delete(target) {
+      if (target === globalThis) {
+        const had = windowListeners !== undefined;
+        windowListeners = undefined;
+        return had;
+      }
+      return weak.delete(target);
+    },
+    has(target) { return target === globalThis ? windowListeners !== undefined : weak.has(target); },
+  };
+})();
 const _eventTargetListenerChanged = new WeakMap();
 function _eventCapture(options) {
   return typeof options === "boolean" ? options : !!(options && options.capture);
