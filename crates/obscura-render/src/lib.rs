@@ -1457,6 +1457,9 @@ pub struct LayoutStyle {
     /// viewport, containing block, or computed font size and cannot be safely
     /// collapsed to pixels during stylesheet parsing.
     pub size_expressions: [Option<String>; 6],
+    /// A functional `flex-basis` (`calc(41.6667% - 16px)`), resolved once the
+    /// containing block is known.
+    pub flex_basis_expression: Option<String>,
     /// `aspect-ratio` as width/height, or an image's intrinsic ratio resolved
     /// at layout. Lets a replaced element (or a padding-box card) derive the
     /// missing dimension from the given one, so a `width:100%` image gets a

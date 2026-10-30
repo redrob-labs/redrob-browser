@@ -39,7 +39,7 @@ pub fn ua_style(tag: &str) -> LayoutStyle {
         "span" | "a" | "b" | "i" | "strong" | "em" | "font" | "code" | "small" | "sub" | "sup"
         | "mark" | "abbr" | "cite" | "var" | "dfn" | "kbd" | "samp" | "q" | "time" | "s" | "u"
         | "del" | "ins" | "tt" | "big" | "bdi" | "bdo" | "br" | "wbr" | "data" | "output"
-        | "label" | "ruby" | "rt" | "rp" | "picture" | "source" => Display::Inline,
+        | "label" | "ruby" | "rt" | "rp" | "picture" | "source" | "map" => Display::Inline,
         // Replaced elements are inline-level in the HTML UA sheet. Defaulting
         // them to block stacked two adjacent icons or canvases vertically
         // and broke "text <svg> text" lines into three.
@@ -558,6 +558,9 @@ fn apply_ua_sheet_extras(tag: &str, style: &mut LayoutStyle) {
         "legend" => {
             style.padding.left = 2.0;
             style.padding.right = 2.0;
+            // A rendered legend is shrink-to-fit (Chrome: "Personalia:" in
+            // a full-width fieldset is 84 wide).
+            style.width_fit_content = true;
         }
         "small" | "sub" | "sup" => {
             style.font_size = None;
@@ -1997,6 +2000,7 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
         }
         "flex-basis" => {
             style.flex_basis = dimension_value(value.trim());
+            style.flex_basis_expression = deferred_length_expression(value);
         }
         "flex" => parse_flex_shorthand(style, value),
         "position" => match value {
@@ -9175,7 +9179,10 @@ fn parse_flex_shorthand(style: &mut LayoutStyle, value: &str) {
     // (e.g. `flex: 0 0 260px`, the fixed-width sidebar idiom).
     let mut numbers: Vec<f32> = Vec::new();
     let mut basis: Option<crate::Dimension> = None;
-    for tok in value.split_whitespace() {
+    style.flex_basis_expression = None;
+    // Split at top-level whitespace only: `calc(41.6667% - 16px)` is one
+    // basis token.
+    for tok in split_ws_paren(value) {
         if let Ok(n) = tok.parse::<f32>() {
             if numbers.len() < 2 {
                 numbers.push(n);
@@ -9184,6 +9191,7 @@ fn parse_flex_shorthand(style: &mut LayoutStyle, value: &str) {
             }
         } else {
             basis = Some(dimension_value(tok));
+            style.flex_basis_expression = deferred_length_expression(tok);
         }
     }
     match numbers.as_slice() {

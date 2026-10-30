@@ -5863,14 +5863,20 @@ class Element extends Node {
     // build, so probe with typeof and fall through to the synthetic rect below.
     const geometry = this._renderBoxGeometry();
     if (geometry !== undefined) {
-      if (geometry) return this._rectFromRenderGeometry(geometry);
+      // Everything inside an outer <svg> (a nested <svg> included) is SVG
+      // content, not a CSS box: its rect is its geometry in the outer
+      // <svg>'s viewport even when the layout cache holds a stray box.
+      const svgContent = this.namespaceURI === 'http://www.w3.org/2000/svg'
+        && this.parentElement?.namespaceURI === 'http://www.w3.org/2000/svg';
+      if (geometry && !svgContent) return this._rectFromRenderGeometry(geometry);
       // SVG shapes have no layout box of their own; their rect comes from
       // their geometry inside the outer <svg>'s box.
-      if (this.namespaceURI === 'http://www.w3.org/2000/svg' && this.localName !== 'svg'
+      if (this.namespaceURI === 'http://www.w3.org/2000/svg' && (this.localName !== 'svg' || svgContent)
           && typeof globalThis.__obscuraSvgClientRect === 'function') {
         const r = globalThis.__obscuraSvgClientRect(this);
         if (r) return { ...r, top: r.y, left: r.x, right: r.x + r.width, bottom: r.y + r.height, toJSON() { return this; } };
       }
+      if (geometry) return this._rectFromRenderGeometry(geometry);
       // CSSOM View: an element without an associated box has an all-zero
       // bounding rect. Do not leak the non-render 100x20 compatibility cell.
       return {
@@ -5910,6 +5916,13 @@ class Element extends Node {
   }
   getClientRects() {
     const geometry = this._renderBoxGeometry();
+    const svgContent = this.namespaceURI === 'http://www.w3.org/2000/svg'
+      && this.parentElement?.namespaceURI === 'http://www.w3.org/2000/svg';
+    if (svgContent && geometry !== undefined
+        && typeof globalThis.__obscuraSvgClientRect === 'function'
+        && globalThis.__obscuraSvgClientRect(this)) {
+      return new DOMRectList([this.getBoundingClientRect()]);
+    }
     if (geometry === null) {
       // SVG shapes have no layout box; their one client rect is their
       // bounding rect inside the outer <svg>.

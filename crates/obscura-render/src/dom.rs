@@ -7069,6 +7069,13 @@ fn layout_dom_once(
                     style.line_height = Some(crate::LineHeight::Px(pixels));
                 }
                 let cb_w = inh.cb_width;
+                if let Some(expression) = style.flex_basis_expression.as_deref() {
+                    if let Some(px) = crate::style::resolve_contextual_length(
+                        expression, em_px, root_fs, vw, vh, cb_w,
+                    ) {
+                        style.flex_basis = crate::Dimension::Px(px);
+                    }
+                }
                 for index in 0..6 {
                     let Some(expression) = style.size_expressions[index].as_deref() else {
                         continue;
@@ -7995,6 +8002,44 @@ fn layout_dom_once(
         }
 
         resolve_grid_areas(tree, root_id, &mut styles);
+
+        // A fieldset's rendered legend (its first legend child, in flow)
+        // sits on the fieldset's top border: the border and padding-top
+        // come after it (Chrome: the legend's top is the fieldset's border
+        // edge, the content starts padding-top below the legend).
+        for id in rendered_descendants(tree, root_id) {
+            if !tree.borrow_node(id).is_some_and(|node| {
+                node.as_element()
+                    .is_some_and(|e| e.local.as_ref() == "fieldset")
+            }) {
+                continue;
+            }
+            let Some(fieldset) = styles.get(&id).cloned() else {
+                continue;
+            };
+            let legend = rendered_children(tree, id).into_iter().find(|&child| {
+                tree.borrow_node(child)
+                    .is_some_and(|node| node.is_element())
+            });
+            let Some(legend) = legend.filter(|&child| {
+                tree.borrow_node(child).is_some_and(|node| {
+                    node.as_element()
+                        .is_some_and(|e| e.local.as_ref() == "legend")
+                })
+            }) else {
+                continue;
+            };
+            if let Some(style) = styles.get_mut(&legend) {
+                if style.float.is_some()
+                    || style.position.is_some()
+                    || style.display == crate::Display::None
+                {
+                    continue;
+                }
+                style.margin.top -= fieldset.border.top + fieldset.padding.top;
+                style.margin.bottom += fieldset.padding.top;
+            }
+        }
 
         // The root's outer display is always blockified. Keep a declared
         // inline-flex/grid root's inner mode, but remove its inline
@@ -9412,12 +9457,31 @@ fn place_inline_content(
         ifc.origin = origin;
         let root = ifc.root;
         let parts = ifc.fragments(origin);
+        // An IFC with only collapsible whitespace and empty inlines makes no
+        // line box (CSS 2 9.4.2): its inlines get an empty rect at the
+        // content edge, which a wrapper's union ignores (Chrome).
+        let collapsed = !ifc.has_content;
+        let empty = |rect: Rect| {
+            if collapsed {
+                Rect {
+                    x: rect.x,
+                    y: origin.1,
+                    width: 0.0,
+                    height: 0.0,
+                }
+            } else {
+                rect
+            }
+        };
         for (element, rect) in parts.elements {
-            fragments.entry(element).or_default().push(rect);
+            fragments.entry(element).or_default().push(empty(rect));
         }
         for (text, rect, content) in parts.texts {
-            fragments.entry(text).or_default().push(rect);
-            text_runs.entry(text).or_default().push((rect, content));
+            fragments.entry(text).or_default().push(empty(rect));
+            text_runs
+                .entry(text)
+                .or_default()
+                .push((empty(rect), content));
         }
         for (br, rect) in parts.breaks {
             rects.insert(br, rect);
