@@ -6675,23 +6675,34 @@ fn layout_dom_once(
                 style.height == crate::Dimension::Auto
                     && !style.display_contents
                     && !matches!(style.position, Some(taffy::Position::Absolute))
-                    && rendered_parent(tree, id)
-                        .and_then(|parent| styles.get(&parent))
-                        .is_some_and(|parent| {
-                            parent.display == crate::Display::Flex
-                                && !parent.internal_flex_container
-                                && if matches!(
-                                    parent.flex_direction,
-                                    Some(
-                                        taffy::FlexDirection::Column
-                                            | taffy::FlexDirection::ColumnReverse
-                                    )
-                                ) {
-                                    parent_definite
-                                } else {
-                                    stretched_row_flex_item(parent, style)
-                                }
-                        })
+                    && std::iter::successors(rendered_parent(tree, id), |parent| {
+                        styles
+                            .get(parent)
+                            .is_some_and(|style| style.display_contents)
+                            .then(|| rendered_parent(tree, *parent))
+                            .flatten()
+                    })
+                    .find(|parent| {
+                        !styles
+                            .get(parent)
+                            .is_some_and(|style| style.display_contents)
+                    })
+                    .and_then(|parent| styles.get(&parent))
+                    .is_some_and(|parent| {
+                        parent.display == crate::Display::Flex
+                            && !parent.internal_flex_container
+                            && if matches!(
+                                parent.flex_direction,
+                                Some(
+                                    taffy::FlexDirection::Column
+                                        | taffy::FlexDirection::ColumnReverse
+                                )
+                            ) {
+                                parent_definite
+                            } else {
+                                stretched_row_flex_item(parent, style)
+                            }
+                    })
             });
             let reused_computed_style = fresh_styles
                 .as_ref()
@@ -6857,16 +6868,21 @@ fn layout_dom_once(
                             .max(0.0)
                     };
                 }
-                inh.cb_width = child_cb_width;
-                if let Some(style) = styles.get(&id) {
-                    if style.position.is_some() {
-                        inh.abs_cb_height = child_cb_height_definite
-                            .then(|| child_cb_height + style.padding.top + style.padding.bottom);
+                // A `display: contents` element generates no box: its children
+                // keep the containing block it was given.
+                if !styles.get(&id).is_some_and(|style| style.display_contents) {
+                    inh.cb_width = child_cb_width;
+                    if let Some(style) = styles.get(&id) {
+                        if style.position.is_some() {
+                            inh.abs_cb_height = child_cb_height_definite.then(|| {
+                                child_cb_height + style.padding.top + style.padding.bottom
+                            });
+                        }
                     }
+                    inh.cb_height = child_cb_height;
+                    inh.cb_height_definite = child_cb_height_definite;
+                    inh.cb_height_deferred = child_cb_height_deferred;
                 }
-                inh.cb_height = child_cb_height;
-                inh.cb_height_definite = child_cb_height_definite;
-                inh.cb_height_deferred = child_cb_height_deferred;
                 for child in style_children(tree, id).into_iter().rev() {
                     queue.push((child, inh.clone()));
                 }
@@ -7791,16 +7807,20 @@ fn layout_dom_once(
                     };
                 }
             }
-            inh.cb_width = child_cb_width;
-            if let Some(style) = styles.get(&id) {
-                if style.position.is_some() {
-                    inh.abs_cb_height = child_cb_height_definite
-                        .then(|| child_cb_height + style.padding.top + style.padding.bottom);
+            // A `display: contents` element generates no box: its children
+            // keep the containing block it was given.
+            if !styles.get(&id).is_some_and(|style| style.display_contents) {
+                inh.cb_width = child_cb_width;
+                if let Some(style) = styles.get(&id) {
+                    if style.position.is_some() {
+                        inh.abs_cb_height = child_cb_height_definite
+                            .then(|| child_cb_height + style.padding.top + style.padding.bottom);
+                    }
                 }
+                inh.cb_height = child_cb_height;
+                inh.cb_height_definite = child_cb_height_definite;
+                inh.cb_height_deferred = child_cb_height_deferred;
             }
-            inh.cb_height = child_cb_height;
-            inh.cb_height_definite = child_cb_height_definite;
-            inh.cb_height_deferred = child_cb_height_deferred;
             for child in style_children(tree, id).into_iter().rev() {
                 queue.push((child, inh.clone()));
             }

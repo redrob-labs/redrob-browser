@@ -5165,3 +5165,25 @@ fn deeply_nested_inline_spans_and_decorated_wrappers_lay_out() {
         );
     }
 }
+
+#[test]
+fn percentage_height_inside_display_contents_flex_item_resolves() {
+    let tree = parse_html(
+        r#"<!doctype html><html><body style="margin:0">
+        <div style="height:900px;display:flex;flex-flow:column;width:100%;position:relative">
+          <div style="display:contents">
+            <div id=c style="flex:none;width:100%;height:70%;min-height:650px;position:relative">
+              <div id=x style="height:100%;width:100%;display:flex;position:relative"><div style="height:50px"></div></div>
+            </div>
+          </div>
+        </div></body></html>"#,
+    );
+    let layout = layout_dom(&tree, (1280.0, 800.0));
+    let c = tree.get_element_by_id("c").unwrap();
+    let x = tree.get_element_by_id("x").unwrap();
+    assert_eq!(layout.rects[&c].height, 650.0);
+    assert_eq!(
+        layout.rects[&x].height, 650.0,
+        "height:100% of a flex item reached through display:contents"
+    );
+}
