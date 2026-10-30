@@ -116,6 +116,14 @@ pub enum Op {
         inset: bool,
         transform: Affine,
     },
+    /// Scene recordings only: `backdrop-filter` over `rect` (rounded by
+    /// `radii`): what is painted under it so far, filtered.
+    Backdrop {
+        rect: [f32; 4],
+        radii: [f32; 4],
+        filters: Vec<redrob_scene::FilterOp>,
+        transform: Affine,
+    },
     /// Scene recordings only: a hit-test region for DOM node `node`, painted
     /// at this point of the paint order. Draws nothing.
     Hit {
@@ -459,6 +467,7 @@ fn map_op(op: &mut Op, t: &Affine) {
         | Op::Image { transform, .. }
         | Op::Glyphs { transform, .. }
         | Op::BoxShadow { transform, .. }
+        | Op::Backdrop { transform, .. }
         | Op::Hit { transform, .. }
         | Op::External { transform, .. }
         | Op::PushRef { transform, .. } => {

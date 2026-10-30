@@ -26,6 +26,12 @@
 //!   its subtree is drawn flat in its local plane, then projected onto the
 //!   frame with perspective-correct sampling; points the matrix maps behind
 //!   the viewer are not drawn.
+//! - `Backdrop`: everything before it in the list is drawn (open layers
+//!   closed), its device bounding box read back and filtered with
+//!   `redrob_scene::filter::apply_filters` (blur samples clamp at the box
+//!   edge), and the result drawn at the item's place in paint order,
+//!   clipped to its rounded rect and the scroll clips. Inside a projective
+//!   plane it is not drawn.
 
 mod resources;
 mod spatial;
@@ -117,46 +123,146 @@ pub fn rasterize(
         1.0
     };
     let root = Affine::scale(scale) * Affine::translate((-clip.x as f64, -clip.y as f64));
-    let mut ctx = RenderContext::new(w, h);
     let mut glyphs = resources.glyphs.lock().unwrap_or_else(|e| e.into_inner());
-    {
-        let mut p = Painter {
-            ctx: &mut ctx,
-            res: resources,
-            glyphs: &mut glyphs,
-            map: &map,
-            root,
-            screen: kurbo::Rect::new(0.0, 0.0, w as f64, h as f64),
-            layer_xf: Affine::IDENTITY,
-            layers: Vec::new(),
-            user_clips: 0,
-            scroll_clip: None,
+    let target = Target {
+        frame,
+        resources,
+        map: &map,
+        root,
+        size: (w, h),
+    };
+    // Each backdrop filters what the items before it drew (earlier
+    // backdrops included), then the whole list draws with the results.
+    let mut patches: HashMap<usize, Patch> = HashMap::new();
+    for (i, di) in frame.items.iter().enumerate() {
+        let Item::Backdrop { rect, filters, .. } = &di.item else {
+            continue;
         };
-        p.background(frame.background);
-        let items = &frame.items;
-        let mut i = 0;
-        while i < items.len() {
-            if let Some(plane) = map.projective_root(items[i].spatial) {
-                let start = i;
-                while i < items.len() && map.projective_root(items[i].spatial) == Some(plane) {
-                    i += 1;
-                }
-                p.projected(&items[start..i], plane);
-                continue;
-            }
-            p.item(&items[i]);
-            i += 1;
+        if map.projective_root(di.spatial).is_some() {
+            continue;
         }
-        p.finish();
+        let (below, device) = target.paint(&mut glyphs, i, &patches);
+        if let Some(patch) = backdrop_patch(&below, device, *rect, filters) {
+            patches.insert(i, patch);
+        }
     }
-    ctx.flush();
-    let mut pm = Pixmap::new(w, h);
-    ctx.render(&mut pm, &mut glyphs);
+    let (pm, _) = target.paint(&mut glyphs, frame.items.len(), &patches);
     RgbaImage {
         width: w as u32,
         height: h as u32,
         data: pm.take_rgba8(ImageAlphaType::Alpha),
     }
+}
+
+/// A filtered backdrop: device pixels (premultiplied) and their origin.
+struct Patch {
+    image: Arc<Pixmap>,
+    origin: (f64, f64),
+}
+
+/// The output a frame draws into.
+struct Target<'a> {
+    frame: &'a Frame,
+    resources: &'a ResourceStore,
+    map: &'a SpatialMap,
+    root: Affine,
+    size: (u16, u16),
+}
+
+impl Target<'_> {
+    /// Draw items `..end` (with the backdrops already filtered) and close
+    /// what is open; also the device transform item `end` would draw with.
+    fn paint(
+        &self,
+        glyphs: &mut Resources,
+        end: usize,
+        patches: &HashMap<usize, Patch>,
+    ) -> (Pixmap, Affine) {
+        let (w, h) = self.size;
+        let mut ctx = RenderContext::new(w, h);
+        let mut device = Affine::IDENTITY;
+        {
+            let mut p = Painter {
+                ctx: &mut ctx,
+                res: self.resources,
+                glyphs: &mut *glyphs,
+                map: self.map,
+                root: self.root,
+                screen: kurbo::Rect::new(0.0, 0.0, w as f64, h as f64),
+                layer_xf: Affine::IDENTITY,
+                layers: Vec::new(),
+                user_clips: 0,
+                scroll_clip: None,
+                patches: Some(patches),
+                index: 0,
+            };
+            p.background(self.frame.background);
+            let items = &self.frame.items[..end.min(self.frame.items.len())];
+            let mut i = 0;
+            while i < items.len() {
+                if let Some(plane) = self.map.projective_root(items[i].spatial) {
+                    let start = i;
+                    while i < items.len()
+                        && self.map.projective_root(items[i].spatial) == Some(plane)
+                    {
+                        i += 1;
+                    }
+                    p.projected(&items[start..i], plane);
+                    continue;
+                }
+                p.index = i;
+                p.item(&items[i]);
+                i += 1;
+            }
+            if let Some(next) = self.frame.items.get(end) {
+                device = p.device(next.spatial);
+            }
+            p.finish();
+        }
+        ctx.flush();
+        let mut pm = Pixmap::new(w, h);
+        ctx.render(&mut pm, glyphs);
+        (pm, device)
+    }
+}
+
+/// Filter the device bounding box of `rect` (local space under `device`)
+/// read from `below`.
+fn backdrop_patch(
+    below: &Pixmap,
+    device: Affine,
+    rect: Rect,
+    filters: &[redrob_scene::FilterOp],
+) -> Option<Patch> {
+    let (bw, bh) = (below.width() as f64, below.height() as f64);
+    let bbox = device
+        .transform_rect_bbox(to_kurbo_rect(rect))
+        .intersect(kurbo::Rect::new(0.0, 0.0, bw, bh));
+    let (x0, y0) = (bbox.x0.round().max(0.0), bbox.y0.round().max(0.0));
+    let (x1, y1) = (bbox.x1.round().min(bw), bbox.y1.round().min(bh));
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let (w, h) = ((x1 - x0) as usize, (y1 - y0) as usize);
+    let stride = below.width() as usize;
+    let src = below.data_as_u8_slice();
+    let mut region = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        let start = ((y0 as usize + y) * stride + x0 as usize) * 4;
+        region.extend_from_slice(&src[start..start + w * 4]);
+    }
+    let c = device.as_coeffs();
+    let scale = (c[0] * c[3] - c[1] * c[2]).abs().sqrt() as f32;
+    redrob_scene::filter::apply_filters(&mut region, w, h, filters, scale);
+    let meta = PixelMetadata {
+        may_have_transparency: true,
+        alpha_type: ImageAlphaType::AlphaPremultiplied,
+    };
+    let image = Pixmap::from_parts(region, w as u16, h as u16, meta);
+    Some(Patch {
+        image: Arc::new(image),
+        origin: (x0, y0),
+    })
 }
 
 fn color(c: [f32; 4]) -> AlphaColor<Srgb> {
@@ -268,6 +374,10 @@ struct Painter<'a> {
     /// The scroll clip chain currently pushed on top of the clip stack:
     /// (scroller, number of clip entries pushed).
     scroll_clip: Option<(SpatialId, usize)>,
+    /// Filtered backdrops by item index (None inside a projective plane).
+    patches: Option<&'a HashMap<usize, Patch>>,
+    /// Index of the item being drawn.
+    index: usize,
 }
 
 type Homography = [[f64; 3]; 3];
@@ -407,6 +517,8 @@ impl Painter<'_> {
                 layers: Vec::new(),
                 user_clips: 0,
                 scroll_clip: None,
+                patches: None,
+                index: 0,
             };
             for di in items {
                 sub.item(di);
@@ -626,6 +738,29 @@ impl Painter<'_> {
     fn item(&mut self, di: &DisplayItem) {
         let xf = self.device(di.spatial);
         match &di.item {
+            Item::Backdrop { rect, radii, .. } => {
+                let Some(patch) = self.patches.and_then(|p| p.get(&self.index)) else {
+                    return;
+                };
+                let r = to_kurbo_rect(*rect);
+                if !self.enter(di.spatial, xf.transform_rect_bbox(r)) {
+                    return;
+                }
+                self.ctx.set_transform(xf);
+                self.ctx.set_paint(Image {
+                    image: ImageSource::Pixmap(patch.image.clone()),
+                    sampler: ImageSampler {
+                        x_extend: Extend::Pad,
+                        y_extend: Extend::Pad,
+                        quality: ImageQuality::Low,
+                        alpha: 1.0,
+                    },
+                });
+                self.ctx
+                    .set_paint_transform(xf.inverse() * Affine::translate(patch.origin));
+                self.ctx.fill_path(&rounded(*rect, *radii).to_path(0.1));
+                self.ctx.reset_paint_transform();
+            }
             Item::Rect { rect, color: c } => {
                 let r = to_kurbo_rect(*rect);
                 if c[3] <= 0.0 || !self.enter(di.spatial, xf.transform_rect_bbox(r)) {

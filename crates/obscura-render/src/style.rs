@@ -2564,7 +2564,7 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
         }
         "backdrop-filter" | "-webkit-backdrop-filter" => {
             style.backdrop_filter_css = non_none_value(value).then(|| value.trim().to_string());
-            style.backdrop_blur = backdrop_blur_radius(value);
+            style.backdrop_filters = redrob_scene::filter::parse_filter_list(value);
             set_containing_block_trigger(
                 style,
                 crate::CB_TRIGGER_BACKDROP_FILTER,
@@ -4734,21 +4734,6 @@ fn set_containing_block_trigger(style: &mut LayoutStyle, trigger: u16, enabled: 
 /// Strictly split a `transform` value into `name(args)` functions in source
 /// order. Any non-whitespace between functions, missing delimiter, or
 /// unbalanced parenthesis invalidates the whole declaration.
-/// The radius of the `blur()` function in a filter list, in px.
-fn backdrop_blur_radius(value: &str) -> Option<f32> {
-    transform_functions(value)
-        .into_iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("blur"))
-        .and_then(|(_, arguments)| {
-            let arguments = arguments.trim();
-            if arguments.is_empty() {
-                return Some(0.0);
-            }
-            px_value(arguments)
-        })
-        .filter(|radius| radius.is_finite() && *radius > 0.0)
-}
-
 fn transform_functions(value: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let bytes = value.as_bytes();

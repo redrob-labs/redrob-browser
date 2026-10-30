@@ -1919,11 +1919,11 @@ pub struct LayoutStyle {
     /// `opacity`, own (non-inherited) value in 0.0-1.0. `None` means the
     /// default of 1.0.
     /// Specified `filter` and `backdrop-filter` text (`None` is `none`),
-    /// for CSSOM. Paint uses `backdrop_blur`.
+    /// for CSSOM. Paint uses `backdrop_filters`.
     pub filter_css: Option<String>,
     pub backdrop_filter_css: Option<String>,
-    /// The blur radius (px) of a `backdrop-filter: blur(...)`.
-    pub backdrop_blur: Option<f32>,
+    /// The parsed `backdrop-filter` function list.
+    pub backdrop_filters: Option<Vec<redrob_scene::FilterOp>>,
     /// `isolation: isolate`.
     pub isolation_isolate: bool,
     /// `mix-blend-mode`; `None` is `normal`.
