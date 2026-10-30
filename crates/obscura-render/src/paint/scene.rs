@@ -727,6 +727,7 @@ impl<'a> Builder<'a> {
                     parent: None,
                     kind: rs::SpatialKind::Reference {
                         transform: IDENTITY,
+                        projective: None,
                     },
                 },
                 root_scroll,
@@ -1116,6 +1117,7 @@ impl<'a> Builder<'a> {
             spatial,
             rs::SpatialKind::Reference {
                 transform: *transform,
+                projective: None,
             },
         );
         let inherited = self.boundary(spatial);
@@ -1128,13 +1130,17 @@ impl<'a> Builder<'a> {
             let tag = list.nodes.get(index).copied().unwrap_or(0);
             match op {
                 Op::PushRef {
-                    node, transform, ..
+                    node,
+                    transform,
+                    projective,
+                    ..
                 } => {
                     let parent = self.op_spatial(*node);
                     let spatial = self.push_spatial(
                         parent,
                         rs::SpatialKind::Reference {
                             transform: *transform,
+                            projective: *projective,
                         },
                     );
                     let inherited = self.boundary(parent);
