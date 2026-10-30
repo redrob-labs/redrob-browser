@@ -7196,6 +7196,11 @@ function _parserInsertedNodes() {
   }
   if (_ceDefinitionCount) _ceConnected(roots, true);
   if (_shadowHostCount) _slotsMaybeChanged(roots);
+  // Named access on window (HTML 7.2.2.3): `window.someId` for elements the
+  // parser inserted, as for script insertions.
+  for (var r = 0; r < roots.length; r++) {
+    if (roots[r].isConnected) _registerWindowNamedTree(roots[r]);
+  }
 }
 Object.defineProperty(globalThis, '__obscuraParserInserted', {
   value: _parserInsertedNodes, writable: false, enumerable: false, configurable: false,
