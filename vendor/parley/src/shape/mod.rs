@@ -120,6 +120,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             // Items are at least one character long, therefore the item's own first character is
             // never a split point.
             chars.next();
+            let mut join_next = false;
 
             let char_end = loop {
                 let Some(&(char_index, (byte_index, _))) = chars.peek() else {
@@ -131,12 +132,16 @@ pub(crate) fn shape_text<'a, B: Brush>(
                 //
                 // We loop because there may be multiple boxes at this index.
                 let mut split = false;
+                let mut only_empty_edges = true;
                 while let Some(inline_box) = inline_box_iter.peek() {
                     if inline_box.index < byte_index {
                         // Inline boxes *before* this index are popped (this occurs if the itemizer
                         // split a run and we were not called, such as at a bidi boundary).
                         inline_box_iter.next();
                     } else if inline_box.index == byte_index {
+                        only_empty_edges &= inline_box.kind == crate::InlineBoxKind::InFlow
+                            && inline_box.edge != crate::InlineBoxEdge::None
+                            && inline_box.width == 0.0;
                         inline_box_iter.next();
                         split = true;
                     } else {
@@ -144,22 +149,27 @@ pub(crate) fn shape_text<'a, B: Brush>(
                     }
                 }
 
-                if split {
-                    break char_index;
-                }
-
                 let style_index = char_style_indices[char_index];
-                if style_index != item_style_index {
-                    let style = &styles[usize::from(style_index)];
-                    split = !nearly_eq(style.font_size, item_style.font_size)
+                let style = &styles[usize::from(style_index)];
+                let shapes_differently = style_index != item_style_index
+                    && (!nearly_eq(style.font_size, item_style.font_size)
                         || style.locale != item_style.locale
                         || style.font_variations != item_style.font_variations
                         || style.font_features != item_style.font_features
                         || !nearly_eq(style.letter_spacing, item_style.letter_spacing)
-                        || !nearly_eq(style.word_spacing, item_style.word_spacing);
-                }
+                        || !nearly_eq(style.word_spacing, item_style.word_spacing));
 
                 if split {
+                    join_next = only_empty_edges
+                        && !shapes_differently
+                        && style.font_family == item_style.font_family
+                        && style.font_weight == item_style.font_weight
+                        && style.font_style == item_style.font_style
+                        && style.font_width == item_style.font_width;
+                    break char_index;
+                }
+
+                if shapes_differently {
                     break char_index;
                 }
 
@@ -169,6 +179,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             item_start_char = char_end;
             Some(parley_engine::itemize::Item {
                 char_end: char_end as u32,
+                join_next,
                 options: ShapeOptions {
                     language: item_style.locale,
                     font_size: item_style.font_size,

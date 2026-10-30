@@ -54,6 +54,13 @@ pub struct Item<'a> {
     /// greater than 0.
     pub char_end: u32,
 
+    /// The item ends only at an element boundary that does not interrupt
+    /// shaping (an inline element edge with no inline-axis size) and the
+    /// next item shapes with the same options: its last glyph is shaped
+    /// with the next character as Blink shapes across such boundaries, so
+    /// a kerning pair across them adjusts the last glyph's advance.
+    pub join_next: bool,
+
     /// The options to shape this item with.
     //
     // TODO: should users instead be allowed to build `options` at the `Segment` level (i.e.,

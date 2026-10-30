@@ -1230,3 +1230,21 @@ fn overflowing_atomic_at_line_start_keeps_trailing_space_on_its_line() {
     // "word x" is on the second line, below the image line.
     assert!(w.x < 50.0 && w.y > height(&tree, &laid, "a"), "{w:?}");
 }
+
+#[test]
+fn kerning_applies_across_undecorated_inline_boundaries() {
+    // Chrome (42px Arial, Liberation Sans): "L" before <span> " T" kerns
+    // with the space: the span starts at 21.813, not 23.359. A span with
+    // padding breaks shaping (23.359).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:42px Arial'>\
+         <div>L<span id=a> T</span></div><div>L<span id=b style='padding-left:2px'> T</span></div>",
+        &[],
+    );
+    let x = |id: &str| {
+        let node = element(&tree, id);
+        laid.inline_fragments[&node][0].x
+    };
+    assert!((x("a") - 21.81).abs() < 0.05, "{}", x("a"));
+    assert!((x("b") - 23.36).abs() < 0.05, "{}", x("b"));
+}
