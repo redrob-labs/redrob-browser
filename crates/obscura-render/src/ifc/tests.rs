@@ -1471,3 +1471,16 @@ fn null_cells_in_grid_template_areas_count_as_explicit_columns() {
     );
     assert!(r("d").x == 0.0 && r("d").y == 18.0, "{:?}", r("d"));
 }
+
+#[test]
+fn bundled_liberation_sans_kerns_digit_pairs_like_chrome() {
+    // Chrome (Liberation Sans 2.1.5, HarfBuzz): "1111" at 16px Arial is
+    // 32.03 wide, the "11" pair kerned by -152 units; 1.07.4 had no pair
+    // (35.59).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'><div><span id=a>1111</span></div>",
+        &[],
+    );
+    let w = width(&tree, &laid, "a");
+    assert!((w - 32.03).abs() < 0.05, "{w}");
+}
