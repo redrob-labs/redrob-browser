@@ -1706,3 +1706,19 @@ fn push_button_inputs_without_native_appearance_use_the_cascaded_line_height() {
     let h = |id: &str| laid.rects[&element(&tree, id)].height;
     assert_eq!((h("a"), h("c")), (54.0, 24.0));
 }
+
+#[test]
+fn empty_inline_elements_put_their_strut_on_the_line() {
+    // Chrome: `a <span style=line-height:60px></span>` makes a 60px line,
+    // a 32px/48px empty span a 48px one; a line with only an empty span
+    // stays an invisible zero-height line box.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px/24px Arial'>\
+         <p id=a style='margin:0'>a <span style='font-size:32px;line-height:48px'></span></p>\
+         <p id=c style='margin:0'>a <span style='line-height:60px'></span></p>\
+         <p id=d style='margin:0'><span style='line-height:60px'></span></p>",
+        &[],
+    );
+    let h = |id: &str| laid.rects[&element(&tree, id)].height;
+    assert_eq!((h("a"), h("c"), h("d")), (48.0, 60.0, 0.0));
+}

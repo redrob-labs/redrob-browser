@@ -927,8 +927,23 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 quantize,
             );
             layout_box.baseline_offset = placement.baseline_offset;
+            let edge_style =
+                (inline_box.edge != crate::InlineBoxEdge::None).then_some(layout_box.parent_style_index);
             self.state
                 .append_aligned_inline_box_to_line(next_x, inline_box, placement, quantize);
+            // An inline element's edge puts its span box (its strut: font
+            // metrics and line-height) on the line even when the element
+            // holds no text (CSS 2 10.8: `a <span style=line-height:36px>
+            // </span>` makes a 36px line).
+            if let Some(style_index) = edge_style {
+                let state = &mut self.state;
+                state.line.box_metrics.add_style(
+                    style_index,
+                    &self.layout.data.style_metrics,
+                    &mut state.contributed,
+                    &mut state.subtrees,
+                );
+            }
         } else {
             self.state
                 .append_inline_box_to_line(next_x, f32::NEG_INFINITY, f32::NEG_INFINITY);
