@@ -980,6 +980,10 @@ fn layout_ifc(
             border,
         );
         ifc.content_offset = (container_pb.left, line_box_top);
+        ifc.logical_size = (
+            (final_size.width - content_box_inset.horizontal_axis_sum()).max(0.0),
+            (final_size.height - content_box_inset.vertical_axis_sum()).max(0.0),
+        );
         mark_final(ifc);
     }
 

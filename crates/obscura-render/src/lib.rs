@@ -1399,6 +1399,25 @@ pub(crate) struct WaapiSampleState {
     pub opacity_fast_path: bool,
 }
 
+/// A vertical `writing-mode` (CSS Writing Modes 4).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WritingMode {
+    #[default]
+    VerticalRl,
+    VerticalLr,
+    SidewaysRl,
+    SidewaysLr,
+}
+
+/// `text-orientation`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TextOrientation {
+    #[default]
+    Mixed,
+    Upright,
+    Sideways,
+}
+
 /// The subset of CSS that influences box layout. Expanded in later phases.
 /// `PartialEq` lets paint damage tell an unchanged style from a changed one.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1823,6 +1842,12 @@ pub struct LayoutStyle {
     pub column_count: Option<u16>,
     /// `writing-mode: vertical-*` / `sideways-*` declared on the element.
     pub vertical_writing: bool,
+    /// Which vertical writing mode (with `vertical_writing`).
+    pub writing_mode: WritingMode,
+    /// `text-orientation`; `None` inherits (initial `mixed`).
+    pub text_orientation: Option<TextOrientation>,
+    /// `text-combine-upright: all`; `None` inherits (initial `none`).
+    pub text_combine_upright: Option<bool>,
     /// `shape-outside: circle() | ellipse()` of a float.
     pub shape_outside: Option<taffy::FloatShape>,
     /// `break-inside: avoid` makes this box an atomic balancing unit. The

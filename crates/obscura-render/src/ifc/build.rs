@@ -459,6 +459,8 @@ impl IfcStore {
             white_space: WhiteSpaceCollapse,
             style: &'s LayoutStyle,
             offset: (f32, f32),
+            orientation: crate::TextOrientation,
+            combine: bool,
         }
         let root_decorations = Decorations::default().with(root_style);
         let root_color = root_style.color.unwrap_or([0, 0, 0, 255]);
@@ -473,6 +475,8 @@ impl IfcStore {
             clip_fill: root_fill,
             owner: root,
             offset: (0.0, 0.0),
+            orientation: root_style.text_orientation.unwrap_or_default(),
+            combine: root_style.text_combine_upright.unwrap_or(false),
         }];
         let mut spans: Vec<Span> = Vec::new();
         let mut span_text_styles: Vec<TextStyle<'static, 'static, Brush>> = Vec::new();
@@ -489,6 +493,8 @@ impl IfcStore {
             owner: root,
             white_space: white_space(root_style).0,
             style: root_style,
+            orientation: root_style.text_orientation.unwrap_or_default(),
+            combine: root_style.text_combine_upright.unwrap_or(false),
             offset: (0.0, 0.0),
         }];
         for item in items {
@@ -506,6 +512,8 @@ impl IfcStore {
                         clip_fill: parent.clip_fill,
                         owner: parent.owner,
                         offset: parent.offset,
+                        orientation: parent.orientation,
+                        combine: parent.combine,
                     });
                 }
                 Item::GeneratedText(_) => {
@@ -520,6 +528,8 @@ impl IfcStore {
                         clip_fill: parent.clip_fill,
                         owner: parent.owner,
                         offset: parent.offset,
+                        orientation: parent.orientation,
+                        combine: parent.combine,
                     });
                 }
                 Item::SpanStart(_) | Item::SplitSpanStart(..) => {
@@ -564,6 +574,8 @@ impl IfcStore {
                         clip_fill,
                         owner: owner_node(*owner),
                         offset,
+                        orientation: style.text_orientation.unwrap_or(parent.orientation),
+                        combine: style.text_combine_upright.unwrap_or(parent.combine),
                     });
                     let culled = is_culled(style, parent.style);
                     spans.push(Span {
@@ -592,6 +604,8 @@ impl IfcStore {
                         white_space: white_space(style).0,
                         style,
                         offset,
+                        orientation: style.text_orientation.unwrap_or(parent.orientation),
+                        combine: style.text_combine_upright.unwrap_or(parent.combine),
                     };
                     stack.push(frame);
                 }
@@ -606,6 +620,36 @@ impl IfcStore {
         }
 
         let mut root_text_style = text_style(fonts, root_style, Brush(0));
+        // Vertical text: the `vert` alternates (CJK punctuation and the
+        // like, drawn upright); sideways text keeps its horizontal forms.
+        if params.vertical
+            && matches!(
+                params.writing_mode,
+                crate::WritingMode::VerticalRl | crate::WritingMode::VerticalLr
+            )
+        {
+            for (index, style) in std::iter::once(&mut root_text_style)
+                .chain(span_text_styles.iter_mut())
+                .enumerate()
+            {
+                let orientation = if index == 0 {
+                    paints[0].orientation
+                } else {
+                    paints[style.brush.0 as usize].orientation
+                };
+                if orientation != crate::TextOrientation::Sideways {
+                    let mut features: Vec<FontFeature> = match &style.font_features {
+                        parley::FontFeatures::List(list) => list.to_vec(),
+                        _ => Vec::new(),
+                    };
+                    features.push(FontFeature {
+                        tag: parley::setting::Tag::new(b"vert"),
+                        value: 1,
+                    });
+                    style.font_features = parley::FontFeatures::List(Cow::Owned(features));
+                }
+            }
+        }
         // The root inline box is the strut: the root element's own
         // `vertical-align` places it in its parent's line, not its content.
         root_text_style.vertical_align = parley::VerticalAlign::BASELINE;
@@ -888,6 +932,7 @@ impl IfcStore {
             content_offset: (0.0, 0.0),
             has_content,
             origin: (0.0, 0.0),
+            logical_size: (0.0, 0.0),
             clip: None,
             marker,
         })));
@@ -920,6 +965,7 @@ pub(crate) fn root_params(style: &LayoutStyle, has_marker: bool, center_block: b
         ellipsis: style.text_overflow == crate::TextOverflow::Ellipsis && style.clips_overflow_x(),
         balance: style.text_wrap_style == Some(crate::TextWrapStyle::Balance),
         vertical: style.vertical_writing,
+        writing_mode: style.writing_mode,
     }
 }
 

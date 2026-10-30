@@ -104,6 +104,8 @@ struct GlyphKey {
     coords: u64,
     embolden: bool,
     skew_bits: u32,
+    /// Linear part of the glyph transform (vertical text), as bits.
+    matrix: [u32; 4],
 }
 
 /// Rasterized glyph cache shared by every IFC of a layout.
@@ -139,6 +141,7 @@ impl GlyphRaster {
             coords: hasher.finish(),
             embolden,
             skew_bits: skew.to_bits(),
+            matrix: IDENTITY_LINEAR.map(f32::to_bits),
         };
         let context = &mut self.context;
         self.lcd
@@ -195,6 +198,7 @@ impl GlyphRaster {
         coords: &[i16],
         embolden: bool,
         skew: f32,
+        matrix: [f32; 4],
     ) -> Option<&Image> {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         coords.hash(&mut hasher);
@@ -207,6 +211,7 @@ impl GlyphRaster {
             coords: hasher.finish(),
             embolden,
             skew_bits: skew.to_bits(),
+            matrix: matrix.map(f32::to_bits),
         };
         let context = &mut self.context;
         self.images
@@ -230,12 +235,18 @@ impl GlyphRaster {
                 if embolden {
                     render.embolden(size / 24.0);
                 }
-                if skew != 0.0 {
-                    render.transform(Some(Transform::skew(
-                        Angle::from_degrees(skew),
-                        Angle::from_degrees(0.0),
-                    )));
+                let mut transform = (skew != 0.0)
+                    .then(|| Transform::skew(Angle::from_degrees(skew), Angle::from_degrees(0.0)));
+                if matrix != IDENTITY_LINEAR {
+                    // `matrix` is in y-down page space; outlines are y-up.
+                    let [a, b, c, d] = matrix;
+                    let turn = Transform::new(a, -b, -c, d, 0.0, 0.0);
+                    transform = Some(match transform {
+                        Some(skew) => skew.then(&turn),
+                        None => turn,
+                    });
                 }
+                render.transform(transform);
                 render.render(&mut scaler, glyph)
             })
             .as_ref()
@@ -263,7 +274,93 @@ struct PaintRun {
     /// Index of the line the run is on, and that line's right edge.
     line: usize,
     line_end: f32,
+    /// How the run is drawn in a vertical root.
+    orient: Orient,
+    /// The font's ascent as a fraction of its ascent + descent: where an
+    /// upright glyph's baseline sits below the top of its em box.
+    em_ascent: f32,
+    /// The font's ascent and descent (px).
+    font_ascent: f32,
+    font_descent: f32,
 }
+
+/// `[a, b, c, d]` of a 2D linear map: (x, y) -> (a x + c y, b x + d y).
+const IDENTITY_LINEAR: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+
+/// How a glyph run of a vertical root is drawn (CSS Writing Modes 4 5.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Orient {
+    /// Turned with the line (sideways, and Latin in `mixed`).
+    Rotated,
+    /// Upright on the vertical line, at its laid-out advance (CJK in
+    /// `mixed`).
+    Upright,
+    /// `text-orientation: upright`: every glyph upright, stacked by the
+    /// font's ascent + descent, its baseline the ascent below the top
+    /// (HarfBuzz's vertical metrics for a font without vmtx, as Chrome).
+    Stacked,
+    /// `text-combine-upright: all`: set horizontally within 1em, upright.
+    Combine,
+}
+
+/// Whether `c` stands upright in `text-orientation: mixed` (Unicode
+/// Vertical_Orientation U or Tu: CJK, kana, Hangul, fullwidth forms).
+fn upright_char(c: char) -> bool {
+    matches!(c as u32,
+        0x1100..=0x11FF
+        | 0x2E80..=0x2FFF
+        | 0x3000..=0x303F
+        | 0x3040..=0x31FF
+        | 0x3200..=0x4DBF
+        | 0x4E00..=0x9FFF
+        | 0xA960..=0xA97F
+        | 0xAC00..=0xD7FF
+        | 0xF900..=0xFAFF
+        | 0xFE10..=0xFE1F
+        | 0xFE30..=0xFE4F
+        | 0xFF01..=0xFF60
+        | 0xFFE0..=0xFFE6
+        | 0x1F000..=0x1FAFF
+        | 0x20000..=0x3FFFF)
+}
+
+/// The orientation of a run of `text` with this paint in `ifc`.
+fn orient(ifc: &Ifc, paint: usize, text: &str) -> Orient {
+    let Some(paint) = ifc.paints.get(paint) else {
+        return Orient::Rotated;
+    };
+    if !ifc.params.vertical {
+        return Orient::Rotated;
+    }
+    if matches!(
+        ifc.params.writing_mode,
+        crate::WritingMode::SidewaysRl | crate::WritingMode::SidewaysLr
+    ) {
+        return Orient::Rotated;
+    }
+    if paint.combine {
+        return Orient::Combine;
+    }
+    match paint.orientation {
+        crate::TextOrientation::Sideways => Orient::Rotated,
+        crate::TextOrientation::Upright => Orient::Stacked,
+        crate::TextOrientation::Mixed => match text.chars().find(|c| !c.is_whitespace()) {
+            Some(c) if upright_char(c) => Orient::Upright,
+            _ => Orient::Rotated,
+        },
+    }
+}
+
+/// A 2D affine `[a, b, c, d, e, f]`: (x, y) -> (a x + c y + e, b x + d y + f).
+type Affine2 = [f32; 6];
+
+fn apply(m: &Affine2, x: f32, y: f32) -> (f32, f32) {
+    (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
+}
+
+/// One glyph to draw: id, pen position (page CSS px) and the linear part
+/// of its transform.
+type Placed = (u16, f32, f32, [f32; 4]);
 
 fn runs(ifc: &Ifc) -> Vec<PaintRun> {
     let mut out = Vec::new();
@@ -277,6 +374,19 @@ fn runs(ifc: &Ifc) -> Vec<PaintRun> {
             let synthesis = parley_run.synthesis();
             let font_metrics = parley_run.font_metrics();
             let paint = run.style().brush.0 as usize;
+            let run_orient = orient(
+                ifc,
+                paint,
+                ifc.text.get(parley_run.text_range()).unwrap_or(""),
+            );
+            let em_ascent = {
+                let total = font_metrics.ascent + font_metrics.descent;
+                if total > 0.0 {
+                    font_metrics.ascent / total
+                } else {
+                    0.88
+                }
+            };
             let (dx, dy) = ifc
                 .paints
                 .get(paint)
@@ -309,6 +419,10 @@ fn runs(ifc: &Ifc) -> Vec<PaintRun> {
                 ascent: font_metrics.ascent,
                 line: line_index,
                 line_end: metrics.inline_max_coord,
+                orient: run_orient,
+                em_ascent,
+                font_ascent: font_metrics.ascent,
+                font_descent: font_metrics.descent,
             });
         }
     }
@@ -432,6 +546,10 @@ fn runs_of_layout(ifc: &Ifc, layout: &parley::Layout<super::Brush>) -> Vec<Paint
                 ascent: font_metrics.ascent,
                 line: 0,
                 line_end: metrics.inline_max_coord,
+                orient: Orient::Rotated,
+                em_ascent: 0.88,
+                font_ascent: font_metrics.ascent,
+                font_descent: font_metrics.descent,
             });
         }
     }
@@ -505,6 +623,122 @@ fn scene_font(font: &parley::FontData, coords: &[i16]) -> u64 {
 }
 
 impl Ifc {
+    /// For a vertical root, the map from the run's laid-out (horizontal)
+    /// coordinates to page coordinates, with the content box at (ox, oy):
+    /// `vertical-rl`/`sideways-rl` turn the lines 90 degrees clockwise with
+    /// the first line at the right; `vertical-lr` stacks them from the left
+    /// (each line still turned clockwise); `sideways-lr` turns them
+    /// counterclockwise. None for horizontal text.
+    fn vertical_frame(&self, run: &PaintRun, ox: f32, oy: f32) -> Option<Affine2> {
+        if !self.params.vertical {
+            return None;
+        }
+        let (inline, block) = self.logical_size;
+        let block = if block > 0.0 {
+            block
+        } else {
+            self.final_layout().height()
+        };
+        Some(match self.params.writing_mode {
+            crate::WritingMode::VerticalRl | crate::WritingMode::SidewaysRl => {
+                [0.0, 1.0, -1.0, 0.0, ox + block, oy]
+            }
+            crate::WritingMode::VerticalLr => {
+                [0.0, 1.0, -1.0, 0.0, ox + run.line_top + run.line_bottom, oy]
+            }
+            crate::WritingMode::SidewaysLr => {
+                let inline = if inline > 0.0 {
+                    inline
+                } else {
+                    self.final_layout().width()
+                };
+                [0.0, -1.0, 1.0, 0.0, ox, oy + inline]
+            }
+        })
+    }
+
+    /// The glyphs of `run` as drawn, with the content box at (ox, oy).
+    fn placed(&self, run: &PaintRun, ox: f32, oy: f32) -> Vec<Placed> {
+        let Some(frame) = self.vertical_frame(run, ox, oy) else {
+            return run
+                .glyphs
+                .iter()
+                .map(|&(glyph, x, y)| (glyph, ox + x, oy + y, IDENTITY_LINEAR))
+                .collect();
+        };
+        let linear = [frame[0], frame[1], frame[2], frame[3]];
+        let center = (run.line_top + run.line_bottom) / 2.0;
+        // The vertical line's center, across the line.
+        let (line_x, _) = apply(&frame, 0.0, center);
+        let baseline_drop = run.em_ascent * run.size;
+        match run.orient {
+            Orient::Rotated => run
+                .glyphs
+                .iter()
+                .map(|&(glyph, x, y)| {
+                    let (px, py) = apply(&frame, x, y);
+                    (glyph, px, py, linear)
+                })
+                .collect(),
+            Orient::Upright => run
+                .glyphs
+                .iter()
+                .enumerate()
+                .map(|(index, &(glyph, x, _))| {
+                    let next = run.glyphs.get(index + 1).map_or(run.x1, |next| next.1);
+                    let advance = (next - x).max(0.0);
+                    let (_, top) = apply(&frame, x, center);
+                    (
+                        glyph,
+                        line_x - advance / 2.0,
+                        top + baseline_drop,
+                        IDENTITY_LINEAR,
+                    )
+                })
+                .collect(),
+            Orient::Stacked => {
+                // Chrome advances by whole pixels here.
+                let step = (run.font_ascent + run.font_descent).round();
+                let mut inline = run.x0;
+                run.glyphs
+                    .iter()
+                    .enumerate()
+                    .map(|(index, &(glyph, x, _))| {
+                        let next = run.glyphs.get(index + 1).map_or(run.x1, |next| next.1);
+                        let advance = (next - x).max(0.0);
+                        let (_, top) = apply(&frame, inline, center);
+                        if advance > 0.0 {
+                            inline += step;
+                        }
+                        let drop = run.font_ascent;
+                        (glyph, line_x - advance / 2.0, top + drop, IDENTITY_LINEAR)
+                    })
+                    .collect()
+            }
+            Orient::Combine => {
+                let width = (run.x1 - run.x0).max(0.0);
+                let scale = if width > run.size && width > 0.0 {
+                    run.size / width
+                } else {
+                    1.0
+                };
+                let (_, middle) = apply(&frame, (run.x0 + run.x1) / 2.0, center);
+                let top = middle - run.size / 2.0;
+                run.glyphs
+                    .iter()
+                    .map(|&(glyph, x, _)| {
+                        (
+                            glyph,
+                            line_x - width * scale / 2.0 + (x - run.x0) * scale,
+                            top + baseline_drop,
+                            [scale, 0.0, 0.0, 1.0],
+                        )
+                    })
+                    .collect()
+            }
+        }
+    }
+
     /// Paint the glyphs and text decorations of this IFC into `pixmap`, with
     /// its content box at `origin` (CSS px) and the surface's `offset`.
     #[allow(clippy::too_many_arguments)]
@@ -572,6 +806,9 @@ impl Ifc {
         }
         // Cull runs whose line is entirely outside the surface.
         let visible = |run: &PaintRun| {
+            if self.params.vertical {
+                return true;
+            }
             let top = oy + (run.line_top - run.size * 4.0) * raster_scale;
             let bottom = oy + (run.line_bottom + run.size * 4.0) * raster_scale;
             bottom >= 0.0 && top <= ph as f32
@@ -675,14 +912,25 @@ impl Ifc {
             if color[3] == 0 && fill.is_none() {
                 continue;
             }
-            strokes.extend(decorations(self, run, color));
+            let frame = self.vertical_frame(run, 0.0, 0.0);
+            strokes.extend(
+                decorations(self, run, color)
+                    .into_iter()
+                    .map(|stroke| (stroke, frame)),
+            );
             let size = run.size * raster_scale;
             let lcd_tables = crate::paint::lcd::lcd_preblend(color);
             let gray_table = crate::paint::lcd::gray_preblend(color);
-            for &(glyph, gx, gy) in &run.glyphs {
-                let (x, x_bin) = subpixel(ox + gx * raster_scale);
-                let y = (oy + gy * raster_scale).round() as i32;
-                if fill.is_none() {
+            let placed = self.placed(run, origin.0 + offset.0, origin.1 + offset.1);
+            for &(glyph, gx, gy, matrix) in &placed {
+                let turned = matrix != IDENTITY_LINEAR;
+                let (x, x_bin) = if turned {
+                    ((gx * raster_scale).round() as i32, 0)
+                } else {
+                    subpixel(gx * raster_scale)
+                };
+                let y = (gy * raster_scale).round() as i32;
+                if fill.is_none() && !self.params.vertical {
                     if let Some(image) = raster.lcd_image(
                         &run.font,
                         glyph,
@@ -721,6 +969,7 @@ impl Ifc {
                     &run.coords,
                     run.embolden,
                     run.skew,
+                    matrix,
                 ) else {
                     continue;
                 };
@@ -777,8 +1026,23 @@ impl Ifc {
                 }
             }
         }
-        for (x0, x1, y, thickness, color) in strokes {
+        for ((x0, x1, y, thickness, color), frame) in strokes {
             if color[3] == 0 {
+                continue;
+            }
+            if let Some(frame) = frame {
+                // A turned stroke: an axis-aligned rect in page space.
+                let t = thickness.round().max(1.0);
+                let (ax, ay) = apply(&frame, x0, y);
+                let (bx, by) = apply(&frame, x1, y + t);
+                let (left, right) = (ax.min(bx), ax.max(bx));
+                let (top, bottom) = (ay.min(by), ay.max(by));
+                for py in (oy + top * raster_scale) as i32..(oy + bottom * raster_scale) as i32 {
+                    for px in (ox + left * raster_scale) as i32..(ox + right * raster_scale) as i32
+                    {
+                        blend(px, py, color, 255, None);
+                    }
+                }
                 continue;
             }
             let t = (thickness * raster_scale).round().max(1.0) as i32;
@@ -821,7 +1085,7 @@ impl Ifc {
         let default_owner = crate::display_list::current_node();
         let mut strokes = Vec::new();
         // One hit region per text owner per run.
-        let mut hits: Vec<(u64, f32, f32, f32, f32)> = Vec::new();
+        let mut hits: Vec<(u64, f32, f32, f32, f32, Affine2)> = Vec::new();
         for run in &runs {
             if invisible(self, run.paint, styles) {
                 continue;
@@ -833,41 +1097,80 @@ impl Ifc {
                 .text_node
                 .map(|node| node.index() as u64 + 1)
                 .unwrap_or(default_owner);
+            // Vertical text: hit regions and decorations are the run's
+            // laid-out rects under the vertical frame.
+            let frame = self.vertical_frame(run, ox, oy);
+            let frame_transform = frame.unwrap_or([1.0, 0.0, 0.0, 1.0, ox, oy]);
             hits.push((
                 owner,
                 run.x0,
                 run.line_top,
                 run.x1 - run.x0,
                 run.line_bottom - run.line_top,
+                frame_transform,
             ));
             if paint.color[3] == 0 {
                 continue;
             }
-            strokes.extend(decorations(self, run, paint.color));
-            let op = Op::Glyphs {
-                font: scene_font(&run.font, &run.coords),
-                size: run.size,
-                color: paint.color.map(|c| c as f32 / 255.0),
-                glyphs: run
-                    .glyphs
-                    .iter()
-                    .map(|&(glyph, x, y)| (glyph as u32, ox + x, oy + y))
-                    .collect(),
-                synthetic_bold: run.embolden,
-                skew: if run.skew != 0.0 {
-                    -run.skew.to_radians().tan()
-                } else {
-                    0.0
-                },
-                transform: crate::display_list::IDENTITY,
+            strokes.extend(
+                decorations(self, run, paint.color)
+                    .into_iter()
+                    .map(|stroke| (stroke, frame_transform)),
+            );
+            let font = scene_font(&run.font, &run.coords);
+            let color = paint.color.map(|c| c as f32 / 255.0);
+            let skew = if run.skew != 0.0 {
+                -run.skew.to_radians().tan()
+            } else {
+                0.0
             };
-            emit_scene_op(pixmap, clip_mask, clip, op);
+            let glyph_op = |glyphs: Vec<(u32, f32, f32)>, transform| Op::Glyphs {
+                font,
+                size: run.size,
+                color,
+                glyphs,
+                synthetic_bold: run.embolden,
+                skew,
+                transform,
+            };
+            match (frame, run.orient) {
+                (Some(frame), Orient::Rotated) => {
+                    let glyphs = run
+                        .glyphs
+                        .iter()
+                        .map(|&(glyph, x, y)| (glyph as u32, x, y))
+                        .collect();
+                    emit_scene_op(pixmap, clip_mask, clip, glyph_op(glyphs, frame));
+                }
+                (Some(_), Orient::Combine) => {
+                    // Placed glyphs share one horizontal scale.
+                    let placed = self.placed(run, ox, oy);
+                    let Some(&(_, x0, y0, [scale, ..])) = placed.first() else {
+                        continue;
+                    };
+                    let glyphs = placed
+                        .iter()
+                        .map(|&(glyph, x, y, _)| (glyph as u32, (x - x0) / scale, y - y0))
+                        .collect();
+                    let transform = [scale, 0.0, 0.0, 1.0, x0, y0];
+                    emit_scene_op(pixmap, clip_mask, clip, glyph_op(glyphs, transform));
+                }
+                _ => {
+                    let glyphs = self
+                        .placed(run, ox, oy)
+                        .into_iter()
+                        .map(|(glyph, x, y, _)| (glyph as u32, x, y))
+                        .collect();
+                    let op = glyph_op(glyphs, crate::display_list::IDENTITY);
+                    emit_scene_op(pixmap, clip_mask, clip, op);
+                }
+            }
         }
-        for (x0, x1, y, thickness, color) in strokes {
+        for ((x0, x1, y, thickness, color), transform) in strokes {
             if color[3] == 0 || x1 <= x0 {
                 continue;
             }
-            let (x, y, w, h) = (ox + x0, oy + y, x1 - x0, thickness.max(1.0).round());
+            let (x, y, w, h) = (x0, y, x1 - x0, thickness.max(1.0).round());
             let op = Op::Fill {
                 path: vec![
                     crate::display_list::Verb::M(x, y),
@@ -880,11 +1183,11 @@ impl Ifc {
                     color: color.map(|c| c as f32 / 255.0),
                 },
                 rule: crate::display_list::Rule::NonZero,
-                transform: crate::display_list::IDENTITY,
+                transform,
             };
             emit_scene_op(pixmap, clip_mask, clip, op);
         }
-        for (node, x, y, w, h) in hits {
+        for (node, x, y, w, h, transform) in hits {
             if w <= 0.0 || h <= 0.0 {
                 continue;
             }
@@ -892,11 +1195,11 @@ impl Ifc {
                 pixmap,
                 Op::Hit {
                     node,
-                    rect: [ox + x, oy + y, w, h],
+                    rect: [x, y, w, h],
                     radii: [0.0; 4],
                     clip,
                     text: true,
-                    transform: crate::display_list::IDENTITY,
+                    transform,
                 },
             );
         }
