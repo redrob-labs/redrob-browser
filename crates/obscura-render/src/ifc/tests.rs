@@ -1248,3 +1248,16 @@ fn kerning_applies_across_undecorated_inline_boundaries() {
     assert!((x("a") - 21.81).abs() < 0.05, "{}", x("a"));
     assert!((x("b") - 23.36).abs() < 0.05, "{}", x("b"));
 }
+
+#[test]
+fn stretched_row_flex_items_are_definite_for_percentage_children() {
+    // Chrome: in a row flex container of indefinite height, a stretched
+    // item (300px from its sibling) lets a height:100% child be 300.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><div style='display:flex'>\
+         <div style='height:300px;width:100px'>a</div>\
+         <div><div id=p style='height:100%;width:50px'></div></div></div>",
+        &[],
+    );
+    assert_eq!(height(&tree, &laid, "p"), 300.0);
+}
