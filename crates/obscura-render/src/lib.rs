@@ -3288,7 +3288,7 @@ fn dimension(v: Dimension) -> taffy::style::Dimension {
 /// (100.4px is 100.390625). Each length truncates on its own, so a box's
 /// size is the sum of truncated parts (Chrome: 100.4px wide with 8.2px and
 /// 7.2px padding and 4px + 3px borders is 122.765625).
-fn layout_unit(px: f32) -> f32 {
+pub(crate) fn layout_unit(px: f32) -> f32 {
     if !px.is_finite() || px.abs() >= 1.0e7 {
         return px;
     }
