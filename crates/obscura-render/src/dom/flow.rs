@@ -613,6 +613,26 @@ impl BuildCx<'_> {
         }
     }
 
+    /// The line clamp of the nearest `-webkit-box` vertical line-clamp root
+    /// above `root` through block containers: the clamp counts the lines
+    /// of block descendants too (CSS Overflow 4, `line-clamp`), as in
+    /// Chrome, where a clamp root's first paragraph is clamped.
+    fn inherited_line_clamp(&self, root: NodeId) -> Option<usize> {
+        let mut current = root;
+        for _ in 0..64 {
+            let parent = crate::dom::rendered_parent(self.tree, current)?;
+            let style = self.styles.get(&parent)?;
+            if style.webkit_box_display.is_some() && style.webkit_box_orient_vertical {
+                return style.webkit_line_clamp.map(|lines| lines as usize);
+            }
+            if style.display != crate::Display::Block || style.display_contents {
+                return None;
+            }
+            current = parent;
+        }
+        None
+    }
+
     /// Create the IFC of `items` rooted at `root` (with `root_style`).
     fn create_ifc(
         &mut self,
@@ -626,7 +646,10 @@ impl BuildCx<'_> {
             && is_li
             && !matches!(root_style.list_style, Some(crate::ListStyle::None) | None);
         let is_button = !anonymous && local_name(self.tree, root).as_deref() == Some("button");
-        let params = crate::ifc::build::root_params(root_style, has_marker, is_button);
+        let mut params = crate::ifc::build::root_params(root_style, has_marker, is_button);
+        if params.line_clamp.is_none() {
+            params.line_clamp = self.inherited_line_clamp(root);
+        }
         self.ifc_items.ifc.create(
             self.tree,
             self.styles,

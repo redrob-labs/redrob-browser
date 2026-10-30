@@ -5204,3 +5204,16 @@ fn percentage_height_inside_inset_abspos_box_of_an_aspect_ratio_box() {
     let fill = tree.get_element_by_id("fill").unwrap();
     assert_eq!(layout.rects[&fill].height, 200.0);
 }
+
+#[test]
+fn webkit_line_clamp_counts_lines_of_a_block_descendant() {
+    let tree = parse_html(
+        r#"<!doctype html><html><body style="margin:0;font:16px/24px sans-serif">
+        <div style="width:120px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden">
+          <p id=p style="margin:0">one two three four five six seven eight nine ten eleven twelve</p>
+        </div></body></html>"#,
+    );
+    let layout = layout_dom(&tree, (800.0, 600.0));
+    let p = tree.get_element_by_id("p").unwrap();
+    assert_eq!(layout.rects[&p].height, 48.0, "two clamped lines");
+}
