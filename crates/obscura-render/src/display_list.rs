@@ -141,7 +141,7 @@ pub enum Op {
         offset: [f32; 2],
         transform: Affine,
         /// A row-major 4x4 applied before `transform` (a 3D plane).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         projective: Option<[f32; 16]>,
     },
     PopRef,

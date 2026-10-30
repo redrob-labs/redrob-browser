@@ -52,7 +52,7 @@ pub enum SpatialKind {
     /// not drawn.
     Reference {
         transform: Affine,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         projective: Option<[f32; 16]>,
     },
     /// A scroll container. `frame` is its clip/viewport rect in the parent's
@@ -412,4 +412,58 @@ pub fn sticky_offset(
         dx.clamp(horizontal_range.0, horizontal_range.1),
         dy.clamp(vertical_range.0, vertical_range.1),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// bincode has no field names: every field must be on the wire, so a
+    /// `skip_serializing_if` field would shift everything after it.
+    #[test]
+    fn frames_round_trip_through_the_wire_format() {
+        let frame = Frame {
+            epoch: 3,
+            viewport: (100.0, 50.0),
+            background: [1.0; 4],
+            spatial: vec![
+                SpatialNode {
+                    id: ROOT_SPATIAL,
+                    parent: None,
+                    kind: SpatialKind::Reference {
+                        transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                        projective: None,
+                    },
+                },
+                SpatialNode {
+                    id: SpatialId(2),
+                    parent: Some(ROOT_SPATIAL),
+                    kind: SpatialKind::Reference {
+                        transform: [1.0, 0.0, 0.0, 1.0, 5.0, 6.0],
+                        projective: Some([1.0; 16]),
+                    },
+                },
+            ],
+            items: vec![DisplayItem {
+                spatial: SpatialId(2),
+                item: Item::Rect {
+                    rect: Rect {
+                        x: 1.0,
+                        y: 2.0,
+                        w: 3.0,
+                        h: 4.0,
+                    },
+                    color: [0.0, 0.0, 0.0, 1.0],
+                },
+            }],
+            hits: Vec::new(),
+        };
+        let bytes = encode(&SceneMsg::Frame(frame.clone()));
+        let SceneMsg::Frame(decoded) = decode::<SceneMsg>(&bytes[4..]).expect("decodes") else {
+            panic!("not a frame");
+        };
+        assert_eq!(decoded.spatial, frame.spatial);
+        assert_eq!(decoded.items, frame.items);
+        assert_eq!(decoded.epoch, 3);
+    }
 }
