@@ -3004,6 +3004,35 @@ pub(crate) fn non_geometric_computed_style(
         cursor_css(style.cursor.unwrap_or_default()).to_string(),
     );
     out.insert("opacity", css_number(style.opacity.unwrap_or(1.0)));
+    out.insert(
+        "writing-mode",
+        match (style.vertical_writing, style.writing_mode) {
+            (false, _) => "horizontal-tb",
+            (true, crate::WritingMode::VerticalRl) => "vertical-rl",
+            (true, crate::WritingMode::VerticalLr) => "vertical-lr",
+            (true, crate::WritingMode::SidewaysRl) => "sideways-rl",
+            (true, crate::WritingMode::SidewaysLr) => "sideways-lr",
+        }
+        .to_string(),
+    );
+    out.insert(
+        "text-orientation",
+        match style.text_orientation.unwrap_or_default() {
+            crate::TextOrientation::Mixed => "mixed",
+            crate::TextOrientation::Upright => "upright",
+            crate::TextOrientation::Sideways => "sideways",
+        }
+        .to_string(),
+    );
+    out.insert(
+        "text-combine-upright",
+        if style.text_combine_upright.unwrap_or(false) {
+            "all"
+        } else {
+            "none"
+        }
+        .to_string(),
+    );
     // Filter-like longhands: their initial values, as Chrome reports them.
     out.insert(
         "filter",
@@ -15588,6 +15617,62 @@ mod tests {
     }
 
     #[test]
+    fn vertical_writing_modes_turn_and_stack_glyphs() {
+        // Same page as Chrome comparisons: 20px Liberation Sans columns.
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;font:20px sans-serif;background:#fff">
+              <div style="position:absolute;left:0;top:0;height:220px;writing-mode:vertical-rl">vertical-rl Text</div>
+              <div style="position:absolute;left:100px;top:0;height:220px;writing-mode:sideways-lr">sideways-lr</div>
+              <div style="position:absolute;left:200px;top:0;height:220px;writing-mode:vertical-rl;text-orientation:upright">UPRIGHT</div>
+              <p style="position:absolute;left:0;top:240px;margin:0;width:300px">horizontal text</p>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (320.0, 280.0), None).expect("vertical");
+        let red = |x: u32, y: u32| pixmap.pixel(x, y).map_or(255, |p| p.red());
+        // vertical-rl: one column of turned glyphs, taller than wide, inside
+        // its 24px wide box (Chrome: ink x 7..21, y 2..124).
+        let (x0, y0, x1, y1) = ink_box(red, (0, 0, 60, 230)).expect("vertical-rl ink");
+        assert!(x0 >= 3 && x1 <= 23, "column x {x0}..{x1}");
+        assert!(y0 <= 4 && (118..=130).contains(&y1), "column y {y0}..{y1}");
+        // The horizontal paragraph still paints horizontally.
+        let (hx0, hy0, hx1, hy1) = ink_box(red, (0, 238, 320, 280)).expect("horizontal ink");
+        assert!(
+            hx1 - hx0 > 4 * (hy1 - hy0),
+            "horizontal line {hx0}..{hx1} x {hy0}..{hy1}"
+        );
+        // sideways-lr reads bottom to top: its text ends at the top, so the
+        // ink starts far down the 220px box, not at its top (Chrome: y 77..220).
+        let (_, sy0, _, sy1) = ink_box(red, (100, 0, 160, 230)).expect("sideways ink");
+        assert!(sy0 > 50 && sy1 > 200, "sideways-lr y {sy0}..{sy1}");
+        // text-orientation: upright stacks upright letters 22px apart
+        // (ascent + descent), the first top 4px down (Chrome: 4, 26, 48, ...).
+        let rows = ink_rows(red, 200, 230, 0, 220);
+        assert_eq!(rows.len(), 7, "seven upright letters: {rows:?}");
+        assert!((3..=5).contains(&rows[0].0), "first letter top {rows:?}");
+        assert!(
+            (21..=23).contains(&(rows[1].0 - rows[0].0)),
+            "pitch {rows:?}"
+        );
+        let computed = {
+            let mut layout = crate::layout_dom(&tree, (320.0, 280.0));
+            let id = tree
+                .descendants(tree.document())
+                .into_iter()
+                .find(|id| {
+                    layout
+                        .styles
+                        .get(id)
+                        .is_some_and(|s| s.text_orientation.is_some())
+                })
+                .expect("upright div");
+            non_geometric_computed_style(&layout.styles.remove(&id).unwrap())
+        };
+        assert_eq!(computed["writing-mode"], "vertical-rl");
+        assert_eq!(computed["text-orientation"], "upright");
+        assert_eq!(computed["text-combine-upright"], "none");
+    }
+
+    #[test]
     fn backdrop_filter_blurs_what_is_under_a_translucent_fixed_header() {
         let rows: String = (0..20)
             .map(|i| {
@@ -24075,6 +24160,49 @@ mod tests {
     }
 }
 
+/// Test helper: the ink bounding box (x0, y0, x1, y1) of dark pixels of
+/// `pixel(x, y) -> red` inside the rect.
+#[cfg(test)]
+fn ink_box(
+    pixel: impl Fn(u32, u32) -> u8,
+    rect: (u32, u32, u32, u32),
+) -> Option<(u32, u32, u32, u32)> {
+    let mut out: Option<(u32, u32, u32, u32)> = None;
+    for y in rect.1..rect.3 {
+        for x in rect.0..rect.2 {
+            if pixel(x, y) < 128 {
+                out = Some(match out {
+                    None => (x, y, x, y),
+                    Some((a, b, c, d)) => (a.min(x), b.min(y), c.max(x), d.max(y)),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Test helper: the dark row runs (start, end) of a column strip.
+#[cfg(test)]
+fn ink_rows(pixel: impl Fn(u32, u32) -> u8, x0: u32, x1: u32, y0: u32, y1: u32) -> Vec<(u32, u32)> {
+    let mut runs = Vec::new();
+    let mut start = None;
+    for y in y0..y1 {
+        let ink = (x0..x1).any(|x| pixel(x, y) < 128);
+        match (ink, start) {
+            (true, None) => start = Some(y),
+            (false, Some(s)) => {
+                runs.push((s, y - 1));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(s) = start {
+        runs.push((s, y1 - 1));
+    }
+    runs
+}
+
 #[cfg(all(test, feature = "scene"))]
 mod scene_text_tests {
     use super::*;
@@ -24277,6 +24405,82 @@ mod scene_text_tests {
             "the backdrop follows the scroll"
         );
         assert_eq!(&scrolled.pixel(150, 12)[..3], &[255, 255, 255]);
+    }
+
+    /// Vertical text reaches the scene turned (a rotated reference frame)
+    /// and the scene rasterizer draws it where the CPU paint does.
+    #[test]
+    fn scene_vertical_text_matches_the_cpu_paint() {
+        let tree = obscura_dom::parse_html(
+            r#"<html style="margin:0"><body style="margin:0;font:20px sans-serif;background:#fff">
+              <div style="position:absolute;left:0;top:0;height:220px;writing-mode:vertical-rl">vertical-rl Text</div>
+              <div style="position:absolute;left:60px;top:0;height:220px;writing-mode:vertical-lr;width:60px">vertical-lr two lines here</div>
+              <div style="position:absolute;left:140px;top:0;height:220px;writing-mode:sideways-lr">sideways-lr</div>
+              <div style="position:absolute;left:200px;top:0;height:220px;writing-mode:vertical-rl;text-orientation:upright">UPRIGHT</div>
+              <div style="position:absolute;left:250px;top:0;height:220px;writing-mode:vertical-rl">x<span style="text-combine-upright:all">12</span>x</div>
+            </body></html>"#,
+        );
+        let viewport = (300.0, 240.0);
+        let mut resources = RenderResourceCache::default();
+        let mut prepared = prepare_dom(&tree, viewport, None, &mut resources).unwrap();
+        let built = scene::build_scene_prepared(
+            &tree,
+            &mut prepared,
+            &mut resources,
+            (0.0, 0.0),
+            &HashMap::new(),
+            [255, 255, 255, 255],
+            &EMPTY_CANVAS_SURFACES,
+            1.0,
+        )
+        .unwrap();
+        let turned = built.frame.spatial.iter().any(|node| {
+            matches!(
+                node.kind,
+                redrob_scene::SpatialKind::Reference { transform, .. }
+                    if transform[0].abs() < 1e-3 && transform[1].abs() > 0.99
+            )
+        });
+        assert!(turned, "a reference frame turned 90 degrees");
+        let mut store = redrob_scene_raster::ResourceStore::new();
+        for font in &built.fonts {
+            store.apply(redrob_scene::Resource::Font {
+                id: font.id,
+                data: font.data.bytes().to_vec(),
+                index: font.data.index(),
+            });
+        }
+        let image = redrob_scene_raster::rasterize(
+            &built.frame,
+            &store,
+            &HashMap::new(),
+            redrob_scene::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: viewport.0,
+                h: viewport.1,
+            },
+            1.0,
+        );
+        let cpu = paint_dom(&tree, viewport, None).unwrap();
+        let scene_red = |x: u32, y: u32| image.pixel(x, y)[0];
+        let cpu_red = |x: u32, y: u32| cpu.pixel(x, y).map_or(255, |p| p.red());
+        for (name, rect) in [
+            ("vertical-rl", (0, 0, 50, 230)),
+            ("vertical-lr", (60, 0, 130, 230)),
+            ("sideways-lr", (140, 0, 190, 230)),
+            ("upright", (200, 0, 240, 230)),
+            ("combine", (250, 0, 290, 230)),
+        ] {
+            let a = ink_box(scene_red, rect).expect(name);
+            let b = ink_box(cpu_red, rect).expect(name);
+            let close = |p: u32, q: u32| p.abs_diff(q) <= 2;
+            assert!(
+                close(a.0, b.0) && close(a.1, b.1) && close(a.2, b.2) && close(a.3, b.3),
+                "{name}: scene {a:?} cpu {b:?}"
+            );
+            assert!(a.3 - a.1 > a.2 - a.0, "{name} runs down the page: {a:?}");
+        }
     }
 
     /// The compositor scene (what redrob-shell draws) carries the IFC's text
