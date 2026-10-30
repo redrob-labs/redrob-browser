@@ -16,6 +16,8 @@ pub struct ResourceStore {
     externals: HashMap<u64, Arc<Pixmap>>,
     /// vello_cpu's glyph caches, reused across rasterizations.
     pub(crate) glyphs: Mutex<vello_cpu::Resources>,
+    /// LCD glyph masks (`crate::lcd_text`).
+    pub(crate) lcd: Mutex<crate::lcd_text::GlyphCache>,
 }
 
 impl Default for ResourceStore {
@@ -55,6 +57,7 @@ impl ResourceStore {
             instances: HashMap::new(),
             externals: HashMap::new(),
             glyphs: Mutex::new(vello_cpu::Resources::new()),
+            lcd: Mutex::new(crate::lcd_text::GlyphCache::new()),
         }
     }
 
