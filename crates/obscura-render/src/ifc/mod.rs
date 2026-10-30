@@ -212,6 +212,9 @@ pub(crate) struct Ifc {
     pub(crate) has_content: bool,
     /// Content-box origin in document coordinates (set after layout).
     pub(crate) origin: (f32, f32),
+    /// Per-line offset of a line box moved into a later column of its
+    /// multicol container (empty when the IFC is not fragmented).
+    pub(crate) line_shifts: Vec<(f32, f32)>,
     /// Clip of the root's ancestors (and its own overflow), screen space.
     pub(crate) clip: Option<crate::Rect>,
     /// The shaped "…" marker of a clamped or ellipsized IFC.
@@ -327,6 +330,13 @@ impl IfcStore {
         if let Some(ifcs) = ACTIVE.with(|active| active.borrow_mut().pop()) {
             self.ifcs = ifcs;
         }
+    }
+}
+
+impl Ifc {
+    /// The column-fragmentation offset of line `index`.
+    pub(crate) fn line_shift(&self, index: usize) -> (f32, f32) {
+        self.line_shifts.get(index).copied().unwrap_or((0.0, 0.0))
     }
 }
 

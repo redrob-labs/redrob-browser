@@ -2486,6 +2486,22 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
                 .into_iter()
                 .find_map(parse_column_count);
         }
+        "column-span" | "-webkit-column-span" => {
+            style.column_span_all = value.trim().eq_ignore_ascii_case("all");
+        }
+        "column-fill" => {
+            style.column_fill_auto = value.trim().eq_ignore_ascii_case("auto");
+        }
+        "break-before" | "-webkit-column-break-before" => {
+            let v = value.trim().to_ascii_lowercase();
+            style.break_before_column =
+                matches!(v.as_str(), "column" | "page" | "always" | "left" | "right");
+        }
+        "break-after" | "-webkit-column-break-after" => {
+            let v = value.trim().to_ascii_lowercase();
+            style.break_after_column =
+                matches!(v.as_str(), "column" | "page" | "always" | "left" | "right");
+        }
         "break-inside" => {
             style.break_inside_avoid = matches!(
                 value.trim().to_ascii_lowercase().as_str(),

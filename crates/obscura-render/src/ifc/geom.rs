@@ -223,8 +223,11 @@ impl Ifc {
         let mut placed: std::collections::HashSet<u32> = std::collections::HashSet::new();
         let depths = self.span_depths();
         let line_count = layout.len();
+        let base_origin = origin;
         for (line_index, line) in layout.lines().enumerate() {
             let metrics = *line.metrics();
+            let shift = self.line_shift(line_index);
+            let origin = (base_origin.0 + shift.0, base_origin.1 + shift.1);
             // After a forced break, a last line holding only collapsed
             // whitespace (`<br><span>\n</span>`) is no line box: Chrome puts
             // its inline boxes at the end of the previous line box, empty.

@@ -1831,6 +1831,15 @@ pub struct LayoutStyle {
     /// explicit and lets the balancing path distinguish authored break
     /// avoidance as finer-grained fragmentation is added.
     pub break_inside_avoid: bool,
+    /// `column-span: all`: the box spans every column of its multicol
+    /// container, splitting the column flow above and below it.
+    pub column_span_all: bool,
+    /// `column-fill: auto` (fill columns in order instead of balancing).
+    pub column_fill_auto: bool,
+    /// `break-before: column | page` (forced column break before the box).
+    pub break_before_column: bool,
+    /// `break-after: column | page`.
+    pub break_after_column: bool,
 
     /// `border-spacing: <horizontal> <vertical>?` (or the `cellspacing`
     /// attribute). Only meaningful on a `<table>`; taffy has no native table

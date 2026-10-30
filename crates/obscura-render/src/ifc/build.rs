@@ -886,6 +886,7 @@ impl IfcStore {
             texts,
             params,
             content_offset: (0.0, 0.0),
+            line_shifts: Vec::new(),
             has_content,
             origin: (0.0, 0.0),
             clip: None,

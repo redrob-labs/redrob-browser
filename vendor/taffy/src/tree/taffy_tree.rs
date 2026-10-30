@@ -1090,6 +1090,17 @@ impl<NodeContext> TaffyTree<NodeContext> {
         }
     }
 
+    /// Move a laid-out node by (dx, dy) relative to its parent, after layout
+    /// (CSS fragmentation moves a box into a later column). The rounded
+    /// layout moves by the rounded offset.
+    pub fn translate_layout(&mut self, node: NodeId, dx: f32, dy: f32) {
+        let data = &mut self.nodes[node.into()];
+        data.unrounded_layout.location.x += dx;
+        data.unrounded_layout.location.y += dy;
+        data.final_layout.location.x += dx.round();
+        data.final_layout.location.y += dy.round();
+    }
+
     /// Returns this node layout with unrounded values relative to its parent.
     #[inline]
     pub fn unrounded_layout(&self, node: NodeId) -> &Layout {
