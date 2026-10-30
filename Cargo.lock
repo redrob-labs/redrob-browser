@@ -6020,6 +6020,7 @@ dependencies = [
  "glifo 0.4.0",
  "redrob-scene",
  "skrifa 0.44.0",
+ "swash",
  "vello_cpu 0.3.0",
 ]
 

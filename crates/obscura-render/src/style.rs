@@ -2474,6 +2474,27 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
             let v = value.trim().to_ascii_lowercase();
             style.vertical_writing =
                 v.starts_with("vertical") || v.starts_with("sideways") || v.starts_with("tb");
+            style.writing_mode = match v.as_str() {
+                "vertical-lr" => crate::WritingMode::VerticalLr,
+                "sideways-rl" => crate::WritingMode::SidewaysRl,
+                "sideways-lr" => crate::WritingMode::SidewaysLr,
+                _ => crate::WritingMode::VerticalRl,
+            };
+        }
+        "text-orientation" | "-webkit-text-orientation" => {
+            style.text_orientation = match value.trim().to_ascii_lowercase().as_str() {
+                "upright" => Some(crate::TextOrientation::Upright),
+                "sideways" | "sideways-right" => Some(crate::TextOrientation::Sideways),
+                "mixed" | "vertical-right" => Some(crate::TextOrientation::Mixed),
+                _ => style.text_orientation,
+            };
+        }
+        "text-combine-upright" | "-webkit-text-combine" => {
+            style.text_combine_upright = match value.trim().to_ascii_lowercase().as_str() {
+                "all" | "horizontal" => Some(true),
+                "none" => Some(false),
+                _ => style.text_combine_upright,
+            };
         }
         "column-count" | "-webkit-column-count" => {
             style.column_count = parse_column_count(value);

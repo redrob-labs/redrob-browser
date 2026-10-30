@@ -54,6 +54,10 @@ pub(crate) struct TextPaint {
     pub(crate) owner: NodeId,
     /// Accumulated `position: relative` offset of the enclosing spans.
     pub(crate) offset: (f32, f32),
+    /// `text-orientation` of the text (vertical roots only).
+    pub(crate) orientation: crate::TextOrientation,
+    /// `text-combine-upright: all`.
+    pub(crate) combine: bool,
 }
 
 /// Margin, border and padding of one inline-axis side of an inline element.
@@ -174,6 +178,8 @@ pub(crate) struct RootParams {
     /// `-webkit-line-clamp` of a legacy vertical `-webkit-box`: only this
     /// many lines count towards the height and paint, the last with a marker.
     pub(crate) line_clamp: Option<usize>,
+    /// The vertical writing mode (with `vertical`).
+    pub(crate) writing_mode: crate::WritingMode,
     /// `text-overflow: ellipsis` with clipped inline overflow.
     pub(crate) ellipsis: bool,
     /// `text-wrap-style: balance`.
@@ -215,6 +221,9 @@ pub(crate) struct Ifc {
     /// Per-line offset of a line box moved into a later column of its
     /// multicol container (empty when the IFC is not fragmented).
     pub(crate) line_shifts: Vec<(f32, f32)>,
+    /// Content-box size of the final layout in the IFC's own (logical)
+    /// axes: inline extent, block extent.
+    pub(crate) logical_size: (f32, f32),
     /// Clip of the root's ancestors (and its own overflow), screen space.
     pub(crate) clip: Option<crate::Rect>,
     /// The shaped "…" marker of a clamped or ellipsized IFC.
