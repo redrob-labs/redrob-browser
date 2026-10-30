@@ -395,7 +395,20 @@ impl Ifc {
                     // A culled span's rect over a child inline has the
                     // child's vertical extent (Chrome: an undecorated <li>
                     // around a ::before with 8px padding is 33 tall, not 17).
-                    let metrics_span = self.spans.get(source as usize).unwrap_or(span);
+                    let mut metrics_span = self.spans.get(source as usize).unwrap_or(span);
+                    let mut baseline = baseline;
+                    // ... but only a child with the culled span's own font
+                    // metrics on its baseline: over a child with another font
+                    // size or a vertical-align shift Chrome reports the culled
+                    // span's own font box on the line's baseline.
+                    if source != index
+                        && (metrics_span.ascent != span.ascent
+                            || metrics_span.descent != span.descent
+                            || (baseline - metrics.baseline).abs() > 0.01)
+                    {
+                        metrics_span = span;
+                        baseline = metrics.baseline;
+                    }
                     if trailing_empty {
                         let rect = Rect {
                             x: origin.0 + x0 + span.relative.0,

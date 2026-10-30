@@ -1646,3 +1646,19 @@ fn vertical_block_is_as_wide_as_its_stacked_lines() {
         (48.0, 150.0, 144.0, 24.0)
     );
 }
+
+#[test]
+fn culled_inline_over_a_bigger_or_shifted_child_keeps_its_own_font_box() {
+    // Chrome: an undecorated span around a 24px child, or a child shifted
+    // by vertical-align, reports its own 17px font box on the baseline;
+    // around a same-font child with padding it reports the child's box.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px/24px Arial'><p style='margin:0'>x \
+         <b id=a><span style='font-size:24px'>=</span></b> \
+         <span id=g><span style='vertical-align:10px'>=</span></span> \
+         <span id=f><span style='padding:8px'>=</span></span></p>",
+        &[],
+    );
+    let h = |id: &str| laid.inline_fragments[&element(&tree, id)][0].height;
+    assert_eq!((h("a"), h("g"), h("f")), (17.0, 17.0, 33.0));
+}
