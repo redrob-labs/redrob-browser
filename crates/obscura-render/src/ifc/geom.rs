@@ -68,7 +68,7 @@ impl Ifc {
         pieces: &[Piece],
         line_spans: &[u32],
         depths: &[usize],
-    ) -> std::collections::HashMap<u32, Vec<(f32, f32, f32)>> {
+    ) -> std::collections::HashMap<u32, Vec<(f32, f32, f32, u32)>> {
         // chain[p] = piece p's span and its ancestors, innermost first.
         let chains: Vec<Vec<u32>> = pieces
             .iter()
@@ -95,7 +95,7 @@ impl Ifc {
         order.sort_by_key(|span| {
             std::cmp::Reverse(depths.get(*span as usize).copied().unwrap_or(0))
         });
-        let mut memo: std::collections::HashMap<u32, Vec<(f32, f32, f32)>> =
+        let mut memo: std::collections::HashMap<u32, Vec<(f32, f32, f32, u32)>> =
             std::collections::HashMap::new();
         for span in order {
             let culled = self.spans.get(span as usize).is_some_and(|s| s.culled);
@@ -119,11 +119,11 @@ impl Ifc {
                     });
                 }
                 extent
-                    .map(|(a, b, base)| (start.unwrap_or(a), end.unwrap_or(b), base))
+                    .map(|(a, b, base)| (start.unwrap_or(a), end.unwrap_or(b), base, span))
                     .into_iter()
                     .collect()
             } else {
-                let mut out = Vec::new();
+                let mut out: Vec<(f32, f32, f32, u32)> = Vec::new();
                 let mut current: Option<(f32, f32, f32)> = None;
                 let mut empty_at: Option<(f32, f32)> = None;
                 let mut p = 0;
@@ -131,8 +131,8 @@ impl Ifc {
                     let piece = &pieces[p];
                     match toward(p, span) {
                         None => {
-                            if let Some(segment) = current.take() {
-                                out.push(segment);
+                            if let Some((a, b, base)) = current.take() {
+                                out.push((a, b, base, span));
                             }
                             p += 1;
                         }
@@ -148,8 +148,8 @@ impl Ifc {
                             p += 1;
                         }
                         Some(Some(child)) => {
-                            if let Some(segment) = current.take() {
-                                out.push(segment);
+                            if let Some((a, b, base)) = current.take() {
+                                out.push((a, b, base, span));
                             }
                             if let Some(rects) = memo.get(&child) {
                                 out.extend(rects.iter().copied());
@@ -160,12 +160,12 @@ impl Ifc {
                         }
                     }
                 }
-                if let Some(segment) = current.take() {
-                    out.push(segment);
+                if let Some((a, b, base)) = current.take() {
+                    out.push((a, b, base, span));
                 }
                 if out.is_empty() {
                     if let Some((x, baseline)) = empty_at {
-                        out.push((x, x, baseline));
+                        out.push((x, x, baseline, span));
                     }
                 }
                 out
@@ -388,7 +388,11 @@ impl Ifc {
                     continue;
                 };
                 placed.insert(index);
-                for (x0, x1, baseline) in line_rects.remove(&index).unwrap_or_default() {
+                for (x0, x1, baseline, source) in line_rects.remove(&index).unwrap_or_default() {
+                    // A culled span's rect over a child inline has the
+                    // child's vertical extent (Chrome: an undecorated <li>
+                    // around a ::before with 8px padding is 33 tall, not 17).
+                    let metrics_span = self.spans.get(source as usize).unwrap_or(span);
                     if trailing_empty {
                         let rect = Rect {
                             x: origin.0 + x0 + span.relative.0,
@@ -402,11 +406,12 @@ impl Ifc {
                         }
                         continue;
                     }
+                    let m = metrics_span;
                     let rect = Rect {
-                        x: origin.0 + x0 + span.relative.0,
-                        y: origin.1 + baseline - span.ascent - span.block_start + span.relative.1,
+                        x: origin.0 + x0 + m.relative.0,
+                        y: origin.1 + baseline - m.ascent - m.block_start + m.relative.1,
                         width: (x1 - x0).max(0.0),
-                        height: span.ascent + span.descent + span.block_start + span.block_end,
+                        height: m.ascent + m.descent + m.block_start + m.block_end,
                     };
                     match span.owner {
                         SpanOwner::Element(node) => out.elements.push((node, rect)),

@@ -1519,3 +1519,20 @@ fn absolute_shrink_to_fit_room_excludes_insets() {
     assert!(a.width <= 50.0 && a.height > 50.0, "{a:?}");
     assert!(b.width > 210.0 && b.height < 20.0, "{b:?}");
 }
+
+#[test]
+fn culled_inline_rect_spans_its_padded_children() {
+    // Chrome: an undecorated span around a child with 8px padding reports
+    // the child's extent (y -8, 33 tall); a span with a background keeps
+    // its own 17px font box.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'><div>\
+         <span id=b><span style='padding:8px'>B</span></span> \
+         <span id=d style='background:#eee'><span style='padding:8px'>C</span></span></div>",
+        &[],
+    );
+    let b = laid.inline_fragments[&element(&tree, "b")][0];
+    let d = laid.inline_fragments[&element(&tree, "d")][0];
+    assert_eq!((b.y, b.height), (-8.0, 33.0), "{b:?}");
+    assert_eq!((d.y, d.height), (0.0, 17.0), "{d:?}");
+}
