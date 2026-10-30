@@ -1546,6 +1546,10 @@ pub struct LayoutStyle {
     /// as buttons are atomic inline boxes but still use ordinary grid `normal`
     /// stretch behavior in Chromium and Gecko.
     pub(crate) has_replaced_sizing: bool,
+    /// A replaced element's percentage width is held as 0px while its flex
+    /// ancestor's inline size is still cyclic. It keeps the percentage's
+    /// zero min-content contribution (a compressible replaced element).
+    pub(crate) deferred_percent_width: bool,
     pub margin: Edges,
     /// Which margin sides are `auto` (top, right, bottom, left). `margin: 0
     /// auto` / `margin-inline: auto` centering needs a real Auto margin, which

@@ -256,7 +256,12 @@ impl ReplacedItem {
             intrinsic_height: intrinsic
                 .height
                 .filter(|height| height.is_finite() && *height > 0.0),
-            preferred_width: px(style.width),
+            // A deferred cyclic percentage width (held as 0px) behaves as
+            // auto for intrinsic contributions: natural size for max-content,
+            // zero for min-content (zero_inline_min_content).
+            preferred_width: (!style.deferred_percent_width)
+                .then(|| px(style.width))
+                .flatten(),
             preferred_height: px(style.height),
             preferred_ratio: explicit_ratio.unwrap_or(intrinsic_ratio),
             min_width: px(style.min_width),
@@ -267,7 +272,8 @@ impl ReplacedItem {
                 && intrinsic.height.is_none()
                 && explicit_ratio.is_some(),
             ratio_only_available_width: style.ratio_only_available_width,
-            zero_inline_min_content: matches!(style.width, Dimension::Percent(_))
+            zero_inline_min_content: style.deferred_percent_width
+                || matches!(style.width, Dimension::Percent(_))
                 || matches!(style.max_width, Dimension::Percent(_))
                 || expression_has_percentage(0)
                 || expression_has_percentage(4),

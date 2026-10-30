@@ -13022,6 +13022,16 @@ globalThis.DOMParser = class DOMParser {
     };
 
     const findByTagName = (name) => walk(root, n => n.tagName === name);
+    // An XML document's element is the source's own root (an <svg> for
+    // plotly's icons: parseFromString(svg, "application/xml").childNodes[0]
+    // must be the <svg>, not the <html> wrapper the fragment parser needs).
+    const sourceRootName = (() => {
+      const m = /<([A-Za-z_][\w:.-]*)/.exec(html.replace(/<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<![^>]*>/g, ''));
+      return m ? m[1].toLowerCase() : '';
+    })();
+    const xmlElement = isXml && !isParserError && sourceRootName && sourceRootName !== 'html'
+      ? walk(root, n => n !== root && String(n.localName).toLowerCase() === sourceRootName) : null;
+    const top = xmlElement || root;
 
     const docNode = {
       _root: root,
@@ -13033,7 +13043,7 @@ globalThis.DOMParser = class DOMParser {
         // For XML parsererror docs, return the <parsererror> child, not the
         // <html> wrapper — matches Chrome's behavior.
         if (isParserError) return root.firstElementChild;
-        return root;
+        return top;
       },
       get body() { return findByTagName("BODY"); },
       get head() { return findByTagName("HEAD"); },
@@ -13054,10 +13064,10 @@ globalThis.DOMParser = class DOMParser {
         }
         t.textContent = String(value);
       },
-      get firstChild() { return root; },
-      get lastChild() { return root; },
-      get children() { return [root]; },
-      get childNodes() { return [root]; },
+      get firstChild() { return top; },
+      get lastChild() { return top; },
+      get children() { return [top]; },
+      get childNodes() { return [top]; },
       // Inert documents inherit the parser realm's URL, not its browsing context.
       get URL() { return parserURL; },
       get documentURI() { return parserURL; },

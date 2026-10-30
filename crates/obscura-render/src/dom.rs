@@ -15090,7 +15090,11 @@ fn defer_cyclic_flex_inline_sizes(
             // value and are restored after outer flex sizing.
             let intrinsic = crate::Dimension::Px(definite_row_width.unwrap_or(intrinsic).max(0.0));
             match slot {
-                0 => style.width = intrinsic,
+                0 => {
+                    style.width = intrinsic;
+                    style.deferred_percent_width = style.has_replaced_sizing
+                        && matches!(source, DeferredCyclicInlineSource::Percent(_));
+                }
                 2 => style.min_width = intrinsic,
                 // A cyclic percentage max-size behaves as its initial value
                 // during intrinsic contribution sizing; treating 50% as a
@@ -15201,6 +15205,37 @@ where
                 })
                 .filter(|width| width.is_finite() && *width > 0.0)
                 .fold(0.0_f32, f32::max);
+            // The floor is the item's flex base size, not a minimum: a
+            // shrinkable item in a row with a definite width shrinks to the
+            // room its siblings leave (Chrome: the sass certificate preview
+            // is 206 wide beside a 170px column in a 376px row, not 250).
+            let room = (style.flex_shrink.unwrap_or(1.0) > 0.0)
+                .then(|| rendered_parent(tree, flex_item))
+                .flatten()
+                .and_then(|parent| {
+                    let parent_layout = taffy_tree.layout(*taffy_by_dom.get(&parent)?).ok()?;
+                    let inner = parent_layout.size.width
+                        - parent_layout.padding.left
+                        - parent_layout.padding.right
+                        - parent_layout.border.left
+                        - parent_layout.border.right;
+                    if inner <= 0.0 {
+                        return None;
+                    }
+                    let siblings: f32 = rendered_children(tree, parent)
+                        .into_iter()
+                        .filter(|&sibling| sibling != flex_item)
+                        .filter_map(|sibling| taffy_tree.layout(*taffy_by_dom.get(&sibling)?).ok())
+                        .map(|sibling| {
+                            sibling.size.width + sibling.margin.left + sibling.margin.right
+                        })
+                        .sum();
+                    Some((inner - siblings).max(0.0))
+                });
+            let natural_floor = match room {
+                Some(room) => natural_floor.min(room - horizontal_edges.min(room)),
+                None => natural_floor,
+            };
             used_declaration = used_declaration.max(natural_floor);
         }
         if let Ok(current) = taffy_tree.style(taffy_id) {
