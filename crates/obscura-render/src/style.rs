@@ -2469,6 +2469,7 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
         "column-gap" | "grid-column-gap" | "-webkit-column-gap" => {
             apply_gap_value(style, false, value)
         }
+        "shape-outside" => style.shape_outside = parse_shape_outside(value),
         "column-count" | "-webkit-column-count" => {
             style.column_count = parse_column_count(value);
         }
@@ -5353,6 +5354,80 @@ fn max_track(
 }
 
 /// Parse `grid-template-areas: 'a a' 'b c'` into a matrix of cell names.
+/// `circle(<r> [at <x> <y>])` / `ellipse(<rx> <ry> [at <x> <y>])` with
+/// px or percentage radii and centre (default 50% 50%, radius
+/// closest-side as 50%).
+fn parse_shape_outside(value: &str) -> Option<taffy::FloatShape> {
+    let value = value.trim().to_ascii_lowercase();
+    let (circle, inner) = if let Some(rest) = value.strip_prefix("circle(") {
+        (true, rest)
+    } else if let Some(rest) = value.strip_prefix("ellipse(") {
+        (false, rest)
+    } else {
+        return None;
+    };
+    let inner = inner.split(')').next()?.trim();
+    let (radii, center) = match inner.split_once(" at ") {
+        Some((r, c)) => (r.trim(), Some(c.trim())),
+        None if inner.starts_with("at ") => ("", Some(inner[3..].trim())),
+        None => (inner, None),
+    };
+    let length = |token: &str| -> Option<(f32, bool)> {
+        if let Some(p) = token.strip_suffix('%') {
+            return p.parse::<f32>().ok().map(|v| (v / 100.0, true));
+        }
+        if let Some(p) = token.strip_suffix("px") {
+            return p.parse::<f32>().ok().map(|v| (v, false));
+        }
+        match token {
+            "0" => Some((0.0, false)),
+            "closest-side" | "farthest-side" => Some((0.5, true)),
+            _ => None,
+        }
+    };
+    let radii: Vec<&str> = radii.split_whitespace().collect();
+    let default = (0.5, true);
+    let (rx, ry) = if circle {
+        let r = radii.first().map_or(Some(default), |t| length(t))?;
+        (r, r)
+    } else {
+        (
+            radii.first().map_or(Some(default), |t| length(t))?,
+            radii.get(1).map_or(Some(default), |t| length(t))?,
+        )
+    };
+    let fraction = |token: &str| -> Option<f32> {
+        match token {
+            "left" | "top" => Some(0.0),
+            "center" => Some(0.5),
+            "right" | "bottom" => Some(1.0),
+            t => t
+                .strip_suffix('%')
+                .and_then(|p| p.parse::<f32>().ok())
+                .map(|v| v / 100.0),
+        }
+    };
+    let (cx, cy) = match center {
+        Some(c) => {
+            let parts: Vec<&str> = c.split_whitespace().collect();
+            (
+                parts.first().map_or(Some(0.5), |t| fraction(t))?,
+                parts.get(1).map_or(Some(0.5), |t| fraction(t))?,
+            )
+        }
+        None => (0.5, 0.5),
+    };
+    Some(taffy::FloatShape {
+        circle,
+        rx: rx.0,
+        rx_percent: rx.1,
+        ry: ry.0,
+        ry_percent: ry.1,
+        cx,
+        cy,
+    })
+}
+
 fn parse_grid_areas(value: &str) -> Vec<Vec<String>> {
     let mut rows = Vec::new();
     let mut in_str = false;

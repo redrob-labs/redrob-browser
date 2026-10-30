@@ -156,6 +156,29 @@ impl BlockContext<'_> {
         )
     }
 
+    /// Narrow the float just placed on `direction` to its `shape-outside`.
+    pub fn apply_float_shape(
+        &mut self,
+        margin_box: Size<f32>,
+        direction: FloatDirection,
+        shape: crate::style::FloatShape,
+    ) {
+        self.bfc.float_context.apply_shape_to_last(margin_box, direction, shape);
+    }
+
+    /// The room beside the floats over the whole band `[top, bottom)`: the
+    /// widest intrusion of any float overlapping it on each side.
+    pub fn band_slot(&self, top: f32, bottom: f32) -> ContentSlot {
+        let mut slot = self.bfc.float_context.band_slot(
+            top + self.y_offset,
+            bottom + self.y_offset,
+            self.content_box_insets,
+        );
+        slot.y -= self.y_offset;
+        slot.x -= self.insets[0];
+        slot
+    }
+
     /// Search a space suitable for laying out non-floated content into
     pub fn find_content_slot(&self, min_y: f32, clear: Clear, after: Option<usize>) -> ContentSlot {
         let mut slot =
@@ -218,6 +241,9 @@ struct BlockItem {
     #[cfg(feature = "float_layout")]
     /// The `clear` style of the node
     clear: Clear,
+    #[cfg(feature = "float_layout")]
+    /// The `shape-outside` of a float
+    shape_outside: Option<crate::style::FloatShape>,
 
     /// The base size of this item
     size: Size<Option<f32>>,
@@ -719,6 +745,8 @@ fn generate_item_list(
                 float,
                 #[cfg(feature = "float_layout")]
                 clear: child_style.clear(),
+                #[cfg(feature = "float_layout")]
+                shape_outside: child_style.shape_outside(),
                 // A replaced element's natural ratio relates its content box
                 // whatever `box-sizing` says (Chrome: a 120px border-box
                 // image with a 6px border and a 420/868 ratio is 235.19 tall).
@@ -912,6 +940,9 @@ fn perform_final_layout_on_in_flow_children(
                 // the previous block's bottom margin).
                 let float_y = y_offset_for_float + active_collapsible_margin_set.resolve().max(0.0);
                 let mut location = block_ctx.place_floated_box(margin_box, float_y, float_direction, item.clear);
+                if let Some(shape) = item.shape_outside {
+                    block_ctx.apply_float_shape(margin_box, float_direction, shape);
+                }
 
                 // Ensure that content that appears after a float does not get positioned before/above the float
                 //

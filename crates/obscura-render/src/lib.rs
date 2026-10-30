@@ -1821,6 +1821,8 @@ pub struct LayoutStyle {
     // bounded balancing pass then distributes them in column-major order.
     // `None` is the initial `auto` column count.
     pub column_count: Option<u16>,
+    /// `shape-outside: circle() | ellipse()` of a float.
+    pub shape_outside: Option<taffy::FloatShape>,
     /// `break-inside: avoid` makes this box an atomic balancing unit. The
     /// current box-level multicol implementation cannot fragment the inside
     /// of a child yet, but retaining the computed value makes that limitation
@@ -3151,6 +3153,7 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
         || style.containment & (CONTAIN_LAYOUT | CONTAIN_PAINT) != 0
         || style.container_type != ContainerType::Normal
         || style.column_count.is_some_and(|count| count > 1);
+    s.shape_outside = style.shape_outside;
     s.float = match style.float {
         Some(Float::Left) => taffy::style::Float::Left,
         Some(Float::Right) => taffy::style::Float::Right,

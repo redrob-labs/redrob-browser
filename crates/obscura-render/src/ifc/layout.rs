@@ -660,6 +660,29 @@ fn layout_ifc(
                             data.line_y_start, data.line_y_end
                         );
                     }
+                    // A line box avoids every float over its whole height,
+                    // not only at its top (CSS 2.2 9.5): a float, or a
+                    // shape-outside, that intrudes further lower down on the
+                    // line narrows it at the same y.
+                    if has_active_floats && slot.segment_id.is_some() && retries < 64 {
+                        let band =
+                            block_ctx.band_slot(data.line_y_start as f32, data.line_y_end as f32);
+                        if used > band.width + 0.01
+                            && band.width + 0.01 < slot.width
+                            && breaker.revert()
+                        {
+                            retries += 1;
+                            slot = taffy::compute::ContentSlot {
+                                x: band.x,
+                                width: band.width,
+                                ..slot
+                            };
+                            let state = breaker.state_mut();
+                            state.set_line_max_advance(fit(band.width));
+                            state.set_line_x(band.x);
+                            continue;
+                        }
+                    }
                     // Floats placed on this line stay placed: re-breaking it
                     // below them only skips their boxes (see InlineBoxBreak).
                     if has_active_floats

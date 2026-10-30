@@ -1561,3 +1561,30 @@ fn calc_percentages_resolve_against_layout_unit_widths() {
         .unwrap_or(laid.rects[&element(&tree, "d")]);
     assert_eq!((d.y, d.width), (10.0, 175.234375), "{d:?}");
 }
+
+#[test]
+fn text_wraps_around_shape_outside_circles_and_ellipses() {
+    // Chrome: a paragraph in 500px beside a 300x300 left float is 360 tall;
+    // with shape-outside:circle(45%) 312, with ellipse(25% 50%) 264
+    // (16px/24px Arial).
+    let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla ac laoreet quam, id aliquet nisl. Etiam id eros ligula. Aenean euismod, enim sed mollis feugiat, magna massa cursus leo, ut maximus metus eros non ante. Praesent quis neque eu urna dignissim consequat. Sed vitae tincidunt quam. Vivamus nec ipsum vitae justo pretium ornare. Maecenas tempor tellus at lacus interdum, in congue lectus ultricies.";
+    let height = |shape: &str| {
+        let (tree, laid) = layout(
+            &format!(
+                "<!doctype html><body style='margin:0;font:16px/24px Arial'><div style='width:500px'>\
+                 <div style='float:left;width:300px;height:300px;{shape}'></div>\
+                 <p id=p style='margin:0'>{text}</p></div>"
+            ),
+            &[],
+        );
+        laid.rects[&element(&tree, "p")].height
+    };
+    assert_eq!(
+        (
+            height(""),
+            height("shape-outside:circle(45%)"),
+            height("shape-outside:ellipse(25% 50%)")
+        ),
+        (360.0, 312.0, 264.0)
+    );
+}
