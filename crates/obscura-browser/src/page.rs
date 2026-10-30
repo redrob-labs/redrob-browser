@@ -5747,6 +5747,26 @@ mod tests {
     use obscura_dom::parse_html;
 
     #[tokio::test(flavor = "current_thread")]
+    async fn parser_inserted_elements_are_named_window_properties() {
+        let context = std::sync::Arc::new(crate::BrowserContext::new("named-props".into()));
+        let mut page = super::Page::new("named-props".into(), context);
+        // Framer reads `window.__framer__appearAnimationsContent.text` for a
+        // <script id> the parser inserted.
+        page.navigate(
+            "data:text/html,<!doctype html><body><div id=early></div>\
+             <script>window.seen=[typeof window.early, typeof window.late]</script>\
+             <script type=x id=late>payload</script>\
+             <script>window.seen.push(window.late && window.late.text)</script></body>",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            page.evaluate("window.seen"),
+            serde_json::json!(["object", "undefined", "payload"])
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn blank_navigation_has_no_doctype_and_starts_in_quirks_mode() {
         let context = std::sync::Arc::new(crate::BrowserContext::new("blank-mode".into()));
         let mut page = super::Page::new("blank-mode".into(), context);

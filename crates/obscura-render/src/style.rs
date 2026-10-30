@@ -2148,6 +2148,7 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
             None => {}
         },
         "opacity" => style.opacity = value.trim().parse::<f32>().ok(),
+        "mix-blend-mode" => style.mix_blend_mode = crate::MixBlendMode::parse(value),
         "animation" => apply_animation_shorthand(style, value),
         "animation-name" => {
             let first = split_top_level(value, ',')
