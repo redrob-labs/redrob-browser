@@ -448,6 +448,7 @@ impl State {
             )
             .await?;
         let (w, h, scale) = self.size_of(tab);
+        eprintln!("P7DBG attach size {w}x{h}@{scale}");
         self.c
             .call(
                 s,
@@ -673,6 +674,7 @@ async fn run_command(
 }
 
 async fn resize(st: &mut State, window: WindowId, size: (u32, u32, f32)) {
+    eprintln!("P7DBG resize {window:?} {size:?} known {:?} tabs {:?} tab_window {:?}", st.sizes, st.tabs.keys().collect::<Vec<_>>(), st.tab_window);
     if st.sizes.get(&window) == Some(&size) {
         return;
     }
@@ -685,9 +687,11 @@ async fn resize(st: &mut State, window: WindowId, size: (u32, u32, f32)) {
         .collect();
     for (tab, session) in sessions {
         let params = json!({ "width": size.0, "height": size.1, "deviceScaleFactor": size.2, "mobile": false });
-        if let Err(e) =
-            st.c.call(Some(&session), "Emulation.setDeviceMetricsOverride", params)
-                .await
+        let r = st.c.call(Some(&session), "Emulation.setDeviceMetricsOverride", params).await;
+        eprintln!("P7DBG resize result {r:?}");
+        let v = st.c.call(Some(&session), "Runtime.evaluate", json!({"expression": "[innerWidth, innerHeight, location.href]", "returnByValue": true})).await;
+        eprintln!("P7DBG after resize {v:?}");
+        if let Err(e) = r
         {
             st.emit(tab, Event::Error(e.to_string()));
         }

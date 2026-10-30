@@ -5187,3 +5187,20 @@ fn percentage_height_inside_display_contents_flex_item_resolves() {
         "height:100% of a flex item reached through display:contents"
     );
 }
+
+#[test]
+fn percentage_height_inside_inset_abspos_box_of_an_aspect_ratio_box() {
+    // Framer image fills: an aspect-ratio box, an absolutely positioned
+    // inset:0 layer, and an <img> at height:100% of that layer.
+    let tree = parse_html(
+        r#"<!doctype html><html><body style="margin:0">
+        <div style="width:330px;aspect-ratio:1.65 / 1;position:relative">
+          <div style="position:absolute;top:0;right:0;bottom:0;left:0">
+            <div id=fill style="display:block;width:100%;height:100%"></div>
+          </div>
+        </div></body></html>"#,
+    );
+    let layout = layout_dom(&tree, (800.0, 600.0));
+    let fill = tree.get_element_by_id("fill").unwrap();
+    assert_eq!(layout.rects[&fill].height, 200.0);
+}
