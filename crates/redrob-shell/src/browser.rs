@@ -358,6 +358,7 @@ impl Browser {
             address: String::new(),
             editing: false,
             focus_address: false,
+            focus_page: false,
             error: None,
             last_size: (0, 0, 0.0),
             address_id: egui::Id::new("address"),

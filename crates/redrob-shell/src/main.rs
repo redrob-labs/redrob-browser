@@ -222,6 +222,10 @@ struct Window {
     address: String,
     editing: bool,
     focus_address: bool,
+    /// Give the page area keyboard focus on the next frame: after the
+    /// address bar navigates, and for a tab opened on a page, as Chrome
+    /// does, so scrolling keys (Page Down, Space, End) reach the page.
+    focus_page: bool,
     error: Option<String>,
     last_size: (u32, u32, f32),
     last_title: String,
@@ -326,6 +330,8 @@ impl Window {
             self.activated();
             if url == NEW_TAB {
                 self.focus_address = true;
+            } else {
+                self.focus_page = true;
             }
         }
     }
@@ -1908,6 +1914,7 @@ impl Window {
         if let Some(url) = go {
             self.editing = false;
             ui.memory_mut(|m| m.surrender_focus(self.address_id));
+            self.focus_page = true;
             self.navigate(url);
         }
     }
@@ -2435,9 +2442,10 @@ impl Window {
                     compositor::scrollbars(ui, rect, &mut self.model.tabs[tab_index].scene, &res);
                 let over_bar = |p: &egui::Pos2| bars.iter().any(|b| b.contains(*p));
 
-                if response.clicked() || response.drag_started() {
+                if response.clicked() || response.drag_started() || self.focus_page {
                     response.request_focus();
                     self.editing = false;
+                    self.focus_page = false;
                 }
                 let focused = response.has_focus();
                 let mut events = ui.input(|i| i.events.clone());
