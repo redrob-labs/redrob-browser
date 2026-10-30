@@ -1676,3 +1676,16 @@ fn inline_ending_at_a_forced_break_has_no_fragment_on_the_next_line() {
     assert_eq!((frags("a"), frags("c")), (1, 1));
     assert_eq!(laid.inline_fragments[&element(&tree, "a")][0].y, 3.0);
 }
+
+#[test]
+fn space_after_an_atomic_inline_at_a_line_start_is_kept() {
+    // Chrome: in y<br><input> <span>em</span> the space after the input
+    // stays; the span starts after it (x 62.45 with a 50px input).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px Arial'><div>y<br>\n\
+         <input style='width:50px'> <span id=s>em</span></div>",
+        &[],
+    );
+    let s = laid.inline_fragments[&element(&tree, "s")][0];
+    assert!(s.x > 60.0, "{s:?}");
+}
